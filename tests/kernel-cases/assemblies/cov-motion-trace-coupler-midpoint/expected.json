@@ -1,0 +1,38 @@
+{
+ "sources": [],
+ "what": "motion.trace of a crank-slider rod's middle over half a turn, 3 samples",
+ "source": "analytic",
+ "method": "a crank-slider: crank r 10 about z through the origin, rod l 30 from the crank pin (10,0) to the slider's pin (40,0), slider on +x; the slider sits at x = r cos \u03b8 + \u221a(l\u00b2 - r\u00b2 sin\u00b2 \u03b8); the rod's middle is ((10 cos \u03b8 + x)/2, 5 sin \u03b8, 3): \u03b8 0 (25,0,3), 90 (14.14214,5,3), 180 (5,0,3)",
+ "body_count": 4,
+ "volume_mm3": 2720,
+ "results": [
+  {
+   "step": 17,
+   "json": {
+    "conflicts": []
+   }
+  },
+  {
+   "step": 18,
+   "json": {
+    "points": [
+     [
+      25.0,
+      0.0,
+      3.0
+     ],
+     [
+      14.142136,
+      5.0,
+      3.0
+     ],
+     [
+      5.0,
+      0.0,
+      3.0
+     ]
+    ]
+   }
+  }
+ ]
+}

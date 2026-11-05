@@ -14,7 +14,8 @@
 //! analysis runs only on what remains.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Seg2, Vec2};
+use solidcore_record::{Seg2, Vec2};
+use solidcraft_geom::prelude::*;
 
 use crate::decompose::Budget;
 use crate::linalg::{Mat, determined_vars, solve as lin_solve};
@@ -273,9 +274,9 @@ impl State<'_> {
                 };
                 crate::curves::ellipse_polyline(self.p(*ci), self.p(*m), r)
             }
-            Some(CurveKind::Spline { pts, control, degree, periodic }) => {
+            Some(CurveKind::Spline { pts, control, degree, periodic, nurbs }) => {
                 let p = self.spline_points(pts, *periodic);
-                crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic)
+                crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic, nurbs.as_ref())
             }
             Some(CurveKind::Conic { a, b, apex, rho }) => crate::curves::conic_polyline(self.p(*a), self.p(*apex), self.p(*b), *rho),
             _ => Vec::new(),
@@ -308,13 +309,15 @@ impl State<'_> {
                 let y = delta.cross(u) / (a * r);
                 return (x.hypot(y) - 1.0) * a.min(r);
             }
-            Some(CurveKind::Spline { pts, control, degree, periodic }) => {
+            Some(CurveKind::Spline { pts, control, degree, periodic, nurbs }) => {
                 let p = self.spline_points(pts, *periodic);
                 if p.len() < 2 {
                     return q.dist(p.first().copied().unwrap_or_default());
                 }
-                if *control {
-                    let k = (*degree as usize).min(solidcraft_geom::MAX_BEZIER_DEGREE).min(p.len().saturating_sub(1)).max(1);
+                if let Some(nurbs) = nurbs {
+                    nurbs.segs(&p, *degree).unwrap_or_default()
+                } else if *control {
+                    let k = (*degree as usize).min(solidcore_record::MAX_BEZIER_DEGREE).min(p.len().saturating_sub(1)).max(1);
                     crate::curves::bspline_beziers(&p, k).iter().filter_map(|span| solidcraft_geom::bezier(span)).collect()
                 } else {
                     crate::curves::fit_beziers_mode(&p, *periodic)
@@ -408,10 +411,10 @@ impl State<'_> {
                 let (cc, r) = self.round(c);
                 (cc - self.p(p)) / (r * r).max(1e-24)
             }
-            CurveKind::Spline { pts, control, degree, periodic } => {
+            CurveKind::Spline { pts, control, degree, periodic, nurbs } => {
                 let q = self.spline_points(pts, *periodic);
                 let at_end = pts.last() == Some(&p) && pts.first() != Some(&p);
-                crate::curves::end_curvature(&|t| crate::curves::spline_point_mode(&q, *control, *degree, *periodic, t), at_end)
+                crate::curves::end_curvature(&|t| crate::curves::spline_point_mode(&q, *control, *degree, *periodic, nurbs.as_ref(), t), at_end)
             }
             CurveKind::Conic { a, b, apex, rho } => {
                 let (pa, pb, px) = (self.p(*a), self.p(*b), self.p(*apex));
@@ -458,6 +461,25 @@ fn wrap_angle(a: f64) -> f64 {
     a
 }
 
+/// Put every pierced point where the curve of the other sketch crosses this sketch's plane
+/// (#3599). The point is held there (it is locked), so the solve keeps it: the crossing is a
+/// fact about the two sketches, not something the iteration works out.
+fn place_pierced_points(sk: &mut Sketch) {
+    let places: Vec<(usize, Vec2)> = sk
+        .constraints
+        .iter()
+        .filter_map(|c| match &c.kind {
+            ConstraintKind::Pierce { p, plane, world, .. } => crate::pierce::pierce_point_world(plane, world).map(|at| (*p, at)),
+            _ => None,
+        })
+        .collect();
+    for (p, at) in places {
+        if let Some(point) = sk.points.get_mut(p) {
+            point.pos = at;
+        }
+    }
+}
+
 /// Distance from `p` to the infinite line through `a`, `b` (signed by side).
 fn line_dist(p: Vec2, a: Vec2, b: Vec2) -> f64 {
     let d = b - a;
@@ -502,11 +524,16 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
         }
         Horizontal { l } => {
             let (a, b) = s.line(l);
-            out.push(b.y - a.y);
+            let scale = if s.sk.curves.get(l).is_some_and(|c| c.infinite) { (b - a).len().max(1e-12) } else { 1.0 };
+            // An infinite line's defining points may be very close together. Its visible
+            // direction must remain horizontal even when their separation is below the
+            // distance tolerance, so measure direction rather than endpoint distance.
+            out.push((b.y - a.y) / scale);
         }
         Vertical { l } => {
             let (a, b) = s.line(l);
-            out.push(b.x - a.x);
+            let scale = if s.sk.curves.get(l).is_some_and(|c| c.infinite) { (b - a).len().max(1e-12) } else { 1.0 };
+            out.push((b.x - a.x) / scale);
         }
         HorizontalPoints { p, q } => out.push(s.p(q).y - s.p(p).y),
         VerticalPoints { p, q } => out.push(s.p(q).x - s.p(p).x),
@@ -587,6 +614,10 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
             out.push((qq - pp).dot(dir) / len);
         }
         Fix { .. } => {}
+        // A pierce holds its point where the other sketch's curve crosses this sketch's
+        // plane: the point is placed there before the solve and kept there (it is
+        // locked), so the constraint adds no rows of its own.
+        Pierce { .. } => {}
         // A distance within convergence tolerance of zero means coincidence: two
         // component rows keep both directions constrained even when the points meet.
         Distance { p, q, value } if value.abs() <= TOL => {
@@ -609,6 +640,13 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
         LineCircleDistance { l, c, value, inside } => out.push(s.line_circle_gap(l, c, inside) - value),
         PointCircleDistance { p, c, value, inside } => out.push(s.point_circle_gap(p, c, inside) - value),
         CircleCircleDistance { a, b, value, circles } => out.push(s.circle_circle_gap(a, b, circles) - value),
+        // A length within convergence tolerance of zero means the line's two ends meet:
+        // the component rows keep both directions constrained even when they do, the way a
+        // coincidence does (the same treatment a distance of zero gets above).
+        Length { l, value } if value.abs() <= TOL => {
+            let (a, b) = s.line(l);
+            out.extend([b.x - a.x, b.y - a.y]);
+        }
         Length { l, value } => {
             let (a, b) = s.line(l);
             out.push(a.dist(b) - value);
@@ -958,7 +996,7 @@ fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
             Tangent { a, b } => tangent(a, b).to_vec(),
             Smooth { a, b } => vec![C(a), C(b)],
             Symmetric { p, q, l } => vec![P(p), P(q), L(l)],
-            Fix { .. } | OffsetDistance { .. } => vec![],
+            Fix { .. } | OffsetDistance { .. } | Pierce { .. } => vec![],
         },
         Block::TangentAt(_, k, p) => match **k {
             ConstraintKind::Tangent { a, b } if freeform(a) || freeform(b) => vec![P(*p), C(a), C(b)],
@@ -1041,7 +1079,7 @@ fn system(sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], x: &mut [f6
         for &v in vars {
             let Some(x0) = x.get(v).copied() else { continue };
             let opening = distance_opening_slope(&State { sk, lay, x }, b, v);
-            let h = 1e-7 * x0.abs().max(1.0);
+            let h = direction_difference_step(&State { sk, lay, x }, b, v, x0);
             if let Some(xv) = x.get_mut(v) {
                 *xv = x0 + h;
             }
@@ -1093,7 +1131,7 @@ fn local_system(
             let Some(c) = col.get(v).copied().filter(|c| *c < ncols) else { continue };
             let Some(x0) = x.get(v).copied() else { continue };
             let opening = distance_opening_slope(&State { sk, lay, x }, b, v);
-            let h = 1e-7 * x0.abs().max(1.0);
+            let h = direction_difference_step(&State { sk, lay, x }, b, v, x0);
             if let Some(xv) = x.get_mut(v) {
                 *xv = x0 + h;
             }
@@ -1115,6 +1153,32 @@ fn local_system(
         row += rows;
     }
     (r, j, owner)
+}
+
+/// An infinite line's direction derivative must be sampled within its defining span. The
+/// usual coordinate-sized step can cross its other end and measure a half-turn instead
+/// of the local slope when the saved defining points are very close (#11001).
+fn direction_difference_step(s: &State<'_>, block: &Block<'_>, variable: usize, value: f64) -> f64 {
+    let mut step = 1e-7 * value.abs().max(1.0);
+    let Block::User(_, kind) = block else { return step };
+    let lines = match **kind {
+        ConstraintKind::Angle { a, b, .. } => [Some(a), Some(b)],
+        ConstraintKind::LineAngle { l, .. } => [Some(l), None],
+        ConstraintKind::Horizontal { l } | ConstraintKind::Vertical { l } if s.sk.curves.get(l).is_some_and(|c| c.infinite) => [Some(l), None],
+        _ => return step,
+    };
+    for l in lines.into_iter().flatten() {
+        let Some(CurveKind::Line { a, b }) = s.sk.curves.get(l).filter(|c| c.infinite).map(|c| &c.kind) else { continue };
+        let depends = [a, b].into_iter().any(|&p| s.lay.pvar.get(p).copied().flatten().is_some_and(|v| variable == v || variable == v + 1));
+        if depends {
+            let length = (s.p(*b) - s.p(*a)).len();
+            if length > 0.0 {
+                step = step.min(length * 1e-3);
+            }
+        }
+    }
+    // Keep both samples representable when the sketch is far from its origin.
+    step.max(value.abs() * f64::EPSILON * 8.0)
 }
 
 fn max_abs(v: &[f64]) -> f64 {
@@ -1558,7 +1622,7 @@ fn accumulate(sk: &Sketch, lay: &Layout, b: &Block, unit: &[usize], x: &mut [f64
     let (mut plus, mut minus) = (Vec::new(), Vec::new());
     for (&v, dk) in unit.iter().zip(&mut d) {
         let Some(x0) = x.get(v).copied() else { continue };
-        let h = 1e-7 * x0.abs().max(1.0);
+        let h = direction_difference_step(&State { sk, lay, x }, b, v, x0);
         for (at, out) in [(x0 + h, &mut plus), (x0 - h, &mut minus)] {
             if let Some(xv) = x.get_mut(v) {
                 *xv = at;
@@ -2554,10 +2618,22 @@ pub fn fillets_kept(before: &Sketch, after: &Sketch) -> bool {
 /// The turns of every filleted arc from `before` to where `sk` is now, applying the swaps.
 fn settle(sk: &mut Sketch, before: &[ArcSense]) -> Vec<(usize, Turn)> {
     let after = arc_senses(sk, &|i| sk.points.get(i).map(|p| p.pos).unwrap_or_default());
+    // A swap gives the corner its arc back when its lines cut back through it. An arc whose lines
+    // all leave it already rounds its corner, whatever the reference it is judged against (a
+    // mirrored start) showed: swapping that one would make the fillet its complement.
     let turns: Vec<(usize, Turn)> = before
         .iter()
-        .filter_map(|b| after.iter().find(|a| a.arc == b.arc).map(|a| (b.arc, turn(b, a))))
-        .filter(|(_, t)| !matches!(t, Turn::Kept))
+        .filter_map(|b| {
+            after.iter().find(|a| a.arc == b.arc).map(|a| {
+                let leave = !a.lines.is_empty() && a.lines.iter().all(|l| l.3 == Some(1.0));
+                (b.arc, turn(b, a), leave)
+            })
+        })
+        .filter_map(|(arc, t, leave)| match t {
+            Turn::Kept => None,
+            Turn::Swap if leave => None,
+            t => Some((arc, t)),
+        })
         .collect();
     for (arc, t) in &turns {
         if matches!(t, Turn::Swap) {
@@ -2652,6 +2728,7 @@ fn solve_inner(
     profiling::count(|c| c.solve_calls = c.solve_calls.saturating_add(1));
     sk.prune_patterns();
     sk.refresh_pattern_shapes();
+    place_pierced_points(sk);
     let mut orientation_before = Vec::new();
     for constraint in &sk.constraints {
         if !constraint.driven
@@ -3077,7 +3154,7 @@ fn solve_inner(
             }
         }
         for curve in &sk.curves {
-            if let CurveKind::Spline { pts, control, degree, periodic: true } = &curve.kind {
+            if let CurveKind::Spline { pts, control, degree, periodic: true, .. } = &curve.kind {
                 let points = pts.iter().map(|i| positions.get(*i).copied()).collect::<Option<Vec<_>>>();
                 if *control || *degree != 3 || points.as_ref().is_none_or(|p| crate::periodic::validate_periodic_points(p).is_err()) {
                     valid = false;

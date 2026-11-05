@@ -270,7 +270,7 @@ pub fn update(app: &mut SolveApp, d: &mut Dialog, ctx: &egui::Context) {
 
 /// Where a pick in an Operation row is noted for the next [`update`].
 pub(crate) fn picked_id() -> egui::Id {
-    egui::Id::new("op_auto_picked")
+    egui::Id::unique("op_auto_picked")
 }
 
 /// The Operation row of a window that chooses by itself: any pick there, the shown option

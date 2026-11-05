@@ -1,8 +1,9 @@
 //! Analytic curve shapes for geometry operations (profiles, trim, extend, fillet…).
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
-use solidcraft_geom::{Seg2, Vec2};
+use solidcore_record::{Seg2, Vec2};
 
 use crate::model::{CurveKind, Sketch};
 

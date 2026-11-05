@@ -4,11 +4,12 @@
 //! `sketch.edit_text` live; the whole gesture is one undo step and Esc cancels it (the drag
 //! shares [`crate::viewport::Viewport::text_drag`] with moving a text, so it ends and cancels
 //! the same way). A drag from anywhere else inside the frame moves the text ([`grab_inside`]).
+use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 
 use egui::{Align2, CursorIcon, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, vec2};
 use serde_json::json;
-use solidcraft_engine::geom::Vec2;
+use solidcore_record::Vec2;
 use solidcraft_engine::sketch::{CurveKind, LinkKind, LinkSource};
 
 use crate::SolveApp;
@@ -102,7 +103,7 @@ fn target(app: &SolveApp) -> Option<String> {
 /// The frame of text `link` in the active sketch, as shown (solved).
 fn frame(app: &SolveApp, link: &str) -> Option<Frame> {
     let sid = app.session.active_sketch?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let sk = &state.sketch(sid)?.sketch;
     let source = sk.link(link).filter(|l| l.kind == LinkKind::Text)?;
     let LinkSource::Text { at, height, angle, style, .. } = &source.source else { return None };
@@ -147,7 +148,7 @@ struct Screen {
 
 fn screen(app: &SolveApp, proj: &Proj, f: &Frame) -> Option<Screen> {
     let sid = app.session.active_sketch?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let plane = state.sketch(sid)?.plane;
     let to_screen = |local: Vec2| proj.to_screen(plane.to_world(f.to_sketch(local)));
     let [a, b, c, d] = f.corners();
@@ -187,7 +188,7 @@ pub(crate) fn grab_inside(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Hit>
         return None;
     }
     let id = crate::sketch_text::selected_entity(app)?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let ss = state.sketch(sketch)?;
     let curve = ss.sketch.curves.iter().find(|c| c.id == id)?;
     let straight = matches!(curve.kind, CurveKind::Line { .. });
@@ -196,7 +197,7 @@ pub(crate) fn grab_inside(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Hit>
 
 /// Where the pointer is on the active sketch's plane.
 fn on_plane(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec2> {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let ss = state.sketch(app.session.active_sketch?)?;
     let (o, d) = proj.ray(pos);
     ss.plane.intersect_ray(o, d).map(|w| ss.plane.to_local(w))
@@ -427,7 +428,7 @@ mod tests {
         h.app.session.selection.clear();
         h.frames(2);
         let sid = h.app.session.active_sketch.unwrap();
-        let inside = h.app.session.world_state().sketch(sid).unwrap().profiles[0].centroid;
+        let inside = h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles[0].centroid;
         h.step(&json!({"click":{"sketch":[inside.x,inside.y]},"double":true})).unwrap();
         h.frames(2);
         match h.app.dialog.as_ref().map(|d| &d.kind) {

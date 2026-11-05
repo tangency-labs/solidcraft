@@ -1,0 +1,15 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1974",
+  "tangency-labs/solidcraft#2043"
+ ],
+ "what": "a block whose every plane's axis points into the part and whose faces say same_sense .F. while their FACE_OUTER_BOUND loops run counter-clockwise about the outward normal: the loops are outer bounds, not holes",
+ "source": "analytic",
+ "method": "box 30x20x10: V = 6000; A = 2200; 6 faces, 12 edges, 8 vertices",
+ "body_count": 1,
+ "volume_mm3": 6000.0,
+ "area_mm2": 2200.0,
+ "faces": 6,
+ "edges": 12,
+ "vertices": 8
+}

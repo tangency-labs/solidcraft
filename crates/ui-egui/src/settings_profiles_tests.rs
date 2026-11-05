@@ -17,6 +17,7 @@ fn error(h: &mut Harness, id: &str, params: Value) -> String {
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
+    assert_eq!(keys.len(), 100, "page presentation must not alter profile membership");
     for key in [
         "nav",
         "mouse_gestures",
@@ -26,6 +27,8 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "ui_scale",
         "ui_font",
         "navigator_style",
+        "nav_bridge_enabled",
+        "nav_bridge_port",
         "language",
         "suppress_sketch_snap",
     ] {
@@ -35,6 +38,11 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "space_mouse_calibrations",
         "space_mouse_driver",
         "space_mouse_speed",
+        "space_mouse_axis_source",
+        "space_mouse_axis_speed",
+        "space_mouse_reverse",
+        "space_mouse_buttons",
+        "space_mouse_enabled",
         "dark_parts_shading",
         "msaa",
         "window_system",
@@ -86,6 +94,30 @@ fn switching_profiles_applies_every_setting_at_once() {
     assert_eq!(h.app.toolbar_custom.panels.get("DESIGN/SOLID/CREATE"), Some(&vec!["solid.box".to_string()]));
 
     assert!(error(&mut h, "settings.profile.apply", json!({"name": "Desk"})).contains("no settings profile"));
+}
+
+/// The quick-access bar (#10223) travels with the toolbar: a profile captures it, survives its
+/// checks, and switching profiles brings each one's bar back.
+#[test]
+fn a_profile_carries_the_quick_access_bar() {
+    let mut h = Harness::new();
+    run(&mut h, "settings.profile.save", json!({"name": "Plain"}));
+    crate::toolbar_custom::quick_add(&mut h.app, "solid.fillet").unwrap();
+    crate::toolbar_custom::quick_add(&mut h.app, "solid.extrude").unwrap();
+    let doc = capture(&h.app, "Quick");
+    assert_eq!(doc["toolbar"]["quick_access"], json!(["solid.fillet", "solid.extrude"]));
+    assert_eq!(sanitize(&doc).unwrap(), doc);
+    run(&mut h, "settings.profile.save", json!({"name": "Quick"}));
+
+    run(&mut h, "settings.profile.apply", json!({"name": "Plain"}));
+    assert!(h.app.toolbar_custom.quick_access.is_empty());
+    run(&mut h, "settings.profile.apply", json!({"name": "Quick"}));
+    assert_eq!(h.app.toolbar_custom.quick_access, ["solid.fillet", "solid.extrude"]);
+
+    // A hostile list is cut down to what the bar holds.
+    let hostile = json!({"format": FORMAT, "name": "Odd", "toolbar": {"version": 3, "quick_access": (0..500).map(|i| json!(format!("c{i}"))).chain([json!(3)]).collect::<Vec<_>>()}});
+    let doc = sanitize(&hostile).unwrap();
+    assert_eq!(doc["toolbar"]["quick_access"].as_array().map(Vec::len), Some(crate::toolbar_custom::MAX_QUICK_ACCESS));
 }
 
 #[test]
@@ -331,6 +363,31 @@ fn starting_a_profile_command_opens_preferences_instead_of_failing() {
 }
 
 #[test]
+fn typing_a_profile_name_keeps_focus_out_of_preferences_search() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.prefs", json!({"open": "General"}));
+    h.frames(3);
+    h.step(&json!({"text": "profiles"})).expect("find Settings profiles");
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "dialog:Profile name"}})).expect("focus the profile name");
+    h.frames(2);
+    let name_focus = h.ctx.memory(|memory| memory.focused()).expect("the name field has focus");
+    for text in ["Lap", "top"] {
+        h.step(&json!({"text": text})).expect("type a profile name");
+        h.frames(2);
+        assert_eq!(h.app.prefs_window.filter, "profiles", "profile-name text went to Preferences search");
+        assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(name_focus), "the name field keeps focus");
+    }
+    assert!(h.widget("Laptop").is_some(), "the name field contains the typed name");
+    h.step(&json!({"widget": "Save as new"})).expect("save the profile");
+    h.frames(2);
+    assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
+    assert_eq!(h.app.settings_profiles.names(), ["Laptop"]);
+    assert_eq!(h.app.prefs_window.filter, "profiles");
+}
+
+#[test]
 fn choosing_a_profile_in_preferences_applies_it() {
     let mut h = Harness::new();
     run(&mut h, "settings.profile.save", json!({"name": "Laptop"}));
@@ -340,16 +397,349 @@ fn choosing_a_profile_in_preferences_applies_it() {
     assert!(!h.app.preferences.zoom_reverse);
     h.call("ui.prefs", json!({"open": "General"}));
     h.frames(3);
-    h.step(&json!({"click": {"handle": "dialog:Active profile"}})).unwrap();
-    h.frames(3);
-    h.step(&json!({"click": {"handle": "dialog:list:Large monitor"}})).unwrap();
+    h.step(&json!({"click": {"handle": "prefs:profile:Large monitor:apply"}})).unwrap();
     h.frames(3);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Large monitor"));
     assert!(h.app.preferences.zoom_reverse);
 }
 
 #[test]
-fn profile_keys_preserve_the_literal_pre_split_baseline() {
+fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() {
+    for theme in ["light", "dark"] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"language":"en", "theme":theme, "open":"General"}));
+        h.frames(3);
+        assert!(h.app.settings_profiles.list.is_empty());
+        let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+        let heading = crate::scenario::rect_of("prefs:page_heading").unwrap();
+        let subtitle = crate::scenario::rect_of("dialog:hint:settings_heading").unwrap();
+        let profiles = crate::scenario::rect_of("prefs:section:profiles").unwrap();
+        assert!(heading.contains_rect(subtitle));
+        {
+            let title = h
+                .shapes
+                .iter()
+                .find_map(|shape| {
+                    if let egui::Shape::Text(text) = &shape.shape
+                        && text.galley.job.text == "PROFILES"
+                        && profiles.contains(text.pos)
+                    {
+                        return Some(egui::Rect::from_min_size(text.pos, text.galley.size()));
+                    }
+                    None
+                })
+                .unwrap();
+            let count = crate::scenario::rect_of("dialog:section:Profiles:count").unwrap();
+            assert!((count.left() - title.right() - 12.0).abs() < 1.1, "{theme}: count follows the painted title");
+            let t = crate::theme::Tokens::get();
+            let rule = h
+                .shapes
+                .iter()
+                .find_map(|shape| {
+                    if let egui::Shape::LineSegment { points, stroke } = &shape.shape
+                        && stroke.color == t.dialog_rule
+                        && points.iter().all(|point| (point.y - profiles.center().y).abs() < 0.5)
+                    {
+                        return Some(*points);
+                    }
+                    None
+                })
+                .unwrap();
+            assert!((rule[0].x - count.right() - 12.0).abs() < 0.5, "{theme}: the rule begins after the count");
+            assert!((rule[1].x - profiles.right()).abs() < 0.5);
+            for (key, text) in [("held", "Held"), ("computer", "This computer")] {
+                let label = crate::scenario::rect_of(&format!("prefs:profiles:{key}:label")).unwrap();
+                let first = crate::scenario::rect_of(&format!("prefs:profiles:{key}:first_chip")).unwrap();
+                let painted = h
+                    .shapes
+                    .iter()
+                    .find_map(|shape| {
+                        if let egui::Shape::Text(galley) = &shape.shape
+                            && galley.galley.job.text == text
+                            && label.contains(galley.pos)
+                        {
+                            return Some(egui::Rect::from_min_size(galley.pos, galley.galley.size()));
+                        }
+                        None
+                    })
+                    .unwrap();
+                assert!((painted.left() - body.left()).abs() < 0.75, "{theme}: {text} starts at the body's left edge");
+                assert!((first.left() - body.left() - 90.0).abs() < 0.5, "{theme}: {text} reserves the full caption column and gap");
+                assert!((first.height() - 24.0).abs() < 0.5);
+            }
+            let held = crate::scenario::rect_of("prefs:profiles:held:row").unwrap();
+            let computer = crate::scenario::rect_of("prefs:profiles:computer:row").unwrap();
+            assert!((computer.top() - held.bottom() - 8.0).abs() < 0.5);
+        }
+        assert!((profiles.top() - heading.bottom() - 38.0).abs() < 0.5, "{theme}: the first section has the same breathing room as later sections");
+        for (previous, next) in [("profiles", "language"), ("language", "saving")] {
+            let previous_body = crate::scenario::rect_of(&format!("prefs:section:{previous}:body")).unwrap();
+            let next_header = crate::scenario::rect_of(&format!("prefs:section:{next}")).unwrap();
+            assert!((next_header.top() - previous_body.bottom() - 38.0).abs() < 0.5, "{theme}: {previous} to {next}");
+            assert!((next_header.height() - 30.0).abs() < 0.5);
+            let next_body = crate::scenario::rect_of(&format!("prefs:section:{next}:body")).unwrap();
+            assert!((next_body.top() - next_header.bottom() - 10.0).abs() < 0.5);
+        }
+        let name_field = crate::scenario::rect_of("dialog:widget:Profile name").unwrap();
+        assert!((name_field.width() - 220.0).abs() < 0.5, "{theme}: bounded name entry");
+        assert!((name_field.left() - body.left()).abs() < 0.5, "{theme}: no separate label column before name entry");
+        assert!(body.contains_rect(name_field));
+        h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
+        let status = h.app.status.clone();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert_eq!(h.app.status, status, "empty Enter cannot submit a save");
+        h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
+        h.step(&json!({"text":"x".repeat(65)})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert_eq!(h.app.status, status, "invalid Enter cannot submit a save");
+        assert!(h.app.settings_profiles.list.is_empty());
+        h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
+        h.step(&json!({"key":"A", "cmd":true})).unwrap();
+        h.step(&json!({"text":"  Laptop  "})).unwrap();
+        h.step(&json!({"click":{"handle":"prefs:profile:save"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.settings_profiles.names(), ["Laptop"]);
+        assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
+        assert_eq!(
+            h.output
+                .accesskit_update
+                .as_ref()
+                .unwrap()
+                .nodes
+                .iter()
+                .filter(|(_, node)| node.label() == Some("Profile name"))
+                .find_map(|(_, node)| node.value()),
+            Some("  Laptop  "),
+            "saving keeps exactly the typed text while the command normalizes its name"
+        );
+        assert!(crate::scenario::rect_of("prefs:profile:Laptop:active").is_some());
+        assert!(crate::scenario::rect_of("prefs:profile:Laptop:apply").is_none());
+        h.app.preferences.zoom_reverse = true;
+        h.frames(3);
+        assert!(crate::scenario::rect_of("prefs:profile:Laptop:edited").is_some());
+        assert!(crate::scenario::rect_of("prefs:profile:edited").is_some());
+        // The new label must keep save's replacement semantics, not create a duplicate.
+        h.step(&json!({"click":{"handle":"prefs:profile:save"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.settings_profiles.list.len(), 1);
+        assert_eq!(h.app.settings_profiles.list[0]["preferences"]["zoom_reverse"], true);
+        assert!(crate::scenario::rect_of("prefs:profile:Laptop:edited").is_none());
+        assert!(crate::scenario::rect_of("prefs:profile:edited").is_none());
+        h.app.preferences.zoom_reverse = false;
+        h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
+        h.step(&json!({"key":"A", "cmd":true})).unwrap();
+        h.step(&json!({"text":"Desk"})).unwrap();
+        h.step(&json!({"click":{"handle":"prefs:profile:save"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.settings_profiles.names(), ["Laptop", "Desk"]);
+        assert!(crate::scenario::rect_of("prefs:profile:Desk:apply").is_none());
+        let laptop = crate::scenario::rect_of("prefs:profile:Laptop:card").unwrap();
+        let desk = crate::scenario::rect_of("prefs:profile:Desk:card").unwrap();
+        assert!((laptop.height() - 42.0).abs() < 0.5 && (desk.height() - 42.0).abs() < 0.5, "{theme}: compact saved cards");
+        assert!((desk.top() - laptop.bottom() - 8.0).abs() < 0.5, "{theme}: saved card gap");
+        assert_eq!((laptop.left(), laptop.right()), (desk.left(), desk.right()));
+        for (name, card) in [("Laptop", laptop), ("Desk", desk)] {
+            assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains_rect(card));
+            for action in ["export", "rename", "delete"] {
+                let target = crate::scenario::rect_of(&format!("prefs:profile:{name}:{action}")).unwrap();
+                assert!(card.contains_rect(target), "{theme}: {name} {action} stays inside its card");
+                assert!((target.width() - 24.0).abs() < 0.5 && (target.height() - 24.0).abs() < 0.5);
+            }
+        }
+        let active = crate::scenario::rect_of("prefs:profile:Desk:active").unwrap();
+        assert!(desk.contains_rect(active));
+        assert!((active.height() - 18.0).abs() < 0.5);
+        let t = crate::theme::Tokens::get();
+        assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect == desk && rect.fill == t.selected_bg && rect.stroke.color == t.form_primary)));
+        assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if desk.contains(text.pos) && text.galley.job.text == "Desk" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::fonts::semibold(t.font_label)))));
+        let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+        assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if body.contains(text.pos) && text.galley.job.text == "Appearance" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::fonts::semibold(t.font_caption)))));
+        assert!(laptop.contains_rect(crate::scenario::rect_of("prefs:profile:Laptop:apply").unwrap()));
+        h.step(&json!({"click":{"handle":"prefs:profile:Laptop:apply"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
+        assert!(h.app.preferences.zoom_reverse);
+        assert_eq!(
+            h.output
+                .accesskit_update
+                .as_ref()
+                .unwrap()
+                .nodes
+                .iter()
+                .filter(|(_, node)| node.label() == Some("Profile name"))
+                .find_map(|(_, node)| node.value()),
+            Some("Desk"),
+            "applying a different row preserves the user-typed draft"
+        );
+        h.app.preferences.zoom_reverse = false;
+        h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
+        h.step(&json!({"key":"A", "cmd":true})).unwrap();
+        h.step(&json!({"text":"Laptop"})).unwrap();
+        h.step(&json!({"click":{"handle":"prefs:profile:save"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.settings_profiles.list.len(), 2, "typing an existing name still replaces it");
+        assert_eq!(h.app.settings_profiles.list[0]["preferences"]["zoom_reverse"], false);
+        assert_eq!(
+            h.output
+                .accesskit_update
+                .as_ref()
+                .unwrap()
+                .nodes
+                .iter()
+                .filter(|(_, node)| node.label() == Some("Profile name"))
+                .find_map(|(_, node)| node.value()),
+            Some("Laptop"),
+            "replacement keeps the typed name too"
+        );
+        assert!(h.app.prefs_window.filter.is_empty(), "name entry must not type into search");
+        assert!(h.app.prefs_window.open);
+    }
+}
+
+#[test]
+fn general_inactive_profile_rows_export_rename_import_and_delete_without_applying() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.zoom_reverse = true;
+    run(&mut h, "settings.profile.save", json!({"name":"Laptop"}));
+    h.app.preferences.zoom_reverse = false;
+    run(&mut h, "settings.profile.save", json!({"name":"Desk"}));
+    h.call("ui.prefs", json!({"language":"en", "open":"General"}));
+    assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
+    assert_eq!(
+        h.output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.label() == Some("Profile name"))
+            .find_map(|(_, node)| node.value()),
+        Some(""),
+        "the name entry starts empty even with an active profile"
+    );
+    h.step(&json!({"click":{"handle":"prefs:profile:Laptop:export"}})).unwrap();
+    h.frames(6);
+    let path = h.dir.join("Laptop.solidcraft-profile.json");
+    let exported: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(exported["name"], "Laptop");
+    assert_eq!(exported["preferences"]["zoom_reverse"], true);
+    assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
+    assert!(!h.app.preferences.zoom_reverse);
+
+    h.step(&json!({"click":{"handle":"prefs:profile:Laptop:rename"}})).unwrap();
+    h.frames(3);
+    assert!(h.widget("Laptop").is_some(), "the shared editor is prefilled");
+    h.step(&json!({"text":"Travel"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.settings_profiles.names(), ["Travel", "Desk"]);
+    assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
+    assert!(!h.app.preferences.zoom_reverse);
+    assert!(h.app.prefs_window.open && h.app.prefs_window.filter.is_empty());
+    assert_eq!(
+        h.output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.label() == Some("Profile name"))
+            .find_map(|(_, node)| node.value()),
+        Some(""),
+        "the row rename editor does not fill the independent name entry"
+    );
+
+    h.step(&json!({"choose_file":"Laptop.solidcraft-profile.json"})).unwrap();
+    h.step(&json!({"click":{"handle":"prefs:profile:import"}})).unwrap();
+    h.frames(6);
+    assert_eq!(h.app.settings_profiles.names(), ["Travel", "Desk", "Laptop"]);
+    assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
+    assert!(!h.app.preferences.zoom_reverse, "import keeps the active settings");
+    h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
+    h.step(&json!({"text":"Next profile"})).unwrap();
+    h.step(&json!({"click":{"handle":"prefs:profile:Travel:delete"}})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.settings_profiles.names(), ["Desk", "Laptop"]);
+    assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
+    h.step(&json!({"click":{"handle":"prefs:profile:Desk:delete"}})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.settings_profiles.active, None);
+    assert!(!h.app.preferences.zoom_reverse, "deleting never applies another row");
+    assert_eq!(
+        h.output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.label() == Some("Profile name"))
+            .find_map(|(_, node)| node.value()),
+        Some("Next profile"),
+        "deleting either an inactive or active row retains the draft"
+    );
+}
+
+#[test]
+fn general_profile_row_rename_commits_or_cancels_without_closing_preferences() {
+    for action in ["Enter", "Tab", "ok", "Escape", "cancel", "outside"] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        run(&mut h, "settings.profile.save", json!({"name":"Laptop"}));
+        run(&mut h, "settings.profile.save", json!({"name":"Desk"}));
+        h.call("ui.prefs", json!({"language":"en", "open":"General"}));
+        h.step(&json!({"click":{"handle":"prefs:profile:Laptop:rename"}})).unwrap();
+        h.frames(3);
+        let popup = crate::scenario::rect_of("prefs:profile:rename_popup").unwrap();
+        let editor = crate::scenario::rect_of("rename:name").unwrap();
+        assert!(popup.contains_rect(editor), "the editor is outside the page's scroll clip");
+        h.step(&json!({"text":"  Travel  "})).unwrap();
+        match action {
+            "ok" | "cancel" => h.step(&json!({"click":{"handle":format!("prefs:profile:rename:{action}")}})).unwrap(),
+            "outside" => {
+                let page = crate::scenario::rect_of("prefs:page_body").unwrap();
+                let at = egui::pos2(page.right() - 4.0, page.top() + 4.0);
+                assert!(!popup.contains(at));
+                h.step(&json!({"click":[at.x, at.y]})).unwrap();
+            }
+            _ => h.step(&json!({"key":action})).unwrap(),
+        }
+        h.frames(3);
+        let committed = matches!(action, "Enter" | "Tab" | "ok");
+        assert_eq!(h.app.settings_profiles.names(), [if committed { "Travel" } else { "Laptop" }, "Desk"], "{action}");
+        assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
+        assert!(h.app.prefs_window.open && h.app.prefs_window.filter.is_empty(), "{action}");
+        assert!(crate::scenario::rect_of("prefs:profile:rename_popup").is_none());
+    }
+}
+
+#[test]
+fn general_profile_row_rename_keeps_validation_and_unchanged_name_noop() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    run(&mut h, "settings.profile.save", json!({"name":"Laptop"}));
+    run(&mut h, "settings.profile.save", json!({"name":"Desk"}));
+    h.call("ui.prefs", json!({"language":"en", "open":"General"}));
+    for to in ["Laptop".to_string(), "Desk".to_string(), "x".repeat(65)] {
+        h.step(&json!({"click":{"handle":"prefs:profile:Laptop:rename"}})).unwrap();
+        h.frames(3);
+        if to != "Laptop" {
+            h.step(&json!({"text":to})).unwrap();
+        }
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.settings_profiles.names(), ["Laptop", "Desk"]);
+        assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
+        assert!(h.app.prefs_window.open);
+        if to == "Desk" {
+            assert!(h.widget("another settings profile is called `Desk`").is_some(), "the existing act outcome surfaces duplicates");
+        }
+    }
+}
+
+#[test]
+fn profile_keys_preserve_the_baseline_and_explicit_additions() {
     let expected = [
         "browser_bodies_folders",
         "browser_collapsed",
@@ -370,6 +760,8 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
         "history_in_browser",
         "history_play_button",
         "history_sketches",
+        "home_fit_size",
+        "invert_navigator_arrows",
         "keep_work_on_tab_switch",
         "language",
         "layout",
@@ -385,6 +777,7 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
         "nav_bridge_enabled",
         "nav_bridge_port",
         "navigation_bar",
+        "navigator_fit",
         "navigator_style",
         "orbit_around",
         "orbit_reverse",
@@ -396,10 +789,13 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
         "project_options_dialog",
         "quick_measure",
         "radial_context_menu",
+        "ribbon_click_ends_tool",
         "ribbon_icon_grid",
         "ribbon_labels",
+        "ribbon_menus_follow_hover",
         "ribbon_menus_skip_pinned",
         "ribbon_reveal",
+        "ribbon_tabs_only",
         "right_drag_orbits",
         "select_other_hidden",
         "selection_shift_add_only",
@@ -410,6 +806,7 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
         "sketch_conflict_colour",
         "sketch_construction_lines",
         "sketch_exit_view",
+        "sketch_face_activates_part",
         "sketch_open_look_at",
         "sketch_recent_snap",
         "sketch_state_icons",
@@ -447,7 +844,7 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 93);
+    assert_eq!(expected.len(), 100);
     assert_eq!(actual, expected);
 }
 
@@ -455,7 +852,7 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
 fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     let mut h = Harness::new();
     let defaults = crate::prefs::Prefs::default();
-    assert!(!defaults.keep_work_on_tab_switch && !defaults.line_hover_tangent_arc);
+    assert!(!defaults.keep_work_on_tab_switch && !defaults.line_hover_tangent_arc && !defaults.ribbon_menus_follow_hover);
     for (key, page) in [("keep_work_on_tab_switch", crate::prefs::PAGE_LAYOUT), ("line_hover_tangent_arc", crate::prefs::PAGE_SKETCH)] {
         let homes: Vec<_> = crate::prefs::FIELD_PAGES.iter().filter_map(|(field, page)| (*field == key).then_some(*page)).collect();
         assert_eq!(homes, [Some(page)], "{key} keeps its new page home");
@@ -468,15 +865,39 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.viewport_analysis_status = false;
     h.app.preferences.keep_work_on_tab_switch = true;
     h.app.preferences.line_hover_tangent_arc = true;
+    h.app.preferences.navigator_fit = true;
+    h.app.preferences.invert_navigator_arrows = true;
+    h.app.preferences.home_fit_size = 0.5;
+    h.app.preferences.ribbon_click_ends_tool = false;
+    h.app.preferences.ribbon_menus_follow_hover = true;
+    h.app.preferences.sketch_face_activates_part = true;
     run(&mut h, "settings.profile.save", json!({"name":"Moved"}));
     let saved = h.app.settings_profiles.prefs();
     let doc = h.app.settings_profiles.list[0].clone();
     assert_eq!(doc["preferences"]["keep_work_on_tab_switch"], true);
     assert_eq!(doc["preferences"]["line_hover_tangent_arc"], true);
+    for (key, value) in [
+        ("home_fit_size", json!(0.5)),
+        ("invert_navigator_arrows", json!(true)),
+        ("navigator_fit", json!(true)),
+        ("ribbon_click_ends_tool", json!(false)),
+        ("ribbon_menus_follow_hover", json!(true)),
+        ("sketch_face_activates_part", json!(true)),
+    ] {
+        assert_eq!(doc["preferences"][key], value, "capture retains {key}");
+    }
     assert!(doc["preferences"].get("dark_parts_shading").is_none());
     assert_eq!(sanitize(&doc).unwrap(), doc);
     h.app.settings_profiles.load(&serde_json::from_str::<Value>(&serde_json::to_string(&saved).unwrap()).unwrap());
     assert_eq!(h.app.settings_profiles.list[0], doc);
+    let path = h.dir.join("moved.solidcraft-profile.json");
+    let exported = run(&mut h, "settings.profile.export", json!({"name":"Moved", "path":path}));
+    assert_eq!(exported["profile"], doc);
+    let written: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(written, doc);
+    run(&mut h, "settings.profile.delete", json!({"name":"Moved"}));
+    assert_eq!(run(&mut h, "settings.profile.import", json!({"path":path})), json!({"name":"Moved"}));
+    assert_eq!(h.app.settings_profiles.list[0], doc, "file import retains the complete profile");
     h.app.preferences.nav_bridge_enabled = false;
     h.app.preferences.nav_bridge_port = 8765;
     h.app.preferences.origin_plane_names = crate::prefs::OriginPlaneNames::Xyz;
@@ -485,28 +906,65 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.viewport_analysis_status = true;
     h.app.preferences.keep_work_on_tab_switch = false;
     h.app.preferences.line_hover_tangent_arc = false;
+    h.app.preferences.navigator_fit = defaults.navigator_fit;
+    h.app.preferences.invert_navigator_arrows = defaults.invert_navigator_arrows;
+    h.app.preferences.home_fit_size = defaults.home_fit_size;
+    h.app.preferences.ribbon_click_ends_tool = defaults.ribbon_click_ends_tool;
+    h.app.preferences.ribbon_menus_follow_hover = defaults.ribbon_menus_follow_hover;
+    h.app.preferences.sketch_face_activates_part = defaults.sketch_face_activates_part;
     let out = run(&mut h, "settings.profile.apply", json!({"name":"Moved"}));
     assert_eq!(out["skipped"], json!([]));
-    assert!(h.app.preferences.keep_work_on_tab_switch && h.app.preferences.line_hover_tangent_arc);
+    assert!(h.app.preferences.keep_work_on_tab_switch && h.app.preferences.line_hover_tangent_arc && h.app.preferences.ribbon_menus_follow_hover);
     assert_eq!(capture(&h.app, "Moved"), doc);
+    for value in [0.05, 1.1] {
+        let mut invalid = doc.clone();
+        invalid["preferences"]["home_fit_size"] = json!(value);
+        let imported = run(&mut h, "settings.profile.import", json!({"profile":invalid, "name":"Invalid fit"}));
+        let out = run(&mut h, "settings.profile.apply", json!({"name":imported["name"]}));
+        assert_eq!(out["skipped"], json!(["home_fit_size"]));
+        assert_eq!(h.app.preferences.home_fit_size, 0.5, "an out-of-range profile value is refused");
+    }
 }
 
 #[test]
 fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     let mut h = Harness::new();
     h.app.home.open = false;
+    h.app.preferences.language = "en".into();
     run(&mut h, "settings.profile.save", json!({"name":"Laptop"}));
     h.app.preferences.zoom_reverse = true;
     run(&mut h, "settings.profile.save", json!({"name":"Desk"}));
     h.call("ui.prefs", json!({"open":"Tools"}));
     h.frames(3);
     assert!(crate::scenario::rect_of("prefs:profile:edited").is_none());
-    h.step(&json!({"click":{"handle":"prefs:profile"}})).unwrap();
+    let card = crate::scenario::rect_of("prefs:profile").unwrap();
+    h.step(&json!({"click":[card.left() + 3.0, card.center().y]})).unwrap();
     h.frames(2);
+    assert!(crate::scenario::rect_of("dialog:list:Laptop").is_some(), "the card's padding opens its real menu");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.prefs_window.open);
+    assert!(crate::scenario::rect_of("dialog:list:Laptop").is_none(), "Escape dismisses the sidebar menu itself");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::rect_of("dialog:list:Laptop").is_some(), "the same trigger opens from the keyboard");
     h.step(&json!({"click":{"handle":"dialog:list:Laptop"}})).unwrap();
     h.frames(3);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
     assert!(!h.app.preferences.zoom_reverse);
+    h.step(&json!({"widget":"General"})).unwrap();
+    assert_eq!(
+        h.output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.label() == Some("Profile name"))
+            .find_map(|(_, node)| node.value()),
+        Some(""),
+        "sidebar Apply does not fill the independent name entry"
+    );
+    h.step(&json!({"widget":"Tools"})).unwrap();
     h.app.preferences.direct_interaction = true;
     h.frames(3);
     assert!(crate::scenario::rect_of("prefs:profile:edited").is_some());
@@ -524,4 +982,91 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     h.step(&json!({"widget":profiles_label})).unwrap();
     h.frames(3);
     assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GENERAL);
+    assert_eq!(
+        h.output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.label() == Some("Profile name"))
+            .find_map(|(_, node)| node.value()),
+        Some(""),
+        "sidebar Save does not fill the independent name entry either"
+    );
+    h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
+    h.step(&json!({"text":"Next profile"})).unwrap();
+    h.step(&json!({"click":{"handle":"prefs:profile"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"dialog:list:Desk"}})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
+    assert_eq!(
+        h.output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.label() == Some("Profile name"))
+            .find_map(|(_, node)| node.value()),
+        Some("Next profile"),
+        "selecting another sidebar profile preserves typed input"
+    );
+    h.step(&json!({"click":{"handle":"prefs:profile"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget":"Save"})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.settings_profiles.names(), ["Laptop", "Desk"]);
+    assert_eq!(
+        h.output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.label() == Some("Profile name"))
+            .find_map(|(_, node)| node.value()),
+        Some("Next profile"),
+        "sidebar Save preserves typed input and saves the selected profile"
+    );
+}
+
+#[test]
+fn a_profile_carries_the_view_navigators_body_and_one_without_leaves_it_alone() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10})).unwrap();
+    let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
+    // Not the defaults, so the profile has something to carry.
+    run(&mut h, "view.navigator", json!({"style": "custom", "body": body, "texture": "modeled", "arrows": false, "home": false}));
+    run(&mut h, "settings.profile.save", json!({"name": "Gizmo"}));
+    let exported = capture(&h.app, "Gizmo");
+    assert!(exported["view_gizmo"]["v"].is_string(), "the body is packed into the profile: {}", exported["view_gizmo"]);
+    assert!(exported.to_string().len() < 64 * 1024, "a box costs little");
+
+    // Elsewhere: a design without that body, the cube, and no custom body yet.
+    let mut other = Harness::new();
+    run(&mut other, "settings.profile.save", json!({"name": "Plain"}));
+    assert_eq!(run(&mut other, "settings.profile.import", json!({"profile": exported})), json!({"name": "Gizmo"}));
+    assert!(other.app.preferences.navigator_arrows && other.app.preferences.navigator_home, "before the profile: the defaults");
+    run(&mut other, "settings.profile.apply", json!({"name": "Gizmo"}));
+    let shape = other.app.view_gizmo.shape.as_ref().expect("the profile brings the body along");
+    assert!(!other.app.preferences.navigator_arrows && !other.app.preferences.navigator_home, "and the arrows and Home");
+    assert_eq!(shape.name, body);
+    assert_eq!(shape.mesh.triangles.len(), h.app.view_gizmo.shape.as_ref().unwrap().mesh.triangles.len());
+    assert_eq!(other.app.preferences.navigator_style, crate::prefs::NavigatorStyle::Custom);
+    assert_eq!(other.app.preferences.navigator_texture, crate::prefs::NavigatorTexture::Modeled);
+
+    // A profile saved before a body was chosen keeps the current body.
+    run(&mut other, "settings.profile.apply", json!({"name": "Plain"}));
+    assert_eq!(other.app.view_gizmo.shape.as_ref().map(|s| s.name.as_str()), Some(body.as_str()));
+
+    // An unreadable body is left out of the profile; the rest of it still applies.
+    let mut broken = capture(&h.app, "Broken");
+    broken["view_gizmo"] = json!({"name": "x", "v": "not base64!"});
+    let checked = sanitize(&broken).unwrap();
+    assert!(checked.get("view_gizmo").is_none());
+    broken["view_navigator"] = json!({"texture": "glossy", "arrows": "yes", "home": true, "extra": 1});
+    assert_eq!(sanitize(&broken).unwrap()["view_navigator"], json!({"home": true}), "only what this version reads");
+    assert_eq!(checked["preferences"]["navigator_style"], "custom");
 }

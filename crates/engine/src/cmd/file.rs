@@ -44,12 +44,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("save")
         .key("Ctrl+S")
         .noundo()
-        .params("path? (default: current file); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused)"),
+        .params("path? (default: current file; a name that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused)"),
     CommandSpec::new("file.save_as", "Save As", save_as)
         .icon("save")
         .key("Ctrl+Shift+S")
         .noundo()
-        .params("path; format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file)"),
+        .params("path (a design file name, .sc as a rule; one that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file)"),
     CommandSpec::new("doc.recovery_list", "Recoverable Designs", recovery_list).icon("restore")
         .noundo()
         .params("dir? (default: the recovery folder) → designs autosaved by apps that crashed or closed with unsaved changes"),
@@ -61,6 +61,39 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("export")
         .noundo()
         .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10); quality?: standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts)"),
+    // One command per format, so each File › Export item can have a key of its own; started
+    // from a key or command search, the app opens the save picker (the mesh dialog for STL and
+    // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
+    CommandSpec::new("file.export_step", "Export STEP", crate::checked!("file.export_step", export_step))
+        .icon("export")
+        .noundo()
+        .contract(&EXPORT_STEP_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
+        .params("path; bodies?: [names] (default: every body; a design with components then exports as a STEP assembly) → {path, bytes, format}: STEP, whatever the path's extension"),
+    CommandSpec::new("file.export_stl", "Export STL", crate::checked!("file.export_stl", export_stl))
+        .icon("mesh_export")
+        .noundo()
+        .contract(&EXPORT_STL_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
+        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard) → {path, bytes, format}: binary STL, whatever the path's extension"),
+    CommandSpec::new("file.export_3mf", "Export 3MF", crate::checked!("file.export_3mf", export_3mf))
+        .icon("mesh_export")
+        .noundo()
+        .contract(&EXPORT_3MF_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
+        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard); objects?: body|component (as file.export) → {path, bytes, format}: 3MF, whatever the path's extension"),
+    CommandSpec::new("file.export_obj", "Export OBJ", crate::checked!("file.export_obj", export_obj_cmd))
+        .icon("export")
+        .noundo()
+        .contract(&EXPORT_OBJ_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
+        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard) → {path, bytes, format, files}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it"),
+    CommandSpec::new("file.export_urdf", "Export URDF", crate::checked!("file.export_urdf", export_urdf_cmd))
+        .icon("export")
+        .noundo()
+        .contract(&EXPORT_URDF_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::file::UrdfExportResult>)
+        .params("path; mesh_prefix?; effort? (default 1000); velocity? (default 10) → {path, format, files, links, joints, warnings}: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md"),
     CommandSpec::new("file.save_mesh", "Save As Mesh", save_mesh)
         .at("INSERT", "FILES")
         .icon("mesh_export")
@@ -88,6 +121,12 @@ fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
     s.user_named = !name.trim().is_empty() && name.trim() != DEFAULT_NAME;
     Ok(json!({"name": name}))
 }
+
+const EXPORT_STEP_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportStepParams> = crate::schema::TypedContract::new();
+const EXPORT_STL_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMeshParams> = crate::schema::TypedContract::new();
+const EXPORT_3MF_CONTRACT: crate::schema::TypedContract<crate::schema::file::Export3mfParams> = crate::schema::TypedContract::new();
+const EXPORT_OBJ_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMeshParams> = crate::schema::TypedContract::new();
+const EXPORT_URDF_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportUrdfParams> = crate::schema::TypedContract::new();
 
 fn path_arg<'a>(p: &'a Value, cmd: &str) -> Result<&'a str> {
     str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))
@@ -142,12 +181,17 @@ fn exporter_up(import: &solidcraft_kernel::StepImport) -> Option<(&'static str, 
 
 /// A quarter turn about X through the origin: a file's Y up becomes Z up.
 fn quarter_turn_x() -> solidcraft_doc::Mat {
-    solidcraft_doc::rigid(solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::X, std::f64::consts::FRAC_PI_2)
+    solidcraft_doc::rigid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X, std::f64::consts::FRAC_PI_2)
 }
 
 /// Add an Import feature for a STEP file to the session's design, in a new component named
 /// after the file (#1386).
+///
+/// While the profiler records, the reply's `profile` is the import's share of it (reading,
+/// building the solids in SMLib, placing, meshing and evaluating them), as
+/// `diagnostics.profile` reports it.
 fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions) -> Result<Value> {
+    let profiled = solidcraft_profile::enabled().then(solidcraft_profile::mark);
     let sf = read_step(path, options.names)?;
     let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&sf.name).to_string();
     let cname = import::component_name(path, name);
@@ -165,6 +209,10 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptio
     placed.report(&mut out);
     if let Some(turned) = turned {
         out["stand_up"] = json!(turned);
+    }
+    if let Some(mark) = profiled {
+        let report = crate::schema::diagnostics::ProfileReport::new(&mark.report(), 20);
+        out["profile"] = serde_json::to_value(report).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     }
     Ok(out)
 }
@@ -268,7 +316,11 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(m) = placement {
         let occ = out["occurrence"].as_u64().ok_or_else(|| EngineError::Other("the import has no placement to move".into()))?;
         if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ) {
-            o.transform = solidcraft_doc::mat_mul(&m, &o.transform);
+            let placed = solidcraft_doc::mat_mul(&m, &o.transform);
+            if !solidcraft_doc::is_placement(&placed) {
+                return Err(bad(cmd, "`matrix` moves the import out of a rigid placement within 1e9 mm"));
+            }
+            o.transform = placed;
             out["transform"] = json!(o.transform);
         }
         s.refresh();
@@ -287,6 +339,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(command) = super::drawing_import_command(path) {
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
         let mut fresh = Session::new(Document::new(&stem));
+        fresh.set_validation(s.validation());
         let mut out = fresh.execute(command, &json!({"path": path}))?;
         fresh.undo.clear();
         s.replace_design(fresh);
@@ -318,6 +371,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         // A new, unsaved design holding the file's bodies.
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
         let mut fresh = Session::new(Document::new(&stem));
+        fresh.set_validation(s.validation());
         let r = if solidcraft_io::is_step_path(path) {
             add_step(&mut fresh, path, None, &step_options(p, "doc.open")?)?
         } else {
@@ -343,7 +397,8 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     // Stamped before it is read: a write while it is being read is a change too.
     let disk = solidcraft_io::design_lock::stamp(path);
     let (doc, saved) = read_design(s, path)?;
-    opened_design(s, Session::opened_at(doc, saved.as_ref(), Some(path)), path, read_only, disk)
+    let opened = Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation());
+    opened_design(s, opened, path, read_only, disk)
 }
 
 /// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.
@@ -433,8 +488,48 @@ fn rename_design(s: &mut Session, from: &str, to: &str) {
     }
 }
 
-fn write(s: &mut Session, path: &str, format: &str, compression: &str, preview: bool, cache: bool, overwrite: bool) -> Result<Value> {
+/// The kind of file `doc.open` reads `path` as when that is not a design, by its extension. A
+/// design saved under such a name would not open again as the design (#9745).
+fn other_file_kind(path: &str) -> Option<&'static str> {
+    if solidcraft_io::is_step_path(path) {
+        Some("a STEP or other CAD exchange file")
+    } else if solidcraft_io::is_mesh_path(path) {
+        Some("a mesh")
+    } else if super::drawing_import_command(path).is_some() {
+        Some("a 2D drawing")
+    } else if solidcraft_io::is_point_cloud_path(path) {
+        Some("a point cloud")
+    } else if solidcraft_io::is_drawing_path(path) {
+        Some("a SolidCraft drawing")
+    } else {
+        None
+    }
+}
+
+/// Refuse to save a design under a name [`other_file_kind`] opens as another kind of file,
+/// pointing to `file.export` when that writes the format.
+fn check_design_name(cmd: &str, path: &str) -> Result<()> {
+    let Some(kind) = other_file_kind(path) else { return Ok(()) };
+    let ext = std::path::Path::new(path).extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
+    let export = if solidcraft_io::Format::from_name(&ext).is_ok() { format!(", or write a .{ext} file with file.export") } else { String::new() };
+    Err(bad(cmd, format!("{path}: a .{ext} file opens as {kind}, not as a design; save the design as .{}{export}", solidcraft_io::DESIGN_EXT)))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write(s: &mut Session, cmd: &str, path: &str, format: &str, compression: &str, preview: bool, cache: bool, overwrite: bool) -> Result<Value> {
+    // A path outside the agent's folders says so first, whatever its name.
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
+    check_design_name(cmd, path)?;
+    // A move not captured yet isn't in the document a file holds: refuse, rather than write the
+    // file without it and say nothing (#9736). The app asks the Capture Position question first.
+    // An exploded view shown saves as before: its placements aren't the design's.
+    if s.moved_uncaptured() {
+        let moved: Vec<&str> = s.doc.occurrences.iter().filter(|o| s.pending_moves.contains_key(&o.id)).map(|o| o.name.as_str()).collect();
+        return Err(EngineError::Other(format!(
+            "{path}: {} moved and not captured yet; component.capture_position keeps the move and component.revert_position puts it back, then save",
+            moved.join(", ")
+        )));
+    }
     if s.path.as_deref() == Some(path) {
         if s.read_only {
             return Err(EngineError::Other(format!("{path}: the design was opened read-only; save it to another file with file.save_as")));
@@ -494,9 +589,19 @@ fn write_bytes(
 impl Session {
     /// Open a design with its file location, resolving component links before history keeps
     /// them. Absolute in-memory targets survive Save As, undo, redo and recovery unchanged.
-    pub fn opened_at(mut doc: Document, saved: Option<&solidcraft_doc::SavedModel>, path: Option<&str>) -> Self {
+    pub fn opened_at(doc: Document, saved: Option<&solidcraft_doc::SavedModel>, path: Option<&str>) -> Self {
+        Self::opened_at_validating(doc, saved, path, solidcraft_kernel::Validation::default())
+    }
+
+    /// [`Self::opened_at`], its features evaluated under `validation` ([`Session::set_validation`]).
+    pub fn opened_at_validating(
+        mut doc: Document,
+        saved: Option<&solidcraft_doc::SavedModel>,
+        path: Option<&str>,
+        validation: solidcraft_kernel::Validation,
+    ) -> Self {
         super::component_link::resolve_design_links(&mut doc, path);
-        Self::opened(doc, saved).located(path)
+        Self::opened_validating(doc, saved, validation).located(path)
     }
 
     /// This session, just opened, as the design in the file at `path`.
@@ -623,6 +728,7 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
     };
     write(
         s,
+        "file.save",
         &path,
         str_(p, "format").unwrap_or(default_design_format(&path)),
         str_(p, "compression").unwrap_or("fast"),
@@ -640,6 +746,7 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
     let path = path_arg(p, "file.save_as")?.to_string();
     write(
         s,
+        "file.save_as",
         &path,
         str_(p, "format").unwrap_or(default_design_format(&path)),
         str_(p, "compression").unwrap_or("fast"),
@@ -700,6 +807,7 @@ fn component_parts(s: &Session) -> Vec<(String, Vec<String>)> {
 
 fn export_to(
     s: &Session,
+    cmd: &str,
     path: &str,
     format: Format,
     bodies: &[String],
@@ -714,7 +822,7 @@ fn export_to(
     // A design with components exports as a STEP assembly; otherwise bodies as placed.
     let bytes = if format == Format::Design {
         if !bodies.is_empty() {
-            return Err(bad("file.export", "design JSON exports the complete document; omit bodies"));
+            return Err(bad(cmd, "design JSON exports the complete document; omit bodies"));
         }
         solidcraft_io::write_design(&s.design())
     } else if format == Format::Step && bodies.is_empty() && !s.doc.occurrences.is_empty() {
@@ -722,7 +830,7 @@ fn export_to(
     } else {
         // Bodies carry the colour they are shown in (appearance, material or imported), and the
         // file the design's properties where the format has a place for them.
-        solidcraft_io::export_with_parts(&s.doc.painted(&s.world_state()), bodies, parts, format, &name, &s.doc.metadata, quality)?
+        solidcraft_io::export_with_parts(&s.doc.painted(&*s.world_state()?), bodies, parts, format, &name, &s.doc.metadata, quality)?
     };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")}))
@@ -739,7 +847,7 @@ fn export_laid_to(
     quality: solidcraft_io::MeshQuality,
 ) -> Result<Value> {
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
-    let mut state = s.doc.painted(&s.world_state());
+    let mut state = s.doc.painted(&*s.world_state()?);
     let laid = print_face::lay_on_print_faces(s, &mut state, bodies, parts);
     let bytes = solidcraft_io::export_with_parts(&state, bodies, parts, format, &name, &s.doc.metadata, quality)?;
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
@@ -753,11 +861,44 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let path = path_arg(p, cmd)?;
     let format = Format::from_name(str_(p, "format").unwrap_or(path))?;
     if format == Format::Urdf {
-        return export_urdf(s, path, p);
+        if !string_list(cmd, p, "bodies")?.is_empty() {
+            return Err(bad(cmd, "urdf exports the whole assembly; omit bodies"));
+        }
+        return export_urdf(s, cmd, path, p);
     }
     let quality = mesh_quality(p, cmd)?;
     let parts = mesh_parts(s, p, cmd, format)?;
-    export_to(s, path, format, &string_list(cmd, p, "bodies")?, &parts, quality)
+    export_to(s, cmd, path, format, &string_list(cmd, p, "bodies")?, &parts, quality)
+}
+
+fn export_step(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.export_step";
+    let path = path_arg(p, cmd)?;
+    export_to(s, cmd, path, Format::Step, &string_list(cmd, p, "bodies")?, &[], solidcraft_io::MeshQuality::default())
+}
+
+fn export_stl(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.export_stl";
+    let path = path_arg(p, cmd)?;
+    export_to(s, cmd, path, Format::StlBinary, &string_list(cmd, p, "bodies")?, &[], mesh_quality(p, cmd)?)
+}
+
+fn export_3mf(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.export_3mf";
+    let path = path_arg(p, cmd)?;
+    let parts = mesh_parts(s, p, cmd, Format::ThreeMf)?;
+    export_to(s, cmd, path, Format::ThreeMf, &string_list(cmd, p, "bodies")?, &parts, mesh_quality(p, cmd)?)
+}
+
+fn export_obj_cmd(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.export_obj";
+    let path = path_arg(p, cmd)?;
+    export_to(s, cmd, path, Format::Obj, &string_list(cmd, p, "bodies")?, &[], mesh_quality(p, cmd)?)
+}
+
+fn export_urdf_cmd(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.export_urdf";
+    export_urdf(s, cmd, path_arg(p, cmd)?, p)
 }
 
 /// The OBJ export: the mesh file and the material library beside it, with the colours of the
@@ -766,7 +907,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
 fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality) -> Result<Value> {
     let mtl_path = std::path::Path::new(path).with_extension("mtl");
     let mtl_name = mtl_path.file_name().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| String::from("model.mtl"));
-    let files = solidcraft_io::export_obj(&s.doc.painted(&s.world_state()), bodies, &mtl_name, quality)?;
+    let files = solidcraft_io::export_obj(&s.doc.painted(&*s.world_state()?), bodies, &mtl_name, quality)?;
     let mut targets: Vec<(String, &[u8])> = Vec::new();
     if !files.mtl.is_empty() {
         targets.push((mtl_path.to_string_lossy().to_string(), files.mtl.as_bytes()));
@@ -788,11 +929,7 @@ fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io
 
 /// The assembly as a URDF and its meshes next to it (docs/urdf.md). Every path is checked before
 /// anything is written; the meshes go first and the `.urdf` last.
-fn export_urdf(s: &Session, path: &str, p: &Value) -> Result<Value> {
-    let cmd = "file.export";
-    if !string_list(cmd, p, "bodies")?.is_empty() {
-        return Err(bad(cmd, "urdf exports the whole assembly; omit bodies"));
-    }
+fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
     let positive = |k: &str| match p.get(k) {
         None | Some(Value::Null) => Ok(None),
         Some(_) => num(p, k).filter(|x| *x > 0.0).map(Some).ok_or_else(|| bad(cmd, format!("`{k}` must be a positive number"))),
@@ -807,13 +944,15 @@ fn export_urdf(s: &Session, path: &str, p: &Value) -> Result<Value> {
     // their links.
     let st = s.model.state();
     let mut held = Vec::new();
-    let doc = if s.pending_moves.is_empty() {
+    // The exploded view is shown only: the links are where the design places them.
+    let moves = s.uncaptured_moves();
+    let doc = if moves.is_empty() {
         std::borrow::Cow::Borrowed(&*s.doc)
     } else {
         let placed = solidcraft_doc::joints::solve(&s.doc, &st).world;
         let mut doc = (*s.doc).clone();
         for o in &mut doc.occurrences {
-            match s.pending_moves.get(&o.id) {
+            match moves.get(&o.id) {
                 Some(_) if placed.contains_key(&o.id) => held.push(o.name.clone()),
                 Some(t) => o.transform = *t,
                 None => {}
@@ -887,7 +1026,7 @@ fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
             },
         );
     }
-    export_to(s, path, format, &string_list(cmd, p, "bodies")?, &parts, quality)
+    export_to(s, cmd, path, format, &string_list(cmd, p, "bodies")?, &parts, quality)
 }
 
 /// The browser build can't start a program.
@@ -963,7 +1102,7 @@ fn recover(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(stem) = entry.path.as_deref().and_then(|path| default_name_for(&doc.name, path)) {
         doc.name = stem;
     }
-    s.replace_design(Session::opened_at(doc, None, entry.path.as_deref()));
+    s.replace_design(Session::opened_at_validating(doc, None, entry.path.as_deref(), s.validation()));
     s.mark_unsaved();
     if bool_(p, "discard").unwrap_or(false) {
         crate::recovery::remove(&dir, id)?;
@@ -993,6 +1132,30 @@ mod urdf_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// While the profiler records, a STEP import's reply carries its own profile: the import's
+    /// stages and the kernel's calls, as diagnostics.profile reports them.
+    #[test]
+    fn a_step_import_reports_its_profile_while_the_profiler_records() {
+        let _serial = crate::schema::diagnostics::PROFILE_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = std::env::temp_dir().join(format!("solidcraft-import-profile-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("block.step").to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5})).unwrap();
+        s.execute("file.export", &json!({"path": path})).unwrap();
+        // The first read of the file (a second one finds it in the import cache).
+        solidcraft_profile::set_enabled(true);
+        let out = Session::default().execute("file.insert_step", &json!({"path": path})).unwrap();
+        solidcraft_profile::set_enabled(false);
+        let plain = Session::default().execute("file.insert_step", &json!({"path": path})).unwrap();
+        assert!(plain.get("profile").is_none(), "nothing recorded, nothing reported: {plain}");
+        let p = &out["profile"];
+        let rows = p["rows"].as_array().unwrap();
+        let has = |cat: &str| rows.iter().any(|r| r["category"] == cat);
+        assert!(has("import") && has("solidcore"), "{p}");
+        assert!(p["by_category"].as_array().is_some_and(|c| !c.is_empty()) && p["wall_ms"].as_f64().is_some_and(|w| w > 0.0), "{p}");
+    }
 
     /// #8139: with `objects: "component"` a 3MF has one object for each placement of a component
     /// with two or more bodies, its bodies the object's parts; the design's own bodies stay objects
@@ -1050,6 +1213,43 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Each format's own export command (one key each in Keyboard Shortcuts) writes that format
+    /// whatever the path's extension, as `file.export` does with `format`, and says so.
+    #[test]
+    fn each_format_has_an_export_command_of_its_own() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-export-per-format-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let at = |n: &str| dir.join(n).to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5, "body_name": "Block"})).unwrap();
+        for (cmd, format, signature) in [
+            ("file.export_step", "Step", &b"ISO-10303-21;"[..]),
+            ("file.export_3mf", "ThreeMf", &b"PK"[..]),
+            ("file.export_obj", "Obj", &b""[..]),
+            ("file.export_stl", "StlBinary", &b""[..]),
+        ] {
+            // A name with another format's extension: the command, not the name, picks the format.
+            let path = at(&format!("{format}.txt"));
+            let r = s.execute(cmd, &json!({"path": path})).unwrap();
+            assert_eq!((r["path"].as_str(), r["format"].as_str()), (Some(path.as_str()), Some(format)), "{cmd}: {r}");
+            let bytes = std::fs::read(&path).unwrap();
+            assert_eq!(r["bytes"].as_u64(), Some(bytes.len() as u64), "{cmd}");
+            assert!(bytes.starts_with(signature), "{cmd}");
+        }
+        // The triangles `file.export` writes (the 80-byte header holds the file's name): a box is
+        // 12 triangles, 84 + 50 bytes each.
+        s.execute("file.export", &json!({"path": at("box.stl")})).unwrap();
+        assert_eq!(std::fs::read(at("StlBinary.txt")).unwrap()[80..], std::fs::read(at("box.stl")).unwrap()[80..]);
+        assert_eq!(std::fs::metadata(at("box.stl")).unwrap().len(), 84 + 50 * 12);
+        let obj = std::fs::read_to_string(at("Obj.txt")).unwrap();
+        assert_eq!(obj.lines().filter(|l| l.starts_with("f ")).count(), 12, "{obj}");
+        let r = s.execute("file.export_urdf", &json!({"path": at("robot.urdf")})).unwrap();
+        assert_eq!(r["format"], "Urdf");
+        assert!(std::fs::read_to_string(at("robot.urdf")).unwrap().contains("<robot"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// #4747: a mesh export's `quality` follows curved faces more closely. A 3 mm hole in a
     /// 200 mm plate gets more triangles at fine and more again at finest, in STL and 3MF alike
     /// (Save As Mesh too); standard is what the export always gave; anything else is refused.
@@ -1100,7 +1300,7 @@ mod tests {
             assert_eq!(s.doc.features.len(), 1);
             let id = s.active_sketch.unwrap();
             let sketch = s.doc.sketch(id).unwrap();
-            assert_eq!(s.model.state().sketch(id).unwrap().plane, solidcraft_geom::Plane::XY);
+            assert_eq!(s.model.state().sketch(id).unwrap().plane, solidcore_record::Plane::XY);
             assert_eq!(sketch.curves.len(), 3);
             assert_eq!(s.doc.name, "outline");
             assert!(s.path.is_none(), "Save must ask for a design path");
@@ -1242,6 +1442,53 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// #9736: a component moved and not captured yet is a change the file doesn't hold. The
+    /// design reads as unsaved, and Save and Save As refuse, naming the component, until the move
+    /// is captured (then the file has it) or reverted (then the design is as saved).
+    #[test]
+    fn a_move_not_captured_is_unsaved_and_saving_waits_for_it() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-pending-move-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("two.sc").to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0], "body_name": "BaseB"})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 30, "corner": [15, 15, 10], "body_name": "ArmB"})).unwrap();
+        s.execute("component.from_bodies", &json!({"bodies": ["BaseB", "ArmB"]})).unwrap();
+        s.execute("file.save_as", &json!({"path": path})).unwrap();
+        assert!(!s.is_dirty());
+        let arm = s.doc.occurrences.iter().find(|o| o.name.starts_with("ArmB")).unwrap().name.clone();
+        let arm_x = |s: &Session| {
+            let world = s.world_state().unwrap();
+            let body = world.bodies.iter().find(|b| b.name.starts_with("ArmB")).unwrap();
+            solidcraft_kernel::measure(&body.body).unwrap().centroid.x
+        };
+        for answer in ["component.revert_position", "component.capture_position"] {
+            s.execute("occurrence.move", &json!({"occurrence": arm, "translate": [7, 0, 0], "capture": false})).unwrap();
+            assert!(s.is_dirty(), "{answer}: the move is a change to save");
+            for (cmd, p) in [("file.save", json!({})), ("file.save_as", json!({"path": dir.join("other.sc").to_string_lossy()}))] {
+                let e = s.execute(cmd, &p).unwrap_err().to_string();
+                assert!(e.contains(&arm) && e.contains("not captured") && e.contains("component.capture_position"), "{cmd}: {e}");
+            }
+            assert!(!dir.join("other.sc").exists(), "nothing written");
+            s.execute(answer, &json!({})).unwrap();
+            s.execute("file.save", &json!({})).unwrap();
+            assert!(!s.is_dirty(), "{answer}");
+        }
+        let opened = Session::new(crate::io::read_design(&std::fs::read(&path).unwrap()).unwrap());
+        assert!((arm_x(&opened) - 27.0).abs() < 1e-6, "the captured move is in the file: {}", arm_x(&opened));
+        // An exploded view shown places the components only while it is shown: no change to
+        // save, and the design saves as it is. A move on top of it is one.
+        s.execute("explode.create", &json!({"name": "Apart", "moves": [{"occurrence": arm, "translate": [0, 0, 40]}]})).unwrap();
+        s.execute("file.save", &json!({})).unwrap();
+        s.execute("explode.show", &json!({"view": "Apart"})).unwrap();
+        assert!(!s.pending_moves.is_empty() && !s.is_dirty(), "an exploded view shown");
+        s.execute("file.save", &json!({})).unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": arm, "translate": [5, 0, 0], "capture": false})).unwrap();
+        assert!(s.is_dirty());
+        assert!(s.execute("file.save", &json!({})).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     #[ignore = "manual warmed engine save and provisional-open benchmark"]
     fn benchmark_warm_design_save_with_preview() {
@@ -1251,7 +1498,7 @@ mod tests {
         let input = target.join("issue303-step.json");
         let doc = solidcraft_io::read_design(&std::fs::read(input).unwrap()).unwrap();
         let mut session = Session::new(doc);
-        for body in &session.world_state().bodies {
+        for body in &session.world_state().unwrap().bodies {
             body.mesh();
         }
         let mut samples = [Vec::new(), Vec::new()];
@@ -1290,7 +1537,7 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
         assert!(saved_preview(&s).is_none(), "save must not triangulate a cold body");
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         for body in &state.bodies {
             body.mesh();
         }
@@ -1341,19 +1588,19 @@ mod tests {
         assert!(saved_preview(&s).is_none());
         assert!(saved_geometry(&s, &s.doc).is_some(), "the timeline's bodies need no placement");
         assert!(s.world_cache.lock().unwrap().is_none(), "saving must not prepare cold placements");
-        for body in &s.world_state().bodies {
+        for body in &s.world_state().unwrap().bodies {
             body.mesh();
         }
         assert!(saved_preview(&s).is_some());
         s.execute("occurrence.move", &json!({"occurrence":occurrence,"translate":[10,0,0],"capture":false})).unwrap();
-        for body in &s.world_state().bodies {
+        for body in &s.world_state().unwrap().bodies {
             body.mesh();
         }
         assert!(!s.pending_moves.is_empty());
         assert!(saved_preview(&s).is_none(), "uncaptured positions are not in the saved document");
         assert!(saved_geometry(&s, &s.doc).is_none());
         s.execute("component.capture_position", &json!({})).unwrap();
-        for body in &s.world_state().bodies {
+        for body in &s.world_state().unwrap().bodies {
             body.mesh();
         }
         let preview = saved_preview(&s).unwrap();
@@ -1361,7 +1608,7 @@ mod tests {
         assert!((min_x - 10.0).abs() < 1e-9);
         let mut editing = s.scratch();
         editing.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
-        for body in &editing.world_state().bodies {
+        for body in &editing.world_state().unwrap().bodies {
             body.mesh();
         }
         assert!(editing.active_sketch.is_some());
@@ -1375,7 +1622,7 @@ mod tests {
         crate::capture::install_test_renderer();
         let mut session = Session::new(Document::new("Cache opt-in"));
         session.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
-        let world = session.world_state();
+        let world = session.world_state().unwrap();
         for body in &world.bodies {
             body.mesh();
         }
@@ -1399,30 +1646,6 @@ mod tests {
         }
         std::fs::remove_file(&path).unwrap();
         std::fs::remove_file(format!("{}.bak", path.display())).unwrap();
-    }
-
-    /// #5286: a saved model whose feature records the boolean retries it took (as the kernel
-    /// writes them, with no `rejected` list when there were none) is taken on opening, not
-    /// refused and evaluated again.
-    #[test]
-    fn a_saved_model_with_boolean_retries_is_adopted() {
-        let mut session = Session::new(Document::new("Retried"));
-        session.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
-        let mut saved = saved_geometry(&session, &session.doc).unwrap();
-        // What a coplanar-face retry leaves in the file (a user's design, #5286).
-        let retry = json!({"events": [{"face_shift_mm": 0.6477, "rotation_rad": 0.0, "strategy": "coplanar_separation", "tolerance_mm": 0.0, "translation_mm": 0.0}], "truncated": false});
-        saved.records["features"][0]["diagnostics"] = retry;
-        let bytes =
-            solidcraft_io::write_design_container_with_cache(&session.doc, solidcraft_io::DesignCompression::Fast, None, Some(&saved)).unwrap();
-        let path = std::env::temp_dir().join(format!("solidcraft-saved-retries-{}.solidcraft", std::process::id()));
-        std::fs::write(&path, &bytes).unwrap();
-        let mut reopened = Session::default();
-        reopened.execute("doc.open", &json!({"path": path})).unwrap();
-        std::fs::remove_file(&path).unwrap();
-        assert!(reopened.model.results.iter().all(|r| r.ms == session.model.results[0].ms), "taken from the file, not evaluated");
-        let d = &reopened.model.results[0].boolean_diagnostics;
-        assert_eq!(d.events.len(), 1, "{d:?}");
-        assert!(d.rejected.is_empty());
     }
 
     /// The model a save keeps writes each distinct sheet-metal body once, and every state names
@@ -1514,7 +1737,7 @@ mod tests {
     fn saved_model_needs_no_meshes_and_is_adopted_only_for_its_document() {
         let mut session = Session::new(Document::new("Saved model"));
         session.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
-        let world = session.world_state();
+        let world = session.world_state().unwrap();
         assert!(world.bodies.iter().all(|b| b.cached_mesh().is_none()));
         let bytes = session.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
         assert!(world.bodies.iter().all(|b| b.cached_mesh().is_none()), "saving the model must not triangulate");
@@ -1687,7 +1910,7 @@ mod tests {
         let target = std::env::var_os("CARGO_TARGET_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from("target"));
         let input = std::env::var_os("SOLIDCRAFT_BENCH_FILE").map(std::path::PathBuf::from).unwrap_or_else(|| target.join("issue303-step.json"));
         let mut session = Session::new(solidcraft_io::read_design(&std::fs::read(input).unwrap()).unwrap());
-        for body in &session.world_state().bodies {
+        for body in &session.world_state().unwrap().bodies {
             body.mesh();
         }
         let modes = [("json", false, "fast"), ("container", false, "fast"), ("container", true, "fast"), ("container", true, "compact")];
@@ -1729,7 +1952,7 @@ mod tests {
         assert_eq!(result["errors"], 0);
         let reconstructed = start.elapsed().as_secs_f64() * 1000.;
         let mut triangles = 0;
-        let world = session.world_state();
+        let world = session.world_state().unwrap();
         for body in &world.bodies {
             triangles += body.mesh().triangles.len();
         }
@@ -1780,6 +2003,36 @@ mod tests {
         let mut failed = Session::default();
         assert!(failed.execute("file.save_as", &json!({"path":dir.join("missing-dir").join("plate.solidcraft")})).is_err());
         assert_eq!(failed.doc.name, "Untitled");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_design_is_not_saved_under_a_name_that_opens_as_another_file() {
+        // #9745: a design saved as `part.step` or `part.stl` was refused or opened as a broken mesh.
+        let dir = name_dir("other-kind");
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+        for name in
+            ["part.step", "part.STP", "part.igs", "part.stl", "part.obj", "part.3mf", "part.glb", "part.dxf", "part.svg", "part.ply", "part.scdwg"]
+        {
+            let path = dir.join(name);
+            for command in ["file.save_as", "file.save"] {
+                let e = s.execute(command, &json!({"path":path})).unwrap_err().to_string();
+                assert!(e.contains("not as a design") && e.contains(".sc"), "{command} {name}: {e}");
+                assert!(!path.exists(), "{command} {name} wrote the file");
+            }
+        }
+        let e = s.execute("file.save_as", &json!({"path":dir.join("part.stl")})).unwrap_err().to_string();
+        assert!(e.contains("file.export"), "STL is an export format: {e}");
+        assert!(s.path.is_none() && s.is_dirty(), "a refused save changes nothing");
+        // Names that open again as the design still save, and what they write opens as it.
+        for name in ["part.sc", "part.json", "part.txt", "part"] {
+            let path = dir.join(name);
+            s.execute("file.save_as", &json!({"path":path})).unwrap();
+            let mut reopened = Session::default();
+            reopened.execute("doc.open", &json!({"path":path})).unwrap();
+            assert_eq!(reopened.doc.features.len(), 1, "{name} reopens as the design");
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1905,14 +2158,14 @@ mod tests {
         let mut opened = Session::default();
         watch(progress.clone(), || opened.execute("doc.open", &json!({"path":path}))).unwrap();
         assert_eq!(progress.features(), (3, 3));
-        assert_eq!(opened.world_state().bodies.len(), 3);
+        assert_eq!(opened.world_state().unwrap().bodies.len(), 3);
 
         let progress = Arc::new(Progress::default());
         progress.cancel();
         let mut stopped = Session::default();
         watch(progress, || stopped.execute("doc.open", &json!({"path":path}))).unwrap();
         assert!(stopped.model.results.iter().all(|r| r.skipped), "no feature was rebuilt after Cancel");
-        assert!(stopped.world_state().bodies.is_empty());
+        assert!(stopped.world_state().unwrap().bodies.is_empty());
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1939,7 +2192,8 @@ mod tests {
         let mut whole = Session::default();
         let opened = whole.execute("doc.open", &json!({"path": path, "read_only": true})).unwrap();
 
-        let mut steps = OpenSteps::start(&json!({"path": path, "read_only": true})).unwrap().expect("a design is opened in steps");
+        let mut steps =
+            OpenSteps::start(&json!({"path": path, "read_only": true}), Default::default()).unwrap().expect("a design is opened in steps");
         assert_eq!(steps.path(), path);
         assert_eq!(steps.progress(), (0, features - 1), "the saved marker is where evaluation stops");
         let mut imports = 0;
@@ -1964,17 +2218,62 @@ mod tests {
         assert_eq!((stepped.path.as_deref(), stepped.read_only), (Some(path.as_str()), true));
         let summary = |s: &Session| -> Vec<(u64, bool, bool)> { s.model.results.iter().map(|r| (r.id, r.skipped, r.error.is_some())).collect() };
         assert_eq!(summary(&stepped), summary(&whole));
-        let bodies =
-            |s: &Session| -> Vec<(String, usize)> { s.world_state().bodies.iter().map(|b| (b.name.clone(), b.mesh().triangles.len())).collect() };
+        let bodies = |s: &Session| -> Vec<(String, usize)> {
+            s.world_state().unwrap().bodies.iter().map(|b| (b.name.clone(), b.mesh().triangles.len())).collect()
+        };
         assert_eq!(bodies(&stepped), bodies(&whole));
-        assert_eq!(stepped.world_state().bodies.len(), 3, "the box, the cylinder and the box before the marker");
+        assert_eq!(stepped.world_state().unwrap().bodies.len(), 3, "the box, the cylinder and the box before the marker");
         assert!(stepped.model.is_current(&stepped.doc));
 
         // Other files, and STEP-only options, are opened by `doc.open`.
         for p in [json!({"path": step}), json!({"path": "part.stl"}), json!({"path": path, "up": "y"}), json!({})] {
-            assert!(OpenSteps::start(&p).unwrap().is_none(), "{p}");
+            assert!(OpenSteps::start(&p, Default::default()).unwrap().is_none(), "{p}");
         }
-        assert!(OpenSteps::start(&json!({"path": dir.join("missing.sc").to_string_lossy()})).is_err());
+        assert!(OpenSteps::start(&json!({"path": dir.join("missing.sc").to_string_lossy()}), Default::default()).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A design opened a feature at a time is evaluated under the session's check mode, as
+    /// `doc.open` is. Started under another mode than the session's (the mode changed meanwhile),
+    /// nothing evaluated under it stands: every feature is evaluated again. The bar's last round
+    /// is one the check refuses on solidcore (kernel case
+    /// fillets/1207-fillet-bar-top-edge-after-boss-arc-round-r0-5), so there the modes differ in
+    /// their errors too.
+    #[test]
+    fn a_design_opened_a_feature_at_a_time_is_checked_under_the_sessions_mode() {
+        use super::open_steps::OpenSteps;
+        use solidcraft_kernel::Validation;
+        let dir = std::env::temp_dir().join(format!("solidcraft-open-steps-mode-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("steps.sc").to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.set_validation(Validation::Off);
+        s.execute("solid.box", &json!({"length": 100, "width": 30, "height": 10, "corner": [0, -15, 0], "body_name": "Arm"})).unwrap();
+        s.execute("solid.cylinder", &json!({"diameter": 40, "height": 20, "base": [0, 0, 0], "operation": "join", "targets": ["Arm"]})).unwrap();
+        s.execute("solid.fillet", &json!({"edges": [[16, 12, 10]], "radius": 2})).unwrap();
+        s.execute("solid.fillet", &json!({"edges": [[60, -15, 10]], "radius": 0.5})).unwrap();
+        s.execute("file.save", &json!({"path": path, "cache": false})).unwrap();
+        let errors = |s: &Session| s.model.results.iter().filter(|r| r.error.is_some()).count();
+        let open = |mode: Validation| {
+            let mut whole = Session::default();
+            whole.set_validation(mode);
+            whole.execute("doc.open", &json!({"path": path})).unwrap();
+            errors(&whole)
+        };
+        for mode in Validation::ALL {
+            for started in [mode, Validation::EachFeature, Validation::Off] {
+                let mut steps = OpenSteps::start(&json!({"path": path}), started).unwrap().expect("a design is opened in steps");
+                while steps.step() {}
+                let mut stepped = Session::default();
+                stepped.set_validation(mode);
+                steps.finish(&mut stepped).unwrap();
+                assert_eq!(stepped.validation(), mode);
+                assert_eq!(errors(&stepped), open(mode), "started under {started:?}, the session's mode {mode:?}");
+                let again = if started == mode { 0 } else { stepped.doc.features.len() };
+                assert_eq!(stepped.model.last_recomputed, again, "started under {started:?}, the session's mode {mode:?}");
+                assert!(stepped.model.is_current(&stepped.doc));
+            }
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 

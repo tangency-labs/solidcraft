@@ -1,6 +1,7 @@
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use super::*;
 use crate::Services;
@@ -34,7 +35,7 @@ fn valve() -> SolveApp {
 
 /// A pick of the mesh edge nearest a point.
 fn edge(app: &SolveApp, p: Vec3) -> Sel {
-    let st = app.session.world_state();
+    let st = app.session.world_state().unwrap();
     let mut best: Option<(f64, Sel)> = None;
     for b in &st.bodies {
         for (index, e) in b.mesh().edges.iter().enumerate() {

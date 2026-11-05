@@ -362,6 +362,7 @@ pub struct JobStatus {
 }
 
 struct Data {
+    completed_duration: Option<std::time::Duration>,
     punctual_diagnostics: Option<super::PunctualDiagnostics>,
     sampling: Option<super::adaptive::SamplingReport>,
     progress: Progress,
@@ -370,6 +371,7 @@ struct Data {
     preview: Option<Arc<RenderPreview>>,
 }
 struct Record {
+    started: web_time::Instant,
     presentation: Option<Arc<RetainedPresentation>>,
     textures: Option<super::textures::TextureSummary>,
     options: JobOptions,
@@ -398,6 +400,10 @@ pub struct JobHandle(Arc<Record>);
 impl JobHandle {
     pub fn id(&self) -> JobId {
         self.0.id
+    }
+    /// Submission-to-publication time, captured once by the host, independent of UI polling.
+    pub fn completed_duration(&self) -> Result<Option<std::time::Duration>> {
+        self.0.data.lock().map(|data| data.completed_duration).map_err(|_| JobError::new(ErrorCode::Internal, "render duration lock poisoned"))
     }
     pub fn status(&self) -> Result<JobStatus> {
         let data = self.0.data.lock().map_err(|_| JobError::new(ErrorCode::Internal, "render status lock poisoned"))?;
@@ -690,7 +696,8 @@ impl Running {
                 let request = work.request.ok_or_else(|| JobError::new(ErrorCode::Internal, "missing registered executor request"))?;
                 executor.begin(work.scene, request, work.handle.0.options, work.handle.0.cancel.clone()).map(WorkTask::Registered)
             } else {
-                WorkTask::new(work.scene, work.handle.0.request.clone(), work.handle.0.cancel.clone(), work.environment)
+                let request = work.request.unwrap_or_else(|| work.handle.0.request.clone());
+                WorkTask::new(work.scene, request, work.handle.0.cancel.clone(), work.environment)
             }
         }))
         .unwrap_or_else(|_| Err(JobError::new(ErrorCode::Internal, "image executor failed while preparing the job")));
@@ -861,6 +868,7 @@ impl Running {
         }));
         data.preview = None;
         data.progress = Progress { phase: Phase::Completed, done: 1, total: 1 };
+        data.completed_duration = Some(self.handle.0.started.elapsed());
         self.handle.0.notify();
         Ok(false)
     }
@@ -1312,12 +1320,13 @@ impl ImageHost {
         let request_reservation = if request_bytes == 0 { None } else { Some(self.0.shared.budget.reserve(request_bytes)?) };
         // Preserve the original CPU option capacities in the retained request and its lease.
         // Registered executors instead move resource Arcs into work and keep a small public copy.
-        let (public_request, work_request) = if self.0.executor.is_some() {
+        let (public_request, work_request) = if self.0.executor.is_some() || request.textures.is_some() {
             (ImageRequest { environment: None, textures: None, ..request.clone() }, Some(request))
         } else {
             (request, None)
         };
         let handle = JobHandle(Arc::new(Record {
+            started: web_time::Instant::now(),
             presentation: None,
             textures,
             options,
@@ -1329,6 +1338,7 @@ impl ImageHost {
             resolved,
             cancel: CancelToken::default(),
             data: Mutex::new(Data {
+                completed_duration: None,
                 punctual_diagnostics: None,
                 sampling: None,
                 progress: Progress { phase: Phase::Queued, done: 0, total: 1 },
@@ -1435,6 +1445,7 @@ impl ImageHost {
         let metadata = self.0.shared.budget.reserve(metadata_bytes)?;
         let origin = Arc::new(RetainedPresentation { info: origin, _reservation: metadata });
         let handle = JobHandle(Arc::new(Record {
+            started: web_time::Instant::now(),
             presentation: Some(origin),
             textures: None,
             options,
@@ -1446,6 +1457,7 @@ impl ImageHost {
             resolved,
             cancel: CancelToken::default(),
             data: Mutex::new(Data {
+                completed_duration: None,
                 punctual_diagnostics: None,
                 sampling: None,
                 progress: Progress { phase: Phase::Queued, done: 0, total: 1 },
@@ -1589,8 +1601,8 @@ mod retained_request_tests {
         request.raytrace.as_mut().unwrap().emissions = Some(values);
         let expected = retained_request_bytes(&request).unwrap();
         let mesh = solidcraft_geom::Mesh {
-            positions: vec![solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::X, solidcraft_geom::Vec3::Y],
-            normals: vec![solidcraft_geom::Vec3::Z; 3],
+            positions: vec![solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X, solidcore_record::Vec3::Y],
+            normals: vec![solidcore_record::Vec3::Z; 3],
             triangles: vec![[0, 1, 2]],
             tri_face: vec![0],
             ..Default::default()
@@ -1775,7 +1787,7 @@ mod surface_request_metadata_tests {
                 bump_amplitude_mm: 0.0,
             });
         }
-        let scene = ProductScene { meshes, bounds: Aabb3 { min: solidcraft_geom::Vec3::ZERO, max: solidcraft_geom::Vec3::ZERO } };
+        let scene = ProductScene { meshes, bounds: Aabb3 { min: solidcore_record::Vec3::ZERO, max: solidcore_record::Vec3::ZERO } };
         let mut request = request();
         request.integrator = Integrator::Raytrace;
         request.raytrace = Some(super::super::RaytraceOptions { surface_effects: Some(effects), ..Default::default() });

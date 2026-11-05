@@ -132,14 +132,15 @@ impl HomeState {
 pub fn thumbnail(s: &Session) -> Option<egui::ColorImage> {
     let mut cam = Camera::default();
     cam.set_view(StandardView::Iso);
-    let b = solidcraft_engine::view::bounds(s);
+    // No picture of a model that cannot be placed.
+    let b = solidcraft_engine::view::bounds(s).ok()?;
     if b.is_empty() {
         return None;
     }
     cam.fit(&b);
     // Fill the card: the fit leaves room for a whole window's margins.
     cam.distance *= 0.7;
-    let scene = solidcraft_engine::view::scene(s, &cam);
+    let scene = solidcraft_engine::view::scene(s, &cam).ok()?;
     // Drawn on the GPU by the renderer the app installs; none (a browser): no picture.
     let picture = solidcraft_engine::capture::rgba(&scene, &cam, THUMB[0] as u32, THUMB[1] as u32).ok()?;
     Some(egui::ColorImage::from_rgba_unmultiplied(THUMB, &picture.rgba))
@@ -348,7 +349,7 @@ fn make_unless(key: &str, stopped: &dyn Fn() -> bool) -> Made {
     }
     if sample.is_some() {
         // Keep the first viewport frame warm even though the preview needs no new render.
-        s.world_state().warm_meshes(|| true);
+        crate::open_meshing::session_world(&s).warm_meshes(|| true);
     }
     let img = match sample {
         Some(i) => sample_picture(i),
@@ -623,13 +624,13 @@ enum FileAction {
 /// File view replaces the workspace while keeping the open design and its history intact.
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     poll(app, ui.ctx());
-    let file_menu_open = ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new("sc_file_menu"))).unwrap_or(false);
+    let file_menu_open = ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::unique("sc_file_menu"))).unwrap_or(false);
     let interactive = !app.file_picker_busy() && !app.file_load.busy() && !file_menu_open;
     // Help windows draw before Home; remember their prior visibility so one Escape closes only the window.
     let had_help_window = ui.ctx().memory(|memory| {
         ["sc_about", "sc_crash_reports"]
             .iter()
-            .any(|id| memory.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, egui::Id::new(id))))
+            .any(|id| memory.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, egui::Id::unique(id))))
     });
 
     if interactive
@@ -1272,7 +1273,7 @@ mod tests {
         }
         let mut session = Session::default();
         session.execute("solid.box", &serde_json::json!({"length":10,"width":20,"height":30})).unwrap();
-        for body in &session.world_state().bodies {
+        for body in &session.world_state().unwrap().bodies {
             body.mesh();
         }
         let bytes = session.design_container(solidcraft_engine::io::DesignCompression::Fast, false, true).unwrap();
@@ -1340,7 +1341,7 @@ mod tests {
         let key = path.to_string_lossy().into_owned();
         let mut s = Session::default();
         s.execute("solid.box", &serde_json::json!({"length":10,"width":20,"height":30})).unwrap();
-        for b in &s.world_state().bodies {
+        for b in &s.world_state().unwrap().bodies {
             b.mesh();
         }
         let bytes = s.design_container(solidcraft_engine::io::DesignCompression::Fast, false, true).unwrap();
@@ -1502,7 +1503,7 @@ mod tests {
         h.call("ui.click", serde_json::json!({"x": gear.x, "y": gear.y}));
         assert!(h.app.prefs_window.open && h.app.home.open);
         let shown = |h: &crate::scenario::Harness| {
-            h.ctx.memory(|m| m.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, egui::Id::new("sc_prefs"))))
+            h.ctx.memory(|m| m.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, egui::Id::unique("sc_prefs"))))
         };
         assert!(shown(&h), "the Preferences window must be drawn on Home");
         h.call("ui.prefs", serde_json::json!({"button": "cancel"}));

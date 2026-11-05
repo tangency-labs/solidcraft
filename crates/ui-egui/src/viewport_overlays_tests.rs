@@ -67,7 +67,8 @@ fn section_details_live_fields_reconstruct_arbitrary_plane_without_losing_compan
     assert!((original.1 + flipped.1).len() < 1e-9);
     h.app.session.doc_mut().units = "in".into();
     let effect = h.app.session.status_items().remove(0);
-    let params = crate::viewport_details::edit_params(&h.app, &effect, "offset", &V::Length { value: -25.4, units: "in".into() }).unwrap();
+    let params =
+        crate::viewport_details::edit_params(&h.app, &effect, "offset", &V::Length { value: -25.4, units: "in".into(), decimals: 2 }).unwrap();
     assert_eq!(params["offset"], "-25.4 mm");
     assert_eq!(params["hatch"], true);
     assert_eq!(params["flip"], !current_flip);
@@ -121,7 +122,7 @@ fn details_record_scope_preserves_mixed_limits_and_stale_targets_never_move_came
     crate::viewport_details::dispatch(&mut h.app, &h.ctx, &owner, DetailEvent::Target(target));
     assert_eq!(h.app.session.camera, before);
     let effect = h.app.session.status_items().remove(0);
-    assert!(crate::viewport_details::edit_params(&h.app, &effect, "gap", &V::Length { value: 1.0, units: "in".into() }).is_none());
+    assert!(crate::viewport_details::edit_params(&h.app, &effect, "gap", &V::Length { value: 1.0, units: "in".into(), decimals: 2 }).is_none());
     assert!(crate::viewport_details::description(&h.app, &effect).findings.iter().all(|row| !row.target));
 }
 
@@ -1237,6 +1238,128 @@ fn frame_rate_readout_stays_beside_a_right_pane() {
     }
 }
 
+/// The Curvature Comb tool's options card (Comb length, Teeth) shows while the tool runs, and
+/// moving either slider draws the combs already shown again: their teeth as long as the length
+/// says (a multiple of the automatic length), as many as Teeth says. Using the card picks nothing.
+#[test]
+fn comb_options_draw_the_combs_shown_again() {
+    use crate::sketch_tools::{comb_options, shown_combs};
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.cylinder", json!({"radius": 10, "height": 20})).unwrap();
+    h.settle();
+    h.step(&json!({"start": "inspect.curvature_comb"})).unwrap();
+    h.frame();
+    assert!(crate::scenario::rect_of("comb_options").is_some(), "the options card is drawn");
+    assert_eq!((comb_options().length, comb_options().teeth), (1.0, 40));
+    h.step(&json!({"click": {"world": [10, 0, 20]}})).unwrap();
+    let combs = shown_combs(&h.app);
+    assert_eq!(combs.len(), 1, "{:?}", h.app.status);
+    assert_eq!(combs[0].len(), 40);
+    let tooth = |c: &[[solidcore_record::Vec3; 2]]| c[0][0].dist(c[0][1]);
+    let auto = tooth(&combs[0]);
+    assert!(auto > 0.0);
+    let slider = |name: &str| crate::scenario::rect_of(&format!("dialog:slider_track:{name}")).unwrap_or_else(|| panic!("no slider {name}"));
+    // Comb length to its right end: 8 × the automatic length.
+    let track = slider("ui.comb_length");
+    h.step(&json!({"drag": [[track.center().x, track.center().y], [track.right() + 40.0, track.center().y]]})).unwrap();
+    h.frame();
+    assert_eq!(comb_options().length, 8.0);
+    let combs = shown_combs(&h.app);
+    assert_eq!(combs.len(), 1, "the card's drag picked nothing");
+    assert!((tooth(&combs[0]) - 8.0 * auto).abs() < 1e-9 * auto, "{} vs 8 × {auto}", tooth(&combs[0]));
+    // Teeth to its left end: 4.
+    let track = slider("ui.comb_teeth");
+    h.step(&json!({"drag": [[track.center().x, track.center().y], [track.left() - 40.0, track.center().y]]})).unwrap();
+    h.frame();
+    assert_eq!(comb_options().teeth, 4);
+    let combs = shown_combs(&h.app);
+    assert_eq!((combs.len(), combs[0].len()), (1, 4));
+    // The tool ends: the combs and the card go.
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(shown_combs(&h.app).is_empty() && crate::scenario::rect_of("comb_options").is_none());
+    assert!(!crate::toolbar::shows_pressed(&h.app, "inspect.curvature_comb"), "Esc turned the analysis off");
+}
+
+/// Every comb shown shares one scale: the tool combs each new pick together with those already
+/// shown, so tooth lengths compare across curves. An R5 edge's teeth are twice an R10 edge's,
+/// after either pick and after the options change.
+#[test]
+fn combs_shown_together_share_one_scale() {
+    use crate::sketch_tools::{CombOptions, set_comb_options, shown_combs};
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.cylinder", json!({"radius": 5, "height": 20})).unwrap();
+    h.app.run("solid.cylinder", json!({"base": [30, 0, 0], "radius": 10, "height": 20})).unwrap();
+    h.settle();
+    h.step(&json!({"start": "inspect.curvature_comb"})).unwrap();
+    h.frame();
+    h.step(&json!({"click": {"world": [0, 5, 20]}})).unwrap();
+    h.step(&json!({"click": {"world": [30, 10, 20]}})).unwrap();
+    let ratio = |h: &Harness| {
+        let combs = shown_combs(&h.app);
+        assert_eq!(combs.len(), 2, "{:?}", h.app.status);
+        let tooth = |c: &[[solidcore_record::Vec3; 2]]| c[0][0].dist(c[0][1]);
+        tooth(&combs[0]) / tooth(&combs[1])
+    };
+    assert!((ratio(&h) - 2.0).abs() < 1e-9, "{}", ratio(&h));
+    set_comb_options(&mut h.app, CombOptions { length: 3.0, teeth: 12 });
+    assert!((ratio(&h) - 2.0).abs() < 1e-9, "{}", ratio(&h));
+    assert_eq!(shown_combs(&h.app)[1].len(), 12);
+}
+
+/// The view analysis buttons are one toggle group, reflecting the session's one analysis on:
+/// Curvature Comb on shows it pressed (through another dialog too); its button again turns it off
+/// and clears the combs; Zebra on turns the comb off, and Zebra again leaves none on.
+#[test]
+fn view_analysis_buttons_are_one_toggle_group() {
+    use crate::sketch_tools::shown_combs;
+    use crate::toolbar::shows_pressed;
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.cylinder", json!({"radius": 10, "height": 20})).unwrap();
+    h.settle();
+    let (comb, zebra) = ("inspect.curvature_comb", "inspect.zebra");
+    let active = |h: &mut Harness| h.app.run("inspect.analysis", json!({})).unwrap()["active"].clone();
+    // Comb on, then off with its button again.
+    h.step(&json!({"start": comb})).unwrap();
+    h.frame();
+    assert!(shows_pressed(&h.app, comb) && !shows_pressed(&h.app, zebra));
+    assert_eq!(active(&mut h), json!(comb));
+    h.step(&json!({"click": {"world": [0, 10, 20]}})).unwrap();
+    assert_eq!(shown_combs(&h.app).len(), 1, "{:?}", h.app.status);
+    h.step(&json!({"start": comb})).unwrap();
+    h.frame();
+    assert!(shown_combs(&h.app).is_empty() && h.app.tool.is_none() && !shows_pressed(&h.app, comb));
+    assert_eq!(active(&mut h), json!(null));
+    // Comb on again; it stays on, pressed, while another dialog is open.
+    h.step(&json!({"start": comb})).unwrap();
+    h.step(&json!({"click": {"world": [0, 10, 20]}})).unwrap();
+    h.step(&json!({"start": "solid.fillet"})).unwrap();
+    h.frame();
+    assert!(h.app.dialog.is_some() && h.app.tool.is_none());
+    assert!(shows_pressed(&h.app, comb) && shown_combs(&h.app).len() == 1);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frame();
+    // Zebra on: the comb goes off and its combs go.
+    h.step(&json!({"start": zebra})).unwrap();
+    h.frame();
+    assert!(shows_pressed(&h.app, zebra) && !shows_pressed(&h.app, comb));
+    assert!(shown_combs(&h.app).is_empty());
+    assert_eq!(active(&mut h), json!(zebra));
+    // Comb on: Zebra goes off.
+    h.step(&json!({"start": comb})).unwrap();
+    h.frame();
+    assert!(shows_pressed(&h.app, comb) && !shows_pressed(&h.app, zebra) && h.app.session.analysis.is_none());
+    // Zebra on, then off: none is on.
+    h.step(&json!({"start": zebra})).unwrap();
+    h.step(&json!({"start": zebra})).unwrap();
+    h.frame();
+    assert!(!shows_pressed(&h.app, zebra) && !shows_pressed(&h.app, comb));
+    assert_eq!(active(&mut h), json!(null));
+}
+
 /// The View angles readout (#6032) sits under the orientation gizmo only while View ▸ View angles
 /// is on, follows the view live with its projection, and its card turns the view to typed angles
 /// through `view.apply`, without touching the design or its history.
@@ -1640,7 +1763,7 @@ fn selected_sketch_point_aliases_respect_owner_and_visibility() {
     h.call("ui.view", json!({"view":"top"}));
     h.settle();
     let sid = h.app.session.active_sketch.unwrap();
-    let origin = h.app.session.world_state().sketch(sid).unwrap().sketch.points[0].id.clone();
+    let origin = crate::open_meshing::session_world(&h.app.session).sketch(sid).unwrap().sketch.points[0].id.clone();
     let ids = [origin, "custom:point".into(), "l1.end".into(), format!("{sid}:l1.end"), format!("{}:l1.start", sid + 1)];
     h.app.run("select.set", json!({"items":ids.iter().map(|id| json!({"type":"sketch_point","id":id})).collect::<Vec<_>>()})).unwrap();
     let rings = point_selection_rings(&point_overlays(&h.app));
@@ -2005,8 +2128,8 @@ fn analysis_status_row_and_key_stay_below_preferences_and_cannot_steal_its_click
             assert!(window.contains(at), "the real Preferences window must overlap {target}");
             let layer = h.ctx.layer_id_at(at).unwrap();
             assert_eq!(layer.order, egui::Order::Middle, "Preferences stays above {target}");
-            assert_ne!(layer.id, egui::Id::new("viewport_status_row"));
-            assert_ne!(layer.id, egui::Id::new("viewport_status_key"));
+            assert_ne!(layer.id, egui::Id::unique("viewport_status_row"));
+            assert_ne!(layer.id, egui::Id::unique("viewport_status_key"));
         }
         let at = crate::scenario::handle_at(&format!("viewport_status:{}:close", item.id)).unwrap();
         h.call("ui.click", json!({"x":at.x,"y":at.y}));
@@ -2668,5 +2791,31 @@ fn summary_preferences_cancel_restores_layout_independently_of_all_effect_polici
         });
         h.frames(3);
         assert_eq!(crate::scenario::rect_of("viewport_status:summary").is_some(), saved);
+    }
+}
+
+#[test]
+fn a_section_card_shows_every_row_and_reads_like_its_pill() {
+    // #10708: the card was cut off below Hatch (and Flip for a tilted plane), and showed
+    // "15.000000 mm" and a normal with 16 digits.
+    use crate::ui_kit::DetailValue as V;
+    for (plane, rows, normal) in [(json!("XZ"), 3, None), (json!({"origin":[20,15,10],"normal":[1,1,0]}), 3, Some("(0.707, 0.707, 0)"))] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+        h.app.run("inspect.section", json!({"plane":plane,"offset":15})).unwrap();
+        h.frames(3);
+        let effect = h.app.session.status_items().remove(0);
+        let owner = crate::viewport_status::identity(&effect);
+        h.step(&json!({"click":{"handle":format!("viewport_status:{owner}:setting")}})).unwrap();
+        h.frames(4);
+        let card = crate::scenario::rect_of("viewport_status:card").expect("the card");
+        let fields: Vec<_> = ["offset", "flip", "hatch"].iter().filter_map(|f| crate::scenario::rect_of(&format!("details:field:{f}"))).collect();
+        assert_eq!(fields.len(), rows);
+        assert!(fields.iter().all(|f| card.contains_rect(*f)), "{plane}: card {card:?}, rows {fields:?}");
+        let description = crate::viewport_details::description(&h.app, &effect);
+        assert!(description.settings.iter().any(|s| matches!(&s.value, V::Length { decimals: 2, .. })));
+        if let Some(normal) = normal {
+            assert!(description.settings.iter().any(|s| matches!(&s.value, V::Axis { current, .. } if current == normal)), "{plane}");
+        }
     }
 }

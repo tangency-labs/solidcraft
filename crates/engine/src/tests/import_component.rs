@@ -5,7 +5,8 @@
 //! imports sit loose in a component open and rebuild as they did.
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Aabb3;
 use solidcraft_kernel::{ExportBody, ExportProduct, StepHeader, box_solid, step_export_products};
 
 use super::run;
@@ -80,7 +81,7 @@ fn key(b: solidcraft_geom::Aabb3) -> [i64; 6] {
 
 /// Where the design shows its bodies, sorted.
 fn shown_boxes(s: &Session) -> Vec<[i64; 6]> {
-    let mut out: Vec<[i64; 6]> = s.world_state().bodies.iter().map(|b| key(solidcraft_kernel::measure(&b.body).unwrap().bbox)).collect();
+    let mut out: Vec<[i64; 6]> = s.world_state().unwrap().bodies.iter().map(|b| key(solidcraft_kernel::measure(&b.body).unwrap().bbox)).collect();
     out.sort();
     out
 }
@@ -112,7 +113,7 @@ fn corner_of(s: &Session, occurrence: &str) -> Vec3 {
     };
     let names = s.occurrence_bodies(&path, true).unwrap();
     assert!(!names.is_empty());
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     world.bodies.iter().filter(|b| names.contains(&b.name)).fold(Aabb3::EMPTY, |a, b| a.union(&solidcraft_kernel::measure(&b.body).unwrap().bbox)).min
 }
 
@@ -288,7 +289,7 @@ fn undo_takes_the_whole_import_away() {
     run(&mut s, "edit.undo", json!({}));
     assert!(s.doc.features.is_empty() && s.doc.components.is_empty() && s.doc.occurrences.is_empty(), "nothing left");
     assert!(s.doc.assembly.joints.is_empty() && s.doc.body_components.is_empty() && s.doc.body_offsets.is_empty());
-    assert!(s.world_state().bodies.is_empty());
+    assert!(s.world_state().unwrap().bodies.is_empty());
     run(&mut s, "edit.redo", json!({}));
     assert_eq!(shown_boxes(&s), file_boxes(&path));
     let _ = std::fs::remove_dir_all(&dir);

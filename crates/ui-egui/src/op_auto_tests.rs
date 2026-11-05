@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use serde_json::json;
-use solidcraft_engine::geom::Vec3;
+use solidcore_record::Vec3;
 
 use super::{CUT, JOIN, NEW};
 use crate::dialogs::Kind;

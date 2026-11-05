@@ -1,0 +1,30 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "radius": 9.524999999999999,
+    "height": 25.4,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     9.524999999999999,
+     0,
+     12.7
+    ],
+    "modeled": true,
+    "form": "acme",
+    "designation": "3/4-6 ACME"
+   }
+  }
+ ]
+}
