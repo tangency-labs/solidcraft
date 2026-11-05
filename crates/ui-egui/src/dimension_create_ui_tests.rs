@@ -23,7 +23,7 @@ fn place(h: &mut Harness, picks: &[[f64; 2]], at: [f64; 2]) {
     }
     h.step(&json!({"click":{"world":[at[0],at[1],0]}})).unwrap();
     assert!(crate::dim_view::editing(), "placement opens an editor");
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")));
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")));
 }
 fn type_value(h: &mut Harness, text: &str) {
     h.step(&json!({"key":"A","cmd":true})).unwrap();
@@ -85,7 +85,7 @@ fn click_d1_and_apply(h: &mut Harness) -> String {
     h.step(&json!({"click":{"dimension":"d1"}})).unwrap();
     assert!(crate::dim_view::editing(), "a reference click keeps the editor open");
     h.frames(2);
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")), "the value field keeps the keyboard");
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")), "the value field keeps the keyboard");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(!crate::dim_view::editing(), "{}", h.call("ui.inspect", json!({})));
     let expr = h.app.session.doc.param("d2").unwrap().expr.clone();
@@ -165,7 +165,7 @@ fn dimension_tool_click_on_an_existing_dimension_edits_its_value() {
     h.step(&json!({"click":{"dimension":"d1"}})).unwrap();
     assert!(crate::dim_view::editing(), "a click on the dimension opens its value");
     h.frames(5);
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")), "the value field takes the keyboard");
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")), "the value field takes the keyboard");
     type_value(&mut h, "25");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(!crate::dim_view::editing(), "{}", h.call("ui.inspect", json!({})));
@@ -221,7 +221,7 @@ fn a_new_dimension_in_the_window_steps_previews_and_applies_once() {
     h.step(&json!({"click":{"world":[10,6,0]}})).unwrap();
     h.frames(3);
     assert!(crate::dim_view::editing(), "placing the text opens the window");
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")), "its field takes the keyboard");
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")), "its field takes the keyboard");
     let window = crate::scenario::rect_of("dimwin").expect("the window is shown");
     let drawable = h.app.viewport.layout.as_ref().unwrap().drawable;
     assert!(drawable.contains_rect(window), "the window {window:?} stays in the view {drawable:?}");
@@ -238,7 +238,7 @@ fn a_new_dimension_in_the_window_steps_previews_and_applies_once() {
     assert!(crate::scenario::count_of("dimwin:preview_curves").unwrap_or(0.0) > 0.0, "what the value moves is drawn");
     assert_eq!(h.app.session.doc.to_json(), original, "nothing reaches the design before OK");
     assert_eq!(h.app.session.undo.len(), undo);
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")), "the arrows leave the keyboard with the field");
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")), "the arrows leave the keyboard with the field");
     // The wheel over the field steps it instead of zooming the view.
     let cam = h.app.cam;
     let field = crate::scenario::rect_of("dimwin:value").unwrap();
@@ -434,7 +434,7 @@ fn edge_and_endpoint_creation_commit_once_and_undo_restores_exact_design() {
         ([20., 0.], vec![[10., 0.]], [10., 5.]),
         ([20., 0.], vec![[0., 0.], [20., 0.]], [10., 5.]),
         ([0., 20.], vec![[0., 0.], [0., 20.]], [-5., 10.]),
-        ([12., 16.], vec![[0., 0.], [12., 16.]], [10., 4.]),
+        ([12., 16.], vec![[0., 0.], [12., 16.]], [-5., 12.]),
     ] {
         let mut h = line(end);
         let original = h.app.session.doc.to_json();
@@ -733,15 +733,16 @@ fn inch_dimension_entry_survives_unit_changes_undo_and_reopen() {
     crate::dim_view::cancel();
 }
 
-/// Placing the dimension of two unaligned points above or below the box they span gives the
-/// horizontal distance, beside it the vertical one, and inside it or in its outer corners the
-/// distance between them (#257). Just above the middle of the box, and just beside it, are
-/// horizontal and vertical too, not only past the ends (#7295).
+/// Placing the dimension of two unaligned points across from them, on either side, gives the
+/// distance between them; pulled past an end, up or down from it gives the horizontal distance
+/// and sideways the vertical one (#257, #7295).
 #[test]
 fn placing_a_two_point_dimension_picks_horizontal_vertical_or_aligned() {
     // What each placement fixes at 10 mm: the X span, the Y span, or the length.
     let spans = |a: solidcore_record::Vec2, b: solidcore_record::Vec2| [(b.x - a.x).abs(), (b.y - a.y).abs(), a.dist(b)];
-    for (at, measured) in [([6., 25.], 0), ([2., 20.], 0), ([-10., 1.], 1), ([15., 4.], 1), ([10., 4.], 2), ([-6., 22.], 2)] {
+    for (at, measured) in
+        [([6., 25.], 0), ([8., 26.], 0), ([-10., 1.], 1), ([22., 14.], 1), ([10., 4.], 2), ([-6., 22.], 2), ([2., 20.], 2), ([15., 4.], 2)]
+    {
         let mut h = line([12., 16.]);
         place(&mut h, &[[0., 0.], [12., 16.]], at);
         type_value(&mut h, "10 mm");
@@ -922,7 +923,7 @@ fn dimension_count(h: &Harness) -> usize {
 fn assert_live(h: &Harness) {
     assert!(crate::dim_view::editing(), "the pick opens the value at once");
     assert_eq!(crate::dim_view::live(), Some(false));
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")));
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")));
 }
 
 #[test]
@@ -1298,7 +1299,7 @@ fn type_first_keeps_the_place_first_flow() {
     h.step(&json!({"click":{"world":[10,-7,0]}})).unwrap();
     assert!(crate::dim_view::editing());
     assert_eq!(crate::dim_view::live(), None, "the text is pinned");
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")));
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")));
     h.step(&json!({"move":{"world":[0,12,0]}})).unwrap();
     keys(&mut h, "18");
     h.step(&json!({"key":"Enter"})).unwrap();
@@ -1321,7 +1322,7 @@ fn type_first_keeps_the_place_first_flow() {
     assert_eq!(h.app.tool.as_ref().map(|t| t.picks.len()), Some(1));
     h.step(&json!({"click":{"world":[10,6,0]}})).unwrap();
     assert!(crate::dim_view::editing());
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")));
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")));
     keys(&mut h, "21");
     h.step(&json!({"key":"Enter"})).unwrap();
     let new = added(&h, dims);
@@ -1332,7 +1333,7 @@ fn type_first_keeps_the_place_first_flow() {
 /// Put the value field's caret at `at` with nothing selected, as the field itself does when it
 /// misses the keyboard for a frame (a WebView2 showed the caret before the value, #11204).
 fn caret_without_the_person(h: &Harness, at: usize) {
-    let id = egui::Id::new("sc_dim_edit");
+    let id = egui::Id::unique("sc_dim_edit");
     let mut state = egui::TextEdit::load_state(&h.ctx, id).unwrap_or_default();
     state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(at))));
     state.store(&h.ctx, id);
@@ -1352,7 +1353,7 @@ fn held_click(h: &mut Harness, at: [f64; 2], frames: usize) {
 
 /// The value field's caret and selection end (characters).
 fn caret(h: &Harness) -> Option<(usize, usize)> {
-    egui::TextEdit::load_state(&h.ctx, egui::Id::new("sc_dim_edit"))
+    egui::TextEdit::load_state(&h.ctx, egui::Id::unique("sc_dim_edit"))
         .and_then(|s| s.cursor.char_range())
         .map(|r| (r.primary.index.0, r.secondary.index.0))
 }
@@ -1373,7 +1374,7 @@ fn typed_digits_replace_the_proposed_value_whatever_moved_the_caret() {
         h.frames(12);
         caret_without_the_person(&h, 0);
         h.frames(2);
-        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")), "held {held}");
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")), "held {held}");
         keys(&mut h, "400");
         assert_eq!(crate::dim_view::draft_preview().map(|d| d.0).as_deref(), Some("400"), "held {held}");
         h.step(&json!({"key":"Enter"})).unwrap();
@@ -1424,8 +1425,8 @@ fn a_caret_the_person_moved_stays_where_they_put_it() {
     crate::dim_view::cancel();
 }
 
-/// Type-first, the text follows the pointer: moving it from inside the box the picks span (the
-/// distance between them) to above or beside it switches to the horizontal or vertical distance and
+/// Type-first, the text follows the pointer: moving it from across the picks (the distance
+/// between them) to above or beside them switches to the horizontal or vertical distance and
 /// back. Until something is typed the value follows the dimension, so the preview measures the
 /// picked points where they are (it neither moves nor scales them) and Enter keeps them there.
 #[test]
@@ -1433,8 +1434,8 @@ fn type_first_switching_between_aligned_horizontal_and_vertical_keeps_the_picked
     use solidcraft_engine::sketch::ConstraintKind as K;
     let end = [12., 16.];
     let mid = [6., 8.];
-    // Inside the picks' box, above it (over its middle), beside it.
-    let (across, above, beside) = ([10., 4.], [3., 20.], [-10., 1.]);
+    // Across from the picks, above them, beside them.
+    let (across, above, beside) = ([-5., 12.], [6., 25.], [-10., 1.]);
     type Kind = fn(&K) -> bool;
     let aligned: Kind = |k| matches!(k, K::Distance { .. } | K::Length { .. });
     let horizontal: Kind = |k| matches!(k, K::DistanceX { .. });
@@ -1824,7 +1825,7 @@ fn double_clicking_a_shown_dimension_edits_it_without_editing_the_sketch() {
     let at = model_text(&h, "d2");
     h.step(&json!({"click":at,"double":true})).unwrap();
     assert!(crate::dim_view::editing(), "the double-click opens the value");
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")));
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")));
     assert_eq!(h.app.session.active_sketch, None, "the sketch is not edited");
     type_value(&mut h, "14");
     h.step(&json!({"key":"Enter"})).unwrap();

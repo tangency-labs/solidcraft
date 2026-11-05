@@ -873,7 +873,7 @@ fn slider_drag_does_not_open_suggestions_over_the_slider() {
         .unwrap();
     h.app.start("joint.drive");
     h.frames(4);
-    let editor = egui::Id::new("sc_drive_value");
+    let editor = egui::Id::unique("sc_drive_value");
     let bounds = h
         .output
         .accesskit_update
@@ -1469,4 +1469,37 @@ fn interference_checks_off_the_window_thread_and_drops_a_check_of_a_changed_desi
     assert_eq!(overlaps, 1, "the shared volume, drawn in red");
     compute(&mut app, true);
     assert_eq!(state(&app), (None, 0, false), "a check of the design before the change is dropped");
+}
+
+#[test]
+fn joint_dialog_applies_custom_name_or_falls_back_to_type_default() {
+    // 1. Empty name field: commands() generates payload without "name", backend creates "Rigid Joint1"
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].0, "joint.create");
+    assert!(cmds[0].1.get("name").is_none());
+    for (id, p) in cmds {
+        let r = app.run(&id, p).unwrap();
+        assert_eq!(r["name"], "Rigid Joint1");
+    }
+
+    // 2. Custom name in f.name: reset to fresh boxes so B is at its initial coordinates
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.name = "MyCustomJoint".into();
+    }
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].1["name"], "MyCustomJoint");
+    for (id, p) in cmds {
+        let r = app.run(&id, p).unwrap();
+        assert_eq!(r["name"], "MyCustomJoint");
+    }
 }

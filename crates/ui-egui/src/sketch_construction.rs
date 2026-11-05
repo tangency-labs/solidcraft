@@ -60,7 +60,7 @@ pub fn line_type_switch(ui: &mut egui::Ui, t: &mut Tool) {
         return;
     }
     let Some(i) = t.dims.iter().position(|b| b.label == "Length") else { return };
-    let Some(length_box) = ui.ctx().memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", i)))) else { return };
+    let Some(length_box) = ui.ctx().memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))) else { return };
     let tokens = crate::theme::Tokens::get();
     let has_length = typed_length(t).is_some();
     let reason = crate::i18n::tr("ui.construction.normal_needs_length");
@@ -70,7 +70,7 @@ pub fn line_type_switch(ui: &mut egui::Ui, t: &mut Tool) {
     let mut selected = usize::from(has_length && t.normal);
     let frame = crate::ui_kit::Container::popup_frame(ui.style()).inner_margin(egui::Margin::same(1)).fill(tokens.panel);
     crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Canvas)
-        .area(egui::Id::new("sc_construction_switch"))
+        .area(egui::Id::unique("sc_construction_switch"))
         .fixed_pos(length_box.left_bottom() + egui::vec2(0.0, tokens.space_2))
         .order(egui::Order::Background)
         .show(ui.ctx(), |ui| {

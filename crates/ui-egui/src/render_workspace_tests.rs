@@ -2209,6 +2209,7 @@ fn result_navigation_uses_shared_pan_zoom_and_leaves_product_camera_unchanged() 
         &mut time,
         Modifiers::NONE,
         vec![Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Line,
             delta: vec2(0.0, 3.0),
             modifiers: Modifiers::NONE,
@@ -2663,7 +2664,13 @@ fn render_preview_navigates_like_the_modelling_viewport_in_every_preset() {
             // Wheel over the model, then modifier-only motion (Touchpad: Shift pans, Alt orbits).
             let before = design.cam;
             both(vec![Event::PointerMoved(model)], none, &mut design, &mut render);
-            let wheel = Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: vec2(0.0, 3.0), modifiers: none, phase: egui::TouchPhase::Move };
+            let wheel = Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
+                unit: egui::MouseWheelUnit::Line,
+                delta: vec2(0.0, 3.0),
+                modifiers: none,
+                phase: egui::TouchPhase::Move,
+            };
             both(vec![wheel], none, &mut design, &mut render);
             for _ in 0..30 {
                 both(vec![], none, &mut design, &mut render);
@@ -7019,7 +7026,13 @@ fn render_results_compare_divider_drag_clamps_and_blocks_all_camera_input() {
     let end = egui::pos2(canvas.right() + 100.0, start.y);
     h.frame_with(vec![
         Event::PointerMoved(end),
-        Event::MouseWheel { unit: MouseWheelUnit::Point, delta: vec2(0.0, -300.0), modifiers: Modifiers::ALT, phase: egui::TouchPhase::Move },
+        Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: MouseWheelUnit::Point,
+            delta: vec2(0.0, -300.0),
+            modifiers: Modifiers::ALT,
+            phase: egui::TouchPhase::Move,
+        },
     ]);
     assert!(
         (h.app.render_workspace.view.compare.as_ref().unwrap().position - 0.95).abs() < 1e-6,
@@ -7419,4 +7432,739 @@ fn render_results_batch_continues_in_background_tabs_and_keeps_each_shot_result_
     assert!(Arc::ptr_eq(&document, &h.app.session.doc));
     assert_eq!(before, (h.app.session.undo.len(), h.app.session.redo.len()));
     assert!(results.iter().all(|result| result.frame.scene_generation == captured_revision));
+}
+
+#[test]
+fn host_product_fit_uses_frame_and_selected_shot_projection_with_its_own_fov() {
+    use crate::panel_runtime::{logical_rect, resolve_usable_region};
+    use crate::viewport_layout::Layout;
+    use egui::{Rect, pos2, vec2};
+    use solidcore_record::Vec3;
+    use solidcraft_engine::geom::Aabb3;
+    let mut h = Harness::new();
+    enter(&mut h.app, true).unwrap();
+    let name = h.app.render_workspace.view.name.clone();
+    h.app.run("render.settings.set", json!({"name":name,"set":{"width":1024,"height":4096}})).unwrap();
+    setups::load(&mut h.app);
+    let viewport = Rect::from_min_max(pos2(0.0, 34.0), pos2(1400.0, 950.0));
+    h.app.shell.content = Some(viewport);
+    h.app.shell.workspace_panels.clear();
+    h.app.preferences.perspective_fov = 1.2;
+    h.app.ui.perspective = true;
+    let bounds = Aabb3 { min: Vec3::new(-60.0, -10.0, -5.0), max: Vec3::new(60.0, 10.0, 5.0) };
+    for selected_shot in [false, true] {
+        h.app.render_workspace.view.stage = if selected_shot { Stage::Look } else { Stage::Frame };
+        h.app.render_workspace.view.selection = if selected_shot { RenderSelection::Shot(name.clone()) } else { RenderSelection::Nothing };
+        let picture = shot::preview_rect(&h.app, viewport).unwrap();
+        assert!((picture.width() / picture.height() - 0.25).abs() < 1e-5);
+        let obstacle = Rect::from_min_size(picture.min, vec2(picture.width() * 0.3, 160.0));
+        let usable = resolve_usable_region(logical_rect(viewport), &[logical_rect(obstacle)]).unwrap();
+        let layout = Layout::host_with_axis(viewport, &usable, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, Rect::NOTHING, false);
+        for fov in [0.0, 0.95] {
+            let camera = Camera { fov, ..Default::default() };
+            let fitted = fit_host_product_bounds(&h.app, camera, &bounds, &layout, &usable).unwrap();
+            assert_eq!(fitted.fov, fov, "the Design FOV preference must never replace the product lens");
+            let radius = (bounds.diagonal() + bounds.center().dist(fitted.target)).max(fitted.half_height() * 2.0).max(10.0);
+            let mut footprint = Rect::NOTHING;
+            for point in corners(&bounds) {
+                let (x, y, _) = fitted.to_screen(point, f64::from(picture.width()), f64::from(picture.height()), radius).unwrap();
+                footprint.extend_with(pos2(picture.left() + x as f32, picture.top() + y as f32));
+            }
+            assert!(picture.contains_rect(footprint.expand(Tokens::get().space_4)));
+            assert!(!footprint.expand(Tokens::get().space_4).intersect(obstacle).is_positive());
+            let centred = centre_host_product_camera(&h.app, camera, Some(&bounds), &layout, &usable).unwrap();
+            assert_eq!(centred.distance.to_bits(), camera.distance.to_bits());
+            assert_eq!(centred.fov, camera.fov);
+        }
+    }
+}
+
+#[test]
+fn host_bounded_results_and_comparison_actions_are_visible_and_clickable() {
+    use egui::{Event, Modifiers, PointerButton};
+    for comparison in [false, true] {
+        let (mut h, _, selected) = render_results_compare_fixture();
+        h.app.preferences.language = "en".into();
+        h.call("ui.resize", json!({"width":1440,"height":960}));
+        h.app.run("view.render_stage", json!({"stage":"frame"})).unwrap();
+        crate::panel_runtime::enable_host_specimen(&mut h.app, "tabs").unwrap();
+        let select = |h: &mut Harness| {
+            if comparison {
+                h.app.run("render.compare", json!({"left":0,"right":1})).unwrap();
+            } else {
+                h.app.run("render.result.select", json!({"index":1})).unwrap();
+            }
+            h.frames(4);
+        };
+        select(&mut h);
+        h.app.pending_fit = None;
+        h.app.cancel_view_animation();
+        let canvas = h.app.viewport.rect.unwrap();
+        let document = h.app.session.doc.clone();
+        let history = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+        let product = h.app.cam;
+        let card = h.app.shell.workspace_panels["render:result-controls"].0;
+        assert!(card.width() <= 528.0, "exercise the native report's bounded card: {card:?}");
+        for target in [
+            "render:results",
+            "render:result-discard",
+            "render:result-model",
+            "render:result-fit",
+            "render:result-actual",
+            "render:result-copy",
+            "render:result-export",
+            "render:result-close",
+        ] {
+            let rect = crate::scenario::rect_of(target).unwrap();
+            assert!(card.contains_rect(rect), "{target}: {rect:?} outside {card:?}, comparison={comparison}");
+            assert!(crate::scenario::rect_of("render:result-actions-clip").unwrap().contains_rect(rect), "{target} is clipped");
+        }
+        let click = |h: &mut Harness, target: &str| {
+            let rect = crate::scenario::rect_of(target).unwrap();
+            assert!(h.app.shell.workspace_panels["render:result-controls"].0.contains_rect(rect), "{target}");
+            assert!(crate::scenario::rect_of("render:result-actions-clip").unwrap().contains_rect(rect), "{target}");
+            let pos = rect.center();
+            h.frame_with(vec![Event::PointerMoved(pos)]);
+            h.frame_with(vec![Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }]);
+            h.frame_with(vec![Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }]);
+        };
+        click(&mut h, "render:result-actual");
+        assert_eq!(h.app.render_workspace.view.result_scale, ResultScale::Actual);
+        click(&mut h, "render:result-fit");
+        assert_eq!(h.app.render_workspace.view.result_scale, ResultScale::Fit);
+        if comparison {
+            click(&mut h, "render:compare:swap");
+            assert_eq!(h.app.render_workspace.view.compare.as_ref().unwrap().left, Some(selected));
+        }
+        click(&mut h, "render:result-copy");
+        let mut copied = false;
+        for _ in 0..4 {
+            copied |= h.output.commands.iter().any(|command| matches!(command, egui::OutputCommand::CopyImage(image) if image.size == [16, 16]));
+            h.frame();
+        }
+        assert!(copied, "Copy must receive a real pointer click inside the card");
+        click(&mut h, "render:result-export");
+        h.settle();
+        assert!(h.dir.join("render.png").is_file(), "Export must receive the click and use the harness picker");
+        click(&mut h, "render:result-model");
+        assert!(!result_active(&h.app));
+        assert!(h.app.render_workspace.view.compare.is_none());
+        select(&mut h);
+        click(&mut h, "render:result-close");
+        assert!(!result_active(&h.app));
+        assert!(h.app.render_workspace.view.compare.is_none());
+        assert_eq!(h.app.render_workspace.view.completed, Some(selected));
+        assert_eq!(h.app.viewport.rect, Some(canvas));
+        assert_eq!(h.app.cam, product);
+        assert!(Arc::ptr_eq(&document, &h.app.session.doc));
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision), history);
+    }
+}
+
+/// Render the production legacy card at an assigned bound; no duplicate toolbar
+/// or controller logic. Full-app layout/navigation remain covered above.
+fn bounded_result_card_frame(h: &mut Harness, bounds: egui::Rect, events: Vec<egui::Event>) -> egui::Rect {
+    let canvas = h.app.viewport.rect.unwrap();
+    let time = h.ctx.input(|input| input.time) + 1.0 / 60.0;
+    crate::scenario::clear_handles();
+    let mut painted = egui::Rect::NOTHING;
+    let mut output =
+        h.ctx.run_ui(egui::RawInput { screen_rect: Some(canvas), time: Some(time), focused: true, events, ..Default::default() }, |ui| {
+            painted = host_result_card(&mut h.app, ui, bounds, canvas)
+        });
+    output.textures_delta.clear();
+    h.shapes = output.shapes;
+    h.output = output.platform_output;
+    painted
+}
+
+#[test]
+fn host_narrow_result_cards_scroll_real_actions_into_their_clip() {
+    use egui::{Event, Modifiers, MouseWheelUnit, PointerButton, TouchPhase};
+    for comparison in [false, true] {
+        for width in [240.0, 120.0] {
+            let (mut h, _, _) = render_results_compare_fixture();
+            crate::panel_runtime::enable_host_specimen(&mut h.app, "tabs").unwrap();
+            if comparison {
+                h.app.run("render.compare", json!({"left":0,"right":1})).unwrap();
+            } else {
+                h.app.run("render.result.select", json!({"index":1})).unwrap();
+            }
+            h.frames(4);
+            let canvas = h.app.viewport.rect.unwrap();
+            let product = h.app.cam;
+            let image = h.app.render_workspace.view.result_camera;
+            let document = h.app.session.doc.clone();
+            let history = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+            let bounds = egui::Rect::from_min_size(canvas.min, egui::vec2(width, 96.0));
+            for _ in 0..4 {
+                assert!(bounds.contains_rect(bounded_result_card_frame(&mut h, bounds, Vec::new())));
+            }
+            let initial_close = crate::scenario::rect_of("render:result-close").unwrap();
+            let mut moved = false;
+            for target in [
+                "render:result-copy",
+                "render:result-export",
+                "render:result-fit",
+                "render:result-actual",
+                "render:result-close",
+                "render:result-model",
+            ] {
+                let clip = crate::scenario::rect_of("render:result-actions-clip").unwrap();
+                assert!(bounds.contains_rect(bounded_result_card_frame(
+                    &mut h,
+                    bounds,
+                    vec![
+                        Event::PointerMoved(clip.center()),
+                        Event::MouseWheel {
+                            source: egui::MouseWheelSource::Unknown,
+                            unit: MouseWheelUnit::Point,
+                            delta: egui::Vec2::ZERO,
+                            modifiers: Modifiers::NONE,
+                            phase: TouchPhase::Start
+                        },
+                    ],
+                )));
+                let mut interaction = None;
+                for _ in 0..60 {
+                    let rect = crate::scenario::rect_of(target).unwrap();
+                    let clip = crate::scenario::rect_of("render:result-actions-clip").unwrap();
+                    let visible = rect.intersect(clip).intersect(bounds);
+                    // An intrinsic button can be wider than the card. Its clipped
+                    // centre must remain a usable target, even in the 120-point case.
+                    if visible.width() >= rect.width().min(24.0) && visible.height() >= rect.height().min(16.0) {
+                        assert!(bounds.contains_rect(bounded_result_card_frame(
+                            &mut h,
+                            bounds,
+                            vec![Event::MouseWheel {
+                                source: egui::MouseWheelSource::Unknown,
+                                unit: MouseWheelUnit::Point,
+                                delta: egui::Vec2::ZERO,
+                                modifiers: Modifiers::NONE,
+                                phase: TouchPhase::End,
+                            }],
+                        )));
+                        assert!(!h.ctx.input(|input| input.is_scrolling()));
+                        let rect = crate::scenario::rect_of(target).unwrap();
+                        let clip = crate::scenario::rect_of("render:result-actions-clip").unwrap();
+                        let visible = rect.intersect(clip).intersect(bounds);
+                        assert!(visible.width() >= rect.width().min(24.0) && visible.height() >= rect.height().min(16.0));
+                        interaction = Some(visible.center());
+                        break;
+                    }
+                    // A bracketed trackpad gesture follows the measured target, never a
+                    // reconstructed toolbar or a private scroll-state offset.
+                    let delta = clip.center() - rect.center();
+                    let painted = bounded_result_card_frame(
+                        &mut h,
+                        bounds,
+                        vec![
+                            Event::PointerMoved(clip.center()),
+                            Event::MouseWheel {
+                                source: egui::MouseWheelSource::Unknown,
+                                unit: MouseWheelUnit::Point,
+                                delta,
+                                modifiers: Modifiers::NONE,
+                                phase: TouchPhase::Move,
+                            },
+                        ],
+                    );
+                    assert!(bounds.contains_rect(painted));
+                    // ScrollArea stores its new offset after laying out the content.
+                    // Publish the resulting geometry before measuring another delta.
+                    assert!(bounds.contains_rect(bounded_result_card_frame(&mut h, bounds, Vec::new())));
+                    moved |= crate::scenario::rect_of("render:result-close").unwrap() != initial_close;
+                }
+                let pos = interaction.unwrap_or_else(|| panic!("{target} must be reachable by scrolling: width={width}, comparison={comparison}"));
+                assert!(bounds.contains(pos));
+                assert!(crate::scenario::rect_of("render:result-actions-clip").unwrap().contains(pos));
+                // Exercise the widest action through the real clipped widget;
+                // other action outcomes are covered by the full-card fixture.
+                if target == "render:result-model" {
+                    assert!(result_active(&h.app));
+                    for events in [
+                        vec![Event::PointerMoved(pos)],
+                        vec![Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }],
+                        vec![Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }],
+                    ] {
+                        assert!(bounds.contains_rect(bounded_result_card_frame(&mut h, bounds, events)));
+                    }
+                    assert!(!result_active(&h.app), "the clipped Model button must receive the pointer click");
+                    assert!(h.app.render_workspace.view.compare.is_none());
+                }
+            }
+            assert!(moved, "the narrow fixture must exercise actual scrolling");
+            assert_eq!(h.app.viewport.rect, Some(canvas));
+            assert_eq!(h.app.cam, product);
+            assert_eq!(h.app.render_workspace.view.result_camera, image);
+            assert!(Arc::ptr_eq(&document, &h.app.session.doc));
+            assert_eq!((h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision), history);
+        }
+    }
+}
+
+#[test]
+fn host_tiny_result_cards_clip_paint_and_reject_off_card_action_clicks() {
+    use egui::{Event, Modifiers, PointerButton};
+    for comparison in [false, true] {
+        let (mut h, _, _) = render_results_compare_fixture();
+        crate::panel_runtime::enable_host_specimen(&mut h.app, "tabs").unwrap();
+        if comparison {
+            h.app.run("render.compare", json!({"left":0,"right":1})).unwrap();
+        } else {
+            h.app.run("render.result.select", json!({"index":1})).unwrap();
+        }
+        h.frames(4);
+        let canvas = h.app.viewport.rect.unwrap();
+        let bounds = egui::Rect::from_min_size(canvas.min, egui::vec2(48.0, 44.0));
+        for _ in 0..4 {
+            assert!(bounds.contains_rect(bounded_result_card_frame(&mut h, bounds, Vec::new())));
+        }
+        let mut visible_shapes = 0;
+        for shape in &h.shapes {
+            if shape.clip_rect.is_positive() && shape.shape.visual_bounding_rect().is_positive() {
+                assert!(bounds.contains_rect(shape.clip_rect), "legacy card paint escaped: {:?}", shape.clip_rect);
+                visible_shapes += 1;
+            }
+        }
+        assert!(visible_shapes > 0, "the tiny card must still exercise visible paint clips");
+        let pos = crate::scenario::rect_of("render:result-close").unwrap().center();
+        assert!(!bounds.contains(pos), "the tiny fixture must put Close outside its real clip");
+        assert!(canvas.contains(pos), "exercise clipping inside the screen, rather than an off-screen pointer");
+        for events in [
+            vec![Event::PointerMoved(pos)],
+            vec![Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }],
+            vec![Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }],
+        ] {
+            assert!(bounds.contains_rect(bounded_result_card_frame(&mut h, bounds, events)));
+        }
+        assert!(result_active(&h.app), "an off-card target rectangle cannot receive a click");
+        assert_eq!(h.app.render_workspace.view.compare.is_some(), comparison);
+        assert_eq!(h.app.viewport.rect, Some(canvas));
+    }
+}
+
+#[test]
+fn host_results_and_comparison_keep_full_canvas_real_control_footprints_and_cameras_on_panel_changes() {
+    use crate::panel_runtime::{egui_rect, logical_rect};
+    for comparison in [false, true] {
+        let (mut h, _, _) = render_results_compare_fixture();
+        crate::panel_runtime::enable_host_specimen(&mut h.app, "docks").unwrap();
+        if comparison {
+            h.app.run("render.compare", json!({"left":0,"right":1})).unwrap();
+        } else {
+            h.app.run("render.result.select", json!({"index":1})).unwrap();
+        }
+        h.frames(4);
+        h.app.pending_fit = None;
+        h.app.cancel_view_animation();
+        let domain = egui_rect(h.app.universal_panel_frame().unwrap().layout.render_domain);
+        assert_eq!(h.app.viewport.rect, Some(domain));
+        if comparison {
+            assert_eq!(crate::scenario::rect_of("render:compare:canvas"), Some(domain));
+        }
+        let controls = h.app.shell.workspace_panels["render:result-controls"].0;
+        assert!(domain.contains_rect(controls));
+        assert!(h.app.shell.cards.iter().all(|card| !controls.intersect(*card).is_positive()), "the later ribbon must never cover actions");
+        assert!(h.app.universal_panel_frame().unwrap().layout.usable.contains_rect(logical_rect(controls)));
+        assert!(crate::shell::host_usable(&h.app).unwrap().obstacles.contains(&logical_rect(controls)));
+        let product = h.app.cam;
+        let image = h.app.render_workspace.view.result_camera;
+        let draft = h.app.render_workspace.view.draft.clone();
+        let dirty = h.app.render_workspace.view.dirty;
+        let document = h.app.session.doc.clone();
+        let history = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+        h.app.run_panel_command("panel.collapse", &json!({"target":{"type":"instance","id":"specimen-0"},"collapsed":true})).unwrap();
+        h.frames(4);
+        assert_eq!(h.app.viewport.rect, Some(domain));
+        assert_eq!(h.app.cam, product);
+        assert_eq!(h.app.render_workspace.view.result_camera, image, "an already fitted image is not reframed by panels");
+        assert_eq!(h.app.render_workspace.view.draft, draft);
+        assert_eq!(h.app.render_workspace.view.dirty, dirty);
+        assert!(Arc::ptr_eq(&document, &h.app.session.doc));
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision), history);
+        h.app.run("render.result.view", json!({"view":"actual"})).unwrap();
+        h.frames(3);
+        let actual = result_rect(h.app.render_workspace.view.result_camera, [16, 16], domain);
+        assert!((actual.width() * h.ctx.pixels_per_point() - 16.0).abs() < 1e-4);
+        assert_eq!(h.app.cam, product);
+    }
+}
+
+#[test]
+fn host_result_framing_recovers_after_classic_without_refitting_free_cameras_or_panel_moves() {
+    use crate::panel_runtime::logical_rect;
+    use solidcraft_engine::panels::ActionSink as _;
+    for comparison in [false, true] {
+        for scale in [ResultScale::Fit, ResultScale::Actual, ResultScale::Free] {
+            let (mut h, _, _) = render_results_compare_fixture();
+            crate::panel_runtime::enable_host_specimen(&mut h.app, "docks").unwrap();
+            if comparison {
+                h.app.run("render.compare", json!({"left":0,"right":1})).unwrap();
+            } else {
+                h.app.run("render.result.select", json!({"index":1})).unwrap();
+            }
+            h.frames(4);
+            h.app.pending_fit = None;
+            h.app.cancel_view_animation();
+            match scale {
+                ResultScale::Fit => {
+                    h.app.run("render.result.view", json!({"view":"fit"})).unwrap();
+                }
+                ResultScale::Actual => {
+                    h.app.run("render.result.view", json!({"view":"actual"})).unwrap();
+                }
+                ResultScale::Free => {
+                    with_result_camera(&mut h.app, |app| {
+                        app.cam.distance *= 0.7;
+                        app.cam.target.x += 7.0;
+                        app.cam.target.y -= 3.0;
+                    });
+                }
+            }
+            h.frames(4);
+            let canvas = h.app.viewport.rect.unwrap();
+            let domain = h.app.render_workspace.view.result_domain;
+            let image = h.app.render_workspace.view.result_camera;
+            let product = h.app.cam;
+            let draft = h.app.render_workspace.view.draft.clone();
+            let dirty = h.app.render_workspace.view.dirty;
+            let document = h.app.session.doc.clone();
+            let history = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+            let layout = h.app.panel_runtime().unwrap().layout().inspect();
+            let controllers = h.app.panel_runtime().unwrap().controller_count();
+            assert_eq!(h.app.render_workspace.view.result_scale, scale);
+            assert_eq!(domain.is_some(), scale != ResultScale::Free);
+            match scale {
+                ResultScale::Fit => {
+                    assert!(crate::shell::host_usable(&h.app).unwrap().contains_rect(logical_rect(result_rect(image, [16, 16], canvas))));
+                }
+                ResultScale::Actual => {
+                    assert!((result_rect(image, [16, 16], canvas).width() * h.ctx.pixels_per_point() - 16.0).abs() < 1e-4);
+                }
+                ResultScale::Free => {}
+            }
+
+            // Disable only the host: the same runtime and retained content survive.
+            h.app.disable_universal_panel_host().unwrap();
+            h.frames(3);
+            assert!(!h.app.universal_panel_host_enabled());
+            assert_eq!(h.app.render_workspace.view.result_domain, None);
+            let classic = h.app.render_workspace.view.result_camera;
+            if scale == ResultScale::Free {
+                assert_eq!(classic, image);
+            } else {
+                let classic_canvas = h.app.viewport.rect.unwrap();
+                assert_ne!(classic_canvas, canvas);
+                assert_eq!(classic, result_camera([16, 16], classic_canvas, h.ctx.pixels_per_point(), scale));
+                assert_ne!(classic, image, "Classic must actually reframe the image: comparison={comparison}, scale={scale:?}");
+            }
+            assert_eq!(h.app.panel_runtime().unwrap().layout().inspect(), layout);
+            assert_eq!(h.app.panel_runtime().unwrap().controller_count(), controllers);
+            h.app.enable_universal_panel_host(Default::default()).unwrap();
+            h.frames(4);
+            assert_eq!(h.app.viewport.rect, Some(canvas), "the original host domain must return");
+            assert_eq!(h.app.render_workspace.view.result_domain, domain);
+            assert_eq!(h.app.render_workspace.view.result_camera, image, "comparison={comparison}, scale={scale:?}");
+            assert_eq!(h.app.render_workspace.view.result_scale, scale);
+            assert_eq!(h.app.panel_runtime().unwrap().layout().inspect(), layout);
+            assert_eq!(h.app.panel_runtime().unwrap().controller_count(), controllers);
+
+            h.app
+                .run_panel_command(
+                    "panel.move",
+                    &json!({"target":{"type":"instance","id":"specimen-0"},"destination":{
+                        "type":"new_section","section":"camera-moved","index":0,
+                        "location":{"type":"dock","zone":"right"},"size":{"width":280,"height":240}
+                    }}),
+                )
+                .unwrap();
+            h.frames(4);
+            assert_ne!(h.app.panel_runtime().unwrap().layout().inspect(), layout, "the panel move must commit");
+            assert_eq!(h.app.viewport.rect, Some(canvas));
+            assert_eq!(h.app.render_workspace.view.result_camera, image, "panel changes cannot refit {scale:?}");
+            assert_eq!(h.app.render_workspace.view.result_domain, domain);
+            assert_eq!(h.app.cam, product);
+            assert_eq!(h.app.render_workspace.view.draft, draft);
+            assert_eq!(h.app.render_workspace.view.dirty, dirty);
+            assert!(Arc::ptr_eq(&document, &h.app.session.doc));
+            assert_eq!((h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision), history);
+        }
+    }
+}
+
+#[test]
+fn host_result_controls_shield_wheel_and_comparison_divider_keeps_capture() {
+    use egui::{Event, Modifiers, MouseWheelUnit, PointerButton, vec2};
+    let (mut h, _, _) = render_results_compare_fixture();
+    crate::panel_runtime::enable_host_specimen(&mut h.app, "docks").unwrap();
+    h.app.run("render.compare", json!({"left":0,"right":1})).unwrap();
+    h.frames(4);
+    h.app.preferences.nav = "maya".into();
+    h.app.render_workspace.view.result_scale = ResultScale::Free;
+    let product = h.app.cam;
+    let image = h.app.render_workspace.view.result_camera;
+    let controls = h.app.shell.workspace_panels["render:result-controls"].0;
+    h.frame_with(vec![
+        Event::PointerMoved(controls.center()),
+        Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: MouseWheelUnit::Point,
+            delta: vec2(0.0, -300.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        },
+    ]);
+    assert_eq!(h.app.cam, product);
+    assert_eq!(h.app.render_workspace.view.result_camera, image);
+    let canvas = h.app.viewport.rect.unwrap();
+    let start = crate::scenario::rect_of("render:compare:handle").unwrap().center();
+    assert!(!controls.contains(start));
+    h.frame_with(vec![
+        Event::ModifiersChanged(Modifiers::ALT),
+        Event::PointerMoved(start),
+        Event::PointerButton { pos: start, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::ALT },
+    ]);
+    let end = egui::pos2(canvas.right() + 100.0, start.y);
+    h.frame_with(vec![
+        Event::PointerMoved(end),
+        Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: MouseWheelUnit::Point,
+            delta: vec2(0.0, -300.0),
+            modifiers: Modifiers::ALT,
+            phase: egui::TouchPhase::Move,
+        },
+    ]);
+    assert!((h.app.render_workspace.view.compare.as_ref().unwrap().position - 0.95).abs() < 1e-6);
+    assert_eq!(h.app.render_workspace.view.result_camera, image);
+    assert_eq!(h.app.cam, product);
+    h.frame_with(vec![Event::PointerButton { pos: end, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::ALT }]);
+}
+
+#[test]
+fn host_panel_capture_blocks_result_navigation_through_release() {
+    use crate::panel_runtime::{HostControlTarget, HostPointerTarget, HostResizeEdge, egui_rect};
+    use egui::{Event, Modifiers, MouseWheelUnit, PointerButton, vec2};
+    for comparison in [false, true] {
+        for resize in [false, true] {
+            let (mut h, _, _) = render_results_compare_fixture();
+            crate::panel_runtime::enable_host_specimen(&mut h.app, "docks").unwrap();
+            if comparison {
+                h.app.run("render.compare", json!({"left":0,"right":1})).unwrap();
+            } else {
+                h.app.run("render.result.select", json!({"index":1})).unwrap();
+            }
+            h.frames(4);
+            h.app.pending_fit = None;
+            h.app.cancel_view_animation();
+            h.app.preferences.nav = "maya".into();
+            h.app.preferences.smooth_wheel_zoom = false;
+            h.app.render_workspace.view.result_scale = ResultScale::Free;
+            let product = h.app.cam;
+            let image = h.app.render_workspace.view.result_camera;
+            let frame = h.app.universal_panel_frame().unwrap();
+            let section = frame.layout.sections.iter().find(|section| section.instance.0 == "specimen-0").unwrap();
+            let target = if resize {
+                HostPointerTarget::Resize { section: section.section.clone(), edge: HostResizeEdge::Right }
+            } else {
+                HostPointerTarget::Header { instance: section.instance.clone() }
+            };
+            let start = egui_rect(frame.controls.iter().find(|control| control.target == HostControlTarget::Pointer(target.clone())).unwrap().bounds)
+                .center();
+            let canvas = h.app.viewport.rect.unwrap();
+            // Below this content-sized side card and away from the comparison divider.
+            let end = egui::pos2(canvas.center().x + 80.0, canvas.center().y + 80.0);
+            assert!(!crate::shell::covered(&h.app, end));
+            assert!(!h.app.viewport.layout.as_ref().unwrap().navigation.contains(end));
+            h.frame_with(vec![Event::PointerMoved(start)]);
+            h.frame_with(vec![Event::PointerButton { pos: start, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }]);
+            assert!(host_navigation_captured(&h.app), "the real host control must capture: comparison={comparison}, resize={resize}");
+            h.frame_with(vec![Event::PointerMoved(end)]);
+            assert!(host_navigation_captured(&h.app));
+            assert!(!crate::shell::covered(&h.app, end), "wheel input must be over exposed canvas during capture");
+            let wheel = || Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
+                unit: MouseWheelUnit::Point,
+                delta: vec2(0.0, -300.0),
+                modifiers: Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            };
+            h.frame_with(vec![wheel()]);
+            assert_eq!(h.app.render_workspace.view.result_camera, image, "a stationary host drag still owns wheel input");
+            h.frame_with(vec![
+                Event::PointerButton { pos: end, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE },
+                wheel(),
+            ]);
+            assert!(!host_navigation_captured(&h.app));
+            assert_eq!(h.app.render_workspace.view.result_camera, image, "host release cannot zoom the result");
+            assert_eq!(h.app.cam, product);
+            assert!(h.app.render_workspace.result_navigation.is_none(), "the deferred response is consumed once");
+            // Navigation must recover after release. Find a point outside all current chrome.
+            h.frames(2);
+            let point = (1..10)
+                .flat_map(|y| (1..10).map(move |x| canvas.min + canvas.size() * vec2(x as f32 / 10.0, y as f32 / 10.0)))
+                .find(|point| !crate::shell::covered(&h.app, *point) && !h.app.viewport.layout.as_ref().unwrap().navigation.contains(*point))
+                .unwrap();
+            h.frame_with(vec![Event::PointerMoved(point)]);
+            h.frame_with(vec![wheel()]);
+            assert_ne!(h.app.render_workspace.view.result_camera, image, "fresh canvas wheel input resumes after host release");
+            assert_eq!(h.app.cam, product);
+        }
+    }
+}
+
+#[test]
+fn disabling_host_in_render_clears_result_controls_before_classic_layout_and_input() {
+    use egui::{Event, Modifiers, MouseWheelUnit, vec2};
+    for comparison in [false, true] {
+        let (mut h, _, _) = render_results_compare_fixture();
+        crate::panel_runtime::enable_host_specimen(&mut h.app, "docks").unwrap();
+        if comparison {
+            h.app.run("render.compare", json!({"left":0,"right":1})).unwrap();
+        } else {
+            h.app.run("render.result.select", json!({"index":1})).unwrap();
+        }
+        h.frames(4);
+        h.app.pending_fit = None;
+        h.app.cancel_view_animation();
+        let controls = h.app.shell.workspace_panels["render:result-controls"].0;
+        let product = h.app.cam;
+        let document = h.app.session.doc.clone();
+        let history = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+        h.app.disable_universal_panel_host().unwrap();
+        // The stale entry exists at the transition; the first real Classic frame must remove it.
+        assert!(h.app.shell.workspace_panels.contains_key("render:result-controls"));
+        h.frame();
+        assert!(active(&h.app));
+        assert!(!h.app.universal_panel_host_enabled());
+        assert_eq!(h.app.render_workspace.view.compare.is_some(), comparison);
+        assert!(!h.app.shell.workspace_panels.contains_key("render:result-controls"));
+        assert!(!crate::shell::fit_rects(&h.app).contains(&controls));
+        assert!(!crate::shell::covered_rects(&h.app).contains(&controls));
+        let layout = h.app.viewport.layout.as_ref().unwrap().clone();
+        assert!(layout.usable.is_none());
+        // Recomputing from the now-clean shell must match what Classic already consumed.
+        crate::viewport::refresh_layout(&mut h.app, &h.ctx);
+        let refreshed = h.app.viewport.layout.as_ref().unwrap();
+        assert_eq!((layout.content, layout.middle, layout.drawable), (refreshed.content, refreshed.middle, refreshed.drawable));
+        // Classic paints the image before its legacy panels update shell.content.
+        // Keep the first-frame cleanup assertions above, then target the settled
+        // Classic image rather than the previous host's full content rectangle.
+        h.frames(3);
+        let layout = h.app.viewport.layout.as_ref().unwrap().clone();
+        let canvas = h.app.viewport.rect.unwrap();
+        let responses = h.ctx.viewport(|viewport| {
+            viewport
+                .prev_pass
+                .widgets
+                .layers()
+                .flat_map(|(_, widgets)| widgets.iter())
+                .filter(|widget| widget.enabled && widget.rect == canvas && widget.sense == egui::Sense::click_and_drag())
+                .copied()
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(responses.len(), 1, "identify the actual Classic image allocation, comparison={comparison}: {responses:?}");
+        let response = responses[0];
+        let divider =
+            comparison.then(|| crate::scenario::rect_of("render:compare:divider").unwrap().expand(h.ctx.global_style().interaction.interact_radius));
+        let point = (1..10)
+            .flat_map(|y| (1..10).map(move |x| controls.min + controls.size() * vec2(x as f32 / 10.0, y as f32 / 10.0)))
+            .chain((1..10).flat_map(|y| (1..10).map(move |x| canvas.min + canvas.size() * vec2(x as f32 / 10.0, y as f32 / 10.0))))
+            .find(|point| {
+                response.interact_rect.contains(*point)
+                    && !crate::shell::covered(&h.app, *point)
+                    && !layout.navigation.contains(*point)
+                    && !divider.is_some_and(|divider| divider.contains(*point))
+                    && h.ctx.layer_id_at(*point) == Some(response.layer_id)
+            })
+            .expect("an unoccluded point owned by the actual Classic image response");
+        h.app.preferences.nav = "maya".into();
+        h.app.preferences.smooth_wheel_zoom = false;
+        h.app.render_workspace.view.result_scale = ResultScale::Free;
+        assert!(!crate::frame::dock_dragging(&h.ctx), "a dock drag must not own Classic image input, comparison={comparison}");
+        h.frame_with(vec![Event::PointerMoved(point)]);
+        assert_eq!(h.app.viewport.mouse, Some(point), "shared navigation must accept the Classic image pointer, comparison={comparison}");
+        let owned = h.ctx.read_response(response.id).expect("the Classic image response remains mounted");
+        assert!(
+            owned.enabled() && owned.contains_pointer() && owned.interact_rect.contains(point),
+            "wheel input must belong to the image: {owned:?}"
+        );
+        assert_eq!(h.ctx.layer_id_at(point), Some(owned.layer_id));
+        assert!(!comparison_drag_captured(&h.app), "the comparison divider must not own image input");
+        let image = h.app.render_workspace.view.result_camera;
+        h.frame_with(vec![Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: MouseWheelUnit::Point,
+            delta: vec2(0.0, -300.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        }]);
+        assert!(!crate::frame::dock_dragging(&h.ctx), "a dock drag must not own Classic image wheel input, comparison={comparison}");
+        assert!(!comparison_drag_captured(&h.app), "the comparison divider must not own image wheel input");
+        assert_eq!(h.app.viewport.mouse, Some(point), "shared navigation must accept the Classic image wheel pointer, comparison={comparison}");
+        assert_ne!(
+            h.app.render_workspace.view.result_camera,
+            image,
+            "the invisible host card must not block Classic wheel input: comparison={comparison}, mouse={:?}, raw/available events/smooth delta={:?}, wheel speed={}, scale/job={:?}",
+            h.app.viewport.mouse,
+            h.ctx.input(|input| (input.raw.events.clone(), input.events.clone(), input.smooth_scroll_delta)),
+            h.app.preferences.wheel_zoom_speed,
+            (h.app.render_workspace.view.result_scale, h.app.render_workspace.view.result_job)
+        );
+        h.app.run("render.result.view", json!({"view":"fit"})).unwrap();
+        h.frame();
+        assert_eq!(
+            h.app.render_workspace.view.result_camera,
+            result_camera([16, 16], h.app.viewport.rect.unwrap(), h.ctx.pixels_per_point(), ResultScale::Fit)
+        );
+        assert_eq!(h.app.cam, product);
+        assert!(Arc::ptr_eq(&document, &h.app.session.doc));
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision), history);
+    }
+}
+
+#[test]
+fn host_empty_result_keeps_full_domain_and_tiny_blocked_controls_publish_nothing() {
+    let mut h = output_viewer_fixture();
+    crate::panel_runtime::enable_host_specimen(&mut h.app, "docks").unwrap();
+    h.frames(3);
+    h.app.render_workspace.view.result = true;
+    let domain = h.app.viewport.rect.unwrap();
+    let camera = h.app.render_workspace.view.result_camera;
+    let ctx = h.ctx.clone();
+    for size in [egui::vec2(4.0, 4.0), egui::vec2(40.0, 24.0), domain.size()] {
+        let canvas = egui::Rect::from_min_size(domain.min, size);
+        h.app.viewport.host_windows = Some(vec![domain]);
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(domain), ..Default::default() }, |ui| {
+            let mut scene = ui.new_child(egui::UiBuilder::new().max_rect(canvas));
+            show(&mut h.app, &mut scene);
+            host_result_overlays(&mut h.app, ui);
+        });
+        output.textures_delta.clear();
+        assert_eq!(h.app.viewport.rect, Some(canvas));
+        assert!(!h.app.shell.workspace_panels.contains_key("render:result-controls"));
+        assert_eq!(h.app.render_workspace.view.result_camera, camera);
+    }
+}
+
+#[test]
+fn classic_results_and_comparison_keep_their_reserved_chrome_and_scale_policy() {
+    for comparison in [false, true] {
+        let (mut h, _, _) = render_results_compare_fixture();
+        assert!(!h.app.universal_panel_host_enabled(), "the production default remains Classic");
+        if comparison {
+            h.app.run("render.compare", json!({"left":0,"right":1})).unwrap();
+        } else {
+            h.app.run("render.result.select", json!({"index":1})).unwrap();
+        }
+        h.frames(3);
+        let canvas = h.app.viewport.rect.unwrap();
+        assert!(canvas.top() > crate::toolbar::APP_BAR_HEIGHT);
+        assert_eq!(h.app.render_workspace.view.result_camera, result_camera([16, 16], canvas, h.ctx.pixels_per_point(), ResultScale::Fit));
+        assert!(!h.app.shell.workspace_panels.contains_key("render:result-controls"));
+        if comparison {
+            assert_eq!(crate::scenario::rect_of("render:compare:canvas"), Some(canvas));
+        }
+    }
 }

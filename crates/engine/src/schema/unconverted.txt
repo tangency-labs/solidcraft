@@ -198,9 +198,7 @@ sketch.constraint.polygon
 sketch.constraint.symmetry
 sketch.constraint.tangent
 sketch.construction
-sketch.copy
 sketch.create
-sketch.cut
 sketch.delete
 sketch.dimension
 sketch.dimension_text
@@ -233,7 +231,6 @@ sketch.move_point
 sketch.offset
 sketch.offset.break
 sketch.options
-sketch.paste
 sketch.pattern.circular
 sketch.pattern.rectangular
 sketch.point

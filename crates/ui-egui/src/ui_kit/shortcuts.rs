@@ -54,7 +54,7 @@ pub(crate) fn shortcut_binding(ui: &mut Ui, chord: &str, editable: bool) -> Resp
     }
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
-            if editable { egui::WidgetType::Button } else { egui::WidgetType::Label },
+            if editable { egui::Role::Button } else { egui::Role::Label },
             ui.is_enabled(),
             if chord.is_empty() { crate::i18n::tr("prefs.shortcuts_not_assigned") } else { chord },
         )
@@ -109,7 +109,7 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
     if show_clear {
         let clear_rect = Rect::from_center_size(pos2(r.right() - height * 0.5, r.center().y), vec2(height, height));
         let clear = ui.push_id(id.with("clear"), |ui| super::quiet_icon_button_at(ui, clear_rect, "close", "Clear")).inner;
-        if id == egui::Id::new("prefs_search") {
+        if id == egui::Id::unique("prefs_search") {
             crate::scenario::publish_handle("prefs:search:clear", clear_rect.center());
         }
         if clear.clicked() {
@@ -120,9 +120,9 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
     if frame.clicked() && !cleared {
         response.request_focus();
     }
-    super::layout::publish(ui, &response, egui::WidgetType::TextEdit);
+    super::layout::publish(ui, &response, egui::Role::TextInput);
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), crate::i18n::tr_label(hint));
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), crate::i18n::tr_label(hint));
         info.current_text_value = Some(value.clone());
         info
     });
