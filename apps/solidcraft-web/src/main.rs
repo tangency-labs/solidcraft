@@ -954,6 +954,12 @@ mod web {
             if let Some(res) = done {
                 let kind = self.font_fetch_kind.take();
                 let installed = match res {
+                    Ok((path, bytes)) if kind == Some("ko") && !solidcraft_ui_egui::fonts::valid_web_hangul_font(&bytes) => {
+                        // Reject a corrupt or wrong-script response before it becomes ready.
+                        self.hangul_bytes = None;
+                        log::warn!("invalid Korean script font from {path}");
+                        false
+                    }
                     Ok((path, bytes)) => {
                         match kind {
                             Some("ko") => {
