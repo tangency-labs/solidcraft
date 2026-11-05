@@ -60,6 +60,7 @@ pub mod browser;
 pub mod clearance;
 pub mod compare;
 pub mod component;
+pub mod component_link;
 pub mod config;
 pub mod construct;
 pub mod diagnostics;
