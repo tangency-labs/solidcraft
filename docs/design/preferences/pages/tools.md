@@ -24,7 +24,7 @@ Each group is a 120x64 figure at the left of its checkboxes, with a group name u
 |---|---|---|---|---|---|---|
 | Use joint motion handles for Move | Checkbox | `Prefs.assembly_move_handles` | `true` | "Off: the previous Move panel." | `assembly-move` | |
 | Show moved parts' old place as a ghost | Checkbox | `Prefs.drive_joints_ghost` | `true` | none | `assembly-move` | |
-| Highlight what is under the pointer while dragging a component | Checkbox | `Prefs.move_drag_highlights` | `false` | "Off: nothing under the pointer is highlighted while Move drags a component, which keeps large assemblies smooth." | `assembly-move` | On: the highlight as before #7273, at the cost of a pick and a Browser lookup at each step. |
+| Highlight what is under the pointer while Move's arrows drag a component | Checkbox | `Prefs.move_drag_highlights` | `false` | "Off: while Move's arrows drag a component, nothing under the pointer is highlighted, which keeps large assemblies smooth. With a section or an analysis shown it is highlighted all the same, and a part dragged along its joints never highlights it." | `assembly-move` | On: the highlight as before #7273, at the cost of a pick and a Browser lookup at each step. |
 | Near-axis step | Number field (64 wide, aria "Degrees") with "deg" | `Prefs.joint_rotation_coarse` (0.001 to 180) | `10` | "Pull outside the dashed guide for the fine step." | `assembly-move` | Confirmed: near-axis uses the coarse step; the existing fine-mode hysteresis and rebasing remain unchanged. |
 | Far-axis step | Number field with "deg" | `Prefs.joint_rotation_fine` (0.001 to 180) | `0.1` | none | `assembly-move` | Confirmed: far-axis uses the fine step. |
 

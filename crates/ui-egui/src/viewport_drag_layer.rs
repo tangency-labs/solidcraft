@@ -63,9 +63,9 @@ pub(super) fn follow(app: &mut SolveApp) -> bool {
 }
 
 /// Whether the pointer picks nothing this frame: the triad drags a component drawn as a layer
-/// (`layered`) and "Highlight what is under the pointer while dragging a component" is off.
-/// Picking the dragged bodies would mesh them where they stand at every step, and a highlight
-/// has the Browser look up its row again.
+/// (`layered`) and "Highlight what is under the pointer while Move's arrows drag a component"
+/// is off. Picking the dragged bodies would mesh them where they stand at every step, and a
+/// highlight has the Browser look up its row again.
 pub(super) fn holds_pointer(app: &SolveApp, layered: bool, manipulator_dragging: bool) -> bool {
     layered && manipulator_dragging && !app.preferences.move_drag_highlights
 }
@@ -346,8 +346,8 @@ mod tests {
     }
 
     /// While the triad drags a component drawn as a layer, the pointer picks nothing; "Highlight
-    /// what is under the pointer while dragging a component" picks and highlights as before
-    /// (#7273). A pointer that isn't dragging the triad picks either way.
+    /// what is under the pointer while Move's arrows drag a component" picks and highlights as
+    /// before (#7273). A pointer that isn't dragging the triad picks either way.
     #[test]
     fn a_layer_drag_picks_under_the_pointer_only_with_its_preference() {
         let (s, dragged) = two_parts();

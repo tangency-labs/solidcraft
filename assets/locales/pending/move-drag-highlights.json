@@ -1,42 +1,42 @@
 {
   "en": {
-    "prefs.move_drag_highlights": "Highlight what is under the pointer while dragging a component",
-    "prefs.move_drag_highlights_tip": "Off: nothing under the pointer is highlighted while Move drags a component, which keeps large assemblies smooth."
+    "prefs.move_drag_highlights": "Highlight what is under the pointer while Move's arrows drag a component",
+    "prefs.move_drag_highlights_tip": "Off: while Move's arrows drag a component, nothing under the pointer is highlighted, which keeps large assemblies smooth. With a section or an analysis shown it is highlighted all the same, and a part dragged along its joints never highlights it."
   },
   "ar": {
-    "prefs.move_drag_highlights": "تمييز ما تحت المؤشر أثناء سحب مكوّن",
-    "prefs.move_drag_highlights_tip": "عند الإيقاف: لا يُميَّز أي شيء تحت المؤشر أثناء سحب مكوّن بأداة النقل، فتبقى التجميعات الكبيرة سلسة."
+    "prefs.move_drag_highlights": "تمييز ما تحت المؤشر أثناء سحب مكوّن بأسهم أداة النقل",
+    "prefs.move_drag_highlights_tip": "عند الإيقاف: لا يُميَّز أي شيء تحت المؤشر أثناء سحب مكوّن بأسهم أداة النقل، فتبقى التجميعات الكبيرة سلسة. مع عرض مقطع أو تحليل يبقى التمييز كما هو، ولا يُميَّز شيء أبدًا عند سحب جزء على امتداد وصلاته."
   },
   "de": {
-    "prefs.move_drag_highlights": "Beim Ziehen einer Komponente hervorheben, was unter dem Zeiger liegt",
-    "prefs.move_drag_highlights_tip": "Aus: Während Verschieben eine Komponente zieht, wird nichts unter dem Zeiger hervorgehoben; so bleiben große Baugruppen flüssig."
+    "prefs.move_drag_highlights": "Hervorheben, was unter dem Zeiger liegt, während die Pfeile von Verschieben eine Komponente ziehen",
+    "prefs.move_drag_highlights_tip": "Aus: Solange die Pfeile von Verschieben eine Komponente ziehen, wird nichts unter dem Zeiger hervorgehoben; so bleiben große Baugruppen flüssig. Mit einem Schnitt oder einer Analyse wird es trotzdem hervorgehoben, und ein entlang seiner Gelenke gezogenes Teil hebt nie etwas hervor."
   },
   "es": {
-    "prefs.move_drag_highlights": "Resaltar lo que hay bajo el puntero al arrastrar un componente",
-    "prefs.move_drag_highlights_tip": "Desactivado: mientras Mover arrastra un componente no se resalta nada bajo el puntero, y los ensamblajes grandes se mueven con fluidez."
+    "prefs.move_drag_highlights": "Resaltar lo que hay bajo el puntero mientras las flechas de Mover arrastran un componente",
+    "prefs.move_drag_highlights_tip": "Desactivado: mientras las flechas de Mover arrastran un componente no se resalta nada bajo el puntero, y los ensamblajes grandes se mueven con fluidez. Con un corte o un análisis visible se resalta igualmente, y una pieza arrastrada a lo largo de sus uniones nunca lo resalta."
   },
   "fr": {
-    "prefs.move_drag_highlights": "Mettre en évidence ce qui est sous le pointeur pendant le glissement d’un composant",
-    "prefs.move_drag_highlights_tip": "Désactivé : pendant que Déplacer fait glisser un composant, rien n’est mis en évidence sous le pointeur, ce qui garde les grands assemblages fluides."
+    "prefs.move_drag_highlights": "Mettre en évidence ce qui est sous le pointeur pendant que les flèches de Déplacer font glisser un composant",
+    "prefs.move_drag_highlights_tip": "Désactivé : pendant que les flèches de Déplacer font glisser un composant, rien n’est mis en évidence sous le pointeur, ce qui garde les grands assemblages fluides. Avec une coupe ou une analyse affichée, la mise en évidence reste, et une pièce glissée le long de ses liaisons n’en montre jamais."
   },
   "he": {
-    "prefs.move_drag_highlights": "הדגשת מה שמתחת לסמן בזמן גרירת רכיב",
-    "prefs.move_drag_highlights_tip": "כבוי: בזמן שהזזה גוררת רכיב, דבר אינו מודגש מתחת לסמן, וכך מכלולים גדולים נשארים חלקים."
+    "prefs.move_drag_highlights": "הדגשת מה שמתחת לסמן בזמן שחצי ההזזה גוררים רכיב",
+    "prefs.move_drag_highlights_tip": "כבוי: בזמן שחצי ההזזה גוררים רכיב, דבר אינו מודגש מתחת לסמן, וכך מכלולים גדולים נשארים חלקים. כשמוצג חתך או ניתוח ההדגשה נשארת, וחלק שנגרר לאורך המפרקים שלו לעולם אינו מדגיש."
   },
   "ja": {
-    "prefs.move_drag_highlights": "コンポーネントのドラッグ中にポインターの下をハイライト",
-    "prefs.move_drag_highlights_tip": "オフ: 移動でコンポーネントをドラッグしている間はポインターの下をハイライトしないため、大きなアセンブリでも滑らかに動きます。"
+    "prefs.move_drag_highlights": "移動の矢印でコンポーネントをドラッグ中にポインターの下をハイライト",
+    "prefs.move_drag_highlights_tip": "オフ: 移動の矢印でコンポーネントをドラッグしている間はポインターの下をハイライトしないため、大きなアセンブリでも滑らかに動きます。断面や解析を表示中は通常どおりハイライトし、ジョイントに沿ってドラッグする部品ではハイライトしません。"
   },
   "ko": {
-    "prefs.move_drag_highlights": "구성 요소를 끄는 동안 포인터 아래 항목 강조 표시",
-    "prefs.move_drag_highlights_tip": "끄면 이동으로 구성 요소를 끄는 동안 포인터 아래 항목을 강조 표시하지 않아 큰 어셈블리도 부드럽게 움직입니다."
+    "prefs.move_drag_highlights": "이동 화살표로 구성 요소를 끄는 동안 포인터 아래 항목 강조 표시",
+    "prefs.move_drag_highlights_tip": "끄면 이동 화살표로 구성 요소를 끄는 동안 포인터 아래 항목을 강조 표시하지 않아 큰 어셈블리도 부드럽게 움직입니다. 단면이나 해석이 표시된 동안에는 그대로 강조 표시하며, 조인트를 따라 끄는 부품은 강조 표시하지 않습니다."
   },
   "vi": {
-    "prefs.move_drag_highlights": "Tô sáng thứ nằm dưới con trỏ khi kéo một thành phần",
-    "prefs.move_drag_highlights_tip": "Tắt: khi Di chuyển kéo một thành phần, không có gì dưới con trỏ được tô sáng, nhờ đó các cụm lắp ráp lớn vẫn mượt."
+    "prefs.move_drag_highlights": "Tô sáng thứ nằm dưới con trỏ khi các mũi tên của Di chuyển kéo một thành phần",
+    "prefs.move_drag_highlights_tip": "Tắt: khi các mũi tên của Di chuyển kéo một thành phần, không có gì dưới con trỏ được tô sáng, nhờ đó các cụm lắp ráp lớn vẫn mượt. Khi đang hiện mặt cắt hoặc phân tích thì vẫn tô sáng như thường, và chi tiết được kéo dọc theo khớp nối không bao giờ tô sáng."
   },
   "zh": {
-    "prefs.move_drag_highlights": "拖动组件时高亮指针下的对象",
-    "prefs.move_drag_highlights_tip": "关闭：使用移动拖动组件时，不高亮指针下的对象，大型装配体也能保持流畅。"
+    "prefs.move_drag_highlights": "用移动的箭头拖动组件时高亮指针下的对象",
+    "prefs.move_drag_highlights_tip": "关闭：用移动的箭头拖动组件时，不高亮指针下的对象，大型装配体也能保持流畅。显示剖切或分析时仍照常高亮；沿关节拖动零件时从不高亮。"
   }
 }
