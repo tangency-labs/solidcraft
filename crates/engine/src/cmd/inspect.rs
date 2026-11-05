@@ -215,6 +215,26 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
             b["sheet_metal"] = json!(true);
         }
     }
+    // A sheet made from surfaces (#6748): its perforation fields the same way.
+    let surface_sheets = s.model.state().surface_sheets.clone();
+    for b in &mut bodies {
+        let Some(sk) = surface_sheets.iter().find(|x| b["name"].as_str() == Some(x.body.as_str())) else { continue };
+        b["sheet_metal"] = json!(true);
+        let open = sk.perforated_area();
+        if open > 0.0 {
+            if let Some(v) = b["volume_mm3"].as_f64() {
+                let nv = v - open * sk.thickness;
+                if let Some(m) = b["mass_g"].as_f64().filter(|_| v > 0.0) {
+                    b["mass_g"] = json!(m * nv / v);
+                }
+                b["volume_mm3"] = json!(nv);
+            }
+            let shown = sk.shown();
+            let bores: f64 =
+                shown.perforations.iter().map(|p| shown.perforation_holes(p).len() as f64 * std::f64::consts::PI * p.diameter * sk.thickness).sum();
+            b["area_mm2"] = json!(b["area_mm2"].as_f64().unwrap_or(0.0) - 2.0 * open + bores);
+        }
+    }
     let skipped = bodies.iter().filter(|b| b["closed"] == false).count();
     let tv: f64 = bodies.iter().filter_map(|b| b["volume_mm3"].as_f64()).sum();
     let ta: f64 = bodies.iter().filter_map(|b| b["area_mm2"].as_f64()).sum();

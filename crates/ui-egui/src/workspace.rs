@@ -575,7 +575,7 @@ pub fn feature_icon(k: &FeatureKind) -> Option<&'static str> {
         FeatureKind::SheetPath { .. } => "path_flange",
         FeatureKind::SheetUnfold { refold: false, .. } => "unfold",
         FeatureKind::SheetUnfold { .. } => "refold",
-        FeatureKind::SheetConvert { .. } => "convert_sheet",
+        FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } => "convert_sheet",
         FeatureKind::Boss { .. } => "boss",
         FeatureKind::Lip { .. } => "lip",
         FeatureKind::SnapFit { .. } => "snap_fit",
@@ -607,7 +607,8 @@ fn active_body<'a>(app: &'a crate::SolveApp, state: &'a solidcraft_engine::doc::
 pub fn sheet_body(app: &crate::SolveApp) -> Option<String> {
     let state = app.session.model.state();
     let body = active_body(app, &state)?;
-    state.sheets.iter().find(|s| s.body == body).map(|s| s.body.clone())
+    let sheet = state.sheets.iter().any(|s| s.body == body) || state.surface_sheets.iter().any(|s| s.body == body);
+    sheet.then(|| body.to_string())
 }
 
 /// The active body when a Frame Member feature made it.

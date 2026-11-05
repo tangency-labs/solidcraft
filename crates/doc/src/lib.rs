@@ -78,7 +78,18 @@ pub mod render_resources;
 pub mod render_settings;
 pub mod render_surface;
 pub mod sheet;
+mod sheet_flat_lineage;
+mod sheet_surface;
+mod sheet_surface_convert;
+mod sheet_surface_cuts;
+mod sheet_surface_features;
+mod sheet_surface_fold;
+mod sheet_surface_shadow;
 pub mod sketch_equation;
+pub use sheet_surface_convert::{
+    ConvertRule, RollEdge, RollInfo, RollLine, SheetFaces, SurfaceBendLine, SurfaceConversion, SurfaceSheet, convert_surfaces,
+};
+pub use sheet_surface_cuts::{Loose, Recess};
 pub mod text_params;
 pub mod thread_forms;
 

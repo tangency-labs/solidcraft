@@ -16,6 +16,7 @@ pub mod label;
 pub mod normal_section;
 pub mod pcurve;
 pub mod placement;
+pub mod query;
 mod split;
 pub use split::split_edges;
 

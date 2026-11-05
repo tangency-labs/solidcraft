@@ -129,10 +129,11 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
             // A flat face of a sheet metal body attaches to its panel (or a panel's rim): the
             // exact plane comes from the panel's flat region and fold, and the sketch keeps the
             // face's name to follow it.
-            if !fixed
-                && let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body.name)
-                && let Some((face, plane)) = sheet.panel_face_at(local_point, tolerance * 10.0)
-            {
+            let on_sheet = || match state.sheets.iter().find(|sheet| sheet.body == body.name) {
+                Some(sheet) => sheet.panel_face_at(local_point, tolerance * 10.0),
+                None => state.surface_sheets.iter().find(|sheet| sheet.body == body.name)?.panel_face_at(&body.body, local_point, tolerance * 10.0),
+            };
+            if !fixed && let Some((face, plane)) = on_sheet() {
                 if chosen.is_some() || sheet_face.is_some() {
                     return Err(bad(cmd, "face point is ambiguous; pick an exact body and face index"));
                 }

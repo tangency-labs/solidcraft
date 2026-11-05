@@ -461,7 +461,8 @@ pub struct HemParams {
     pub edges: SheetPoints,
     /// The hem's length, to its outer face.
     pub length: LengthExpr,
-    /// The gap inside the hem (its inner radius). Default: the sheet's rule's hem gap.
+    /// The gap between the hem's leg and the face it folds over, twice the bend's inner radius.
+    /// Default: the sheet's rule's hem gap.
     #[serde(default)]
     pub gap: Option<LengthExpr>,
     /// Hem to the other side. Default: false.

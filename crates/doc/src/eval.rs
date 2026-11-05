@@ -576,6 +576,9 @@ pub struct ModelState {
     pub reserved_body_names: std::collections::BTreeSet<String>,
     /// Sheet metal bodies (by body name) and their flat patterns.
     pub sheets: Vec<crate::sheet::SheetBody>,
+    /// Bodies converted to sheet metal (#6748): their flat patterns. Such a
+    /// body is the folded sheet.
+    pub surface_sheets: Vec<crate::SurfaceSheet>,
     /// Construction planes, axes and points as evaluated (by feature).
     pub construct: Vec<crate::construct::Construct>,
     /// Evaluation-cache keys of the sketches (by sketch feature id).
@@ -701,6 +704,7 @@ impl ModelState {
         }
         serde_json::to_string(&self.threads).unwrap_or_default().hash(&mut h);
         serde_json::to_string(&self.sheets).unwrap_or_default().hash(&mut h);
+        serde_json::to_string(&self.surface_sheets).unwrap_or_default().hash(&mut h);
         // Construction axes, planes and points so far: features find them here by name, and a
         // result taken from the cache brings back the ones it was made with, so one moved past
         // a feature must change the key (#9544). A state without any hashes as before.
@@ -2339,6 +2343,9 @@ impl Model {
                 track_altered_sheets(&state, &mut next, f, &mut warning);
                 note_join_apart(&state, &next, f, &mut warning);
             }
+            let r = r.and_then(|()| {
+                absorb_sheet_cuts(&state, &mut next, f, validation, &mut warning).map_err(|e| kernel::KernelError::Failed(e.to_string()))
+            });
             let ms = t0.elapsed().as_secs_f64() * 1000.0;
             let internal = matches!(r, Err(kernel::KernelError::Internal(_)));
             let error = match r {
@@ -2466,10 +2473,12 @@ impl Model {
                 .all(|r| r.state.bodies.iter().all(|b| if b.name == old { b.feature == feature } else { !b.name.starts_with(&derived) }))
         };
         let quoted = self.results.iter().skip(at).any(|r| [&r.error, &r.warning].into_iter().flatten().any(|m| m.contains(old)));
-        let named_elsewhere = self
-            .results
-            .iter()
-            .any(|r| r.state.body(new).is_some() || r.state.sheets.iter().any(|x| x.body == old) || r.state.threads.iter().any(|t| t.body == old));
+        let named_elsewhere = self.results.iter().any(|r| {
+            r.state.body(new).is_some()
+                || r.state.sheets.iter().any(|x| x.body == old)
+                || r.state.surface_sheets.iter().any(|x| x.body == old)
+                || r.state.threads.iter().any(|t| t.body == old)
+        });
         let faces_named = doc.features.iter().skip(at + 1).any(|f| f.face_names.iter().any(|n| n.contains(old)));
         if !(untouched || (one_run && same_body())) || quoted || named_elsewhere || faces_named {
             return false;
@@ -2828,6 +2837,76 @@ fn copy_body_name(state: &ModelState, f: &Feature, k: usize, source: &str) -> St
     unique_body_name(state, base)
 }
 
+/// Reads what a feature cut from a sheet made from surfaces back onto its sheet, and puts the
+/// body built again from the sheet in place (#6748, see `sheet_surface_cuts`). Checking each
+/// step, the body built again is weighed against the body cut.
+fn absorb_sheet_cuts(
+    before: &ModelState,
+    after: &mut ModelState,
+    f: &Feature,
+    validation: kernel::Validation,
+    warning: &mut Option<String>,
+) -> Result<()> {
+    let weigh = validation == kernel::Validation::EachStep;
+    let letters = more::cut_letters(after, f);
+    // What takes material away that the sheet can't hold (a cut, a hole, a chamfer or fillet on
+    // a face's edge) is refused; any other change (a join, a mirror into it, a modelled thread)
+    // stays on the body, and marks the sheet (see `SurfaceSheet::altered_by`).
+    let cuts = match &f.kind {
+        FeatureKind::Hole { .. } | FeatureKind::Chamfer { .. } | FeatureKind::Fillet { .. } => true,
+        FeatureKind::Extrude { operation, .. }
+        | FeatureKind::Revolve { operation, .. }
+        | FeatureKind::Box { operation, .. }
+        | FeatureKind::Cylinder { operation, .. }
+        | FeatureKind::Sphere { operation, .. }
+        | FeatureKind::Torus { operation, .. }
+        | FeatureKind::Cone { operation, .. }
+        | FeatureKind::Loft { operation, .. }
+        | FeatureKind::Sweep { operation, .. }
+        | FeatureKind::Pipe { operation, .. }
+        | FeatureKind::Coil { operation, .. }
+        | FeatureKind::BoundaryFill { operation, .. }
+        | FeatureKind::Thicken { operation, .. }
+        | FeatureKind::SurfaceNetwork { operation, .. } => matches!(operation, Operation::Cut | Operation::Intersect),
+        _ => false,
+    };
+    // What isn't a cut is always weighed: material the sheet doesn't show (a join into a bend)
+    // is caught there.
+    for (i, absorbed) in crate::sheet_surface_cuts::absorb(before, after, f, weigh || !cuts)? {
+        let (mut sk, built, note) = match absorbed {
+            crate::sheet_surface_cuts::Absorbed::Read(sk, built, note) => (sk, built, note),
+            crate::sheet_surface_cuts::Absorbed::Refused(why) if cuts => return Err(DocError::Invalid(why)),
+            crate::sheet_surface_cuts::Absorbed::Refused(_) => {
+                if let Some(sk) = after.surface_sheets.get_mut(i).filter(|sk| sk.altered_by.is_none()) {
+                    sk.altered_by = Some(f.name.clone());
+                    append_warning(
+                        warning,
+                        format!(
+                            "`{}` is sheet metal: its flat pattern, DXF and bend table can't include this change yet and are refused; a later sheet metal feature rebuilds the body without it",
+                            sk.body
+                        ),
+                    );
+                }
+                continue;
+            }
+        };
+        if let Some(note) = note {
+            append_warning(warning, note);
+        }
+        // The sheet remembers where the cut's letters went.
+        if let Some(flat) = letters.as_ref().and_then(|(plane, regions)| sk.flat_of(plane, regions)) {
+            sk.labels.extend(flat);
+        }
+        if let Some(b) = after.bodies.iter_mut().find(|b| b.name == sk.body) {
+            more::replace_sheet_body(b, built);
+        }
+        if let Some(slot) = after.surface_sheets.get_mut(i) {
+            *slot = sk;
+        }
+    }
+    Ok(())
+}
+
 /// Keeps each sheet metal body's flat pattern true to the body (see `SheetBody::altered_by`).
 /// A feature that changes a sheet body's material but not its sheet model (a fillet, a join, a
 /// mirror combined into it) marks the sheet with its name, and says so. A feature that rebuilds
@@ -2846,6 +2925,17 @@ fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature
             | FeatureKind::Thread { modeled: false, .. }
     ) {
         return;
+    }
+    for sk in after.surface_sheets.iter_mut() {
+        let Some(old) = before.surface_sheets.iter().find(|s| s.body == sk.body) else { continue };
+        if old.altered_by.is_some() && (f.kind.is_sheet() || old.sheet != sk.sheet) {
+            if let Some(lost) = sk.altered_by.take() {
+                append_warning(
+                    warning,
+                    format!("`{}` is rebuilt from its sheet metal features: what {lost} changed is not kept (not supported yet)", sk.body),
+                );
+            }
+        }
     }
     let ModelState { sheets, bodies, .. } = after;
     for sh in sheets.iter_mut() {
@@ -3332,7 +3422,10 @@ fn apply_traced_with(
             let mut extra = 0usize;
             let mut split: Vec<ModelBody> = Vec::new();
             for mb in std::mem::take(&mut state.bodies) {
-                let Some(&had) = affected.get(&mb.name).filter(|_| !state.sheets.iter().any(|s| s.body == mb.name)) else {
+                // Sheet metal keeps its body whole: what the cut left of the sheet is read back
+                // onto it.
+                let sheet = state.sheets.iter().any(|s| s.body == mb.name) || state.surface_sheets.iter().any(|s| s.body == mb.name);
+                let Some(&had) = affected.get(&mb.name).filter(|_| !sheet) else {
                     split.push(mb);
                     continue;
                 };
@@ -6115,6 +6208,11 @@ fn rotation(o: Vec3, a: Vec3, ang: f64) -> Mat {
 /// mirrored into the opposite hand ([`crate::sheet::SheetBody::copied`]), so the copy has its
 /// own flat pattern, DXF and bend table. A copy by any other transform stays a plain solid.
 fn copy_sheet(st: &mut ModelState, from: &str, to: &str, m: &crate::Mat) {
+    if let Some(sheet) = st.surface_sheets.iter().find(|s| s.body == from).and_then(|s| s.copied(to, m)) {
+        st.surface_sheets.retain(|s| s.body != to);
+        st.surface_sheets.push(sheet);
+        return;
+    }
     let Some(sheet) = st.sheets.iter().find(|s| s.body == from).and_then(|s| s.copied(to, m)) else { return };
     st.sheets.retain(|s| s.body != to);
     st.sheets.push(sheet);
@@ -7232,7 +7330,8 @@ fn eval_feature(
         | FeatureKind::SheetFold { .. }
         | FeatureKind::SheetPath { .. }
         | FeatureKind::SheetUnfold { .. }
-        | FeatureKind::SheetConvert { .. } => more::sheet_eval(doc, vals, f, st, warning),
+        | FeatureKind::SheetConvert { .. }
+        | FeatureKind::SheetSurfaceConvert { .. } => more::sheet_eval(doc, vals, f, st, warning),
         FeatureKind::Boss { .. } | FeatureKind::Lip { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. } => {
             more::plastic_eval(doc, vals, f, st)
         }
@@ -7343,6 +7442,21 @@ fn eval_feature(
                     return apply_beside_sheet_cut(doc, st, f, tools, *operation, &crate::plain(targets), &handled);
                 }
             }
+            // A cut square through flat panels of sheets made from surfaces goes into their outlines.
+            if *operation == Operation::Cut && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.surface_sheets.is_empty() {
+                let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
+                let handled = more::surface_prism_cut(f, st, &bodies, &crate::plain(targets), constructor.as_ref())?;
+                if !handled.is_empty() {
+                    return apply_beside_sheet_cut(doc, st, f, tools, *operation, &crate::plain(targets), &handled);
+                }
+            }
+            // A join one sheet thick in the plane of a flat panel of a sheet made from surfaces
+            // becomes part of that panel.
+            if *operation == Operation::Join && to_body.is_none() && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.surface_sheets.is_empty() {
+                if !more::surface_sheet_join(f, st, &crate::plain(targets), constructor.as_ref())?.is_empty() {
+                    return Ok(());
+                }
+            }
             // A join one sheet thick in the plane of a panel becomes part of that panel. A Join to an
             // object (#6424) is left to the generic path below, which joins the object as well.
             if *operation == Operation::Join && to_body.is_none() && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.sheets.is_empty() {
@@ -7372,7 +7486,10 @@ fn eval_feature(
             }
             let (spots, dir) = hole_spots(vals, st, f)?;
             let tools = hole_feature_tools(vals, st, f)?;
-            let handled = sheet_hole_cut(st, f, &tools, warning)?;
+            let mut handled = sheet_hole_cut(st, f, &tools, warning)?;
+            if handled.is_empty() && !st.surface_sheets.is_empty() {
+                handled = more::surface_hole_cut(st, &tools)?;
+            }
             let tools: Vec<Traced> = tools.into_iter().map(|(tool, _)| tool).collect();
             if handled.is_empty() {
                 // A hole moved off the material (a changed position, parameter or sketch point)

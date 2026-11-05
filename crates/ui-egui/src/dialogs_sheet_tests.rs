@@ -31,7 +31,7 @@ fn flange_follows_the_picks() {
         assert_eq!(c[0].1["type"], "base");
         assert_eq!(c[0].1["profiles"], json!([0]));
         run_all(&mut app, c);
-        assert_eq!(app.session.model.state().sheets.len(), 1);
+        assert_eq!(app.session.model.state().surface_sheets.len(), 1);
         // Four edge flanges at once, 20 high, outside.
         let edges: Vec<Sel> = [[50.0, 0.0, 2.5], [50.0, 60.0, 2.5], [0.0, 30.0, 2.5], [100.0, 30.0, 2.5]]
             .iter()
@@ -370,7 +370,7 @@ fn bend_table_picker_writes_the_current_body() {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         app.run("sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20})).unwrap();
-        let body = app.session.model.state().sheets[0].body.clone();
+        let body = app.session.model.state().surface_sheets[0].body.clone();
         let path = std::env::temp_dir().join(format!("solidcraft-bend-table-{}.csv", std::process::id()));
         let output = path.to_string_lossy().into_owned();
         let chosen = output.clone();
@@ -859,28 +859,34 @@ fn flange_dialog_offers_material_outside_and_tangent_bend_positions() {
     assert_eq!(saved, "tangent");
 }
 
-/// Convert takes a fixed face and, for a solid or shelled body, its bend edges; Edit Feature
-/// brings both back.
+/// Convert's Thicken mode (#6748) takes the faces that make the sheet and the edges that bend
+/// more faces onto them; Edit Feature brings both back, still thickening.
 #[test]
-fn convert_takes_the_fixed_face_and_the_bend_edges() {
+fn thicken_takes_the_faces_and_the_bend_edges() {
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length": 100, "width": 60, "height": 30, "body_name": "Tray"})).unwrap();
     s.execute("solid.shell", &json!({"faces": [[50, 30, 30]], "thickness": 2})).unwrap();
     let mut app = SolveApp::new(s, Services::default());
     app.start("sheet.convert");
     let mut d = app.dialog.clone().unwrap();
-    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Fixed Face", "Bend Edges"]);
-    assert!(apply_commands(&app, &d).is_err(), "nothing to convert without a face");
-    // The face alone is the plate conversion: no `bends`.
+    if let Kind::Sheet(Sm::Convert { mode, .. }) = &mut d.kind {
+        *mode = THICKEN;
+    }
+    convert_switch(&mut d.inputs, true);
+    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Faces", "Bend Edges"]);
+    assert!(apply_commands(&app, &d).is_err(), "nothing to thicken without a face");
+    // The floor alone: one face and no `bends`.
     d.inputs[0].items = face_sel(&app.session, Vec3::new(50.0, 30.0, 0.0)).into_iter().collect();
-    assert!(apply_commands(&app, &d).unwrap()[0].1.get("bends").is_none());
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c[0].1.get("bends").is_none() && c[0].1["faces"] == json!([]), "{}", c[0].1);
+    assert_eq!(c[0].1["face"], json!([50.0, 30.0, 0.0]));
     let edges: Vec<Sel> = [[50.0, 0.0, 0.0], [100.0, 30.0, 0.0], [50.0, 60.0, 0.0], [0.0, 30.0, 0.0]]
         .iter()
         .filter_map(|p| edge_sel(&app.session, Vec3::new(p[0], p[1], p[2])))
         .collect();
     d.inputs[1].items = edges;
     let c = apply_commands(&app, &d).unwrap();
-    assert_eq!(c[0].0, "sheet.convert");
+    assert_eq!((c[0].0.as_str(), c[0].1["mode"].clone()), ("sheet.convert", json!("thicken")));
     assert_eq!(c[0].1["bends"], json!([[50.0, 0.0, 0.0], [100.0, 30.0, 0.0], [50.0, 60.0, 0.0], [0.0, 30.0, 0.0]]));
     run_all(&mut app, c);
     let bends = |app: &mut SolveApp| app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"].as_array().map(Vec::len);
@@ -888,6 +894,7 @@ fn convert_takes_the_fixed_face_and_the_bend_edges() {
     // Edit Feature: the face and the four edges are back in their rows, and OK rebuilds the sheet.
     let f = app.session.doc.features.last().unwrap().clone();
     let e = edit_dialog(&app, f.id, None).unwrap();
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Convert { mode: THICKEN, .. })));
     assert_eq!((e.inputs[0].items.len(), e.inputs[1].items.len()), (1, 4));
     let c = apply_commands(&app, &e).unwrap();
     assert_eq!(c[0].0, "timeline.redefine");
@@ -895,6 +902,56 @@ fn convert_takes_the_fixed_face_and_the_bend_edges() {
     run_all(&mut app, c);
     assert_eq!(bends(&mut app), Some(4));
     assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+}
+
+/// Convert (#6748) fixes no face: it takes the body, the edges that bend and the faces it skips,
+/// and the material's side; a solid tray converts with its top skipped. Edit Feature brings all
+/// of it back.
+#[test]
+fn convert_takes_the_body_its_bends_and_the_faces_it_skips() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 100, "width": 60, "height": 30, "body_name": "Block"})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    app.start("sheet.convert");
+    let mut d = app.dialog.clone().unwrap();
+    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Body", "Bend Edges", "Skip Faces"], "Convert is the default");
+    // A fixed face picked to thicken carries its body over to Convert.
+    convert_switch(&mut d.inputs, true);
+    d.inputs[0].items = face_sel(&app.session, Vec3::new(50.0, 30.0, 0.0)).into_iter().collect();
+    convert_switch(&mut d.inputs, false);
+    if let Kind::Sheet(Sm::Convert { side, .. }) = &mut d.kind {
+        *side = 1;
+    }
+    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Block".into() }]);
+    d.inputs[1].items = [[50.0, 0.0, 0.0], [100.0, 30.0, 0.0], [50.0, 60.0, 0.0], [0.0, 30.0, 0.0]]
+        .iter()
+        .filter_map(|p| edge_sel(&app.session, Vec3::new(p[0], p[1], p[2])))
+        .collect();
+    d.inputs[2].items = face_sel(&app.session, Vec3::new(50.0, 30.0, 30.0)).into_iter().collect();
+    let c = apply_commands(&app, &d).unwrap();
+    let p = &c[0].1;
+    assert!(p.get("mode").is_none() && p.get("face").is_none() && p["direction"] == json!("outside"), "{p}");
+    assert_eq!((p["bends"].as_array().map(Vec::len), p["skip"].as_array().map(Vec::len)), (Some(4), Some(1)));
+    // Inside is the default, and goes unsaid.
+    if let Kind::Sheet(Sm::Convert { side, .. }) = &mut d.kind {
+        *side = 0;
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c[0].1.get("direction").is_none());
+    run_all(&mut app, c);
+    let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
+    assert_eq!((flat["surfaces"].clone(), flat["bends"].as_array().map(Vec::len)), (json!(true), Some(4)), "{flat}");
+    // Edit Feature as the app opens it: rolled back to before the conversion, where the skipped
+    // face still is.
+    let f = app.session.doc.features.last().unwrap().clone();
+    app.edit_feature(f.id);
+    let e = app.dialog.clone().unwrap();
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Convert { mode: 0, side: 0, .. })));
+    assert_eq!(e.inputs.iter().map(|i| i.items.len()).collect::<Vec<_>>(), [1, 4, 1]);
+    // Switched to Thicken, the faces are to pick and the bends stay.
+    let mut back = e.inputs.clone();
+    convert_switch(&mut back, true);
+    assert_eq!(back.iter().map(|i| (i.label, i.items.len())).collect::<Vec<_>>(), [("Faces", 0), ("Bend Edges", 4)]);
 }
 
 /// The Path Flange dialog takes the edge and the path's sketch lines: one feature, one body,
@@ -1242,7 +1299,7 @@ fn hem_handle_runs_along_the_hem_to_its_tip() {
     for flipped in [false, true] {
         let mut app = plate(crate::shell::LayoutMode::Floating);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
-        let body = app.session.model.state().sheets[0].body.clone();
+        let body = app.session.model.state().surface_sheets[0].body.clone();
         app.session.selection = vec![edge_sel(&app.session, Vec3::new(50.0, 0.0, 2.5)).unwrap()];
         app.start("sheet.hem");
         let mut d = app.dialog.clone().unwrap();
@@ -1319,7 +1376,7 @@ fn perforate_ok_targets_the_picked_sheet_and_updates_flat_data() {
     for face in [false, true] {
         let mut app = plate(crate::shell::LayoutMode::Docked);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
-        let body = app.session.model.state().sheets[0].body.clone();
+        let body = app.session.model.state().surface_sheets[0].body.clone();
         app.session.selection =
             vec![if face { face_sel(&app.session, Vec3::new(50.0, 30.0, 2.5)).unwrap() } else { Sel::Body { name: body.clone() } }];
         app.start("sheet.perforate");
@@ -1340,7 +1397,7 @@ fn perforate_ok_targets_the_picked_sheet_and_updates_flat_data() {
 fn perforate_edit_restores_dimensions_pattern_and_target() {
     let mut app = plate(crate::shell::LayoutMode::Docked);
     app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
-    let body = app.session.model.state().sheets[0].body.clone();
+    let body = app.session.model.state().surface_sheets[0].body.clone();
     app.run("sheet.perforate", json!({"body": body, "diameter": "4 mm", "pitch": "9 mm", "margin": "5 mm", "pattern": "square"})).unwrap();
     let feature = app.session.doc.features.last().unwrap();
     let dialog = edit_dialog(&app, feature.id, None).expect("Perforate can be edited");

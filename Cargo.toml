@@ -17,6 +17,7 @@ robust = "1.2"
 # internal
 solidcraft-geom = { path = "crates/geom" }
 solidcraft-profile = { path = "crates/profile" }
+solidcraft-develop = { path = "crates/develop" }
 solidcraft-sketch = { path = "crates/sketch" }
 solidcraft-kernel = { path = "crates/kernel" }
 solidcraft-smlib = { path = "crates/smlib" }

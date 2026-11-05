@@ -214,7 +214,7 @@ pub use prism::{PLANAR_FIT_TOL, extrude_planar_regions, planar_regions_boolean};
 pub use prism_curve::{PlanarPiece, PlanarSpline};
 pub use prism_measure::{PrismSection, certified_prism_equivalent, certified_prism_section};
 pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairReport, SewnGap, repair};
-pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew, sew_touching};
+pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew, sew_touching, sew_touching_traced};
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::stop::Stop;
 pub use solidcraft_smlib::trace as smlib_trace;
