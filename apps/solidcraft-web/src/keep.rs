@@ -173,6 +173,35 @@ pub fn is_open(open: Option<&str>, wanted: &str) -> bool {
     open == Some(wanted)
 }
 
+/// What follows once a design restored from a kept copy, or recovered, is open: it opens in
+/// stages, a few features a frame with progress and Cancel (#10198), so this waits for the answer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AfterOpen {
+    /// A kept copy (#10220): it is its own design again (saving goes to `path`, it is named
+    /// `name`), with its changes unsaved; then the copy `id` goes when `drop` says so.
+    KeptCopy { opened: String, id: String, path: Option<String>, name: String, drop: bool },
+    /// The saved design offered beside a kept copy: the copy `id` goes when `drop` says so.
+    KeptSaved { opened: String, id: String, drop: bool },
+    /// Unsaved work from the page's last visit: it belongs to `path` again, named `name`, unsaved.
+    Recovery { opened: String, path: Option<String>, name: String },
+}
+
+impl AfterOpen {
+    /// The file the open reads.
+    pub fn opened(&self) -> &str {
+        match self {
+            AfterOpen::KeptCopy { opened, .. } | AfterOpen::KeptSaved { opened, .. } | AfterOpen::Recovery { opened, .. } => opened,
+        }
+    }
+}
+
+/// Whether the open of `wanted` answered with `reply` put it in: the answer says so, and it is
+/// the design now open (`open`: the open design's path). A refusal, a Cancel or another file
+/// leaves the copy or the recovered work offered.
+pub fn opened(reply: &Value, open: Option<&str>, wanted: &str) -> bool {
+    reply["ok"].as_bool() == Some(true) && is_open(open, wanted)
+}
+
 /// Whether leaving the page asks through the browser's "leave site?" box: there is unsaved work,
 /// and either the user still wants to be asked or it isn't all kept in the browser yet (with the
 /// keep preference off it never is, so there the box always stays).
