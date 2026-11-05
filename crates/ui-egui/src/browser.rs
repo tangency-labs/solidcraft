@@ -3480,7 +3480,11 @@ fn apply_drop(app: &mut SolveApp, d: DropAction) {
         DropAction::Component { to, folder, keys } => {
             let _ = match folder {
                 "bodies" => app.run("component.move_bodies", json!({ "bodies": keys, "component": to })),
-                "sketches" => app.run("component.move_sketches", json!({ "sketches": keys, "component": to })),
+                "sketches" => {
+                    // Ids, as numbers: a string is a sketch's name first, and a sketch may be named like another one's id.
+                    let ids: Vec<u64> = keys.iter().filter_map(|k| k.parse().ok()).collect();
+                    app.run("component.move_sketches", json!({ "sketches": ids, "component": to }))
+                }
                 _ => Ok(serde_json::Value::Null),
             };
         }

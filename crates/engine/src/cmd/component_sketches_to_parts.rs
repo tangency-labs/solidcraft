@@ -135,7 +135,7 @@ pub(super) fn to_parts(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     for (id, component) in moves {
-        super::move_sketches(s, &json!({"sketches": [id.to_string()], "component": component}))?;
+        super::move_sketches(s, &json!({"sketches": [id], "component": component}))?;
     }
     (result.moved, result.stayed) = (result.sketches.len(), result.kept.len());
     serde_json::to_value(result).map_err(|e| bad(cmd, e.to_string()))
