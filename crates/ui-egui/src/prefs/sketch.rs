@@ -175,6 +175,11 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if check(ui, "auto_project", "ui.project_face_edges_sketch", None, &mut auto).changed() {
                     let _ = app.run("sketch.auto_project", json!({"value": auto}));
                 }
+                let response = setting::sketch_pattern_limit(app, ui).backing_on_hover_text(app.tr("prefs.sketch.pattern_limit_note"));
+                crate::scenario::publish_target("prefs:sketch_pattern_limit", response.rect);
+                if response.changed() {
+                    sync_pattern_limit(app);
+                }
                 check(
                     ui,
                     "project_options_dialog",
