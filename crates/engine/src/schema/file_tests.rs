@@ -3,8 +3,8 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use super::{
-    Export3mfParams, ExportMeshParams, ExportStepParams, ExportUrdfParams, OpenElsewhere, OpenParams, OpenResult, OpenedDesign, RecoverParams,
-    RecoverResult, RecoveryDiscardParams, RecoveryDiscardResult, RecoveryListParams, RecoveryListResult,
+    Export3mfParams, ExportMeshParams, ExportStepParams, ExportUrdfParams, NewerFileReport, OpenElsewhere, OpenParams, OpenResult, OpenedDesign,
+    RecoverParams, RecoverResult, RecoveryDiscardParams, RecoveryDiscardResult, RecoveryListParams, RecoveryListResult,
 };
 use crate::Session;
 use crate::recovery::Autosaver;
@@ -160,9 +160,30 @@ fn replies_match_the_output_schema() {
         name: "a".into(),
         read_only: None,
         open_elsewhere: Some(OpenElsewhere { host: "h".into(), user: "u".into(), app: "1".into(), opened: 7 }),
+        newer_file: None,
+        warnings: None,
         param_warnings: Vec::new(),
     };
     matches(output_schema_for::<OpenResult>(), "doc.open", &serde_json::to_value(OpenResult::Design(busy)).unwrap_or_default());
+    // A design a newer SolidCraft saved: the notice and what wasn't read.
+    let newer = OpenedDesign {
+        path: "a.sc".into(),
+        features: 0,
+        errors: 0,
+        name: "a".into(),
+        read_only: None,
+        open_elsewhere: None,
+        newer_file: Some(NewerFileReport {
+            format: 99,
+            reads_up_to: 50,
+            unknown_changes: vec!["gyroid_lattice".into()],
+            not_understood: vec!["feature 3".into()],
+            notice: "Saved by a newer SolidCraft".into(),
+        }),
+        warnings: Some(vec!["Saved by a newer SolidCraft".into(), "Not read: feature 3. Saving keeps it.".into()]),
+        param_warnings: Vec::new(),
+    };
+    matches(output_schema_for::<OpenResult>(), "doc.open", &serde_json::to_value(OpenResult::Design(newer)).unwrap_or_default());
     let warned = run(&mut s, "doc.open", json!({"path": at("part.sc"), "pathh": 1}));
     assert!(warned["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{warned}");
     matches(output_schema_for::<OpenResult>(), "doc.open", &warned);
