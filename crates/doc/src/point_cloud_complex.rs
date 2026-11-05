@@ -30,6 +30,9 @@ pub enum On {
 }
 
 impl On {
+    fn is_point(&self) -> bool {
+        *self == On::Point
+    }
     pub fn name(self) -> &'static str {
         match self {
             On::Point => "point",
@@ -44,7 +47,7 @@ impl On {
 pub struct Column {
     pub name: String,
     /// Points unless said: a design saved with numbers on points alone says nothing.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "On::is_point")]
     pub on: On,
     /// Whole numbers (labels, counts): coloured by a palette rather than a ramp.
     #[serde(default)]
@@ -280,6 +283,7 @@ mod tests {
         let back: Complex = serde_json::from_str(&serde_json::to_string(&complex).unwrap()).unwrap();
         assert_eq!(back, complex);
         let points: Column = serde_json::from_str(r#"{"name": "t", "values": ""}"#).unwrap();
+        assert!(!serde_json::to_string(&points).unwrap().contains("\"on\""), "a column on the points does not say so");
         assert_eq!(points.on, On::Point, "a column without `on` is on the points");
         complex.check(3).unwrap();
         assert!(complex.check(2).is_err(), "index 2 names a missing point");

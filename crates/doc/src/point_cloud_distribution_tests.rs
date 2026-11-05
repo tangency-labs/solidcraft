@@ -108,15 +108,18 @@ fn kinds_weigh_alike_and_colours_split_what_is_kept() {
 
 #[test]
 fn a_ramp_of_the_most_bands_keeps_all_of_an_element() {
-    // Across every band of the finest ramp the API accepts, nothing is lost: a segment and a triangle.
+    // Across every band of the finest ramp the API accepts, nothing is lost: a segment and a
+    // triangle, within the ramp and running past both its ends.
     let t = |values: &[f32]| vec![column("t", On::Point, false, values)];
     let ramp = Colour::Ramp { property: "t", range: [0.0, 1.0], bands: MAX_BINS };
     for c in [
         cloud(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], &[0, 1], &[], t(&[0.0, 1.0])),
         cloud(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], &[], &[0, 1, 2], t(&[0.0, 1.0, 0.5])),
+        cloud(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], &[0, 1], &[], t(&[-0.5, 1.5])),
+        cloud(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], &[], &[0, 1, 2], t(&[-0.5, 1.5, 0.5])),
     ] {
         let g = Geometry::of(&c);
-        let h = histogram(&c, &g, "t", [0.0, 1.0], 4, &ramp, &[]).unwrap();
+        let h = histogram(&c, &g, "t", [-1.0, 2.0], 4, &ramp, &[]).unwrap();
         let total: f64 = h.slots.iter().flatten().sum();
         assert!((total - 1.0).abs() < 1e-9, "{total}");
     }

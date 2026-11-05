@@ -18,10 +18,10 @@ use crate::point_cloud::{ColorBy, Filter, Keep, On, PALETTE, PointCloud, Source}
 
 /// Most bins of one histogram.
 pub const MAX_BINS: usize = 8192;
-/// How far past its first band one part of an element is split by one cut. A ramp or an axis of
-/// [`MAX_BINS`] has no more than this to cross, so its measure is whole; only the whole numbers
-/// have more (a hostile file's values may cross billions).
-const MAX_BANDS: usize = MAX_BINS;
+/// How far past its first band one part of an element is split by one cut. A ramp of [`MAX_BINS`]
+/// bands, with the one below it and the one above it, has no more than this to cross, so its
+/// measure is whole; only the whole numbers have more (a hostile file's values may cross billions).
+const MAX_BANDS: usize = MAX_BINS + 1;
 /// Most corners of a part of a triangle: each cut adds at most one to its three.
 const MAX_CORNERS: usize = 24;
 
