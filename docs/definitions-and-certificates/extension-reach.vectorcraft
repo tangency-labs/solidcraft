@@ -54,7 +54,11 @@
                     "paint": {
                       "type": "none"
                     },
-                    "width": 1.5
+                    "width": 1.5,
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -195,7 +199,11 @@
                     "paint": {
                       "type": "none"
                     },
-                    "width": 1.5
+                    "width": 1.5,
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -265,7 +273,11 @@
                         "b": 0.9607843
                       }
                     },
-                    "width": 18.0
+                    "width": 18.0,
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -323,7 +335,11 @@
                         "b": 0.69803923
                       }
                     },
-                    "width": 3.0
+                    "width": 3.0,
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -381,7 +397,11 @@
                         "b": 0.69803923
                       }
                     },
-                    "width": 3.0
+                    "width": 3.0,
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -439,7 +459,11 @@
                         "b": 0.0
                       }
                     },
-                    "width": 2.0
+                    "width": 2.0,
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -505,7 +529,11 @@
                       ],
                       "offset": 0.0,
                       "align_corners": false
-                    }
+                    },
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -571,7 +599,11 @@
                       ],
                       "offset": 0.0,
                       "align_corners": false
-                    }
+                    },
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -629,7 +661,11 @@
                       ],
                       "offset": 0.0,
                       "align_corners": false
-                    }
+                    },
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -687,7 +723,11 @@
                       ],
                       "offset": 0.0,
                       "align_corners": false
-                    }
+                    },
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -737,7 +777,11 @@
                         "b": 0.0
                       }
                     },
-                    "width": 2.5
+                    "width": 2.5,
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -795,7 +839,11 @@
                       ],
                       "offset": 0.0,
                       "align_corners": false
-                    }
+                    },
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -845,7 +893,11 @@
                         "b": 0.33333334
                       }
                     },
-                    "width": 2.0
+                    "width": 2.0,
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -1084,8 +1136,8 @@
                     "start_arrow": "Arrow",
                     "end_arrow": "Arrow",
                     "arrow_scale": [
-                      45.0,
-                      45.0
+                      250.0,
+                      250.0
                     ],
                     "arrow_align": "Tip"
                   }
@@ -1201,8 +1253,8 @@
                     "start_arrow": "Arrow",
                     "end_arrow": "Arrow",
                     "arrow_scale": [
-                      45.0,
-                      45.0
+                      250.0,
+                      250.0
                     ],
                     "arrow_align": "Tip"
                   }
@@ -1434,7 +1486,11 @@
                         "b": 0.0
                       }
                     },
-                    "width": 0.75
+                    "width": 0.75,
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -1544,7 +1600,11 @@
                         "b": 0.0
                       }
                     },
-                    "width": 0.75
+                    "width": 0.75,
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -1654,7 +1714,11 @@
                         "b": 0.69803923
                       }
                     },
-                    "width": 3.0
+                    "width": 3.0,
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -1764,7 +1828,11 @@
                         "b": 0.0
                       }
                     },
-                    "width": 2.0
+                    "width": 2.0,
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -1882,7 +1950,11 @@
                       ],
                       "offset": 0.0,
                       "align_corners": false
-                    }
+                    },
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -1992,7 +2064,11 @@
                         "b": 0.9607843
                       }
                     },
-                    "width": 14.0
+                    "width": 14.0,
+                    "arrow_scale": [
+                      250.0,
+                      250.0
+                    ]
                   }
                 ]
               },
@@ -3088,7 +3164,7 @@
       "copyrightNotice": "",
       "copyrightUrl": "",
       "created": 1793885586,
-      "modified": 1793886130
+      "modified": 1793886250
     }
   },
   "images": {}
