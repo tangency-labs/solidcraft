@@ -48,10 +48,19 @@ pub struct Laid {
 
 /// A block's text set on paper: its runs in cell order, and the fonts they are set in (a font may be
 /// listed more than once; the scene keeps each once).
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Set {
     pub runs: Vec<TextRun>,
     pub fonts: Vec<Font>,
+}
+
+impl Set {
+    /// The faces it is set in, each once, in order of id: one family name can mean another face once
+    /// a font is installed or removed, and that face has another id.
+    pub fn faces(&self) -> Vec<[u8; 32]> {
+        let ids: std::collections::BTreeSet<[u8; 32]> = self.fonts.iter().map(|font| font.id).collect();
+        ids.into_iter().collect()
+    }
 }
 
 /// The text cells of sheet `at`'s title block as the sheet shows them, in the block's order. The

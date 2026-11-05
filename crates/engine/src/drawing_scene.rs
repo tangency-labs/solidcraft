@@ -68,7 +68,7 @@ use solidcraft_geom::{Aabb2, ArcMap};
 use crate::drawing_picture::{picture_items, view_parts};
 use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, Shown, ShownSet, Stats, Styles, Unmeasured, paper_lines};
 use crate::params::bad;
-use crate::title_block_text::{self, CellText};
+use crate::title_block_text::{self, CellText, Set};
 use crate::{EngineError, Result, Session};
 
 #[path = "drawing_scene_kept.rs"]
@@ -297,8 +297,8 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // placed as they are drawn, so at most one view's are held beside the scene.
     let shown = crate::drawing_view::shown(s);
     let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(s, &shown, *id, view)));
-    let block = (Lettering::of(s, drawing), cell_texts(s, drawing, sheet));
-    let mut assembly = assemble(record, drawing.projection, &block, &crate::drawing_pictures::groups(drawing, sheet), drawn)?;
+    let text = block_text(record, &Lettering::of(s, drawing), &cell_texts(s, drawing, sheet))?;
+    let mut assembly = assemble(record, drawing.projection, &text, &crate::drawing_pictures::groups(drawing, sheet), drawn)?;
     // After the views, as they need the views' frames: one read for the sheet's dimensions.
     let frames: BTreeMap<u64, ViewFrame> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
     let wanted = dimensions_on(drawing, on.iter().map(|(id, ..)| *id));
@@ -571,13 +571,13 @@ impl Assembly {
 
 /// The scene of sheet `record`: its border, then `images`, then each of `views` (its id, centre and
 /// lines, in id order) moved to its centre, with its title block, its symbol in `projection` and
-/// its cells' text as `block` gives it in the drawing's lettering, to go on top
-/// ([`Assembly::finish`]). A view that would take the scene past a paper scene's limits is left out
-/// and says why, and the views after it are still drawn when they fit.
+/// its cells' text as [`block_text`] set it, to go on top ([`Assembly::finish`]). A view that would
+/// take the scene past a paper scene's limits is left out and says why, and the views after it are
+/// still drawn when they fit.
 fn assemble<D: Borrow<Drawn>>(
     record: &Sheet,
     projection: Projection,
-    (lettering, cells): &(Lettering, Vec<CellText>),
+    text: &Set,
     images: &[Group],
     views: impl Iterator<Item = (u64, Vec2, D)>,
 ) -> Result<Assembly> {
@@ -590,9 +590,8 @@ fn assemble<D: Borrow<Drawn>>(
         (Some(block), Some(layout)) => {
             let placed = block.layout(layout).map_err(|e| bad(CMD, e.to_string()))?;
             let mut group = placed.paper(record.id, projection);
-            let text = title_block_text::lay(block, &placed, &lettering.font, &lettering.language, cells).set();
-            group.items.extend(text.runs.into_iter().map(Item::Text));
-            (Some(group), text.fonts)
+            group.items.extend(text.runs.iter().cloned().map(Item::Text));
+            (Some(group), text.fonts.clone())
         }
         _ => (None, Vec::new()),
     };
@@ -684,6 +683,15 @@ fn cell_texts(s: &Session, d: &Drawing, sheet: u64) -> Vec<CellText> {
     let Some(at) = d.sheets.iter().position(|x| x.id == sheet && x.title_block.is_some()) else { return Vec::new() };
     let state = s.model.state();
     title_block_text::shown(&s.doc, &mut Tree::new(&s.doc, &state), d, at)
+}
+
+/// Sheet `record`'s title block text, its cells as `cells` gives them, set on paper in `lettering`'s
+/// font and language: nothing without a block.
+fn block_text(record: &Sheet, lettering: &Lettering, cells: &[CellText]) -> Result<Set> {
+    Ok(match (&record.title_block, record.title_block_layout().map_err(|e| bad(CMD, e.to_string()))?) {
+        (Some(block), Some(placed)) => title_block_text::lay(block, &placed, &lettering.font, &lettering.language, cells).set(),
+        _ => Set::default(),
+    })
 }
 
 /// Sheet `sheet` of `d`.
@@ -797,8 +805,9 @@ struct Inputs {
 }
 
 /// The last answer of [`extract`], for the sheet, drawing, design, world state, lettering and serial
-/// it was for: the same six again return it as it is. Its scene is used again for the same inputs
-/// and title block cells.
+/// it was for: the same six again return it as it is. Its title block's cells and their text set on
+/// paper hold for the same first five ([`Assembled::reads`]), so views drawn set no text, and its
+/// scene is used again for the same inputs, cells and faces.
 struct Assembled {
     sheet: u64,
     drawing: Arc<Drawing>,
@@ -806,9 +815,21 @@ struct Assembled {
     state: Arc<ModelState>,
     lettering: Lettering,
     cells: Vec<CellText>,
+    text: Arc<Set>,
     serial: u64,
     inputs: Inputs,
     answer: SheetView,
+}
+
+impl Assembled {
+    /// Whether it was read from sheet `sheet` of `d`, `doc`, `state` and `lettering`, all as they are.
+    fn reads(&self, sheet: u64, d: &Arc<Drawing>, doc: &Arc<Document>, state: &Arc<ModelState>, lettering: &Lettering) -> bool {
+        self.sheet == sheet
+            && self.lettering == *lettering
+            && Arc::ptr_eq(&self.drawing, d)
+            && Arc::ptr_eq(&self.doc, doc)
+            && Arc::ptr_eq(&self.state, state)
+    }
 }
 
 impl Cache {
@@ -929,18 +950,22 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     let d = s.drawing(CMD)?.clone();
     let state = s.world_state()?;
     let lettering = Lettering::of(s, &d);
-    if let Some(last) = &s.drawing_scenes.last
-        && last.sheet == sheet
+    let last = s.drawing_scenes.last.as_ref().filter(|last| last.reads(sheet, &d, &s.doc, &state, &lettering));
+    if let Some(last) = last
         && last.serial == s.drawing_scenes.serial
-        && last.lettering == lettering
-        && Arc::ptr_eq(&last.drawing, &d)
-        && Arc::ptr_eq(&last.doc, &s.doc)
-        && Arc::ptr_eq(&last.state, &state)
     {
         return Ok(last.answer.clone());
     }
-    // What the title block's cells say: a change of the design (a name, a mass) can change them.
-    let block = (lettering, cell_texts(s, &d, sheet));
+    // The title block's cells are read and set again only for another sheet, drawing, design, model
+    // or lettering (a name or a mass can change them), not for each view drawn.
+    let (cells, text) = match last {
+        Some(last) => (last.cells.clone(), last.text.clone()),
+        None => {
+            let cells = cell_texts(s, &d, sheet);
+            let text = Arc::new(block_text(sheet_of(&d, sheet)?, &lettering, &cells)?);
+            (cells, text)
+        }
+    };
     let doc = s.doc.clone();
     let cache = &mut s.drawing_scenes;
     let record = sheet_of(&d, sheet)?;
@@ -949,10 +974,10 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     catch_up(s, &d, on.iter().map(|(id, ..)| *id), &state);
     let cache = &mut s.drawing_scenes;
     let stale = on.iter().filter(|(id, view, _)| !cache.fresh(*id, &state, view)).map(|(id, ..)| *id).collect();
-    let stale_dimensions = cache.stale_dimensions(&d, &on, &state, &block.0).iter().map(|record| record.id).collect();
+    let stale_dimensions = cache.stale_dimensions(&d, &on, &state, &lettering).iter().map(|record| record.id).collect();
     let inputs = cache.inputs(&d, record, &on);
     let (scene, views, objects, dimensions, generation) = match cache.last.take() {
-        Some(last) if last.inputs == inputs && last.cells == block.1 => {
+        Some(last) if last.inputs == inputs && last.cells == cells && last.text.faces() == text.faces() => {
             (last.answer.scene, last.answer.views, last.answer.objects, last.answer.dimensions, last.answer.generation)
         }
         _ => {
@@ -961,15 +986,14 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
             cache.views.retain(|id, _| kept.contains(id));
             cache.dimensions.retain(|id, _| d.dimension(*id).is_some());
             let drawn = on.iter().filter_map(|(id, _, centre)| cache.views.get(id).map(|e| (*id, *centre, &e.drawn)));
-            let mut assembly = assemble(record, d.projection, &block, &inputs.images, drawn)?;
+            let mut assembly = assemble(record, d.projection, &text, &inputs.images, drawn)?;
             assembly.add_dimensions(inputs.dimensions.iter().filter_map(|(id, _)| cache.dimensions.get(id).map(|e| &e.drawn)));
             let (scene, views, objects, dimensions) = assembly.finish()?;
             (Arc::new(scene), views, objects.into(), dimensions, GENERATION.fetch_add(1, Ordering::Relaxed).wrapping_add(1))
         }
     };
     let answer = SheetView { scene, generation, views, stale, objects, dimensions, stale_dimensions };
-    let (lettering, cells) = block;
-    cache.last = Some(Assembled { sheet, drawing: d, doc, state, lettering, cells, serial: cache.serial, inputs, answer: answer.clone() });
+    cache.last = Some(Assembled { sheet, drawing: d, doc, state, lettering, cells, text, serial: cache.serial, inputs, answer: answer.clone() });
     Ok(answer)
 }
 

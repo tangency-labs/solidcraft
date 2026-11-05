@@ -89,10 +89,9 @@ fn bytes(scene: &Scene) -> String {
     serde_json::to_string(scene).unwrap()
 }
 
-/// The drawing border's groups of sheet `sheet` of the drawing open, as its sheet layout draws them.
-/// No title block text: the drawing's lettering and no cells (the block's labels are still set).
-fn no_cells() -> (Lettering, Vec<CellText>) {
-    (Lettering { units: String::new(), language: String::new(), font: String::new() }, Vec::new())
+/// `record`'s title block text with no cells, in the built-in font: its labels only.
+fn labels(record: &Sheet) -> Set {
+    block_text(record, &Lettering { units: String::new(), language: String::new(), font: String::new() }, &[]).unwrap()
 }
 
 /// `group` without its text: a title block's lines and symbol, as its layout draws them.
@@ -477,6 +476,108 @@ fn after_a_model_change_the_last_scene_shows_until_its_views_are_drawn_again() {
     assert_eq!((last.stale.len(), s.drawing_scenes.projections, bytes(&last.scene)), (0, projections + 2, bytes(&now)));
 }
 
+/// The faces a title block's text is set in are part of what its scene is assembled from: the same
+/// face keeps the scene and its generation, and another face under the same family name, as when a
+/// family is found after it wasn't, is another scene. The text is set once for each drawing and
+/// model, not for each view drawn (#4890 F5).
+#[test]
+fn a_scene_is_for_the_faces_its_title_blocks_text_is_set_in() {
+    let (mut s, sheet, _) = front_and_top();
+    let block = solidcraft_geom::title_block::default_block();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": serde_json::to_value(&block).unwrap()}));
+    let again = |s: &mut Session| {
+        let d = (**s.drawing("test").unwrap()).clone();
+        s.doc_mut().put_drawing(Arc::new(d));
+        extract(s, sheet).unwrap()
+    };
+    let text = |s: &Session| s.drawing_scenes.last.as_ref().unwrap().text.clone();
+    extract(&mut s, sheet).unwrap();
+    let laid = text(&s);
+    let first = settled(&mut s, sheet);
+    assert!(Arc::ptr_eq(&laid, &text(&s)), "the views drawn set no text");
+    let faces: Vec<[u8; 32]> = first.scene.fonts.iter().map(|font| font.id).collect();
+    assert!(!faces.is_empty());
+    assert_eq!(laid.faces(), faces);
+    assert_eq!(again(&mut s).generation, first.generation, "the same face");
+    assert!(!Arc::ptr_eq(&laid, &text(&s)), "set again for the new drawing");
+
+    // Another face under the same family name.
+    let last = s.drawing_scenes.last.as_mut().unwrap();
+    let mut planted = (*last.text).clone();
+    planted.fonts[0].id = [9; 32];
+    last.text = Arc::new(planted);
+    let other = again(&mut s);
+    assert!(other.generation > first.generation, "another face");
+    assert_eq!(bytes(&other.scene), bytes(&built(&s, sheet).scene));
+
+    // A family with no face is set in the built-in font, so it is the same scene, until it's found.
+    run(&mut s, "drawing.set", json!({"font": "No Such Family"}));
+    let missing = extract(&mut s, sheet).unwrap();
+    assert_eq!(missing.generation, other.generation);
+    assert_eq!(missing.scene.fonts, other.scene.fonts);
+}
+
+/// A title block's text is set for the sheet asked for and the model as it is, whichever was last
+/// (#4890 F5).
+#[test]
+fn a_title_blocks_text_follows_its_sheet_and_the_model() {
+    use solidcraft_geom::cell::{Content, Format, Part, Source};
+    use solidcraft_geom::title_block::CellKind;
+    let (mut s, first, _) = front_and_top();
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    let source = s.drawing("test").unwrap().sources[0].id;
+    let second = run(&mut s, "drawing.sheet.add", json!({}))["sheet"].as_str().and_then(ids::decode).unwrap();
+    let mut block = solidcraft_geom::title_block::default_block();
+    let mass = block.cells.iter_mut().find_map(|c| if let CellKind::Text(text) = &mut c.kind { Some(text) } else { None }).unwrap();
+    mass.content = Content(vec![Part::Field { source: Source::Component, key: "mass".into(), format: Format::default() }]);
+    let block = serde_json::to_value(&block).unwrap();
+    let documents = json!({"source": ids::encode(source), "component": 0});
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(first), "title_block": block, "documents": documents}));
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(second), "title_block": block, "title_block_overrides": {"title": "Second"}}));
+    let checkpoint = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].clone();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [40, 60, 0], "body_name": "Tower", "operation": "new_body"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+
+    // Back and forth between the sheets, each is its own.
+    for sheet in [first, second, first] {
+        assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built(&s, sheet).scene), "{sheet}");
+    }
+    let shown = |s: &Session| s.drawing_scenes.last.as_ref().unwrap().cells.clone();
+    let with_tower = shown(&s);
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": checkpoint}));
+    assert_eq!(bytes(&settled(&mut s, first).scene), bytes(&built(&s, first).scene));
+    assert_ne!(shown(&s), with_tower, "the mass read from the model as it is");
+}
+
+/// The model's state alone changing, the design and the sheet as they were, sets the title
+/// block's text again: its mass is read from the state, not the design.
+#[test]
+fn a_title_blocks_text_follows_the_model_state_alone() {
+    use solidcraft_geom::cell::{Content, Format, Part, Source};
+    use solidcraft_geom::title_block::CellKind;
+    let (mut s, sheet, _) = front_and_top();
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    let source = s.drawing("test").unwrap().sources[0].id;
+    let mut block = solidcraft_geom::title_block::default_block();
+    let mass = block.cells.iter_mut().find_map(|c| if let CellKind::Text(text) = &mut c.kind { Some(text) } else { None }).unwrap();
+    mass.content = Content(vec![Part::Field { source: Source::Component, key: "mass".into(), format: Format::default() }]);
+    let documents = json!({"source": ids::encode(source), "component": 0});
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": block, "documents": documents}));
+    let without_tower = s.model.clone();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [40, 60, 0], "body_name": "Tower", "operation": "new_body"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    settled(&mut s, sheet);
+    let shown = |s: &Session| s.drawing_scenes.last.as_ref().unwrap().cells.clone();
+    let with_tower = shown(&s);
+
+    // The state from before the tower, the design unchanged.
+    s.model = without_tower;
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built(&s, sheet).scene));
+    assert_ne!(shown(&s), with_tower, "the mass read from the model's state as it is");
+}
+
 /// Closing the drawing drops its scenes and the world states they hold, and keeps each view's lines.
 /// Opened again with nothing changed, its views show those lines, up to date, and none is drawn:
 /// only its dimensions are read again.
@@ -693,7 +794,8 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
     };
     for title_block in [None, Some(solidcraft_geom::title_block::default_block())] {
         let record = Sheet { title_block, ..(**d.sheets.iter().find(|x| x.id == sheet).unwrap()).clone() };
-        let (empty, ..) = assemble(&record, Projection::Third, &no_cells(), &[], std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap().finish().unwrap();
+        let (empty, ..) =
+            assemble(&record, Projection::Third, &labels(&record), &[], std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap().finish().unwrap();
         assert_eq!(empty.groups.len(), if record.title_block.is_some() { 4 } else { 3 });
         // The block's text and its fonts count too.
         let fonts = |scene: &Scene| Scene::new(scene.size_mm, Vec::new()).font_records_beyond(&scene.fonts);
@@ -702,7 +804,7 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
         let views = [lines(left - 22), lines(30), lines(18)];
         let centre = Vec2::new(100.0, 100.0);
         let views = views.iter().enumerate().map(|(i, v)| (i as u64, centre, v));
-        let (scene, states, ..) = assemble(&record, Projection::Third, &no_cells(), &[], views).unwrap().finish().unwrap();
+        let (scene, states, ..) = assemble(&record, Projection::Third, &labels(&record), &[], views).unwrap().finish().unwrap();
         let statuses: Vec<&'static str> = states.iter().map(|v| v.status.name()).collect();
         assert_eq!(statuses, ["drawn", "failed", "drawn"]);
         let records = scene.groups.iter().map(Group::records).sum::<usize>() + fonts(&scene);
@@ -1045,7 +1147,8 @@ fn a_views_box_is_what_it_draws() {
             frame: None,
             owners: None,
         };
-        let (_, _, objects, _) = assemble(&record, Projection::Third, &no_cells(), &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
+        let (_, _, objects, _) =
+            assemble(&record, Projection::Third, &labels(&record), &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
         let object = objects.iter().find(|o| o.object == 7).unwrap();
         assert!(near(&object.bounds_mm, min, max), "{object:?}");
     }
@@ -1409,7 +1512,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
         frame: Some(ViewFrame::new(solidcore_record::Plane::XY, "1:1".parse().unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap()),
         owners: None,
     };
-    let mut assembly = assemble(record, Projection::Third, &no_cells(), &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
+    let mut assembly = assemble(record, Projection::Third, &labels(record), &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
     let stroke = |to: Vec2| Item::Stroke { path: vec![Seg2::Line { a: Vec2::ZERO, b: to }], closed: false, width_mm: 0.25, pattern: None };
     let dimension = |id, items| DrawnDimension {
         dimension: id,
@@ -1466,7 +1569,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     let (a, b, too_big) = (text(1, "11", 0), text(2, "22", 0), text(3, "77", MAX_RECORDS));
     let shared = glyphs(&a) + glyphs(&b);
     let mut assembly =
-        assemble(record, Projection::Third, &no_cells(), &[], std::iter::once((front, Vec2::new(100.0, 100.0), view.clone()))).unwrap();
+        assemble(record, Projection::Third, &labels(record), &[], std::iter::once((front, Vec2::new(100.0, 100.0), view.clone()))).unwrap();
     assembly.add_dimensions([&a, &too_big, &b].into_iter());
     let (scene, _, objects, states) = assembly.finish().unwrap();
     assert!(states[0].drawn && !states[1].drawn && states[2].drawn, "{states:?}");
@@ -1477,7 +1580,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     assert!(bounds.min.x >= 100.0 && bounds.min.y >= 100.0 && bounds.max.y > 102.0 && bounds.max.y < 104.0, "{bounds:?}");
 
     // Past the limit only with its font's records: its group alone would fit. Without them, it joins.
-    let mut assembly = assemble(record, Projection::Third, &no_cells(), &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
+    let mut assembly = assemble(record, Projection::Third, &labels(record), &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
     let room = MAX_RECORDS - assembly.records;
     let records = |one: &DrawnDimension| one.group.as_ref().unwrap().records();
     let (bare, per_line) = (text(4, "8", 0), records(&text(4, "8", 1)) - records(&text(4, "8", 0)));
