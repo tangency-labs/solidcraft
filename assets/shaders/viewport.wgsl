@@ -1071,8 +1071,8 @@ fn vs_cloud_segment(@builtin(vertex_index) vi: u32, i: CIn) -> COut {
 
 @vertex
 fn vs_cloud_triangle(@builtin(vertex_index) vi: u32, i: CIn) -> COut {
-    var w = vec3<f32>(0.0);
-    w[vi] = 1.0;
+    // Not `w[vi] = 1.0`: the Windows D3D12 shader compiler cannot write through a dynamic vector index.
+    let w = vec3<f32>(f32(vi == 0u), f32(vi == 1u), f32(vi == 2u));
     let wp = i.a * w.x + i.b * w.y + i.c * w.z;
     var n = cross(i.b - i.a, i.c - i.a);
     if (length(n) > 0.0) { n = normalize(n); }
