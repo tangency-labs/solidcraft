@@ -9,16 +9,16 @@
 //! V = integral of (34 + 2w)(24 + 2w) dz over 0..10 + d.
 //!
 //! With SolidCraft's flags (183 `UpstreamFixes`, among them the fork's cliff-overflow
-//! and side-edge run-on fixes), every depth but -9 builds. At -9 the rail meets the
-//! side edge's run-on line exactly at the end of its extended interval (top 1, rail
-//! at z -2, run-on reach 2 at the doubled extension factor), and the put-back fails;
-//! the put-back is refused, typed `OffsetFacesRefusal::NotPutBack`. The fork refuses it too:
-//! 2fc375f built it (6 faces, V 1006.32063218278 through `SmApiFilletEdges`; 1006.320632128887
-//! through SolidCraft's capi), and 779cb9b, which evaluates the side edge's UV trim past its
-//! ends while the run-on widens it, refuses it, as the fork's tip does. Solidcore's line trims
-//! evaluate past their ends already, so the port refuses it as the fork does from 779cb9b on;
-//! with `fillet_trace_reaches_rails` (WR-610's run-on) off it builds, at 5e-12 relative to
-//! 2fc375f. Building it is left to the generic-blend construction (#2020). With the flags off, the put-back fails at -7.5 (a corner edge) and at -9
+//! and side-edge run-on fixes), every depth builds. Below the floor the rails meet the
+//! side edges' lines past the moved side edges' lower ends; each rail's search runs the
+//! side edge on along its line as far as the rail's base surface's domain is extended
+//! (#2769). Bounded by the edge's own length alone (where the trace's reach was not set,
+//! a face an offset had widened), one rail at a corner was found and the other not, and
+//! the corner's bevel adjustment read the unsolved rail's crossing as parameter 0 (d =
+//! -9.5, a put-back refused); at -9 the rail met the run-on exactly at the end of its
+//! widened interval, and the put-back was refused as the fork's since 779cb9b. -9 now
+//! builds the fork's 2fc375f body (6 faces, V 1006.320632128887 through SolidCraft's
+//! capi). With the flags off, the put-back fails at -7.5 (a corner edge) and at -9
 //! (a rollover). Each such failure is now a typed refusal,
 //! `OffsetFacesRefusal::NotPutBack`, where it had none.
 #![allow(
@@ -165,35 +165,21 @@ fn solidcraft_flags_build_the_depths_below_the_rounds() {
     }
 }
 
+/// At -9 the rails meet the side edges' lines 3 below the moved side edges' lower ends
+/// (z = -2). With the run-on bounded by the base surface's domain as the solve extends it
+/// (#2769), each rail's search reaches that point, not only the one whose solver's trace
+/// reach was set: it builds, as the fork's 2fc375f did.
 #[test]
-fn solidcraft_flags_refuse_minus_nine_typed() {
-    // the current behaviour, as the fork's since 779cb9b (an untyped 1001 there); #2020
-    let k = &mut Kernel::default();
-    solidcraft_flags(k);
-    let (_, ex, r) = moved(k, -9.0);
-    assert!(r.is_err());
-    assert_eq!(
-        ex.refusal(),
-        OffsetFacesRefusal::NotPutBack,
-        "{}",
-        ex.reason()
-    );
-    assert!(
-        ex.reason().starts_with("putting back a blend"),
-        "{}",
-        ex.reason()
-    );
-}
-
-#[test]
-#[ignore = "#2020: refused since fork 779cb9b (fork tip too); fork 2fc375f built it (see the module docs)"]
 fn solidcraft_flags_build_minus_nine_as_the_fork() {
     let k = &mut Kernel::default();
     solidcraft_flags(k);
     let (mut b, ex, r) = moved(k, -9.0);
     assert!(r.is_ok(), "{r:?}: {:?} {}", ex.refusal(), ex.reason());
+    assert_eq!(ex.refusal(), OffsetFacesRefusal::None);
+    assert!(brep_is_manifold_solid(&b).unwrap());
     assert_eq!(b.face_list().len(), 6);
     let v = volume(k, &mut b);
+    assert!((v - analytic(-9.0)).abs() <= 1e-6 * analytic(-9.0), "V {v}");
     assert!((v - FORK_VOLUME_D9).abs() <= 1e-9 * FORK_VOLUME_D9, "V {v}");
 }
 

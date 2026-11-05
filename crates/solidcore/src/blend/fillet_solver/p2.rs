@@ -549,6 +549,14 @@ fn bspline_part(curve: &Curve) -> Result<&BSplineCurve> {
 /// edge is a line, its UV trim curve is linear and the rail's base surface is planar:
 /// by the trace's reach or the extension factor times the edge's length, whichever is
 /// larger, in the UV trim curve's parameters. Returns whether it widened the interval.
+///
+/// Not the fork's (#2769): and at each end at least as far as the trim's line stays in
+/// `domain`, the base surface's domain as the solve extends it. The trace's reach is set
+/// only where the base domains' default extension falls short of the rails
+/// (`extend_trace_to_its_rails`); where it does not (a wide face, such as one an offset
+/// widened), the edge's own length bounded the run-on, and of the two rails meeting a
+/// side edge's line past its end one was found and the other not.
+#[allow(clippy::too_many_arguments)] // the solve's state, read in place
 fn run_side_edge_on_along_its_line(
     k: &Kernel,
     b: &mut Brep,
@@ -556,6 +564,7 @@ fn run_side_edge_on_along_its_line(
     side_edge: EdgeId,
     uv_trim: &Curve,
     base: &Surface,
+    domain: &Extent2d,
     solver: &FilletSolver,
     intervals: &mut ExtentNd,
 ) -> Result<bool> {
@@ -591,11 +600,13 @@ fn run_side_edge_on_along_its_line(
     };
     if length > EFF_ZERO_SQRT {
         let past = reach * edge_ivl.length() / length;
+        let (in_lo, in_hi) = line_in_domain(k, uv_trim, &edge_ivl, domain)?;
+        let (past_lo, past_hi) = (past.max(in_lo), past.max(in_hi));
         if !k.fixes.fillet_run_on_past_far_end_only {
             set_interval(
                 intervals,
                 0,
-                Extent1d::from_min_max(edge_ivl.min() - past, edge_ivl.max() + past),
+                Extent1d::from_min_max(edge_ivl.min() - past_lo, edge_ivl.max() + past_hi),
             );
             return Ok(true);
         }
@@ -648,12 +659,12 @@ fn run_side_edge_on_along_its_line(
         let before = if corner_at_start && !corner_at_end && !tangent_seam {
             0.0
         } else {
-            past
+            past_lo
         };
         let after = if corner_at_end && !corner_at_start && !tangent_seam {
             0.0
         } else {
-            past
+            past_hi
         };
         set_interval(
             intervals,
@@ -663,6 +674,47 @@ fn run_side_edge_on_along_its_line(
         return Ok(true);
     }
     Ok(false)
+}
+
+/// How far (in its parameters) the linear UV trim `uv_trim` runs on past the start and
+/// past the end of `ivl` before it leaves `domain`: 0 at an end already outside, or where
+/// the trim does not move.
+fn line_in_domain(
+    k: &Kernel,
+    uv_trim: &Curve,
+    ivl: &Extent1d,
+    domain: &Extent2d,
+) -> Result<(f64, f64)> {
+    let a = uv_trim.evaluate_point(k, ivl.min())?;
+    let c = uv_trim.evaluate_point(k, ivl.max())?;
+    let span = ivl.length();
+    if span.is_nan() || span <= 0.0 {
+        return Ok((0.0, 0.0));
+    }
+    // the trim's velocity per parameter
+    let vel = [(c.x - a.x) / span, (c.y - a.y) / span];
+    let (lo, hi) = ([domain.min.x, domain.min.y], [domain.max.x, domain.max.y]);
+    // the largest s >= 0 with `from + s dir` in the box, dir = sign * vel
+    let reach = |from: [f64; 2], sign: f64| {
+        let mut s = f64::INFINITY;
+        for ((&p, &v), (&l, &h)) in from.iter().zip(&vel).zip(lo.iter().zip(&hi)) {
+            let d = sign * v;
+            if p.is_nan() || p < l || p > h {
+                return 0.0;
+            }
+            if d > 0.0 {
+                s = s.min((h - p) / d);
+            } else if d < 0.0 {
+                s = s.min((l - p) / d);
+            }
+        }
+        if s.is_finite() {
+            s
+        } else {
+            0.0
+        }
+    };
+    Ok((reach([a.x, a.y], -1.0), reach([c.x, c.y], 1.0)))
 }
 
 /// Opt-in (`fixes.fillet_run_on_bspline_trims`, WR-654, #1981), not upstream: turns
@@ -2190,6 +2242,7 @@ impl FilletSolver {
                     side_edge,
                     &uv_trim,
                     &base,
+                    &domain,
                     ops.solver(),
                     &mut intervals,
                 )?;
