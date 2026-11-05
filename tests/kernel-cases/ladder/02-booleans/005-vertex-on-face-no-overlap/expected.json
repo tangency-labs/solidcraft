@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "an inverted cone whose apex touches the middle of the top face, cut",
+ "source": "analytic",
+ "method": "the cone (apex (30,20,20), base r10 at z=30) meets the stock only at its apex: the cut removes nothing",
+ "body_count": 1,
+ "volume_mm3": 48000,
+ "faces": 6,
+ "edges": 12,
+ "vertices": 8
+}

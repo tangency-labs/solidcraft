@@ -1,0 +1,13 @@
+{
+ "sources": [],
+ "what": "the body of an arm turned 90 degrees copied to the root",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); hinge driven to 90 puts ArmBox at (0,20,5); its copy in the root stays there: centres (0,0,-5), (0,20,5), (0,20,5): mean (0,13.333,1.667)",
+ "body_count": 3,
+ "volume_mm3": 12000.0,
+ "center_of_mass": [
+  0,
+  13.333333,
+  1.666667
+ ]
+}

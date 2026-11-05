@@ -26,29 +26,40 @@ pub(crate) mod clearance;
 mod clipboard;
 mod clipboard_foreign;
 mod compare;
+mod compare_picture;
+#[cfg(test)]
+mod compare_picture_tests;
 mod component;
 mod component_clone;
 mod component_clone_assembly;
 mod construct;
 mod delete;
-mod diagnostics;
+pub(crate) mod diagnostics;
 mod edit;
 mod face;
 mod features;
 mod features_more;
 mod join_pieces;
-pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis};
+pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis, plane_axis_point_kind};
 pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_object, edge_ref_form, explicit_plane, plane_name_problem, sketch_key};
 pub use features::{auto_operation, extrude_reach, shown_scope};
+pub use file::open_steps::OpenSteps;
+pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
+pub use parts::part_length_label;
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
-pub use sketch_construction::{ConstructionLine, construction_line_choice, construction_line_mode, construction_line_solutions};
+pub use sketch_construction::{
+    ConstructionLine, construction_line_choice, construction_line_mode, construction_line_solutions, construction_line_takes_length,
+    construction_segment,
+};
+pub use sketch_create::{tangent_arc_preview, tangent_arc_starts_at};
 pub use sketch_import::drawing_import_command;
-pub use sketch_modify::{extend_arc_preview, extend_preview, trim_piece};
+pub use sketch_modify::{TrimHover, extend_arc_preview, extend_end_at, extend_preview, trim_hover, trim_piece};
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
+pub(crate) use view_navigation::camera_form;
 pub use view_navigation::standard_view;
 mod component_link;
 pub use component_link::resolve_design_links;
@@ -63,6 +74,7 @@ mod libraries;
 pub mod mass_properties;
 mod material_properties;
 mod materials;
+mod measure_exact;
 mod measure_sel;
 mod measure_shape;
 mod mesh;
@@ -77,6 +89,7 @@ pub(crate) use measure_sel::{measure_items, shape_of};
 pub(crate) use measure_shape::Shape;
 #[cfg(test)]
 mod kernel_heal_tests;
+mod panels;
 mod parameter_sweep;
 mod parameters;
 mod plastic;
@@ -88,7 +101,7 @@ mod script_tests;
 mod sheet;
 pub(crate) use sheet::{
     FlangeType, ThenStep, flange_edge, flange_edge_list, flange_position, flange_type, fold_points, fold_position, perforation_pattern, sheet_points,
-    then_list,
+    sheet_rule_name, then_list,
 };
 mod silhouette;
 mod sketch;
@@ -241,18 +254,20 @@ impl CommandSpec {
             other => other,
         }
     }
+    /// The refusal this command gives when it is not available in this session: none when it
+    /// is. It is the engine's own wording (`EngineError::Disabled`), so a caller that only has
+    /// the message can tell it from a failure of the command itself.
+    pub fn disabled_refusal(&self, s: &Session) -> Option<String> {
+        (self.enabled)(s).err().map(|why| crate::EngineError::Disabled(self.id.to_string(), why).to_string())
+    }
     pub fn info(&self, s: &Session) -> CommandInfo {
         let e = (self.enabled)(s);
-        let (label, icon) = match self.id {
-            "inspect.colored_components" if s.colored_components.is_some() => ("Disable Component Colors", "colored_components_off"),
-            _ => (self.label, self.icon),
-        };
         CommandInfo {
             id: self.id,
-            label,
+            label: self.label,
             tab: self.tab,
             panel: self.panel,
-            icon,
+            icon: self.icon,
             shortcut: self.shortcut,
             params: self.params,
             enabled: e.is_ok(),
@@ -324,6 +339,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(joints::COMMANDS.iter());
     v.extend(clearance::COMMANDS.iter());
     v.extend(motion::COMMANDS.iter());
+    v.extend(panels::COMMANDS.iter());
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
@@ -341,6 +357,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());
+    v.extend(compare_picture::COMMANDS.iter());
     v.extend(silhouette::COMMANDS.iter());
     v.extend(materials::COMMANDS.iter());
     v.extend(material_properties::COMMANDS.iter());

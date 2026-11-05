@@ -214,7 +214,8 @@ It is a fit point spline through fixed points that the formulas place, and they 
 when the design's parameters change. Compare *spline*, whose points are placed by hand.
 
 - **In SolidCraft:** `sketch.equation_curve`, `sketch.equation_curve.edit`; the `equations`
-  design-file key of a sketch.
+  design-file key of a sketch; `variable_unit` says whether the variable is a plain number or a
+  length like its range.
 - **Don't use:** formula curve, function curve, parametric curve (for the command).
 - **Elsewhere:** equation-driven curve, curve from equation, function plot.
 - **For translators:** "equation" is a mathematical formula, not a balance or an equality constraint.
@@ -439,6 +440,18 @@ The ordered list of a design's features, which SolidCraft computes from first to
 - **Elsewhere:** timeline, history, feature tree.
 - **For translators:** not the undo history.
 
+### turn (of two rounds)
+
+How two rounds of a fillet continue where they turn round a sharp corner edge between them, such
+as the rounds along a boss's base at its upright edges: in a mitre, or swept round the corner
+edge as a torus.
+
+- **In SolidCraft:** the `turn` parameter of `solid.fillet` and its design-file key, `mitre`
+  (the default) or `swept`; the Fillet dialog's Turns row.
+- **Don't use:** corner (that is what fills a corner where three rounded edges meet, `corner`).
+- **Elsewhere:** mitred corner, swept corner, corner sweep.
+- **For translators:** "Mitre" and "Swept" name the two shapes, not a direction of travel.
+
 ### view angles
 
 The yaw, pitch and roll, in degrees, that give the direction a view looks along and how its
@@ -518,8 +531,8 @@ Search lists both under the same name, and the label lookup gives both the same 
 ## A feature's type
 
 A feature type has one name: its design-file key, such as `sheet_flange`. The label (Flange) is
-its display name. Replies and scripts should use the design-file key; today `timeline.inspect`
-reports a different name (`EdgeFlangeFeature`), so a script can't match one against the other.
+its display name. Replies and scripts use the design-file key (`timeline.inspect` reports both
+`type: "sheet_flange"` and `type_name: "EdgeFlangeFeature"`).
 
 ## Open questions for the maintainer
 

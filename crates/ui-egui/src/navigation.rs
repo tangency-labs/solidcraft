@@ -12,7 +12,8 @@
 
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::json;
-use solidcraft_engine::geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::Camera;
 
 use crate::SolveApp;
@@ -366,6 +367,7 @@ fn zoom_point(app: &mut SolveApp, rect: Rect, point: Option<Pos2>, surface: bool
 }
 
 /// Modifier-only navigation never borrows pointer movement from another widget or gesture.
+/// Tool fields keep keyboard focus without blocking motion over the exposed viewport.
 pub(crate) fn modifier_motion(
     app: &mut SolveApp,
     ui: &egui::Ui,
@@ -376,7 +378,6 @@ pub(crate) fn modifier_motion(
 ) -> Option<(NavMode, egui::Vec2)> {
     let owns = inside
         && ui.input(|i| i.focused && !i.pointer.any_down() && !i.pointer.any_released() && !i.pointer.any_pressed())
-        && !ui.ctx().egui_wants_keyboard_input()
         && !egui::Popup::is_any_open(ui.ctx())
         && !crate::dim_view::editing()
         && app.viewport.context_menu.is_none()
@@ -503,7 +504,7 @@ pub(crate) fn step_key_hold(app: &mut SolveApp, ctx: &egui::Context) {
     {
         app.cancel_view_animation();
         app.viewport.orbit_free = None;
-        app.cam = cam;
+        app.cam = crate::view_angles::keep_locked(app, app.cam, cam);
     }
 }
 
@@ -574,6 +575,20 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         && resp.contains_pointer()
         && ui.rect_contains_pointer(rect)
         && hover.is_some_and(|p| !axes.contains(p) && !readout.is_some_and(|r| r.contains(p)));
+    // The wheel and trackpad gestures go on under a box anchored to the model (a value box such
+    // as Extrude's distance, a dimension's editor): it scrolls nothing, and a pan, orbit or zoom
+    // stopped as it crossed one (#10061). Its clicks stay its own. Not while the wheel steps the
+    // value under the pointer (Preferences › Design, value stepping).
+    let wheel_inside = inside
+        || (ui.is_enabled()
+            && !crate::value_step::enabled(ui.ctx())
+            && !hover.is_some_and(|p| crate::dim_view::window::covers(ui.ctx(), p))
+            && hover.is_some_and(|p| {
+                rect.contains(p)
+                    && !axes.contains(p)
+                    && !readout.is_some_and(|r| r.contains(p))
+                    && ui.ctx().layer_id_at(p).is_some_and(crate::ui_kit::container::is_canvas)
+            }));
     app.viewport.mouse = hover.filter(|_| inside);
     // Sketch snap suppression is set once in `viewport::show` from preferences.
     middle_double_click(app, ui, inside);
@@ -621,7 +636,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // Pinch-to-zoom (trackpad): direct manipulation, never smoothed.
     let pinch = ui.input(|i| pinch_factor(i, options, page_height, zoom_modifier));
     let h = rect.height().max(1.0) as f64;
-    if inside && pinch != 1.0 {
+    if wheel_inside && pinch != 1.0 {
         app.viewport.orbit_free = None;
         // Spread zooms in: the camera distance shrinks by the pinch factor.
         let f = f64::from(pinch).powf(-crate::prefs::zoom_sign(app));
@@ -637,7 +652,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             app.cam.zoom_at(f, anchor);
         }
     }
-    if inside && scroll.is_finite() && scroll != 0.0 {
+    if wheel_inside && scroll.is_finite() && scroll != 0.0 {
         app.viewport.orbit_free = None;
         let f = (-scroll as f64 * 0.0015 * f64::from(app.preferences.wheel_zoom_speed) * crate::prefs::zoom_sign(app)).exp();
         let anchor = zoom_anchor(app, rect, hover, caps.orbit);
@@ -653,7 +668,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         }
     }
     // Two-finger scroll pans the model with the fingers.
-    if inside && pan.is_finite() && pan != egui::Vec2::ZERO {
+    if wheel_inside && pan.is_finite() && pan != egui::Vec2::ZERO {
         app.viewport.orbit_free = None;
         if app.preferences.nav == crate::prefs::TOUCHPAD_NAV {
             camera_motion(app, rect, json!({"motion":"pan","delta":[pan.x,pan.y]}));
@@ -662,7 +677,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             app.cam.pan(f64::from(pan.x), f64::from(pan.y), h);
         }
     }
-    if inside && caps.orbit && trackpad_orbit && raw.shift_pan != egui::Vec2::ZERO {
+    if wheel_inside && caps.orbit && trackpad_orbit && raw.shift_pan != egui::Vec2::ZERO {
         app.cancel_view_animation();
         app.viewport.orbit_free = None;
         let sign = crate::prefs::orbit_sign(app);
@@ -733,6 +748,23 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // floating shell card that disables the underlying egui response.
     let captured_orbit = app.viewport.orbit_from.is_some() && button.is_some();
     let dragging = resp.dragged() || (inside && button.is_some()) || captured_orbit;
+    // A middle or right drag keeps the mode it started with until its button is released, as a
+    // left one does (`primary_nav`): letting go of Shift partway through a Shift+middle orbit
+    // doesn't turn the rest into a pan (#9557). Off in Preferences, the keys held decide on every
+    // frame, as before.
+    let button_mode = match button {
+        Some(b) if dragging && app.viewport.axis_drag.is_none() => {
+            let kept = app.viewport.button_nav.filter(|(held, _)| *held == b && app.preferences.nav_drag_keeps_mode);
+            let mode = kept.map_or_else(|| crate::prefs::nav_mode(app, b, mods), |(_, mode)| mode);
+            app.viewport.button_nav = Some((b, mode));
+            mode
+        }
+        Some(_) => None,
+        None => {
+            app.viewport.button_nav = None;
+            None
+        }
+    };
     // Without orbit (a flat page), bindings that orbit do nothing.
     let allowed = |m: NavMode| caps.orbit || m != NavMode::Orbit;
     let motion = modifier_motion(app, ui, inside, hover, mods, picking).filter(|(m, _)| allowed(*m));
@@ -741,7 +773,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         .or_else(|| {
             if dragging && app.viewport.axis_drag.is_none() {
                 match button {
-                    Some(b) => crate::prefs::nav_mode(app, b, mods),
+                    Some(_) => button_mode,
                     // A press held still that opened Select Other stays its own: egui calls it a
                     // drag after 0.8 s, and moving to a row must not turn the view under the list.
                     None if primary_down && !crate::select_other::is_open(app) => primary_nav,
@@ -802,7 +834,8 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
                 Some(NavMode::Zoom) => {
                     let press = ui.input(|i| i.pointer.press_origin());
                     let anchor = model_zoom_anchor(app, rect, press.or(hover), caps.orbit);
-                    app.cam.zoom_at((f64::from(delta.y) * 0.01).exp(), anchor);
+                    let sign = if crate::prefs::nav_preset(&app.preferences.nav).reverse_drag_zoom { -1.0 } else { 1.0 };
+                    app.cam.zoom_at((f64::from(delta.y) * 0.01 * sign * crate::prefs::zoom_sign(app)).exp(), anchor);
                 }
                 _ => {}
             }
@@ -862,7 +895,7 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     }
     let sketch_turns = app.preferences.space_mouse_sketch_orbit;
     let sketch_view_is_initial = !sketch_turns
-        && solidcraft_engine::view::open_sketch_plane(&app.session).is_some_and(|plane| {
+        && solidcraft_engine::view::open_sketch_plane(&app.session).ok().flatten().is_some_and(|plane| {
             let normal = plane.normal();
             let mut initial = app.cam.looking_from(normal);
             if normal.z.abs() > 0.999 {
@@ -896,11 +929,15 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
         }
     });
     if let Some(queued) = app.viewport.device_motion.take() {
+        let before = app.cam;
         device_camera(&mut app.cam, queued.motion, queued.seconds, height, turn, app.preferences.free_orbit, anchor, pivot);
+        app.cam = crate::view_angles::keep_locked(app, before, app.cam);
     }
     // A device app's motion (the navigation bridge), on the same terms.
     if let Some(queued) = app.viewport.bridge_motion.take() {
+        let before = app.cam;
         bridge_camera(&mut app.cam, queued, height, turn, app.preferences.zoom_reverse, app.preferences.free_orbit, anchor, pivot);
+        app.cam = crate::view_angles::keep_locked(app, before, app.cam);
     }
 }
 
@@ -932,7 +969,7 @@ pub(crate) fn bridge_camera(
         if free_orbit {
             cam.rotate_in_view(Vec3::new(-oy * 0.008, -ox * 0.008, 0.0));
         } else {
-            cam.orbit(ox, oy);
+            orbit_on_screen(cam, ox, oy);
         }
         if let Some((p, coords)) = keep {
             cam.place(p, coords);
@@ -984,13 +1021,23 @@ pub(crate) fn device_camera(
         if free_orbit {
             cam.rotate_in_view(Vec3::new(-rx, -ry, rz) * (2.0 * seconds));
         } else {
-            cam.orbit(ry * 250.0 * seconds, rx * 250.0 * seconds);
+            orbit_on_screen(cam, ry * 250.0 * seconds, rx * 250.0 * seconds);
             cam.roll_by(rz * 2.0 * seconds);
         }
         if let Some((p, coords)) = keep {
             cam.place(p, coords);
         }
     }
+}
+
+/// A 3D mouse's turn in the upright (turntable) orbit: `dx` and `dy` are screen deltas, as for
+/// [`Camera::orbit`], which turns about the unrolled view's axes. The device's Spin rolls the
+/// view, so its Tilt and Turn are taken back through that roll first: rolled upside down (#10083)
+/// or on its side, the cap still turns the view the way it is pushed on screen, not the way the
+/// world's axes lie. Unrolled, this is [`Camera::orbit`] exactly.
+fn orbit_on_screen(cam: &mut Camera, dx: f64, dy: f64) {
+    let (sin, cos) = cam.roll.sin_cos();
+    cam.orbit(dx * cos + dy * sin, dy * cos - dx * sin);
 }
 
 /// Six principal views, twelve edge diagonals and eight isometric corner directions.
@@ -1201,6 +1248,7 @@ fn orbit_camera(app: &mut SolveApp, dx: f64, dy: f64) {
 
 #[cfg(test)]
 mod tests {
+    use solidcraft_engine::geom::prelude::*;
     fn web_wheel(unit: egui::MouseWheelUnit, delta: egui::Vec2, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::MouseWheel { unit, delta, modifiers, phase: egui::TouchPhase::Move }
     }
@@ -1768,6 +1816,47 @@ mod tests {
         assert!(cam.pitch < std::f64::consts::FRAC_PI_2 && cam.pitch > 1.5);
     }
 
+    /// The upright 3D mouse orbit follows the view, not the world (#10083): with the view rolled
+    /// upside down or on its side, Tilt and Turn move the model on screen as they do upright,
+    /// for the cap and for a device app over the bridge.
+    #[test]
+    fn the_3d_mouse_turns_a_rolled_or_upside_down_view_the_way_it_is_pushed() {
+        use super::*;
+        use std::f64::consts::{FRAC_PI_2, PI};
+        // Where the eye moves on screen (along the view's right and up) for one small turn.
+        let on_screen = |cam: Camera, turn: &dyn Fn(&mut Camera)| {
+            let mut after = cam;
+            turn(&mut after);
+            let (right, up, _) = cam.basis();
+            let moved = after.back() - cam.back();
+            let (x, y) = (moved.dot(right), moved.dot(up));
+            let length = x.hypot(y);
+            assert!(length > 1e-6, "{cam:?}: the view turns");
+            (x / length, y / length)
+        };
+        for (pitch, roll) in [(1.28, PI), (0.0, PI), (0.0, FRAC_PI_2), (0.0, -FRAC_PI_2), (0.3, 2.5)] {
+            let upright = Camera { yaw: -0.13, pitch, roll: 0.0, ..Default::default() };
+            let rolled = Camera { roll, ..upright };
+            for rotation in [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.6, -0.8, 0.0]] {
+                let cap = |cam: &mut Camera| {
+                    device_camera(cam, Motion { translation: [0.0; 3], rotation }, 1e-4, 600.0, true, false, None, None);
+                };
+                let bridge = |cam: &mut Camera| {
+                    let orbit = [rotation[1] * 0.03, rotation[0] * 0.03];
+                    bridge_camera(cam, BridgeMotion { orbit, ..Default::default() }, 600.0, true, false, false, None, None);
+                };
+                for turn in [&cap as &dyn Fn(&mut Camera), &bridge] {
+                    let (want, got) = (on_screen(upright, turn), on_screen(rolled, turn));
+                    let tolerance = if pitch == 0.0 || roll == PI { 1e-3 } else { 0.1 };
+                    assert!(
+                        (want.0 - got.0).hypot(want.1 - got.1) < tolerance,
+                        "pitch {pitch}, roll {roll}, {rotation:?}: {want:?} upright, {got:?} rolled"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn solidworks_free_orbit_keeps_the_configured_pivot_on_screen() {
         use super::*;
@@ -1834,6 +1923,84 @@ mod tests {
         }
         assert!(scanned > 50, "the source tree was scanned ({scanned} files)");
         assert!(offenders.is_empty(), "camera input outside navigation::handle; call it instead:\n{}", offenders.join("\n"));
+    }
+
+    /// Reverse zoom must affect mouse drags as well as the wheel (#10354).
+    #[test]
+    fn drag_zoom_respects_reverse_on_every_canvas() {
+        use crate::prefs::{NAV_PRESETS, NavButton};
+        use egui::{Event, Modifiers, PointerButton, pos2, vec2};
+        use serde_json::json;
+
+        let mut bindings = Vec::new();
+        for preset in NAV_PRESETS {
+            for binding in preset.bindings.iter().filter(|binding| binding.mode == super::NavMode::Zoom) {
+                let button = match binding.button {
+                    NavButton::Left => PointerButton::Primary,
+                    NavButton::Middle => PointerButton::Middle,
+                    NavButton::Right => PointerButton::Secondary,
+                };
+                let keys = binding.keys;
+                let mods = Modifiers { shift: keys.shift, ctrl: keys.ctrl, command: keys.ctrl, alt: keys.alt, ..Default::default() };
+                bindings.push((preset.id, button, mods, false));
+            }
+        }
+        // The navigation bar's Zoom tool also uses the shared drag handler.
+        for preset in ["fusion", "creo"] {
+            bindings.push((preset, PointerButton::Primary, Modifiers::NONE, true));
+        }
+        for (preset, button, mods, tool) in bindings {
+            for caps in [super::NavCaps::MODEL, super::NavCaps { orbit: false, pick: false }] {
+                for perspective in [false, true] {
+                    for reverse in [false, true] {
+                        for dy in [-80.0, 80.0] {
+                            let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+                            crate::prefs::set(&mut app, &json!({"nav":preset, "zoom_reverse":reverse, "zoom_stop_at_model":false})).unwrap();
+                            app.ui.perspective = perspective;
+                            app.cam.fov = if perspective { 45.0_f64.to_radians() } else { 0.0 };
+                            if tool {
+                                app.run("view.tool", json!({"tool":"zoom"})).unwrap();
+                            }
+                            let before = app.cam;
+                            let ctx = crate::fonts::test_context();
+                            let mut frame = |mut events: Vec<Event>| {
+                                events.insert(0, Event::ModifiersChanged(mods));
+                                let raw = egui::RawInput {
+                                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 600.0))),
+                                    focused: true,
+                                    events,
+                                    ..Default::default()
+                                };
+                                let mut out = ctx.run_ui(raw, |ui| {
+                                    let rect = ui.max_rect();
+                                    let resp = ui.interact(rect, ui.id().with("drag-zoom"), egui::Sense::click_and_drag());
+                                    super::handle(&mut app, ui, rect, &resp, caps);
+                                });
+                                out.textures_delta.clear();
+                            };
+                            let from = pos2(200.0, 300.0);
+                            let to = from + vec2(0.0, dy);
+                            frame(vec![Event::PointerMoved(from)]);
+                            frame(vec![Event::PointerButton { pos: from, button, pressed: true, modifiers: mods }]);
+                            frame(vec![Event::PointerMoved(to)]);
+                            frame(vec![Event::PointerButton { pos: to, button, pressed: false, modifiers: mods }]);
+                            frame(Vec::new());
+                            assert!(app.cam.is_valid());
+                            assert_ne!(app.cam.distance, before.distance, "the drag must zoom");
+                            // Creo zooms in on a downward drag by default; the preference reverses that too.
+                            let default_zooms_out = if preset == "creo" { dy < 0.0 } else { dy > 0.0 };
+                            assert_eq!(
+                                app.cam.distance > before.distance,
+                                default_zooms_out != reverse,
+                                "{preset} {button:?}, tool={tool}, {caps:?}, perspective={perspective}, reverse={reverse}, dy={dy}"
+                            );
+                            assert_eq!(app.cam.target, before.target, "drag zoom keeps the view centre");
+                            assert_eq!((app.cam.yaw, app.cam.pitch, app.cam.roll, app.cam.fov), (before.yaw, before.pitch, before.roll, before.fov));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -2463,6 +2630,7 @@ mod tests {
 mod view_key_tests {
     use crate::scenario::Harness;
     use serde_json::json;
+    use solidcraft_engine::geom::prelude::*;
 
     fn turned(h: &mut Harness, key: serde_json::Value) -> (f64, f64) {
         let before = h.app.cam;

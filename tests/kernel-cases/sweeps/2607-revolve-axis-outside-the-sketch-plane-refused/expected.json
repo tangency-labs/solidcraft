@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3736",
+  "tangency-labs/solidcraft#2607"
+ ],
+ "what": "a profile on the XZ plane revolved about the world Y axis, which does not lie in the sketch plane",
+ "source": "invariants",
+ "method": "the revolve axis must lie in the profile plane (the Y axis is perpendicular to the XZ plane): the right behaviour is a clean refusal, with no body made.",
+ "outcome": "refused",
+ "refusal": "the Y axis does not lie in the sketch plane"
+}

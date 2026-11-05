@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "XY turned about Z, its own normal",
+ "source": "analytic",
+ "method": "a turn about the plane's normal maps the plane onto itself: XY, normal Z through the origin",
+ "construction": {
+  "P": {
+   "plane": {
+    "through": [
+     3,
+     4,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   }
+  }
+ }
+}

@@ -112,7 +112,7 @@ pub fn restart(software: bool, lost_at: u64, reason: &str) {
 pub fn end() -> ! {
     let watchdog = std::thread::Builder::new().name("solidcraft-exit".into()).spawn(|| {
         std::thread::sleep(END_GRACE);
-        eprintln!("SolidCraft graphics: still closing after the device was lost; aborting");
+        solidcraft_engine::note!("SolidCraft graphics: still closing after the device was lost; aborting");
         std::process::abort();
     });
     if let Err(e) = watchdog {

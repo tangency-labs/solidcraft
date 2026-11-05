@@ -1,5 +1,6 @@
 //! Standalone Environment inspector body. Drawing and source browsing never save a setup.
 use super::{ImageMethod, Stage, cpu, hdr, setups, studio};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, theme::Tokens, ui_kit};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::render_settings::{RenderJob, RenderSetup};
@@ -55,8 +56,7 @@ fn ring_target(app: &SolveApp) -> bool {
     let view = &app.render_workspace.view;
     super::active(app)
         && !view.result
-        && (view.selection == super::RenderSelection::Environment
-            || matches!(view.inspector.page, super::inspector::Page::Environment | super::inspector::Page::Background))
+        && view.selection == super::RenderSelection::Environment
         && environment_values(app).is_some_and(|(_, _, _, rotates)| rotates)
         && !app.session.model.is_stale()
 }
@@ -207,7 +207,7 @@ pub(super) fn ring_overlay(app: &mut SolveApp, ui: &mut egui::Ui, viewport: egui
         egui::Id::new("render_environment_rotation"),
         ring.center + egui::vec2(0.0, ring.radius - t.control_height - t.space_8),
         egui::Align2::CENTER_BOTTOM,
-        |ui| ui_kit::text(ui, &format!("{angle:.0}°"), ui_kit::Text::Inline).on_hover_text(app.tr("render.env_ring_help")),
+        |ui| ui_kit::text(ui, &format!("{angle:.0}°"), ui_kit::Text::Inline).backing_on_hover_text(app.tr("render.env_ring_help")),
     );
     crate::scenario::publish_target("render:environment:ring-degrees", chip.response.rect);
 }
@@ -268,12 +268,10 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 pub(super) fn open_sources(app: &mut SolveApp) {
-    let page = app.render_workspace.view.inspector.page;
     super::library::open_category(app, "hdr");
     if let Err(error) = app.run("view.render_stage", json!({"stage":Stage::Light.key()})) {
         app.set_status(error, true);
     }
-    app.render_workspace.view.inspector.page = page;
 }
 
 fn note(app: &SolveApp, ui: &mut egui::Ui, key: &str) {

@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#4011"
+  ],
+  "what": "a blind hole mirrored to a spot where half its top disc lies under a wall's foot",
+  "source": "analytic",
+  "method": "plate 100x60x10 (6000+... =60000) plus wall 10x60x10 (6000) = 66000. Each blind hole r=3, 4 deep from z=5 removes pi*9*4 = 113.097 from the plate only (the wall is above z=5, untouched); two holes: V = 66000 - 2*pi*9*4",
+  "body_count": 1,
+  "volume_mm3": 65773.8053
+}

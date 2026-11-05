@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4438"
+ ],
+ "what": "a whole torus (R 15, r 5) exported to STEP and read back: truck wrote it as two faces on one shared loop with no seam edges (V-E+F = 2), which other readers took as a sphere-like shell of volume 0",
+ "source": "analytic",
+ "method": "V = 2*pi^2*R*r^2 = 7402.203, A = 4*pi^2*R*r = 2960.881. The re-imported body is graded, not the exported one (the design holds only the import)",
+ "body_count": 1,
+ "volume_mm3": 7402.2033,
+ "area_mm2": 2960.8813
+}

@@ -1,5 +1,6 @@
 //! Dense editable tables. Geometry and typography share the form label-column tokens.
 use super::metrics::*;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use crate::{scenario, theme::Tokens};
 use egui::{Response, Ui, vec2};
@@ -48,16 +49,7 @@ pub(crate) struct Table<'a> {
     reveal: Option<egui::Rect>,
 }
 
-/// Header, horizontally scrolling body and empty state. Regular rows use table_row_height.
-/// Tokens: form_label_width, font_label, dialog_label, space_4/8, dialog_rule, text/dim, selected_bg.
-pub(crate) fn table<R>(ui: &mut Ui, id: &str, columns: &[Column<'_>], empty: &str, add: impl FnOnce(&mut Ui, &mut Table<'_>) -> R) -> R {
-    table_custom(ui, id, columns, empty, |ui, table| {
-        table.headers(ui, |_, _| false);
-        add(ui, table)
-    })
-}
-
-/// The same table grid with caller-supplied header actions through Table::headers.
+/// Table grid with caller-supplied header actions through Table::headers.
 /// Custom cells own their actions; all body rows share the same widths and metrics.
 pub(crate) fn table_custom<R>(ui: &mut Ui, id: &str, columns: &[Column<'_>], empty: &str, add: impl FnOnce(&mut Ui, &mut Table<'_>) -> R) -> R {
     let mut reveal = None;
@@ -224,7 +216,7 @@ impl Table<'_> {
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), crate::i18n::tr_label(label)));
         scenario::publish_handle(&format!("dialog:table:{}:add", self.id), rect.center());
         scenario::publish_rect(&format!("dialog:table:{}:add", self.id), rect);
-        response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(crate::i18n::tr_label(tooltip))
+        response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(crate::i18n::tr_label(tooltip))
     }
 
     fn row_content(&self, ui: &mut Ui, key: &str, selected: bool, force: bool, add: impl FnOnce(&mut TableRow<'_>)) -> Response {
@@ -305,7 +297,7 @@ pub(crate) fn label_actions(ui: &mut Ui, text: &str, add: impl FnOnce(&mut Ui)) 
 fn header_label(ui: &mut Ui, label: &str) {
     let t = Tokens::get();
     ui.add(egui::Label::new(egui::RichText::new(crate::i18n::tr_label(label)).size(t.font_small).strong().color(t.form_dim)).truncate())
-        .on_hover_text(crate::i18n::tr_label(label));
+        .backing_on_hover_text(crate::i18n::tr_label(label));
 }
 
 /// How a table orders its rows by one column. `Listed` keeps the order the owner gave them.
@@ -400,7 +392,7 @@ pub(crate) fn sort_header(ui: &mut Ui, label: &str, sort: &mut Sort) -> Response
         Sort::Descending => "Back to the original order",
     };
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), text));
-    response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(crate::i18n::tr_label(tip))
+    response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(crate::i18n::tr_label(tip))
 }
 
 /// Column removal appears inside the hovered header only. Keeps the former × button handle.
