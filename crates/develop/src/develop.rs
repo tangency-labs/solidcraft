@@ -629,7 +629,20 @@ fn cut_by_rips(flat: &FlatPanel, sides: &[RipSide]) -> Result<FlatPanel, Develop
                 *slot = b;
             }
         }
-        let edges: Stretch = stretches.into_iter().flatten().filter(|(s, _)| s.length() > 0.0).collect();
+        // An edge the joins trimmed to a hair (a rip's new edge meeting a step its own cut was
+        // drawn for) goes, the lines beside it closed up on each other.
+        let hair = RIP_TOL * 10.0;
+        let mut edges: Stretch = stretches.into_iter().flatten().filter(|(s, _)| s.length() > hair).collect();
+        let count = edges.len();
+        for i in 0..count {
+            let Some(end) = edges.get(i).map(|e| e.0.end()) else { continue };
+            if let Some((Seg2::Line { a, .. }, _)) = edges.get_mut((i + 1) % count)
+                && a.dist(end) <= hair
+            {
+                *a = end;
+            }
+        }
+        edges.retain(|(s, _)| s.length() > hair);
         let new = Loop2 { segs: edges.iter().map(|e| e.0).collect() };
         if li == 0 {
             out.region.outer = new;

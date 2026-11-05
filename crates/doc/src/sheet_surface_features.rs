@@ -542,6 +542,22 @@ impl SurfaceSheet {
             // Convert reads a rip's turn).
             let (y, into_w) = (pf.z, (-pw.z).cross(way));
             let turn = into_w.dot(y).atan2(into_w.dot(way.cross(y)));
+            // The flange that reaches past the other keeps the mitre's gap on up its side: set back
+            // past the rip's end as far as the rip's lap cuts it below, its side stays one line.
+            let lap = Lap::Miter { gap: self.reliefs.gap };
+            let (cut_f, cut_w) = lap.cuts(turn, t);
+            let inward = |m: Vec2, an: &Anchor, end: f64| {
+                let along = if end == 0.0 { an.dir } else { -an.dir };
+                (along - m * along.dot(m)).normalized()
+            };
+            let rf = match inward(mf, &on_f, e1) {
+                Some(into) if hf > h + 1e-9 && cut_f > 1e-12 => set_back_past(&rf, cf, mf, hf, h, into, cut_f).unwrap_or(rf),
+                _ => rf,
+            };
+            let rw = match inward(mw, &on_w, e2) {
+                Some(into) if hw > h + 1e-9 && cut_w > 1e-12 => set_back_past(&rw, cw, mw, hw, h, into, cut_w).unwrap_or(rw),
+                _ => rw,
+            };
             if let Some(x) = self.sheet.panels.get_mut(f) {
                 x.region = rf;
             }
@@ -1306,6 +1322,39 @@ fn half(region: &Region2, n: Vec2, from: f64) -> Result<Vec<Region2>> {
 
 fn area(r: &[Region2]) -> f64 {
     r.iter().map(Region2::area).sum()
+}
+
+/// `region` with its side from `from` along `m` for `rise` (as `to_line` leaves it) set back `by`
+/// toward `into`, square to it, past `h` along it: the side steps in at `h` and runs on parallel,
+/// and the edge past the side runs on along its line to meet it. `None` where the side or that
+/// edge isn't a straight line of the outline.
+fn set_back_past(region: &Region2, from: Vec2, m: Vec2, rise: f64, h: f64, into: Vec2, by: f64) -> Option<Region2> {
+    let segs = &region.outer.segs;
+    let n = segs.len();
+    let top = from + m * rise;
+    let tol = rise.max(1.0) * 1e-9;
+    let same = |p: Vec2, q: Vec2| p.dist(q) <= tol;
+    let k = segs.iter().position(|g| matches!(*g, Seg2::Line { a, b } if (same(a, from) && same(b, top)) || (same(a, top) && same(b, from))))?;
+    let up = matches!(segs[k], Seg2::Line { a, .. } if same(a, from));
+    // The edge past the side, at its top.
+    let past_at = if up { (k + 1) % n } else { (k + n - 1) % n };
+    let Seg2::Line { a: pa, b: pb } = segs[past_at] else { return None };
+    let (p, q) = (from + m * h, from + m * h + into * by);
+    let w = pb - pa;
+    let cross = m.cross(w);
+    if cross.abs() <= 1e-12 {
+        return None;
+    }
+    let new_top = q + m * ((pa - q).cross(w) / cross);
+    let mut out = segs.clone();
+    let side = if up {
+        vec![Seg2::Line { a: from, b: p }, Seg2::Line { a: p, b: q }, Seg2::Line { a: q, b: new_top }]
+    } else {
+        vec![Seg2::Line { a: new_top, b: q }, Seg2::Line { a: q, b: p }, Seg2::Line { a: p, b: from }]
+    };
+    out[past_at] = if up { Seg2::Line { a: new_top, b: pb } } else { Seg2::Line { a: pa, b: new_top } };
+    out.splice(k..=k, side);
+    Some(Region2 { outer: Loop2 { segs: out }, holes: region.holes.clone() })
 }
 
 /// How far a point lies from the segment `a`–`b`.
