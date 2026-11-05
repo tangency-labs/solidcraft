@@ -1,14 +1,19 @@
 //! `SmFeatureExecutive::DoDefeature` of face 2 of `Defeature/defillet.smb` (the
 //! `blend.feature_executive` case `single_face_defillet_2`). Extending loop edge 14's
-//! neighbour, face 8, XORs its extended B-spline surface with a copy of the face. In
-//! that boolean, eight edge-definition imprints fail at `MakeEdgeInFace`'s
-//! `FindVertexSector` checks: the extended surface folds over itself, so the
-//! intersection UV curves sit on the other preimage of the face's vertices. Upstream
-//! `IntersectInsertRelate` ignores those failures and goes on (`SmTopologyIntersector.cpp:1233`),
-//! which is defined because `MakeEdgeInFace` makes both checks before any edit. The port
-//! used to stop there as for UB-242's half-edited B-reps, so the XOR kept 7 faces instead
-//! of 10 and the feature's patches differed. The C++ reference gives the values asserted
-//! here.
+//! neighbour, face 8 (the fillet), XORs its extended surface with a copy of the face.
+//! Upstream's fitted extension folds over itself there: eight edge-definition imprints fail
+//! at `MakeEdgeInFace`'s `FindVertexSector` checks, which upstream `IntersectInsertRelate`
+//! ignores and goes on past (`SmTopologyIntersector.cpp:1233`; defined, since
+//! `MakeEdgeInFace` makes both checks before any edit), and its patch for that loop keeps no
+//! face.
+//!
+//! On the exact extension (`surface::extend`, Tangent) the surface does not fold: the XOR
+//! gives two faces, and `sm_TrimPatches` keeps the one bounded by the loop circle (radius
+//! 0.7 round the boss axis at z 2), so the loop's own patch has one face where the C++ has
+//! none. Neither loop's patch fills its void alone, so both are joined into the first
+//! loop's patch, and the defeatured body is the C++ reference's (the difftest compares its
+//! whole graph and geometry: 8 faces, 17 edges, 11 vertices). Only the unused loop patch's
+//! face count moved (recorded in the difftest's known mismatches).
 //!
 //! The model is the upstream test file, read by the Rust reader when the pinned upstream
 //! checkout is present (as the difftest does).
@@ -96,7 +101,36 @@ fn defeature_goes_on_past_imprints_without_a_vertex_sector() {
     let got = patch_faces(&ex);
     eprintln!("patch faces per loop: {got:?}");
     assert_eq!(got, EXPECTED);
+
+    // the second loop's one patch face is bounded by the loop circle
+    let pid = ex.features()[0].loops[1].base_patch.unwrap();
+    let patch = ex.patch(pid).unwrap();
+    let on_circle = bp1::edges(patch, None).unwrap().into_iter().any(|e| {
+        let r = patch.edge(e).unwrap();
+        let c = r.curve.as_ref().unwrap();
+        (0..=8).all(|i| {
+            let p = c
+                .evaluate_point(&k, r.interval.evaluate(f64::from(i) / 8.0))
+                .unwrap();
+            let rho = (p.x - 1.0).hypot(p.y - 1.0);
+            (rho - 0.7).abs() < 1e-12 && (p.z - 2.0).abs() < 1e-12
+        })
+    });
+    assert!(
+        on_circle,
+        "the loop patch is not bounded by the loop circle"
+    );
+
+    // the defeatured body is the C++ reference's
+    let base = ex.base_brep();
+    let counts = (
+        bp1::faces(base, None).unwrap().len(),
+        bp1::edges(base, None).unwrap().len(),
+        bp1::vertices(base, None).unwrap().len(),
+    );
+    assert_eq!(counts, (8, 17, 11), "faces, edges, vertices");
 }
 
-/// The C++ reference's patch face counts (difftest `single_face_defillet_2`).
-const EXPECTED: &[(i64, i64)] = &[(4, 4), (0, 0)];
+/// Per loop, the base and feature patch face counts on the exact extension: the C++
+/// reference's [(4, 4), (0, 0)] but for the second loop's own (joined, unused) patch.
+const EXPECTED: &[(i64, i64)] = &[(4, 4), (1, 1)];
