@@ -18,7 +18,7 @@ fn error(h: &mut Harness, id: &str, params: Value) -> String {
 #[test]
 fn a_profile_holds_personal_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 167, "profiles retain the previous 100 settings and include the new personal preferences");
+    assert_eq!(keys.len(), 168, "profiles retain the previous 100 settings and include the new personal preferences");
     for key in [
         "nav",
         "nav_drag_keeps_mode",
@@ -33,6 +33,7 @@ fn a_profile_holds_personal_settings_but_not_the_machine() {
         "navigator_arrows",
         "navigator_home",
         "ellipse_axes",
+        "sketch_mirror_auto_line",
         "select_hidden_edges",
         "nav_bridge_enabled",
         "nav_bridge_port",
@@ -103,6 +104,7 @@ fn a_profile_holds_personal_settings_but_not_the_machine() {
         assert!(keys.contains(&key), "{key} belongs in a profile");
     }
     for key in [
+        "profile_include_all",
         "space_mouse_calibrations",
         "space_mouse_driver",
         "space_mouse_speed",
@@ -165,6 +167,7 @@ fn a_profile_holds_personal_settings_but_not_the_machine() {
 #[test]
 fn personal_design_and_tool_settings_survive_profile_export_import_and_apply() {
     let mut h = Harness::new();
+    assert!(h.call("ui.prefs", json!({"profile_include_all":true}))["error"].is_null());
     let personal = json!({
         "default_units":"in", "length_decimals":4, "extrude_view_isometric":true,
         "extrude_view_return":true, "dark_parts_shading":true, "invert_curved_roll_arrows":true,
@@ -184,10 +187,34 @@ fn personal_design_and_tool_settings_survive_profile_export_import_and_apply() {
     assert_eq!(other.app.preferences.default_units, "mm", "import does not apply the profile");
     let out = run(&mut other, "settings.profile.apply", json!({"name":"Inch tools"}));
     assert_eq!(out["skipped"], json!([]));
+    assert!(!other.app.preferences.profile_include_all, "applying an expanded profile does not opt in this computer");
     let applied = other.call("ui.prefs", json!({}));
     for (key, value) in personal.as_object().unwrap() {
         assert_eq!(&applied["result"][key], value, "apply must restore {key}");
     }
+}
+
+/// Saving and re-saving profiles keeps the original scope until the user opts in.
+#[test]
+fn default_profile_saves_leave_design_and_tool_settings_alone() {
+    let mut h = Harness::new();
+    h.app.preferences.default_units = "in".into();
+    h.app.preferences.extrude_view_isometric = true;
+    h.app.preferences.zoom_reverse = true;
+    for _ in 0..2 {
+        run(&mut h, "settings.profile.save", json!({"name":"Laptop"}));
+        let saved = run(&mut h, "settings.profile.export", json!({"name":"Laptop"}))["profile"].clone();
+        assert!(saved["preferences"]["default_units"].is_null(), "saving must not silently expand the profile scope");
+        assert!(saved["preferences"]["extrude_view_isometric"].is_null());
+        assert_eq!(saved["preferences"]["zoom_reverse"], true);
+    }
+    h.app.preferences.default_units = "mm".into();
+    h.app.preferences.extrude_view_isometric = false;
+    h.app.preferences.zoom_reverse = false;
+    run(&mut h, "settings.profile.apply", json!({"name":"Laptop"}));
+    assert_eq!(h.app.preferences.default_units, "mm");
+    assert!(!h.app.preferences.extrude_view_isometric);
+    assert!(h.app.preferences.zoom_reverse);
 }
 
 /// Sparse profiles preserve absent values and report edits only to settings they actually store.
@@ -230,6 +257,7 @@ fn older_profiles_leave_newly_supported_settings_unchanged() {
     run(&mut h, "settings.profile.apply", json!({"name":"Older"}));
     assert_edited(&mut h, false);
     assert_eq!(h.app.settings_profiles.prefs()["profiles"], stored["profiles"], "comparison must not fill absent saved keys");
+    h.app.preferences.profile_include_all = true;
     run(&mut h, "settings.profile.save", json!({"name":"Older"}));
     assert_edited(&mut h, false);
     assert_eq!(h.app.settings_profiles.list[0]["preferences"]["default_units"], "mm", "saving captures newly supported preferences");
@@ -259,12 +287,48 @@ fn older_profiles_compare_only_the_navigator_settings_they_store() {
     assert_eq!(h.app.settings_profiles.prefs(), stored, "comparison does not fill absent saved fields");
 }
 
+/// The save opt-in is computer-local and does not alter existing expanded profiles.
+#[test]
+fn profile_scope_opt_in_preserves_saved_values_and_edited_state_when_disabled() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    assert!(!h.app.preferences.profile_include_all);
+    h.call("ui.prefs", json!({"language":"en", "open":"General"}));
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"prefs:profile:include_all"}})).unwrap();
+    assert!(h.app.preferences.profile_include_all, "the General checkbox enables expanded saves");
+    h.app.preferences.default_units = "in".into();
+    run(&mut h, "settings.profile.save", json!({"name":"Expanded"}));
+    let saved = h.app.settings_profiles.prefs();
+    assert_eq!(saved["profiles"][0]["preferences"].as_object().unwrap().len(), keys().count());
+    assert!(saved["profiles"][0]["preferences"]["profile_include_all"].is_null());
+    h.call("ui.prefs", json!({"profile_include_all":false}));
+    h.app.settings_profiles.load(&saved);
+    h.frames(3);
+    assert_eq!(h.app.settings_profiles.prefs(), saved, "loading preserves expanded profiles without opt-in");
+    assert!(crate::scenario::rect_of("prefs:profile:edited").is_none());
+    assert!(crate::scenario::rect_of("prefs:profile:Expanded:edited").is_none());
+    h.app.preferences.default_units = "mm".into();
+    h.frames(3);
+    assert!(crate::scenario::rect_of("prefs:profile:edited").is_some(), "stored expanded values still detect edits");
+    assert!(crate::scenario::rect_of("prefs:profile:Expanded:edited").is_some());
+    run(&mut h, "settings.profile.apply", json!({"name":"Expanded"}));
+    assert_eq!(h.app.preferences.default_units, "in");
+    assert!(!h.app.preferences.profile_include_all);
+    h.frames(3);
+    assert!(crate::scenario::rect_of("prefs:profile:edited").is_none());
+    run(&mut h, "settings.profile.save", json!({"name":"Expanded"}));
+    assert!(h.app.settings_profiles.list[0]["preferences"]["default_units"].is_null(), "saving after opting out restores the original scope");
+    h.frames(3);
+    assert!(crate::scenario::rect_of("prefs:profile:edited").is_none());
+}
+
 /// Summary chips follow declared scope, including mixed pages and migration-only fields.
 #[test]
 fn profile_summary_distinguishes_personal_and_computer_settings_on_mixed_pages() {
     use crate::prefs::ProfileScope::{Computer, Profile};
-    let held: Vec<_> = crate::settings_profiles::groups(Profile).collect();
-    let computer: Vec<_> = crate::settings_profiles::groups(Computer).collect();
+    let held: Vec<_> = crate::settings_profiles::groups(Profile, true).collect();
+    let computer: Vec<_> = crate::settings_profiles::groups(Computer, true).collect();
     assert!(held.contains(&("ui.design", "prefs_design", true)));
     assert!(held.contains(&("ui.graphics", "prefs_graphics", true)));
     assert!(computer.contains(&("ui.graphics", "prefs_graphics", true)));
@@ -274,6 +338,13 @@ fn profile_summary_distinguishes_personal_and_computer_settings_on_mixed_pages()
     assert!(computer.iter().any(|(label, _, partial)| *label == "prefs.assistant" && !partial));
     assert!(!held.iter().any(|(label, _, _)| *label == "prefs.assistant"));
     assert!(held.iter().any(|(label, _, _)| *label == "prefs.profiles_other_settings"));
+    let default_held: Vec<_> = crate::settings_profiles::groups(Profile, false).collect();
+    let default_computer: Vec<_> = crate::settings_profiles::groups(Computer, false).collect();
+    assert!(default_held.contains(&("prefs.structure.tools", "prefs_tools", true)));
+    assert!(default_computer.iter().any(|(label, _, partial)| *label == "prefs.structure.tools" && *partial));
+    for field in crate::prefs::FIELDS.iter().filter(|f| ["navigator_texture", "navigator_arrows", "navigator_home"].contains(&f.key)) {
+        assert_eq!(field.scope.effective(false), Profile, "{} already travels in the navigator entry", field.key);
+    }
 }
 
 /// Summary captions keep their existing column while the expanded page chips wrap beside them.
@@ -1089,6 +1160,11 @@ fn profile_keys_retain_every_previously_saved_setting() {
     for key in expected {
         assert!(actual.contains(&key), "older profiles must still restore {key}");
     }
+    let h = Harness::new();
+    let doc = capture(&h.app, "Default");
+    let mut captured: Vec<_> = doc["preferences"].as_object().unwrap().keys().map(String::as_str).collect();
+    captured.sort_unstable();
+    assert_eq!(captured, expected, "default saves preserve exactly the existing preference map");
 }
 
 /// Moving a preference between pages must not change its profile scope or validation.
@@ -1130,7 +1206,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     ] {
         assert_eq!(doc["preferences"][key], value, "capture retains {key}");
     }
-    assert_eq!(doc["preferences"]["dark_parts_shading"], false);
+    assert!(doc["preferences"]["dark_parts_shading"].is_null());
     assert_eq!(sanitize(&doc).unwrap(), doc);
     h.app.settings_profiles.load(&serde_json::from_str::<Value>(&serde_json::to_string(&saved).unwrap()).unwrap());
     assert_eq!(h.app.settings_profiles.list[0], doc);

@@ -1,0 +1,37 @@
+{
+  "ar": {
+    "prefs.profiles_include_all": "تضمين جميع الإعدادات الشخصية في ملفات التعريف المحفوظة",
+    "prefs.profiles_include_all_help": "عند تفعيل هذا الخيار، يشمل حفظ ملف التعريف أيضًا وحدات التصميم وسلوك الأدوات والإعدادات الشخصية الأخرى. لا تتغير ملفات التعريف الحالية إلا عند حفظها مجددًا. يؤدي إيقاف هذا الخيار إلى استعادة النطاق الأصلي لعمليات الحفظ اللاحقة؛ ويظل تطبيق ملف التعريف يستعيد الإعدادات المحفوظة فيه."
+  },
+  "de": {
+    "prefs.profiles_include_all": "Alle persönlichen Einstellungen in gespeicherte Profile aufnehmen",
+    "prefs.profiles_include_all_help": "Wenn diese Option aktiviert ist, werden beim Speichern eines Profils auch Designeinheiten, Werkzeugverhalten und weitere persönliche Einstellungen aufgenommen. Bestehende Profile ändern sich erst beim erneuten Speichern. Wenn Sie diese Option deaktivieren, gilt für künftige Speichervorgänge wieder der ursprüngliche Umfang. Beim Anwenden eines Profils werden weiterhin dessen gespeicherte Einstellungen wiederhergestellt."
+  },
+  "en": {
+    "prefs.profiles_include_all": "Include all personal settings in saved profiles",
+    "prefs.profiles_include_all_help": "When enabled, saving a profile also includes design units, tool behavior and other personal settings. Existing profiles change only when saved again. Turning this off restores the original scope for future saves; applying a profile still restores its saved settings."
+  },
+  "en-GB": {
+    "prefs.profiles_include_all_help": "When enabled, saving a profile also includes design units, tool behaviour and other personal settings. Existing profiles change only when saved again. Turning this off restores the original scope for future saves; applying a profile still restores its saved settings."
+  },
+  "he": {
+    "prefs.profiles_include_all": "כלול את כל ההגדרות האישיות בפרופילים שנשמרים",
+    "prefs.profiles_include_all_help": "כאשר אפשרות זו מופעלת, שמירת פרופיל כוללת גם את יחידות התכנון, התנהגות הכלים והגדרות אישיות נוספות. פרופילים קיימים משתנים רק כששומרים אותם מחדש. כיבוי האפשרות מחזיר את היקף ההגדרות המקורי לשמירות הבאות; החלת פרופיל עדיין משחזרת את ההגדרות השמורות בו."
+  },
+  "ja": {
+    "prefs.profiles_include_all": "保存するプロファイルにすべての個人設定を含める",
+    "prefs.profiles_include_all_help": "有効にすると、プロファイルの保存時に設計の単位、ツールの動作、その他の個人設定も含まれます。既存のプロファイルは、再保存するまで変更されません。無効にすると、今後の保存対象は元の範囲に戻ります。プロファイルを適用するときは、引き続きそのプロファイルに保存された設定が復元されます。"
+  },
+  "ko": {
+    "prefs.profiles_include_all": "저장하는 프로필에 모든 개인 설정 포함",
+    "prefs.profiles_include_all_help": "이 옵션을 켜면 프로필을 저장할 때 설계 단위, 도구 동작 및 기타 개인 설정도 포함됩니다. 기존 프로필은 다시 저장할 때만 변경됩니다. 이 옵션을 끄면 이후 저장 시 원래 범위의 설정만 포함됩니다. 프로필을 적용할 때는 여전히 해당 프로필에 저장된 설정이 복원됩니다."
+  },
+  "vi": {
+    "prefs.profiles_include_all": "Bao gồm mọi cài đặt cá nhân trong hồ sơ được lưu",
+    "prefs.profiles_include_all_help": "Khi bật tùy chọn này, thao tác lưu hồ sơ cũng bao gồm đơn vị thiết kế, cách hoạt động của công cụ và các cài đặt cá nhân khác. Hồ sơ hiện có chỉ thay đổi khi được lưu lại. Tắt tùy chọn này sẽ khôi phục phạm vi ban đầu cho những lần lưu sau; áp dụng hồ sơ vẫn khôi phục các cài đặt đã lưu trong hồ sơ đó."
+  },
+  "zh": {
+    "prefs.profiles_include_all": "在保存的配置文件中包含所有个人设置",
+    "prefs.profiles_include_all_help": "启用后，保存配置文件时还会包含设计单位、工具行为和其他个人设置。现有配置文件只有在重新保存时才会更改。关闭此选项后，今后的保存将恢复为原来的设置范围；应用配置文件时仍会恢复其中保存的设置。"
+  }
+}

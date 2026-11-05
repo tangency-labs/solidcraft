@@ -983,8 +983,24 @@ impl BodiesFolders {
 /// Whether a preference travels in settings profiles or stays with this computer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProfileScope {
+    /// The original preference map, including later explicit additions on main.
     Profile,
+    /// Additional personal preferences captured only after opting in.
+    ProfileOptIn,
+    /// Already stored in the separate view_navigator entry, even without opting in.
+    ProfileNavigator,
     Computer,
+}
+
+impl ProfileScope {
+    /// Whether the setting travels in a newly saved profile, including navigator entries.
+    pub(crate) fn effective(self, include_all: bool) -> Self {
+        match self {
+            Self::Profile | Self::ProfileNavigator => Self::Profile,
+            Self::ProfileOptIn if include_all => Self::Profile,
+            Self::ProfileOptIn | Self::Computer => Self::Computer,
+        }
+    }
 }
 
 /// One stored preference's profile scope and Defaults page, declared beside its value.
@@ -995,7 +1011,7 @@ pub(crate) struct PreferenceField {
 }
 
 // The stored fields, profile scopes, defaults, page resets and form controls share this table.
-// Every row must choose Profile or Computer; there is no implicit scope for new settings.
+// Every row chooses an explicit scope; new personal settings use ProfileOptIn.
 // Omitted pages keep fields such as grid_follows_view and added agents when restoring defaults.
 // Accepted control-channel ranges may differ from slider ranges (look_at_speed).
 macro_rules! preference_settings {
@@ -1066,9 +1082,17 @@ macro_rules! preference_settings {
     };
 }
 
+/// General's computer-local choice for the scope of future profile saves.
+pub(crate) fn profile_scope_setting(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let response = setting::profile_include_all(app, ui);
+    crate::scenario::publish_target("prefs:profile:include_all", response.rect);
+}
+
 preference_settings! {
+    /// Expand future profile saves; applying existing profiles never changes this choice.
+    Computer profile_include_all: bool = false, PAGE_GENERAL => check_id_help("prefs.profiles_include_all", "prefs.profiles_include_all_help");
     /// Units of new designs.
-    Profile default_units: String = "mm".into(), PAGE_DESIGN;
+    ProfileOptIn default_units: String = "mm".into(), PAGE_DESIGN;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     Profile nav: String = "fusion".into(), PAGE_NAVIGATION;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
@@ -1082,15 +1106,15 @@ preference_settings! {
     /// A middle or right drag keeps the mode it started with until its button is released, as a
     /// left drag with the mapping's keys does: letting go of Shift partway through a Shift+middle
     /// orbit doesn't turn it into a pan (#9557). Off: the keys held decide on every frame, as before.
-    Profile nav_drag_keeps_mode: bool = true, PAGE_NAVIGATION => check_tr("nav.drag_keeps_mode.label");
+    ProfileOptIn nav_drag_keeps_mode: bool = true, PAGE_NAVIGATION => check_tr("nav.drag_keeps_mode.label");
     /// View orientation widget: original signed axes (default) or compact cube.
     Profile navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// The custom view gizmo's colours: the cube's (themed) or the body's own (modeled).
-    Profile navigator_texture: NavigatorTexture = NavigatorTexture::default(), PAGE_NAVIGATION;
+    ProfileNavigator navigator_texture: NavigatorTexture = NavigatorTexture::default(), PAGE_NAVIGATION;
     /// The custom view gizmo has the cube's orbit and roll arrows around it.
-    Profile navigator_arrows: bool = true, PAGE_NAVIGATION;
+    ProfileNavigator navigator_arrows: bool = true, PAGE_NAVIGATION;
     /// The custom view gizmo has the cube's Home button beside it.
-    Profile navigator_home: bool = true, PAGE_NAVIGATION;
+    ProfileNavigator navigator_home: bool = true, PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
     Profile radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
     /// Work on the model directly in the viewport (pull a face to extrude or cut); off by default.
@@ -1161,7 +1185,7 @@ preference_settings! {
     /// Anti-aliasing samples (applies on restart).
     Computer msaa: u32 = 4, PAGE_GRAPHICS;
     /// Share shading and Continuity; false preserves their independent legacy behavior.
-    Profile single_surface_analysis: bool = true, PAGE_GRAPHICS => check_id("prefs.graphics_page.single_surface_analysis");
+    ProfileOptIn single_surface_analysis: bool = true, PAGE_GRAPHICS => check_id("prefs.graphics_page.single_surface_analysis");
     /// Linux: the window system the app opens with at its next start (#3083): `auto` (XWayland
     /// whenever there is an X display, native Wayland on niri), `wayland` or `x11`.
     Computer window_system: String = "auto".into(), PAGE_GRAPHICS;
@@ -1170,31 +1194,31 @@ preference_settings! {
     /// Soft contact shading in the GPU viewport; optional and applied immediately.
     Computer ambient_occlusion: bool = false, PAGE_GRAPHICS;
     /// Restore the shadow plane at the lowest visible body, including above the origin (#9838).
-    Profile ground_shadow_follows_model: bool = false, PAGE_GRAPHICS => check_id("prefs.ground_shadow_follows_model");
+    ProfileOptIn ground_shadow_follows_model: bool = false, PAGE_GRAPHICS => check_id("prefs.ground_shadow_follows_model");
     /// Shade the viewport in linear light with a sky fill, so dark parts keep their shape
     /// (#7974). Off by default: the viewport shades as it always has.
-    Profile dark_parts_shading: bool = false, PAGE_GRAPHICS => check_id("prefs.dark_parts_shading");
+    ProfileOptIn dark_parts_shading: bool = false, PAGE_GRAPHICS => check_id("prefs.dark_parts_shading");
     /// Optional schematic markings on threaded cylindrical walls; off for new and older preferences.
-    Profile cosmetic_threads: bool = false, PAGE_GRAPHICS;
+    ProfileOptIn cosmetic_threads: bool = false, PAGE_GRAPHICS;
     /// A section hatches each cut body its own way (the default), or every one alike, in the cap
     /// colour at 45 degrees, as before.
-    Profile section_hatch: SectionHatch = SectionHatch::ByPart, PAGE_GRAPHICS;
+    ProfileOptIn section_hatch: SectionHatch = SectionHatch::ByPart, PAGE_GRAPHICS;
     /// The grid turns to the upright origin plane facing a side view (#1470). Off by default: the
     /// grid stays on the ground plane (XY) whatever the view.
-    Profile grid_follows_view: bool = false => check_id("ui.grid_follows_view");
+    ProfileOptIn grid_follows_view: bool = false => check_id("ui.grid_follows_view");
     /// Draw reference geometry such as inactive sketches and datum planes through shaded bodies.
     /// Off by default to preserve the depth-tested viewport behaviour.
-    Profile reference_geometry_through_bodies: bool = false, PAGE_GRAPHICS => check_id("prefs.graphics_page.reference_geometry_through_bodies");
+    ProfileOptIn reference_geometry_through_bodies: bool = false, PAGE_GRAPHICS => check_id("prefs.graphics_page.reference_geometry_through_bodies");
     /// A small dot at every vertex wherever edges are drawn (#7834). Off by default: the viewport
     /// draws edges only, as it always has.
-    Profile vertex_markers: bool = false;
+    ProfileOptIn vertex_markers: bool = false;
     /// A preview of a feature that changes a body draws the surface it adds in the preview
     /// colour, working out face by face which surface that is. Off: the body is drawn as itself
     /// and nothing is worked out (`preview::Colors::tint_new`).
-    Profile preview_tint_new_faces: bool = true, PAGE_GRAPHICS => check_id("prefs.preview_tint_new_faces");
+    ProfileOptIn preview_tint_new_faces: bool = true, PAGE_GRAPHICS => check_id("prefs.preview_tint_new_faces");
     /// A preview that removes material shows the removed shape as a red see-through ghost. Off:
     /// the ghost is fully transparent and only its outline is drawn (`preview::Colors::cut_tint`).
-    Profile cut_preview_tint: bool = true, PAGE_GRAPHICS => check_id("prefs.cut_preview_tint");
+    ProfileOptIn cut_preview_tint: bool = true, PAGE_GRAPHICS => check_id("prefs.cut_preview_tint");
     /// Restore the previous platform-specific fixed Render preview geometry budget.
     Computer render_previous_geometry_budget: bool = false, PAGE_GRAPHICS => check_id("prefs.render_previous_geometry_budget");
     /// How finely the viewport tessellates curved faces and edges: `coarse`, `normal`, `fine` or
@@ -1213,24 +1237,24 @@ preference_settings! {
     /// With the frame rate: a frame-time graph, a histogram and what the GPU drew (#2548).
     Computer frame_rate_details: bool = false, PAGE_GRAPHICS;
     /// Draw a wider rim under finished sketch curves to improve contrast on shaded faces.
-    Profile sketch_halo: bool = false, PAGE_GRAPHICS => check("Halo under sketch curves");
+    ProfileOptIn sketch_halo: bool = false, PAGE_GRAPHICS => check("Halo under sketch curves");
     /// Show the view's pitch, yaw and roll and its projection under the orientation gizmo (#6032).
     /// Off by default; View ▸ View angles and `view.angle_readout` turn it on.
-    Profile show_view_angles: bool = false, PAGE_GRAPHICS;
+    ProfileOptIn show_view_angles: bool = false, PAGE_GRAPHICS;
     /// Show world X/Y/Z component dimensions beside the total distance in Measure.
-    Profile measure_axis_distances: bool = true, PAGE_TOOLS;
+    ProfileOptIn measure_axis_distances: bool = true, PAGE_TOOLS;
     /// Perspective view's vertical field of view in radians (#5364), 15° to 90°. The view reads a
     /// saved value outside that range as the default ([`perspective_fov`]).
-    Profile perspective_fov: f64 = PERSPECTIVE_FOV, PAGE_GRAPHICS, accept(15f64.to_radians()..=90f64.to_radians());
+    ProfileOptIn perspective_fov: f64 = PERSPECTIVE_FOV, PAGE_GRAPHICS, accept(15f64.to_radians()..=90f64.to_radians());
     /// Decimals shown for lengths and angles.
-    Profile length_decimals: u8 = 2, PAGE_DESIGN;
-    Profile angle_decimals: u8 = 1, PAGE_DESIGN;
+    ProfileOptIn length_decimals: u8 = 2, PAGE_DESIGN;
+    ProfileOptIn angle_decimals: u8 = 1, PAGE_DESIGN;
     /// The most parameters Down arrow lists in an empty expression box (#9246): fewer keeps the
     /// list light in a large design.
-    Profile parameter_list_rows: u16 = 50, PAGE_DESIGN;
+    ProfileOptIn parameter_list_rows: u16 = 50, PAGE_DESIGN;
     /// Up/Down and the wheel over a focused value field step its plain number (`value_step`,
     /// #2320). Off by default: the keys move the text cursor and the wheel scrolls, as before.
-    Profile step_values: bool = false, PAGE_DESIGN => check_id("ui.step_values");
+    ProfileOptIn step_values: bool = false, PAGE_DESIGN => check_id("ui.step_values");
     /// When SMLib's full check runs while features are computed (`diagnostics.validation`):
     /// `each_feature` (the default) checks the bodies each feature keeps once; `each_step`, as
     /// before, checks after every sweep, boolean and blend; `off` (experimental) never does.
@@ -1238,42 +1262,42 @@ preference_settings! {
     /// A command's value (Extrude's Distance, Fillet's Radius…) in a box beside its handle in the
     /// view (`canvas::boxes_shown`). Off: it is typed in the command window only, which takes the
     /// keyboard after a pick instead, and nothing covers the model (#9479).
-    Profile value_boxes_in_view: bool = true, PAGE_DESIGN => check_id("prefs.value_boxes_in_view");
+    ProfileOptIn value_boxes_in_view: bool = true, PAGE_DESIGN => check_id("prefs.value_boxes_in_view");
     /// The Parameters dialog applies an expression as soon as its field is left (#9279). Off: the
     /// edits wait in the dialog until Apply or OK sets them together, in one rebuild and one undo
     /// step. Its checkbox is in the dialog itself.
-    Profile parameters_apply_live: bool = true;
+    ProfileOptIn parameters_apply_live: bool = true;
     /// A design coming back to its tab reads again the linked designs whose files changed since
     /// it last read them. Off: they wait for Update Links, as before.
-    Profile update_changed_links: bool = true, PAGE_DESIGN => check_id("settings.update_changed_links");
+    ProfileOptIn update_changed_links: bool = true, PAGE_DESIGN => check_id("settings.update_changed_links");
     /// A double-click on a component, in the browser or on its face in the view, opens a linked
     /// one's design with the assembly around it (`edit_in_place`) and activates any other. Off:
     /// a double-click in the browser activates every component and one in the view does nothing,
     /// as before.
-    Profile double_click_components: bool = true, PAGE_DESIGN => check_id("settings.double_click_components");
+    ProfileOptIn double_click_components: bool = true, PAGE_DESIGN => check_id("settings.double_click_components");
     /// Insert Design lists the designs open in other tabs, each inserted with one click, then
     /// Browse… for a file (#8570). Off: it opens the file picker at once, as before.
-    Profile insert_lists_open_designs: bool = true, PAGE_DESIGN => check_id("settings.insert_lists_open_designs");
+    ProfileOptIn insert_lists_open_designs: bool = true, PAGE_DESIGN => check_id("settings.insert_lists_open_designs");
     /// Reopen the saved designs that were open when the app was last closed (#5542).
-    Profile reopen_designs: bool = true, PAGE_GENERAL;
+    ProfileOptIn reopen_designs: bool = true, PAGE_GENERAL;
     /// Those designs' files, in tab order, as the last quit left them.
     Computer open_designs: Vec<String> = Vec::new(), PAGE_GENERAL;
     /// Web app (#10220): keep each open design's unsaved changes current in the browser's
     /// private storage, so closing or reloading the tab doesn't ask through the browser's own
     /// "leave site?" box; the next visit offers them back. Off: the browser asks, as before.
-    Profile keep_unsaved_in_browser: bool = false, PAGE_GENERAL;
-    Profile keep_unsaved_also_asks: bool = true, PAGE_GENERAL;
+    ProfileOptIn keep_unsaved_in_browser: bool = false, PAGE_GENERAL;
+    ProfileOptIn keep_unsaved_also_asks: bool = true, PAGE_GENERAL;
     /// The largest STEP or import file opened, in MB (#4086): from the default (512) up to 16 GB.
     /// `--max-file-size` overrides it for one run. The browser keeps the default.
     Computer max_step_file_mb: u64 = DEFAULT_STEP_MB, PAGE_GENERAL;
     /// The largest design file opened or saved, in MB (#4086): from the default (256) up to 16 GB.
     Computer max_design_file_mb: u64 = DEFAULT_DESIGN_MB, PAGE_GENERAL;
     /// Explicit assembly Move uses joint handles; off keeps the previous Move panel.
-    Profile assembly_move_handles: bool = true, PAGE_TOOLS => check_id("joint_move.use_handles");
+    ProfileOptIn assembly_move_handles: bool = true, PAGE_TOOLS => check_id("joint_move.use_handles");
     /// Degrees per step near the assembly Move ring.
-    Profile joint_rotation_coarse: f64 = 10.0, PAGE_TOOLS;
+    ProfileOptIn joint_rotation_coarse: f64 = 10.0, PAGE_TOOLS;
     /// Degrees per step after pulling the cursor outside the precision guide.
-    Profile joint_rotation_fine: f64 = 0.1, PAGE_TOOLS;
+    ProfileOptIn joint_rotation_fine: f64 = 0.1, PAGE_TOOLS;
     /// `dark`, `light` or `system` (follow the operating system), or a theme file's id: a
     /// built-in one (`gruvbox-dark`, …) or one of `custom_themes` (#2255).
     Profile theme: String = "dark".into(), PAGE_APPEARANCE;
@@ -1384,11 +1408,11 @@ preference_settings! {
     /// the user drags wider or narrower at its right edge.
     Profile browser_width: f32 = DEFAULT_BROWSER_WIDTH, PAGE_LAYOUT;
     /// Render shell preference, independent of the document and Design history.
-    Profile render_shots_strip: bool = true;
-    Profile render_inspector_side: String = "right".into();
-    Profile render_inspector_width: f32 = 305.0;
-    Profile render_browser_side: String = "left".into();
-    Profile render_browser_width: f32 = 266.0;
+    ProfileOptIn render_shots_strip: bool = true;
+    ProfileOptIn render_inspector_side: String = "right".into();
+    ProfileOptIn render_inspector_width: f32 = 305.0;
+    ProfileOptIn render_browser_side: String = "left".into();
+    ProfileOptIn render_browser_width: f32 = 266.0;
     /// Resource identities and history belong to the user, never the design.
     Computer render_library_favorites: std::collections::BTreeSet<(String, String)> = Default::default();
     Computer render_library_recent: std::collections::VecDeque<(String, String)> = Default::default();
@@ -1413,7 +1437,7 @@ preference_settings! {
     Profile browser_eye_left: bool = false, PAGE_LAYOUT;
     /// Every component placement in the browser starts open, as before #9274, instead of closed
     /// until the user opens it. Off by default.
-    Profile browser_components_open: bool = false, PAGE_LAYOUT;
+    ProfileOptIn browser_components_open: bool = false, PAGE_LAYOUT;
     /// Folders in the Browser start closed, and placements too whatever "Components start open"
     /// says, and they open only on request (#8768): with their arrow, Expand All or Find in
     /// Browser, which opens just the rows down to its body and closes again the ones the last find
@@ -1421,7 +1445,7 @@ preference_settings! {
     /// Browser found has the rows above it marked, so a large assembly's placements are not named
     /// again after each edit. Off by default: folders start open, placements as "Components start
     /// open" says, and a pick in the 3D view opens the Browser down to its body (#3005), as before.
-    Profile browser_rows_start_closed: bool = false, PAGE_LAYOUT;
+    ProfileOptIn browser_rows_start_closed: bool = false, PAGE_LAYOUT;
     /// The wheel zooms toward the point under the cursor (else toward the view's centre).
     Profile zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's center)");
     /// Speed multiplier for wheel zoom, independent of the 3D mouse.
@@ -1446,40 +1470,40 @@ preference_settings! {
     Profile look_at_anim: bool = true, PAGE_NAVIGATION => check("Animate view changes", "ui.look_at_anim_desc");
     Profile look_at_speed: f32 = 1.0, PAGE_NAVIGATION, accept(0.25..=4.0) => enabled_slider(look_at_anim, "Animation speed", 0.5..=3.0, 0.25, |v| format!("{v:.2}×"));
     /// Default modelling orientation: `z` (Z up) or `y` (Y up) (#3).
-    Profile up_axis: String = "z".into(), PAGE_DESIGN;
+    ProfileOptIn up_axis: String = "z".into(), PAGE_DESIGN;
     /// After a STEP or IGES file opens, offer to stand a Y-up part up (`stand_up`).
-    Profile offer_stand_up: bool = true, PAGE_DESIGN => check_tr("ui.offer_to_stand_up_y_up_files");
+    ProfileOptIn offer_stand_up: bool = true, PAGE_DESIGN => check_tr("ui.offer_to_stand_up_y_up_files");
     /// How the offer is made for a file whose header names no program known to save Y up: a note
     /// over the view (the default), the dialog, or nothing (#7717).
-    Profile stand_up_unknown: StandUpUnknown = StandUpUnknown::default(), PAGE_DESIGN;
+    ProfileOptIn stand_up_unknown: StandUpUnknown = StandUpUnknown::default(), PAGE_DESIGN;
     /// Extrude: with a profile picked, a face, vertex or parallel plane picked off its plane
     /// switches the extent to To Object (off: picks only add profiles, as before). A click into the
     /// Profiles box makes the next picks profiles again.
-    Profile extrude_auto_to_object: bool = true, PAGE_TOOLS => check_tr("ui.extrude_auto_to_object");
+    ProfileOptIn extrude_auto_to_object: bool = true, PAGE_TOOLS => check_tr("ui.extrude_auto_to_object");
     /// Extrude turns the view to isometric each time it opens, so the depth can be seen (#9176).
     /// Off (the default): the view stays as it is.
-    Profile extrude_view_isometric: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_isometric");
+    ProfileOptIn extrude_view_isometric: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_isometric");
     /// With `extrude_view_isometric`: when Extrude closes (OK or Cancel) the view goes back to
     /// where it was before it turned (#9176). Off (the default): it stays isometric.
-    Profile extrude_view_return: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_return");
+    ProfileOptIn extrude_view_return: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_return");
     /// Feature windows choose Join, New Body or Cut from what their material touches (`op_auto`,
     /// #6901). Off: they keep the operation they open with (Extrude its own Join or Cut), as before.
-    Profile auto_operation: bool = true, PAGE_TOOLS => check_id("prefs.auto_operation");
+    ProfileOptIn auto_operation: bool = true, PAGE_TOOLS => check_id("prefs.auto_operation");
     /// Reuse a command's safe values and options after it succeeds, until the app closes. Off by default: each dialog opens with its usual defaults.
-    Profile remember_dialog_values: bool = false, PAGE_TOOLS => check_id_help("prefs.remember_dialog_values", "prefs.remember_dialog_values.help");
+    ProfileOptIn remember_dialog_values: bool = false, PAGE_TOOLS => check_id_help("prefs.remember_dialog_values", "prefs.remember_dialog_values.help");
     /// Placing a Single hole snaps to the middle of the face and the centres of its round edges
     /// (`hole_place`). Off by default: a hole goes where it is clicked.
-    Profile hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");
+    ProfileOptIn hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");
     /// A placed Single hole has a handle that drags it, and a pick elsewhere on a face that has a
     /// hole moves the hole there (`hole_place`). Off by default: a second pick on its face takes
     /// the hole out, and a hole is moved by taking it out and picking again.
-    Profile hole_moves: bool = false, PAGE_TOOLS => check("Move holes by clicking or dragging");
+    ProfileOptIn hole_moves: bool = false, PAGE_TOOLS => check("Move holes by clicking or dragging");
     /// The browser's Origin folder starts hidden in designs that don't keep its eye themselves.
-    Profile hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
+    ProfileOptIn hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
     /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit): a marker that
     /// drags it across the model and a ring that turns it. Off by default: the feature is then placed
     /// by its click only, as before, and its Position input takes faces only.
-    Profile placement_handles: bool = false, PAGE_TOOLS => check_tr("ui.placement_handles");
+    ProfileOptIn placement_handles: bool = false, PAGE_TOOLS => check_tr("ui.placement_handles");
     /// The files a design names (linked designs, font files) may be on any network location, for
     /// organisations that keep their designs on file servers. Off (the default): only on the
     /// servers in `network_hosts`, or one the user allows when asked (`network_prompt`).
@@ -1499,7 +1523,7 @@ preference_settings! {
     /// The view cube's two curved arrows roll the view the other way: the clockwise arrow rolls
     /// counterclockwise and the counterclockwise arrow rolls clockwise (`invert_curved_roll_arrows`,
     /// #10483). Off by default: each arrow rolls the view the way it curls.
-    Profile invert_curved_roll_arrows: bool = false, PAGE_NAVIGATION;
+    ProfileOptIn invert_curved_roll_arrows: bool = false, PAGE_NAVIGATION;
     /// How much of the view the model fills when Home, Fit, an opened design or a navigator
     /// view change frames it (0.1 to 1; #10091): 1, the default, fills the room between the
     /// panels, the compass and the navigation bar, as before.
@@ -1522,24 +1546,24 @@ preference_settings! {
     /// Save as mesh: the last format (`stl` or `3mf`). Older versions also kept a "send to slicer"
     /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
     /// and they are ignored.
-    Profile save_mesh_format: String = "stl".into();
+    ProfileOptIn save_mesh_format: String = "stl".into();
     /// Hidden edges in the current-view DXF export (false: omit, true: dashed).
-    Profile view_dxf_dashed: bool = false;
+    ProfileOptIn view_dxf_dashed: bool = false;
     /// Model-space chord tolerance for current-view DXF curves, in millimetres.
-    Profile view_dxf_tolerance: f64 = 0.01;
+    ProfileOptIn view_dxf_tolerance: f64 = 0.01;
     /// Send to Slicer: the last slicer used (an installed slicer's id or a program path).
     Computer send_slicer: String = String::new();
     /// Slicers that can load a file into the window that is already open do so (default on).
     Computer slicer_single_instance: bool = true, 0;
     /// How strongly a print face stands out in the viewport (#8429): the share of the section
     /// colour in its tint, 0 to 1; its outline follows. 0 draws no highlight.
-    Profile print_face_highlight: f32 = 0.2, PAGE_GENERAL, accept(0.0..=1.0);
+    ProfileOptIn print_face_highlight: f32 = 0.2, PAGE_GENERAL, accept(0.0..=1.0);
     /// The line about sending again replacing the slicer's file has been shown.
     Computer slicer_resend_hint_seen: bool = false;
     /// The user has agreed to Open with EasyPrint uploading a model to Printables' servers.
     Computer easyprint_consent: bool = false;
     /// Save as mesh: the last quality (`standard`, `fine` or `finest`, #4747).
-    Profile save_mesh_quality: String = "standard".into();
+    ProfileOptIn save_mesh_quality: String = "standard".into();
     /// The programs the user added to the slicer list, newest first.
     Computer custom_slicers: Vec<String> = Vec::new();
     /// AI features (docs/agent-chat.md): the master switch. Off: no AI button, shortcut, menu
@@ -1621,7 +1645,7 @@ preference_settings! {
     /// Show the construction-line family in Sketch CREATE; off restores the earlier menu.
     Profile sketch_construction_lines: bool = true, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.
-    Profile sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
+    ProfileOptIn sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
     /// A sketch tool's shortcut pressed again before the first point steps to the tool's next
     /// creation mode (#2459). Off (the default): the key starts the tool again, as it always has.
     Profile shortcut_cycles_modes: bool = false, PAGE_SKETCH;
@@ -1638,7 +1662,7 @@ preference_settings! {
     /// While a sketch is open, only sketch keys and keys that work everywhere run; a model
     /// command's key (E, F) does nothing. Off (the default): a model key pressed in a sketch
     /// runs its command, and one that builds a feature finishes the sketch first (#2815).
-    Profile sketch_keys_only: bool = false, PAGE_SHORTCUTS;
+    ProfileOptIn sketch_keys_only: bool = false, PAGE_SHORTCUTS;
     /// Where the view goes when a sketch ends (#7038). Keep (the default) leaves it as it is.
     Profile sketch_exit_view: SketchExitView = SketchExitView::default(), PAGE_SKETCH;
     /// A shape drawn in a sketch gets all its dimensions at once: the typed values, and every
@@ -1662,16 +1686,16 @@ preference_settings! {
     Profile line_hover_tangent_arc: bool = false, PAGE_SKETCH;
     /// Allow ordinary edge picks through faces in Shaded with hidden edges.
     /// Off preserves the visible-only picking used in v0.30.1.
-    Profile select_hidden_edges: bool = false, PAGE_SKETCH;
+    ProfileOptIn select_hidden_edges: bool = false, PAGE_SKETCH;
     /// Include hidden geometry and a small pointer neighbourhood in Select Other.
     Profile select_other_hidden: bool = true, PAGE_SKETCH;
     /// Where a dimension's value is typed: in a box on the dimension (the default), or in a small
     /// window at it whose arrows step the value (#7246, `dim_view::window`).
-    Profile dimension_input: DimensionInput = DimensionInput::View, PAGE_SKETCH;
+    ProfileOptIn dimension_input: DimensionInput = DimensionInput::View, PAGE_SKETCH;
     /// What the dimension window's arrows, Up/Down and the wheel add to a length (millimetres,
     /// converted to the unit the value is written in) and to an angle (degrees).
-    Profile dimension_step_mm: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_MM);
-    Profile dimension_step_deg: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_DEG);
+    ProfileOptIn dimension_step_mm: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_MM);
+    ProfileOptIn dimension_step_deg: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_DEG);
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     Profile selection_shift_add_only: bool = false, PAGE_SKETCH;
@@ -1689,14 +1713,14 @@ preference_settings! {
     /// The Ellipse tool draws the major and minor axes as construction lines with the ellipse, so
     /// its half-axes and axes can be dimensioned. Off: the ellipse alone, and D on it gives its
     /// minor radius, labelled R, as before.
-    Profile ellipse_axes: bool = true, PAGE_SKETCH;
+    ProfileOptIn ellipse_axes: bool = true, PAGE_SKETCH;
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
-    Profile drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
+    ProfileOptIn drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
     /// While Move's triad drags a component drawn as a layer of its own, what is under the pointer
     /// is still picked and highlighted, as before #7273. Off by default: such a drag picks nothing,
     /// so a step neither meshes the dragged bodies where they stand nor looks up the Browser row a
     /// highlight follows (`drag_layer::holds_pointer`).
-    Profile move_drag_highlights: bool = false, PAGE_TOOLS => check_id("prefs.move_drag_highlights");
+    ProfileOptIn move_drag_highlights: bool = false, PAGE_TOOLS => check_id("prefs.move_drag_highlights");
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
     Computer disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
 }
@@ -6202,6 +6226,7 @@ mod tests {
             ("joint_rotation_fine", json!(0.2), PAGE_TOOLS),
             ("drive_joints_ghost", json!(false), PAGE_TOOLS),
             ("measure_axis_distances", json!(false), PAGE_TOOLS),
+            ("profile_include_all", json!(true), PAGE_GENERAL),
             ("network_locations", json!(true), PAGE_GENERAL),
             ("network_hosts", json!(["files.studio"]), PAGE_GENERAL),
             ("nav_bridge_enabled", json!(true), PAGE_MOUSE3D),

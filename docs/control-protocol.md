@@ -694,6 +694,8 @@ listed, or is `null`.
 
 ### `ui.prefs` settings
 
+`profile_include_all` (General, default false) includes all personal preferences in future settings-profile saves. With it off, saves retain the original preference scope. Import preserves expanded saved settings; applying the profile restores them. Neither changes this computer-local choice.
+
 `render_previous_geometry_budget` (Graphics, default false) restores the previous fixed Render preview geometry budget: 512 MiB on 64-bit desktop, 128 MiB elsewhere. With it off, desktop uses the device-based budget.
 
 

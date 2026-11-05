@@ -137,3 +137,65 @@ fn render_browser_uses_shared_rows_in_both_lenses_and_themes() {
         }
     }
 }
+
+#[test]
+fn profile_scope_checkbox_fits_general_and_renders_default_and_expanded_saves() {
+    let previous = theme::is_dark();
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/profile-scope-review");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width":1100,"height":1500}));
+    h.call("ui.set", json!({"dark":false}));
+    h.call("ui.prefs", json!({"language":"en","default_units":"in","open":"General"}));
+    assert!(!h.app.preferences.profile_include_all);
+    // Start a fresh renderer so every font and icon texture is captured with the app frames.
+    h.ctx = egui::Context::default();
+    solidcraft_ui_egui::fonts::setup_fonts(&h.ctx);
+    theme::apply(&h.ctx);
+    let mut textures: HashMap<TextureId, ColorImage> = HashMap::new();
+    for expanded in [false, true] {
+        if expanded {
+            let at = scenario::rect_of("prefs:profile:include_all").unwrap().center();
+            for pressed in [true, false] {
+                raster::paint(
+                    &mut h,
+                    &mut textures,
+                    vec![
+                        egui::Event::PointerMoved(at),
+                        egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+                    ],
+                );
+            }
+        }
+        assert_eq!(h.app.preferences.profile_include_all, expanded, "the visible checkbox controls future profile saves");
+        h.app.run("settings.profile.save", json!({"name":"Laptop"})).unwrap();
+        let exported = h.app.run("settings.profile.export", json!({"name":"Laptop"})).unwrap();
+        let saved = &exported["profile"]["preferences"];
+        if expanded {
+            assert_eq!(saved["default_units"], "in", "opting in includes design units when re-saving the profile");
+        } else {
+            assert!(saved.get("default_units").is_none(), "the default save preserves the original profile scope");
+        }
+        assert!(saved.get("profile_include_all").is_none(), "the opt-in stays local to the computer");
+        for _ in 0..8 {
+            raster::paint(&mut h, &mut textures, vec![]);
+        }
+        let output = raster::paint(&mut h, &mut textures, vec![]);
+        let page = scenario::rect_of("prefs:page_body").unwrap();
+        let checkbox = scenario::rect_of("prefs:profile:include_all").unwrap();
+        let card = scenario::rect_of("prefs:profile:Laptop:card").unwrap();
+        let held = scenario::rect_of("prefs:profiles:held:row").unwrap();
+        let computer = scenario::rect_of("prefs:profiles:computer:row").unwrap();
+        for (name, rect) in [("scope checkbox", checkbox), ("saved profile", card), ("profile summary", held), ("computer summary", computer)] {
+            assert!(rect.is_positive() && page.contains_rect(rect), "{name} must remain fully inside the General page: {rect:?} in {page:?}");
+        }
+        assert!(checkbox.bottom() <= card.top(), "the scope control does not overlap the saved profile");
+        assert!(held.bottom() <= computer.top(), "the summary rows do not overlap");
+        assert!(scenario::rect_of("prefs:profile:Laptop:edited").is_none(), "saving either scope leaves the profile unedited");
+        let screenshot = raster::raster(&mut h, &textures, output);
+        assert_eq!((screenshot.width(), screenshot.height()), (1100, 1500));
+        screenshot.save(dir.join(if expanded { "expanded.png" } else { "default.png" })).unwrap();
+    }
+    theme::set_dark(previous);
+}

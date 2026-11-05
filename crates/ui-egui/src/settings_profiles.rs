@@ -1,6 +1,7 @@
 //! Settings profiles: personal settings kept together under a name, such as "Laptop" and
 //! "Large monitor", and switched at once. Each preference declares its profile scope beside
-//! its default in `prefs::preference_settings`. A profile also holds keyboard shortcuts,
+//! its default in `prefs::preference_settings`. Additional personal preferences require
+//! opting in for future saves. A profile also holds keyboard shortcuts,
 //! the toolbar with its quick-access bar, S box favourites, the imported theme, and custom view
 //! navigator settings and body.
 //! Profiles without a navigator body leave the current body alone. Device configuration,
@@ -38,14 +39,14 @@ const MAX_THEMES: usize = 4;
 /// Most characters in a command id or a key name.
 const MAX_ID: usize = 200;
 
-/// The preferences a profile holds, by their stored key. Page moves never change the scope.
+/// All supported profile preference keys, including opt-in saves and imported profiles.
 pub fn keys() -> impl Iterator<Item = &'static str> {
-    prefs::FIELDS.iter().filter(|field| field.scope == prefs::ProfileScope::Profile).map(|field| field.key)
+    prefs::FIELDS.iter().filter(|field| field.scope != prefs::ProfileScope::Computer).map(|field| field.key)
 }
 
 /// Page chips and whether only part of that page belongs to this scope. Unpaged settings
-/// share an Other settings chip. Both capture and this summary use the declaration's scope.
-pub(crate) fn groups(scope: prefs::ProfileScope) -> impl Iterator<Item = (&'static str, &'static str, bool)> {
+/// share an Other settings chip. The summary describes the current scope of future saves.
+pub(crate) fn groups(scope: prefs::ProfileScope, include_all: bool) -> impl Iterator<Item = (&'static str, &'static str, bool)> {
     prefs::WINDOW_PAGES
         .iter()
         .enumerate()
@@ -53,10 +54,10 @@ pub(crate) fn groups(scope: prefs::ProfileScope) -> impl Iterator<Item = (&'stat
         .chain([(None, "prefs.profiles_other_settings", "settings")])
         .filter_map(move |(page, label, icon)| {
             let fields = || prefs::FIELDS.iter().filter(|field| field.page == page);
-            if !fields().any(|field| field.scope == scope) {
+            if !fields().any(|field| field.scope.effective(include_all) == scope) {
                 return None;
             }
-            Some((label, icon, fields().any(|field| field.scope != scope)))
+            Some((label, icon, fields().any(|field| field.scope.effective(include_all) != scope)))
         })
 }
 
@@ -152,8 +153,16 @@ fn set_name(doc: &mut Value, name: &str) {
 
 /// The current settings as a profile called `name`.
 pub fn capture(app: &SolveApp, name: &str) -> Value {
+    capture_with_scope(app, name, app.preferences.profile_include_all)
+}
+
+fn capture_with_scope(app: &SolveApp, name: &str, include_all: bool) -> Value {
     let all = serde_json::to_value(&app.preferences).unwrap_or_default();
-    let preferences: Map<String, Value> = keys().filter_map(|key| Some((key.to_string(), all.get(key)?.clone()))).collect();
+    let preferences: Map<String, Value> = prefs::FIELDS
+        .iter()
+        .filter(|field| field.scope == prefs::ProfileScope::Profile || (include_all && field.scope != prefs::ProfileScope::Computer))
+        .filter_map(|field| Some((field.key.to_string(), all.get(field.key)?.clone())))
+        .collect();
     let themes: Vec<Value> = app.preferences.custom_themes.iter().filter(|t| t.id == app.preferences.theme).map(theme_document).collect();
     let mut doc = json!({
         "format": FORMAT,
@@ -177,7 +186,8 @@ pub fn capture(app: &SolveApp, name: &str) -> Value {
 
 /// Older profiles leave absent preferences and optional navigator state alone.
 fn is_edited(app: &SolveApp, doc: &Value) -> bool {
-    let mut current = capture(app, name_of(doc));
+    // Compare every saved value even when future saves use the original scope.
+    let mut current = capture_with_scope(app, name_of(doc), true);
     for key in ["preferences", "view_navigator"] {
         if let (Some(saved), Some(values)) = (doc.get(key).and_then(Value::as_object), current.get_mut(key).and_then(Value::as_object_mut)) {
             values.retain(|key, _| saved.contains_key(key));
@@ -495,6 +505,7 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let count = crate::i18n::format("prefs.reports_saved", &[("n", &app.settings_profiles.list.len().to_string())]);
     ui_kit::settings_section_count(ui, "profiles", app.tr("ui.profiles"), Some(&count), |ui| {
         let names = app.settings_profiles.names();
+        prefs::profile_scope_setting(app, ui);
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing.y = t.space_8;
             for name in &names {
@@ -616,7 +627,7 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(t.space_6, t.space_6);
                         let locale = crate::i18n::Locale::for_language(&app.preferences.language);
-                        for (index, (chip, icon, partial)) in groups(scope).enumerate() {
+                        for (index, (chip, icon, partial)) in groups(scope, app.preferences.profile_include_all).enumerate() {
                             let label = if partial {
                                 locale.format("prefs.profiles_partial_page", &[("page", app.tr(chip))])
                             } else {
