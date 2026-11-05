@@ -221,6 +221,14 @@ The bar is empty, and so not shown, until a command is added, and holds up to 24
 windows hide it with Undo and Redo. It is saved with the toolbar's customisations, so it is
 exported with the keyboard shortcuts and carried by settings profiles.
 
+Layout › **Show only the ribbon's tabs** (off by default) folds the ribbon to its tab
+row, so the view gets the room its panels took. Click a tab to show its panels over the view; they
+close again when a command starts, when the pointer leaves them, when Escape is pressed or when the
+open tab is clicked again. The command **Ribbon Tabs Only** (VIEW tab, the toolbar's right-click
+menu and command search) switches the option, so it can be given a key in Keyboard Shortcuts:
+choose it again to keep the whole ribbon shown. Scripts run `view.ribbon_tabs_only` with
+`{"on": true}` or `{"on": false}`, or with no parameters to switch.
+
 Interface › Layout › **Show origin and bodies at the top** (off by default) puts the active
 component's Bodies folder and the Origin (planes, axes and point) at the top of the History when
 it sits on the left or under the browser and is wide enough for names. They are the browser's own

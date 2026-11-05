@@ -121,8 +121,10 @@ impl RenderSetup {
         if !self.stage.is_empty() && matches!(self.job, Some(RenderJob::Raster { .. })) {
             return Err(DocError::Invalid("passive stage geometry requires raytracing; raster cannot silently discard it".into()));
         }
-        if !self.surfaces.is_empty() && !matches!(self.job, Some(RenderJob::GpuPath { .. })) {
-            return Err(DocError::Invalid("saved surfaces require an explicit GPU job; unsupported methods cannot discard bindings".into()));
+        if !self.surfaces.is_empty() && !matches!(self.job, Some(RenderJob::CpuRaytrace { .. } | RenderJob::GpuPath { .. })) {
+            return Err(DocError::Invalid(
+                "saved surfaces require an explicit CPU raytrace or GPU path job; unsupported methods cannot discard bindings".into(),
+            ));
         }
         let (width, height) = (u64::from(self.width), u64::from(self.height));
         if width == 0 || height == 0 {
@@ -185,6 +187,8 @@ pub struct RenderSettings {
     pub setups: BTreeMap<String, RenderSetup>,
     #[serde(skip_serializing_if = "crate::render_resources::HdrResources::is_empty")]
     pub resources: crate::render_resources::HdrResources,
+    #[serde(skip_serializing_if = "crate::render_texture_resources::TextureResources::is_empty")]
+    pub texture_resources: crate::render_texture_resources::TextureResources,
 }
 
 #[derive(Default, Deserialize)]
@@ -192,12 +196,13 @@ pub struct RenderSettings {
 struct UncheckedSettings {
     setups: BTreeMap<String, RenderSetup>,
     resources: crate::render_resources::HdrResources,
+    texture_resources: crate::render_texture_resources::TextureResources,
 }
 
 impl TryFrom<UncheckedSettings> for RenderSettings {
     type Error = DocError;
     fn try_from(value: UncheckedSettings) -> Result<Self> {
-        let settings = Self { setups: value.setups, resources: value.resources };
+        let settings = Self { setups: value.setups, resources: value.resources, texture_resources: value.texture_resources };
         settings.validate()?;
         Ok(settings)
     }
@@ -205,7 +210,7 @@ impl TryFrom<UncheckedSettings> for RenderSettings {
 
 impl RenderSettings {
     pub fn is_empty(&self) -> bool {
-        self.setups.is_empty() && self.resources.is_empty()
+        self.setups.is_empty() && self.resources.is_empty() && self.texture_resources.is_empty()
     }
 
     pub fn validate_name(name: &str) -> Result<()> {
@@ -228,6 +233,17 @@ impl RenderSettings {
     }
 
     pub fn validate_resources(&self, setup: &RenderSetup) -> Result<()> {
+        for surface in setup.surfaces.iter() {
+            if let crate::render_surface::SurfaceSource::Embedded(source) = &surface.source {
+                for (role, id) in source.role_resources() {
+                    let resource = self.texture_resources.required(&id)?;
+                    resource.validate_role(role)?;
+                    if matches!(setup.job, Some(RenderJob::CpuRaytrace { .. })) {
+                        resource.validate_cpu_encoding()?;
+                    }
+                }
+            }
+        }
         match &setup.job {
             Some(RenderJob::CpuRaytrace { options }) => {
                 if let Some(hdr) = options.hdr {

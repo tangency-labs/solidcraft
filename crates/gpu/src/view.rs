@@ -20,7 +20,7 @@ use wgpu::util::DeviceExt;
 mod ao;
 pub use ao::GroundAo;
 mod clouds;
-pub use clouds::{CloudFilter, CloudStyle, ColorMode, DOT_SIZE, Dot, FILTERS, GpuCloud, cloud_dot};
+pub use clouds::{CELL_SIZE, Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, GpuCloud, cloud_cell};
 #[cfg(not(target_arch = "wasm32"))]
 mod msaa_check;
 mod oit;
@@ -1035,7 +1035,7 @@ pub struct Frame {
     pub cap: [f32; 4],
     /// Canvases and decals.
     pub images: Vec<GpuImage>,
-    /// Point clouds.
+    /// Point clouds and their cells.
     pub clouds: Vec<GpuCloud>,
     /// Surface analysis: (mode: 0 none, 1 zebra, 2 draft, 3 curvature, 4 environment,
     /// 5 accessibility; parameter; scale; size) and the pull / access direction.
@@ -5265,19 +5265,30 @@ mod glass_tests {
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let mut renderer = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false }, None);
         let mut frame = test_frame(GpuScene::default(), 2.0);
-        // A dot labelled 2 (red in the palette) and a dot filtered by 5 (a range) and the label
-        // 2 (a set).
+        // A dot (labelled 2, red in the palette) and a bead across the view, filtered by 5 (a
+        // range) and the label 2 (a set).
         let mut dots = Vec::new();
-        cloud_dot(&mut dots, &Dot { at: [5.0, 5.0, 0.0], rgb: [0, 0, 255], value: 2.0, has: 16, ..Default::default() });
-        let filtered = Dot { at: [-3.0, -3.0, 0.0], value: 1.0, filtered: [5.0, 2.0, 0.0, 0.0], rgb: [0, 255, 0], has: 0b10011 };
-        cloud_dot(&mut dots, &filtered);
+        cloud_cell(&mut dots, &Cell { corners: [[5.0, 5.0, 0.0]; 3], rgb: [0, 0, 255], value: [2.0; 3], has: 16, ..Default::default() });
+        let mut segments = Vec::new();
+        let ends = [[-3.0, -3.0, 0.0], [3.0, -3.0, 0.0], [3.0, -3.0, 0.0]];
+        let bead = Cell {
+            corners: ends,
+            value: [1.0; 3],
+            filtered: [[5.0; 3], [2.0; 3], [0.0; 3], [0.0; 3]],
+            size: [0.2, 0.2],
+            rgb: [0, 255, 0],
+            has: 0b10011,
+            ..Default::default()
+        };
+        cloud_cell(&mut segments, &bead);
         let style = CloudStyle { mode: ColorMode::Own, range: [0.0, 1.0], filters: Default::default(), point_size: 20.0 };
-        frame.clouds.push(GpuCloud { id: 1, version: 1, dots: Arc::new(dots), style });
+        let empty = Arc::new(Vec::new());
+        frame.clouds.push(GpuCloud { id: 1, version: 1, dots: Arc::new(dots), segments: Arc::new(segments), triangles: empty, style });
         let has = |img: &[u8], f: &dyn Fn(&[u8; 4]) -> bool| img.as_chunks::<4>().0.iter().any(f);
         let green = |p: &[u8; 4]| p[1] > 120 && p[0] < 30 && p[2] < 30;
         let own = render_frame(&mut renderer, &device, &queue, &frame, true);
-        assert!(has(&own, &|p| p[2] > 200 && p[0] < 30), "a dot in its own colour");
-        assert!(has(&own, &green), "the other in its own colour");
+        assert!(has(&own, &|p| p[2] > 200 && p[0] < 30), "the dot in its own colour");
+        assert!(has(&own, &green), "the bead in its own colour");
         // Values from -1: bit 3 is the label 2, bit 2 the label 1.
         frame.clouds[0].style.filters[1] = CloudFilter::Values { offset: -1, mask: 0b1000 };
         assert!(has(&render_frame(&mut renderer, &device, &queue, &frame, true), &green), "label 2 kept");
@@ -5287,11 +5298,100 @@ mod glass_tests {
         frame.clouds[0].style.filters[0] = CloudFilter::Range([0.0, 4.0]);
         frame.clouds[0].style.mode = ColorMode::Palette;
         let filtered = render_frame(&mut renderer, &device, &queue, &frame, true);
-        assert!(!has(&filtered, &green), "its 5 lies outside the range");
-        assert!(has(&filtered, &|p| p[0] > 200 && p[1] < 90 && p[2] < 90), "the first, without that value, in the palette's red");
+        assert!(!has(&filtered, &green), "the bead's 5 lies outside the range");
+        assert!(has(&filtered, &|p| p[0] > 200 && p[1] < 90 && p[2] < 90), "the dot, without that value, in the palette's red");
         frame.clouds.clear();
         let hidden = render_frame(&mut renderer, &device, &queue, &frame, true);
         assert!(!has(&hidden, &|p| p[0] > 200 && p[1] < 90 && p[2] < 90), "hiding the cloud removes it");
+    }
+
+    /// A set of values keeps the part of a bead where its rounded value is kept, as the range
+    /// tracks measure it, whichever end holds the kept value: the first end's value alone does
+    /// not decide for the whole bead.
+    #[test]
+    fn a_set_filter_keeps_the_part_of_a_bead_whose_ends_differ() {
+        let Some((_, device, queue)) = crate::open_headless().ok() else { return };
+        let depth = crate::depth_format(&device, true);
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
+        let mut renderer = Renderer::new(&device, target, None);
+        let mut draw = |version: u64, at_start: f32, at_end: f32, mask: u32| {
+            let mut frame = test_frame(GpuScene::default(), 1.0);
+            let ends = [[-3.0, -3.0, 0.0], [3.0, -3.0, 0.0], [3.0, -3.0, 0.0]];
+            let bead = Cell {
+                corners: ends,
+                neighbours: [ends[0], ends[1]],
+                filtered: [[at_start, at_end, at_end], [0.0; 3], [0.0; 3], [0.0; 3]],
+                size: [0.5, 0.5],
+                rgb: [0, 255, 0],
+                has: 1,
+                ..Default::default()
+            };
+            let mut segments = Vec::new();
+            cloud_cell(&mut segments, &bead);
+            let mut filters: [CloudFilter; 4] = Default::default();
+            filters[0] = CloudFilter::Values { offset: 0, mask };
+            let style = CloudStyle { mode: ColorMode::Own, range: [0.0, 1.0], filters, point_size: 1.0 };
+            let empty = Arc::new(Vec::new());
+            frame.clouds.push(GpuCloud { id: 1, version, dots: empty.clone(), segments: Arc::new(segments), triangles: empty, style });
+            let img = render_frame(&mut renderer, &device, &queue, &frame, true);
+            // The 64 by 64 picture, split down the middle.
+            let side =
+                |left: bool| img.as_chunks::<4>().0.iter().enumerate().any(|(i, p)| (i % 64 < 32) == left && p[1] > 60 && p[0] < 30 && p[2] < 30);
+            (side(true), side(false))
+        };
+        assert_eq!(draw(1, 0.0, 1.0, 0b10), (false, true), "1 is kept at the end only: the half towards the end");
+        assert_eq!(draw(2, 1.0, 0.0, 0b10), (true, false), "1 is kept at the start only: the half towards the start");
+        assert_eq!(draw(3, 0.0, 1.0, 0b11), (true, true), "both kept: the whole bead");
+        assert_eq!(draw(4, 0.0, 1.0, 0b100), (false, false), "neither kept: nothing");
+        assert_eq!(draw(5, 1.0, 1.0, 0b01), (false, false), "the same value at both ends, not kept: nothing");
+    }
+
+    /// A floor and a bead on it, one end far off to the side behind the eye: each is cut exactly at
+    /// the near plane. So what lies ahead shows where the perspective puts it, and nothing is
+    /// drawn straight below the eye, where an end moved to a made-up place would pull a wedge.
+    #[test]
+    fn a_cloud_element_crossing_the_near_plane_is_cut_there() {
+        let Some((_, device, queue)) = crate::open_headless().ok() else { return };
+        let depth = crate::depth_format(&device, true);
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
+        let mut renderer = Renderer::new(&device, target, None);
+        // Looking along -z from the origin: a point shows at x/d, y/d at distance d = -z.
+        let (near, far) = (0.1f32, 1000.0f32);
+        let (a, b) = (-far / (far - near), -far * near / (far - near));
+        let view_proj = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, a, -1.0], [0.0, 0.0, b, 0.0]];
+        let mut draw = |version: u64, segments: Vec<u8>, triangles: Vec<u8>| {
+            let mut frame = test_frame(GpuScene::default(), 1.0);
+            frame.view_proj = view_proj;
+            let style = CloudStyle { mode: ColorMode::Own, range: [0.0, 1.0], filters: Default::default(), point_size: 1.0 };
+            let dots = Arc::new(Vec::new());
+            frame.clouds.push(GpuCloud { id: 1, version, dots, segments: Arc::new(segments), triangles: Arc::new(triangles), style });
+            render_frame(&mut renderer, &device, &queue, &frame, true)
+        };
+        // Green at pixel `x` of row `y`, counted from the top of the 64 by 64 picture.
+        let green =
+            |img: &[u8], x: usize, y: usize| img.get((y * 64 + x) * 4..(y * 64 + x) * 4 + 3).is_some_and(|p| p[1] > 60 && p[0] < 30 && p[2] < 30);
+        // Pixel 47 of row 43 is (0.48, -0.36). On y = -1 that is 2.78 away, where the path from
+        // (0, -1, -3) to (40, -1, 3) has come to x = 1.47: x/d = 0.53, within the floor (0.18 to
+        // 0.87 there) and the bead. Pixel 32 of row 56 is (0.0, -0.77): by that distance both have
+        // gone far off to the right.
+        let (ahead, below) = ((47, 43), (32, 56));
+
+        let mut triangles = Vec::new();
+        let floor = [[-1.0, -1.0, -3.0], [1.0, -1.0, -3.0], [40.0, -1.0, 3.0]];
+        cloud_cell(&mut triangles, &Cell { corners: floor, rgb: [0, 255, 0], ..Default::default() });
+        let img = draw(1, Vec::new(), triangles);
+        assert!(green(&img, ahead.0, ahead.1), "the floor ahead");
+        assert!(!green(&img, below.0, below.1), "no wedge of floor below the eye");
+
+        let (start, end) = ([40.0, -1.0, 3.0], [0.0, -1.0, -3.0]);
+        let mut segments = Vec::new();
+        let bead = Cell { corners: [start, end, end], neighbours: [start, end], size: [0.5, 0.5], rgb: [0, 255, 0], ..Default::default() };
+        cloud_cell(&mut segments, &bead);
+        let img = draw(2, segments, Vec::new());
+        assert!(green(&img, ahead.0, ahead.1), "the bead ahead");
+        assert!(!green(&img, below.0, below.1), "no wedge of bead below the eye");
     }
 
     /// A still view shows the picture it drew last: a reused frame (whose filtered picture is

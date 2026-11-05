@@ -2568,7 +2568,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         inside |= pointer.is_some_and(|p| area.contains(p));
         let hot = pointer.and_then(|p| sector(p - c));
         let resp = Container::new(ctx, Surface::Popup)
-            .area(egui::Id::new("sc_marking_menu"))
+            .area(egui::Id::unique("sc_marking_menu"))
             .fixed_pos(area.min)
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
@@ -2615,7 +2615,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let key_row = app.menu.key_row;
     let mut seen: Vec<Seen> = Vec::new();
     let resp = Container::new(ctx, Surface::Popup)
-        .area(egui::Id::new("sc_context_menu"))
+        .area(egui::Id::unique("sc_context_menu"))
         .fixed_pos(list_at)
         .constrain(true)
         .order(egui::Order::Foreground)
@@ -2632,7 +2632,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         let Some(row) = seen.get(depth - 1).and_then(|s| s.anchor) else { break };
         // One area per flyout and contents: an egui area keeps its last size, so a flyout sharing
         // one with a shorter one would be squeezed into it and scroll.
-        let id = egui::Id::new(("sc_context_submenu", depth)).with(rows.iter().map(|i| (&i.id, &i.label)).collect::<Vec<_>>());
+        let id = egui::Id::unique(("sc_context_submenu", depth)).with(rows.iter().map(|i| (&i.id, &i.label)).collect::<Vec<_>>());
         let cursor = if depth == path.len() { app.menu.submenu_key } else { None };
         let sub = crate::ui_kit::Menu::submenu(ctx, id, row, list_height(rows), leftward, |ui| {
             egui::ScrollArea::vertical()
@@ -2823,7 +2823,7 @@ fn show_rename(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut r) = app.menu.rename.take() else { return };
     let mut done: Option<bool> = None;
     let resp =
-        Container::new(ctx, Surface::Popup).area(egui::Id::new("sc_rename")).fixed_pos(r.at).constrain(true).order(egui::Order::Foreground).show(
+        Container::new(ctx, Surface::Popup).area(egui::Id::unique("sc_rename")).fixed_pos(r.at).constrain(true).order(egui::Order::Foreground).show(
             ctx,
             |ui| {
                 done = crate::ui_kit::rename_menu(ui, &mut r.text, &mut r.focused);

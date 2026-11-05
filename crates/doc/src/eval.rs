@@ -784,7 +784,7 @@ impl ModelState {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             serde_json::to_string(&s.plane).unwrap_or_default().hash(&mut h);
             let mut sketch = s.sketch.clone();
-            quantize(&mut sketch);
+            fingerprint_sketch(&mut sketch);
             serde_json::to_string(&sketch).unwrap_or_default().hash(&mut h);
             s.report.ok().hash(&mut h);
             self.sketch_keys.insert(feature, h.finish());
@@ -1253,6 +1253,13 @@ fn quantize(sk: &mut solidcraft_sketch::Sketch) {
     }
 }
 
+/// The stored solve as a cache key: on the [`QUANTUM`] grid, without the editor state
+/// (see [`solidcraft_sketch::Sketch::clear_id_counters`]).
+fn fingerprint_sketch(sk: &mut solidcraft_sketch::Sketch) {
+    quantize(sk);
+    sk.clear_id_counters();
+}
+
 /// A feature as fingerprinted: its definition, a sketch's stored solve quantized, an imported
 /// file's text or mesh payload by its content digest.
 /// Hash [`feature_json`] of `f` into `h`. Every evaluation fingerprints every feature, and in a
@@ -1319,7 +1326,7 @@ fn feature_json(f: &Feature, steps: &ImportDigests) -> String {
     if let FeatureKind::Sketch { .. } = &f.kind {
         let mut g = f.clone();
         if let FeatureKind::Sketch { sketch, .. } = &mut g.kind {
-            quantize(sketch);
+            fingerprint_sketch(sketch);
         }
         return serde_json::to_string(&g).unwrap_or_default();
     }
@@ -7259,7 +7266,7 @@ fn eval_feature(
         | FeatureKind::Rib { .. }
         | FeatureKind::ReplaceFace { .. }
         | FeatureKind::Align { .. }
-        | FeatureKind::Remove { .. } => more::eval(doc, vals, f, st),
+        | FeatureKind::Remove { .. } => more::eval(doc, vals, f, st, warning),
         FeatureKind::Sketch { plane, sketch } => {
             let anchor = crate::face_anchor::plane_face_anchor(plane);
             let fst = match anchor {

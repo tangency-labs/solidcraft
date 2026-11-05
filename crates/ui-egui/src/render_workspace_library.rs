@@ -2,6 +2,8 @@
 //! assignments and saved resources; this view owns only search and request drafts.
 #[path = "render_workspace_library_review.rs"]
 pub(super) mod review;
+#[path = "render_workspace_surface_import.rs"]
+mod surface_import;
 
 use super::{ImageMethod, materials, setups};
 use crate::ui_kit::BackingTooltipExt as _;
@@ -53,6 +55,8 @@ pub(super) struct View {
     preview_error: Option<String>,
     mapping_plane: usize,
     mapping_scale: f64,
+    mapping_angle_deg: f64,
+    imported: surface_import::View,
 }
 #[derive(Clone, Debug)]
 struct Navigation {
@@ -118,6 +122,8 @@ impl Default for View {
             preview_error: None,
             mapping_plane: 0,
             mapping_scale: 1.0,
+            mapping_angle_deg: 0.0,
+            imported: surface_import::View::default(),
         }
     }
 }
@@ -222,7 +228,7 @@ fn target_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View) {
     ui.label(app.tr("render.library_target"));
     ui_kit::bounded_cell_editor(
         ui,
-        ui.id().with("render_library_target_search"),
+        ui.scope_id().with("render_library_target_search"),
         &mut view.target_query,
         app.tr("render.material_filter"),
         false,
@@ -620,7 +626,7 @@ fn light_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if view.light_scope == 4 {
         ui.add_enabled_ui(false, |ui| {
-            ui_kit::search_field(ui, ui.id().with("render_mine_search"), &mut view.query, app.tr("render.stage_panels.search_studios"));
+            ui_kit::search_field(ui, ui.scope_id().with("render_mine_search"), &mut view.query, app.tr("render.stage_panels.search_studios"));
             ui_kit::button(ui, app.tr("render.stage_panels.apply"), ui_kit::Button::Normal);
         });
         ui_kit::text(ui, app.tr("render.stage_panels.mine_pending"), ui_kit::Text::Note("render:mine:reason"));
@@ -679,7 +685,7 @@ fn light_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 fn catalog_search(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, hint: &str) {
-    let search = ui_kit::search_field(ui, ui.id().with("render_stage_catalog_search"), &mut view.query, app.tr(hint));
+    let search = ui_kit::search_field(ui, ui.scope_id().with("render_stage_catalog_search"), &mut view.query, app.tr(hint));
     crate::scenario::publish_target("render:library-search", search.rect);
     let end = view.query.char_indices().nth(128).map_or(view.query.len(), |(at, _)| at);
     view.query.truncate(end);
@@ -720,6 +726,9 @@ fn surface_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::Segments { compact: true, proportional: true, targets: &["render:surfaces", "render:references"], ..Default::default() },
     ) {
         switch_kind(&mut view, if scope == 0 { "surfaces" } else { "physical_profiles" });
+    }
+    if scope == 0 {
+        surface_import::controls(app, ui, &mut view);
     }
     catalog_search(app, ui, &mut view, "render.stage_panels.search_surfaces");
     let layout = ui_kit::CatalogLayout::new(ui, "render:surface:catalog", 3);
@@ -824,6 +833,10 @@ fn surface_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id: 
         let repeat = ui_kit::number_field(ui, &mut view.mapping_scale, 0.001..=1000.0, 0.01, " ×");
         crate::scenario::publish_target("render:surface:repeat", repeat.rect);
     });
+    ui_kit::row(ui, app.tr("render.stage_panels.grain_angle"), |ui| {
+        let angle = ui_kit::number_field(ui, &mut view.mapping_angle_deg, -180.0..=180.0, 1.0, "°");
+        crate::scenario::publish_target("render:surface:grain-angle", angle.rect);
+    });
     let supported = view
         .details
         .as_ref()
@@ -839,11 +852,14 @@ fn surface_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id: 
             requested = Some(1);
         }
     });
-    if ui_kit::button(ui, app.tr("render.stage_panels.save_maps"), ui_kit::Button::Enabled(enabled && gpu && patch(app).is_ok())).clicked() {
+    let raytrace = app.render_workspace.view.method != ImageMethod::Raster;
+    if ui_kit::button(ui, app.tr("render.stage_panels.save_maps"), ui_kit::Button::Enabled(enabled && raytrace && patch(app).is_ok())).clicked() {
         requested = Some(2);
     }
-    if !gpu {
-        ui_kit::text(ui, app.tr("render.stage_panels.gpu_required"), ui_kit::Text::Note("surface:gpu:reason"));
+    if !raytrace {
+        ui_kit::text(ui, app.tr("render.surface_import.raytrace_required"), ui_kit::Text::Note("surface:gpu:reason"));
+    } else if !gpu {
+        ui_kit::text(ui, app.tr("render.surface_import.saved_cpu"), ui_kit::Text::Note("surface:cpu:reason"));
     }
     if !supported {
         ui_kit::text(ui, app.tr("render.library_specification_only"), ui_kit::Text::Note("surface:reference:reason"));
@@ -861,7 +877,8 @@ fn surface_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id: 
                     },
                 )
             } else {
-                let surface = json!({"id":id,"body_index":target.ordinal,"body_name":target.name,"scale":view.mapping_scale,"plane":plane});
+                let rotation_rad = view.mapping_angle_deg.to_radians();
+                let surface = json!({"id":id,"body_index":target.ordinal,"body_name":target.name,"scale":view.mapping_scale,"plane":plane,"rotation_rad":rotation_rad});
                 let plan = app.run("render.library.surface.prepare", surface.clone())?;
                 let action = if mode == 2 {
                     review::Apply::Command {
@@ -869,7 +886,7 @@ fn surface_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id: 
                         params: json!({"name":app.render_workspace.view.name,"set":patch(app)?,"surface":surface,"replace":true}),
                     }
                 } else {
-                    review::Apply::Maps { id: id.into(), target, plane: plane.into(), scale: view.mapping_scale }
+                    review::Apply::Maps { id: id.into(), target, plane: plane.into(), scale: view.mapping_scale, rotation_rad }
                 };
                 (plan, action)
             };
@@ -959,7 +976,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
     };
     let hint = crate::i18n::format("render.search_appearances", &[("count", &count.to_string())]);
     let query = if view.collection == 0 { &mut view.query } else { &mut view.collection_query };
-    let search = ui_kit::search_field(ui, ui.id().with("render_library_search"), query, &hint);
+    let search = ui_kit::search_field(ui, ui.scope_id().with("render_library_search"), query, &hint);
     query.truncate(query.char_indices().nth(128).map_or(query.len(), |(at, _)| at));
     crate::scenario::publish_target("render:library-search", search.rect);
     if search.changed() {
@@ -1517,10 +1534,11 @@ fn saved_surface_content(app: &mut SolveApp, ui: &mut egui::Ui, target: Option<&
             ui_kit::text(ui, app.tr("render.saved_maps_runtime_conflict"), ui_kit::Text::Note("render.saved_maps_runtime_conflict"));
         }
         for (index, binding) in bindings.iter().enumerate().filter(|(_, b)| target.is_none_or(|t| t == &b.target)) {
-            ui.label(format!(
-                "{} - {} ({}): {:?}",
-                binding.source.id, binding.target.definition, binding.target.feature, binding.target.occurrence_path
-            ));
+            let source = match &binding.source {
+                solidcraft_engine::doc::render_surface::SurfaceSource::Builtin(source) => source.id.as_str(),
+                solidcraft_engine::doc::render_surface::SurfaceSource::Embedded(_) => app.tr("render.surface_import.embedded"),
+            };
+            ui.label(format!("{} - {} ({}): {:?}", source, binding.target.definition, binding.target.feature, binding.target.occurrence_path));
             if ui_kit::button(ui, app.tr("render.inspector_replace"), ui_kit::Button::Normal).clicked() {
                 open_category(app, "surfaces");
             }
@@ -1613,7 +1631,7 @@ fn physical_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id:
         }
     }
     ui.label(app.tr("render.physical_material_name"));
-    ui_kit::bounded_cell_editor(ui, ui.id().with("physical_reference_name"), &mut view.physical_name, "", false, 128);
+    ui_kit::bounded_cell_editor(ui, ui.scope_id().with("physical_reference_name"), &mut view.physical_name, "", false, 128);
     if ui_kit::button(ui, app.tr("render.stage_panels.prepare_plan"), ui_kit::Button::Normal).clicked() {
         let result =
             app.run("render.library.physical.prepare", json!({"id":id,"name":view.physical_name,"acknowledge_reference":true})).and_then(|plan| {
@@ -1669,10 +1687,146 @@ pub(super) fn invalidate(app: &mut SolveApp) {
     app.render_workspace.view.library.loaded = false;
 }
 
+pub(super) fn poll_import(app: &mut SolveApp, ctx: &egui::Context) {
+    surface_import::poll(app, ctx);
+}
+
+pub(super) fn reveal_import(app: &mut SolveApp) {
+    app.render_workspace.view.library.imported.reveal = true;
+}
+
 #[cfg(test)]
 mod studio_browser_tests {
     use super::*;
     use crate::scenario::Harness;
+
+    fn image_import_fixture() -> (Harness, View) {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":20,"width":10,"height":5,"body_name":"Board"})).unwrap();
+        super::super::enter(&mut h.app, true).unwrap();
+        super::super::select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
+        h.app.render_workspace.view.name = "Imported wood".into();
+        let path = h.dir.join("original-wood.png");
+        image::RgbaImage::from_pixel(4, 4, image::Rgba([180, 110, 60, 255])).save(&path).unwrap();
+        let mut view = std::mem::take(&mut h.app.render_workspace.view.library);
+        refresh_targets(&mut h.app, &mut view).unwrap();
+        view.target = view.targets.first().cloned();
+        view.mapping_plane = 1;
+        view.mapping_angle_deg = 90.0;
+        view.imported.path = path.to_string_lossy().into_owned();
+        view.imported.author = "Original test author".into();
+        view.imported.source = "Original synthetic fixture".into();
+        view.imported.license = "CC0-1.0".into();
+        view.imported.repeat_mm = [20.0, 40.0];
+        (h, view)
+    }
+
+    fn prepared_image_import(h: &mut Harness, view: View) -> surface_import::Pending {
+        let request = surface_import::request(&mut h.app, &view).unwrap();
+        let prepared = h.app.session.scratch().compute_commands(&[("render.surface.import".into(), request)], None).unwrap();
+        h.app.render_workspace.view.library = view;
+        let (sender, receiver) = std::sync::mpsc::channel();
+        assert!(sender.send(Ok(prepared)).is_ok());
+        surface_import::Pending {
+            result: Arc::new(std::sync::Mutex::new(receiver)),
+            document: Arc::downgrade(&h.app.session.doc),
+            revision: h.app.session.revision,
+            shot: h.app.render_workspace.view.name.clone(),
+            method: h.app.render_workspace.view.method,
+            snapshot: patch(&h.app).unwrap(),
+        }
+    }
+
+    #[test]
+    fn image_import_controls_keep_physical_grain_and_adopt_without_reading_source_again() {
+        let (mut h, view) = image_import_fixture();
+        let request = surface_import::request(&mut h.app, &view).unwrap();
+        let frame: solidcraft_engine::render::job::textures::PlanarFrame = serde_json::from_value(request["frame"].clone()).unwrap();
+        assert!((frame.u[2] - 20.0).abs() < 1e-10 && frame.u[1].abs() < 1e-10);
+        assert!((frame.v[1] + 40.0).abs() < 1e-10 && frame.v[2].abs() < 1e-10);
+        assert_eq!(request["provenance"]["author"], "Original test author");
+        assert_eq!(request["provenance"]["source"], "Original synthetic fixture");
+        let before = h.app.session.doc.to_json();
+        let physical = (h.app.session.doc.features.clone(), h.app.session.doc.materials.clone());
+        let undo = h.app.session.undo.len();
+        let pending = prepared_image_import(&mut h, view);
+        std::fs::remove_file(h.dir.join("original-wood.png")).unwrap();
+        h.app.render_workspace.view.library.imported.pending = Some(pending);
+        poll_import(&mut h.app, &crate::fonts::test_context());
+        assert!(h.app.render_workspace.view.library.imported.pending.is_none());
+        assert_eq!(h.app.session.doc.render.texture_resources.len(), 1);
+        assert_eq!(h.app.session.doc.render.setups["Imported wood"].surfaces.len(), 1);
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!((h.app.session.doc.features.clone(), h.app.session.doc.materials.clone()), physical);
+        assert!(!h.app.session.doc.to_json().contains("original-wood.png"));
+        assert_eq!(h.app.render_workspace.view.draft.surfaces.len(), 1);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.to_json(), before);
+    }
+
+    #[test]
+    fn image_import_completion_cannot_replace_a_changed_document_shot_method_or_draft() {
+        for change in ["document", "shot", "method", "draft"] {
+            let (mut h, view) = image_import_fixture();
+            let pending = prepared_image_import(&mut h, view);
+            h.app.render_workspace.view.library.imported.pending = Some(pending);
+            match change {
+                "document" => {
+                    h.app.run("appearance.assign", json!({"bodies":["Board"],"color":"#208040"})).unwrap();
+                }
+                "shot" => h.app.render_workspace.view.name = "Other shot".into(),
+                "method" => h.app.render_workspace.view.method = ImageMethod::Raster,
+                _ => h.app.render_workspace.view.draft.width = 96,
+            }
+            let before = h.app.session.doc.clone();
+            poll_import(&mut h.app, &crate::fonts::test_context());
+            assert!(Arc::ptr_eq(&before, &h.app.session.doc), "{change}");
+            assert!(h.app.render_workspace.view.library.imported.pending.is_none());
+            assert!(h.app.session.doc.render.texture_resources.is_empty());
+        }
+    }
+
+    #[test]
+    fn image_picker_cancellation_and_late_answers_keep_the_current_selection() {
+        use crate::picker_test_support::{Slot, open};
+        for change in ["cancel", "document", "shot", "method", "input"] {
+            let mut h = Harness::new();
+            h.app.render_workspace.view.library.imported.path = "original.png".into();
+            let slot: Slot = Default::default();
+            open(&mut h.app, &slot);
+            surface_import::pick(&mut h.app, "original.png".into());
+            match change {
+                "document" => {
+                    h.app.session.execute("file.new", &json!({})).unwrap();
+                }
+                "shot" => h.app.render_workspace.view.name = "Other shot".into(),
+                "method" => h.app.render_workspace.view.method = ImageMethod::CpuRaytrace,
+                "input" => h.app.render_workspace.view.library.imported.path = "newer.png".into(),
+                _ => {}
+            }
+            let before = h.app.render_workspace.view.library.imported.path.clone();
+            let document = h.app.session.doc.clone();
+            *slot.borrow_mut() = Some(if change == "cancel" { None } else { Some("never-opened-late.png".into()) });
+            crate::file_picker::tick(&mut h.app, &crate::fonts::test_context());
+            assert_eq!(h.app.render_workspace.view.library.imported.path, before, "{change}");
+            assert!(Arc::ptr_eq(&document, &h.app.session.doc));
+        }
+    }
+
+    #[test]
+    fn starting_image_import_reveals_file_controls_without_changing_the_design() {
+        let (mut h, view) = image_import_fixture();
+        h.app.render_workspace.view.library = view;
+        h.call("ui.resize", json!({"width":1440,"height":1800}));
+        let before = h.app.session.doc.to_json();
+        h.app.start("render.surface.import");
+        h.frames(3);
+        assert!(crate::scenario::rect_of("render:surface-import:choose").is_some());
+        assert!(crate::scenario::rect_of("render:surface-import:save").is_some());
+        assert_eq!(h.app.session.doc.to_json(), before);
+        assert!(!h.app.file_picker_busy());
+    }
+
     #[test]
     fn appearance_cards_select_inspect_switch_layout_and_keep_explicit_apply() {
         let mut h = Harness::new();

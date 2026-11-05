@@ -4,7 +4,7 @@ use super::*;
 #[derive(Clone, Debug)]
 pub(in crate::render_workspace) enum Apply {
     Command { id: String, params: Value },
-    Maps { id: String, target: materials::Target, plane: String, scale: f64 },
+    Maps { id: String, target: materials::Target, plane: String, scale: f64, rotation_rad: f64 },
     Quality(Value),
     Physical(Value),
 }
@@ -139,7 +139,9 @@ fn apply(app: &mut SolveApp, draft: &mut Draft) -> Result<(), String> {
                 setups::load(app);
             }
         }
-        Apply::Maps { id, target, plane, scale } => materials::install_library_surface(app, id, target.clone(), plane, *scale)?,
+        Apply::Maps { id, target, plane, scale, rotation_rad } => {
+            materials::install_library_surface(app, id, target.clone(), plane, *scale, *rotation_rad)?
+        }
         Apply::Quality(plan) => {
             super::super::inspector::apply_quality(app, plan)?;
             setups::save(app)?;
@@ -298,7 +300,7 @@ pub(in crate::render_workspace) fn confirmation(app: &mut SolveApp, ctx: &egui::
     let title = app.tr(if stage { "render.stage_panels.remove_stage_title" } else { "render.stage_panels.remove_optics_title" }).to_string();
     let message = app.tr(if stage { "render.stage_panels.remove_stage_help" } else { "render.stage_panels.remove_optics_help" }).to_string();
     let label = app.tr(if stage { "render.stage_panels.remove_stage" } else { "render.stage_panels.remove_optics" }).to_string();
-    let (closed, answer) = ui_kit::Confirm::new(egui::Id::new("render_resource_removal"), "delete", &title)
+    let (closed, answer) = ui_kit::Confirm::new(egui::Id::unique("render_resource_removal"), "delete", &title)
         .tone(ui_kit::Tone::Danger)
         .actions(&label, app.tr("render.stage_panels.keep"), None)
         .show(ctx, true, |ui| {

@@ -96,6 +96,7 @@ const PROFILE_KEYS: &[&str] = &[
     "ribbon_menus_follow_hover",
     "ribbon_menus_skip_pinned",
     "ribbon_reveal",
+    "ribbon_tabs_only",
     "right_drag_orbits",
     "select_other_hidden",
     "selection_shift_add_only",
@@ -741,7 +742,7 @@ pub(crate) fn rename_popup(app: &mut SolveApp, ctx: &egui::Context) {
     crate::prefs_search::note_key_sink(ctx);
     let mut done = None;
     let popup = ui_kit::Container::new(ctx, ui_kit::Surface::Popup)
-        .area(egui::Id::new("sc_profile_rename"))
+        .area(egui::Id::unique("sc_profile_rename"))
         .fixed_pos(rename.at)
         .constrain(true)
         .order(egui::Order::Foreground)

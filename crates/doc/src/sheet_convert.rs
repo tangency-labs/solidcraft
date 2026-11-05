@@ -419,6 +419,21 @@ fn bend_cylinder(b: &Body, mesh: &Mesh, f: usize, tol: f64) -> Option<Chamfer> {
     na.cross(nb).normalized().map(|_| Chamfer { strip: f, a, b: bb })
 }
 
+/// Every piece of bend cylinder `c`'s cylinder (the same axis line and radius) that is a bend
+/// cylinder between the same two faces: the pieces cut-outs across a bend leave of it. `c` too.
+fn bend_pieces(b: &Body, mesh: &Mesh, c: Chamfer, tol: f64) -> Vec<Chamfer> {
+    let Some(FaceSurface::Cylinder { origin, axis, radius }) = face_surface(b, c.strip) else { return vec![c] };
+    let coaxial = |g: usize| match face_surface(b, g) {
+        Some(FaceSurface::Cylinder { origin: o, axis: a, radius: r }) => {
+            (r - radius).abs() <= tol && a.cross(axis).len() <= 1e-6 && ((o - origin) - axis * (o - origin).dot(axis)).len() <= tol
+        }
+        _ => false,
+    };
+    let same = |o: &Chamfer| (o.a, o.b) == (c.a, c.b) || (o.a, o.b) == (c.b, c.a);
+    let pieces = (0..b.face_count()).filter(|g| *g != c.strip && coaxial(*g)).filter_map(|g| bend_cylinder(b, mesh, g, tol)).filter(same);
+    std::iter::once(c).chain(pieces).collect()
+}
+
 /// The cylinder of bend `c` on a shell's other skin: the bend cylinder between the faces
 /// straight behind `c`'s two sides, so that a bend picked on either skin is that bend on both.
 fn other_skin(b: &Body, mesh: &Mesh, c: &Chamfer, tol: f64) -> Option<Chamfer> {
@@ -703,31 +718,89 @@ fn drawn(trimmed: &[Vec2], from: &[Option<usize>], pts: &[Vec2], round: &[Option
     if round.iter().all(Option::is_none) {
         return Ok(None);
     }
-    let (m, n) = (trimmed.len(), pts.len());
-    let mut segs: Vec<Seg2> = Vec::with_capacity(m);
-    for j in 0..m {
-        let (Some(&a), Some(&b)) = (trimmed.get(j), trimmed.get((j + 1) % m)) else { continue };
-        let arc = from.get(j).copied().flatten().and_then(|i| Some((i, round.get(i).copied().flatten()?)));
-        let Some((i, (c, mid))) = arc else {
-            segs.push(Seg2::Line { a: snap(a), b: snap(b) });
-            continue;
-        };
-        let (Some(&p), Some(&q)) = (pts.get(i), pts.get((i + 1) % n)) else { continue };
-        if a.dist(p) > 1e-6 || b.dist(q) > 1e-6 {
-            return err("not supported yet: a round edge of a face that ends at a bend or a cut edge of the sheet");
-        }
-        let (start, r) = ((p - c).angle(), c.dist(p));
-        let half = ((mid - c).angle() - start + PI).rem_euclid(TAU) - PI;
-        match segs.last_mut() {
-            Some(Seg2::Arc { center, radius, sweep, .. })
-                if center.dist(c) <= 1e-9 && (*radius - r).abs() <= 1e-9 && *sweep * half > 0.0 && (*sweep + 2.0 * half).abs() <= PI + 1e-9 =>
+    let mut segs: Vec<Seg2> = Vec::with_capacity(trimmed.len());
+    for j in 0..trimmed.len() {
+        let Some(seg) = drawn_edge(trimmed, from, pts, round, j)? else { continue };
+        match (segs.last_mut(), seg) {
+            (Some(Seg2::Arc { center, radius, sweep, .. }), Seg2::Arc { center: c, radius: r, sweep: s, .. })
+                if center.dist(c) <= 1e-9 && (*radius - r).abs() <= 1e-9 && *sweep * s > 0.0 && (*sweep + s).abs() <= PI + 1e-9 =>
             {
-                *sweep += 2.0 * half;
+                *sweep += s;
             }
-            _ => segs.push(Seg2::Arc { center: c, radius: r, start, sweep: 2.0 * half }),
+            _ => segs.push(seg),
         }
     }
     Ok(Some(Loop2 { segs }))
+}
+
+/// A panel's trimmed outline where it meets the panel across bend `g` along more than one edge
+/// (cut-outs across the bend notch it): the edges must lie in one line, running the same way;
+/// they become one edge, from the first one's start to the last one's end, and each notch
+/// between two of them a hole of the sheet (the notch's edges, closed along the line). Returns
+/// the holes, each with the corners where it leaves the line and comes back to it. Nothing
+/// changes where the panel meets `g` along one edge or none.
+fn join_runs(
+    trimmed: &mut Vec<Vec2>,
+    from: &mut Vec<Option<usize>>,
+    across: &[Option<usize>],
+    pts: &[Vec2],
+    round: &[Option<(Vec2, Vec2)>],
+    g: usize,
+    tol: f64,
+) -> Result<Vec<(Region2, Vec2, Vec2)>> {
+    let m = trimmed.len();
+    let along = |j: usize| from.get(j).copied().flatten().and_then(|i| across.get(i).copied().flatten()) == Some(g);
+    let runs: Vec<usize> = (0..m).filter(|j| along(*j)).collect();
+    let (Some(&first), true) = (runs.first(), runs.len() > 1) else { return Ok(Vec::new()) };
+    let corner = |j: usize| trimmed.get(j % m).copied().unwrap_or_default();
+    let (o, Some(d)) = (corner(first), (corner(first + 1) - corner(first)).normalized()) else { return err("a bend edge has no length") };
+    let off = |p: Vec2| (p - o).cross(d).abs();
+    if runs.iter().any(|j| off(corner(*j)) > tol || off(corner(j + 1)) > tol || (corner(j + 1) - corner(*j)).dot(d) <= 0.0) {
+        return err("not supported yet: a face of the sheet that meets a bend along edges not in one line");
+    }
+    let mut order = runs.clone();
+    order.sort_by(|x, y| (corner(*x) - o).dot(d).total_cmp(&(corner(*y) - o).dot(d)));
+    let mut gone = vec![false; m];
+    let mut holes = Vec::new();
+    for pair in order.windows(2) {
+        let &[ja, jb] = pair else { continue };
+        // The notch: forward round the outline from the end of one edge to the start of the next.
+        let mut segs = Vec::new();
+        let mut j = (ja + 1) % m;
+        while j != jb {
+            if along(j) || segs.len() > m {
+                return err("not supported yet: a face of the sheet that meets a bend along edges out of order");
+            }
+            segs.extend(drawn_edge(trimmed, from, pts, round, j)?);
+            gone[j] = true;
+            j = (j + 1) % m;
+        }
+        gone[jb] = true;
+        let (e, s) = (corner(ja + 1), corner(jb));
+        segs.push(Seg2::Line { a: snap(s), b: snap(e) });
+        let lp = Loop2 { segs };
+        holes.push((Region2 { outer: if lp.signed_area() < 0.0 { lp.reversed() } else { lp }, holes: Vec::new() }, e, s));
+    }
+    let keep: Vec<usize> = (0..m).filter(|j| !gone.get(*j).copied().unwrap_or(false)).collect();
+    let (kept, kept_from): (Vec<Vec2>, Vec<Option<usize>>) = keep.iter().map(|j| (corner(*j), from.get(*j).copied().flatten())).unzip();
+    (*trimmed, *from) = (kept, kept_from);
+    Ok(holes)
+}
+
+/// Edge `j` of a panel's trimmed outline as [`drawn`] draws it: a line, or an arc where it was a
+/// round edge of the face.
+fn drawn_edge(trimmed: &[Vec2], from: &[Option<usize>], pts: &[Vec2], round: &[Option<(Vec2, Vec2)>], j: usize) -> Result<Option<Seg2>> {
+    let (m, n) = (trimmed.len(), pts.len());
+    let (Some(&a), Some(&b)) = (trimmed.get(j % m), trimmed.get((j + 1) % m)) else { return Ok(None) };
+    let arc = from.get(j % m).copied().flatten().and_then(|i| Some((i, round.get(i).copied().flatten()?)));
+    let Some((i, (c, mid))) = arc else { return Ok(Some(Seg2::Line { a: snap(a), b: snap(b) })) };
+    let (Some(&p), Some(&q)) = (pts.get(i), pts.get((i + 1) % n)) else { return Ok(None) };
+    if a.dist(p) > 1e-6 || b.dist(q) > 1e-6 {
+        return err("not supported yet: a round edge of a face that ends at a bend or a cut edge of the sheet");
+    }
+    let (start, r) = ((p - c).angle(), c.dist(p));
+    let half = ((mid - c).angle() - start + PI).rem_euclid(TAU) - PI;
+    Ok(Some(Seg2::Arc { center: c, radius: r, start, sweep: 2.0 * half }))
 }
 
 /// Names of the edges of `body` at the bend points, to find them again after the body changes.
@@ -779,7 +852,8 @@ pub fn convert_body(
     for p in bends {
         if let Some(c) = chamfer_at(mb, &mesh, *p, tol, near) {
             picks.push((*p, (c.a, c.b)));
-            for c in std::iter::once(c).chain(other_skin(b, &mesh, &c, tol)) {
+            // Every piece of the bend, on either skin: cut-outs across it split its cylinder.
+            for c in std::iter::once(c).chain(other_skin(b, &mesh, &c, tol)).flat_map(|c| bend_pieces(b, &mesh, c, tol)) {
                 if !chamfers.iter().any(|x| x.strip == c.strip) {
                     chamfers.push(c);
                 }
@@ -956,7 +1030,20 @@ pub fn convert_body(
         }
         let first = panel.face.pts.first().copied().unwrap_or_default();
         let face_at = |e: DocError| DocError::Invalid(format!("{e} (the face at {})", at(first)));
-        let (trimmed, from) = inset(&pts, &by, tol).map_err(face_at)?;
+        let (mut trimmed, mut from) = inset(&pts, &by, tol).map_err(face_at)?;
+        // Where cut-outs across a bend notch the panel, its edges along the bend are one bend
+        // edge and the notches holes of the sheet, as is the bend zone between them (below).
+        let mut gaps: BTreeMap<usize, Vec<(Vec2, Vec2)>> = BTreeMap::new();
+        let mut bent: Vec<usize> =
+            across.iter().flatten().copied().filter(|g| panel.parent == Some(*g) || panels.get(g).is_some_and(|c| c.parent == Some(pf))).collect();
+        bent.sort_unstable();
+        bent.dedup();
+        for g in bent {
+            for (hole, e, s) in join_runs(&mut trimmed, &mut from, &across, &pts, &round, g, tol).map_err(face_at)? {
+                sh.holes.push(hole);
+                gaps.entry(g).or_default().push((e, s));
+            }
+        }
         let exact = drawn(&trimmed, &from, &pts, &round).map_err(face_at)?;
         match fl {
             None => sh.base.outer = exact.unwrap_or_else(|| Loop2::polygon(&trimmed.iter().map(|q| snap(*q)).collect::<Vec<_>>())),
@@ -1072,7 +1159,13 @@ pub fn convert_body(
                 tag: String::new(),
                 tear: (false, false),
             });
-            queue.push((g, Some(sh.flanges.len() - 1)));
+            let i = sh.flanges.len() - 1;
+            let (ba, n) = sh.flanges.get(i).map_or((0.0, Vec2::new(d.y, -d.x)), |f| (sh.allowance(f), f.n));
+            for (e, s) in gaps.get(&g).into_iter().flatten() {
+                let zone = Loop2::polygon(&[snap(*e), snap(*s), snap(*s + n * ba), snap(*e + n * ba)]);
+                sh.holes.push(Region2 { outer: zone.ccw(), holes: Vec::new() });
+            }
+            queue.push((g, Some(i)));
         }
     }
     // The bends on the fixed face finished as an edge flange feature finishes its own

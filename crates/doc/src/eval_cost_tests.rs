@@ -1759,3 +1759,30 @@ fn mesh_metadata_and_order_remain_part_of_the_fingerprint() {
         same_as_fresh(&doc, &model);
     }
 }
+
+#[test]
+fn an_added_and_deleted_sketch_entity_keeps_its_fingerprint() {
+    let mut doc = Document::new("sketch fingerprint");
+    let id = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(10.0, 0.0)), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let key = model.state().sketch_keys.get(&id).copied();
+    let json = super::feature_json(doc.feature(id).unwrap(), &super::ImportDigests::default());
+
+    // Make and delete an id: the counters advance, but the geometry is the same.
+    {
+        let sk = doc.sketch_mut(id).unwrap();
+        let a = sk.add_point(Vec2::new(2.0, 2.0), None).unwrap();
+        let b = sk.add_point(Vec2::new(3.0, 2.0), None).unwrap();
+        let line = sk.add_line_pts(a, b, None).unwrap();
+        sk.remove_curves(&[line]);
+        sk.remove_points(&[b]);
+        sk.remove_points(&[a]);
+    }
+
+    let json_after = super::feature_json(doc.feature(id).unwrap(), &super::ImportDigests::default());
+    assert_eq!(json, json_after, "deleted ids are not geometry");
+    model.evaluate(&doc);
+    assert_eq!(model.state().sketch_keys.get(&id).copied(), key);
+    assert_eq!((model.last_recomputed, model.last_restored), (0, 0));
+}

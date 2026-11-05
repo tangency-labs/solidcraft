@@ -80,7 +80,7 @@ fn section(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
     }];
     let row = browser::draw_row(
         ui,
-        ui.id().with(&id),
+        ui.scope_id().with(&id),
         &Row {
             label: &label,
             name: true,
@@ -180,7 +180,7 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
     let environment_label = app.tr("render.tree_environment").to_string();
     let row = browser::draw_row(
         ui,
-        ui.id().with("render_environment"),
+        ui.scope_id().with("render_environment"),
         &Row {
             label: &environment_label,
             name: true,
@@ -212,7 +212,7 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
             let actions = [ui_kit::TreeAction { icon: "lookat", hover_only: true, label: &solo_label, reason: None, target: &solo_target }];
             let row = browser::draw_row(
                 ui,
-                ui.id().with(("render_light", id)),
+                ui.scope_id().with(("render_light", id)),
                 &Row {
                     depth: 1,
                     label: &label,
@@ -251,7 +251,7 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
             let active = name == app.render_workspace.view.name;
             let row = browser::draw_row(
                 ui,
-                ui.id().with(("render_shot", &name)),
+                ui.scope_id().with(("render_shot", &name)),
                 &Row {
                     depth: 1,
                     label: &name,
@@ -300,7 +300,7 @@ pub(crate) fn output(app: &mut SolveApp, ui: &mut egui::Ui) {
     let subtitle = format!("{size} · {format}");
     let row = browser::draw_row(
         ui,
-        ui.id().with("render_output"),
+        ui.scope_id().with("render_output"),
         &Row {
             label: app.tr("render.tree_output"),
             icon: "render_image",
@@ -324,7 +324,7 @@ pub(crate) fn output(app: &mut SolveApp, ui: &mut egui::Ui) {
         let subtitle = crate::render_workspace::output_child_summary(app, kind);
         let row = browser::draw_row(
             ui,
-            ui.id().with(("render_output_child", kind)),
+            ui.scope_id().with(("render_output_child", kind)),
             &Row {
                 depth: 1,
                 label: app.tr(key),
@@ -377,7 +377,7 @@ fn wear(app: &mut SolveApp, ui: &mut egui::Ui) {
     let subtitle = wear_subtitle(app);
     let row = browser::draw_row(
         ui,
-        ui.id().with("render_wear"),
+        ui.scope_id().with("render_wear"),
         &Row {
             depth: 1,
             label: app.tr("render.wear_title"),
@@ -421,7 +421,7 @@ pub(crate) fn objects(app: &mut SolveApp, ui: &mut egui::Ui, hover_bodies: &mut 
         );
         let row = browser::draw_row(
             ui,
-            ui.id().with(("render_look", &key)),
+            ui.scope_id().with(("render_look", &key)),
             &Row {
                 depth: 1,
                 label: &label,
@@ -479,7 +479,7 @@ pub(crate) fn objects(app: &mut SolveApp, ui: &mut egui::Ui, hover_bodies: &mut 
                 });
                 let row = browser::draw_row(
                     ui,
-                    ui.id().with((&key, &name)),
+                    ui.scope_id().with((&key, &name)),
                     &Row {
                         depth: 2,
                         label: &name,

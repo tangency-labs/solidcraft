@@ -270,7 +270,7 @@ impl PanelHost for EguiPanelHost<'_> {
                                 if let Some(status) = &presentation.status {
                                     response = response.backing_on_hover_text(status);
                                 }
-                                response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &presentation.title));
+                                response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &presentation.title));
                             }
                             if slot == ContentSlot::Footer && !presentation.actions.is_empty() {
                                 egui::ScrollArea::horizontal().id_salt("panel_actions").show(ui, |ui| {

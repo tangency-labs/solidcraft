@@ -134,6 +134,8 @@ pub fn admit(scene: &ProductScene, request: &ImageRequest, options: &RaytraceOpt
     if let Some(progressive) = options.progressive {
         progressive.validate_image_with_budget(request.width, request.height, options.budget)?;
     }
+    let map_bytes =
+        request.textures.as_ref().map_or(Ok(0), |maps| job::textures::cpu_cache::CpuTextureCache::required_bytes(maps, scene, options))?;
     let mut a = job::image::admit_raytrace_source(scene, request, options.budget)?;
     let r = options.reflections.as_ref().filter(|r| !r.bodies.is_empty()).map_or(1, |r| r.samples);
     u64::from(request.width)
@@ -239,6 +241,7 @@ pub fn admit(scene: &ProductScene, request: &ImageRequest, options: &RaytraceOpt
         .checked_add(a.triangles.checked_mul(std::mem::size_of::<Look>() as u64).ok_or_else(|| error(TraceError::MemoryLimit))?)
         .and_then(|v| v.checked_add(emission_bytes))
         .and_then(|v| v.checked_add(effect_bytes))
+        .and_then(|v| v.checked_add(map_bytes))
         .and_then(|v| v.checked_add(optical_bytes))
         .and_then(|v| v.checked_add(film_bytes))
         // The resumable pixel owns two traversal cursors. Its fallible, fixed
@@ -454,6 +457,7 @@ fn resume_optical_path(pending: &mut PendingPixel, path: OpticalPath) {
 }
 
 pub struct ImageTask {
+    maps: Vec<job::textures::cpu_cache::CpuTextureCache>,
     punctual_diagnostics: job::PunctualDiagnostics,
     progressive: Option<Progressive>,
     optical: Vec<OpticalTask>,
@@ -598,6 +602,14 @@ impl ImageTask {
         {
             return Err(error(TraceError::MemoryLimit));
         }
+        let mut maps = Vec::new();
+        if let Some(resources) = &request.textures {
+            maps.try_reserve_exact(1).map_err(|_| error(TraceError::AllocationFailed))?;
+            if maps.capacity() != 1 {
+                return Err(error(TraceError::MemoryLimit));
+            }
+            maps.push(job::textures::cpu_cache::CpuTextureCache::new(resources.clone(), &cancel)?);
+        }
         let pending = PendingPixelSlot::new(&cancel)?;
         let budget = options.budget;
         let progressive = options
@@ -609,6 +621,7 @@ impl ImageTask {
             })
             .transpose()?;
         Ok(Self {
+            maps,
             punctual_diagnostics: Default::default(),
             progressive,
             optical,
@@ -652,6 +665,9 @@ impl ImageTask {
             (Phase::Completed, 1, 1)
         } else if let Some(e) = &self.encoder {
             (Phase::Encoding, e.row() as u64, self.request.height as u64)
+        } else if let Some(maps) = self.maps.first().filter(|maps| !maps.ready()) {
+            let (done, total) = maps.preparation_rows();
+            (Phase::Preparing, done, total)
         } else if let Some(progressive) = &self.progressive {
             let count = u64::from(self.request.width) * u64::from(self.request.height);
             if !progressive.film.ready() {
@@ -723,7 +739,7 @@ impl ImageTask {
                 .map_err(|_| invalid("invalid scalar surface"))?,
         };
         self.triangles.push(Triangle::new(vertices).map_err(error)?);
-        self.looks.push(Look { body_index: self.body, face, surface, normals, vertices });
+        self.looks.push(Look { body_index: self.body, face, has_face_override: look.is_some(), surface, normals, vertices });
         self.triangle += 1;
         Ok(())
     }
@@ -863,7 +879,12 @@ impl ImageTask {
             // fabricated traversal debit. Check cancel/limit before mutations.
             self.work.tick(&self.cancel).map_err(error)?;
             let bvh = self.bvh.as_ref().ok_or_else(|| invalid("missing reusable primary BVH"))?;
-            let shared = resolved_surface_hit(&PreparedScene { bvh, primitives: &self.looks, source: &self.scene }, pending, &self.effects)?;
+            let shared = resolved_surface_hit(
+                &PreparedScene { bvh, primitives: &self.looks, source: &self.scene },
+                pending,
+                &self.effects,
+                self.maps.first(),
+            )?;
             if self.optical.first().is_some_and(|o| o.pending.is_some())
                 || self.options.dielectrics.iter().any(|input| input.body_index == shared.body_index)
             {
@@ -998,6 +1019,9 @@ impl ImageTask {
                     self.primary_coverage.checked_add(1).filter(|n| *n <= 1024).ok_or_else(|| invalid("spatial coverage overflow"))?;
             }
             pending.hit = Some(hit);
+            if let Some(maps) = self.maps.first_mut() {
+                maps.reset_hit();
+            }
             pending.light = 0;
             let shared = scene.resolve_hit(pending.ray, hit).map_err(error)?;
             let mode =
@@ -1011,7 +1035,7 @@ impl ImageTask {
                 // Traversal consumed this continuation; selector work begins next call.
                 return Ok(());
             }
-            pending.surface_ready = self.effects.is_empty();
+            pending.surface_ready = self.effects.is_empty() && self.maps.is_empty();
             if !pending.surface_ready {
                 // Traversal already consumed this continuation's unit. Scan one
                 // effect per following call, before beginning any lighting stage.
@@ -1042,8 +1066,37 @@ impl ImageTask {
             if pending.surface_cursor != self.effects.len() {
                 return Err(invalid("invalid surface effect scan state"));
             }
+            if let Some(maps) = self.maps.first_mut() {
+                if !maps.hit_started() {
+                    let shared = unmapped_surface_hit(&scene, pending, &self.effects)?;
+                    let has_face_override = self.looks.get(shared.primitive_index).is_none_or(|look| look.has_face_override);
+                    let footprint = primary_footprint(
+                        &self.request,
+                        &self.options,
+                        self.progressive.as_ref(),
+                        self.pixel,
+                        self.spatial,
+                        self.clip,
+                        shared.position,
+                        shared.oriented_geometric_normal(),
+                    )?;
+                    maps.begin_hit(
+                        crate::surface_patterns::ShadingSurface { surface: shared.surface, shading_normal: shared.shading_normal },
+                        (!has_face_override).then_some(shared.body_index),
+                        job::textures::cpu_preparation::MapPoint {
+                            position: shared.position,
+                            geometric_normal: shared.oriented_geometric_normal(),
+                            view_direction: -pending.ray.direction(),
+                        },
+                        footprint,
+                    )?;
+                }
+                if !maps.hit_ready() && !maps.advance_hit()? {
+                    return Ok(());
+                }
+            }
             pending.surface_ready = true;
-            let shared = resolved_surface_hit(&scene, pending, &self.effects)?;
+            let shared = resolved_surface_hit(&scene, pending, &self.effects, self.maps.first())?;
             let mode =
                 self.options.reflections.as_ref().and_then(|r| r.bodies.iter().find(|entry| entry.body == shared.body_name).map(|entry| entry.mode));
             if self.options.shadows && !self.lights.lights().is_empty() && mode != Some(job::ReflectionMode::Mirror) {
@@ -1060,7 +1113,7 @@ impl ImageTask {
             *pending.visibility.get_mut(pending.light).ok_or_else(|| invalid("light visibility index"))? = shadow.is_none();
             pending.light += 1;
             if let Some(light) = self.lights.lights().get(pending.light) {
-                let shared = resolved_surface_hit(&scene, pending, &self.effects)?;
+                let shared = resolved_surface_hit(&scene, pending, &self.effects, self.maps.first())?;
                 pending.cursor = TraceCursor::new(shared.spawn(light.direction()).map_err(error)?, true);
                 return Ok(());
             }
@@ -1082,7 +1135,7 @@ impl ImageTask {
             return Ok(());
         }
         if pending.punctual_index < self.options.punctual_lights.as_ref().map_or(0, Vec::len) {
-            let shared = resolved_surface_hit(&scene, pending, &self.effects)?;
+            let shared = resolved_surface_hit(&scene, pending, &self.effects, self.maps.first())?;
             let mode =
                 self.options.reflections.as_ref().and_then(|r| r.bodies.iter().find(|entry| entry.body == shared.body_name).map(|entry| entry.mode));
             let face = self.looks.get(shared.primitive_index).ok_or_else(|| invalid("punctual face missing"))?.face;
@@ -1093,7 +1146,7 @@ impl ImageTask {
             return Ok(());
         }
         if pending.area_light < self.options.area_lights.as_ref().map_or(0, Vec::len) {
-            let shared = resolved_surface_hit(&scene, pending, &self.effects)?;
+            let shared = resolved_surface_hit(&scene, pending, &self.effects, self.maps.first())?;
             let mode =
                 self.options.reflections.as_ref().and_then(|r| r.bodies.iter().find(|entry| entry.body == shared.body_name).map(|entry| entry.mode));
             let face = self.looks.get(shared.primitive_index).ok_or_else(|| invalid("area face missing"))?.face;
@@ -1129,7 +1182,7 @@ impl ImageTask {
         }
         if pending.light == self.lights.lights().len() {
             self.work.tick(&self.cancel).map_err(error)?;
-            let shared = resolved_surface_hit(&scene, pending, &self.effects)?;
+            let shared = resolved_surface_hit(&scene, pending, &self.effects, self.maps.first())?;
             let mode =
                 self.options.reflections.as_ref().and_then(|r| r.bodies.iter().find(|entry| entry.body == shared.body_name).map(|entry| entry.mode));
             let view = -pending.ray.direction();
@@ -1320,7 +1373,7 @@ impl ImageTask {
         }
         state.ready = true;
         let Some(index) = state.selected else {
-            pending.surface_ready = self.effects.is_empty();
+            pending.surface_ready = self.effects.is_empty() && self.maps.is_empty();
             if !pending.surface_ready {
                 return Ok(());
             }
@@ -1444,6 +1497,8 @@ impl ImageTask {
         self.options.emissions = None;
         self.emissions = Vec::new();
         self.options.surface_effects = None;
+        self.maps = Vec::new();
+        self.request.textures = None;
         self.options.dielectrics = Vec::new();
         self.options.environment = None;
         self.optical = Vec::new();
@@ -1493,7 +1548,12 @@ impl ImageTask {
             return Err(JobError::new(ErrorCode::InvalidRequest, "invalid raytrace step or completed task"));
         }
         for _ in 0..units.min(4) {
-            if self.progressive.as_ref().is_some_and(|p| !p.film.ready()) {
+            if self.maps.first().is_some_and(|maps| !maps.ready()) {
+                self.maps
+                    .first_mut()
+                    .ok_or_else(|| invalid("CPU map cache disappeared"))?
+                    .prepare_one(&self.cancel, &mut |units| self.work.charge(units, &self.cancel).map_err(error))?;
+            } else if self.progressive.as_ref().is_some_and(|p| !p.film.ready()) {
                 self.progressive
                     .as_mut()
                     .ok_or_else(|| invalid("missing progressive initialization"))?
@@ -1576,8 +1636,25 @@ fn resolved_surface_hit<'a>(
     scene: &PreparedScene<'a>,
     pending: &PendingPixel,
     effects: &[(usize, crate::surface_patterns::PreparedEffect)],
+    maps: Option<&job::textures::cpu_cache::CpuTextureCache>,
 ) -> job::Result<SharedHit<'a>> {
-    if !pending.surface_ready || pending.surface_cursor != effects.len() {
+    if !pending.surface_ready {
+        return Err(invalid("mapped surface is incomplete"));
+    }
+    let mut shared = unmapped_surface_hit(scene, pending, effects)?;
+    if let Some(maps) = maps {
+        let mapped = maps.surface()?;
+        shared.surface = mapped.surface;
+        shared.shading_normal = mapped.shading_normal;
+    }
+    Ok(shared)
+}
+fn unmapped_surface_hit<'a>(
+    scene: &PreparedScene<'a>,
+    pending: &PendingPixel,
+    effects: &[(usize, crate::surface_patterns::PreparedEffect)],
+) -> job::Result<SharedHit<'a>> {
+    if pending.surface_cursor != effects.len() {
         return Err(invalid("surface effect is not completely resolved"));
     }
     let mut shared = scene.resolve_hit(pending.ray, pending.hit.ok_or_else(|| invalid("missing prepared surface hit"))?).map_err(error)?;
@@ -1591,6 +1668,47 @@ fn resolved_surface_hit<'a>(
         shared.shading_normal = changed.shading_normal;
     }
     Ok(shared)
+}
+
+/// Adjacent shading-grid rays meet the same captured geometric plane. This is a
+/// texture footprint only: no topology or visibility decision uses the plane.
+/// A grazing footprint that crosses the horizon selects the coarsest mip.
+fn primary_footprint(
+    request: &ImageRequest,
+    options: &RaytraceOptions,
+    progressive: Option<&Progressive>,
+    pixel: usize,
+    spatial: u8,
+    clip: (f64, f64),
+    position: Vec3,
+    normal: Vec3,
+) -> job::Result<Option<[Vec3; 2]>> {
+    let width = request.width as usize;
+    let offset = if let Some(progressive) = progressive {
+        progressive::variates(progressive.options.seed, pixel as u64, progressive.film.samples(), 0)
+    } else {
+        primary_offset(options.primary_samples, spatial)?
+    };
+    let x = (pixel % width) as f64 + offset[0];
+    let y = (pixel / width) as f64 + offset[1];
+    let spacing = if progressive.is_some() { 1.0 } else { 1.0 / f64::from(options.primary_samples).sqrt() };
+    let mut result = [Vec3::ZERO; 2];
+    for (output, [dx, dy]) in result.iter_mut().zip([[spacing, 0.0], [0.0, spacing]]) {
+        let ray = primary_ray(request, x + dx, y + dy, clip).map_err(error)?;
+        let denominator = ray.direction().dot(normal);
+        if !denominator.is_finite() || denominator.abs() < 1e-12 {
+            return Ok(None);
+        }
+        let distance = (position - ray.origin()).dot(normal) / denominator;
+        if !distance.is_finite() || distance < 0.0 {
+            return Ok(None);
+        }
+        *output = ray.origin() + ray.direction() * distance - position;
+        if !output.is_finite() {
+            return Ok(None);
+        }
+    }
+    Ok(Some(result))
 }
 
 fn bounded_radiance(v: Vec3) -> bool {

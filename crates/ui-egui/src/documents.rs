@@ -461,8 +461,8 @@ pub fn active_is_blank(app: &SolveApp) -> bool {
 }
 
 /// Show `session` (a design built or read elsewhere): in place of a blank active design,
-/// otherwise in a new tab.
-pub fn adopt(app: &mut SolveApp, session: Session) {
+/// otherwise in a new tab. Whether it is shown (no tab left for it: the status says so).
+pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
     if active_is_blank(app) {
         let rev = app.session.revision;
         crate::browser::discard_reveals(app);
@@ -482,8 +482,12 @@ pub fn adopt(app: &mut SolveApp, session: Session) {
         // The linked designs that changed while it was closed are read again (#9739): last, as a
         // read is taken up only by the design revision it started from.
         crate::linked_source::update_changed(app);
+        true
     } else if let Err(e) = open_tab(app, session) {
         app.set_status(e, true);
+        false
+    } else {
+        true
     }
 }
 
@@ -939,7 +943,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         .collect();
     let fit_all = shown == n && natural.iter().sum::<f32>() <= x1 - x0 - 34.0;
     // A right-click on a tab opens its menu (#3055): the tab and where the menu opens.
-    let menu_id = egui::Id::new("sc_doc_tab_menu");
+    let menu_id = egui::Id::unique("sc_doc_tab_menu");
     let mut menu: Option<(usize, egui::Pos2)> = ui.ctx().data(|d| d.get_temp(menu_id));
     // The shown tabs' widths, in strip order.
     let widths: Vec<f32> = (first..first + shown).map(|i| if fit_all { natural.get(i).copied().unwrap_or(w) } else { w }).collect();
@@ -948,7 +952,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let title_bar = app.custom_titlebar || app.integrated_titlebar;
     // A tab being dragged to a new place follows the pointer and the others make room for it;
     // Escape puts it back.
-    let drag_id = egui::Id::new("sc_doc_tab_drag");
+    let drag_id = egui::Id::unique("sc_doc_tab_drag");
     let (held_down, released, escape) = ui.input(|i| (i.pointer.primary_down(), i.pointer.primary_released(), i.key_pressed(egui::Key::Escape)));
     let mut drag =
         ui.ctx().data(|d| d.get_temp::<TabDrag>(drag_id)).filter(|d| (held_down || released) && !escape && (first..first + shown).contains(&d.from));
@@ -981,7 +985,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         };
         let tr = Rect::from_min_size(pos2(left, r.top() + 4.0), vec2(w - 2.0, r.height() - 8.0));
         let active = !app.home.open && (i == app.docs.active || app.docs.slots.is_empty());
-        let resp = ui.interact(tr, ui.id().with(("doc_tab", i)), Sense::click_and_drag());
+        let resp = ui.interact(tr, ui.scope_id().with(("doc_tab", i)), Sense::click_and_drag());
         crate::scenario::publish_target(&format!("tab:design:{i}"), tr);
         // Dragging a tab along the strip moves it. The tabs are also part of the title bar:
         // dragging the only tab, or one mostly up or down, moves the window, and a double click
@@ -1024,7 +1028,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         // ×
         let xr = Rect::from_center_size(pos2(tr.right() - 13.0, tr.center().y), vec2(16.0, 16.0));
         let show_close = active || resp.hovered() || ui.rect_contains_pointer(tr);
-        let xresp = ui.interact(xr, ui.id().with(("doc_close", i)), if show_close { Sense::click() } else { Sense::hover() });
+        let xresp = ui.interact(xr, ui.scope_id().with(("doc_close", i)), if show_close { Sense::click() } else { Sense::hover() });
         crate::scenario::publish_target(&format!("tab:close:{i}"), xr);
         if show_close && (xresp.hovered() || xresp.has_focus()) {
             ui.painter().rect_filled(xr, t.radius_sm.saturating_sub(1), t.app_bar_hover_strong);
@@ -1040,6 +1044,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         if resp.secondary_clicked() {
             menu = Some((i, ui.ctx().pointer_interact_pos().unwrap_or(tr.left_bottom())));
         }
+        // Named apart from a dialog's Close: egui 0.37 names an unnamed widget after its tooltip.
+        xresp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, show_close, crate::i18n::tr("ui.close_tab")));
         if xresp.backing_on_hover_text("Close").clicked() {
             shut = Some(i);
         } else if (if held.is_some() { resp } else { resp.backing_on_hover_text(tip) }).clicked() {
@@ -1056,7 +1062,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     // More tabs than fit: a chevron lists them all.
     if shown < n {
         let mr = Rect::from_center_size(pos2(x + 12.0, r.center().y), vec2(20.0, 22.0));
-        let mresp = ui.interact(mr, ui.id().with("doc_more"), Sense::click());
+        let mresp = ui.interact(mr, ui.scope_id().with("doc_more"), Sense::click());
         crate::scenario::publish_handle("tab:overflow", mr.center());
         if mresp.hovered() {
             ui.painter().rect_filled(mr, t.radius_sm, t.app_bar_hover_button);
@@ -1068,7 +1074,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             FontId::proportional(crate::theme::Tokens::get().font_body),
             t.app_bar_text,
         );
-        let id = egui::Id::new("sc_doc_more");
+        let id = egui::Id::unique("sc_doc_more");
         if mresp.clone().backing_on_hover_text(crate::i18n::tr_label("All open designs")).clicked() {
             ui.ctx().data_mut(|d| d.insert_temp(id, !d.get_temp::<bool>(id).unwrap_or(false)));
         }
@@ -1138,7 +1144,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     });
     // Choose a new design, open or sample from the File view before creating a tab.
     let pr = Rect::from_center_size(pos2(x + 14.0, r.center().y), vec2(22.0, 22.0));
-    let presp = ui.interact(pr, ui.id().with("doc_new"), Sense::click());
+    let presp = ui.interact(pr, ui.scope_id().with("doc_new"), Sense::click());
     if presp.hovered() {
         ui.painter().rect_filled(pr, t.radius_sm, t.app_bar_hover_button);
     }
@@ -1256,7 +1262,7 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
         answer = Some(choice);
     }
     let title = crate::i18n::format("document.save_changes", &[("name", &name_display)]);
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("sc_close_prompt"), "status_warning", &title)
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_close_prompt"), "status_warning", &title)
         .tone(ui_kit::Tone::Warning)
         .actions(crate::i18n::tr("ui.save"), crate::i18n::tr("ui.cancel"), Some(crate::i18n::tr("ui.don_t_save")))
         .secondary_left()

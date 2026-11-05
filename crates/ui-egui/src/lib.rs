@@ -349,6 +349,10 @@ pub struct UiState {
     /// Not saved: it only lives while a sketch is open.
     #[serde(skip)]
     pub sketch_return_tab: Option<String>,
+    /// The folded ribbon's panels are open over the view (`ribbon_tabs_only`, #10112). Not saved:
+    /// a tab click opens them, and a command starting or the pointer leaving closes them.
+    #[serde(skip)]
+    pub ribbon_open: bool,
     /// Last contextual body/sketch, only used to select on entry.
     #[serde(skip)]
     pub ribbon_context: Option<String>,
@@ -411,6 +415,7 @@ impl Default for UiState {
             tab: "MODEL".into(),
             ribbon_context: None,
             sketch_return_tab: None,
+            ribbon_open: false,
             show_browser: true,
             show_timeline: true,
             show_grid: true,
@@ -563,6 +568,8 @@ pub struct SolveApp {
     pub render_workspace: render_workspace::State,
     pub tool: Option<tools::Tool>,
     pub dialog: Option<dialogs::Dialog>,
+    /// Each command dialog's options and values as last applied (this session only).
+    pub(crate) remembered_commands: Vec<dialogs::RememberedCommand>,
     /// The Change Parameters window, when open.
     pub params: Option<params_dialog::ParamsDialog>,
     /// The Design Properties window, when open.
@@ -736,6 +743,8 @@ pub struct SolveApp {
     pub synthetic: Vec<egui::Event>,
     /// The modifiers of the synthetic press in progress (a Ctrl-drag keeps Ctrl while it moves).
     pub synthetic_mods: egui::Modifiers,
+    /// A click that came in the same frame as typing before it, held for the next frame.
+    held_click: Vec<egui::Event>,
     control_rx: Option<Receiver<ControlRequest>>,
     /// Control requests that change the design, held while a file loads or an agent's design
     /// change computes.
@@ -753,6 +762,9 @@ pub struct SolveApp {
     pending_shots: Vec<(u64, Option<String>, std::sync::mpsc::Sender<Value>, f64)>,
     shot_chat_turns: std::collections::HashMap<u64, std::sync::Arc<std::sync::atomic::AtomicBool>>,
     queued_shots: Vec<(u64, f64, u32)>,
+    /// Screenshots egui hands back, by token; egui calls back, `collect_screenshots` reads them.
+    shot_tx: std::sync::mpsc::Sender<(u64, std::sync::Arc<egui::ColorImage>)>,
+    shot_rx: std::sync::mpsc::Receiver<(u64, std::sync::Arc<egui::ColorImage>)>,
     shot_token: u64,
     styled: bool,
     fitted: bool,
@@ -808,6 +820,7 @@ impl SolveApp {
         #[cfg(not(target_arch = "wasm32"))]
         solidcraft_engine::slicer_files::clean_old();
         let tree = browser::TreeState::for_session(session.uid);
+        let (shot_tx, shot_rx) = std::sync::mpsc::channel();
         let mut app = SolveApp {
             panel_runtime: None,
             viewport_status: Default::default(),
@@ -834,6 +847,7 @@ impl SolveApp {
             render_workspace,
             tool: None,
             dialog: None,
+            remembered_commands: Vec::new(),
             params: None,
             design_properties: None,
             sketch_report: None,
@@ -918,6 +932,7 @@ impl SolveApp {
             frame_rate: frame_rate::FrameRate::default(),
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
+            held_click: Vec::new(),
             control_rx: None,
             agent_chat: Default::default(),
             ai_connect: Default::default(),
@@ -928,6 +943,8 @@ impl SolveApp {
             pending_shots: Vec::new(),
             shot_chat_turns: Default::default(),
             queued_shots: Vec::new(),
+            shot_tx,
+            shot_rx,
             shot_token: 0,
             styled: false,
             fitted: false,
@@ -1300,6 +1317,11 @@ impl SolveApp {
                     self.ui.show_navigation_bar = v.get("visible").and_then(Value::as_bool).unwrap_or(!self.ui.show_navigation_bar)
                 }
                 "view.next_tab" | "view.previous_tab" => documents::cycle(self, id == "view.next_tab"),
+                "view.ribbon_tabs_only" => {
+                    let on = v.get("on").and_then(Value::as_bool).unwrap_or(!self.preferences.ribbon_tabs_only);
+                    self.preferences.ribbon_tabs_only = on;
+                    self.ui.ribbon_open = false;
+                }
                 // An edit OK'd on a feature behind the history marker changes nothing in the view:
                 // say why, or the edit looks as if it had silently failed (#8100).
                 "timeline.redefine" if v.get("rolled_back").and_then(Value::as_bool) == Some(true) => {
@@ -1615,6 +1637,13 @@ impl SolveApp {
             return;
         }
         self.tree.clear_folder_pick();
+        // A command started from the folded ribbon's open panels closes them (#10112).
+        self.ui.ribbon_open = false;
+        // Folding the ribbon, or showing it whole, keeps the tab it shows (no switch to VIEW).
+        if id == "view.ribbon_tabs_only" {
+            let _ = self.run(id, json!({}));
+            return;
+        }
         if id == "timeline.play" {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
@@ -2968,7 +2997,7 @@ impl SolveApp {
         self.return_from_extrude_view();
         agent_cursor::step(self, ctx);
         browser::eye_drag_frame(self, ctx);
-        if !self.synthetic.is_empty() {
+        if !self.synthetic.is_empty() || !self.held_click.is_empty() {
             ctx.request_repaint();
         }
         issue_report::tick(self, ctx);
@@ -3008,7 +3037,26 @@ impl SolveApp {
     /// capture hides the report waits for it (the control channel's typing too).
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
         self.synthetic_input(raw);
+        finite_input(raw);
+        self.hold_click_after_typing(raw);
         issue_report::hold_input(self, raw);
+    }
+
+    /// A pointer button after typing in the same frame (a slow frame) waits for the next frame,
+    /// with the events after it. egui 0.37 drops a field's focus on a click elsewhere before the
+    /// field reads the frame's typing, which lost what was typed. Drop once emilk/egui#8763 is fixed.
+    fn hold_click_after_typing(&mut self, raw: &mut egui::RawInput) {
+        if !self.held_click.is_empty() {
+            let mut events = std::mem::take(&mut self.held_click);
+            events.append(&mut raw.events);
+            raw.events = events;
+        }
+        let button = raw.events.iter().position(|e| matches!(e, egui::Event::PointerButton { .. }));
+        if let Some(i) = button
+            && raw.events[..i].iter().any(issue_report::typing)
+        {
+            self.held_click = raw.events.split_off(i);
+        }
     }
 
     /// Inject synthetic events (one pointer event per frame).
@@ -3400,10 +3448,15 @@ impl SolveApp {
         // A view that just moved is drawn with fewer AO samples: shoot the full-quality frame
         // that follows (#7165), or after half a second a view that keeps moving as it is.
         let settled = viewport::ao_settled(self, ctx);
+        let shot_tx = &self.shot_tx;
         self.queued_shots.retain_mut(|(token, at, frames)| {
             *frames += 1;
             if now >= *at && *frames >= 3 && (settled || now >= *at + 500.0) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(*token)));
+                let (token, tx, ctx2) = (*token, shot_tx.clone(), ctx.clone());
+                ctx.request_screenshot(move |image| {
+                    let _ = tx.send((token, image));
+                    ctx2.request_repaint();
+                });
                 false
             } else {
                 true
@@ -3428,23 +3481,13 @@ impl SolveApp {
                 true
             }
         });
+        // Drained every frame: a shot that comes after its request was cancelled or timed out
+        // is dropped here instead of waiting in the channel.
+        let shots: Vec<_> = self.shot_rx.try_iter().collect();
         if self.pending_shots.is_empty() && !issue_report::pending(self) {
             return;
         }
-        let events: Vec<_> = ctx.input(|i| {
-            i.raw
-                .events
-                .iter()
-                .filter_map(|e| match e {
-                    egui::Event::Screenshot { user_data, image, .. } => {
-                        let token = user_data.data.as_ref().and_then(|d| d.downcast_ref::<u64>()).copied()?;
-                        Some((token, image.clone()))
-                    }
-                    _ => None,
-                })
-                .collect()
-        });
-        for (token, image) in events {
+        for (token, image) in shots {
             issue_report::receive(self, token, image.clone());
             if let Some(i) = self.pending_shots.iter().position(|(t, ..)| *t == token) {
                 let (_, path, reply, _) = self.pending_shots.remove(i);
@@ -3464,6 +3507,17 @@ impl SolveApp {
             false
         });
     }
+}
+
+/// Drop pointer, wheel and gesture events that carry a non-finite number: egui 0.37 asserts on them.
+fn finite_input(raw: &mut egui::RawInput) {
+    raw.events.retain(|event| match event {
+        egui::Event::PointerMoved(pos) | egui::Event::PointerButton { pos, .. } | egui::Event::MiddleClickPaste { pos, .. } => pos.is_finite(),
+        egui::Event::MouseMoved(delta) | egui::Event::MouseWheel { delta, .. } => delta.is_finite(),
+        egui::Event::Zoom(amount) | egui::Event::Rotate(amount) => amount.is_finite(),
+        egui::Event::Touch { pos, force, .. } => pos.is_finite() && force.is_none_or(f32::is_finite),
+        _ => true,
+    });
 }
 
 /// The window is minimised or fully covered, so it presents no frames (#1677). Unknown counts as

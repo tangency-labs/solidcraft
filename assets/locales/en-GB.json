@@ -235,6 +235,8 @@
   "render.studio_area_help": "Up to four one-sided rectangles. Orthogonal half-edges U and V define size; U × V faces the lit side. Coordinates are world-space millimetres.",
   "render.studio_center": "Centre X, Y, Z (mm)",
   "render.studio_hdr_help": "Radiance .hdr, 2:1 panorama, up to 2048 × 1024. EXR is unavailable. The colour assumption applies only when primaries are unspecified.",
+  "render.surface_import.complete": "Choose an image and enter its author, source and licence.",
+  "render.surface_import.license": "Licence / ownership",
   "sketch.hint.arc.center_point": "Arc: click centre and start, go round either way and click the end, or type a signed sweep",
   "sketch.hint.circle.center": "Circle: click the centre, then a point on the circle",
   "sketch.hint.constraint.midpoint": "MidPoint: pick a point and a line, or two lines to centre the second on the first",
