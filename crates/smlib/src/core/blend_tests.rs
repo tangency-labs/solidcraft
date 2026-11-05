@@ -700,6 +700,32 @@ fn a_variable_round_is_the_union_of_its_balls() {
     assert_eq!(fillet_variable(&b, [90.0; 3], TOL, [0.0; 3], 1, &[0.0, 0.0, 1.0, 1.0], &[1.0, 3.0]).err(), Some(Error::NoMatch { point: 0 }));
 }
 
+/// A constant-radius round is the torus the ball rolls, and its face crosses to the record as
+/// that torus (#11876): a cylinder's top rim rounded r2 leaves one of major radius 3 and tube 2,
+/// not the blend definition's NURBS, so Measure reads its radius off an analytic surface as it
+/// did before the SMLib kernel. The torus comes back as one through SMLib too, so a saved body
+/// keeps it.
+#[test]
+fn a_rounds_face_crosses_as_its_torus() {
+    let tori = |body: &Body| -> Vec<(f64, f64)> {
+        let (rec, _) = native(&to_arrays(body).unwrap()).unwrap();
+        rec.faces
+            .iter()
+            .filter_map(|f| match f.surface {
+                solidcore_record::brep::Surface::Torus { major_radius, minor_radius, .. } => Some((major_radius, minor_radius)),
+                _ => None,
+            })
+            .collect()
+    };
+    let cylinder = Shape::Cylinder([0.0; 3], 5.0, 10.0).core();
+    let round = blend(&cylinder, Blend::Round, &[[0.0, 5.0, 10.0]], &[2.0], TOL, &[], &[], Corners::Filled).unwrap();
+    let found = tori(&round);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!((found[0].0 - 3.0).abs() < 1e-9 && (found[0].1 - 2.0).abs() < 1e-9, "{found:?}");
+    let again = super::from_arrays(&to_arrays(&round).unwrap()).unwrap();
+    assert_eq!(tori(&again).len(), 1, "the torus through SMLib");
+}
+
 /// The capi's argument checks, before any kernel call.
 #[test]
 fn hostile_arguments_are_refused() {
