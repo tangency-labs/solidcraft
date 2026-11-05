@@ -284,6 +284,7 @@ sketch.loose_ends.tie             2D sketch only (the sketch solver and engine t
 sketch.mirror                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.move                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.move3d                     2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.move_points                2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.offset                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.offset.break               2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.paste                      2D sketch only (the sketch solver and engine tests); no kernel operation
