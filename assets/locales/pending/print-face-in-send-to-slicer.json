@@ -26,5 +26,9 @@
   "zh": {
     "prefs.print_face_everywhere_box": "通过面菜单和 Ctrl+B 设置打印底面，并始终显示",
     "prefs.print_face_everywhere_tip": "开启：面菜单中的“打印底面”和打印底面 (Ctrl+B) 将所选平面设为打印底面，视图显示所有打印底面。关闭：打印底面在“发送到切片软件”中选取，仅在其打开时显示，且只显示要发送的实体。"
+  },
+  "ko": {
+    "prefs.print_face_everywhere_box": "면 메뉴와 Ctrl+B로 출력 바닥면을 지정하고 항상 표시",
+    "prefs.print_face_everywhere_tip": "켜기: 면 메뉴의 출력 바닥면과 출력 바닥면(Ctrl+B)이 선택한 평면을 지정하고, 뷰에 모든 출력 바닥면을 표시합니다. 끄기: 출력 바닥면은 슬라이서로 보내기에서 선택하며, 그 창이 열려 있는 동안 보내는 바디에 대해서만 표시됩니다."
   }
 }

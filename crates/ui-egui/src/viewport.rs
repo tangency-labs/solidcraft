@@ -4445,7 +4445,8 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     // outline takes a little over twice it, so the face reads as marked without outshouting the model.
     let strength = app.preferences.print_face_highlight.clamp(0.0, 1.0);
     let print_bodies = crate::print_face_ui::drawn_bodies(app);
-    let print_shown = |name: &str| print_bodies.as_ref().is_none_or(|names| names.iter().any(|n| n == name));
+    let print_set: Option<std::collections::HashSet<&str>> = print_bodies.as_ref().map(|names| names.iter().map(String::as_str).collect());
+    let print_shown = |name: &str| print_set.as_ref().is_none_or(|names| names.contains(name));
     if !product && strength > 0.0 && print_bodies.as_ref().is_none_or(|names| !names.is_empty()) {
         let cap = t.section_cap;
         let blend = |from: u8, to: u8, k: f32| (f32::from(from) + (f32::from(to) - f32::from(from)) * k).round().clamp(0.0, 255.0) as u8;
