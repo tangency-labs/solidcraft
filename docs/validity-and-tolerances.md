@@ -112,7 +112,10 @@ the code runs:
 `Geometry` (level 1) and `All` (level 2, the slow geometric tests); each failed test is one line
 `<type>::Test #<n> <name>: <message>`, and warnings (`SmBrep` test 21) are not failures. Every
 operation's result in ops passes `finish` (`solidcore-ops/src/body.rs`): a result with no faces is
-`Error::Empty`, and a solid input whose result fails `is_outward_solid` is `Error::NotSolid`.
+`Error::Empty`, and a solid input whose result fails `is_outward_solid` is `Error::NotSolid`. A
+boolean's result is checked with `is_outward_touching_solids` instead, which allows solids that touch
+along an edge or at a vertex, and the boolean returns `None` for an empty result
+([booleans.md](booleans.md) §3).
 `finish` runs level 0, so the tolerance tests of level 2 are not part of the result contract.
 
 The tests that decide each property, by the test numbers the check reports:
@@ -184,9 +187,10 @@ vertex/edge and vertex/face gaps and the largest τ_e at it.
 Where the faces carry definitions, the distances compose. With B_i certified within ε_i of S_i
 ([definitions-and-certificates.md](definitions-and-certificates.md) §4) and C proved within δ of
 S1 ∩ S2, C lies within δ + ε_i of the net B_i, and the gap any check measures against the net is
-bounded by that sum. So **an edge's tolerance in a constructed body is δ + max ε_i, known before any
-gap is measured**; a measured gap larger than it is evidence against the construction, not a
-quantity to cover (§8).
+bounded by that sum. So **an edge's deviation bound in a constructed body is δ + max ε_i, known
+before any gap is measured**, and its stored tolerance is that bound, raised to the body tolerance
+where it is smaller (§5.1, invariant 5). A measured gap larger than the bound is evidence against
+the construction, not a quantity to cover (§8).
 
 The gaps themselves are measured, not enclosed. `calc_max_edge_face_gap`
 (`topology/edgeuse/p1.rs`) takes the largest of 20 samples of the distance from C to the face's
@@ -197,7 +201,8 @@ upstream's tolerance list (tests 5 to 7) are not evaluated, and `EdgeFaceTrimCur
 
 ## 6. Seams, poles and closed surfaces
 
-A closed surface (a cylinder in U, a sphere or torus in both) has a seam where its parameter wraps; a
+A closed surface (a cylinder or cone in U, a sphere in U with its V ending at the poles, a torus in
+both U and V) has a seam where its parameter wraps; a
 sphere or cone has poles where a whole parameter line is one point. The B-rep makes both explicit:
 - **a seam is an edge.** A face that crosses its surface's seam must carry a seam edge there, used
   twice by the same face with two UV trims at the two ends of the period
@@ -295,9 +300,9 @@ face's surface along its pcurve at 2,000 points:
 
 The stored curves lie up to 6.6e-3 off the sphere and 3.6e-3 off the extruded wall, while edge 43's
 curve is on the floor to 1e-14. Each pcurve follows C's foot on its surface: |C(t) − S(p(t))| along
-the pcurve matches the projection gap on the sphere and the floor. So the two pcurves' images are as
-far apart as C is from the surfaces (7.3e-3 for edge 14): the faces' trimmed boundaries do not meet,
-and the tube is what joins them. The healed body passes every gap test at every level; its check
+the pcurve matches the projection gap on the sphere and the floor. The two pcurves' images, measured
+directly at the same parameter, are 7.32e-3 apart on edge 14 (3.56e-3 on 43, 3.23e-3 on 13): the
+faces' trimmed boundaries do not meet, and the tube is what joins them. The healed body passes every gap test at every level; its check
 fails only on a surface discontinuity and curve kinks. Healing re-measured these tolerances in both
 directions (43 and 13 shrank, 14 grew) and closed no gap. The construction §8 asks for here is the
 edge recomputed on the sphere and the wall's intersection, which no healer step does.
@@ -361,7 +366,8 @@ tolerance.
    edge uses close within the intersection tolerance.
 7. No tube or ball reaches an entity it does not bound: an edge is longer than its tolerance, and no
    two entities coincide.
-8. A solid result is one closed manifold, valid at level 0, facing out (positive volume).
+8. A solid result is one closed manifold, valid at level 0, facing out (positive volume); a
+   boolean's may be closed solids that touch along an edge or at a vertex.
 9. A constructed result's tolerances come from its certificates (§8); a measured gap past them is a
    refusal or a recomputed curve, never a larger tolerance.
 10. Imported data may be given larger tolerances only to an enclosed gap, recorded.

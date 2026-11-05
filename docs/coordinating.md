@@ -30,10 +30,11 @@ Read, in this order, before you write a brief:
 Write down, in two or three sentences, what the correct result is and which invariant the
 failing case breaks. If you cannot, you are not ready to split the work.
 
-Every result is one of three: exact (the net is the definition), certified (the net within a
-stored, proved ε of the definition), or a typed refusal that names its cause and the size that
-builds ([definitions-and-certificates.md](definitions-and-certificates.md)). There is no fourth
-class. A correct refusal is a success. A body that builds with a bare B-spline face standing in
+Every face of a result is exact (the net is the definition) or certified (the net within a
+stored, proved ε of the definition); an operation that cannot build such a body refuses with a
+typed error that names its cause and, where one exists, the size that builds
+([definitions-and-certificates.md](definitions-and-certificates.md)). There is no fourth
+outcome. A correct refusal is a success. A body that builds with a bare B-spline face standing in
 for its definition, an estimated bound, or a widened tolerance is a failure, whatever its picture
 looks like.
 
@@ -100,8 +101,8 @@ measurement. A subagent sees only its brief, so the brief carries everything:
   branch or compatibility flag; never loosen a tolerance or change an expected value without a
   reason shown in numbers and pictures; the layer the work lives in; that you hold the claim and
   the pull request.
-- **That a refusal can be the answer**: a refusal that names the size that builds is a correct
-  result, and the brief says so.
+- **That a refusal can be the answer**: a refusal that names its cause, and the size that builds
+  where one exists, is a correct result, and the brief says so.
 
 Independent pieces run at once; a piece that needs another's answer waits for it. Keep the
 number of agents to what you can inspect: a piece you cannot check is not worth starting. Start

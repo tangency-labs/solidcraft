@@ -306,8 +306,9 @@ names its cause and place, as the blend's do, is the target and not yet the bool
 
 A reviewer can check each of these on a change to the boolean.
 
-1. Every decision point (a ray hit, a step-off point, an imprinted vertex) is a root on the
-   surfaces' definitions S; a net answers only a guess or a box, and a box is grown by ε.
+1. Every surface hit or explicitly surface-solved decision point is a root on the surfaces'
+   definitions S. An evaluated operand-edge ray origin is only a seed and need not itself be a
+   root; a net answers only a guess or a box, and a box is grown by ε.
 2. No display mesh or tessellation is read by any step.
 3. A face's class is inside, outside or on, from a sector at a common edge, a ray, or a coincident
    pair; nothing is kept or dropped for any other reason.

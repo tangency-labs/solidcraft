@@ -138,16 +138,20 @@ curvature, and every larger distance crosses it and folds. The case is the test
 
 ### 4.1 The theory
 
-The offset is a regular surface where det(I − d W) > 0, W the shape operator of S: with principal
-curvatures k₁, k₂ along n, where (1 − k₁d)(1 − k₂d) > 0 [1, 3, 13]. Where it vanishes, d is a
+The offset is a regular surface where det(I − d W) ≠ 0, W the shape operator of S: with principal
+curvatures k₁, k₂ along n, where (1 − k₁d)(1 − k₂d) ≠ 0 [1, 3, 13]. Where it is positive the offset
+keeps S's orientation; where it is negative the offset is regular but turned inside out, its normal
+reversed. The certificate checks positivity, the condition for a wall that keeps its side. Where it vanishes, d is a
 principal radius of curvature and the offset point is on the focal surface (the evolute of a curve
 in the plane) [8, 9]. Past it the offset runs back over itself: the parallel of a curve develops
 cusps and a swallowtail where it crosses the evolute, and the surface's offset folds the same way
 [8, 10]. Two cases are told apart:
 - **collapse**: |d| equals a radius of curvature the face attains over a region, as a round inset
   by its radius, whose offset is its spine (a line or a point);
-- **fold**: |d| passes the least radius of curvature on the displaced side, so the offset crosses
-  itself (Figure 1).
+- **fold**: |d| passes the least radius of curvature on the displaced side. Where the curvature
+  varies across the face, the offset meets the focal surface inside the face and crosses itself
+  (Figure 1). Where it is constant (a cylinder inset past its radius), the offset is a regular
+  cylinder turned inside out, which bounds no wall on the side it should.
 
 Either way the largest wall that builds is bounded by the least radius of curvature on the side
 the offset moves to. A wall on the other side (away from the centre of curvature) never folds
@@ -297,7 +301,8 @@ stitch:
 1. **Guard.** `check_shell_radius` refuses |d| < 2 × the input's tolerance.
 2. **Offset.** `run_shell_offset` offsets every face but the open ones (`shell_faces`, copied
    unmoved) into a new body.
-3. **Implicit offsets** are replaced by nets (§3.2), within the input's tolerance.
+3. **Implicit offsets** are replaced by nets (§3.2), fitted to the input's tolerance at samples: a
+   target, not a proved bound at every parameter. Only the certified path proves its net's bound.
 4. **A sheet** (the input is no manifold solid, `create_offset_solid`) is merged with the offset
    and stitched: from a tenth of the input's tolerance, ×10 per pass, at most four passes and never
    past |d| / 2. With `merge_sheet_side_walls` the side walls of a thickened sheet's coplanar edges
