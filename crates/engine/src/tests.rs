@@ -3900,8 +3900,22 @@ fn a_deleted_sketch_point_drops_only_its_own_hole() {
     let h = holes(&s);
     assert_eq!(h.error, None);
     assert_eq!(h.warning.as_deref(), Some("sketch point(s) `b` no longer in the sketch: not drilled there (edit the Hole to drop them)"));
-    assert!(!s.model.state().bodies.iter().any(|b| b.body.contains(solidcore_record::Vec3::new(15.0, 10.0, 5.0))), "the hole at `a` is drilled");
-    assert!(s.model.state().bodies.iter().any(|b| b.body.contains(solidcore_record::Vec3::new(45.0, 10.0, 5.0))), "`b`'s spot is solid");
+    assert!(
+        s.model.state().bodies.iter().all(|b| b
+            .body
+            .classify_point(solidcore_record::Vec3::new(15.0, 10.0, 5.0))
+            .unwrap_or(solidcraft_kernel::PointClass::Outside)
+            == solidcraft_kernel::PointClass::Outside),
+        "the hole at `a` is drilled"
+    );
+    assert!(
+        s.model.state().bodies.iter().any(|b| b
+            .body
+            .classify_point(solidcore_record::Vec3::new(45.0, 10.0, 5.0))
+            .unwrap_or(solidcraft_kernel::PointClass::Outside)
+            == solidcraft_kernel::PointClass::Inside),
+        "`b`'s spot is solid"
+    );
     let f = s.doc.find_feature("Holes").unwrap();
     assert!(matches!(&f.kind, solidcraft_doc::FeatureKind::Hole { points: Some(sp), .. } if sp.ids == ["a", "b"]), "{:?}", f.kind);
 
