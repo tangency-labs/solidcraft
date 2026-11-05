@@ -1624,7 +1624,7 @@
   "help.sketch.insert_svg": "Lit les tracés d'un dessin SVG dans une esquisse, mis à l'échelle, tournés et placés comme vous le définissez. À utiliser pour transformer un logo ou un contour vectoriel en courbes que vous pouvez extruder.",
   "help.sketch.inspect": "Ouvre un rapport sur l'esquisse ouverte : combien de degrés de liberté il reste et si elle est entièrement contrainte. À utiliser pour savoir ce qui bouge encore avant de terminer l'esquisse.",
   "help.sketch.intersect": "Ajoute les courbes ou points où des corps, faces, arêtes ou d'autres esquisses traversent le plan d'esquisse. Ils restent liés et suivent le modèle lorsqu'il change.",
-  "help.sketch.intersection_curve": "Crée des courbes 3D là où deux corps ou faces se rencontrent, liées à eux. À utiliser comme trajectoires ou rails guides qui suivent le modèle.",
+  "help.sketch.intersection_curve": "Crée des courbes 3D là où deux corps, faces ou courbes d'autres esquisses se rencontrent, liées à eux. À utiliser comme trajectoires ou rails guides qui suivent le modèle.",
   "help.sketch.isoparametric_curve": "Crée une courbe 3D le long de la direction U ou V d'une face, par un point que vous choisissez, liée à la face. À utiliser comme trajectoire ou ligne de partage qui suit la surface.",
   "help.sketch.line": "Dessine des lignes connectées point par point, en chaîne ouverte ou en contour fermé. C'est l'outil de base de la plupart des profils.",
   "help.sketch.line.midpoint": "Dessine une ligne de son milieu vers une extrémité, l'autre extrémité étant son symétrique. À utiliser pour des lignes centrées sur un point, comme une arête symétrique.",

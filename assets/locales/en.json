@@ -1704,7 +1704,7 @@
   "help.sketch.insert_svg": "Reads the paths of an SVG drawing into a sketch, scaled, turned and placed where you set. Use it to turn a logo or vector outline into curves you can extrude.",
   "help.sketch.inspect": "Opens a report on the open sketch: how many degrees of freedom are left and whether it is fully constrained. Use it to find out what still moves before you finish the sketch.",
   "help.sketch.intersect": "Adds the curves or points where bodies, faces, edges or other sketches cross the sketch plane. They stay linked and follow the model when it changes.",
-  "help.sketch.intersection_curve": "Creates 3D curves where two bodies or faces meet, linked to them. Use them as paths or guide rails that follow the model.",
+  "help.sketch.intersection_curve": "Creates 3D curves where two bodies, faces or curves of other sketches meet, linked to them. Use them as paths or guide rails that follow the model.",
   "help.sketch.isoparametric_curve": "Creates a 3D curve along a face's U or V direction through a point you pick, linked to the face. Use it as a path or split line that follows the surface.",
   "help.sketch.line": "Draws connected lines point by point, as an open chain or a closed outline. It is the basic tool for most profiles.",
   "help.sketch.line.midpoint": "Draws a line from its midpoint out to one end, with the other end mirrored. Use it for lines centred on a point, such as a symmetric edge.",

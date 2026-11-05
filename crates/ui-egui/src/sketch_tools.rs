@@ -948,7 +948,7 @@ pub fn hint(id: &str) -> Option<String> {
             "sketch.constraint.polygon" => "Polygon: click the lines of a closed chain; right-click to apply",
             "sketch.centerline" => "Centerline: click lines",
             "sketch.project_to_surface" => "Project to surface: click curves of other sketches, right-click, then click the face",
-            "sketch.intersection_curve" => "Intersection curve: click two faces",
+            "sketch.intersection_curve" => "Intersection curve: click two faces or curves of other sketches",
             "sketch.spun_profile" => "Spun profile: click the body, then the axis line",
             _ => return None,
         }
@@ -1306,13 +1306,19 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
         }
         Mode::Steps => match cmd {
             "sketch.intersection_curve" => {
-                if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)).filter(|r| r.get("face").is_some()) {
+                // Either side is a face or a curve of another sketch (#11048).
+                if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)).filter(|r| r.get("face").is_some() || r.get("curve").is_some()) {
                     tool.picks.push(r.to_string());
                     if tool.picks.len() >= 2 {
                         let a: Value = serde_json::from_str(&tool.picks[0]).unwrap_or(Value::Null);
                         let b: Value = serde_json::from_str(&tool.picks[1]).unwrap_or(Value::Null);
-                        let _ = app.run(cmd, json!({"a": a, "b": b}));
+                        // Done: the hint asks for the next pair again (a failure keeps its error).
+                        if app.run(cmd, json!({"a": a, "b": b})).is_ok() {
+                            app.set_status(crate::tools::hint(cmd), false);
+                        }
                         tool.picks.clear();
+                    } else {
+                        app.set_status(app.tr("ui.intersection_curve_second_pick").to_string(), false);
                     }
                 }
             }
@@ -1480,6 +1486,12 @@ pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
             run_entities(app, tool);
             tool.picks.clear();
             tool.pts.clear();
+            true
+        }
+        // Intersection Curve: the right-click starts the picks over (#11048).
+        Mode::Steps if tool.cmd == "sketch.intersection_curve" && !tool.picks.is_empty() => {
+            tool.picks.clear();
+            app.set_status(crate::tools::hint(tool.cmd), false);
             true
         }
         Mode::Steps if !tool.picks.is_empty() && tool.picks.last().is_some_and(|x| x != "|") => {

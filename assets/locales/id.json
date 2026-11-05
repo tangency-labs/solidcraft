@@ -1621,7 +1621,7 @@
   "help.sketch.insert_svg": "Membaca path gambar SVG ke dalam sketsa, diskalakan, diputar, dan ditempatkan sesuai pengaturan Anda. Gunakan untuk mengubah logo atau kontur vektor menjadi kurva yang dapat diekstrusi.",
   "help.sketch.inspect": "Membuka laporan tentang sketsa yang terbuka: berapa derajat kebebasan yang tersisa dan apakah sketsa terbatasi penuh. Gunakan untuk mengetahui apa yang masih bergerak sebelum Anda menyelesaikan sketsa.",
   "help.sketch.intersect": "Menambahkan kurva atau titik tempat bodi, muka, tepi, atau sketsa lain memotong bidang sketsa. Semuanya tetap tertaut dan mengikuti model saat model berubah.",
-  "help.sketch.intersection_curve": "Membuat kurva 3D di tempat dua bodi atau muka bertemu, tertaut padanya. Gunakan sebagai jalur atau rel pemandu yang mengikuti model.",
+  "help.sketch.intersection_curve": "Membuat kurva 3D di tempat dua bodi, muka, atau kurva sketsa lain bertemu, tertaut padanya. Gunakan sebagai jalur atau rel pemandu yang mengikuti model.",
   "help.sketch.isoparametric_curve": "Membuat kurva 3D sepanjang arah U atau V sebuah muka melalui titik yang Anda pilih, tertaut ke muka itu. Gunakan sebagai jalur atau garis pisah yang mengikuti permukaan.",
   "help.sketch.line": "Menggambar garis-garis tersambung titik demi titik, sebagai rantai terbuka atau kontur tertutup. Ini alat dasar untuk sebagian besar profil.",
   "help.sketch.line.midpoint": "Menggambar garis dari titik tengahnya ke satu ujung, dengan ujung lainnya dicerminkan. Gunakan untuk garis yang dipusatkan pada sebuah titik, seperti tepi simetris.",
