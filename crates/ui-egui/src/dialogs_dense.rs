@@ -4,6 +4,7 @@ use crate::ui_kit;
 use crate::ui_kit::{choice_row, expr_row, hint_row};
 use solidcraft_engine::kernel::Continuity;
 
+/// The command whose icon and label head a dialog of `kind`, when it has one.
 pub(super) fn command(kind: &Kind) -> Option<&'static str> {
     match kind {
         Kind::Material { .. } => Some("material.assign"),
@@ -338,6 +339,7 @@ fn choose_fillet_type(extra: &mut serde_json::Map<String, Value>, index: usize, 
     }
 }
 
+/// The dialog's form: its hints, inputs and value rows. True when Enter was pressed in a field.
 pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let t = Tokens::get();
     let mut enter = false;

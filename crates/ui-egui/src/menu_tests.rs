@@ -1290,6 +1290,30 @@ fn toolbar_pins_removes_reorders_and_keeps_its_layout() {
     assert_eq!(ids(&app, "CREATE"), create);
 }
 
+/// The Construct panel's default buttons are Plane, Axis and Point (#11340). The old layout, Offset
+/// Plane alone, stays one pin and three removals away, and is kept with the `toolbar` preference.
+#[test]
+fn the_old_construct_layout_is_kept_with_the_toolbar_preference() {
+    use crate::toolbar_custom as tc;
+    let mut app = sample_app();
+    app.ui.tab = "MODEL".into();
+    let ids = |app: &SolveApp| -> Vec<&'static str> {
+        let lists = tc::panel_lists("MODEL");
+        let (_, cmds, n) = lists.iter().find(|(p, ..)| *p == "CONSTRUCT").unwrap();
+        tc::buttons(app, "MODEL", "CONSTRUCT", cmds, *n).iter().map(|c| c.id).collect()
+    };
+    assert_eq!(ids(&app), vec!["construct.plane", "construct.axis", "construct.point"]);
+    act(&mut app, &Target::ToolbarCommand { id: "construct.plane.offset".into() }, "Pin to Toolbar");
+    for id in ["construct.plane", "construct.axis", "construct.point"] {
+        act(&mut app, &Target::ToolbarCommand { id: id.into() }, "Remove from Toolbar");
+    }
+    assert_eq!(ids(&app), vec!["construct.plane.offset"]);
+    let mut reopened = sample_app();
+    reopened.ui.tab = "MODEL".into();
+    reopened.load_prefs(&app.prefs());
+    assert_eq!(ids(&reopened), vec!["construct.plane.offset"], "the old layout comes back with the preferences");
+}
+
 #[test]
 fn the_workspace_menu_lists_design_and_render_and_greys_future_workspaces() {
     let app = sample_app();

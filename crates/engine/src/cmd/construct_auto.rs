@@ -111,6 +111,8 @@ fn as_form(r: &Value, form: Form) -> Value {
 /// Every way to put each of `refs` in its own slot of `slots`, with every required slot filled:
 /// the slot index of each reference. The first ways keep the references in the slots' order.
 fn placements(refs: usize, slots: &[Slot]) -> Vec<Vec<usize>> {
+    /// Extend the placement in `at` by one reference, in every free slot, and keep each complete
+    /// one that fills every required slot.
     fn go(refs: usize, slots: &[Slot], at: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
         if at.len() == refs {
             if slots.iter().enumerate().all(|(i, s)| !s.required || at.contains(&i)) {
@@ -174,6 +176,8 @@ pub fn construct_method(s: &Session, tool: &str, refs: &[Value], with: &Map<Stri
     }))
 }
 
+/// Run `tool` (`construct.plane`…): build with its first method that takes `refs` and `with`, as
+/// one undo step, and name the method in the reply.
 fn build(s: &mut Session, tool: &str, p: &Value) -> Result<Value> {
     // The contract has checked `refs` and `with`; this reads them as given.
     let refs = p.get("refs").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -187,14 +191,17 @@ fn build(s: &mut Session, tool: &str, p: &Value) -> Result<Value> {
     Ok(reply)
 }
 
+/// `construct.plane`.
 fn plane(s: &mut Session, p: &Value) -> Result<Value> {
     build(s, "construct.plane", p)
 }
 
+/// `construct.axis`.
 fn axis(s: &mut Session, p: &Value) -> Result<Value> {
     build(s, "construct.axis", p)
 }
 
+/// `construct.point`.
 fn point(s: &mut Session, p: &Value) -> Result<Value> {
     build(s, "construct.point", p)
 }
