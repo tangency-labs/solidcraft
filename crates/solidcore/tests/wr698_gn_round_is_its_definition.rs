@@ -575,12 +575,12 @@ fn an_offset_of_a_reopened_round_stands_off_its_definition() {
     );
 }
 
-/// #2388, contract 5, known failing: the offset of a round is not built on S. Its offset
-/// face's surface is an offset surface of the round's net B (`TurnToNURBS` slices a blend
-/// to its net, fork 0136260), so the offset stands 0.5 off B, within the bound ε of S,
-/// not off S. This test fails once the offset's base is the round by its definition.
+/// #2388, contract 5: the offset of a round is built on S. Its offset face's surface is an
+/// offset surface of the round by its definition (the procedural blend extended exactly
+/// past its sides, its across length measured with an honest rounding bound), not of the
+/// round's net B (`TurnToNURBS` slices a blend to its net, fork 0136260).
 #[test]
-fn known_failing_the_offset_of_a_round_is_the_offset_of_its_net() {
+fn the_offset_of_a_round_is_the_offset_of_its_definition() {
     let mut k = kernel(true);
     let (offset, walls) = offset_rounds(&mut k);
     assert_eq!(walls.len(), 2, "the rounds' offsets");
@@ -589,10 +589,10 @@ fn known_failing_the_offset_of_a_round_is_the_offset_of_its_net() {
         let SurfaceKind::OffsetSurface(o) = s.kind() else {
             panic!("not an offset surface: {}", s.type_code());
         };
-        assert!(
-            matches!(o.base_surface().kind(), SurfaceKind::BSpline(_)),
-            "the offset's base is now {} (fixed? update this test)",
-            o.base_surface().type_code()
+        assert_eq!(
+            o.base_surface().type_code(),
+            PROCEDURAL_BLEND_TYPE,
+            "the offset's base is not the round by its definition"
         );
     }
 }
