@@ -334,7 +334,7 @@
                 ],
                 "runs": [
                   {
-                    "text": "SolidCraft (any app)",
+                    "text": "App (SolidCraft, or any app)",
                     "style": {
                       "font_family": "Helvetica",
                       "font_style": "Bold",
@@ -583,7 +583,7 @@
                 ],
                 "runs": [
                   {
-                    "text": "the app",
+                    "text": "App",
                     "style": {
                       "font_family": "Helvetica",
                       "font_style": "Bold",
@@ -5637,7 +5637,7 @@
       "copyrightNotice": "",
       "copyrightUrl": "",
       "created": 1793887324,
-      "modified": 1793887569
+      "modified": 1793887672
     }
   },
   "images": {}
