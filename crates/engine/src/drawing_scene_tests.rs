@@ -540,6 +540,7 @@ fn seeded_edits_and_steps_always_end_at_the_built_scene() {
     let pick = |seed: u64, salt: u64, n: u64| ((seed ^ salt).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 33) % n;
     for seed in 1..=24u64 {
         let (mut s, sheet, [front, top]) = front_and_top();
+        let dimension = top_edge(&mut s, front);
         let edit =
             |s: &mut Session, view: u64, set: Value| s.execute("drawing.view.edit", &json!({"view": ids::encode(view), "set": set})).map(|_| ());
         for i in 0..12u64 {
@@ -547,7 +548,7 @@ fn seeded_edits_and_steps_always_end_at_the_built_scene() {
             let scale = ["1:1", "1:2", "1:5"][pick(seed, 200 + i, 3) as usize];
             let tangent_edges = ["hide", "show"][pick(seed, 300 + i, 2) as usize];
             // Refused edits (nothing to undo, say) change nothing, which the end still checks.
-            let _ = match pick(seed, i, 9) {
+            let _ = match pick(seed, i, 10) {
                 0 => edit(&mut s, front, json!({"place": {"at": [along, 150.0]}})),
                 1 => edit(&mut s, top, json!({"place": {"aligned": along + 100.0}})),
                 2 => edit(&mut s, front, json!({"scale": scale})),
@@ -562,6 +563,9 @@ fn seeded_edits_and_steps_always_end_at_the_built_scene() {
                     step(&mut s);
                     Ok(())
                 }
+                8 => {
+                    s.execute("drawing.dimension.edit", &json!({"dimension": ids::encode(dimension), "set": {"offset_mm": along / 10.0}})).map(|_| ())
+                }
                 _ => extract(&mut s, sheet).map(drop),
             };
         }
@@ -570,6 +574,7 @@ fn seeded_edits_and_steps_always_end_at_the_built_scene() {
         let at_once = built(&s, sheet);
         assert_eq!(bytes(&end.scene), bytes(&at_once.scene), "seed {seed}");
         assert_eq!(&*end.objects, at_once.objects.as_slice(), "seed {seed}");
+        assert_eq!(end.dimensions, at_once.dimensions, "seed {seed}");
         assert_eq!(run(&mut s, "drawing.status", json!({}))["waiting"], json!(0), "seed {seed}");
     }
 }
@@ -1307,4 +1312,61 @@ fn hit_says_what_is_under_a_point_of_a_sheet() {
     }
     assert!(s.execute("drawing.scene.hit", &json!({"sheet": "no such", "point_mm": [0.0, 0.0]})).is_err());
     assert!(s.execute("drawing.scene.hit", &json!({"sheet": sheet_id, "point_mm": [0.0]})).is_err());
+}
+
+/// A model change with the drawing open marks the view, and its old lines keep their old dimensions
+/// until the one step that swaps both: at no step do new dimensions sit on old lines or old ones on
+/// new. The dimension's points land on the view's new lines, and a dimension's own edit projects
+/// nothing.
+#[test]
+fn a_views_dimensions_swap_with_its_lines() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let id = top_edge(&mut s, front);
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    let checkpoint = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].clone();
+    run(&mut s, "drawing.close", json!({}));
+    let block = s.doc.features[0].id;
+    run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"height": 40}}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    let old = settled(&mut s, sheet);
+    // Back to 20 tall, with the drawing open.
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": checkpoint}));
+
+    let waiting = extract(&mut s, sheet).unwrap();
+    assert_eq!(bytes_of(group_of(&waiting.scene, id)), bytes_of(group_of(&old.scene, id)), "the old lines keep the old dimension");
+    assert_eq!(bytes_of(group_of(&waiting.scene, front)), bytes_of(group_of(&old.scene, front)));
+
+    // A step at a time, until the front view is drawn: until then its dimension stays on its old lines.
+    let one = loop {
+        step(&mut s);
+        let mid = extract(&mut s, sheet).unwrap();
+        if !mid.stale.contains(&front) {
+            break mid;
+        }
+        assert_eq!(bytes_of(group_of(&mid.scene, id)), bytes_of(group_of(&old.scene, id)), "the old lines keep the old dimension");
+    };
+    let new = built(&s, sheet);
+    assert_ne!(bytes_of(group_of(&old.scene, front)), bytes_of(group_of(&new.scene, front)), "the model changed the view");
+    assert_eq!(bytes_of(group_of(&one.scene, front)), bytes_of(group_of(&new.scene, front)));
+    assert_eq!(bytes_of(group_of(&one.scene, id)), bytes_of(group_of(&new.scene, id)), "and its dimension in the same swap");
+    assert!(one.stale_dimensions.is_empty(), "{:?}", one.stale_dimensions);
+
+    // The block's top edge at 1:2, as a_dimension_is_drawn_after_the_views_on_the_sheet has it: 10 above it.
+    let tips: Vec<f64> = group_of(&one.scene, id)
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Fill { region } => Some(region.outer.segs[0].start().y),
+            _ => None,
+        })
+        .collect();
+    assert!(tips.iter().all(|y| (y - 165.0).abs() < 1e-9), "{tips:?}");
+
+    let end = settled(&mut s, sheet);
+    let projections = s.drawing_scenes.projections;
+    run(&mut s, "drawing.dimension.edit", json!({"dimension": ids::encode(id), "set": {"offset_mm": 20.0}}));
+    let edited = settled(&mut s, sheet);
+    assert_eq!(s.drawing_scenes.projections, projections);
+    assert_eq!(bytes_of(group_of(&edited.scene, front)), bytes_of(group_of(&end.scene, front)));
+    assert_ne!(bytes_of(group_of(&edited.scene, id)), bytes_of(group_of(&end.scene, id)));
 }
