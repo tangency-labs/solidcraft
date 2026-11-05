@@ -995,6 +995,18 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
         "browser.expand_all" | "browser.collapse_all" => item.params = Some(json!({"path": path})),
         _ => {}
     });
+    // One placement of several can show another design on its own, above the row for all of them.
+    if app.session.doc.links.contains_key(&placement.component)
+        && app.session.doc.occurrences.iter().filter(|o| o.component == placement.component).count() > 1
+    {
+        let one =
+            act("ui.relinkPlacement", "Relink Source…", "update").with(json!({"component": placement.component, "occurrence": placement.occurrence}));
+        each_item(&mut entries, &mut |item: &mut Item| {
+            if let Some(i) = item.children.iter().position(|c| c.id == "ui.relinkSource") {
+                item.children.insert(i, one.clone());
+            }
+        });
+    }
     entries
 }
 
@@ -1517,9 +1529,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.finishSketch" => app.finish_sketch(),
         "ui.cancelSketch" => app.cancel_sketch(),
-        "ui.relinkSource" => {
+        "ui.relinkSource" | "ui.relinkPlacement" => {
             if let Some(component) = id_of(&p, "component") {
-                crate::linked_source::start(app, component);
+                crate::linked_source::start(app, component, id_of(&p, "occurrence"));
             }
         }
         "ui.extractComponent" => {

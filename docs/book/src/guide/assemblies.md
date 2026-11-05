@@ -484,6 +484,14 @@ instances**, keeping their identities and placements. Cancelling or choosing a m
 invalid, empty or self-referencing design leaves the assembly unchanged. The operation is
 one undo step and the new path is saved relative to the assembly when possible.
 
+To swap only one occurrence of a component placed several times, right-click that occurrence
+and choose **Component → Relink Source…**. Only that occurrence shows the chosen design. It
+keeps its position, grounding and joints, which move to the same faces of the new design where
+it has them. It becomes an occurrence of the component already linked to that design, or of a
+new linked component; the other occurrences keep the old source. Scripts pass the occurrence:
+`component.relink {component, occurrence, path}`, and the reply's `component` is then the one
+the occurrence shows and `previous_component` the one it showed.
+
 Scripts use `component.relink {component, path}`. The reply includes `previous_path`, `path`,
 `warnings`, `joint_errors` and `joint_conflicts`. Changed geometry can invalidate a joint's
 face reference: relinking reports those joints in the reply and UI status/message history;

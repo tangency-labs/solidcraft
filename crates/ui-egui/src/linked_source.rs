@@ -21,13 +21,15 @@ pub(crate) fn start_selected(app: &mut SolveApp) {
     if let [component] = components.as_slice()
         && app.session.doc.links.contains_key(component)
     {
-        start(app, *component);
+        start(app, *component, None);
     } else {
         app.set_status(app.tr("ui.relink_select_one").to_string(), true);
     }
 }
 
-pub(crate) fn start(app: &mut SolveApp, component: u64) {
+/// Ask for the design a linked component shows instead: in all its placements, or with
+/// `occurrence` in that one only.
+pub(crate) fn start(app: &mut SolveApp, component: u64, occurrence: Option<u64>) {
     if app.file_picker_busy() || app.file_load.busy() {
         return;
     }
@@ -49,14 +51,18 @@ pub(crate) fn start(app: &mut SolveApp, component: u64) {
         }
         // Picked in the file dialog: its server is the user's choice.
         let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(&path).into_iter().collect();
-        let relinked =
-            solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.relink", json!({"component": component, "path": path})));
+        let mut params = json!({"component": component, "path": path});
+        if let Some(occurrence) = occurrence {
+            params["occurrence"] = json!(occurrence);
+        }
+        let relinked = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.relink", params));
         if let Ok(result) = relinked {
+            let done = if occurrence.is_some() { app.tr_label("ui.relink_one_done") } else { app.tr_label("ui.relink_done") }.to_string();
             let warnings: Vec<&str> = result["warnings"].as_array().into_iter().flatten().filter_map(|w| w.as_str()).collect();
             if warnings.is_empty() {
-                app.set_status(app.tr_label("ui.relink_done").to_string(), false);
+                app.set_status(done, false);
             } else {
-                let text = format!("{} {}", app.tr_label("ui.relink_done"), warnings.join("; "));
+                let text = format!("{done} {}", warnings.join("; "));
                 app.session.echo(text.clone());
                 app.set_status(text, true);
             }
@@ -328,24 +334,52 @@ mod tests {
         let _ = std::fs::remove_dir_all(folder);
     }
 
+    /// #12227: a placement's menu relinks that placement alone when the component has others.
+    #[test]
+    fn relink_menu_relinks_one_placement_of_several() {
+        let (mut app, component, occurrence, folder, moved) = fixture("one");
+        let rows = |app: &SolveApp, target: &Target| -> Vec<String> { context_menu::entries(app, target).into_iter().map(|i| i.id).collect() };
+        assert!(
+            !rows(&app, &Target::Occurrence { path: vec![occurrence] }).contains(&"ui.relinkPlacement".to_string()),
+            "one placement: only the row for all"
+        );
+        let second = app.run("occurrence.copy", json!({"occurrence": occurrence, "translate": [90,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+        assert!(!rows(&app, &Target::Component { id: component }).contains(&"ui.relinkPlacement".to_string()), "no placement to relink");
+        let target = Target::Occurrence { path: vec![second] };
+        let ids = rows(&app, &target);
+        let at = ids.iter().position(|id| id == "ui.relinkPlacement").expect("a row for this placement");
+        assert_eq!(ids[at + 1], "ui.relinkSource", "right above the row for all instances");
+        let item = context_menu::entries(&app, &target).into_iter().find(|i| i.id == "ui.relinkPlacement").unwrap();
+        assert_eq!(item.params, Some(json!({"component": component, "occurrence": second})));
+        answer(&mut app, Some(moved.to_string_lossy().into_owned()));
+        context_menu::run_item(&mut app, &item, egui::Pos2::ZERO);
+        crate::file_picker::tick(&mut app, &egui::Context::default());
+        let shows = |app: &SolveApp, o: u64| app.session.doc.occurrences.iter().find(|x| x.id == o).unwrap().component;
+        assert_eq!(shows(&app, occurrence), component);
+        assert_ne!(shows(&app, second), component);
+        assert!(app.session.doc.links[&shows(&app, second)].path.ends_with("moved.solidcraft"));
+        assert!(app.status.as_ref().is_some_and(|(s, _, error)| s.contains("this instance") && !error), "{:?}", app.status);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
     #[test]
     fn relink_picker_cancel_bad_file_and_changed_document_keep_the_link() {
         let (mut app, component, _, folder, moved) = fixture("cancel");
         let before = serde_json::to_value(&*app.session.doc).unwrap();
         let undo = app.session.undo.len();
         answer(&mut app, None);
-        start(&mut app, component);
+        start(&mut app, component, None);
         crate::file_picker::tick(&mut app, &egui::Context::default());
         assert_eq!(serde_json::to_value(&*app.session.doc).unwrap(), before);
         assert_eq!(app.session.undo.len(), undo);
         answer(&mut app, Some(folder.join("missing.solidcraft").to_string_lossy().into_owned()));
-        start(&mut app, component);
+        start(&mut app, component, None);
         crate::file_picker::tick(&mut app, &egui::Context::default());
         assert_eq!(serde_json::to_value(&*app.session.doc).unwrap(), before);
         assert_eq!(app.session.undo.len(), undo);
         assert!(app.status.as_ref().is_some_and(|(_, _, error)| *error));
         answer(&mut app, Some(moved.to_string_lossy().into_owned()));
-        start(&mut app, component);
+        start(&mut app, component, None);
         // The ordinary UI blocks edits while picking. Simulate a host replacing/editing the
         // session directly to exercise the continuation's independent stale-target guard.
         app.session.execute("component.rename", &json!({"component": component, "name": "Changed"})).unwrap();
@@ -379,7 +413,7 @@ mod tests {
         part.execute("solid.box", &json!({"length": 10, "width": 20, "height": 45})).unwrap();
         part.execute("file.save", &json!({"path": plain})).unwrap();
         answer(&mut app, Some(plain.to_string_lossy().into_owned()));
-        start(&mut app, component);
+        start(&mut app, component, None);
         crate::file_picker::tick(&mut app, &egui::Context::default());
         assert!(app.session.doc.links[&component].path.ends_with("plain.json"));
         let _ = std::fs::remove_dir_all(folder);
@@ -771,7 +805,7 @@ mod tests {
         changed.execute("solid.box", &json!({"length": 10, "width": 20, "height": 45})).unwrap();
         changed.execute("file.save", &json!({"path": moved})).unwrap();
         answer(&mut app, Some(moved.to_string_lossy().into_owned()));
-        start(&mut app, component);
+        start(&mut app, component, None);
         crate::file_picker::tick(&mut app, &egui::Context::default());
         assert!(app.status.as_ref().is_some_and(|(s, _, error)| s.contains("check this component's joints") && *error));
         assert!(app.session.log.iter().any(|s| s.contains("check this component's joints")));

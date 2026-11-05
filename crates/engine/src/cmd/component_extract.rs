@@ -144,7 +144,7 @@ fn renamed(old: &ModelState, new: &[&ModelBody], name: &str, near: Vec3) -> Opti
 
 /// Joints on the placements `own` name faces of features that are gone: give them the names of
 /// the same faces of the linked bodies (Import feature `import`).
-fn rename_joint_faces(s: &mut Session, old: &ModelState, import: u64, own: &BTreeSet<u64>) {
+pub(super) fn rename_joint_faces(s: &mut Session, old: &ModelState, import: u64, own: &BTreeSet<u64>) {
     use solidcraft_doc::joints::{Coupling, JointOrigin, Size, Snap, cam::CamProfile};
     let state = s.model.state();
     let linked: Vec<&ModelBody> = state.bodies.iter().filter(|b| b.feature == import).collect();
