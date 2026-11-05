@@ -4,8 +4,9 @@
 //! older design called one of these words, and the design renames each as it opens (`g` to
 //! `g_param`): every expression and text that uses it follows as the older build read it (`2 g`
 //! was 2 × `g`), its comment says why, and no value changes. The words are this change's own,
-//! kept here as they were made: a later unit word brings its own step. The last release refuses a
-//! design saved with this (the newer format number) instead of failing to evaluate `50 g`.
+//! kept here as they were made: a later unit word brings its own step. The last release opens a
+//! design saved with this with a warning and keeps what it can't read (`crates/doc/src/newer_file.rs`),
+//! but a value written with one of these units, such as `50 g`, fails to evaluate there.
 use serde_json::Value;
 
 /// The words this change made units (not `expr::UNITS`, which grows).
