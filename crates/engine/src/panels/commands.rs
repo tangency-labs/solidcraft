@@ -245,6 +245,7 @@ pub const IDS: &[&str] = &[
     "layout.reset",
     "layout.save",
     "layout.workspace.select",
+    "panel.action",
     "panel.activate",
     "panel.close",
     "panel.collapse",
@@ -267,6 +268,7 @@ pub enum PanelCommand {
     List,
     Get,
     Open(wire::Open),
+    HeaderAction(wire::HeaderAction),
     Select { operation: &'static str, params: wire::Select },
     Move { operation: &'static str, params: wire::Move },
     Resize(wire::Resize),
@@ -316,6 +318,7 @@ pub fn parse_command(id: &str, params: &Value) -> PanelResult<PanelCommand> {
             PanelCommand::Get
         }
         "panel.open" => PanelCommand::Open(read(params)?),
+        "panel.action" => PanelCommand::HeaderAction(read(params)?),
         "panel.close" | "panel.activate" | "panel.focus" | "panel.peek" | "panel.native_close" => {
             PanelCommand::Select { operation: id, params: read(params)? }
         }
@@ -341,6 +344,7 @@ fn validate_selector(target: &Option<wire::Target>, id: &Option<String>) -> Pane
         (Some(target), None) => match target {
             wire::Target::Instance(id) => valid_id(&id.0),
             wire::Target::Section(id) => valid_id(&id.0),
+            wire::Target::Column(id) => valid_id(&id.0),
             wire::Target::Workspace(id) => valid_id(&id.0),
             wire::Target::NativeHost(id) => valid_id(&id.0),
         },
@@ -364,6 +368,18 @@ fn validate_destination(destination: Destination) -> PanelResult<()> {
                 return Err(error(Rule::Bounds, "tab index cap"));
             }
         }
+        Destination::Relative { section, placement, new_section, new_column, size } => {
+            valid_id(&section.0)?;
+            valid_id(&new_section.0)?;
+            size.validate()?;
+            if let Some(column) = &new_column {
+                valid_id(&column.0)?;
+            }
+            let split_column = matches!(placement, RelativePlacement::BeforeColumn | RelativePlacement::AfterColumn);
+            if split_column != new_column.is_some() {
+                return Err(error(Rule::Placement, "new_column required only for relative column placement"));
+            }
+        }
     }
     Ok(())
 }
@@ -377,6 +393,10 @@ fn validate_command(command: &PanelCommand) -> PanelResult<()> {
             }
         }
         PanelCommand::Select { params, .. } => validate_selector(&params.target, &params.id)?,
+        PanelCommand::HeaderAction(p) => {
+            validate_selector(&p.target, &p.id)?;
+            valid_id(&p.action.0)?;
+        }
         PanelCommand::Move { params, .. } => {
             validate_selector(&params.target, &params.id)?;
             validate_destination(params.destination.clone().into())?;
@@ -515,7 +535,29 @@ fn lower(command: PanelCommand, state: &LayoutReply, registry: &PanelRegistry, w
         }
         PanelCommand::Resize(p) => {
             revision(p.expected_revision, state)?;
-            Mutation::SetSize { section: section(target(p.target, p.id, layout, registry)?, layout)?, size: p.size.into() }
+            match target(p.target, p.id, layout, registry)? {
+                LayoutTarget::Column(column) => Mutation::SetColumnWidth { column, width: p.size.width },
+                selected => {
+                    let section = section(selected, layout)?;
+                    if p.thickness_only {
+                        let group = layout.section(&section)?;
+                        match &group.location {
+                            SectionLocation::Dock { zone: Zone::Bottom } => Mutation::SetBottomHeight { section, height: p.size.height },
+                            SectionLocation::Dock { zone: Zone::Left | Zone::Right } => Mutation::SetColumnWidth {
+                                column: group.column.clone().ok_or_else(|| error(Rule::Placement, "side section requires a column"))?,
+                                width: p.size.width,
+                            },
+                            _ => return Err(error(Rule::Placement, "thickness-only resize requires a dock target")),
+                        }
+                    } else {
+                        Mutation::SetSize { section, size: p.size.into() }
+                    }
+                }
+            }
+        }
+        PanelCommand::HeaderAction(p) => {
+            revision(p.expected_revision, state)?;
+            Mutation::HeaderAction { instance: instance(target(p.target, p.id, layout, registry)?, layout)?, action: p.action }
         }
         PanelCommand::Collapse(p) => {
             revision(p.expected_revision, state)?;
@@ -547,9 +589,26 @@ fn current_envelope(catalogue: &CatalogueState, state: &LayoutReply, registry: &
     }
 }
 
+/// Read-only retained projection for reservation capture. Do not force expanded
+/// v1 writes merely to inspect identities; callers union current live IDs too.
+pub fn current_envelope_snapshot(catalogue: &dyn LayoutCatalogue, state: &LayoutReply, registry: &PanelRegistry) -> PanelResult<LayoutEnvelope> {
+    match catalogue.state().remembered(&state.layout.workspace) {
+        Some(stored) => stored.project_envelope(registry, &state.layout.workspace),
+        None => Ok(LayoutEnvelope::new(state.layout.clone())),
+    }
+}
+
 /// Preserve all opaque sidecars. Reusing an identity with different opaque intent
 /// is an error, never silently resolved by choosing one preset's value.
 fn merge_envelopes(current: &LayoutEnvelope, mut next: LayoutEnvelope, registry: &PanelRegistry) -> PanelResult<LayoutEnvelope> {
+    let current_priorities = preparation_context(current)?.extent_priorities;
+    let incoming_priorities = preparation_context(&next)?.extent_priorities;
+    if let Some(raw) = &current.recovery_wire {
+        if next.recovery_wire.as_ref().is_some_and(|other| other != raw) {
+            return Err(error(Rule::DuplicateId, "opaque envelope recovery intent collision"));
+        }
+        next.recovery_wire = Some(raw.clone());
+    }
     next.layout.workspace = current.layout.workspace.clone();
     for item in &current.quarantine {
         if next.layout.instances.iter().any(|known| known.id == item.instance) {
@@ -588,6 +647,7 @@ fn merge_envelopes(current: &LayoutEnvelope, mut next: LayoutEnvelope, registry:
         }
     }
     next.section_order = order;
+    super::persistence::merge_retained_priority_context(&mut next, &current_priorities, &incoming_priorities)?;
     let layout = next.layout.clone();
     with_live_layout(&next, layout, registry)
 }
@@ -598,13 +658,40 @@ fn stage_current(
     action: &LayoutAction,
     envelope: &LayoutEnvelope,
     recovery: Option<Arc<[u8]>>,
+    next: CatalogueState,
+) -> PanelResult<LayoutReply> {
+    let preparation = preparation_context(envelope)?;
+    stage_current_prepared(context, state, action, envelope, recovery, next, &preparation)
+}
+
+fn stage_current_prepared(
+    context: &mut PanelCommandContext<'_>,
+    state: &LayoutReply,
+    action: &LayoutAction,
+    envelope: &LayoutEnvelope,
+    recovery: Option<Arc<[u8]>>,
     mut next: CatalogueState,
-) -> PanelResult<(LayoutReply, CatalogueState)> {
-    let projected = context.sink.project(action.clone())?;
+    preparation: &LayoutPreparationContext,
+) -> PanelResult<LayoutReply> {
+    let source_catalogue = context.catalogue.state().clone();
+    let projected = context.sink.project_in_context(action.clone(), preparation)?;
+    let workspace = match action {
+        LayoutAction::Replace { layout, .. } => &layout.workspace,
+        _ => &state.layout.workspace,
+    };
+    if &projected.workspace != workspace {
+        return Err(error(Rule::Revision, "projected layout changed requested workspace"));
+    }
     let envelope = with_live_layout(envelope, projected, context.registry)?;
     let stored = StoredEnvelope::new(&envelope, recovery.as_deref(), context.registry)?;
     next.remembered.insert(envelope.layout.workspace.clone(), stored);
+    if context.catalogue.state() != &source_catalogue {
+        return Err(error(Rule::Revision, "catalogue changed during layout projection"));
+    }
     let prepared = context.catalogue.prepare(next)?;
+    if context.catalogue.state() != &source_catalogue {
+        return Err(error(Rule::Revision, "catalogue changed during storage staging"));
+    }
     // Inspect can change through external adapters between planning and dispatch.
     // Every action below includes the inspected revision; no stale catalogue publishes.
     if context.sink.inspect().revision != state.revision {
@@ -615,10 +702,45 @@ fn stage_current(
         revision(Some(state.revision), &current)?;
         current
     } else {
-        context.sink.dispatch(action.clone())?
+        context.sink.dispatch_in_context(action.clone(), preparation)?
     };
     context.catalogue.publish(prepared);
-    Ok((committed, context.catalogue.state().clone()))
+    Ok(committed)
+}
+
+/// Current-workspace GUI actions share the command catalogue preflight. The sink
+/// owns the exact private proposal returned by project and consumed by dispatch.
+pub fn execute_layout_action(action: LayoutAction, context: &mut PanelCommandContext<'_>) -> PanelResult<LayoutReply> {
+    if let LayoutAction::Apply { mutations, .. } = &action {
+        if mutations.is_empty() || mutations.len() > MAX_MUTATIONS {
+            return Err(error(Rule::CollectionLimit, "transaction requires 1..64 mutations"));
+        }
+        validate_lifecycle_intents(mutations)?;
+        validate_header_action_transaction(mutations)?;
+        if matches!(mutations.first(), Some(Mutation::HeaderAction { .. })) {
+            // Registration, revision, presentation, availability and controller
+            // permission remain authoritative sink responsibilities.
+            return context.sink.dispatch(action);
+        }
+    }
+    let state = context.sink.inspect();
+    let action = match action {
+        LayoutAction::Apply { expected_revision, mutations } => {
+            revision(expected_revision, &state)?;
+            LayoutAction::Apply { expected_revision: Some(state.revision), mutations }
+        }
+        LayoutAction::Replace { expected_revision, layout } => {
+            revision(expected_revision, &state)?;
+            if layout.workspace != state.layout.workspace {
+                return Err(error(Rule::Capability, "workspace replacement requires workspace command"));
+            }
+            LayoutAction::Replace { expected_revision: Some(state.revision), layout }
+        }
+        LayoutAction::Inspect => LayoutAction::Inspect,
+    };
+    let next = context.catalogue.state().clone();
+    let (current, recovery) = current_envelope(&next, &state, context.registry)?;
+    stage_current(context, &state, &action, &current, recovery, next)
 }
 
 pub fn execute_command(command: PanelCommand, context: &mut PanelCommandContext<'_>) -> PanelResult<Value> {
@@ -627,6 +749,13 @@ pub fn execute_command(command: PanelCommand, context: &mut PanelCommandContext<
     match command {
         PanelCommand::List => return value(wire::ListReply { state, kinds: context.registry.specs().cloned().collect() }),
         PanelCommand::Get => return value(wire::GetReply { state, workspaces: context.catalogue.state().summaries() }),
+        command @ PanelCommand::HeaderAction(_) => {
+            let mutation = lower(command, &state, context.registry, context.web)?;
+            return value(execute_layout_action(
+                LayoutAction::Apply { expected_revision: Some(state.revision), mutations: vec![mutation] },
+                context,
+            )?);
+        }
         PanelCommand::Workspace(ref p) if p.workspace == state.layout.workspace => {
             revision(p.expected_revision, &state)?;
             return value(wire::WorkspaceReply {
@@ -655,7 +784,7 @@ pub fn execute_command(command: PanelCommand, context: &mut PanelCommandContext<
             }
             next.users.insert(name.clone(), StoredEnvelope::new(&current, recovery.as_deref(), context.registry)?);
             let action = LayoutAction::Inspect;
-            let (state, _) = stage_current(context, &state, &action, &current, recovery, next)?;
+            let state = stage_current(context, &state, &action, &current, recovery, next)?;
             value(wire::SaveReply { name, overwritten, state })
         }
         PanelCommand::Apply(p) => {
@@ -669,7 +798,7 @@ pub fn execute_command(command: PanelCommand, context: &mut PanelCommandContext<
             restore_quarantine(&mut envelope, context.registry)?;
             let recovery = merge_recovery(recovery, stored.rejected.clone())?;
             let action = LayoutAction::Replace { expected_revision: Some(state.revision), layout: envelope.layout.clone() };
-            value(stage_current(context, &state, &action, &envelope, recovery, next)?.0)
+            value(stage_current(context, &state, &action, &envelope, recovery, next)?)
         }
         PanelCommand::Reset(p) => {
             revision(p.expected_revision, &state)?;
@@ -683,7 +812,7 @@ pub fn execute_command(command: PanelCommand, context: &mut PanelCommandContext<
             restore_quarantine(&mut envelope, context.registry)?;
             let recovery = merge_recovery(recovery, stored.rejected.clone())?;
             let action = LayoutAction::Replace { expected_revision: Some(state.revision), layout: envelope.layout.clone() };
-            value(stage_current(context, &state, &action, &envelope, recovery, next)?.0)
+            value(stage_current(context, &state, &action, &envelope, recovery, next)?)
         }
         PanelCommand::Workspace(p) => {
             revision(p.expected_revision, &state)?;
@@ -703,13 +832,24 @@ pub fn execute_command(command: PanelCommand, context: &mut PanelCommandContext<
             let incoming_recovery = stored.rejected.clone();
             next.remembered.insert(previous_workspace.clone(), StoredEnvelope::new(&current, recovery.as_deref(), context.registry)?);
             let action = LayoutAction::Replace { expected_revision: Some(state.revision), layout: envelope.layout.clone() };
-            let (state, _) = stage_current(context, &state, &action, &envelope, incoming_recovery, next)?;
+            let state = stage_current(context, &state, &action, &envelope, incoming_recovery, next)?;
             value(wire::WorkspaceReply { previous_workspace, source, state })
         }
         command => {
+            let activate = matches!(&command, PanelCommand::Move { params, .. } if params.activate);
             let mutation = lower(command, &state, context.registry, context.web)?;
-            let action = LayoutAction::Apply { expected_revision: Some(state.revision), mutations: vec![mutation] };
-            value(stage_current(context, &state, &action, &current, recovery, next)?.0)
+            let activation = if activate {
+                match &mutation {
+                    Mutation::Move { instance, .. } => Some(Mutation::Activate { instance: instance.clone() }),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            let mut mutations = vec![mutation];
+            mutations.extend(activation);
+            let action = LayoutAction::Apply { expected_revision: Some(state.revision), mutations };
+            value(stage_current(context, &state, &action, &current, recovery, next)?)
         }
     }
 }
@@ -734,6 +874,7 @@ struct PlanningSink<'a> {
     state: LayoutReply,
     mutations: Vec<Mutation>,
     replaced: bool,
+    preparation: LayoutPreparationContext,
 }
 impl ActionSink for PlanningSink<'_> {
     fn inspect(&self) -> LayoutReply {
@@ -782,6 +923,44 @@ impl ActionSink for PlanningSink<'_> {
         self.state.layout = layout;
         Ok(self.state.clone())
     }
+    fn project_in_context(&self, action: LayoutAction, context: &LayoutPreparationContext) -> PanelResult<Layout> {
+        match action {
+            LayoutAction::Apply { expected_revision, mutations } => {
+                revision(expected_revision, &self.state)?;
+                if self.replaced {
+                    return Err(error(Rule::Capability, "cannot combine replacement and mutations"));
+                }
+                if self.mutations.len().saturating_add(mutations.len()) > MAX_MUTATIONS {
+                    return Err(error(Rule::CollectionLimit, "layout batch mutation cap"));
+                }
+                let mut combined = self.mutations.clone();
+                combined.extend(mutations);
+                self.authoritative
+                    .project_in_context(LayoutAction::Apply { expected_revision: Some(self.state.revision), mutations: combined }, &self.preparation)
+            }
+            LayoutAction::Replace { expected_revision, layout } => {
+                revision(expected_revision, &self.state)?;
+                if !self.mutations.is_empty() {
+                    return Err(error(Rule::Capability, "cannot combine replacement and mutations"));
+                }
+                self.authoritative.project_in_context(LayoutAction::Replace { expected_revision: Some(self.state.revision), layout }, context)
+            }
+            LayoutAction::Inspect => Ok(self.state.layout.clone()),
+        }
+    }
+    fn dispatch_in_context(&mut self, action: LayoutAction, context: &LayoutPreparationContext) -> PanelResult<LayoutReply> {
+        let layout = self.project_in_context(action.clone(), context)?;
+        match action {
+            LayoutAction::Apply { mutations, .. } => self.mutations.extend(mutations),
+            LayoutAction::Replace { .. } => {
+                self.replaced = true;
+                self.state.interaction = InteractionState::default();
+            }
+            LayoutAction::Inspect => {}
+        }
+        self.state.layout = layout;
+        Ok(self.state.clone())
+    }
 }
 
 /// Pure structural preflight, usable before application context publication.
@@ -793,12 +972,14 @@ pub fn preflight_batch(steps: &[Value], workspace: &WorkspaceId) -> PanelResult<
     let mut selected = workspace.clone();
     let mut replacement = false;
     let mut mutation = false;
+    let mut header_action = false;
     for step in steps {
         let id =
             step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).ok_or_else(|| error(Rule::Schema, "batch command required"))?;
         let empty = json!({});
         match parse_command(id, step.get("params").unwrap_or(&empty))? {
             PanelCommand::List | PanelCommand::Get | PanelCommand::Save(_) => {}
+            PanelCommand::HeaderAction(_) => header_action = true,
             PanelCommand::Apply(_) | PanelCommand::Reset(_) => replacement = true,
             PanelCommand::Workspace(params) => {
                 replacement |= params.workspace != selected;
@@ -806,6 +987,9 @@ pub fn preflight_batch(steps: &[Value], workspace: &WorkspaceId) -> PanelResult<
             }
             _ => mutation = true,
         }
+    }
+    if header_action && steps.len() != 1 {
+        return Err(error(Rule::Capability, "header actions require a standalone transaction"));
     }
     if replacement && mutation {
         return Err(error(Rule::Capability, "atomic batches cannot combine snapshot replacement and explicit panel mutations; use rollback:false"));
@@ -821,8 +1005,25 @@ pub fn execute_batch(steps: &[Value], context: &mut PanelCommandContext<'_>) -> 
     }
     let state = context.sink.inspect();
     preflight_batch(steps, &state.layout.workspace)?;
+    if let Some(step) = steps.first() {
+        let id =
+            step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).ok_or_else(|| error(Rule::Schema, "batch command required"))?;
+        let empty = json!({});
+        let command = parse_command(id, step.get("params").unwrap_or(&empty))?;
+        if matches!(&command, PanelCommand::HeaderAction(_)) {
+            let result = execute_command(command, context)?;
+            return Ok(json!({"completed":1,"results":[result],"undone":0}));
+        }
+    }
     let mut planned = InMemoryCatalogue { state: context.catalogue.state().clone(), fail_stage: false };
-    let mut sink = PlanningSink { authoritative: &*context.sink, state: state.clone(), mutations: Vec::new(), replaced: false };
+    let preparation = preparation_context(&current_envelope_snapshot(&*context.catalogue, &state, context.registry)?)?;
+    let mut sink = PlanningSink {
+        authoritative: &*context.sink,
+        state: state.clone(),
+        mutations: Vec::new(),
+        replaced: false,
+        preparation: preparation.clone(),
+    };
     let mut rows = Vec::new();
     for step in steps {
         let id =
@@ -849,7 +1050,8 @@ pub fn execute_batch(steps: &[Value], context: &mut PanelCommandContext<'_>) -> 
     drop(sink);
     let committed = if changed {
         let (envelope, recovery) = current_envelope(&planned.state, &planned_state, context.registry)?;
-        stage_current(context, &state, &action, &envelope, recovery, planned.state)?.0
+        let final_context = if matches!(&action, LayoutAction::Apply { .. }) { preparation } else { preparation_context(&envelope)? };
+        stage_current_prepared(context, &state, &action, &envelope, recovery, planned.state, &final_context)?
     } else {
         context.sink.inspect()
     };
@@ -897,6 +1099,33 @@ pub struct InMemoryPanelBackend {
 /// native flags cannot make this adapter claim that it opened an OS window.
 struct HeadlessSink<'a>(&'a mut LayoutService);
 impl ActionSink for HeadlessSink<'_> {
+    fn project_in_context(&self, action: LayoutAction, context: &LayoutPreparationContext) -> PanelResult<Layout> {
+        let availability = if matches!(&action, LayoutAction::Replace { .. }) { AvailabilityMap::new() } else { self.0.inspect().availability };
+        let prepared = self.0.prepare_with_context(action, &availability, context)?;
+        if prepared
+            .effects()
+            .iter()
+            .any(|effect| matches!(effect, HostEffect::CreateNative { .. } | HostEffect::RebindNative { .. } | HostEffect::HeaderAction { .. }))
+        {
+            return Err(error(Rule::Capability, "headless cannot realize native or controller actions"));
+        }
+        Ok(prepared.layout().clone())
+    }
+    fn dispatch_in_context(&mut self, action: LayoutAction, context: &LayoutPreparationContext) -> PanelResult<LayoutReply> {
+        let availability = if matches!(&action, LayoutAction::Replace { .. }) { AvailabilityMap::new() } else { self.0.inspect().availability };
+        let prepared = self.0.prepare_with_context(action, &availability, context)?;
+        if prepared
+            .effects()
+            .iter()
+            .any(|effect| matches!(effect, HostEffect::CreateNative { .. } | HostEffect::RebindNative { .. } | HostEffect::HeaderAction { .. }))
+        {
+            return Err(error(Rule::Capability, "headless cannot realize native or controller actions"));
+        }
+        let mut reply = self.0.commit(prepared)?;
+        reply.capabilities.native_windows = false;
+        reply.capabilities.max_native_hosts = 0;
+        Ok(reply)
+    }
     fn inspect(&self) -> LayoutReply {
         let mut state = self.0.inspect();
         state.capabilities.native_windows = false;
@@ -907,6 +1136,9 @@ impl ActionSink for HeadlessSink<'_> {
         let prepared = self.0.prepare(action)?;
         if prepared.effects().iter().any(|effect| matches!(effect, HostEffect::CreateNative { .. } | HostEffect::RebindNative { .. })) {
             return Err(error(Rule::Capability, "headless has no native host adapter"));
+        }
+        if prepared.effects().iter().any(|effect| matches!(effect, HostEffect::HeaderAction { .. })) {
+            return Err(error(Rule::Capability, "headless has no owning panel action controller"));
         }
         Ok(prepared.layout().clone())
     }

@@ -2349,6 +2349,8 @@
   "prefs.edges": "Aristas y sombreado",
   "prefs.extend": "Extensiones",
   "prefs.extra_navigation": "Ctrl + arrastrar con el botón izquierdo sobre un espacio vacío orbita; mantén Espacio para desplazar.",
+  "prefs.extrude_arrow_face_stops": "La flecha de Extruir se detiene en las caras",
+  "prefs.extrude_arrow_face_stops_note": "Al arrastrar la flecha de distancia de Extruir, se detiene en las caras planas paralelas al perfil, como el lado opuesto de un bloque que se corta, y resalta la cara. Desactivado: la flecha solo avanza en pasos redondos.",
   "prefs.extrude_view_isometric": "Girar la vista a isométrica al abrir Extrusión",
   "prefs.extrude_view_return": "Volver a la vista anterior al cerrar Extrusión",
   "prefs.follows_os": "Sigue al sistema operativo",
