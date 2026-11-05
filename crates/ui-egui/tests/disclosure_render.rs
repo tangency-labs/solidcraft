@@ -173,6 +173,9 @@ fn stand_up_memory_controls_apply_and_forget_with_visible_evidence() {
     h.step(&json!({"click":{"handle":"prefs:reuse_imports"}})).unwrap();
     assert!(h.app.preferences.reuse_imports);
     h.step(&json!({"click":{"handle":"prefs:clear_imports"}})).unwrap();
+    let status = h.app.status.as_ref().map(|(text, _, error)| (text.clone(), *error));
+    let (text, error) = status.expect("Clear sets a status");
+    assert!(!error && text.starts_with("Cleared ") && text.ends_with(" cached imports"), "Clear reports what it removed: {text}");
     let digest = "a".repeat(64);
     h.app.preferences.stand_up_answers.remember(digest.clone(), Answer::Leave);
     h.step(&json!({"widget":"Forget remembered answers"})).unwrap();
@@ -209,6 +212,11 @@ fn stand_up_memory_controls_apply_and_forget_with_visible_evidence() {
         }
         let output = raster::paint(h, &mut textures, vec![]);
         raster::raster(h, &textures, output).save(dir.join(name)).unwrap();
+        // The raster pass keeps its own clock; the harness goes on with a fresh context, so its
+        // later frames are not earlier than the ones the raster pass ran.
+        h.ctx = egui::Context::default();
+        solidcraft_ui_egui::fonts::setup_fonts(&h.ctx);
+        theme::apply(&h.ctx);
     };
     capture(&mut h, "preferences.png");
     h.call("ui.prefs", json!({"button":"ok", "stand_up_unknown":"ask"}));

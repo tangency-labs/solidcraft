@@ -122,9 +122,20 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 const CLEAR_IMPORT_CACHE_CONTRACT: crate::schema::TypedContract<crate::schema::file::ImportCacheClearParams> = crate::schema::TypedContract::new();
 
+static IMPORT_CACHE_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Keep this process's reused imports in `dir` instead of the per-user data folder. For test
+/// harnesses of other crates, where `cfg!(test)` is false in the engine; the first call wins.
+pub fn use_import_cache_dir(dir: std::path::PathBuf) {
+    let _ = IMPORT_CACHE_DIR.set(dir);
+}
+
 fn import_cache() -> Option<solidcraft_io::ImportCache> {
     if cfg!(target_arch = "wasm32") {
         return None;
+    }
+    if let Some(dir) = IMPORT_CACHE_DIR.get() {
+        return Some(solidcraft_io::ImportCache::new(dir.clone()));
     }
     if let Some(dir) = solidcraft_geom::env::var_os("IMPORT_CACHE_DIR").filter(|dir| !dir.is_empty()) {
         return Some(solidcraft_io::ImportCache::new(dir.into()));

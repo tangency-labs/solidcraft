@@ -182,7 +182,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let clear = ui_kit::button(ui, app.tr("prefs.clear_imports"), ui_kit::Button::Normal);
                 crate::scenario::publish_handle("prefs:clear_imports", clear.rect.center());
                 if clear.clicked() {
-                    let _ = app.run("file.import_cache_clear", serde_json::json!({}));
+                    match app.run("file.import_cache_clear", serde_json::json!({})) {
+                        Ok(reply) => {
+                            let count = reply.get("removed").and_then(serde_json::Value::as_u64).unwrap_or(0).to_string();
+                            app.set_status(crate::i18n::format("prefs.clear_imports_done", &[("count", &count)]), false);
+                        }
+                        Err(e) => app.set_status(e.to_string(), true),
+                    }
                 }
             });
         });

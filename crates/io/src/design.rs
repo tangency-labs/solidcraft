@@ -1523,7 +1523,12 @@ mod tests {
         std::fs::write(&unrelated, b"leave me").unwrap();
 
         cache.budget = original_bytes.len() as u64 * 2 + 64;
-        std::fs::File::open(&path).unwrap().set_times(std::fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH)).unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH))
+            .unwrap();
         let second = "b".repeat(64);
         cache.write(&second, &doc, &saved, &reply).unwrap();
         assert!(cache.read(&key).is_some());

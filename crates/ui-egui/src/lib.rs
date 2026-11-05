@@ -799,6 +799,8 @@ impl Drop for SolveApp {
 impl SolveApp {
     pub fn new(mut session: Session, services: Services) -> Self {
         #[cfg(test)]
+        solidcraft_engine::use_import_cache_dir(std::env::temp_dir().join(format!("solidcraft-ui-test-imports-{}", std::process::id())));
+        #[cfg(test)]
         let image_host = Some(solidcraft_engine::render::job::CpuHost::cooperative());
         #[cfg(not(test))]
         let image_host = solidcraft_engine::render::job::CpuHost::for_platform().map_err(|e| log::error!("render image host: {e}")).ok();

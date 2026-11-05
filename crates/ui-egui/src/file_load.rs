@@ -268,15 +268,21 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
     let _ = begin_request(app, Request::new(path, if insert { Kind::Insert } else { Kind::Open }));
 }
 
+/// The preference's `reuse_import` default for an import-backed open only: a native design's
+/// request keeps empty options, so `reuse_open` can still switch to its open tab.
+fn default_reuse_import(app: &SolveApp, request: &mut Request) {
+    if request.kind == Kind::Open && solidcraft_engine::io::is_step_path(&request.path) {
+        request.options.entry("reuse_import").or_insert(Value::Bool(app.preferences.reuse_imports));
+    }
+}
+
 /// Queue a file operation; on the web (no threads) it runs now.
 pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
     if crate::control::chat_turn_cancelled(request.chat_turn.as_deref()) {
         request.answer(Err("the agent chat turn ended".into()));
         return Ok(());
     }
-    if request.kind == Kind::Open {
-        request.options.entry("reuse_import").or_insert(Value::Bool(app.preferences.reuse_imports));
-    }
+    default_reuse_import(app, &mut request);
     if app.file_load.idle() && reuse_open(app, &request) {
         return Ok(());
     }
@@ -1381,6 +1387,20 @@ mod tests {
             built: None,
             staged: None,
         });
+    }
+
+    #[test]
+    fn the_reuse_import_default_is_added_to_import_opens_only() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        for (path, expected) in [("part.step", Some(true)), ("part.IGS", Some(true)), ("design.sc", None), ("old.solidcraft", None)] {
+            let mut request = Request::new(path, Kind::Open);
+            default_reuse_import(&app, &mut request);
+            assert_eq!(request.options.get("reuse_import").and_then(Value::as_bool), expected, "{path}");
+        }
+        app.preferences.reuse_imports = false;
+        let mut request = Request::new("part.step", Kind::Open);
+        default_reuse_import(&app, &mut request);
+        assert_eq!(request.options.get("reuse_import").and_then(Value::as_bool), Some(false), "the old value restores the old behaviour");
     }
 
     #[test]

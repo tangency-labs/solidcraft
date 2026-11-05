@@ -179,6 +179,8 @@ impl Drop for Harness {
 
 impl Harness {
     pub fn new() -> Harness {
+        // Test-owned reuse store: never the developer's per-user data folder.
+        solidcraft_engine::use_import_cache_dir(std::env::temp_dir().join(format!("solidcraft-scenario-imports-{}", std::process::id())));
         crate::i18n::pin_system_language();
         let mut h = Harness {
             app: SolveApp::new(Session::default(), Services::default()),
