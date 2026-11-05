@@ -622,7 +622,9 @@ reads!(
 /// undo. `camera` is always needed, and then one of three: `direction` (look from it), `action`
 /// (a turn, a roll, home or fit) or `motion` (direct manipulation, which wins when given and
 /// does not take `fit`). Keys of the other forms are not used.
-#[derive(Debug, Deserialize, JsonSchema)]
+// Deserialize is written out below rather than derived: the handler reads only the keys of the
+// form it takes, so a key of another form is neither read nor checked.
+#[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = camera_required)]
 pub struct NavigateParams {
     // Optional in the type and required in the schema (`camera_required`), as `mode` above.
@@ -680,6 +682,70 @@ pub struct NavigateParams {
     #[serde(default, deserialize_with = "navigate_anchor", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "point3_schema")]
     pub anchor: Option<Vec3>,
+}
+
+impl<'de> Deserialize<'de> for NavigateParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let p = serde_json::Map::<String, Value>::deserialize(d)?;
+        navigate_form(&p).map_err(serde::de::Error::custom)
+    }
+}
+
+/// A key's value through its reader, or `None` when the key is left out.
+fn navigate_key<'a, T>(
+    p: &'a serde_json::Map<String, Value>,
+    key: &str,
+    read: impl FnOnce(&'a Value) -> Result<Option<T>, serde_json::Error>,
+) -> Result<Option<T>, serde_json::Error> {
+    p.get(key).map_or(Ok(None), read)
+}
+
+/// The keys `view.navigate`'s handler reads, in its order: the camera and `fit`, then those of
+/// a motion (each motion its own), of a direction, or of an action.
+fn navigate_form(p: &serde_json::Map<String, Value>) -> Result<NavigateParams, serde_json::Error> {
+    let mut form = NavigateParams {
+        camera: navigate_key(p, "camera", navigate_camera)?,
+        fit: navigate_key(p, "fit", navigate_fit)?,
+        direction: None,
+        action: None,
+        degrees: None,
+        motion: None,
+        delta: None,
+        free_orbit: None,
+        viewport: None,
+        pivot: None,
+        factor: None,
+        anchor: None,
+    };
+    if p.contains_key("motion") {
+        form.free_orbit = navigate_key(p, "free_orbit", navigate_free_orbit)?;
+        form.motion = navigate_key(p, "motion", navigate_motion)?;
+        match form.motion {
+            Some(NavigateMotion::Pan) => {
+                form.delta = navigate_key(p, "delta", navigate_delta)?;
+                form.viewport = navigate_key(p, "viewport", navigate_viewport)?;
+            }
+            Some(NavigateMotion::Orbit) => {
+                form.delta = navigate_key(p, "delta", navigate_delta)?;
+                // An orbit needs the viewport only about a pivot.
+                if p.contains_key("pivot") {
+                    form.pivot = navigate_key(p, "pivot", navigate_pivot)?;
+                    form.viewport = navigate_key(p, "viewport", navigate_viewport)?;
+                }
+            }
+            Some(NavigateMotion::Zoom) => {
+                form.factor = navigate_key(p, "factor", navigate_factor)?;
+                form.anchor = navigate_key(p, "anchor", navigate_anchor)?;
+            }
+            None => {}
+        }
+    } else if p.contains_key("direction") {
+        form.direction = navigate_key(p, "direction", navigate_direction)?;
+    } else {
+        form.degrees = navigate_key(p, "degrees", navigate_degrees)?;
+        form.action = navigate_key(p, "action", navigate_action)?;
+    }
+    Ok(form)
 }
 
 /// What `view.navigate` returns: the camera after the move, and whether the window should also

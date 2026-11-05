@@ -618,15 +618,29 @@ fn the_types_read_each_key_as_its_handler_does() {
     check("view.navigate", json!({"action": "fit"}), "camera", with(camera_values));
 }
 
-/// Keys of another form than the one the handler takes are checked by the contract (in warn they
-/// are named), while the handler, with the check off, goes on as it did.
+/// A key of another form than the one the handler takes is not used, so the contract does not
+/// read it either: such a call replies as it does with the check off, in warn and in strict.
 #[test]
-fn navigate_warns_of_keys_it_does_not_use() {
-    let p = json!({"camera": nav_camera(), "motion": "zoom", "factor": 2, "action": "bogus"});
-    let off = Session::default().execute("view.navigate", &p).unwrap();
-    let warned = Session { param_check: ParamCheck::Warn, ..Session::default() }.execute("view.navigate", &p).unwrap();
-    assert_eq!(warned["param_warnings"], json!(["unknown navigation action"]));
-    let mut without = warned.clone();
-    without.as_object_mut().map(|o| o.remove("param_warnings"));
-    assert_eq!(without, off);
+fn navigate_reads_only_the_keys_of_its_form() {
+    for p in [
+        // A motion wins over an action and a direction.
+        json!({"camera": nav_camera(), "motion": "zoom", "factor": 2, "action": "bogus", "direction": "up"}),
+        // Each motion reads its own keys: a pan has no factor, a zoom no delta.
+        json!({"camera": nav_camera(), "motion": "pan", "delta": [3, 4], "viewport": [800, 600], "factor": 99}),
+        json!({"camera": nav_camera(), "motion": "zoom", "factor": 2, "delta": "far", "viewport": 0, "pivot": "here"}),
+        // An orbit reads the viewport only about a pivot.
+        json!({"camera": nav_camera(), "motion": "orbit", "delta": [3, 4], "viewport": 0}),
+        // A direction has no degrees or action.
+        json!({"camera": nav_camera(), "direction": [0, 0, 1], "degrees": 500, "action": "bogus"}),
+    ] {
+        let off = Session::default().execute("view.navigate", &p).unwrap();
+        for check in [ParamCheck::Warn, ParamCheck::Strict] {
+            let checked = Session { param_check: check, ..Session::default() }.execute("view.navigate", &p).unwrap();
+            assert_eq!(checked, off, "{check:?} {p}");
+        }
+    }
+    // The keys of the form taken are still checked.
+    let p = json!({"camera": nav_camera(), "motion": "pan", "delta": [3, 4], "viewport": [0, 600]});
+    let strict = Session { param_check: ParamCheck::Strict, ..Session::default() }.execute("view.navigate", &p);
+    assert!(strict.unwrap_err().to_string().contains("viewport dimensions must be in 1..1000000"));
 }
