@@ -54,6 +54,7 @@ const SINGLE_MEDIUM_SHADER: &str = path_shader!(1);
 const MAX_TRIANGLES: u64 = MAX_GPU_PATH_TRIANGLES;
 const PATH_WORKGROUP_SIZE: u32 = 32;
 const SCENE_PIPELINE_CACHE_SLOTS: usize = 5;
+const CLAMPED_PIPELINE_CACHE_SLOTS: usize = SCENE_PIPELINE_CACHE_SLOTS + 1;
 const PARAMETER_BYTES: usize = 1184;
 // Eight u32 words: count low, pixel, bounce, sample, code, count high, first-writer flag, spare.
 const FAILURE_BYTES: u64 = 32;
@@ -181,6 +182,9 @@ struct Context {
     // Plain opaque and non-nested glass are ready before the host is published.
     // The four map/nested variants are prepared lazily in the remaining slots.
     scene_pipelines: [std::sync::OnceLock<wgpu::ComputePipeline>; SCENE_PIPELINE_CACHE_SLOTS],
+    // The same six programs with the indirect clamp compiled in, each built and warmed by the
+    // first job that asks for it. Jobs without a clamp never compile or use them.
+    clamped_pipelines: [std::sync::OnceLock<wgpu::ComputePipeline>; CLAMPED_PIPELINE_CACHE_SLOTS],
     // Built and warmed by the first denoised job, then shared by later ones.
     denoise: std::sync::OnceLock<denoise::Pipelines>,
     layout: wgpu::BindGroupLayout,
@@ -199,20 +203,38 @@ impl Context {
     fn wait(&self, submission: wgpu::SubmissionIndex, timeout: Duration) -> Result<()> {
         wait_device(&self.device, &self.healthy, submission, timeout)
     }
-    fn prepared_scene_pipeline(&self, opaque: bool, maps: bool, nested: bool) -> Result<&wgpu::ComputePipeline> {
-        let Some(index) = scene_pipeline_variant(opaque, maps, nested) else { return Ok(&self.pipeline) };
-        self.scene_pipelines.get(index).and_then(std::sync::OnceLock::get).ok_or_else(|| gpu("captured scene has no prepared pipeline"))
+    // A job with an indirect clamp (JobOptions::clamp_indirect) uses its scene's program with
+    // the clamp compiled in; every other job keeps the programs without it.
+    fn scene_pipeline_slot(&self, opaque: bool, maps: bool, nested: bool, clamp: bool) -> Option<&std::sync::OnceLock<wgpu::ComputePipeline>> {
+        if clamp {
+            return self.clamped_pipelines.get(clamped_pipeline_variant(opaque, maps, nested));
+        }
+        scene_pipeline_variant(opaque, maps, nested).and_then(|index| self.scene_pipelines.get(index))
     }
-    fn prepare_scene_pipeline(&self, opaque: bool, maps: bool, nested: bool) -> Result<&wgpu::ComputePipeline> {
+    fn prepared_scene_pipeline(&self, opaque: bool, maps: bool, nested: bool, clamp: bool) -> Result<&wgpu::ComputePipeline> {
+        if !clamp && scene_pipeline_variant(opaque, maps, nested).is_none() {
+            return Ok(&self.pipeline);
+        }
+        self.scene_pipeline_slot(opaque, maps, nested, clamp)
+            .and_then(std::sync::OnceLock::get)
+            .ok_or_else(|| gpu("captured scene has no prepared pipeline"))
+    }
+    fn prepare_scene_pipeline(&self, opaque: bool, maps: bool, nested: bool, clamp: bool) -> Result<&wgpu::ComputePipeline> {
         self.ensure_available()?;
-        let Some(index) = scene_pipeline_variant(opaque, maps, nested) else { return Ok(&self.pipeline) };
-        let slot = self.scene_pipelines.get(index).ok_or_else(|| gpu("scene pipeline variant exceeds its finite cache"))?;
+        if !clamp && scene_pipeline_variant(opaque, maps, nested).is_none() {
+            return Ok(&self.pipeline);
+        }
+        let slot = self.scene_pipeline_slot(opaque, maps, nested, clamp).ok_or_else(|| gpu("scene pipeline variant exceeds its finite cache"))?;
         if let Some(pipeline) = slot.get() {
             return Ok(pipeline);
         }
         let _compiling = one_compile_at_a_time();
         if let Some(pipeline) = slot.get() {
             return Ok(pipeline);
+        }
+        let mut constants = vec![("OPAQUE_SCENE", f64::from(u8::from(opaque))), ("HAS_TEXTURES", f64::from(u8::from(maps)))];
+        if clamp {
+            constants.extend_from_slice(CLAMP_INDIRECT);
         }
         let scopes = scopes(&self.device);
         let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -229,10 +251,7 @@ impl Context {
             layout: Some(&layout),
             module: &shader,
             entry_point: Some("main"),
-            compilation_options: wgpu::PipelineCompilationOptions {
-                constants: &[("OPAQUE_SCENE", f64::from(u8::from(opaque))), ("HAS_TEXTURES", f64::from(u8::from(maps)))],
-                ..Default::default()
-            },
+            compilation_options: wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() },
             cache: None,
         });
         checked(scopes)?;
@@ -318,13 +337,17 @@ impl Executor {
             layout,
             denoise: std::sync::OnceLock::new(),
             scene_pipelines: std::array::from_fn(|_| std::sync::OnceLock::new()),
+            clamped_pipelines: std::array::from_fn(|_| std::sync::OnceLock::new()),
         });
         // The original host prepared glass before advertising readiness. Keep the
         // common no-map/non-nested program out of the first image job's work.
-        context.prepare_scene_pipeline(false, false, false)?;
+        context.prepare_scene_pipeline(false, false, false, false)?;
         Ok(Self { context })
     }
 }
+
+/// Pipeline constants that compile the indirect clamp into the integrator (path.wgsl).
+const CLAMP_INDIRECT: &[(&str, f64)] = &[("clamp_indirect", 1.0)];
 
 /// Native drivers compile the path pipeline for minutes and gigabytes on a cold shader cache.
 /// Executors opened side by side (parallel tests, each on its own device) compiled it together
@@ -395,6 +418,11 @@ fn descriptor() -> Result<ExecutorDescriptor> {
 
 fn scene_pipeline_variant(opaque: bool, maps: bool, nested: bool) -> Option<usize> {
     if opaque { maps.then_some(0) } else { Some(1 + 2 * usize::from(maps) + usize::from(nested)) }
+}
+
+/// The clamped program's slot: all six scene programs, the eager opaque/no-map one included.
+fn clamped_pipeline_variant(opaque: bool, maps: bool, nested: bool) -> usize {
+    scene_pipeline_variant(opaque, maps, nested).map_or(0, |index| index + 1)
 }
 
 fn use_opaque_pipeline(scene: &ProductScene, options: JobOptions) -> bool {
@@ -651,19 +679,23 @@ impl Task {
         cancel.check()?;
         let opaque_scene = use_opaque_pipeline(&scene, options);
         let has_textures = request.textures.is_some();
-        context.prepare_scene_pipeline(opaque_scene, has_textures, options.nested_media)?;
+        // A job with an indirect clamp builds its scene's clamped program here, once per device.
+        context.prepare_scene_pipeline(opaque_scene, has_textures, options.nested_media, options.clamp_indirect.is_some())?;
         cancel.check()?;
         let start = Instant::now();
         let aging = options.aging.gpu_layers([request.camera.target.x, request.camera.target.y, request.camera.target.z])?;
+        // The albedo row's spare w carries the indirect clamp in both branches: zero is off.
+        // Validation keeps a set limit a normal f32, so it never rounds to zero here.
+        let clamp_indirect = options.clamp_indirect.map_or(0.0, |limit| limit as f32);
         let volume = if let Some(v) = options.volume.filter(|v| v.active()) {
             let bounds = v.relative_bounds([request.camera.target.x, request.camera.target.y, request.camera.target.z])?;
             [
                 [bounds[0][0], bounds[0][1], bounds[0][2], v.extinction_per_mm as f32],
                 [bounds[1][0], bounds[1][1], bounds[1][2], v.anisotropy as f32],
-                [v.scattering_albedo[0] as f32, v.scattering_albedo[1] as f32, v.scattering_albedo[2] as f32, 0.0],
+                [v.scattering_albedo[0] as f32, v.scattering_albedo[1] as f32, v.scattering_albedo[2] as f32, clamp_indirect],
             ]
         } else {
-            [[0.0; 4]; 3]
+            [[0.0; 4], [0.0; 4], [0.0, 0.0, 0.0, clamp_indirect]]
         };
         if let Some(resources) = &request.textures {
             resources.validate_scene(&scene)?;
@@ -876,7 +908,8 @@ impl Task {
         let mut encoder = context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("path tile") });
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("path tile"), timestamp_writes: None });
-            let pipeline = context.prepared_scene_pipeline(self.opaque_scene, self.has_textures, self.options.nested_media)?;
+            let clamp = self.options.clamp_indirect.is_some();
+            let pipeline = context.prepared_scene_pipeline(self.opaque_scene, self.has_textures, self.options.nested_media, clamp)?;
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &self.bind, &[]);
             pass.dispatch_workgroups(count.div_ceil(PATH_WORKGROUP_SIZE), 1, 1);

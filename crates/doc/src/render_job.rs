@@ -172,6 +172,9 @@ pub struct GpuJob {
     pub seed: u32,
     pub tone_map: ToneMap,
     pub denoise: bool,
+    /// Biased firefly control; absent keeps every path contribution (see `JobOptions`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clamp_indirect: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lens: Option<ThinLens>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -199,6 +202,7 @@ impl Default for GpuJob {
             seed: options.seed,
             tone_map: options.tone_map,
             denoise: options.denoise,
+            clamp_indirect: options.clamp_indirect,
             lens: options.lens,
             lighting: options.lighting,
             environment: None,
@@ -246,6 +250,7 @@ impl GpuJob {
             seed: self.seed,
             tone_map: self.tone_map,
             denoise: self.denoise,
+            clamp_indirect: self.clamp_indirect,
             lens: self.lens,
             lighting: self.lighting,
             exposure_ev,
