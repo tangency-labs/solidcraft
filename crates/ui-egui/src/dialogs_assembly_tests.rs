@@ -1464,4 +1464,3 @@ fn joint_dialog_applies_custom_name_or_falls_back_to_type_default() {
         assert_eq!(r["name"], "MyCustomJoint");
     }
 }
-
