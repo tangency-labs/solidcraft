@@ -224,6 +224,20 @@ pub fn answers(entry: &Entry, saved_exists: bool) -> Vec<Answer> {
 mod tests {
     use super::*;
 
+    /// A restored or recovered design opens in stages (#10198): only an answer that it is in, for
+    /// the file asked for, counts; a refusal, a Cancel or another design open leaves it offered.
+    #[test]
+    fn a_staged_restore_counts_only_when_its_file_is_in() {
+        let copy = "/opfs/.kept/a.sc";
+        assert!(opened(&json!({"ok": true}), Some(copy), copy));
+        assert!(!opened(&json!({"ok": false, "error": "cancelled"}), Some(copy), copy));
+        assert!(!opened(&json!({"ok": false, "error": "not a design"}), None, copy));
+        assert!(!opened(&json!({"ok": true}), Some("/opfs/other.sc"), copy));
+        assert!(!opened(&json!({}), Some(copy), copy));
+        let after = AfterOpen::KeptCopy { opened: copy.into(), id: "a".into(), path: None, name: "Bracket".into(), drop: true };
+        assert_eq!(after.opened(), copy);
+    }
+
     fn entry(id: &str, changed_at: f64, path: Option<&str>) -> Entry {
         Entry { id: id.into(), name: "Bracket".into(), path: path.map(str::to_string), changed_at }
     }
