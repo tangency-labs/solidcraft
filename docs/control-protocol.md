@@ -42,13 +42,14 @@ Query replies contain no new host effects.
 | `panel.list` | `{}` → `{state:LayoutReply,kinds:[PanelSpec]}` from the live sink and registry. |
 | `panel.open` | `{kind,instance,destination?,expected_revision?}`. New instances require a destination; closed instances can reuse remembered placement. |
 | `panel.close` | `{target:instance,expected_revision?}`. Explicit guarded close retains placement and can refuse cancellation. |
-| `panel.move` | `{target:instance,destination,expected_revision?}`. Existing open instances only. |
-| `panel.resize` | `{target:section|instance,size:{width,height},expected_revision?}`. Instance must have an open section; all tab bounds intersect. |
-| `panel.collapse` | `{target:section|instance,collapsed:bool,expected_revision?}`. Keeps requested dimensions. |
+| `panel.move` | `{target:instance,destination,activate?:false,expected_revision?}`. Existing open instances only; explicit activation joins atomically. |
+| `panel.resize` | `{target:column\|section\|instance,size:{width,height},thickness_only?:bool,expected_revision?}`. Omitted/false keeps full-size behavior. True changes shared Bottom row height or side column width while preserving stack extent preference/rank/weight; Floating/Window refuse. Both size components must remain finite, positive and bounded. All tab and column bounds intersect. |
+| `panel.collapse` | `{target:section\|instance,collapsed:bool,expected_revision?}`. Keeps requested dimensions. |
 | `panel.float` | Same as move, requiring a `new_section` with `floating` location. |
 | `panel.popout` | Same as move, requiring a `new_section` with `window` location and return destination. Desktop/headless without native capability refuse; web explicitly lowers to `floating`. |
 | `panel.focus` | `{target:instance,expected_revision?}`. Reopens retained closed state, activates, expands and requests focus. |
 | `panel.activate` | `{target:instance,expected_revision?}`. Activates an open tab without expanding or requesting focus. |
+| `panel.action` | `{target:instance,action:ControlId,expected_revision?}`. Validates registration, active/open state, availability and owning controller binding, then invokes the real bound action. Returns `LayoutReply`; missing/disabled bindings refuse. |
 | `panel.peek` | `{target:instance,expected_revision?}`. Temporary presentation of a collapsed tab, without persistence changes to size/collapse. |
 | `panel.dismiss` | `{expected_revision?}`. Dismisses transient peek. |
 | `panel.resize_pair` | `{first:SectionId,second:SectionId,first_size:{width,height},second_size:{width,height},expected_revision?}`. Adjacent sections of one dock; conserves split-axis extent and cross-axis dimensions. |
@@ -58,13 +59,14 @@ Query replies contain no new host effects.
 | `layout.apply` | `{name,expected_revision?}`. Applies a named preset to the **current** workspace, rebinding its known layout workspace ID. |
 | `layout.reset` | `{expected_revision?}`. Applies the selected workspace's registered immutable default. User presets and other workspace histories remain. Missing defaults return a capability error. |
 | `layout.get` | `{}` → `{state,workspaces:[{id,title_key,default_preset,has_remembered_layout}]}`. Selection is only `state.layout.workspace`. |
-| `layout.workspace.select` | `{workspace:WorkspaceId,expected_revision?}` → `{previous_workspace,source:"remembered"|"default_preset"|"unchanged",state}`. Registered descriptors only; no implicit creation. |
+| `layout.workspace.select` | `{workspace:WorkspaceId,expected_revision?}` → `{previous_workspace,source:"remembered"\|"default_preset"\|"unchanged",state}`. Registered descriptors only; no implicit creation. |
 
 Destinations are distinct foundation operations, not aliases:
 
 ```json
 {"type":"new_section","section":"logs","index":0,"location":{"type":"dock","zone":"left"},"size":{"width":280,"height":240}}
 {"type":"join_tab","section":"logs","index":1}
+{"type":"relative","section":"logs","placement":"after_column","new_section":"new-logs","new_column":"extra-column","size":{"width":280,"height":240}}
 ```
 
 New-section indices address the global section order after detachment; join indices
@@ -74,6 +76,32 @@ activation, collapse and dimensions. Locations are `dock` (left/right/bottom),
 `return_to` contains `{zone,index,size,collapsed,join?:{section,index}}`; it never
 recursively contains another native host. Pins and placement/size intersections
 retain the foundation's structured refusal rules.
+
+The host's explicit title/tab drag is a separate UX intent: a tab landing sends
+Move and Activate in the same guarded transaction so the dragged tab is visible.
+Generic background joins keep the activation semantics above.
+
+Side sections reference stable columns, ordered outer to inner, and retain saved
+stack weights. Relative Before/After column placement is logical; Above/Below
+stacks within a target column. Pointer code maps physical edges through dock side
+and RTL. App commands and gestures share host allocation and typed `no_space`
+admission. Missing host/environment refuses structural app commands. Overflowing
+neutral/worsening proposals reject except Close, Collapse (including expansion),
+Focus, Activate, or strict extent improvement without growth on the other axis. Independent
+commands and refused batches cancel a pending gesture before parsing/preflight.
+Standalone `panel.action` validates registration, the available fallback selection,
+owner availability, enabled binding and controller preflight. It can execute
+without a host environment, during overflow, or when layout storage refuses writes;
+it neither allocates placement nor stages layout persistence. It cannot be combined with structural
+mutations in one runtime transaction. Published peek/dismiss requests remain
+compatibility commands; the amended host exposes no rail/peek/pin-open UI.
+
+Sole side Content height uses bounded immutable controller metrics at assigned
+width, including chrome/body/footer/padding. Fill is declarative registration or
+responsive snapshot data. An incoming owner cohort captures its own availability and immutable metric
+providers before candidate allocation. Projection and commit retain those same
+controllers/providers. Changing metrics cancels previews, pending widget intents,
+cached proposals and the old frame, requiring fresh paint for widget admission. No hidden render pass is used.
 
 Preset names trim surrounding whitespace, require 1..64 Unicode scalar values and
 reject controls anywhere in the supplied name. Raw input is capped at 1024 UTF-8
@@ -184,7 +212,9 @@ model change earlier in a sequential batch/script is visible to the next panel
 step without a tick. Queries and failed actions cannot borrow the previous
 document's context. No content tick, document edit, geometry work or camera tail is
 added to this boundary. All application GUI and command routes use one stored
-native adapter, installed once; redock its native sections before disabling it.
+native adapter. Command-adapter installation is once-only and precedes native
+placements. Disabling the runtime preflights retained controllers and native
+release through that same adapter; refusal leaves it installed.
 Unsupported atomic intent mixtures are rejected by pure structural preflight
 before any context/controller publication as well as before layout/native effects.
 
@@ -206,6 +236,119 @@ Render dock changes can affect a pair. They are not silently mapped to universal
 instances. Integrations with explicit identities can issue typed `panel.move`,
 `panel.resize` and `panel.collapse` requests for safe placement changes. No command
 implicitly selects a layout workspace on a document, ribbon, tool or context change.
+
+At the Rust app boundary, `AppPanelRuntime::new(runtime, services)` is fallible and
+rejects incoming native placements. `SolveApp::dispatch_panel_layout(action)` uses
+the stored native adapter with the shared host enabled or disabled; it accepts no
+borrowed adapter. Install a future native adapter with `set_panel_native_adapter`
+before native creation/restore, or install it with the catalogue through
+`AppPanelRuntime::set_command_adapters`. Once command adapters are installed,
+neither injection API can replace them. App command/action/render/mount boundaries reconcile the
+actual current Session without another service tick. Runtime inspection remains
+read-only. The shared host adds no production command registration beyond the
+application-layout commands above.
+
+For native host evidence, `ui.panel_fixture {enabled?, preset?}` installs bounded
+synthetic content in the real `SolveApp` workspace host. The normal connection
+authentication applies. It is off by default; no environment switch, preference,
+design change, production content registration or native panel window is added.
+
+| Request | Effect |
+| --- | --- |
+| `{}` | Read current host/probe/Session observations without ticking services or dispatching actions. |
+| `{"enabled":true}` | Enable the `docks` specimen if no runtime exists. |
+| `{"preset":"tabs"}` | Enable the named specimen if no runtime exists. |
+| `{"enabled":false}` | Preflight and tear down only the specimen runtime; refusal leaves it intact. |
+
+Presets are `docks` (Left/Right/Bottom, with two Left sections), `tabs` (two groups
+of two), `collapsed` (four full-width collapsed headers), `floating` (four in-app floating
+sections), `overflow` (24 instances), and `pinned` (an outer pinned Right section
+plus ordinary docks), `columns` (three independent Left columns), `stack_tabs`, `content_fill` (sole Content versus Fill), and `inline` (one editable total row). The retired `rails` preset is rejected. Original synthetic content retains editable drafts and
+controller state across hiding and moves. Services keep ticking while content is
+hidden. Apply/Finish/Cancel are synthetic actions; the Session is never passed to
+their command sink. The editor's cancellation guard checkbox can refuse explicit
+Close and whole-runtime teardown while its synthetic transaction is live.
+
+Enabling always rejects an existing runtime, including an already enabled specimen.
+To change preset, disable successfully first, then enable the next preset. Enable
+stages the runtime, first tick and host before publishing any of them; teardown
+preflights every retained controller. Wrong types, unknown parameters/presets and
+`enabled:false` combined with `preset` fail before mutation.
+
+Replies include `enabled`, `runtime` when the specimen runtime exists, `host`
+(null before its first rendered frame), and `session`. `runtime` contains the
+committed `LayoutReply`, retained controller count and synthetic probe snapshots
+(typed instance/owner, process-local controller identity tokens, drafts,
+service/render/lifecycle/action counts, transaction and guard state).
+`host` reports the last actual host frame: full semantic control IDs/typed target
+descriptions, accessible names, enabled flags and logical rectangles; section/body
+rectangles, collapse/inline flags, declared surface policy and captured frame
+`paint_alpha` (null without a renderer snapshot), resolved unpresented content,
+bounded scroll extent/offset, paint/input/occlusion
+rectangles, render domain, placement capacity, usable-space geometry, viewport,
+exact prepared preview, menu bounds, observed host events and committed frame
+reply. The top-level `effective_usable` application contour additionally includes
+current persistent windows and independent navigation controls; the host's own
+usable geometry describes host footprints. Sections and resolved geometry retain intended layout;
+paint/input/occlusion arrays and published controls describe actual paint, excluding
+invisible Area sizing passes. `reply`, `committed` and `prepared_committed` events describe authoritative post-dispatch state.
+Region events include the menu and owned overlays in effective paint/input/
+occlusion rectangles. Those overlays do not shrink the render domain or become
+automatic camera targets. The viewport fills everything below the application
+bar, including behind the ribbon and panels; opacity never makes controls
+click-through. Ordinary layout commands and gestures preserve camera pose, zoom,
+projection and framing offset. Explicit Fit/Centre use safe usable space and the
+model extent. The effective contour combines host footprints with current
+persistent surfaces outside the host, such as the active sketch palette; hidden
+surfaces and transient menus do not create fitting reservations. Fit may change
+zoom. Existing Look At/`view.normal_to` centring
+preserves zoom/distance, requested orientation and selected focus: it places the
+whole footprint at the current zoom when possible, otherwise only the focus at a
+stable usable centre. It never silently zooms out, and generic camera apply/replay
+does not acquire a centring offset.
+
+Ordinary title/tab drags accept explicit dock, split and tab targets. A landing
+preview describes the exact candidate, affected neighbours and insertion index.
+Empty space does not create a floating panel; use `panel.float` or the explicit
+menu action. Invalid/no target, cancellation and stale captured geometry
+commit nothing. A valid unchanged candidate commits once, consuming its owned prepared state without redispatch. Only its landing, changed neighbours and tab marker are painted. There are no idle target widgets. Full-width collapsed headers retain declared custom actions, menu, chevron and optional quick close; one click expands. Tiny windows retain panels at minima in a bounded scroll extent; narrow scroll tracks do not shield uncovered canvas.
+
+Public Rust `SolveApp::universal_panel_frame()` also exposes
+`HostFrame::next_layout`, the resolved state pending repaint, and
+`owned_overlays`. The fixture JSON does not serialize those two as separate
+fields. Never infer painted controls from pending layout geometry. Compare the
+painted frame's revision with committed replies and runtime revisions. An empty
+fixture query neither reconciles context nor ticks: the current Session may have
+changed since the retained runtime/frame was reconciled. Compare document scope
+as well as revision. Target descriptions are diagnostics, never command addresses
+or strings to parse.
+
+`session` observes actual document ID/UID/revision/dirty/undo/redo, document/model/
+cache Arc identities, recomputed feature counts, existing cached mesh identities
+(first 128 bodies, with total count), and camera. Pointer strings are opaque
+process-local equality tokens. Inspection uses only already cached meshes;
+`evaluation_count` counts live-model evaluations after Session initialization.
+It excludes construction, other Sessions and trial evaluations of cloned models;
+it does not count all geometry work or tessellation. These values permit
+before/after comparisons, not a claim that any invariant or visual result has
+already been verified.
+
+In the real `cad_ui`, host drawing defers input finalization until after all
+foreground windows/modal layers. Finalization checks the current Session and the
+actual enabled/top-layer egui target before accepting an initial press, then uses
+the stored native adapter for dispatch. Exported rectangles alone do not authorize
+clicking through another window. The root host and each native-host presentation
+use complete separate mount sets; mounting or unmounting one does not deactivate
+the others. These are native-adapter seams, not an implementation of OS panel
+windows. The specimen/default adapter advertises no native windows, and the
+current opaque renderer rejects unsupported translucent policy requests.
+
+Scenarios accept `{"panel_fixture":{"enabled":true,"preset":"docks"}}`,
+`{"panel_fixture":{}}` and `{"panel_fixture":{"enabled":false}}`, using this
+same control path and normal `fail:true` handling. Use the returned control
+rectangles with existing pointer/key, resize and screenshot requests. Capture real
+native `ui.screenshot` output and inspect it for chrome evidence; a model-only
+`ui.render` or headless scenario does not show a native panel host.
 
 For UI-kit review, `ui.status_fixture {"preset":"mode"}` shows bounded status
 specimens in the real viewport. Presets are `off`, `mode`, `result`, `attention`,

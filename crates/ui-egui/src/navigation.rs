@@ -54,6 +54,27 @@ impl NavCaps {
     pub const RENDER: NavCaps = NavCaps { orbit: true, pick: true };
 }
 
+/// Give a panel the wheel delta left by its children, one movable axis at a time.
+/// Boundary deltas remain available to the panel host's input fallback.
+pub(crate) fn panel_scroll_offset(ctx: &egui::Context, previous: egui::Vec2, maximum: egui::Vec2) -> egui::Vec2 {
+    let mut offset = previous;
+    ctx.input_mut(|input| {
+        if maximum.x > 0.0 && input.smooth_scroll_delta.x != 0.0 {
+            offset.x = (previous.x - input.smooth_scroll_delta.x).clamp(0.0, maximum.x);
+            if offset.x != previous.x {
+                input.smooth_scroll_delta.x = 0.0;
+            }
+        }
+        if maximum.y > 0.0 && input.smooth_scroll_delta.y != 0.0 {
+            offset.y = (previous.y - input.smooth_scroll_delta.y).clamp(0.0, maximum.y);
+            if offset.y != previous.y {
+                input.smooth_scroll_delta.y = 0.0;
+            }
+        }
+    });
+    offset
+}
+
 /// Supplies the scroll phases browsers omit, before the shared navigation sees input.
 #[derive(Default)]
 pub struct WebWheelGestures {
@@ -1269,6 +1290,40 @@ fn orbit_camera(app: &mut SolveApp, dx: f64, dy: f64) {
 #[cfg(test)]
 mod tests {
     use solidcraft_engine::geom::prelude::*;
+
+    #[test]
+    fn panel_wheel_consumes_only_axes_that_move_and_clamps_to_their_limits() {
+        use egui::vec2;
+        let ctx = crate::fonts::test_context();
+        for (previous, delta, maximum, expected, remaining) in [
+            (vec2(20.0, 30.0), vec2(-200.0, 200.0), vec2(100.0, 80.0), vec2(100.0, 0.0), egui::Vec2::ZERO),
+            (vec2(100.0, 30.0), vec2(-10.0, 10.0), vec2(100.0, 80.0), vec2(100.0, 20.0), vec2(-10.0, 0.0)),
+            (vec2(20.0, 0.0), vec2(10.0, 10.0), vec2(100.0, 80.0), vec2(10.0, 0.0), vec2(0.0, 10.0)),
+            (egui::Vec2::ZERO, vec2(-10.0, -10.0), egui::Vec2::ZERO, egui::Vec2::ZERO, vec2(-10.0, -10.0)),
+        ] {
+            crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+                ui.input_mut(|input| input.smooth_scroll_delta = delta);
+                assert_eq!(super::panel_scroll_offset(ui.ctx(), previous, maximum), expected);
+                assert_eq!(ui.input(|input| input.smooth_scroll_delta), remaining);
+            });
+        }
+    }
+
+    #[test]
+    fn panel_wheel_leaves_child_consumed_axes_and_raw_fallback_untouched() {
+        use egui::vec2;
+        let ctx = crate::fonts::test_context();
+        let event = web_wheel(egui::MouseWheelUnit::Point, vec2(-12.0, -18.0), egui::Modifiers::NONE);
+        crate::test_support::frame(&ctx, egui::RawInput { events: vec![event], ..Default::default() }, |ui| {
+            // A child has already consumed Y; only its unclaimed X reaches the host.
+            ui.input_mut(|input| input.smooth_scroll_delta = vec2(-12.0, 0.0));
+            let events = ui.input(|input| input.events.clone());
+            assert_eq!(super::panel_scroll_offset(ui.ctx(), vec2(5.0, 7.0), vec2(40.0, 40.0)), vec2(17.0, 7.0));
+            assert_eq!(ui.input(|input| input.smooth_scroll_delta), egui::Vec2::ZERO);
+            assert_eq!(ui.input(|input| input.events.clone()), events, "raw fallback ownership stays with the host");
+        });
+    }
+
     fn web_wheel(unit: egui::MouseWheelUnit, delta: egui::Vec2, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown, unit, delta, modifiers, phase: egui::TouchPhase::Move }
     }

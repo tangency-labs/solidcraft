@@ -202,7 +202,9 @@ pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::render_workspace::environment_overlay(app, ui, viewport);
     crate::render_workspace::assign::selection_bar(app, ui, free);
     crate::render_workspace::assign::replacement_dialog(app, ui.ctx());
-    crate::navigation_bar_view::show(app, ui, viewport);
+    if !app.universal_panel_host_enabled() {
+        crate::navigation_bar_view::show(app, ui, viewport);
+    }
     crate::shell::register_panel(app, "render:compare-controls", None, None);
     if !crate::render_workspace::result_active(app) && app.session.render_selected_result().is_some() {
         let free = if crate::render_workspace::job_busy(app) { Container::below_navigation_row(free) } else { free };

@@ -1277,8 +1277,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let id = egui::Id::unique("file_loading");
     let card_id = id.with("card");
     // Above the dialogs over the design; menus, tooltips and the resize edges stay above it.
-    ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, id));
-    ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, card_id));
+    Container::bring_to_front(ctx, egui::LayerId::new(egui::Order::Middle, id));
+    Container::bring_to_front(ctx, egui::LayerId::new(egui::Order::Middle, card_id));
     Container::new(ctx, Surface::InputShield).area(id).order(egui::Order::Middle).fixed_pos(cover.min).interactable(true).show(ctx, |ui| {
         ui.set_min_size(cover.size());
         ui.interact(cover, egui::Id::unique("file_loading_block"), egui::Sense::click_and_drag());
