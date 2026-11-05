@@ -49,6 +49,9 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
+use solidcore_ops::blend::{blend, Blend, Corners};
+use solidcore_ops::boolean::{boolean, BooleanOp};
+use solidcore_ops::sweep::{extrude, revolve, Curve, DraftCorner};
 use solidcore_ops::{make_sphere, offset, session, Body, Order};
 use solidcore_record::brep::Brep as Record;
 
@@ -66,6 +69,10 @@ const PORTED: &[&str] = &[
     "shell",
     "offset_faces",
     "thicken",
+    "boolean",
+    "extrude",
+    "revolve",
+    "blend_dropping",
 ];
 
 /// The relative tolerance the rig grades volume and area with when a case states none.
@@ -221,6 +228,53 @@ fn faces(slot: &mut Slot, pick: &Value) -> Result<(Vec<usize>, Order), Stop> {
     Ok((record, order))
 }
 
+/// A traced profile: its curves as the operation takes them (`line`, `arc`, `nurbs`).
+fn profile(v: &Value) -> Option<Vec<Curve>> {
+    let mut out = Vec::new();
+    for seg in v.as_array()? {
+        out.push(if let Some(l) = seg.get("line") {
+            Curve::Line {
+                start: f64s::<3>(&l["start"])?,
+                end: f64s::<3>(&l["end"])?,
+            }
+        } else if let Some(a) = seg.get("arc") {
+            Curve::Arc {
+                center: f64s::<3>(&a["center"])?,
+                axis: f64s::<3>(&a["axis"])?,
+                reference: f64s::<3>(&a["reference"])?,
+                radius: a["radius"].as_f64()?,
+                start: a["start"].as_f64()?,
+                end: a["end"].as_f64()?,
+            }
+        } else {
+            let n = seg.get("nurbs")?;
+            Curve::Nurbs {
+                degree: usize::try_from(n["degree"].as_u64()?).ok()?,
+                points: n["points"]
+                    .as_array()?
+                    .iter()
+                    .map(f64s::<4>)
+                    .collect::<Option<Vec<_>>>()?,
+                knots: n["knots"]
+                    .as_array()?
+                    .iter()
+                    .map(Value::as_f64)
+                    .collect::<Option<Vec<_>>>()?,
+            }
+        });
+    }
+    Some(out)
+}
+
+/// A body an operation made: no record order yet (it is taken when a later pick needs it).
+fn made(b: solidcore_ops::Result<Body>) -> Result<Slot, String> {
+    b.map(|body| Slot {
+        body: Arc::new(body),
+        order: None,
+    })
+    .map_err(|e| e.to_string())
+}
+
 /// Runs one traced call: its output, or the operation's error as text.
 fn call(c: &Value, ins: &mut [Slot]) -> Result<Result<Slot, String>, Stop> {
     call_with_copy(c, ins, Slot::copied)
@@ -283,6 +337,82 @@ fn call_with_copy(
             let t = p["thickness"].as_f64().ok_or_else(|| bad("thickness"))?;
             let sym = p["symmetric"].as_bool().ok_or_else(|| bad("symmetric"))?;
             let r = offset::thicken(&s.body, t, sym);
+            in_place(Slot { order: None, ..s }, r)
+        }
+        "boolean" => {
+            let operation = match p["op"].as_str() {
+                Some("union") => BooleanOp::Union,
+                Some("subtract") => BooleanOp::Subtract,
+                Some("intersect") => BooleanOp::Intersect,
+                _ => return Err(bad("op")),
+            };
+            let [a, b] = ins else {
+                return Err(bad("two inputs"));
+            };
+            let owned = |s: &Slot| {
+                s.body
+                    .copy()
+                    .map_err(|e| Stop::Fail(format!("copy before boolean: {e}")))
+            };
+            match boolean(owned(a)?, owned(b)?, operation) {
+                Ok(Some(body)) => Ok(Slot {
+                    body: Arc::new(body),
+                    order: None,
+                }),
+                Ok(None) => Err("the boolean left nothing".to_owned()),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        "extrude" => {
+            let curves = profile(&p["profile"]).ok_or_else(|| bad("profile"))?;
+            let corner = match p["corner"].as_str() {
+                Some("curvature") | None => DraftCorner::Curvature,
+                Some("tangent") => DraftCorner::Tangent,
+                Some("round") => DraftCorner::Round,
+                Some(_) => return Err(bad("corner")),
+            };
+            made(extrude(
+                &curves,
+                f64s::<3>(&p["direction"]).ok_or_else(|| bad("direction"))?,
+                p["distance"].as_f64().ok_or_else(|| bad("distance"))?,
+                p["draft"].as_f64().unwrap_or(0.0),
+                corner,
+                p["cap"].as_bool().ok_or_else(|| bad("cap"))?,
+            ))
+        }
+        "revolve" => {
+            let curves = profile(&p["profile"]).ok_or_else(|| bad("profile"))?;
+            made(revolve(
+                &curves,
+                f64s::<3>(&p["origin"]).ok_or_else(|| bad("origin"))?,
+                f64s::<3>(&p["direction"]).ok_or_else(|| bad("direction"))?,
+                p["angle"].as_f64().ok_or_else(|| bad("angle"))?,
+                p["cap"].as_bool().ok_or_else(|| bad("cap"))?,
+            ))
+        }
+        "blend_dropping" => {
+            if p.get("turn").is_some() {
+                return Err(Stop::Unsupported(
+                    "blend_dropping with a corner turn: the ops blend takes none".to_owned(),
+                ));
+            }
+            let kind = match p["kind"].as_str() {
+                Some("round") => Blend::Round,
+                Some("curvature") => Blend::Curvature,
+                Some("chord") => Blend::Chord,
+                Some("chamfer") => Blend::Chamfer,
+                _ => return Err(bad("kind")),
+            };
+            let sizes: Vec<f64> = p["sizes"]
+                .as_array()
+                .ok_or_else(|| bad("sizes"))?
+                .iter()
+                .map(Value::as_f64)
+                .collect::<Option<_>>()
+                .ok_or_else(|| bad("sizes"))?;
+            let mut s = copy_for_edit(&first()?)?;
+            let (edges, _) = faces(&mut s, &p["edges"])?;
+            let r = blend(&s.body, kind, &edges, &sizes, &[], Corners::Filled).map(|_| ());
             in_place(Slot { order: None, ..s }, r)
         }
         other => {
