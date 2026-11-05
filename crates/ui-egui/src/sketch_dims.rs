@@ -632,6 +632,28 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     } else {
         None
     };
+    // Line inputs need screen-space clearance: a fixed sketch-space offset can leave a
+    // wide field over a vertical line, especially when the whole preview is short.
+    let line_positions = if matches!(t.cmd, "sketch.line" | "sketch.line.midpoint") {
+        t.pts.last().and_then(|(point, _)| {
+            let start = if t.cmd == "sketch.line.midpoint" { *point * 2.0 - e } else { *point };
+            let start = proj.to_screen(plane.to_world(start))?;
+            let end = proj.to_screen(plane.to_world(e))?;
+            if !start.is_finite() || !end.is_finite() || !(end - start).length().is_finite() {
+                return None;
+            }
+            let sizes: Vec<_> = t
+                .dims
+                .iter()
+                .map(|b| {
+                    crate::ui_kit::placement_field_content_size(ui, &b.value) + vec2(2.0 * tk.form_inset, 0.0) + field_frame.total_margin().sum()
+                })
+                .collect();
+            Some(line_input_positions([start, end], &sizes, view, tk.space_8))
+        })
+    } else {
+        None
+    };
     for (i, b) in t.dims.iter_mut().enumerate() {
         let Some((_, at)) = lv.get(i).copied() else { continue };
         let Some(sp) = proj.to_screen(plane.to_world(at)) else { continue };
@@ -644,8 +666,9 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             s.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
             s.store(ui.ctx(), id);
         }
-        let pos = polygon_positions
+        let pos = line_positions
             .as_ref()
+            .or(polygon_positions.as_ref())
             .and_then(|positions| positions.get(i).copied())
             .unwrap_or_else(|| in_view(sp + vec2(-34.0, -11.0), view, ui.ctx().pointer_latest_pos()));
         // Background: under Preferences and Report a bug (#9016), like canvas value boxes.
@@ -690,6 +713,69 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     // A box waiting before the first click only places on Enter once it has the keyboard.
     let nothing = ui.ctx().memory(|m| m.focused().is_none()) && !(construction && t.pts.is_empty());
     (enter && (any_focused || nothing)).then_some(e)
+}
+
+/// Keep measured Length and Angle fields clear of the projected line and each other.
+/// Opposite sides are preferred; drawing-area edges may require both fields on one side.
+/// Candidate count is bounded for the two fields. An area too small to fit them can only clamp.
+fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<egui::Rect>, gap: f32) -> Vec<Pos2> {
+    let [start, end] = segment;
+    let delta = end - start;
+    let length = delta.length();
+    let direction = if length > 0.0 { delta / length } else { vec2(1.0, 0.0) };
+    let normal = vec2(-direction.y, direction.x);
+    let reach = |size: egui::Vec2, axis: egui::Vec2| 0.5 * (size.x * axis.x.abs() + size.y * axis.y.abs());
+    let bounds = egui::Rect::from_two_pos(start, end);
+    // Segment/rectangle separation: the two screen axes and the segment's normal.
+    let clear = |rect: egui::Rect| {
+        let rect = rect.expand(gap * 0.5);
+        !rect.intersects(bounds) || (rect.center() - start).dot(normal).abs() > reach(rect.size(), normal)
+    };
+    let mut placed: Vec<egui::Rect> = Vec::new();
+    for (i, &size) in sizes.iter().enumerate() {
+        let inside = |center: Pos2| {
+            let pos = center - size * 0.5;
+            let pos = view.map_or(pos, |view| {
+                let inset = view.shrink(gap * 0.5);
+                pos.clamp(inset.min, (inset.max - size).max(inset.min))
+            });
+            egui::Rect::from_min_size(pos, size)
+        };
+        let preferred = if i == 0 { -1.0 } else { 1.0 };
+        // Keep the existing 60-pixel cap on the Angle input's distance from the start.
+        let anchor = if i == 0 { start + delta * 0.5 } else { start + direction * (length * 0.3).min(60.0) };
+        let offset = |side: f32| normal * (side * (reach(size, normal) + gap));
+        let mut candidates = Vec::new();
+        for side in [preferred, -preferred] {
+            candidates.push(anchor + offset(side));
+        }
+        for side in [preferred, -preferred] {
+            let off = offset(side);
+            candidates.push(start - direction * (reach(size, direction) + gap) + off);
+            candidates.push(end + direction * (reach(size, direction) + gap) + off);
+            if let Some(previous) = placed.last() {
+                let along = (previous.center() - start).dot(direction);
+                let separation = reach(previous.size(), direction) + reach(size, direction) + gap;
+                for distance in [-separation, separation] {
+                    candidates.push(start + direction * (along + distance) + off);
+                }
+            }
+        }
+        if let Some(view) = view {
+            candidates.extend([view.left_top(), view.right_top(), view.left_bottom(), view.right_bottom()]);
+        }
+        let position = candidates
+            .into_iter()
+            .map(inside)
+            .find(|rect| {
+                view.is_none_or(|view| view.contains_rect(*rect))
+                    && clear(*rect)
+                    && placed.iter().all(|previous| !rect.intersects(previous.expand(gap * 0.5)))
+            })
+            .unwrap_or_else(|| inside(anchor + offset(preferred)));
+        placed.push(position);
+    }
+    placed.into_iter().map(|rect| rect.min).collect()
 }
 
 /// Stack the polygon inputs beside its screen bounds. Try each side before falling back to
