@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use solidcraft_doc::ids;
 use solidcraft_geom::paper::ObjectKind;
 
+use super::Point2;
 use super::drawing_sheet::sheet_ref;
 use super::drawing_view::{BoxResult, LinesStatsResult, paper_scene_schema};
 use crate::drawing_scene::{SheetObject, ViewState};
@@ -90,6 +91,39 @@ impl From<SheetObject> for SheetObjectResult {
         let on_paper = |b: solidcraft_geom::Aabb2| BoxResult { min: b.min.into(), max: b.max.into() };
         SheetObjectResult { object: ids::encode(o.object), kind: o.kind, bounds_mm: on_paper(o.bounds_mm), boundary_mm: o.boundary_mm.map(on_paper) }
     }
+}
+
+/// What is under a point of one sheet of the open drawing. Read-only.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct SheetHitParams {
+    /// The sheet, by id or name.
+    #[serde(deserialize_with = "sheet_ref")]
+    pub sheet: String,
+    /// The point, in paper millimetres from the sheet's lower-left corner.
+    pub point_mm: Point2,
+    /// How near a box's edge counts as on it, in paper millimetres: 0 or more (0 when not given).
+    #[serde(default)]
+    pub band_mm: f64,
+}
+
+/// The object a point hit, with its kind as `drawing.scene`'s objects give it, and whether the point
+/// is on its box's edge.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct HitResult {
+    pub object: String,
+    #[schemars(with = "String")]
+    pub kind: ObjectKind,
+    pub on_edge: bool,
+}
+
+/// What `drawing.scene.hit` returns: the object, or null when the point hits nothing.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetHitResult {
+    pub hit: Option<HitResult>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// Where the drawing open stands. It takes nothing.
