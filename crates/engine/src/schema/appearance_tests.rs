@@ -82,15 +82,18 @@ fn replies_match_the_output_schema() {
 }
 
 /// A colour's text pattern allows what `inspect::color_param` reads: spaces at either end, as
-/// `trim` drops them, and any number of `#` before the six digits. `conforms` doesn't read
-/// patterns, so the pattern's text is pinned here, next to the reader's answers.
+/// `trim` drops them, any number of `#` before the three bytes, and a byte written as `+` and
+/// one digit, as `from_str_radix` reads it. `conforms` doesn't read patterns, so the pattern's
+/// text is pinned here, next to the reader's answers.
 #[test]
 fn the_colour_pattern_allows_what_the_reader_trims() {
     for text in ["#ff00ff", "ff00ff", "  #FF00ff\t", "##ff00ff"] {
         assert_eq!(crate::cmd::inspect::color_param(&json!(text)), Some([255, 0, 255]), "{text}");
     }
     assert_eq!(crate::cmd::inspect::color_param(&json!("# ff00ff")), None, "a space after the `#` isn't trimmed");
+    assert_eq!(crate::cmd::inspect::color_param(&json!("+fff00")), Some([15, 255, 0]), "`from_str_radix` takes a leading `+`");
     let schema = schemars::schema_for!(super::ColorParam);
     let ws = crate::schema::types::whitespace_class();
-    assert_eq!(schema.as_value()["anyOf"][0]["pattern"], json!(format!("^[{ws}]*#*[0-9A-Fa-f]{{6}}[{ws}]*$")), "{}", schema.as_value());
+    let pattern = format!("^[{ws}]*#*(?:[0-9A-Fa-f]{{2}}|\\+[0-9A-Fa-f]){{3}}[{ws}]*$");
+    assert_eq!(schema.as_value()["anyOf"][0]["pattern"], json!(pattern), "{}", schema.as_value());
 }
