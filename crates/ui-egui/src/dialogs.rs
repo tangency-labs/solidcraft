@@ -6868,7 +6868,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 Some(sp) => {
                     d.inputs = vec![SelInput::new("Points", selection::POINTS, true)];
                     // Points gone from the sketch are left out (#8087), so OK drops them.
-                    let st = s.world_state();
+                    let st = crate::open_meshing::session_world(s);
                     let kept = |id: &&String| st.sketch(sp.sketch.0).is_none_or(|ss| ss.sketch.points.iter().any(|p| &p.id == *id));
                     if let Some(inp) = d.inputs.first_mut() {
                         inp.items = sp.ids.iter().filter(kept).map(|id| Sel::SketchPoint { id: format!("{}:{id}", sp.sketch) }).collect();
