@@ -528,13 +528,13 @@ fn cuda_fp64_tensor_core_detection_rules() {
     if let Some(cuda) = CudaBackend::global() {
         let dev = cuda.device_info();
         let (major, minor) = dev.compute_capability;
-        let expected_hw_fp64 = (major == 8 && minor == 0) || (major == 9 && minor == 0);
+        let expected_hw_fp64 = (major == 8 && minor == 0) || (major == 9 && minor == 0) || (major == 10 && (minor == 0 || minor == 7));
         assert_eq!(
             dev.supports_fp64_tensor_core, expected_hw_fp64,
-            "device {} (SM {}.{}) FP64 tensor core flag must be {} (hardware FP64 MMA only exists on sm_80 and sm_90)",
+            "device {} (SM {}.{}) FP64 tensor core flag must be {} (hardware FP64 MMA only exists on sm_80, sm_90, sm_100/107)",
             dev.name, major, minor, expected_hw_fp64
         );
-        assert_eq!(cuda.has_fp64_tensor_core(), expected_hw_fp64);
+        assert_eq!(cuda.has_fp64_tensor_core(), expected_hw_fp64 && cuda.has_ampere_ptx());
     }
 }
 
