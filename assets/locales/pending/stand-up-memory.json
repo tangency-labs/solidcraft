@@ -1,0 +1,68 @@
+{
+  "ar": {
+    "cmd.file.import_cache_clear": "مسح الاستيرادات المخزنة",
+    "prefs.clear_imports": "مسح",
+    "prefs.forget_stand_up": "نسيان الإجابات المحفوظة",
+    "prefs.remember_stand_up": "تذكّر إجابات تعديل اتجاه الملفات التي فتحتها",
+    "prefs.remember_stand_up_note": "طبّق إجابة تعديل الاتجاه نفسها عند فتح ملف لم يتغير مجددًا. عطّل هذا الخيار للسؤال كل مرة.",
+    "prefs.reuse_imports": "إعادة استخدام استيرادات الملفات التي فتحتها",
+    "prefs.reuse_imports_note": "افتح ملفات STEP وIGES غير المتغيرة من ذاكرة نماذج محلية. عطّل الخيار للاستيراد كل مرة. يمسح زر المسح الاستيرادات المخزنة مع إبقاء إجابات تعديل الاتجاه."
+  },
+  "de": {
+    "cmd.file.import_cache_clear": "Gespeicherte Importe leeren",
+    "prefs.clear_imports": "Leeren",
+    "prefs.reuse_imports": "Importe zuvor geöffneter Dateien wiederverwenden",
+    "prefs.reuse_imports_note": "Unveränderte STEP- und IGES-Dateien aus einem lokalen Modellcache öffnen. Ausschalten, um jedes Mal zu importieren. Leeren behält gespeicherte Antworten zum Aufrichten bei."
+  },
+  "en": {
+    "cmd.file.import_cache_clear": "Clear Reused Imports",
+    "prefs.clear_imports": "Clear",
+    "prefs.forget_stand_up": "Forget remembered answers",
+    "prefs.remember_stand_up": "Remember stand-up answers for files I've opened",
+    "prefs.remember_stand_up_note": "Apply the same stand-up answer when an unchanged file opens again. Turn off to ask each time.",
+    "prefs.reuse_imports": "Reuse imports I've opened before",
+    "prefs.reuse_imports_note": "Reopen unchanged STEP and IGES files from a local model cache. Turn off to import each time. Clear removes cached imports, keeping remembered stand-up answers."
+  },
+  "he": {
+    "cmd.file.import_cache_clear": "נקה ייבוא שמור",
+    "prefs.clear_imports": "נקה",
+    "prefs.forget_stand_up": "שכח תשובות שמורות",
+    "prefs.remember_stand_up": "זכור תשובות ליישור קבצים שפתחתי",
+    "prefs.remember_stand_up_note": "החל את אותה תשובת יישור בפתיחה חוזרת של קובץ שלא השתנה. כבה כדי לשאול בכל פעם.",
+    "prefs.reuse_imports": "השתמש שוב בייבוא של קבצים שפתחתי",
+    "prefs.reuse_imports_note": "פתח קובצי STEP ו־IGES שלא השתנו ממטמון מודלים מקומי. כבה כדי לייבא בכל פעם. ניקוי מסיר ייבוא שמור ומשאיר תשובות יישור זכורות."
+  },
+  "ja": {
+    "cmd.file.import_cache_clear": "再利用するインポート結果をクリア",
+    "prefs.clear_imports": "クリア",
+    "prefs.forget_stand_up": "記憶した回答を消去",
+    "prefs.remember_stand_up": "開いたファイルの正立に関する回答を記憶する",
+    "prefs.remember_stand_up_note": "変更されていないファイルを再び開くと、同じ正立の回答を適用します。オフにすると毎回確認します。",
+    "prefs.reuse_imports": "以前開いたファイルのインポート結果を再利用する",
+    "prefs.reuse_imports_note": "変更されていないSTEP・IGESファイルをローカルのモデルキャッシュから開きます。オフにすると毎回インポートします。クリアしても正立の回答は保持されます。"
+  },
+  "ko": {
+    "cmd.file.import_cache_clear": "저장된 가져오기 결과 지우기",
+    "prefs.clear_imports": "지우기",
+    "prefs.reuse_imports": "이전에 연 파일의 가져오기 결과 재사용",
+    "prefs.reuse_imports_note": "변경되지 않은 STEP 및 IGES 파일을 로컬 모델 캐시에서 다시 엽니다. 끄면 매번 가져옵니다. 캐시를 지워도 세우기 응답은 유지됩니다."
+  },
+  "vi": {
+    "cmd.file.import_cache_clear": "Xóa kết quả nhập đã lưu",
+    "prefs.clear_imports": "Xóa",
+    "prefs.forget_stand_up": "Quên các câu trả lời đã nhớ",
+    "prefs.remember_stand_up": "Nhớ câu trả lời dựng đứng cho các tệp tôi đã mở",
+    "prefs.remember_stand_up_note": "Áp dụng cùng câu trả lời dựng đứng khi mở lại tệp chưa thay đổi. Tắt để hỏi mỗi lần.",
+    "prefs.reuse_imports": "Dùng lại kết quả nhập các tệp tôi đã mở",
+    "prefs.reuse_imports_note": "Mở lại tệp STEP và IGES chưa thay đổi từ bộ nhớ đệm mô hình cục bộ. Tắt để nhập mỗi lần. Xóa bộ nhớ đệm vẫn giữ các câu trả lời dựng đứng đã nhớ."
+  },
+  "zh": {
+    "cmd.file.import_cache_clear": "清除重用的导入结果",
+    "prefs.clear_imports": "清除",
+    "prefs.forget_stand_up": "清除记住的回答",
+    "prefs.remember_stand_up": "记住已打开文件的摆正选择",
+    "prefs.remember_stand_up_note": "再次打开未更改的文件时应用相同的摆正选择。关闭后每次都会询问。",
+    "prefs.reuse_imports": "重用以前打开文件的导入结果",
+    "prefs.reuse_imports_note": "从本地模型缓存重新打开未更改的 STEP 和 IGES 文件。关闭后每次都会重新导入。清除缓存会保留记住的摆正选择。"
+  }
+}

@@ -1,6 +1,7 @@
 //! Contracts and result types for the commands in `cmd/file.rs`: so far the export command of
 //! each format (`file.export_step`, `file.export_stl`, `file.export_3mf`, `file.export_obj`,
-//! `file.export_urdf`), which take what `file.export` takes for that format, without `format`.
+//! `file.export_urdf`), which take what `file.export` takes for that format, without `format`,
+//! and local import-cache maintenance.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -128,6 +129,16 @@ pub struct UrdfExportResult {
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImportCacheClearParams {}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ImportCacheClearResult {
+    /// Number of cached imports removed. Open designs and stand-up answers are retained.
+    pub removed: usize,
 }
 
 #[cfg(test)]
