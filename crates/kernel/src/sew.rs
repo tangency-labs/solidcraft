@@ -453,7 +453,7 @@ fn folded_pcurve(label: &b::Surface, form: Option<&b::Surface>, curve: &b::Curve
     let on = SurfaceEval::new(form.unwrap_or(label)).ok()?;
     let edge = solidcraft_geom::brep::eval::CurveEval::new(curve).ok()?;
     let raw_angle = |t: f64| -> Option<f64> {
-        let d = curve_derivs(knots, points, t)?[0] - o;
+        let d = edge.point(t)? - o;
         Some(d.dot(y).atan2(d.dot(x)))
     };
     let angle_near = |t: f64, near: f64| raw_angle(t).map(|a| a + ((near - a) / TAU).round() * TAU);
@@ -464,8 +464,10 @@ fn folded_pcurve(label: &b::Surface, form: Option<&b::Surface>, curve: &b::Curve
         let inside = |a: f64| (lo - 1e-9..=hi + 1e-9).contains(&solidcraft_geom::brep::form::param(a));
         start = (-2..=2).map(|k| start + f64::from(k) * TAU).find(|a| inside(*a))?;
     }
-    // The angle along the edge, unwrapped from its start, on a grid fine against the edge's spans.
-    let grid = 64 * knots.len().max(1);
+    // The angle along the edge, unwrapped from its start, on a grid of 32 points to each of the
+    // edge's spans (a span of a fold turns through far less than a half turn).
+    let spans = knots.windows(2).filter(|w| w[1] > w[0] && w[1] > t0 && w[0] < t1).count();
+    let grid = 32 * spans.max(1);
     let ts: Vec<f64> = (0..=grid).map(|i| t0 + (t1 - t0) * i as f64 / grid as f64).collect();
     let mut angles = Vec::with_capacity(ts.len());
     let mut prev = start;
