@@ -5223,6 +5223,7 @@
   "ui.inspect": "检查",
   "ui.instances": "实例数",
   "ui.intersect": "相交",
+  "ui.intersection_curve_second_pick": "相交曲线：单击第二个面或曲线（右键单击重新开始）",
   "ui.iso_4753": "ISO 4753",
   "ui.isolate": "隔离",
   "ui.join": "连接",

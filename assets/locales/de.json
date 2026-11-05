@@ -5144,6 +5144,7 @@
   "ui.inspect": "Prüfen",
   "ui.instances": "Instanzen",
   "ui.intersect": "Schnitt",
+  "ui.intersection_curve_second_pick": "Schnittkurve: zweite Fläche oder Kurve anklicken (Rechtsklick zum Neubeginn)",
   "ui.isolate": "Isolieren",
   "ui.join": "Verbinden",
   "ui.joint_play": "▶ Abspielen",

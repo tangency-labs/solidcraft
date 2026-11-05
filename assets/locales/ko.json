@@ -3934,6 +3934,7 @@
   "ui.inspect": "검사",
   "ui.instances": "인스턴스",
   "ui.intersect": "교차",
+  "ui.intersection_curve_second_pick": "교차 곡선: 두 번째 면 또는 곡선을 클릭하세요 (오른쪽 클릭으로 다시 시작)",
   "ui.isolate": "분리 표시",
   "ui.join": "접합",
   "ui.joint_play": "▶ 재생",

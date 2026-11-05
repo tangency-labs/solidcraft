@@ -5223,6 +5223,7 @@
   "ui.inspect": "Inspect",
   "ui.instances": "Instances",
   "ui.intersect": "Intersect",
+  "ui.intersection_curve_second_pick": "Intersection curve: click the second face or curve (right-click to start over)",
   "ui.iso_4753": "ISO 4753",
   "ui.isolate": "Isolate",
   "ui.join": "Join",

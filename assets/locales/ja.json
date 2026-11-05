@@ -5223,6 +5223,7 @@
   "ui.inspect": "検査",
   "ui.instances": "インスタンス",
   "ui.intersect": "交差",
+  "ui.intersection_curve_second_pick": "交差曲線: 2 つ目の面または曲線をクリックします (右クリックでやり直し)",
   "ui.iso_4753": "ISO 4753",
   "ui.isolate": "分離表示",
   "ui.join": "結合",
