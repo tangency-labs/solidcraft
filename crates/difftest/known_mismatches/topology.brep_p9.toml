@@ -1,0 +1,29 @@
+# Known mismatches of topology.brep_p9 (format: crates/difftest/src/known.rs).
+
+# WR-751 (plan/upstream-issues/WR-751--addendum-2026-11-05-difftest-cases.md names each case): the
+# C++ splits the edge at the classification's TParam, which these fixtures set off the point;
+# solidcore splits where the edge passes the point (#2735, #2794). Parked, not passed.
+
+[[mismatch]]
+unit = "topology.brep_p9"
+case = "point_merge_6_same_point"
+cpp_defect = "WR-751"
+why = "C++ splits the unit edge at TParam 0.5 for the point (0,0,0) and leaves a vertex at x 0.25 with tolerance 0.25; solidcore classifies the point to the start vertex it lies on (no split)"
+
+[[mismatch]]
+unit = "topology.brep_p9"
+case = "point_merge_6_source_dominates"
+cpp_defect = "WR-751"
+why = "as point_merge_6_same_point with the point at (1e-8,0,0): C++ vertex at x 0.250004955 with tolerance 0.25000505; solidcore classifies the point to the start vertex"
+
+[[mismatch]]
+unit = "topology.brep_p9"
+case = "review_op6_parameter_inf"
+cpp_defect = "WR-751"
+why = "TParam +inf for the point (0.2,0,0): C++ returns success with the point classified to the end vertex (1,0,0), 0.8 away, no split and no tolerance update; solidcore splits at t 0.2 where the edge passes the point"
+
+[[mismatch]]
+unit = "topology.brep_p9"
+case = "review_op6_parameter_-inf"
+cpp_defect = "WR-751"
+why = "TParam -inf for the point (0.2,0,0): C++ returns success with the point classified to the start vertex (0,0,0), 0.2 away, no split; solidcore splits at t 0.2 where the edge passes the point"

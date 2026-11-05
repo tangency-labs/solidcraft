@@ -801,3 +801,10 @@ why = "the exact surface extension replaces the fitted one (geometry; plan/findi
 unit = "blend.fillet_executive_p3"
 case = "real-box-fillet4v-r3-shell-closed"
 why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+# The nearest-point split of MergeIntoObject (#2735, WR-751) moves one case within tolerance
+# (plan/findings/blend.fillet_executive_p3--corner-box-edge9-split-nearest-point.md names it).
+[[mismatch]]
+unit = "blend.fillet_executive_p3"
+case = "source-file-corner_box-edge9"
+why = "the fillet's insertion splits body edge 11 where it passes the classified point (7.68e-7 away) instead of at TParam (1.01e-6 away), both within the edge's 1e-5 (#2735, WR-751); the split edge's interval end moves 2.48e-7 relative and its samples with it (plan/findings/blend.fillet_executive_p3--corner-box-edge9-split-nearest-point.md)"
