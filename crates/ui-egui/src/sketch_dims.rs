@@ -717,7 +717,9 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
 
 /// Keep measured Length and Angle fields clear of the projected line and each other.
 /// Opposite sides are preferred; drawing-area edges may require both fields on one side.
-/// Candidate count is bounded for the two fields. An area too small to fit them can only clamp.
+/// Retry first-field candidates when the second field cannot fit. Candidate count is bounded
+/// for the two fields. Only if the original candidates fail, also try axis-aligned
+/// neighbors and slides away from the line. An area too small to fit them can only clamp.
 fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<egui::Rect>, gap: f32) -> Vec<Pos2> {
     let [start, end] = segment;
     let delta = end - start;
@@ -731,29 +733,28 @@ fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<e
         let rect = rect.expand(gap * 0.5);
         !rect.intersects(bounds) || (rect.center() - start).dot(normal).abs() > reach(rect.size(), normal)
     };
-    let mut placed: Vec<egui::Rect> = Vec::new();
-    for (i, &size) in sizes.iter().enumerate() {
-        let inside = |center: Pos2| {
-            let pos = center - size * 0.5;
-            let pos = view.map_or(pos, |view| {
-                let inset = view.shrink(gap * 0.5);
-                pos.clamp(inset.min, (inset.max - size).max(inset.min))
-            });
-            egui::Rect::from_min_size(pos, size)
-        };
+    let inside = |size: egui::Vec2, center: Pos2| {
+        let pos = center - size * 0.5;
+        let pos = view.map_or(pos, |view| {
+            let inset = view.shrink(gap * 0.5);
+            pos.clamp(inset.min, (inset.max - size).max(inset.min))
+        });
+        egui::Rect::from_min_size(pos, size)
+    };
+    // Keep the existing 60-pixel cap on the Angle input's distance from the start.
+    let anchor = |i| if i == 0 { start + delta * 0.5 } else { start + direction * (length * 0.3).min(60.0) };
+    let candidates = |i, size: egui::Vec2, previous: Option<egui::Rect>, repair: bool| {
         let preferred = if i == 0 { -1.0 } else { 1.0 };
-        // Keep the existing 60-pixel cap on the Angle input's distance from the start.
-        let anchor = if i == 0 { start + delta * 0.5 } else { start + direction * (length * 0.3).min(60.0) };
         let offset = |side: f32| normal * (side * (reach(size, normal) + gap));
         let mut candidates = Vec::new();
         for side in [preferred, -preferred] {
-            candidates.push(anchor + offset(side));
+            candidates.push(anchor(i) + offset(side));
         }
         for side in [preferred, -preferred] {
             let off = offset(side);
             candidates.push(start - direction * (reach(size, direction) + gap) + off);
             candidates.push(end + direction * (reach(size, direction) + gap) + off);
-            if let Some(previous) = placed.last() {
+            if let Some(previous) = previous {
                 let along = (previous.center() - start).dot(direction);
                 let separation = reach(previous.size(), direction) + reach(size, direction) + gap;
                 for distance in [-separation, separation] {
@@ -764,15 +765,75 @@ fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<e
         if let Some(view) = view {
             candidates.extend([view.left_top(), view.right_top(), view.left_bottom(), view.right_bottom()]);
         }
-        let position = candidates
+        let mut rects = candidates.into_iter().map(|center| inside(size, center)).collect::<Vec<_>>();
+        if !repair {
+            return rects;
+        }
+        // Clamping can move a preferred box back onto the line. Add bounded repairs
+        // only after the original search fails, preserving its successful placements.
+        let mut repair_seeds = rects.clone();
+        if let Some(previous) = previous {
+            for axis in [vec2(1.0, 0.0), vec2(0.0, 1.0)] {
+                let separation = reach(previous.size(), axis) + reach(size, axis) + gap;
+                for side in [-1.0, 1.0] {
+                    let rect = inside(size, previous.center() + axis * (side * separation));
+                    rects.push(rect);
+                    repair_seeds.push(rect);
+                }
+            }
+        }
+        for rect in repair_seeds {
+            // Move the box slightly instead of relaxing the clearance predicate when
+            // f32 cancellation places a clamped edge exactly on the line.
+            for nudge in [vec2(0.01, 0.0), vec2(-0.01, 0.0), vec2(0.0, 0.01), vec2(0.0, -0.01)] {
+                rects.push(inside(size, rect.center() + nudge));
+            }
+            // Match clear()'s expanded-box reach; the preferred offset can rule out a feasible pair.
+            for side in [-1.0, 1.0] {
+                let correction =
+                    side * (reach(size, normal) + gap * 0.5 * (normal.x.abs() + normal.y.abs()) + 0.01) - (rect.center() - start).dot(normal);
+                for axis in [vec2(1.0, 0.0), vec2(0.0, 1.0)] {
+                    let projection = axis.dot(normal);
+                    if projection.abs() > 0.0001 {
+                        rects.push(inside(size, rect.center() + axis * (correction / projection)));
+                    }
+                }
+            }
+        }
+        rects
+    };
+    let usable = |rect: egui::Rect| view.is_none_or(|view| view.contains_rect(rect)) && clear(rect);
+    let mut placed: Vec<egui::Rect> = Vec::new();
+    for (i, &size) in sizes.iter().enumerate() {
+        let mut position = candidates(i, size, placed.last().copied(), false)
             .into_iter()
-            .map(inside)
-            .find(|rect| {
-                view.is_none_or(|view| view.contains_rect(*rect))
-                    && clear(*rect)
-                    && placed.iter().all(|previous| !rect.intersects(previous.expand(gap * 0.5)))
-            })
-            .unwrap_or_else(|| inside(anchor + offset(preferred)));
+            .find(|rect| usable(*rect) && placed.iter().all(|previous| !rect.intersects(previous.expand(gap * 0.5))));
+        // A good first position can block every second position in a shallow view.
+        // For this two-field tool, retry the bounded first/second candidate pairs.
+        if (position.is_none() || placed.iter().any(|rect| !usable(*rect)))
+            && i == 1
+            && let Some(&first_size) = sizes.first()
+        {
+            for repair in [false, true] {
+                for first in candidates(0, first_size, None, repair).into_iter().filter(|rect| usable(*rect)) {
+                    if let Some(second) =
+                        candidates(1, size, Some(first), repair).into_iter().find(|rect| usable(*rect) && !rect.intersects(first.expand(gap * 0.5)))
+                        && let Some(previous) = placed.first_mut()
+                    {
+                        *previous = first;
+                        position = Some(second);
+                        break;
+                    }
+                }
+                if position.is_some() && placed.iter().all(|rect| usable(*rect)) {
+                    break;
+                }
+            }
+        }
+        let position = position.unwrap_or_else(|| {
+            let side = if i == 0 { -1.0 } else { 1.0 };
+            inside(size, anchor(i) + normal * (side * (reach(size, normal) + gap)))
+        });
         placed.push(position);
     }
     placed.into_iter().map(|rect| rect.min).collect()

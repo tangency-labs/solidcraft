@@ -633,6 +633,7 @@ fn assert_live_line_inputs_are_clear(h: &Harness) {
     let point = tool.pts.last().unwrap().0;
     let end = crate::sketch_dims::shown(&h.app, tool, tool.hover.as_ref().unwrap());
     let start = if tool.cmd == "sketch.line.midpoint" { point * 2.0 - end } else { point };
+    assert!(start.dist(end) > 1e-9, "{}: the input-clearance check needs a nonzero preview: {start:?} to {end:?}", tool.cmd);
     let state = crate::open_meshing::session_world(&h.app.session);
     let plane = state.sketch(h.app.session.active_sketch.unwrap()).unwrap().plane;
     let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
@@ -656,8 +657,14 @@ fn line_inputs_clear_the_preview_in_all_directions() {
                 h.call("ui.view", json!({"view":view}));
                 h.step(&json!({"start":command})).unwrap();
                 h.step(&json!({"click":{"sketch":[10,10]}})).unwrap();
+                // Approach along the drawing direction so an initial editor does not own the hover.
+                h.step(&json!({"move":{"sketch":[10 + dx * 10,10 + dy * 10]}})).unwrap();
                 h.step(&json!({"move":{"sketch":[10 + dx,10 + dy]}})).unwrap();
                 h.frames(3);
+                let tool = h.app.tool.as_ref().unwrap();
+                let end = crate::sketch_dims::shown(&h.app, tool, tool.hover.as_ref().unwrap());
+                let target = super::Vec2::new(f64::from(10 + dx), f64::from(10 + dy));
+                assert!(end.dist(target) < 1e-8, "{command}, {view}: preview {end:?} must reach {target:?}");
                 assert_live_line_inputs_are_clear(&h);
             }
         }
@@ -686,6 +693,8 @@ fn line_inputs_at_drawing_area_edges_clear_the_preview() {
             let end = start + offset;
             h.step(&json!({"click":[start.x,start.y]})).unwrap();
             assert!(!h.app.tool.as_ref().unwrap().pts.is_empty(), "{command}, corner {corner}: click at {start:?} must place the first point");
+            let approach = start + offset * 10.0;
+            h.step(&json!({"move":[approach.x,approach.y]})).unwrap();
             h.step(&json!({"move":[end.x,end.y]})).unwrap();
             h.frames(3);
             assert_live_line_inputs_are_clear(&h);
@@ -715,6 +724,158 @@ fn line_input_placement_measures_each_field_and_handles_tiny_views() {
     let positions = super::line_input_positions([egui::pos2(1.0, 1.0); 2], &sizes, Some(tiny), 8.0);
     assert_eq!(positions.len(), 2);
     assert!(positions.iter().all(|p| p.is_finite()));
+}
+
+#[test]
+fn line_inputs_retry_the_first_position_when_both_fit_in_a_shallow_view() {
+    let view = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(220.0, 70.0));
+    let segment = [egui::pos2(100.0, 55.0), egui::pos2(120.0, 55.0)];
+    let sizes = [egui::vec2(100.0, 24.0); 2];
+    // A constructive witness establishes that overlapping is not forced by the small view.
+    let witness = [egui::Rect::from_min_size(egui::pos2(4.0, 4.0), sizes[0]), egui::Rect::from_min_size(egui::pos2(112.0, 4.0), sizes[1])];
+    assert!(!witness[0].intersects(witness[1].expand(4.0)));
+    for rect in witness {
+        assert!(view.contains_rect(rect));
+        assert!(!segment_intersects_input(segment, rect.expand(4.0)));
+    }
+    let positions = super::line_input_positions(segment, &sizes, Some(view), 8.0);
+    let rects: Vec<_> = positions.iter().zip(sizes).map(|(p, size)| egui::Rect::from_min_size(*p, size)).collect();
+    assert!(!rects[0].intersects(rects[1].expand(4.0)), "fields overlap: {rects:?}");
+    for rect in rects {
+        assert!(view.contains_rect(rect), "{rect:?} outside {view:?}");
+        assert!(!segment_intersects_input(segment, rect.expand(4.0)), "{rect:?} covers {segment:?}");
+    }
+}
+
+#[test]
+fn line_inputs_slide_clear_of_slanted_previews_in_small_views() {
+    for (view_size, segment, size, witness_positions) in [
+        (
+            egui::vec2(180.0, 60.0),
+            [egui::pos2(0.0, 15.0), egui::pos2(-8.742278e-07, 35.0)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(4.0, 20.8), egui::pos2(94.0, 4.0)],
+        ),
+        (
+            egui::vec2(180.0, 60.0),
+            [egui::pos2(0.0, 15.0), egui::pos2(-3.4969112e-06, 95.0)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(4.0, 20.8), egui::pos2(94.0, 4.0)],
+        ),
+        (
+            egui::vec2(220.0, 70.0),
+            [egui::pos2(0.0, 0.0), egui::pos2(173.20508, 100.0)],
+            egui::vec2(100.0, 24.0),
+            [egui::pos2(60.0, 4.0), egui::pos2(116.0, 34.4)],
+        ),
+        (
+            egui::vec2(220.0, 70.0),
+            [egui::pos2(0.0, 70.0), egui::pos2(173.20506, -30.000038)],
+            egui::vec2(100.0, 24.0),
+            [egui::pos2(60.0, 42.0), egui::pos2(116.0, 11.6)],
+        ),
+        (
+            egui::vec2(220.0, 70.0),
+            [egui::pos2(220.0, 0.0), egui::pos2(46.79492, 100.000015)],
+            egui::vec2(100.0, 24.0),
+            [egui::pos2(4.0, 4.0), egui::pos2(4.0, 34.4)],
+        ),
+        (
+            egui::vec2(220.0, 70.0),
+            [egui::pos2(220.0, 70.0), egui::pos2(46.79492, -29.999992)],
+            egui::vec2(100.0, 24.0),
+            [egui::pos2(4.0, 11.6), egui::pos2(4.0, 42.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(0.0, 3e+01), egui::pos2(17.320507, 4e+01)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(94.0, 4.0), egui::pos2(7.474098, 4.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(0.0, 3e+01), egui::pos2(69.28203, 7e+01)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(94.0, 4.0), egui::pos2(7.474098, 4.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(0.0, 3e+01), egui::pos2(173.20508, 1.3e+02)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(7.474098, 4.0), egui::pos2(94.0, 4.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(0.0, 3e+01), egui::pos2(17.320507, 19.999996)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(94.0, 4.0), egui::pos2(7.474098, 32.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(0.0, 3e+01), egui::pos2(69.28203, -10.000015)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(94.0, 4.0), egui::pos2(7.474098, 32.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(0.0, 3e+01), egui::pos2(173.20506, -70.00004)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(94.0, 4.0), egui::pos2(7.474098, 32.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(1.8e+02, 3e+01), egui::pos2(162.67949, 4e+01)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(4.0, 4.0), egui::pos2(90.52591, 4.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(1.8e+02, 3e+01), egui::pos2(110.71797, 7e+01)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(4.0, 4.0), egui::pos2(90.52591, 4.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(1.8e+02, 3e+01), egui::pos2(6.794922, 130.00002)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(4.0, 4.0), egui::pos2(90.52591, 4.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(1.8e+02, 3e+01), egui::pos2(162.67949, 2e+01)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(4.0, 4.0), egui::pos2(90.52591, 32.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(1.8e+02, 3e+01), egui::pos2(110.71797, -9.999996)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(4.0, 4.0), egui::pos2(90.52591, 32.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(1.8e+02, 3e+01), egui::pos2(6.794922, -69.99999)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(4.0, 4.0), egui::pos2(90.52591, 32.0)],
+        ),
+    ] {
+        let view = egui::Rect::from_min_size(egui::Pos2::ZERO, view_size);
+        let sizes = [size; 2];
+        // These known clear layouts show that the viewport has enough room.
+        let witness = witness_positions.map(|p| egui::Rect::from_min_size(p, size));
+        assert!(!witness[0].intersects(witness[1].expand(4.0)));
+        for rect in witness {
+            assert!(view.contains_rect(rect));
+            assert!(!segment_intersects_input(segment, rect.expand(4.0)));
+        }
+        let positions = super::line_input_positions(segment, &sizes, Some(view), 8.0);
+        let rects: Vec<_> = positions.iter().map(|p| egui::Rect::from_min_size(*p, size)).collect();
+        assert!(!rects[0].intersects(rects[1].expand(4.0)), "fields overlap: {segment:?}, {rects:?}");
+        for rect in rects {
+            assert!(view.contains_rect(rect), "{rect:?} outside {view:?}");
+            assert!(!segment_intersects_input(segment, rect.expand(4.0)), "{rect:?} covers {segment:?}");
+        }
+    }
 }
 
 #[test]
