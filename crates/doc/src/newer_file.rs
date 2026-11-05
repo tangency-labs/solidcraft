@@ -338,7 +338,7 @@ fn fill_foreign(doc: &mut Document, mut foreign: BTreeMap<u64, Value>) {
         if let crate::FeatureKind::NewerFileFeature { raw } = &mut feature.kind
             && let Some(value) = foreign.remove(&feature.id)
         {
-            raw.0 = Box::new(value);
+            *raw.0 = value;
         }
     }
 }
