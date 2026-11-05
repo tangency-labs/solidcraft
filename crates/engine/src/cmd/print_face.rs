@@ -295,6 +295,64 @@ mod tests {
         assert!(opened.print_faces.is_empty());
     }
 
+    /// A file in a fresh folder of the system's temporary folder, for `case`.
+    fn temp_file(case: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("solidcraft-print-faces-{case}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temporary folder");
+        dir.join("block.solidcraft").to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn without_keep_print_faces_a_save_leaves_them_out_and_the_session_keeps_them() {
+        let mut s = block();
+        s.keep_print_faces = false;
+        run(&mut s, "body.print_face", json!({"body": "Block", "point": [10, 5, 5]}));
+        let path = temp_file("save");
+        run(&mut s, "file.save", json!({"path": path}));
+        // The design on screen still has it, and is not left with unsaved changes.
+        assert!(s.doc.print_faces.contains_key("Block"));
+        assert!(!s.is_dirty());
+        let mut opened = Session::default();
+        run(&mut opened, "doc.open", json!({"path": path}));
+        assert!(opened.doc.print_faces.is_empty(), "the file has no print face");
+        assert_eq!(opened.doc.features.len(), s.doc.features.len());
+        assert_eq!(opened.doc.params, s.doc.params);
+        // With keep_print_faces on (the engine's default), the file keeps it, as before.
+        s.keep_print_faces = true;
+        run(&mut s, "file.save", json!({"path": path}));
+        let mut opened = Session::default();
+        run(&mut opened, "doc.open", json!({"path": path}));
+        assert_eq!(opened.doc.print_faces, s.doc.print_faces);
+    }
+
+    #[test]
+    fn a_design_saved_with_print_faces_opens_without_them_unless_they_are_kept() {
+        let mut s = block();
+        run(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Brass"}));
+        run(&mut s, "body.print_face", json!({"body": "Block", "point": [10, 5, 5]}));
+        // Saved as an older version saved it: with the print face in the file.
+        let path = temp_file("older");
+        run(&mut s, "file.save", json!({"path": path}));
+        let mut opened = Session::default();
+        opened.keep_print_faces = false;
+        run(&mut opened, "doc.open", json!({"path": path}));
+        assert!(opened.doc.print_faces.is_empty(), "the stored print face is dropped as the design opens");
+        assert!(!opened.is_dirty(), "dropping it is not an unsaved change");
+        assert!(opened.undo.is_empty(), "nor a step to undo");
+        // Everything else the file holds is there.
+        assert_eq!(opened.doc.features.len(), s.doc.features.len());
+        assert_eq!(opened.doc.params, s.doc.params);
+        assert_eq!(opened.doc.materials, s.doc.materials);
+        assert_eq!(opened.model.state().bodies.len(), 1);
+        // The setting is the user's: it survives the open.
+        assert!(!opened.keep_print_faces);
+        // Kept, the design opens with its print face.
+        let mut kept = Session::default();
+        run(&mut kept, "doc.open", json!({"path": path}));
+        assert_eq!(kept.doc.print_faces, s.doc.print_faces);
+    }
+
     #[test]
     fn renaming_the_body_keeps_its_print_face() {
         let mut s = block();
