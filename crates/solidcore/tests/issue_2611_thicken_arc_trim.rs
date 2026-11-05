@@ -14,9 +14,9 @@
 //! parameterisation differs: the B-spline's offset ended up to 4.3e-5 (four tolerances)
 //! from the arc's at their shared corner, and 6e-6 along the curve at the tangent
 //! junction, where the crossing is also ill-conditioned. The merge of the side walls then
-//! failed (R14 to R40 inward) or split slivers off the walls (R12, R18 outward).
-//! `offset_lamina_corner_at_vertex_image` (WR-736) ends the offset at the vertex's own
-//! image `V + d n(V)`.
+//! failed (R14 to R40 inward) or split slivers off the walls (R12, R18 outward). The offset
+//! now ends at the vertex's own image `V + d n(V)` (WR-736; the only path since #2769, so
+//! the pinned defaults close too).
 //!
 //! Every result is graded against the closed form: each side wall is ruled along the
 //! surface normals, so the solid is the set of radii between 25 and 25 + t over the
@@ -50,7 +50,7 @@ use solidcore::topology::brep::p2::ArenaNotifyState;
 use solidcore::topology::brep::p3::new_brep;
 use solidcore::topology::brep::p7::copy_faces;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
-use solidcore::{Brep, EntityRef, FaceId, Kernel, SolidError};
+use solidcore::{Brep, EntityRef, FaceId, Kernel};
 
 /// Relative tolerance on the volume: the integration is asked for 1e-6; the results come
 /// within 3.7e-7 of the closed form.
@@ -213,29 +213,27 @@ fn closed_form(r: f64, sweep: f64, t: f64) -> f64 {
     (outer * outer - inner * inner) / 2.0 * angular_integral(r, sweep)
 }
 
-/// Every opt-in fix (`all`) or the pinned defaults, with
-/// `offset_lamina_corner_at_vertex_image` as `fix` says.
-fn kernel(all: bool, fix: bool) -> Kernel {
+/// Every opt-in fix (`all`) or the pinned defaults.
+fn kernel(all: bool) -> Kernel {
     let mut k = Kernel::default();
     if all {
         k.fixes = UpstreamFixes::all();
     }
-    k.fixes.offset_lamina_corner_at_vertex_image = fix;
     k
 }
 
 /// Thickens the arc-`r` sheet by `t`; the kernel and the result.
-fn run(all: bool, fix: bool, r: f64, sweep: f64, t: f64) -> (Kernel, solidcore::Result<Brep>) {
-    let mut k = kernel(all, fix);
+fn run(all: bool, r: f64, sweep: f64, t: f64) -> (Kernel, solidcore::Result<Brep>) {
+    let mut k = kernel(all);
     let mut s = sheet(&mut k, r, sweep);
     let out = thicken(&mut k, &mut s, t);
     (k, out)
 }
 
-/// With the fix: built, a manifold solid of 8 faces (the sheet, its offset and six side
+/// Built, a manifold solid of 8 faces (the sheet, its offset and six side
 /// walls), `check_brep` clean at level 2, of the closed-form volume.
 fn assert_sound(all: bool, r: f64, sweep: f64, t: f64) {
-    let (mut k, out) = run(all, true, r, sweep, t);
+    let (mut k, out) = run(all, r, sweep, t);
     let mut b = out.unwrap_or_else(|e| panic!("R{r} sweep {sweep} t {t}: {e}"));
     assert!(
         brep_is_manifold_solid(&b).unwrap(),
@@ -316,34 +314,11 @@ fn issue_2611_other_arc_sweeps_thicken() {
 }
 
 #[test]
-fn issue_2611_fix_alone_on_the_pinned_defaults() {
-    // the fix needs no other opt-in: on the pinned defaults the same sheets close
-    assert_all_sound(false, &[14.0, 20.0, 30.0], 45.0, &[2.0, -2.0]);
-}
-
-#[test]
-fn issue_2611_without_the_fix_inward_r20_fails_in_relate() {
-    // upstream behaviour (flag off): the B-spline's offset corner lands 4.3e-5 from the
-    // arc's, and the merge's Relate finds a vertex already mated to another
-    let (_, out) = run(true, false, 20.0, 45.0, -2.0);
-    match out {
-        Err(SolidError::Upstream {
-            code, operation, ..
-        }) => {
-            assert_eq!(code, 1001);
-            assert!(operation.ends_with("::relate"), "{operation}");
-        }
-        other => panic!("expected 1001 from Relate, got {:?}", other.map(|_| ())),
-    }
-}
-
-#[test]
-fn issue_2611_without_the_fix_outward_r12_is_no_closed_solid() {
-    // upstream behaviour (flag off): slivers split off the side walls at the corners
-    let (_, out) = run(true, false, 12.0, 45.0, 2.0);
-    let b = out.unwrap();
-    assert!(!brep_is_manifold_solid(&b).unwrap());
-    assert_eq!(b.face_list().len(), 11);
+fn issue_2611_closes_on_the_pinned_defaults() {
+    // no opt-in needed: on the pinned defaults the same sheets close, among them R20
+    // inward (upstream: 1001 in Relate) and R12 outward (upstream: slivers, no closed
+    // solid)
+    assert_all_sound(false, &[12.0, 14.0, 20.0, 30.0], 45.0, &[2.0, -2.0]);
 }
 
 /// Writes the R20 and R12 sheets (`fixtures/offset.offset_executive_p2/data/`) for the

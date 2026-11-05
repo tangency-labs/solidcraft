@@ -10,10 +10,11 @@
 //! first glue (the fork's da8d05e, unconditional). It reaches that stop on this input
 //! once, for Brep 1, and returns a result.
 //!
-//! At the defaults that result is upstream's WR-673 one: a body of 4 faces, 8 edges and
-//! 5 vertices that is not a manifold solid (one rim half got the whole offset circle, the
-//! other nothing). `Kernel::fixes.offset_open_edge_second_trim_point` gives the sound
-//! sector (`issue_2174_cap_rim_two_edges.rs`). Both shell entry points are checked:
+//! Upstream's result at the defaults was WR-673's: a body of 4 faces, 8 edges and 5
+//! vertices that is not a manifold solid (one rim half got the whole offset circle, the
+//! other nothing). Each rim half's offset now ends at its vertices' images (WR-736, the
+//! only path since #2769), and the result is the sound sector: 4 faces, 8 edges, 6
+//! vertices, a manifold solid of the closed-form volume, clean at level 2. Both shell entry points are checked:
 //! `api_shell_brep_full`'s options (no merged sheet side walls; the difftest case
 //! `issue2174_cap_two_rim_edges_api_shell_out`) and the issue's
 //! (`merge_sheet_side_walls`).
@@ -21,8 +22,8 @@
 //! The stop is not what decides this result: with it removed the port glues through a
 //! vertex its arena has already dropped, which is a soft no-op, and returns the same
 //! body. The stop itself is tested in `topology::proto_topology::p3`
-//! (`glue_stops_once_the_second_vertex_is_glued_away`). This test pins the Rust result
-//! on the input that crashes the C++: no panic, no hang, the same body.
+//! (`glue_stops_once_the_second_vertex_is_glued_away`). This test checks the Rust result
+//! on the input that crashes the C++: no panic, no hang, a sound body.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -91,15 +92,35 @@ fn thicken_out(merge_sheet_side_walls: bool) -> Brep {
 }
 
 #[test]
-fn outward_thicken_returns_upstreams_body() {
+fn outward_thicken_is_the_sector() {
+    use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+    use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    // the shell between the radii 10 and 11 over the cap's cone of half-angle 60 degrees
+    let want = std::f64::consts::PI / 3.0 * (11.0_f64.powi(3) - 10.0_f64.powi(3));
     for side_walls in [false, true] {
-        let b = thicken_out(side_walls);
+        let mut b = thicken_out(side_walls);
         let counts = (
             b.face_list().len(),
             b.edge_list().len(),
             b.vertex_list().len(),
         );
-        assert_eq!(counts, (4, 8, 5), "side walls {side_walls}");
-        assert!(!is_manifold_solid(&b).unwrap(), "side walls {side_walls}");
+        assert_eq!(counts, (4, 8, 6), "side walls {side_walls}");
+        assert!(is_manifold_solid(&b).unwrap(), "side walls {side_walls}");
+        let mut k = Kernel::default();
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "side walls {side_walls}: {lines:?}");
+        let store = AttributeStore::default();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        };
+        let v = brep_volume(&k, &mut b, 1e-8, &attrs).unwrap();
+        assert!(
+            (v - want).abs() <= 1e-6 * want,
+            "side walls {side_walls}: {v} vs {want}"
+        );
     }
 }

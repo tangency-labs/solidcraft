@@ -57,13 +57,12 @@ use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{Brep, FaceId};
 
 /// The issue's flags: every fix on except `geometric_g2_continuity`, with or without
-/// this one. `offset_lamina_corner_at_vertex_image` (WR-736, #2611), which came later and
-/// ends each rim half at its vertices' images by itself, is off as it was then.
+/// this one.
 fn issue_kernel(fixed: bool) -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && name != "offset_lamina_corner_at_vertex_image" {
+        if name != "geometric_g2_continuity" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -241,42 +240,25 @@ fn intersected_cap_thickens_with_this_fix_alone() {
     assert_sound(only_this_fix(), intersected_cap, -1.0);
 }
 
-/// Upstream behaviour, with every other fix on: the loop gap is refused (1043).
+/// Without this fix the gap is closed too: each rim half's offset ends at its vertices'
+/// images (WR-736, #2611, the only path since #2769), never at the first trim point's twin.
+/// Upstream refused the loop gap there (1043).
 #[test]
-fn flag_off_refuses_the_gap() {
-    for distance in [1.0, -1.0] {
-        let mut k = issue_kernel(false);
-        let s = intersected_cap(&mut k);
-        match thicken(&mut k, &s, distance) {
-            Err(e) => assert_eq!(e.sm_status(), Some(1043), "{distance}"),
-            other => panic!("{distance}: {other:?}"),
-        }
-    }
-}
-
-/// Without this fix, WR-736's (#2611) alone closes the gap too: each rim half's offset
-/// ends at its vertices' images, never at the first trim point's twin.
-#[test]
-fn wr736_alone_closes_the_gap() {
+fn flag_off_closes_the_gap_at_the_vertex_images() {
     let sheets: [fn(&mut Kernel) -> Brep; 3] = [intersected_cap, turned_cap, solidcraft_cap];
     for sheet in sheets {
         for distance in [1.0, -1.0] {
-            let mut k = issue_kernel(false);
-            k.fixes.offset_lamina_corner_at_vertex_image = true;
-            assert_sound(k, sheet, distance);
+            assert_sound(issue_kernel(false), sheet, distance);
         }
     }
 }
 
-/// Upstream behaviour at the defaults (the pinned C++ inward): a body that is no manifold
-/// solid.
+/// At the defaults the sheet thickens to the sector both ways (upstream, the pinned C++
+/// inward, gave a body that is no manifold solid: the rim halves' corners missed).
 #[test]
-fn defaults_give_no_manifold_solid() {
+fn defaults_thicken_the_sector() {
     for distance in [1.0, -1.0] {
-        let mut k = Kernel::default();
-        let s = intersected_cap(&mut k);
-        let r = thicken(&mut k, &s, distance).unwrap();
-        assert!(!is_manifold_solid(&r).unwrap(), "{distance}");
+        assert_sound(Kernel::default(), intersected_cap, distance);
     }
 }
 

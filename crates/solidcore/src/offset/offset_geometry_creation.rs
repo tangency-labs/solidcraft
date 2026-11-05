@@ -47,12 +47,13 @@
 //!   reached first from the edge's other end. That choice also skips, on an open edge's
 //!   second end, a cut at the first trim point again (the fork's `bFirstAgain`, used there
 //!   only; the main candidate search is upstream's, WR-463's opt-in covers closed curves).
-//! - **A lamina edge's corner at its vertex image (WR-736, #2611, opt-in).** With
-//!   `Kernel::fixes.offset_lamina_corner_at_vertex_image`, `trim_extended_edge` ends a
-//!   lamina edge's offset, at a vertex whose next edge is lamina or a tangent sector, where
-//!   the offset curve passes nearest the vertex's image `V + d n(V)`
-//!   (`offset_vertex_image`), instead of at the crossing of the two edges' UV trim curves
-//!   or the neighbour's offset vertex. Solidcore-native, no fork commit.
+//! - **A lamina edge's corner at its vertex image (WR-736, #2611, #2769).**
+//!   `trim_extended_edge` ends a lamina edge's offset, at a vertex whose next edge is
+//!   lamina or a tangent sector, where the offset curve passes nearest the vertex's image
+//!   `V + d n(V)` (`offset_vertex_image`), not at the crossing of the two edges' UV trim
+//!   curves (a parameter of the UV curve, which the lifted 3D curve does not keep: corners
+//!   landed up to 4.3e-5 apart) nor at the neighbour's offset vertex. Upstream's reading is
+//!   gone (no flag). Solidcore-native, no fork commit.
 //! - **Object handles.** Every `SmObject*` (topology, curves, surfaces) is a caller
 //!   handle `O` ([`ClassObject`] + [`SolutionObject`]), as in
 //!   [`proto_topology`](crate::topology::proto_topology) and the topology intersector.
@@ -2551,8 +2552,7 @@ impl OffsetGeometryCreation {
                 }
             } // end 2nd iteration branch
 
-            // `Kernel::fixes.offset_lamina_corner_at_vertex_image` (WR-736, #2611): a lamina
-            // edge's offset (the lifted curve, on its own face's offset) ends, at a vertex
+            // (WR-736, #2611, #2769) a lamina edge's offset (the lifted curve, on its own face's offset) ends, at a vertex
             // whose next edge is lamina or a tangent sector, at the vertex's own image
             // `V + d n(V)`, where it passes nearest that image (a well-conditioned solve: the
             // curve runs through the image to the lift's tolerance). Neither the neighbour's
@@ -2560,9 +2560,7 @@ impl OffsetGeometryCreation {
             // edges' UV trim curves is taken: the crossing's parameter is the UV curve's,
             // which the lifted curve does not keep, and between tangent edges the crossing
             // is ill-conditioned.
-            let vertex_image = k.fixes.offset_lamina_corner_at_vertex_image
-                && !tan_eus.is_empty()
-                && brep.edge_is_lamina(base_edge)?;
+            let vertex_image = !tan_eus.is_empty() && brep.edge_is_lamina(base_edge)?;
             if vertex_image {
                 let tol_3d = brep.brep_tolerance(base_edge)?;
                 let image = self.offset_vertex_image(k, brep, base_edgeuse, base_vertex)?;
@@ -3112,7 +3110,7 @@ impl OffsetGeometryCreation {
         }))
     }
 
-    /// Not upstream (WR-736, `Kernel::fixes.offset_lamina_corner_at_vertex_image`): the
+    /// Not upstream (WR-736, #2611, #2769): the
     /// image of `vertex` on the offset of `edgeuse`'s face, `V + sign d n(V)`: the unit
     /// normal of the face's surface at the vertex, `sign` that of the face use's
     /// orientation, as [`Self::faceuse_offset`] offsets the surface. The vertex lies on
