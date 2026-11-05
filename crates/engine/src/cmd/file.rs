@@ -1903,6 +1903,23 @@ mod tests {
         }
     }
 
+    /// A saved model whose states name one large tap marking over and over is refused: every
+    /// state holds its own copy of each marking it lists, so a marking counts by its text.
+    #[test]
+    fn a_saved_model_repeating_a_large_tap_marking_is_refused() {
+        let mut s = Session::new(Document::new("Marked"));
+        s.execute("solid.cylinder", &json!({"radius":3,"height":6,"base":[0,0,0]})).unwrap();
+        s.execute("solid.thread", &json!({"face":[3,0,2],"designation":"M6","length":4})).unwrap();
+        let saved = saved_geometry(&s, &s.doc).unwrap();
+        assert!(solidcraft_doc::Model::adopt(&s.doc, &saved).is_ok());
+        let mut hostile = solidcraft_doc::SavedModel { records: saved.records.clone(), bodies: saved.bodies.clone() };
+        hostile.records["threads"][0]["designation"] = json!("M".repeat(1 << 20));
+        let repeated: Vec<Value> = (0..4000).map(|_| json!([0, 1])).collect();
+        let last = hostile.records["states"].as_array().unwrap().len() - 1;
+        hostile.records["states"][last]["threads"] = Value::Array(repeated);
+        assert!(solidcraft_doc::Model::adopt(&s.doc, &hostile).is_err());
+    }
+
     #[test]
     #[ignore = "manual native cache save benchmark; generate issue303-step.json first"]
     fn benchmark_native_cache_save() {

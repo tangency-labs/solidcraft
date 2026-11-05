@@ -486,14 +486,28 @@ impl SavedModel {
             }
             key_sets.push(keys);
         }
+        // Running totals of what each marking costs to clone (its items and text), by place.
+        let mut thread_weight = vec![0usize];
+        for t in &threads {
+            let w = 1usize.saturating_add((t.body.len().saturating_add(t.designation.len())) / 64);
+            thread_weight.push(thread_weight.last().copied().unwrap_or(0).saturating_add(w));
+        }
         let records = list("states")?;
         // What every state holds, counted from its runs and its sketch-key set before any is
         // built (a hostile file cannot make the states clone more than MAX_HELD items).
         for s in records {
-            for key in ["bodies", "sketches", "threads"] {
+            for key in ["bodies", "sketches"] {
                 for run in s.get(key).and_then(Json::as_array).ok_or_else(|| bad("saved model: state"))? {
                     held = held.saturating_add(run.get(1).and_then(Json::as_u64).and_then(|n| usize::try_from(n).ok()).unwrap_or(usize::MAX));
                 }
+            }
+            // A marking is cloned deeply into every state that lists it, so each counts by its
+            // text, not as one item: a run of a large marking repeated cannot exhaust memory.
+            for run in s.get("threads").and_then(Json::as_array).ok_or_else(|| bad("saved model: state"))? {
+                let first = index(run.get(0), threads.len())?;
+                let count = run.get(1).and_then(Json::as_u64).and_then(|n| usize::try_from(n).ok()).ok_or_else(|| bad("saved model: run"))?;
+                let end = first.checked_add(count).filter(|end| *end <= threads.len()).ok_or_else(|| bad("saved model: run"))?;
+                held = held.saturating_add(thread_weight[end].saturating_sub(thread_weight[first]));
             }
             held = held.saturating_add(s.get("sheets").and_then(Json::as_array).map_or(0, Vec::len));
             held = held.saturating_add(key_sets.get(index(s.get("sketch_key_set"), key_sets.len())?).map_or(0, BTreeMap::len));
