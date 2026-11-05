@@ -10,10 +10,13 @@
 //! | [`FilletSession::prepare_chamfers_along`] | not upstream: the same, each first size along a face the caller names |
 //!
 //! Deviations: explicit generator descriptors replace cross-section type codes.
-//! List sizes and live edges are checked before changing session state. No recursion.
+//! List sizes and live edges are checked before changing session state. A knife edge's
+//! chamfer of equal distances has no wedge for its definition: it is the linear section on the
+//! ball of radius the distance (#2793's rig cases). No recursion.
 
 use super::{FilletBody, FilletObject, FilletSession, FilletSurfaceGenerator};
 use crate::blend::fillet_executive::p2::FilletParametersAccess;
+use crate::blend::fillet_solver::p5::is_knife_edge;
 use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
 use crate::topology::{edge, EdgeId};
 use crate::{EntityRef, Kernel, Result, SolidError};
@@ -130,9 +133,11 @@ impl FilletSession<'_> {
     /// # Errors
     ///
     /// Those of [`Self::prepare_per_edge_two_offsets`]; native invalid input for an edge
-    /// without a blend edge use or its mate, faces that do not make a wedge there (tangent
-    /// or folded back), sizes that are not finite and positive, an angle past the wedge's
-    /// room, or two distances that fold on it (one at most the other's `cos(wedge)`).
+    /// without a blend edge use or its mate, faces that do not make a wedge there (tangent,
+    /// or folded back other than a knife edge chamfered at equal distances, which is the chord
+    /// between the contacts of the ball of radius the distance), sizes that are not finite and
+    /// positive, an angle past the wedge's room, or two distances that fold on it (one at most
+    /// the other's `cos(wedge)`).
     pub fn prepare_chamfers(
         &mut self,
         k: &Kernel,
@@ -195,6 +200,22 @@ impl FilletSession<'_> {
                     }
                 }
             };
+            // a knife edge has no wedge: equal distances are the chord between the contacts of
+            // the ball of that radius, kept as the linear section on those offsets; other
+            // sizes have no such chord
+            let tol = k.tolerances.ang_tol_deg * (crate::math::PI / 180.0);
+            if is_knife_edge(k, target, id, tol)? {
+                let ChamferSize::Distances([d, d2]) = value(sizes, index)? else {
+                    return Err(invalid());
+                };
+                if !(d == d2 && d.is_finite() && d > 0.0) {
+                    return Err(invalid());
+                }
+                first.push(d);
+                second.push(d);
+                chamfers.push(None);
+                continue;
+            }
             let t = target
                 .edge(id)
                 .map_err(|_| invalid())?
@@ -227,7 +248,7 @@ impl FilletSession<'_> {
             let [r1, r2] = chamfer.offsets().map_err(|_| invalid())?;
             first.push(r1);
             second.push(r2);
-            chamfers.push(chamfer);
+            chamfers.push(Some(chamfer));
         }
         let offsets: Vec<[f64; 2]> = first.iter().zip(&second).map(|(&a, &b)| [a, b]).collect();
         let solvers_before = self.objects.solvers.len();
@@ -247,7 +268,7 @@ impl FilletSession<'_> {
         }
         for (i, chamfer) in made.into_iter().zip(chamfers) {
             if let Some(Some(solver)) = self.objects.solvers.get_mut(i) {
-                solver.base_mut().chamfer = Some(chamfer);
+                solver.base_mut().chamfer = chamfer;
             }
         }
         Ok(offsets)
