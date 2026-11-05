@@ -472,6 +472,9 @@ impl Harness {
     }
 
     /// Run one step.
+    // The harness runs only under tests, where libtest captures `eprintln!`; `note!` would write
+    // past the capture and fill the logs of passing tests.
+    #[allow(clippy::print_stderr)]
     pub fn step(&mut self, s: &Value) -> Result<(), String> {
         let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
         let res =
@@ -644,18 +647,14 @@ impl Harness {
                 return Ok(());
             } else if let Some(m) = s.get("print").and_then(Value::as_str) {
                 let r = self.call(m, s.get("params").cloned().unwrap_or(json!({})));
-                solidcraft_engine::note!("print {m}: {r}");
+                eprintln!("print {m}: {r}");
                 return Ok(());
             } else if s.get("debug").is_some() {
                 let ui = self.call("ui.inspect", json!({}));
                 let sel = self.call("ui.selection", json!({}));
-                solidcraft_engine::note!(
+                eprintln!(
                     "debug: dialog {} tool {} hover {}\nselection {}\nstatus {:?}",
-                    ui["result"]["dialog"],
-                    ui["result"]["tool"],
-                    ui["result"]["hover"],
-                    sel["result"]["selection"],
-                    self.app.status
+                    ui["result"]["dialog"], ui["result"]["tool"], ui["result"]["hover"], sel["result"]["selection"], self.app.status
                 );
                 if s["debug"] == json!("widgets") {
                     let texts: Vec<String> = self
@@ -668,11 +667,11 @@ impl Harness {
                             n.label().or(n.value()).map(|l| format!("{:?} {l}{at}", n.role()))
                         })
                         .collect();
-                    solidcraft_engine::note!("widgets: {texts:?}");
+                    eprintln!("widgets: {texts:?}");
                 }
                 if s["debug"] == json!("handles") {
                     let names: Vec<String> = HANDLES.with(|h| h.borrow().iter().map(|(n, p)| format!("{n} @{:.0},{:.0}", p.x, p.y)).collect());
-                    solidcraft_engine::note!("handles: {names:?}");
+                    eprintln!("handles: {names:?}");
                 }
                 return Ok(());
             } else if let Some(e) = s.get("until") {
