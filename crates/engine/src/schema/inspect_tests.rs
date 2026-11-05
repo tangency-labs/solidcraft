@@ -880,3 +880,19 @@ fn classify_points_refuses_hostile_inputs_in_every_check_mode() {
         assert_eq!(s.doc, before);
     }
 }
+
+#[test]
+fn feature_effects_publish_schemas_and_check_their_contract() {
+    assert_keys(input_schema_for::<super::FeatureEffectsParams>(), &["feature"]);
+    let mut s = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+    let description = s.execute("engine.describe", &json!({"command": "timeline.effects"})).unwrap();
+    for field in ["feature", "evaluated", "created_bodies", "changed_bodies", "removed_bodies"] {
+        assert!(description["output"]["properties"].get(field).is_some(), "{field}");
+    }
+    assert!(s.execute("timeline.effects", &json!({"feature": 1, "typo": true})).unwrap_err().to_string().contains("unknown key"));
+    let feature = s.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).unwrap()["feature"].clone();
+    s.param_check = crate::schema::ParamCheck::Warn;
+    let reply = s.execute("timeline.effects", &json!({"feature": feature, "typo": true})).unwrap();
+    let schema = &description["output"];
+    assert!(crate::schema::tests::conforms(schema, schema, &reply), "{reply}");
+}
