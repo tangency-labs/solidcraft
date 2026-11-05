@@ -142,9 +142,6 @@ render.library.surface.unbind
 render.optics.bind
 render.optics.unbind
 render.preflight
-render.preset.apply
-render.preset.resolve
-render.quality.prepare
 render.result.pin
 render.result.regrade
 render.scene

@@ -91,11 +91,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("No parameters. Returns the explicitly defined current view camera, or null if the session has no camera override. No camera is fitted, no job is started and no saved setup or engineering document is changed."),
 CommandSpec::new("render.camera.fit", "Frame Render Subject", fit_camera).icon("camera").noundo()
     .params("aspect?: the picture's width over its height, 0.000001 to 1000000 (default 1). Fits the current camera to the visible product bounds through the shared Camera::fit contract, moving back for a picture taller than wide so its sides hold the product too; changes only view state, not a saved setup, rendering job, stage or engineering geometry."),
-CommandSpec::new("render.preset.resolve", "Review Native Studio", studio_presets::resolve).icon("render_scene").noundo()
+CommandSpec::new("render.preset.resolve", "Review Native Studio", crate::checked!("render.preset.resolve", studio_presets::resolve)).icon("render_scene").noundo()
+    .contract(&studio_presets::PRESET_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_presets::StudioComposition>)
     .params("id: NATIVE-STUDIO-001..025; name; set?: typed GPU setup patch; expected_revision?:u64. Resolves original built-in HDR/rig/passive ground with conservative geometry clearance, returns all replacements and preserved fields without mutation. Unbound SCENE-* concepts are not accepted."),
-CommandSpec::new("render.preset.apply", "Apply Native Studio", studio_presets::apply).icon("render_scene")
+CommandSpec::new("render.preset.apply", "Apply Native Studio", crate::checked!("render.preset.apply", studio_presets::apply)).icon("render_scene")
+    .contract(&studio_presets::PRESET_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_presets::StudioComposition>)
     .params("Same reviewed input as render.preset.resolve, expected_revision required, replace_lighting_and_environment:true and replace_stage:true when an existing stage would change. Re-resolves the complete candidate and publishes one undo or no mutation; camera, optical bindings, geometry and engineering materials are preserved."),
-CommandSpec::new("render.quality.prepare", "Review Fixed Sampling Budget", studio_presets::quality).icon("settings").noundo().doc_only()
+CommandSpec::new("render.quality.prepare", "Review Fixed Sampling Budget", crate::checked!("render.quality.prepare", studio_presets::quality)).icon("settings").noundo().doc_only()
+    .contract(&studio_presets::QUALITY_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_presets::QualityPlan>)
     .params("id: Q-*; variant:fixed_samples_png; acknowledge_omissions:true. Read-only bounded GPU still-budget projection, not full adaptive/convergence/linear-master quality acceptance. Returns dimensions/samples/depth/seed/denoise and explicit omissions. Never switches executor or mutates a shot."),
 CommandSpec::new("render.shot.duplicate", "Duplicate Render Shot", crate::checked!("render.shot.duplicate", shots::duplicate)).icon("copy").doc_only()
     .contract(&shots::CONTRACT)
