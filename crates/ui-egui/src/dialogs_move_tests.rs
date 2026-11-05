@@ -884,6 +884,32 @@ fn crossing_a_face_keeps_a_rims_centre_awake() {
     assert!(matches!(from.as_slice(), [Sel::Vertex { point, .. }] if point.dist(centre) < 1e-6), "{from:?}");
 }
 
+/// Crossing a second face of the rim's body replaces all the first face's points; the rim's
+/// stay.
+#[test]
+fn a_second_crossed_face_replaces_the_firsts_points() {
+    let mut h = holed_plate_picking_from();
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    assert!(matches!(h.app.viewport.woken.item, Some(Sel::Edge { .. })), "{:?}", h.app.viewport.woken);
+    let rim_centre = Vec3::new(45.0, 20.0, 10.0);
+    let st = h.app.session.world_state().unwrap();
+    let b = st.body("Body1").unwrap();
+    let tol = (b.body.size() * 2e-3).max(1e-3);
+    let flat: Vec<_> = b.body.faces(tol).unwrap().into_iter().filter(|f| f.plane_normal.is_some()).collect();
+    let top = flat.iter().find(|f| (f.centroid.z - 10.0).abs() < 1e-6).unwrap();
+    let side = flat.iter().find(|f| f.centroid.x.abs() < 1e-6).unwrap();
+    let has = |h: &crate::scenario::Harness, at: Vec3| h.app.viewport.woken.points.iter().any(|p| p.at.dist(at) < 1e-6);
+    for (face, gone) in [(top, None), (side, Some(top.centroid))] {
+        h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: "Body1".into(), index: face.index, point: face.centroid });
+        crate::snap_wake::update(&mut h.app, &[]);
+        assert!(has(&h, rim_centre), "the rim's centre stays: {:?}", h.app.viewport.woken);
+        assert!(has(&h, face.centroid), "the face's centre wakes: {:?}", h.app.viewport.woken);
+        if let Some(at) = gone {
+            assert!(!has(&h, at), "the first face's centre sleeps: {:?}", h.app.viewport.woken);
+        }
+    }
+}
+
 /// A face of another body is not on the way to the rim's centre: it sleeps the rim's points
 /// and wakes its own centre.
 #[test]

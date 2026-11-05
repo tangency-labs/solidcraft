@@ -90,10 +90,12 @@ pub fn update(app: &mut SolveApp, hits: &[Hit]) {
     // adds the face's; a face of another body sleeps them and wakes its own.
     let points = snap_points(&app.session, &item);
     if let Sel::Face { body: face_body, .. } = &item
-        && app.viewport.woken.item.as_ref().is_some_and(|w| matches!(w, Sel::Edge { body, .. } if body == face_body))
+        && let Some(rim) = app.viewport.woken.item.clone().filter(|w| matches!(w, Sel::Edge { body, .. } if body == face_body))
     {
+        // The rim's own points, without any an earlier crossed face added; then this face's.
+        let rim_points = snap_points(&app.session, &rim);
         let w = &mut app.viewport.woken;
-        w.points.retain(|p| w.face.is_none() || p.kind != SnapKind::FaceCentre);
+        w.points = rim_points;
         for p in points {
             let tol = 1e-6 * (1.0 + p.at.x.abs().max(p.at.y.abs()).max(p.at.z.abs()));
             if !w.points.iter().any(|q| (q.at.x - p.at.x).abs() <= tol && (q.at.y - p.at.y).abs() <= tol && (q.at.z - p.at.z).abs() <= tol) {
