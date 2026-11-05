@@ -18,10 +18,16 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "sketch", app.tr("prefs.sketch.snapping_guides"), |ui| {
         let available = ui.available_width();
         let figure_width = t.space_24 * 5.0;
-        let labels_width = ["prefs.sketch.tracking_guides", "prefs.sketch.tracking_points", "prefs.sketch.recent_snap", "prefs.sketch.align_points"]
-            .into_iter()
-            .map(|id| check_width(ui, app.tr(id), true))
-            .fold(0.0, f32::max);
+        let labels_width = [
+            "prefs.sketch.tracking_guides",
+            "prefs.sketch.tracking_points",
+            "prefs.sketch.recent_snap",
+            "prefs.sketch.align_points",
+            "prefs.sketch.snap_to_axes",
+        ]
+        .into_iter()
+        .map(|id| check_width(ui, app.tr(id), true))
+        .fold(0.0, f32::max);
         let controls_width = if available >= figure_width + t.space_14 + labels_width { available - figure_width - t.space_14 } else { available };
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
             ui.spacing_mut().item_spacing.x = t.space_14;
@@ -59,6 +65,13 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "prefs.sketch.align_points",
                     Some("prefs.sketch.align_points_note"),
                     &mut app.preferences.sketch_align_points,
+                );
+                check(
+                    ui,
+                    "sketch_snap_to_axes",
+                    "prefs.sketch.snap_to_axes",
+                    Some("prefs.sketch.snap_to_axes_note"),
+                    &mut app.preferences.sketch_snap_to_axes,
                 );
             });
         });

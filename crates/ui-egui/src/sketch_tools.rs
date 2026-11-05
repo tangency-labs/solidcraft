@@ -581,6 +581,27 @@ fn nearest_on_polyline(poly: &[Vec2], p: Vec2) -> Option<Vec2> {
         .min_by(|x, y| x.dist(p).total_cmp(&y.dist(p)))
 }
 
+/// Whether a drawing point snaps to the sketch's own X and Y axes (#9330): the Sketch preference
+/// asks for it and the Origin shows the axes.
+fn snaps_to_axes(app: &SolveApp) -> bool {
+    app.preferences.sketch_snap_to_axes && app.origin_visible()
+}
+
+/// The curves (by index) a drawing point may snap to. The line an earlier snap onto the
+/// sketch's X or Y axis added (`Sketch::sketch_axis_line`) stays in the sketch, so while axis
+/// snapping is off ([`snaps_to_axes`]) it is left out: a point snapped onto it would be held on
+/// the axis all the same.
+fn snap_curves<'a>(app: &SolveApp, sk: &'a solidcraft_engine::sketch::Sketch) -> impl Fn(usize) -> bool + Copy + 'a {
+    let axes = snaps_to_axes(app);
+    move |i| {
+        axes || !sk
+            .curves
+            .get(i)
+            .and_then(|c| sk.link(c.link.as_deref()?))
+            .is_some_and(|l| matches!(l.source, solidcraft_engine::sketch::LinkSource::SketchAxis { .. }))
+    }
+}
+
 /// Snap a cursor point on the sketch plane to what is inferred while drawing: a crossing of
 /// two curves, a line's midpoint, alignment (horizontal/vertical) with the previous point of
 /// the tool, or else the sketch's own X or Y axis. None: nothing near, use the grid.
@@ -609,9 +630,10 @@ pub fn refine_snap(
     let mid_tol = if mid_only { tol * 1.5 } else { tol };
     let mut best: Option<(f64, &'static str, Vec2)> = None;
     let mut mid_of: Option<String> = None;
+    let take = snap_curves(app, sk);
     // A crossing of two curves, before a midpoint or a point on one curve.
     if !mid_only
-        && let Some((q, i, j)) = solidcraft_engine::sketch::nearest_curve_intersection(sk, lp, tol)
+        && let Some((q, i, j)) = solidcraft_engine::sketch::nearest_curve_intersection_among(sk, lp, tol, take)
         && let (Some(a), Some(b)) = (sk.curves.get(i), sk.curves.get(j))
     {
         best = Some((q.dist(lp), "X", q));
@@ -619,7 +641,8 @@ pub fn refine_snap(
     }
     if best.is_none() {
         for (i, c) in sk.curves.iter().enumerate() {
-            if let solidcraft_engine::sketch::CurveKind::Line { .. } = c.kind
+            if take(i)
+                && let solidcraft_engine::sketch::CurveKind::Line { .. } = c.kind
                 && let Some(solidcraft_engine::sketch::Shape::Line { a, b }) = sk.shape(i)
             {
                 let m = (a + b) * 0.5;
@@ -677,7 +700,7 @@ pub fn refine_snap(
     // nearest point of the polyline it is drawn with, which the click's point-on-curve
     // constraint then puts on the curve itself (#9321).
     if !mid_only && best.is_none() {
-        for (i, c) in sk.curves.iter().enumerate() {
+        for (i, c) in sk.curves.iter().enumerate().filter(|(i, _)| take(*i)) {
             let (d, q) = match sk.shape(i) {
                 Some(sh) => (sh.dist(lp), sh.project(lp)),
                 None if c.kind.is_freeform() => {
@@ -719,7 +742,7 @@ pub fn refine_snap(
         && best.is_none()
         && line_tool
         && let Some(prev) = prev
-        && let Some(i) = crate::inference::lines(sk, prev, lp, tol)
+        && let Some(i) = crate::inference::lines(sk, prev, lp, tol, take)
     {
         best = Some((i.dist, i.label(), i.at));
     }
@@ -740,10 +763,11 @@ pub fn refine_snap(
             lined.extend(plumb);
         }
     }
-    // Last, before the grid: on the sketch's own X or Y axis, while the Origin shows them. The
-    // point is held on it, as on a curve (`x` and `y` name the axes in a point argument, as in
-    // constraints), its free coordinate on the grid (#9330).
-    if !mid_only && best.is_none() && app.origin_visible() {
+    // Last, before the grid: on the sketch's own X or Y axis, while the Origin shows them and
+    // the Sketch preference asks for it. The point is held on it, as on a curve (`x` and `y`
+    // name the axes in a point argument, as in constraints), its free coordinate on the grid
+    // (#9330).
+    if !mid_only && best.is_none() && snaps_to_axes(app) {
         for (axis, d, q) in [("x", lp.y.abs(), Vec2::new(g(lp.x), 0.0)), ("y", lp.x.abs(), Vec2::new(0.0, g(lp.y)))] {
             if d < tol * 0.8 && best.is_none_or(|x| d < x.0) {
                 best = Some((d, "On", q));
