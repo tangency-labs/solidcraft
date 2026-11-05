@@ -421,7 +421,9 @@ pub fn grid_lines(half_height: f64, at: f64, reach: f64, cap: i64) -> Vec<GridLi
 /// to snap to.
 fn grid_drawn_step(half_height: f64) -> f64 {
     let (minor, _) = grid_step(half_height);
-    let Some(b) = grid_blend(half_height) else { return minor; };
+    let Some(b) = grid_blend(half_height) else {
+        return minor;
+    };
     let (own_lo, own_hi) = b.own();
     // The level with the bigger weight is the one the grid is drawn at (`grid_step`).
     let (level, own) = if b.s >= 0.5 { (b.hi, own_hi) } else { (b.lo, own_lo) };
@@ -455,7 +457,7 @@ pub fn sketch_grid_step(half_height: f64) -> (f64, f64) {
 /// otherwise: the rule is in `sketch_grid_takes_crossing`.
 pub fn sketch_grid_crossing(p: Vec2, minor: f64, fine: f64) -> Option<Vec2> {
     let crossing = Vec2::new((p.x / minor).round() * minor, (p.y / minor).round() * minor);
-    let taken = sketch_grid_takes_crossing(crossing.dist(p), sketch_grid_lattice(p, fine).dist(p), minor, fine);
+    let taken = sketch_grid_takes_crossing(crossing.dist(p), sketch_grid_lattice(p, fine).dist(p), fine);
     taken.then_some(crossing)
 }
 
@@ -469,6 +471,12 @@ pub fn sketch_grid_crossing(p: Vec2, minor: f64, fine: f64) -> Option<Vec2> {
 /// smaller than the quarter of a fine step the last clause measures.
 const SKETCH_GRID_EXACT: f64 = 1e-3;
 
+/// How many fine steps the crossing of the drawn grid may take the pointer (#9843).
+///
+/// The crossing is a point of the finer lattice too, so the pointer may land on it from two fine
+/// steps away at most: the point does not move farther than that from where the pointer was.
+const SKETCH_GRID_CROSSING_STEPS: f64 = 2.0;
+
 /// Whether the crossing of the drawn grid's lines takes the pointer that is `d` away from it,
 /// when the finer lattice's point is `l` away from it.
 ///
@@ -481,17 +489,20 @@ const SKETCH_GRID_EXACT: f64 = 1e-3;
 ///    crossing's own place on the finer lattice and the one right beside it, which is the case
 ///    the issue is about: the pointer is aimed at the crossing the user can see.
 /// 3. **The crossing takes the pointer further out only when the finer lattice cannot hold
-///    it.** A pointer that is more than a quarter of a fine step away from any point of the
-///    lattice has no exact value to hold, so the crossing is the better answer.
+///    it, and only from two fine steps away.** A pointer that is more than a quarter of a fine
+///    step away from any point of the lattice has no exact value to hold, so the crossing is
+///    the better answer; but the crossing takes it only when it is no farther than two fine
+///    steps, so that the point does not move more than two fine steps from where the pointer
+///    was (#9843).
 /// 4. Otherwise the finer lattice holds the pointer.
-fn sketch_grid_takes_crossing(d: f64, l: f64, minor: f64, fine: f64) -> bool {
+fn sketch_grid_takes_crossing(d: f64, l: f64, fine: f64) -> bool {
     // The exact value of a lattice point wins over the crossing beside it (rule 1).
     if l <= fine * SKETCH_GRID_EXACT && d > fine * SKETCH_GRID_EXACT {
         return false;
     }
-    // The crossing takes the pointer within a fine step of it, or when the lattice cannot
-    // hold it (rules 2 and 3).
-    d <= fine || (l > fine / 4.0 && d <= minor / 4.0)
+    // The crossing takes the pointer within a fine step of it, or when the lattice cannot hold
+    // it and the crossing is no farther than two fine steps (rules 2 and 3).
+    d <= fine || (l > fine / 4.0 && d <= fine * SKETCH_GRID_CROSSING_STEPS)
 }
 
 /// The point of the finer lattice between the crossings nearest `p`.
@@ -527,7 +538,7 @@ pub fn sketch_grid_free(free: f64, fixed: f64, minor: f64, fine: f64) -> f64 {
     }
     let crossing = (free / minor).round() * minor;
     let lattice = sketch_grid_lattice_axis(free, fine);
-    let taken = sketch_grid_takes_crossing((crossing - free).abs(), (lattice - free).abs(), minor, fine);
+    let taken = sketch_grid_takes_crossing((crossing - free).abs(), (lattice - free).abs(), fine);
     if taken { crossing } else { lattice }
 }
 
