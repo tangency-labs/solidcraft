@@ -17,10 +17,12 @@
 //! brings one of them up to date, a short piece of work for the UI's tick: a view's projection with
 //! its dimensions in the same swap, so new lines never show under old dimensions, or, once the views
 //! are, the dimensions of one view that changed. A view moved across its sheet is moved, never
-//! projected again, and an edited dimension is read again alone. The provider
-//! evaluates no model either. Its cache is the
+//! projected again, and an edited dimension is read again alone. A view drawn from a world state that
+//! showed the same bodies, where and as they are now (`SourceKey`), is up to date: an appearance,
+//! or an edit taken back, draws nothing. The provider evaluates no model either. Its cache is the
 //! session's view state, beside the drawing: never saved, never an undo step, and dropped when its
-//! drawing closes.
+//! drawing closes, all but its views' lines (`drawing_scene_kept.rs`), which the drawing opened
+//! again starts from.
 //!
 //! [`hit`] says which of a scene's objects is under a point of the sheet, the one rule for picking
 //! there: the sheet page's hover and `drawing.scene.hit`.
@@ -53,6 +55,10 @@ use crate::drawing_picture::{picture_items, view_parts};
 use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, Shown, ShownSet, Stats, Styles, Unmeasured, paper_lines};
 use crate::params::bad;
 use crate::{EngineError, Result, Session};
+
+#[path = "drawing_scene_kept.rs"]
+mod kept;
+use kept::{KeptLines, KeptView};
 
 /// The command the sheet scene answers for, in its errors.
 pub const CMD: &str = "drawing.scene";
@@ -605,18 +611,46 @@ pub struct Cache {
     /// Numbers each view drawn and each read of dimensions, so a scene is assembled again only when
     /// one of its views or dimensions was.
     serial: u64,
+    /// The views' lines of each drawing closed, for when it opens again. They outlive the rest.
+    kept: KeptLines,
     /// Views drawn, for tests: a move draws none.
     #[cfg(test)]
     projections: usize,
 }
 
+/// What a view's lines show: each body of the world state by the occurrences that place it, its
+/// definition's body name, whether it is a reference, and its geometry where it stands. A world state
+/// with the same draws the same lines, so an appearance, or an edit taken back, draws nothing. It
+/// keys the whole set, not a view's own bodies: which bodies share a mesh, so the lines' last bits,
+/// hangs on all of them ([`crate::mesh_lines`]).
+#[derive(Debug, PartialEq)]
+pub(crate) struct SourceKey(Vec<(Vec<u64>, String, bool, u64)>);
+
+impl SourceKey {
+    /// None when there is nothing to show, or a body's geometry has no key: a view drawn from it
+    /// always draws again.
+    fn of(shown: &std::result::Result<ShownSet, Unmeasured>) -> Option<Arc<SourceKey>> {
+        let set = shown.as_ref().ok()?;
+        let body = |one: &Shown| Some((one.path.clone(), one.body.clone(), one.reference, set.body(one)?.geometry_key()?));
+        set.bodies.iter().map(body).collect::<Option<Vec<_>>>().map(|bodies| Arc::new(SourceKey(bodies)))
+    }
+}
+
 /// A view's last drawing, and what it was drawn from: the world state (held, so its address can't
-/// be reused while it is compared) and the view as it drew.
+/// be reused while it is compared), what that showed, and the view as it drew.
 struct Entry {
     state: Arc<ModelState>,
+    shows: Option<Arc<SourceKey>>,
     view: ResolvedView,
     drawn: Drawn,
     serial: u64,
+}
+
+impl Entry {
+    /// Drawn from another world state than `state` that showed `now`.
+    fn shows_the_same(&self, state: &Arc<ModelState>, now: &SourceKey) -> bool {
+        !Arc::ptr_eq(&self.state, state) && self.shows.as_deref() == Some(now)
+    }
 }
 
 /// A dimension's last drawing, and what it was drawn from: its record, the world state, its view's
@@ -655,6 +689,17 @@ struct Assembled {
 }
 
 impl Cache {
+    /// Drawing `drawing`'s lines kept when it closed, as its views' entries: from a world state that
+    /// has gone, so each is out of date until [`keep_what_shows_the_same`] finds it shows the same.
+    fn take_kept(&mut self, drawing: u64) {
+        let gone: Arc<ModelState> = Arc::default();
+        for (id, kept) in self.kept.take(drawing) {
+            self.serial += 1;
+            let entry = Entry { state: gone.clone(), shows: kept.shows, view: kept.view, drawn: kept.drawn, serial: self.serial };
+            self.views.insert(id, entry);
+        }
+    }
+
     /// Whether view `id`, drawing as `view` now, was last drawn so, from `state`.
     fn fresh(&self, id: u64, state: &Arc<ModelState>, view: &ResolvedView) -> bool {
         self.views.get(&id).is_some_and(|e| Arc::ptr_eq(&e.state, state) && e.view == *view)
@@ -756,8 +801,13 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     }
     let record = sheet_of(&d, sheet)?;
     let on = views_on(&d, sheet)?;
+    if cache.drawing != Some(d.id) {
+        cache.take_kept(d.id);
+    }
     cache.drawing = Some(d.id);
     cache.sheet = Some(sheet);
+    keep_what_shows_the_same(s, &on, &state);
+    let cache = &mut s.drawing_scenes;
     let stale = on.iter().filter(|(id, view, _)| !cache.fresh(*id, &state, view)).map(|(id, ..)| *id).collect();
     let stale_dimensions = cache.stale_dimensions(&d, &on, &state, &units).iter().map(|record| record.id).collect();
     let inputs = cache.inputs(&d, record, &on);
@@ -791,6 +841,7 @@ pub fn step(s: &mut Session) -> bool {
     let Ok(on) = views_on(&d, sheet) else { return false };
     let Ok(state) = s.world_state() else { return false };
     let units = s.doc.drawing_units(&d).to_string();
+    keep_what_shows_the_same(s, &on, &state);
     let waiting: Vec<(u64, ResolvedView)> =
         on.iter().filter(|(id, view, _)| !s.drawing_scenes.fresh(*id, &state, view)).map(|(id, view, _)| (*id, view.clone())).collect();
     let Some((id, view)) = waiting.first().cloned() else { return step_dimensions(s, &d, &on, &state, units) };
@@ -799,6 +850,7 @@ pub fn step(s: &mut Session) -> bool {
         _ => crate::drawing_view::shown(s),
     };
     let drawn = draw(s, &shown, id, &view);
+    let shows = SourceKey::of(&shown);
     // The view's dimensions through its new frame, in the same swap as its lines.
     let frame = drawn.frame;
     let these = dimensions_on(&d, std::iter::once(id));
@@ -807,7 +859,7 @@ pub fn step(s: &mut Session) -> bool {
     cache.shown = Some((state.clone(), shown));
     cache.serial += 1;
     let serial = cache.serial;
-    cache.views.insert(id, Entry { state: state.clone(), view, drawn, serial });
+    cache.views.insert(id, Entry { state: state.clone(), shows, view, drawn, serial });
     cache.keep_dimensions(these, lines, &state, serial, &units);
     #[cfg(test)]
     {
@@ -831,12 +883,41 @@ fn step_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)
     !others.is_empty()
 }
 
-/// Drops the cache once its drawing isn't the one open: closing a drawing (or opening another) ends
-/// its scenes, and the world states they hold. [`Session::execute`] calls it after every command.
-pub(crate) fn forget_closed(s: &mut Session) {
-    if s.drawing_scenes.drawing.is_some_and(|d| s.open_drawing != Some(d)) {
-        s.drawing_scenes = Cache::default();
+/// Each view of `on` drawn from another world state that showed what `state` shows takes `state`:
+/// drawn as it draws now, it is then up to date ([`Cache::fresh`]) and draws nothing. `state`'s shown
+/// set is worked out once, only when a view is behind it, and kept for [`step`] to draw from.
+fn keep_what_shows_the_same(s: &mut Session, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>) {
+    let entry = |id: &u64| s.drawing_scenes.views.get(id);
+    if !on.iter().any(|(id, ..)| entry(id).is_some_and(|e| e.shows.is_some() && !Arc::ptr_eq(&e.state, state))) {
+        return;
     }
+    let shown = match s.drawing_scenes.shown.take() {
+        Some((was, shown)) if Arc::ptr_eq(&was, state) => shown,
+        _ => crate::drawing_view::shown(s),
+    };
+    let now = SourceKey::of(&shown);
+    let cache = &mut s.drawing_scenes;
+    cache.shown = Some((state.clone(), shown));
+    let Some(now) = now else { return };
+    for (id, ..) in on {
+        if let Some(entry) = cache.views.get_mut(id).filter(|e| e.shows_the_same(state, &now)) {
+            entry.state = state.clone();
+        }
+    }
+}
+
+/// Drops the cache once its drawing isn't the one open: closing a drawing (or opening another) ends
+/// its scenes, and the world states they hold. Its views' lines are kept, for when it opens again,
+/// and forgotten with the drawing. [`Session::execute`] calls it after every command.
+pub(crate) fn forget_closed(s: &mut Session) {
+    let cache = &mut s.drawing_scenes;
+    if let Some(drawing) = cache.drawing.filter(|d| s.open_drawing != Some(*d)) {
+        let mut kept = std::mem::take(&mut cache.kept);
+        let views = std::mem::take(&mut cache.views).into_iter().map(|(id, e)| (id, KeptView { view: e.view, drawn: e.drawn, shows: e.shows }));
+        kept.keep(drawing, views.collect());
+        *cache = Cache { kept, ..Cache::default() };
+    }
+    cache.kept.retain(|drawing| s.doc.drawings.iter().any(|d| d.id == drawing));
 }
 
 #[cfg(test)]
