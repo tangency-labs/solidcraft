@@ -5,7 +5,8 @@
 //! sheet metal and in a part placed twice.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_kernel::PointClass;
 
 use crate::Session;
 
@@ -45,7 +46,7 @@ fn near(v: &Value, expected: f64) -> bool {
 }
 
 fn solid_at(s: &Session, x: f64, y: f64, z: f64) -> bool {
-    s.model.state().bodies.iter().any(|b| b.body.contains(Vec3::new(x, y, z)))
+    s.model.state().bodies.iter().any(|b| matches!(b.body.classify_point(Vec3::new(x, y, z)), Ok(PointClass::Inside)))
 }
 
 /// The bearing block: 100 x 60 x 40 with a 50 x 40 x 5 pocket in its top (floor at z = 35).
