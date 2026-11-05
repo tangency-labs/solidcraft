@@ -138,11 +138,9 @@ fn plain_copy_of_tagged_box() {
     assert_eq!(tagged(&b), all_tags(), "the source keeps its attributes");
     // #1584 / #1585: every geometry owner of the copy is its entity
     assert_checks_valid(&mut k, &mut c, "copy");
-    // the copy's geometry names its faces and edges (a `Clone`'s has no owner)
+    // the copy's geometry names its faces and edges
     assert_eq!(p1::surfaces(&c, None).unwrap().len(), 6);
     assert_eq!(p1::curves(&c, None).unwrap().len(), 12);
-    let clone = b.clone();
-    assert_eq!(p1::surfaces(&clone, None).unwrap().len(), 0);
     // a copy of the copy is a copy too
     let mut cc = brep_copy(&mut k, &c).unwrap();
     assert_eq!(counts(&cc), (6, 12, 8));

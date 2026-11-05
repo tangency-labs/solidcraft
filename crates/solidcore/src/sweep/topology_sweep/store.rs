@@ -1887,7 +1887,7 @@ mod tests {
         assert_eq!(store.curve_tag((b, edge)).unwrap(), Some(curve_tag));
         assert_eq!(store.tag(SweepEntity::Edge(b, edge)).unwrap(), None);
         assert!(store
-            .insert_brep(c, store.brep(b).unwrap().clone())
+            .insert_brep(c, store.brep(b).unwrap().clone_standing_for_self().unwrap())
             .is_err());
         store.remove_brep(b).unwrap();
         assert!(!store.attributes.is_live(h));

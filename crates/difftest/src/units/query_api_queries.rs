@@ -556,7 +556,10 @@ impl<'a> Objects<'a> {
         for (i, (cache, brep)) in caches.iter_mut().zip(&breps).enumerate() {
             cache.build_trees(k, CacheSource::Brep(brep), |o| Object(i, o), &arena_identity)?;
         }
-        let snapshots = [breps[0].clone(), breps[1].clone()];
+        let snapshots = [
+            breps[0].clone_standing_for_self()?,
+            breps[1].clone_standing_for_self()?,
+        ];
         let [b0, b1] = breps;
         let [i0, i1] = identities;
         Ok(Self {
@@ -878,7 +881,7 @@ fn topology(k: &mut Kernel, i: &Inputs, b: &mut Brep, second: &mut Brep) -> Resu
             api::face_classify_uv(
                 k,
                 // (the classification may attach missing UV trim curves: a copy)
-                &mut b.clone(),
+                &mut b.clone_standing_for_self()?,
                 f.ok_or_else(missing)?,
                 solidcore::math::Point2::new(a[11], a[12]),
             )?

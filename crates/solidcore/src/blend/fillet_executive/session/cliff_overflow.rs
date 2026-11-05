@@ -512,13 +512,19 @@ impl FilletSession<'_> {
 
         // the region from the target, by the Boolean (the merge modifies the target in
         // place; the region is deleted after)
-        let kept = (*self.objects.target).clone();
-        let target_solid = crate::topology::brep::p2::is_manifold_solid(&kept)?;
+        // (a snapshot, not a clone: the target put back must still own its geometry,
+        // #2715; a clone's surfaces have no owner, so the caller's body would save none)
+        let kept = self.objects.target.snapshot()?;
+        let target_solid = crate::topology::brep::p2::is_manifold_solid(self.objects.target)?;
         let serial = self.objects.target_serial;
         // (not upstream) the target's application attributes ride on its objects through
         // the Boolean, as the fork's live on them, so a split, merged or copied edge keeps
         // them (#1980); the session store takes the result's back once it succeeds
-        let carried = super::body_application_attributes(&self.objects.attributes, &kept, serial)?;
+        let carried = super::body_application_attributes(
+            &self.objects.attributes,
+            self.objects.target,
+            serial,
+        )?;
         let mut taken: Brep = std::mem::take(&mut *self.objects.target);
         taken.set_attributes(carried);
         match boolean(k, taken, region, BooleanOperation::Difference) {
@@ -528,11 +534,19 @@ impl FilletSession<'_> {
                 // region whose face meets a target face a hair from its edge, #1467's box
                 // at r10.02); the fork checks only the Boolean's status. Refused here as
                 // no room, the target as it was.
-                if target_solid
+                // (an error past here puts the target back first: it was taken out of
+                // the caller's body for the Boolean)
+                let leaves_no_solid = target_solid
                     && (outcome.result.faces().ids().next().is_none()
-                        || !crate::topology::brep::p2::is_manifold_solid(&outcome.result)?)
-                {
-                    *self.objects.target = kept;
+                        || match crate::topology::brep::p2::is_manifold_solid(&outcome.result) {
+                            Ok(solid) => !solid,
+                            Err(e) => {
+                                self.objects.target.restore(kept);
+                                return Err(e);
+                            }
+                        });
+                if leaves_no_solid {
+                    self.objects.target.restore(kept);
                     self.note_refusal(Refusal {
                         code: FilletErrorType::NoRoom,
                         reason: Some(NoRoomReason::CliffSubtractionLeavesNoSolid),
@@ -541,16 +555,19 @@ impl FilletSession<'_> {
                     return Err(SolidError::sm_err(OP));
                 }
                 let mut result = outcome.result;
-                super::replace_application_attributes(
+                if let Err(e) = super::replace_application_attributes(
                     &mut self.objects.attributes,
                     &mut result,
                     serial,
-                )?;
+                ) {
+                    self.objects.target.restore(kept);
+                    return Err(e);
+                }
                 *self.objects.target = result;
                 Ok(())
             }
             Err(e) => {
-                *self.objects.target = kept;
+                self.objects.target.restore(kept);
                 if e.is_unported_or_cancelled() {
                     return Err(e);
                 }

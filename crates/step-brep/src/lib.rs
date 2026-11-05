@@ -864,7 +864,7 @@ fn closed_volume(brep: &Brep) -> Option<f64> {
         store: &store,
         key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
     };
-    let mut copy = brep.clone();
+    let mut copy = brep.clone_standing_for_self().ok()?;
     solidcore::mass::integrator::properties::brep_volume(
         &kernel,
         &mut copy,
@@ -1526,7 +1526,7 @@ mod tests {
         assert!(has_uv_trims(&brep).expect("uv trims"));
         validate_for_display(&brep).expect("display");
         let kernel = Kernel::default();
-        let mut solid = brep.clone();
+        let mut solid = brep.clone_standing_for_self().unwrap();
         let area = solidcore::mass::integrator::properties::brep_area(&kernel, &mut solid, 1e-9)
             .expect("area");
         let expected_area =
@@ -1601,7 +1601,7 @@ mod tests {
         );
         validate_for_display(&brep).expect("display");
         let kernel = Kernel::default();
-        let mut sheet = brep.clone();
+        let mut sheet = brep.clone_standing_for_self().unwrap();
         let area = solidcore::mass::integrator::properties::brep_area(&kernel, &mut sheet, 1e-9)
             .expect("area");
         assert!((area - 50.0).abs() < 1e-7, "area {area}");
@@ -1662,7 +1662,7 @@ mod tests {
             store: &store,
             key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
         };
-        let mut solid = brep.clone();
+        let mut solid = brep.clone_standing_for_self().unwrap();
         let volume =
             solidcore::mass::integrator::properties::brep_volume(&kernel, &mut solid, 1e-9, &attrs)
                 .expect("volume");

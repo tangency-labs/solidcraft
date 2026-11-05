@@ -739,6 +739,20 @@ pub(crate) fn scheme_owner_identity(
 
 /// A boundary representation (`SmBrep`): arenas of shells, faces, loops, edges and
 /// vertices linked by typed ids.
+///
+/// # Copying
+///
+/// `Brep` is not `Clone` (#2715): a field-by-field copy would drop every curve's and
+/// surface's owner, and a body whose faces own no surface queries, operates on and
+/// saves wrongly. Say which copy you mean:
+/// - [`brep::p3::brep_copy`] (`SmApiBrepCopy`): an independent body to operate on,
+///   edit or save. It owns its geometry under its own naming; its arena ids are new.
+///   ([`brep::p3::api_brep_copy`] notifies it through the caller's environment.)
+/// - [`Brep::clone_standing_for_self`]: a private copy that stands for this B-rep,
+///   with the same ids, key and naming, and geometry that keeps its owners. Use it
+///   for a scratch copy a query addresses by this B-rep's ids.
+/// - [`Brep::with_rollback`] (inside the crate, `snapshot`/`restore`): an operation's
+///   rollback, putting this B-rep back exactly as it was.
 #[derive(Debug)]
 pub struct Brep {
     shells: Arena<ShellId, Shell>,
@@ -825,49 +839,6 @@ pub struct Brep {
 /// where it was taken.
 #[derive(Debug)]
 pub(crate) struct Snapshot(Brep);
-
-/// A copy of the arenas whose curves and surfaces have **no owner**.
-///
-/// # Warning
-///
-/// The geometry's copy constructor resets every curve's and surface's owner, so a clone's
-/// geometry no longer names its edges and faces. Every kernel call that finds a curve's
-/// edge or a surface's face through the owner then silently skips them on the clone,
-/// with no error:
-/// - topology solves over the clone ([`crate::query::brep::LiveBrepObjects`],
-///   `query::api_queries::face_closest_point_in_shape` and the other shape and B-rep
-///   point, curve and ray solves): no face or edge answers, only vertices (a point on a
-///   face gets a corner);
-/// - `SmBrep::GetSurfaces` / `GetCurves` ([`brep::p1::surfaces`], [`brep::p1::curves`])
-///   and the `.smb` writer (`brep_data_write`'s `FromBrep`): the surfaces and curves are
-///   left out, the faces written without surface;
-/// - B-rep caches and ray-fire caches built from the clone (no curve or surface in their
-///   trees), the fillet merge (`fillet_edges` of a clone fails, #1144) and transforms of a
-///   body's geometry.
-///
-/// What a clone shares with this B-rep: its arena ids, its [`Brep::key`], its naming
-/// scheme and recorded owner keys (not its notification serial: a clone gets its own
-/// when first notified). It owns copies of the
-/// topology, the geometry values and the attributes ([`Brep::add_attribute`]). It is
-/// safe for reading the topology and the geometry values (counts, points, parameters,
-/// attributes) and as a value to restore, not for queries, edits or operations.
-///
-/// Use instead:
-/// - [`brep::p3::brep_copy`] (`SmApiBrepCopy`) for an independent body that is
-///   queried or edited later (undo, history, preview, an operand of every operation):
-///   the copy owns its geometry, under the B-rep's own naming, without namings or a
-///   notification environment of the caller's;
-/// - [`brep::p3::api_brep_copy`] for the same copy notified through the caller's
-///   [`NotifyEnv`](crate::topology::edge::NotifyEnv) under the caller's namings;
-/// - [`Brep::clone_standing_for_self`] for a private read-only stand-in for this B-rep
-///   (its geometry keeps this B-rep's owners), not an independent body.
-///
-/// See `plan/findings/topology--brep-clone-drops-geometry-owners.md`.
-impl Clone for Brep {
-    fn clone(&self) -> Self {
-        self.copy(false)
-    }
-}
 
 impl Brep {
     /// The copy constructor; with `share` the edge and edge use arenas (the bulk of a
@@ -1177,8 +1148,8 @@ impl Brep {
     /// query makes or reuses on the copy are the B-rep's surfaces' own, as upstream's
     /// are. They also keep their owners (and the face tolerance cached on them), so
     /// that `GetFace()` of the copy's surfaces finds the face as upstream's in-place
-    /// queries do (`SmTol::GetZoneTol3d(pSurface)` reads the face tolerance). A plain
-    /// `clone` (the copy constructor) starts every surface without cache or owner.
+    /// queries do (`SmTol::GetZoneTol3d(pSurface)` reads the face tolerance); the geometry's
+    /// copy constructor would start every surface without cache or owner.
     #[must_use]
     pub fn clone_sharing_surface_caches(&self) -> Self {
         let mut copy = self.copy(true);
@@ -1197,16 +1168,16 @@ impl Brep {
     /// queries the B-rep in place (a `const` query that still makes missing UV trim
     /// curves on it): its edge curves, face surfaces and UV trim curves are exact copies
     /// that keep their owners (and the surfaces share their cache slots), so the copy's
-    /// geometry still names its own edges and faces. A plain `clone` (the copy
-    /// constructor) resets every owner, and a B-rep cache made from it then holds no
-    /// curve or surface.
+    /// geometry still names its own edges and faces (the geometry's copy constructor
+    /// resets every owner, and a B-rep cache made from such a copy holds no curve or
+    /// surface).
     ///
     /// # Errors
     ///
     /// Those of the geometry copies (a geometry nesting deeper than
     /// `MAX_GEOMETRY_NESTING`).
     pub fn clone_standing_for_self(&self) -> Result<Self> {
-        let mut copy = self.clone();
+        let mut copy = self.copy(false);
         for (id, edge) in self.edges.iter() {
             if let Some(curve) = edge.curve.as_ref() {
                 copy.edge_mut(id)?.curve = Some(curve.clone_for_evaluation()?);
@@ -2194,8 +2165,8 @@ mod tests {
         surface.set_owner(Some(face_owner));
         b.face_mut(f).unwrap().surface = Some(surface);
 
-        // the copy constructor resets the owners
-        let plain = b.clone();
+        // the arena copy (the geometry's copy constructor) resets the owners
+        let plain = b.copy(false);
         assert_eq!(plain.edge(e).unwrap().curve.as_ref().unwrap().owner(), None);
         assert_eq!(
             plain.face(f).unwrap().surface.as_ref().unwrap().owner(),

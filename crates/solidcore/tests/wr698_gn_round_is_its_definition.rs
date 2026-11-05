@@ -492,7 +492,7 @@ fn a_boolean_cuts_a_reopened_round_on_its_definition() {
     use solidcore::primitive::api_primitives::create_cylinder;
     let mut k = kernel(true);
     let built = chamfered_box(&mut k);
-    let mut open = built.clone();
+    let mut open = built.clone_standing_for_self().unwrap();
     let rounds = reopen(&k, &mut open);
     let mut results = Vec::new();
     for body in [built, open] {
@@ -664,7 +664,7 @@ fn a_plane_section_of_a_round_is_within_its_tolerance() {
 fn distance_and_volume_of_a_reopened_round_are_its_definition_s() {
     let mut k = kernel(true);
     let built = chamfered_box(&mut k);
-    let mut open = built.clone();
+    let mut open = built.clone_standing_for_self().unwrap();
     let rounds = reopen(&k, &mut open);
     for (f, s) in &rounds {
         let tol = open.face(*f).unwrap().tolerance;
@@ -762,7 +762,7 @@ fn a_reopened_round_measurably_off_its_net_is_the_operand_on_s() {
     let rounding = 1e3 * 60.0 * f64::EPSILON;
     let mut k = kernel(true);
     let built = tilted_pipe(&mut k);
-    let mut open = built.clone();
+    let mut open = built.clone_standing_for_self().unwrap();
     let rounds = reopen(&k, &mut open);
     assert_eq!(rounds.len(), 1, "the root round");
     let (f, s) = &rounds[0];
@@ -795,7 +795,8 @@ fn a_reopened_round_measurably_off_its_net_is_the_operand_on_s() {
 
     // boolean: a cylinder through the round
     let tool = create_cylinder(&mut k, Point3::new(30.0, 30.5, 0.0), 1.5, 30.0).unwrap();
-    let cut = boolean_difference(&mut k, open.clone(), tool).unwrap();
+    let operand = solidcore::topology::brep::p3::brep_copy(&mut k, &open).unwrap();
+    let cut = boolean_difference(&mut k, operand, tool).unwrap();
     let (n, worst) = edges_on_s(&k, &cut, &rounds);
     assert!(n > 0, "no edge on the round");
     assert!(worst <= 1.0, "an edge {worst} of its tolerance off S");

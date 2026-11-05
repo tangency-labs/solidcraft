@@ -2892,7 +2892,7 @@ mod tests {
         edit(&mut k, &mut b2, false);
         edit(&mut k, &mut b1, false);
         // a copy is another value
-        let mut copy = b1.clone();
+        let mut copy = b1.clone_standing_for_self().unwrap();
         edit(&mut k, &mut copy, false);
     }
 

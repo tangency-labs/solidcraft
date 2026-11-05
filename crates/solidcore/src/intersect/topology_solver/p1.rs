@@ -2290,7 +2290,7 @@ fn face_classifies_on_face<O: Copy>(
             "query.face_p1",
         ));
     };
-    let mut copy = b.clone();
+    let mut copy = b.clone_standing_for_self()?;
     let mut pc = PointClassification::<EntityRef>::new(tol);
     let mut classify = |tol: f64, pc: &mut PointClassification<EntityRef>| -> Result<bool> {
         match point_3d_classify(

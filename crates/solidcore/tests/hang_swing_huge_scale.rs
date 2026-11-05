@@ -29,6 +29,7 @@ use solidcore::geom::a_object::BooleanOperation;
 use solidcore::primitive::api_curves as curves;
 use solidcore::primitive::api_primitives as prim;
 use solidcore::sweep::api_brep as sweeps;
+use solidcore::topology::brep::p3::brep_copy;
 use solidcore::topology::proto_topology::p1::api_transform::{api_scale, TransformObject};
 use solidcore::{Brep, Kernel, Point3};
 
@@ -102,9 +103,11 @@ fn fuzz_case_returns() {
         // the fuzz's body indices 5, 5 and 6, 3 taken modulo the bodies made
         let n = bodies.len();
         if n > 0 {
-            let (x, y) = (bodies[5 % n].clone(), bodies[5 % n].clone());
+            let x = brep_copy(&mut k, &bodies[5 % n]).unwrap();
+            let y = brep_copy(&mut k, &bodies[5 % n]).unwrap();
             let _ = boolean::piecewise_merge(&mut k, x, y, false);
-            let (x, y) = (bodies[6 % n].clone(), bodies[3 % n].clone());
+            let x = brep_copy(&mut k, &bodies[6 % n]).unwrap();
+            let y = brep_copy(&mut k, &bodies[3 % n]).unwrap();
             let _ = boolean::boolean(&mut k, x, y, BooleanOperation::Merge);
         }
     });
@@ -126,8 +129,13 @@ fn merge_of_a_swung_body_scaled_past_the_coincidence_bound_returns() {
             )
             .unwrap();
         }
-        let _ = boolean::piecewise_merge(&mut k, body.clone(), body.clone(), false);
-        let _ = boolean::boolean(&mut k, body.clone(), body, BooleanOperation::Merge);
+        let (x, y) = (
+            brep_copy(&mut k, &body).unwrap(),
+            brep_copy(&mut k, &body).unwrap(),
+        );
+        let _ = boolean::piecewise_merge(&mut k, x, y, false);
+        let x = brep_copy(&mut k, &body).unwrap();
+        let _ = boolean::boolean(&mut k, x, body, BooleanOperation::Merge);
     });
 }
 

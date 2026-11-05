@@ -1093,7 +1093,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let d2 = Extent2d::from_points(Point2::new(a(9), a(10)), Point2::new(a(11), a(12)));
             match qf::classify_param_on_faces(
                 &k,
-                &mut b.clone(),
+                &mut b
+                    .clone_standing_for_self()
+                    .map_err(|e| harness(e.to_string()))?,
                 uv,
                 zone_tol3d(&k, *tol),
                 f1,

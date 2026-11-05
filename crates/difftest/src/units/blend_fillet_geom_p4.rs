@@ -402,7 +402,7 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
         }
         Query::RailIntExtended { v } | Query::Int2Fillets { v } | Query::Nx2 { v } => {
             let vid = rm.vertex(*v)?;
-            let mut target = rm.target.clone();
+            let mut target = rm.target.clone_standing_for_self().map_err(h)?;
             let r = match &i.query {
                 Query::RailIntExtended { .. } => rm
                     .fb
@@ -456,7 +456,7 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
         }
         Query::Blending { g } => {
             let gid = rm.geom(*g)?;
-            let mut target = rm.target.clone();
+            let mut target = rm.target.clone_standing_for_self().map_err(h)?;
             let r = rm.fb.calc_blending_geom(&k, gid, &solvers, &mut target);
             o.push(status_of!(r));
         }

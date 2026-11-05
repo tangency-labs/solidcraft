@@ -272,7 +272,7 @@ fn rust_brep(k: &Kernel, b: &Brep) -> Result<Output, HarnessError> {
     if !graph_exportable(b).map_err(herr)? {
         return Ok(Output::new().values("record", geom));
     }
-    let mut b = b.clone();
+    let mut b = b.clone_standing_for_self().map_err(herr)?;
     strip_unrecorded(&mut b).map_err(herr)?;
     normalize_face_shells(&mut b).map_err(herr)?;
     Ok(graph(&b, geom))

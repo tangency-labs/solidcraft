@@ -669,7 +669,9 @@ fn put_piece(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
 /// edge's classification (as `ComputeEdgeVisibility` makes it) reaches UB-170 in
 /// `IntersectCurveWithSilhouettes`.
 fn global_undefined(k: &mut Kernel, h: &Hcr) -> Result<bool, SolidError> {
-    let mut h2 = h.clone();
+    // the second `SmHCR`: its scene keeps its surfaces' owners, so `ComputeSilhouettes`
+    // finds the scene's surfaces as the native copy's does (#2715)
+    let mut h2 = h.copy_standing_for_self()?;
     // its status is ignored, as `ComputeGlobalVisibility` does
     if let Err(e) = h2.compute_silhouettes(k) {
         if e.is_unported() {

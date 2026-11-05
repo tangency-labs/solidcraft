@@ -163,7 +163,7 @@ impl VertexNode {
 
 /// The construction state (`SmBrepConstructor`): the B-rep being built and the open
 /// region, shells, face, loop, edge and vertex.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BrepConstructor {
     /// `m_pBrep`.
     brep: Option<Brep>,

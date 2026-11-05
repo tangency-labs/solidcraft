@@ -71,7 +71,7 @@ fn ub_285_nurb_fillet_shell_returns_for_every_open_face() {
         let faces = part.face_list().to_vec();
         let mut outcomes = Vec::new();
         for (i, &face) in faces.iter().enumerate().take(2) {
-            let mut copy = part.clone();
+            let mut copy = part.clone_standing_for_self().unwrap();
             let r = offset_fixture::api_shell(
                 &mut k,
                 &mut copy,

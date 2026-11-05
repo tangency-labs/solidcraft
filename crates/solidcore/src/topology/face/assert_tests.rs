@@ -722,7 +722,7 @@ mod tests {
                 continue;
             }
             two_loop_faces += 1;
-            let mut b = b.clone();
+            let mut b = b.clone_standing_for_self().unwrap();
             // move the inner loop's edge (and its vertex) 4 along x, dropping its UV
             // trims so they are rebuilt from the moved curve
             let inner = loopuse::loop_edges(&b, loops[1]).unwrap();

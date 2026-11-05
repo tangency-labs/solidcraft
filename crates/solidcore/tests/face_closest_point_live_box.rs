@@ -27,7 +27,7 @@ use solidcore::{EntityRef, Kernel};
 fn closest(k: &mut Kernel, b: &mut Brep, f: FaceId, p: Point3) -> (Point3, f64) {
     let id = BrepId::from_index(0);
     let shape = Shape::new(k, &(id, &*b), &[], &[(id, f)], &[], &[]).unwrap();
-    let names = b.clone();
+    let names = b.clone_standing_for_self().unwrap();
     let keys = move |o: CacheObject| match o {
         CacheObject::Face(f) => names.owner_identity(EntityRef::Face(f)),
         CacheObject::Edge(e) => names.owner_identity(EntityRef::Edge(e)),

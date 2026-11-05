@@ -5264,7 +5264,7 @@ mod tests {
         let (mut ctx, _seen) = recording_context();
         let mut k = Kernel::default();
         let (mut b1, [a, _, _], [e0, _]) = test_support::wire_chain(true);
-        let mut b2 = b1.clone();
+        let mut b2 = b1.clone_standing_for_self().unwrap();
         let serial = notify_serial(&mut ctx, &mut b1).unwrap();
         // b2 claims b1's kernel identities, for itself and for its objects
         b2.set_key(topology_ref(serial, brep_entity()).key);
@@ -5300,8 +5300,8 @@ mod tests {
             squeeze_edge(&mut k, &mut b2, &mut env, e0, a),
             Err(RESERVED_KEY)
         );
-        // clones are other objects: no serial, no curve key
-        assert_eq!(b1.clone().notify_serial(), None);
+        // copies are other objects: no serial, no curve key
+        assert_eq!(b1.clone_standing_for_self().unwrap().notify_serial(), None);
         let curve = b1.edge(e0).unwrap().curve.clone().unwrap();
         assert_eq!(curve.notify_key(), None);
     }
@@ -5964,7 +5964,7 @@ mod tests {
         };
         let mut records = topo::NotifyRecords::new();
         let mut full = topo::NotifyRecords::new();
-        let mut copy = b.clone();
+        let mut copy = b.clone_standing_for_self().unwrap();
         b.remove_vertex_record(vs[0]).unwrap();
         b.remove_vertex_record(vs[1]).unwrap();
         edit_once(&mut b, &key_of, &mut records, &mut full).unwrap();

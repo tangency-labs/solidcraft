@@ -2600,7 +2600,7 @@ fn rust_probe(k: &Kernel, branch: Probe, tolerance: f64) -> RResult<Output> {
             offsets.clone_from(&originals);
             // Native passes the original face itself as the offset face. The safe
             // API resolves result IDs through its own B-rep, so install its clone.
-            executive.set_offset_brep(original.clone());
+            executive.set_offset_brep(original.clone_standing_for_self()?);
             probe_env(|env, offset_key_of| {
                 executive.map_edgeuses(&kernel, &mut original, faceuse, face, env, offset_key_of)
             })

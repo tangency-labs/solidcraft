@@ -43,7 +43,8 @@ struct Outcome {
     counts: (usize, usize, usize),
     manifold: Option<bool>,
     display: bool,
-    level2_failures: Option<usize>,
+    /// The Level-2 check's failure count, or the check's own error.
+    level2_failures: Result<usize, String>,
     area: Option<f64>,
     volume: Option<f64>,
 }
@@ -55,15 +56,23 @@ fn measure(brep: &Brep) -> Outcome {
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
-    let mut copy = brep.clone();
-    let area = brep_area(&kernel, &mut copy, 1e-9).ok();
-    let mut copy = brep.clone();
-    let volume = brep_volume(&kernel, &mut copy, 1e-9, &attrs).ok();
-    let mut copy = brep.clone();
-    let mut check_kernel = Kernel::default();
-    let level2_failures = check_brep(&mut check_kernel, &mut copy, CheckLevel::Level2)
+    // each measurement on its own copy standing for the body; a copy that fails leaves
+    // area and volume unmeasured and is the Level-2 result's error, so it is reported
+    let copy = || brep.clone_standing_for_self();
+    let area = copy()
         .ok()
-        .map(|check| check.failures().count());
+        .and_then(|mut c| brep_area(&kernel, &mut c, 1e-9).ok());
+    let volume = copy()
+        .ok()
+        .and_then(|mut c| brep_volume(&kernel, &mut c, 1e-9, &attrs).ok());
+    let mut check_kernel = Kernel::default();
+    let level2_failures = copy()
+        .map_err(|e| format!("standing copy: {e:?}"))
+        .and_then(|mut c| {
+            check_brep(&mut check_kernel, &mut c, CheckLevel::Level2)
+                .map(|check| check.failures().count())
+                .map_err(|e| format!("{e:?}"))
+        });
     Outcome {
         counts: (
             brep.face_list().len(),
@@ -116,12 +125,47 @@ fn regressions(off: &Outcome, on: &Outcome) -> Vec<String> {
     if off.display && !on.display {
         out.push("display valid -> invalid".into());
     }
-    match (off.level2_failures, on.level2_failures) {
-        (Some(a), Some(b)) if b > a => out.push(format!("Level-2 failures {a} -> {b}")),
-        (Some(a), None) => out.push(format!("Level-2 failures {a} -> check error")),
+    match (&off.level2_failures, &on.level2_failures) {
+        (Ok(a), Ok(b)) if b > a => out.push(format!("Level-2 failures {a} -> {b}")),
+        (Ok(a), Err(e)) => out.push(format!("Level-2 failures {a} -> check error {e}")),
+        // a baseline that cannot be checked is no baseline: report it, don't skip it
+        (Err(e), _) => out.push(format!("Level-2 check of the baseline failed: {e}")),
         _ => {}
     }
     out
+}
+
+fn outcome(level2_failures: Result<usize, String>) -> Outcome {
+    Outcome {
+        counts: (6, 12, 8),
+        manifold: Some(true),
+        display: true,
+        level2_failures,
+        area: Some(6.0),
+        volume: Some(1.0),
+    }
+}
+
+/// A baseline whose Level-2 check fails is reported, not skipped; so is a check that
+/// fails only with the file's pcurves, and more failures with them than without.
+#[test]
+fn regressions_report_level2_check_errors() {
+    let failed = || outcome(Err("no surface".into()));
+    let baseline = regressions(&failed(), &outcome(Ok(0)));
+    assert_eq!(
+        baseline,
+        vec!["Level-2 check of the baseline failed: no surface".to_string()]
+    );
+    let on = regressions(&outcome(Ok(2)), &failed());
+    assert_eq!(
+        on,
+        vec!["Level-2 failures 2 -> check error no surface".to_string()]
+    );
+    assert_eq!(
+        regressions(&outcome(Ok(1)), &outcome(Ok(3))),
+        vec!["Level-2 failures 1 -> 3".to_string()]
+    );
+    assert!(regressions(&outcome(Ok(3)), &outcome(Ok(1))).is_empty());
 }
 
 #[test]
@@ -251,7 +295,7 @@ fn one_body_face_by_face() {
     println!("{stats:?}");
     let kernel = Kernel::default();
     let face_areas = |brep: &Brep| -> Vec<(String, Option<f64>)> {
-        let mut copy = brep.clone();
+        let mut copy = brep.clone_standing_for_self().unwrap();
         brep.face_list()
             .iter()
             .map(|&f| {
@@ -279,7 +323,7 @@ fn one_body_face_by_face() {
         println!("face {i} {kind}: {x:?} -> {y:?}{mark}");
     }
     let lines = |brep: &Brep| {
-        let mut copy = brep.clone();
+        let mut copy = brep.clone_standing_for_self().unwrap();
         let mut k = Kernel::default();
         check_brep(&mut k, &mut copy, CheckLevel::Level2)
             .map(|check| check.lines())

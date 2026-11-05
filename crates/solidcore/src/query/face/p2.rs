@@ -2756,10 +2756,6 @@ pub(crate) mod tests {
         let original = b.face(f).unwrap().surface.as_ref().unwrap();
         let copy = snapshot.face(f).unwrap().surface.as_ref().unwrap();
         assert!(copy.shares_cache_slot_with(original));
-        // a plain copy (the copy constructor) does not
-        let plain = b.clone();
-        let copy = plain.face(f).unwrap().surface.as_ref().unwrap();
-        assert!(!copy.shares_cache_slot_with(original));
     }
 
     #[test]
@@ -3122,7 +3118,7 @@ pub(crate) mod tests {
         };
         b.face_mut(f).unwrap().surface = None;
         let mut cache = CurveOnClassifyCache {
-            snapshot: Some(b.clone()),
+            snapshot: Some(b.clone_standing_for_self().unwrap()),
         };
         let result = crate::topology::vertexuse::calc_vertex_face_gap(
             &k,
@@ -3177,7 +3173,7 @@ pub(crate) mod tests {
                 2,
             )),
         };
-        let mut copy = b.clone();
+        let mut copy = b.clone_standing_for_self().unwrap();
         let loops = boundary_loops(
             &k,
             &mut SnapshotObjects::new(&objects, &b, &mut copy),
@@ -3199,7 +3195,7 @@ pub(crate) mod tests {
             Extent1d::from_min_max(0., 1.),
             1e-6,
         );
-        let mut snapshot = b.clone();
+        let mut snapshot = b.clone_standing_for_self().unwrap();
         let mut made = Vec::new();
         intersect_ts_bound(
             &k,
@@ -3220,7 +3216,7 @@ pub(crate) mod tests {
                 3,
             )),
         };
-        let mut copy = b.clone();
+        let mut copy = b.clone_standing_for_self().unwrap();
         intersect_edges(
             &k,
             &mut SnapshotObjects::new(&objects, &b, &mut copy),
@@ -3241,7 +3237,7 @@ pub(crate) mod tests {
             b: &b,
             source: Curve::from(Line::from_points(Vec3::ZERO, Vec3::X, 2)),
         };
-        let mut copy = b.clone();
+        let mut copy = b.clone_standing_for_self().unwrap();
         let loops = boundary_loops(
             &k,
             &mut SnapshotObjects::new(&objects, &b, &mut copy),

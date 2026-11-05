@@ -101,7 +101,7 @@ fn chamfer_9(k: &Kernel, b: &Brep) -> FaceId {
 
 /// No loop of `b` has a gap between consecutive edges (`check_brep`).
 fn no_loop_gaps(k: &mut Kernel, b: &Brep) -> bool {
-    let mut b = b.clone();
+    let mut b = b.clone_standing_for_self().unwrap();
     let check = check_brep(k, &mut b, CheckLevel::Level2).unwrap();
     !check.lines().iter().any(|l| l.contains("Gap"))
 }

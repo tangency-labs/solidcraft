@@ -1152,13 +1152,13 @@ fn run_rust(i: &Inputs, b: &mut Brep, other: &mut Brep) -> Result<Vec<f64>, Soli
             }
             // Object 1 is the primary's first region (with the case's void flag), object 2
             // the other operand's first region, as the shim wires them.
-            let mut primary = b.clone();
+            let mut primary = b.clone_standing_for_self()?;
             primary
                 .region_mut(RegionId::from_index(0))?
                 .set_is_void(i32::from(a != 0));
             let lookup = TwoRegions {
                 primary,
-                other: other.clone(),
+                other: other.clone_standing_for_self()?,
             };
             port::propagate_other_src_region_attribs(
                 &[port::RegionPropagation {
@@ -1204,7 +1204,9 @@ fn run_rust(i: &Inputs, b: &mut Brep, other: &mut Brep) -> Result<Vec<f64>, Soli
             out.push(port::edge_borders_solid(b, e)?.map_or(-1.0, |v| f64::from(v.index())));
         }
         7 => {
-            let mut other = other.clone();
+            // the other operand itself upstream: a copy standing for it, whose curves
+            // and surfaces the transform finds through their owners and moves
+            let mut other = other.clone_standing_for_self()?;
             // The native probe constructs and immediately destroys its shift.
             let shift = port::temporary_brep_transform(&k, &k, b, &other)?;
             // SmBrep::Transform, both operands in the one kernel

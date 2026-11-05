@@ -626,7 +626,7 @@ fn round_trip(k: &mut Kernel, b: &Brep, trip: Trip) -> Brep {
         next_key: 1 << 50,
     };
     let mut out = match trip {
-        Trip::None => return b.clone(),
+        Trip::None => return b.clone_standing_for_self().unwrap(),
         Trip::Data | Trip::BareNets => {
             let mut data = BrepData::from_brep(b, &env, &mut Vec::new()).unwrap();
             if matches!(trip, Trip::BareNets) {

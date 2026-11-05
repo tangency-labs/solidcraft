@@ -3978,17 +3978,17 @@ mod tests {
     fn seam_redistribution_requires_four_uses_and_usable_trims() {
         let (b, edge, uses, previous) = seam_fixture();
         for count in [0, 2, 6] {
-            let mut bad = b.clone();
+            let mut bad = b.clone_standing_for_self().unwrap();
             bad.edge_mut(edge).unwrap().edgeuses = uses.into_iter().cycle().take(count).collect();
             assert!(redistribute_fixture(&mut bad, edge).is_err());
         }
         for eu in [uses[0], uses[2], previous[0], previous[1]] {
-            let mut bad = b.clone();
+            let mut bad = b.clone_standing_for_self().unwrap();
             bad.edgeuse_mut(eu).unwrap().uv_trim_curve = Some(Curve::from(BSplineCurve::default()));
             assert!(redistribute_fixture(&mut bad, edge).is_err());
         }
         for eu in [uses[0], uses[2]] {
-            let mut bad = b.clone();
+            let mut bad = b.clone_standing_for_self().unwrap();
             bad.edgeuse_mut(eu).unwrap().uv_trim_curve = None;
             let before = format!("{bad:?}");
             assert!(redistribute_fixture(&mut bad, edge).is_err());
@@ -4068,14 +4068,14 @@ mod tests {
     #[test]
     fn reflection_edgeuses_require_live_members_of_the_edge() {
         let (b, edge, uses, _) = seam_fixture();
-        let mut good = b.clone();
+        let mut good = b.clone_standing_for_self().unwrap();
         reverse_reflection_edgeuses(&mut good, edge).unwrap();
         assert_eq!(
             good.edge(edge).unwrap().edgeuses,
             [uses[1], uses[0], uses[3], uses[2]]
         );
         for bad_member in 0..4 {
-            let mut bad = b.clone();
+            let mut bad = b.clone_standing_for_self().unwrap();
             bad.edgeuse_mut(uses[bad_member]).unwrap().edge = None;
             assert!(reverse_reflection_edgeuses(&mut bad, edge).is_err());
             assert_eq!(bad.edge(edge).unwrap().edgeuses, uses);

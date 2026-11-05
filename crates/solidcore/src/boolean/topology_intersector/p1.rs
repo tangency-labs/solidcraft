@@ -5352,7 +5352,7 @@ mod tests {
         let mut k = Kernel::default();
         let b = crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
             .unwrap();
-        let other = b.clone();
+        let other = b.clone_standing_for_self().unwrap();
         let faces: Vec<FaceId> = b.faces().ids().collect();
         let (first, last) = (faces[0], faces[faces.len() - 1]);
         // an edge use of `first`'s loop

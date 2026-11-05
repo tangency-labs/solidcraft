@@ -133,7 +133,7 @@ pub enum TaperExtrude {
 }
 
 /// A swept solid and its faces (the outputs of the curve sweeps).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct CurveSweep {
     /// `rpResult`: the swept solid.
     pub brep: Brep,
@@ -147,7 +147,7 @@ pub struct CurveSweep {
 
 /// A curve sweep and where it placed the profile (the outputs of
 /// [`create_curve_sweep_with_placements`]; the SolidCraft fork's `pOptPlacements`).
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PlacedCurveSweep {
     /// The swept solid and its faces, as [`create_curve_sweep`] returns them.
     pub sweep: CurveSweep,

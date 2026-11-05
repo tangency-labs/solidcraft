@@ -1092,7 +1092,7 @@ pub(crate) fn copy_component(
 }
 
 /// The independent B-rep or planar surface outputs of [`boolean_lists`].
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct BooleanListsResult {
     /// One B-rep per separate solid, for 3D or non-planar inputs.
     pub breps: Vec<Brep>,

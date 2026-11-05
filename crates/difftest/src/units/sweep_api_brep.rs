@@ -980,14 +980,14 @@ fn rust_attributed(
         }
     })();
     let mut rows = Vec::new();
-    let out = match &result {
+    let out = match result {
         Ok(c) => {
             built(put_attribute_rows(&mut rows, &c.brep), "attributes")?;
-            success(&Swept::CurveSweep(c.clone()))
+            success(&Swept::CurveSweep(c))
         }
-        Err(e) => match Output::unported(e) {
+        Err(e) => match Output::unported(&e) {
             Some(out) => return Ok(out),
-            None => Output::new().values("status", vec![status(e)]),
+            None => Output::new().values("status", vec![status(&e)]),
         },
     };
     for b in &discs {

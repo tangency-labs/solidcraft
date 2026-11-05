@@ -1693,7 +1693,7 @@ impl FilletBrep {
             // normal lines there within the tolerance and a degree more, the margin for
             // the trim's accuracy the check's normals come from.
             if may_meet_tangentially(k, target, &faces, vertex, tol_deg + 1.0)? {
-                let mut scratch = target.clone();
+                let mut scratch = target.clone_standing_for_self()?;
                 if crate::blend::fillet_corner::topology::check_tangential_edgeuse_at_vertex(
                     k,
                     &mut scratch,

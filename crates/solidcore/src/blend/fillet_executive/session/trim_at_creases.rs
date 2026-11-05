@@ -560,8 +560,9 @@ impl FilletSession<'_> {
             }
         }
 
-        // the target is trimmed in place; a failed trim puts it back as it was
-        let kept = (*self.objects.target).clone();
+        // the target is trimmed in place; a failed trim puts it back as it was, from a
+        // snapshot that keeps its geometry's owners (#2715: a clone's surfaces have none)
+        let kept = self.objects.target.snapshot()?;
         let trimmed = self.trim_sheet_into(
             k,
             sheet,
@@ -577,7 +578,7 @@ impl FilletSession<'_> {
             self.note_refusal(refused);
         }
         if trimmed.is_err() {
-            *self.objects.target = kept;
+            self.objects.target.restore(kept);
         }
         trimmed
     }

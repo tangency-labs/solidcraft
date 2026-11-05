@@ -2049,8 +2049,14 @@ mod tests {
             b.edgeuse_mut(eu(bad)).unwrap().uv_trim_curve = Some(Curve::from(BSplineCurve::new(2)));
             let bad_edge = eu1::edge(&b, eu(bad)).unwrap();
             let mut k = Kernel::default();
-            let off = uv_corner_boundaries(&k, &mut b.clone(), LoopId::from_index(0), &dom, 1e-6)
-                .unwrap();
+            let off = uv_corner_boundaries(
+                &k,
+                &mut b.clone_standing_for_self().unwrap(),
+                LoopId::from_index(0),
+                &dom,
+                1e-6,
+            )
+            .unwrap();
             k.fixes.topology_failed_evaluations_propagate = true;
             let on = uv_corner_boundaries(&k, &mut b, LoopId::from_index(0), &dom, 1e-6).unwrap();
             assert!(!on.on_edges.contains(&bad_edge), "bad={bad}: {on:?}");

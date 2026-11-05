@@ -83,7 +83,7 @@ fn corner_at(
     e: EdgeId,
     p: Point3,
 ) -> (FilletCornerKind, Option<(BlendCornerEvent, BlendEnd)>) {
-    let mut b = b.clone();
+    let mut b = b.clone_standing_for_self().unwrap();
     let mut s = FilletSession::new(k, &mut b).unwrap();
     s.prepare_per_edge_constant_radius(
         k,

@@ -321,7 +321,7 @@ fn geometry(k: &Kernel, kind: i32, scale: f64, pick: [i32; 4]) -> Result<Geometr
     }
     Ok(Geometry {
         curve: c,
-        brep: b.0.clone(),
+        brep: b.0.clone_standing_for_self().map_err(|e| h(e.to_string()))?,
         first,
         records: solidcore::topology::topology::NotifyRecords::new(),
         attributes: solidcore::geom::attribute::AttributeStore::default(),

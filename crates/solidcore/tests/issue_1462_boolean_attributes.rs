@@ -303,10 +303,10 @@ fn coplanar_faces_merged_by_the_cleanup_keep_both_origins() {
 fn clone_copies_attributes_and_dead_entities_have_none() {
     let mut k = Kernel::default();
     let (a, _) = boxes(&mut k, Behavior::Copy);
-    let c = a.clone();
+    let c = a.clone_standing_for_self().unwrap();
     let f = a.face_list()[0];
     assert_eq!(origins(&c, EntityRef::Face(f)), vec![(0, 0, 0)]);
-    let mut d = a.clone();
+    let mut d = a.clone_standing_for_self().unwrap();
     assert!(d.clear_attributes(EntityRef::Face(f)).is_ok());
     assert!(d.find_attribute(EntityRef::Face(f), BASE_ID).is_none());
     assert!(a.find_attribute(EntityRef::Face(f), BASE_ID).is_some());

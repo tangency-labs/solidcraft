@@ -1446,7 +1446,7 @@ mod tests {
         let id = crate::topology::BrepId::from_index(0);
         assert_eq!(pc.brep(&topology, None).unwrap(), Some(id));
         assert_eq!(pc.brep(&topology, Some(id)).unwrap(), None);
-        let other = b.clone();
+        let other = b.clone_standing_for_self().unwrap();
         assert_eq!(ClassGeometry::<T>::brep_id(&topology, &other), None);
     }
 

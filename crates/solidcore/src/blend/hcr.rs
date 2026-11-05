@@ -805,7 +805,7 @@ struct RaySetup {
 }
 
 /// A hidden curve removal object (`SmHCR`).
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Hcr {
     view_vector: Vec3,
     ray_offset_tolerance: f64,
@@ -831,6 +831,40 @@ pub struct Hcr {
 }
 
 impl Hcr {
+    /// A copy of this HCR object (the `SmHCR` copy constructor): its view, tolerances,
+    /// silhouettes, curves and ray state, and its scene copied standing for this one's
+    /// ([`Brep::clone_standing_for_self`]: the same ids, its geometry's owners kept, so
+    /// that the copy's scene still finds its faces' surfaces). Not `Clone`: a `Brep` is
+    /// not (#2715).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Brep::clone_standing_for_self`].
+    pub fn copy_standing_for_self(&self) -> Result<Self> {
+        Ok(Self {
+            view_vector: self.view_vector,
+            ray_offset_tolerance: self.ray_offset_tolerance,
+            scene: self.scene.clone_standing_for_self()?,
+            view_transform: self.view_transform,
+            inv_view_transform: self.inv_view_transform,
+            proj_bbox: self.proj_bbox,
+            sil_vertex_tree: self.sil_vertex_tree.clone(),
+            sil_edge_tree: self.sil_edge_tree.clone(),
+            sil_vertices: self.sil_vertices.clone(),
+            sil_edges: self.sil_edges.clone(),
+            sil_edge_order: self.sil_edge_order.clone(),
+            back_facing_edges: self.back_facing_edges.clone(),
+            visible_curves: self.visible_curves.clone(),
+            invisible_curves: self.invisible_curves.clone(),
+            approx_tol_3d: self.approx_tol_3d,
+            ang_tol_rad: self.ang_tol_rad,
+            for_silhouettes: self.for_silhouettes,
+            display_seams: self.display_seams,
+            display_smooth_edges: self.display_smooth_edges,
+            ray: self.ray.clone(),
+        })
+    }
+
     /// An HCR object looking along `view_vector` (`SmHCR(crContext, pBrep,
     /// crViewVector, ..)`).
     ///
@@ -2081,7 +2115,7 @@ mod tests {
             Some(BrepId::from_index(0))
         );
         // another B-rep has no id here
-        let other = scene.clone();
+        let other = scene.clone_standing_for_self().unwrap();
         assert_eq!(geometry.brep_id(&other), None);
     }
 

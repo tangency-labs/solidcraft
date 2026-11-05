@@ -112,7 +112,7 @@ const OP_MERGE_BREPS: &str = "boolean::api_brep::merge_breps";
 const OP_PIECEWISE: &str = "boolean::api_brep::piecewise_merge";
 
 /// The outcome of a two-B-rep boolean ([`boolean`], [`boolean_with_options`]).
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BooleanOutcome {
     /// `rpResult`: the first operand, modified in place by the merge.
     pub result: Brep,
@@ -123,7 +123,7 @@ pub struct BooleanOutcome {
 }
 
 /// The outcome of [`boolean_with_curves`].
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BooleanWithCurves {
     /// The result and the second operand when kept, as [`boolean`]'s.
     pub outcome: BooleanOutcome,
@@ -133,7 +133,7 @@ pub struct BooleanWithCurves {
 }
 
 /// The outcome of a successful [`boolean_2d`].
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Boolean2dOutcome {
     /// `rpResult`: the first operand, modified; the second was consumed.
     Result(Brep),
@@ -148,7 +148,7 @@ pub enum Boolean2dOutcome {
 }
 
 /// The outcome of [`piecewise_merge`].
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PiecewiseMergeOutcome {
     /// `rpResult`: the first operand, modified.
     pub result: Brep,
@@ -750,13 +750,13 @@ mod tests {
     fn merge_breps_rejects_without_consuming() {
         let mut k = Kernel::default();
         for n in 0..2 {
-            let mut breps = vec![Brep::new(); n];
+            let mut breps: Vec<Brep> = (0..n).map(|_| Brep::new()).collect();
             let e = merge_breps(&mut k, &mut breps, BooleanOperation::Union).unwrap_err();
             assert!(matches!(e, SolidError::InvalidInput { .. }));
             assert_eq!(breps.len(), n);
         }
         for op in ALL {
-            let mut breps = vec![Brep::new(); 3];
+            let mut breps: Vec<Brep> = (0..3).map(|_| Brep::new()).collect();
             if merge_breps_kernel_operation(op).is_some() {
                 // The merge is constructed and runs.
                 assert!(

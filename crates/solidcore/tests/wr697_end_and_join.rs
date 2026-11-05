@@ -222,7 +222,12 @@ fn a_mixed_convexity_end_s_rail_ends_on_the_end_face_s_surface() {
     let want = 12000.0 + 3000.0 * PI - removed;
     let mut k = all_fixes();
     let mut b = cylinder_wall(&mut k);
-    let cs = corners(&mut k, &mut b.clone(), &[[30.0, 0.0, 10.0]], 2.0);
+    let cs = corners(
+        &mut k,
+        &mut b.clone_standing_for_self().unwrap(),
+        &[[30.0, 0.0, 10.0]],
+        2.0,
+    );
     let (kind, event) = at(&cs, [20.0, 0.0, 10.0]);
     assert_eq!(kind, FilletCornerKind::NByOne);
     assert_eq!(event, Some((BlendCornerEvent::End, BlendEnd::OnEndFace)));
@@ -289,7 +294,7 @@ fn a_cut_ball_s_rim_joins_on_its_shared_sections() {
     let s = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0).unwrap();
     let cut = create_box(&mut k, Point3::new(-20.0, -20.0, 4.0), 40.0, 40.0, 20.0).unwrap();
     let mut b = boolean_difference(&mut k, s, cut).unwrap();
-    let cs = corners(&mut k, &mut b.clone(), &rim, 2.0);
+    let cs = corners(&mut k, &mut b.clone_standing_for_self().unwrap(), &rim, 2.0);
     eprintln!("{cs:?}");
     assert_eq!(cs.len(), 2);
     let two = cs.iter().find(|c| c.3 == 22).unwrap();
@@ -322,7 +327,12 @@ fn a_tee_s_closed_saddle_is_a_closed_join() {
     transform(&mut k, &mut pipe, &pl, None, false).unwrap();
     let branch = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 8.0, 40.0).unwrap();
     let mut b = boolean_union(&mut k, pipe, branch).unwrap();
-    let cs = corners(&mut k, &mut b.clone(), &saddle, 3.0);
+    let cs = corners(
+        &mut k,
+        &mut b.clone_standing_for_self().unwrap(),
+        &saddle,
+        3.0,
+    );
     assert_eq!(cs.len(), 1);
     assert_eq!(cs[0].1, FilletCornerKind::NByTwo);
     assert_eq!(cs[0].2.map(|e| e.0), Some(BlendCornerEvent::Join));
@@ -514,7 +524,7 @@ fn a_closed_edge_meeting_itself_at_an_angle_is_the_closed_corner() {
     for (r, want) in [(0.5, 7133.840112885839517), (1.0, 7140.722103719867846)] {
         let mut k = all_fixes();
         let mut b = teardrop_boss(&mut k);
-        let cs = corners(&mut k, &mut b.clone(), &foot, r);
+        let cs = corners(&mut k, &mut b.clone_standing_for_self().unwrap(), &foot, r);
         assert_eq!(cs.len(), 1);
         assert!(cs[0].0.distance(Point3::new(0.0, 0.0, 0.0)) <= 1e-12);
         assert_eq!(

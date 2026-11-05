@@ -109,7 +109,7 @@ struct Outcome {
 
 fn measure(brep: &Brep) -> Outcome {
     let mut kernel = Kernel::default();
-    let mut copy = brep.clone();
+    let mut copy = brep.clone_standing_for_self().unwrap();
     let level2_failures = check_brep(&mut kernel, &mut copy, CheckLevel::Level2)
         .ok()
         .map(|check| check.failures().count());
@@ -132,9 +132,9 @@ fn properties(brep: &Brep) -> (f64, f64) {
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
-    let mut copy = brep.clone();
+    let mut copy = brep.clone_standing_for_self().unwrap();
     let volume = brep_volume(&kernel, &mut copy, 1e-9, &attrs).unwrap();
-    let mut copy = brep.clone();
+    let mut copy = brep.clone_standing_for_self().unwrap();
     let area = brep_area(&kernel, &mut copy, 1e-9).unwrap();
     (volume, area)
 }
@@ -186,7 +186,10 @@ fn the_body_still_builds_with_its_closed_form_volume_and_area() {
         Outcome {
             counts: (3, 3, 2),
             manifold: Some(true),
-            level2_failures: Some(6),
+            // checked on a copy that keeps its geometry's owners (#2715): the 6 failures a
+            // field-by-field clone gave were its 3 surfaces without owner and its 3 edges
+            // failing `ValidateGeometry` for want of one
+            level2_failures: Some(0),
         }
     );
 

@@ -1542,7 +1542,7 @@ impl FilletGeom {
 /// The pseudo B-rep holding the fillet edges and vertices (`SmFilletBrep`), with the
 /// fillet members of its topology records and the fillet geometries referenced from
 /// them.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FilletBrep {
     /// The topology records (`SmBrep`).
     brep: Brep,

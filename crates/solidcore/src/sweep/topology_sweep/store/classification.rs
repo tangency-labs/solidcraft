@@ -127,7 +127,7 @@ impl ClassGeometry<Handle> for Geometry<'_> {
             }
             // As query::face's boundary views do, retain lazy gap mutations in a
             // private topology snapshot while evaluating under the real kernel.
-            let mut snapshot = self.brep.clone();
+            let mut snapshot = self.brep.clone_standing_for_self().ok()?;
             return crate::topology::vertexuse::vertex_face_gap(
                 self.kernel,
                 &mut snapshot,

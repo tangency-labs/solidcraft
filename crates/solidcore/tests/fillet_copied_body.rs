@@ -1,7 +1,7 @@
 //! tangency-labs/solidcore#1144: a body copied for an edit (undo, history, preview) is
 //! copied with `SmApiBrepCopy`, whose geometry is owned by the copy's topology, and
-//! fillets as the body itself does. A plain `Clone` (geometry without owners) gives the
-//! fillet's merge no face for its surfaces.
+//! fillets as the body itself does. (A field-by-field copy, whose geometry had no owners,
+//! gave the fillet's merge no face for its surfaces; `Brep` is not `Clone` since #2715.)
 #![allow(clippy::unwrap_used)] // test helpers
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -76,12 +76,4 @@ fn issue_1144_an_api_brep_copy_fillets_as_the_body_does() {
     // the box less the round's 100 mm long corner, (1 - pi/4) r^2 in section
     let expected = 100_000.0 - 100.0 * (1.0 - PI / 4.0);
     assert!((a - expected).abs() < 1e-6 * expected, "{a} vs {expected}");
-}
-
-#[test]
-fn issue_1144_a_plain_clone_does_not_fillet() {
-    let mut k = Kernel::default();
-    let body = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 100.0, 100.0, 10.0).unwrap();
-    let mut cloned = body.clone();
-    assert!(round(&mut k, &mut cloned).is_err());
 }

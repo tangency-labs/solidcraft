@@ -558,7 +558,10 @@ impl<'a> Objects<'a> {
             return Ok(None);
         };
         let mut gaps = self.gaps.borrow_mut();
-        let b = gaps.get_or_insert_with(|| self.brep.clone());
+        let b = match &mut *gaps {
+            Some(b) => b,
+            slot @ None => slot.insert(self.brep.clone_standing_for_self()?),
+        };
         let gap = solidcore::topology::vertexuse::vertex_face_gap(self.k, b, vu, false)?;
         Ok(Some(gap.map_or(0.0, |g| g.gap_3d)))
     }

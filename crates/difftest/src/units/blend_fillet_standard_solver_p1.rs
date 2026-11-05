@@ -1709,7 +1709,7 @@ fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
             let probe = Setup {
                 path: String::new(),
                 block: Vec::new(),
-                brep: s.brep.clone(),
+                brep: s.brep.clone_standing_for_self().map_err(|e| he(&e))?,
                 eu: radial,
                 types: s.types.clone(),
             };

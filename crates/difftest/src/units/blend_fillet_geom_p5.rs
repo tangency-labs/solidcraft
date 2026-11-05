@@ -367,7 +367,7 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
         }
     }
     let k = Kernel::default();
-    let mut target = rm.target.clone();
+    let mut target = rm.target.clone_standing_for_self().map_err(h)?;
     let mut o = Vec::new();
     macro_rules! status_of {
         ($r:expr) => {

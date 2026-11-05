@@ -616,7 +616,7 @@ pub fn calculate_tight_bounding_box_into(
                 // (it may attach missing UV trim curves to the B-rep)
                 ignored(point_classify(
                     k,
-                    lb.get_mut(),
+                    lb.get_mut()?,
                     f,
                     uv,
                     &mut pt_class,
@@ -751,7 +751,7 @@ fn cell_directed_max(
         out.top = out.top.max(value);
         ignored(point_classify(
             k,
-            lb.get_mut(),
+            lb.get_mut()?,
             f,
             uv,
             &mut pt_class,

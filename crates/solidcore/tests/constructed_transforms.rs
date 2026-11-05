@@ -24,24 +24,6 @@ fn samples(k: &Kernel, b: &Brep) -> solidcore::Result<(Point3, Point3)> {
 }
 
 #[test]
-fn clone_does_not_rebind_unowned_geometry() {
-    let mut k = Kernel::default();
-    let original = create_box(&mut k, Point3::new(2.0, 3.0, 5.0), 2.0, 3.0, 4.0).unwrap();
-    let mut cloned = original.clone();
-    let before = samples(&k, &cloned).unwrap();
-    let delta = Vec3::new(7.0, -2.0, 3.0);
-    api_translate(&mut k, Some(TransformObject::Brep(&mut cloned)), delta).unwrap();
-    let after = samples(&k, &cloned).unwrap();
-    assert_eq!(after, before);
-    let vertex = p1::vertices(&cloned, None).unwrap()[0];
-    assert_eq!(
-        cloned.vertex(vertex).unwrap().point,
-        original.vertex(vertex).unwrap().point + delta
-    );
-    assert_eq!(samples(&k, &original).unwrap(), before);
-}
-
-#[test]
 fn foreign_and_unowned_geometry_remains_filtered() {
     for foreign in [false, true] {
         let mut k = Kernel::default();

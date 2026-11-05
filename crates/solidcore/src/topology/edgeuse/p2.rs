@@ -1427,7 +1427,7 @@ mod tests {
             if face(&b0, eu).unwrap().is_none() {
                 continue;
             }
-            let mut b = b0.clone();
+            let mut b = b0.clone_standing_for_self().unwrap();
             let e = edge(&b, eu).unwrap().unwrap();
             b.edge_mut(e).unwrap().curve = Some(Curve::from(
                 crate::nurbs::b_spline_curve::BSplineCurve::new(3),
@@ -1574,8 +1574,8 @@ mod tests {
 
         for step_off in [false, true] {
             for tol_deg in [0.0, 2.0] {
-                let mut b_def = b0.clone();
-                let mut b_opt = b0.clone();
+                let mut b_def = b0.clone_standing_for_self().unwrap();
+                let mut b_opt = b0.clone_standing_for_self().unwrap();
                 assert!(is_convex_radial_sector(
                     &default_k, &mut b_def, convex_eu, 3, step_off, tol_deg
                 )
@@ -1608,7 +1608,7 @@ mod tests {
         let mid_t = b0.edge(e).unwrap().interval.evaluate(0.5);
         let step_err = evaluate_binormal_step_off(
             &default_k,
-            &mut b0.clone(),
+            &mut b0.clone_standing_for_self().unwrap(),
             concave_eu,
             mid_t,
             20.0,
@@ -1619,7 +1619,7 @@ mod tests {
 
         // Default (`false`): `SER` inside `SmBoolean` falsely classifies the concave
         // sector as convex (`Ok(true)`).
-        let mut b_def = b0.clone();
+        let mut b_def = b0.clone_standing_for_self().unwrap();
         assert!(is_convex_radial_sector(&default_k, &mut b_def, concave_eu, 3, true, 0.0).unwrap());
 
         // Opt-in (`true`): propagates the step-off `Err` instead of reporting convex.
@@ -1675,7 +1675,7 @@ mod tests {
 
         assert!(evaluate_binormal_step_off(
             &default_k,
-            &mut b0.clone(),
+            &mut b0.clone_standing_for_self().unwrap(),
             concave_eu,
             mid_t,
             0.2,
@@ -1684,7 +1684,7 @@ mod tests {
         .is_ok());
         let radial_err = evaluate_binormal_step_off(
             &default_k,
-            &mut b0.clone(),
+            &mut b0.clone_standing_for_self().unwrap(),
             radial_eu,
             mid_t,
             0.2,
@@ -1696,9 +1696,15 @@ mod tests {
             SolidError::Upstream { code: 1001, .. }
         ));
 
-        assert!(
-            is_convex_radial_sector(&default_k, &mut b0.clone(), concave_eu, 1, true, 2.0).unwrap()
-        );
+        assert!(is_convex_radial_sector(
+            &default_k,
+            &mut b0.clone_standing_for_self().unwrap(),
+            concave_eu,
+            1,
+            true,
+            2.0
+        )
+        .unwrap());
         let err =
             is_convex_radial_sector(&opt_in_k, &mut b0, concave_eu, 1, true, 2.0).unwrap_err();
         assert!(matches!(err, SolidError::Upstream { code: 1001, .. }));
@@ -1732,14 +1738,14 @@ mod tests {
             CPoint::new(mid_pt.x, mid_pt.y, mid_pt.z, NOW),
         ];
         let nl = NlCurve::new(pw, 1, vec![ivl.min(), ivl.min(), ivl.max(), ivl.max()]).unwrap();
-        let mut b_const = b0.clone();
+        let mut b_const = b0.clone_standing_for_self().unwrap();
         b_const.edge_mut(e).unwrap().curve = Some(Curve::from(
             crate::nurbs::b_spline_curve::BSplineCurve::from_nurb(nl, 3, false),
         ));
 
         assert!(is_convex_radial_sector(
             &default_k,
-            &mut b_const.clone(),
+            &mut b_const.clone_standing_for_self().unwrap(),
             concave_eu,
             1,
             false,
@@ -1758,7 +1764,7 @@ mod tests {
         ));
         assert!(is_convex_radial_sector(
             &default_k,
-            &mut b_uninit.clone(),
+            &mut b_uninit.clone_standing_for_self().unwrap(),
             concave_eu,
             1,
             false,

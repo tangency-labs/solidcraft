@@ -206,7 +206,7 @@ fn volume(brep: &Brep) -> Option<f64> {
         store: &store,
         key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
     };
-    let mut copy = brep.clone();
+    let mut copy = brep.clone_standing_for_self().ok()?;
     solidcore::mass::integrator::properties::brep_volume(&kernel, &mut copy, 1e-9, &attrs).ok()
 }
 

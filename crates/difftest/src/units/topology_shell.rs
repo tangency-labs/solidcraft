@@ -234,7 +234,7 @@ fn rust_ray(brep: &solidcore::topology::Brep, input: &RayInput) -> Result<Output
     use solidcore::intersect::point_class::{PointClassType, PointClassification};
     use solidcore::topology::shell::{ray_fire, ShellRayInput, ShellRayState};
     // The ray fires may add UV trim curves (as the native B-rep's): one copy per case.
-    let mut scratch = brep.clone();
+    let mut scratch = brep.clone_standing_for_self().map_err(failure)?;
     own_geometry(&mut scratch)?;
     let mut kernel = solidcore::kernel::Kernel::default();
     let mut out = Vec::new();

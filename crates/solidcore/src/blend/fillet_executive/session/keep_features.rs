@@ -470,10 +470,12 @@ impl FilletSession<'_> {
     /// The refusals as `SM_ERR`; those of the steps.
     pub(super) fn keep_features_in_bands(&mut self, k: &mut Kernel) -> Result<bool> {
         crate::profile::profile_scope!(k, "blend::session::keep_features");
-        let saved = (*self.objects.target).clone();
+        // a snapshot, not a clone: the target put back must still own its geometry
+        // (#2715; a clone's surfaces have no owner, so the caller's body would save none)
+        let saved = self.objects.target.snapshot()?;
         let result = self.keep_features_steps(k);
         if result.is_err() {
-            *self.objects.target = saved;
+            self.objects.target.restore(saved);
         }
         result
     }
@@ -743,9 +745,9 @@ impl FilletSession<'_> {
             }
             for wall in feature.walls.clone() {
                 let wall_body: Brep = if feature.boss {
-                    sheet.clone()
+                    sheet.clone_standing_for_self()?
                 } else {
-                    (*self.objects.target).clone()
+                    self.objects.target.clone_standing_for_self()?
                 };
                 let wall_box =
                     crate::query::api_queries::face_bounding_box(k, &wall_body, wall, false)?;

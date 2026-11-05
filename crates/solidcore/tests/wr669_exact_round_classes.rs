@@ -504,7 +504,7 @@ fn box_edge(xsect: u32) -> (Kernel, Brep) {
 /// `b` offset by `d` (outward for d > 0), its convex edges extended, merged.
 fn offset_by(k: &mut Kernel, b: &Brep, d: f64) -> Brep {
     use solidcore::offset::offset_executive::p2::{offset_brep_simple, OffsetOptions};
-    let mut b = b.clone();
+    let mut b = solidcore::topology::brep::p3::brep_copy(k, b).unwrap();
     offset_brep_simple(
         k,
         &mut b,

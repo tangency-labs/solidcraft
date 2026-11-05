@@ -1096,7 +1096,7 @@ mod tests {
         b.edgeuse_mut(EdgeuseId::from_index(3))
             .unwrap()
             .uv_trim_curve = Some(Curve::from(BSplineCurve::new(2)));
-        assert!(contains(&mut b.clone(), [0.0, 0.0]).is_ok());
+        assert!(contains(&mut b.clone_standing_for_self().unwrap(), [0.0, 0.0]).is_ok());
         let mut k = Kernel::default();
         k.fixes.query_statuses_pass_on = true;
         let r = contains_uv_point(
@@ -1146,7 +1146,7 @@ mod tests {
         for i in -17..=17 {
             for j in -17..=17 {
                 let uv = [f64::from(i) * 0.7, f64::from(j) * 0.7];
-                let r = contains(&mut b.clone(), uv).unwrap();
+                let r = contains(&mut b.clone_standing_for_self().unwrap(), uv).unwrap();
                 if hull.excludes(Point2::new(uv[0], uv[1]), false) {
                     excluded += 1;
                     assert_ne!(r.containment, PointContainment::Inside, "{uv:?}");
@@ -1183,7 +1183,7 @@ mod tests {
             for j in -17..=17 {
                 let uv = [f64::from(i) * 0.7, f64::from(j) * 0.7];
                 if hull.excludes(Point2::new(uv[0], uv[1]), false) {
-                    let r = contains(&mut b.clone(), uv).unwrap();
+                    let r = contains(&mut b.clone_standing_for_self().unwrap(), uv).unwrap();
                     assert_ne!(r.containment, PointContainment::Inside, "{uv:?}");
                 }
             }

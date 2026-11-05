@@ -1976,15 +1976,24 @@ pub(super) fn register_notification_brep(
 /// uses' UV trim curves: offset queries may make them lazily in the input (as
 /// upstream's `NormalizedEvaluate` / `GetUVTrimCurve` do), and the native
 /// snapshot block, which the native purity bit compares, does not record them.
-fn purity_state(brep: &Brep) -> String {
-    let mut state = brep.clone();
+fn purity_state(brep: &Brep) -> Result<String, SolidError> {
+    let mut state = brep.clone_standing_for_self()?;
+    // nor the surfaces' caches: the standing copy shares the source's cache slots, so its
+    // Debug would show the caches the operation built (#2715); each surface gets a
+    // value copy of its own
+    let faces: Vec<_> = state.faces().ids().collect();
+    for f in faces {
+        if let Ok(face) = state.face_mut(f) {
+            face.surface = face.surface.clone();
+        }
+    }
     let uses: Vec<_> = state.edgeuses().ids().collect();
     for id in uses {
         if let Ok(record) = state.edgeuse_mut(id) {
             record.uv_trim_curve = None;
         }
     }
-    format!("{state:?}")
+    Ok(format!("{state:?}"))
 }
 fn rust_output(input: &Inputs) -> RResult<Output> {
     validate(input)?;
@@ -2037,8 +2046,8 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
     };
     let keys = selections(input, source.as_ref(), foreign.as_ref())?;
     let selected_before = observe_selections(&keys, source.as_ref(), foreign.as_ref(), None);
-    let source_state_before = source.as_ref().map(purity_state);
-    let foreign_state_before = foreign.as_ref().map(purity_state);
+    let source_state_before = source.as_ref().map(purity_state).transpose()?;
+    let foreign_state_before = foreign.as_ref().map(purity_state).transpose()?;
     let source_before = input
         .source
         .as_ref()
@@ -2162,8 +2171,8 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         .zip(foreign.as_ref())
         .map(|(fixture, brep)| rust_projection(&kernel, fixture, brep))
         .transpose()?;
-    let source_pure = source_state_before == source.as_ref().map(purity_state);
-    let foreign_pure = foreign_state_before == foreign.as_ref().map(purity_state);
+    let source_pure = source_state_before == source.as_ref().map(purity_state).transpose()?;
+    let foreign_pure = foreign_state_before == foreign.as_ref().map(purity_state).transpose()?;
     let lifetime = if input.source.is_none() {
         0
     } else if source.is_some() {

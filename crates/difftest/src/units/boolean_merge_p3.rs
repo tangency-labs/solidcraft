@@ -309,7 +309,7 @@ fn record_brep(brep: &Brep, identity: i64, values: &mut Vec<f64>) -> solidcore::
     let walk_error = |_| {
         SolidError::invalid_input("difftest::boolean_merge_p3", "fixture walk failed")
     };
-    let mut canonical = brep.clone();
+    let mut canonical = brep.clone_standing_for_self()?;
     let brep = match super::boolean_merge_p4::canonical_loop_starts(&mut canonical) {
         Ok(()) => &canonical,
         Err(_) => brep,
@@ -1327,7 +1327,7 @@ mod tests {
         native.extend(&graph);
         native.push(0.0);
         let mut result = port::BooleanListsResult {
-            breps: vec![pool.breps[0].clone()],
+            breps: vec![pool.breps[0].clone_standing_for_self().unwrap()],
             surfaces: Vec::new(),
         };
         let mut rust = vec![0.0];

@@ -119,7 +119,8 @@ fn output(state: &[f64]) -> Result<Output, HarnessError> {
 // rail curves live in this separate pseudo-B-rep. No default Kernel is hidden.
 struct Objects<'a> {
     k: &'a Kernel,
-    fillets: &'a FilletBrep,
+    /// The pseudo-B-rep of the fillets (`FilletBrep::brep`).
+    fillets: &'a Brep,
     target: &'a Brep,
 }
 impl ClassGeometry<EntityRef> for Objects<'_> {
@@ -145,7 +146,7 @@ impl ClassGeometry<EntityRef> for Objects<'_> {
                 .map(|(f, _)| f)?,
         };
         let vu = solidcore::topology::vertex::vertexuse_of_face(self.target, v, Some(f)).ok()??;
-        let mut b = self.target.clone();
+        let mut b = self.target.clone_standing_for_self().ok()?;
         let gap =
             solidcore::topology::vertexuse::vertex_face_gap(self.k, &mut b, vu, false).ok()?;
         Some(gap.map_or(0.0, |g| g.gap_3d))
@@ -156,7 +157,6 @@ impl ClassGeometry<EntityRef> for Objects<'_> {
                 let offset = self.target.edges().len() as u32;
                 if let Some(index) = e.index().checked_sub(offset) {
                     self.fillets
-                        .brep()
                         .edge(EdgeId::from_index(index))
                         .ok()?
                         .curve
@@ -437,7 +437,7 @@ fn run(i: &Inputs) -> Result<Output, HarnessError> {
         .map(|&c| FilletCornerId(c as u32))
         .collect();
     let outcome = if i.op == 0 {
-        let mut snapshot = fb.brep().clone();
+        let mut snapshot = fb.brep().clone_standing_for_self().map_err(harness)?;
         solver.process_roll_over(
             &k,
             &mut snapshot,
@@ -452,8 +452,9 @@ fn run(i: &Inputs) -> Result<Output, HarnessError> {
         if i.op == 1 {
             solver.fillet_geoms.clear();
         }
-        let snapshot = fb.clone();
-        let target_objects = target.clone();
+        // the rails' curves are read from the pseudo-B-rep, standing for it
+        let snapshot = fb.brep().clone_standing_for_self().map_err(harness)?;
+        let target_objects = target.clone_standing_for_self().map_err(harness)?;
         solver.test_roll_over(
             &k,
             &mut target,

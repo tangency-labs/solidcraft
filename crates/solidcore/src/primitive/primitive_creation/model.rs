@@ -143,7 +143,7 @@ impl<'k> PrimitiveModel<'k> {
             let id = if let Some(&(_, id)) = seen.iter().find(|(b, _)| core::ptr::eq(*b, brep)) {
                 id
             } else {
-                let id = self.add_brep(brep.clone())?;
+                let id = self.add_brep(brep.clone_standing_for_self()?)?;
                 seen.push((brep, id));
                 id
             };

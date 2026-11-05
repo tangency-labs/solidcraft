@@ -82,7 +82,7 @@ fn offset_faces_on_filleted_notify_block_keeps_owners() {
         if !planar {
             continue;
         }
-        let mut c = b.clone();
+        let mut c = b.clone_standing_for_self().unwrap();
         let mut ex = OffsetFacesExecutive::new();
         ex.offset_faces(&mut k, &mut c, &[f], -1.0).unwrap();
         let check = check_brep(&mut k, &mut c, CheckLevel::Level2).unwrap();

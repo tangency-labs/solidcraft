@@ -65,7 +65,7 @@ const OP_SKIN_FROM_FACES: &str = "sweep::api_surfaces::create_skin_from_faces";
 pub const SWEEP_APPROX_TOL: f64 = 1.0e-5;
 
 /// A lofted solid and its faces ([`create_skin_primitive`]'s outputs).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct SkinPrimitive {
     /// `rpResult`: the lofted solid.
     pub brep: Brep,
@@ -78,7 +78,7 @@ pub struct SkinPrimitive {
 }
 
 /// A solid lofted between face loops ([`create_skin_from_faces`]'s outputs).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct SkinFromFaces {
     /// `rpResult`: the B-rep holding the lofted faces.
     pub brep: Brep,
