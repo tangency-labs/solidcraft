@@ -7,7 +7,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 
 use super::types::{Point2, SketchRef, StringList, present};
 use crate::params;
