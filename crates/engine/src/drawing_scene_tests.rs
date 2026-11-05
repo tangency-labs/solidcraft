@@ -1458,6 +1458,41 @@ fn a_press_names_the_part_and_its_role() {
     assert_eq!((&line["occurrence"], &line["reference"]), (&json!([over]), &json!(true)), "{line}");
 }
 
+/// A press names what drew a line, on each placement of a part placed twice: a round bar of radius
+/// 10 and height 20 along Z, the second 40 along X. Its outline is the bar's silhouette, by the face
+/// it lies on, and its top is an edge, each through the occurrence pressed. At 1:2 round (150, 150)
+/// the two span x -10..50 and z 0..20: the far sides at x 135 and 165, the tops at y 155.
+#[test]
+fn a_press_names_what_drew_the_line_on_each_placement() {
+    let mut design = Session::default();
+    let first = run(&mut design, "component.create", json!({"name": "Bar"}))["occurrence"].as_u64().unwrap();
+    run(&mut design, "solid.cylinder", json!({"radius": 10, "height": 20, "base": [0, 0, 0], "axis": "Z", "body_name": "Round", "operation": "new"}));
+    run(&mut design, "component.activate", json!({"component": 0}));
+    let second = run(&mut design, "occurrence.copy", json!({"component": "Bar", "translate": [40, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let (mut s, sheet, _) = front_and_top_of(design);
+    let side = |s: &Session, x: f64| {
+        let state = s.model.state();
+        let body = state.body("Round").unwrap();
+        solidcraft_doc::appearance::face_index_at(body, solidcore_record::Vec3::new(x, 0.0, 10.0)).unwrap()
+    };
+    let (left, right) = (side(&s, -10.0), side(&s, 10.0));
+    for (x, occurrence, face) in [(135.1, first, left), (164.9, second, right)] {
+        let line = line_under(&mut s, sheet, [x, 150.0], 0.5);
+        assert_eq!((&line["body"], &line["occurrence"]), (&json!("Round"), &json!([occurrence])), "{line}");
+        assert_eq!((&line["source"]["kind"], &line["source"]["face"]), (&json!("silhouette"), &json!(face)), "{line}");
+    }
+    let edges = {
+        let state = s.model.state();
+        state.body("Round").unwrap().mesh().edges.clone()
+    };
+    for (x, occurrence) in [(140.0, first), (160.0, second)] {
+        let line = line_under(&mut s, sheet, [x, 155.1], 0.5);
+        assert_eq!((&line["occurrence"], &line["source"]["kind"]), (&json!([occurrence]), &json!("edge")), "{line}");
+        let edge = edges.get(line["source"]["edge"].as_u64().unwrap() as usize).unwrap();
+        assert!(edge.iter().all(|p| (p.z - 20.0).abs() < 1e-9), "the top rim: {line}");
+    }
+}
+
 /// A view's pictures come before its strokes in its group: with `Over` as a shaded reference part over
 /// `Under`'s visible lines, a press on `Under`'s top edge (z 10, at y 152.5) still names `Under`, and
 /// the same edge as with `Over` left out, which has no picture.
