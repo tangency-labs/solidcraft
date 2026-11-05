@@ -4,7 +4,7 @@
 use serde_json::{Value, json};
 use solidcraft_doc::Mat;
 use solidcraft_doc::point_cloud::{
-    ColorBy, Colors, Filter, Keep, MAX_COORD, MAX_FILTERS, MAX_NAMES, MAX_POINTS, POINT_SIZE, PointCloud, Points, UNITS, unit_scale,
+    ColorBy, Colors, Complex, Filter, Keep, MAX_COORD, MAX_FILTERS, MAX_NAMES, MAX_POINTS, POINT_SIZE, PointCloud, Points, UNITS, unit_scale,
 };
 
 use super::CommandSpec;
@@ -132,11 +132,16 @@ fn check_properties(c: &PointCloud, cmd: &str) -> Result<()> {
             return Err(bad(cmd, format!("the point cloud has no property `{n}` (it has {})", names.join(", "))));
         }
     }
-    // A set of values filters a label: a property with named whole numbers.
-    if let Some(f) = c.filters.iter().find(|f| matches!(f.keep, Keep::Values { .. }) && c.complex.names(&f.property).is_none()) {
+    if let Some(f) = c.filters.iter().find(|f| picks_from_no_names(&c.complex, f)) {
         return Err(bad(cmd, format!("`{}` has no named values: filter it with a range", f.property)));
     }
     Ok(())
+}
+
+/// A set of values filters a label: a property with named whole numbers. Is this one a set of
+/// values on a property with no names?
+fn picks_from_no_names(complex: &Complex, f: &Filter) -> bool {
+    matches!(f.keep, Keep::Values { .. }) && complex.names(&f.property).is_none()
 }
 
 /// `height_range`: absent (`None`), null for the automatic one (`Some(None)`), or [low, high].
@@ -361,7 +366,7 @@ fn reload(s: &mut Session, p: &Value) -> Result<Value> {
     c.complex = read.complex;
     // What the file no longer has is no longer coloured or filtered by.
     let names: Vec<String> = c.property_names().map(str::to_string).collect();
-    c.filters.retain(|f| names.contains(&f.property));
+    c.filters.retain(|f| names.contains(&f.property) && !picks_from_no_names(&c.complex, f));
     if c.color_by == ColorBy::Property && !c.color_property.as_ref().is_some_and(|n| names.contains(n)) {
         (c.color_by, c.color_property) = (ColorBy::File, None);
     }
@@ -580,6 +585,34 @@ mod tests {
         let (before, undo) = (s.doc.point_clouds.clone(), s.undo.len());
         assert!(s.execute("pointcloud.reload", &json!({"cloud": id})).is_err());
         assert_eq!((&s.doc.point_clouds, s.undo.len()), (&before, undo));
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    /// A set of values filters a label, so it lasts as long as the file names that property's
+    /// values: left behind, it would make every later `pointcloud.edit` of the cloud refused.
+    #[test]
+    fn a_reload_drops_a_value_filter_when_the_file_stops_naming_the_values() {
+        let d = dir("reload-names");
+        let path = d.join("scan.ply");
+        let write = |comment: &str| {
+            let head = "ply\nformat ascii 1.0\n";
+            let body = "element vertex 2\nproperty float x\nproperty float y\nproperty float z\nproperty int layer\nend_header\n0 0 0 0\n1 0 0 1\n";
+            std::fs::write(&path, format!("{head}{comment}{body}")).unwrap();
+        };
+        write("comment layer: 0 first, 1 second\n");
+        let mut s = Session::default();
+        let id = s.execute("pointcloud.insert", &json!({"path": path})).unwrap()["cloud"].as_u64().unwrap();
+        s.execute("pointcloud.edit", &json!({"cloud": id, "filters": [{"property": "layer", "values": [1]}]})).unwrap();
+
+        // Still named: the filter stays.
+        s.execute("pointcloud.reload", &json!({"cloud": id})).unwrap();
+        assert_eq!(s.doc.point_clouds[0].filters.len(), 1);
+
+        // The same property with no names: the filter goes, and the cloud can still be edited.
+        write("");
+        s.execute("pointcloud.reload", &json!({"cloud": id})).unwrap();
+        assert!(s.doc.point_clouds[0].filters.is_empty());
+        s.execute("pointcloud.edit", &json!({"cloud": id, "point_size": 4})).unwrap();
         let _ = std::fs::remove_dir_all(d);
     }
 
