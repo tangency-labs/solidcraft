@@ -2623,6 +2623,7 @@
   "prefs.sketch_exit_view_note": "Legt fest, zu welcher Ansicht nach „Skizze beenden“, „Abbrechen“ oder zweimaligem Drücken der Esc-Taste gewechselt wird.",
   "prefs.sketch_face_activates_part": "Skizzieren auf der Fläche eines Teils aktiviert dieses Teil",
   "prefs.sketch_face_activates_part_note": "Eine Skizze, die auf einer Fläche am Körper einer anderen Komponente begonnen wird, aktiviert zuerst diese Komponente, sodass die Skizze zu ihr gehört und im Browser bei diesem Teil bleibt. Das Teil bleibt danach aktiv. Aus: Die Skizze gehört zur aktiven Komponente.",
+  "prefs.sketch_mirror_auto_line": "Vorausgewählte Konstruktionslinie zum Spiegeln verwenden",
   "prefs.sketch_open_look_at": "Beim Öffnen einer Skizze auf sie ausrichten",
   "prefs.sketch_open_look_at_note": "Aus: Beim Erstellen oder Bearbeiten einer Skizze bleibt die Ansicht, wie sie ist. „Ansehen“ richtet die Ansicht bei Bedarf auf die Skizze aus.",
   "prefs.sketch_recent_snap": "Automatisch an zuletzt verwendete Mittelpunkte fangen",

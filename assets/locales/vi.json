@@ -2665,6 +2665,7 @@
   "prefs.sketch_exit_view_note": "Góc nhìn sẽ chuyển đến đâu sau khi bấm Hoàn tất phác thảo, Hủy bỏ hoặc bấm phím Esc hai lần.",
   "prefs.sketch_face_activates_part": "Phác thảo trên mặt của một chi tiết sẽ kích hoạt chi tiết đó",
   "prefs.sketch_face_activates_part_note": "Bản phác thảo bắt đầu trên mặt của một khối thuộc thành phần khác sẽ kích hoạt thành phần đó trước, nên bản phác thảo thuộc về nó và nằm cùng chi tiết đó trong trình duyệt. Chi tiết vẫn được kích hoạt sau đó. Tắt: bản phác thảo thuộc thành phần đang hoạt động.",
+  "prefs.sketch_mirror_auto_line": "Dùng đường dựng hình đã chọn làm đường đối xứng",
   "prefs.sketch_open_look_at": "Xoay góc nhìn trực diện phác thảo khi mở",
   "prefs.sketch_open_look_at_note": "Tắt: tạo hoặc chỉnh sửa phác thảo sẽ giữ nguyên góc nhìn. Dùng Nhìn trực diện để nhìn thẳng vào phác thảo khi cần.",
   "prefs.sketch_recent_snap": "Tự động bắt điểm vào tâm và trung điểm gần đây",

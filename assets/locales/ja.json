@@ -2665,6 +2665,7 @@
   "prefs.sketch_exit_view_note": "「スケッチを終了」、キャンセル、Esc の 2 回押しの後にビューが移る先です。",
   "prefs.sketch_face_activates_part": "部品の面にスケッチするとその部品をアクティブにする",
   "prefs.sketch_face_activates_part_note": "別のコンポーネントのボディの面で始めたスケッチは、先にそのコンポーネントをアクティブにし、スケッチはそのコンポーネントに属してブラウザでその部品の下に表示されます。部品はその後もアクティブのままです。オフ：スケッチはアクティブなコンポーネントに属します。",
+  "prefs.sketch_mirror_auto_line": "事前に選択した補助直線をミラー線に使用する",
   "prefs.sketch_open_look_at": "スケッチを開いたときに正対させる",
   "prefs.sketch_open_look_at_note": "オフ: スケッチの作成や編集でビューを動かしません。必要なときは「正面視」でスケッチに正対します。",
   "prefs.sketch_recent_snap": "最近使った中心と中点へ自動スナップ",

@@ -2665,6 +2665,7 @@
   "prefs.sketch_exit_view_note": "“完成草图”、取消或连按两次 Esc 后视图的去向。",
   "prefs.sketch_face_activates_part": "在零件的面上绘制草图时激活该零件",
   "prefs.sketch_face_activates_part_note": "在另一个组件的实体面上开始的草图会先激活该组件，因此草图属于它，并在浏览器中留在该零件下。之后该零件保持激活。关闭时：草图属于当前激活的组件。",
+  "prefs.sketch_mirror_auto_line": "将预选的构造直线用作镜像线",
   "prefs.sketch_open_look_at": "打开草图时转向正对草图",
   "prefs.sketch_open_look_at_note": "关闭：创建或编辑草图时视图保持不变。需要时用“朝向”正对草图。",
   "prefs.sketch_recent_snap": "自动吸附到最近的圆心和中点",

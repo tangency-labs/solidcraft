@@ -2665,6 +2665,7 @@
   "prefs.sketch_exit_view_note": "Where the view goes after Finish Sketch, Cancel or a double Esc.",
   "prefs.sketch_face_activates_part": "Sketching on a part's face makes that part active",
   "prefs.sketch_face_activates_part_note": "A sketch started on a face of another component's body activates that component first, so the sketch belongs to it and stays with that part in the browser. The part stays active afterwards. Off: the sketch belongs to the active component.",
+  "prefs.sketch_mirror_auto_line": "Use the preselected construction line for Mirror",
   "prefs.sketch_open_look_at": "Turn to face a sketch when it opens",
   "prefs.sketch_open_look_at_note": "Off: creating or editing a sketch leaves the view as it is. Look At faces the sketch when you want it.",
   "prefs.sketch_recent_snap": "Auto snap to recent centers and midpoints",

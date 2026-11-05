@@ -828,6 +828,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | docs/book/src/media/sketching/offset.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) offsetting a sketch outline, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
 | docs/book/src/media/sketching/trim.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) trimming a notch in a sketch, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
 | assets/locales/ca.json | carlymx | Catalan translation of the English catalog, contributed upstream | MIT OR Apache-2.0 |
+| assets/locales/pending/sketch-mirror-auto-line.json | SolidCraft contributors | Original Mirror preference label and translations | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 

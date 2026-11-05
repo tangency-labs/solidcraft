@@ -2160,6 +2160,7 @@
   "prefs.sketch_conflict_colour": "충돌하는 기하를 충돌 색상으로 표시",
   "prefs.sketch_conflict_colour_note": "스케치의 구속 조건이 충돌하는 동안 실패한 구속 조건의 글리프나 치수뿐 아니라 그 구속 조건이 잡고 있는 곡선과 점도 충돌 색상으로 그립니다. 끄기: 평소 색상을 유지합니다.",
   "prefs.sketch_construction_lines": "확장 보조 직선 도구",
+  "prefs.sketch_mirror_auto_line": "미리 선택한 보조 직선을 미러 선으로 사용",
   "prefs.sketch_open_look_at": "스케치를 열 때 정면으로 돌리기",
   "prefs.sketch_open_look_at_note": "끄기: 스케치를 만들거나 편집해도 뷰가 그대로입니다. 필요할 때 '바라보기'로 스케치를 정면으로 봅니다.",
   "prefs.sketch_recent_snap": "최근 중심과 중점에 자동 스냅",
