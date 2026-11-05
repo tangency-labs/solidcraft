@@ -596,6 +596,11 @@ fn path_pattern_start_point_measures_the_copies_from_the_original() {
     refused(json!({"start": "15 * pi"}), "past the end of the path");
     refused(json!({"start": "5 * pi", "spacing": "-5 * pi"}), "past the start of the path");
     refused(json!({"start": 5, "start_fraction": 0.5}), "not both");
+    // A start point that isn't a number or an expression is refused, not read as the path's start.
+    refused(json!({"start": [10]}), "`start` must be a number or an expression");
+    refused(json!({"start": ""}), "`start` must be a number or an expression");
+    refused(json!({"start_fraction": true}), "`start_fraction` must be a number or an expression");
+    refused(json!({"start_fraction": {"value": 0.5}}), "`start_fraction` must be a number or an expression");
     // Backwards from a start point, the copies may run toward the path's start.
     assert_centres(
         &pattern(json!({"start": "10 * pi", "spacing": "-5 * pi"})),

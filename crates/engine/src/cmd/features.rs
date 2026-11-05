@@ -2344,7 +2344,13 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
         Some(o) => return Err(bad(cmd, format!("unknown orientation `{o}` (identical or path)"))),
     };
     let flip = bool_(p, "flip").unwrap_or(false);
-    // The start point: a distance along the path, or a fraction of its length.
+    // The start point: a distance along the path, or a fraction of its length. A value given
+    // that isn't a number or an expression is refused rather than read as the path's start.
+    for key in ["start", "start_fraction"] {
+        if p.get(key).is_some_and(|v| !v.is_null()) && expr(p, key).is_none() {
+            return Err(bad(cmd, format!("`{key}` {}", expr_problem(p.get(key)))));
+        }
+    }
     let (start, start_fraction) = match (expr(p, "start"), expr(p, "start_fraction")) {
         (Some(_), Some(_)) => return Err(bad(cmd, "give `start` (a distance along the path) or `start_fraction` (0…1 of its length), not both")),
         (Some(x), None) => {
