@@ -91,14 +91,11 @@ material.edit
 material.inspect
 material.list
 mesh.convert
-motion.delete
 motion.export
 motion.export_animation
 motion.interference
-motion.list
 motion.play
 motion.plot
-motion.study
 motion.trace
 motion.trace.edit
 motion.trace.keep
