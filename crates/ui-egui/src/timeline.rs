@@ -16,6 +16,82 @@ use crate::SolveApp;
 use crate::context_menu::Item;
 use crate::theme::Tokens;
 
+/// Historical effects and current selections share the engine's query in both timelines.
+pub(crate) fn affected_bodies_menu(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
+    let menu = crate::ui_kit::Menu::button(ui, crate::i18n::tr("timeline.effects.title"), |ui| {
+        let effects = app.session.feature_effects(id);
+        if !effects.evaluated {
+            ui.label(crate::i18n::tr("timeline.effects.unevaluated"));
+            return;
+        }
+        if effects.created_bodies.is_empty() && effects.changed_bodies.is_empty() && effects.removed_bodies.is_empty() {
+            ui.label(crate::i18n::tr("timeline.effects.empty"));
+            return;
+        }
+        egui::ScrollArea::vertical().max_height(Tokens::get().space_24 * 12.0).show(ui, |ui| {
+            for (label, bodies) in [
+                ("timeline.effects.created", effects.created_bodies),
+                ("timeline.effects.changed", effects.changed_bodies),
+                ("timeline.effects.removed", effects.removed_bodies),
+            ] {
+                if bodies.is_empty() {
+                    continue;
+                }
+                ui.strong(crate::i18n::tr(label));
+                for body in bodies {
+                    let label = match body.component_name {
+                        Some(component) => crate::i18n::format("timeline.effects.body_component", &[("body", &body.name), ("component", &component)]),
+                        None => body.name.clone(),
+                    };
+                    let available = !body.selectable_bodies.is_empty();
+                    let response = ui.add_enabled_ui(available, |ui| crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)).inner;
+                    crate::scenario::publish_handle(&format!("timeline:affected:{}", body.name), response.rect.center());
+                    if response.on_disabled_hover_text(crate::i18n::tr("timeline.effects.unavailable")).clicked() {
+                        let items: Vec<_> = body.selectable_bodies.iter().map(|name| json!({"type": "body", "name": name})).collect();
+                        let _ = app.run("select.set", json!({"items": items}));
+                        ui.close();
+                    }
+                }
+            }
+        });
+    });
+    crate::scenario::publish_handle("timeline:effects", menu.response.rect.center());
+}
+
+/// The feature menu's Affected bodies flyout: the bodies the feature created, changed and removed,
+/// from the same `timeline.effects` query as [`affected_bodies_menu`]. A row selects the body's
+/// current instances; one consumed later is listed but disabled.
+fn affected_bodies_item(app: &SolveApp, id: u64) -> Item {
+    let mut item = Item::action("timeline.effects", crate::i18n::tr("timeline.effects.title"), "inspect").with(json!({ "feature": id }));
+    let note = |key: &str| Item::action("-note", crate::i18n::tr(key), "inspect").on_if(false);
+    let effects = app.session.feature_effects(id);
+    if !effects.evaluated {
+        item.children.push(note("timeline.effects.unevaluated"));
+        return item;
+    }
+    if effects.created_bodies.is_empty() && effects.changed_bodies.is_empty() && effects.removed_bodies.is_empty() {
+        item.children.push(note("timeline.effects.empty"));
+        return item;
+    }
+    for (section, bodies) in [
+        ("timeline.effects.created", effects.created_bodies),
+        ("timeline.effects.changed", effects.changed_bodies),
+        ("timeline.effects.removed", effects.removed_bodies),
+    ] {
+        for body in bodies {
+            let name = match &body.component_name {
+                Some(component) => crate::i18n::format("timeline.effects.body_component", &[("body", &body.name), ("component", component)]),
+                None => body.name.clone(),
+            };
+            let label = format!("{}: {name}", crate::i18n::tr(section));
+            let items: Vec<_> = body.selectable_bodies.iter().map(|name| json!({"type": "body", "name": name})).collect();
+            item.children
+                .push(Item::action("select.set", &label, "select").with(json!({ "items": items })).on_if(!body.selectable_bodies.is_empty()));
+        }
+    }
+    item
+}
+
 /// Apply transport actions from the current marker; endpoints stay bounded, including an
 /// empty design. All orientations reach the same rollback command.
 pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryTransport) {
@@ -425,6 +501,7 @@ pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::action("timeline.roll_to", "Roll History Marker Here", "rollback").with(json!({ "feature": id })),
         Item::action("ui.findBrowser", "Find in Browser", "list").with(json!({ "feature": id })),
         Item::sep(),
+        affected_bodies_item(app, id),
         Item::action("timeline.copy", "Copy", "copy").with(json!({ "features": menu_targets(app, id) })),
         Item::action("timeline.paste", "Paste", "paste").with(json!({})).on_if(!app.session.clipboard.is_empty()),
     ]);
@@ -2087,6 +2164,38 @@ mod tests {
             h.step(&json!({"click": {"handle": "timeline:Depth"}, "button": "right"})).unwrap();
             h.step(&json!({"widget": "Edit Profile Sketch"})).unwrap();
             assert_eq!(h.app.session.active_sketch, Some(sketch), "left: {left}");
+        }
+    }
+
+    #[test]
+    fn affected_bodies_menu_selects_a_body_in_both_timelines() {
+        for left in [false, true] {
+            let mut h = Harness::new();
+            h.app.preferences.timeline_left = left;
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Block", "body_name": "Plate"})).unwrap();
+            h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "operation": "cut", "name": "Pocket"})).unwrap();
+            h.frames(4);
+            for (feature, row) in [("Block", "Created: Plate"), ("Pocket", "Changed: Plate")] {
+                if left {
+                    h.step(&json!({"click": {"handle": format!("timeline:{feature}")}, "button": "right"})).unwrap();
+                    h.step(&json!({"widget": "Affected bodies"})).unwrap();
+                    h.step(&json!({"click": {"handle": "timeline:affected:Plate"}})).unwrap();
+                } else {
+                    // The bottom timeline's menu is the shared one (#10745): the flyout's rows are its items.
+                    let id = h.app.session.doc.find_feature(feature).map(|f| f.id).unwrap();
+                    let menu = crate::context_menu::entries(&h.app, &crate::context_menu::Target::Timeline { feature: id });
+                    let item = menu
+                        .iter()
+                        .find(|i| i.label == row)
+                        .unwrap_or_else(|| panic!("no `{row}` in {:?}", menu.iter().map(|i| &i.label).collect::<Vec<_>>()));
+                    crate::context_menu::run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
+                }
+                assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Body { name: "Plate".into() }], "left: {left}, {feature}");
+                if left {
+                    h.step(&json!({"key": "Escape"})).unwrap();
+                }
+                h.app.run("select.set", json!({"items": []})).unwrap();
+            }
         }
     }
 
