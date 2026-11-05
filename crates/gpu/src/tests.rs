@@ -520,6 +520,28 @@ fn multi_backend_bicubic_patch_f32_and_f64_dmma_parity() {
     }
 }
 
+/// Verifies that CUDA device info correctly restricts hardware FP64 tensor cores to enterprise architectures (sm_80, sm_90)
+/// and does not misidentify consumer Ampere/Ada (sm_86, sm_87, sm_89) GPUs as having hardware FP64 tensor cores.
+#[test]
+fn cuda_fp64_tensor_core_detection_rules() {
+    use crate::cuda::CudaBackend;
+    if let Some(cuda) = CudaBackend::global() {
+        let dev = cuda.device_info();
+        let (major, minor) = dev.compute_capability;
+        let expected_hw_fp64 = (major == 8 && minor == 0) || (major == 9 && minor == 0);
+        assert_eq!(
+            dev.supports_fp64_tensor_core,
+            expected_hw_fp64,
+            "device {} (SM {}.{}) FP64 tensor core flag must be {} (hardware FP64 MMA only exists on sm_80 and sm_90)",
+            dev.name,
+            major,
+            minor,
+            expected_hw_fp64
+        );
+        assert_eq!(cuda.has_fp64_tensor_core(), expected_hw_fp64);
+    }
+}
+
 /// Verifies 3-ray watertight point-in-solid classification parity across CPU, Vulkan, CUDA PTX, and RT/BVH backends, including empty-BVH fallback.
 #[test]
 fn multi_backend_point_in_solid_and_rt_bvh_parity() {
