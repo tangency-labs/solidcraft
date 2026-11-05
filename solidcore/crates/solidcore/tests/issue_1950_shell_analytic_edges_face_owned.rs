@@ -98,7 +98,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.check_loop_projected_seam_ends = true;
     f.trim_boundary_seam_wrap = true;
     f.bspline_check_min_radius = true;
-    f.oscillating_skips_failed_guesses = true;
     f.refine_cc_range_ends = true;
     f.flat_corners_test_bits = true;
     f.cylinder_rebuild_mean_radius = true;

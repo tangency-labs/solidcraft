@@ -238,7 +238,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "offset_swap_uv_extended_distance",
     "offset_tangent_gap_statuses",
     "offset_walls_touch_refused",
-    "oscillating_skips_failed_guesses",
     "periodic_extent_add_empty_interval",
     "perspective_sphere_offsets",
     "planar_path_profile_in_path_frame",

@@ -67,7 +67,6 @@
   "curve_check_zero_speed_tangent_end",
   "loop_orientation_floor_from_loop_box",
   "conic_evaluate_uses_computed_second_deriv",
-  "oscillating_skips_failed_guesses",
   "refine_cc_range_ends",
   "global_solver_identical_prefers_larger_when_maximizing",
   "flat_corners_test_bits",

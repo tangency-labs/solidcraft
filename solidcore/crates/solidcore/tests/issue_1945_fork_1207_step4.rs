@@ -3,7 +3,7 @@
 //! with SolidCraft's flag set, rounded r2 along the bar's top front edge and the first round's
 //! section curve. Repro, flag set and root cause by tdamsma on #1945: `SmLocalSolveNd::SolveIt`
 //! kept the unscaled point's Jacobian for a clamped-and-scaled step (fixed in the fork's
-//! tangency-labs/smlib@d2757e1, ported under WR-253's `fixes.oscillating_skips_failed_guesses`), so
+//! tangency-labs/smlib@d2757e1, now unconditional under WR-253), so
 //! a near-tangent SSI's end landed 1.6e-8 off and the rail's UV trim kept a 3.1e-8 span. The fork's
 //! C++ (68fb9162) builds 11 faces / 25 edges / 16 vertices, V 49712.42808748303, check clean.
 #![allow(
@@ -70,7 +70,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.ellipse_step_interval_checks = true;
     k.fixes.uv_trim_checks_on_surface = true;
     k.fixes.loop_orientation_floor_from_loop_box = true;
-    k.fixes.oscillating_skips_failed_guesses = true;
     k.fixes.refine_cc_range_ends = true;
     k.fixes.flat_corners_test_bits = true;
     k.fixes.good_drop_result_distances_in_order = true;
@@ -235,20 +234,19 @@ fn edge_by(k: &Kernel, b: &Brep, pts: &[[f64; 3]; 5]) -> EdgeId {
     best.1.unwrap()
 }
 
-fn run(nd_fix: bool) -> (usize, usize, usize, f64, Vec<String>) {
-    run_memo(nd_fix, None)
+fn run() -> (usize, usize, usize, f64, Vec<String>) {
+    run_memo(None)
 }
 
 /// [`run`] with `Kernel::memoize_curve_caches` set to `memo` (left at its default for
 /// `None`).
-fn run_memo(nd_fix: bool, memo: Option<bool>) -> (usize, usize, usize, f64, Vec<String>) {
+fn run_memo(memo: Option<bool>) -> (usize, usize, usize, f64, Vec<String>) {
     let mut k = Kernel::new(&solidcore::kernel::KernelOptions::default());
     if let Some(memo) = memo {
         k.memoize_curve_caches = memo;
     }
     sc_fixes(&mut k);
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.oscillating_skips_failed_guesses = nd_fix;
     let mut b = read(&mut k);
     let top = edge_by(
         &k,
@@ -308,37 +306,16 @@ fn run_memo(nd_fix: bool, memo: Option<bool>) -> (usize, usize, usize, f64, Vec<
     )
 }
 
-/// With the fix: the fork's body (topology, volume to 1e-9 relative) and a clean check.
+/// The default N-D solve builds the fork's body (topology, volume to 1e-9 relative)
+/// with a clean check. The former flag-on and flag-off controls built this same body
+/// after #2574 made failed 1-D evaluations unconditional; #2782 retires their switch.
 #[test]
 fn step4_round_matches_the_fork_and_checks_clean() {
-    let (f, e, v, vol, lines) = run(true);
+    let (f, e, v, vol, lines) = run();
     assert_eq!((f, e, v), (11, 25, 16));
     let fork = 49712.42808748303;
     assert!((vol - fork).abs() <= 1e-9 * fork, "V {vol} vs fork {fork}");
     assert!(lines.is_empty(), "{lines:#?}");
-}
-
-/// Without the N-D opt-in this case builds the same body: since
-/// tangency-labs/solidcore#2574 the one-dimensional solve takes no value from a failed
-/// evaluation by default, and `oscillating_skips_failed_guesses` no longer changes the
-/// result here — the fork's topology and volume, bit for bit what `run(true)` builds, and
-/// a clean check. Before #2574 the rail's UV trim kept its short span (test #15), and
-/// with SolidCraft's tangent end (WR-600's flag, the fork's tangency-labs/smlib@856b54e)
-/// the upstream solve left a false near cusp in a straight 2D trim instead (test #13), so
-/// the body was refused.
-#[test]
-fn step4_round_without_the_nd_opt_in_builds_the_same_body() {
-    let (f, e, v, vol, lines) = run(false);
-    assert_eq!((f, e, v), (11, 25, 16));
-    let fork = 49712.42808748303;
-    assert!((vol - fork).abs() <= 1e-9 * fork, "V {vol} vs fork {fork}");
-    assert!(lines.is_empty(), "{lines:#?}");
-    let (_, _, _, with_opt_in, _) = run(true);
-    assert_eq!(
-        vol.to_bits(),
-        with_opt_in.to_bits(),
-        "V {vol} vs {with_opt_in}"
-    );
 }
 
 /// #2568: the check's curve analysis shortcuts change no report. Without the fix the
@@ -347,11 +324,9 @@ fn step4_round_without_the_nd_opt_in_builds_the_same_body() {
 /// the report.
 #[test]
 fn step4_checks_the_same_with_and_without_the_curve_analysis_shortcuts() {
-    for nd_fix in [false, true] {
-        let full = run_memo(nd_fix, Some(false));
-        let fast = run_memo(nd_fix, Some(true));
-        assert_eq!(fast.4, full.4, "nd_fix {nd_fix}");
-        assert_eq!((fast.0, fast.1, fast.2), (full.0, full.1, full.2));
-        assert_eq!(fast.3.to_bits(), full.3.to_bits());
-    }
+    let full = run_memo(Some(false));
+    let fast = run_memo(Some(true));
+    assert_eq!(fast.4, full.4);
+    assert_eq!((fast.0, fast.1, fast.2), (full.0, full.1, full.2));
+    assert_eq!(fast.3.to_bits(), full.3.to_bits());
 }

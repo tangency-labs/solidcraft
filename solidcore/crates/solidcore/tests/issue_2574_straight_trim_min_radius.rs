@@ -5,7 +5,7 @@
 //! where its objective cannot be evaluated.
 //!
 //! The curve is the mapped UV trim of a face of `issue_1945_fork_1207_step4`'s result
-//! built without `oscillating_skips_failed_guesses` (its `run(false)`), read out of the
+//! built with the former N-D fix disabled (its historical `run(false)`), read out of the
 //! check: a 2D cubic with 13 control points of weight 1, all at y = 2 sqrt 2, x rising
 //! unevenly from 5.6e-15 to 4.70465, over four spans joined `C0` (interior knots of
 //! multiplicity 3 = p).
@@ -178,7 +178,7 @@ impl SolutionObject for TrimCurve {
 
 /// A kernel whose only opt-in fix is the one the radius test needs: it reads the search's
 /// minimum radius (WR-382). The search itself takes no value from a failed evaluation by
-/// default since #2574, so `oscillating_skips_failed_guesses` stays off here.
+/// default since #2574; the N-D correction is also unconditional since #2782.
 fn check_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes.bspline_check_min_radius = true;
