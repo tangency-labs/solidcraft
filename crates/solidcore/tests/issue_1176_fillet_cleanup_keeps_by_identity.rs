@@ -46,6 +46,11 @@ fn read(k: &mut Kernel, rel: &str) -> Option<Brep> {
         .join("../../upstream/TestFiles/pt_TestFiles")
         .join(rel);
     let Ok(bytes) = std::fs::read(&path) else {
+        assert!(
+            std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+            "SOLIDCORE_REQUIRE_UPSTREAM is set and the upstream test file is missing: {}",
+            path.display()
+        );
         eprintln!("unavailable upstream test file: {}", path.display());
         return None;
     };

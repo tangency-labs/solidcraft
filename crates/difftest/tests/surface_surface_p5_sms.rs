@@ -227,6 +227,11 @@ fn available_surface_fixture_matches_original_layout_bitwise() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../upstream/TestFiles/pt_TestFiles/Surface.sms");
     if !path.is_file() {
+        assert!(
+            std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+            "SOLIDCORE_REQUIRE_UPSTREAM is set and the upstream test file is missing: {}",
+            path.display()
+        );
         eprintln!("Surface.sms bit census unavailable: {}", path.display());
         return;
     }

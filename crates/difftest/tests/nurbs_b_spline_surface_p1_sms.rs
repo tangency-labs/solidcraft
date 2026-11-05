@@ -215,6 +215,11 @@ fn available_fixture_asset_bit_census() {
     ] {
         let path = root.join(file);
         if !path.exists() {
+            assert!(
+                std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+                "SOLIDCORE_REQUIRE_UPSTREAM is set and the upstream test file is missing: {}",
+                path.display()
+            );
             eprintln!("SKIP unavailable asset: {}", path.display());
             continue;
         }

@@ -244,6 +244,11 @@ fn available_fixture_bit_census() {
         assert!(files.iter().any(|file| file == name));
         let path = root.join("upstream/TestFiles/pt_TestFiles").join(name);
         if !path.exists() {
+            assert!(
+                std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+                "SOLIDCORE_REQUIRE_UPSTREAM is set and the upstream test file is missing: {}",
+                path.display()
+            );
             eprintln!("unavailable fixture: {}", path.display());
             continue;
         }

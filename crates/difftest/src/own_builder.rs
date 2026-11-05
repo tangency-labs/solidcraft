@@ -1919,6 +1919,11 @@ mod tests {
         use solidcore::topology::edgeuse::p1::{set_uv_trim_curve, UvTrimCurveArg};
         let root = crate::case::repo_root();
         let Ok(path) = crate::fixtures::upstream_test_file(&root, "Solids/box.smb") else {
+            assert!(
+                std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+                "SOLIDCORE_REQUIRE_UPSTREAM is set and the upstream test file is missing: {}",
+                "Solids/box.smb"
+            );
             eprintln!("unavailable upstream test file: Solids/box.smb");
             return;
         };

@@ -64,6 +64,11 @@ fn root() -> Option<PathBuf> {
     if root.is_dir() {
         Some(root)
     } else {
+        assert!(
+            std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+            "SOLIDCORE_REQUIRE_UPSTREAM is set and the upstream test file is missing: {}",
+            root.display()
+        );
         eprintln!("upstream test files missing: {}", root.display());
         None
     }

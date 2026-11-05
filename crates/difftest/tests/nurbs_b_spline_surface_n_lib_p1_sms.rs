@@ -270,6 +270,11 @@ fn available_fixture_bit_census_and_unchanged_reference_inventory() {
     for name in sms_refs.keys() {
         let path = root.join("upstream/TestFiles/pt_TestFiles").join(name);
         if !path.is_file() {
+            assert!(
+                std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+                "SOLIDCORE_REQUIRE_UPSTREAM is set and the upstream test file is missing: {}",
+                path.display()
+            );
             missing.push(name.clone());
             continue;
         }

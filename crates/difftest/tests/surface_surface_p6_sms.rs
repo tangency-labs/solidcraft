@@ -233,6 +233,11 @@ fn available_upstream_fixture_census_matches_original_storage_bits() {
         let path = root.join(name);
         if !path.exists() {
             // The licensed upstream checkout is optional for non-C++ CI.
+            assert!(
+                std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+                "SOLIDCORE_REQUIRE_UPSTREAM is set and the upstream test file is missing: {}",
+                path.display()
+            );
             eprintln!("fixture census: {name} unavailable (not checked)");
             continue;
         }

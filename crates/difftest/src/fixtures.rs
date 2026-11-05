@@ -209,6 +209,13 @@ mod tests {
     fn pts_loader() {
         let root = crate::case::repo_root();
         let Ok(p) = upstream_test_file(&root, "FitCrvPoints.pts") else {
+            assert!(
+                std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+                "SOLIDCORE_REQUIRE_UPSTREAM is set and the upstream test file is missing: {}",
+                root.join(UPSTREAM_TEST_FILES)
+                    .join("FitCrvPoints.pts")
+                    .display()
+            );
             return; // upstream checkout absent
         };
         let pts = load_pts(&p).unwrap();

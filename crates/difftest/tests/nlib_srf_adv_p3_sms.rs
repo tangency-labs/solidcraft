@@ -208,6 +208,11 @@ fn available_sms_asset_storage_bit_census() {
     for name in ["Surface.sms", "offset_nurb.sms", "DropCurveSurface.sms"] {
         let path = root.join(name);
         if !path.exists() {
+            assert!(
+                std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+                "SOLIDCORE_REQUIRE_UPSTREAM is set and the upstream test file is missing: {}",
+                path.display()
+            );
             eprintln!("SMS census missing: {}", path.display());
             continue;
         }

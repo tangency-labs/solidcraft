@@ -112,8 +112,14 @@ jobs:
     runs-on: blacksmith-8vcpu-ubuntu-2404
     env:
       SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
+      # Tests that read upstream/TestFiles fail instead of skipping when it is missing.
+      SOLIDCORE_REQUIRE_UPSTREAM: "1"
     steps:
       - uses: actions/checkout@v4
+      # upstream/ for the tests that read its TestFiles, sccache for every build here,
+      # and the C++ reference for the difftest runner tests below.
+      - name: Upstream sources, sccache and the C++ reference
+        uses: ./.github/actions/cpp-reference
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> bin"
@@ -157,11 +163,9 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       # The difftest runners' own unit tests (guards, decoders, probes) need the C++
-      # reference. Same profile as the difftest job's binary (Cargo.toml
-      # [profile.difftest]); here rather than after the difftest run, so they no longer
-      # add to its wall time.
-      - uses: ./.github/actions/cpp-reference
-        if: needs.changes.outputs.full == 'true' && github.event_name == 'workflow_dispatch' && inputs.difftest
+      # reference (installed above). Same profile as the difftest job's binary
+      # (Cargo.toml [profile.difftest]); here rather than after the difftest run, so they
+      # no longer add to its wall time.
       - name: Difftest runner tests
         if: needs.changes.outputs.full == 'true' && github.event_name == 'workflow_dispatch' && inputs.difftest
         run: cargo test --profile difftest -p difftest -p solidcore-ffi --features cpp
