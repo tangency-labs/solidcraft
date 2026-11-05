@@ -399,6 +399,12 @@ pub fn order_grouped<'a>(
     out
 }
 
+/// Which group of `panel`'s drop-down command `id` is in (past the last for one in none).
+pub fn group_index(tab: &str, panel: &str, id: &str) -> usize {
+    let groups = crate::workspace::groups(tab, panel);
+    groups.iter().position(|g| g.ids.contains(&id)).unwrap_or(groups.len())
+}
+
 /// Move a command in its panel's drop-down before `before` (None: to the end), within its own
 /// group: a place in another group moves it to the nearest end of its own (#5080).
 pub fn move_in_menu(app: &mut SolveApp, tab: &str, panel: &str, id: &str, before: Option<&str>) {

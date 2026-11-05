@@ -244,7 +244,8 @@ onto the ribbon, also pins it; a pinned command always shows its pin.
 
 To change the order of a section's menu, drag a command to another place in it (list or large
 icons): a line shows where it will go. A command stays within its group (Edges, Faces, …). The
-order is kept with the toolbar, and **Reset Toolbar** restores it.
+order is kept with the toolbar, and **Reset Toolbar** restores it. Two menus keep their built-in
+order and can't be rearranged: Sketch › **Create** and the **»** overflow menu.
 
 Interface › **Leave pinned commands out of the drop-down menus** (off by default) lists in a
 section's menu only the commands that are not already buttons on the ribbon. When the window is

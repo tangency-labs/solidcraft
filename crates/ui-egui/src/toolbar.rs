@@ -2282,7 +2282,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                     &mut paints,
                                     &mut placed,
                                 );
-                                if let Some((id, before)) = menu_drop(ui, &placed, true) {
+                                if let Some((id, before)) = menu_drop(ui, &placed, true, &|id| crate::toolbar_custom::group_index(&tab, panel, id)) {
                                     menu_move = Some((*panel, id, before));
                                 }
                                 grid_action(app, ui, action, &mut menu, &mut toggle);
@@ -2324,7 +2324,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                         section_heading(ui, heading, row_w);
                                     }
                                     let pinned = crate::toolbar_custom::pinned_on(app, &tab, c.id).is_some();
-                                    placed.push((c.id, Rect::from_min_size(ui.cursor().min, vec2(row_w, ROW_H))));
+                                    // Only the part the menu's scroll area shows takes a drop.
+                                    placed.push((c.id, Rect::from_min_size(ui.cursor().min, vec2(row_w, ROW_H)).intersect(ui.clip_rect())));
                                     let revealed = reveal.as_ref().is_some_and(|r| r.id == c.id);
                                     match dropdown_row(app, ui, c, row_w, pinned, revealed.then_some(pulse)) {
                                         RowAction::None => {}
@@ -2337,7 +2338,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                     }
                                 }
                             });
-                            if let Some((id, before)) = menu_drop(ui, &placed, false) {
+                            if let Some((id, before)) = menu_drop(ui, &placed, false, &|id| crate::toolbar_custom::group_index(&tab, panel, id)) {
                                 menu_move = Some((*panel, id, before));
                             }
                             section_footer(ui, "ui.ribbon_pin_footer");
@@ -2970,14 +2971,30 @@ fn dropdown_row(
 /// or after the command under the pointer (the nearer side: across in the grid, up or down in
 /// the list), and on release it goes there. `placed`: where each command was drawn, in order.
 /// Returns the command and the one it goes before (None: after the last).
-fn menu_drop(ui: &egui::Ui, placed: &[(&'static str, Rect)], grid: bool) -> Option<(&'static str, Option<&'static str>)> {
+fn menu_drop(
+    ui: &egui::Ui,
+    placed: &[(&'static str, Rect)],
+    grid: bool,
+    group_of: &dyn Fn(&str) -> usize,
+) -> Option<(&'static str, Option<&'static str>)> {
     let dragged = egui::DragAndDrop::payload::<ToolbarDrag>(ui.ctx()).filter(|d| d.from_menu)?.id;
     if !placed.iter().any(|(id, _)| *id == dragged) {
         return None;
     }
     let pointer = ui.ctx().pointer_latest_pos()?;
-    let (at, &(_, rect)) = placed.iter().enumerate().find(|(_, (_, r))| r.contains(pointer))?;
-    let after = if grid { pointer.x > rect.center().x } else { pointer.y > rect.center().y };
+    let (at, &(target, rect)) = placed.iter().enumerate().find(|(_, (_, r))| r.is_positive() && r.contains(pointer))?;
+    let mut after = if grid { pointer.x > rect.center().x } else { pointer.y > rect.center().y };
+    let mut at = at;
+    let mut rect = rect;
+    // A command stays within its group: over another group's command, the marker shows at its
+    // own group's nearer end, where the move puts it.
+    let own = group_of(dragged);
+    if group_of(target) != own {
+        let mine: Vec<usize> = placed.iter().enumerate().filter(|(_, (id, _))| group_of(id) == own).map(|(i, _)| i).collect();
+        let end = if group_of(target) < own { mine.first().map(|i| (*i, false)) } else { mine.last().map(|i| (*i, true)) };
+        let (i, a) = end?;
+        (at, after, rect) = (i, a, placed.get(i)?.1);
+    }
     let before = if after { placed.get(at + 1).map(|(id, _)| *id) } else { placed.get(at).map(|(id, _)| *id) };
     let t = Tokens::get();
     let painter = ui.ctx().layer_painter(ui.layer_id());
@@ -3250,7 +3267,7 @@ fn dropdown_grid(
         for ((_, c), (rect, _)) in grouped.iter().zip(&layout.cells) {
             let rect = rect.translate(origin.to_vec2());
             let pinned = crate::toolbar_custom::pinned_on(app, tab, c.id).is_some();
-            placed.push((c.id, rect));
+            placed.push((c.id, rect.intersect(ui.clip_rect())));
             match dropdown_cell(app, ui, c, rect, pinned, paints) {
                 RowAction::None => {}
                 done => action = Some((c.id, done)),
