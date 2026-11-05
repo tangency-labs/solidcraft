@@ -418,10 +418,10 @@ fn a_thread_depth_of_its_own_gets_its_own_line() {
     run(&mut s, "solid.hole", json!({"position": [90, 30, 40], "thread": "M8", "depth": 15, "thread_depth": 10, "name": "Tapped"}));
     let c = callout(&mut s, "Tapped");
     assert!(near(&c["callout"]["thread_depth"], 10.0), "{c}");
-    assert_eq!(lines(&c), ["Ø6.75 ↧ 15.00", "M8 ↧ 10.00"]);
+    assert_eq!(lines(&c), ["M8 ↧ 10.00", "Ø6.75 ↧ 15.00"]);
     // Through, threaded 10: the tap drill goes through, the thread doesn't.
     run(&mut s, "solid.hole", json!({"position": [10, 30, 40], "thread": "M6", "thread_depth": 10, "name": "ThroughTapped"}));
-    assert_eq!(lines(&callout(&mut s, "ThroughTapped")), ["Ø5.00 THRU", "M6 ↧ 10.00"]);
+    assert_eq!(lines(&callout(&mut s, "ThroughTapped")), ["M6 ↧ 10.00", "Ø5.00 THRU"]);
 }
 
 #[test]
@@ -572,7 +572,7 @@ fn a_tapped_hole_under_a_recess_gives_its_thread_depth_from_the_start_face() {
     );
     let c = callout(&mut s, "Cb");
     assert!(near(&c["callout"]["thread_depth"], 14.0), "{c}");
-    assert_eq!(lines(&c), ["Ø6.75 ↧ 20.00", "M8 ↧ 14.00", "⌴ Ø14.00 ↧ 4.00"]);
+    assert_eq!(lines(&c), ["M8 ↧ 14.00", "Ø6.75 ↧ 20.00", "⌴ Ø14.00 ↧ 4.00"]);
     // Countersunk Ø12.75 × 90°: its cone reaches (12.75 - 6.75) / 2 = 3 below the top.
     run(
         &mut s,
@@ -581,5 +581,5 @@ fn a_tapped_hole_under_a_recess_gives_its_thread_depth_from_the_start_face() {
     );
     let c = callout(&mut s, "Cs");
     assert!((c["callout"]["thread_depth"].as_f64().unwrap_or(f64::NAN) - 13.0).abs() < 1e-9, "{c}");
-    assert_eq!(lines(&c), ["Ø6.75 ↧ 20.00", "M8 ↧ 13.00", "⌵ Ø12.75 × 90.00°"]);
+    assert_eq!(lines(&c), ["M8 ↧ 13.00", "Ø6.75 ↧ 20.00", "⌵ Ø12.75 × 90.00°"]);
 }

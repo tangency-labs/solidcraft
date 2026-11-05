@@ -514,10 +514,10 @@ fn bore_floor(st: &ModelState, id: u64, at: Vec3, dir: Vec3, r: f64, depth: Opti
     body.filter(|_| wall || floor).map(|body| Bore { floor, body, changed })
 }
 
-/// The callout's text, one line each: the hole, then (for a thread of its own depth, shorter
-/// than the hole) the thread, then its counterbore or countersink. Both depths read from the
-/// face the hole starts on. A tapped hole whose thread runs its length is one line, the thread in
-/// place of the drill.
+/// The callout's text, one line each, the count on the first: for a thread of its own depth,
+/// shorter than the hole, the thread first (ASME Y14.5, ISO 6410), then the drill and its extent;
+/// then the counterbore or countersink. Both depths read from the face the hole starts on. A
+/// tapped hole whose thread runs its length is one line, the thread in place of the drill.
 pub fn text(c: &HoleCallout, style: &TextStyle) -> Result<Vec<String>> {
     style.validate()?;
     let len = |mm: f64| display_units::length_number(mm, &style.units, style.decimals);
@@ -528,18 +528,15 @@ pub fn text(c: &HoleCallout, style: &TextStyle) -> Result<Vec<String>> {
         (Some(t), Extent::Blind { depth }) if t >= depth - 1e-9 * depth.max(1.0) => None,
         (t, _) => t,
     };
-    let size = match (&c.thread, thread_depth) {
-        (Some(t), None) => t.clone(),
-        _ => format!("Ø{}", len(c.diameter)),
-    };
     let extent = match c.extent {
         Extent::Through => format!(" {}", words(&style.language).through),
         Extent::Blind { depth } => format!(" ↧ {}", len(depth)),
     };
-    let mut lines = vec![format!("{count}{size}{extent}")];
-    if let (Some(t), Some(depth)) = (&c.thread, thread_depth) {
-        lines.push(format!("{t} ↧ {}", len(depth)));
-    }
+    let mut lines = match (&c.thread, thread_depth) {
+        (Some(t), Some(depth)) => vec![format!("{count}{t} ↧ {}", len(depth)), format!("Ø{}{extent}", len(c.diameter))],
+        (Some(t), None) => vec![format!("{count}{t}{extent}")],
+        (None, _) => vec![format!("{count}Ø{}{extent}", len(c.diameter))],
+    };
     match c.form {
         Form::Simple | Form::Drilled { .. } => {}
         Form::Counterbore { diameter, depth } => lines.push(format!("⌴ Ø{} ↧ {}", len(diameter), len(depth))),
@@ -608,7 +605,7 @@ mod tests {
         c.thread = Some("M8".into());
         assert_eq!(text(&c, &style("mm", 2, "en")).unwrap(), ["2× M8 ↧ 15.00"]);
         c.thread_depth = Some(10.0);
-        assert_eq!(text(&c, &style("mm", 2, "en")).unwrap(), ["2× Ø6.75 ↧ 15.00", "M8 ↧ 10.00"]);
+        assert_eq!(text(&c, &style("mm", 2, "en")).unwrap(), ["2× M8 ↧ 10.00", "Ø6.75 ↧ 15.00"]);
         // As deep as the hole, or (never from the model, which keeps a thread within the wall)
         // deeper: the thread runs its length, one line as before, never two that disagree.
         for t in [15.0, 16.0] {
@@ -620,7 +617,7 @@ mod tests {
         c.thread_depth = Some(14.0);
         c.extent = Extent::Through;
         c.form = Form::Counterbore { diameter: 14.0, depth: 4.0 };
-        assert_eq!(text(&c, &style("mm", 2, "de")).unwrap(), ["2× Ø6.75 DURCH", "M8 ↧ 14.00", "⌴ Ø14.00 ↧ 4.00"]);
+        assert_eq!(text(&c, &style("mm", 2, "de")).unwrap(), ["2× M8 ↧ 14.00", "Ø6.75 DURCH", "⌴ Ø14.00 ↧ 4.00"]);
     }
 
     #[test]
