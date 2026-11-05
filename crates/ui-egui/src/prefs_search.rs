@@ -839,6 +839,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn theme_picker_names_and_controls_are_searchable_and_theme_results_reveal_real_cards() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", serde_json::json!({"width":1467,"height":1146}));
+        h.call("ui.prefs", serde_json::json!({"language":"en","theme":"system","open":"Appearance"}));
+        for label in
+            ["Onyx", "Follow system", "One theme", "Carousel", "Grid", "Day theme", "Night theme", "High contrast", "Import theme file…", "Imported"]
+        {
+            h.app.prefs_window.filter = label.to_owned();
+            h.frames(5);
+            let (_, _, hits) = nav(&h.ctx);
+            let matches: Vec<_> =
+                hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_APPEARANCE && hit.label == label).collect();
+            assert_eq!(
+                matches.len(),
+                1,
+                "{label} has one searchable Appearance control: {:?}",
+                hits.iter().map(|hit| (&hit.label, hit.page)).collect::<Vec<_>>()
+            );
+            if label == "Onyx" {
+                set_cursor(&h.ctx, matches[0].0);
+                h.frames(2);
+                h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+                h.frames(25);
+                let page = crate::scenario::rect_of("prefs:page_body").unwrap();
+                let target = crate::scenario::rect_of("prefs:theme:onyx").unwrap();
+                assert!(page.contains_rect(target));
+                assert_eq!(h.app.preferences.theme, "system", "revealing a theme never selects it");
+            }
+        }
+    }
+
+    #[test]
     fn graphics_cards_tiles_and_short_status_labels_keep_search_paths_and_reveal() {
         for theme in ["light", "dark"] {
             let mut h = crate::scenario::Harness::new();
