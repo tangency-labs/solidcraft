@@ -515,7 +515,7 @@ fn tool_sheets_drag_over_browser_and_history_but_clear_protected_panels() {
             if target == browser.center() {
                 assert!(sheet.intersect(browser).is_positive(), "sheet can cover Browser");
                 let layer = h.ctx.layer_id_at(sheet.intersect(browser).center()).unwrap();
-                assert_eq!(layer.id, egui::Id::new(("sc_dialog", "CREATE SKETCH")), "sheet receives input above Browser");
+                assert_eq!(layer.id, egui::Id::unique(("sc_dialog", "CREATE SKETCH")), "sheet receives input above Browser");
             } else if target == history.center() {
                 assert!(sheet.intersect(history).is_positive(), "sheet can cover History");
             }
@@ -546,7 +546,7 @@ fn tool_sheets_stay_above_browser_and_history_after_panel_clicks() {
             assert!(!sheet.contains(exposed), "the panel click is outside the dialog");
             h.call("ui.click", json!({"x":exposed.x,"y":exposed.y}));
             let layer = h.ctx.layer_id_at(overlap.center()).unwrap();
-            assert_eq!(layer.id, egui::Id::new(("sc_dialog", "EXTRUDE")), "{dock}: clicking a panel must not cover the dialog");
+            assert_eq!(layer.id, egui::Id::unique(("sc_dialog", "EXTRUDE")), "{dock}: clicking a panel must not cover the dialog");
             let panel_layer = h.ctx.layer_id_at(exposed).unwrap();
             h.call("ui.click", json!({"x":1700,"y":500}));
             assert_eq!(h.ctx.layer_id_at(exposed), Some(panel_layer), "clicking the model view must not cover the panel");
@@ -575,9 +575,9 @@ fn tool_sheet_dropdowns_and_preferences_still_open_above_the_sheet() {
         let preferences = rect_of("dialog:window").unwrap();
         let overlap = sheet.intersect(preferences);
         assert!(overlap.is_positive(), "Preferences overlaps the feature dialog");
-        assert_eq!(h.ctx.layer_id_at(overlap.center()).unwrap().id, egui::Id::new("sc_prefs"), "Preferences receives input above the sheet");
+        assert_eq!(h.ctx.layer_id_at(overlap.center()).unwrap().id, egui::Id::unique("sc_prefs"), "Preferences receives input above the sheet");
         let cancel = rect_of("prefs:cancel").expect("Preferences Cancel");
-        assert_eq!(h.ctx.layer_id_at(cancel.center()).unwrap().id, egui::Id::new("sc_prefs"), "Preferences owns its Cancel target");
+        assert_eq!(h.ctx.layer_id_at(cancel.center()).unwrap().id, egui::Id::unique("sc_prefs"), "Preferences owns its Cancel target");
         h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
         assert!(!h.app.prefs_window.open && h.app.dialog.is_some(), "Cancel closes Preferences, leaving the feature dialog open");
         h.step(&json!({"widget":"Cancel"})).unwrap();
@@ -741,11 +741,90 @@ fn embed_keeps_model_panels_without_application_chrome() {
     assert!(h.app.viewport.rect.is_some());
 }
 
+#[test]
+fn embed_editor_keeps_the_ribbon_and_leaves_files_to_the_host() {
+    let mut h = Harness::new();
+    h.settle();
+    assert!(rect_of("appbar:home").is_some(), "the full app has its application bar");
+    h.app.embed_editor = true;
+    h.app.home.show(h.app.session.revision);
+    h.settle();
+    assert!(!h.app.home.open, "the host shows the design, never the start page");
+    assert_eq!(h.app.ui.layout, LayoutMode::Docked);
+    assert!(rect_of("appbar:home").is_none() && rect_of("titlebar:report").is_none(), "no application bar");
+    assert!(rect_of("button:sketch.create").is_some() && rect_of("browser:card").is_some(), "the modelling surface stays");
+    // With no bar to hold it, command search stays in the ribbon whatever the host's header layout.
+    h.app.header = crate::toolbar::HeaderLayout::COMPACT;
+    h.settle();
+    assert!(rect_of("ribbon:search").is_some() && rect_of("titlebar:search").is_none());
+    h.step(&json!({"click":{"handle":"button:sketch.create"}})).unwrap();
+    assert!(h.app.dialog.is_some(), "and its commands work");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    // New, Open, Save, Close and Preferences belong to the host page.
+    let (docs, revision) = (h.app.docs.count(), h.app.session.revision);
+    for key in ["N", "O", "S", "W", "Comma"] {
+        h.step(&json!({"key":key,"cmd":true})).unwrap();
+    }
+    h.settle();
+    assert_eq!((h.app.docs.count(), h.app.session.revision), (docs, revision));
+    assert!(!h.app.file_picker_busy() && !h.app.prefs_window.open, "{}", h.call("ui.inspect", json!({})));
+    // Undo stays the design's own.
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.settle();
+    h.step(&json!({"key":"Z","cmd":true})).unwrap();
+    assert!(h.app.session.doc.features.is_empty(), "Ctrl+Z undoes in the embed too");
+}
+
 /// A design with a finished sketch nothing uses yet, so Extrude opens ready for OK.
 fn sketched(h: &mut Harness) {
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
+}
+
+#[test]
+fn a_host_keeps_the_design_and_gives_it_back_with_its_timeline() {
+    let mut h = Harness::new();
+    h.app.embed_editor = true;
+    sketched(&mut h);
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.settle();
+    let kept = h.call("document.export", json!({}));
+    assert_eq!(kept["ok"], true, "{kept}");
+    let kept = &kept["result"];
+    assert_eq!((kept["format"].as_str(), kept["dirty"].as_bool()), (Some("json"), Some(true)));
+    assert_eq!(kept["revision"], h.call("document.revision", json!({}))["result"]["revision"], "the revision that follows the design");
+    let text = kept["text"].as_str().unwrap().to_string();
+    let timeline = |h: &Harness| h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    let before = timeline(&h);
+    assert!(before.len() >= 2, "{before:?}");
+    // The host says it saved: the design is saved from there, until the next change.
+    let at = kept["revision"].as_u64().unwrap();
+    assert_eq!(h.call("document.saved", json!({"revision": at}))["result"]["dirty"], false);
+    assert!(!h.app.session.is_dirty());
+    assert_eq!(h.call("document.saved", json!({"revision": at + 7}))["ok"], false, "another revision is refused");
+    // Something else is drawn and left open; the kept design comes back in its place, saved,
+    // timeline and all, and what was going on in the other leaves with it.
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    assert_eq!(h.call("document.saved", json!({"revision": at}))["ok"], false, "the design changed since");
+    h.call("ui.start", json!({"command":"sketch.create"}));
+    h.settle();
+    assert!(h.app.dialog.is_some(), "{}", h.call("ui.inspect", json!({})));
+    let (docs, id) = (h.app.docs.count(), h.app.session.document_id.clone());
+    let back = h.call("document.import", json!({"text": text, "name": "Bracket"}));
+    assert_eq!(back["ok"], true, "{back}");
+    assert_eq!(back["result"]["errors"], 0);
+    assert_eq!(back["result"]["revision"], h.call("document.revision", json!({}))["result"]["revision"]);
+    assert_eq!(timeline(&h), before);
+    assert_eq!((h.app.session.doc.name.as_str(), h.app.session.is_dirty(), h.app.docs.count()), ("Bracket", false, docs));
+    assert_ne!(h.app.session.document_id, id, "another design, as one opened is");
+    assert!(h.app.session.undo.is_empty(), "the undo history is the opened design's own");
+    assert!(h.app.dialog.is_none() && h.app.tool.is_none());
+    h.settle();
+    for bad in [json!({}), json!({"text": "{"}), json!({"text": "not a design"})] {
+        assert_eq!(h.call("document.import", bad.clone())["ok"], false, "{bad}");
+        assert_eq!(timeline(&h), before, "a refused import leaves the design as it was");
+    }
 }
 
 /// Dialogs › In the left column (#6707): Extrude takes the place of the browser and the History
@@ -1107,7 +1186,7 @@ fn status_bar_units_open_the_units_menu_above_the_bar_and_change_units_in_one_un
     let labels: Vec<_> = menu["items"].as_array().unwrap().iter().map(|i| i["label"].as_str().unwrap().to_string()).collect();
     assert_eq!(labels, crate::prefs::UNITS);
     // The list opens above the bar, inside the window.
-    let list = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_context_menu"))).unwrap();
+    let list = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).unwrap();
     assert!(list.bottom() <= button.top() + 0.5 && list.top() >= 0.0, "{list:?} {button:?}");
     assert_eq!(h.app.session.undo.len(), undo, "opening the menu changes nothing");
     h.call("ui.menuPick", json!({"item":"in"}));
@@ -1151,7 +1230,7 @@ fn status_bar_mouse_mapping_opens_the_mappings_and_picks_one_as_the_preferences_
     let labels: Vec<_> = menu.iter().map(|item| item.label.as_str()).collect();
     assert_eq!(labels, crate::prefs::NAV_PRESETS.iter().map(|preset| preset.translated_label()).collect::<Vec<_>>());
     assert_eq!(menu.iter().filter(|item| item.shortcut == "current").map(|item| item.label.as_str()).collect::<Vec<_>>(), ["Fusion"]);
-    let list = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_context_menu"))).unwrap();
+    let list = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).unwrap();
     assert!(list.bottom() <= button.top() + 0.5 && list.top() >= 0.0, "{list:?} {button:?}");
     // Each mapping, picked from the menu, sets what Preferences › Navigation sets for it.
     for preset in crate::prefs::NAV_PRESETS {

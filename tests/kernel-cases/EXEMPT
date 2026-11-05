@@ -5,7 +5,9 @@
 #
 # Commands with no geometry to grade: the view, rendering, appearance, materials, selection, the
 # browser, files and saving, documents, diagnostics, and component, parameter and timeline
-# bookkeeping. Each is covered by the engine's and the UI's own tests.
+# bookkeeping. Each is covered by the engine's and the UI's own tests. A command added since this
+# folder stopped taking cases (tests/kernel-cases/CASES) is listed here too, its reason naming
+# where it is tested: its kernel case in solidcore's corpus, or its test in its area's test file.
 
 appearance.assign                 appearance only: colours and textures
 appearance.chain                  appearance only: colours and textures
@@ -91,6 +93,11 @@ inspect.curvature_map             display analysis: shading
 inspect.environment_map           display analysis: shading
 inspect.silhouette                display analysis: outline
 inspect.zebra                     display analysis: shading
+layout.apply                      application panel layout; no geometry (engine/UI/MCP tests)
+layout.get                        application panel layout; no geometry (engine/UI/MCP tests)
+layout.reset                      application panel layout; no geometry (engine/UI/MCP tests)
+layout.save                       application panel layout; no geometry (engine/UI/MCP tests)
+layout.workspace.select           application panel layout; no geometry (engine/UI/MCP tests)
 library.apply                     material and appearance libraries
 library.export                    material and appearance libraries
 library.inspect                   material and appearance libraries
@@ -107,6 +114,21 @@ motion.delete                     removes a motion study
 motion.export                     writes a study's results to a file
 motion.export_animation           writes an animation
 motion.list                       a listing of motion studies
+panel.activate                    application panel layout; no geometry (engine/UI/MCP tests)
+panel.close                       application panel layout; no geometry (engine/UI/MCP tests)
+panel.collapse                    application panel layout; no geometry (engine/UI/MCP tests)
+panel.dismiss                     application panel layout; no geometry (engine/UI/MCP tests)
+panel.float                       application panel layout; no geometry (engine/UI/MCP tests)
+panel.focus                       application panel layout; no geometry (engine/UI/MCP tests)
+panel.list                        application panel layout; no geometry (engine/UI/MCP tests)
+panel.move                        application panel layout; no geometry (engine/UI/MCP tests)
+panel.native_close                application panel layout; no geometry (engine/UI/MCP tests)
+panel.open                        application panel layout; no geometry (engine/UI/MCP tests)
+panel.peek                        application panel layout; no geometry (engine/UI/MCP tests)
+panel.popout                      application panel layout; no geometry (engine/UI/MCP tests)
+panel.reset_pair                  application panel layout; no geometry (engine/UI/MCP tests)
+panel.resize                      application panel layout; no geometry (engine/UI/MCP tests)
+panel.resize_pair                 application panel layout; no geometry (engine/UI/MCP tests)
 parameters.comment                parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
 parameters.complete               parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
 parameters.delete                 parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
@@ -183,6 +205,9 @@ render.stage.clear                rendering: images, cameras, stages
 render.stage.ground               rendering: images, cameras, stages
 render.start                      rendering: images, cameras, stages
 render.status                     rendering: images, cameras, stages
+render.surface.import             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
+render.texture.list               rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
+render.texture.remove             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 select.clear                      the selection
 select.filter                     the selection
 select.same_look                  the selection
@@ -307,6 +332,7 @@ view.left                         the view: camera, layout, display
 view.list                         the view: camera, layout, display
 view.navigate                     the view: camera, layout, display
 view.navigation_bar               the view: camera, layout, display
+view.navigator                    the view: navigator type; crates/engine/src/schema/view_navigation_tests.rs
 view.next_tab                     the view: camera, layout, display
 view.normal_to                    the view: camera, layout, display
 view.perspective                  the view: camera, layout, display
@@ -319,6 +345,7 @@ view.render_frame                 the view: camera, layout, display
 view.render_inspector             the view: camera, layout, display
 view.render_select                the view: camera, layout, display
 view.render_stage                 the view: camera, layout, display
+view.ribbon_tabs_only             the view: camera, layout, display
 view.right                        the view: camera, layout, display
 view.save                         the view: camera, layout, display
 view.shots_strip                  the view: camera, layout, display
@@ -329,9 +356,10 @@ view.tool                         the view: camera, layout, display
 view.top                          the view: camera, layout, display
 view.visual_style                 the view: camera, layout, display
 
-# Commands that make or change geometry and have no case yet. This section only shrinks:
-# the pull request that adds a case for one removes its line (the check fails on a listed command
-# that a case uses), and a new geometry command gets a case, not a line here.
+# Commands that make or change geometry and have no case yet. This section only shrinks: the
+# pull request that gives one a case in solidcore's corpus or a test moves its line to the section
+# above with where it is tested (the check fails on a listed command that a case here uses), and a
+# new geometry command gets its line in the section above.
 [to cover]
 body.repair                       repair: the solid a refused or open part becomes
 component.move_sketches           assemblies: sketches moved between components

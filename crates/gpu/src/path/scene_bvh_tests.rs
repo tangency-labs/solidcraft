@@ -16,6 +16,7 @@ fn decades(count: usize) -> Vec<Triangle> {
                 surface,
                 transmission: None,
                 medium: 0,
+                scalar_face: false,
             }
         })
         .collect()

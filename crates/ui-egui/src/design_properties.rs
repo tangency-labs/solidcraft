@@ -87,12 +87,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut d) = app.design_properties.take() else { return };
     let metadata = app.session.doc.metadata.clone();
     let title = crate::i18n::tr_label("Design Properties");
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_design_properties"), "settings", title).fields().show(ctx, true, |ui| {
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_design_properties"), "settings", title).fields().show(ctx, true, |ui| {
         for (i, k) in keys(Owner::Design).enumerate() {
             let (key, label) = (k.name, crate::i18n::tr(k.label));
             let Some(field) = d.fields.get_mut(i) else { continue };
             if key == DESCRIPTION {
-                ui_kit::multiline_text_field(ui, label, egui::Id::new(("sc_design_properties", key)), field);
+                ui_kit::multiline_text_field(ui, label, egui::Id::unique(("sc_design_properties", key)), field);
             } else {
                 ui_kit::row(ui, label, |ui| ui_kit::text_field(ui, field, ""));
             }
@@ -133,8 +133,20 @@ pub fn open_object(app: &mut SolveApp, command: &str, params: &Value, fallback: 
     // copy beside it, the card shows when done. Headless and in tests (no wait set), here.
     // The worker reports how many bodies it has measured, and stops when the card closes (#8706).
     let progress = Arc::new(Progress::default());
+    // Tests hold the reply until let go (`apply_gate`), so a window thread held up under load
+    // cannot find the measurement already in where the card should still be measuring.
+    #[cfg(test)]
+    let gate = app.apply_gate.clone();
+    let hold = move || {
+        #[cfg(test)]
+        if let Some(gate) = gate
+            && let Ok(gate) = gate.lock()
+        {
+            let _ = gate.recv();
+        }
+    };
     if let Some(wait) = app.apply_off_thread
-        && let Some(rx) = measure_beside(app.session.scratch(), command, params, progress.clone())
+        && let Some(rx) = measure_beside(app.session.scratch(), command, params, progress.clone(), hold)
     {
         match rx.recv_timeout(wait) {
             Ok(reply) => opened(app, reply, fallback),
@@ -190,13 +202,14 @@ fn opened(app: &mut SolveApp, reply: Result<Value, String>, fallback: String) {
 }
 
 /// Run `command` on `copy` on a worker, watched by `progress`; the reply comes on the returned
-/// channel.
+/// channel once `hold` returns (which only tests make wait).
 #[cfg(not(target_arch = "wasm32"))]
 fn measure_beside(
     mut copy: solidcraft_engine::Session,
     command: &str,
     params: &Value,
     progress: Arc<Progress>,
+    hold: impl FnOnce() + Send + 'static,
 ) -> Option<std::sync::mpsc::Receiver<Result<Value, String>>> {
     let (tx, rx) = std::sync::mpsc::channel();
     let (command, params) = (command.to_string(), params.clone());
@@ -204,6 +217,7 @@ fn measure_beside(
         .name("properties".into())
         .spawn(move || {
             let reply = solidcraft_engine::doc::progress::watch(progress, || copy.execute(&command, &params));
+            hold();
             let _ = tx.send(reply.map_err(|e| e.to_string()));
         })
         .ok()?;
@@ -217,6 +231,7 @@ fn measure_beside(
     _command: &str,
     _params: &Value,
     _progress: Arc<Progress>,
+    _hold: impl FnOnce() + Send + 'static,
 ) -> Option<std::sync::mpsc::Receiver<Result<Value, String>>> {
     None
 }
@@ -238,7 +253,7 @@ fn show_measuring(app: &mut SolveApp, ctx: &egui::Context) {
         Some((done, total)) => crate::i18n::format("ui.properties.measuring_bodies", &[("done", &done.to_string()), ("total", &total.to_string())]),
         None => app.tr("ui.properties.measuring").to_string(),
     };
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
         ui.horizontal(|ui| {
             ui.spinner();
             ui_kit::text(ui, &text, ui_kit::Text::Note("measuring"));
@@ -420,7 +435,7 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     let copy = shown_tensor(app, total).map(|t| tensor_text(&t));
     let copy_label = app.tr("ui.properties.copy_matrix").to_string();
     let heading = window_title(&title, &v);
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
         for (label, value) in &rows {
             ui_kit::row(ui, crate::i18n::tr_label(label), |ui| ui_kit::text(ui, value, ui_kit::Text::Cell));
         }
@@ -631,9 +646,14 @@ mod tests {
         h.app.run("solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "Block"})).unwrap();
         let here = h.app.session.execute("component.properties", &json!({})).unwrap();
         h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+        // The worker holds its reply until let go, so a window thread held up under load cannot
+        // find it already in.
+        let (finish, gate) = std::sync::mpsc::channel();
+        h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
         super::open_object(&mut h.app, "component.properties", &json!({}), String::new());
         assert!(h.app.menu.props.is_none(), "nothing is waited for on the window thread");
         let m = h.app.menu.props_measuring.take().expect("measuring beside the window");
+        finish.send(()).unwrap();
         assert_eq!(m.rx.recv().unwrap().unwrap(), here, "the copy measures what the design here does");
 
         let (tx, rx) = std::sync::mpsc::channel();
@@ -674,11 +694,15 @@ mod tests {
             h.app.run("occurrence.copy", json!({"component": block, "translate": [20 * i, 0, 0]})).unwrap();
         }
         h.app.apply_off_thread = Some(std::time::Duration::ZERO);
-        let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Component { id: 0 });
+        // Held until checked: under load the worker could otherwise finish before the menu returns.
+        let (finish, gate) = std::sync::mpsc::channel();
+        h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+        let items = crate::context_menu::entries(&h.app, &crate::context_menu::Target::Component { id: 0 });
         let item = items.iter().find(|i| i.label == "Properties").expect("Properties item");
         crate::context_menu::run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
         assert!(h.app.menu.props_measuring.is_some(), "the menu returns at once, the card measuring");
         assert!(h.app.menu.props.is_none());
+        finish.send(()).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
         while h.app.menu.props.is_none() {
             assert!(std::time::Instant::now() < deadline, "the measurements never came in");
@@ -708,13 +732,13 @@ mod tests {
     #[test]
     fn the_file_menu_browser_and_root_component_open_the_window() {
         let mut h = Harness::new();
-        let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Component { id: 0 });
+        let items = crate::context_menu::entries(&h.app, &crate::context_menu::Target::Component { id: 0 });
         let item = items.iter().find(|i| i.id == "ui.designProperties").expect("root component menu item");
         assert_eq!(item.label, "Design Properties");
         crate::context_menu::run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
         assert!(h.app.design_properties.is_some());
         h.app.design_properties = None;
-        h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("sc_file_menu"), true));
+        h.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu"), true));
         h.frames(2);
         h.step(&json!({"widget": "Design Properties…"})).unwrap();
         assert!(h.app.design_properties.is_some());

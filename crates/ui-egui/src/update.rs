@@ -16,6 +16,7 @@
 //! The host provides the HTTP client (`Services::http_get`), so this crate stays portable and
 //! the browser build never checks (it updates itself through its service worker).
 
+use crate::ui_kit::BackingTooltipExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -954,7 +955,7 @@ pub fn button(app: &mut SolveApp, ui: &mut egui::Ui, span: egui::Rect, labeled: 
     let full = crate::i18n::format("update.button_version", &[("version", &version)]);
     let labels = [full.as_str(), crate::i18n::tr("update.button")];
     let (rect, response) = crate::toolbar::offer_pill(ui, span, labeled, &labels, TAB_ROOM, "update", "titlebar:update")?;
-    if response.on_hover_text(crate::i18n::format("update.available", &[("version", &version)])).clicked() {
+    if response.backing_on_hover_text(crate::i18n::format("update.available", &[("version", &version)])).clicked() {
         app.updater.open = !app.updater.open;
     }
     Some(rect)
@@ -1002,7 +1003,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         State::Offer if managed.is_some() => ("", crate::i18n::tr("update.later"), Some(crate::i18n::tr("update.skip"))),
         State::Offer => (primary, crate::i18n::tr("update.later"), Some(crate::i18n::tr("update.skip"))),
     };
-    let id = egui::Id::new("sc_update");
+    let id = egui::Id::unique("sc_update");
     let mut also_download = false;
     let (closed, answer) =
         ui_kit::Window::new(id, "update", crate::i18n::tr("update.title")).cards(1.7).actions(ok, cancel, apply).show(ctx, true, |ui| {
@@ -1129,7 +1130,7 @@ fn show_check_status(app: &mut SolveApp, ctx: &egui::Context) {
             Status::Idle => (crate::i18n::tr("update.check_unavailable").to_string(), false),
         }
     };
-    let id = egui::Id::new("sc_update");
+    let id = egui::Id::unique("sc_update");
     let (closed, action) = ui_kit::Window::new(id, "update", crate::i18n::tr("update.check_for_updates"))
         .cards(1.7)
         .actions("", crate::i18n::tr("ui.close"), None)
@@ -1393,7 +1394,7 @@ fn markdown(ui: &mut egui::Ui, src: &str, t: &Tokens) {
         ui.horizontal_wrapped(|ui| {
             ui.add_space(indent);
             for (text, url) in targets {
-                ui.hyperlink_to(RichText::new(text).size(t.font_caption), url).on_hover_text(url);
+                ui.hyperlink_to(RichText::new(text).size(t.font_caption), url).backing_on_hover_text(url);
             }
         });
     };

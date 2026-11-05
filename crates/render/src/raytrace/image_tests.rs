@@ -1484,3 +1484,154 @@ fn cancelled_pending_pixel_allocation_is_refused_before_any_continuation() {
     cancel.cancel();
     assert_eq!(PendingPixelSlot::new(&cancel).err().unwrap().code, ErrorCode::Cancelled);
 }
+
+fn mapped_wood_fixture() -> (ProductScene, ImageRequest, RaytraceOptions) {
+    use crate::job::textures::{BaseColorMode, PlanarFrame, RuntimeTextures, TextureBinding, TextureMap};
+    use image::ImageEncoder;
+    use std::sync::Arc;
+    let mesh = solidcraft_geom::Mesh {
+        positions: vec![Vec3::new(-40., -40., 0.), Vec3::new(40., -40., 0.), Vec3::new(40., 40., 0.), Vec3::new(-40., 40., 0.)],
+        normals: vec![Vec3::Z; 4],
+        triangles: vec![[0, 1, 2], [0, 2, 3]],
+        tri_face: vec![0, 0],
+        ..Default::default()
+    };
+    let bounds = mesh.bounds();
+    let surface = OpaqueSurface::new(Vec3::new(1., 1., 1.), 0., 0.7, 1.).unwrap();
+    let scene = ProductScene {
+        bounds,
+        meshes: vec![crate::ProductMesh {
+            name: "Wood board".into(),
+            mesh: Arc::new(mesh),
+            color: [255; 3],
+            opacity: 1.,
+            surface: Some(surface),
+            transmission: None,
+            faces: vec![],
+        }],
+    };
+    // Original diagnostic grain: alternating opaque dark/light fibres with known mean.
+    let mut encoded = Vec::new();
+    let pixels: Vec<u8> = (0..64)
+        .flat_map(|i| {
+            let value = if i % 8 % 2 == 0 { 0 } else { 255 };
+            [value, value, value, 255]
+        })
+        .collect();
+    image::codecs::png::PngEncoder::new(&mut encoded).write_image(&pixels, 8, 8, image::ExtendedColorType::Rgba8).unwrap();
+    let textures = RuntimeTextures::new(vec![TextureBinding {
+        body_index: 0,
+        body_name: "Wood board".into(),
+        frame: PlanarFrame { origin: [0.; 3], u: [1., 0., 0.], v: [0., 1., 0.] },
+        normal_strength: 0.4,
+        base_color: Some(TextureMap::new(encoded, crate::texture_input::MapRole::BaseColor).unwrap()),
+        normal: None,
+        roughness: None,
+        metallic: None,
+        base_color_mode: BaseColorMode::Replace,
+        flip_v: false,
+    }])
+    .unwrap();
+    let mut request = request();
+    request.camera.set_view(crate::StandardView::Top);
+    request.camera.distance = 1.25;
+    request.textures = Some(Arc::new(textures));
+    let options = RaytraceOptions {
+        lights: Some(vec![job::DirectionalLightOptions { direction: [0., 0., 1.], color: [1.; 3], intensity: std::f64::consts::PI }]),
+        shadows: false,
+        ..Default::default()
+    };
+    request.raytrace = Some(options.clone());
+    (scene, request, options)
+}
+fn mapped_png(scene: ProductScene, request: ImageRequest, options: RaytraceOptions, quantum: usize) -> Vec<u8> {
+    let mut task = ImageTask::new(scene, request, CancelToken::default(), options).unwrap();
+    for _ in 0..300_000 {
+        let before = task.work.used();
+        let result = task.step(quantum).unwrap();
+        // Four bounded continuations; a PNG row keeps its legacy explicit row cost.
+        if let TaskPoll::Complete(png) = result {
+            return png;
+        }
+        assert!(task.work.used() >= before);
+    }
+    panic!("mapped image did not finish");
+}
+#[test]
+fn cpu_wood_keeps_close_fibres_and_minifies_distant_fibres_to_the_linear_mean() {
+    let (scene, mut request, options) = mapped_wood_fixture();
+    let mesh = scene.meshes[0].mesh.clone();
+    let close = mapped_png(scene.clone(), request.clone(), options.clone(), 1);
+    assert_eq!(close, mapped_png(scene.clone(), request.clone(), options.clone(), 7));
+    let image = image::load_from_memory(&close).unwrap().to_rgba8();
+    let values: Vec<_> = image.pixels().map(|p| p[0]).collect();
+    assert!(values.iter().max().unwrap() - values.iter().min().unwrap() > 150, "magnified fibres must remain distinct: {values:?}");
+    request.camera.distance = 25.;
+    let far = mapped_png(scene.clone(), request.clone(), options.clone(), 7);
+    let image = image::load_from_memory(&far).unwrap().to_rgba8();
+    // Linear mean reflectance is 0.5. Unit irradiance/pi yields 0.5 radiance,
+    // then the existing Reinhard presentation maps 0.5 to 1/3 before sRGB.
+    let expected = encode8(1. / 3.);
+    assert!(image.pixels().all(|p| p.0 == [expected, expected, expected, 255]), "distant grain must converge to linear-light mean");
+    assert!(std::sync::Arc::ptr_eq(&mesh, &scene.meshes[0].mesh));
+    assert_eq!(scene.meshes[0].surface.unwrap().dielectric_ior(), 1.);
+}
+#[test]
+fn cpu_wood_scalar_face_override_suppresses_inherited_body_maps() {
+    let (mut scene, mut request, options) = mapped_wood_fixture();
+    scene.meshes[0].faces.push(crate::FaceAppearance {
+        face: 0,
+        color: [64, 96, 128],
+        opacity: 1.,
+        surface: Some(OpaqueSurface::new(Vec3::new(0.2, 0.3, 0.4), 0., 0.7, 1.).unwrap()),
+        transmission: None,
+    });
+    let mapped = mapped_png(scene.clone(), request.clone(), options.clone(), 1);
+    request.textures = None;
+    assert_eq!(mapped, mapped_png(scene, request, options, 7));
+}
+#[test]
+fn cpu_wood_footprint_uses_unwrapped_physical_spacing_and_applies_supersampling_once() {
+    let (_, request, mut options) = mapped_wood_fixture();
+    let clip = request.camera.clip(100.);
+    let ray = primary_ray(&request, 0.5, 0.5, clip).unwrap();
+    let point = ray.origin() + ray.direction() * (-ray.origin().z / ray.direction().z);
+    let first = primary_footprint(&request, &options, None, 0, 0, clip, point, Vec3::Z).unwrap().unwrap();
+    assert!((first[0].len() - 0.125).abs() < 1e-12);
+    assert!((first[1].len() - 0.125).abs() < 1e-12);
+    for samples in [4, 16] {
+        options.primary_samples = samples;
+        let offset = primary_offset(samples, 0).unwrap();
+        let ray = primary_ray(&request, offset[0], offset[1], clip).unwrap();
+        let p = ray.origin() + ray.direction() * (-ray.origin().z / ray.direction().z);
+        let footprint = primary_footprint(&request, &options, None, 0, 0, clip, p, Vec3::Z).unwrap().unwrap();
+        for delta in footprint {
+            assert!((delta.len() - 0.125 / f64::from(samples).sqrt()).abs() < 1e-12);
+        }
+    }
+}
+#[test]
+fn cpu_wood_preparation_cancel_and_role_work_limit_never_publish_partial_pixels() {
+    let (scene, request, options) = mapped_wood_fixture();
+    let cancel = CancelToken::default();
+    let mut task = ImageTask::new(scene, request, cancel.clone(), options).unwrap();
+    let cache = task.maps.first().unwrap();
+    assert!(!cache.ready());
+    assert_eq!(cache.prepared_maps(), 0);
+    assert_eq!(cache.preparation_phase(), None);
+    for _ in 0..100_000 {
+        if task.maps.first().is_some_and(|cache| cache.hit_role() == Some(1)) {
+            break;
+        }
+        assert!(matches!(task.step(1).unwrap(), TaskPoll::Pending(_)));
+    }
+    assert_eq!(task.maps.first().unwrap().prepared_maps(), 1);
+    assert_eq!(task.maps.first().unwrap().hit_role(), Some(1));
+    assert!(task.pixels.is_empty());
+    task.work.limit = task.work.used();
+    assert_eq!(task.step(1).err().unwrap().code, ErrorCode::LimitExceeded);
+    assert_eq!(task.maps.first().unwrap().hit_role(), Some(1));
+    cancel.cancel();
+    assert_eq!(task.step(1).err().unwrap().code, ErrorCode::Cancelled);
+    assert!(!task.done);
+}

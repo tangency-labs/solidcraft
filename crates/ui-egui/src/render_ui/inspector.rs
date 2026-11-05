@@ -1,5 +1,6 @@
 //! One floating editor for the selected Render item.
 use super::{RenderSelection, environment, inspector, library, light, setups, shot, wear};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, ui_kit};
 use inspector::selection_appearance;
 use serde_json::json;
@@ -130,7 +131,7 @@ pub(super) fn output_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
         ] {
             let ready = super::ribbon::action_ready(app, id);
             let response = ui_kit::icon_label_action(ui, &label, Some("play"), ready.is_ok(), id == "render.start");
-            let response = if let Err(reason) = ready { response.on_disabled_hover_text(reason) } else { response };
+            let response = if let Err(reason) = ready { response.backing_on_disabled_hover_text(reason) } else { response };
             crate::scenario::publish_target(target, response.rect);
             if response.clicked() {
                 app.start(id);

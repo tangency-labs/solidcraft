@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Shortcuts</title>
+  <path d="M12 13L52 13A6 6 0 0 1 58 19L58 45A6 6 0 0 1 52 51L12 51A6 6 0 0 1 6 45L6 19A6 6 0 0 1 12 13Z" fill="none" stroke="currentColor" stroke-width="6.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="18" cy="26" r="3.6" fill="currentColor"/><circle cx="28" cy="26" r="3.6" fill="currentColor"/><circle cx="38" cy="26" r="3.6" fill="currentColor"/><circle cx="48" cy="26" r="3.6" fill="currentColor"/><path d="M20 40L44 40" fill="none" stroke="currentColor" stroke-width="6.8" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -109,7 +109,7 @@ pub fn speed_slider(ui: &mut egui::Ui, speed: &mut Speed) -> egui::Response {
         1.0..=5.5,
         crate::ui_kit::Slider {
             step: Some(0.5),
-            format: |v| if v > 5.25 { crate::i18n::tr_label("Instant").into() } else { Speed::Times(v).label() },
+            format: |v| if v > 5.25 { crate::i18n::tr_label("Instant").into() } else { format!("{v:.2}x") },
             ..Default::default()
         },
     );
@@ -272,6 +272,9 @@ fn batch_targets(steps: &[Value]) -> Vec<(Pos2, &'static str)> {
 /// The places a command's parameters pick, in the world: [x, y, z] points (faces, edges,
 /// vertices, positions), active-sketch [x, y] points, and a new sketch's plane.
 pub fn picks(app: &SolveApp, command: &str, params: &Value) -> Vec<Vec3> {
+    if solidcraft_engine::panels::commands::is_command(command) {
+        return Vec::new();
+    }
     let id = solidcraft_engine::find_command(command).map_or(command, |c| c.id);
     let mut out = Vec::new();
     if id == "sketch.create"
@@ -482,7 +485,7 @@ pub fn paint(app: &SolveApp, ctx: &egui::Context) {
         return;
     }
     let Some(p) = app.agent.pos else { return };
-    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Debug, egui::Id::new("sc_agent_cursor")));
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Debug, egui::Id::unique("sc_agent_cursor")));
     for (at, t0) in &app.agent.ripples {
         let k = ((app.now - t0) / 0.6).clamp(0.0, 1.0) as f32;
         painter.circle_stroke(*at, 6.0 + 22.0 * k, Stroke::new(3.0 * (1.0 - k) + 0.5, agent().gamma_multiply(1.0 - k)));
@@ -492,14 +495,15 @@ pub fn paint(app: &SolveApp, ctx: &egui::Context) {
         use crate::ui_kit::{Container, Surface};
         let t = crate::theme::Tokens::get();
         Container::new(ctx, Surface::Popup)
-            .area(egui::Id::new("sc_agent_command"))
+            .area(egui::Id::unique("sc_agent_command"))
             .order(egui::Order::Debug)
             .fixed_pos(p + vec2(15.0, 42.0))
             .constrain(true)
             .interactable(false)
             .fade_in(false)
             .show(ctx, |ui| {
-                Container::popup_frame(ui.style()).fill(t.overlay).show(ui, |ui| {
+                let frame = Container::popup_frame(ui.style()).fill(t.overlay);
+                Container::show_backing(ui, frame, |ui| {
                     ui.label(egui::RichText::new(crate::i18n::tr_label(label)).size(t.font_label).color(t.text));
                 });
             });

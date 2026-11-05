@@ -84,6 +84,65 @@ pub struct Drawing {
     pub language: String,
     /// In order, each behind its own `Arc`, so an undo step shares every sheet it didn't change.
     pub sheets: Vec<Arc<Sheet>>,
+    /// Set when a newer SolidCraft saved the file this came from.
+    #[serde(skip)]
+    pub newer_file: Option<Arc<NewerDrawing>>,
+}
+
+/// The fields a drawing's record has: anything else in a file is a newer build's.
+const RECORD_FIELDS: [&str; 7] = ["format", "name", "sources", "properties", "units", "language", "sheets"];
+
+/// Move the elements of the list `key` that don't read as `T` out of a newer build's drawing.
+fn take_unread<T: serde::de::DeserializeOwned>(top: &mut serde_json::Map<String, Value>, key: &str, one: &str, file: &mut NewerDrawing) {
+    let Some(Value::Array(list)) = top.get_mut(key) else { return };
+    let mut readable = Vec::with_capacity(list.len());
+    for element in std::mem::take(list) {
+        match DRAWING.check_numbers(&element, "properties").and_then(|()| serde_json::from_value::<T>(element.clone()).map_err(damaged)) {
+            Ok(_) => readable.push(element),
+            Err(why) => {
+                let name = element.get("name").or(element.get("path")).and_then(Value::as_str).unwrap_or("unnamed");
+                file.not_understood.push(format!("{one} `{name}` ({why})"));
+                file.elements.push((key.to_string(), element));
+            }
+        }
+    }
+    *list = readable;
+}
+
+/// What a drawing file says and holds that this build doesn't read ([`Drawing::from_newer`]).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NewerDrawing {
+    /// The number the file says.
+    pub format: u32,
+    /// The number this build reads up to.
+    pub reads_up_to: u32,
+    /// The changes the file names that this build doesn't have.
+    pub unknown_changes: Vec<String>,
+    /// What this build couldn't read, by name.
+    pub not_understood: Vec<String>,
+    fields: Vec<(String, Value)>,
+    elements: Vec<(String, Value)>,
+}
+
+impl NewerDrawing {
+    /// What to tell the user.
+    pub fn notice(&self) -> String {
+        format!(
+            "Saved by a newer SolidCraft (format {}, this version reads up to {}). If something's missing, update.",
+            self.format, self.reads_up_to
+        )
+    }
+
+    fn restore(&self, value: &mut Value) {
+        for (key, field) in &self.fields {
+            value[key] = field.clone();
+        }
+        for (key, element) in &self.elements {
+            if let Some(list) = value.get_mut(key).and_then(Value::as_array_mut) {
+                list.push(element.clone());
+            }
+        }
+    }
 }
 
 /// A design the drawing draws.
@@ -175,6 +234,7 @@ impl Drawing {
             units: Units::default(),
             language: language.into(),
             sheets: vec![Arc::new(first)],
+            newer_file: None,
         };
         drawing.validate()?;
         Ok(drawing)
@@ -188,11 +248,65 @@ impl Drawing {
         }
         let mut v: Value = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("not a SolidCraft drawing: {e}")))?;
         let (version, applied) = DRAWING.take_version(&mut v)?;
+        if let Some(newer) = DRAWING.newer(version, applied.as_deref()) {
+            return Self::from_newer(v, version, applied, newer);
+        }
+        let d = Self::decode(v, version, applied.as_deref())?;
+        Ok(Drawing { format: DRAWING.format_string(DRAWING.current()), format_pending: DRAWING.pending_names(), ..d })
+    }
+
+    fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<Drawing> {
         DRAWING.check_numbers(&v, "properties")?;
-        DRAWING.upgrade(&mut v, version, applied.as_deref())?;
+        DRAWING.upgrade(&mut v, version, applied)?;
         let d: Drawing = serde_json::from_value(v).map_err(damaged)?;
         d.validate().map_err(damaged)?;
-        Ok(Drawing { format: DRAWING.format_string(DRAWING.current()), format_pending: DRAWING.pending_names(), ..d })
+        Ok(d)
+    }
+
+    /// A drawing a newer build saved: it opens with what this build can read of it. Everything in a
+    /// drawing refuses a field it doesn't know, so what it can't read shows as a top-level field,
+    /// a source or a sheet that doesn't read, which stays out and is named in
+    /// [`NewerDrawing::not_understood`]; [`Drawing::to_json`] writes it all back, with the file's
+    /// format. It takes at least one sheet this build can read to open.
+    fn from_newer(mut v: Value, version: u32, applied: Option<Vec<String>>, newer: crate::format::Newer) -> Result<Drawing> {
+        let list = applied.as_deref();
+        let can_read = |v: Value| Self::decode(v, version, list).map_err(|e| e.to_string());
+        let mut file = NewerDrawing {
+            format: newer.format,
+            reads_up_to: newer.reads_up_to,
+            unknown_changes: newer.unknown_changes.clone(),
+            ..NewerDrawing::default()
+        };
+        let mut read = can_read(v.clone());
+        if read.is_err() {
+            let top = v.as_object_mut().ok_or_else(|| damaged("expected a JSON object"))?;
+            let keys: Vec<String> = top.keys().cloned().collect();
+            for key in keys {
+                if !RECORD_FIELDS.contains(&key.as_str())
+                    && let Some(value) = top.remove(&key)
+                {
+                    file.not_understood.push(format!("field `{key}`"));
+                    file.fields.push((key, value));
+                }
+            }
+            take_unread::<Sheet>(top, "sheets", "sheet", &mut file);
+            take_unread::<Source>(top, "sources", "source", &mut file);
+            read = can_read(v);
+        }
+        let d = read.map_err(|why| {
+            DocError::Invalid(format!(
+                "this drawing was saved by a newer SolidCraft (format {}, this version reads up to {}) and this version can't read it: {why}. Update SolidCraft to open it",
+                newer.format, newer.reads_up_to
+            ))
+        })?;
+        let (format, format_pending) = if newer.format > newer.reads_up_to {
+            (DRAWING.format_string(newer.format), applied.unwrap_or_default())
+        } else {
+            let mut pending = DRAWING.pending_names();
+            pending.extend(newer.unknown_changes.iter().cloned());
+            (DRAWING.format_string(DRAWING.current()), pending)
+        };
+        Ok(Drawing { format, format_pending, newer_file: Some(Arc::new(file)), ..d })
     }
 
     /// The drawing's JSON: the same bytes for the same drawing. JSON longer than a read takes
@@ -200,7 +314,15 @@ impl Drawing {
     /// properties are kept as they came, and indenting them can make a drawing that read in
     /// under the limit save over it.
     pub fn to_json(&self) -> Result<String> {
-        let text = serde_json::to_string_pretty(self).map_err(|e| DocError::Invalid(format!("drawing not saved: {e}")))?;
+        let unsaved = |e: serde_json::Error| DocError::Invalid(format!("drawing not saved: {e}"));
+        let text = match &self.newer_file {
+            None => serde_json::to_string_pretty(self).map_err(unsaved)?,
+            Some(file) => {
+                let mut value = serde_json::to_value(self).map_err(unsaved)?;
+                file.restore(&mut value);
+                serde_json::to_string_pretty(&value).map_err(unsaved)?
+            }
+        };
         require(text.len() <= MAX_DRAWING_BYTES, || format!("drawing too large to save (at most {} MiB)", MAX_DRAWING_BYTES >> 20))?;
         Ok(text)
     }

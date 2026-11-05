@@ -149,7 +149,7 @@ fn show_lock_prompt(app: &mut SolveApp, ctx: &egui::Context) {
         "document.open_elsewhere_detail",
         &[("name", &name), ("who", &who), ("when", &crate::recovery_ui::ago(lock.opened)), ("app", &lock.app)],
     );
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("sc_open_elsewhere"), "status_warning", &title)
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_open_elsewhere"), "status_warning", &title)
         .tone(ui_kit::Tone::Warning)
         .actions(crate::i18n::tr("document.open_read_only"), crate::i18n::tr("ui.cancel"), Some(crate::i18n::tr("document.open_anyway")))
         .selected(ui_kit::Action::Ok)
@@ -219,7 +219,7 @@ fn show_disk_prompt(app: &mut SolveApp, ctx: &egui::Context) {
     let name = app.session.path.as_deref().map(file_name).unwrap_or_default();
     let title = crate::i18n::format("document.changed_on_disk", &[("name", &name)]);
     let detail = crate::i18n::format("document.changed_on_disk_detail", &[("name", &name)]);
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("sc_changed_on_disk"), "status_warning", &title)
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_changed_on_disk"), "status_warning", &title)
         .tone(ui_kit::Tone::Warning)
         .actions(crate::i18n::tr("document.save_copy"), crate::i18n::tr("ui.cancel"), Some(crate::i18n::tr("document.overwrite")))
         .selected(ui_kit::Action::Ok)

@@ -17,11 +17,11 @@ pub enum LayoutMode {
 
 impl LayoutMode {
     pub(crate) fn publish(self, ctx: &egui::Context) {
-        ctx.data_mut(|data| data.insert_temp(egui::Id::new("sc_container_layout"), self));
+        ctx.data_mut(|data| data.insert_temp(egui::Id::unique("sc_container_layout"), self));
     }
 
     pub(crate) fn current(ctx: &egui::Context) -> Self {
-        ctx.data(|data| data.get_temp(egui::Id::new("sc_container_layout"))).unwrap_or_default()
+        ctx.data(|data| data.get_temp(egui::Id::unique("sc_container_layout"))).unwrap_or_default()
     }
 }
 
