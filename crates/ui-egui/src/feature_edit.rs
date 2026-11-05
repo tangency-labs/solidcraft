@@ -44,7 +44,7 @@ impl SolveApp {
     /// it opens, as a double-click on that feature's row does (a fillet's or chamfer's arrow sits
     /// by the face clicked). A face of a component other than the active one, or one no feature
     /// made (imported or lost), leaves everything as it was. Whether an editor was started.
-    pub(crate) fn edit_feature_of_face(&mut self, body: &str, index: usize, point: solidcraft_engine::geom::Vec3) -> bool {
+    pub(crate) fn edit_feature_of_face(&mut self, body: &str, index: usize, point: solidcore_record::Vec3) -> bool {
         if self.pending_feature_edit.is_some() || self.session.active_sketch.is_some() {
             return false;
         }

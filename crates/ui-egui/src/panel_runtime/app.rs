@@ -1,0 +1,727 @@
+use solidcraft_engine::Session;
+use solidcraft_engine::panels::*;
+
+use super::runtime::standalone_header_action;
+use super::*;
+
+/// Later content adapters supply their own services. The app integration exposes
+/// only an immutable Session during refresh; a layout tick cannot run a document
+/// command. Explicit content commands stay on the separate supplied sink.
+pub trait AppPanelServices {
+    fn refresh_read_only(&mut self, session: &Session) -> PanelResult<()>;
+    fn services(&mut self) -> ContentServices<'_>;
+}
+
+pub struct AppPanelRuntime {
+    runtime: PanelRuntime,
+    services: Box<dyn AppPanelServices>,
+    native: Box<dyn NativeHostAdapter>,
+    host: Option<WorkspacePanelHost>,
+    last_tick_frame: Option<u64>,
+    last_error: Option<PanelError>,
+    catalogue: Box<dyn commands::LayoutCatalogue>,
+    adapters_set: bool,
+}
+impl AppPanelRuntime {
+    pub fn new(runtime: PanelRuntime, services: Box<dyn AppPanelServices>) -> PanelResult<Self> {
+        runtime.require_live()?;
+        if runtime.layout().layout().sections.iter().any(|section| section.location.zone() == Zone::Window) {
+            return Err(error(Rule::Lifecycle, "install the app adapter before creating or restoring native placement"));
+        }
+        Ok(Self {
+            runtime,
+            services,
+            native: Box::<InAppNativeAdapter>::default(),
+            host: None,
+            last_tick_frame: None,
+            last_error: None,
+            catalogue: Box::<commands::InMemoryCatalogue>::default(),
+            adapters_set: false,
+        })
+    }
+    pub fn last_error(&self) -> Option<&PanelError> {
+        self.last_error.as_ref()
+    }
+    pub fn runtime(&self) -> &PanelRuntime {
+        &self.runtime
+    }
+    /// Internal capability injection. Production preferences/native realization
+    /// remain peer work. Installation is once-only and precedes native hosts.
+    pub fn set_command_adapters(&mut self, catalogue: Box<dyn commands::LayoutCatalogue>, native: Box<dyn NativeHostAdapter>) -> PanelResult<()> {
+        self.set_native_adapter(native)?;
+        self.catalogue = catalogue;
+        self.adapters_set = true;
+        Ok(())
+    }
+    pub fn command(&mut self, session: &Session, id: &str, params: &serde_json::Value) -> PanelResult<serde_json::Value> {
+        if !matches!(id, "panel.list" | "layout.get")
+            && let Some(host) = &mut self.host
+        {
+            host.cancel_gesture();
+        }
+        let command = commands::parse_command(id, params)?;
+        self.reconcile(session)?;
+        if !matches!(&command, commands::PanelCommand::HeaderAction(_)) {
+            self.refresh_metrics()?;
+            self.refresh_reservations()?;
+        }
+        self.with_command_context(|context| commands::execute_command(command, context))
+    }
+    pub fn command_batch(&mut self, session: &Session, steps: &[serde_json::Value]) -> PanelResult<serde_json::Value> {
+        if let Some(host) = &mut self.host {
+            host.cancel_gesture();
+        }
+        // Unsupported intent mixtures refuse before even context lifecycle or
+        // availability publication; supported calls then read current context.
+        commands::preflight_batch(steps, &self.runtime.layout().layout().workspace)?;
+        self.reconcile(session)?;
+        if !matches!(steps, [step] if step.get("command").or_else(|| step.get("id")).and_then(serde_json::Value::as_str) == Some("panel.action")) {
+            self.refresh_metrics()?;
+            self.refresh_reservations()?;
+        }
+        self.with_command_context(|context| commands::execute_batch(steps, context))
+    }
+    /// Commands borrow the same adapter, provider and local overlay ledger as
+    /// host gestures. Forward committed focus effects without parsing JSON.
+    fn with_command_context<R>(&mut self, execute: impl FnOnce(&mut commands::PanelCommandContext<'_>) -> PanelResult<R>) -> PanelResult<R> {
+        let Self { runtime, services, native, catalogue, host, .. } = self;
+        let registry = runtime.layout().registry().clone();
+        let scope = runtime_scope(runtime);
+        let mut services = services.services();
+        let mut committed = None;
+        let run = |host: Option<&mut WorkspacePanelHost>, services: &mut ContentServices<'_>| {
+            let mut live = RuntimeActionSink { runtime: &mut *runtime, native: native.as_mut(), services };
+            let mut admitted = AdmittedActionSink { live: &mut live, host, proposal: std::cell::RefCell::new(None) };
+            let mut sink = CommandActionSink { live: &mut admitted, committed: &mut committed };
+            execute(&mut commands::PanelCommandContext {
+                sink: &mut sink,
+                registry: &registry,
+                catalogue: catalogue.as_mut(),
+                web: cfg!(target_arch = "wasm32"),
+            })
+        };
+        let result = if let Some(host) = host.as_mut() {
+            host.with_command_services(&scope, &mut services, |host, services| run(Some(host), services))
+        } else {
+            run(None, &mut services)
+        };
+        if let Some(host) = host {
+            host.reconcile_scope(runtime);
+            if let Some(reply) = committed {
+                host.note_reply(&reply);
+            }
+        }
+        result
+    }
+    /// Inspection borrows the exact injected provider. A read-only runtime keeps
+    /// callers from bypassing the app's single stored native resource owner.
+    pub fn with_services<R>(&mut self, use_services: impl FnOnce(&PanelRuntime, &mut ContentServices<'_>) -> PanelResult<R>) -> PanelResult<R> {
+        self.with_adapters(|runtime, _native, services| use_services(runtime, services))
+    }
+    fn with_adapters<R>(
+        &mut self,
+        use_services: impl FnOnce(&mut PanelRuntime, &mut dyn NativeHostAdapter, &mut ContentServices<'_>) -> PanelResult<R>,
+    ) -> PanelResult<R> {
+        let Self { runtime, services, native, host, .. } = self;
+        let scope = runtime_scope(runtime);
+        let mut services = services.services();
+        if let Some(host) = host {
+            host.with_local_services(&scope, &mut services, |services| use_services(runtime, native.as_mut(), services))
+        } else {
+            use_services(runtime, native.as_mut(), &mut services)
+        }
+    }
+    pub fn dispatch(&mut self, session: &Session, action: LayoutAction) -> PanelResult<LayoutReply> {
+        if let Some(host) = &mut self.host {
+            host.cancel_gesture();
+        }
+        self.reconcile(session)?;
+        if !standalone_header_action(&action) {
+            self.refresh_metrics()?;
+            self.refresh_reservations()?;
+        }
+        self.with_command_context(|context| commands::execute_layout_action(action, context))
+    }
+    /// All host actions use one retained native adapter and the injected provider.
+    pub fn dispatch_host(&mut self, session: &Session, action: LayoutAction) -> PanelResult<LayoutReply> {
+        self.dispatch(session, action)
+    }
+    /// Install before native placement exists. Replacing an adapter while it owns
+    /// resources would orphan those resources and is rejected atomically.
+    pub fn set_native_adapter(&mut self, native: Box<dyn NativeHostAdapter>) -> PanelResult<()> {
+        self.runtime.require_live()?;
+        if self.adapters_set {
+            return Err(error(Rule::Lifecycle, "application panel adapters are already installed"));
+        }
+        if self.runtime.layout().layout().sections.iter().any(|section| section.location.zone() == Zone::Window) {
+            return Err(error(Rule::Lifecycle, "redock native hosts before replacing their adapter"));
+        }
+        let capabilities = native.capabilities();
+        if capabilities.max_native_hosts > MAX_SECTIONS || !capabilities.native_windows && capabilities.max_native_hosts != 0 {
+            return Err(error(Rule::Capability, "invalid native adapter capacity"));
+        }
+        self.native = native;
+        Ok(())
+    }
+    pub fn native_capabilities(&self) -> HostCapabilities {
+        self.native.capabilities()
+    }
+    pub fn host(&self) -> Option<&WorkspacePanelHost> {
+        self.host.as_ref()
+    }
+    pub fn enable_host(&mut self, options: HostOptions) -> PanelResult<()> {
+        self.runtime.require_live()?;
+        if self.host.is_some() {
+            return Err(error(Rule::Lifecycle, "universal panel host already enabled"));
+        }
+        if !self.native.capabilities().native_windows
+            && self.runtime.layout().layout().sections.iter().any(|section| section.location.zone() == Zone::Window)
+        {
+            return Err(error(Rule::Capability, "redock existing native placements through their adapter before enabling the in-app host"));
+        }
+        self.host = Some(WorkspacePanelHost::new(options)?);
+        Ok(())
+    }
+    pub fn disable_host(&mut self) -> PanelResult<()> {
+        if self.host.is_some() {
+            self.with_adapters(|runtime, _native, services| runtime.mount_in_app(&ResolvedLayout::default(), &mut EmptyPanelHost, services))?;
+        }
+        self.host = None;
+        Ok(())
+    }
+    /// Hiding the application workspace is an input/presentation transition,
+    /// independent of layout revision. Retained owners keep their live services.
+    fn hide_in_app(&mut self) -> PanelResult<()> {
+        if let Some(host) = &mut self.host {
+            host.invalidate_context();
+        }
+        self.with_adapters(|runtime, _native, services| runtime.mount_in_app(&ResolvedLayout::default(), &mut EmptyPanelHost, services))
+    }
+    pub fn prepare_host(&mut self, session: &Session, capacity: LogicalRect) -> PanelResult<()> {
+        self.prepare_host_in_domain(session, capacity, capacity, &[])
+    }
+
+    pub fn prepare_host_in_domain(
+        &mut self,
+        session: &Session,
+        render_domain: LogicalRect,
+        capacity: LogicalRect,
+        chrome: &[LogicalRect],
+    ) -> PanelResult<()> {
+        self.reconcile(session)?;
+        self.refresh_metrics()?;
+        if let Some(host) = &mut self.host {
+            host.capture_reservations(&self.runtime, self.catalogue.as_ref())?;
+            host.note_native_capabilities(self.native.capabilities());
+        }
+        let result = self.host.as_mut().ok_or_else(|| error(Rule::Lifecycle, "universal panel host disabled"))?.prepare_in_domain(
+            &self.runtime,
+            render_domain,
+            capacity,
+            chrome,
+        );
+        if result.is_err() {
+            self.with_adapters(|runtime, _native, services| runtime.mount_in_app(&ResolvedLayout::default(), &mut EmptyPanelHost, services))?;
+        }
+        result
+    }
+    pub fn show_host(&mut self, session: &Session, ui: &mut egui::Ui) -> PanelResult<()> {
+        self.show_host_impl(session, ui, false)
+    }
+    pub fn show_host_deferred(&mut self, session: &Session, ui: &mut egui::Ui) -> PanelResult<()> {
+        self.show_host_impl(session, ui, true)
+    }
+    fn show_host_impl(&mut self, session: &Session, ui: &mut egui::Ui, deferred: bool) -> PanelResult<()> {
+        let geometry = self.host.as_ref().and_then(WorkspacePanelHost::prepared_geometry);
+        self.reconcile(session)?;
+        self.refresh_metrics()?;
+        if let Some(host) = &mut self.host
+            && host.frame().is_none()
+            && let Some((domain, capacity, chrome)) = geometry
+        {
+            host.prepare_in_domain(&self.runtime, domain, capacity, &chrome)?;
+            ui.ctx().request_repaint();
+        }
+        let mut services = self.services.services();
+        let host = self.host.as_mut().ok_or_else(|| error(Rule::Lifecycle, "universal panel host disabled"))?;
+        if deferred {
+            host.show_deferred(ui, &mut self.runtime, self.native.as_mut(), &mut services)
+        } else {
+            host.show(ui, &mut self.runtime, self.native.as_mut(), &mut services, self.catalogue.as_mut())
+        }
+    }
+    /// Finish after every window/modal has registered its current layer. Refresh
+    /// current Session again before dispatch, without a background update.
+    pub fn finish_host(&mut self, session: &Session, ui: &mut egui::Ui) -> PanelResult<()> {
+        if !self.host.as_ref().is_some_and(WorkspacePanelHost::has_pending) {
+            return Ok(());
+        }
+        self.reconcile(session)?;
+        self.refresh_metrics()?;
+        let mut services = self.services.services();
+        if let Some(host) = &mut self.host {
+            host.finish(ui, &mut self.runtime, self.native.as_mut(), &mut services, self.catalogue.as_mut())
+        } else {
+            Ok(())
+        }
+    }
+    /// Complete root/in-app cohort only. Native peers always use mount_native,
+    /// even while the shared root renderer is disabled.
+    pub fn mount(&mut self, session: &Session, resolved: &ResolvedLayout, host: &mut dyn PanelHost) -> PanelResult<()> {
+        self.reconcile(session)?;
+        if self.host.is_some() {
+            return Err(error(Rule::Lifecycle, "universal host owns the complete in-app presentation frame"));
+        }
+        self.with_adapters(|runtime, _native, services| runtime.mount_in_app(resolved, host, services))
+    }
+    pub fn mount_native(&mut self, session: &Session, native_host: &HostId, resolved: &ResolvedLayout, host: &mut dyn PanelHost) -> PanelResult<()> {
+        self.reconcile(session)?;
+        self.with_adapters(|runtime, _native, services| runtime.mount_native(native_host, resolved, host, services))
+    }
+    pub fn content_action(&mut self, session: &Session, instance: &InstanceId, action: &ControlId) -> PanelResult<()> {
+        self.reconcile(session)?;
+        self.with_adapters(|runtime, _native, services| runtime.content_action(instance, action, services))
+    }
+    fn refresh_reservations(&mut self) -> PanelResult<()> {
+        if let Some(host) = &mut self.host {
+            host.capture_reservations(&self.runtime, self.catalogue.as_ref())?;
+        }
+        Ok(())
+    }
+    fn refresh_metrics(&mut self) -> PanelResult<()> {
+        if let Some(host) = &mut self.host {
+            let services = self.services.services();
+            if let Err(reason) = host.capture_metrics(&self.runtime, services.models) {
+                host.invalidate_context();
+                self.runtime.suspend_presentations(services.local);
+                return Err(reason);
+            }
+        }
+        Ok(())
+    }
+    /// Current Session is refreshed at every presentation/action boundary, even
+    /// after this egui frame's one background tick. No controller update runs.
+    pub fn reconcile(&mut self, session: &Session) -> PanelResult<()> {
+        let before = self.runtime.environment().clone();
+        let revision = self.runtime.layout().inspect().revision;
+        let result = (|| {
+            self.services.refresh_read_only(session)?;
+            let mut environment = self.runtime.environment().clone();
+            environment.document = Some(DocumentId::new(session.document_id.clone())?);
+            self.with_adapters(|runtime, _native, services| runtime.reconcile_context(environment, services))
+        })();
+        match &result {
+            Ok(()) => {
+                if self.runtime.update_errors().is_empty() {
+                    self.last_error = None;
+                }
+                if (self.runtime.environment() != &before || self.runtime.layout().inspect().revision != revision)
+                    && let Some(host) = &mut self.host
+                {
+                    host.invalidate_context();
+                    host.reconcile_scope(&self.runtime);
+                }
+            }
+            Err(reason) => {
+                self.last_error = Some(reason.clone());
+                if let Some(host) = &mut self.host {
+                    host.invalidate_context();
+                }
+                let services = self.services.services();
+                self.runtime.suspend_presentations(services.local);
+            }
+        }
+        result
+    }
+    pub fn tick(&mut self, session: &Session) -> PanelResult<()> {
+        let result = match self.services.refresh_read_only(session) {
+            Ok(()) => (|| {
+                let mut environment = self.runtime.environment().clone();
+                environment.document = Some(DocumentId::new(session.document_id.clone())?);
+                self.with_adapters(|runtime, _native, services| {
+                    runtime.set_environment(environment, services.local)?;
+                    runtime.update(services)
+                })
+            })(),
+            Err(reason) => {
+                // The provider still represents the previous context. Never
+                // admit the incoming Session owner against those stale models.
+                if let Some(host) = &mut self.host {
+                    host.invalidate_context();
+                }
+                // Retained background owners still receive this tick's one
+                // service attempt. Bounded failures remain in update_errors;
+                // the caller receives the original refresh failure.
+                let _update = self.with_adapters(|runtime, _native, services| runtime.update(services));
+                let services = self.services.services();
+                self.runtime.suspend_presentations(services.local);
+                Err(reason)
+            }
+        };
+        self.last_error = result.as_ref().err().cloned();
+        result
+    }
+    /// Explicit teardown preflights all owners before any controller is destroyed.
+    pub fn shutdown(&mut self) -> PanelResult<()> {
+        self.with_adapters(|runtime, native, services| runtime.shutdown_with_native(native, services.local))
+    }
+}
+
+/// Observe typed replies from the authoritative command sink, including repeated
+/// Focus requests whose persistent focused instance has not changed.
+struct CommandActionSink<'a> {
+    live: &'a mut dyn ActionSink,
+    committed: &'a mut Option<LayoutReply>,
+}
+
+/// The app has a real captured placement environment. Structural commands may
+/// not bypass its allocator merely because they arrived over a control channel.
+pub(super) struct AdmittedActionSink<'a, 'runtime, 'services> {
+    pub(super) live: &'a mut RuntimeActionSink<'runtime, 'services>,
+    pub(super) host: Option<&'a mut WorkspacePanelHost>,
+    pub(super) proposal: std::cell::RefCell<Option<super::runtime::RuntimeHostProposal>>,
+}
+impl AdmittedActionSink<'_, '_, '_> {
+    fn project_owned(&self, action: LayoutAction, context: Option<&LayoutPreparationContext>) -> PanelResult<Layout> {
+        if standalone_header_action(&action) {
+            return match context {
+                Some(context) => self.live.project_in_context(action, context),
+                None => self.live.project(action),
+            };
+        }
+        let host = self.host.as_ref().ok_or_else(|| error(Rule::Availability, "panel host environment is unavailable"))?;
+        let reference = host.command_reference(self.live.runtime)?;
+        let mut cached = self.proposal.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "panel proposal already borrowed"))?;
+        if let Some(proposal) = cached.as_ref().filter(|proposal| proposal.action() == &action) {
+            let freshness = (|| {
+                if let Some(context) = context {
+                    proposal.validate_preparation_context(context)?;
+                }
+                proposal.validate(self.live.runtime, &reference, self.live.services.models)
+            })();
+            if let Err(reason) = freshness {
+                cached.take();
+                return Err(reason);
+            }
+            return Ok(proposal.layout().clone());
+        }
+        let proposal = match cached.take() {
+            Some(previous) => self.live.runtime.revise_host_proposal(previous, reference, action, context, self.live.services.models)?,
+            None => match context {
+                Some(context) => self.live.runtime.prepare_host_proposal_in_context(reference, action, context, self.live.services.models)?,
+                None => self.live.runtime.prepare_host_proposal(reference, action, self.live.services.models)?,
+            },
+        };
+        let layout = proposal.layout().clone();
+        *cached = Some(proposal);
+        Ok(layout)
+    }
+    fn dispatch_owned(&mut self, action: LayoutAction, context: Option<&LayoutPreparationContext>) -> PanelResult<LayoutReply> {
+        if action == LayoutAction::Inspect {
+            return Ok(self.inspect());
+        }
+        if standalone_header_action(&action) {
+            return match context {
+                Some(context) => self.live.dispatch_in_context(action, context),
+                None => self.live.dispatch(action),
+            };
+        }
+        self.project_owned(action.clone(), context)?;
+        let proposal = self.proposal.get_mut().take().ok_or_else(|| error(Rule::Lifecycle, "panel proposal missing"))?;
+        if proposal.action() != &action {
+            return Err(error(Rule::Revision, "panel dispatch intent changed"));
+        }
+        let reply = self.live.runtime.commit_host_proposal(proposal, self.live.native, self.live.services)?;
+        Ok(super::runtime::normalize_native_reply(reply, &self.live.native.capabilities()))
+    }
+}
+impl ActionSink for AdmittedActionSink<'_, '_, '_> {
+    fn project(&self, action: LayoutAction) -> PanelResult<Layout> {
+        self.project_owned(action, None)
+    }
+    fn project_in_context(&self, action: LayoutAction, context: &LayoutPreparationContext) -> PanelResult<Layout> {
+        self.project_owned(action, Some(context))
+    }
+    fn inspect(&self) -> LayoutReply {
+        self.live.inspect()
+    }
+    fn dispatch(&mut self, action: LayoutAction) -> PanelResult<LayoutReply> {
+        self.dispatch_owned(action, None)
+    }
+    fn dispatch_in_context(&mut self, action: LayoutAction, context: &LayoutPreparationContext) -> PanelResult<LayoutReply> {
+        self.dispatch_owned(action, Some(context))
+    }
+}
+impl ActionSink for CommandActionSink<'_> {
+    fn project_in_context(&self, action: LayoutAction, context: &LayoutPreparationContext) -> PanelResult<Layout> {
+        self.live.project_in_context(action, context)
+    }
+    fn dispatch_in_context(&mut self, action: LayoutAction, context: &LayoutPreparationContext) -> PanelResult<LayoutReply> {
+        let reply = self.live.dispatch_in_context(action, context)?;
+        *self.committed = Some(reply.clone());
+        Ok(reply)
+    }
+    fn project(&self, action: LayoutAction) -> PanelResult<Layout> {
+        self.live.project(action)
+    }
+    fn inspect(&self) -> LayoutReply {
+        self.live.inspect()
+    }
+    fn dispatch(&mut self, action: LayoutAction) -> PanelResult<LayoutReply> {
+        let reply = self.live.dispatch(action)?;
+        *self.committed = Some(reply.clone());
+        Ok(reply)
+    }
+}
+
+impl crate::SolveApp {
+    pub fn run_panel_command(&mut self, id: &str, params: &serde_json::Value) -> PanelResult<serde_json::Value> {
+        // Parse even without a runtime: hostile/unknown fields never become a
+        // misleading capability success or reach the document command path.
+        match self.panel_runtime.as_mut() {
+            Some(integration) => integration.command(&self.session, id, params),
+            None => {
+                commands::parse_command(id, params)?;
+                Err(error(Rule::Capability, "application panel runtime is not enabled"))
+            }
+        }
+    }
+    pub fn run_panel_batch(&mut self, steps: &[serde_json::Value]) -> PanelResult<serde_json::Value> {
+        self.panel_runtime
+            .as_mut()
+            .ok_or_else(|| error(Rule::Capability, "application panel runtime is not enabled"))?
+            .command_batch(&self.session, steps)
+    }
+    pub fn enable_universal_panel_host(&mut self, options: HostOptions) -> PanelResult<()> {
+        self.panel_runtime.as_mut().ok_or_else(|| error(Rule::Lifecycle, "enable a panel runtime before its host"))?.enable_host(options)
+    }
+    pub fn disable_universal_panel_host(&mut self) -> PanelResult<()> {
+        if let Some(integration) = &mut self.panel_runtime {
+            integration.disable_host()?;
+        }
+        Ok(())
+    }
+    pub fn universal_panel_host_enabled(&self) -> bool {
+        self.panel_runtime.as_ref().is_some_and(|integration| integration.host.is_some())
+    }
+    pub fn universal_panel_frame(&self) -> Option<&HostFrame> {
+        self.panel_runtime.as_ref()?.host.as_ref()?.frame()
+    }
+    /// Internal opt-in only: no preference, control method, command or default change.
+    pub fn enable_panel_runtime(&mut self, runtime: PanelRuntime, services: Box<dyn AppPanelServices>) -> PanelResult<()> {
+        if self.panel_runtime.is_some() {
+            return Err(error(Rule::Lifecycle, "panel runtime already enabled"));
+        }
+        let mut integration = AppPanelRuntime::new(runtime, services)?;
+        integration.tick(&self.session)?;
+        self.panel_runtime = Some(integration);
+        Ok(())
+    }
+    pub fn panel_runtime(&self) -> Option<&PanelRuntime> {
+        self.panel_runtime.as_ref().map(|integration| &integration.runtime)
+    }
+    pub fn panel_runtime_mut(&mut self) -> Option<&mut AppPanelRuntime> {
+        self.panel_runtime.as_mut()
+    }
+    pub fn set_panel_native_adapter(&mut self, native: Box<dyn NativeHostAdapter>) -> PanelResult<()> {
+        self.panel_runtime.as_mut().ok_or_else(|| error(Rule::Lifecycle, "panel runtime disabled"))?.set_native_adapter(native)
+    }
+    pub fn dispatch_panel_layout(&mut self, action: LayoutAction) -> PanelResult<LayoutReply> {
+        self.panel_runtime.as_mut().ok_or_else(|| error(Rule::Lifecycle, "panel runtime disabled"))?.dispatch(&self.session, action)
+    }
+    pub fn mount_panels(&mut self, resolved: &ResolvedLayout, host: &mut dyn PanelHost) -> PanelResult<()> {
+        self.panel_runtime.as_mut().ok_or_else(|| error(Rule::Lifecycle, "panel runtime disabled"))?.mount(&self.session, resolved, host)
+    }
+    /// A complete set for one native host; empty unmounts just that viewport.
+    pub fn mount_native_panels(&mut self, native_host: &HostId, resolved: &ResolvedLayout, host: &mut dyn PanelHost) -> PanelResult<()> {
+        self.panel_runtime.as_mut().ok_or_else(|| error(Rule::Lifecycle, "panel runtime disabled"))?.mount_native(
+            &self.session,
+            native_host,
+            resolved,
+            host,
+        )
+    }
+    pub fn panel_content_action(&mut self, instance: &InstanceId, action: &ControlId) -> PanelResult<()> {
+        self.panel_runtime.as_mut().ok_or_else(|| error(Rule::Lifecycle, "panel runtime disabled"))?.content_action(&self.session, instance, action)
+    }
+    pub fn tick_panel_runtime(&mut self) -> PanelResult<()> {
+        self.panel_runtime.as_mut().ok_or_else(|| error(Rule::Lifecycle, "panel runtime disabled"))?.tick(&self.session)
+    }
+    pub fn disable_panel_runtime(&mut self) -> PanelResult<()> {
+        if let Some(integration) = &mut self.panel_runtime {
+            integration.shutdown()?;
+        }
+        self.panel_runtime = None;
+        Ok(())
+    }
+}
+
+pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
+    if let Some(integration) = &mut app.panel_runtime {
+        let frame = ctx.cumulative_frame_nr();
+        if integration.last_tick_frame == Some(frame) {
+            return;
+        }
+        integration.last_tick_frame = Some(frame);
+        // Errors remain inspectable without inventing untranslated production UI.
+        integration.last_error = integration.tick(&app.session).err();
+    }
+}
+
+/// Called on the actual hidden transition, including a control-channel Home
+/// open/close interval between paints. No tick, destruction or owner rebind.
+pub(crate) fn hide_app_host(app: &mut crate::SolveApp) {
+    if let Some(integration) = &mut app.panel_runtime
+        && let Err(reason) = integration.hide_in_app()
+    {
+        integration.last_error = Some(reason);
+    }
+}
+
+pub(crate) fn reserve_host_input(app: &mut crate::SolveApp, ctx: &egui::Context) {
+    let Some(integration) = &mut app.panel_runtime else {
+        return;
+    };
+    let Some(host) = &mut integration.host else {
+        return;
+    };
+    if host.wants_escape(&integration.runtime) && crate::ui_kit::Container::reserve_host_escape(ctx) {
+        host.request_escape();
+        app.esc_handled = true;
+    }
+}
+
+pub(crate) fn finish_app_host(app: &mut crate::SolveApp, ui: &mut egui::Ui) {
+    if let Some(integration) = &mut app.panel_runtime
+        && let Err(reason) = integration.finish_host(&app.session, ui)
+    {
+        integration.last_error = Some(reason);
+    }
+}
+
+impl crate::SolveApp {
+    /// Alternate placement only. The caller keeps the app bar, ribbon, existing
+    /// viewport/navigation and late feature/system overlays in their normal flow.
+    pub(crate) fn universal_workspace_ui(&mut self, ui: &mut egui::Ui) {
+        // Capture before either ribbon or bottom chrome consumes root layout.
+        // Rendering and picking always share this full domain below the app bar.
+        let render_domain = ui.available_rect_before_wrap();
+        self.viewport.host_confirm = None;
+        crate::ui_kit::Container::begin_host_windows(ui.ctx());
+        self.viewport.host_windows = Some(Vec::new());
+        if self.session.active_sketch.is_none() {
+            self.viewport.palette_rect = None;
+        }
+        // Clear stale Browser-owned metadata; the retained independent
+        // redefine/feature editor publishes its actual paint later in this pass.
+        if self.dialog.is_none() {
+            self.viewport.dialog_rect = None;
+        }
+        // Unoccupied dock capacity and ribbon spacing are application backdrop,
+        // not panel paint/input regions. Cover the native GPU clear through the
+        // shared viewport surface without changing any declared panel geometry.
+        let backdrop = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Viewport);
+        crate::ui_kit::Container::paint_frame(ui.painter(), backdrop.edge_frame(crate::theme::Tokens::get().panel), ui.available_rect_before_wrap());
+        crate::timeline::follow_view_pick(self);
+        crate::render_ui::focus_shortcut(self, ui);
+        crate::dialogs::sync_feature_edit(self);
+        if cfg!(not(target_arch = "wasm32")) && self.preferences.agent_chat_popped {
+            // Keep the previous embedded-window rect for hover shortcuts.
+            // `show` owns geometry/lifecycle and also polls in this path.
+            crate::agent_chat::show(self, ui);
+        } else {
+            // The root Assistant panel is suppressed. Forget only presentation
+            // geometry and placement, so a later pop uses the saved window place.
+            self.agent_chat.panel_rect = None;
+            self.agent_chat.drop_rect = None;
+            self.agent_chat.dock_space = None;
+            self.agent_chat.window_placed = false;
+            crate::agent_chat::poll(self, ui.ctx());
+        }
+        self.shell.browser = None;
+        self.shell.browser_hidden = false;
+        self.shell.history = None;
+        self.shell.panels.clear();
+        self.shell.workspace_panels.clear();
+        self.shell.dialog_column = None;
+        self.shell.left_space = None;
+        self.shell.history_dock_space = None;
+        self.shell.history_folding = None;
+        self.shell.history_fold_motion = None;
+        crate::theme::TabAccent::publish(self, ui.ctx());
+        crate::browser::publish_row_prefs(self, ui.ctx());
+        let mut placement = render_domain;
+        self.shell.status_bar = if crate::status_bar::shown(self) {
+            let height = crate::status_bar::HEIGHT.min(placement.height().max(0.0));
+            let bar = egui::Rect::from_min_max(egui::pos2(placement.left(), placement.bottom() - height), placement.max);
+            placement.max.y = bar.top();
+            Some(bar)
+        } else {
+            None
+        };
+        if !self.embedded {
+            let cards = crate::toolbar::shell_cards(self, placement);
+            self.shell.cards = vec![cards.workspace, cards.ribbon];
+            placement.min.y = cards.bottom.min(placement.bottom()).max(placement.top());
+        } else {
+            self.shell.cards.clear();
+        }
+        let gap = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Panel).gap();
+        placement.min.x += gap.min(placement.width() / 2.0);
+        placement.max.x -= gap.min(placement.width());
+        placement.max.y -= gap.min(placement.height());
+        if self.embedded {
+            placement.min.y += gap.min(placement.height());
+        }
+        let chrome: Vec<_> = self
+            .shell
+            .cards
+            .iter()
+            .copied()
+            .chain(self.shell.status_bar)
+            .map(|bounds| bounds.intersect(render_domain))
+            .filter(|bounds| bounds.is_positive() && bounds.is_finite())
+            .map(logical_rect)
+            .collect();
+        let prepared = match &mut self.panel_runtime {
+            Some(integration) => {
+                let result = (|| {
+                    if let Some(host) = &mut integration.host {
+                        host.note_egui_context(ui.ctx());
+                        host.set_gap(gap)?;
+                    }
+                    integration.prepare_host_in_domain(&self.session, logical_rect(render_domain), logical_rect(placement), &chrome)
+                })();
+                if let Err(reason) = &result {
+                    integration.last_error = Some(reason.clone());
+                }
+                result.is_ok()
+            }
+            None => false,
+        };
+        self.shell.content = Some(render_domain);
+        if render_domain.is_positive() && render_domain.is_finite() {
+            crate::preview::update(self, ui.ctx());
+            let mut scene = ui.new_child(egui::UiBuilder::new().id_salt("universal_panel_viewport").max_rect(render_domain));
+            scene.set_clip_rect(scene.clip_rect().intersect(render_domain));
+            self.show_workspace(&mut scene);
+        }
+        // Chrome paints and receives input above the full-domain scene. Its
+        // measured rectangles affect usable space, never the camera projection.
+        crate::status_bar::show(self, ui);
+        if !self.embedded {
+            crate::toolbar::toolbar(self, ui);
+        }
+        crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Viewport)
+            .central()
+            .frame(crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Viewport).edge_frame(egui::Color32::TRANSPARENT))
+            .show(ui, |ui| {
+                if prepared
+                    && let Some(integration) = &mut self.panel_runtime
+                    && let Err(reason) = integration.show_host_deferred(&self.session, ui)
+                {
+                    integration.last_error = Some(reason);
+                }
+            });
+    }
+}

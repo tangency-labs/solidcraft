@@ -1,7 +1,9 @@
 // Home and Fit frame what is shown now, and a middle-button double-click goes Home.
 use crate::scenario::Harness;
 use serde_json::json;
-use solidcraft_engine::geom::{Aabb3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::Aabb3;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::StandardView;
 
 /// A block drawn at the origin and extruded, then moved 500 mm along X: its sketch stays at the
@@ -341,7 +343,8 @@ fn navigation_bar_display_menu_runs_grid_and_shadow_commands() {
         h.step(&json!({"widget":label})).unwrap();
         let after = if id == "view.grid" { h.app.ui.show_grid } else { h.app.ui.ground_shadow };
         assert_eq!(after, !before);
-        let echo = crate::i18n::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
+        let language = crate::i18n::Locale::for_language(&h.app.preferences.language);
+        let echo = language.format("ui.command_done", &[("command", language.label(crate::command_label(id)))]);
         assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{id} was not run");
     }
 }

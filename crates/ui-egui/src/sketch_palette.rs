@@ -9,6 +9,7 @@
 //! The line type is also a drawing mode: with nothing selected, Construction (or X) makes what
 //! is drawn next construction geometry until it is switched back.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use std::cell::Cell;
 
 use serde_json::{Value, json};
@@ -376,14 +377,16 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
     let panel = crate::ui_kit::Panel::new(
         app.tr_label("ui.palette_sketch_options"),
-        egui::Id::new("sc_sketch_palette"),
+        egui::Id::unique("sc_sketch_palette"),
         anchor,
         vp,
         crate::frame::Side::Right,
         frame,
     )
     .width(width(vp));
+    let mut painted = false;
     let response = panel.window(ctx).show(ctx, |ui| {
+        painted = ui.is_visible() && !ui.is_sizing_pass();
         panel.palette(ui, bottom, top, |ui, part| match part {
             crate::ui_kit::Part::Header => {
                 let status = if !solved || !geometry || remaining == 0 {
@@ -407,14 +410,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 let t = crate::theme::Tokens::get();
                 if open_ends > 0 {
                     let text = crate::i18n::format("sketch.open_ends", &[("count", &open_ends.to_string())]);
-                    ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).on_hover_text(app.tr("ui.open_ends_tip"));
+                    ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(app.tr("ui.open_ends_tip"));
                 }
                 if untied_ends > 0 {
                     ui.horizontal(|ui| {
                         let text = crate::i18n::format("sketch.untied_ends", &[("count", &untied_ends.to_string())]);
-                        ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).on_hover_text(app.tr("ui.untied_ends_tip"));
-                        let button =
-                            crate::ui_kit::button(ui, app.tr("ui.tie_ends"), crate::ui_kit::Button::Normal).on_hover_text(app.tr("ui.tie_ends_tip"));
+                        ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(app.tr("ui.untied_ends_tip"));
+                        let button = crate::ui_kit::button(ui, app.tr("ui.tie_ends"), crate::ui_kit::Button::Normal)
+                            .backing_on_hover_text(app.tr("ui.tie_ends_tip"));
                         crate::scenario::publish_handle("sketch_palette:tie_ends", button.rect.center());
                         tie = button.clicked();
                     });
@@ -507,7 +510,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         });
     });
-    app.viewport.palette_rect = response.map(|r| r.response.rect.expand(frame.stroke.width));
+    app.viewport.palette_rect =
+        response.filter(|_| !app.universal_panel_host_enabled() || painted).map(|r| r.response.rect.expand(frame.stroke.width));
     if let Some(rect) = app.viewport.palette_rect {
         crate::scenario::publish_rect("sketch_palette:outer", rect);
     }
@@ -537,6 +541,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.set_status(error, true);
     }
     if look {
+        if app.universal_panel_host_enabled() {
+            app.viewport.host_windows = crate::ui_kit::Container::host_window_regions(ctx);
+            crate::viewport::refresh_layout(app, ctx);
+        }
         crate::dialogs::look_at_sketch_again(app);
     }
     if finish {

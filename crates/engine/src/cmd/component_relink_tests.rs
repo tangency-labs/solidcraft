@@ -278,8 +278,8 @@ fn linked_design_properties_update_density_without_geometry_and_keep_edited_card
 
 #[test]
 fn linked_design_properties_keep_opaque_pbr_and_face_color_after_reload() {
+    use solidcore_record::Vec3;
     use solidcraft_doc::appearance::{FaceLook, Look};
-    use solidcraft_geom::Vec3;
     let dir = folder("properties-optics");
     let file = dir.join("source.solidcraft");
     let mut part = properties_part(&file, "Steel", None, [12, 34, 56]);
@@ -321,8 +321,8 @@ fn linked_design_properties_keep_opaque_pbr_and_face_color_after_reload() {
 
 #[test]
 fn linked_face_overrides_update_independently_and_preserve_local_edits_and_removals() {
+    use solidcore_record::Vec3;
     use solidcraft_doc::appearance::{FaceLook, Look};
-    use solidcraft_geom::Vec3;
     let dir = folder("properties-faces");
     let file = dir.join("source.solidcraft");
     let mut part = properties_part(&file, "Steel", None, [12, 34, 56]);
@@ -416,7 +416,7 @@ fn linked_face_removal_without_a_body_look_does_not_reveal_baked_source_paint() 
     part.doc_mut().appearances.bodies.clear();
     part.doc_mut().appearances.faces.push(FaceLook {
         body: "Cube".into(),
-        point: solidcraft_geom::Vec3::new(5.0, 5.0, 10.0),
+        point: solidcore_record::Vec3::new(5.0, 5.0, 10.0),
         look: Look::custom([190, 20, 30], 0.65),
         name: None,
         strict_name: false,
@@ -444,7 +444,7 @@ fn unchanged_linked_face_overrides_do_not_reorder_assignments_or_report_updates(
     let mut part = properties_part(&file, "Steel", None, [12, 34, 56]);
     part.doc_mut().appearances.faces.push(FaceLook {
         body: "Cube".into(),
-        point: solidcraft_geom::Vec3::new(5.0, 5.0, 10.0),
+        point: solidcore_record::Vec3::new(5.0, 5.0, 10.0),
         look: Look::custom([190, 20, 30], 0.65),
         name: None,
         strict_name: false,
@@ -547,6 +547,8 @@ fn relink_repairs_a_moved_source_for_every_instance_in_one_undo_step() {
     assert!((volume(&mut s) - 12000.0).abs() < 1e-5);
     run(&mut s, "edit.redo", json!({}));
     assert_eq!(serde_json::to_value(&*s.doc).unwrap(), after);
+    // A move not captured stops a save (#9736).
+    run(&mut s, "component.capture_position", json!({}));
     run(&mut s, "file.save", json!({}));
     let mut reopened = Session::default();
     run(&mut reopened, "doc.open", json!({"path": assembly}));
@@ -644,7 +646,7 @@ fn relink_keeps_joint_definitions_and_reports_solver_diagnostics() {
     // requiring relink to guess which face of a different design was intended.
     let joint = s.doc_mut().assembly.joints.first_mut().unwrap();
     joint.b.snap =
-        solidcraft_doc::joints::Snap::FaceCenter { pick: solidcraft_geom::Vec3::ZERO, face: Some("no-such-linked-face".to_string()), x: None };
+        solidcraft_doc::joints::Snap::FaceCenter { pick: solidcore_record::Vec3::ZERO, face: Some("no-such-linked-face".to_string()), x: None };
     s.refresh();
     let result = run(&mut s, "component.relink", json!({"component": component, "path": replacement}));
     assert!(result["joint_errors"].as_array().unwrap().iter().any(|e| e["name"] == "Seat"));

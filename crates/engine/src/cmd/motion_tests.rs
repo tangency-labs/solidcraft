@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -15,6 +16,13 @@ fn occ(s: &Session, component: &str) -> u64 {
     s.doc.occurrence_of(c).map(|o| o.id).unwrap_or(0)
 }
 
+/// The call that deletes item `id` with `delete`: Edit Contact Set deletes with `delete: true`;
+/// Delete Motion Study and Delete Exploded View take only the item, and strict refuses any other
+/// key (#12155).
+fn deletion(delete: &str, key: &str, id: u64) -> Value {
+    if delete == "contact.edit" { json!({key: id, "delete": true}) } else { json!({key: id}) }
+}
+
 #[test]
 fn deleted_motion_item_ids_are_not_reused_after_reopening() {
     for (create, delete, key, params) in [
@@ -28,13 +36,13 @@ fn deleted_motion_item_ids_are_not_reused_after_reopening() {
             run(&mut s, "component.create", json!({"name": name}));
         }
         let first = run(&mut s, create, params.clone())[key].as_u64().unwrap();
-        let deletion = json!({key: first, "delete": true});
-        run(&mut s, delete, deletion.clone());
+        let deleting = deletion(delete, key, first);
+        run(&mut s, delete, deleting.clone());
         let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
         *s.doc_mut() = doc;
         let second = run(&mut s, create, params)[key].as_u64().unwrap();
         assert!(second > first, "{create}: deleted item {first} was reused as {second}");
-        assert!(s.execute(delete, &deletion).is_err());
+        assert!(s.execute(delete, &deleting).is_err());
     }
 }
 
@@ -59,7 +67,7 @@ fn default_names_skip_names_in_use() {
         let (first, one) = made(&mut s);
         let (_, two) = made(&mut s);
         assert_eq!([one, two], [format!("{prefix}1"), format!("{prefix}2")]);
-        run(&mut s, delete, json!({key: first, "delete": true}));
+        run(&mut s, delete, deletion(delete, key, first));
         assert_eq!(made(&mut s).1, format!("{prefix}1"), "{create}: the free name, not {prefix}2 again");
     }
     // Placements: with the first deleted, a copy takes a name none has.

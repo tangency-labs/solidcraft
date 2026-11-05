@@ -9,7 +9,7 @@ What it records, as nested spans on each thread:
 
 | Category | Spans |
 |---|---|
-| `smlib` | every SMLib C API call, timed by the C API itself (`steady_clock`) |
+| `solidcore` | every call into solidcore, the kernel |
 | `kernel` | booleans, blends, sweeps, lofts, shell/draft/offset, healing, sewing, conversions, meshing, measuring |
 | `import` | the stages of a STEP or IGES import: parse, index, each solid, placement, mesh check, convert batches |
 | `feature` | each feature computed, by its type; `doc evaluate` around them |
@@ -1012,3 +1012,32 @@ cache. These counting-only hooks/switch are absent from the published source and
 
 [Reproduction code, exact source/executable hashes and per-operation release samples](https://gist.github.com/takuto-NA/cf4c0c9a40f50d44e1b6cda96bba18bd)
 cover both baseline contexts and the independent counting probe.
+
+## Occurrence placements: one children-by-parent index (2026-11-05)
+
+`Document::placements` walks the assembly tree from the root and, for each component it visits,
+scanned every occurrence for that component's children: placements times occurrences. It runs
+for every world placement (`body_frames`), the Browser, the viewport, edit in place, motion and
+export. `OccurrenceTree` (`crates/doc/src/occurrence_tree.rs`) builds the children of each
+component once, in one pass and in document order, and the walk reads them from it. The walk's
+order, its depth and count caps and where it stops are unchanged; a test compares it with the
+scanning walk on 13 shapes and on hostile generated documents. `inside_component` uses the same
+index.
+
+`benchmark_placements_walk` (ignored; `cargo test --release -p solidcraft-doc --lib
+benchmark_placements_walk -- --ignored --nocapture`) times both walks on a generated board-like
+assembly: `top` modules, each holding `parts` parts of 9 pins. It runs each order in turn (the
+scanning walk first in each round, then the tree first), so neither walk always runs on a cache
+the other warmed. Windows x64, AMD Ryzen 7 7800X3D, Rust 1.99.1, release profile; median of 9
+rounds per order, in milliseconds, the tree's time including building it:
+
+| Occurrences | Placements | First | Scanning | Tree |
+| ---: | ---: | --- | ---: | ---: |
+| 1,010 | 10,011 | scanning | 6.118 | 1.645 |
+| 1,010 | 10,011 | tree | 6.022 | 1.643 |
+| 2,539 | 97,540 | scanning | 121.283 | 15.711 |
+| 2,539 | 97,540 | tree | 120.094 | 15.456 |
+
+The order moves either walk by about 1%.
+
+Both walks return the same placements in the same order (the benchmark asserts it).

@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 use crate::{ForeignCopy, Session};
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
 fn run(s: &mut Session, cmd: &str, p: Value) -> Value {

@@ -3,7 +3,9 @@
 mod raster;
 use egui::{ColorImage, Event, PointerButton, Pos2, Rect, TextureId, vec2};
 use serde_json::json;
-use solidcraft_engine::{Sel, geom::Vec3};
+use solidcore_record::Vec3;
+use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_ui_egui::{
     scenario::{self, Harness},
     theme, viewport,
@@ -69,10 +71,7 @@ fn save_frame(h: &mut Harness, textures: &mut HashMap<TextureId, ColorImage>, mu
     }
     out.shapes.insert(
         background,
-        egui::epaint::ClippedShape {
-            clip_rect: rect,
-            shape: egui::Shape::image(id, rect, Rect::from_min_max(Pos2::ZERO, egui::pos2(1., 1.)), egui::Color32::WHITE),
-        },
+        egui::epaint::ClippedShape::new(rect, egui::Shape::image(id, rect, Rect::from_min_max(Pos2::ZERO, egui::pos2(1., 1.)), egui::Color32::WHITE)),
     );
     raster::raster(h, textures, out).save(path).unwrap();
 }

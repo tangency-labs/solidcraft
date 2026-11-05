@@ -45,7 +45,7 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: us
         let selected = active && !copies.is_empty() && copies.iter().all(|copy| app.session.selection.contains(copy));
         let response = draw_row(
             ui,
-            ui.id().with(("sketch_pattern", sketch, &pattern.id)),
+            ui.scope_id().with(("sketch_pattern", sketch, &pattern.id)),
             &Row { depth, icon, label: &label, name: true, selected, dim, ..Default::default() },
         );
         if let Some(rect) = response.rect {

@@ -1,4 +1,5 @@
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 
 use crate::{EngineError, Session};
 
@@ -254,6 +255,41 @@ fn rules_and_canvases_follow_a_renamed_parameter() {
         run(&mut s, "edit.undo", json!({}));
     }
     assert_eq!(s.doc.sheet.rules[0].thickness, "gauge");
+}
+
+/// #9623: outside a rule's own `thickness`, `Thickness` is the rule's thickness, not a design
+/// parameter of that name: renaming that parameter leaves it, and it doesn't count as a user.
+#[test]
+fn a_rules_own_thickness_is_not_a_parameter_named_thickness() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Thickness", "expression": "2 mm"}));
+    run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": "Thickness", "bend_radius": "Thickness", "active": true}));
+    run(&mut s, "plastic.manage_rules", json!({"name": "Housing", "thickness": "3 mm", "clearance": "Thickness / 10"}));
+    let u = run(&mut s, "parameters.users", json!({"name": "Thickness"}));
+    let fields: Vec<String> = u["users"].as_array().unwrap().iter().map(|x| x.to_string()).collect();
+    assert_eq!(fields.len(), 1, "only the sheet metal rule's thickness: {u}");
+    run(&mut s, "parameters.rename", json!({"name": "Thickness", "new_name": "Gauge"}));
+    let r = &s.doc.sheet.rules[0];
+    assert_eq!((r.thickness.as_str(), r.bend_radius.as_str(), r.gap.as_str()), ("Gauge", "Thickness", "Thickness"));
+    let housing = s.doc.plastic.rules.iter().find(|r| r.name == "Housing").unwrap();
+    assert_eq!(housing.clearance, "Thickness / 10");
+}
+
+/// #9623: renaming a parameter to `Thickness` is refused while a rule field other than its own
+/// thickness uses it (that field would then read the rule's thickness), and nothing changes.
+#[test]
+fn renaming_to_thickness_is_refused_where_a_rule_would_read_its_own() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Factor", "expression": "0.3", "unit": ""}));
+    run(&mut s, "parameters.add", json!({"name": "Gauge", "expression": "2 mm"}));
+    run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": "Gauge", "k_factor": "Factor", "active": true}));
+    let before = s.doc.clone();
+    let e = err(&mut s, "parameters.rename", json!({"name": "Factor", "new_name": "Thickness"}));
+    assert!(e.contains("sheet metal rule R (k_factor)"), "{e}");
+    assert!(s.doc == before, "a refused rename changes nothing");
+    // Used only by a rule's own thickness, the rename goes through.
+    run(&mut s, "parameters.rename", json!({"name": "Gauge", "new_name": "Thickness"}));
+    assert_eq!((s.doc.sheet.rules[0].thickness.as_str(), s.doc.sheet.rules[0].k_factor.as_str()), ("Thickness", "Factor"));
 }
 
 #[test]
@@ -668,7 +704,7 @@ fn a_failed_auto_constrain_keeps_the_stored_sketch_consistent() {
 }
 
 /// The stored sketch's points, by id.
-fn stored_points(s: &Session, feature: u64) -> Vec<solidcraft_geom::Vec2> {
+fn stored_points(s: &Session, feature: u64) -> Vec<solidcore_record::Vec2> {
     s.doc.sketch(feature).unwrap().points.iter().map(|p| p.pos).collect()
 }
 
@@ -699,7 +735,7 @@ fn an_unsolvable_value_edit_is_refused_and_changes_nothing() {
 fn value_edits_continue_from_the_last_solved_state() {
     // A → B → C, each a small edit solved in one jump; C is solved from B (the stored state),
     // and setting both values back reproduces A (the linkage is fully constrained).
-    let close = |a: &[solidcraft_geom::Vec2], b: &[solidcraft_geom::Vec2], tol: f64| a.iter().zip(b).all(|(p, q)| p.dist(*q) < tol);
+    let close = |a: &[solidcore_record::Vec2], b: &[solidcore_record::Vec2], tol: f64| a.iter().zip(b).all(|(p, q)| p.dist(*q) < tol);
     let (mut s, feature, params) = linkage_session();
     run(&mut s, "sketch.finish", json!({}));
     let a = stored_points(&s, feature);

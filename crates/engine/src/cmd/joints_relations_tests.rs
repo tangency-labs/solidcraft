@@ -3,7 +3,8 @@
 //! parts are, and they keep holding as the parts change size.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::tests::{occ, place, run};
 use crate::Session;

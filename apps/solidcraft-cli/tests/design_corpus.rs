@@ -2,6 +2,7 @@
 //! the current format and evaluate (what they rebuild to today is today's, not what the build
 //! that saved them made); damaged and hostile design files never panic.
 
+use solidcraft_engine::geom::prelude::*;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};

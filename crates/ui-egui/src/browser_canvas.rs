@@ -4,8 +4,9 @@
 
 use egui::{Pos2, Stroke, vec2};
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_engine::doc::canvas::Canvas;
-use solidcraft_engine::geom::Vec2;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::browser::panel_pos;
@@ -25,7 +26,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let at = panel_pos(app);
     let (calibrate, name) = (m.calibrate, c.id);
     let (ok, cancel) = if calibrate { (crate::i18n::tr_label("Calibrate"), crate::i18n::tr("ui.cancel")) } else { ("", crate::i18n::tr("ui.close")) };
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_canvas_panel"), "canvas", &title)
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_canvas_panel"), "canvas", &title)
         .placed(egui::Align2::LEFT_TOP, at)
         .fields()
         .actions(ok, cancel, None)
@@ -170,6 +171,7 @@ fn on_image(c: &Canvas, p: Vec2) -> bool {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use solidcraft_engine::geom::prelude::*;
 
     fn canvas(h: &mut crate::scenario::Harness) -> u64 {
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
@@ -236,8 +238,8 @@ mod tests {
         let plane = h.app.session.doc.canvas_plane(&vals, &c).unwrap();
         let ax = c.center.x - 20.0;
         let bx = c.center.x + 20.0;
-        let sa = proj.to_screen(plane.to_world(solidcraft_engine::geom::Vec2::new(ax, c.center.y))).expect("point A on screen");
-        let sb = proj.to_screen(plane.to_world(solidcraft_engine::geom::Vec2::new(bx, c.center.y))).expect("point B on screen");
+        let sa = proj.to_screen(plane.to_world(solidcore_record::Vec2::new(ax, c.center.y))).expect("point A on screen");
+        let sb = proj.to_screen(plane.to_world(solidcore_record::Vec2::new(bx, c.center.y))).expect("point B on screen");
         assert!(super::click(&mut h.app, &proj, sa), "first click sets A");
         let panel = h.app.tree.canvas_panel.as_ref().unwrap();
         assert_eq!(panel.next, 1);
@@ -247,7 +249,7 @@ mod tests {
         assert_eq!(panel.next, 0);
         assert!((panel.b[0] - bx).abs() < 0.5, "{:?}", panel.b);
         let before = panel.a;
-        let miss = plane.to_world(solidcraft_engine::geom::Vec2::new(c.center.x + 500.0, c.center.y));
+        let miss = plane.to_world(solidcore_record::Vec2::new(c.center.x + 500.0, c.center.y));
         if let Some(sm) = proj.to_screen(miss) {
             assert!(!super::click(&mut h.app, &proj, sm));
             assert_eq!(h.app.tree.canvas_panel.as_ref().unwrap().a, before);

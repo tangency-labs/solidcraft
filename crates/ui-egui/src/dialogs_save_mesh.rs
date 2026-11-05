@@ -15,6 +15,7 @@
 //! over a program the user added removes it.
 
 use crate::selection::SelectionExt as _;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::choice_row;
 use std::collections::HashMap;
 
@@ -260,7 +261,7 @@ pub fn start_with_format(app: &mut SolveApp, format: &str) {
 /// A popup with the slicer list is open (Delete belongs to it, not to the design's selection).
 pub fn popup_open(ctx: &egui::Context) -> bool {
     let frame = ctx.cumulative_frame_nr();
-    let at = ctx.data(|d| d.get_temp::<u64>(egui::Id::new("sc_slicer_popup")));
+    let at = ctx.data(|d| d.get_temp::<u64>(egui::Id::unique("sc_slicer_popup")));
     at.is_some_and(|n| n + 1 >= frame)
 }
 
@@ -434,7 +435,7 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
     let r = crate::ui_kit::dropdown_menu(ui, "sm_slicer", &text, |ui| {
         let frame = ctx.cumulative_frame_nr();
-        ctx.data_mut(|d| d.insert_temp(egui::Id::new("sc_slicer_popup"), frame));
+        ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_slicer_popup"), frame));
         for e in &entries {
             let tex = icon(&mut app.slicer_menu, &ctx, e);
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
@@ -450,12 +451,12 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
             crate::scenario::publish_handle(&format!("dialog:Slicer:{}", e.slicer.name), rect.center());
             if e.user {
                 let hint = crate::i18n::format("ui.slicer_delete_tip", &[("program", e.slicer.command.first().map_or("", String::as_str))]);
-                resp.clone().on_hover_text(if elided { format!("{}\n{hint}", e.slicer.name) } else { hint });
+                resp.clone().backing_on_hover_text(if elided { format!("{}\n{hint}", e.slicer.name) } else { hint });
                 if resp.hovered() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
                     delete = Some(e.key.clone());
                 }
             } else if elided {
-                resp.clone().on_hover_text(&e.slicer.name);
+                resp.clone().backing_on_hover_text(&e.slicer.name);
             }
             if resp.clicked() {
                 chosen = Some(e.key.clone());
@@ -495,14 +496,14 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
             Tokens::get().text,
         );
         crate::scenario::publish_handle("dialog:Slicer:Custom", rect.center());
-        if resp.on_hover_text(crate::i18n::tr("ui.custom_program_tip")).clicked() {
+        if resp.backing_on_hover_text(crate::i18n::tr("ui.custom_program_tip")).clicked() {
             pick_custom = true;
             ui.close();
         }
     });
     ui.style_mut().wrap_mode = wrap;
     if let Some(name) = name {
-        r.clone().on_hover_text(name);
+        r.clone().backing_on_hover_text(name);
     }
     if let Some(e) = current {
         let tex = icon(&mut app.slicer_menu, &ctx, e);
@@ -973,7 +974,7 @@ mod tests {
         h.settle();
         // A click on the face of `body` at `point` in the Print face input; that face's index.
         let pick = |h: &mut crate::scenario::Harness, body: &str, point: [f64; 3]| {
-            let p = solidcraft_engine::geom::Vec3::new(point[0], point[1], point[2]);
+            let p = solidcore_record::Vec3::new(point[0], point[1], point[2]);
             let index = solidcraft_engine::doc::appearance::face_index_at(h.app.session.world_state().unwrap().body(body).unwrap(), p).unwrap();
             let d = h.app.dialog.as_mut().unwrap();
             d.active = 1;

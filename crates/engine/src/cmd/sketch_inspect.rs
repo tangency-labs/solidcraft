@@ -2,7 +2,9 @@
 //! centre of mass of bodies.
 
 use serde_json::Value;
-use solidcraft_geom::{Aabb3, Seg2, Vec2, Vec3};
+use solidcore_record::{Seg2, Vec2, Vec3};
+use solidcraft_geom::Aabb3;
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, string_list, vec3};
@@ -505,6 +507,7 @@ fn center_of_mass(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
+    use solidcraft_geom::prelude::*;
 
     use crate::Session;
 
@@ -543,7 +546,7 @@ mod tests {
     /// options, a sketch curve keeps its own sketch, and `clear` turns the analysis off.
     #[test]
     fn added_combs_share_one_scale_and_clear_turns_them_off() {
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         let mut s = Session::default();
         s.execute("solid.cylinder", &json!({"radius": 5, "height": 10})).unwrap();
         s.execute("solid.cylinder", &json!({"base": [40, 0, 0], "radius": 10, "height": 10})).unwrap();
@@ -839,7 +842,7 @@ mod tests {
         let spline = face["face"].as_u64().unwrap() as u32;
         for c in curve_points(&r) {
             for q in &c {
-                let p = solidcraft_geom::Vec3::new(q[0], q[1], q[2]);
+                let p = solidcore_record::Vec3::new(q[0], q[1], q[2]);
                 // On that face (within the display mesh's sag), within its extent, clear of the hole.
                 let d = mesh
                     .triangles

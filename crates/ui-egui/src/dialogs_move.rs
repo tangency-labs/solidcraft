@@ -7,10 +7,11 @@
 use crate::selection::SelectionExt as _;
 use crate::ui_kit::{choice_row, expr_row};
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::{Mat, apply_point, apply_vector, is_identity, mat_inverse, mat_mul, rigid};
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};

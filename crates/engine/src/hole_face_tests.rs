@@ -3,7 +3,7 @@
 //! where it was put and says so instead of sliding to the face's nearest point.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::Session;
 
@@ -492,4 +492,87 @@ fn a_hole_wider_than_the_part_says_it_removes_all_of_it() {
     assert!(said(&s, "H1").contains("the hole removes all of Body1"), "{}", said(&s, "H1"));
     change(&mut s, "hd", "5 mm");
     assert_eq!(said(&s, "H1"), "");
+}
+
+/// The volume of one body.
+fn body_volume(s: &mut Session, name: &str) -> f64 {
+    let m = run(s, "inspect.measure", json!({}));
+    let b = m["bodies"].as_array().unwrap().iter().find(|b| b["name"] == name).unwrap_or_else(|| panic!("no body {name}: {m}"));
+    b["volume_mm3"].as_f64().unwrap()
+}
+
+/// A Block (x 0…20) made first, then a 3 mm Plate (x −3…0) whose front face touches the Block's
+/// back face round (0, 30, 20).
+fn plate_behind_block(s: &mut Session) {
+    run(s, "solid.box", json!({"length": 20, "width": 40, "height": 30, "corner": [0, 10, 5], "body_name": "Block", "operation": "new"}));
+    run(s, "solid.box", json!({"length": 3, "width": 60, "height": 40, "corner": [-3, 0, 0], "body_name": "Plate", "operation": "new"}));
+}
+
+/// The Plate with a 3.4 mm hole through it at (y 30, z 20), and the Block untouched.
+fn plate_drilled_through(s: &mut Session) {
+    near(body_volume(s, "Plate"), 7200.0 - pi() * 1.7 * 1.7 * 3.0);
+    near(body_volume(s, "Block"), 24_000.0);
+    assert!(!solid_at(s, -2.5, 30.0, 20.0), "the hole comes out of the Plate's back");
+    assert!(solid_at(s, 0.5, 30.0, 20.0), "the Block is not drilled");
+}
+
+/// #12066: a hole on a face that another part touches there drills the part it names. Both faces
+/// pass through the point, and the Block, made first, used to win: the hole drilled away from
+/// the Plate and cut only a shallow pocket into it, without a word.
+#[test]
+fn a_hole_on_a_face_another_part_touches_drills_the_part_it_names() {
+    let mut s = Session::default();
+    plate_behind_block(&mut s);
+    run(&mut s, "solid.hole", json!({"position": [0, 30, 20], "targets": ["Plate"], "diameter": 3.4, "name": "H"}));
+    assert!(hole_direction(&s, "H").x < -0.999, "drills along -X: {:?}", hole_direction(&s, "H"));
+    assert_eq!(said(&s, "H"), "");
+    plate_drilled_through(&mut s);
+}
+
+/// #12066: a design saved with that hole's direction pointing into the Block (as older builds
+/// saved it) drills the Plate when it is opened: the direction is mirrored into the Plate's face,
+/// as format 18 does for one taken from a thin plate's far side.
+#[test]
+fn a_saved_hole_turned_towards_a_touching_part_drills_its_own_part_when_opened() {
+    let mut s = Session::default();
+    plate_behind_block(&mut s);
+    run(&mut s, "solid.hole", json!({"position": [0, 30, 20], "targets": ["Plate"], "diameter": 3.4, "name": "H"}));
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let hole = saved["features"].as_array_mut().unwrap().iter_mut().find(|f| f["name"] == "H").unwrap();
+    hole["direction"] = json!([1.0, 0.0, 0.0]);
+    let mut opened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    assert!((hole_direction(&opened, "H").x - 1.0).abs() < 1e-9, "the design keeps the direction it was saved with");
+    assert_eq!(said(&opened, "H"), "");
+    plate_drilled_through(&mut opened);
+}
+
+fn hole_direction(s: &Session, name: &str) -> Vec3 {
+    match &s.doc.find_feature(name).unwrap().kind {
+        solidcraft_doc::FeatureKind::Hole { direction, .. } => direction.0,
+        other => panic!("{name} is not a hole: {}", other.type_name()),
+    }
+}
+
+/// A hole placed on a Cover's top to drill the Base under it (`targets` leaves the Cover out)
+/// still goes by the Cover's face, the only face there: it drills down through the Base, made
+/// now or opened from a design that saved the direction up (as format 18 repairs).
+#[test]
+fn a_hole_placed_on_another_parts_face_drills_its_own_part_behind_it() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "body_name": "Base"}));
+    run(&mut s, "solid.box", json!({"corner": [10, 10, 10], "length": 20, "width": 20, "height": 4, "body_name": "Cover", "operation": "new"}));
+    run(&mut s, "solid.hole", json!({"position": [20, 20, 14], "targets": ["Base"], "diameter": 5, "name": "H"}));
+    let drilled_base_only = |s: &mut Session| {
+        assert_eq!(said(s, "H"), "");
+        near(body_volume(s, "Base"), 16_000.0 - pi() * 6.25 * 10.0);
+        near(body_volume(s, "Cover"), 1600.0);
+    };
+    assert!(hole_direction(&s, "H").z < -0.999, "{:?}", hole_direction(&s, "H"));
+    drilled_base_only(&mut s);
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let hole = saved["features"].as_array_mut().unwrap().iter_mut().find(|f| f["name"] == "H").unwrap();
+    hole["direction"] = json!([0.0, 0.0, 1.0]);
+    let mut opened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    assert!(hole_direction(&opened, "H").z > 0.999);
+    drilled_base_only(&mut opened);
 }

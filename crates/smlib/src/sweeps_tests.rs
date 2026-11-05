@@ -1,10 +1,9 @@
-//! The sweeps against analytic volumes, each result a valid closed solid (built with SMLib only).
-#![cfg(feature = "native")]
+//! The sweeps against analytic volumes, each result a valid closed solid.
 
 use std::f64::consts::{PI, TAU};
 
 use super::*;
-use crate::CheckLevel;
+use crate::{CheckLevel, Error};
 
 fn solid_volume(b: &Brep, what: &str) -> f64 {
     let report = b.check(CheckLevel::All).unwrap();
@@ -63,8 +62,8 @@ fn a_horn_torus_comes_out_as_its_nurbs() {
     let want = 1.5 * PI * (14.0 + 56.0 / (3.0 * PI)) * PI * 98.0;
     assert_close(solid_volume(&b, "horn torus"), want, 1e-6, "horn torus");
     let record = b.to_native().unwrap();
-    record.validate().unwrap();
-    assert!(record.faces.iter().all(|f| !matches!(f.surface, solidcraft_geom::brep::Surface::Torus { .. })), "a torus label on a horn torus");
+    solidcraft_geom::brep::check::validate(&record).unwrap();
+    assert!(record.faces.iter().all(|f| !matches!(f.surface, solidcore_record::brep::Surface::Torus { .. })), "a torus label on a horn torus");
 }
 
 #[test]

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 use solidcraft_kernel::Continuity;
 use solidcraft_sketch::Sketch;
 
@@ -320,6 +321,12 @@ pub struct Extent {
     /// Through all bodies in the direction(s) instead of `distance`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub through_all: bool,
+    /// Two Sides as older builds read it: `distance2` goes the other way from wherever the
+    /// first side went, so a negative entered distance sends it back along the normal. Saved
+    /// designs from before entered distances kept their sides carry it, so they rebuild as
+    /// they did whatever their expressions evaluate to; new and edited extrudes leave it off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub second_follows_first: bool,
     /// Taper angle (expression; positive grows the profile).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(angle = "Taper angle")]
@@ -451,8 +458,14 @@ pub enum AxisRef {
     SketchAxis { axis: String },
     /// World X / Y / Z axis through the origin.
     World { axis: String },
-    /// Any line in the sketch plane, in world coordinates.
-    Line { origin: Position, dir: Dir },
+    /// Any line in the sketch plane, in world coordinates. The origin's coordinates are length
+    /// expressions, so the axis follows parameter changes.
+    Line {
+        #[serde(with = "point_expr")]
+        #[walk(placement)]
+        origin: PointExpr,
+        dir: Dir,
+    },
     /// An edge or round face of the model (a straight or circular edge, a cylinder, cone or
     /// torus face), found again on each evaluation: [`crate::construct::model_axis`].
     Model { geo: GeoRef },
@@ -609,10 +622,61 @@ impl<'de> Deserialize<'de> for FlangeEdge {
     }
 }
 
+/// One side of an Align by frames (#6257): an origin and a z direction, found again from the
+/// geometry each time the design is evaluated, so the bodies follow it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AlignFrame {
+    /// A joint origin on the model (its component's coordinates): its origin and z.
+    Origin { origin: Box<crate::joints::JointOrigin> },
+    /// A sketch point; z along the sketch's normal.
+    SketchPoint { sketch: SketchId, point: String },
+    /// The centre of a sketch circle, arc or ellipse; z along the sketch's normal.
+    SketchCurve { sketch: SketchId, curve: String },
+}
+
+impl AlignFrame {
+    /// The frame's origin and unit z in the model state `st` (its component's coordinates).
+    pub fn resolve(&self, doc: &Document, st: &crate::ModelState) -> Result<(Vec3, Vec3)> {
+        let sketch = |id: &SketchId| st.sketch(id.0).ok_or_else(|| DocError::Unknown(format!("sketch {id}")));
+        let (o, z) = match self {
+            AlignFrame::Origin { origin } => {
+                let m = crate::joints::resolve_origin(doc, st, origin)?;
+                (Vec3::new(m[3][0], m[3][1], m[3][2]), Vec3::new(m[2][0], m[2][1], m[2][2]))
+            }
+            AlignFrame::SketchPoint { sketch: id, point } => {
+                let ss = sketch(id)?;
+                let q = ss.sketch.point_index(point).and_then(|i| ss.sketch.point(i));
+                (ss.plane.to_world(q.ok_or_else(|| DocError::Unknown(format!("sketch point `{point}`")))?), ss.plane.normal())
+            }
+            AlignFrame::SketchCurve { sketch: id, curve } => {
+                use solidcraft_sketch::CurveKind;
+                let ss = sketch(id)?;
+                let kind = ss.sketch.curve_index(curve).and_then(|i| ss.sketch.curves.get(i)).map(|c| &c.kind);
+                let centre = match kind.ok_or_else(|| DocError::Unknown(format!("sketch curve `{curve}`")))? {
+                    CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } | CurveKind::Ellipse { c, .. } => ss.sketch.point(*c),
+                    _ => return Err(DocError::Invalid(format!("sketch curve `{curve}` is not a circle, arc or ellipse"))),
+                };
+                (ss.plane.to_world(centre.ok_or_else(|| DocError::Invalid(format!("sketch curve `{curve}` has no centre")))?), ss.plane.normal())
+            }
+        };
+        match z.normalized() {
+            Some(z) if o.is_finite() => Ok((o, z)),
+            _ => Err(DocError::Invalid("the frame has no finite origin and direction".into())),
+        }
+    }
+}
+
 /// Feature definitions.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FeatureKind {
+    /// A feature a newer SolidCraft saved that this build can't read ([`crate::newer_file`]): it
+    /// holds its place on the timeline, reports an error when evaluated, and goes back into the
+    /// file as it came.
+    NewerFileFeature {
+        raw: crate::newer_file::RawFeature,
+    },
     /// A recorded timeline ownership boundary. Geometry is converted from its
     /// current local frame into the destination component frame exactly once.
     BodyTransfer {
@@ -688,6 +752,10 @@ pub enum FeatureKind {
         /// from the vertex instead of where the rounds meet (a constant-radius fillet only).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         setbacks: Vec<CornerSetback>,
+        /// How two rounds turn where they meet at a sharp side edge: in a mitre (the default) or
+        /// swept round it (a constant-radius, exact, rolling-corner fillet without setbacks only).
+        #[serde(default, skip_serializing_if = "FilletTurn::is_mitre")]
+        turn: FilletTurn,
         /// Round each picked edge's tangent chain with it (the default: edges continuing it
         /// smoothly at its ends, as far as they go), or only the picked edges.
         #[serde(default = "yes", skip_serializing_if = "is_yes")]
@@ -913,6 +981,10 @@ pub enum FeatureKind {
         /// Buttress forms: which way the steep flank of the screw's teeth faces.
         #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
         steep_flank: crate::thread_forms::SteepFlank,
+        /// Set on threads saved before holes were sized by their nominal diameter, whose size
+        /// was left to the tap drill: a 12 mm hole stays M14 there. New threads leave it off.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        old_auto_size: bool,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {
@@ -990,6 +1062,8 @@ pub enum FeatureKind {
     Split {
         body: BodyName,
         plane: PlaneRef,
+        // The tool face is picked (and named), so the split follows it (#11674).
+        #[walk(picks_faces)]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool: Option<FaceAt>,
         /// A straight line of this sketch as the tool (#1552): the plane through it along the
@@ -1171,6 +1245,19 @@ pub enum FeatureKind {
         /// offset in full.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         axes: Option<Vec<Dir>>,
+        /// A frame on the bodies (#6257), found again on every evaluation: its origin and z are
+        /// the `from` point and normal. Replaces `from`, `from_normal` and `from_plane`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from_frame: Option<AlignFrame>,
+        /// A frame the bodies move onto, found again on every evaluation, so they follow it when
+        /// it moves. Replaces `to`, `to_normal` and `to_plane`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to_frame: Option<AlignFrame>,
+        /// A turn about the target's direction (its frame's z, face normal or plane normal),
+        /// through where `from` lands, after the move.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Angle")]
+        angle: Option<Expr>,
     },
     /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
     /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).
@@ -1412,7 +1499,7 @@ pub enum FeatureKind {
     },
     /// Plastic lip (raised band) or groove (recess) along the rim face picked at `face`.
     Lip {
-        face: Position,
+        face: FacePick,
         #[walk(length = "Width")]
         width: Expr,
         #[walk(length = "Height")]
@@ -1908,6 +1995,38 @@ impl FilletCorner {
     }
 }
 
+/// How two constant rounds of one radius turn round a sharp, straight, convex side edge square to
+/// both on a plane, such as the rounds along a boss's base at its upright edges.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilletTurn {
+    /// The rounds run on to where they cross and meet in a mitre.
+    #[default]
+    Mitre,
+    /// The rounds end at the side edge and the corner is their section revolved about it, a
+    /// torus tangent to both (`solidcraft_kernel::FilletTurn::Swept`).
+    Swept,
+}
+
+/// Why a swept turn is refused with a fillet's other options: the kernel sweeps the turn of two
+/// constant rounds of one radius, at its own corners only.
+pub const SWEPT_TAKES: &str = "a swept corner turns two constant rounds of one radius: `turn: swept` takes `type: constant`, \
+`corner: rolling`, no `setbacks` and `fit: exact` or `reduce`";
+
+impl FilletTurn {
+    pub fn is_mitre(&self) -> bool {
+        *self == FilletTurn::Mitre
+    }
+
+    /// The kernel's turn.
+    pub fn kernel(self) -> solidcraft_kernel::FilletTurn {
+        match self {
+            FilletTurn::Mitre => solidcraft_kernel::FilletTurn::Mitre,
+            FilletTurn::Swept => solidcraft_kernel::FilletTurn::Swept,
+        }
+    }
+}
+
 /// How Extend continues a surface past its edges.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -2311,6 +2430,12 @@ pub enum HoleKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Tip angle")]
         tip_angle: Option<Expr>,
+        /// Printing aid: two bridge layers this thick below the counterbore's floor (a slot along
+        /// X, then a square), so a printer bridges the step instead of sagging into it. Absent:
+        /// a plain counterbore.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Bridge layer")]
+        bridge: Option<Expr>,
     },
     Countersink {
         #[walk(length = "Countersink diameter")]
@@ -2495,6 +2620,7 @@ impl FeatureKind {
     /// Short type name (timeline tooltip, `inspect`).
     pub fn type_name(&self) -> &'static str {
         match self {
+            FeatureKind::NewerFileFeature { .. } => "NewerFileFeature",
             FeatureKind::BodyTransfer { .. } => "BodyTransferFeature",
             FeatureKind::Sketch { .. } => "Sketch",
             FeatureKind::Extrude { .. } => "ExtrudeFeature",
@@ -2580,6 +2706,7 @@ impl FeatureKind {
     /// Design-file variant key (e.g. `"extrude"`, `"box"`, `"sheet_flange"`).
     pub fn kind_key(&self) -> &'static str {
         match self {
+            FeatureKind::NewerFileFeature { .. } => "newer_file_feature",
             FeatureKind::BodyTransfer { .. } => "body_transfer",
             FeatureKind::Sketch { .. } => "sketch",
             FeatureKind::Extrude { .. } => "extrude",
@@ -2742,6 +2869,7 @@ impl FeatureKind {
     /// Default name prefix (`Extrude` → `Extrude1`).
     pub fn base_name(&self) -> &'static str {
         match self {
+            FeatureKind::NewerFileFeature { .. } => "Unknown",
             FeatureKind::BodyTransfer { .. } => "BodyTransfer",
             FeatureKind::Sketch { .. } => "Sketch",
             FeatureKind::Extrude { .. } => "Extrude",
@@ -3014,6 +3142,10 @@ pub fn is_counted_body_name(name: &str) -> bool {
 /// The document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
+    /// Set when a newer SolidCraft saved the file this came from: what to tell the user, and what
+    /// this build couldn't read and keeps for the next save ([`crate::newer_file`]).
+    #[serde(skip)]
+    pub newer_file: Option<std::sync::Arc<crate::newer_file::NewerFile>>,
     /// Named image intent and immutable embedded HDR sources. Active jobs and device state are not saved.
     #[serde(default, skip_serializing_if = "crate::render_settings::RenderSettings::is_empty")]
     pub render: std::sync::Arc<crate::render_settings::RenderSettings>,
@@ -3186,7 +3318,7 @@ impl Visibility {
 pub struct NamedView {
     #[serde(default)]
     pub name: String,
-    pub target: solidcraft_geom::Vec3,
+    pub target: solidcore_record::Vec3,
     pub yaw: f64,
     pub pitch: f64,
     pub distance: f64,
@@ -3375,6 +3507,7 @@ impl Document {
 
     pub fn new(name: &str) -> Self {
         Document {
+            newer_file: None,
             render: Default::default(),
             format: default_format(),
             format_pending: crate::format::pending_names(),
@@ -3796,7 +3929,12 @@ impl Document {
 
     /// Read a design file's JSON (any format this build knows; older ones are upgraded).
     pub fn from_json(s: &str) -> Result<Document> {
-        crate::render_resources::check_json_budget(s)?;
+        // A newer build's resources may not read here; the section stays out then (`newer_file`).
+        if let Err(why) = crate::render_resources::check_json_budget(s).and_then(|()| crate::render_texture_resources::check_json_budget(s))
+            && !crate::format::says_newer(s)
+        {
+            return Err(why);
+        }
         let mut d = crate::format::read(s)?;
         if d.features.len() > MAX_FEATURES || d.params.len() > MAX_PARAMS {
             return Err(DocError::Invalid("document too large".into()));
@@ -3808,6 +3946,11 @@ impl Document {
         Ok(d)
     }
     pub fn to_json(&self) -> String {
+        if self.newer_file.is_some() {
+            let mut value = serde_json::to_value(self).unwrap_or_default();
+            crate::newer_file::restore(self, &mut value);
+            return serde_json::to_string_pretty(&value).unwrap_or_default();
+        }
         serde_json::to_string_pretty(self).unwrap_or_default()
     }
 

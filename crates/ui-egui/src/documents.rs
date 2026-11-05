@@ -5,6 +5,7 @@
 //! Closing a design with unsaved changes asks first, and so does quitting: one "save changes?"
 //! per design with unsaved changes ([`request_quit`]).
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use egui::{FontId, Rect, Sense, pos2, vec2};
 use serde_json::{Value, json};
@@ -46,12 +47,15 @@ pub struct DocSlot {
     pre_sketch_component: Option<crate::PreSketchComponent>,
     view: DocView,
     occurrence_move: Option<crate::browser::OccMove>,
+    reveals: crate::browser::PendingReveals,
     agent_chat: crate::agent_chat::AgentChat,
     /// Its linked design files as the design last read them (`Documents::link_stamps`).
     link_stamps: Vec<(u64, crate::linked_source::Stamp)>,
     edit_in_place: Option<crate::edit_in_place::PartContext>,
     /// The dialog or tool it had open and its toolbar tab, kept while another design is shown.
     work: DocWork,
+    /// What it has computing off the window thread or waiting its turn.
+    jobs: crate::deferred::DocJobs,
 }
 
 /// What a design was doing when its tab was left, with the "Keep dialogs and tools open when
@@ -139,10 +143,12 @@ impl DocSlot {
             pre_sketch_component: None,
             view: DocView::default(),
             occurrence_move: None,
+            reveals: Default::default(),
             agent_chat: Default::default(),
             link_stamps: Vec::new(),
             edit_in_place: None,
             work: DocWork::default(),
+            jobs: Default::default(),
         }
     }
 }
@@ -187,6 +193,15 @@ impl Documents {
     }
 }
 
+/// The host renamed a design file: every open tab of that path follows it, including the
+/// borrowed design name the tab title shows (#11375).
+pub fn follow_file_rename(app: &mut SolveApp, old_path: &str, new_path: &str) {
+    app.session.follow_file_rename(old_path, new_path);
+    for slot in app.docs.background_mut() {
+        slot.session.follow_file_rename(old_path, new_path);
+    }
+}
+
 fn take_view(app: &mut SolveApp) -> DocView {
     DocView {
         render: std::mem::take(&mut app.render_workspace.view),
@@ -211,6 +226,8 @@ fn put_view(app: &mut SolveApp, v: DocView) {
 
 /// Put `slot` into the app and return what was there.
 fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
+    let reveals = crate::browser::take_reveals(app);
+    crate::semantic_content::leave_document(app);
     if crate::render_workspace::active(app) {
         let _ = crate::render_workspace::enter(app, false);
     }
@@ -244,11 +261,14 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         pre_sketch_component: std::mem::replace(&mut app.pre_sketch_component, slot.pre_sketch_component),
         view: take_view(app),
         occurrence_move: std::mem::replace(&mut app.tree.occurrence_move, slot.occurrence_move),
+        reveals,
         agent_chat: slot.agent_chat,
         link_stamps: std::mem::replace(&mut app.docs.link_stamps, slot.link_stamps),
         edit_in_place: std::mem::replace(&mut app.edit_in_place.active, slot.edit_in_place),
         work,
+        jobs: app.swap_jobs(slot.jobs),
     };
+    crate::browser::restore_reveals(app, slot.reveals);
     // Only the displayed design owns the process-wide crash replay journal.
     app.session.crash_journal = out.session.crash_journal;
     out.session.crash_journal = false;
@@ -267,6 +287,8 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     if let Some(pending) = &mut app.pending_feature_edit {
         pending.view_changed(before, app.session.revision);
     }
+    app.jobs_view_changed(before, app.session.revision);
+    crate::browser::forget_found(app);
     put_work(app, slot.work, before);
     out
 }
@@ -448,10 +470,12 @@ pub fn active_is_blank(app: &SolveApp) -> bool {
 }
 
 /// Show `session` (a design built or read elsewhere): in place of a blank active design,
-/// otherwise in a new tab.
-pub fn adopt(app: &mut SolveApp, session: Session) {
+/// otherwise in a new tab. Whether it is shown (no tab left for it: the status says so).
+pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
     if active_is_blank(app) {
         let rev = app.session.revision;
+        crate::browser::discard_reveals(app);
+        crate::semantic_content::leave_document(app);
         crate::dialogs::cancel(app);
         app.tool = None;
         crate::design_properties::close_object(app);
@@ -467,9 +491,56 @@ pub fn adopt(app: &mut SolveApp, session: Session) {
         // The linked designs that changed while it was closed are read again (#9739): last, as a
         // read is taken up only by the design revision it started from.
         crate::linked_source::update_changed(app);
+        true
     } else if let Err(e) = open_tab(app, session) {
         app.set_status(e, true);
+        false
+    } else {
+        true
     }
+}
+
+/// The active design as its file holds it (`document.export`): what a host that keeps the files
+/// itself writes (#8517). `text` is the design's JSON, the same a `.json` design file holds, and
+/// `revision` is the one `document.revision` names this state by.
+pub fn export(app: &mut SolveApp) -> Result<Value, String> {
+    let revision = app.session.design_revision();
+    let design = app.session.design();
+    let text = String::from_utf8(solidcraft_engine::io::write_design(&design)).map_err(|e| e.to_string())?;
+    Ok(json!({"name": design.name, "revision": revision, "dirty": app.session.is_dirty(), "format": "json", "text": text}))
+}
+
+/// Replace the active design with one a host kept (`document.import {text, name?}`): the text of
+/// a design file (its JSON, as `document.export` gives it). It opens saved, with nothing to undo,
+/// in the active design's place: as a design opened in a tab of its own, with that tab closed
+/// without asking. A text that does not read changes nothing.
+pub fn import(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
+    if app.file_picker_busy() || app.file_load.busy() || app.docs.closing.is_some() || app.docs.quitting.is_some() || app.docs.batch.is_some() {
+        return Err("a file is being opened or saved, or designs are being closed: try again".into());
+    }
+    let text = p.get("text").and_then(Value::as_str).ok_or("missing `text` (the design's JSON)")?;
+    let mut doc = solidcraft_engine::io::read_design(text.as_bytes()).map_err(|e| e.to_string())?;
+    if let Some(name) = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()) {
+        doc.name = name.to_string();
+    }
+    let replaced = app.docs.active;
+    open_tab(app, Session::opened(doc, None))?;
+    close(app, replaced, true);
+    let errors = app.session.model.results.iter().filter(|r| r.error.is_some()).count();
+    let revision = app.session.design_revision();
+    Ok(json!({"name": app.session.doc.name, "features": app.session.doc.features.len(), "errors": errors, "revision": revision}))
+}
+
+/// The host saved the design at `revision` (`document.saved`): it counts as saved from there.
+/// Refused when the design has changed since.
+pub fn saved(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
+    let revision = p.get("revision").and_then(Value::as_u64).ok_or("missing `revision`")?;
+    let now = app.session.design_revision();
+    if revision != now {
+        return Err(format!("the design changed since revision {revision} (now {now})"));
+    }
+    app.session.mark_saved();
+    Ok(json!({"revision": revision, "dirty": app.session.is_dirty()}))
 }
 
 /// A new, empty design in its own tab. One that is already empty keeps its tab and still
@@ -539,11 +610,15 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
     }
     app.docs.closing = None;
     if n <= 1 {
+        crate::browser::discard_reveals(app);
+        crate::semantic_content::leave_document(app);
         // The last design: a blank one takes its place.
         reset_chat(app);
         if let Some(a) = app.autosave.as_mut().and_then(|a| a.active.take()) {
             a.discard();
         }
+        // What it had computing goes with it: the blank design waits for none of it.
+        app.cancel_computing();
         app.big_operation = false;
         crate::sketch_text_move::cancel_drag(app);
         let rev = app.session.revision;
@@ -565,10 +640,11 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         let next = if i + 1 < n { i + 1 } else { i - 1 };
         switch(app, next);
     }
-    if let Some(slot) = app.docs.slots.remove(i)
-        && let Some(a) = slot.autosave
-    {
-        a.discard();
+    if let Some(slot) = app.docs.slots.remove(i) {
+        slot.session.stop_computing();
+        if let Some(a) = slot.autosave {
+            a.discard();
+        }
     }
     if app.docs.active > i {
         app.docs.active -= 1;
@@ -596,6 +672,13 @@ pub(crate) fn reset_chat(app: &mut SolveApp) {
 pub(crate) fn disconnect_background_chats(app: &mut SolveApp, wait: bool) {
     for slot in app.docs.background_mut() {
         slot.agent_chat.disconnect_document(&mut slot.session, wait);
+    }
+}
+
+/// Stop only the hidden conversations whose endpoint permission was revoked.
+pub(crate) fn disconnect_background_endpoint(app: &mut SolveApp, id: &str) {
+    for slot in app.docs.background_mut() {
+        slot.agent_chat.disconnect_endpoint(&mut slot.session, id);
     }
 }
 
@@ -682,6 +765,15 @@ pub fn any_dirty(app: &SolveApp) -> bool {
     (0..app.docs.count()).any(|i| dirty(app, i))
 }
 
+/// Every open design, in tab order (the shown one in its place): what the web app keeps a copy
+/// of in the browser when "keep unsaved work in this browser" is on (#10220).
+pub fn open_sessions(app: &SolveApp) -> Vec<&Session> {
+    if app.docs.slots.is_empty() {
+        return vec![&app.session];
+    }
+    app.docs.slots.iter().map(|s| s.as_ref().map_or(&app.session, |d| &d.session)).collect()
+}
+
 fn dirty(app: &SolveApp, i: usize) -> bool {
     if i == app.docs.active || app.docs.slots.is_empty() {
         return app.session.is_dirty();
@@ -733,9 +825,11 @@ fn tab_paths(app: &SolveApp) -> Vec<Option<String>> {
 }
 
 /// A tab's tooltip: where its design is saved (home shortened to `~`), or that it isn't yet; with
-/// the full name above when the tab cut it short (#5868).
-fn tab_tooltip(name: &str, path: Option<&str>, cut: bool) -> String {
+/// the full name above when the tab cut it short (#5868), and below, that a saved design has
+/// changes not saved yet (`dirty`), which the bullet after a cut name no longer shows (#11408).
+fn tab_tooltip(name: &str, path: Option<&str>, cut: bool, dirty: bool) -> String {
     let place = path.map_or_else(|| crate::i18n::tr_label("Not saved yet").to_string(), crate::home::friendly_path);
+    let place = if dirty && path.is_some() { format!("{place}\n{}", crate::i18n::tr("document.tab_unsaved_changes")) } else { place };
     if cut { format!("{name}\n{place}") } else { place }
 }
 
@@ -746,6 +840,25 @@ pub fn designs_to_reopen(app: &SolveApp) -> Vec<String> {
         return Vec::new();
     }
     app.preferences.open_designs.iter().filter(|p| std::path::Path::new(p.as_str()).is_file()).take(MAX_OPEN).cloned().collect()
+}
+
+/// What this launch reopens (#5542), with the crash guard applied (#5064): when the recovery
+/// folder still holds the marker of a session that died mid-reopen, nothing is reopened this
+/// time and the designs it died on come back as the reason, so the app starts usable instead
+/// of hanging on the same design every launch. The marker is written here and cleared as each
+/// design finishes opening (`file_load`), so a healthy session leaves nothing behind.
+pub fn reopen_plan(app: &SolveApp, dir: Option<&std::path::Path>) -> (Vec<String>, Vec<String>) {
+    let Some(dir) = dir else {
+        return (designs_to_reopen(app), Vec::new());
+    };
+    let stuck = solidcraft_engine::recovery::stuck_reopen(dir);
+    if !stuck.is_empty() {
+        solidcraft_engine::recovery::clear_reopen(dir);
+        return (Vec::new(), stuck);
+    }
+    let reopen = designs_to_reopen(app);
+    solidcraft_engine::recovery::begin_reopen(dir, &reopen);
+    (reopen, Vec::new())
 }
 
 /// The control channel's `ui.documents`: list, `new`, `switch`, `close` (by index; `force`
@@ -839,7 +952,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         .collect();
     let fit_all = shown == n && natural.iter().sum::<f32>() <= x1 - x0 - 34.0;
     // A right-click on a tab opens its menu (#3055): the tab and where the menu opens.
-    let menu_id = egui::Id::new("sc_doc_tab_menu");
+    let menu_id = egui::Id::unique("sc_doc_tab_menu");
     let mut menu: Option<(usize, egui::Pos2)> = ui.ctx().data(|d| d.get_temp(menu_id));
     // The shown tabs' widths, in strip order.
     let widths: Vec<f32> = (first..first + shown).map(|i| if fit_all { natural.get(i).copied().unwrap_or(w) } else { w }).collect();
@@ -848,7 +961,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let title_bar = app.custom_titlebar || app.integrated_titlebar;
     // A tab being dragged to a new place follows the pointer and the others make room for it;
     // Escape puts it back.
-    let drag_id = egui::Id::new("sc_doc_tab_drag");
+    let drag_id = egui::Id::unique("sc_doc_tab_drag");
     let (held_down, released, escape) = ui.input(|i| (i.pointer.primary_down(), i.pointer.primary_released(), i.key_pressed(egui::Key::Escape)));
     let mut drag =
         ui.ctx().data(|d| d.get_temp::<TabDrag>(drag_id)).filter(|d| (held_down || released) && !escape && (first..first + shown).contains(&d.from));
@@ -881,7 +994,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         };
         let tr = Rect::from_min_size(pos2(left, r.top() + 4.0), vec2(w - 2.0, r.height() - 8.0));
         let active = !app.home.open && (i == app.docs.active || app.docs.slots.is_empty());
-        let resp = ui.interact(tr, ui.id().with(("doc_tab", i)), Sense::click_and_drag());
+        let resp = ui.interact(tr, ui.scope_id().with(("doc_tab", i)), Sense::click_and_drag());
         crate::scenario::publish_target(&format!("tab:design:{i}"), tr);
         // Dragging a tab along the strip moves it. The tabs are also part of the title bar:
         // dragging the only tab, or one mostly up or down, moves the window, and a double click
@@ -918,13 +1031,13 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         };
         let g = ui.painter().layout_no_wrap(label, font, ink);
         let text_w = (tr.width() - 30.0).max(10.0);
-        let tip = tab_tooltip(&name_display, paths.get(i).cloned().flatten().as_deref(), g.size().x > text_w);
+        let tip = tab_tooltip(&name_display, paths.get(i).cloned().flatten().as_deref(), g.size().x > text_w, *dirty);
         let clip = Rect::from_min_size(tr.min, vec2(text_w + 10.0, tr.height()));
         ui.painter().with_clip_rect(clip).galley(pos2(tr.left() + 10.0, tr.center().y - g.size().y / 2.0), g, ink);
         // ×
         let xr = Rect::from_center_size(pos2(tr.right() - 13.0, tr.center().y), vec2(16.0, 16.0));
         let show_close = active || resp.hovered() || ui.rect_contains_pointer(tr);
-        let xresp = ui.interact(xr, ui.id().with(("doc_close", i)), if show_close { Sense::click() } else { Sense::hover() });
+        let xresp = ui.interact(xr, ui.scope_id().with(("doc_close", i)), if show_close { Sense::click() } else { Sense::hover() });
         crate::scenario::publish_target(&format!("tab:close:{i}"), xr);
         if show_close && (xresp.hovered() || xresp.has_focus()) {
             ui.painter().rect_filled(xr, t.radius_sm.saturating_sub(1), t.app_bar_hover_strong);
@@ -940,9 +1053,11 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         if resp.secondary_clicked() {
             menu = Some((i, ui.ctx().pointer_interact_pos().unwrap_or(tr.left_bottom())));
         }
-        if xresp.on_hover_text("Close").clicked() {
+        // Named apart from a dialog's Close: egui 0.37 names an unnamed widget after its tooltip.
+        xresp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, show_close, crate::i18n::tr("ui.close_tab")));
+        if xresp.backing_on_hover_text("Close").clicked() {
             shut = Some(i);
-        } else if (if held.is_some() { resp } else { resp.on_hover_text(tip) }).clicked() {
+        } else if (if held.is_some() { resp } else { resp.backing_on_hover_text(tip) }).clicked() {
             pick = Some(i);
         }
     }
@@ -956,7 +1071,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     // More tabs than fit: a chevron lists them all.
     if shown < n {
         let mr = Rect::from_center_size(pos2(x + 12.0, r.center().y), vec2(20.0, 22.0));
-        let mresp = ui.interact(mr, ui.id().with("doc_more"), Sense::click());
+        let mresp = ui.interact(mr, ui.scope_id().with("doc_more"), Sense::click());
         crate::scenario::publish_handle("tab:overflow", mr.center());
         if mresp.hovered() {
             ui.painter().rect_filled(mr, t.radius_sm, t.app_bar_hover_button);
@@ -968,8 +1083,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             FontId::proportional(crate::theme::Tokens::get().font_body),
             t.app_bar_text,
         );
-        let id = egui::Id::new("sc_doc_more");
-        if mresp.clone().on_hover_text(crate::i18n::tr_label("All open designs")).clicked() {
+        let id = egui::Id::unique("sc_doc_more");
+        if mresp.clone().backing_on_hover_text(crate::i18n::tr_label("All open designs")).clicked() {
             ui.ctx().data_mut(|d| d.insert_temp(id, !d.get_temp::<bool>(id).unwrap_or(false)));
         }
         if ui.ctx().data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
@@ -1038,7 +1153,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     });
     // Choose a new design, open or sample from the File view before creating a tab.
     let pr = Rect::from_center_size(pos2(x + 14.0, r.center().y), vec2(22.0, 22.0));
-    let presp = ui.interact(pr, ui.id().with("doc_new"), Sense::click());
+    let presp = ui.interact(pr, ui.scope_id().with("doc_new"), Sense::click());
     if presp.hovered() {
         ui.painter().rect_filled(pr, t.radius_sm, t.app_bar_hover_button);
     }
@@ -1051,7 +1166,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     // A file loading into the window keeps the tabs as they are (dragging still moves it).
     let idle = !app.file_load.busy();
     crate::scenario::publish_handle("tab:new", pr.center());
-    if presp.on_hover_text(app.tr("ui.start_page")).clicked() && idle {
+    if presp.backing_on_hover_text(app.tr("ui.start_page")).clicked() && idle {
         app.home.show(app.session.revision);
     }
     match (shut, pick) {
@@ -1123,6 +1238,11 @@ pub enum Answer {
 pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
     let _language = crate::i18n::scope(&app.preferences.language);
     quit_step(app);
+    // Saved, it asks the Capture Position question first (#9736): that question is the one to
+    // answer meanwhile, not this one again.
+    if app.tree.capture_prompt.is_some() {
+        return;
+    }
     let Some(i) = app.docs.closing else { return };
     let name = tabs_info(app).get(i).map(|x| x.0.clone()).unwrap_or_default();
     let name_display = crate::i18n::tr_name(&name);
@@ -1151,7 +1271,7 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
         answer = Some(choice);
     }
     let title = crate::i18n::format("document.save_changes", &[("name", &name_display)]);
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("sc_close_prompt"), "status_warning", &title)
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_close_prompt"), "status_warning", &title)
         .tone(ui_kit::Tone::Warning)
         .actions(crate::i18n::tr("ui.save"), crate::i18n::tr("ui.cancel"), Some(crate::i18n::tr("ui.don_t_save")))
         .secondary_left()
@@ -1181,7 +1301,7 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Act on the "save changes?" answer (also the control channel's `ui.documents {answer}`).
 pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
-    if app.file_picker_busy() {
+    if app.file_picker_busy() || app.tree.capture_prompt.is_some() {
         return;
     }
     let Some(i) = app.docs.closing else { return };
@@ -1217,6 +1337,11 @@ pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
 
 /// Resume Close/Quit only after Save As has answered and the write succeeded.
 pub(crate) fn saved_for_close(app: &mut SolveApp) {
+    // Save asks the Capture Position question first while a move isn't captured (#9736): the
+    // close waits for its answer.
+    if app.tree.capture_prompt.is_some() {
+        return;
+    }
     if !std::mem::take(&mut app.docs.saving) || app.docs.closing.is_none() {
         return;
     }
@@ -1275,6 +1400,26 @@ mod tests {
         a.open_path(&path);
         assert_eq!(a.docs.count(), 2);
         assert!(std::sync::Arc::ptr_eq(&doc, &a.session.doc));
+    }
+
+    #[test]
+    fn follow_file_rename_updates_every_open_tab_title() {
+        let mut a = app();
+        a.session.doc_mut().name = "Plate".into();
+        a.session.path = Some("opfs://Plate.solidcraft".into());
+        a.session.user_named = false;
+        new_tab(&mut a);
+        a.session.doc_mut().name = "Other".into();
+        a.session.path = Some("opfs://Other.solidcraft".into());
+        // Background tab is Plate; active is Other.
+        follow_file_rename(&mut a, "opfs://Plate.solidcraft", "opfs://Bracket.solidcraft");
+        assert_eq!(a.session.doc.name, "Other");
+        assert_eq!(a.session.path.as_deref(), Some("opfs://Other.solidcraft"));
+        let bg = a.docs.background().next().expect("background Plate");
+        assert_eq!(bg.doc.name, "Bracket");
+        assert_eq!(bg.path.as_deref(), Some("opfs://Bracket.solidcraft"));
+        switch(&mut a, 0);
+        assert_eq!(a.session.doc.name, "Bracket");
     }
 
     #[test]
@@ -1343,18 +1488,26 @@ mod tests {
     use egui::Color32;
 
     /// #5868: a tab's tooltip says where its design is saved (home as `~`), or that it isn't
-    /// yet, with the full name above when the tab cut the name short.
+    /// yet, with the full name above when the tab cut the name short. #11408: a saved design with
+    /// changes not saved yet says so below, since a cut name hides the tab's bullet.
     #[test]
     fn tab_tooltip_says_where_the_design_is_saved() {
-        assert_eq!(tab_tooltip("plate", Some("/srv/designs/plate.solidcraft"), false), "/srv/designs/plate.solidcraft");
-        assert_eq!(tab_tooltip("a-long-name", Some("/srv/a-long-name.solidcraft"), true), "a-long-name\n/srv/a-long-name.solidcraft");
-        assert_eq!(tab_tooltip("Untitled", None, false), "Not saved yet");
-        assert_eq!(tab_tooltip("Untitled", None, true), "Untitled\nNot saved yet");
+        assert_eq!(tab_tooltip("plate", Some("/srv/designs/plate.solidcraft"), false, false), "/srv/designs/plate.solidcraft");
+        assert_eq!(tab_tooltip("a-long-name", Some("/srv/a-long-name.solidcraft"), true, false), "a-long-name\n/srv/a-long-name.solidcraft");
+        assert_eq!(tab_tooltip("Untitled", None, false, false), "Not saved yet");
+        assert_eq!(tab_tooltip("Untitled", None, true, false), "Untitled\nNot saved yet");
+        assert_eq!(tab_tooltip("plate", Some("/srv/designs/plate.solidcraft"), false, true), "/srv/designs/plate.solidcraft\nUnsaved changes");
+        assert_eq!(
+            tab_tooltip("a-long-name", Some("/srv/a-long-name.solidcraft"), true, true),
+            "a-long-name\n/srv/a-long-name.solidcraft\nUnsaved changes"
+        );
+        // A design never saved says so already, changed or not.
+        assert_eq!(tab_tooltip("Untitled", None, true, true), "Untitled\nNot saved yet");
         if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).filter(|h| !h.is_empty()) {
             // The abbreviation keeps the relative path's native separators after `~/`.
             let relative = std::path::Path::new("Designs").join("bracket.solidcraft");
             let path = std::path::Path::new(&home).join(&relative);
-            assert_eq!(tab_tooltip("bracket", path.to_str(), false), format!("~/{}", relative.display()));
+            assert_eq!(tab_tooltip("bracket", path.to_str(), false, false), format!("~/{}", relative.display()));
         }
     }
 
@@ -1419,6 +1572,22 @@ mod tests {
         open_tab(&mut a, Session::default()).unwrap();
         assert_eq!(a.docs.count(), 4);
         a
+    }
+
+    /// #10220: every open design in tab order, the shown one in its place.
+    #[test]
+    fn open_sessions_lists_every_tab_in_order() {
+        let mut a = app();
+        assert_eq!(open_sessions(&a).len(), 1);
+        let mut a4 = four_tabs();
+        switch(&mut a4, 1);
+        let uids: Vec<u64> = open_sessions(&a4).iter().map(|s| s.uid).collect();
+        assert_eq!(uids.len(), 4);
+        assert_eq!(uids.get(1), Some(&a4.session.uid));
+        let dirty: Vec<bool> = open_sessions(&a4).iter().map(|s| s.is_dirty()).collect();
+        assert_eq!(dirty, [true, false, true, false]);
+        a.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        assert!(open_sessions(&a).iter().all(|s| s.is_dirty()));
     }
 
     /// #3055: Close Other Tabs on the first tab closes the blank fourth, asks about the third
@@ -1720,6 +1889,35 @@ mod tests {
         a.preferences.reopen_designs = true;
         let _ = std::fs::remove_file(&file);
         assert!(designs_to_reopen(&a).is_empty(), "a file that is gone is skipped");
+    }
+
+    /// #5064: a design that kills the app while it is being reopened is skipped once, with the
+    /// reason said, and the launch after that reopens normally again.
+    #[test]
+    fn reopen_plan_skips_what_killed_the_last_session() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-reopen-plan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("part.solidcraft");
+        std::fs::write(&file, []).unwrap();
+        let path = file.to_string_lossy().to_string();
+        let mut a = app();
+        a.preferences.open_designs = vec![path.clone()];
+
+        // A normal launch: it reopens the design and marks that it is doing so.
+        assert_eq!(reopen_plan(&a, Some(&dir)), (vec![path.clone()], Vec::new()));
+        // The session dies while opening it: the marker survives, so the next launch skips it
+        // and says what it skipped.
+        assert_eq!(
+            reopen_plan(&a, Some(&dir)),
+            (Vec::new(), vec![path.clone()]),
+            "the design that killed the last session is skipped, with the reason"
+        );
+        // The skip cleared the marker: the launch after it works normally again.
+        assert_eq!(reopen_plan(&a, Some(&dir)), (vec![path.clone()], Vec::new()));
+        // No recovery folder on this system: the guard is off, the plain list is used.
+        assert_eq!(reopen_plan(&a, None).0, vec![path]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Cancel, Esc's answer, or a Save that saves nothing (a never-saved design whose Save As

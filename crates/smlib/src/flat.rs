@@ -1,8 +1,8 @@
 //! SMLib's flat B-rep arrays (`capi/include/smlib.h`, "Flat B-rep arrays"): a B-rep as plain
-//! int64 and double arrays laid out like a member of USD's BrepArray schema, read from SMLib with
-//! [`Brep::export`](crate::Brep::export) and built into SMLib with [`Flat::import`].
+//! int64 and double arrays laid out like a member of USD's BrepArray schema, which solidcore's body
+//! is converted to and from ([`crate::import::Arrays`]).
 
-use crate::{Brep, Result, error, ffi, init};
+use crate::{Brep, Result};
 
 // Array ids and kind values, as in smlib.h.
 pub const REGION_SHELL_COUNT: i32 = 1;
@@ -39,6 +39,7 @@ pub const FACE_NURBS_V_ORDER: i32 = 31;
 pub const SOURCE: i32 = 32;
 pub const FACE_NURBS_FORM: i32 = 33;
 pub const EDGE_NURBS_FORM: i32 = 34;
+pub const WIRE_EDGE_NURBS_FORM: i32 = 35;
 /// Per face whose kind carries a definition (a ball patch), in face order: how many reals of
 /// `FACE_DEFINITION_REALS` are its definition (a ball patch: 4).
 pub const FACE_DEFINITION_REAL_COUNT: i32 = 36;
@@ -128,62 +129,9 @@ pub const CURVE_LINE: u8 = 1;
 pub const CURVE_CIRCLE: u8 = 2;
 pub const CURVE_ELLIPSE: u8 = 3;
 
-/// One B-rep's flat arrays, owned on the C side.
-pub struct Flat(ffi::flat::FlatHandle);
-
-impl std::fmt::Debug for Flat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("smlib::Flat")
-    }
-}
-
-impl Flat {
-    /// An empty set of arrays.
-    pub fn new() -> Result<Flat> {
-        init()?;
-        ffi::flat::new().map(Flat).map_err(error)
-    }
-
-    /// The arrays of `a` (see [`crate::import::arrays`]).
-    pub fn from_arrays(a: &crate::import::Arrays) -> Result<Flat> {
-        let mut f = Flat::new()?;
-        for (id, v) in &a.ints {
-            f.set_i64(*id, v)?;
-        }
-        for (id, v) in &a.reals {
-            f.set_f64(*id, v)?;
-        }
-        Ok(f)
-    }
-
-    pub fn get_i64(&self, id: i32) -> Result<Vec<i64>> {
-        ffi::flat::get_i64(&self.0, id).map_err(error)
-    }
-    pub fn get_f64(&self, id: i32) -> Result<Vec<f64>> {
-        ffi::flat::get_f64(&self.0, id).map_err(error)
-    }
-    pub fn set_i64(&mut self, id: i32, v: &[i64]) -> Result<()> {
-        crate::check(ffi::flat::set_i64(&mut self.0, id, v))
-    }
-    pub fn set_f64(&mut self, id: i32, v: &[f64]) -> Result<()> {
-        crate::check(ffi::flat::set_f64(&mut self.0, id, v))
-    }
-
-    /// The SMLib B-rep these arrays describe (checked on the C side before SMLib sees them).
-    pub fn import(&self) -> Result<Brep> {
-        init()?;
-        ffi::flat::import(&self.0).map(Brep).map_err(error)
-    }
-}
-
 impl Brep {
-    /// This body as flat arrays.
-    pub fn export(&self) -> Result<Flat> {
-        ffi::flat::export(&self.0).map(Flat).map_err(error)
-    }
-
     /// Whether SMLib finds this body one closed, manifold solid.
     pub fn is_manifold_solid(&self) -> Result<bool> {
-        ffi::flat::is_manifold_solid(&self.0).map_err(error)
+        crate::core::is_manifold_solid(self.core())
     }
 }

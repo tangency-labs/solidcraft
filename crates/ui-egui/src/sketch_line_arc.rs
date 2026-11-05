@@ -5,7 +5,8 @@
 
 use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
-use solidcraft_engine::geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::Sketch;
 
 use crate::SolveApp;

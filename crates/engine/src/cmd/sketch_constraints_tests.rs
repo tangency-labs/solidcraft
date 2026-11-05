@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::ConstraintKind;
 
 use crate::Session;
@@ -182,7 +183,7 @@ fn curvature_polygon_arc_length_linear_diameter() {
     let sk = sketch(&s);
     let ai = sk.curve_index(&a).unwrap();
     let len = match sk.segs(ai)[0] {
-        solidcraft_geom::Seg2::Arc { radius, sweep, .. } => radius * sweep,
+        solidcore_record::Seg2::Arc { radius, sweep, .. } => radius * sweep,
         _ => 0.0,
     };
     assert!((len - 20.0).abs() < 1e-6, "{len}");
@@ -1547,6 +1548,11 @@ fn midpoint_pair_orientation_uses_the_text_box_and_respects_explicit_types() {
         ("auto", [25., 33.], 'x'),
         ("auto", [43., 20.], 'y'),
         ("auto", [25., 20.], 'd'),
+        // The box's outer corners keep the distance between them, as before #7355.
+        ("auto", [50., 45.], 'd'),
+        ("auto", [55., 35.], 'd'),
+        ("auto", [0., 0.], 'd'),
+        ("auto", [-5., 5.], 'd'),
         ("distance", [25., 33.], 'd'),
         ("horizontal", [43., 20.], 'x'),
         ("vertical", [25., 33.], 'y'),
@@ -1707,7 +1713,7 @@ fn an_arc_and_its_end_point_dimension_the_arc_length() {
     let arc_length = |s: &Session, a: &str| {
         let sk = sketch(s);
         match sk.segs(sk.curve_index(a).unwrap())[0] {
-            solidcraft_geom::Seg2::Arc { radius, sweep, .. } => radius * sweep.abs(),
+            solidcore_record::Seg2::Arc { radius, sweep, .. } => radius * sweep.abs(),
             _ => f64::NAN,
         }
     };

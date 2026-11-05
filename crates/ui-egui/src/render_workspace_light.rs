@@ -1,8 +1,10 @@
 //! Selected-light editor and transient visibility. Saved settings are edited only by commands.
 use super::{ImageMethod, RenderSelection, cpu, setups, studio};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, ui_kit};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::render_settings::{CpuJob, GpuJob, RenderJob, RenderSetup, SkyEnvironment};
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::job::{AreaLights, StudioLighting};
 use solidcraft_engine::schema::render_lights::{Geometry, Light, Visibility};
 
@@ -289,9 +291,9 @@ pub(super) fn preview(app: &SolveApp) -> Result<Vec<[f32; 16]>, String> {
                 emitted_axis, inner_half_angle_radians, outer_half_angle_radians, reference_distance_mm, minimum_distance_mm, ..
             } => (emitted_axis, inner_half_angle_radians.cos(), outer_half_angle_radians.cos(), reference_distance_mm.powi(2), minimum_distance_mm),
             Geometry::Area { edge_u_mm: [ux, uy, uz], edge_v_mm: [vx, vy, vz], .. } => {
-                let normal = solidcraft_engine::geom::Vec3::new(ux, uy, uz).cross(solidcraft_engine::geom::Vec3::new(vx, vy, vz));
+                let normal = solidcore_record::Vec3::new(ux, uy, uz).cross(solidcore_record::Vec3::new(vx, vy, vz));
                 let area = normal.len();
-                let n = solidcraft_engine::render::surface::unit_direction(normal).unwrap_or(-solidcraft_engine::geom::Vec3::Z);
+                let n = solidcraft_engine::render::surface::unit_direction(normal).unwrap_or(-solidcore_record::Vec3::Z);
                 ([n.x, n.y, n.z], 0.0, 0.0, area, 0.001)
             }
             _ => ([0.0; 3], 0.0, 0.0, 1.0, 0.001),
@@ -520,7 +522,7 @@ pub(super) fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let enabled = count < cap && !(gpu && kind == "point");
                 let response = ui.add_enabled_ui(enabled, |ui| ui_kit::list_picker(ui, kind, app.tr(key), false)).inner;
                 if response
-                    .on_hover_text(app.tr(if gpu && kind == "point" { "render.light_gpu_punctual" } else { "render.lighting_budget_help" }))
+                    .backing_on_hover_text(app.tr(if gpu && kind == "point" { "render.light_gpu_punctual" } else { "render.lighting_budget_help" }))
                     .clicked()
                 {
                     dispatch(app, "render.lights.add", None, Some(json!({"kind":kind})));
@@ -591,7 +593,7 @@ pub(super) fn confirmation(app: &mut SolveApp, ctx: &egui::Context) {
     let title = app.tr("render.lighting_review_title").to_string();
     let apply = app.tr("render.lighting_apply").to_string();
     let cancel = app.tr("render.keep_editing").to_string();
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("render_lighting_review"), "render_scene", &title)
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("render_lighting_review"), "render_scene", &title)
         .actions(&apply, &cancel, None)
         .selected(ui_kit::Action::Cancel)
         .show(ctx, review.consent, |ui| {
@@ -797,7 +799,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                 });
                 let response = ui_kit::button(ui, app.tr("render.light_place_highlight"), ui_kit::Button::Enabled(false));
                 crate::scenario::publish_target("render:light:place-highlight", response.rect);
-                response.on_hover_text(app.tr("render.light_place_pending"));
+                response.backing_on_hover_text(app.tr("render.light_place_pending"));
                 note(app, ui, "render.light_place_pending");
                 if sun {
                     note(app, ui, "render.lighting_direction_help");
@@ -904,7 +906,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                     )
                     .count();
                 if ui_kit::button(ui, app.tr("render.light_duplicate"), ui_kit::Button::Enabled(!blocked && count < cap))
-                    .on_hover_text(app.tr("render.lighting_budget_help"))
+                    .backing_on_hover_text(app.tr("render.lighting_budget_help"))
                     .clicked()
                 {
                     dispatch(app, "render.lights.duplicate", Some(id), None);

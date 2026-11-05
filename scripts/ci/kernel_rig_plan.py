@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """Select the kernel rig areas a pull request affects (.github/workflows/kernel-rig.yml).
 
-Usage: kernel_rig_plan.py (--all | --paths FILE) [--root DIR] [--github-output FILE]
+Usage: kernel_rig_plan.py (--all | --paths FILE [--pin-diff DIFF]) [--root DIR] [--github-output FILE]
 
 FILE holds the changed paths relative to the repository root, separated by NUL (git diff -z);
-"-" reads standard input. --all selects every area (pushes, merge groups, the release gate, a run
+"-" reads standard input. DIFF is the pull request's unified diff of the root Cargo.toml and
+Cargo.lock (PIN_FILES). --all selects every area (pushes, merge groups, the release gate, a run
 by hand). --root is the repository (default: two folders up from this script).
 
 The areas are the folders of tests/kernel-cases/ (the ladder aside), so a new area joins by
 having a folder with its cases, its KNOWN_FAILING and its PATHS. A changed path selects:
 - every area, when it matches tests/kernel-cases/PATHS-ALL (the shared core: SMLib, geom, the
   kernel's core, the rig's grader and runner, the workflow);
+- every area, when the solidcore pin moves: a changed line of DIFF names solidcore's repository
+  (the root Cargo.toml's git rev, Cargo.lock's source). Another dependency's change in those
+  files runs none, so a pin is told apart by its lines, which a path filter cannot see;
 - an area, when it is under tests/kernel-cases/<area>/ or matches that area's PATHS: one git
   pathspec glob a line (`*` within a folder, `**` across folders), `#` starts a comment.
 The ladder spans every operation: it runs whenever any area does, and on a change under
@@ -40,6 +44,18 @@ COVERAGE = (
     "tests/kernel-cases/**/recipe.json",
     "xtask/src/kernel_cases.rs",
 )
+
+# The files that pin solidcore, and the repository a pin's lines name.
+PIN_FILES = ("Cargo.toml", "Cargo.lock")
+SOLIDCORE = "github.com/tangency-labs/solidcore"
+
+
+def pin_moved(diff):
+    """Whether a unified diff of PIN_FILES changes a line that names solidcore's repository (an
+    added or removed line, not its file headers or context)."""
+    return any(
+        line.startswith(("+", "-")) and not line.startswith(("+++ ", "--- ")) and SOLIDCORE in line for line in diff.splitlines()
+    )
 
 
 def glob_regex(glob):
@@ -95,11 +111,11 @@ def matches(globs, path):
     return any(glob_regex(g).match(path) for g in globs)
 
 
-def select(root, paths, everything=False):
+def select(root, paths, everything=False, pin_diff=""):
     """Return (shards, build): the areas to run, in order and the ladder last, and whether the
-    build job runs."""
+    build job runs. `pin_diff` is the diff of PIN_FILES."""
     by_area = areas(root)
-    if everything:
+    if everything or pin_moved(pin_diff):
         return [*by_area, LADDER], True
     shared = read_globs(os.path.join(root, CASES, "PATHS-ALL"))
     hit, ladder = set(), False
@@ -127,10 +143,15 @@ def main():
     group = ap.add_mutually_exclusive_group(required=True)
     group.add_argument("--paths")
     group.add_argument("--all", action="store_true")
+    ap.add_argument("--pin-diff")
     ap.add_argument("--root", default=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     ap.add_argument("--github-output")
     a = ap.parse_args()
-    shards, build = select(a.root, [] if a.all else read_paths(a.paths), everything=a.all)
+    pin_diff = ""
+    if a.pin_diff:
+        with open(a.pin_diff, encoding="utf-8", errors="replace") as f:
+            pin_diff = f.read()
+    shards, build = select(a.root, [] if a.all else read_paths(a.paths), everything=a.all, pin_diff=pin_diff)
     lines = [f"shards={json.dumps(shards)}", f"build={'true' if build else 'false'}"]
     print("\n".join(lines))
     if a.github_output:

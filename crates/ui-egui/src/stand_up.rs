@@ -17,6 +17,7 @@
 //! context menu's "Turn Up Axis" fixes it any time.
 
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::prefs::StandUpUnknown;
@@ -56,7 +57,7 @@ pub enum Upright {
 /// The flat area of `mesh` facing down Z, facing down Y and facing up Y, looking at no more than
 /// `budget` triangles.
 pub fn flat_areas(mesh: &solidcraft_engine::geom::Mesh, budget: usize) -> [f64; 3] {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     struct Face {
         first: Vec3,
         area: f64,
@@ -295,7 +296,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let title = if app.stand_up_assembly { "Stand this assembly up?" } else { "Stand this part up?" };
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_stand_up"), "move", crate::i18n::tr_label(title))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_stand_up"), "move", crate::i18n::tr_label(title))
         .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 140.0))
         .actions("Stand it up", "Leave it", Some("Don't ask again"))
         .show(ctx, true, |ui| {

@@ -5,9 +5,10 @@
 //! the same from frame to frame and as the plane moves. Spacing and line width are the same for
 //! every hatch; only the angle and the colour change.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-use solidcraft_geom::{Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
 
 /// The colours a cut is hatched in: the section cap's own, then the others of its family.
 pub const HATCH_COLOURS: usize = 3;

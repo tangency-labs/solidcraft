@@ -11,15 +11,17 @@
 //! is all its preview builds: its boolean, which can take seconds (a text joined onto a part),
 //! runs once, on OK, and an error it finds shows then, the dialog staying open.
 
+use solidcraft_engine::geom::prelude::*;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::ModelState;
 use solidcraft_engine::doc::progress::Progress;
-use solidcraft_engine::geom::{Aabb3, Mesh, Ring, Vec3};
+use solidcraft_engine::geom::{Aabb3, Mesh, Ring};
 use solidcraft_engine::kernel::history::Change;
 
 use crate::SolveApp;
@@ -436,8 +438,10 @@ fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, V
     // Watched by `progress`, so a job left behind for other inputs skips its remaining features.
     let watched = progress.clone();
     let spawned = std::thread::Builder::new().name("preview".into()).spawn(move || {
-        let job = solidcraft_engine::doc::progress::watch(watched, || {
-            if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) }
+        let job = scratch.stop_token().within(|| {
+            solidcraft_engine::doc::progress::watch(watched, || {
+                if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) }
+            })
         });
         let _ = tx.send(job);
     });
@@ -772,38 +776,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             replaced.push(b.name.clone());
         }
     }
-    let sketches = after
-        .sketches
-        .iter()
-        .filter_map(|sketch| {
-            let old = before.sketch(sketch.feature);
-            let old_curves =
-                old.into_iter().flat_map(|s| s.sketch.curves.iter().map(|c| (c.id.as_str(), c))).collect::<std::collections::HashMap<_, _>>();
-            let old_points =
-                old.into_iter().flat_map(|s| s.sketch.points.iter().map(|p| (p.id.as_str(), p.pos))).collect::<std::collections::HashMap<_, _>>();
-            let indices = sketch
-                .sketch
-                .curves
-                .iter()
-                .enumerate()
-                .filter_map(|(index, curve)| {
-                    let unchanged = old_curves.get(curve.id.as_str()).is_some_and(|previous| {
-                        previous.kind == curve.kind
-                            && curve.kind.point_ids().iter().all(|i| old.and_then(|s| s.sketch.point(*i)) == sketch.sketch.point(*i))
-                    });
-                    if unchanged { None } else { Some(index) }
-                })
-                .collect::<Vec<_>>();
-            let points = sketch
-                .sketch
-                .points
-                .iter()
-                .enumerate()
-                .filter_map(|(i, p)| if old_points.get(p.id.as_str()) == Some(&p.pos) { None } else { Some(i) })
-                .collect::<Vec<_>>();
-            if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
-        })
-        .collect();
+    let sketches = after.sketches.iter().filter_map(|sketch| sketch_changes(before.sketch(sketch.feature), sketch)).collect();
     Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None }
 }
 
@@ -818,6 +791,37 @@ fn on_surface(index: &SurfaceIndex, [a, b, c]: [Vec3; 3]) -> bool {
 /// facets happen to fall, and a spread sample of a larger one. The lookups per face stay
 /// bounded, so a modeled thread's thousands of faces still cost little.
 const FACE_SAMPLES: usize = 24;
+
+/// What of `sketch` differs from `old`, the same sketch before a change: the curves whose shape
+/// or points moved and the points that moved (`None`: nothing did).
+pub(crate) fn sketch_changes(
+    old: Option<&solidcraft_engine::doc::SolvedSketch>,
+    sketch: &std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
+) -> Option<SketchPreview> {
+    let old_curves = old.into_iter().flat_map(|s| s.sketch.curves.iter().map(|c| (c.id.as_str(), c))).collect::<std::collections::HashMap<_, _>>();
+    let old_points =
+        old.into_iter().flat_map(|s| s.sketch.points.iter().map(|p| (p.id.as_str(), p.pos))).collect::<std::collections::HashMap<_, _>>();
+    let indices = sketch
+        .sketch
+        .curves
+        .iter()
+        .enumerate()
+        .filter_map(|(index, curve)| {
+            let unchanged = old_curves.get(curve.id.as_str()).is_some_and(|previous| {
+                previous.kind == curve.kind && curve.kind.point_ids().iter().all(|i| old.and_then(|s| s.sketch.point(*i)) == sketch.sketch.point(*i))
+            });
+            if unchanged { None } else { Some(index) }
+        })
+        .collect::<Vec<_>>();
+    let points = sketch
+        .sketch
+        .points
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| if old_points.get(p.id.as_str()) == Some(&p.pos) { None } else { Some(i) })
+        .collect::<Vec<_>>();
+    if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
+}
 
 /// Which of the `nf` faces of `m` are new surface, i.e. not on the old mesh? Each is decided by
 /// a vote of points on it (triangle centroids spread over the face). One pass over `m`'s
@@ -960,22 +964,30 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
     {
         return;
     }
-    let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);
     let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
-    let mut curves = 0;
-    for preview in &app.preview.sketches {
-        let sketch = &preview.sketch;
-        for index in &preview.curves {
-            crate::tools::paint_curve(&sketch.sketch, *index, &sketch.plane, painter, proj, stroke, &mut budget);
-            curves += 1;
-        }
-        for index in &preview.points {
-            if let Some(point) = sketch.sketch.point(*index).and_then(|p| proj.to_screen(sketch.plane.to_world(p))) {
-                painter.circle_filled(point, 3.0, stroke.color);
-            }
+    let curves: usize = app.preview.sketches.iter().map(|preview| paint_sketch(preview, painter, proj, &mut budget)).sum();
+    crate::scenario::publish_count("sketch_preview_curves", curves as f64);
+}
+
+/// Draw what a change moves in a sketch, its curves and points, in the preview colour; returns
+/// how many curves it drew.
+pub(crate) fn paint_sketch(
+    preview: &SketchPreview,
+    painter: &egui::Painter,
+    proj: &crate::viewport::Proj,
+    budget: &mut solidcraft_engine::render::SamplingBudget,
+) -> usize {
+    let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);
+    let sketch = &preview.sketch;
+    for index in &preview.curves {
+        crate::tools::paint_curve(&sketch.sketch, *index, &sketch.plane, painter, proj, stroke, budget);
+    }
+    for index in &preview.points {
+        if let Some(point) = sketch.sketch.point(*index).and_then(|p| proj.to_screen(sketch.plane.to_world(p))) {
+            painter.circle_filled(point, 3.0, stroke.color);
         }
     }
-    crate::scenario::publish_count("sketch_preview_curves", curves as f64);
+    preview.curves.len()
 }
 
 #[cfg(test)]
@@ -1248,6 +1260,21 @@ mod tests {
             let built = compute(&s, &[cmd], colors()).unwrap_or_else(|e| panic!("{op}: {e}"));
             assert!(built.error.is_none(), "{op}: {:?}", built.error);
         }
+    }
+
+    /// #7520: a Hole's preview leaves a hidden body out, drawn nor drilled, as OK does; before,
+    /// it replaced the hidden body with a drilled one while the dialog was open.
+    #[test]
+    fn a_hole_preview_leaves_hidden_bodies_out() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 40, "height": 5, "body_name": "Plate"})).unwrap();
+        s.execute("solid.box", &json!({"corner": [0, 0, 5], "length": 40, "width": 40, "height": 20, "operation": "new", "body_name": "Block"}))
+            .unwrap();
+        s.execute("browser.visibility", &json!({"items": ["Block"], "visible": false})).unwrap();
+        let cmd = ("solid.hole".to_string(), json!({"position": [20, 20, 0], "diameter": 5, "depth": 10}));
+        let built = compute(&s, &[cmd], colors()).unwrap();
+        assert!(built.error.is_none(), "{:?}", built.error);
+        assert_eq!(built.replaced, vec!["Plate".to_string()]);
     }
 
     /// A plate in its own component, stood up by its placement (an imported part set upright)

@@ -5,7 +5,8 @@
 //! reopening.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -153,12 +154,12 @@ fn a_tube_keeps_its_bore_when_its_inner_diameter_changes() {
         assert!((volume / (100.0 * area) - 1.0).abs() < 0.001, "{m}");
         let body = &s.model.state().bodies[0].body;
         assert_eq!(
-            body.classify_point(solidcraft_geom::Vec3::new(0.0, 0.0, 50.0)).unwrap(),
+            body.classify_point(solidcore_record::Vec3::new(0.0, 0.0, 50.0)).unwrap(),
             solidcraft_kernel::PointClass::Outside,
             "the bore stays empty"
         );
         assert_eq!(
-            body.classify_point(solidcraft_geom::Vec3::new(inner + 5.0, 0.0, 50.0)).unwrap(),
+            body.classify_point(solidcore_record::Vec3::new(inner + 5.0, 0.0, 50.0)).unwrap(),
             solidcraft_kernel::PointClass::Inside,
             "the wall stays solid"
         );

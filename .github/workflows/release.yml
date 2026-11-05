@@ -126,9 +126,6 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-icons
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - run: cargo build --release --locked -p solidcraft-cli
       - run: |
           . packaging/env.sh
@@ -168,9 +165,6 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-linux-${{ matrix.arch }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Build and package (AppImage, deb, rpm, tar.gz)
         run: packaging/linux/package.sh
       - name: Check the packages
@@ -240,6 +234,8 @@ jobs:
     if: needs.version.outputs.build == 'true'
     # makepkg only repackages the tarball's prebuilt binaries, so both architectures build here.
     runs-on: ubuntu-24.04
+    # A pre-release or nightly without an Arch package is still worth having; a stable release isn't.
+    continue-on-error: ${{ contains(needs.version.outputs.version, '-') }}
     strategy:
       fail-fast: false
       matrix:
@@ -256,10 +252,29 @@ jobs:
       # makepkg in an archlinux:base-devel container. The package is named after the tarball's
       # .desktop file (io.tangencylabs.solidcraft) and written as
       # dist/release/solidcraft-<version>-linux-<arch>.pkg.tar.zst.
+      # An Arch version can't hold a hyphen, and the action reads the version from the tarball's name
+      # (a hyphenated one comes out as 0.0.0): 0.40.0-rc.1 goes in as 0.40.0rc.1, which pacman sorts
+      # before 0.40.0, and the package keeps the release's name.
+      - id: pkgver
+        name: Arch version
+        run: |
+          pkgver="${VERSION//-/}"
+          echo "pkgver=$pkgver" >>"$GITHUB_OUTPUT"
+          if [ "$pkgver" != "$VERSION" ]; then
+            cp "dist/linux/solidcraft-$VERSION-linux-$ARCH.tar.gz" "dist/linux/solidcraft-$pkgver-linux-$ARCH.tar.gz"
+          fi
+        env:
+          ARCH: ${{ matrix.arch }}
       - uses: storytold/craft-common-actions/actions/arch-package@fa5ef18780cf5e7d5d3b8de068de56cffc83cac5 # main
         with:
-          tarball: dist/linux/solidcraft-${{ env.VERSION }}-linux-${{ matrix.arch }}.tar.gz
+          tarball: dist/linux/solidcraft-${{ steps.pkgver.outputs.pkgver }}-linux-${{ matrix.arch }}.tar.gz
           arch: ${{ matrix.arch }}
+      - name: The package under the release's version
+        if: steps.pkgver.outputs.pkgver != env.VERSION
+        env:
+          ARCH: ${{ matrix.arch }}
+          PKGVER: ${{ steps.pkgver.outputs.pkgver }}
+        run: sudo mv "dist/release/solidcraft-$PKGVER-linux-$ARCH.pkg.tar.zst" "dist/release/solidcraft-$VERSION-linux-$ARCH.pkg.tar.zst"
       - name: Check the package
         env:
           PKG: dist/release/solidcraft-${{ env.VERSION }}-linux-${{ matrix.arch }}.pkg.tar.zst
@@ -395,9 +410,6 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-macos-${{ matrix.arch }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh ${{ matrix.target }}
       - name: Build
         run: packaging/macos/package.sh --build-only ${{ matrix.target }}
       # Not named release-*: the release job collects every release-* artifact as an asset.
@@ -496,9 +508,6 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-windows-${{ matrix.arch }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh ${{ matrix.target }}
       - name: Install WiX
         shell: pwsh
         run: |
@@ -630,9 +639,6 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-web
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh wasm32-unknown-unknown
       - name: Install trunk
         run: |
           curl -fsSL "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" \

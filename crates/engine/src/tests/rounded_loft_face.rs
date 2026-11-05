@@ -2,7 +2,7 @@
 //! end a few 1e-5 mm short of the face's other edges, and where a round dies away at a corner the
 //! mesh keeps an edge from a point to itself; the face's outline still closes into one profile.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use super::*;
 

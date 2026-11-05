@@ -32,7 +32,7 @@ pub(crate) fn occurrence_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         m.pivot = if m.path.is_empty() {
             occurrence_origin(app, m.occurrence)
         } else {
-            app.session.occurrence_placement(&m.path).ok().map(|p| solidcraft_engine::doc::apply_point(&p.world, solidcraft_engine::geom::Vec3::ZERO))
+            app.session.occurrence_placement(&m.path).ok().map(|p| solidcraft_engine::doc::apply_point(&p.world, solidcore_record::Vec3::ZERO))
         };
     }
     let name = app.session.doc.occurrences.iter().find(|o| o.id == m.occurrence).map(|o| o.name.clone()).unwrap_or_default();
@@ -41,7 +41,7 @@ pub(crate) fn occurrence_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     let title = crate::i18n::format("browser.move_title", &[("name", &name)]);
     let at = panel_pos(app);
     let (units, decimals) = (app.session.doc.units.clone(), app.preferences.length_decimals);
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_occ_move"), "move", &title)
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_occ_move"), "move", &title)
         .placed(egui::Align2::LEFT_TOP, at)
         .fields()
         .cards(2.0)
@@ -97,7 +97,7 @@ pub(crate) fn capture_prompt(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let n = app.session.pending_moves.len();
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_capture_prompt"), "capture", crate::i18n::tr_label("Capture Position"))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_capture_prompt"), "capture", crate::i18n::tr_label("Capture Position"))
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -80.0))
         .actions("Capture Position", "Cancel", Some("Revert"))
         .show(ctx, true, |ui| {

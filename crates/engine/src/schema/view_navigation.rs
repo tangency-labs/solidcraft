@@ -131,6 +131,27 @@ pub struct TabStep {
     pub param_warnings: Vec<String>,
 }
 
+/// `view.ribbon_tabs_only`: fold the ribbon to its tab row, or show it whole (#10112).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RibbonTabsOnlyParams {
+    /// True folds the ribbon to its tab row, false shows it whole; omitted switches between the two.
+    #[serde(default)]
+    pub on: Option<bool>,
+}
+
+/// What `view.ribbon_tabs_only` returns: the request echoed. The window applies it to its
+/// preference; the design is not changed and nothing is added to undo.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RibbonTabsOnly {
+    /// The requested state; absent when the call asked to switch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// Validated request and echoed result of `view.render_select`.
 #[derive(Debug, Serialize)]
 pub struct RenderSelect {
@@ -224,6 +245,58 @@ pub struct RenderFrame {
     #[serde(default, deserialize_with = "super::types::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub centre_mark: Option<bool>,
+}
+
+/// Set the view navigator at the view's corner: its type, and for the custom one the body it
+/// draws, its texture and the controls around it. The navigator is the app's, kept with the
+/// preferences and settings profiles, never in the design; without an app the call only checks
+/// its parameters. Never opens a dialog.
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NavigatorParams {
+    /// The navigator: signed axes, the cube, or a custom body (the cube until a body is
+    /// chosen). Default: unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<NavigatorStyle>,
+    /// A body of the open design for the custom navigator to draw; the app keeps a snapshot of
+    /// it, so it stays when the design closes. `null`: no body (the cube again). A body over
+    /// 10,000 triangles, or whose thinnest width is under a fifth of its widest, is refused.
+    /// Default: unchanged.
+    #[serde(default, deserialize_with = "nullable", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub body: Option<Option<String>>,
+    /// The custom navigator's colours: the cube's (`themed`) or the body's own appearance and
+    /// edge colour (`modeled`). Default: unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub texture: Option<NavigatorTexture>,
+    /// The cube's orbit and roll arrows around the custom navigator. Default: unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arrows: Option<bool>,
+    /// The cube's Home button beside the custom navigator. Default: unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home: Option<bool>,
+}
+
+/// A view navigator type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NavigatorStyle {
+    Axes,
+    Cube,
+    Custom,
+}
+
+/// How the custom view navigator colours its body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NavigatorTexture {
+    Themed,
+    Modeled,
+}
+
+/// A key that may be given as `null` (`Some(None)`), apart from absent (`None`).
+fn nullable<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(d).map(Some)
 }
 
 #[cfg(test)]

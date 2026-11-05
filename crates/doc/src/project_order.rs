@@ -1,9 +1,11 @@
 //! Stable face projection order: outer boundary first, then holes by geometry.
 //! B-rep edge indices depend on face enumeration and must not choose sketch curve IDs.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-use solidcraft_geom::{Aabb3, Mesh, Plane, Vec3};
+use solidcore_record::{Plane, Vec3};
+use solidcraft_geom::{Aabb3, Mesh};
 
 use crate::{DocError, Result};
 
@@ -228,7 +230,7 @@ mod tests {
 
     #[test]
     fn coarsely_tessellated_round_silhouette_fits_an_arc() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::LinkGeom;
         let on = |deg: f64| Vec2::new(5. + 5. * deg.to_radians().cos(), 5. + 5. * deg.to_radians().sin());
         let mut chain = vec![Vec2::new(0., -20.)];
@@ -241,7 +243,7 @@ mod tests {
 
     #[test]
     fn tangent_snapping_leaves_unrelated_collinear_lines_alone() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::LinkGeom;
         let v = Vec2::new;
         // A rounded corner of radius 2 meeting the top edge, and an unrelated collinear edge.
@@ -258,7 +260,7 @@ mod tests {
 
     #[test]
     fn tangent_snapping_leaves_a_line_further_along_alone() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::LinkGeom;
         let v = Vec2::new;
         let y = |x: f64| 2.0 - (4.0 - x * x).sqrt();
@@ -279,7 +281,7 @@ mod tests {
 
     #[test]
     fn tangent_snapping_gives_one_line_to_one_end_of_an_arc() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::LinkGeom;
         let v = Vec2::new;
         let y = |x: f64| 2.0 - (4.0 - x * x).sqrt();
@@ -293,7 +295,7 @@ mod tests {
 
     #[test]
     fn tangent_snapping_moves_the_other_end_of_an_arc_to_its_next_line() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::LinkGeom;
         let v = Vec2::new;
         let y = |x: f64| 2.0 - (4.0 - x * x).sqrt();
@@ -312,7 +314,7 @@ mod tests {
 
     #[test]
     fn tangent_snapping_closes_a_conic_corner_in_any_order() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::LinkGeom;
         // A square of side 150 with a conic round of 10 mm legs at each corner, fitted with lines
         // and arcs the way a silhouette is, then snapped with the pieces in each order.
@@ -410,7 +412,7 @@ mod tests {
 
     #[test]
     fn family_line_normalization_preserves_corners_arcs_branches_and_retracing() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::LinkGeom;
         let line = |a, b| LinkGeom::Line(Vec2::new(a, 0.), Vec2::new(b, 0.));
         assert_eq!(super::super::merge_family_lines(vec![line(0., 1.), line(2., 1.)]).unwrap(), vec![line(0., 2.)]);
@@ -498,7 +500,7 @@ mod tests {
 
     #[test]
     fn rounded_boundary_arc_sweeps_survive_individual_edge_reversal() {
-        use solidcraft_geom::{Seg2, Vec2};
+        use solidcore_record::{Seg2, Vec2};
         use solidcraft_sketch::LinkGeom;
         let mut mesh = Mesh::default();
         for (extent, radius) in [(10.0, 3.0), (8.0, 1.0)] {
@@ -593,7 +595,7 @@ mod tests {
 
     #[test]
     fn curve_ends_a_hair_apart_become_one_point_and_distant_ones_stay() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::LinkGeom;
         let mut geom = vec![
             LinkGeom::Line(Vec2::new(0., 0.), Vec2::new(10., 0.)),

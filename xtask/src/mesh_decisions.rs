@@ -32,10 +32,14 @@ pub const CRATES: &[&str] = &["crates/doc", "crates/engine", "crates/kernel"];
 const MODEL_BODY_CRATES: &[&str] = &["crates/doc", "crates/engine"];
 
 /// Modules (a file, or a directory with everything below it) whose job is display, export,
-/// previews or mesh bodies: their mesh use is what a mesh is for.
+/// previews or mesh bodies: their mesh use is what a mesh is for. Or that hold no mesh at all,
+/// only a field the check's syntactic pattern takes for one.
 pub const SKIPPED_MODULES: &[(&str, &str)] = &[
     ("crates/doc/src/display_quality.rs", "the viewport's display quality levels"),
     ("crates/doc/src/placed_mesh.rs", "the display meshes and plans of bodies and placed parts"),
+    ("crates/doc/src/point_cloud.rs", "no mesh: the triangles of a point cloud's own complex"),
+    ("crates/doc/src/point_cloud_complex.rs", "no mesh: the triangles of a point cloud's own complex"),
+    ("crates/doc/src/point_cloud_distribution.rs", "no mesh: the triangles of a point cloud's own complex"),
     ("crates/engine/src/cmd/file_thumbnail.rs", "a design's thumbnail picture"),
     ("crates/engine/src/cmd/mesh.rs", "mesh bodies: repair, decimate and inspect imported meshes"),
     ("crates/engine/src/cmd/render", "rendered pictures"),
@@ -61,6 +65,8 @@ pub const SKIPPED_MODULES: &[(&str, &str)] = &[
 /// Functions, in modules that also decide geometry, whose job is the display mesh itself, a
 /// preview, or a mesh body.
 pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
+    ("crates/doc/src/eval.rs:ImportDigests::of", "mesh-body imports: retained content identities, not tessellated-solid decisions"),
+    ("crates/doc/src/eval.rs:MeshDigest::matches", "mesh-body imports: compares retained source-array identities"),
     ("crates/doc/src/eval.rs:ModelBody::display_plan", "the display plan"),
     ("crates/doc/src/eval.rs:ModelBody::mesh", "the display mesh"),
     ("crates/doc/src/eval.rs:ModelBody::mesh_in_place", "the display mesh where the body stands"),
@@ -72,7 +78,9 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
     ("crates/doc/src/eval.rs:ModelState::warm_display", "display meshes made ahead"),
     ("crates/doc/src/eval.rs:ModelState::warm_display_at", "display meshes made ahead"),
     ("crates/doc/src/eval.rs:ModelState::warm_meshes", "display meshes made ahead"),
+    ("crates/doc/src/eval.rs:feature_json", "fingerprints feature inputs; triangles are only embedded mesh-body source data"),
     ("crates/doc/src/eval.rs:mesh_bodies", "mesh bodies: a mesh import's triangles"),
+    ("crates/doc/src/eval.rs:mesh_content_digest", "mesh-body imports: hashes source arrays without geometric classification"),
     ("crates/engine/src/cmd/file.rs:saved_preview", "the preview picture saved in a design"),
     ("crates/kernel/src/body.rs:Body::classify_point", "mesh bodies: its mesh-body branch (a B-rep is classified by SMLib)"),
     ("crates/kernel/src/body.rs:Body::mesh_untimed", "the mesher: a body's tessellation"),

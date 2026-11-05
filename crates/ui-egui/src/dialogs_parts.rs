@@ -225,7 +225,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
     text_row(ui, "Name", &mut k.name, crate::i18n::tr("parts.automatic_name"));
     // The part, and its table values.
     let key = (k.family, k.size, k.length);
-    let tex_id = egui::Id::new("sc_part_picture");
+    let tex_id = egui::Id::unique("sc_part_picture");
     if k.picture != Some(key) {
         let tex = insert_params(&lib, k, &[])
             .ok()
@@ -306,7 +306,7 @@ fn dimension_label(key: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
 
     fn lib() -> Vec<Family> {
         families(&json!({"families": [

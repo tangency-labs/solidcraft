@@ -15,9 +15,11 @@
 //! are looked up on the input's faces. Those names are marked unverified, and references that
 //! resolve through them say so. Names are worked out lazily, on first request.
 
+use solidcraft_geom::prelude::*;
 use std::sync::{Arc, OnceLock};
 
-use solidcraft_geom::{Aabb3, Mesh, Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::{Aabb3, Mesh};
 
 use crate::history_names::Names;
 use crate::lineage::Lineage;
@@ -39,6 +41,9 @@ pub struct NamingOrigin {
 #[derive(Clone, Debug, Default)]
 pub struct NameCell {
     pub origin: Option<Arc<NamingOrigin>>,
+    /// Direct construction verified from identical cached body/name cells during adoption.
+    /// Used only by manual Project compatibility, independently of general naming history.
+    pub(crate) cached_construction: Option<u64>,
     /// What the body's faces came from, when the feature that made it reports it.
     lineage: Option<Arc<Lineage>>,
     names: Arc<OnceLock<Arc<Names>>>,
@@ -55,7 +60,7 @@ impl NameCell {
     }
     /// Names of a body made by `origin`'s feature, following `lineage` where it is known.
     pub(crate) fn traced(origin: Option<Arc<NamingOrigin>>, lineage: Option<Arc<Lineage>>) -> Self {
-        NameCell { origin, lineage, names: Arc::new(OnceLock::new()), copy_of: None, saved_depth: None }
+        NameCell { origin, cached_construction: None, lineage, names: Arc::new(OnceLock::new()), copy_of: None, saved_depth: None }
     }
     /// Names already known, taken as they are.
     pub fn known(names: Arc<Vec<String>>) -> Self {
@@ -96,7 +101,7 @@ impl NameCell {
     fn shared(names: Arc<Names>) -> Self {
         let cell = OnceLock::new();
         let _ = cell.set(names);
-        NameCell { origin: None, lineage: None, names: Arc::new(cell), copy_of: None, saved_depth: None }
+        NameCell { origin: None, cached_construction: None, lineage: None, names: Arc::new(cell), copy_of: None, saved_depth: None }
     }
 }
 
@@ -830,7 +835,7 @@ pub(crate) fn face_centres(b: &ModelBody) -> Vec<Vec3> {
     samples(&b.mesh(), face_count(b)).into_iter().map(|ps| ps.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / ps.len().max(1) as f64)).collect()
 }
 
-/// The name of a face new to `f`.
+/// The name of a face new to `f` (a feature that went through `eval::naming_feature`).
 fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usize, fid: u64, curves: &std::cell::OnceCell<Curves>) -> String {
     let c = ps.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / ps.len().max(1) as f64);
     match &f.kind {
@@ -853,7 +858,10 @@ fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usi
         }
         FeatureKind::Revolve { sketch, axis, .. } => {
             let Some(ss) = before.sketch(sketch.0) else { return format!("F{fid}:face:{fi}") };
-            let Ok((o2, d2)) = crate::eval::revolve_axis(ss, axis, before, &|name| crate::eval::construction_axis_in(None, before, name, 0)) else {
+            // The origin was written as its values when the feature was evaluated (`naming_feature`).
+            let Ok((o2, d2)) =
+                crate::eval::revolve_axis(&Default::default(), ss, axis, before, &|name| crate::eval::construction_axis_in(None, before, name, 0))
+            else {
                 return format!("F{fid}:face:{fi}");
             };
             let (o, d) = (ss.plane.to_world(o2), (ss.plane.to_world(o2 + d2) - ss.plane.to_world(o2)).normalized().unwrap_or(Vec3::Z));
@@ -1446,7 +1454,7 @@ mod tests {
         let ss = crate::SolvedSketch {
             feature: 1,
             name: "S".into(),
-            plane: solidcraft_geom::Plane::XY,
+            plane: solidcore_record::Plane::XY,
             sketch,
             report,
             profiles,

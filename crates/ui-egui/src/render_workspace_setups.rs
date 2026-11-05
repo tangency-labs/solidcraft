@@ -304,6 +304,7 @@ pub(super) fn same_model_source(app: &SolveApp, document: &std::sync::Weak<solid
         }};
     }
     compare_authoring_fields!(
+        newer_file,
         format,
         format_pending,
         name,

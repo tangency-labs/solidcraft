@@ -82,7 +82,6 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf | IBM Corp. (IBM Plex Mono) | https://github.com/IBM/plex (via google/fonts), unmodified; licence text in assets/fonts/ibm-plex-mono/OFL.txt; the interface monospace font | SIL OFL 1.1 |
 | assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf | IBM Corp. (IBM Plex Sans, variable wdth and wght) | https://github.com/IBM/plex (via google/fonts), unmodified; licence text in assets/fonts/ibm-plex-sans/OFL.txt; the default interface font | SIL OFL 1.1 |
 | docs/book/src/generated/tool-preview.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/tool-preview.json`; gitignored) | MIT OR Apache-2.0 |
-| assets/fonts/liberation-sans/LiberationSans-Regular.ttf | Red Hat, Inc. (Liberation Fonts 2.x; digitized data Google) | https://github.com/liberationfonts (Debian fonts-liberation), unmodified; licence text in assets/fonts/liberation-sans/OFL.txt; used for sketch Text outlines | SIL OFL 1.1 |
 | assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf | The BIZ UDGothic Project Authors | https://github.com/googlefonts/morisawa-biz-ud-gothic (Google Fonts), unmodified; licence text in assets/fonts/biz-udp-gothic/OFL.txt; used for web UI Japanese font | SIL OFL 1.1 |
 | assets/fonts/craft-ui-sc/CraftUI-SC.otf | Adobe / Google Inc. (Noto Sans SC); SolidCraft subset | https://github.com/notofonts/noto-cjk Sans/SubsetOTF/SC Regular, glyph-subset for assets/locales/zh.json and renamed Craft UI SC (OFL reserved-name); licence text in assets/fonts/craft-ui-sc/OFL.txt; web UI Simplified Chinese | SIL OFL 1.1 |
 | assets/fonts/craft-ui-tc/CraftUI-TC.otf | Adobe / Google Inc. (Noto Sans TC); SolidCraft subset | https://github.com/notofonts/noto-cjk Sans/SubsetOTF/TC Regular, glyph-subset for assets/locales/zh-TW.json and renamed Craft UI TC (OFL reserved-name); licence text in assets/fonts/craft-ui-tc/OFL.txt; web UI Traditional Chinese | SIL OFL 1.1 |
@@ -147,7 +146,6 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/fonts/craft-ui-tc/OFL.txt | Adobe / Google Inc. (Noto CJK); SolidCraft header | Accompanying OFL for CraftUI-TC.otf | SIL OFL 1.1 |
 | assets/fonts/ibm-plex-mono/OFL.txt | IBM Corp. | Unmodified accompanying font licence | SIL OFL 1.1 |
 | assets/fonts/ibm-plex-sans/OFL.txt | IBM Corp. | Unmodified accompanying font licence | SIL OFL 1.1 |
-| assets/fonts/liberation-sans/OFL.txt | Red Hat, Inc.; Liberation Fonts contributors | Unmodified accompanying font licence | SIL OFL 1.1 |
 | assets/icons/app/linux/exports/hicolor/128x128/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
 | assets/icons/app/linux/exports/hicolor/16x16/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
 | assets/icons/app/linux/exports/hicolor/24x24/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
@@ -245,6 +243,18 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/icons/ui/design/svg/flat/plus.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/flat/pan.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/flat/perspective.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/prefs_appearance.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/prefs_assistant.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/prefs_design.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/prefs_general.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/prefs_graphics.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/prefs_layout.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/prefs_mouse3d.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/prefs_navigation.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/prefs_plugins.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/prefs_shortcuts.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/prefs_sketch.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/prefs_tools.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/flat/redo.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/flat/save.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/flat/settings.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
@@ -305,7 +315,6 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/icons/ui/design/svg/model/circle_ttt.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/coil.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/colored_components.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/colored_components_off.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/combine.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/component.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 
@@ -772,6 +781,63 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | `assets/locales/pending/sketch-offset-instances.json` | SolidCraft contributors | Original offset instance-count label and translations | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/flat/settings_profile.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original analytic head and shoulder geometry for settings profiles | MIT OR Apache-2.0 |
 | tests/kernel-cases/import/4561-convert-box-mesh-with-a-zero-area-triangle/box-degenerate.stl | SolidCraft contributors | synthetic ASCII STL written by hand: a box with one zero-area triangle, for the kernel regression case of tangency-labs/solidcraft#4561 | MIT OR Apache-2.0 |
+| assets/locales/pending/theme-blur-ui.json | SolidCraft contributors | Original blur controls, notices and translations | MIT OR Apache-2.0 |
+| crates/ui-egui/tests/fixtures/theme-blur.json | SolidCraft contributors | Original theme for blur option scenarios and manager review | MIT OR Apache-2.0 |
+| assets/locales/ka.json | David Machakhelidze (devius) | Original Georgian translation of SolidCraft's English catalog, written with Claude Code from the meaning of each English string; terminology and doubtful strings decided by a native Georgian speaker; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/branding/logo/solidcraft-mark.svg | SolidCraft contributors | static SolidCraft mark: the five faces and gradients of assets/icons/app/macos/source/SolidCraft.icon/Assets/03-solid-blue-cutout.svg (the final frame of assets/styles/web/loading-logo.svg), cropped to the mark's bounds; original artwork | MIT OR Apache-2.0 |
+| assets/branding/logo/solidcraft-mark-mono-black.svg | SolidCraft contributors | one-colour (black) version of assets/branding/logo/solidcraft-mark.svg, same paths; original artwork | MIT OR Apache-2.0 |
+| assets/branding/logo/solidcraft-mark-mono-white.svg | SolidCraft contributors | one-colour (white) version of assets/branding/logo/solidcraft-mark.svg, same paths; original artwork | MIT OR Apache-2.0 |
+| assets/branding/logo/solidcraft-mark-512.png | SolidCraft contributors | transparent 512 px render of assets/branding/logo/solidcraft-mark.svg (cairosvg); original artwork | MIT OR Apache-2.0 |
+| assets/branding/logo/solidcraft-mark-1024.png | SolidCraft contributors | transparent 1024 px render of assets/branding/logo/solidcraft-mark.svg (cairosvg); original artwork | MIT OR Apache-2.0 |
+| assets/branding/logo/solidcraft-mark-2048.png | SolidCraft contributors | transparent 2048 px render of assets/branding/logo/solidcraft-mark.svg (cairosvg); original artwork | MIT OR Apache-2.0 |
+| assets/branding/logo/solidcraft-wordmark.svg | SolidCraft contributors | the name SolidCraft set like the loading logo's wordmark (bold, +0.02 em tracking, #15499e) in IBM Plex Sans Bold from assets/fonts/ibm-plex-sans (SIL OFL 1.1, IBM Corp.), outlined to paths; no font file is embedded | MIT OR Apache-2.0 |
+| assets/branding/logo/solidcraft-lockup-horizontal.svg | SolidCraft contributors | assets/branding/logo/solidcraft-mark.svg beside assets/branding/logo/solidcraft-wordmark.svg, in the proportions of assets/branding/web/source/og.png; original artwork | MIT OR Apache-2.0 |
+| assets/styles/ui/themes/onyx.json | SolidCraft contributors | original Onyx stone-grey palette, option overlays and semantic icon-role mapping; existing SolidCraft artwork is unchanged | MIT OR Apache-2.0 |
+| docs/book/src/media/ui-tour/window.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (`solidcraft --sample`, default dark theme, software renderer, 1280x800) with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/ui-tour/navigate.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (`--sample`, default dark theme, software renderer) orbiting, panning and zooming, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| assets/locales/pending/sketch-tool-hints.json | carlymx | Original sketch tool hints and engine error translations | MIT OR Apache-2.0 |
+| assets/locales/pending/primitive-pick-field-tips.json | SolidCraft contributors | Original primitive pick-field tooltip translations | MIT OR Apache-2.0 |
+| assets/locales/pending/ribbon-panel-hover.json | SolidCraft contributors | Original ribbon panel menu preference labels and translations | MIT OR Apache-2.0 |
+| docs/screenshots/box-insert-designer.gif | Shawn Marx | original recording made with BoxInsertDesigner's own Motion export (its three.js viewer) of its example game `examples/ccg-example` (https://github.com/ShawnMarx/BoxInsertDesigner): a card game box insert whose trays were built by SolidCraft through `solidcraft-cli`; the published card, board and box art in it is pixelated beyond recognition, and no logos or game names are shown (2.5× playback, 800 px wide) | MIT OR Apache-2.0 |
+| docs/screenshots/box-insert-designer.mp4 | Shawn Marx | original recording made with BoxInsertDesigner's own Motion export (its three.js viewer) of its example game `examples/ccg-example` (https://github.com/ShawnMarx/BoxInsertDesigner): a card game box insert whose trays were built by SolidCraft through `solidcraft-cli`; the published card, board and box art in it is pixelated beyond recognition, and no logos or game names are shown (1280×720) | MIT OR Apache-2.0 |
+| assets/locales/pending/agent-http-consent.json | SolidCraft contributors | Original endpoint-specific HTTP consent messages and translations | MIT OR Apache-2.0 |
+| assets/locales/pending/ground-shadow-placement.json | SolidCraft contributors | Original ground-shadow placement preference messages and translations | MIT OR Apache-2.0 |
+| docs/book/src/media/assemblies/components.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) making components from two original hinge-leaf bodies, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/assemblies/joint.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) creating a revolute joint between two hinge leaves, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/assemblies/drag.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) dragging a jointed hinge leaf, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/assemblies/drive.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) driving a revolute joint between two hinge leaves, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/features/extrude.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) extruding a sketch's profile, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/features/shell.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) shelling a block, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/features/fillet.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) filleting four edges, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/features/edit.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) editing a feature from the timeline, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/features/hole.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) placing a hole, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/features/pattern.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) patterning a hole around an axis, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/parameters/dialog.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (default dark theme, software renderer) showing the Parameters dialog, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/files/menu.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (`--sample`, default dark theme, software renderer) showing the File menu, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/getting-started/start.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (default dark theme, software renderer, 1280x800) showing the start page with its built-in sample thumbnails, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/getting-started/sample.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) opening the built-in Sample Plate from the start page, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sheet-metal/base.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) making a sheet metal base flange, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sheet-metal/flange.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) adding sheet metal edge flanges, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sheet-metal/flat.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) showing a sheet metal flat pattern, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sketching/create.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) starting a sketch on the Top plane, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sketching/draw.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) drawing a rectangle and a circle with typed values, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sketching/dimension.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) dimensioning a sketch until it is fully constrained, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sketching/parts.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (default dark theme, software renderer, 1280x800) showing a fully constrained sketch, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sketching/offset.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) offsetting a sketch outline, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/sketching/trim.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) trimming a notch in a sketch, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| assets/locales/ca.json | carlymx | Catalan translation of the English catalog, contributed upstream | MIT OR Apache-2.0 |
+| assets/locales/pending/sketch-mirror-auto-line.json | SolidCraft contributors | Original Mirror preference label and translations | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-01-extrude5-edge-frame.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-04-preview-outer-l11.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-05-preview-inner-l8.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-06-result-outer-120.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-07-preview-360.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-08-cancelled.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-13-colliding-id.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-14-surface-l1.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-15-surface-result.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/revolve-selected-edge.mp4 | SamD98 | screen recording of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| assets/locales/bg.json | Yasen-55 | Original translation | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
@@ -811,10 +877,19 @@ in THIRD-PARTY-LICENSES.txt; no images or artwork from that project are copied.
 The glTF test files are built by the tests themselves (crates/io/src/gltf_in_tests.rs,
 crates/engine/src/tests/gltf_import.rs); no third-party models are committed.
 
+## Geometry kernel crates
+
+| Crate | Used for | Licence |
+|---|---|---|
+| solidcore (https://github.com/tangency-labs/solidcore, pinned by rev in Cargo.toml) | the Rust port of NVIDIA's SMLib: the B-rep kernel behind crates/smlib | Apache-2.0 (its NOTICE credits NVIDIA's USD BRep) |
+
+Linked as a crate; no code from it is copied into SolidCraft. Its licence text and NOTICE go
+into THIRD-PARTY-LICENSES.txt when `main` regenerates it.
+
 ## FreeCAD and Rhino import library
 
 FreeCAD `.FCStd` and Rhino `.3dm` files are read with [cadmpeg](https://github.com/cadmpeg/cadmpeg)
-0.6.3 (Apache-2.0), linked as the crates `cadmpeg-core`, `cadmpeg-ir`, `cadmpeg-registry`,
+0.6.7 (Apache-2.0), linked as the crates `cadmpeg-core`, `cadmpeg-ir`, `cadmpeg-registry`,
 `cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-rhino` and `cadmpeg-codec-step`
 in native and browser builds (`crates/io/src/native_cad.rs`). Only those open-format codecs are built: no
 default features, so cadmpeg's codecs for commercial CAD formats and its ShapeManager/ACIS
@@ -826,16 +901,16 @@ copied into SolidCraft.
 | SolidCraft file | Original contribution | Licence |
 |---|---|---|
 | crates/ui-egui/src/viewport.rs (`nearest_quarter_turn`, `axis_view_orbit`) | N3MI-DG's [PR #101](https://github.com/bherbruck/solidcraft/pull/101): [minimal TOP/BOTTOM turns](https://github.com/bherbruck/solidcraft/commit/c28e780f52490784ef5886f094b9d3f6d10c3e3f) and [drag-to-orbit](https://github.com/bherbruck/solidcraft/commit/f30b30be6ecc4e2e6544a851243137c01a354934), adapted to the axis gizmo | MIT OR Apache-2.0 |
+| crates/smlib/src/core/offset.rs (`draft`: the tilted planes and `SmBrep::LocalOperation`, the tail of the capi's `draft_faces`) | ablasik's `draft` in `crates/smlib/src/ffi/rs_ops2.rs` on [ablasik/solidcraft `app/solidcore-backend-on-develop`](https://github.com/ablasik/solidcraft/blob/9c7e8e31565e1823f0591b58e2967351c32af13f/crates/smlib/src/ffi/rs_ops2.rs), adapted to `core::offset`'s errors and checks | MIT OR Apache-2.0 |
 
 ## Vendored third-party code
 
 | Directory | Source | Licence | Changes |
 |---|---|---|---|
-| vendor/accesskit_macos | accesskit_macos 0.26.3, https://github.com/AccessKit/accesskit (The AccessKit contributors) | MIT OR Apache-2.0 | the subclassing adapter and its tests from 0.27.2: dropping the adapter keeps AppKit's key-value observers (vendor/README.md) |
 
 ## Vendored renderer compatibility fix
 
-`vendor/egui-wgpu` is egui-wgpu 0.36.2 from https://github.com/emilk/egui
+`vendor/egui-wgpu` is egui-wgpu 0.37.0 from https://github.com/emilk/egui
 (MIT OR Apache-2.0; both original licence texts are included). Rust sources and
 its original `egui.wgsl` shader are retained; no images or other artwork are copied.
 SolidCraft's narrow patch selects a safe 1x MSAA path on the chosen OpenGL adapter

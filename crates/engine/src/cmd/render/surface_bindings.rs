@@ -3,12 +3,12 @@
 use crate::{Result, Session, params::bad};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::{
     render_resources::HdrId,
     render_settings::{RenderJob, RenderSetup},
-    render_surface::{BuiltinSurfaceSource, RenderBodyTarget, SavedSurface, SurfaceBindings},
+    render_surface::{BuiltinSurfaceSource, RenderBodyTarget, SavedSurface, SurfaceBindings, SurfaceSource},
 };
-use solidcraft_geom::Vec3;
 use solidcraft_render::{ProductScene, job::textures::PlanarFrame};
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -18,7 +18,7 @@ fn vec(a: [f64; 3]) -> Vec3 {
 fn array(v: Vec3) -> [f64; 3] {
     [v.x, v.y, v.z]
 }
-fn transform(frame: PlanarFrame, m: &solidcraft_doc::Mat, command: &str) -> Result<PlanarFrame> {
+pub(super) fn transform(frame: PlanarFrame, m: &solidcraft_doc::Mat, command: &str) -> Result<PlanarFrame> {
     let result = PlanarFrame {
         origin: array(solidcraft_doc::apply_point(m, vec(frame.origin))),
         u: array(solidcraft_doc::apply_vector(m, vec(frame.u))),
@@ -85,7 +85,9 @@ pub(super) fn resolve(s: &Session, scene: &ProductScene, bindings: &SurfaceBindi
     let mut result = Vec::new();
     result.try_reserve_exact(bindings.len()).map_err(|_| bad(command, "could not reserve saved surface lowering"))?;
     for binding in bindings.iter() {
-        if binding.source != source(&binding.source.id, command)? {
+        if let SurfaceSource::Builtin(builtin) = &binding.source
+            && *builtin != source(&builtin.id, command)?
+        {
             return Err(bad(command, "saved surface version or SHA-256 differs from installed source; explicit rebinding required"));
         }
         let name =
@@ -96,10 +98,36 @@ pub(super) fn resolve(s: &Session, scene: &ProductScene, bindings: &SurfaceBindi
             return Err(bad(command, "surface definition/world mapping disagrees"));
         }
         let frame = transform(binding.local_frame, &body.source_transform, command)?;
-        let id = &binding.source.id;
-        let wire = json!({"body_index":ordinal,"body_name":name,"frame":frame,"normal_strength":binding.normal_strength,
-            "flip_v":true,"base_color_mode":"replace","base_color_srgb":format!("builtin://{id}/base_color"),
-            "normal_opengl":format!("builtin://{id}/normal_open_gl"),"roughness_linear":format!("builtin://{id}/roughness"),"metallic_linear":format!("builtin://{id}/metallic")});
+        let mut wire = json!({"body_index":ordinal,"body_name":name,"frame":frame,"normal_strength":binding.normal_strength,
+            "base_color_mode":"replace"});
+        match &binding.source {
+            SurfaceSource::Builtin(source) => {
+                let id = &source.id;
+                wire["flip_v"] = json!(true);
+                for (field, role) in [
+                    ("base_color_srgb", "base_color"),
+                    ("normal_opengl", "normal_open_gl"),
+                    ("roughness_linear", "roughness"),
+                    ("metallic_linear", "metallic"),
+                ] {
+                    wire[field] = json!(format!("builtin://{id}/{role}"));
+                }
+            }
+            SurfaceSource::Embedded(source) => {
+                wire["flip_v"] = json!(source.flip_v);
+                for (field, id) in [
+                    ("base_color_srgb", source.base_color),
+                    ("normal_opengl", source.normal_open_gl),
+                    ("roughness_linear", source.roughness),
+                    ("metallic_linear", source.metallic),
+                ] {
+                    if let Some(id) = id {
+                        s.doc.render.texture_resources.required(&id).map_err(|e| bad(command, e.to_string()))?;
+                        wire[field] = json!(format!("embedded://{id}"));
+                    }
+                }
+            }
+        }
         result.push(serde_json::from_value(wire).map_err(|e| bad(command, e.to_string()))?);
     }
     Ok(result)
@@ -135,8 +163,8 @@ pub(super) fn bind(s: &mut Session, params: &Value) -> Result<Value> {
         return Err(bad(command, "setup patch cannot erase or replace saved surface bindings; use explicit bind/unbind commands"));
     }
 
-    if !matches!(setup.job, Some(RenderJob::GpuPath { .. })) {
-        return Err(bad(command, "persistent authored maps require an explicit GPU setup"));
+    if !matches!(setup.job, Some(RenderJob::CpuRaytrace { .. } | RenderJob::GpuPath { .. })) {
+        return Err(bad(command, "persistent authored maps require an explicit CPU raytrace or GPU path setup"));
     }
     let prepared = super::library::prepare_surface(s, &input.surface)?;
     let id = prepared["id"].as_str().ok_or_else(|| bad(command, "missing prepared surface identifier"))?;
@@ -154,7 +182,7 @@ pub(super) fn bind(s: &mut Session, params: &Value) -> Result<Value> {
     setup
         .surfaces
         .set(
-            SavedSurface { target, source: source(id, command)?, local_frame: transform(frame, &inverse, command)?, normal_strength: 1.0 },
+            SavedSurface { target, source: source(id, command)?.into(), local_frame: transform(frame, &inverse, command)?, normal_strength: 1.0 },
             input.replace,
         )
         .map_err(|e| bad(command, e.to_string()))?;

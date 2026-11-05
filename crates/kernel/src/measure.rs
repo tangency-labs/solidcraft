@@ -1,5 +1,6 @@
 use serde::Serialize;
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Aabb3;
 
 use crate::Result;
 use crate::body::Body;
@@ -102,7 +103,7 @@ pub fn measure_mass(b: &Body) -> Result<MassMeasure> {
         return Ok(MassMeasure { volume: m.volume, area: m.area, centroid: m.centroid, bbox: m.bbox, measured_by: m.measured_by, notes: m.notes });
     }
     let m = crate::guard("SMLib mass properties", || {
-        b.smlib()?.mass_properties(ACCURACY).map_err(|e| crate::KernelError::Failed(format!("SMLib mass properties: {e}")))
+        b.smlib()?.mass_properties(ACCURACY).map_err(|e| crate::KernelError::smlib("SMLib mass properties", e))
     })?;
     let [x, y, z] = m.centroid;
     Ok(MassMeasure { volume: m.volume, area: m.area, centroid: Vec3::new(x, y, z), bbox: b.exact_bounds()?, measured_by: "smlib", notes: Vec::new() })
@@ -112,6 +113,7 @@ pub fn measure_mass(b: &Body) -> Result<MassMeasure> {
 mod tests {
     use super::*;
     use crate::{BoolOp, boolean, cylinder, torus};
+    use solidcraft_geom::prelude::*;
 
     /// The mass properties alone are [`measure`]'s, to the bit; and on a curved intersection
     /// they are the textbook ones.
@@ -139,7 +141,7 @@ mod tests {
     // A body's measured volume does not depend on where it sits: the same revolved ring of cones
     // and cylinders, moved far from the origin, measures what it measures at the origin.
     use crate::{revolve, transform};
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
     use std::f64::consts::{PI, TAU};
 
     /// Ring cross-section in (radius, height): cones top and bottom, cylinders inside and out.

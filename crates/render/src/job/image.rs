@@ -1,9 +1,10 @@
 //! Incremental product rasterization. Every phase yields between bounded work units.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde::Serialize;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use super::{CancelToken, ErrorCode, ImageRequest, JobError, Phase, Progress, Result};
 use crate::{FaceAppearance, Mat4, ProductScene, RenderFormat, RenderMode, RenderOperation, RenderRequest};
@@ -52,8 +53,8 @@ fn add_bytes(sum: &mut u64, count: usize, size: usize, maximum: u64) -> Result<(
 /// counted even when another owner already holds them. Allocator and codec internals are estimates.
 /// Includes the CPU raster work estimate and its 384 MiB per-job check.
 pub fn admit(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> {
-    if request.environment.is_some() || request.textures.is_some() {
-        return Err(JobError::new(ErrorCode::InvalidRequest, "captured GPU environments and textures require a registered image executor"));
+    if request.environment.is_some() || (request.textures.is_some() && request.integrator != super::Integrator::Raytrace) {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "captured GPU environments and raster textures require a registered image executor"));
     }
     match request.integrator {
         super::Integrator::Raster => {

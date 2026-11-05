@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams,
-    ScaleParams, SphereParams, TorusParams,
+    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, FilletParams, FilletResult, OffsetPlaneParams,
+    PipeParams, PlaneAtAngleParams, ScaleParams, SphereParams, TorusParams,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms, sketch_rectangle};
@@ -87,6 +87,30 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ScaleParams>(), &["bodies", "factor", "factors", "name", "origin", "participants"]);
     assert_keys(input_schema_for::<OffsetPlaneParams>(), &["base", "name", "offset", "participants", "through"]);
     assert_keys(input_schema_for::<PlaneAtAngleParams>(), &["angle", "axis", "base", "name", "participants"]);
+    assert_keys(
+        input_schema_for::<FilletParams>(),
+        &[
+            "body",
+            "body_name",
+            "body_names",
+            "corner",
+            "edges",
+            "fit",
+            "knots",
+            "mid",
+            "name",
+            "participants",
+            "radii",
+            "radius",
+            "radius2",
+            "setbacks",
+            "smooth",
+            "start",
+            "tangent_chain",
+            "turn",
+            "type",
+        ],
+    );
 }
 
 #[test]
@@ -157,6 +181,13 @@ fn strict_keeps_todays_errors() {
         ("construct.plane.at_angle", json!({"base": "XY", "axis": {"face": "x", "point": [0, 0, 0]}, "angle": 30})),
         ("construct.plane.at_angle", json!({"base": "XY", "axis": {"face": "x"}, "angle": 30})),
         ("construct.plane.at_angle", json!({"base": "XY", "axis": "X", "angle": true})),
+        ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "turn": "round"})),
+        ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "turn": "ROUND"})),
+        ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "type": "bogus"})),
+        ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "fit": "bogus"})),
+        ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "corner": "round"})),
+        ("solid.fillet", json!({"edges": [], "radius": 1})),
+        ("solid.fillet", json!({"edges": 5, "radius": 1})),
     ]);
 }
 
@@ -211,6 +242,47 @@ fn replies_match_the_output_schema() {
     let mut bad = ok.clone();
     bad.as_object_mut().map(|o| o.remove("name"));
     assert!(!conforms(schema, schema, &bad), "{bad}");
+}
+
+/// `solid.fillet` replies with `FilletResult` in each of its forms, its contract taking each: a
+/// boss's base rounded with each turn and its options spelled out, a reduced round (with the radii
+/// it used), chord and curvature rounds, a smooth-patch corner with setbacks, and the variable and
+/// spline forms.
+#[test]
+fn fillet_replies_match_its_output_schema() {
+    let schema = output_schema_for::<FilletResult>();
+    let schema = schema.as_value();
+    // A 40 x 30 x 10 plate with a 10 x 10 x 5 boss on it, whose base edges `boss` are.
+    let run = |p: Value| {
+        let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "body_name": "B"})).unwrap_or_else(|e| panic!("{e}"));
+        s.execute("solid.box", &json!({"corner": [15, 10, 10], "length": 10, "width": 10, "height": 5, "operation": "join"}))
+            .unwrap_or_else(|e| panic!("{e}"));
+        let r = s.execute("solid.fillet", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{p}: {r}");
+        r
+    };
+    let boss = json!([[20, 10, 10], [25, 15, 10], [20, 20, 10], [15, 15, 10]]);
+    run(
+        json!({"edges": boss, "radius": 1, "turn": "mitre", "type": "constant", "fit": "exact", "corner": "rolling", "tangent_chain": true, "body": "B", "name": "Round"}),
+    );
+    run(json!({"edges": boss, "radius": "1 mm", "turn": "Swept"}));
+    run(json!({"edges": boss, "radius": 1, "turn": "swept", "fit": "reduce"}));
+    let reduced = run(json!({"edges": [[20, 0, 10]], "radius": 15, "fit": "reduce"}));
+    assert!(reduced.get("radius_applied").is_some_and(Value::is_number) && reduced.get("radii_applied").is_some_and(Value::is_array), "{reduced}");
+    run(json!({"edges": [[20, 0, 10]], "radius": 1, "type": "chord"}));
+    run(json!({"edges": [{"body": "B", "index": 0}], "radius": 0.5, "tangent_chain": false}));
+    run(json!({"edges": [[20, 0, 10]], "radius": 1, "type": "curvature"}));
+    // Variable and spline radii: solidcore fails a variable round on a box edge at this pin (status
+    // 1001, as `variable_radius_on_a_box_edge`), so their forms are checked against the contract.
+    for p in [
+        json!({"edges": [[20, 0, 10]], "radius": 1, "type": "variable", "radius2": 2, "start": [0, 0, 10], "mid": [[0.5, "1.5 mm"]], "smooth": true}),
+        json!({"edges": [[20, 0, 10]], "radius": 1, "type": "spline", "start": [0, 0, 10], "radii": [2], "knots": [0, 0, 1, 1]}),
+    ] {
+        assert!(crate::schema::Contract::check(&crate::schema::TypedContract::<FilletParams>::new(), &p).is_empty(), "{p}");
+    }
+    run(json!({"edges": [[20, 0, 10], [40, 15, 10], [40, 0, 5]], "radius": 2, "corner": "g2", "setbacks": [{"vertex": [40, 0, 10], "distance": 4}]}));
 }
 
 /// The feature commands converted after box and extrude answer with `FeatureResult` too, and

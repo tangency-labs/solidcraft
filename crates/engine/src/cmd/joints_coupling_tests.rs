@@ -408,3 +408,24 @@ fn a_motion_link_takes_its_driven_joints_freedom_with_nothing_grounded() {
         }
     }
 }
+
+/// Rolling the marker back works a gear's ratio out from the faces as they were then, so the
+/// editor's pinned model and its source differ in the link's ratio, and the edit still goes
+/// through.
+#[test]
+fn an_editor_accepts_the_ratios_rolling_the_marker_works_out() {
+    let mut s = gear_train();
+    let before = s.doc.features.len();
+    // G1's wall moves out to a radius of 12, so the link's ratio goes from -0.5 to -0.6.
+    run(&mut s, "solid.offset_face", json!({"faces": [[10, 0, 2.5]], "distance": 2}));
+    let ratio = |s: &Session| s.doc.assembly.links.first().map(|l| l.ratio).unwrap_or(f64::NAN);
+    assert!(close_to(ratio(&s), -0.6), "{}", ratio(&s));
+    let original = s.scratch();
+    run(&mut s, "timeline.roll_to", json!({"position": before}));
+    let source = s.scratch();
+    assert!(close_to(ratio(&source), -0.5), "before the offset, the pitch radius is 10: {}", ratio(&source));
+    let prepared = s.scratch().compute_editor_commands(&[], &source, original).unwrap();
+    s.accept_commands(prepared).unwrap();
+    assert_eq!(s.doc.marker, None);
+    assert!(close_to(ratio(&s), -0.6), "{}", ratio(&s));
+}

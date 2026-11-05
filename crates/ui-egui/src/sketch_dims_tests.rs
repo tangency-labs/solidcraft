@@ -1,6 +1,7 @@
 //! Real keyboard input must stay inside the dimensions of the shape being drawn.
 
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 
 use super::{BOX, in_view};
 use crate::scenario::Harness;
@@ -16,7 +17,7 @@ fn drawing(command: &str) -> Harness {
 }
 
 fn assert_focus(h: &Harness, index: usize) {
-    let expected = egui::Id::new(("sc_dim", index));
+    let expected = egui::Id::unique(("sc_dim", index));
     assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(expected), "focus must stay in inline dimension {index}");
 }
 
@@ -169,7 +170,7 @@ fn two_point_circle_takes_a_typed_diameter() {
     assert!(sk.radius(0).is_some_and(|r| (r - 15.0).abs() < 1e-6), "{:?}", sk.radius(0));
     let c = sk.center(0).unwrap();
     // From the first point (the origin) toward the cursor at (20, 10).
-    let dir = solidcraft_engine::geom::Vec2::new(20.0, 10.0).normalized().unwrap();
+    let dir = solidcore_record::Vec2::new(20.0, 10.0).normalized().unwrap();
     assert!((c - dir * 15.0).len() < 1e-6, "{c:?}");
 }
 
@@ -192,11 +193,14 @@ fn an_ellipse_takes_a_typed_major_and_minor_radius() {
     h.step(&json!({"key": "Enter"})).unwrap();
     let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
-    assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status);
-    let CurveKind::Ellipse { c, m, r } = sk.curves[0].kind.clone() else { panic!("{:?}", sk.curves[0].kind) };
+    // The ellipse and its two axes (the default ellipse_axes preference).
+    assert_eq!(sk.curves.len(), 3, "{:?}", h.app.status);
+    let Some(CurveKind::Ellipse { c, m, r }) = sk.curves.iter().map(|k| k.kind.clone()).find(|k| matches!(k, CurveKind::Ellipse { .. })) else {
+        panic!("{:?}", sk.curves)
+    };
     let (c, m) = (sk.point(c).unwrap(), sk.point(m).unwrap());
     // From the centre (the origin) toward the cursor at (20, 10).
-    let dir = solidcraft_engine::geom::Vec2::new(20.0, 10.0).normalized().unwrap();
+    let dir = solidcore_record::Vec2::new(20.0, 10.0).normalized().unwrap();
     assert!(c.len() < 1e-6 && (m - dir * 25.0).len() < 1e-6, "{c:?} {m:?}");
     assert!((r - 8.0).abs() < 1e-6, "{r}");
     let doc = &h.app.session.doc;
@@ -266,7 +270,7 @@ fn a_typed_rho_shapes_the_conic_whose_apex_is_placed_next() {
         .expect("the typed value placed a conic");
     assert!((rho - 0.8).abs() < 1e-9, "typed rho reached the command: {rho}");
     // The apex lands where the cursor was, within the pixel the cursor was converted through.
-    assert!(sketch.point(apex).unwrap().dist(solidcraft_engine::geom::Vec2::new(20.0, 20.0)) < 0.5, "{:?}", sketch.point(apex));
+    assert!(sketch.point(apex).unwrap().dist(solidcore_record::Vec2::new(20.0, 20.0)) < 0.5, "{:?}", sketch.point(apex));
 }
 
 /// A rho the command would refuse stays in its box to be corrected, and places nothing.
@@ -433,7 +437,7 @@ fn a_line_end_on_a_spline_snaps_on_it_and_stays_on_it() {
         sk.constraints
     );
     let end = sk.point(b).unwrap();
-    let to_segment = |a: solidcraft_engine::geom::Vec2, b: solidcraft_engine::geom::Vec2| {
+    let to_segment = |a: solidcore_record::Vec2, b: solidcore_record::Vec2| {
         let ab = b - a;
         let t = ((end - a).dot(ab) / ab.len2().max(1e-300)).clamp(0.0, 1.0);
         (a + ab * t).dist(end)
@@ -449,7 +453,7 @@ fn a_line_end_on_a_spline_snaps_on_it_and_stays_on_it() {
 /// snaps to horizontal or vertical, so the click must place exactly that line, on the circle.
 #[test]
 fn a_line_end_on_a_circle_within_the_axis_snap_lands_on_the_quadrant_the_preview_shows() {
-    use solidcraft_engine::geom::Vec2;
+    use solidcore_record::Vec2;
     use solidcraft_engine::sketch::{ConstraintKind, CurveKind};
     let r = 30.0_f64;
     for (deg, end, horizontal) in [(-1.5_f64, Vec2::new(r, 0.0), true), (91.8, Vec2::new(0.0, r), false), (178.0, Vec2::new(-r, 0.0), true)] {
@@ -493,7 +497,7 @@ fn a_line_end_on_a_circle_within_the_axis_snap_lands_on_the_quadrant_the_preview
 /// Outside the axis snap a line end on a circle stays where the cursor meets the circle.
 #[test]
 fn a_line_end_on_a_circle_outside_the_axis_snap_stays_at_the_cursor() {
-    use solidcraft_engine::geom::Vec2;
+    use solidcore_record::Vec2;
     use solidcraft_engine::sketch::CurveKind;
     let mut h = Harness::new();
     h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
@@ -624,7 +628,7 @@ fn polygon_inputs_clear_each_other_and_the_preview() {
             let boxes: Vec<_> = (0..2usize)
                 .map(|i| {
                     h.ctx
-                        .memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", i))))
+                        .memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i))))
                         .unwrap_or_else(|| panic!("{command}, {view}, {corner:?}: input {i} missing"))
                 })
                 .collect();
@@ -736,7 +740,7 @@ fn a_second_circle_on_the_same_centre_keeps_its_diameter_box_after_release() {
             h.app.status
         );
         assert!(
-            h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", 0usize)))).is_some(),
+            h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", 0usize)))).is_some(),
             "{label}: Diameter field missing; focused={:?} hover={:?}",
             h.ctx.memory(|m| m.focused()),
             tool.hover
@@ -766,7 +770,7 @@ fn a_typed_first_circle_then_same_centre_keeps_the_diameter_box() {
     assert_eq!(tool.pts.len(), 1, "pts={:?} status={:?}", tool.pts, h.app.status);
     assert_eq!(tool.dims.iter().map(|d| d.label).collect::<Vec<_>>(), ["Diameter"]);
     assert!(
-        h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", 0usize)))).is_some(),
+        h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", 0usize)))).is_some(),
         "Diameter field gone; focused={:?} hover={:?} dims={:?}",
         h.ctx.memory(|m| m.focused()),
         tool.hover,

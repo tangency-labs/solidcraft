@@ -2,6 +2,7 @@
 //! area times its height).
 
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -182,15 +183,15 @@ fn attachment(s: &Session, sketch: &str) -> solidcraft_doc::FaceAttachmentStatus
     s.placed_document().sketch_face_attachment(id, &s.model)
 }
 
-fn attached(s: &Session, sketch: &str) -> (solidcraft_geom::Plane, Option<solidcraft_doc::config::FaceCertificate>) {
+fn attached(s: &Session, sketch: &str) -> (solidcore_record::Plane, Option<solidcraft_doc::config::FaceCertificate>) {
     match attachment(s, sketch) {
         solidcraft_doc::FaceAttachmentStatus::Healthy { plane, target, .. } => (plane, target.certificate),
         other => panic!("{sketch}: {other:?}"),
     }
 }
 
-fn same_plane(a: &solidcraft_geom::Plane, b: &solidcraft_geom::Plane) {
-    let near = |p: solidcraft_geom::Vec3, q: solidcraft_geom::Vec3| (p - q).len() < 1e-9;
+fn same_plane(a: &solidcore_record::Plane, b: &solidcore_record::Plane) {
+    let near = |p: solidcore_record::Vec3, q: solidcore_record::Vec3| (p - q).len() < 1e-9;
     assert!(near(a.origin, b.origin) && near(a.x, b.x) && near(a.y, b.y), "{a:?} != {b:?}");
 }
 
@@ -284,7 +285,7 @@ fn no_errors(s: &Session, context: &str) {
 }
 
 /// How far a face's plane lies from the origin along its own normal.
-fn plane_offset(plane: &solidcraft_geom::Plane) -> f64 {
+fn plane_offset(plane: &solidcore_record::Plane) -> f64 {
     plane.normal().dot(plane.origin)
 }
 
@@ -342,7 +343,7 @@ fn flat_side_faces(s: &Session) -> Vec<(String, [f64; 3])> {
     let mut out = Vec::new();
     let Some(body) = world.bodies.first() else { return out };
     let mesh = body.mesh();
-    let mut best: std::collections::BTreeMap<usize, (solidcraft_geom::Vec3, f64)> = std::collections::BTreeMap::new();
+    let mut best: std::collections::BTreeMap<usize, (solidcore_record::Vec3, f64)> = std::collections::BTreeMap::new();
     for (triangle, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
         if let Some([a, b, c]) = mesh.tri(triangle) {
             let area = (b - a).cross(c - a).len();
@@ -379,7 +380,7 @@ fn the_round_sides_of_a_thin_ring_are_named_by_the_circle_they_run_beside() {
     for (side, radius) in [("left", 9.0), ("right", 11.0)] {
         let name = format!("F2:wall:c1:{side}");
         assert!(walls.contains(&&name), "{walls:?}");
-        let at = solidcraft_geom::Vec3::new(0.0, radius, 2.5);
+        let at = solidcore_record::Vec3::new(0.0, radius, 2.5);
         assert_eq!(solidcraft_doc::naming::face_names_at(&s.model.state(), &[at]), vec![name.clone()]);
     }
 }

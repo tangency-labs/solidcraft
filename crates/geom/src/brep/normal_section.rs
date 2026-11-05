@@ -17,8 +17,9 @@
 //! (the lower orders' terms on the right), and the height's coefficient is the normal part of the
 //! same expansion. Nothing is sampled: the answer is exact up to rounding.
 
-use crate::Vec3;
+use crate::prelude::*;
 use crate::tess::partials::{MAX_PARTIAL_ORDER, Partials, orders};
+use solidcore_record::Vec3;
 
 /// Taylor coefficients in `x` up to the fourth power (index = power).
 type Series<T> = [T; MAX_PARTIAL_ORDER + 1];
@@ -118,7 +119,7 @@ fn factorial(n: usize) -> f64 {
 mod tests {
     use super::*;
     use crate::brep::eval::SurfaceEval;
-    use crate::brep::{Frame, Surface};
+    use solidcore_record::brep::{Frame, Surface};
 
     fn frame() -> Frame {
         Frame { origin: [1., 2., 3.], x_axis: [0., 1., 0.], y_axis: [0., 0., 1.] }

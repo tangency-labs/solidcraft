@@ -28,10 +28,11 @@
 
 use egui::Pos2;
 use serde_json::{Map, Value, json};
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::Document;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::geom::{Vec2, Vec3};
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::{PatternAlignment, VariableUnit};
 
 use crate::SolveApp;
@@ -117,8 +118,9 @@ pub enum Mod {
     /// turn about the centre, and whether the originals stay behind. The command already
     /// carries the copy flag, so the Create Copy row needs no engine change.
     Move { x: String, y: String, angle: String, copy: bool },
-    /// `sketch.transform`: the picked entities scaled, turned and moved as one, about the middle
-    /// of their box. `x` and `y` move that middle, `factor` scales and `angle` turns about it.
+    /// `sketch.transform`: the picked entities scaled, turned and moved as one, about the picked
+    /// Center point or else the middle of their box. `x` and `y` move that point, `factor` scales
+    /// and `angle` turns about it.
     /// `frame` is the box (middle and size in the sketch, kept up to date from the picks by
     /// `sketch_transform_ui`) the window's size rows and the handles work on.
     Transform { x: String, y: String, factor: String, angle: String, frame: Option<([f64; 2], [f64; 2])> },
@@ -197,7 +199,10 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         // AXES is the mask that takes a straight sketch curve (`selection::SelInput::accepts`).
         Mod::Mirror => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Mirror line", AXES, false)],
         Mod::Move { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Center", SKETCH_POINTS, false)],
-        Mod::Transform { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true)],
+        // Center: the point Scale and Angle work about (#11718); empty, the middle of the picks' box.
+        Mod::Transform { .. } => {
+            vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Center", SKETCH_POINTS, false)]
+        }
         // The direction is optional: `sketch.pattern.rectangular` documents sketch x as its
         // default, the way the engine reads it.
         Mod::PatternRect { .. } => vec![
@@ -728,7 +733,7 @@ pub(crate) fn point_id<'a>(session: &solidcraft_engine::Session, sel: &'a Sel) -
 
 /// The curves and lone points picked in input `i`, as the engine's `entities` list. A profile
 /// pick expands to every curve of its boundary and its holes (#8390).
-fn entity_ids(session: &solidcraft_engine::Session, inputs: &[SelInput], i: usize) -> Vec<String> {
+pub(crate) fn entity_ids(session: &solidcraft_engine::Session, inputs: &[SelInput], i: usize) -> Vec<String> {
     let mut out = Vec::new();
     for x in items(inputs, i) {
         match x {
@@ -919,7 +924,8 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             let f = factor(app, text)?;
             let turn = value(app, angle, ValueKind::Angle, "Angle")?.to_degrees();
             let (dx, dy) = (value(app, x, ValueKind::Length, "X")?, value(app, y, ValueKind::Length, "Y")?);
-            ("sketch.transform", json!({"entities": entities, "factor": f, "angle": turn, "center": middle, "translate": [dx, dy]}))
+            let center = items(inputs, 1).first().and_then(|sel| point_id(&app.session, sel)).map_or_else(|| json!(middle), |id| json!(id));
+            ("sketch.transform", json!({"entities": entities, "factor": f, "angle": turn, "center": center, "translate": [dx, dy]}))
         }
         Mod::Offset { distance, distance2, instances, mode, chain, flip } => {
             let curves = curve_ids(inputs, 0);
@@ -959,15 +965,11 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 Some(sel @ Sel::Axis { name }) if matches!(name.as_str(), "X" | "Y" | "Z") => {
                     if let Some(axis) = crate::tools::sketch_axis_of(app, name) {
                         json!(axis)
-                    } else {
-                        let (origin, dir) = crate::dialogs::axis_of(app, sel).ok_or("Select an origin axis")?;
-                        let st = crate::open_meshing::session_world(&app.session);
-                        let plane =
-                            st.sketch(app.session.active_sketch.ok_or("No sketch is being edited")?).ok_or("The sketch no longer exists")?.plane;
-                        if plane.normal().dot(dir).abs() > 1e-9 || plane.normal().dot(origin - plane.origin).abs() > 1e-6 {
-                            return Err("The origin axis must lie in the sketch plane".into());
-                        }
+                    } else if sketch_dir(app, sel).is_some() {
+                        // An axis outside the plane still gives the line it makes in the plane.
                         json!({"axis":name})
+                    } else {
+                        return Err("The origin axis is perpendicular to the sketch plane, so it has no line in the plane".into());
                     }
                 }
                 Some(_) => return Err("The mirror line must be a straight curve of this sketch or an origin axis in its plane".into()),

@@ -689,6 +689,7 @@ mod tests {
     use super::*;
     use crate::Services;
     use solidcraft_engine::Session;
+    use solidcraft_engine::geom::prelude::*;
     use solidcraft_engine::render::Camera;
 
     /// The camera math the page applies the motion with (`navigation::device`): `sketch` keeps
@@ -1159,6 +1160,7 @@ mod tests {
 
     fn wheel(dy: f32) -> egui::Event {
         egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
             delta: egui::vec2(0.0, dy),
             modifiers: egui::Modifiers::NONE,

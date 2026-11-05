@@ -16,7 +16,21 @@ use solidcraft_render::{
     texture_input::MapRole,
 };
 
+use crate::schema::TypedContract;
+use crate::schema::render_library::{
+    LibraryDescribeParams, LibraryListParams, LibraryPage, LibraryPreview, LibraryPreviewParams, LibraryResource, LibraryTargets,
+    LibraryTargetsParams, Pbr, RenderTarget, ResourceSummary, SceneBounds,
+};
 use crate::{Result, Session, params::bad};
+
+pub(super) const LIST_CONTRACT: TypedContract<LibraryListParams> = TypedContract::new();
+pub(super) const DESCRIBE_CONTRACT: TypedContract<LibraryDescribeParams> = TypedContract::new();
+pub(super) const TARGETS_CONTRACT: TypedContract<LibraryTargetsParams> = TypedContract::new();
+pub(super) const PREVIEW_CONTRACT: TypedContract<LibraryPreviewParams> = TypedContract::new();
+
+fn reply(command: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(command, e.to_string()))
+}
 
 const KINDS: &[&str] = &[
     "materials",
@@ -162,28 +176,47 @@ pub(super) fn list(_s: &mut Session, params: &Value) -> Result<Value> {
     };
     let values = catalog(&input.kind, command)?;
     let count = values.iter().filter(matches).count();
-    let items: Vec<_> = values.iter().filter(matches).skip(input.offset).take(input.limit).map(|v| {
-        json!({"id":v["id"],"name":v["name"],"domains":v["domains"],"family":v["family"],"source_status":v.get("status").or_else(|| v.get("state")),"projection":projection(&input.kind,v)})
-    }).collect();
+    let items = values
+        .iter()
+        .filter(matches)
+        .skip(input.offset)
+        .take(input.limit)
+        .map(|v| {
+            let listed = Listed::deserialize(v).map_err(|e| bad(command, format!("built-in catalog {}: {e}", input.kind)))?;
+            Ok(ResourceSummary {
+                id: listed.id,
+                name: listed.name,
+                domains: listed.domains,
+                family: listed.family,
+                source_status: listed.status.or(listed.state),
+                projection: projection(&input.kind, v),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     let end = input.offset.saturating_add(items.len());
-    Ok(json!({"kind":input.kind,"total":count,"offset":input.offset,"next_offset":(end < count).then_some(end),"items":items}))
+    let next_offset = (end < count).then_some(end);
+    reply(command, LibraryPage { kind: input.kind, total: count, offset: input.offset, next_offset, items, param_warnings: Vec::new() })
 }
 
+/// The fields of a catalog's resource a page lists. Every catalog gives an id and a name; the
+/// source's status is `status`, or a rig's `state`.
 #[derive(Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct TargetQuery {
-    query: String,
-    offset: usize,
-    limit: usize,
+struct Listed {
+    id: String,
+    name: String,
+    #[serde(default)]
+    domains: Option<Vec<String>>,
+    #[serde(default)]
+    family: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
 }
-impl Default for TargetQuery {
-    fn default() -> Self {
-        Self { query: String::new(), offset: 0, limit: 128 }
-    }
-}
+
 pub(super) fn targets(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.library.targets";
-    let input: TargetQuery = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    let input: LibraryTargetsParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     if input.query.len() > 256
         || input.query.chars().any(char::is_control)
         || input.limit == 0
@@ -202,49 +235,70 @@ pub(super) fn targets(s: &mut Session, params: &Value) -> Result<Value> {
         .filter(|(_, body)| body.name.to_lowercase().contains(&query))
         .skip(input.offset)
         .take(input.limit)
-        .map(|(ordinal, body)| {
-            json!({"ordinal":ordinal,"name":body.name,"color":body.color,"opacity":body.opacity,
-            "pbr":body.surface.map(|v|json!({"metallic":v.metallic(),"roughness":v.roughness(),"dielectric_ior":v.dielectric_ior()}))})
+        .map(|(ordinal, body)| RenderTarget {
+            ordinal,
+            name: body.name.clone(),
+            color: body.color,
+            opacity: body.opacity,
+            pbr: body.surface.map(|v| Pbr { metallic: v.metallic(), roughness: v.roughness(), dielectric_ior: v.dielectric_ior() }),
         })
         .collect();
     let end = input.offset.saturating_add(items.len());
-    Ok(json!({"items":items,"total":count,"offset":input.offset,"next_offset":(end<count).then_some(end),"revision":s.revision,
-        "bounds":if scene.bounds.is_empty(){Value::Null}else{json!({"min":scene.bounds.min,"max":scene.bounds.max})}}))
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Identify {
-    kind: String,
-    id: String,
+    let bounds = (!scene.bounds.is_empty()).then(|| SceneBounds { min: scene.bounds.min.into(), max: scene.bounds.max.into() });
+    reply(
+        command,
+        LibraryTargets {
+            items,
+            total: count,
+            offset: input.offset,
+            next_offset: (end < count).then_some(end),
+            revision: s.revision,
+            bounds,
+            param_warnings: Vec::new(),
+        },
+    )
 }
 
 pub(super) fn describe(_s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.library.describe";
-    let input: Identify = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    let input: LibraryDescribeParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     if input.kind == "physical_profiles" {
         return super::physical_library::describe(&input.id);
     }
     let value = item(&input.kind, &input.id, command)?;
-    let mut reply = json!({"kind":input.kind,"resource":value,"projection":projection(&input.kind,value),"source_manifest_unchanged":true});
-    if matches!(input.kind.as_str(), "materials" | "surfaces") {
-        reply["physical_references"] = super::physical_library::associations(&input.id)?;
-    }
-    Ok(reply)
+    let physical_references =
+        if matches!(input.kind.as_str(), "materials" | "surfaces") { Some(super::physical_library::associations(&input.id)?) } else { None };
+    let projection = projection(&input.kind, value);
+    reply(
+        command,
+        LibraryResource {
+            kind: input.kind,
+            resource: value.as_object().cloned().unwrap_or_default(),
+            projection,
+            source_manifest_unchanged: true,
+            physical_references,
+            param_warnings: Vec::new(),
+        },
+    )
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Preview {
-    id: String,
-}
 pub(super) fn preview(_s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.library.preview";
-    let input: Preview = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    let input: LibraryPreviewParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     item("surfaces", &input.id, command)?;
     let bytes = asset_bytes(&format!("{}/base_color", input.id), 2 * 1024 * 1024, command)?;
-    Ok(json!({"id":input.id,"mime":"image/png","sha256":HdrId::of(&bytes),"bytes":bytes,
-        "fidelity":"authored_base_color_source_map_not_a_render","document_changed":false}))
+    reply(
+        command,
+        LibraryPreview {
+            id: input.id,
+            mime: "image/png".into(),
+            sha256: HdrId::of(&bytes).to_string(),
+            bytes,
+            fidelity: "authored_base_color_source_map_not_a_render".into(),
+            document_changed: false,
+            param_warnings: Vec::new(),
+        },
+    )
 }
 
 /// The key is matched against generated constants, never joined to a filesystem path.
@@ -451,6 +505,8 @@ struct SurfacePrepare {
     scale: f64,
     #[serde(default)]
     plane: Plane,
+    #[serde(default)]
+    rotation_rad: f64,
 }
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -468,12 +524,18 @@ pub(super) fn prepare_surface(s: &mut Session, params: &Value) -> Result<Value> 
     if !input.scale.is_finite() || !(0.001..=1000.0).contains(&input.scale) {
         return Err(bad(command, "surface repeat scale must be finite in 0.001..1000"));
     }
+    if !input.rotation_rad.is_finite() || input.rotation_rad.abs() > 1e6 {
+        return Err(bad(command, "surface grain rotation must be finite and within one million radians"));
+    }
     let tile: [f64; 2] = serde_json::from_value(value["tile_mm"].clone()).map_err(|e| bad(command, e.to_string()))?;
     let (u, v) = (tile[0] * input.scale, tile[1] * input.scale);
+    let (sin, cos) = input.rotation_rad.sin_cos();
+    // Rotate the unit directions before applying the two physical repeat lengths.
+    // Mixing the already-scaled vectors would skew non-square wood tiles.
     let (u, v) = match input.plane {
-        Plane::Xy => ([u, 0.0, 0.0], [0.0, v, 0.0]),
-        Plane::Yz => ([0.0, u, 0.0], [0.0, 0.0, v]),
-        Plane::Zx => ([0.0, 0.0, u], [v, 0.0, 0.0]),
+        Plane::Xy => ([cos * u, sin * u, 0.0], [-sin * v, cos * v, 0.0]),
+        Plane::Yz => ([0.0, cos * u, sin * u], [0.0, -sin * v, cos * v]),
+        Plane::Zx => ([sin * u, 0.0, cos * u], [cos * v, 0.0, -sin * v]),
     };
     let scene = crate::product_scene::extract(s)?;
     let body = scene

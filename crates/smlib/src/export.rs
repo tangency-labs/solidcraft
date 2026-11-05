@@ -35,55 +35,62 @@
 //!   `VERTEX_TOLERANCE`), never below a floor of 10⁻⁶ of the body's size (at least 10⁻⁵ mm),
 //!   which is the body's; from a library without them, SMLib's intersection tolerance (or the
 //!   floor where larger) for the body, every edge and every vertex.
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
 use std::collections::HashMap;
 
-use solidcraft_geom::Vec3;
-use solidcraft_geom::brep as b;
+use solidcore_record::Vec3;
+use solidcore_record::brep as b;
 
 use crate::flat::{self, *};
 use crate::history::{Order, Piece};
 use crate::import::Arrays;
-use crate::{Brep, Result, error, ffi, init};
+use crate::{Brep, Result};
 
 impl Brep {
     /// A cylinder about +Z: base centre, radius and height (mm, > 0).
     pub fn make_cylinder(origin: [f64; 3], radius: f64, height: f64) -> Result<Brep> {
-        init()?;
-        ffi::make_cylinder(&origin, radius, height).map(Brep).map_err(error)
+        let r = crate::core::make_cylinder(origin, radius, height).map(Brep::made_core);
+        crate::trace::made("make_cylinder", &[], &r, || serde_json::json!({"origin": origin, "radius": radius, "height": height}));
+        r
     }
 
     /// A sphere: centre and radius (mm, > 0).
     pub fn make_sphere(center: [f64; 3], radius: f64) -> Result<Brep> {
-        init()?;
-        ffi::make_sphere(&center, radius).map(Brep).map_err(error)
+        let r = crate::core::make_sphere(center, radius).map(Brep::made_core);
+        crate::trace::made("make_sphere", &[], &r, || serde_json::json!({"center": center, "radius": radius}));
+        r
     }
 
     /// A cone or frustum about +Z: base centre, base radius (> 0), top radius (≥ 0, not the base
     /// radius) and height (> 0), in mm.
     pub fn make_cone(origin: [f64; 3], base_radius: f64, top_radius: f64, height: f64) -> Result<Brep> {
-        init()?;
-        ffi::make_cone(&origin, base_radius, top_radius, height).map(Brep).map_err(error)
+        let r = crate::core::make_cone(origin, base_radius, top_radius, height).map(Brep::made_core);
+        crate::trace::made(
+            "make_cone",
+            &[],
+            &r,
+            || serde_json::json!({"origin": origin, "base_radius": base_radius, "top_radius": top_radius, "height": height}),
+        );
+        r
     }
 
     /// A ring torus about +Z: centre, major radius > minor radius > 0 (mm).
     pub fn make_torus(center: [f64; 3], major_radius: f64, minor_radius: f64) -> Result<Brep> {
-        init()?;
-        ffi::make_torus(&center, major_radius, minor_radius).map(Brep).map_err(error)
+        let r = crate::core::make_torus(center, major_radius, minor_radius).map(Brep::made_core);
+        crate::trace::made(
+            "make_torus",
+            &[],
+            &r,
+            || serde_json::json!({"center": center, "major_radius": major_radius, "minor_radius": minor_radius}),
+        );
+        r
     }
 
-    /// The flat arrays of this body that the mapping reads ([`Brep::export`]), copied out.
+    /// The flat arrays of this body that the mapping reads.
     pub fn arrays(&self) -> Result<Arrays> {
-        let f = self.export()?;
-        let mut out = Arrays::default();
-        for &id in I64_IDS {
-            out.ints.insert(id, f.get_i64(id)?);
-        }
-        for &id in F64_IDS {
-            out.reals.insert(id, f.get_f64(id)?);
-        }
-        Ok(out)
+        crate::core::to_arrays(self.core())
     }
 
     /// This body as a schema 4 B-rep, validated.
@@ -94,7 +101,11 @@ impl Brep {
     /// [`Brep::to_native`], with what the mapping kept as SMLib wrote it.
     pub fn to_native_report(&self) -> std::result::Result<(b::Brep, Report), ExportError> {
         let arrays = self.arrays().map_err(ExportError::Smlib)?;
-        native(&arrays)
+        let r = native(&arrays);
+        if let Ok((record, _)) = &r {
+            crate::trace::exported(self, record);
+        }
+        r
     }
 
     /// [`Brep::to_native`], with where each of SMLib's faces and edges went in the record's
@@ -103,7 +114,11 @@ impl Brep {
     /// `GetEdges`), the order its history uses.
     pub fn to_native_ordered(&self) -> std::result::Result<(b::Brep, Order), ExportError> {
         let arrays = self.arrays().map_err(ExportError::Smlib)?;
-        native_ordered(&arrays).map(|(brep, _, order)| (brep, order))
+        let r = native_ordered(&arrays).map(|(brep, _, order)| (brep, order));
+        if let Ok((record, _)) = &r {
+            crate::trace::exported(self, record);
+        }
+        r
     }
 }
 
@@ -149,92 +164,6 @@ fn unsupported(what: impl std::fmt::Display) -> ExportError {
 }
 
 // ---- The arrays (ids and kinds from `crate::flat`, as in capi/include/smlib.h) ------------
-
-/// The int64 arrays this mapping reads.
-const I64_IDS: &[i32] = &[
-    REGION_SHELL_COUNT,
-    REGION_TYPE,
-    SHELL_FACEUSE_COUNT,
-    SHELL_WIRE_EDGE_COUNT,
-    SHELL_POINT_TYPE,
-    FACEUSE_FACE,
-    FACEUSE_ORIENTATION,
-    FACE_LOOP_COUNT,
-    FACE_SURFACE_TYPE,
-    LOOP_EDGEUSE_COUNT,
-    LOOP_VERTEX,
-    EDGEUSE_EDGE,
-    EDGEUSE_ORIENTATION,
-    EDGEUSE_NEXT_RADIAL,
-    EDGEUSE_RADIAL_ENTRY,
-    EDGEUSE_NURBS_VERTEX_COUNT,
-    EDGEUSE_NURBS_ORDER,
-    EDGE_CURVE_TYPE,
-    EDGE_VERTICES,
-    EDGE_NURBS_VERTEX_COUNT,
-    EDGE_NURBS_ORDER,
-    FACE_NURBS_U_VERTEX_COUNT,
-    FACE_NURBS_V_VERTEX_COUNT,
-    FACE_NURBS_U_ORDER,
-    FACE_NURBS_V_ORDER,
-    FACE_NURBS_FORM,
-    EDGE_NURBS_FORM,
-    FACE_DEFINITION_REAL_COUNT,
-];
-
-/// The double arrays this mapping reads.
-const F64_IDS: &[i32] = &[
-    TOLERANCE,
-    EXTENT,
-    FACE_RANGE,
-    EDGE_RANGE,
-    VERTEX_POSITION,
-    EDGE_NURBS_CVS,
-    EDGE_NURBS_KNOTS,
-    EDGE_NURBS_WEIGHTS,
-    EDGE_CIRCLE_CENTER,
-    EDGE_CIRCLE_AXIS,
-    EDGE_CIRCLE_REF_DIRECTION,
-    EDGE_CIRCLE_RADIUS,
-    EDGE_LINE_ORIGIN,
-    EDGE_LINE_DIRECTION,
-    EDGE_ELLIPSE_CENTER,
-    EDGE_ELLIPSE_AXIS,
-    EDGE_ELLIPSE_REF_DIRECTION,
-    EDGE_ELLIPSE_X_RADIUS,
-    EDGE_ELLIPSE_Y_RADIUS,
-    EDGEUSE_NURBS_CVS,
-    EDGEUSE_NURBS_KNOTS,
-    EDGEUSE_NURBS_WEIGHTS,
-    FACE_NURBS_CVS,
-    FACE_NURBS_U_KNOTS,
-    FACE_NURBS_V_KNOTS,
-    FACE_NURBS_WEIGHTS,
-    FACE_SPHERE_CENTER,
-    FACE_SPHERE_AXIS,
-    FACE_SPHERE_REF_DIRECTION,
-    FACE_SPHERE_RADIUS,
-    FACE_PLANE_ORIGIN,
-    FACE_PLANE_AXIS,
-    FACE_PLANE_REF_DIRECTION,
-    FACE_CYLINDER_ORIGIN,
-    FACE_CYLINDER_AXIS,
-    FACE_CYLINDER_REF_DIRECTION,
-    FACE_CYLINDER_RADIUS,
-    FACE_CONE_ORIGIN,
-    FACE_CONE_AXIS,
-    FACE_CONE_REF_DIRECTION,
-    FACE_CONE_RADIUS,
-    FACE_CONE_SEMI_ANGLE,
-    FACE_TORUS_ORIGIN,
-    FACE_TORUS_AXIS,
-    FACE_TORUS_REF_DIRECTION,
-    FACE_TORUS_MAJOR_RADIUS,
-    FACE_TORUS_MINOR_RADIUS,
-    EDGE_TOLERANCE,
-    VERTEX_TOLERANCE,
-    FACE_DEFINITION_REALS,
-];
 
 // The kind values as the arrays hold them (int64); a local item shadows the glob import.
 const SURFACE_NURBS: i64 = flat::SURFACE_NURBS as i64;
@@ -384,8 +313,9 @@ fn surfaces(flat: View, n_faces: usize) -> Res<Vec<(b::Surface, Option<b::Surfac
                     v3(flat.f(FACE_CONE_REF_DIRECTION), i, "cone")?,
                 );
                 let (radius, half) = (at(flat.f(FACE_CONE_RADIUS), i, "cone")?, at(flat.f(FACE_CONE_SEMI_ANGLE), i, "cone")?);
-                // SMLib's cone of semi-angle 0 is its cylinder.
-                if half == 0.0 {
+                // SMLib's cone of semi-angle 0 is its cylinder, and one within rounding of it (a thread's
+                // cone of 1e-13 comes out of the trims) is too: the portable record refuses it as a cone.
+                if half.abs() < 1e-12 {
                     b::Surface::Cylinder { frame: f, radius }
                 } else {
                     b::Surface::Cone { frame: f, radius_at_origin: radius, half_angle: half }
@@ -446,7 +376,7 @@ fn surfaces(flat: View, n_faces: usize) -> Res<Vec<(b::Surface, Option<b::Surfac
 /// `form`, the NURBS the edge runs on over `range`: what [`b::Edge::curve_interval`] reads (an
 /// ellipse's radii scale its axes, not the way its angle turns).
 fn along(f: b::Frame, form: &b::Curve, range: [f64; 2]) -> Res<b::Frame> {
-    let eval = b::eval::CurveEval::new(form).map_err(|e| invalid(format!("circle NURBS form: {e}")))?;
+    let eval = solidcraft_geom::brep::eval::CurveEval::new(form).map_err(|e| invalid(format!("circle NURBS form: {e}")))?;
     let [t0, t1] = range;
     let (p, q) = (eval.point(t0), eval.point(t0 + 1e-3 * (t1 - t0)));
     let (Some(p), Some(q)) = (p, q) else { return Err(invalid("circle NURBS form")) };
@@ -814,7 +744,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         let r = range.get(4 * f..4 * f + 4).ok_or_else(|| invalid("face range"))?;
         // A face with a NURBS form is parameterised on it: its range and trims are that NURBS's.
         let params = nurbs.as_ref().unwrap_or(&surface);
-        let natural = params.natural();
+        let natural = solidcraft_geom::brep::label::surface_natural(params);
         let domain = [onto([r[0], r[2]], natural[0]), onto([r[1], r[3]], natural[1])];
         // SMLib's own trims are taken where the arrays carry them: B-spline faces, NURBS forms, and
         // planes (mapped onto the plane's own (u, v) by the export).
@@ -1336,7 +1266,7 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
         })
         .collect::<Res<Vec<_>>>()?;
     let brep = b::Brep { version: b::VERSION, tolerance, regions, shells, faces: face_records, edges: edge_records, vertices };
-    brep.validate_built().map_err(|e| invalid(format!("the mapped B-rep does not validate: {e}")))?;
+    solidcraft_geom::brep::check::validate_built(&brep).map_err(|e| invalid(format!("the mapped B-rep does not validate: {e}")))?;
     let placed = |new: &[Option<u32>]| {
         new.iter().map(|i| i.map(|i| i as usize).ok_or_else(|| invalid("an entity outside the canonical walk"))).collect::<Res<Vec<_>>>()
     };
@@ -1589,7 +1519,7 @@ fn pcurves<'a>(
         let mut loop_uses = Vec::with_capacity(l.len());
         for (&(e, forward), given) in l.iter().zip(g) {
             let geometry = edge(e).ok_or_else(|| invalid("edge"))?;
-            loop_uses.push(b::pcurve::EdgeUse {
+            loop_uses.push(solidcraft_geom::brep::pcurve::EdgeUse {
                 edge: e,
                 curve: geometry.curve,
                 interval: geometry.interval,
@@ -1600,7 +1530,8 @@ fn pcurves<'a>(
         }
         uses.push(loop_uses);
     }
-    let mut curves = b::pcurve::pcurves_within(surface, &uses, tolerance, Some(domain)).map_err(|e| invalid(format!("pcurve: {e}")))?;
+    let mut curves =
+        solidcraft_geom::brep::pcurve::pcurves_within(surface, &uses, tolerance, Some(domain)).map_err(|e| invalid(format!("pcurve: {e}")))?;
     into_domain(surface, domain, &mut curves);
     Ok(curves)
 }
@@ -1658,7 +1589,7 @@ fn point2(c: &b::Curve2, t: f64) -> Option<[f64; 2]> {
 
 /// Moves each loop's pcurves by whole periods so the loop's middle is nearest the domain's.
 fn into_domain(surface: &b::Surface, domain: [[f64; 2]; 2], curves: &mut [Vec<b::Curve2>]) {
-    for (d, natural) in surface.natural().into_iter().enumerate() {
+    for (d, natural) in solidcraft_geom::brep::label::surface_natural(surface).into_iter().enumerate() {
         if natural != b::Natural::Periodic {
             continue;
         }

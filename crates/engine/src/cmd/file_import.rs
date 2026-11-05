@@ -10,10 +10,10 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::joints::{Joint, JointKind, JointOrigin, Snap};
 use solidcraft_doc::kernel::{StepImport, StepNode};
 use solidcraft_doc::{FeatureKind, IDENTITY, Mat};
-use solidcraft_geom::Vec3;
 
 use crate::{EngineError, Result, Session};
 

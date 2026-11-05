@@ -1,7 +1,8 @@
 //! CPU rasterizer for headless snapshots: z-buffered, smooth-shaded triangles and depth-tested
 //! lines, rendered at 2× and downsampled for anti-aliasing.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::Camera;
 use crate::scene::{Rgb, SECTION_CAP, Scene, png};
@@ -175,7 +176,14 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                         {
                             continue;
                         }
-                        let z = (w0 * a[2] + w1 * b[2] + w2 * cc[2]) as f32;
+                        let mut z = (w0 * a[2] + w1 * b[2] + w2 * cc[2]) as f32;
+                        // The cut wins a tie: where a body stands on another, its bottom seen
+                        // through the cut and the other's top are the same plane, a rounding
+                        // apart (the viewport settles it without depth, by counting the faces
+                        // behind the cut in the stencil: `Cut::count`).
+                        if inside && scene.clip.is_some() && !pass.glass() {
+                            z -= z.abs() * DEPTH_EPS as f32;
+                        }
                         let i = y * sw + x;
                         if c.depth.get(i).is_some_and(|d| z < *d) {
                             // A see-through body is blended over what is already drawn and

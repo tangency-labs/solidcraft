@@ -2,9 +2,11 @@
 //! of the operands (in tests only: the history itself is recorded, never sampled), and the exact
 //! origins asserted where the outcome is known.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 
-use solidcraft_geom::{Mesh, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Mesh;
 
 use crate::body::Body;
 use crate::history::BodyHistory;
@@ -347,7 +349,7 @@ fn faceted_tool() {
 /// one face each past the cutter's floor, untouched (Kept).
 #[test]
 fn stepped_cut_keeps_the_stock_walls_whole() {
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
     for curved in [true, false] {
         let (outer, inner) = if curved {
             (Loop2::circle(Vec2::ZERO, 10.0), Loop2::circle(Vec2::ZERO, 5.0))
@@ -429,7 +431,6 @@ fn stacked_pieces_of_one_cylinder_keep_their_walls() {
 
 /// The same booleans through SMLib: its tags, renumbered into the operands' and the result's
 /// face and edge order, give a history that holds against the geometry.
-#[cfg(feature = "smlib")]
 mod smlib {
     use super::*;
     use crate::smlib_boolean::smlib_boolean;
@@ -465,7 +466,7 @@ mod smlib {
     /// how the two meet.
     #[test]
     fn cubes_touching_along_an_edge_or_at_a_vertex_unite_into_two_solids() {
-        use solidcraft_geom::brep::part::{Contact, RegionContact};
+        use solidcore_record::brep::part::{Contact, RegionContact};
         let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
         for (name, b, contact) in [
             ("edge", boxed(10.0, 10.0, 0.0, 20.0, 20.0, 10.0), Contact::Edge),

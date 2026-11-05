@@ -1,9 +1,11 @@
 //! Reference triangles belong to a definition, even while its occurrences move. Keep one lazy
 //! source mesh and map it into each pose; retain the exact placed B-rep separately in ModelBody.
+use solidcraft_geom::prelude::*;
 use std::sync::{Arc, OnceLock};
 
+use solidcore_record::Vec3;
+use solidcraft_geom::Mesh;
 use solidcraft_geom::tess::TessPlan;
-use solidcraft_geom::{Mesh, Vec3};
 use solidcraft_kernel::{self as kernel, Body};
 
 use super::ModelBody;
@@ -80,6 +82,16 @@ impl PlacedMesh {
                 tolerance: source.display_tol(),
             },
         })
+    }
+
+    /// Identity of the definition's display cells, shared by every placement of it.
+    pub(super) fn definition_id(&self) -> usize {
+        Arc::as_ptr(&self.mesh) as usize
+    }
+
+    /// Where this placement puts the definition.
+    pub(super) fn transform(&self) -> &crate::Mat {
+        &self.transform
     }
 
     pub(super) fn mesh(&self) -> Arc<Mesh> {

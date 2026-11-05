@@ -37,6 +37,25 @@ the API with the page's browser permissions. File paths refer to the browser's v
 system, not arbitrary files on the user's computer. Native-only operations remain subject to
 the browser host's limitations; this API does not grant desktop filesystem or window access.
 
+## A host page that keeps the designs
+
+`?embed=editor` runs the app as an editing embed: the ribbon, browser, timeline and properties,
+without the application bar or start page, and with nothing kept in the browser. A page that
+frames it from the same origin reaches this API as `frame.contentWindow.solidcraft`, keeps the
+designs itself and moves them with three [control methods](control-protocol.md):
+
+```js
+const app = frame.contentWindow.solidcraft;
+const kept = await app.request("document.export"); // {name, revision, dirty, format: "json", text}
+// ...the page stores kept.text, and says so:
+await app.request("document.saved", {revision: kept.revision});
+// ...and later puts it back, timeline and parameters as saved:
+await app.request("document.import", {text: kept.text, name: "Bracket"});
+```
+
+The 16 MiB limit on parameters applies to `document.import`'s `text`. A design that links other
+design files keeps those links as paths; the files themselves are not in `text`.
+
 ## Verify a browser build
 
 Build the app with `trunk build` in `apps/solidcraft-web`, then run from the repository root:

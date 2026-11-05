@@ -10,7 +10,7 @@ fn run(s: &mut Session, id: &str, params: Value) -> Value {
 
 #[test]
 fn select_geometry_resolves_points_and_indices_without_changing_history() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
 
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"body_name":"Block", "corner":[20,30,40], "length":10, "width":10, "height":10}));
@@ -47,7 +47,7 @@ fn select_geometry_curved_picks_round_trip_and_add_without_duplicates() {
         let index = serde_json::to_value(&s.selection[0]).unwrap()["index"].clone();
         run(&mut s, "select.set", json!({"items":[{"type":kind,"body":"Round","index":index}]}));
         let complete = serde_json::to_value(&s.selection[0]).unwrap();
-        let pick: solidcraft_geom::Vec3 = serde_json::from_value(complete["point"].clone()).unwrap();
+        let pick: solidcore_record::Vec3 = serde_json::from_value(complete["point"].clone()).unwrap();
         assert!((pick.x.hypot(pick.y) - 5.0).abs() < 1e-6, "the inferred point lies on the cylinder: {complete}");
         let mut partial = complete.clone();
         partial.as_object_mut().unwrap().remove("index");
@@ -73,7 +73,7 @@ fn select_geometry_uses_the_placed_body_in_world_coordinates() {
         assert_eq!(complete["body"], name);
         run(&mut s, "select.set", json!({"items":[{"type":kind,"body":name,"index":complete["index"]}]}));
         let inferred = serde_json::to_value(&s.selection[0]).unwrap();
-        let pick: solidcraft_geom::Vec3 = serde_json::from_value(inferred["point"].clone()).unwrap();
+        let pick: solidcore_record::Vec3 = serde_json::from_value(inferred["point"].clone()).unwrap();
         assert!((pick.z - 4.0).abs() < 1e-9 && (7.0..=10.0).contains(&pick.x) && (20.0..=22.0).contains(&pick.y), "{inferred}");
         assert!(s.execute("select.set", &json!({"items":[{"type":kind,"body":name,"point":[1,1,4]}]})).is_err());
         assert_eq!(serde_json::to_value(&s.selection[0]).unwrap(), inferred);
@@ -1515,7 +1515,7 @@ fn select_same_look_uses_resolved_looks_without_document_history_edits_and_refus
     let history = (s.undo.len(), s.redo.len(), s.evaluations);
     run(&mut s, "select.same_look", json!({"body":"A"}));
     assert_eq!(s.selection.len(), 3);
-    let point = solidcraft_geom::Vec3::new(40.0, 5.0, 5.0);
+    let point = solidcore_record::Vec3::new(40.0, 5.0, 5.0);
     let face = solidcraft_doc::appearance::face_index_at(s.world_state().unwrap().body("C").unwrap(), point).unwrap();
     run(&mut s, "select.set", json!({"items":[Sel::Face {body:"C".into(),index:face,point}]}));
     run(&mut s, "select.same_look", json!({}));
@@ -1687,4 +1687,47 @@ fn assistant_toggle_is_refused_headlessly_without_changing_the_document() {
     assert_eq!((s.doc.to_json(), s.undo.len()), before);
     let spec = crate::find_command("ui.assistant").unwrap();
     assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("Ctrl+Shift+A"), "", false));
+}
+
+#[test]
+fn reorder_reports_where_the_feature_is_or_why_it_did_not_move() {
+    // #12140: a reorder never reports success while the feature stays put without saying so.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [50, 0, 0], "operation": "new_body", "name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0], [10, 10], [0, 10]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "new_body", "name": "Pad"}));
+    let names = |s: &Session| s.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    // A position past the end, where the feature already is: nothing moved, and the note says why.
+    let out = run(&mut s, "timeline.reorder", json!({"feature": "Pad", "position": 9}));
+    assert_eq!((out["position"].as_u64(), out["from"].as_u64(), out["moved"].as_bool()), (Some(2), Some(2), Some(false)));
+    assert!(out["note"].as_str().is_some_and(|n| n.contains("nothing moved") && n.contains("past the end")), "{out}");
+    // Ahead of its own sketch: refused, naming the cause.
+    let e = s.execute("timeline.reorder", &json!({"feature": "Pad", "position": 0})).unwrap_err().to_string();
+    assert!(e.contains("breaks Pad") && e.contains("move that feature earlier first"), "{e}");
+    assert_eq!(names(&s), ["Block", "Profile", "Pad"], "a refused move leaves the order");
+    // Moving the sketch first lets the extrude follow; the reply gives the real index.
+    let out = run(&mut s, "timeline.reorder", json!({"feature": "Profile", "position": 0}));
+    assert_eq!((out["position"].as_u64(), out["from"].as_u64(), out["moved"].as_bool()), (Some(0), Some(1), Some(true)));
+    let out = run(&mut s, "timeline.reorder", json!({"feature": "Pad", "position": 1}));
+    assert_eq!((out["position"].as_u64(), out["moved"].as_bool()), (Some(1), Some(true)));
+    assert!(out.get("note").is_none(), "{out}");
+    assert_eq!(names(&s), ["Profile", "Pad", "Block"]);
+    // `active` on a feature left in place: the note says only the marker moved.
+    run(&mut s, "timeline.reorder", json!({"feature": "Block", "position": 2, "active": false}));
+    let out = run(&mut s, "timeline.reorder", json!({"feature": "Block", "position": 2, "active": true}));
+    assert_eq!((out["moved"].as_bool(), s.doc.marker), (Some(false), None));
+    assert!(out["note"].as_str().is_some_and(|n| n.contains("only the history marker moved")), "{out}");
+}
+
+#[test]
+fn reorder_refusal_after_a_feature_that_removes_its_body_does_not_blame_the_order_of_its_inputs() {
+    // A fillet moved behind a cut that removes its whole body fails though what it uses is earlier.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 5, 10]], "radius": 1, "name": "Round"}));
+    run(&mut s, "solid.box", json!({"length": 30, "width": 30, "height": 30, "corner": [-10, -10, -10], "operation": "cut", "name": "Clear"}));
+    let e = s.execute("timeline.reorder", &json!({"feature": "Round", "position": 2})).unwrap_err().to_string();
+    assert!(e.contains("breaks Round") && e.contains("changes what it works on") && !e.contains("earlier first"), "{e}");
 }

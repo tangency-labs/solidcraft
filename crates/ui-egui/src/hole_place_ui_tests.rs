@@ -6,9 +6,10 @@
 //! section of it.
 
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::FeatureKind;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::dialogs::Kind;
 use crate::scenario::{Harness, handle_at, rect_of};
@@ -167,6 +168,83 @@ fn the_handle_drags_a_placed_hole_and_snaps() {
     h.step(&json!({"key": "Enter"})).unwrap();
     let (_, position) = last_hole(&h);
     assert!(position.dist(free) < 0.2, "{position:?}");
+}
+
+/// What the last frame painted in the handles' white core round `c`: the dot's radius, each
+/// line's ends and each filled shape's farthest point, as distances from `c`, and how many
+/// circles of any colour are centred there (the dot and its casing, nothing else).
+struct Painted {
+    dots: Vec<f32>,
+    lines: Vec<(f32, f32)>,
+    tips: Vec<f32>,
+    circles: usize,
+}
+
+fn painted(h: &Harness, c: egui::Pos2) -> Painted {
+    use egui::epaint::{ColorMode, Shape};
+    let core = crate::theme::Tokens::get().icons.highlight;
+    let mut p = Painted { dots: Vec::new(), lines: Vec::new(), tips: Vec::new(), circles: 0 };
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |s| match s {
+            Shape::Circle(o) if o.center.distance(c) < 0.5 => {
+                p.circles += 1;
+                if o.fill == core {
+                    p.dots.push(o.radius);
+                }
+            }
+            Shape::Path(path) if path.points.iter().all(|q| q.distance(c) < 30.0) => {
+                let far = path.points.iter().map(|q| q.distance(c)).fold(0.0, f32::max);
+                if path.closed && path.fill == core {
+                    p.tips.push(far);
+                } else if !path.closed
+                    && matches!(path.stroke.color, ColorMode::Solid(col) if col == core)
+                    && let [a, b] = path.points.as_slice()
+                {
+                    p.lines.push((a.distance(c), b.distance(c)));
+                }
+            }
+            _ => {}
+        });
+    }
+    p
+}
+
+#[test]
+fn a_placed_hole_s_handle_is_the_shared_move_marker() {
+    // The move marker Rest, Boss and Snap Fit use (#6818): a white dot with four dashed arms at
+    // rest, arrowheads when pointed at, solid shafts while it drags; no ring round the centre.
+    let mut h = block();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = screen(&mut h, Vec3::new(30.0, 8.0, 20.0));
+    h.step(&json!({"click": at})).unwrap();
+    let away = off(&mut h, Vec3::new(30.0, 8.0, 20.0), 60.0, 40.0);
+    h.step(&json!({"move": away})).unwrap();
+    h.frames(30);
+    let c = handle_at("hole:0").expect("the placed hole has a handle");
+    let close = |got: &[f32], want: f32| got.len() == 4 && got.iter().all(|d| (d - want).abs() < 0.3);
+    let rest = painted(&h, c);
+    assert_eq!(rest.dots, vec![3.9], "one white dot");
+    assert_eq!(rest.circles, 2, "the dot and its casing, no ring");
+    let inner: Vec<f32> = rest.lines.iter().map(|l| l.1).collect();
+    assert!(rest.lines.iter().all(|l| (l.0 - 6.0).abs() < 0.3) && close(&inner, 11.5), "four inner dashes: {:?}", rest.lines);
+    assert!(close(&rest.tips, 19.3), "four outer dashes: {:?}", rest.tips);
+    // Pointed at: the outer dashes grow into arrowheads.
+    h.step(&json!({"move": [c.x, c.y]})).unwrap();
+    h.frames(30);
+    let hot = painted(&h, c);
+    assert!(close(&hot.tips, 22.5), "four arrowheads: {:?}", hot.tips);
+    assert_eq!(hot.circles, 2, "still no ring");
+    // Dragged: the inner dashes run on into the heads.
+    h.frame_with(crate::test_support::pointer(c, true));
+    for k in 1..=30 {
+        h.frame_with(vec![egui::Event::PointerMoved(c + egui::vec2(k as f32, 0.0))]);
+    }
+    let c = handle_at("hole:0").expect("the dragged hole keeps its handle");
+    let drag = painted(&h, c);
+    let shafts: Vec<f32> = drag.lines.iter().map(|l| l.1).collect();
+    assert!(close(&shafts, 13.8), "four solid shafts: {:?}", drag.lines);
+    assert!(close(&drag.tips, 22.5), "{:?}", drag.tips);
+    h.frame_with(crate::test_support::pointer(c, false));
 }
 
 #[test]
@@ -337,7 +415,7 @@ fn hole_design_preferences_keep_both_controls_and_cancel_after_page_split() {
     let mut h = Harness::new();
     h.call("ui.prefs", json!({"language":"en", "open":"Tools"}));
     let page = rect_of("prefs:page_body").unwrap();
-    for label in ["Snap to face and edge centers", "Move holes by clicking or dragging"] {
+    for label in ["Snap to centers", "Move by click or drag"] {
         let mut point = None;
         for _ in 0..12 {
             point = h.output.accesskit_update.as_ref().and_then(|tree| {
