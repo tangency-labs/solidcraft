@@ -57,8 +57,8 @@ rebuilds on the taller block.
 
 **Quick measurement** (off by default; turn it on under Preferences › Interface): with edges,
 faces, sketch curves or points selected, the view's bottom right corner, above History, shows
-what they measure: an edge's length (Ø and R for a round one), a face's area, a point's position,
-two items' distance and angle, several edges' or faces' total. A click copies it. The Measure tool
+what they measure: an edge's length (Ø and R for a round one), a face's area and perimeter, a point's
+position, two items' distance and angle, several edges' or faces' total. A click copies it. The Measure tool
 (I) does more.
 
 Extrude, Revolve, Sweep, Loft, Coil and the Box, Cylinder, Sphere and Torus choose their

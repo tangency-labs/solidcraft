@@ -217,3 +217,76 @@ fn a_bore_through_the_wall_is_not_measured_as_the_uncut_band() {
     let area = r["items"][0]["area_mm2"].as_f64().unwrap();
     assert!(area < TAU * 5.0 * 20.0 - 1.0, "the bored wall's area {area} is less than the uncut {}: {r}", TAU * 5.0 * 20.0);
 }
+
+/// The flat face across Z at height `z`, as a pick.
+fn flat_face_at(s: &Session, z: f64) -> Value {
+    face_of(s, |f| matches!(f, solidcraft_kernel::FaceSurface::Plane { normal, point } if normal.vec().z.abs() > 0.999 && (point.z - z).abs() < 1e-6))
+}
+
+/// A flat face with no hole: its perimeter is the length of its four edges, with no outer and
+/// inner split (#12048).
+#[test]
+fn a_box_faces_perimeter_is_the_length_of_its_edges() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    let top = flat_face_at(&s, 20.0);
+    let r = measure(&mut s, vec![top]);
+    let item = &r["items"][0];
+    assert!(close(&item["perimeter_mm"], 140.0, 1e-9), "2 x (40 + 30): {r}");
+    assert!(item.get("outer_perimeter_mm").is_none() && item.get("inner_perimeter_mm").is_none(), "a face with no hole has one loop: {r}");
+}
+
+/// A flat face with two holes: the perimeter adds the outer loop and both circles, each circle at
+/// its exact 2πr and not at the length of the polyline drawn for it (#12048).
+#[test]
+fn a_faces_perimeter_splits_into_its_outer_loop_and_its_holes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 12, "base": [15, 20, -1], "operation": "cut"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 12, "base": [40, 20, -1], "operation": "cut"}));
+    let top = flat_face_at(&s, 10.0);
+    let r = measure(&mut s, vec![top]);
+    let item = &r["items"][0];
+    let holes = TAU * 3.0 + TAU * 5.0;
+    assert!(close(&item["outer_perimeter_mm"], 200.0, 1e-9), "2 x (60 + 40): {r}");
+    assert!(close(&item["inner_perimeter_mm"], holes, 1e-9), "2π x (3 + 5): {r}");
+    assert!(close(&item["perimeter_mm"], 200.0 + holes, 1e-9), "{r}");
+}
+
+/// The outer loop is the one around the holes, even when the holes together are the longer: three
+/// long narrow slots in a small plate add up to more than the plate's outline (#12048).
+#[test]
+fn the_outer_loop_is_the_one_around_the_holes_not_the_longest() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 30, "width": 30, "height": 5}));
+    for x in [5, 14, 23] {
+        run(&mut s, "solid.box", json!({"corner": [x, 2, -1], "length": 2, "width": 26, "height": 7, "operation": "cut"}));
+    }
+    let top = flat_face_at(&s, 5.0);
+    let r = measure(&mut s, vec![top]);
+    let item = &r["items"][0];
+    assert!(close(&item["outer_perimeter_mm"], 120.0, 1e-9), "the plate's outline: {r}");
+    assert!(close(&item["inner_perimeter_mm"], 3.0 * 56.0, 1e-9), "three slots of 2 x (2 + 26): {r}");
+}
+
+/// A cylinder's side: both rims at their exact 2πr and not the seam that closes the surface, and
+/// no outer or inner rim. A cap: its one rim. A whole sphere has no edge around it (#12048).
+#[test]
+fn a_curved_faces_perimeter_counts_its_rims_and_not_its_seam() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "base": [40, 10, 0], "operation": "new"}));
+    let side = face_of(&s, |f| matches!(f, solidcraft_kernel::FaceSurface::Cylinder { .. }));
+    let r = measure(&mut s, vec![side]);
+    let item = &r["items"][0];
+    assert!(close(&item["perimeter_mm"], 2.0 * TAU * 5.0, 1e-9), "two rims and no seam: {r}");
+    assert!(item.get("outer_perimeter_mm").is_none(), "a cylinder's rims are not outer and inner: {r}");
+    let cap = flat_face_at(&s, 20.0);
+    let r = measure(&mut s, vec![cap]);
+    assert!(close(&r["items"][0]["perimeter_mm"], TAU * 5.0, 1e-9), "the cap's rim: {r}");
+
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"radius": 5, "operation": "new"}));
+    let ball = face_of(&s, |f| matches!(f, solidcraft_kernel::FaceSurface::Sphere { .. }));
+    let r = measure(&mut s, vec![ball]);
+    assert!(r["items"][0].get("perimeter_mm").is_none(), "{r}");
+}
