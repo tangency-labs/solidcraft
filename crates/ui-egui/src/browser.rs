@@ -211,6 +211,9 @@ pub struct TreeState {
     /// Show components marked out of the History bar anyway (#10393). Held by the session, like
     /// the bar's Show All toggle; the History controls' menu carries the switch.
     pub history_show_hidden: bool,
+    /// The History bar's Show All toggle: every component's features, not only the active or
+    /// picked one's (#2880).
+    pub history_show_all: bool,
     /// The feature of the face or edge last picked in the view, so a new pick scrolls the
     /// history to it once.
     pub view_pick: Option<u64>,
@@ -475,6 +478,17 @@ pub fn group_name(app: &SolveApp, id: u64) -> Option<String> {
 /// The placement a folder's scope key names: `c0` the design, `o:<ids>` a placement's path.
 fn scope_path(scope: &str) -> Vec<u64> {
     scope.strip_prefix("o:").map(|ids| ids.split('/').filter_map(|id| id.parse().ok()).collect()).unwrap_or_default()
+}
+
+/// Whether a folder or group's scope key is a row the browser draws for `component`: the design's
+/// own (`c0`, the root only), or a placement of it, spelt as the browser keys it (`o:12/3`, not
+/// `o:012/3`: the rows' state is kept by that key).
+pub(crate) fn scope_shows(app: &SolveApp, scope: &str, component: u64) -> bool {
+    if component == 0 && scope == "c0" {
+        return true;
+    }
+    let path = scope_path(scope);
+    is_placement_key(scope) && occurrence_key(&path) == scope && app.session.occurrence_placement(&path).is_ok_and(|p| p.component == component)
 }
 
 /// Paste on a Bodies or Sketches folder or group: copied (or cut) bodies, or copied sketches and
