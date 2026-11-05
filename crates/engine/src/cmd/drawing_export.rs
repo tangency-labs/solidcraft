@@ -34,7 +34,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Export Sheet", cr
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<ExportResult>)
-    .params("sheet: id or name; format?: svg (default) | png (dxf is not supported yet); path?: a file with the format's extension (else the reply holds the document: text for svg, base64 data for png, at most 64 MiB); png only: dpi?: 25 to 2400 (default the sheet's own), colour?: grey (default) | black_white | rgb | transparent; paper?: white (default) | blueprint | prussian_blue, whose png is rgb → {sheet, format, bytes, path | text | data, report: {widths_snapped, pieces_merged, pixels?: [width, height]}, views: [{view, status: drawn|placeholder|failed, reason?, stats?}]}. The sheet as drawing.scene draws it: its drawing border, each image on it, then each view's lines, then its title block's lines. Refused, naming them, while any view on the sheet failed or any image won't decode; a placeholder view draws nothing. No model is evaluated.")];
+    .params("sheet: id or name; format?: svg (default) | png (dxf is not supported yet); path?: a file with the format's extension (else the reply holds the document: its text as svg, its base64 as data for png, at most 64 MiB); png only: dpi?: 25 to 2400 (default the sheet's own), colour?: grey (default) | black_white | rgb | transparent; paper?: white (default) | blueprint | prussian_blue, whose png is rgb → {sheet, format, bytes, path | svg | data, report: {widths_snapped, pieces_merged, pixels?: [width, height]}, views: [{view, status: drawn|placeholder|failed, reason?, stats?}]}. The sheet as drawing.scene draws it: its drawing border, each image on it, then each view's lines, then its title block's lines. Refused, naming them, while any view on the sheet failed or any image won't decode; a placeholder view draws nothing. No model is evaluated.")];
 
 /// A document held for the reply, refused once it passes `limit` bytes: a larger one goes to a file.
 struct Held {
@@ -118,7 +118,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let bytes = document.len();
-    let (path, text, data) = match request.path {
+    let (path, svg, data) = match request.path {
         Some(path) => {
             // Checked again just before writing, as the view DXF does.
             solidcraft_io::vfs::check(&path).map_err(|e| EngineError::Other(e.to_string()))?;
@@ -133,7 +133,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         format: request.format,
         bytes,
         path,
-        text,
+        svg,
         data,
         report: ExportReport { widths_snapped: grid.widths_snapped, pieces_merged: grid.pieces_merged, pixels },
         views: built.views.into_iter().map(Into::into).collect(),
