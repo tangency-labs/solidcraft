@@ -1,0 +1,5 @@
+{
+  "en": { "cmd.sketch_move_points": "Move Sketch Points" },
+  "ja": { "cmd.sketch_move_points": "スケッチ点を移動" },
+  "zh": { "cmd.sketch_move_points": "移动草图点" }
+}
