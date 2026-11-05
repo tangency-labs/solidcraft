@@ -129,6 +129,9 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
     let Some(mut panel) = app.tree.canvas_panel.clone() else { return false };
     if !down {
         let owned = panel.dragging.take().is_some() || panel.edit_drag.take().is_some();
+        if owned {
+            panel.depth = app.session.undo.len();
+        }
         app.tree.canvas_panel = Some(panel);
         return owned;
     }
@@ -171,6 +174,10 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
             if kind == 4 || kind == 5 {
                 let mut params = json!({"canvas": c.id, "flip": !c.flip});
                 if kind == 5 { params["angle"] = json!(c.angle.to_degrees() + 180.0); }
+                panel.edit_drag = Some(crate::browser::CanvasEditDrag {
+                    kind, depth: app.session.undo.len(), pointer: [local.x, local.y], center: [c.center.x, c.center.y],
+                    width: c.width, angle: c.angle,
+                });
                 app.tree.canvas_panel = Some(panel);
                 let _ = app.run("canvas.edit", params);
                 return true;
@@ -201,6 +208,7 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
             let along = (local.x - centre.x) * cos + (local.y - centre.y) * sin;
             params["opacity"] = json!((along / drag.width + 0.5).clamp(0.0, 1.0));
         }
+        4 | 5 => return true,
         _ => return false,
     }
     let depth = drag.depth;
@@ -459,5 +467,10 @@ mod tests {
         assert!(flipped_c.flip, "vertical flip must toggle flip");
         let angle_diff = (flipped_c.angle - (orig_angle + std::f64::consts::PI)).abs();
         assert!(angle_diff < 1e-6 || (angle_diff - 2.0 * std::f64::consts::PI).abs() < 1e-6, "vertical flip must add 180 degrees");
+
+        // Verify flip ownership is retained through pointer release
+        assert!(super::owns_pointer(&h.app, &proj, flip_v_screen), "pointer owned while flip drag active");
+        assert!(super::drag(&mut h.app, &proj, Some(flip_v_screen), false, false), "release must be owned");
+        assert!(h.app.tree.canvas_panel.as_ref().unwrap().edit_drag.is_none(), "drag cleared on release");
     }
 }
