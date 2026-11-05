@@ -1599,6 +1599,9 @@ impl Dialog {
         let sel = inp.accepts(h, s.active_sketch, |body, face| {
             snap.and_then(|f| f.planar(body, face)).unwrap_or_else(|| planar_face(s, body, face).is_some())
         })?;
+        if crate::hole_refs::refuses(self, inp, &sel) {
+            return None;
+        }
         (inp.accept != AXIS_PICKS || takes_as_axis(s, &sel)).then_some(sel)
     }
 

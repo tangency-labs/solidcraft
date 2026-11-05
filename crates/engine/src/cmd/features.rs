@@ -3030,8 +3030,8 @@ fn hole_reference_params(s: &Session, p: &Value, cmd: &str) -> Result<Vec<solidc
         let name = |key: &str| r.get(key).and_then(Value::as_str).filter(|n| !n.trim().is_empty()).map(|n| n.trim().to_string());
         let datum = match (name("plane"), name("axis")) {
             (Some(_), Some(_)) => return Err(bad(cmd, format!("`references[{i}]` takes one of `edge`, `plane` or `axis`"))),
-            (Some(plane), None) => Some(solidcraft_doc::HoleDatum::Plane(plane)),
-            (None, Some(axis)) => Some(solidcraft_doc::HoleDatum::Axis(axis)),
+            (Some(plane), None) => Some(solidcraft_doc::HoleDatum::Plane(plane.into())),
+            (None, Some(axis)) => Some(solidcraft_doc::HoleDatum::Axis(axis.into())),
             (None, None) => None,
         };
         let edge = match &datum {

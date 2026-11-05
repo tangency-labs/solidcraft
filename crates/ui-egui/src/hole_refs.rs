@@ -93,6 +93,12 @@ pub(crate) fn cylinder_inputs() -> Vec<SelInput> {
     v
 }
 
+/// Whether a reference input of `d` turns `sel` down: a straight sketch line passes as an axis
+/// but is no reference (its distance would move nothing).
+pub(crate) fn refuses(d: &Dialog, inp: &SelInput, sel: &Sel) -> bool {
+    matches!(sel, Sel::SketchCurve { .. }) && REFERENCES.contains(&inp.label) && takes(d)
+}
+
 /// Does `d` take reference edges: a Single hole's dialog, or a Cylinder's?
 pub(crate) fn takes(d: &Dialog) -> bool {
     match &d.kind {
@@ -205,8 +211,8 @@ fn frame(s: &Session, d: &mut Dialog) -> Option<(ReferenceFrame, Vec<usize>)> {
             .iter()
             .map(|(_, p)| match p {
                 Pick::Edge(p) => Some(RefInput::Edge(*p, None)),
-                Pick::Plane(name) => datum_input(&st, &HoleDatum::Plane(name.clone())).ok(),
-                Pick::Axis(name) => datum_input(&st, &HoleDatum::Axis(name.clone())).ok(),
+                Pick::Plane(name) => datum_input(&st, &HoleDatum::Plane(name.into())).ok(),
+                Pick::Axis(name) => datum_input(&st, &HoleDatum::Axis(name.into())).ok(),
             })
             .collect();
         reference_frame_of(&st, at, dir, &pts?, true).ok().map(|f| (f, picked.iter().map(|(k, _)| *k).collect()))
@@ -343,8 +349,8 @@ pub(crate) fn restore(s: &Session, d: &mut Dialog, references: &[HoleReference],
     for (k, r) in references.iter().enumerate().take(REFERENCES.len()) {
         // A plane or an axis is picked again by its name.
         let datum = r.datum.as_ref().map(|d| match d {
-            HoleDatum::Plane(name) => Sel::Plane { name: name.clone() },
-            HoleDatum::Axis(name) => Sel::Axis { name: name.clone() },
+            HoleDatum::Plane(name) => Sel::Plane { name: name.to_string() },
+            HoleDatum::Axis(name) => Sel::Axis { name: name.to_string() },
         });
         // Where the edge is now, else where it was picked.
         let sel = found.as_ref().zip(mesh.as_ref()).filter(|_| datum.is_none()).and_then(|(f, m)| {

@@ -2456,8 +2456,8 @@ pub struct HoleReference {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(rename_all = "snake_case")]
 pub enum HoleDatum {
-    Plane(String),
-    Axis(String),
+    Plane(FeatureName),
+    Axis(FeatureName),
 }
 
 /// Pattern layouts.
