@@ -30,6 +30,7 @@ profile = ["solidcraft-engine/profile"]
 [dependencies]
 solidcore-record = { workspace = true }
 solidcraft-engine = { workspace = true }
+solidcraft-exchange = { workspace = true }
 solidcraft-gpu = { workspace = true }
 solidcraft-mcp = { workspace = true }
 log = { workspace = true }
