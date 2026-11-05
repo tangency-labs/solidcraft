@@ -20,6 +20,9 @@
 //!
 //! Each design runs in a child process (this test binary, [`action_matrix_worker`]) so an action
 //! that hangs or aborts is recorded as such and the rest of the design still runs.
+// Test helpers outside #[test] functions print what they skip or measure; clippy.toml
+// `allow-print-in-tests` covers only #[test] functions and #[cfg(test)] code.
+#![allow(clippy::print_stderr)]
 
 use solidcraft_engine::geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};

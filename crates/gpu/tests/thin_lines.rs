@@ -2,6 +2,9 @@
 //! without multisampling (#2823). A quad narrower than a pixel covers no pixel centre when it
 //! falls between two rows, so such lines came and went as the view zoomed. Skipped, with the
 //! reason printed, without a GPU adapter (`SOLIDCRAFT_REQUIRE_GPU=1` makes that a failure).
+// Test helpers outside #[test] functions print what they skip or measure; clippy.toml
+// `allow-print-in-tests` covers only #[test] functions and #[cfg(test)] code.
+#![allow(clippy::print_stderr)]
 
 use solidcore_record::Vec3;
 use solidcraft_engine::render::{Camera, Rgb, Scene, SceneLine, StandardView};

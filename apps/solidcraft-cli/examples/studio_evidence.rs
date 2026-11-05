@@ -2,6 +2,8 @@
 //! Usage: studio_evidence RECIPE.json RENDER-PARAMS.json OUTPUT.png
 //! Writes the editable design, command timings and actual adapter/job metadata beside PNG.
 //! Accepts runtime requests as well as inline or named saved render jobs.
+// A developer tool run by hand, not a process another program starts (see print_stderr in Cargo.toml).
+#![allow(clippy::print_stderr)]
 use serde_json::{Value, json};
 use solidcraft_engine::{
     Session,
