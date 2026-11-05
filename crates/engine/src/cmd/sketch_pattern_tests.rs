@@ -870,3 +870,17 @@ fn rectangular_count_expressions_follow_the_limit() {
     run(&mut s, "parameters.change", json!({"name":"n","expression":"300"}));
     assert_eq!(sketch(&s).patterns[0].total(), 600);
 }
+
+/// `sketch.pattern_limit` sets the limit the pattern commands use; it is the user's setting,
+/// so undo leaves it alone.
+#[test]
+fn the_limit_command_drives_the_gate() {
+    let mut s = seeded();
+    assert!(s.execute("sketch.pattern.rectangular", &grid(20, 30)).is_err());
+    assert_eq!(run(&mut s, "sketch.pattern_limit", json!({"value": 600}))["pattern_limit"], json!(600));
+    run(&mut s, "sketch.pattern.rectangular", grid(20, 30));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.pattern_limit, 600);
+    assert!(s.execute("sketch.pattern_limit", &json!({"value": 20_001})).is_err());
+    assert_eq!(s.pattern_limit, 600);
+}

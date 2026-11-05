@@ -11,6 +11,27 @@ pub(crate) fn pattern_limit_for(limit: usize, existing: Option<&SketchPattern>) 
     existing.map_or(limit, |pattern| limit.max(pattern.total())).clamp(1, solidcraft_sketch::MAX_PATTERN_COPIES)
 }
 
+/// What a pattern limit must be, after the key (`value`), for the handler and the contract.
+pub(crate) fn pattern_limit_problem() -> String {
+    format!("must be a whole number from 2 to {}", solidcraft_sketch::MAX_PATTERN_COPIES)
+}
+
+/// A pattern limit as `sketch.pattern_limit` takes one: a whole number from 2 to the ceiling.
+pub(crate) fn pattern_limit_value(v: &Value) -> Option<usize> {
+    let n = v.as_f64().filter(|n| n.is_finite() && n.fract() == 0.0)?;
+    (2.0..=solidcraft_sketch::MAX_PATTERN_COPIES as f64).contains(&n).then_some(n as usize)
+}
+
+/// `sketch.pattern_limit`: set (with `value`) or report the user's pattern limit (#7824).
+pub(super) fn limit(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(v) = p.get("value").filter(|v| !v.is_null()) {
+        let n = pattern_limit_value(v).ok_or_else(|| bad("sketch.pattern_limit", format!("`value` {}", pattern_limit_problem())))?;
+        s.set_pattern_limit(n);
+    }
+    let reply = crate::schema::sketch_modify::PatternLimitResult { pattern_limit: s.pattern_limit, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
 pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
     let cmd = if circular { "sketch.pattern.circular" } else { "sketch.pattern.rectangular" };
     let user_limit = s.pattern_limit;

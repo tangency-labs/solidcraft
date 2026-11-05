@@ -17,7 +17,7 @@ use crate::{Result, Session};
 
 #[path = "sketch_pattern.rs"]
 mod pattern;
-pub(crate) use pattern::pattern_limit_for;
+pub(crate) use pattern::{pattern_limit_for, pattern_limit_problem, pattern_limit_value};
 #[path = "sketch_support.rs"]
 mod support;
 
@@ -111,7 +111,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch_rect_pattern")
         .enabled(in_sketch)
         .params(concat!("entities: [ids], count, spacing; count2?, spacing2?; counts: positive integer numbers or expressions, at most the pattern limit in total (sketch.pattern_limit, default 500; an edited pattern keeps its own size if larger); spacings: length numbers or expressions; direction?, direction2?: sketch line ids (live references); dir?, dir2?: [x,y] vectors (defaults: sketch x, perpendicular to direction 1); alignment?, alignment2?: left|center|right (default right). Signed spacings reverse each direction. reversed?, reversed2?: bool (default false); reverses placement and the extra side of even centered totals. Quantities include the original. Adds associative pattern constraints. Returns pattern id. pattern?: existing pattern id to edit (omitted values retained; surviving instance ids retained)", created_doc!())),
+    CommandSpec::new("sketch.pattern_limit", "Sketch Pattern Limit", crate::checked!("sketch.pattern_limit", pattern::limit))
+        .icon("sketch_rect_pattern")
+        .noundo()
+        .contract(&PATTERN_LIMIT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::sketch_modify::PatternLimitResult>)
+        .params("value?: whole number 2…20000: the most instances (the original included) one sketch pattern may make; omitted: report it. The user's setting, kept across designs, not saved in a design, not an undo step; an edited pattern keeps its own size if larger. Returns pattern_limit"),
 ];
+
+const PATTERN_LIMIT_CONTRACT: crate::schema::TypedContract<crate::schema::sketch_modify::PatternLimitParams> = crate::schema::TypedContract::new();
 
 const TOL: f64 = 1e-7;
 /// The most offsets `sketch.offset` stacks one behind the other in a single run. Each instance
