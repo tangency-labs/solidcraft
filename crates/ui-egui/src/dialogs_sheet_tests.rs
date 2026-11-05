@@ -1382,3 +1382,32 @@ fn flat_pattern_navigation_slots_hide_orbit_controls_and_keep_fit_home() {
         assert!(crate::scenario::handle_at(&format!("nav:slot:{slot}")).is_some(), "{slot}");
     }
 }
+
+/// A picked edge split into segments: the dialog sends equal stretches with the rows' angle,
+/// height and turns, and the part builds with two bends.
+#[test]
+fn an_edge_flange_can_be_split_into_segments() {
+    let mut app = plate(crate::shell::LayoutMode::Floating);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let edge = edge_sel(&app.session, Vec3::new(50.0, 0.0, 2.5)).unwrap();
+    app.session.selection = vec![edge];
+    app.start("sheet.flange");
+    let mut d = app.dialog.clone().unwrap();
+    if let Kind::Sheet(Sm::Flange { height, angle, segments, .. }) = &mut d.kind {
+        *height = "20 mm".into();
+        *angle = "90 deg".into();
+        segments.push((String::new(), "20 mm".into(), false));
+        segments.push((String::new(), "10 mm".into(), false));
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(
+        c[0].1["edges"][0]["segments"],
+        json!([{"from": 0.0, "to": 0.5, "height": "20 mm"}, {"from": 0.5, "to": 1.0, "height": "10 mm"}]),
+        "{:?}",
+        c[0].1
+    );
+    run_all(&mut app, c);
+    let bends = app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"].clone();
+    assert_eq!(bends.as_array().map(Vec::len), Some(2), "{bends}");
+    assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+}

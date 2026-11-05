@@ -654,11 +654,54 @@ pub(super) fn sheet_eval(
                 return Err(DocError::Invalid("refold the sheet before adding flanges".into()));
             }
             let points: Vec<Vec3> = edges.iter().map(|e| e.point.0).collect();
-            let each: Vec<sheet::EdgeFlange> = sheet_picks(sh, f, &points, warning)
-                .into_iter()
-                .zip(own)
-                .map(|(pick, (height, angle))| sheet::EdgeFlange { pick, height, angle, from })
-                .collect();
+            let picks = sheet_picks(sh, f, &points, warning);
+            let mut each = Vec::with_capacity(edges.len());
+            for (k, (e, pick)) in edges.iter().zip(picks).enumerate() {
+                let (height, angle) = own.get(k).copied().unwrap_or((h, a));
+                if e.segments.is_empty() {
+                    each.push(sheet::EdgeFlange::at(pick, height, angle, from));
+                    continue;
+                }
+                // A segmented edge makes one flange per run of segments that share an angle, a
+                // height and a side: the same bend carries on (see `add_flanges_each`).
+                let mut runs: Vec<(f64, f64, f64, f64, bool)> = Vec::new();
+                for (j, seg) in e.segments.iter().enumerate() {
+                    let height = match &seg.height {
+                        Some(x) => val(vals, x, Kind::Length)?,
+                        None => height,
+                    };
+                    let angle = match &seg.angle {
+                        Some(x) => val(vals, x, Kind::Angle)?,
+                        None => angle,
+                    };
+                    // A segment's own angle and height are checked here, where its index is known,
+                    // so a refusal names the segment the caller wrote.
+                    if !(angle > 1e-6 && angle <= std::f64::consts::PI - 1e-6) {
+                        return Err(DocError::Invalid(format!("edges[{k}].segments[{j}]: the flange angle must be between 0 and 180°")));
+                    }
+                    let least = from.before_leg(angle, rr, sh.t);
+                    if !(height >= least - 1e-9) {
+                        return Err(DocError::Invalid(format!(
+                            "edges[{k}].segments[{j}]: the flange height must be at least {least:.3} mm for this bend"
+                        )));
+                    }
+                    let side = seg.flip.unwrap_or(*flip);
+                    match runs.last_mut() {
+                        Some(last)
+                            if (last.1 - seg.from).abs() < 1e-12
+                                && (last.2 - height).abs() < 1e-12
+                                && (last.3 - angle).abs() < 1e-12
+                                && last.4 == side =>
+                        {
+                            last.1 = seg.to
+                        }
+                        _ => runs.push((seg.from, seg.to, height, angle, side)),
+                    }
+                }
+                for (span_from, span_to, height, angle, side) in runs {
+                    each.push(sheet::EdgeFlange { pick, height, angle, from, span: (span_from, span_to), flip: Some(side) });
+                }
+            }
             let n0 = sh.flanges.len();
             let (_, notes) = sh.add_flanges_each(&each, rr, position, *flip, relief)?;
             if !notes.is_empty() {

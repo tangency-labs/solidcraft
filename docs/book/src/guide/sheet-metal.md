@@ -193,6 +193,26 @@ per edge with an angle and a height box; an empty box takes the value above.
  "height":38.6,"angle":"75 deg"}}
 ```
 
+One edge can also be split into segments: `segments` lists stretches of the picked edge, each
+`{"from": 0, "to": 0.5, "angle": "90 deg", "height": "20 mm", "flip": false}`. `from` and `to`
+are fractions of the stretch the sheet still has there (what cut-outs leave), from the end where
+the outline enters the edge, so the first `from` is 0, the last `to` is 1 and each `to` is the
+next `from`: segments divide the edge, they never leave material out (a set-back is the other
+thing). Consecutive segments that match in angle, height and side make one bend; the others make
+a bend each, with its own setback, leg and side, so the base's outline steps where their angles
+differ and the flange's far edge steps where their heights differ. No bend relief is cut where
+two segments meet, and `then` is refused on a split edge: bend each segment's far edge in its own
+feature. A segment on a curved edge is refused too. In the Flange dialog, **Segments** has
+**Split Edge** for one more equal stretch, each row with its own angle, height and turns.
+
+```json
+{"command":"sheet.flange","params":{"type":"edge","edges":[{"point":[100,0,2],"segments":[
+ {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm"},
+ {"from":0.5,"to":0.75,"angle":"90 deg","height":"15 mm"},
+ {"from":0.75,"to":1,"angle":"45 deg","height":"15 mm","flip":false}]}],
+ "height":"20 mm","angle":"90 deg"}}
+```
+
 An edge flange can bend more than once: `then` lists further bends, each an `angle` and a
 `height`, and each is a flange on the far edge of the one before it, made in the same command
 and undone with one step. It is the way to make a flap with two or more bends that is part of

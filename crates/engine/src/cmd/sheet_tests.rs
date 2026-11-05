@@ -6563,3 +6563,365 @@ fn a_flange_on_part_of_a_stepped_outline_spans_that_part() {
     let expected = 215.8 * 403.5 + 377.8 * (allowance + 18.0);
     assert!(rel(flat_area(&flat(&mut s)), expected) < 1e-9, "{} vs {expected}", flat_area(&flat(&mut s)));
 }
+
+// ---------------------------------------------------------------------------------------------
+// `sheet.flange` segments (FR-3 #5927, FR-4 #5928): one picked edge split into stretches, each
+// with its own parameter range, angle, height and side.
+
+/// The rule the segment tests use: 2 mm, K 0.5, R 1 mm. BA(90°) = π, setback(90°, inside) = 3,
+/// BA(45°) = π/2, setback(45°, inside) = 3·tan(22.5°) = 1.2426406871192852.
+fn al2_rule(s: &mut Session) {
+    run(s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+}
+
+/// A 200 x 100 x 2 mm sheet under that rule, its bottom edge from (0, 0) to (200, 0).
+fn al2_base(s: &mut Session) {
+    al2_rule(s);
+    base(s, 200.0, 100.0);
+}
+
+const SETBACK_45: f64 = 1.2426406871192852;
+
+/// Each bend of the flat pattern: its length, its angle in degrees, its direction and the x range
+/// of its centre line.
+fn bends_of(f: &Value) -> Vec<(f64, f64, String, f64, f64)> {
+    let mut v: Vec<(f64, f64, String, f64, f64)> = f["bends"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|b| {
+            let x = |k: &str, i: usize| b[k][i].as_f64().unwrap_or(f64::NAN);
+            (
+                b["length"].as_f64().unwrap_or(f64::NAN),
+                b["angle_deg"].as_f64().unwrap_or(f64::NAN),
+                b["direction"].as_str().unwrap_or_default().to_string(),
+                x("start", 0).min(x("end", 0)),
+                x("start", 0).max(x("end", 0)),
+            )
+        })
+        .collect();
+    v.sort_by(|a, b| a.3.total_cmp(&b.3));
+    v
+}
+
+/// Whether the flat pattern's material covers the flat point (x, y).
+fn flat_has(f: &Value, p: (f64, f64)) -> bool {
+    let loops = f["outline"].as_array().cloned().unwrap_or_default();
+    let inside = |l: &Value| -> bool {
+        let pts: Vec<(f64, f64)> = l
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .map(|q| (q[0].as_f64().unwrap_or(f64::NAN), q[1].as_f64().unwrap_or(f64::NAN)))
+            .collect();
+        let m = pts.len();
+        let mut c = false;
+        for i in 0..m {
+            let (x0, y0) = pts[i];
+            let (x1, y1) = pts[(i + 1) % m];
+            if ((y0 > p.1) != (y1 > p.1)) && (p.0 < (x1 - x0) * (p.1 - y0) / (y1 - y0) + x0) {
+                c = !c;
+            }
+        }
+        c
+    };
+    loops.iter().filter(|l| inside(l)).count() % 2 == 1
+}
+
+/// Segments that all match are one bend, as a flange without segments is (#5927, #5928).
+#[test]
+fn flange_segments_that_all_match_make_one_bend_like_a_whole_edge_flange() {
+    let mut s = Session::default();
+    al2_base(&mut s);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+            {"from":0,"to":0.25},{"from":0.25,"to":0.5},{"from":0.5,"to":0.75},{"from":0.75,"to":1}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    let f = flat(&mut s);
+    let bends = bends_of(&f);
+    assert_eq!(bends.len(), 1, "four matching segments are one bend: {f}");
+    assert!((bends[0].0 - 200.0).abs() < 1e-9 && (bends[0].1 - 90.0).abs() < 1e-9, "{bends:?}");
+    assert_eq!(bends[0].2, "up");
+    // By hand: 200·100 − 200·3 + 200·(π + 17), twice (the flat is the material).
+    let want = 2.0 * (200.0 * 100.0 - 200.0 * 3.0 + 200.0 * (PI + 17.0));
+    assert!((flat_area(&f) - want / 2.0).abs() < 1e-6, "{} vs {}: {f}", flat_area(&f), want / 2.0);
+    assert!(rel(volume(&mut s), want) < 1e-6, "{} vs {want}", volume(&mut s));
+    assert!((f["flat_size_mm"][1].as_f64().unwrap_or(0.0) - 117.1415926535898).abs() < 1e-6, "{f}");
+    // The same flange without segments builds the same part.
+    let mut whole = Session::default();
+    al2_base(&mut whole);
+    run(&mut whole, "sheet.flange", json!({"edges":[[100,0,2]],"height":"20 mm","angle":"90 deg"}));
+    assert!(rel(volume(&mut whole), want) < 1e-6);
+    assert_eq!(flat(&mut whole)["bends"], f["bends"]);
+    assert!((flat(&mut whole)["flat_size_mm"][1].as_f64().unwrap_or(0.0) - f["flat_size_mm"][1].as_f64().unwrap_or(0.0)).abs() < 1e-6);
+}
+
+/// Each segment takes its own height: two bends side by side, the taller half's panel reaching
+/// further, and the far edge steps at the junction (FR-6 #5930).
+#[test]
+fn flange_segments_take_their_own_heights() {
+    let mut s = Session::default();
+    al2_base(&mut s);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+            {"from":0,"to":0.5,"height":"20 mm"},
+            {"from":0.5,"to":1,"height":"15 mm"}]}],"height":"20 mm","angle":"90 deg"}),
+    );
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    let f = flat(&mut s);
+    let bends = bends_of(&f);
+    assert_eq!(bends.len(), 2, "{f}");
+    assert!((bends[0].0 - 100.0).abs() < 1e-9 && (bends[1].0 - 100.0).abs() < 1e-9, "{bends:?}");
+    assert!((bends[0].3 - 0.0).abs() < 1e-9 && (bends[0].4 - 100.0).abs() < 1e-9, "{bends:?}");
+    assert!((bends[1].3 - 100.0).abs() < 1e-9 && (bends[1].4 - 200.0).abs() < 1e-9, "{bends:?}");
+    // By hand: 200·100 − 200·3 + 100·(π + 17) + 100·(π + 12), twice.
+    let want = 2.0 * (200.0 * 100.0 - 200.0 * 3.0 + 100.0 * (PI + 17.0) + 100.0 * (PI + 12.0));
+    assert!((flat_area(&f) - want / 2.0).abs() < 1e-6, "{} vs {}", flat_area(&f), want / 2.0);
+    assert!(rel(volume(&mut s), want) < 1e-6, "{} vs {want}", volume(&mut s));
+    assert!((f["flat_size_mm"][1].as_f64().unwrap_or(0.0) - 117.1415926535898).abs() < 1e-6, "{f}");
+    // The stepped far edge: the tall half (x 0…100) reaches y −17.14, the short half only −12.14.
+    assert!(flat_has(&f, (50.0, -16.0)), "{f}");
+    assert!(!flat_has(&f, (150.0, -16.0)), "{f}");
+    assert!(flat_has(&f, (150.0, -11.0)), "{f}");
+    // Folded: both panels stand past the bottom edge, the tall one above the short one.
+    assert!(contains(&s, [50.0, 1.0, 15.0]) && contains(&s, [150.0, 1.0, 12.0]), "{:?}", s.model.results);
+    assert!(!contains(&s, [150.0, 1.0, 18.0]));
+}
+
+/// Each segment takes its own angle: two bends at 90° and 45°, the base stepping at the junction
+/// by the difference of their setbacks (FR-5 #5929).
+#[test]
+fn flange_segments_take_their_own_angles() {
+    let mut s = Session::default();
+    al2_base(&mut s);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm"},
+            {"from":0.5,"to":1,"angle":"45 deg","height":"15 mm"}]}],"height":"20 mm","angle":"90 deg"}),
+    );
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    let f = flat(&mut s);
+    let bends = bends_of(&f);
+    assert_eq!(bends.len(), 2, "{f}");
+    assert!((bends[0].1 - 90.0).abs() < 1e-9 && (bends[1].1 - 45.0).abs() < 1e-9, "{bends:?}");
+    assert!((bends[0].0 - 100.0).abs() < 1e-9 && (bends[1].0 - 100.0).abs() < 1e-9, "{bends:?}");
+    // By hand: 200·100 − 100·3 − 100·1.2426406871192852 + 100·(π + 17)
+    //           + 100·(π/2 + 13.757359312880714), twice.
+    let leg45 = 15.0 - SETBACK_45;
+    let want = 2.0 * (200.0 * 100.0 - 100.0 * 3.0 - 100.0 * SETBACK_45 + 100.0 * (PI + 17.0) + 100.0 * (FRAC_PI_2 + leg45));
+    assert!((flat_area(&f) - want / 2.0).abs() < 1e-6, "{} vs {}", flat_area(&f), want / 2.0);
+    assert!(rel(volume(&mut s), want) < 1e-6, "{} vs {want}", volume(&mut s));
+    // The base's flat edge steps by the difference of the setbacks at the junction.
+    assert!((SETBACK_45 - 1.2426406871192852).abs() < 1e-12);
+    assert!(flat_has(&f, (50.0, 2.0)) && flat_has(&f, (150.0, 2.0)), "both bend zones cover y 2: {f}");
+    assert!(!flat_has(&f, (50.0, 1.0)) || flat_has(&f, (150.0, 1.0)), "the zones differ: {f}");
+    let step = 3.0 - SETBACK_45;
+    assert!((step - 1.7573593128807148).abs() < 1e-12);
+    // The bend table gives each segment's own centre line, so an agent can check where they land.
+    let table = run(&mut s, "sheet.export_bend_table", json!({"format":"json"}));
+    let table: Value = serde_json::from_str(table["text"].as_str().unwrap_or_default()).unwrap_or(Value::Null);
+    let rows = table["bends"].as_array().cloned().unwrap_or_default();
+    assert_eq!(rows.len(), 2, "{table}");
+    let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
+    assert!(dxf.contains("BEND_UP") && dxf.contains("OUTLINE"), "{dxf}");
+}
+
+/// Each segment takes its own side: one bend up, one down, and the two still sew into one solid
+/// (FR-7 #5932).
+#[test]
+fn flange_segments_take_their_own_side() {
+    let mut s = Session::default();
+    al2_base(&mut s);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","flip":false},
+            {"from":0.5,"to":1,"angle":"90 deg","height":"20 mm","flip":true}]}],"height":"20 mm","angle":"90 deg"}),
+    );
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    let f = flat(&mut s);
+    let bends = bends_of(&f);
+    assert_eq!(bends.len(), 2, "{f}");
+    assert_eq!(bends[0].2, "up");
+    assert_eq!(bends[1].2, "down");
+    // The flat is the same as a whole-edge flange: the fold direction doesn't change its area.
+    let want = 2.0 * (200.0 * 100.0 - 200.0 * 3.0 + 200.0 * (PI + 17.0));
+    assert!((flat_area(&f) - want / 2.0).abs() < 1e-6, "{} vs {}", flat_area(&f), want / 2.0);
+    assert!(rel(volume(&mut s), want) < 1e-6, "{} vs {want}", volume(&mut s));
+    let m = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(m["bodies"].as_array().map(Vec::len), Some(1), "one closed body: {m}");
+}
+
+/// The segments' expressions are the feature's inputs: changing the parameters moves the part.
+#[test]
+fn flange_segment_expressions_follow_parameters() {
+    let mut s = Session::default();
+    al2_base(&mut s);
+    // The parameters the segments' expressions name, before the feature that uses them.
+    run(&mut s, "parameters.change", json!({"name":"H","expression":"20 mm"}));
+    run(&mut s, "parameters.change", json!({"name":"A","expression":"90 deg"}));
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+            {"from":0,"to":0.5,"angle":"A","height":"H"},
+            {"from":0.5,"to":1,"angle":"90 deg","height":"20 mm"}]}],"height":"20 mm","angle":"90 deg"}),
+    );
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    run(&mut s, "parameters.change", json!({"name":"H","expression":"30 mm"}));
+    run(&mut s, "parameters.change", json!({"name":"A","expression":"45 deg"}));
+    let leg45 = 30.0 - SETBACK_45;
+    let want = 2.0 * (200.0 * 100.0 - 100.0 * SETBACK_45 - 100.0 * 3.0 + 100.0 * (FRAC_PI_2 + leg45) + 100.0 * (PI + 17.0));
+    assert!(rel(volume(&mut s), want) < 1e-6, "{} vs {want}", volume(&mut s));
+    let f = flat(&mut s);
+    assert!((flat_area(&f) - want / 2.0).abs() < 1e-6, "{} vs {}", flat_area(&f), want / 2.0);
+    // Save and reopen: the segments are kept, and an older design without them still opens.
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(no_errors_or_warnings(&reopened), "{:?}", reopened.model.results);
+    assert!(rel(volume(&mut reopened), want) < 1e-6);
+    assert_eq!(flat(&mut reopened), f);
+    let mut older = Session::new(
+        solidcraft_doc::Document::from_json(&{
+            let mut doc: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+            for feature in doc["features"].as_array_mut().into_iter().flatten() {
+                if feature["type"] == "sheet_flange" {
+                    for edge in feature["edges"].as_array_mut().into_iter().flatten() {
+                        edge.as_object_mut().map(|o| o.remove("segments"));
+                    }
+                }
+            }
+            doc.to_string()
+        })
+        .unwrap(),
+    );
+    assert!(no_errors_or_warnings(&older), "{:?}", older.model.results);
+    // Without segments the whole edge is one bend: 200·(π/2 + 20 − 3) at the feature's 90°/20.
+    let whole = 2.0 * (200.0 * 100.0 - 200.0 * 3.0 + 200.0 * (PI + 17.0));
+    assert!(rel(volume(&mut older), whole) < 1e-6, "{} vs {whole}", volume(&mut older));
+    // Undo the flange (and the two parameter changes): the base is back to 200 x 100, no bends.
+    for _ in 0..4 {
+        if rel(volume(&mut s), 40000.0) < 1e-9 {
+            break;
+        }
+        run(&mut s, "edit.undo", json!({}));
+    }
+    assert!(rel(volume(&mut s), 40000.0) < 1e-9, "{}", volume(&mut s));
+    assert_eq!(flat(&mut s)["bends"].as_array().map(Vec::len), Some(0));
+}
+
+/// Every way a `segments` list can be wrong is refused with a message naming the segment, and
+/// the design stays as it was.
+#[test]
+fn flange_segments_refuse_what_is_not_a_partition() {
+    let mut s = Session::default();
+    al2_base(&mut s);
+    let before = s.doc.to_json();
+    let edge = |segments: Value| json!({"type":"edge","edges":[{"point":[100,0,2],"segments":segments}],"height":"20 mm","angle":"90 deg"});
+    let mut many = Vec::new();
+    for i in 0..65 {
+        many.push(json!({"from": i as f64 / 65.0, "to": (i + 1) as f64 / 65.0}));
+    }
+    for (params, want) in [
+        (
+            json!({"type":"base","sketch":"Base","segments":[{"from":0,"to":1}]}),
+            "segments is only for edge flanges (a base or contour flange has no edge to divide)",
+        ),
+        (edge(json!("x")), "edges[0].segments must list segments {from, to, angle?, height?, flip?}"),
+        (edge(json!([])), "edges[0].segments must list 1…64 segments"),
+        (edge(Value::Array(many)), "edges[0].segments must list 1…64 segments"),
+        (
+            edge(json!([{"from":0,"to":0.5,"radius":"1 mm"},{"from":0.5,"to":1}])),
+            "edges[0].segments[0]: unknown key `radius` (a segment takes from, to, angle, height and flip)",
+        ),
+        (edge(json!([{"to":0.5},{"from":0.5,"to":1}])), "edges[0].segments[0].from must be a fraction from 0 to 1"),
+        (edge(json!([{"from":-0.1,"to":0.5},{"from":0.5,"to":1}])), "edges[0].segments[0].from must be a fraction from 0 to 1"),
+        (edge(json!([{"from":0,"to":1.5},{"from":1.5,"to":1}])), "edges[0].segments[0].to must be a fraction from 0 to 1"),
+        (edge(json!([{"from":0,"to":0.5},{"from":0.5,"to":0.5}])), "edges[0].segments[1].to must be more than its from"),
+        (edge(json!([{"from":0.5,"to":1}])), "edges[0].segments[0].from must be 0: the segments cover the whole edge"),
+        (edge(json!([{"from":0,"to":0.9}])), "edges[0].segments[0].to must be 1: the segments cover the whole edge"),
+        (
+            edge(json!([{"from":0,"to":0.4},{"from":0.5,"to":1}])),
+            "edges[0].segments[1].from must equal the to of the segment before it (the segments must meet, with no gap or overlap)",
+        ),
+        (
+            edge(json!([{"from":0,"to":0.6},{"from":0.5,"to":1}])),
+            "edges[0].segments[1].from must equal the to of the segment before it (the segments must meet, with no gap or overlap)",
+        ),
+        (edge(json!([{"from":0,"to":0.5,"flip":"yes"},{"from":0.5,"to":1}])), "edges[0].segments[0].flip must be true or false"),
+        (
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[{"from":0,"to":1}]}],"height":"20 mm","then":[{"height":"10 mm"}]}),
+            "not supported yet: then on a segmented edge (bend each segment's far edge in its own feature)",
+        ),
+        (
+            edge(json!([{"from":0,"to":0.5,"angle":"200 deg"},{"from":0.5,"to":1}])),
+            "edges[0].segments[0]: the flange angle must be between 0 and 180°",
+        ),
+        (
+            edge(json!([{"from":0,"to":0.5,"angle":"45 deg","height":"1 mm"},{"from":0.5,"to":1}])),
+            "edges[0].segments[0]: the flange height must be at least 1.243 mm for this bend",
+        ),
+    ] {
+        let error = s.execute("sheet.flange", &params).unwrap_err();
+        let text = error.to_string();
+        let msg = text.strip_prefix("invalid parameters for `sheet.flange`: ").unwrap_or(&text);
+        assert_eq!(msg, want, "{params}");
+        assert_eq!(s.doc.to_json(), before, "{params}: the design is unchanged");
+    }
+    // A curved edge has no straight stretch to split.
+    let mut disc = Session::default();
+    run(&mut disc, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+    run(&mut disc, "sketch.create", json!({"plane":"XY","name":"Disc"}));
+    run(&mut disc, "sketch.circle.center", json!({"center":[50,50],"radius":50}));
+    run(&mut disc, "sketch.finish", json!({}));
+    run(&mut disc, "sheet.flange", json!({"sketch":"Disc"}));
+    // Two stretches, so the edge really is split: a single 0…1 segment is the whole edge.
+    let error = disc
+        .execute(
+            "sheet.flange",
+            &json!({"edges":[{"point":[100,50,2],"segments":[{"from":0,"to":0.5,"height":"20 mm"},{"from":0.5,"to":1,"height":"15 mm"}]}],"height":"20 mm"}),
+        )
+        .unwrap_err();
+    assert_eq!(error.to_string(), "not supported yet: segments on a curved edge (pick a straight edge of the sheet)");
+}
+
+/// The spec's example: three segments (90°/20 mm, 90°/15 mm, 45°/15 mm) on one edge. Three bends,
+/// the base stepped where the angles differ, and the numbers the spec derives.
+#[test]
+fn the_spec_segment_example_builds() {
+    let mut s = Session::default();
+    al2_base(&mut s);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm"},
+            {"from":0.5,"to":0.75,"angle":"90 deg","height":"15 mm"},
+            {"from":0.75,"to":1,"angle":"45 deg","height":"15 mm","flip":false}]}],
+            "height":"20 mm","angle":"90 deg","position":"inside"}),
+    );
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    let f = flat(&mut s);
+    let bends = bends_of(&f);
+    assert_eq!(bends.len(), 3, "{f}");
+    assert!((bends[0].0 - 100.0).abs() < 1e-9 && (bends[1].0 - 50.0).abs() < 1e-9 && (bends[2].0 - 50.0).abs() < 1e-9, "{bends:?}");
+    assert!((bends[0].1 - 90.0).abs() < 1e-9 && (bends[1].1 - 90.0).abs() < 1e-9 && (bends[2].1 - 45.0).abs() < 1e-9, "{bends:?}");
+    // By hand: the base loses 3 over the 150 mm of the two 90° stretches and 1.2426406871192852
+    // over the 45° one; the panels are 17, 12 and 13.757359312880714 long (heights 20, 15, 15),
+    // and the bend allowances π, π and π/2. The 45° half's flat edge reaches 114.08551495255631.
+    let leg45 = 15.0 - SETBACK_45;
+    let want = 2.0 * (200.0 * 100.0 - 150.0 * 3.0 - 50.0 * SETBACK_45 + 100.0 * (PI + 17.0) + 50.0 * (PI + 12.0) + 50.0 * (FRAC_PI_2 + leg45));
+    assert!((flat_area(&f) - want / 2.0).abs() < 1e-6, "{} vs {}", flat_area(&f), want / 2.0);
+    assert!(rel(volume(&mut s), want) < 1e-6, "{} vs {want}", volume(&mut s));
+    assert!((f["flat_size_mm"][1].as_f64().unwrap_or(0.0) - 117.1415926535898).abs() < 1e-6, "{f}");
+}
