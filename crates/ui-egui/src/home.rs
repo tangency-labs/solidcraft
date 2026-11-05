@@ -588,9 +588,13 @@ fn ask_present(h: &mut HomeState, ctx: &egui::Context, recent: &[String]) {
             }
         }
     }
+    // The browser's files are in memory, so they are looked up here; no thread wakes the page.
     #[cfg(target_arch = "wasm32")]
-    for p in recent {
-        h.present.insert(p.clone(), solidcraft_engine::io::vfs::exists(p));
+    {
+        let _ = ctx;
+        for p in recent {
+            h.present.insert(p.clone(), solidcraft_engine::io::vfs::exists(p));
+        }
     }
 }
 
