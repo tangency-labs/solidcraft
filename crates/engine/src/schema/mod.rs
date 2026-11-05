@@ -79,6 +79,7 @@ pub mod panels;
 pub mod parameter_sweep;
 pub mod parameters;
 pub mod parts;
+pub mod plastic;
 pub mod print_face;
 pub mod render;
 pub mod render_hdr;
