@@ -3750,7 +3750,7 @@ fn move_points(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok((picked, left))
     })?;
-    let solved = s.doc.sketch(id).ok();
+    let solved = sketch_store::read(&s.doc, id).ok();
     let moved: Vec<Value> = picked
         .iter()
         .map(|(q, to)| {
