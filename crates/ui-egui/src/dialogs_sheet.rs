@@ -637,7 +637,7 @@ fn corner_flange_sel(app: &SolveApp, body: &str, tag: &str) -> Option<Sel> {
     }
     let center = points.iter().copied().fold(Vec2::ZERO, |sum, point| sum + point) / points.len() as f64;
     let plane = sheet.panel_face(&format!("{tag}:top"))?;
-    face_sel(&app.session, plane.to_world(center))
+    crate::dialogs::face_sel_world(&app.session, plane.to_world(center))
 }
 
 fn rule_value(app: &SolveApp, rule: usize) -> Option<String> {

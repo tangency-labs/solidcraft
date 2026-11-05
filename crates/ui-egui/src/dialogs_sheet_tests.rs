@@ -969,6 +969,7 @@ fn flange_corner_gap_fields_keep_expressions_overrides_and_rule_defaults() {
 #[test]
 fn standalone_corner_join_dialog_selects_previews_applies_and_reopens() {
     let mut h = crate::scenario::Harness::new();
+    h.app.run("component.create", json!({"name":"Part", "grounded":false})).unwrap();
     h.app
         .run("sheet.manage_rules", json!({"name":"AL2", "thickness":"2 mm", "k_factor":0.5, "bend_radius":"1 mm", "gap":"0.5 mm", "active":true}))
         .unwrap();
@@ -979,14 +980,16 @@ fn standalone_corner_join_dialog_selects_previews_applies_and_reopens() {
     h.app.run("sheet.flange", json!({"edges":[[60,0,2]], "height":38.6})).unwrap();
     h.app.run("sheet.flange", json!({"edges":[[120,45,2]], "height":38.6})).unwrap();
     h.app.run("parameters.change", json!({"name":"corner_clearance", "expression":"0.4 mm"})).unwrap();
-    let state = h.app.session.model.state();
+    let state = h.app.session.world_state().unwrap();
+    assert_eq!(state.sheets.len(), 1);
+    let body = state.sheets[0].body.clone();
     let tags: Vec<String> = state.sheets[0].flanges.iter().map(|flange| flange.tag.clone()).collect();
     h.app.start("sheet.corner_join");
     let mut dialog = h.app.dialog.clone().unwrap();
     assert!(apply_commands(&h.app, &dialog).is_err());
     assert_eq!(dialog.inputs.iter().map(|input| input.label).collect::<Vec<_>>(), ["Flange 1", "Flange 2"]);
     for (input, tag) in dialog.inputs.iter_mut().zip(&tags) {
-        input.items = corner_flange_sel(&h.app, "Body1", tag).into_iter().collect();
+        input.items = corner_flange_sel(&h.app, &body, tag).into_iter().collect();
         assert_eq!(input.items.len(), 1);
     }
     h.app.dialog = Some(dialog);
@@ -1011,6 +1014,8 @@ fn standalone_corner_join_dialog_selects_previews_applies_and_reopens() {
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
     let id = h.app.session.doc.features.last().unwrap().id;
+    h.app.run("occurrence.move", json!({"occurrence":"Part:1", "translate":[200,30,7]})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence":"Part:1", "axis":[0,0,1], "angle":"90 deg", "origin":[200,30,7]})).unwrap();
     let mut edited = edit_dialog(&h.app, id, None).unwrap();
     assert!(
         matches!(&edited.kind, Kind::Sheet(Sm::CornerJoin { kind:1, cover_second:0, overlap, gap }) if overlap == "1 mm" && gap == "corner_clearance")

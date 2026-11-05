@@ -4063,9 +4063,6 @@ impl SheetBody {
     /// Closes a corner with an explicit gap of at least `MIN_CORNER_GAP`.
     /// An overlap names the covering flange and a finite length in `(0, thickness]`.
     fn close_corner_with_gap(&mut self, k: &Corner, overlap: Option<(usize, f64)>, gap: f64) -> std::result::Result<(), String> {
-        if !gap.is_finite() || gap < MIN_CORNER_GAP {
-            return Err(format!("the flange gap {gap:.4} mm is below {MIN_CORNER_GAP} mm or is not finite"));
-        }
         if let Some((covering, amount)) = overlap
             && (covering != k.a && covering != k.b || !amount.is_finite() || amount <= 0.0 || amount > self.t)
         {
@@ -4092,6 +4089,9 @@ impl SheetBody {
         }
         if (fa.angle >= 0.0) != (fb.angle >= 0.0) {
             return Err("the flanges bend opposite ways".into());
+        }
+        if !gap.is_finite() || gap < MIN_CORNER_GAP {
+            return Err(format!("the flange gap {gap:.4} mm is below {MIN_CORNER_GAP} mm or is not finite"));
         }
         let (wa, wb) = (self.fold(k.a), self.fold(k.b));
         let (z_in, normal_sign) = if fa.angle >= 0.0 { (self.t, 1.0) } else { (0.0, -1.0) };
@@ -6749,6 +6749,43 @@ mod tests {
         let b = s.solid().unwrap();
         assert!(b.validity().is_empty() && b.shell_count() == 1, "{:?}", b.validity());
         assert!((vol(&b) - flat_area(&s) * 2.0).abs() < 1e-3 * vol(&b));
+    }
+
+    #[test]
+    fn concave_corners_do_not_validate_unused_rule_gaps() {
+        let rule = RuleValues { gap: MIN_CORNER_GAP * 0.5, ..alu() };
+        let outline = [Vec2::ZERO, Vec2::new(120.0, 0.0), Vec2::new(120.0, 40.0), Vec2::new(60.0, 40.0), Vec2::new(60.0, 90.0), Vec2::new(0.0, 90.0)];
+        let base = Region2 { outer: Loop2::polygon(&outline).ccw(), holes: vec![] };
+        let mut sheet = base_flange("Body1", "AL2", &rule, Plane::XY, base);
+        let picks = [Vec3::new(90.0, 40.0, 2.0), Vec3::new(60.0, 65.0, 2.0)];
+        let (made, notes) = sheet.add_flanges_noted(&picks, 20.0, 90f64.to_radians(), 1.0, "inside", false).unwrap();
+        assert_eq!(made.len(), 2);
+        assert!(notes.is_empty(), "{notes:?}");
+        let corner = Corner { a: made[0], a_end: true, b: made[1], b_end: false, c: Vec2::new(60.0, 40.0) };
+        let result = sheet.close_corner(&corner);
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn corners_without_panels_do_not_validate_unused_gaps() {
+        let (sheet, notes) = tray(&alu(), 90.0, 38.6);
+        assert!(notes.is_empty(), "{notes:?}");
+        let indices: Vec<_> = (0..sheet.flanges.len()).collect();
+        let corners = sheet.corners(&indices);
+        let corner = corners.first().unwrap();
+        for missing in [corner.a, corner.b] {
+            for gap in [0.0, MIN_CORNER_GAP * 0.5, f64::NAN, f64::INFINITY] {
+                let mut no_panel = sheet.clone();
+                no_panel.flanges[missing].leg = 0.0;
+                no_panel.gap = gap;
+                let result = no_panel.close_corner(corner);
+                assert!(result.is_ok(), "missing panel {missing}, gap {gap}: {result:?}");
+                assert_eq!(no_panel.flanges[missing].leg, 0.0);
+                let mut needs_closing = sheet.clone();
+                needs_closing.gap = gap;
+                assert!(needs_closing.close_corner(corner).unwrap_err().contains("gap"));
+            }
+        }
     }
 
     #[test]

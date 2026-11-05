@@ -155,6 +155,34 @@ idea adds its term there.
 [AGENTS.md](AGENTS.md) has the long form of these rules. It's written for AI agents, but it's
 the most complete description of the house style.
 
+## Local CodeRabbit review
+
+Run a local review before pushing to catch issues without waiting for the PR review.
+Install the [CodeRabbit CLI](https://docs.coderabbit.ai/cli) (`brew install coderabbit`
+on macOS), then sign in with `coderabbit auth login` in your own terminal.
+For an EU-hosted account, use `coderabbit auth login --region eu`.
+
+From the worktree you are changing, review staged and unstaged tracked changes:
+
+```sh
+coderabbit review --agent --uncommitted
+```
+
+To review the whole branch, including local tracked edits, compare with its merge base.
+Use the PR's target branch: `origin/main` after a standard clone, or `upstream/main`
+in a fork with an `upstream` remote configured.
+
+```sh
+coderabbit review --agent --base-commit "$(git merge-base HEAD origin/main)"
+```
+
+New files must be staged, or explicitly included with `--include-untracked`.
+The CLI sends code to CodeRabbit; it is not an offline check and does not publish PR comments.
+Read and verify the findings even when the command exits successfully. A failed or incomplete
+review is not approval. Fix valid findings, rerun affected tests, then review the updated diff.
+Do not enable paid usage with `--use-credits` without the account owner's approval.
+This review supplements the checks below; it does not replace them.
+
 ## Tests
 
 | What | Where | Run |
