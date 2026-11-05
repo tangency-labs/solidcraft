@@ -96,7 +96,7 @@ and march for accuracy.
 
 ![Two surface patches meeting in a curve: subdivision boxes, start points on the boundary and in the interior, and the march with its predictor and corrector.](ssi/march.svg)
 
-*Figure 1. Look at the green start points: one on S1's boundary for C, one inside a leaf pair for the
+*Figure 1. Look at the start points: one on S1's boundary for C, one inside a leaf pair for the
 closed loop L; from each, the march predicts along n1 × n2 and corrects onto both surfaces.*
 
 ### 3.1 Dispatch: special cases first
