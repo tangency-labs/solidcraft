@@ -112,8 +112,8 @@ mod tests {
 
     /// The face of `body` at `point`, as a pick.
     fn face(app: &crate::SolveApp, body: &str, point: [f64; 3]) -> Sel {
-        let world = app.session.world_state();
-        let p = solidcraft_engine::geom::Vec3::new(point[0], point[1], point[2]);
+        let world = crate::open_meshing::session_world(&app.session);
+        let p = solidcore_record::Vec3::new(point[0], point[1], point[2]);
         let index = solidcraft_engine::doc::appearance::face_index_at(world.body(body).unwrap(), p).unwrap();
         Sel::Face { body: body.into(), index, point: p }
     }
