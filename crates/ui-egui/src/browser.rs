@@ -780,7 +780,9 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row<'_>) -> RowRes
         crate::semantic_content::record_row(ui, (row.label.to_string(), r, fold, row.fold), &out);
     }
     let clicked = out.resp.as_ref().is_some_and(|resp| resp.clicked());
-    out.slow_rename = slow_rename_click(ui, id, clicked, row.name && out.clicked);
+    // Only a plain click: Ctrl and Shift keep adding to and extending the selection.
+    let plain = !ui.input(|i| i.modifiers.command || i.modifiers.ctrl || i.modifiers.shift);
+    out.slow_rename = slow_rename_click(ui, id, clicked, row.name && out.clicked && plain);
     out
 }
 
@@ -3241,11 +3243,18 @@ fn entry_row(
     if r.eye {
         set_visible(app, folder, &[e], !visible);
     }
-    if r.double && folder == "sketches" {
-        if let Ok(id) = e.key.parse() {
-            app.edit_sketch_in(id, path.map(|path| (comp, path)));
-        }
-    } else if r.clicked {
+    if r.double
+        && folder == "sketches"
+        && let Ok(id) = e.key.parse()
+    {
+        app.edit_sketch_in(id, path.map(|path| (comp, path)));
+    }
+    // A click a dialog takes as a pick (below) leaves the selection as it was: nothing to rename.
+    let dialog_pick = r.clicked && {
+        let shift = ui.input(|i| i.modifiers.shift);
+        folder == "construction" || (folder == "bodies" && !shift && app.dialog.is_some())
+    };
+    if r.clicked && !(r.double && folder == "sketches") {
         let shift = ui.input(|i| i.modifiers.shift);
         // A body row with a dialog open is a pick, as Combine does (#4452), unless Shift is
         // asking for the rows between this one and the anchor.
@@ -3267,7 +3276,7 @@ fn entry_row(
         }
         // A double-click or a slower second click renames the row (sketch double-clicks edit
         // instead), like F2.
-        if r.double || r.slow_rename {
+        if (r.double || r.slow_rename) && !dialog_pick {
             crate::context_menu::rename_selection(app, r.rect.map(|x| x.left_bottom()).unwrap_or_default());
             if let Some(rename) = app.menu.rename.as_mut()
                 && let Some(row_id) = r.row_id
