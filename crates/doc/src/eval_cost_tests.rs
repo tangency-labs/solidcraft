@@ -1819,6 +1819,7 @@ fn a_hole_classifies_the_faces_it_reads_not_every_face_of_the_design() {
             radius: "2".into(),
             height: "10".into(),
             operation: Operation::NewBody,
+            references: Vec::new(),
         };
         doc.add_feature(kind, None).unwrap();
     }
