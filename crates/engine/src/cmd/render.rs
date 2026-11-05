@@ -8,6 +8,7 @@ use solidcraft_doc::render_settings::{RenderSettings, RenderSetup};
 
 use super::CommandSpec;
 use crate::params::bad;
+use crate::schema::render_camera::{CameraApplied, CameraFitted, CameraInfo, CameraSet, RenderCamera};
 use crate::{Result, Session};
 
 mod clear_coat;
@@ -99,11 +100,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("name: saved setup; target: exact saved definition/feature/component/occurrence_path; expected_revision. Removes only that optical assignment in one undo without a device or file access."),
     CommandSpec::new("render.result.regrade", "Regrade Linear Master", jobs::regrade).icon("render_image").noundo().doc_only()
         .params("job?: exact completed JobId (default selected result); presentation: {exposure_ev?,tone_map?,finishing?,backdrop?,background?,transparent_background?}. Queues cancellable nondestructive PNG presentation from that retained native FLOAT32 master, not from PNG. Captured geometry/camera/lighting and source EXR remain unchanged; no path tracing, denoising, external EXR import or automatic file writes. Returns a distinct job with source identity and original-master digest. Existing frame retention and export rules still apply."),
-    CommandSpec::new("render.camera.set", "Set Render Camera", set_camera).icon("camera").noundo().doc_only()
+    CommandSpec::new("render.camera.set", "Set Render Camera", crate::checked!("render.camera.set", set_camera)).icon("camera").noundo().doc_only()
+        .contract(&crate::schema::TypedContract::<crate::schema::render_camera::SetParams>::new())
+        .output(crate::schema::output_schema_for::<crate::schema::render_camera::CameraSet>)
         .params("camera: complete Render Camera snapshot (target, yaw, pitch, distance, fov; roll defaults to 0 and up to z). Validates the same finite mm/radian bounds as saved render intent, preserves explicit roll/up and changes only transient view state. No model evaluation, setup save, renderer, dirty flag or undo step. Design view.apply retains its separate up-axis policy."),
-    CommandSpec::new("render.camera.get", "Inspect Render Camera", get_camera).icon("camera").noundo()
+    CommandSpec::new("render.camera.get", "Inspect Render Camera", crate::checked!("render.camera.get", get_camera)).icon("camera").noundo()
+        .contract(&crate::schema::TypedContract::<crate::schema::render_camera::GetParams>::new())
+        .output(crate::schema::output_schema_for::<crate::schema::render_camera::CameraInfo>)
         .params("No parameters. Returns the explicitly defined current view camera, or null if the session has no camera override. No camera is fitted, no job is started and no saved setup or engineering document is changed."),
-CommandSpec::new("render.camera.fit", "Frame Render Subject", fit_camera).icon("camera").noundo()
+CommandSpec::new("render.camera.fit", "Frame Render Subject", crate::checked!("render.camera.fit", fit_camera)).icon("camera").noundo()
+    .contract(&crate::schema::TypedContract::<crate::schema::render_camera::FitParams>::new())
+    .output(crate::schema::output_schema_for::<crate::schema::render_camera::CameraFitted>)
     .params("aspect?: the picture's width over its height, 0.000001 to 1000000 (default 1). Fits the current camera to the visible product bounds through the shared Camera::fit contract, moving back for a picture taller than wide so its sides hold the product too; changes only view state, not a saved setup, rendering job, stage or engineering geometry."),
 CommandSpec::new("render.preset.resolve", "Review Native Studio", crate::checked!("render.preset.resolve", studio_presets::resolve)).icon("render_scene").noundo()
     .contract(&studio_presets::PRESET_CONTRACT)
@@ -209,9 +216,17 @@ CommandSpec::new("render.settings.set", "Save Render Settings", set_settings).ic
     .params("name: setup name, set: object of fields to replace (backend, mode, camera, width, height, format, exposure_ev, environment_rotation, environment_intensity, background, job, surfaces, optics, coats, stage). job?: typed active raster/cpu_raytrace/gpu_path configuration with optional validated embedded HDR reference; omitted preserves, null clears, object replaces the complete job. Creates from defaults and saves without a host, validates atomically, one undo step; identical edits are no-ops. See docs/render-settings.md"),
 CommandSpec::new("render.scene", "Inspect Render Scene", scene).noundo().at("RENDER", "SCENE").icon("render_scene")
     .params("No parameters. Authoritative product-scene metadata, without modelling overlays or mesh payloads. Explicitly settles stale geometry; does not render an image. See docs/render-workspace.md"),
-CommandSpec::new("render.settings.apply", "Apply Render Camera", apply_settings).icon("camera").noundo().doc_only()
+CommandSpec::new("render.settings.apply", "Apply Render Camera", crate::checked!("render.settings.apply", apply_settings)).icon("camera").noundo().doc_only()
+    .contract(&crate::schema::TypedContract::<crate::schema::render_camera::ApplyParams>::new())
+    .output(crate::schema::output_schema_for::<crate::schema::render_camera::CameraApplied>)
     .params("name: saved setup. Applies its existing Camera snapshot including roll/up as view state, without modifying the document or starting a render."),
 ];
+
+/// A reply built from its output schema's type (`schema::render_camera`), so the two can't
+/// drift apart.
+fn typed_reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
 
 fn set_camera(s: &mut Session, params: &Value) -> Result<Value> {
     let cmd = "render.camera.set";
@@ -222,14 +237,17 @@ fn set_camera(s: &mut Session, params: &Value) -> Result<Value> {
     let setup: RenderSetup = serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
     setup.validate().map_err(|e| bad(cmd, e.to_string()))?;
     s.camera = Some(setup.camera);
-    Ok(json!({"camera":setup.camera,"document_changed":false}))
+    typed_reply(cmd, CameraSet { camera: RenderCamera(setup.camera), document_changed: false, param_warnings: Vec::new() })
 }
 
 fn get_camera(s: &mut Session, params: &Value) -> Result<Value> {
+    let cmd = "render.camera.get";
     if !params.as_object().is_some_and(|p| p.is_empty()) {
-        return Err(bad("render.camera.get", "expected an empty parameter object"));
+        return Err(bad(cmd, "expected an empty parameter object"));
     }
-    Ok(json!({"camera":s.camera,"explicit_view":s.camera.is_some(),"document_changed":false}))
+    let reply =
+        CameraInfo { camera: s.camera.map(RenderCamera), explicit_view: s.camera.is_some(), document_changed: false, param_warnings: Vec::new() };
+    typed_reply(cmd, reply)
 }
 
 fn fit_camera(s: &mut Session, params: &Value) -> Result<Value> {
@@ -253,7 +271,8 @@ fn fit_camera(s: &mut Session, params: &Value) -> Result<Value> {
         return Err(bad("render.camera.fit", "the product cannot be framed at this aspect: the fitted camera is out of range"));
     }
     s.camera = Some(camera);
-    Ok(json!({"camera":camera,"empty":scene.bounds.is_empty(),"document_changed":false}))
+    let reply = CameraFitted { camera: RenderCamera(camera), empty: scene.bounds.is_empty(), document_changed: false, param_warnings: Vec::new() };
+    typed_reply("render.camera.fit", reply)
 }
 
 fn scene(s: &mut Session, params: &Value) -> Result<Value> {
@@ -284,8 +303,9 @@ fn apply_settings(s: &mut Session, params: &Value) -> Result<Value> {
     RenderSettings::validate_name(&name).map_err(|e| bad("render.settings.apply", e.to_string()))?;
     let setup = s.doc.render.setups.get(&name).ok_or_else(|| bad("render.settings.apply", "no saved render setup with that name"))?;
     setup.validate().map_err(|e| bad("render.settings.apply", e.to_string()))?;
-    s.camera = Some(setup.camera);
-    Ok(json!({"name":name,"camera":setup.camera}))
+    let camera = setup.camera;
+    s.camera = Some(camera);
+    typed_reply("render.settings.apply", CameraApplied { name, camera: RenderCamera(camera), param_warnings: Vec::new() })
 }
 
 #[derive(Deserialize)]
