@@ -285,7 +285,7 @@ What came of it, from #17's thread:
 - The corpus is public at [jyviko/ssi-corpus](https://github.com/jyviko/ssi-corpus) (MIT OR
   Apache-2.0): the 119 case files with exact truth, the generators, the scorer, and the SMLib runner
   as the runner contract's example.
-- `difftest --ssi-corpus` (#84) is step 2. It scores the C++ at 81/119, matching #17, and its scorer
+- `difftest --ssi-corpus` is step 2. It scores the C++ at 81/119, matching #17, and its scorer
   agrees with the corpus's `score.py` on 119/119 verdicts (§9). The 38 C++ misses are logged as
   WR-74 to WR-80, the fixes of §4.4.
 - #17 also recommends the method of Yang, Jia and Yan [16] for completeness, since neither SMLib nor

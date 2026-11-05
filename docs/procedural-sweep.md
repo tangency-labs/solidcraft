@@ -119,7 +119,7 @@ square to the first tangent. The angular velocity has no component along x: the 
 about the tangent. The Frenet frame does, by the torsion, and is undefined where the curvature
 vanishes [1]; a profile carried in it twists.
 
-**The owner's ruling (#2723 review).** The first draft of slice 2 defined the frame as the
+**The owner's ruling.** The first draft of slice 2 defined the frame as the
 projection rule from the last sampled station, z_i = unit(z_{i−1} − (z_{i−1} · x_i) x_i) [5]. That
 is the rotation-minimizing frame's discretisation and converges to it, but a definition built on
 it depends on how many points the path was sampled with, which is why walls passed or failed with
@@ -177,8 +177,7 @@ where `create_path` certifies one. A scaled sweep gets neither.
 *Figure 2. Look at each profile control point tracing a line and then a concentric arc, with the
 net's middle control point at the corner of each arc's tangents.*
 
-**Lines and circular arcs give the exact tensor-product NURBS**
-([#2740](https://github.com/tangency-labs/solidcore/pull/2740), `PathMotion::exact_net`). On a line
+**Lines and circular arcs give the exact tensor-product NURBS** (`PathMotion::exact_net`). On a line
 the frame is constant, so each control point C_i of the profile moves along a line. On an arc the
 frame turns rigidly about the arc's axis, so each C_i turns on a circle about that axis. A circle
 arc of less than half a turn is one rational quadratic [7]. So the net is:
@@ -204,8 +203,8 @@ points at RADIUS from the axis or the arc's circle to 10⁻¹² and the net with
 
 **General splines get a fitted net and a ledger entry.** A path with any span that is neither a
 line nor an arc keeps the fitted net and no definition (`path-spline`). The certified enclosure
-of `create_path` exists for a fitted net of a lines-and-arcs path (it was slice 2's net before
-#2740, and it is still the fallback when the exact net's bound passes the zone tolerance).
+of `create_path` exists for a fitted net of a lines-and-arcs path (it was slice 2's net before the
+exact net, and it is still the fallback when the exact net's bound passes the zone tolerance).
 
 ## 5. The certificate
 
@@ -280,12 +279,12 @@ rotation, plus the rounding of moving the net (`add_motion_rounding`, as a moved
 that is not uniform leaves no screw or frame motion: the definition is dropped and the net moves
 without it (`ProceduralSweep::follows`).
 
-| case | certified bound | largest gap found | source |
+| case | certified bound | largest gap found | test file |
 |---|---|---|---|
-| M10×1.5 groove, 3 turns, tolerance 1.5e-4 | 1.1638e-4 | ≥ 0.99 × bound | #2633 |
-| circle along a line | below 1e-9 | 4e-15 | #2723 |
-| wire of straights and R2 arcs, fitted net | 2.2e-2 | 2.2e-2 | #2723 |
-| the same wire, exact net | 5e-7 | 1e-13 | #2740 |
+| M10×1.5 groove, 3 turns, tolerance 1.5e-4 | 1.1638e-4 | ≥ 0.99 × bound | `tests/screw_sweep.rs` |
+| circle along a line | below 1e-9 | 4e-15 | `tests/general_path_sweep.rs` |
+| wire of straights and R2 arcs, fitted net | 2.2e-2 | 2.2e-2 | `tests/general_path_sweep.rs` |
+| the same wire, exact net | 5e-7 | 1e-13 | `tests/general_path_sweep.rs` |
 
 ## 6. Threads as screw sweeps
 
@@ -324,8 +323,7 @@ through the axis. Each section point is the wall's point plus d times its true 3
 carried back into the half-plane by the motion. Two neighbouring offset walls then meet along a
 helix, the screw image of the point where their two sections cross: a 2D curve–curve
 intersection, not a 3D surface–surface trace. An offset that closes a groove shows in the 2D
-section as a refusal naming the largest offset that fits. Draft
-[#2726](https://github.com/tangency-labs/solidcore/pull/2726) builds it, keeping the base profile
+section as a refusal naming the largest offset that fits. The design under way keeps the base profile
 with a signed normal offset, since the exact offset section is in general not a rational B-spline.
 None of it is on main today: Offset Face treats thread walls as general NURBS faces.
 
@@ -392,17 +390,17 @@ A reviewer can check each of these against the code and the tests.
 
 ## 9. Status
 
-| slice | content | where |
-|---|---|---|
-| 1 | a screw-swept wall is a `ProceduralSweep` with a certified bound | [#2633](https://github.com/tangency-labs/solidcore/pull/2633) |
-| 2 | a general-path wall is a `ProceduralSweep`: the rotation-minimizing frame on lines and arcs, the v → t map, the cell enclosure | [#2723](https://github.com/tangency-labs/solidcore/pull/2723) |
-| 2b | the net of a lines-and-arcs path built from its definition, exact to rounding | [#2740](https://github.com/tangency-labs/solidcore/pull/2740) |
+| slice | content |
+|---|---|
+| 1 | a screw-swept wall is a `ProceduralSweep` with a certified bound |
+| 2 | a general-path wall is a `ProceduralSweep`: the rotation-minimizing frame on lines and arcs, the v → t map, the cell enclosure |
+| 2b | the net of a lines-and-arcs path built from its definition, exact to rounding |
 
 **Works.** Screw walls (threads of both hands, round wire, runouts, tapers) and walls along open
 G1 paths of lines and circular arcs carry their definition and a certified bound; the
 lines-and-arcs net is the exact tensor-product NURBS. With the exact net, a lip swept along half
 a block's rim lies flush on it and the union builds where the fitted net crossed the rim twice
-(#2740, `wr_533_lip_swept_flush_round_a_corner`).
+(`wr_533_lip_swept_flush_round_a_corner`).
 
 **Ledger entries** (`tests/data/sweep_definition_ledger/`, #2572): `path-spline`, `path-closed`,
 `path-scaled`, `path-translational`, `screw-cylinder`.
@@ -418,7 +416,7 @@ Known limits of what is merged:
 - **Nothing in the kernel reads S on its own yet.** Intersections, projections and the model check
   read the net; S is read only by a caller that asks through `Surface::procedural_sweep()`.
 - **No record.** solidcore-record has no sweep definition: a wall written and read back is a bare
-  B-spline. #2726 carries a draft record for the screw arm.
+  B-spline. A record for the screw arm is open work.
 - **First partials only.** `evaluate_definition` refuses second derivatives.
 - **The classification's tolerance.** A span within 10⁻¹¹ (1 + size) of a line or a circle takes
   that closed form; the bound covers B against that definition, not the definition against the
@@ -448,11 +446,10 @@ Known limits of what is merged:
   there unless `left`; a face ending at the joint must read its own side. The tests
   `the_definitions_partials_at_the_joints_are_right_sided` and
   `the_definitions_partials_at_a_faces_ends_are_its_own_sides` pin both.
-- **A thread wall misbehaves in an offset or a boolean.** Today those read the net; see #2724 and
-  draft #2726 before building anything on the faces.
+- **A thread wall misbehaves in an offset or a boolean.** Today those read the net; see #2724 before
+  building anything on the faces.
 - **Before designing.** Read the module docs of `surface/procedural_sweep.rs` and
-  `surface/procedural_sweep/path.rs` (they hold the derivations), the review on #2723 (the frame
-  ruling), and the literature below. Tests go in `tests/screw_sweep.rs` or
+  `surface/procedural_sweep/path.rs` (they hold the derivations), the owner's frame ruling (§3), and the literature below. Tests go in `tests/screw_sweep.rs` or
   `tests/general_path_sweep.rs`, gated on values a wrong result changes; no timings.
 
 ## 11. References

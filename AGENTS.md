@@ -223,7 +223,7 @@ own constructions. The policy (owner, 2026-11-04; supersedes 2026-11-02 and #101
   never a fixed angle.
 - **Don't extend code that is going away.** Improve the construction that replaces it; an old
   path is deleted when its replacement lands, never kept as a fallback.
-- **Crash, UB, hang and nondeterminism fixes are unconditional**, e.g. #1160 for UB-87.
+- **Crash, UB, hang and nondeterminism fixes are unconditional**, e.g. the fix for UB-87.
 - **Check that the issue is still open work before you claim it.** Many issues were
   fixed by a PR that did not close them (see #1206). Search merged PRs for the issue
   number, the upstream symbol and the `WR-`/`UB-`/`HANG-` record id, and grep

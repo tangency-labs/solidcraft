@@ -438,9 +438,8 @@ derived reach is zero and the operation has no offset to add past it.
 ### 6.7 Curves
 
 Curve extension on main is still upstream's `Curve::extend_by_dist` (`nurbs/crv_adv`,
-`N_CrvExtendByDist`), whose `Cmax` case fits its length and removes knots again. Moving the curve
-callers to an exact extension by arc length is draft #2738. Until it lands, a curve extension is
-not in the exact class.
+`N_CrvExtendByDist`), whose `Cmax` case fits its length and removes knots again. An exact curve
+extension by arc length is open work; until it lands, a curve extension is not in the exact class.
 
 ## 7. Invariants
 
