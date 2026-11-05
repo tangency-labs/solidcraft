@@ -364,7 +364,11 @@ fn add_link_unless_present(
     let st = state_for_sketch(s, &doc, id, &st, &src.bodies())?;
     let plane = sketch_plane(&doc, id, &st)?;
     let r = resolve(&doc, &vals, &st, &plane, kind, &src)?;
-    if skip_present && r.wires.is_empty() && sk.link_geometry_present(&r.geom) {
+    let present = match kind {
+        LinkKind::Intersect => sk.link_geometry_or_points_present(&r.geom),
+        _ => sk.link_geometry_present(&r.geom),
+    };
+    if skip_present && r.wires.is_empty() && present {
         return Ok(None);
     }
     let name = if let LinkSource::Face { body, at } = &r.source {
@@ -412,11 +416,12 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
         refresh(s, doc, id, sk);
         let mut out = Vec::new();
         // Projecting what the sketch already shows (the border of the face it is on, an edge
-        // projected before) would lay a second copy over the first: those references are skipped.
+        // projected before), or intersecting what was intersected before, would lay a second copy
+        // over the first: those references are skipped.
         let mut present = Vec::new();
         for src in sources {
             let what = src.describe();
-            match add_link_unless_present(s, doc, id, sk, kind, src, kind == LinkKind::Project) {
+            match add_link_unless_present(s, doc, id, sk, kind, src, matches!(kind, LinkKind::Project | LinkKind::Intersect)) {
                 Ok(Some(l)) => {
                     let mut result = link_json(sk, &l);
                     if !projection_link {
@@ -431,7 +436,8 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
         }
         // Nothing new: the sketch is kept as it was.
         if out.is_empty() {
-            return Err(bad(cmd, format!("already projected into this sketch: {}", present.join(", "))));
+            let verb = if kind == LinkKind::Intersect { "intersected" } else { "projected" };
+            return Err(bad(cmd, format!("already {verb} into this sketch: {}", present.join(", "))));
         }
         Ok((out, present))
     })?;

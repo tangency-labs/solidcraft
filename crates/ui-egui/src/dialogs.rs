@@ -4837,6 +4837,11 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
                 {
                     app.set_status(why, false);
                 }
+                if matches!(cmd.as_str(), "sketch.intersect" | "sketch.project")
+                    && let Some(what) = link_status(app, &cmd, &reply)
+                {
+                    app.set_status(what, false);
+                }
             }
             Err(error) => {
                 if let Some((id, _)) = d.editing {
@@ -4857,6 +4862,34 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
         };
     }
     Ok(())
+}
+
+/// What an Intersect or Project added to the sketch, for the status line, and that it is hidden
+/// when the sketch's Projected Geometries option is off: such a result showed nothing and said
+/// nothing, so it looked as if the click had done nothing.
+fn link_status(app: &SolveApp, cmd: &str, reply: &Value) -> Option<String> {
+    let links = reply.get("links").and_then(Value::as_array)?;
+    let count = |key: &str| links.iter().map(|l| l.get(key).and_then(Value::as_array).map_or(0, Vec::len)).sum::<usize>();
+    // A curve's ends are points of its link too: name the curves when there are any.
+    let (curves, points) = (count("curves"), count("points"));
+    let (n, one, many) = if curves > 0 {
+        (curves, "ui.sketch_links_added_curve", "ui.sketch_links_added_curves")
+    } else {
+        (points, "ui.sketch_links_added_point", "ui.sketch_links_added_points")
+    };
+    let command = crate::i18n::tr(if cmd == "sketch.intersect" { "ui.intersect" } else { "ui.project" });
+    let mut text = crate::i18n::format(if n == 1 { one } else { many }, &[("command", command), ("count", &n.to_string())]);
+    let linked = links.iter().any(|l| l.get("link").is_some_and(|l| !l.is_null()));
+    let hidden = linked
+        && app
+            .session
+            .active_sketch
+            .is_some_and(|id| app.session.world_state().ok().and_then(|w| w.sketch(id).map(|s| s.sketch.view.hide_projected)).unwrap_or(false));
+    if hidden {
+        text.push(' ');
+        text.push_str(&crate::i18n::format("ui.sketch_links_hidden", &[("option", crate::i18n::tr("ui.show_projected_geometries"))]));
+    }
+    Some(text)
 }
 
 /// Edit Section Analysis: its dialog, where the dialog that made the section shown (or hidden)

@@ -1,0 +1,9 @@
+{
+  "en": {
+    "ui.sketch_links_added_curve": "{command} added 1 curve to the sketch.",
+    "ui.sketch_links_added_curves": "{command} added {count} curves to the sketch.",
+    "ui.sketch_links_added_point": "{command} added 1 point to the sketch.",
+    "ui.sketch_links_added_points": "{command} added {count} points to the sketch.",
+    "ui.sketch_links_hidden": "The result is hidden because {option} is off in the sketch palette."
+  }
+}
