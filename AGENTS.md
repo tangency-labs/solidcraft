@@ -183,6 +183,11 @@ difftest summary lines in the description, and mark the PR ready. CI is the merg
 an update is an addendum file. Known mismatches live in
 `crates/difftest/known_mismatches/<unit id>.toml`. Never commit `reports/difftest/`.
 
+**No new document without the maintainers.** `docs/` holds the reference pages listed in §1 and
+what the maintainers have agreed to. Never add a file to `docs/` that hasn't been discussed with
+them first, on its issue. A pull request's evidence (validation runs, comparisons, measurements)
+goes in its description, or in a `plan/findings/` record when it must outlive the PR.
+
 **Porting and wiring units** (the work that remains of the port: `UNPORTED` stubs, back-edges,
 unit status): [docs/porting.md](docs/porting.md).
 
