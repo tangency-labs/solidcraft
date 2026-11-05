@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/solidcore", "crates/solidcore-record", "crates/solidcore-convert", "crates/solidcore-tess", "crates/solidcore-ffi", "crates/difftest", "crates/nurbs-grid-mesh", "crates/ssi", "crates/solidcore-ssi", "crates/step-brep", "crates/step-export", "crates/step-import", "crates/xtask", "crates/solidcore-ops"]
+members = ["crates/solidcore", "crates/solidcore-record", "crates/solidcore-convert", "crates/solidcore-tess", "crates/solidcore-ffi", "crates/difftest", "crates/nurbs-grid-mesh", "crates/ssi", "crates/solidcore-ssi", "crates/step-brep", "crates/step-export", "crates/step-import", "crates/xtask", "crates/solidcore-ops", "crates/diagnostics"]
 default-members = ["crates/solidcore"]
 
 [workspace.package]

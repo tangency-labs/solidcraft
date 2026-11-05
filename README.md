@@ -63,6 +63,7 @@ schematics. Start with the first; each ends with "If you're stuck".
 | `crates/solidcore`      | The kernel library                                           |
 | `crates/solidcore-ffi`  | `extern "C"` bindings to the upstream C++ (feature `cpp`)    |
 | `crates/difftest`       | Runs Rust and C++ side by side on the same inputs           |
+| `crates/diagnostics`    | `solidcore-diag`: a shaded picture and a tolerance report of one `.smb` body |
 | `harness/cpp`           | Builds the upstream C++ reference into `bin/cpp`; FFI shims  |
 | `plan/`                 | Unit list, port order, status, findings                      |
 | `site/`                  | Generator for the GitHub Pages progress site                 |
