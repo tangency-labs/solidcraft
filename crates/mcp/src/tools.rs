@@ -346,14 +346,15 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
         tool(
             "export",
             "Export",
-            "Export bodies to STEP (.step/.stp), 3MF (.3mf), binary STL (.stl), ASCII STL (format stla) or OBJ. The format \
+            "Export bodies to STEP (.step/.stp), 3MF (.3mf), binary STL (.stl), ASCII STL (format stla), OBJ or GLB (.glb: binary glTF \
+             in metres with Y up, with each body's colours, metallic and roughness; transparent bodies are refused). The format \
              comes from the extension unless given. URDF (.urdf) exports the whole assembly for robot simulators: a link per \
              component placement with mass and inertia, joints from the assembly's joints, and STL meshes in metres written \
              next to it (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/.",
             obj(
                 json!({
                     "path": string("Output file"),
-                    "format": {"type": "string", "enum": ["step", "3mf", "3mf-tagged", "stl", "stla", "obj", "urdf"]},
+                    "format": {"type": "string", "enum": ["step", "3mf", "3mf-tagged", "stl", "stla", "obj", "glb", "urdf"]},
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf)"},
                     "mesh_prefix": string("urdf: put before each mesh file name (default: none, so relative to the .urdf)"),
                     "effort": {"type": "number", "description": "urdf: joint effort limit, N or N m (default 1000)"},

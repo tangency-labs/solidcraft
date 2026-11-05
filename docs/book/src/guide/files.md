@@ -8,11 +8,19 @@
 | IGES 5.3 | manifold solids, or trimmed surfaces sewn into solids | manifold solids with names and colours |
 | FreeCAD `.FCStd`, Rhino `.3dm` | solids, through cadmpeg | |
 | 3MF, STL, OBJ | mesh bodies | yes |
-| glTF 2.0 (`.glb`, `.gltf` with its `.bin` files) | mesh bodies in the node tree's components, materials as appearances | |
+| glTF 2.0 (`.glb`, `.gltf` with its `.bin` files) | mesh bodies in the node tree's components, materials as appearances | `.glb`: placed bodies with their colours, metallic and roughness, in metres with Y up |
 | 3MF with face tags | as 3MF | each triangle tagged with its B-rep face, exact coordinates |
 | URDF | | the assembly as a robot: links with meshes, mass and inertia, joints from the assembly's joints |
 | DXF, SVG | into a sketch | sketches and flat patterns as DXF |
 | PNG, JPEG | canvases and decals | |
+
+**File → Export GLB…** (`file.export` with a `.glb` path) writes one binary glTF file for web viewers,
+renderers such as Blender, and game engines. Each body is a node named after it, where the design places
+it. Its colour, metallic and roughness become a glTF material, and a face with a look of its own gets that
+look. A body with no colour gets the Render workspace's grey. The file is in metres with Y up, as glTF
+requires, through one root node. A transparent body or face, and a body that a render setup gives an
+image texture or optics, are refused with a message that names the body, since the file would show it
+wrongly; leave such a body out with `bodies`. A refused export leaves a file already at the path as it was.
 
 Opening a STEP, IGES, FreeCAD or Rhino file creates a design with the file's bodies as a base feature, and
 inserting one adds them to the current design. Later features build on them. Mesh bodies render,

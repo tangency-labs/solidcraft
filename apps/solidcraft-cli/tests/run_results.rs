@@ -245,12 +245,26 @@ fn results_still_save_and_export_the_script_once() {
     let saved = dir.0.join("box.json");
     let stl = dir.0.join("box.stl");
     let obj = dir.0.join("box.obj");
+    let glb = dir.0.join("box.glb");
     let result = json_output(
-        cli().arg("run").arg(dir.script()).arg("--results").arg("--save").arg(&saved).arg("--out").arg(&stl).arg("--out").arg(&obj).output().unwrap(),
+        cli()
+            .arg("run")
+            .arg(dir.script())
+            .arg("--results")
+            .arg("--save")
+            .arg(&saved)
+            .arg("--out")
+            .arg(&stl)
+            .arg("--out")
+            .arg(&obj)
+            .arg("--out")
+            .arg(&glb)
+            .output()
+            .unwrap(),
     );
     assert_eq!(result.as_array().unwrap().len(), 1);
     assert_eq!(body_count(&saved), 1);
-    for exported in [&stl, &obj] {
+    for exported in [&stl, &obj, &glb] {
         assert!(std::fs::metadata(exported).unwrap().len() > 0);
         assert_eq!(body_count(exported), 1);
     }
