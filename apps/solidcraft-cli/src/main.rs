@@ -497,8 +497,10 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     // A feature that fails leaves the bodies as they were before it (a parameter change can
     // break a feature without failing the command that made it): writing them would hand out
     // the wrong part with success, so fail the run unless asked to write it anyway.
+    // A feature only a newer SolidCraft can build isn't a broken design: saving the design keeps it
+    // and hands out no part. Exporting bodies without it would, so that still stops.
     if !args.iter().any(|a| a == "--allow-errors") {
-        timeline_ok(&s)?;
+        timeline_ok(&s, flags(args, "--out").is_empty())?;
     }
     for out in flags(args, "--out") {
         s.execute("file.export", &json!({"path": out})).map_err(|e| e.to_string())?;
@@ -574,8 +576,12 @@ fn known_args(cmd: &str, args: &[String], valued: &[&str], switches: &[&str], po
 }
 
 /// Every failing timeline feature, one per line, as an error; Ok when none fails.
-fn timeline_ok(s: &Session) -> Result<(), String> {
-    let failed: Vec<String> = s.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| format!("  {}: {e}", r.name))).collect();
+fn timeline_ok(s: &Session, skip_newer_features: bool) -> Result<(), String> {
+    let newer = |id: u64| {
+        skip_newer_features && s.doc.feature(id).is_some_and(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::NewerFileFeature { .. }))
+    };
+    let failed: Vec<String> =
+        s.model.results.iter().filter(|r| !newer(r.id)).filter_map(|r| r.error.as_ref().map(|e| format!("  {}: {e}", r.name))).collect();
     if failed.is_empty() {
         return Ok(());
     }
