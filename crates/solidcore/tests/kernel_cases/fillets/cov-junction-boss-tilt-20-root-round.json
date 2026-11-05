@@ -104,17 +104,18 @@
   ],
   "case": "cov-junction-boss-tilt-20-root-round",
   "expected": {
-    "body_count": 1,
-    "continuity": {
-      "order": "g1"
-    },
-    "method": "no closed form for the round on these quadrics' intersection: one valid closed body whose round meets its faces G1",
-    "source": "invariants",
-    "sources": [],
-    "what": "cylinder R6 tilted 20 degrees joined into a plate, its root edge rounded 1.5"
+    "method": "Boss R 6 on the axis through the origin along (sin 20, 0, cos 20), its bottom cap the plane p.a = -2, rounded 1.5 where it joins the plate (z = 0). In the plane y = 0 on the -x side the wall rail of a round r lies r (1 - sin 20) above the plate, and the cap's rim 6 sin 20 - 2 cos 20 = 0.1727 above it: past r* = (6 sin 20 - 2 cos 20) / (1 - sin 20) = 0.262524174 the rail runs over the rim onto the cap, where the round's End has no room. The owner's ruling (#2358): refuse, naming r* less the part's tolerance 1e-5, 0.262514174; a round of that size builds.",
+    "outcome": "refused",
+    "refusal": "0.2625",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcore#2358",
+      "tangency-labs/solidcore#2839"
+    ],
+    "what": "cylinder R6 tilted 20 degrees joined into a plate, its root edge rounded 1.5: refused, naming 0.262514174"
   },
   "expressible": false,
-  "gallery_note": "it failed the same way before the blend rework",
+  "gallery_note": "the wall rail would run over the bottom cap's rim, 0.17 above the plate on the -x side; SMLib failed it (status 1001)",
   "operation_expressible": true,
   "outcome": {
     "engine_error": "step 3 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
@@ -147,7 +148,7 @@
     "blend_dropping"
   ],
   "ungraded": [
-    "continuity: SolidCraft computes it"
+    "refusal \"0.2625\": SolidCraft's wording of the kernel's error"
   ],
   "what": "cylinder R6 tilted 20 degrees joined into a plate, its root edge rounded 1.5",
   "why_not": []
