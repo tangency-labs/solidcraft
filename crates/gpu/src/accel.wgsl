@@ -538,10 +538,11 @@ fn mass_properties_reduce(
     var mom = vec3<f32>(0.0);
 
     if idx < mp_params.num_tris {
+        let p0 = mp_tris[0].v0.xyz;
         let tri = mp_tris[idx];
-        let a = tri.v0.xyz;
-        let b = tri.v1.xyz;
-        let c = tri.v2.xyz;
+        let a = tri.v0.xyz - p0;
+        let b = tri.v1.xyz - p0;
+        let c = tri.v2.xyz - p0;
         let det = dot(a, cross(b, c));
         v6 = det;
         area = length(cross(b - a, c - a)) * 0.5;

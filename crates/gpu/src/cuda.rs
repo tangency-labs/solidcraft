@@ -460,6 +460,10 @@ impl CudaBackend {
 
             let is_ampere_plus = major >= 8;
             let is_turing_plus = major > 7 || (major == 7 && minor >= 5);
+            // Hardware FP64 Tensor Cores are only present on datacenter architectures:
+            // sm_80 (A100) and sm_90 (H100), per NVIDIA Table 36.
+            // Consumer Ampere (sm_86, sm_87) and Ada Lovelace (sm_89) execute DMMA at the 1:64 scalar rate.
+            let has_hw_fp64_tensor_cores = (major == 8 && minor == 0) || (major == 9 && minor == 0);
             all_devices.push(CudaDeviceInfo {
                 ordinal,
                 name,
@@ -470,7 +474,7 @@ impl CudaBackend {
                 l2_cache_bytes,
                 total_vram_bytes,
                 supports_ampere_ptx: is_ampere_plus,
-                supports_fp64_tensor_core: is_ampere_plus,
+                supports_fp64_tensor_core: has_hw_fp64_tensor_cores,
                 supports_rt_core: is_turing_plus,
             });
         }

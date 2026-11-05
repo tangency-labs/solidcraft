@@ -773,6 +773,32 @@ fn multi_backend_point_mesh_distance_and_mass_properties_parity() {
             assert!(cu_amp.centroid.dist(exact_measure.centroid) < 1e-4);
         }
     }
+
+    // 3. Translated mesh cancellation invariance (e.g. translated by (1024, -1024, 256))
+    let c0 = Vec3::new(1024.0, -1024.0, 256.0);
+    let c1 = c0 + Vec3::new(2.0, 3.0, 4.0);
+    let trans_bx = ok(solidcraft_kernel::box_solid(c0, c1));
+    let trans_mesh = ok(trans_bx.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)));
+    let (trans_tris, _) = build_gpu_bvh_from_mesh(&trans_mesh);
+    let trans_measure = trans_mesh.measure();
+    let expected_centroid = c0 + Vec3::new(1.0, 1.5, 2.0);
+    assert!((trans_measure.volume - 24.0).abs() < 1e-4);
+    assert!(trans_measure.centroid.dist(expected_centroid) < 1e-4);
+
+    let trans_cpu = cpu_mass_properties_scalar(&trans_tris);
+    assert!((trans_cpu.volume - 24.0).abs() < 1e-4);
+    assert!(trans_cpu.centroid.dist(expected_centroid) < 1e-4);
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_trans = vk.mass_properties(&trans_tris).expect("vk mass_properties translated");
+        assert!((vk_trans.volume - 24.0).abs() < 1e-2, "vk translated volume: {}", vk_trans.volume);
+        assert!(vk_trans.centroid.dist(expected_centroid) < 1e-2, "vk translated centroid: {:?}", vk_trans.centroid);
+    }
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_trans = cuda.mass_properties(&trans_tris, false).expect("cuda translated mass_properties");
+        assert!((cu_trans.volume - 24.0).abs() < 1e-4);
+        assert!(cu_trans.centroid.dist(expected_centroid) < 1e-4);
+    }
 }
 
 /// Verifies [`Dispatcher`] multi-sample rotated calibration, markdown reporting, and forced routing across all backend targets.

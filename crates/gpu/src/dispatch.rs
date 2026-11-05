@@ -663,6 +663,7 @@ impl VulkanAccel {
         self.queue.submit(Some(enc.finish()));
 
         let partials: Vec<MassReduceOut> = self.read_mapped_vec(&read_buf)?;
+        let p0 = Vec3::new(tris[0].v0[0] as f64, tris[0].v0[1] as f64, tris[0].v0[2] as f64);
         let (mut v6, mut area, mut mx, mut my, mut mz) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
         for p in &partials {
             v6 += p.v6_area[0] as f64;
@@ -672,7 +673,7 @@ impl VulkanAccel {
             mz += p.moment1[2] as f64;
         }
         let volume = v6 / 6.0;
-        let centroid = if v6.abs() > 1e-12 { Vec3::new(mx / (4.0 * v6), my / (4.0 * v6), mz / (4.0 * v6)) } else { Vec3::ZERO };
+        let centroid = if v6.abs() > 1e-12 { p0 + Vec3::new(mx / (4.0 * v6), my / (4.0 * v6), mz / (4.0 * v6)) } else { Vec3::ZERO };
         Some(MeshMeasure { volume, area, centroid })
     }
 
