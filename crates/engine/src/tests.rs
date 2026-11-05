@@ -3904,7 +3904,7 @@ fn a_deleted_sketch_point_drops_only_its_own_hole() {
         s.model.state().bodies.iter().all(|b| b
             .body
             .classify_point(solidcore_record::Vec3::new(15.0, 10.0, 5.0))
-            .unwrap_or(solidcraft_kernel::PointClass::Outside)
+            .expect("classify the point at `a`")
             == solidcraft_kernel::PointClass::Outside),
         "the hole at `a` is drilled"
     );
@@ -3912,7 +3912,7 @@ fn a_deleted_sketch_point_drops_only_its_own_hole() {
         s.model.state().bodies.iter().any(|b| b
             .body
             .classify_point(solidcore_record::Vec3::new(45.0, 10.0, 5.0))
-            .unwrap_or(solidcraft_kernel::PointClass::Outside)
+            .expect("classify the point at `b`")
             == solidcraft_kernel::PointClass::Inside),
         "`b`'s spot is solid"
     );
