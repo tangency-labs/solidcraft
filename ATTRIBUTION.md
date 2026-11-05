@@ -839,6 +839,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | docs/screenshots/7452/demo-14-surface-l1.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
 | docs/screenshots/7452/demo-15-surface-result.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
 | docs/screenshots/7452/revolve-selected-edge.mp4 | SamD98 | screen recording of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| assets/locales/bg.json | Yasen-55 | Original translation | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
