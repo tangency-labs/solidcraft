@@ -893,7 +893,7 @@ these shared pieces; the pages themselves arrive in later steps. Sizes follow
 | `preset_card(ui, name, word, selected, enabled, &icon, width)` | A 70 pt card with a 38 pt icon box (`icon` paints into it in the ink it is given), a name, one word and an accent check. Used for Performance, Quality and Custom. | as above, `pref_well` |
 | `help_icon(ui, text)` | The (i) after a label. Shows `text` as a tooltip and exposes it as the widget's label. | `form_dim`, `form_ink` |
 | `shortcut_binding(ui, chord, editable)` | Complete mono keycaps using the command-search painter; one focusable recorder target per binding, or a read-only label. Empty chords show dim Not assigned. `shortcut_binding_width` measures the same font and padding, including literal plus keys. Gallery: `shortcut_binding`. | `font_small/label`, `control_height`, `form_dim`, `form_primary`, `space_4/8/10`, `radius_sm` |
-| `carousel(ui, id, count, item_width, item_height, item)` | A row of items between a previous and a next arrow (both labelled from the `prefs.carousel_*` messages). `carousel_window(count, offset, available, item_width, gap, arrow)` says which items show; an arrow moves by the number of items that fit, the last page ends on the last item, and the arrow at an end is dimmed (0.35) and inert. The first shown index is kept in the Ui's temporary memory under `id`. | `dialog_border`, `control_fill`, `hover`, `form_ink`, `radius_lg` |
+| `theme_browser(ui, id, count, grid, reveal, item)` | The Appearance theme list: a carousel (one clipped row, an edge fade in the container fill, round arrows on a side with more cards, an arrow moves by the cards that fit, drag and horizontal wheel scroll while vertical wheel input goes to the page) or a 5-across grid with its own vertical scroll. `reveal` scrolls an index into view. The box and fades use the `settings_card_frame` fill and stroke. | `dialog_border`, `dialog_border`, `control_fill`, `hover`, `form_ink`, `radius_lg` |
 
 `card_look(selected, enabled, hovered, focused)` holds the state rules (border width, fill, ink, weight,
 dimming, focus ring) apart from the painting so they can be tested.
@@ -929,7 +929,7 @@ Theme thumbnails (`paint_theme_thumbnail`, `paint_theme_system`) take a `ThemeSa
 The Orientation figures and the visual-style icon are not repeated here: the app already has them.
 
 New pieces and figures each have an entry in `gallery::ELEMENTS` (`picture_card`, `toggle_tile`,
-`preset_card`, `help_icon`, `carousel`, `preference_theme_thumbnails`, `preference_figures`), checked
+`preset_card`, `help_icon`, `theme_browser`, `preference_theme_thumbnails`, `preference_figures`), checked
 in both themes. `SOLIDCRAFT_PREFERENCE_WIDGET_EVIDENCE=<dir>` keeps the CPU-rendered boards
 (`preferences-widgets-*.png`, `preferences-figures-*.png`) from
 `preference_widgets_and_figures_board_in_both_themes`.
