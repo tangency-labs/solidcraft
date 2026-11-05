@@ -5183,6 +5183,7 @@ fn centered_extrude(
     end: f64,
     sketch: Option<&SolvedSketch>,
     thin: Option<&crate::lineage::ThinWallRoles>,
+    two_sided: bool,
 ) -> Result<Vec<Traced>> {
     if !plane.origin.is_finite()
         || !plane.x.is_finite()
@@ -5195,12 +5196,17 @@ fn centered_extrude(
     }
     // The faces' roles: the sketch curve under each side, the caps by where they lie.
     let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
-    let roles = crate::lineage::ProfileRoles {
-        sketch,
-        region: Some(region),
-        caps: [Some(crate::lineage::extrude_cap_role(lo)), Some(crate::lineage::extrude_cap_role(hi))],
-        thin,
+    // A two-sided extrude has no cap on its sketch plane: its two caps close the two ends of
+    // the tool, the low one downwards and the high one upwards, so they are named by the end
+    // they close. Their height cannot tell them apart: both sides may lie on the same side of
+    // the sketch plane, and two caps named alike are two pieces of one face, which the
+    // history cannot tell apart (a sketch on either of them could not keep its attachment).
+    let caps = if two_sided {
+        [Some("bottom".to_string()), Some("top".to_string())]
+    } else {
+        [Some(crate::lineage::extrude_cap_role(lo)), Some(crate::lineage::extrude_cap_role(hi))]
     };
+    let roles = crate::lineage::ProfileRoles { sketch, region: Some(region), caps, thin };
     // Fit cap surfaces in their own coordinates. Fitting a distant world-space
     // wire can tilt an otherwise exact planar cap through numeric cancellation.
     // A side drawn in collinear pieces is one face (#1788), and so is a side along one ellipse
@@ -5432,7 +5438,7 @@ fn feature_tools_with_constructor(
             let untrimmed = extent.to.is_none() && extent.from.is_none() && !extent.through_all;
             let mut tools = Vec::new();
             for r in &regions {
-                tools.extend(centered_extrude(&ss.plane, r, lo + off, hi + off, Some(&ss), thin_roles.as_ref())?);
+                tools.extend(centered_extrude(&ss.plane, r, lo + off, hi + off, Some(&ss), thin_roles.as_ref(), extent.distance2.is_some())?);
             }
             // A cut or a join by profiles apart in the sketch (the letters of a text): each tool
             // lies in the prism over its profile, so the tools are apart too. The body is then cut once by all of them, or joined to
