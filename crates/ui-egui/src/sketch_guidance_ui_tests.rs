@@ -684,3 +684,73 @@ fn a_sketch_axis_line_takes_no_new_points_once_axis_snapping_is_off() {
         assert_eq!(on_drawn, 1, "{what}: the point by the crossing is held on the drawn line");
     }
 }
+
+/// The ids of the points on sketch axis lines (`Sketch::sketch_axis_line`): each line's two
+/// ends, 100 mm out on its axis.
+fn sketch_axis_line_ends(h: &Harness) -> Vec<String> {
+    use solidcraft_engine::sketch::LinkSource;
+    let st = h.app.session.world_state().unwrap();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    sk.points
+        .iter()
+        .filter(|p| p.link.as_deref().and_then(|l| sk.link(l)).is_some_and(|l| matches!(l.source, LinkSource::SketchAxis { .. })))
+        .map(|p| p.id.clone())
+        .collect()
+}
+
+/// #9330: a sketch axis's line ends 100 mm out on the axis. With axis snapping on, a drawing
+/// point by one of those ends snaps onto it, as onto any sketch point; with it off, it doesn't,
+/// for the reason the line itself takes no snaps then.
+#[test]
+fn an_end_of_a_sketch_axis_line_takes_no_points_once_axis_snapping_is_off() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.camera", json!({"target": [0, 0, 0], "distance": 600}));
+    h.frames(3);
+    let [x, y] = h.at(&json!({"sketch":[12.3, 0]})).unwrap();
+    step(&mut h, json!({"start":"sketch.point"}));
+    step(&mut h, json!({"click":[x, y - 2.0]}));
+    let ends = sketch_axis_line_ends(&h);
+    assert_eq!(ends.len(), 2, "the X axis's line, with its two ends: {ends:?}");
+    let [ex, ey] = h.at(&json!({"sketch":[100, 0]})).unwrap();
+    let pos = egui::pos2(ex as f32 + 2.0, ey as f32 - 2.0);
+    let rect = h.app.viewport.rect.expect("viewport");
+    assert!(rect.contains(pos), "the line's end is in view: {pos:?} {rect:?}");
+    let proj = crate::viewport::projection(&h.app, rect);
+    for snapping in [true, false] {
+        h.app.preferences.sketch_snap_to_axes = snapping;
+        let (_, id) = crate::viewport::sketch_point_at(&h.app, &proj, pos).unwrap();
+        assert_eq!(id.as_ref().is_some_and(|id| ends.contains(id)), snapping, "axis snapping {snapping}: {id:?}");
+    }
+}
+
+/// #9330: once a snap onto the X axis has left the axis's line in the sketch, a later point near
+/// that axis is snapped by the axis snap, not projected onto the line: it is held on the axis
+/// with its free coordinate on the grid, as the first point was.
+#[test]
+fn a_later_point_near_a_sketch_axis_keeps_its_free_coordinate_on_the_grid() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.frames(3);
+    step(&mut h, json!({"start":"sketch.point"}));
+    for x in [12.3, 47.13] {
+        let [sx, sy] = h.at(&json!({"sketch":[x, 0]})).unwrap();
+        step(&mut h, json!({"click":[sx, sy - 2.0]}));
+    }
+    step(&mut h, json!({"key":"Escape"}));
+    let held = held_on_axes(&h);
+    assert_eq!(held.len(), 2, "both points are held on the X axis: {held:?}");
+    let grid = solidcraft_engine::view::grid_step(h.app.cam.half_height()).0 / 10.0;
+    let st = h.app.session.world_state().unwrap();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    for (id, axis) in &held {
+        let p = sk.point_index(id).and_then(|i| sk.points.get(i)).map(|p| p.pos).unwrap();
+        assert_eq!(axis, "x", "{id}");
+        assert!(p.y.abs() < 1e-9, "{id} on the axis: {p:?}");
+        assert!(((p.x / grid).round() * grid - p.x).abs() < 1e-9, "{id}'s x on the {grid} mm grid: {p:?}");
+    }
+}

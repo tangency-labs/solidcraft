@@ -587,19 +587,31 @@ fn snaps_to_axes(app: &SolveApp) -> bool {
     app.preferences.sketch_snap_to_axes && app.origin_visible()
 }
 
+/// Whether `link` (a curve's or a point's) is the line an earlier snap onto the sketch's X or Y
+/// axis added (`Sketch::sketch_axis_line`), or one of its two end points.
+fn on_sketch_axis_line(sk: &solidcraft_engine::sketch::Sketch, link: Option<&str>) -> bool {
+    link.and_then(|id| sk.link(id)).is_some_and(|l| matches!(l.source, solidcraft_engine::sketch::LinkSource::SketchAxis { .. }))
+}
+
+/// Whether curve `i` is a sketch axis's line (see [`on_sketch_axis_line`]).
+fn is_sketch_axis_curve(sk: &solidcraft_engine::sketch::Sketch, i: usize) -> bool {
+    sk.curves.get(i).is_some_and(|c| on_sketch_axis_line(sk, c.link.as_deref()))
+}
+
 /// The curves (by index) a drawing point may snap to. The line an earlier snap onto the
-/// sketch's X or Y axis added (`Sketch::sketch_axis_line`) stays in the sketch, so while axis
-/// snapping is off ([`snaps_to_axes`]) it is left out: a point snapped onto it would be held on
-/// the axis all the same.
+/// sketch's X or Y axis added stays in the sketch, so while axis snapping is off
+/// ([`snaps_to_axes`]) it is left out: a point snapped onto it would be held on the axis all
+/// the same.
 fn snap_curves<'a>(app: &SolveApp, sk: &'a solidcraft_engine::sketch::Sketch) -> impl Fn(usize) -> bool + Copy + 'a {
     let axes = snaps_to_axes(app);
-    move |i| {
-        axes || !sk
-            .curves
-            .get(i)
-            .and_then(|c| sk.link(c.link.as_deref()?))
-            .is_some_and(|l| matches!(l.source, solidcraft_engine::sketch::LinkSource::SketchAxis { .. }))
-    }
+    move |i| axes || !is_sketch_axis_curve(sk, i)
+}
+
+/// Whether a drawing point may snap onto the existing sketch point `id`: not, while axis
+/// snapping is off, onto an end of a sketch axis's line (it lies on the axis, 100 mm out), for
+/// the reason [`snap_curves`] leaves the line out.
+pub(crate) fn snap_point(app: &SolveApp, sk: &solidcraft_engine::sketch::Sketch, id: &str) -> bool {
+    snaps_to_axes(app) || !sk.point_index(id).and_then(|i| sk.points.get(i)).is_some_and(|p| on_sketch_axis_line(sk, p.link.as_deref()))
 }
 
 /// Snap a cursor point on the sketch plane to what is inferred while drawing: a crossing of
@@ -698,9 +710,11 @@ pub fn refine_snap(
     }
     // On a curve (coincident with it). A spline, ellipse or conic has no exact shape here: the
     // nearest point of the polyline it is drawn with, which the click's point-on-curve
-    // constraint then puts on the curve itself (#9321).
+    // constraint then puts on the curve itself (#9321). A sketch axis's line is left to the
+    // axis snap below, which keeps the point's free coordinate on the grid as the first snap
+    // onto that axis did; a projection onto the line here wouldn't.
     if !mid_only && best.is_none() {
-        for (i, c) in sk.curves.iter().enumerate().filter(|(i, _)| take(*i)) {
+        for (i, c) in sk.curves.iter().enumerate().filter(|(i, _)| !is_sketch_axis_curve(sk, *i)) {
             let (d, q) = match sk.shape(i) {
                 Some(sh) => (sh.dist(lp), sh.project(lp)),
                 None if c.kind.is_freeform() => {

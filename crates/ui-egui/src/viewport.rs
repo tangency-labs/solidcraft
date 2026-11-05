@@ -4537,6 +4537,7 @@ pub fn sketch_point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec2, 
     for h in pick_for_tool(app, proj, pos) {
         if let Hit::SketchPoint { sketch, id, at } = h
             && sketch == sid
+            && crate::sketch_tools::snap_point(app, &ss.sketch, &id)
         {
             return Some((at, Some(id)));
         }
