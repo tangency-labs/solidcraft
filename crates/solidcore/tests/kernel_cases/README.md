@@ -7,7 +7,11 @@ This folder holds the kernel's operation-level cases as data, one entry each, by
 The runner that replays the entries is `crates/solidcore-ops/tests/kernel_cases.rs` (see [Running](#running)). The operations are SolidCraft's compositions of kernel calls (picks, per-edge fillet sessions, setbacks, the overflow retry, the stitch, error mapping), and their one home is `solidcore-ops` (`docs/layers.md`). `crates/solidcore-record/tests/kernel_cases_corpus.rs` checks the corpus itself:
 - every record reads as the record and passes its structural validation;
 - every operation's operands are given records or earlier outputs;
-- the manifest counts every entry.
+- the manifest counts every entry;
+- no two nonempty traces contain exactly the same calls, operand import options and decoded
+  operand records. Descriptions, expected values and gzip filenames do not make a replay
+  distinct. Numbers are compared exactly, without a tolerance. Empty traces remain records
+  of unsupported application operations and are not kernel replay inputs.
 
 ## Where it comes from
 
@@ -75,3 +79,8 @@ replays every entry through `solidcore-ops`' public operations, with the fixes i
 ## Updating
 
 Re-export SolidCraft's cases at the new pin and replace their entries in one pull request, keeping the cases added here. The SolidCraft and solidcore commits are in `manifest.json`.
+
+The five entries refreshed for #2722 carry `export_provenance` with their source,
+exporter patch and fix configuration; the manifest pins describe the remaining
+original exports. See [the duplicate audit](duplicate-audit.md) for reproduction
+steps and the evidence for each removed entry.

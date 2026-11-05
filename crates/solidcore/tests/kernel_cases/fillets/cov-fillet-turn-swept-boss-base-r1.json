@@ -4,9 +4,246 @@
     "b12": {
       "keeping_splines": false,
       "trusted": true
+    },
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
     }
   },
   "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                40.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                40.0,
+                30.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                30.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                30.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                30.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 5.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                25.0,
+                10.0,
+                10.0
+              ],
+              "start": [
+                15.0,
+                10.0,
+                10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                25.0,
+                20.0,
+                10.0
+              ],
+              "start": [
+                25.0,
+                10.0,
+                10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                15.0,
+                20.0,
+                10.0
+              ],
+              "start": [
+                25.0,
+                20.0,
+                10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                15.0,
+                10.0,
+                10.0
+              ],
+              "start": [
+                15.0,
+                20.0,
+                10.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
     {
       "inputs": [
         "b12"
@@ -142,7 +379,8 @@
           1.0,
           1.0,
           1.0
-        ]
+        ],
+        "turn": "swept"
       }
     }
   ],
@@ -156,19 +394,29 @@
     "source": "analytic",
     "sources": [],
     "tolerance": {
-      "rel": 1e-7
+      "rel": 1e-07
     },
     "volume_mm3": 12508.88525901954,
     "what": "the same boss's base rounds turned Swept: at each convex corner the section is revolved about the vertical corner edge through the corner's 90 degrees, a torus piece G1 to both rounds"
+  },
+  "export_provenance": {
+    "disabled_newer_application_flags": [
+      "fillet_through_extended_rail_end",
+      "fillet_round_on_round_as_definition"
+    ],
+    "exporter_commit": "0a79d0874400c8508f5bb6df1406b783f47090ca",
+    "fixes_source": "04b4b2db6:crates/solidcore/tests/kernel_cases/fixes.json",
+    "solidcore": "8ddce901671f1cebd9214a31d21895d725e886c8",
+    "solidcraft": "8f264574875d46860614e9381ee5f8222db7b7a6"
   },
   "expressible": false,
   "operation_expressible": true,
   "outcome": {
     "ran": true,
     "raw_counts": {
-      "edges": 32,
-      "faces": 15,
-      "vertices": 20
+      "edges": 40,
+      "faces": 19,
+      "vertices": 24
     }
   },
   "records": "cov-fillet-turn-swept-boss-base-r1.bodies.json.gz",
@@ -180,17 +428,17 @@
   ],
   "rig": {
     "error": null,
-    "known_failing": "[fail] as on SMLib: solid.fillet has no `turn`; the corners are mitred (12508.9675, the Mitre case's volume)",
+    "known_failing": null,
     "measured": {
-      "area_mm2": 3983.3982236817183,
+      "area_mm2": 3983.2766795022635,
       "body_count": 1,
-      "edges": 32,
-      "faces": 15,
-      "vertices": 20,
-      "volume_mm3": 12508.967554825027
+      "edges": 40,
+      "faces": 19,
+      "vertices": 24,
+      "volume_mm3": 12508.885259031766
     },
     "refused_with": null,
-    "status": "fail"
+    "status": "pass"
   },
   "sources": [],
   "traced_ops": [

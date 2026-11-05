@@ -77,6 +77,48 @@
           }
         ]
       }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "distance": 70.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "center": [
+                -5.0,
+                20.0,
+                30.001
+              ],
+              "end": 6.896285307179586,
+              "radius": 10.0,
+              "reference": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
     }
   ],
   "case": "007-near-tangent-gap-1e-3",
@@ -90,6 +132,16 @@
     "vertices": 8,
     "volume_mm3": 48000,
     "what": "a cylinder r10 along X 1e-3 mm above the top face, cut"
+  },
+  "export_provenance": {
+    "disabled_newer_application_flags": [
+      "fillet_through_extended_rail_end",
+      "fillet_round_on_round_as_definition"
+    ],
+    "exporter_commit": "0a79d0874400c8508f5bb6df1406b783f47090ca",
+    "fixes_source": "04b4b2db6:crates/solidcore/tests/kernel_cases/fixes.json",
+    "solidcore": "8ddce901671f1cebd9214a31d21895d725e886c8",
+    "solidcraft": "8f264574875d46860614e9381ee5f8222db7b7a6"
   },
   "expressible": true,
   "golden": {

@@ -20,7 +20,7 @@
       }
     },
     "booleans": {
-      "cases": 125,
+      "cases": 124,
       "chain": {
         "1": 9,
         "121": 1,
@@ -34,14 +34,14 @@
         "5": 1,
         "6": 1,
         "61": 1,
-        "7": 78,
+        "7": 77,
         "76": 1,
         "8": 6,
         "9": 2
       },
-      "expressible": 110,
+      "expressible": 109,
       "not_expressible": 12,
-      "operation_expressible": 113,
+      "operation_expressible": 112,
       "reasons": {
         "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 10,
         "refused or failed in SolidCraft, not in a kernel operation": 2
@@ -100,23 +100,24 @@
       "ungraded": {}
     },
     "fillets": {
-      "cases": 271,
+      "cases": 265,
       "chain": {
+        "13": 4,
         "2": 6,
-        "4": 246,
+        "4": 236,
         "7": 2,
         "8": 1
       },
       "expressible": 41,
       "not_expressible": 16,
-      "operation_expressible": 255,
+      "operation_expressible": 249,
       "reasons": {
         "SolidCraft has no command for it yet": 2,
         "refused or failed in SolidCraft, not in a kernel operation": 14
       },
       "ungraded": {
-        "continuity": 211,
-        "faces": 4,
+        "continuity": 205,
+        "faces": 2,
         "refusal \"angle\"": 1,
         "refusal \"continues tangentially\"": 3,
         "refusal \"larger than the faces beside its edges allow\"": 1,
@@ -207,7 +208,7 @@
     "ladder/02-booleans": {
       "cases": 25,
       "chain": {
-        "1": 1,
+        "2": 1,
         "7": 22
       },
       "expressible": 21,
@@ -408,31 +409,31 @@
       }
     },
     "solids": {
-      "cases": 11,
+      "cases": 10,
       "chain": {
         "2": 1,
         "3": 1,
         "4": 2
       },
       "expressible": 4,
-      "not_expressible": 7,
+      "not_expressible": 6,
       "operation_expressible": 4,
       "reasons": {
-        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 5,
+        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 4,
         "refused or failed in SolidCraft, not in a kernel operation": 2
       },
       "ungraded": {}
     },
     "surfaces": {
-      "cases": 63,
+      "cases": 62,
       "chain": {
-        "1": 9,
+        "1": 8,
         "2": 24,
         "4": 8
       },
-      "expressible": 30,
+      "expressible": 29,
       "not_expressible": 22,
-      "operation_expressible": 41,
+      "operation_expressible": 40,
       "reasons": {
         "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 11,
         "refused or failed in SolidCraft, not in a kernel operation": 11
@@ -443,9 +444,9 @@
       }
     },
     "sweeps": {
-      "cases": 96,
+      "cases": 95,
       "chain": {
-        "1": 35,
+        "1": 34,
         "10": 2,
         "109": 1,
         "13": 1,
@@ -456,9 +457,9 @@
         "7": 42,
         "8": 2
       },
-      "expressible": 88,
+      "expressible": 87,
       "not_expressible": 7,
-      "operation_expressible": 89,
+      "operation_expressible": 88,
       "reasons": {
         "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 3,
         "refused or failed in SolidCraft, not in a kernel operation": 4
@@ -468,21 +469,21 @@
       }
     },
     "tessellation": {
-      "cases": 14,
+      "cases": 13,
       "chain": {
-        "1": 3,
+        "1": 2,
         "11": 1,
         "13": 1,
         "7": 8
       },
       "expressible": 9,
       "not_expressible": 1,
-      "operation_expressible": 13,
+      "operation_expressible": 12,
       "reasons": {
         "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 1
       },
       "ungraded": {
-        "watertight": 4
+        "watertight": 3
       }
     },
     "threads": {
@@ -1876,12 +1877,6 @@
     },
     {
       "case": "solids/cov-align-face-onto-offset-plane",
-      "why": [
-        "body \"Post\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
-      ]
-    },
-    {
-      "case": "solids/cov-align-side-face-turns-onto-top-face",
       "why": [
         "body \"Post\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
       ]

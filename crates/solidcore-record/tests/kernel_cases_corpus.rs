@@ -2,8 +2,8 @@
 //! rig): every operand record an entry carries (in its `<case>.bodies.json.gz`) is this crate's
 //! B-rep record, reads with its serde form (unknown fields refused) and passes its structural
 //! validation, and every operation an entry lists takes records it gives or bodies an earlier
-//! operation made. The runner that replays the operations lands with
-//! `solidcore-ops`; until then this keeps the corpus readable as the record it is.
+//! operation made. Nonempty replay inputs are unique across the corpus: descriptions and
+//! expected answers cannot disguise duplicate calls on the same operand records.
 
 #![allow(
     clippy::unwrap_used,
@@ -17,6 +17,22 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 use solidcore_record::brep::Brep;
+
+/// Exact replay input, independent of the entry's description, expected values and gzip
+/// filename. Do not round numbers: even a tiny parameter change can select another branch.
+/// Empty traces describe missing/application-only operations, not duplicate kernel tests.
+fn replay_input(e: &Value, records: &Value) -> Option<Vec<u8>> {
+    if e["calls"].as_array().unwrap().is_empty() {
+        return None;
+    }
+    let mut input = serde_json::json!({
+        "calls": e["calls"],
+        "bodies": e["bodies"],
+        "records": records,
+    });
+    input.sort_all_objects();
+    Some(serde_json::to_vec(&input).unwrap())
+}
 
 fn corpus() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../solidcore/tests/kernel_cases")
@@ -34,6 +50,89 @@ fn entries(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(p);
         }
     }
+}
+
+#[test]
+fn no_two_entries_replay_the_same_calls_and_bodies() {
+    let root = corpus();
+    let mut files = Vec::new();
+    entries(&root, &mut files);
+    files.sort();
+    let mut seen = std::collections::BTreeMap::new();
+    let mut duplicates = Vec::new();
+    for f in files {
+        let e: Value = serde_json::from_slice(&std::fs::read(&f).unwrap()).unwrap();
+        let records = match e["records"].as_str() {
+            Some(name) => {
+                let file = std::fs::File::open(f.with_file_name(name)).unwrap();
+                let mut text = String::new();
+                flate2::read::GzDecoder::new(file)
+                    .read_to_string(&mut text)
+                    .unwrap();
+                serde_json::from_str(&text).unwrap()
+            }
+            None => serde_json::json!({}),
+        };
+        if let Some(input) = replay_input(&e, &records) {
+            let name = f.strip_prefix(&root).unwrap().display().to_string();
+            match seen.entry(input) {
+                std::collections::btree_map::Entry::Vacant(slot) => {
+                    slot.insert(name);
+                }
+                std::collections::btree_map::Entry::Occupied(slot) => {
+                    duplicates.push(format!("{} = {name}", slot.get()));
+                }
+            }
+        }
+    }
+    assert!(
+        duplicates.is_empty(),
+        "duplicate kernel replay inputs (fix lost trace arguments before deduplicating):\n{}",
+        duplicates.join("\n")
+    );
+}
+
+#[test]
+fn replay_identity_uses_arguments_and_records_not_case_metadata() {
+    let entry = serde_json::json!({
+        "case": "one", "records": "one.bodies.json.gz", "expected": {"volume": 1},
+        "bodies": {"b1": {"trusted": true, "keeping_splines": false}},
+        "calls": [{"op": "blend_dropping", "inputs": ["b1"], "outputs": ["b2"],
+            "params": {"turn": "mitre", "sizes": [1.0]}}],
+    });
+    let records = serde_json::json!({"b1": {"vertices": [[0.0, 0.0, 0.0]]}});
+    let key = replay_input(&entry, &records);
+    let mut renamed = entry.clone();
+    renamed["case"] = serde_json::json!("two");
+    renamed["records"] = serde_json::json!("two.bodies.json.gz");
+    renamed["expected"]["volume"] = serde_json::json!(2);
+    assert_eq!(key, replay_input(&renamed, &records));
+
+    for (pointer, value) in [
+        ("/calls/0/params/turn", serde_json::json!("swept")),
+        ("/calls/0/params/sizes/0", serde_json::json!(1.0 + 1e-12)),
+        ("/bodies/b1/trusted", serde_json::json!(false)),
+        ("/bodies/b1/keeping_splines", serde_json::json!(true)),
+    ] {
+        let mut changed = entry.clone();
+        *changed.pointer_mut(pointer).unwrap() = value;
+        assert_ne!(key, replay_input(&changed, &records), "ignored {pointer}");
+    }
+    let mut changed_records = records.clone();
+    changed_records["b1"]["vertices"][0][0] = serde_json::json!(1e-12);
+    assert_ne!(key, replay_input(&entry, &changed_records));
+    let mut extra_call = entry.clone();
+    extra_call["calls"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "op": "copy", "inputs": ["b2"], "outputs": ["b3"], "params": {},
+        }));
+    assert_ne!(key, replay_input(&extra_call, &records));
+    assert_eq!(
+        None,
+        replay_input(&serde_json::json!({"calls": []}), &records)
+    );
 }
 
 fn validate_counts(root: &Path, files: &[PathBuf], manifest: &Value) {

@@ -70,16 +70,6 @@
     "reason": "continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0"
   },
   {
-    "case": "fillets/cov-fillet-turn-swept-boss-base-r1",
-    "issue": "to file",
-    "reason": "as on SMLib: solid.fillet has no `turn`; the corners are mitred (12508.9675, the Mitre case's volume)"
-  },
-  {
-    "case": "fillets/cov-fillet-turn-swept-pocket-sharp-corner-refused-r1",
-    "issue": "to file",
-    "reason": "as on SMLib: solid.fillet has no `turn`, so the sharp concave corners are mitred, not refused"
-  },
-  {
     "case": "fillets/cov-junction-boss-tilt-20-root-round",
     "issue": "to file",
     "reason": "fillet status 1001 on a cylinder tilted 20 degrees into the plate, as on SMLib"

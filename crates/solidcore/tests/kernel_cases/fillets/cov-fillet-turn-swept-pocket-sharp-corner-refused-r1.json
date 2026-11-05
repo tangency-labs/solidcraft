@@ -4,9 +4,246 @@
     "b12": {
       "keeping_splines": false,
       "trusted": true
+    },
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
     }
   },
   "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                40.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                40.0,
+                30.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                30.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                30.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                30.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 5.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                30.0,
+                10.0,
+                -5.0
+              ],
+              "start": [
+                10.0,
+                10.0,
+                -5.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                30.0,
+                20.0,
+                -5.0
+              ],
+              "start": [
+                30.0,
+                10.0,
+                -5.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                10.0,
+                20.0,
+                -5.0
+              ],
+              "start": [
+                30.0,
+                20.0,
+                -5.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                10.0,
+                10.0,
+                -5.0
+              ],
+              "start": [
+                10.0,
+                20.0,
+                -5.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    },
     {
       "inputs": [
         "b12"
@@ -40,13 +277,11 @@
       }
     },
     {
+      "error": "the swept corner is not built at (10.000, 20.000, 5.000): a swept turn cannot pass the sharp concave corner edge between the rounds; round that edge at a radius of at least 1 first",
       "inputs": [
         "b15"
       ],
       "op": "blend_dropping",
-      "outputs": [
-        "b16"
-      ],
       "params": {
         "edges": {
           "kind": "edge",
@@ -142,7 +377,8 @@
           1.0,
           1.0,
           1.0
-        ]
+        ],
+        "turn": "swept"
       }
     }
   ],
@@ -155,29 +391,31 @@
     "sources": [],
     "what": "the same pocket's floor rounds asked to turn Swept at sharp concave corners: the ball cannot pass a concave corner rounded less than its radius, so it is refused, naming the corner radius that works"
   },
+  "export_provenance": {
+    "disabled_newer_application_flags": [
+      "fillet_through_extended_rail_end",
+      "fillet_round_on_round_as_definition"
+    ],
+    "exporter_commit": "0a79d0874400c8508f5bb6df1406b783f47090ca",
+    "fixes_source": "04b4b2db6:crates/solidcore/tests/kernel_cases/fixes.json",
+    "solidcore": "8ddce901671f1cebd9214a31d21895d725e886c8",
+    "solidcraft": "8f264574875d46860614e9381ee5f8222db7b7a6"
+  },
   "expressible": true,
   "operation_expressible": true,
   "outcome": {
-    "ran": true,
-    "raw_counts": {
-      "edges": 32,
-      "faces": 15,
-      "vertices": 20
-    }
+    "engine_error": "step 6 (solid.fillet): invalid input: the fillet's swept corner at (10.000, 20.000, 5.000) is not built: a swept turn cannot pass the sharp concave corner edge between the rounds; round that edge at a radius of at least 1 first",
+    "kernel_error": "the swept corner is not built at (10.000, 20.000, 5.000): a swept turn cannot pass the sharp concave corner edge between the rounds; round that edge at a radius of at least 1 first",
+    "ran": false
   },
   "records": "cov-fillet-turn-swept-pocket-sharp-corner-refused-r1.bodies.json.gz",
-  "result": [
-    {
-      "body": "Part",
-      "made": "b16"
-    }
-  ],
+  "result": [],
   "rig": {
-    "error": "succeeded where the case expects a refusal",
-    "known_failing": "[fail] as on SMLib: solid.fillet has no `turn`, so the sharp concave corners are mitred, not refused",
+    "error": null,
+    "known_failing": null,
     "measured": null,
-    "refused_with": null,
-    "status": "fail"
+    "refused_with": "step 6 (solid.fillet): invalid input: the fillet's swept corner at (10.000, 20.000, 5.000) is not built: a swept turn cannot pass the sharp concave corner edge between the rounds; round that edge at a radius of at least 1 first",
+    "status": "pass"
   },
   "sources": [],
   "traced_ops": [
