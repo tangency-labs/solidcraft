@@ -623,3 +623,47 @@ fn reparent_items_keeps_hidden_placements_hidden() {
     assert_eq!(s.doc.occurrences.iter().find(|o| o.id == outer_occurrence).map(|o| o.parent), Some(dest));
     let _ = part;
 }
+
+/// Three loose sketches and an empty part, the sketch with id 2 and another one named "2".
+/// Returns the session, the part, the sketch named "2" and the sketch numbered 2.
+fn sketch_named_like_an_id() -> (Session, u64, u64, u64) {
+    let mut s = Session::default();
+    for name in ["A", "B", "C"] {
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": name}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    let sketches: Vec<u64> = s.doc.features.iter().map(|f| f.id).collect();
+    assert!(sketches.contains(&2), "a sketch has id 2: {sketches:?}");
+    let named = *sketches.iter().find(|id| **id != 2).unwrap();
+    run(&mut s, "timeline.rename", json!({"feature": named, "name": "2"}));
+    let part = run(&mut s, "component.create", json!({"name": "Part", "activate": false}))["component"].as_u64().unwrap();
+    (s, part, named, 2)
+}
+
+/// A feature named "2" is the one `"2"` names, not the feature whose id is 2, as in the
+/// timeline commands (#9748); the number 2 still names the feature with that id.
+#[test]
+fn component_commands_take_a_name_that_looks_like_an_id_as_the_name() {
+    let moved_by = |command: &str, key: Value| {
+        let (mut s, part, named, numbered) = sketch_named_like_an_id();
+        run(&mut s, command, json!({"features": [key], "component": part}));
+        let component = |id: u64| s.doc.feature(id).map(|f| f.component);
+        (component(named) == Some(part), component(numbered) == Some(part))
+    };
+    for command in ["component.move_features", "browser.reparent"] {
+        assert_eq!(moved_by(command, json!("2")), (true, false), "{command}: the name \"2\"");
+        assert_eq!(moved_by(command, json!(2)), (false, true), "{command}: the id 2");
+    }
+}
+
+/// `component.move_sketches.to_parts` with `"2"` looks at the sketch named "2": it is on no
+/// face, so it stays, and the reply names it.
+#[test]
+fn sketches_to_parts_takes_a_name_that_looks_like_an_id_as_the_name() {
+    let (mut s, _, named, _) = sketch_named_like_an_id();
+    let r = run(&mut s, "component.move_sketches.to_parts", json!({"sketches": ["2"]}));
+    assert_eq!(r["moved"], 0, "{r}");
+    let kept: Vec<u64> = r["kept"].as_array().unwrap().iter().filter_map(|k| k["sketch"].as_u64()).collect();
+    assert_eq!(kept, [named], "{r}");
+}
