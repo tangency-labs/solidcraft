@@ -16,6 +16,8 @@
 //!   cursor can act it out first); fails if the answer came in fewer than `min_frames` frames
 //! - `{"call": "ui.view", "params": {…}}`: any other control request (`fail: true` expects an
 //!   error)
+//! - `{"panel_fixture": {"enabled": true, "preset": "docks"}}`: explicit synthetic content
+//!   in the real workspace panel host; `{}` inspects and `{"enabled": false}` tears it down
 //! - `{"make_image": "pic.png"}`: a picture in the scenario's folder
 //! - `{"choose_file": "part.step"}`: the next Open picker returns that file of the scenario's
 //!   folder (Save pickers save there)
@@ -475,7 +477,9 @@ impl Harness {
     pub fn step(&mut self, s: &Value) -> Result<(), String> {
         let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
         let res =
-            if let Some(id) = s.get("start").and_then(Value::as_str) {
+            if let Some(params) = s.get("panel_fixture") {
+                self.call("ui.panel_fixture", params.clone())
+            } else if let Some(id) = s.get("start").and_then(Value::as_str) {
                 self.call("ui.start", json!({ "command": id }))
             } else if let Some(k) = s.get("key").and_then(Value::as_str) {
                 {

@@ -1422,9 +1422,9 @@ fn pipe_and_sweep_follow_3d_sketch_curves() {
 }
 
 /// Between two points, or on a line, that don't line up with an axis, an `auto` dimension takes
-/// its orientation from where its text goes relative to the box the two span: inside it the
-/// distance between them, above or below it the horizontal distance, beside it the vertical
-/// one, in its outer corners the distance again (#257, #7295).
+/// its orientation from where its text goes: across from the two (and a tenth of their distance
+/// past) the distance between them; pulled further past an end, up or down from it the
+/// horizontal distance, sideways the vertical one (#257, #7295).
 #[test]
 fn auto_dimension_orientation_follows_where_its_text_is_placed() {
     use solidcraft_sketch::ConstraintKind;
@@ -1441,8 +1441,8 @@ fn auto_dimension_orientation_follows_where_its_text_is_placed() {
         (kind, r["measured"].as_f64().unwrap_or(f64::NAN), sk)
     };
     let points = json!(["l1.start", "l1.end"]);
-    // A 30 × 40 line (50 long), and a shallow one, 50 × 10, whose box is a thin strip: above
-    // the middle of it is horizontal, not the distance between its ends.
+    // A 30 × 40 line (50 long), and a shallow one, 50 × 10: above or below the middle of it is
+    // the distance between its ends, and past its ends both other types have wide zones.
     let shallow = 2600_f64.sqrt();
     let cases: [([f64; 2], [f64; 2], [f64; 3], &[([f64; 2], &str)]); 2] = [
         (
@@ -1451,16 +1451,18 @@ fn auto_dimension_orientation_follows_where_its_text_is_placed() {
             [30.0, 40.0, 50.0],
             &[
                 ([15.0, 60.0], "horizontal"),
-                ([15.0, 41.0], "horizontal"),
                 ([15.0, -20.0], "horizontal"),
+                ([-20.0, -25.0], "horizontal"),
+                ([40.0, 55.0], "horizontal"),
                 ([-30.0, 5.0], "vertical"),
                 ([55.0, 38.0], "vertical"),
-                ([-20.0, 25.0], "vertical"),
-                ([45.0, 10.0], "vertical"),
+                ([-25.0, -20.0], "vertical"),
                 ([20.0, 10.0], "aligned"),
                 ([10.0, 30.0], "aligned"),
-                ([-20.0, -20.0], "aligned"),
-                ([40.0, 50.0], "aligned"),
+                ([15.0, 41.0], "aligned"),
+                ([-20.0, 25.0], "aligned"),
+                ([45.0, 10.0], "aligned"),
+                ([32.0, 43.0], "aligned"),
             ],
         ),
         (
@@ -1468,14 +1470,18 @@ fn auto_dimension_orientation_follows_where_its_text_is_placed() {
             [60.0, 0.0],
             [50.0, 10.0, shallow],
             &[
-                ([35.0, 30.0], "horizontal"),
-                ([35.0, -20.0], "horizontal"),
-                ([12.0, 40.0], "horizontal"),
+                ([80.0, 40.0], "horizontal"),
+                ([65.0, -30.0], "horizontal"),
+                ([0.0, -10.0], "horizontal"),
+                ([2.0, 30.0], "horizontal"),
                 ([80.0, 5.0], "vertical"),
+                ([90.0, -2.0], "vertical"),
                 ([0.0, 3.0], "vertical"),
+                ([35.0, 30.0], "aligned"),
+                ([35.0, -20.0], "aligned"),
                 ([35.0, 6.0], "aligned"),
-                ([80.0, 40.0], "aligned"),
-                ([0.0, -10.0], "aligned"),
+                ([12.0, 40.0], "aligned"),
+                ([63.0, 5.0], "aligned"),
             ],
         ),
     ];
@@ -2013,6 +2019,58 @@ fn the_first_dimension_scales_a_sketch_drawn_by_eye() {
 }
 
 #[test]
+fn the_first_dimension_scales_a_profile_symmetric_about_the_sketch_axis() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, 20], "p1": [10, 30]}));
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": "l1.start", "b": "l1.end", "line": "y"}));
+    let before = sketch(&s);
+
+    let out = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "40 mm", "scale_sketch": true}));
+    assert_eq!(out["scaled"], 2.0, "{out}");
+    assert_eq!(out["measured"], 40.0, "{out}");
+    let after = sketch(&s);
+    for (p, q) in before.points.iter().zip(&after.points) {
+        let want = if p.fixed { p.pos } else { p.pos * 2.0 };
+        assert!(q.pos.dist(want) < 1e-6, "{}: {:?} -> {:?}, expected {want:?}", p.id, p.pos, q.pos);
+    }
+}
+
+#[test]
+fn the_first_dimension_leaves_another_profile_on_the_same_sketch_axis_alone() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, 20], "p1": [10, 30]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-6, 50], "p1": [6, 65]}));
+    for [a, b] in [["l1.start", "l1.end"], ["l5.start", "l5.end"]] {
+        run(&mut s, "sketch.constraint.symmetry", json!({"a": a, "b": b, "line": "y"}));
+    }
+    let before = sketch(&s);
+
+    let out = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "40 mm", "scale_sketch": true}));
+    assert!(out.get("scaled").is_none(), "{out}");
+    let after = sketch(&s);
+    // The second rectangle's four points remain at their original positions.
+    for (p, q) in before.points.iter().zip(&after.points).skip(5).take(4) {
+        assert!(q.pos.dist(p.pos) < 1e-6, "{}: {:?} -> {:?}", p.id, p.pos, q.pos);
+    }
+}
+
+#[test]
+fn the_first_dimension_measuring_to_a_sketch_axis_endpoint_uses_its_fixed_position() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, 20], "p1": [10, 30]}));
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": "l1.start", "b": "l1.end", "line": "y"}));
+    let before = sketch(&s);
+    let axis = before.sketch_axis_curve("y").unwrap();
+    let end = format!("{}.end", before.curves[axis].id);
+    let end_pos = pt(&s, &end);
+
+    let out = run(&mut s, "sketch.dimension", json!({"entities": ["l1.start", end], "type": "vertical", "value": "60 mm", "scale_sketch": true}));
+    assert!(out.get("scaled").is_none(), "{out}");
+    assert_eq!(out["measured"], 60.0, "{out}");
+    assert_eq!(pt(&s, &end), end_pos);
+}
+
+#[test]
 fn the_first_dimension_does_not_scale_a_sketch_that_has_a_size() {
     // A sketch with projected or fixed geometry, or another length dimension, already has a
     // size: its first new dimension sizes what it measures as before.
@@ -2422,4 +2480,56 @@ fn a_dimension_refuses_a_long_list_of_entities() {
     assert!(error.to_string().contains("at most"), "{error}");
     // The refused request leaves the design as it was.
     assert_eq!(serde_json::to_value(&s.doc).unwrap(), before);
+}
+
+/// #5961: `sketch.move_points` moves several points of a polyline, each to its own target, by id
+/// or by `near`, in one undo step; it says where each ended up, refuses a `near` that finds
+/// nothing or two points as close, and reports a fixed point that can't move.
+#[test]
+fn move_points_moves_each_point_to_its_own_target() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0], [20, 0], [30, 0]]}));
+    let undo_before = run(&mut s, "document.inspect", json!({}))["undo"].clone();
+    let r = run(&mut s, "sketch.move_points", json!({"moves": [{"point": "l1.end", "to": [10, 5]}, {"near": [20.05, 0], "to": [20, -5]}]}));
+    let moved = r["moved"].as_array().unwrap();
+    assert_eq!(moved.len(), 2, "{r}");
+    assert!(moved.iter().all(|m| m["reached"] == true), "{r}");
+    assert_eq!(moved[1]["to"], json!([20.0, -5.0]));
+    let sk = sketch(&s);
+    let at = |id: &str| sk.point(sk.resolve_point(id).unwrap()).unwrap();
+    assert!(at("l1.end").dist(solidcore_record::Vec2::new(10.0, 5.0)) < 1e-9);
+    assert!(at("l2.end").dist(solidcore_record::Vec2::new(20.0, -5.0)) < 1e-9);
+    assert!(at("l3.end").dist(solidcore_record::Vec2::new(30.0, 0.0)) < 1e-9, "the other points stay");
+    // One undo step takes both back.
+    let undo_after = run(&mut s, "document.inspect", json!({}))["undo"].as_u64().unwrap();
+    assert_eq!(undo_after, undo_before.as_u64().unwrap() + 1);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(pt(&s, "l1.end").dist(solidcore_record::Vec2::new(10.0, 0.0)) < 1e-9);
+    // `near` that finds nothing, or a malformed move, is refused and moves nothing.
+    for bad in [
+        json!({"moves": [{"near": [100, 100], "to": [0, 0]}]}),
+        json!({"moves": [{"near": [10, 0]}]}),
+        json!({"moves": []}),
+        json!({"moves": [{"point": "l1.end", "to": [1, 1]}], "tolerance": -1}),
+    ] {
+        let before = sketch(&s);
+        assert!(s.execute("sketch.move_points", &bad).is_err(), "{bad}");
+        assert_eq!(sketch(&s), before, "{bad}");
+    }
+    // A fixed point is reported, not silently left where it was.
+    run(&mut s, "sketch.constraint.fix", json!({"entities": ["l3.end"]}));
+    let r = run(&mut s, "sketch.move_points", json!({"moves": [{"point": "l3.end", "to": [40, 0]}]}));
+    assert_eq!(r["moved"][0]["reached"], false, "{r}");
+    assert_eq!(r["moved"][0]["at"], json!([30.0, 0.0]), "{r}");
+}
+
+/// Two sketch points as close to `near` (two points at one place) can't be told apart: the
+/// move is refused.
+#[test]
+fn move_points_refuses_a_near_that_two_points_answer() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.point", json!({"point": [10, 0]}));
+    run(&mut s, "sketch.point", json!({"point": [10, 0]}));
+    let e = s.execute("sketch.move_points", &json!({"moves": [{"near": [10, 0], "to": [12, 0]}]})).unwrap_err().to_string();
+    assert!(e.contains("as close"), "{e}");
 }

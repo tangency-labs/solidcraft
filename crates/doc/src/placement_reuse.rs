@@ -106,6 +106,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 distance2: _,
                 start_offset: _,
                 through_all,
+                second_follows_first: _,
                 taper: _,
                 to,
                 to_offset: _,
@@ -123,6 +124,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
 /// Assembly records do not feed any of the feature kinds accepted by `local_geometry`.
 fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
     let Document {
+        newer_file: _,
         render,
         format,
         format_pending,
