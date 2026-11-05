@@ -1079,6 +1079,8 @@ preference_settings! {
     mouse_gestures: crate::mouse_gesture::Config = Default::default(), PAGE_NAVIGATION;
     /// The wheel zooms out when turned forward.
     zoom_reverse: bool = false, PAGE_NAVIGATION => check("Reverse zoom direction");
+    /// Maya Alt+right drag uses horizontal motion; off restores the former vertical zoom.
+    maya_horizontal_zoom: bool = true, PAGE_NAVIGATION => check_id("nav.maya_horizontal_zoom.label");
     /// What an orbit turns around.
     orbit_around: OrbitAround = OrbitAround::default(), PAGE_NAVIGATION;
     /// The cursor preference as releases before the origin option saved it (`true` = the point
@@ -10159,6 +10161,23 @@ mod tests {
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&app.prefs());
         assert_eq!(other.preferences.nav, "hfss");
+    }
+
+    #[test]
+    fn maya_zoom_axis_preference_is_saved_and_reset_with_navigation() {
+        let mut h = crate::scenario::Harness::new();
+        assert!(h.app.preferences.maya_horizontal_zoom);
+        control(&mut h.app, &json!({"open":"Navigation","nav":"maya","maya_horizontal_zoom":false})).unwrap();
+        control(&mut h.app, &json!({"button":"apply"})).unwrap();
+        let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        other.load_prefs(&h.app.prefs());
+        assert_eq!(other.preferences.nav, "maya");
+        assert!(!other.preferences.maya_horizontal_zoom, "the legacy direction survives reopening");
+        control(&mut h.app, &json!({"button":"defaults"})).unwrap();
+        assert!(h.app.preferences.maya_horizontal_zoom);
+        control(&mut h.app, &json!({"button":"cancel"})).unwrap();
+        assert!(!h.app.preferences.maya_horizontal_zoom, "Cancel restores the applied legacy choice");
+        assert!(set(&mut h.app, &json!({"maya_horizontal_zoom":"sideways"})).is_err());
     }
 
     /// The dialog: changes apply at once, Cancel puts back what was there when it opened, Apply

@@ -72,6 +72,7 @@ const PROFILE_KEYS: &[&str] = &[
     "look_at_anim",
     "look_at_speed",
     "manipulator_free_alt",
+    "maya_horizontal_zoom",
     "middle_double_click",
     "mouse_gestures",
     "nav",
