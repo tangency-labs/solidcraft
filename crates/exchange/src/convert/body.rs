@@ -109,6 +109,20 @@ pub(crate) fn body(doc: &Document, b: &ModelBody, tolerance: Tolerance, mass: bo
         .collect::<Result<_>>()?;
 
     let vertex_names = solidcraft_doc::naming::vertex_names(b);
+    // The edges ending at each corner, in edge order, found once.
+    let mut at_corner: Vec<Vec<&Edge>> = vec![Vec::new(); record.as_ref().map_or(0, |r| r.vertices.len())];
+    for e in &edges {
+        if let Some([s, z]) = e.ends {
+            if let Some(list) = at_corner.get_mut(s.index()) {
+                list.push(e);
+            }
+            if z != s
+                && let Some(list) = at_corner.get_mut(z.index())
+            {
+                list.push(e);
+            }
+        }
+    }
     let vertices = record
         .as_ref()
         .map(|r| r.vertices.as_slice())
@@ -117,7 +131,7 @@ pub(crate) fn body(doc: &Document, b: &ModelBody, tolerance: Tolerance, mass: bo
         .enumerate()
         .map(|(k, v)| {
             let me = VertexIndex(index32(k));
-            let ending: Vec<&Edge> = edges.iter().filter(|e| e.ends.is_some_and(|ends| ends.contains(&me))).collect();
+            let ending: &[&Edge] = at_corner.get(k).map_or(&[], Vec::as_slice);
             // The mesh vertex at the corner: an end of an edge that ends there.
             let position = ending.iter().find_map(|e| {
                 let [start, end] = e.ends?;

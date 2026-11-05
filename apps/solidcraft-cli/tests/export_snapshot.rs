@@ -88,6 +88,11 @@ fn export_snapshot_writes_the_design_at_the_values_given() {
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     let exact: Value = serde_json::from_slice(&std::fs::read(&exact).unwrap()).unwrap();
     assert_eq!(exact["bodies"][0]["record"]["faces"].as_array().map(Vec::len), Some(7));
+    // A switch before the design path is still a switch.
+    let first = dir.0.join("first.json");
+    let o = cli().arg("export-snapshot").arg("--record").arg(&design).arg("--out").arg(&first).output().unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(std::fs::read(&first).unwrap(), std::fs::read(dir.0.join("exact.json")).unwrap());
 }
 
 #[test]

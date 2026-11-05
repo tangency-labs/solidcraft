@@ -105,10 +105,13 @@ pub fn to_json(snapshot: &Snapshot) -> Result<String> {
     serde_json::to_string(snapshot).map_err(|e| Error::Invalid(format!("snapshot as JSON: {e}")))
 }
 
-/// A snapshot read from JSON, checked ([`Snapshot::validate`]). A schema above [`SCHEMA`] is
-/// refused; unknown fields are ignored.
+/// A snapshot read from JSON, checked ([`Snapshot::validate`]). A missing schema or one above
+/// [`SCHEMA`] is refused; unknown fields are ignored.
 pub fn from_json(text: &str) -> Result<Snapshot> {
     let s: Snapshot = serde_json::from_str(text).map_err(|e| Error::Read(format!("snapshot JSON: {e}")))?;
+    if s.schema == 0 {
+        return Err(Error::Read("snapshot JSON: no `schema` (not an exchange snapshot)".into()));
+    }
     if s.schema > SCHEMA {
         return Err(Error::NotSupported(format!("snapshot schema {} (this reader knows up to {SCHEMA})", s.schema)));
     }

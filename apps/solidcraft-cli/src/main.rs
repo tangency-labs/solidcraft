@@ -399,7 +399,10 @@ fn positional(args: &[String]) -> Option<&String> {
     let mut i = 0;
     while let Some(a) = args.get(i) {
         if a.starts_with("--") {
-            i += if matches!(a.as_str(), "--quiet" | "--results" | "--timings" | "--profile" | "--allow-errors" | "--no-grid" | "--no-axes") {
+            i += if matches!(
+                a.as_str(),
+                "--quiet" | "--results" | "--timings" | "--profile" | "--allow-errors" | "--no-grid" | "--no-axes" | "--record"
+            ) {
                 1
             } else {
                 2

@@ -72,7 +72,7 @@ Every value says what it is. Names and indices have their own types, the same in
 string or number they hold: `BodyName`, `FaceName`, `EdgeName`, `VertexName`, `MaterialName`,
 `ParameterName`; `FeatureId`, `FaceIndex`, `EdgeIndex`, `VertexIndex`, `MeshVertex` (an index
 into a body's `positions`). Persistent names are opaque: compare and keep them, never parse
-them; what they say is given as data (`Face::features`, `Edge::faces`). Lengths are `Mm`, angles
+them; what they say is given as data (`Face::features`, `Edge::bounds`). Lengths are `Mm`, angles
 `Radians` (JSON: the number); a `Point` is `[x, y, z]` in mm; a `Direction` is a unit vector
 `[x, y, z]`, refused when it has no length; a `Quantity` is `{"length": mm}`, `{"angle": rad}` or
 `{"number": n}`; a `Transform` is a row-major 4×4 matrix. Kinds are enums written as tagged
@@ -167,7 +167,7 @@ objects (`{"type": "cylinder", …}`), each with an `other` for kinds the reader
 - **Record.** With `Options::with_record` (CLI `--record`), each body's exact B-rep as
   solidcore's record (`solidcore_record::brep::Brep`, its own serde form and version, solidcore's
   docs/native-brep.md): every surface and curve as the kernel holds it, pcurves, loops and shells,
-  its faces, edges and vertices numbered as the body's `faces`, `edges` and `corners`. Left out
+  its faces, edges and vertices numbered as the body's `faces`, `edges` and `vertices`. Left out
   otherwise, and for a mesh body. Surfaces, curves and corners above come from it.
 - **Corners.** The B-rep's vertices: named after the faces that meet there (`~k` when repeated),
   with the mesh vertex at the point and the edges that end there.

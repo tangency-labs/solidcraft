@@ -13,7 +13,7 @@ use super::ids::{BodyName, FaceName, FeatureId};
 /// JSON: `{"suppress": 4}`, `{"partition": {"name", "plane": {"point", "normal"}, "bodies"?}}`,
 /// `{"split_face": {"name", "body", "face", "plane"}}`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Edit {
     /// Rebuild without the feature (a hole filled, a fillet back to its sharp edge, a boss

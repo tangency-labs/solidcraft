@@ -254,6 +254,10 @@ fn json_reads_back_and_tolerates_what_it_does_not_know() {
     let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
     v["schema"] = serde_json::json!(2);
     assert!(matches!(from_json(&v.to_string()), Err(Error::NotSupported(_))));
+    // JSON with no schema is not a snapshot.
+    v.as_object_mut().unwrap().remove("schema");
+    assert!(matches!(from_json(&v.to_string()), Err(Error::Read(_))));
+    assert!(matches!(from_json("{}"), Err(Error::Read(_))));
 }
 
 #[test]

@@ -3,7 +3,7 @@
 //!
 //! Persistent names ([`FaceName`], [`EdgeName`], [`VertexName`]) are opaque: compare them, keep
 //! them, never parse them. What a name says is given as data next to it ([`super::Face::features`],
-//! [`super::Edge::faces`]).
+//! [`super::Edge::bounds`]).
 
 use std::fmt;
 
