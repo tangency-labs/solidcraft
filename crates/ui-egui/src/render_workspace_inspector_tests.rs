@@ -411,6 +411,7 @@ fn legacy_shot_switch_confirms_transient_inputs_and_current_shot_focus_preserves
         h.step(&json!({"widget":h.app.tr("render.discard_continue")})).unwrap();
         assert_eq!(h.app.render_workspace.view.name, "B");
         assert_eq!(h.app.render_workspace.view.draft.width, 321);
+        assert_eq!(h.app.cam, camera, "legacy shot activation keeps the navigation camera after discarding {kind}");
         assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
         assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
     }

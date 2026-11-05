@@ -179,6 +179,6 @@ angles against the f64 surface, including mixed metallic values. Clear-coat and
 physical transmission contracts are unchanged by this base-lobe correction.
 
 The normal GPU Samples editor keeps the exact requested count, including values
-such as17 or31; every complete pass is published. Merely opening a saved setup
+such as 17 or 31; every complete pass is published. Merely opening a saved setup
 does not round its count. **Use previous Render image defaults** retains the
 previous power-of-two rounding for an edited GPU Samples value.

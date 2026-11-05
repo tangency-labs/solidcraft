@@ -1,10 +1,10 @@
 {
-  "en": {
-    "render.cpu_fixed_retained": "Fixed sampling retained",
-    "render.cpu_progressive_adopt": "Use progressive sampling",
-    "render.cpu_progressive_adopt_help": "Adopting progressive uses one camera sample per pass. Image size, lights and reflection settings stay unchanged.",
-    "render.cpu_progressive_always": "Progressive sampling is always on",
-    "render.cpu_progressive_reflection_adopt": "Set selected reflection attempts to 1 before adopting progressive sampling."
+  "ar": {
+    "render.cpu_fixed_retained": "تم الاحتفاظ بأخذ العينات الثابت",
+    "render.cpu_progressive_adopt": "استخدام أخذ العينات التدريجي",
+    "render.cpu_progressive_adopt_help": "يستخدم أخذ العينات التدريجي عينة كاميرا واحدة لكل تمريرة. يبقى حجم الصورة والأضواء وإعدادات الانعكاس دون تغيير.",
+    "render.cpu_progressive_always": "أخذ العينات التدريجي مفعّل دائمًا",
+    "render.cpu_progressive_reflection_adopt": "اضبط محاولات الانعكاس المحددة على 1 قبل تفعيل أخذ العينات التدريجي."
   },
   "de": {
     "render.cpu_fixed_retained": "Feste Abtastung beibehalten",
@@ -12,6 +12,20 @@
     "render.cpu_progressive_adopt_help": "Die progressive Abtastung verwendet ein Kamerasample pro Durchlauf. Bildgröße, Lichtquellen und Reflexionseinstellungen bleiben unverändert.",
     "render.cpu_progressive_always": "Progressive Abtastung ist immer aktiv",
     "render.cpu_progressive_reflection_adopt": "Setzen Sie die Reflexionsversuche ausgewählter Körper auf 1, bevor Sie die progressive Abtastung übernehmen."
+  },
+  "en": {
+    "render.cpu_fixed_retained": "Fixed sampling retained",
+    "render.cpu_progressive_adopt": "Use progressive sampling",
+    "render.cpu_progressive_adopt_help": "Adopting progressive uses one camera sample per pass. Image size, lights and reflection settings stay unchanged.",
+    "render.cpu_progressive_always": "Progressive sampling is always on",
+    "render.cpu_progressive_reflection_adopt": "Set selected reflection attempts to 1 before adopting progressive sampling."
+  },
+  "he": {
+    "render.cpu_fixed_retained": "הדגימה הקבועה נשמרה",
+    "render.cpu_progressive_adopt": "שימוש בדגימה הדרגתית",
+    "render.cpu_progressive_adopt_help": "מעבר לדגימה הדרגתית משתמש בדגימת מצלמה אחת לכל מעבר. גודל התמונה, האורות והגדרות ההחזר נשארים ללא שינוי.",
+    "render.cpu_progressive_always": "דגימה הדרגתית פעילה תמיד",
+    "render.cpu_progressive_reflection_adopt": "יש לקבוע את מספר ניסיונות ההחזר שנבחרו ל־1 לפני המעבר לדגימה הדרגתית."
   },
   "ja": {
     "render.cpu_fixed_retained": "固定サンプリングを維持",
@@ -26,6 +40,13 @@
     "render.cpu_progressive_adopt_help": "전환하면 패스마다 카메라 샘플 하나를 사용합니다. 이미지 크기, 조명 및 반사 설정은 유지됩니다.",
     "render.cpu_progressive_always": "점진적 샘플링은 항상 켜져 있습니다",
     "render.cpu_progressive_reflection_adopt": "전환하기 전에 선택한 반사의 시도 횟수를 1로 설정하세요."
+  },
+  "vi": {
+    "render.cpu_fixed_retained": "Đã giữ lấy mẫu cố định",
+    "render.cpu_progressive_adopt": "Dùng lấy mẫu lũy tiến",
+    "render.cpu_progressive_adopt_help": "Lấy mẫu lũy tiến sử dụng một mẫu máy ảnh cho mỗi lượt. Kích thước ảnh, nguồn sáng và thiết lập phản xạ không thay đổi.",
+    "render.cpu_progressive_always": "Lấy mẫu lũy tiến luôn bật",
+    "render.cpu_progressive_reflection_adopt": "Đặt số lần thử phản xạ đã chọn thành 1 trước khi chuyển sang lấy mẫu lũy tiến."
   },
   "zh": {
     "render.cpu_fixed_retained": "保留固定采样",

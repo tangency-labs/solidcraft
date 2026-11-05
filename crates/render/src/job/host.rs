@@ -797,6 +797,7 @@ struct Work {
     environment: Option<crate::lighting::environment_input::EnvironmentInput>,
     scene: ProductScene,
     handle: JobHandle,
+    encoded_limit: u64,
     reservation: Reservation,
     // Must remain last: see WorkRelease.
     _work_release: WorkRelease,
@@ -1073,7 +1074,9 @@ impl Running {
                 return None;
             }
         };
-        let checkpoint_target = if let Some(executor) = &work.executor {
+        let checkpoint_target = if work.regrade.is_some() {
+            0
+        } else if let Some(executor) = &work.executor {
             executor.preview_samples(options).unwrap_or(0)
         } else if work.handle.0.request.integrator == Integrator::Raytrace {
             work.handle.0.request.raytrace.as_ref().map_or(Ok(0), super::RaytraceOptions::preview_target).unwrap_or(0)
@@ -1085,10 +1088,9 @@ impl Running {
             if slots == 0 {
                 return Ok(None);
             }
-            let slot_bytes = u64::from(work.handle.0.request.width)
-                .checked_mul(u64::from(work.handle.0.request.height))
-                .and_then(|pixels| pixels.checked_mul(8))
-                .and_then(|bytes| bytes.checked_add(65_536 + FRAME_METADATA_BYTES))
+            let slot_bytes = work
+                .encoded_limit
+                .checked_add(FRAME_METADATA_BYTES)
                 .ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "checkpoint slot overflow"))?;
             CheckpointCredits::new(&mut work.reservation, slot_bytes, slots).map(Some)
         })();
@@ -1271,10 +1273,20 @@ impl Running {
             }
             let mut reservation = credits.acquire()?;
             if reservation.is_none() {
-                // A headless client need not acknowledge snapshots: release our old
-                // slot before deciding that both images are retained by consumers.
-                let released = data.preview.take();
+                // Reclaim a host-only snapshot without removing a consumer's pinned
+                // latest pass. Unwrap under the data lock so a racing Weak upgrade
+                // either pins the Arc we restore or observes its payload released.
+                let released = match data.preview.take().map(Arc::try_unwrap) {
+                    Some(Ok(preview)) => Some(preview),
+                    Some(Err(preview)) => {
+                        data.preview = Some(preview);
+                        None
+                    }
+                    None => None,
+                };
                 drop(data);
+                // Returning its lease locks the credit ledger; keep that outside
+                // the status/publication lock before retrying the free slot.
                 drop(released);
                 reservation = credits.acquire()?;
                 data = self.handle.0.data.lock().map_err(|_| JobError::new(ErrorCode::Internal, "render preview publication lock poisoned"))?;
@@ -2080,7 +2092,7 @@ impl ImageHost {
             environment_info,
             textures,
             resolved,
-            admission: _,
+            admission,
             cancel,
             #[cfg(feature = "raytrace-cpu")]
             proof,
@@ -2123,6 +2135,7 @@ impl ImageHost {
             executor: self.0.executor.clone(),
             scene,
             handle: handle.clone(),
+            encoded_limit: admission.encoded_limit,
             reservation,
             environment,
             _work_release: WorkRelease(Arc::downgrade(&handle.0)),
@@ -2254,6 +2267,8 @@ impl ImageHost {
             environment: None,
             scene: ProductScene { meshes: Vec::new(), bounds: solidcraft_geom::Aabb3::EMPTY },
             handle: handle.clone(),
+            // Regrades are final-only and never create checkpoint slots.
+            encoded_limit: 0,
             reservation,
             _work_release: WorkRelease(Arc::downgrade(&handle.0)),
         });

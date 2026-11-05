@@ -73,7 +73,7 @@ numerical tests.
 The optional `lighting.directional_lights` array retains up to eight sources:
 `{"direction":[0,0,1],"color":[1,0.5,0.25],"intensity":2}`. Direction points toward
 the source, is finite/nonzero, and each component is within +/-1e9. Linear RGB is
-0..1 and relative incident intensity is0..64, matching CPU directional intent.
+0..1 and relative incident intensity is 0..64, matching CPU directional intent.
 The optional finite Sun and this list share an eight-source total. The finite Sun
 keeps its angular-radius, radiance and continuous-MIS contract. Hard sources use
 delta next-event samples with MIS weight one and consume no random numbers; they
@@ -85,9 +85,10 @@ Omitting `lighting` leaves the exact implicit three-source path. An omitted or
 empty directional list adds no source or RNG consumption. Materializing the
 implicit studio into explicit hard directions preserves those three values.
 Zero-intensity/black sources remain authored but perform no sampling/visibility.
-Point/spot lights and mesh emission remain unsupported by this GPU consumer.
+Mesh emission remains unsupported by this GPU consumer. Point and Spot sources
+use the separate punctual-light contract below.
 
-The fixed uniform grows by256 bytes, prepaid as device+host upload storage. Its
+The fixed uniform grows by 256 bytes, prepaid as device+host upload storage. Its
 final `studio_weights.w` lane stays positive zero, preserving the portable
 geometry arithmetic ABI. Nondefault captured options live in one exact-capacity
 fallible allocation with a retained lease under the existing request/job/host
@@ -99,15 +100,15 @@ never collapsed merely because they look like an identity at runtime.
 
 `lighting.punctual_lights` is an optional bounded array of eight combined Point
 and Spot sources, separate from the eight directional and four area slots.
-Positions are world millimetres, RGB is linear, intensity0..64 is defined at the
-explicit reference distance0.001..1e6mm. Minimum distance0.001..reference is an
+Positions are world millimetres, RGB is linear, intensity 0..64 is defined at the
+explicit reference distance 0.001..1e6 mm. Minimum distance 0.001..reference is an
 omission boundary, not a brightness clamp. Spot emitted axes point FROM the
 source; half cones retain exact authored radians. Smoothstep is in cosine space.
-GPU feathers with cosine gaps below1/1024 explicitly refuse before source I/O;
+GPU feathers with cosine gaps below 1/1024 explicitly refuse before source I/O;
 CPU retains its wider existing f64 cone domain.
 
 Each delta source is evaluated once at every admitted opaque or external-volume
-vertex, including the final allowed bounce, with MIS weight1 and no random
+vertex, including the final allowed bounce, with MIS weight 1 and no random
 numbers. Physical hit-to-source deltas use camera-relative high/low source and
 hit positions. The robust shadow connection is re-aimed separately, excludes the
 source endpoint, respects opaque blockers and existing thin/solid transmission,

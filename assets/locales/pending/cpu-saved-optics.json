@@ -1,7 +1,13 @@
 {
   "ar": {
+    "render.appearance_editor.discard_saved_edit": "تجاهل التعديلات البصرية غير المحفوظة",
     "render.cpu_subsurface_denoise_reason": "يتطلب التشتت داخل الزجاج على CPU إيقاف إزالة الضجيج. تبقى إعداداتك محفوظة.",
-    "render.cpu_subsurface_help": "يغيّر التشتت اتجاه الضوء داخل الزجاج المغلق. تتطلب المعدلات الموجبة إضاءة غير مباشرة مع إيقاف إزالة الضجيج. المعدل هو عدد التصادمات لكل مم؛ لا يضيف الصفر أي تشتت. يفضّل انحياز الاتجاه الموجب الأمام، والسالب الخلف."
+    "render.cpu_subsurface_help": "يغيّر التشتت اتجاه الضوء داخل الزجاج المغلق. تتطلب المعدلات الموجبة إضاءة غير مباشرة مع إيقاف إزالة الضجيج. المعدل هو عدد التصادمات لكل مم؛ لا يضيف الصفر أي تشتت. يفضّل انحياز الاتجاه الموجب الأمام، والسالب الخلف.",
+    "render.material_cpu_glass_only": "تتطلب خرائط ملفات الصور المؤقتة GPU. يمكن لـCPU استخدام خرائط الأسطح المضمنة المحفوظة.",
+    "render.material_cpu_optics_limits": "شغّل الإضاءة غير المباشرة لأشكال الزجاج المغلقة المدعومة والتداخل المتحقق منه والتشتت داخل الزجاج. يمكن للصفائح الرقيقة تمرير الضوء للظلال. وإلا فاستخدم صفيحة مستوية أو صندوقًا محاذيًا للمحاور. تظل الأشكال المتلامسة والظلال النافذة عبر الزجاج المغلق غير مدعومة. تبقى قيمك محفوظة.",
+    "render.material_cpu_saved_runtime_conflict": "لا يمكن الجمع بين البصريات المحفوظة على CPU والارتباطات البصرية المؤقتة السابقة. احفظ البصريات التي راجعتها أو أزل الارتباط المؤقت المتعارض.",
+    "render.material_raytrace_required": "يتطلب الزجاج الفيزيائي تتبع الأشعة على CPU أو تتبع المسارات على GPU.",
+    "render.material_saved_edit_pending": "هذه التعديلات البصرية غير محفوظة. احفظ القيم التي راجعتها، أو أزل التعيين المحفوظ، أو تجاهل التعديلات. لا يمكن للارتباطات المؤقتة السابقة والمؤثرات غير المدعومة تجاوز الهدف المحفوظ."
   },
   "de": {
     "render.appearance_editor.discard_saved_edit": "Ungespeicherte Optikänderungen verwerfen",
@@ -24,8 +30,14 @@
     "render.material_saved_edit_pending": "These optical edits are unsaved. Save reviewed values, remove the saved assignment, or discard the edits. Legacy temporary bindings and unsupported effects cannot override the saved target."
   },
   "he": {
+    "render.appearance_editor.discard_saved_edit": "ביטול שינויים אופטיים שלא נשמרו",
     "render.cpu_subsurface_denoise_reason": "פיזור בתוך זכוכית ב־CPU דורש הסרת רעש כבויה. ההגדרות נשמרות.",
-    "render.cpu_subsurface_help": "פיזור משנה את כיוון האור בתוך זכוכית סגורה. קצב חיובי דורש תאורה עקיפה והסרת רעש כבויה. הקצב הוא מספר התנגשויות למ״מ; 0 אינו מוסיף פיזור. הטיית כיוון חיובית מעדיפה קדימה, ושלילית אחורה."
+    "render.cpu_subsurface_help": "פיזור משנה את כיוון האור בתוך זכוכית סגורה. קצב חיובי דורש תאורה עקיפה והסרת רעש כבויה. הקצב הוא מספר התנגשויות למ״מ; 0 אינו מוסיף פיזור. הטיית כיוון חיובית מעדיפה קדימה, ושלילית אחורה.",
+    "render.material_cpu_glass_only": "מפות זמניות מקובצי תמונה דורשות GPU. ב־CPU אפשר להשתמש במפות משטח מובנות שנשמרו.",
+    "render.material_cpu_optics_limits": "יש להפעיל תאורה עקיפה לצורות זכוכית סגורות נתמכות, לקינון שנבדק ולפיזור בתוך הזכוכית. יריעות דקות יכולות להעביר אור לצללים. אחרת יש להשתמש ביריעה מישורית או בתיבה מקבילה לצירים. צורות נוגעות וצללים העוברים בזכוכית סגורה עדיין אינם נתמכים. הערכים נשמרים.",
+    "render.material_cpu_saved_runtime_conflict": "אי אפשר לשלב הגדרות אופטיות שמורות ב־CPU עם הקישורים האופטיים הזמניים הישנים. יש לשמור את ההגדרות שנבדקו או להסיר את הקישור הזמני המתנגש.",
+    "render.material_raytrace_required": "זכוכית פיזיקלית דורשת עקיבת קרניים ב־CPU או עקיבת נתיבים ב־GPU.",
+    "render.material_saved_edit_pending": "השינויים האופטיים האלה לא נשמרו. יש לשמור את הערכים שנבדקו, להסיר את ההקצאה השמורה או לבטל את השינויים. קישורים זמניים ישנים ואפקטים שאינם נתמכים אינם יכולים לעקוף את היעד השמור."
   },
   "ja": {
     "render.appearance_editor.discard_saved_edit": "未保存の光学設定の変更を破棄",
@@ -48,8 +60,14 @@
     "render.material_saved_edit_pending": "광학 편집을 아직 저장하지 않았습니다. 검토한 값을 저장하거나 저장된 할당을 제거하거나 편집을 버리세요. 임시 바인딩과 지원하지 않는 효과는 저장된 대상을 덮어쓸 수 없습니다."
   },
   "vi": {
+    "render.appearance_editor.discard_saved_edit": "Hủy chỉnh sửa quang học chưa lưu",
     "render.cpu_subsurface_denoise_reason": "Tán xạ bên trong kính trên CPU cần tắt Khử nhiễu. Các cài đặt được giữ nguyên.",
-    "render.cpu_subsurface_help": "Tán xạ đổi hướng ánh sáng bên trong kính kín. Tốc độ dương cần Chiếu sáng gián tiếp và tắt Khử nhiễu. Tốc độ là số va chạm mỗi mm; 0 không thêm tán xạ. Độ lệch hướng dương ưu tiên phía trước, âm ưu tiên phía sau."
+    "render.cpu_subsurface_help": "Tán xạ đổi hướng ánh sáng bên trong kính kín. Tốc độ dương cần Chiếu sáng gián tiếp và tắt Khử nhiễu. Tốc độ là số va chạm mỗi mm; 0 không thêm tán xạ. Độ lệch hướng dương ưu tiên phía trước, âm ưu tiên phía sau.",
+    "render.material_cpu_glass_only": "Bản đồ từ tệp ảnh tạm thời yêu cầu GPU. CPU có thể dùng bản đồ bề mặt tích hợp đã lưu.",
+    "render.material_cpu_optics_limits": "Bật Chiếu sáng gián tiếp cho hình kính kín được hỗ trợ, cấu trúc lồng nhau đã kiểm chứng và tán xạ bên trong kính. Tấm mỏng có thể truyền ánh sáng cho bóng. Nếu không, dùng tấm phẳng hoặc hộp thẳng theo trục. Chưa hỗ trợ hình chạm nhau và bóng truyền qua kính kín. Các giá trị được giữ nguyên.",
+    "render.material_cpu_saved_runtime_conflict": "Không thể kết hợp quang học CPU đã lưu với các liên kết quang học tạm thời kiểu cũ. Hãy lưu quang học đã xem xét hoặc xóa liên kết tạm thời xung đột.",
+    "render.material_raytrace_required": "Kính vật lý yêu cầu dò tia trên CPU hoặc dò đường đi trên GPU.",
+    "render.material_saved_edit_pending": "Các chỉnh sửa quang học này chưa được lưu. Hãy lưu các giá trị đã xem xét, xóa phép gán đã lưu hoặc hủy chỉnh sửa. Liên kết tạm thời kiểu cũ và hiệu ứng chưa được hỗ trợ không thể ghi đè đích đã lưu."
   },
   "zh": {
     "render.appearance_editor.discard_saved_edit": "放弃未保存的光学编辑",

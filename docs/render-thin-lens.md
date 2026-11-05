@@ -23,7 +23,7 @@ form is nested inside `raytrace`, rather than the GPU top-level `lens`:
 
 ```json
 {"integrator":"raytrace", "settings":{"width":512,"height":512,
- "camera":{"fov":0.7,"distance":120}}, "raytrace":{
+ "camera":{"target":[0,0,0],"yaw":0,"pitch":0,"fov":0.7,"distance":120}}, "raytrace":{
  "progressive":{"samples_per_pixel":16,"seed":81}, "primary_samples":1,
  "lens":{"aperture_radius_mm":0.5,"focus_distance_mm":120}}}
 ```

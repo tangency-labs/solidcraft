@@ -9248,6 +9248,96 @@ fn gpu_sample_editor_keeps_exact_requested_pass_count_and_saved_intent() {
     }
 }
 
+fn frame_lens_edit_keeps_job_draft_unsaved(method: &str) {
+    use solidcraft_engine::doc::render_settings::RenderJob;
+    use solidcraft_engine::render::job::{CpuProgressiveOptions, ThinLens};
+    let other_method = if method == "cpu_raytrace" { "gpu_path" } else { "cpu_raytrace" };
+    for draft_method in [method, other_method] {
+        for moved_camera in [false, true] {
+            let mut h = Harness::new();
+            let saved_camera = Camera { fov: 0.7, distance: 20.0, ..Default::default() };
+            let options = if method == "cpu_raytrace" {
+                json!({"progressive":{"samples_per_pixel":8,"seed":81}})
+            } else {
+                json!({"samples":8,"max_depth":4,"seed":81})
+            };
+            h.app
+                .run(
+                    "render.settings.set",
+                    json!({"name":"Lens isolation","set":{"width":64,"height":32,"camera":saved_camera,
+                    "job":{"method":method,"options":options}}}),
+                )
+                .unwrap();
+            h.app.render_workspace.view.name = "Lens isolation".into();
+            h.app.cam = if moved_camera { Camera { distance: 30.0, roll: 0.3, ..saved_camera } } else { saved_camera };
+            setups::load(&mut h.app);
+            let draft_kind = if draft_method == "cpu_raytrace" { ImageMethod::CpuRaytrace } else { ImageMethod::GpuRaytrace };
+            if draft_method != method {
+                // The Scene inspector changes the active method without saving it. Opening
+                // Frame and editing DOF must not commit that separate renderer choice.
+                select_image_method(&mut h.app, draft_kind);
+            }
+            if draft_method == "cpu_raytrace" {
+                h.app.render_workspace.view.raytrace.progressive = Some(CpuProgressiveOptions { samples_per_pixel: 16, seed: 93 });
+                h.app.render_workspace.view.raytrace.path = Some(serde_json::from_value(json!({"max_depth":3})).unwrap());
+                h.app.render_workspace.view.raytrace.lights = Some(Vec::new());
+            } else {
+                h.app.render_workspace.view.samples = 17;
+                h.app.render_workspace.view.max_depth = 5;
+                h.app.render_workspace.view.seed = 93;
+            }
+            setups::refresh_dirty(&mut h.app);
+            assert!(h.app.render_workspace.view.dirty);
+            let live_camera = h.app.cam;
+            let before = h.app.session.doc.clone();
+            let model = h.app.session.model.state();
+            let undo = h.app.session.undo.len();
+            let saved = before.render.setups["Lens isolation"].clone();
+            let mut expected_saved = saved.clone();
+            let mut expected_draft = setups::snapshot(&h.app).unwrap();
+            assert_ne!(expected_draft.job, saved.job, "the fixture must have an independent unsaved job draft");
+            let lens = ThinLens { aperture_radius_mm: 0.5, focus_distance_mm: 20.0 };
+            for setup in [&mut expected_saved, &mut expected_draft] {
+                match setup.job.as_mut().unwrap() {
+                    RenderJob::CpuRaytrace { options, .. } => options.lens = Some(lens),
+                    RenderJob::GpuPath { options, .. } => options.lens = Some(lens),
+                    RenderJob::Raster { .. } => panic!("the fixture must use an image job"),
+                }
+            }
+            shot::set_lens(&mut h.app, "Lens isolation", Some(lens)).unwrap();
+            assert!(h.app.render_workspace.view.dirty, "{method} saved/{draft_method} draft: a lens edit must leave unrelated job intent unsaved");
+            assert_eq!(h.app.session.doc.render.setups["Lens isolation"], expected_saved, "{method} saved/{draft_method} draft: save only the lens");
+            assert_eq!(
+                setups::draft(&h.app).unwrap(),
+                expected_draft,
+                "{method} saved/{draft_method} draft: preserve the independent active job draft"
+            );
+            assert_eq!(h.app.render_workspace.view.method, draft_kind);
+            assert_eq!(h.app.cam, live_camera);
+            assert_eq!(h.app.session.doc.render.setups["Lens isolation"].camera, saved_camera);
+            assert!(Arc::ptr_eq(&model, &h.app.session.model.state()));
+            assert_eq!(h.app.session.undo.len(), undo + 1);
+            assert!(h.app.render_workspace.view.job.is_none());
+            h.app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(h.app.session.doc, before);
+            assert_eq!(h.app.cam, live_camera);
+            h.app.run("edit.redo", json!({})).unwrap();
+            assert_eq!(h.app.session.doc.render.setups["Lens isolation"], expected_saved);
+            assert_eq!(h.app.cam, live_camera);
+        }
+    }
+}
+
+#[test]
+fn cpu_frame_lens_edit_keeps_unrelated_job_draft_unsaved() {
+    frame_lens_edit_keeps_job_draft_unsaved("cpu_raytrace");
+}
+
+#[test]
+fn gpu_frame_lens_edit_keeps_unrelated_job_draft_unsaved() {
+    frame_lens_edit_keeps_job_draft_unsaved("gpu_path");
+}
+
 #[test]
 fn cpu_frame_lens_edits_roundtrip_offline_undo_once_and_preserve_saved_and_live_cameras() {
     use solidcraft_engine::doc::render_settings::RenderJob;

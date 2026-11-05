@@ -188,7 +188,14 @@ mod progressive_checkpoints {
         assert_eq!(running.pending_png.as_ref().unwrap().preview_samples, Some(3));
         assert!(running.advance(1).unwrap());
         assert_eq!(job.status().unwrap().preview_retention_skips, 1);
-        assert!(job.preview().unwrap().is_none());
+        let retained = job.preview().unwrap().expect("a skipped publication must keep the latest published preview available");
+        assert!(Arc::ptr_eq(&retained, &second), "a pinned latest preview must retain its existing allocation and lease");
+        let status = job.status().unwrap();
+        let preview = status.preview.expect("status must still identify the latest published complete pass");
+        assert_eq!(preview.frame_sequence, 2);
+        assert_eq!(preview.samples_per_pixel, 2);
+        assert_eq!(preview.frame.png_sha256, second.info.frame.png_sha256);
+        drop(retained);
         assert!(job.frame().unwrap().is_none());
         assert_eq!(host.admitted_bytes(), initial);
         assert_eq!(first.png(), first_bytes);
@@ -1067,6 +1074,144 @@ impl ImageExecutor for CheckpointExecutor {
     }
 }
 
+/// A valid registered producer need not use the built-in dimension-based PNG bound.
+struct BoundedCheckpointExecutor {
+    encoded_limit: usize,
+}
+struct BoundedCheckpointWork {
+    inner: CheckpointWork,
+    encoded_limit: usize,
+}
+impl BoundedCheckpointWork {
+    fn retain_png(&self, png: Vec<u8>) -> Vec<u8> {
+        assert!(png.len() <= self.encoded_limit);
+        let mut retained = Vec::with_capacity(self.encoded_limit);
+        retained.extend_from_slice(&png);
+        assert_eq!(retained.capacity(), self.encoded_limit);
+        retained
+    }
+}
+impl ImageWork for BoundedCheckpointWork {
+    fn take_preview(&mut self) -> Option<super::super::ImageWorkPreview> {
+        self.inner.take_preview()
+    }
+    fn step(&mut self, units: usize) -> Result<TaskPoll> {
+        let poll = self.inner.step(units)?;
+        if let Some(mut preview) = self.inner.preview.take() {
+            preview.png = self.retain_png(preview.png);
+            self.inner.preview = Some(preview);
+        }
+        Ok(match poll {
+            TaskPoll::Complete(png) => TaskPoll::Complete(self.retain_png(png)),
+            pending => pending,
+        })
+    }
+}
+impl ImageExecutor for BoundedCheckpointExecutor {
+    fn preview_samples(&self, options: JobOptions) -> Option<u32> {
+        Some(options.samples)
+    }
+    fn descriptor(&self) -> Result<ExecutorDescriptor> {
+        CpuExecutor.descriptor()
+    }
+    fn admit(&self, scene: &ProductScene, request: &ImageRequest, _: JobOptions) -> Result<Admission> {
+        // Pay the complete built-in encoder envelope and the overlapping repack
+        // allocation independently of the custom retained-output bound.
+        let mut admission = admit(scene, request)?;
+        let repack_bytes = self.encoded_limit as u64 + 4096;
+        admission.preparation_bytes += repack_bytes;
+        admission.estimated_total_bytes += repack_bytes;
+        admission.encoded_limit = self.encoded_limit as u64;
+        Ok(admission)
+    }
+    fn begin(&self, _: ProductScene, request: ImageRequest, options: JobOptions, cancel: CancelToken) -> Result<Box<dyn ImageWork>> {
+        Ok(Box::new(BoundedCheckpointWork {
+            inner: CheckpointWork { request, cancel, samples: 0, target: options.samples, preview: None },
+            encoded_limit: self.encoded_limit,
+        }))
+    }
+}
+
+fn registered_checkpoint_encoded_bound(encoded_limit: usize) {
+    for cancel in [false, true] {
+        let host = ImageHost::cooperative_with(Arc::new(BoundedCheckpointExecutor { encoded_limit }));
+        let request = ImageRequest { width: 2, height: 2, ..request() };
+        let options = JobOptions { samples: 5, ..Default::default() };
+        let work_bytes = admit(&empty(), &request).unwrap().estimated_total_bytes + encoded_limit as u64 + 4096;
+        let slot_bytes = encoded_limit as u64 + FRAME_METADATA_BYTES;
+        let admission = host.admit(&empty(), &request, options).unwrap();
+        assert_eq!(admission.encoded_limit, encoded_limit as u64);
+        assert_eq!(admission.estimated_total_bytes, work_bytes + 2 * slot_bytes + FRAME_METADATA_BYTES);
+        let job = host.submit_with_options(id(9023, 1), 57, empty(), request, options).unwrap();
+        let admitted = host.admitted_bytes();
+        let mut held = Vec::new();
+        for samples in 1..=2 {
+            for _ in 0..8 {
+                host.pump(1).unwrap();
+                let status = job.status().unwrap();
+                assert_ne!(status.progress.phase, Phase::Failed, "custom encoded limit {encoded_limit}: {:?}", status.error);
+                if job.preview().unwrap().is_some_and(|preview| preview.info.samples_per_pixel == samples) {
+                    break;
+                }
+            }
+            let preview = job.preview().unwrap().expect("an admitted custom PNG bound must publish its complete pass");
+            assert_eq!(preview.info.samples_per_pixel, samples);
+            assert_eq!(preview.png.capacity(), encoded_limit);
+            assert_eq!(preview._reservation.bytes, slot_bytes);
+            assert_eq!(preview.info.frame.png_sha256, format!("{:x}", Sha256::digest(preview.png())));
+            let decoded = image::load_from_memory(preview.png()).unwrap().to_rgba8();
+            assert_eq!(decoded.dimensions(), (2, 2));
+            assert_eq!(decoded.as_raw(), &vec![samples as u8; 16]);
+            assert!(job.frame().unwrap().is_none());
+            assert_eq!(host.admitted_bytes(), admitted, "publication only transfers admitted credit");
+            let running = host.0.running.lock().unwrap();
+            let running = running.as_ref().unwrap();
+            assert_eq!(running.reservation.as_ref().unwrap().bytes, work_bytes, "preview credits must not consume executor work");
+            assert_eq!(running.checkpoints.as_ref().unwrap().slot_bytes, slot_bytes);
+            held.push(preview);
+        }
+        if cancel {
+            job.cancel().unwrap();
+        }
+        drain(&host);
+        let status = job.status().unwrap();
+        assert_eq!(status.progress.phase, if cancel { Phase::Cancelled } else { Phase::Completed });
+        assert_eq!(status.preview_retention_skips, if cancel { 0 } else { 2 });
+        assert!(job.preview().unwrap().is_none());
+        assert!(job.work_released());
+        let frame = job.frame().unwrap();
+        if cancel {
+            assert!(frame.is_none());
+        } else {
+            let frame = frame.as_ref().unwrap();
+            assert_eq!(frame.png.capacity(), encoded_limit);
+            assert_eq!(frame._reservation.bytes, slot_bytes);
+            assert_eq!(frame.info.png_sha256, format!("{:x}", Sha256::digest(frame.png())));
+            assert_eq!(image::load_from_memory(frame.png()).unwrap().to_rgba8().as_raw(), &vec![5; 16]);
+        }
+        for (index, preview) in held.iter().enumerate() {
+            assert_eq!(preview.info.samples_per_pixel as usize, index + 1);
+            assert_eq!(preview.info.frame.png_sha256, format!("{:x}", Sha256::digest(preview.png())));
+            assert_eq!(image::load_from_memory(preview.png()).unwrap().to_rgba8().as_raw(), &vec![(index + 1) as u8; 16]);
+        }
+        drop(frame);
+        drop(job);
+        assert_eq!(host.admitted_bytes(), 2 * slot_bytes, "only externally pinned checkpoints retain admission");
+        drop(held);
+        assert_eq!(host.admitted_bytes(), 0);
+    }
+}
+
+#[test]
+fn registered_executor_checkpoint_slots_follow_smaller_admitted_encoded_limit() {
+    registered_checkpoint_encoded_bound(4096);
+}
+
+#[test]
+fn registered_executor_checkpoint_slots_follow_larger_admitted_encoded_limit() {
+    registered_checkpoint_encoded_bound(131_072);
+}
+
 #[test]
 fn registered_executor_checkpoints_are_bounded_immutable_and_never_final() {
     let host = ImageHost::cooperative_with(Arc::new(CheckpointExecutor));
@@ -1439,7 +1584,7 @@ mod cpu_adaptive_checkpoints {
         assert_eq!(running.checkpoint_target, 64);
         let credits = running.checkpoints.as_ref().unwrap();
         assert_eq!(credits.capacity, 2 * credits.slot_bytes + FRAME_METADATA_BYTES);
-        let mut held = Vec::new();
+        let mut held: Vec<Arc<RenderPreview>> = Vec::new();
         let mut saw_reset_production = false;
         let mut published = Vec::new();
         for _ in 0..200_000 {
@@ -1450,8 +1595,21 @@ mod cpu_adaptive_checkpoints {
                 if absolute == 17 {
                     drop(held.remove(0));
                 }
+                let before = job.status().unwrap();
                 assert!(running.advance(1).unwrap());
-                if let Some(preview) = job.preview().unwrap() {
+                let status = job.status().unwrap();
+                let preview = job.preview().unwrap().expect("publication or retention keeps a complete pass available");
+                if status.preview_retention_skips != before.preview_retention_skips {
+                    assert!((3..=16).contains(&absolute), "only the two pinned pilot snapshots skip publication");
+                    assert_eq!(status.preview_retention_skips, before.preview_retention_skips + 1);
+                    let retained = held.last().unwrap();
+                    assert_eq!(retained.info.samples_per_pixel, 2);
+                    assert!(Arc::ptr_eq(&preview, retained), "a skipped pass keeps the pinned second publication");
+                    assert_eq!(serde_json::to_value(&preview.info).unwrap(), serde_json::to_value(&retained.info).unwrap());
+                    assert_eq!(serde_json::to_value(&status.preview).unwrap(), serde_json::to_value(&before.preview).unwrap());
+                    assert_eq!(serde_json::to_value(status.preview.as_ref().unwrap()).unwrap(), serde_json::to_value(&retained.info).unwrap());
+                    assert_eq!(preview.info.frame.png_sha256, format!("{:x}", Sha256::digest(preview.png())));
+                } else {
                     let metadata = preview.info.adaptive.unwrap();
                     assert_eq!(preview.info.samples_per_pixel, absolute);
                     assert_eq!(metadata.pilot_samples, 16);
@@ -1480,7 +1638,7 @@ mod cpu_adaptive_checkpoints {
         assert!(published.contains(&17) && published.contains(&63));
         let status = job.status().unwrap();
         assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
-        assert!(status.preview_retention_skips >= 14);
+        assert_eq!(status.preview_retention_skips, 14);
         assert!(job.preview().unwrap().is_none());
         let report = status.sampling.unwrap();
         assert_eq!((report.pilot_samples_per_pixel, report.minimum_production_samples, report.maximum_production_samples), (16, 16, 16));

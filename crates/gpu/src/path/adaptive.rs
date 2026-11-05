@@ -3,20 +3,24 @@
 use super::*;
 use solidcraft_render::job::adaptive::SamplingReport;
 
+fn internal(message: &str) -> JobError {
+    JobError::new(ErrorCode::Internal, message)
+}
+
 fn production_count(options: &JobOptions, bytes: Option<&[u8]>) -> Result<u32> {
-    let adaptive = options.adaptive.ok_or_else(|| gpu("missing adaptive preview options"))?;
-    let bytes: [u8; 4] = bytes.and_then(|bytes| bytes.try_into().ok()).ok_or_else(|| gpu("missing adaptive preview budget"))?;
+    let adaptive = options.adaptive.ok_or_else(|| internal("missing adaptive preview options"))?;
+    let bytes: [u8; 4] = bytes.and_then(|bytes| bytes.try_into().ok()).ok_or_else(|| internal("missing adaptive preview budget"))?;
     let value = f32::from_le_bytes(bytes);
     if !value.is_finite() || value.fract() != 0.0 || value < adaptive.min_samples as f32 || value > options.samples as f32 {
-        return Err(gpu("invalid adaptive preview production count"));
+        return Err(internal("invalid adaptive preview production count"));
     }
     Ok(value as u32)
 }
 pub(super) fn preview_divisor(options: &JobOptions, completed: u32, budget: Option<&[u8]>) -> Result<f32> {
-    let adaptive = options.adaptive.ok_or_else(|| gpu("missing adaptive preview options"))?;
-    let total = options.samples.checked_add(adaptive.pilot_samples).ok_or_else(|| gpu("adaptive preview target overflow"))?;
+    let adaptive = options.adaptive.ok_or_else(|| internal("missing adaptive preview options"))?;
+    let total = options.samples.checked_add(adaptive.pilot_samples).ok_or_else(|| internal("adaptive preview target overflow"))?;
     if completed == 0 || completed > total {
-        return Err(gpu("adaptive preview iteration exceeds its target"));
+        return Err(internal("adaptive preview iteration exceeds its target"));
     }
     if completed <= adaptive.pilot_samples {
         return Ok(1.0);
@@ -27,14 +31,14 @@ pub(super) fn preview_divisor(options: &JobOptions, completed: u32, budget: Opti
     Ok(if production < target { production as f32 } else { 1.0 })
 }
 pub(super) fn preview_paths(task: &Task, budgets: Option<&[u8]>) -> Result<u64> {
-    let options = task.options.adaptive.ok_or_else(|| gpu("missing adaptive preview options"))?;
+    let options = task.options.adaptive.ok_or_else(|| internal("missing adaptive preview options"))?;
     let pixels = u64::from(task.request.width) * u64::from(task.request.height);
     if task.sample <= options.pilot_samples {
         return Ok(pixels * u64::from(task.sample));
     }
     let production = task.sample - options.pilot_samples;
     let mut paths = pixels * u64::from(options.pilot_samples);
-    let bytes = budgets.ok_or_else(|| gpu("missing adaptive preview budgets"))?;
+    let bytes = budgets.ok_or_else(|| internal("missing adaptive preview budgets"))?;
     for (index, pixel) in bytes.as_chunks::<16>().0.iter().enumerate() {
         if index % 4096 == 0 {
             task.cancel.check()?;

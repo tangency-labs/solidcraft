@@ -1,15 +1,24 @@
 {
-  "en": {
-    "cmd.view.render_live": "Pause or Resume Live Render"
+  "ar": {
+    "cmd.view.render_live": "إيقاف التصيير المباشر مؤقتًا أو استئنافه"
   },
   "de": {
     "cmd.view.render_live": "Live-Rendering pausieren oder fortsetzen"
+  },
+  "en": {
+    "cmd.view.render_live": "Pause or Resume Live Render"
+  },
+  "he": {
+    "cmd.view.render_live": "השהיה או חידוש של הדמיה חיה"
   },
   "ja": {
     "cmd.view.render_live": "ライブレンダーを一時停止・再開"
   },
   "ko": {
     "cmd.view.render_live": "실시간 렌더링 일시 중지 또는 재개"
+  },
+  "vi": {
+    "cmd.view.render_live": "Tạm dừng hoặc tiếp tục kết xuất trực tiếp"
   },
   "zh": {
     "cmd.view.render_live": "暂停或继续实时渲染"

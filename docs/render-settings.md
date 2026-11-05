@@ -184,10 +184,13 @@ validation contracts.
 
 CPU `progressive: {samples_per_pixel, seed}` stores bounded camera accumulation
 using the existing CPU transport. An absent/null value preserves fixed AA; an
-empty object defaults to 16 samples and seed 0. Samples are 1..64 and the seed is
-u32. `primary_samples` must be 1, output is at most 1,048,576 pixels, and
+empty object defaults to 16 samples and seed 0. With the Compact profile, samples
+are 1..64 and the seed is u32. `primary_samples` must be 1, output is at most 1,048,576 pixels, and
 `width × height × samples_per_pixel` is at most 16,777,216. Saving checks these
-limits without a render host. Rectangular and continuous LED lights retain their
+limits without a render host. Larger CPU profiles use their own bounds; for example,
+Studio admits 3840 × 2160 at 128 samples per pixel. Other memory, geometry and work
+limits still apply. See [CPU resource profiles](render-cpu-resource-profiles.md).
+Rectangular and continuous LED lights retain their
 bounded direct-light integral for each camera sample. Dielectric and anisotropic-face
 overrides retain the existing certified thin-sheet/axis-aligned-box and planar-face
 transport and geometry guards. Embedded HDR and one setup exposure remain compatible. See
@@ -392,4 +395,4 @@ includes pilot+production camera work and never lowers that minimum profile.
 The existing `fixed_samples_png` GPU and acknowledged imported-review contracts
 remain unchanged. These projections are read-only and do not certify convergence.
 
-CPU saved `sun` and `sky` preserve the shared numerical domains and explicit method-switch/adoption policy described in [CPU celestial lighting](render-cpu-celestial.md). Sun/Sky support in this source preparation remains uncompiled and unqualified.
+CPU saved `sun` and `sky` preserve the shared numerical domains and explicit method-switch/adoption policy described in [CPU celestial lighting](render-cpu-celestial.md). The renderer, saved/runtime and UI tests have executed; dedicated native Sun/Sky image-quality acceptance remains pending.

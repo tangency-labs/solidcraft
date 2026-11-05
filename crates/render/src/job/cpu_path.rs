@@ -35,7 +35,7 @@ pub(crate) fn validate_emitters(lights: &[super::RectangleLightOptions]) -> Resu
         )
     };
     if lights.len() > 4 {
-        return Err(invalid());
+        return Err(JobError::new(ErrorCode::InvalidRequest, "CPU opaque path transport supports at most four rectangle lights"));
     }
     let vector = |[x, y, z]: [f64; 3]| Vec3::new(x, y, z);
     for (i, a) in lights.iter().enumerate() {
