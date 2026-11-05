@@ -464,7 +464,14 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let disk = solidcraft_io::design_lock::stamp(path);
     let (doc, saved) = read_design(s, path)?;
     let shared = solidcraft_io::is_shared_design_path(path);
-    let opened = Session::opened_at_validating(doc, saved.as_ref(), (!shared).then_some(path), s.validation());
+    let opened = if shared {
+        // Component links are relative to the zip, which the session then forgets (saving asks where).
+        let mut doc = doc;
+        super::component_link::resolve_design_links(&mut doc, Some(path));
+        Session::opened_validating(doc, saved.as_ref(), s.validation()).located(None)
+    } else {
+        Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation())
+    };
     opened_design(s, opened, path, read_only, disk)
 }
 
@@ -867,7 +874,7 @@ fn save_for_sharing(s: &mut Session, p: &Value) -> Result<Value> {
         // Without the evaluated model: the zip is smaller, and the design rebuilds the same.
         None => s.design_container(solidcraft_io::DesignCompression::Compact, false, false)?,
     };
-    solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len()}))
 }
 
@@ -965,7 +972,7 @@ fn export_to(
         // file the design's properties where the format has a place for them.
         solidcraft_io::export_with_parts(&s.doc.painted(&*s.world_state()?), bodies, parts, format, &name, &s.doc.metadata, quality)?
     };
-    solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")}))
 }
 
