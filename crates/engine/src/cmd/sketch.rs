@@ -733,6 +733,22 @@ pub(crate) fn author_path_for_rebind(s: &Session, feature: &solidcraft_doc::Feat
     Ok(path)
 }
 
+/// The message for a `plane` that is none of the forms [`plane_ref`] takes.
+pub(crate) const PLANE_REF_FORMS: &str = "`plane` must be XY, XZ, YZ, a construction plane name or id, or an object";
+
+/// An explicit plane object `{origin?, x_dir, y_dir}` as [`plane_ref`] reads it before it looks at
+/// the design, or its message. A missing origin is the world origin; one that is given but is not
+/// three numbers (an expression, a number with a unit) is an error, not a silent [0, 0, 0].
+pub(crate) fn custom_plane_form(v: &Value) -> std::result::Result<Plane, &'static str> {
+    let origin = match v.get("origin") {
+        None | Some(Value::Null) => Vec3::ZERO,
+        Some(o) => vec3(o).ok_or("plane `origin` must be three numbers [x, y, z] in mm (expressions are not evaluated here)")?,
+    };
+    let x = v.get("x_dir").and_then(vec3).ok_or("plane needs x_dir")?;
+    let y = v.get("y_dir").and_then(vec3).ok_or("plane needs y_dir")?;
+    Plane::new(origin, x, y).ok_or("degenerate plane")
+}
+
 pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
     let base = match p.get("plane") {
         None => PlaneRef::Origin { name: "XY".into() },
@@ -742,19 +758,10 @@ pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
             if o.contains_key("face") {
                 face::capture(s, v, cmd)?
             } else {
-                // A missing origin is the world origin; one that is given but is not three numbers
-                // (an expression, a number with a unit) is an error, not a silent [0, 0, 0].
-                let origin = match v.get("origin") {
-                    None | Some(Value::Null) => Vec3::ZERO,
-                    Some(o) => vec3(o)
-                        .ok_or_else(|| bad(cmd, "plane `origin` must be three numbers [x, y, z] in mm (expressions are not evaluated here)"))?,
-                };
-                let x = v.get("x_dir").and_then(vec3).ok_or_else(|| bad(cmd, "plane needs x_dir"))?;
-                let y = v.get("y_dir").and_then(vec3).ok_or_else(|| bad(cmd, "plane needs y_dir"))?;
-                PlaneRef::Custom { plane: Plane::new(origin, x, y).ok_or_else(|| bad(cmd, "degenerate plane"))? }
+                PlaneRef::Custom { plane: custom_plane_form(v).map_err(|why| bad(cmd, why))? }
             }
         }
-        _ => return Err(bad(cmd, "`plane` must be XY, XZ, YZ, a construction plane name or id, or an object")),
+        _ => return Err(bad(cmd, PLANE_REF_FORMS)),
     };
     Ok(match expr(p, "offset") {
         Some(d) => PlaneRef::Offset { base: Box::new(base), distance: d },
