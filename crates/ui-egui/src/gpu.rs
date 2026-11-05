@@ -459,6 +459,8 @@ fn offscreen_adapter(policy: solidcraft_viewport_gpu::select::Policy) -> Option<
 /// that loses its device, or changes how the device reports errors or its loss, takes
 /// [`offscreen_own_device`] instead.
 #[cfg(all(test, not(target_arch = "wasm32")))]
+// Test-only (`allow-print-in-tests` does not see a `cfg(all(test, ..))`).
+#[allow(clippy::print_stderr)]
 pub(crate) fn offscreen_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
     static SHARED: std::sync::Mutex<Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)>> = std::sync::Mutex::new(None);
     let mut shared = SHARED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -727,6 +729,8 @@ pub(crate) fn render_offscreen_ao(
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
+// Test-only (`allow-print-in-tests` does not see a `cfg(all(test, ..))`).
+#[allow(clippy::print_stderr)]
 fn offscreen(
     scene: GpuScene,
     highlight: Option<GpuScene>,

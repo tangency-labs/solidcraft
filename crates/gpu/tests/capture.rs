@@ -3,6 +3,9 @@
 //! GPU output differs a little between drivers, so the checks count pixels of a kind rather than
 //! compare bytes. Skipped, with the reason printed, on a machine without a GPU adapter
 //! (`SOLIDCRAFT_REQUIRE_GPU=1` makes that a failure).
+// Test helpers outside #[test] functions print what they skip or measure; clippy.toml
+// `allow-print-in-tests` covers only #[test] functions and #[cfg(test)] code.
+#![allow(clippy::print_stderr)]
 
 use serde_json::json;
 use solidcore_record::Vec3;

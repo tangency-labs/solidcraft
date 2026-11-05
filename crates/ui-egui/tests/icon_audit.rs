@@ -1,4 +1,7 @@
 //! Runtime icon discovery: use the same headless UI and requests as control clients.
+// Test helpers outside #[test] functions print what they skip or measure; clippy.toml
+// `allow-print-in-tests` covers only #[test] functions and #[cfg(test)] code.
+#![allow(clippy::print_stderr)]
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
