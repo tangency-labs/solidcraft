@@ -486,6 +486,22 @@ fn row_height_and_label_column_are_fixed_for_long_labels_and_expressions() {
 }
 
 #[test]
+fn section_outside_dialog_scope_can_be_opened_with_the_keyboard() {
+    let ctx = crate::fonts::test_context();
+    let opened = std::cell::Cell::new(false);
+    let mut draw = |ui: &mut Ui| {
+        section(ui, "keyboard_section", "Options", false, |_| opened.set(true));
+    };
+    frame(&ctx, vec![], &mut draw);
+    let at = scenario::handle_at("dialog:section:Options").unwrap();
+    frame(&ctx, crate::ui_kit::test_support::key(egui::Key::Tab), &mut draw);
+    let response = ctx.read_response(ctx.memory(|m| m.focused()).unwrap()).unwrap();
+    assert!(response.rect.contains(at));
+    frame(&ctx, crate::ui_kit::test_support::key(egui::Key::Enter), &mut draw);
+    assert!(opened.get());
+}
+
+#[test]
 fn section_toggles_persist_per_dialog() {
     let ctx = crate::fonts::test_context();
     let mut a = 0;
