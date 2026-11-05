@@ -233,6 +233,36 @@ impl Entry {
 /// Every agent the chat can use: the installed ones found, then the ones the user added.
 pub fn entries(app: &crate::SolveApp) -> Vec<Entry> {
     let mut out = Vec::new();
+
+    // Universal AI Chat Client: available when enabled
+    if app.preferences.ai_provider_active {
+        let provider = app.preferences.ai_provider.as_str();
+        let provider_label = match provider {
+            "lm_studio" => "LM Studio",
+            "ollama" => "Ollama",
+            "antigravity" => "Antigravity",
+            _ => "Custom LLM",
+        };
+        let active_id = format!("provider:{}", app.preferences.ai_provider);
+        let model = if app.preferences.ai_model_name.trim().is_empty() { "local-model".to_string() } else { app.preferences.ai_model_name.clone() };
+        out.push(Entry {
+            id: active_id,
+            name: format!("{provider_label} ({model})"),
+            kind: Kind::Api,
+            argv: Vec::new(),
+            version: None,
+            login: if app.preferences.ai_api_key.is_empty() { "signed_in" } else { "key" },
+            found: false,
+            base_url: app.preferences.ai_endpoint_url.clone(),
+            model,
+            key: !app.preferences.ai_api_key.is_empty(),
+            request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
+            reasoning_effort: String::new(),
+            problem: None,
+            install: "",
+        });
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(d) = &app.agent_chat.detection {
         out.extend(d.found.iter().map(|f| Entry {

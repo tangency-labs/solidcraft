@@ -946,6 +946,20 @@ pub(crate) fn find_cli() -> Option<std::path::PathBuf> {
         .and_then(|e| e.parent().map(|d| d.join(name)))
         .filter(|p| p.is_file())
         .or_else(|| discover::find_in("solidcraft-cli", &discover::search_dirs()))
+        .or_else(|| {
+            for candidate in [
+                "target/aarch64-apple-darwin/release/solidcraft-cli",
+                "target/release/solidcraft-cli",
+                "target/debug/solidcraft-cli",
+                "/Applications/SolidCraft.app/Contents/MacOS/solidcraft-cli",
+            ] {
+                let p = std::path::PathBuf::from(candidate);
+                if p.is_file() {
+                    return Some(p);
+                }
+            }
+            None
+        })
 }
 
 /// The agent's working folder: an empty folder of SolidCraft's own, so an agent's own file tools
@@ -971,8 +985,10 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
         chat.picking = Some(true);
         return;
     };
-    // An API agent's key comes from the keychain for this connection only.
-    let key = if entry.kind.is_api() && entry.key {
+    // An API agent's key comes from the keychain for this connection only, or direct preferences for active provider.
+    let key = if entry.id.starts_with("provider:") {
+        (!app.preferences.ai_api_key.trim().is_empty()).then(|| app.preferences.ai_api_key.clone())
+    } else if entry.kind.is_api() && entry.key {
         match app.services.secrets.as_ref().map(|s| s.get(&entry.id)) {
             Some(Ok(k)) => k,
             Some(Err(e)) => {
@@ -1028,6 +1044,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
                         http,
                         request_timeout_s: entry.request_timeout_s,
                         reasoning_effort: entry.reasoning_effort.clone(),
+                        system_prompt: app.preferences.ai_system_prompt.clone(),
                     },
                     start,
                 )

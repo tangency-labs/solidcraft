@@ -441,11 +441,12 @@ const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
 const PAGE_ALIASES: &[(&str, usize)] = &[
     ("AI", PAGE_ASSISTANT),
     ("AI & MCP Server", PAGE_ASSISTANT),
-    ("MCP", PAGE_ASSISTANT),
-    ("MCP Server", PAGE_ASSISTANT),
+    ("AI Provider Settings", PAGE_ASSISTANT),
     ("Interface", PAGE_APPEARANCE),
     ("Interface/navigation bar", PAGE_LAYOUT),
     ("Keyboard Shortcuts", PAGE_SHORTCUTS),
+    ("MCP", PAGE_ASSISTANT),
+    ("MCP Server", PAGE_ASSISTANT),
     ("Selection", PAGE_SKETCH),
     ("Sketch & selection", PAGE_SKETCH),
     ("Sketch and selection", PAGE_SKETCH),
@@ -1529,6 +1530,18 @@ preference_settings! {
     mcp_workspace: String = String::new(), PAGE_ASSISTANT;
     /// Automatically start the embedded MCP server when SolidCraft launches.
     mcp_autostart: bool = true, PAGE_ASSISTANT;
+    /// Whether the built-in Universal AI Chat provider is enabled.
+    ai_provider_active: bool = false, PAGE_ASSISTANT;
+    /// Active AI Provider ("lm_studio", "ollama", "antigravity", "custom").
+    ai_provider: String = "lm_studio".into(), PAGE_ASSISTANT;
+    /// Endpoint URL for the active AI Provider.
+    ai_endpoint_url: String = "http://localhost:1234/v1/chat/completions".into(), PAGE_ASSISTANT;
+    /// API Key for the active AI Provider (optional).
+    ai_api_key: String = String::new(), PAGE_ASSISTANT;
+    /// Model name for the active AI Provider.
+    ai_model_name: String = "local-model".into(), PAGE_ASSISTANT;
+    /// Customizable system prompt defining the AI's role as a parametric CAD engineer.
+    ai_system_prompt: String = "You are an expert parametric 3D CAD engineer in SolidCraft. When the user asks you to model a part, use the available CAD tools (sketching on planes, drawing profiles, dimensions, constraints, extrusions, fillets, chamfers, holes) to build precise 3D geometry step by step. Always ensure sketches are closed before extruding, use exact millimeter dimensions, and inspect the resulting bodies.".into(), PAGE_ASSISTANT;
 
     // ---- Sketch / selection modifier bindings (classic defaults; alternate mapping is opt-in) ----
     /// Modifier that suppresses sketch auto-snap while drawing or dragging a sketch point.

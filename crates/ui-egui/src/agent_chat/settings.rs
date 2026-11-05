@@ -462,7 +462,6 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         });
         ui.add_enabled_ui(app.preferences.ai_features && !cfg!(target_arch = "wasm32"), |ui| {
-            super::mcp_server_ui::show_mcp_control_center(app, ui);
             permissions_section(app, ui);
             #[cfg(not(target_arch = "wasm32"))]
             {
@@ -476,6 +475,116 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             connecting_section(app, ui);
         });
         ui.add_enabled_ui(app.preferences.ai_features, |ui| pointer_section(app, ui));
+        ui.add_enabled_ui(app.preferences.ai_features && !cfg!(target_arch = "wasm32"), |ui| {
+            provider_settings_section(app, ui);
+            super::mcp_server_ui::show_mcp_control_center(app, ui);
+        });
+    });
+}
+
+fn provider_settings_section(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = crate::theme::Tokens::get();
+    ui_kit::settings_section(ui, "ai_provider_settings", "AI Provider Settings (Universal Chat)", |ui| {
+        ui.label(
+            egui::RichText::new("Route chat prompts and CAD tool calls to any external OpenAI-compatible LLM endpoint (LM Studio, Ollama, Antigravity, or custom local models).")
+                .color(t.text_dim)
+                .size(t.font_small),
+        );
+        ui.add_space(t.space_2);
+
+        // Provider Dropdown / Selector
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Active AI Provider:").strong());
+            let current = app.preferences.ai_provider.clone();
+            let label = match current.as_str() {
+                "lm_studio" => "LM Studio (Local)",
+                "ollama" => "Ollama (Local)",
+                "antigravity" => "Antigravity / Cloud API",
+                _ => "Custom OpenAI-Compatible",
+            };
+            egui::ComboBox::from_id_salt("sc_active_ai_provider").selected_text(label).show_ui(ui, |ui| {
+                if ui.selectable_label(current == "lm_studio", "LM Studio (Local)").clicked() {
+                    app.preferences.ai_provider = "lm_studio".into();
+                    app.preferences.ai_endpoint_url = "http://localhost:1234/v1/chat/completions".into();
+                    if app.preferences.ai_model_name == "local-model" || app.preferences.ai_model_name.is_empty() {
+                        app.preferences.ai_model_name = "qwen2.5-coder".into();
+                    }
+                }
+                if ui.selectable_label(current == "ollama", "Ollama (Local)").clicked() {
+                    app.preferences.ai_provider = "ollama".into();
+                    app.preferences.ai_endpoint_url = "http://localhost:11434/v1/chat/completions".into();
+                    if app.preferences.ai_model_name == "local-model" || app.preferences.ai_model_name.is_empty() {
+                        app.preferences.ai_model_name = "llama3".into();
+                    }
+                }
+                if ui.selectable_label(current == "antigravity", "Antigravity / Cloud API").clicked() {
+                    app.preferences.ai_provider = "antigravity".into();
+                    app.preferences.ai_endpoint_url = "http://127.0.0.1:8989/v1".into();
+                }
+                if ui.selectable_label(current == "custom", "Custom OpenAI-Compatible").clicked() {
+                    app.preferences.ai_provider = "custom".into();
+                }
+            });
+        });
+
+        ui.add_space(t.space_2);
+
+        // Endpoint URL
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Endpoint URL:").size(t.font_small));
+            ui.add(egui::TextEdit::singleline(&mut app.preferences.ai_endpoint_url).desired_width(340.0));
+        });
+
+        // Model Name
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Model Name:").size(t.font_small));
+            ui.add(egui::TextEdit::singleline(&mut app.preferences.ai_model_name).desired_width(200.0));
+            ui.label(egui::RichText::new("(e.g., qwen2.5-coder, deepseek-r1, llama3)").color(t.text_dim).size(t.font_small));
+        });
+
+        // API Key
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("API Key:").size(t.font_small));
+            ui.add(egui::TextEdit::singleline(&mut app.preferences.ai_api_key).password(true).desired_width(260.0));
+            ui.label(egui::RichText::new("(Optional for local LM Studio / Ollama)").color(t.text_dim).size(t.font_small));
+        });
+
+        ui.add_space(t.space_2);
+
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut app.preferences.ai_provider_active, "Enable Universal AI Provider in Chat");
+        });
+
+        ui.add_space(t.space_2);
+
+        // System Prompt Text Area
+        ui.label(egui::RichText::new("System Prompt (Parametric CAD Role):").strong());
+        ui.add(
+            egui::TextEdit::multiline(&mut app.preferences.ai_system_prompt)
+                .desired_width(ui.available_width() - 16.0)
+                .desired_rows(4)
+                .font(egui::TextStyle::Monospace),
+        );
+
+        ui.add_space(t.space_3);
+
+        // Quick Actions
+        ui.horizontal(|ui| {
+            if ui.button(egui::RichText::new("💬 Open Chat Sidebar").strong()).clicked() {
+                app.agent_chat.open = true;
+                app.preferences.agent_chat_minimized = false;
+            }
+            if ui.button(egui::RichText::new("⚡ Connect to AI Provider")).clicked() {
+                app.preferences.ai_provider_active = true;
+                super::connect(app, &ui.ctx().clone());
+            }
+            let is_running = app.agent_chat.state().running();
+            if is_running {
+                ui.label(egui::RichText::new("● Connected & Ready").color(egui::Color32::from_rgb(74, 222, 128)));
+            } else {
+                ui.label(egui::RichText::new("○ Ready to Connect").color(t.text_dim));
+            }
+        });
     });
 }
 

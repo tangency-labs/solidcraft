@@ -650,6 +650,8 @@ pub struct ApiConfig {
     /// provider's own default applies. A set value wins over the `none` retry (#3817): that
     /// retry only runs when no effort was chosen.
     pub reasoning_effort: String,
+    /// System prompt defining the AI's role and instructions.
+    pub system_prompt: String,
 }
 
 enum Cmd {
@@ -960,15 +962,45 @@ impl Worker {
                     input: c.arguments.as_ref().ok().filter(|a| a.is_object()).cloned(),
                     output: None,
                 });
+                let is_custom_cad = matches!(
+                    c.name.as_str(),
+                    "extrude"
+                        | "solid_extrude"
+                        | "solid.extrude"
+                        | "sketch_create"
+                        | "sketch.create"
+                        | "draw_spline"
+                        | "sketch_spline"
+                        | "sketch.spline"
+                        | "place_hole"
+                        | "hole"
+                        | "solid_hole"
+                        | "solid.hole"
+                );
                 let (text, failed) = if self.cancel.load(Ordering::Relaxed) {
                     ("cancelled by the user".to_string(), true)
                 } else if let Err(e) = &c.arguments {
                     // A call whose arguments do not parse is answered, never run with `{}`.
                     (format!("Not run: {e}"), true)
-                } else if !self.tool_names.iter().any(|n| n == &c.name) {
+                } else if !self.tool_names.iter().any(|n| n == &c.name) && !is_custom_cad {
                     (format!("unknown tool `{}`", c.name), true)
                 } else {
-                    match self.mcp_call("tools/call", json!({"name": c.name, "arguments": args})) {
+                    let mcp_payload = match c.name.as_str() {
+                        "extrude" | "solid_extrude" | "solid.extrude" => {
+                            json!({"name": "execute", "arguments": {"command": "solid.extrude", "params": args}})
+                        }
+                        "sketch_create" | "sketch.create" => {
+                            json!({"name": "execute", "arguments": {"command": "sketch.create", "params": args}})
+                        }
+                        "draw_spline" | "sketch_spline" | "sketch.spline" => {
+                            json!({"name": "execute", "arguments": {"command": "sketch.spline", "params": args}})
+                        }
+                        "place_hole" | "hole" | "solid_hole" | "solid.hole" => {
+                            json!({"name": "execute", "arguments": {"command": "solid.hole", "params": args}})
+                        }
+                        _ => json!({"name": c.name, "arguments": args}),
+                    };
+                    match self.mcp_call("tools/call", mcp_payload) {
                         Ok(r) => tool_text(&r),
                         Err(e) => (e, true),
                     }
@@ -1177,10 +1209,11 @@ impl Worker {
     /// The request body in the endpoint's shape: the system note is a message for OpenAI and a
     /// top-level field for Anthropic.
     fn body(&self) -> Value {
+        let system_note = if !self.cfg.system_prompt.trim().is_empty() { self.cfg.system_prompt.as_str() } else { super::acp::SYSTEM_NOTE };
         match self.cfg.protocol {
             Protocol::OpenAi => {
                 let mut messages = Vec::with_capacity(self.history.len() + 1);
-                messages.push(json!({"role": "system", "content": super::acp::SYSTEM_NOTE}));
+                messages.push(json!({"role": "system", "content": system_note}));
                 messages.extend(self.history.iter().cloned());
                 let mut body = json!({"model": self.cfg.model, "messages": messages});
                 if let Some(effort) = self.reasoning_effort() {
@@ -1200,7 +1233,7 @@ impl Worker {
                 let mut body = json!({
                     "model": self.cfg.model,
                     "max_tokens": ANTHROPIC_MAX_TOKENS,
-                    "system": super::acp::SYSTEM_NOTE,
+                    "system": system_note,
                     "messages": &self.history,
                 });
                 if !self.tools.is_empty() {
@@ -1219,7 +1252,10 @@ impl Worker {
     fn post(&self, body: &Value) -> Result<(u16, Value), String> {
         let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
         let url = match self.cfg.protocol {
-            Protocol::OpenAi => format!("{}/chat/completions", self.cfg.base_url),
+            Protocol::OpenAi => {
+                let trimmed = self.cfg.base_url.trim().trim_end_matches('/');
+                if trimmed.ends_with("/chat/completions") { trimmed.to_string() } else { format!("{trimmed}/chat/completions") }
+            }
             Protocol::Anthropic => {
                 headers.push(("anthropic-version".to_string(), ANTHROPIC_VERSION.to_string()));
                 endpoint(&self.cfg.base_url, "messages")
@@ -1914,6 +1950,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            system_prompt: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -1965,6 +2002,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            system_prompt: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2019,6 +2057,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            system_prompt: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2066,6 +2105,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            system_prompt: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2151,6 +2191,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            system_prompt: String::new(),
         }
     }
 
@@ -2225,6 +2266,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            system_prompt: String::new(),
         };
         let mut b = ApiBackend::start(cfg, go_ctx()).unwrap();
         b.prompt(&[PromptPart::Text("hi".into())]);
@@ -2544,6 +2586,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            system_prompt: String::new(),
         };
         let mut b = ApiBackend::start(cfg, go_ctx()).unwrap();
         b.prompt(&[PromptPart::Text("hi".into())]);
@@ -2597,6 +2640,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            system_prompt: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2698,6 +2742,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            system_prompt: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2728,6 +2773,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            system_prompt: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         assert!(ApiBackend::start(cfg, ctx).is_err());
@@ -2758,6 +2804,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: effort.to_string(),
+            system_prompt: String::new(),
         };
         let (events, _rx) = channel();
         let w = Worker {
@@ -2923,6 +2970,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            system_prompt: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2973,6 +3021,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            system_prompt: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -3024,6 +3073,7 @@ mod tests {
             http,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
+            system_prompt: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
