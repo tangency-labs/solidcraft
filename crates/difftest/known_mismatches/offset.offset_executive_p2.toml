@@ -179,11 +179,6 @@ why = "the exact surface extension replaces the fitted one (rounding; plan/findi
 
 [[mismatch]]
 unit = "offset.offset_executive_p2"
-case = "pe_Fillet_cyl_on_box_w_fillet1_f0_d0_out_ext"
-why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
-
-[[mismatch]]
-unit = "offset.offset_executive_p2"
 case = "pe_Fillet_cyl_on_box_w_fillet2_f0_d0_in_ext"
 why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
 
@@ -241,3 +236,18 @@ why = "the exact surface extension replaces the fitted one (geometry; plan/findi
 unit = "offset.offset_executive_p2"
 case = "shell_file_problemShell2_face1_extend"
 why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_cyl_on_box_f2_d0_in_ext"
+why = "the offset's extended surfaces reach as far as the offsets meet, not five offsets (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_cyl_on_box_w_fillet1_f2_d0_in_ext"
+why = "the offset's extended surfaces reach as far as the offsets meet, not five offsets (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_cyl_on_box_w_fillet2_f1_d0_out_ext"
+why = "the offset's extended surfaces reach as far as the offsets meet, not five offsets (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"

@@ -155,6 +155,10 @@ pub fn local_operation(
     // (the geometry creator's constructor tolerance, half a degree under WR-666's opt-in)
     executive.use_creator_tangency_tol(k);
     executive.set_local_surfaces(&all_faces, new_list);
+    // A face's surface is extended to meet the moved surfaces, which the box is to hold
+    // (WR-534), not to meet an offset: by upstream's five half-radii of the sphere bounding
+    // it (more than its diameter, the farthest any point in it lies from a face in it)
+    executive.set_extension_bound(Some(2.5 * radius));
     // the shell faces get copied without being offset: none
     executive.set_shell_faces(&[]);
     // extend/intersect to fill new convex edge gaps rather than adding a fillet

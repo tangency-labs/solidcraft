@@ -93,6 +93,21 @@ fn wr_578_box_and_cylinder_shell_closes_the_loop_gaps() {
     }
 }
 
+/// Seam 200 with the opt-in alone: each face's surface extended by its offset's reach (not
+/// five offsets), the shell is sound as at seams 30 and 55 (manifold, integrity clean), its
+/// volume 1.5e-7 off the fork's closed form as theirs are (WR-578's divergence).
+#[test]
+fn wr_578_seam_200_shells_sound() {
+    let (k, result) = shell_1494(true, 200.0);
+    assert!(report(
+        &k,
+        "wr_578 shell/1494 seam 200",
+        result,
+        Some(SHELL_1494),
+        1e-6
+    ));
+}
+
 /// Seams 125 and 200 degrees off the front face: the fork shells these too; the port
 /// returns a body that is not a manifold solid (WR-578).
 #[test]
@@ -110,12 +125,12 @@ fn wr_578_box_and_cylinder_shell_other_seams() {
     }
 }
 
-/// Seams 125 and 200 with the opt-in alone: the offset is no closed solid, and the shell
-/// refuses it (`SM_ERR`) instead of handing it back as upstream's `ShellBrep` does
-/// (WR-454), so the flag never turns upstream's refusal into a broken body.
+/// Seam 125 with the opt-in alone: the offset is no closed solid, and the shell refuses it
+/// (`SM_ERR`) instead of handing it back as upstream's `ShellBrep` does (WR-454), so the
+/// flag never turns upstream's refusal into a broken body.
 #[test]
 fn wr_578_other_seams_are_refused() {
-    for seam in [125.0, 200.0] {
+    for seam in [125.0] {
         match shell_1494_with(kernel(true), seam).1 {
             Err(e) => assert_eq!(e.sm_status(), Some(SM_ERR), "seam {seam}"),
             other => panic!("seam {seam}: {other:?}"),

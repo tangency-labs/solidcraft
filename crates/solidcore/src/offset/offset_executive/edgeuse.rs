@@ -1265,9 +1265,13 @@ impl CreatorExecutive<Handle> for Executive<'_> {
             Arena::Offset => self.offset_key_of,
         };
         let key = key_of(EntityRef::Face(f)).key.0;
+        let margin = match arena {
+            Arena::Original => self.inner.original_extension_margin(f),
+            Arena::Offset => self.inner.offset_extension_margin(f),
+        };
         let extension = self
             .inner
-            .get_create_extended_surface(k, key, &surface)?
+            .get_create_extended_surface(k, key, &surface, margin)?
             .clone();
         let domain = extension.natural_uv_domain_with_nurb(k)?;
         if let Some(&handle) = self.made.get(&key) {

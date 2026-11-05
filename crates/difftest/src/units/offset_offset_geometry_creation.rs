@@ -1646,7 +1646,14 @@ impl OffsetExecutive<H> for Exec {
         if seeded {
             self.inner.insert_extended_surface(key, surface.clone());
         }
-        let ext = self.inner.get_create_extended_surface(k, key, &surface)?;
+        // The executive extends a face's surface by its offset's reach past the face, from
+        // the original faces it records as it offsets them; this unit's script offsets no
+        // face through it, so an unseeded base is extended by the margin upstream's call
+        // asks for (`GetOffsetDistance() * 5.0`, either way).
+        let margin = (self.inner.offset_distance() * 5.0).abs();
+        let ext = self
+            .inner
+            .get_create_extended_surface(k, key, &surface, margin)?;
         let domain = ext.natural_uv_domain_with_nurb(k)?;
         if seeded {
             // the seeded entry is the base itself, as `m_vSurfExtSurf.Insert(s, s)`

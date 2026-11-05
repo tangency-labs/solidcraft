@@ -1372,6 +1372,9 @@ impl OffsetExecutive {
     ) -> Result<()> {
         let operation = if extended { OP_EXTENDED } else { OP_SOLID };
         let faceuse = select_offset_faceuse(original, id, extended, self.inset(), operation)?;
+        // Not upstream: the margin this face's surface is extended by, from its edges'
+        // sector angles and the offset (upstream extends by five offsets).
+        self.record_extension_reach(kernel, original, id, faceuse)?;
         let (mut surface, ssi) = if self.local_faces.is_empty() {
             let creator = crate::offset::offset_geometry_creation::OffsetGeometryCreation::new(
                 self.offset_distance(),
@@ -1503,8 +1506,9 @@ impl OffsetExecutive {
                 let surface = required(temporary.face(id)?.surface.as_ref(), OP_EXTENDED)?;
                 let original_domain = surface.natural_uv_domain_with_nurb(kernel)?;
                 // Face-owned surfaces use the caller's result-arena identities.
+                let margin = self.offset_extension_margin(id);
                 let extension = self
-                    .get_create_extended_surface(kernel, key.key.0, surface)?
+                    .get_create_extended_surface(kernel, key.key.0, surface, margin)?
                     .clone();
                 let extension_domain = extension.natural_uv_domain_with_nurb(kernel)?;
                 // cpp:1639: UNSURE retains the original; FALSE suppresses UV trim
@@ -1581,7 +1585,7 @@ impl OffsetExecutive {
     }
 }
 
-fn select_offset_faceuse(
+pub(super) fn select_offset_faceuse(
     original: &Brep,
     face: FaceId,
     extended: bool,

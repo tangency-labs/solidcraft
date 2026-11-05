@@ -1699,6 +1699,11 @@ fn rust_extend(input: &Extension) -> RResult<Output> {
         input.offset_distance,
         input.approx_tol,
     );
+    // The executive extends a face's surface by its offset's reach past the face (from the
+    // original faces it records as it offsets them); these bases have no face, so each is
+    // extended by the margin upstream's call asks for (`m_rGeometryCreation
+    // .GetOffsetDistance() * 5.0`, either way).
+    let margin = (input.offset_distance * 5.0).abs();
     let mut identities = BTreeMap::new();
     let mut next_id = 0;
     let mut output = Output::new().int("action_count", input.actions.len() as i64);
@@ -1706,7 +1711,7 @@ fn rust_extend(input: &Extension) -> RResult<Output> {
         let base = at(&bases, base_key)?;
         let hit = identities.contains_key(&base_key);
         let (status, surface) =
-            operation(executive.get_create_extended_surface(&kernel, base_key as u64, base))?;
+            operation(executive.get_create_extended_surface(&kernel, base_key as u64, base, margin))?;
         let result_id = if surface.is_some() {
             *identities.entry(base_key).or_insert_with(|| {
                 let id = next_id;
@@ -2957,6 +2962,132 @@ fn generated_extension(rng: &mut Rng) -> Extension {
 mod tests {
     use super::*;
     use crate::{compare, CaseSource};
+
+    /// The extension cases measured independently of the C++ (#2769's moved cases): over the
+    /// base's box the extension is the base (sampled on a 9 x 9 grid), and past each side
+    /// every row runs on straight, along the base's end direction (the reach of the base's
+    /// middle row against the margin asked, `|offset| * 5`, is reported: the extension
+    /// measures it at the middle of the box as extended so far); a zero margin leaves the base as it is. The C++ reference fitted its
+    /// extension to an estimated parameter reach, so its domains and samples past the box
+    /// differ; these are the values the exact construction must give (each measured within
+    /// the rounding of its points at the surface's size). Writes one line per case to
+    /// `$SC_EXTEND_PROBE` when set.
+    #[test]
+    fn extensions_are_the_base_and_reach_the_margin_straight() {
+        use solidcore::geom::vector2d::Point2;
+        use std::fmt::Write as _;
+        let context = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 0,
+        };
+        let kernel = Kernel::default();
+        let mut report = String::new();
+        let mut measured = 0;
+        let mut failures = 0;
+        for case in &Runner.cases(&context).unwrap() {
+            let Ok(Inputs::Extend(input)) = case.parse() else {
+                continue;
+            };
+            let margin = (input.offset_distance * 5.0).abs();
+            let mut worst_on_box = 0.0_f64;
+            let mut worst_reach = 0.0_f64;
+            let mut worst_straight = 0.0_f64;
+            let mut worst_direction = 0.0_f64;
+            let mut refused = false;
+            for base in &input.surfaces {
+                let Ok(base) = base.rust() else { continue };
+                let mut executive =
+                    OffsetExecutive::new(OffsetOperation::SolidOffset, input.offset_distance, input.approx_tol);
+                let Ok(ext) = executive.get_create_extended_surface(&kernel, 0, &base, margin) else {
+                    refused = true;
+                    continue;
+                };
+                let ext = ext.clone();
+                let Ok(b) = base.natural_uv_domain_with_nurb(&kernel) else { continue };
+                let e = ext.natural_uv_domain_with_nurb(&kernel).unwrap();
+                let scale = {
+                    let p = base.evaluate_point(&kernel, b.min()).unwrap();
+                    let q = base.evaluate_point(&kernel, b.max()).unwrap();
+                    p.distance(q).max(p.length()).max(q.length()).max(1e-300)
+                };
+                let at = |s: &Surface, u: f64, v: f64| s.evaluate_point(&kernel, Point2::new(u, v)).unwrap();
+                let lerp = |a: f64, c: f64, t: f64| (1.0 - t) * a + t * c;
+                for i in 0..=8 {
+                    for j in 0..=8 {
+                        let (u, v) = (lerp(b.min().x, b.max().x, f64::from(i) / 8.0), lerp(b.min().y, b.max().y, f64::from(j) / 8.0));
+                        // within the rounding at the extension's size (its net reaches the margin past)
+                        worst_on_box = worst_on_box.max(at(&base, u, v).distance(at(&ext, u, v)) / (scale + margin));
+                    }
+                }
+                // a margin within a million roundings of the surface's size is no length
+                // to measure a direction on: the base over its box only
+                if margin < 1e6 * f64::EPSILON * scale {
+                    continue;
+                }
+                if margin == 0.0 {
+                    assert_eq!(e, b, "{}: a zero margin extends nothing", case.name);
+                    continue;
+                }
+                // (side, base boundary, extended boundary) in u then v
+                let sides = [
+                    (true, b.min().x, e.min().x),
+                    (true, b.max().x, e.max().x),
+                    (false, b.min().y, e.min().y),
+                    (false, b.max().y, e.max().y),
+                ];
+                for (along_u, edge, far) in sides {
+                    #[allow(clippy::float_cmp)]
+                    if edge == far {
+                        continue; // a side left as it is (closed or degenerate)
+                    }
+                    for k in 0..=8 {
+                        let t = f64::from(k) / 8.0;
+                        let point = |w: f64| {
+                            if along_u {
+                                at(&ext, w, lerp(b.min().y, b.max().y, t))
+                            } else {
+                                at(&ext, lerp(b.min().x, b.max().x, t), w)
+                            }
+                        };
+                        let (p, q, mid) = (point(edge), point(far), point(0.5 * (edge + far)));
+                        let width = if along_u { b.max().x - b.min().x } else { b.max().y - b.min().y };
+                        let inward = if far > edge { -1.0 } else { 1.0 };
+                        let inner = point(edge + inward * 1e-6 * width);
+                        let reach = p.distance(q);
+                        if reach == 0.0 {
+                            continue; // a pole: the row is a point
+                        }
+                        // against the margin at the side's middle (where the extension
+                        // measures it: the rows past it reach as their end tangents go),
+                        // within the points' rounding at the surface's size
+                        if k != 4 {
+                            continue;
+                        }
+                        worst_reach = worst_reach.max((reach - margin).abs() / (1e-9 * margin + 1e3 * f64::EPSILON * scale));
+                        let chord = q - p;
+                        // off the chord by more than its points' rounding at the surface's size
+                        worst_straight = worst_straight.max((mid - p).cross(chord).length() / chord.length() / (1e-9 * chord.length() + 1e3 * f64::EPSILON * scale));
+                        let back = p - inner;
+                        if back.length() > 0.0 {
+                            worst_direction = worst_direction.max(back.cross(chord).length() / (back.length() * chord.length()));
+                        }
+                    }
+                }
+            }
+            measured += 1;
+            let _ = writeln!(
+                report,
+                "{}\tmargin={margin:e}\trefused={refused}\ton_box={worst_on_box:.1e}\treach={worst_reach:.1e}\tstraight={worst_straight:.1e}\tdirection={worst_direction:.1e}",
+                case.name
+            );
+            failures += usize::from(worst_on_box > 1e-12 || worst_straight > 1.0);
+        }
+        if let Ok(path) = std::env::var("SC_EXTEND_PROBE") {
+            std::fs::write(path, &report).unwrap();
+        }
+        assert!(measured > 0);
+        assert_eq!(failures, 0, "{report}");
+    }
 
     /// Issue #1476: every `replace` fixture (extrusion, plane and B-spline bases)
     /// replaces its offset surface by a B-spline approximation on both sides, and the

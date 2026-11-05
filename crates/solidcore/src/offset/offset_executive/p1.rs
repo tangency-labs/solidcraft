@@ -213,6 +213,14 @@ pub struct OffsetExecutive {
     pub(super) vertex_to_faces: Relation<VertexId, FaceId>,
     pub(super) blend_to_faces: Relation<FaceId, FaceId>,
     extended_surfaces: BTreeMap<u64, Surface>,
+    /// Not upstream: how far each original face's surface must reach past the face for
+    /// its neighbours' offsets to meet its own ([`super::reach::extension_reach`]), by the
+    /// face and by each of its face uses, recorded as the face is offset.
+    extension_reaches: BTreeMap<FaceId, f64>,
+    faceuse_extension_reaches: BTreeMap<FaceuseId, f64>,
+    /// Not upstream: the margin of every face of an operation whose faces are not offset
+    /// but moved to surfaces of their own (a local operation), set by its caller.
+    extension_bound: Option<f64>,
     /// Not upstream (WR-346): the original faces of an inset whose offset collapses (a
     /// convex round thinner than the wall), mated across instead of offset
     /// (`m_sCollapsedFaces`; only with `Kernel::fixes.offset_collapsed_rounds_mated`).
@@ -272,6 +280,9 @@ impl OffsetExecutive {
             vertex_to_faces: Relation::default(),
             blend_to_faces: Relation::default(),
             extended_surfaces: BTreeMap::new(),
+            extension_reaches: BTreeMap::new(),
+            faceuse_extension_reaches: BTreeMap::new(),
+            extension_bound: None,
             collapsed_faces: Vec::new(),
             unmated_edgeuses: BTreeSet::new(),
             local_faces: Vec::new(),
@@ -533,6 +544,97 @@ impl OffsetExecutive {
         self.edge_to_faces.remove_all();
         self.vertex_to_faces.remove_all();
         self.blend_to_faces.remove_all();
+        self.extension_reaches.clear();
+        self.faceuse_extension_reaches.clear();
+    }
+
+    /// Records how far the surface of original face `face` must be extended for its
+    /// neighbours' offsets to meet its offset along `faceuse`
+    /// ([`super::reach::extension_reach`] at the executive's offset distance, the shell's
+    /// faces staying where they are), and one offset distance, so that the meetings cross
+    /// the extended surface's boundary rather than touch it.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`super::reach::extension_reach`].
+    pub(super) fn record_extension_reach(
+        &mut self,
+        kernel: &Kernel,
+        original: &mut Brep,
+        face: FaceId,
+        faceuse: FaceuseId,
+    ) -> Result<()> {
+        // The meetings must cross the extended surface's boundary, not touch it (a face
+        // that stays where it is meets its neighbours' offsets at its edge, a tangent
+        // neighbour's offset meets at the edge's image): the margin is the reach and the
+        // offset's own size, so each meeting lies at least one offset inside the extension
+        // (a tolerance-sized margin is below what an extension can certify). A face with
+        // no neighbour meets no offset and is not extended. A local operation's faces move to surfaces of their
+        // own: its margin is the bound it sets ([`Self::set_extension_bound`]).
+        let reach = if let Some(bound) = self.extension_bound {
+            bound
+        } else {
+            super::reach::extension_reach(
+                kernel,
+                original,
+                faceuse,
+                self.offset_distance,
+                &self.shell_faces,
+                self.tangency_tol_radians,
+            )?
+            .map_or(0.0, |reach| reach + self.offset_distance.abs())
+        };
+        self.extension_reaches.insert(face, reach);
+        let (primary, mate) = crate::topology::face::p2::faceuses(original, face)?;
+        for faceuse in [Some(faceuse), primary, mate].into_iter().flatten() {
+            self.faceuse_extension_reaches.insert(faceuse, reach);
+        }
+        Ok(())
+    }
+
+    /// Sets the margin every face's surface is extended by, in place of its offset's reach
+    /// (a local operation, whose faces move to surfaces of their own); `None` derives it.
+    pub fn set_extension_bound(&mut self, bound: Option<f64>) {
+        self.extension_bound = bound;
+    }
+
+    /// The largest reach recorded: the margin of a surface no recorded face accounts for
+    /// (an edge's or vertex's cap, a face the offset did not make from one).
+    fn body_extension_reach(&self) -> f64 {
+        if let Some(bound) = self.extension_bound {
+            return bound;
+        }
+        self.extension_reaches.values().fold(0.0, |a, &b| a.max(b))
+    }
+
+    /// The margin the surface of original face `face` is extended by: its recorded reach.
+    pub(super) fn original_extension_margin(&self, face: FaceId) -> f64 {
+        if let Some(bound) = self.extension_bound {
+            return bound;
+        }
+        self.extension_reaches
+            .get(&face)
+            .copied()
+            .unwrap_or_else(|| self.body_extension_reach())
+    }
+
+    /// The margin the surface of offset face `face` is extended by: the reach of the
+    /// original face use it was made from.
+    pub(super) fn offset_extension_margin(&self, face: FaceId) -> f64 {
+        if let Some(bound) = self.extension_bound {
+            return bound;
+        }
+        let reaches: Vec<f64> = self
+            .faceuse_to_faces
+            .firsts(face)
+            .iter()
+            .filter_map(|faceuse| self.faceuse_extension_reaches.get(faceuse).copied())
+            .collect();
+        if reaches.is_empty() {
+            self.body_extension_reach()
+        } else {
+            reaches.into_iter().fold(0.0, f64::max)
+        }
     }
 
     /// Synchronizes mapped edge ranges, splitting offset edges at the other side's
@@ -621,44 +723,56 @@ impl OffsetExecutive {
         Ok(out)
     }
 
-    /// Returns a cached extension, creating it with distance `|offset_distance| * 5.0` (none
-    /// for a zero offset), every
-    /// side exactly ruled ([`Surface::extended_sides_keeping_parameters`], [`Continuity::Ruled`]): a plane, cone,
-    /// sphere, torus or ball patch as itself, a procedural blend by its definition, an
+    /// Returns a cached extension, creating it `margin` past every side of `base`'s box
+    /// (none for a margin of zero: the base itself), every side exactly ruled
+    /// ([`Surface::extended_sides_keeping_parameters`], [`Continuity::Ruled`]): a plane,
+    /// cone, sphere, torus or ball patch as itself, a procedural blend by its definition, an
     /// offset surface as the offset of its base extended. A hit never re-extends or replaces
     /// the cached surface.
     ///
-    /// Not upstream: upstream's `CreateExtendedSurface(.., SM_CT_G1R, ..)` fits a ruled
-    /// extension and removes knots within a tolerance (the WR-532 / WR-728 opt-ins
-    /// `offset_extends_cones_as_themselves` and `offset_extends_ball_patches_as_themselves`
-    /// extended cones and ball patches as themselves; the exact path always does, so the
-    /// flags no longer change this).
+    /// The margin is how far the face's offset must reach past the face for its
+    /// neighbours' offsets to meet it ([`Self::original_extension_margin`],
+    /// [`Self::offset_extension_margin`]: [`super::reach::extension_reach`]).
+    ///
+    /// Not upstream: upstream's `CreateExtendedSurface(.., SM_CT_G1R, ..)` extends by five
+    /// offset distances, fits a ruled extension and removes knots within a tolerance (the
+    /// WR-532 / WR-728 opt-ins `offset_extends_cones_as_themselves` and
+    /// `offset_extends_ball_patches_as_themselves` extended cones and ball patches as
+    /// themselves; the exact path always does, so the flags no longer change this).
     ///
     /// `base_key` represents upstream pointer identity, including across Rust clones.
     /// Distinct source identities must use distinct keys. Failed extensions are not cached.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a margin that is negative or not finite; those of
+    /// the extension.
     pub fn get_create_extended_surface(
         &mut self,
         kernel: &Kernel,
         base_key: u64,
         base: &Surface,
+        margin: f64,
     ) -> Result<&Surface> {
+        if !(margin.is_finite() && margin >= 0.0) {
+            return Err(SolidError::invalid_input(
+                "offset::offset_executive::p1::get_create_extended_surface",
+                "the margin is negative or not finite",
+            ));
+        }
         match self.extended_surfaces.entry(base_key) {
             std::collections::btree_map::Entry::Occupied(entry) => Ok(entry.into_mut()),
             std::collections::btree_map::Entry::Vacant(entry) => {
                 // The obsolete offset-specific `else` at cpp:2158 is unreachable:
                 // NER(pBase) already established pOrigSurf == pBase != NULL.
-                // The extension is a margin round the base for the offset to be trimmed in:
-                // its size is five offsets either way (an inward offset's distance is
-                // negative), and an offset of zero needs none.
-                let dist = (self.offset_distance * 5.0).abs();
-                let extension = if dist == 0.0 {
+                let extension = if margin == 0.0 {
                     base.clone()
                 } else {
                     base.extended_sides_keeping_parameters(
                         kernel,
                         &BoxSide::ALL,
                         Continuity::Ruled,
-                        dist,
+                        margin,
                     )?
                     .surface
                 };
@@ -3784,7 +3898,7 @@ mod tests {
             .unwrap()
             .surface;
         let first = executive
-            .get_create_extended_surface(&kernel, 41, &base)
+            .get_create_extended_surface(&kernel, 41, &base, 0.625)
             .unwrap();
         assert_eq!(
             first.natural_uv_domain_if_built(),
@@ -3799,7 +3913,7 @@ mod tests {
         // A cached identity does not evaluate even a different/malformed supplied base.
         let broken = Surface::from(BSplineSurface::new());
         let cached = executive
-            .get_create_extended_surface(&kernel, 41, &broken)
+            .get_create_extended_surface(&kernel, 41, &broken, 0.625)
             .unwrap();
         assert_eq!(
             cached
@@ -3811,7 +3925,7 @@ mod tests {
             first_point
         );
         let other = executive
-            .get_create_extended_surface(&kernel, 42, &plane(7.0))
+            .get_create_extended_surface(&kernel, 42, &plane(7.0), 0.625)
             .unwrap();
         assert_eq!(
             other
@@ -3827,32 +3941,75 @@ mod tests {
     }
 
     #[test]
-    fn an_inward_offset_extends_by_five_offsets_and_a_zero_one_not_at_all() {
+    fn a_surface_is_extended_by_its_margin_none_by_zero_and_a_negative_one_is_refused() {
         let kernel = Kernel::default();
         let base = plane(0.0);
         let expected = base
-            .extended_sides_keeping_parameters(
-                &kernel,
-                &BoxSide::ALL,
-                Continuity::Ruled,
-                0.125 * 5.0,
-            )
+            .extended_sides_keeping_parameters(&kernel, &BoxSide::ALL, Continuity::Ruled, 0.3)
             .unwrap()
             .surface;
-        let mut inward = OffsetExecutive::new(OffsetOperation::SolidOffset, -0.125, 1.0e-6);
-        let got = inward
-            .get_create_extended_surface(&kernel, 1, &base)
+        let mut executive = executive();
+        let got = executive
+            .get_create_extended_surface(&kernel, 1, &base, 0.3)
             .unwrap();
         assert_eq!(
             got.natural_uv_domain_if_built(),
             expected.natural_uv_domain_if_built()
         );
-        let mut zero = OffsetExecutive::new(OffsetOperation::SolidOffset, 0.0, 1.0e-6);
-        let same = zero.get_create_extended_surface(&kernel, 1, &base).unwrap();
+        let same = executive
+            .get_create_extended_surface(&kernel, 2, &base, 0.0)
+            .unwrap();
         assert_eq!(
             same.natural_uv_domain_if_built(),
             base.natural_uv_domain_if_built()
         );
+        for refused in [-0.1, f64::NAN, f64::INFINITY] {
+            assert!(executive
+                .get_create_extended_surface(&kernel, 3, &base, refused)
+                .is_err());
+        }
+        assert_eq!(executive.extended_surfaces.len(), 2);
+    }
+
+    /// A box offset by `d` either way: every face's offset is met `d` past (or inside) each
+    /// edge and `d·√2` from each corner, so each face's margin is `d·√2` and one offset. An offset face takes the margin of the face use it was made from; one made
+    /// from none, the body's largest.
+    #[test]
+    fn a_box_face_margin_is_its_offset_corner_reach() {
+        let mut kernel = Kernel::default();
+        let mut brep = crate::primitive::api_primitives::create_box(
+            &mut kernel,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            1.0,
+            2.0,
+            3.0,
+        )
+        .unwrap();
+        let faces = bp1::faces(&brep, None).unwrap();
+        let expected = 0.125 * 2.0_f64.sqrt() + 0.125;
+        for (distance, inset) in [(0.125, false), (0.125, true)] {
+            let mut executive =
+                OffsetExecutive::new(OffsetOperation::SolidOffset, distance, 1.0e-6);
+            executive.set_inset(inset);
+            for &f in &faces {
+                let faceuse =
+                    super::super::p2::select_offset_faceuse(&brep, f, false, inset, "test")
+                        .unwrap();
+                executive
+                    .record_extension_reach(&kernel, &mut brep, f, faceuse)
+                    .unwrap();
+                assert!((executive.original_extension_margin(f) - expected).abs() < 1e-12);
+                executive.relate_faceuse(faceuse, FaceId::from_index(100));
+            }
+            assert!(
+                (executive.offset_extension_margin(FaceId::from_index(100)) - expected).abs()
+                    < 1e-12
+            );
+            assert!(
+                (executive.offset_extension_margin(FaceId::from_index(101)) - expected).abs()
+                    < 1e-12
+            );
+        }
     }
 
     #[test]
@@ -3861,11 +4018,11 @@ mod tests {
         let mut executive = executive();
         let broken = Surface::from(BSplineSurface::new());
         assert!(executive
-            .get_create_extended_surface(&kernel, 1, &broken)
+            .get_create_extended_surface(&kernel, 1, &broken, 0.625)
             .is_err());
         assert!(executive.extended_surfaces.is_empty());
         assert!(executive
-            .get_create_extended_surface(&kernel, 1, &plane(0.0))
+            .get_create_extended_surface(&kernel, 1, &plane(0.0), 0.625)
             .is_ok());
     }
 

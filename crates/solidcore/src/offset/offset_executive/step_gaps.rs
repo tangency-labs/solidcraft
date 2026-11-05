@@ -394,10 +394,14 @@ impl OffsetExecutive {
         }
 
         // The straight segment must lie on the face's surface (as extended for the offset:
-        // the face's own surface ends at its old boundary).
+        // the face's own surface ends at its old boundary). Its far end is no farther past
+        // the face than its length.
         let key = (notifications.result_key_of)(EntityRef::Face(f)).key.0;
+        let margin = self
+            .offset_extension_margin(f)
+            .max(vertex_point.distance(gap_end));
         let ext = self
-            .get_create_extended_surface(kernel, key, &surface)?
+            .get_create_extended_surface(kernel, key, &surface, margin)?
             .clone();
         let ext_domain = ext.natural_uv_domain_with_nurb(kernel)?;
         for ii in 1..4 {

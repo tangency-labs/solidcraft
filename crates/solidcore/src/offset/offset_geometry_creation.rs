@@ -439,8 +439,8 @@ pub trait OffsetExecutive<O> {
     }
     /// `GetCreateExtendedSurface(pBase, rUVDomainOfOffset, rpExtSurface)`: the extension
     /// of `base` cached by the executive (`m_vSurfExtSurf`), created on a miss by
-    /// extending `base` by five offset distances
-    /// (`m_rGeometryCreation.GetOffsetDistance() * 5.0`, G1-ruled) with
+    /// extending `base` exactly ruled by its face's offset reach (not upstream: upstream
+    /// extends by `m_rGeometryCreation.GetOffsetDistance() * 5.0`) with
     /// [`crate::offset::offset_executive::p1::OffsetExecutive::get_create_extended_surface`],
     /// and its natural UV domain. A newly made extension is stored where `brep` resolves
     /// the returned handle; a hit returns the cached handle again.
