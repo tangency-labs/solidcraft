@@ -58,11 +58,21 @@ pub fn angle(s: f64) -> f64 {
     q * FRAC_PI_2 + quarter_psi(s - q)
 }
 
+/// The forms' parameter intervals are finite and ordered.
+fn valid_interval([a0, a1]: [f64; 2]) -> bool {
+    a0.is_finite() && a1.is_finite() && a1 > a0
+}
+
+/// The analytic forms cover a finite, positive interval of at most one turn.
+fn valid_angles([a0, a1]: [f64; 2]) -> bool {
+    valid_interval([a0, a1]) && a1 - a0 <= TAU * (1.0 + 1e-9)
+}
+
 /// The quarters an angle interval needs: the first one and how many. An end within `reach` (an
 /// angle) of a quarter's end is on it: a face whose boundary lies within its tolerance of a
 /// quarter's end needs no part of the quarter past it.
 fn quarters([a0, a1]: [f64; 2], reach: f64) -> Option<(f64, usize)> {
-    if !(a0.is_finite() && a1.is_finite() && a1 > a0 && a1 - a0 <= TAU * (1.0 + 1e-9)) {
+    if !valid_angles([a0, a1]) {
         return None;
     }
     let on_end = |a: f64| {
@@ -85,6 +95,9 @@ fn quarters([a0, a1]: [f64; 2], reach: f64) -> Option<(f64, usize)> {
 /// face's seam uses lie a period apart), anything less the quarters it needs ([`quarters`], ends
 /// within `reach` of a quarter's end on it).
 fn face_quarters(a: [f64; 2], reach: f64) -> Option<((f64, usize), [f64; 2])> {
+    if !valid_angles(a) {
+        return None;
+    }
     if a[1] - a[0] >= TAU * (1.0 - 1e-9) {
         let q0 = quarter_of(a[0]);
         return Some(((q0, 4), [q0, q0 + 4.0]));
@@ -142,6 +155,9 @@ fn face_arcs(
     reach: f64,
     own: bool,
 ) -> Option<((Vec<f64>, Vec<([f64; 2], f64)>), [f64; 2])> {
+    if !valid_angles(a) {
+        return None;
+    }
     if own && a[1] - a[0] < TAU * (1.0 - 1e-9) {
         // Past each end by `reach` (while that stays short of a turn): the face's boundary, which
         // lies off the surface by as much, then stays on the form.
@@ -436,6 +452,67 @@ fn surface_on(
     tolerance: f64,
     own: bool,
 ) -> Option<(Surface, [[f64; 2]; 2])> {
+    if let Surface::PlacedRevolution {
+        profile,
+        origin,
+        axis,
+        matrix,
+        forward,
+    } = s
+    {
+        // The profile's control points turned about the axis on the quarter grid from angle
+        // zero (the profile): (a + ib)(c + is) for each point's radial (a, b) in the frame and
+        // each arc control point (c, s), weights multiplied; then the matrix.
+        let (angles, along) = if *forward { (v, u) } else { (u, v) };
+        if !valid_interval(along) {
+            return None;
+        }
+        let (ring_grid, fa) = face_quarters(angles, 0.0)?;
+        let (a_knots, arcs_r) = arcs(ring_grid.0, ring_grid.1);
+        let (p_knots, h) = profile_nurbs(profile, Some(along))?;
+        let fp = match profile.as_ref() {
+            Curve::Circle { .. } | Curve::Ellipse { .. } => curve(profile, along)?.1,
+            _ => along,
+        };
+        let (o, x, y, k) = revolution_frame(&h, *origin, *axis)?;
+        let net: Vec<Vec<[f64; 4]>> = arcs_r
+            .iter()
+            .map(|([c, s], wu)| {
+                h.iter()
+                    .map(|hp| {
+                        let d = Vec3::new(hp[0] / hp[3], hp[1] / hp[3], hp[2] / hp[3]) - o;
+                        let (a, b, z) = (d.dot(x), d.dot(y), d.dot(k));
+                        let q = o + k * z + x * (a * c - b * s) + y * (a * s + b * c);
+                        hom(affine(matrix, q), wu * hp[3])
+                    })
+                    .collect()
+            })
+            .collect();
+        return if *forward {
+            // u the profile, v the angle: the net turned over.
+            let n = net.first()?.len();
+            let t: Vec<Vec<[f64; 4]>> = (0..n)
+                .map(|j| net.iter().filter_map(|r| r.get(j).copied()).collect())
+                .collect();
+            Some((
+                Surface::RationalSpline {
+                    u_knots: p_knots,
+                    v_knots: a_knots,
+                    homogeneous: t,
+                },
+                [fp, fa],
+            ))
+        } else {
+            Some((
+                Surface::RationalSpline {
+                    u_knots: a_knots,
+                    v_knots: p_knots,
+                    homogeneous: net,
+                },
+                [fa, fp],
+            ))
+        };
+    }
     let (reach_u, reach_v) = reaches(s, v, tolerance);
     let ((u_knots, ring), fu) = face_arcs(u, reach_u, own)?;
     // The ring of arcs times a profile `(control, weight)` mapped to (radial, axial) about the
@@ -525,63 +602,6 @@ fn surface_on(
                 },
                 [fu, fv],
             ))
-        }
-        Surface::PlacedRevolution {
-            profile,
-            origin,
-            axis,
-            matrix,
-            forward,
-        } => {
-            // The profile's control points turned about the axis on the quarter grid from angle
-            // zero (the profile): (a + ib)(c + is) for each point's radial (a, b) in the frame and
-            // each arc control point (c, s), weights multiplied; then the matrix.
-            let (angles, along) = if *forward { (v, u) } else { (u, v) };
-            let (ring_grid, fa) = face_quarters(angles, 0.0)?;
-            let (a_knots, arcs_r) = arcs(ring_grid.0, ring_grid.1);
-            let (p_knots, h) = profile_nurbs(profile, Some(along))?;
-            let fp = match profile.as_ref() {
-                Curve::Circle { .. } | Curve::Ellipse { .. } => curve(profile, along)?.1,
-                _ => along,
-            };
-            let (o, x, y, k) = revolution_frame(&h, *origin, *axis)?;
-            let net: Vec<Vec<[f64; 4]>> = arcs_r
-                .iter()
-                .map(|([c, s], wu)| {
-                    h.iter()
-                        .map(|hp| {
-                            let d = Vec3::new(hp[0] / hp[3], hp[1] / hp[3], hp[2] / hp[3]) - o;
-                            let (a, b, z) = (d.dot(x), d.dot(y), d.dot(k));
-                            let q = o + k * z + x * (a * c - b * s) + y * (a * s + b * c);
-                            hom(affine(matrix, q), wu * hp[3])
-                        })
-                        .collect()
-                })
-                .collect();
-            if *forward {
-                // u the profile, v the angle: the net turned over.
-                let n = net.first()?.len();
-                let t: Vec<Vec<[f64; 4]>> = (0..n)
-                    .map(|j| net.iter().filter_map(|r| r.get(j).copied()).collect())
-                    .collect();
-                Some((
-                    Surface::RationalSpline {
-                        u_knots: p_knots,
-                        v_knots: a_knots,
-                        homogeneous: t,
-                    },
-                    [fp, fa],
-                ))
-            } else {
-                Some((
-                    Surface::RationalSpline {
-                        u_knots: a_knots,
-                        v_knots: p_knots,
-                        homogeneous: net,
-                    },
-                    [fa, fp],
-                ))
-            }
         }
         _ => None,
     }

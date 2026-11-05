@@ -236,6 +236,118 @@ fn closed_forms_and_exact_forms_lie_on_their_surfaces() {
     }
 }
 
+/// Full-turn recognition must not replace an invalid range with one valid turn.
+#[test]
+fn analytic_forms_refuse_invalid_angular_domains() {
+    let invalid = [
+        [0.0, 2.0 * TAU],
+        [0.0, TAU * (1.0 + 2e-9)],
+        [0.0, f64::INFINITY],
+        [f64::NEG_INFINITY, 0.0],
+        [-f64::MAX, f64::MAX],
+        [f64::NAN, 1.0],
+        [0.0, f64::NAN],
+        [1.0, 1.0],
+        [1.0, 0.0],
+    ];
+    for (s, domain, _) in analytic() {
+        let directions: &[usize] = if matches!(s, Surface::Torus { .. }) {
+            &[0, 1]
+        } else {
+            &[0]
+        };
+        for &direction in directions {
+            for bad in invalid {
+                let mut d = domain;
+                d[direction] = bad;
+                assert!(form::surface(&s, d).is_none(), "{s:?}, {d:?}");
+                assert!(form::surface_within(&s, d, 1e-6).is_none(), "{s:?}, {d:?}");
+                assert!(
+                    form::surface_on_own_arcs(&s, d, 1e-6).is_none(),
+                    "{s:?}, {d:?}"
+                );
+                if direction == 1 {
+                    assert!(form::tube_quarters(&s, d, 1e-6).is_none(), "{d:?}");
+                }
+            }
+        }
+    }
+}
+
+/// Keep the existing rounding window around one complete turn and the exact form it chooses.
+#[test]
+fn analytic_forms_keep_the_existing_whole_turn_rounding_window() {
+    for (s, domain, _) in analytic() {
+        let mut d = domain;
+        d[0] = [0.0, TAU];
+        let expected = form::surface(&s, d).unwrap();
+        let expected_within = form::surface_within(&s, d, 0.0).unwrap();
+        let expected_own = form::surface_on_own_arcs(&s, d, 0.0).unwrap();
+        for width in [TAU * (1.0 - 0.5e-9), TAU, TAU * (1.0 + 0.5e-9)] {
+            d[0] = [0.0, width];
+            assert_eq!(form::surface(&s, d).unwrap(), expected);
+            assert_eq!(form::surface_within(&s, d, 0.0).unwrap(), expected_within);
+            assert_eq!(form::surface_on_own_arcs(&s, d, 0.0).unwrap(), expected_own);
+        }
+    }
+}
+
+/// A revolution's profile parameter is a length here, not an angle; its range may exceed a turn.
+#[test]
+fn a_revolution_form_validates_its_angle_without_limiting_its_profile_parameter() {
+    for forward in [false, true] {
+        let s = Surface::PlacedRevolution {
+            profile: Box::new(Curve::Line {
+                start: [2.0, 0.0, 0.0],
+                end: [2.0, 0.0, 1.0],
+            }),
+            origin: [0.0; 3],
+            axis: [0.0, 0.0, 1.0],
+            matrix: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            forward,
+        };
+        let d = if forward {
+            [[0.0, 10.0], [0.0, TAU]]
+        } else {
+            [[0.0, TAU], [0.0, 10.0]]
+        };
+        let (made, mapped) = form::surface(&s, d).unwrap();
+        let at = SurfaceEval::new(&made).unwrap();
+        let uv = if forward { [10.0, 0.0] } else { [0.0, 10.0] };
+        let p = at.point(uv).unwrap();
+        assert!(
+            p.dist(Vec3::new(2.0, 0.0, 10.0)) <= 1e-12,
+            "{p:?}, {mapped:?}"
+        );
+        let angle = usize::from(forward);
+        for bad in [
+            [0.0, 2.0 * TAU],
+            [0.0, f64::INFINITY],
+            [f64::NEG_INFINITY, 0.0],
+        ] {
+            let mut d = d;
+            d[angle] = bad;
+            assert!(form::surface(&s, d).is_none(), "{forward}, {d:?}");
+        }
+        let profile_direction = 1 - angle;
+        for bad in [
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [f64::NAN, 1.0],
+            [0.0, f64::INFINITY],
+        ] {
+            let mut d = d;
+            d[profile_direction] = bad;
+            assert!(form::surface(&s, d).is_none(), "profile {forward}, {d:?}");
+        }
+    }
+}
+
 /// An exact form's points are its label's at the same angles: the form parameter of angle θ is
 /// `form::param(θ)`, and `form::angle` maps it back.
 #[test]
