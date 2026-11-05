@@ -6316,12 +6316,7 @@ fn shown_face_sel(s: &Session, p0: Vec3) -> Option<Sel> {
 
 /// The body face containing `p0`, taken from each body's stored frame to the world by `frames`
 /// ([`stored_on`]; none: `p0` is already where the model is shown).
-fn face_sel_in(
-    s: &Session,
-    only: Option<&str>,
-    p0: Vec3,
-    frames: Option<Vec<(String, solidcraft_engine::doc::Mat)>>,
-) -> Option<Sel> {
+fn face_sel_in(s: &Session, only: Option<&str>, p0: Vec3, frames: Option<Vec<(String, solidcraft_engine::doc::Mat)>>) -> Option<Sel> {
     use solidcraft_engine::kernel::{self, FaceSurface};
 
     if !p0.is_finite() {
