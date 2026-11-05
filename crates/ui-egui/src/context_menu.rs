@@ -3095,6 +3095,7 @@ mod tests {
         assert!(h.app.viewport.context_menu.is_none());
     }
 
+    /// Direct Trim undoes back to the association; the explicit Break menu still makes the offset editable.
     #[test]
     fn line_offset_context_menu_breaks_association_and_allows_trim() {
         use solidcore_record::Vec2;

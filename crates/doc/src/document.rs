@@ -321,6 +321,12 @@ pub struct Extent {
     /// Through all bodies in the direction(s) instead of `distance`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub through_all: bool,
+    /// Two Sides as older builds read it: `distance2` goes the other way from wherever the
+    /// first side went, so a negative entered distance sends it back along the normal. Saved
+    /// designs from before entered distances kept their sides carry it, so they rebuild as
+    /// they did whatever their expressions evaluate to; new and edited extrudes leave it off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub second_follows_first: bool,
     /// Taper angle (expression; positive grows the profile).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(angle = "Taper angle")]

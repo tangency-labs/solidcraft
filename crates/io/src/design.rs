@@ -156,67 +156,11 @@ impl PackageWriter {
     }
 }
 
-/// Counts what is written without keeping it.
-#[derive(Default)]
-struct Measure {
-    position: u64,
-    length: u64,
-}
-
-impl Write for Measure {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.position = self.position.saturating_add(bytes.len() as u64);
-        self.length = self.length.max(self.position);
-        Ok(bytes.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl Seek for Measure {
-    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
-        let target = match position {
-            SeekFrom::Start(n) => Some(n),
-            SeekFrom::End(n) => self.length.checked_add_signed(n),
-            SeekFrom::Current(n) => self.position.checked_add_signed(n),
-        };
-        self.position = target.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "seek out of range"))?;
-        Ok(self.position)
-    }
-}
-
-/// Room kept in a design file for everything besides one large embedded STEP source.
-const STEP_RESERVE: usize = 4 << 20;
-
-/// Can an import's STEP text be saved in a design? It must be no larger than an import
-/// accepts, and, compressed as a save stores it, leave room in a design file for the rest of
-/// the design. Checked when the file is imported, so it never imports and then fails to save.
-pub fn check_step_storable(step: &str) -> Result<()> {
-    let limit = max_design().saturating_sub(STEP_RESERVE);
+/// Can an import's STEP text be imported? The limit of a file being imported is the limit of
+/// its format, not the design file's (#2721): a STEP within the import limit is imported, and
+/// the design file limit applies to the design that is saved, which refuses it there.
+pub fn check_step_importable(step: &str) -> Result<()> {
     crate::limits::check(crate::limits::Kind::Step, step.len() as u64).map_err(|e| IoError::Invalid(format!("STEP {e}")))?;
-    // Deflate adds at most a few bytes per 16 KiB block: smaller text always fits.
-    if step.len() <= limit - (limit >> 10) {
-        return Ok(());
-    }
-    let mut zip = zip::ZipWriter::new(Measure::default());
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated)
-        .compression_level(Some(STEP_LEVEL))
-        .large_file(step.len() as u64 >= u64::from(u32::MAX));
-    zip.start_file("blobs/source.step", options).map_err(invalid)?;
-    zip.write_all(step.as_bytes()).map_err(invalid)?;
-    let compressed = usize::try_from(zip.finish().map_err(invalid)?.length).unwrap_or(usize::MAX);
-    if compressed > limit {
-        return Err(IoError::Invalid(format!(
-            "STEP file too large to save in a design: {} MB of STEP text compresses to {} MB, over the {} MB a design file may hold. \
-             The design file limit counts here too: {}",
-            step.len() >> 20,
-            compressed >> 20,
-            limit >> 20,
-            crate::limits::how_to_raise()
-        )));
-    }
     Ok(())
 }
 
@@ -2390,11 +2334,27 @@ mod tests {
         }
     }
 
+    /// #2721: the limit of a file being imported is the limit of its format, not the design
+    /// file's. A STEP within the import limit (512 MB) is not refused by the design limit
+    /// (256 MB): that one applies to the design that is saved, which refuses it there.
     #[test]
-    fn step_that_cannot_be_saved_even_compressed_is_refused_at_import() {
+    fn a_step_within_the_import_limit_is_not_refused_by_the_design_limit() {
+        let step = padded_step(500 << 20, true);
+        assert!(step.len() <= crate::MAX_STEP_BYTES, "the STEP is within the import limit");
+        check_step_importable(&step).unwrap_or_else(|e| panic!("a STEP within the import limit is refused: {e}"));
+    }
+
+    /// #3221: a STEP that no design file may hold is refused with a clear message, when the
+    /// design is saved: the import limit governs the import and the design file limit governs
+    /// the design (#2721).
+    #[test]
+    fn step_that_cannot_be_saved_even_compressed_is_refused_when_the_design_is_saved() {
         let step = padded_step(crate::MAX_DESIGN_BYTES + (80 << 20), true);
-        let message = crate::step_import_feature(step.as_bytes(), "noisy.step").err().unwrap().to_string();
-        assert!(message.contains("too large to save in a design"), "{message}");
+        let mut doc = Document::new("Noisy import");
+        doc.add_feature(FeatureKind::Import { file: "noisy.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None)
+            .unwrap();
+        let message = write_design_container(&doc).err().unwrap().to_string();
+        assert!(message.contains("the design would be") && message.contains("a design file may hold"), "{message}");
     }
 
     #[test]

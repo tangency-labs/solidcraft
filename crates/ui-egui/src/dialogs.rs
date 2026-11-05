@@ -3882,6 +3882,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let window = panel.window(ctx);
     let repeatable =
         matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
+    let host = app.universal_panel_host_enabled();
+    let mut painted = false;
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
         let detail = with.join(" · ");
         let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::unique(("sc_dialog", title(&d.kind))), "delete", &heading)
@@ -3889,6 +3891,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             .actions("Delete", "Cancel", None)
             .detail(&detail)
             .show(ctx, true, |ui| {
+                painted = ui.is_visible() && !ui.is_sizing_pass();
                 if !with.is_empty() {
                     crate::ui_kit::text(ui, tr("Also deletes"), crate::ui_kit::Text::Report("also_deletes", false));
                 }
@@ -3898,9 +3901,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             });
         ok = action == crate::ui_kit::Action::Ok;
         cancel = closed || action == crate::ui_kit::Action::Cancel;
-        app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
+        app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window").filter(|_| !host || painted);
     } else {
         let response = window.open(&mut keep).show(ctx, |ui| {
+            painted = ui.is_visible() && !ui.is_sizing_pass();
             let spec = dense::command(&d.kind).and_then(solidcraft_engine::find_command);
             let icon = spec.as_ref().map_or("", |s| s.icon);
             let label = spec.as_ref().map_or(heading.as_str(), |s| tr(s.label));
@@ -3957,7 +3961,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
         });
-        app.viewport.dialog_rect = response.map(|r| r.response.rect);
+        app.viewport.dialog_rect = response.filter(|_| !host || painted).map(|r| r.response.rect);
         // OK and Cancel in the view's corner do what the dialog's own do (#6709).
         if app.issue_report.draft.is_none() {
             match corner {
@@ -4749,7 +4753,25 @@ fn look_at_sketch_from(app: &mut SolveApp, again: bool) {
     if let Some(ss) = app.session.active_sketch.and_then(|id| st.sketch(id)) {
         let n = facing(app, ss.plane.normal(), again);
         let to = square_sketch_axes(app.cam.looking_from(n), ss.plane.x, ss.plane.y);
-        app.animate_to(onto_sketch(to, ss));
+        if app.universal_panel_host_enabled() && again {
+            let bounds = ss.sketch.bounds().map(|(lo, hi)| {
+                let mut bounds = Aabb3::default();
+                for point in [lo, hi, solidcore_record::Vec2::new(lo.x, hi.y), solidcore_record::Vec2::new(hi.x, lo.y)] {
+                    bounds.add(ss.plane.to_world(point));
+                }
+                bounds
+            });
+            let mut to = to;
+            to.target = bounds.as_ref().map_or(ss.plane.origin, Aabb3::center);
+            if let (Some(layout), Ok(usable)) = (app.viewport.layout.as_ref(), crate::shell::host_usable(app))
+                && let Some(centred) = crate::viewport_layout::centre_host_camera(to, bounds.as_ref(), layout, &usable, app.view_fov())
+            {
+                to = centred;
+            }
+            app.animate_to(to);
+        } else {
+            app.animate_to(onto_sketch(to, ss));
+        }
     }
 }
 
