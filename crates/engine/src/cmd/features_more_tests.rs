@@ -2474,8 +2474,8 @@ fn an_emboss_that_changes_nothing_says_so() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
     let before = volume(&mut s);
-    // A sketch on the XY plane, the sheet's underside: a deboss goes down, away from the sheet.
-    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Logo"}));
+    // A sketch 5 mm below the sheet: a deboss goes down, away from the sheet, and misses it.
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, -5], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Logo"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [20, 20]}));
     run(&mut s, "sketch.finish", json!({}));
     let reply = run(&mut s, "solid.emboss", json!({"sketch": "Logo", "depth": 0.6, "mode": "deboss"}));
