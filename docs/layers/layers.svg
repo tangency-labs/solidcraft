@@ -49,7 +49,7 @@
       </g>
     </g>
     <path d="M319 250 C319 243.925 323.925 239 330 239 C336.075 239 341 243.925 341 250 C341 256.075 336.075 261 330 261 C323.925 261 319 256.075 319 250 Z" fill="#1f6fb2"/>
-    <text transform="matrix(1 0 0 1 326 254.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">5</tspan></text>
+    <text transform="matrix(1 0 0 1 326 254.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">6</tspan></text>
     <text transform="matrix(1 0 0 1 348 254.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">result / refusal</tspan></text>
     <g>
       <g>
@@ -69,26 +69,12 @@
     <text transform="matrix(1 0 0 1 226 555.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">3</tspan></text>
     <g>
       <g>
-        <path d="M480 625.1 L546 625.1 C554.836 625.1 559.1 620.836 559.1 612 L559.1 490 C559.1 480.17 564.17 475.1 574 475.1 L637.48 475.1 L637.48 476.9 L574 476.9 C565.164 476.9 560.9 481.164 560.9 490 L560.9 612 C560.9 621.83 555.83 626.9 546 626.9 L480 626.9 Z" fill="#555555"/>
-        <path d="M640 476 L632.8 479.6 L634.96 476 L632.8 472.4 Z" fill="#555555"/>
-      </g>
-    </g>
-    <path d="M549 560 C549 553.925 553.925 549 560 549 C566.075 549 571 553.925 571 560 C571 566.075 566.075 571 560 571 C553.925 571 549 566.075 549 560 Z" fill="#1f6fb2"/>
-    <text transform="matrix(1 0 0 1 556 564.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">4</tspan></text>
-    <g>
-      <g>
-        <path d="M640 456.9 L604 456.9 C594.17 456.9 589.1 451.83 589.1 442 L589.1 340 C589.1 331.164 584.836 326.9 576 326.9 L482.52 326.9 L482.52 325.1 L576 325.1 C585.83 325.1 590.9 330.17 590.9 340 L590.9 442 C590.9 450.836 595.164 455.1 604 455.1 L640 455.1 Z" fill="#555555"/>
-        <path d="M480 326 L487.2 322.4 L485.04 326 L487.2 329.6 Z" fill="#555555"/>
-      </g>
-    </g>
-    <g>
-      <g>
         <path d="M760.9 172 L760.9 277.48 L759.1 277.48 L759.1 172 Z" fill="#555555"/>
         <path d="M760 280 L756.4 272.8 L760 274.96 L763.6 272.8 Z" fill="#555555"/>
       </g>
     </g>
     <path d="M749 250 C749 243.925 753.925 239 760 239 C766.075 239 771 243.925 771 250 C771 256.075 766.075 261 760 261 C753.925 261 749 256.075 749 250 Z" fill="#1f6fb2"/>
-    <text transform="matrix(1 0 0 1 756 254.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">6</tspan></text>
+    <text transform="matrix(1 0 0 1 756 254.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">7</tspan></text>
     <text transform="matrix(1 0 0 1 778 254.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">request mesh</tspan></text>
     <g>
       <g>
@@ -97,7 +83,29 @@
       </g>
     </g>
     <path d="M869 250 C869 243.925 873.925 239 880 239 C886.075 239 891 243.925 891 250 C891 256.075 886.075 261 880 261 C873.925 261 869 256.075 869 250 Z" fill="#1f6fb2"/>
-    <text transform="matrix(1 0 0 1 876 254.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">7</tspan></text>
+    <text transform="matrix(1 0 0 1 876 254.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">8</tspan></text>
     <text transform="matrix(1 0 0 1 40 740)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#555555"><tspan x="0" y="0">The kernel computes; ops decides and sequences; convert translates between record and kernel; the app only maps input to a command and draws.</tspan></text>
+    <g>
+      <g>
+        <path d="M369.1 580 L369.1 524.52 L370.9 524.52 L370.9 580 Z" fill="#555555"/>
+        <path d="M370 522 L373.6 529.2 L370 527.04 L366.4 529.2 Z" fill="#555555"/>
+      </g>
+    </g>
+    <path d="M359 551 C359 544.925 363.925 540 370 540 C376.075 540 381 544.925 381 551 C381 557.075 376.075 562 370 562 C363.925 562 359 557.075 359 551 Z" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 366 556.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">4</tspan></text>
+    <text transform="matrix(1 0 0 1 388 556.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">B-rep</tspan></text>
+    <g>
+      <g>
+        <path d="M369.1 430 L369.1 374.52 L370.9 374.52 L370.9 430 Z" fill="#555555"/>
+        <path d="M370 372 L373.6 379.2 L370 377.04 L366.4 379.2 Z" fill="#555555"/>
+      </g>
+    </g>
+    <path d="M359 401 C359 394.925 363.925 390 370 390 C376.075 390 381 394.925 381 401 C381 407.075 376.075 412 370 412 C363.925 412 359 407.075 359 401 Z" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 366 406.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">5</tspan></text>
+    <text transform="matrix(1 0 0 1 388 406.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">record</tspan></text>
+    <text transform="matrix(1 0 0 1 248 406.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">record</tspan></text>
+    <text transform="matrix(1 0 0 1 248 556.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">B-rep</tspan></text>
+    <path d="M480 476 L648 476" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="8 6"/>
+    <text transform="matrix(1 0 0 1 500 468)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#555555"><tspan x="0" y="0">reads and writes</tspan></text>
   </g>
 </svg>

@@ -1,7 +1,7 @@
 {
   "format": "vectorcraft",
   "version": 4,
-  "generator": "VectorCraft 0.10.0",
+  "generator": "VectorCraft 0.9.0",
   "document": {
     "version": 1,
     "title": "layers",
@@ -2894,7 +2894,7 @@
                 ],
                 "runs": [
                   {
-                    "text": "5",
+                    "text": "6",
                     "style": {
                       "font_family": "Helvetica",
                       "font_style": "Bold",
@@ -3454,367 +3454,6 @@
               }
             },
             {
-              "id": 49,
-              "appearance": {
-                "items": [
-                  {
-                    "kind": "fill",
-                    "paint": {
-                      "type": "none"
-                    }
-                  },
-                  {
-                    "kind": "stroke",
-                    "paint": {
-                      "type": "solid",
-                      "color": {
-                        "model": "rgb",
-                        "r": 0.33333334,
-                        "g": 0.33333334,
-                        "b": 0.33333334
-                      }
-                    },
-                    "width": 1.8,
-                    "join": "Round",
-                    "end_arrow": "Arrow",
-                    "arrow_align": "Tip"
-                  }
-                ]
-              },
-              "kind": {
-                "type": "path",
-                "path": {
-                  "subpaths": [
-                    {
-                      "anchors": [
-                        {
-                          "p": [
-                            480.0,
-                            626.0
-                          ]
-                        },
-                        {
-                          "p": [
-                            546.0,
-                            626.0
-                          ],
-                          "out": [
-                            555.3333333333334,
-                            626.0
-                          ]
-                        },
-                        {
-                          "p": [
-                            560.0,
-                            612.0
-                          ],
-                          "in": [
-                            560.0,
-                            621.3333333333334
-                          ]
-                        },
-                        {
-                          "p": [
-                            560.0,
-                            490.0
-                          ],
-                          "out": [
-                            560.0,
-                            480.6666666666667
-                          ]
-                        },
-                        {
-                          "p": [
-                            574.0,
-                            476.0
-                          ],
-                          "in": [
-                            564.6666666666666,
-                            476.0
-                          ]
-                        },
-                        {
-                          "p": [
-                            640.0,
-                            476.0
-                          ]
-                        }
-                      ],
-                      "closed": false
-                    }
-                  ]
-                }
-              }
-            },
-            {
-              "id": 50,
-              "appearance": {
-                "items": [
-                  {
-                    "kind": "fill",
-                    "paint": {
-                      "type": "solid",
-                      "color": {
-                        "model": "rgb",
-                        "r": 0.12156863,
-                        "g": 0.43529412,
-                        "b": 0.69803923
-                      }
-                    }
-                  },
-                  {
-                    "kind": "stroke",
-                    "paint": {
-                      "type": "none"
-                    },
-                    "width": 1.8
-                  }
-                ]
-              },
-              "kind": {
-                "type": "path",
-                "path": {
-                  "subpaths": [
-                    {
-                      "anchors": [
-                        {
-                          "p": [
-                            549.0,
-                            560.0
-                          ],
-                          "in": [
-                            549.0,
-                            566.0751322481387
-                          ],
-                          "out": [
-                            549.0,
-                            553.9248677518613
-                          ],
-                          "kind": "Smooth"
-                        },
-                        {
-                          "p": [
-                            560.0,
-                            549.0
-                          ],
-                          "in": [
-                            553.9248677518613,
-                            549.0
-                          ],
-                          "out": [
-                            566.0751322481387,
-                            549.0
-                          ],
-                          "kind": "Smooth"
-                        },
-                        {
-                          "p": [
-                            571.0,
-                            560.0
-                          ],
-                          "in": [
-                            571.0,
-                            553.9248677518613
-                          ],
-                          "out": [
-                            571.0,
-                            566.0751322481387
-                          ],
-                          "kind": "Smooth"
-                        },
-                        {
-                          "p": [
-                            560.0,
-                            571.0
-                          ],
-                          "in": [
-                            566.0751322481387,
-                            571.0
-                          ],
-                          "out": [
-                            553.9248677518613,
-                            571.0
-                          ],
-                          "kind": "Smooth"
-                        }
-                      ],
-                      "closed": true
-                    }
-                  ]
-                },
-                "live": {
-                  "shape": "ellipse",
-                  "w": 22.0,
-                  "h": 22.0,
-                  "pie": [
-                    0.0,
-                    360.0
-                  ],
-                  "xf": [
-                    1.0,
-                    0.0,
-                    0.0,
-                    1.0,
-                    549.0,
-                    549.0
-                  ]
-                }
-              }
-            },
-            {
-              "id": 51,
-              "kind": {
-                "type": "text",
-                "kind": {
-                  "kind": "point"
-                },
-                "xf": [
-                  1.0,
-                  0.0,
-                  0.0,
-                  1.0,
-                  556.0,
-                  564.5
-                ],
-                "runs": [
-                  {
-                    "text": "4",
-                    "style": {
-                      "font_family": "Helvetica",
-                      "font_style": "Bold",
-                      "size": 12.0,
-                      "tracking": 0.0,
-                      "baseline_shift": 0.0,
-                      "h_scale": 100.0,
-                      "v_scale": 100.0,
-                      "rotation": 0.0,
-                      "fill": {
-                        "type": "solid",
-                        "color": {
-                          "model": "rgb",
-                          "r": 1.0,
-                          "g": 1.0,
-                          "b": 1.0
-                        }
-                      },
-                      "stroke": {
-                        "type": "none"
-                      },
-                      "stroke_width": 0.0,
-                      "underline": false,
-                      "strikethrough": false,
-                      "all_caps": false
-                    }
-                  }
-                ],
-                "para": {
-                  "justify": "Left",
-                  "justify_auto": true,
-                  "left_indent": 0.0,
-                  "right_indent": 0.0,
-                  "first_line_indent": 0.0,
-                  "space_before": 0.0,
-                  "space_after": 0.0,
-                  "hyphenate": false,
-                  "mojikumi": "lineEndHalf",
-                  "burasagari": "standard"
-                }
-              }
-            },
-            {
-              "id": 53,
-              "appearance": {
-                "items": [
-                  {
-                    "kind": "fill",
-                    "paint": {
-                      "type": "none"
-                    }
-                  },
-                  {
-                    "kind": "stroke",
-                    "paint": {
-                      "type": "solid",
-                      "color": {
-                        "model": "rgb",
-                        "r": 0.33333334,
-                        "g": 0.33333334,
-                        "b": 0.33333334
-                      }
-                    },
-                    "width": 1.8,
-                    "join": "Round",
-                    "end_arrow": "Arrow",
-                    "arrow_align": "Tip"
-                  }
-                ]
-              },
-              "kind": {
-                "type": "path",
-                "path": {
-                  "subpaths": [
-                    {
-                      "anchors": [
-                        {
-                          "p": [
-                            640.0,
-                            456.0
-                          ]
-                        },
-                        {
-                          "p": [
-                            604.0,
-                            456.0
-                          ],
-                          "out": [
-                            594.6666666666666,
-                            456.0
-                          ]
-                        },
-                        {
-                          "p": [
-                            590.0,
-                            442.0
-                          ],
-                          "in": [
-                            590.0,
-                            451.3333333333333
-                          ]
-                        },
-                        {
-                          "p": [
-                            590.0,
-                            340.0
-                          ],
-                          "out": [
-                            590.0,
-                            330.6666666666667
-                          ]
-                        },
-                        {
-                          "p": [
-                            576.0,
-                            326.0
-                          ],
-                          "in": [
-                            585.3333333333334,
-                            326.0
-                          ]
-                        },
-                        {
-                          "p": [
-                            480.0,
-                            326.0
-                          ]
-                        }
-                      ],
-                      "closed": false
-                    }
-                  ]
-                }
-              }
-            },
-            {
               "id": 55,
               "appearance": {
                 "items": [
@@ -3999,7 +3638,7 @@
                 ],
                 "runs": [
                   {
-                    "text": "6",
+                    "text": "7",
                     "style": {
                       "font_family": "Helvetica",
                       "font_style": "Bold",
@@ -4287,7 +3926,7 @@
                 ],
                 "runs": [
                   {
-                    "text": "7",
+                    "text": "8",
                     "style": {
                       "font_family": "Helvetica",
                       "font_style": "Bold",
@@ -4352,6 +3991,853 @@
                       "font_family": "Helvetica",
                       "font_style": "Regular",
                       "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.33333334,
+                          "g": 0.33333334,
+                          "b": 0.33333334
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 64,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.33333334,
+                        "g": 0.33333334,
+                        "b": 0.33333334
+                      }
+                    },
+                    "width": 1.8,
+                    "join": "Round",
+                    "end_arrow": "Arrow",
+                    "arrow_align": "Tip"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            370.0,
+                            580.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            370.0,
+                            522.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 370.0,
+                    "y": 580.0
+                  },
+                  "b": {
+                    "x": 370.0,
+                    "y": 522.0
+                  }
+                }
+              }
+            },
+            {
+              "id": 65,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.12156863,
+                        "g": 0.43529412,
+                        "b": 0.69803923
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 1.8
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            359.0,
+                            551.0
+                          ],
+                          "in": [
+                            359.0,
+                            557.0751322481387
+                          ],
+                          "out": [
+                            359.0,
+                            544.9248677518613
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            370.0,
+                            540.0
+                          ],
+                          "in": [
+                            363.92486775186126,
+                            540.0
+                          ],
+                          "out": [
+                            376.07513224813874,
+                            540.0
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            381.0,
+                            551.0
+                          ],
+                          "in": [
+                            381.0,
+                            544.9248677518613
+                          ],
+                          "out": [
+                            381.0,
+                            557.0751322481387
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            370.0,
+                            562.0
+                          ],
+                          "in": [
+                            376.07513224813874,
+                            562.0
+                          ],
+                          "out": [
+                            363.92486775186126,
+                            562.0
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 22.0,
+                  "h": 22.0,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    359.0,
+                    540.0
+                  ]
+                }
+              }
+            },
+            {
+              "id": 66,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  366.0,
+                  556.5
+                ],
+                "runs": [
+                  {
+                    "text": "4",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Bold",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 1.0,
+                          "g": 1.0,
+                          "b": 1.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 67,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  388.0,
+                  556.5
+                ],
+                "runs": [
+                  {
+                    "text": "B-rep",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 68,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.33333334,
+                        "g": 0.33333334,
+                        "b": 0.33333334
+                      }
+                    },
+                    "width": 1.8,
+                    "join": "Round",
+                    "end_arrow": "Arrow",
+                    "arrow_align": "Tip"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            370.0,
+                            430.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            370.0,
+                            372.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 370.0,
+                    "y": 430.0
+                  },
+                  "b": {
+                    "x": 370.0,
+                    "y": 372.0
+                  }
+                }
+              }
+            },
+            {
+              "id": 69,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.12156863,
+                        "g": 0.43529412,
+                        "b": 0.69803923
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 1.8
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            359.0,
+                            401.0
+                          ],
+                          "in": [
+                            359.0,
+                            407.07513224813874
+                          ],
+                          "out": [
+                            359.0,
+                            394.92486775186126
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            370.0,
+                            390.0
+                          ],
+                          "in": [
+                            363.92486775186126,
+                            390.0
+                          ],
+                          "out": [
+                            376.07513224813874,
+                            390.0
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            381.0,
+                            401.0
+                          ],
+                          "in": [
+                            381.0,
+                            394.92486775186126
+                          ],
+                          "out": [
+                            381.0,
+                            407.07513224813874
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            370.0,
+                            412.0
+                          ],
+                          "in": [
+                            376.07513224813874,
+                            412.0
+                          ],
+                          "out": [
+                            363.92486775186126,
+                            412.0
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 22.0,
+                  "h": 22.0,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    359.0,
+                    390.0
+                  ]
+                }
+              }
+            },
+            {
+              "id": 70,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  366.0,
+                  406.5
+                ],
+                "runs": [
+                  {
+                    "text": "5",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Bold",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 1.0,
+                          "g": 1.0,
+                          "b": 1.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 71,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  388.0,
+                  406.5
+                ],
+                "runs": [
+                  {
+                    "text": "record",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 72,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  248.0,
+                  406.5
+                ],
+                "runs": [
+                  {
+                    "text": "record",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 73,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  248.0,
+                  556.5
+                ],
+                "runs": [
+                  {
+                    "text": "B-rep",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 74,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.6,
+                        "g": 0.6,
+                        "b": 0.6
+                      }
+                    },
+                    "width": 1.5,
+                    "dash": {
+                      "pattern": [
+                        8.0,
+                        6.0
+                      ],
+                      "offset": 0.0,
+                      "align_corners": false
+                    }
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            480.0,
+                            476.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            648.0,
+                            476.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 480.0,
+                    "y": 476.0
+                  },
+                  "b": {
+                    "x": 648.0,
+                    "y": 476.0
+                  }
+                }
+              }
+            },
+            {
+              "id": 75,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  500.0,
+                  468.0
+                ],
+                "runs": [
+                  {
+                    "text": "reads and writes",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 11.0,
                       "tracking": 0.0,
                       "baseline_shift": 0.0,
                       "h_scale": 100.0,
@@ -5326,7 +5812,7 @@
     },
     "raster_effects_ppi": 72.0,
     "images": {},
-    "next_id": 64,
+    "next_id": 76,
     "metadata": {
       "author": "",
       "authorTitle": "",
@@ -5337,7 +5823,7 @@
       "copyrightNotice": "",
       "copyrightUrl": "",
       "created": 1793887324,
-      "modified": 1793887835
+      "modified": 1793892579
     },
     "last_view": {
       "name": "",
