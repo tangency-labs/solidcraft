@@ -50,14 +50,14 @@ mod tests {
     fn bad_calls_say_what_is_wrong_and_change_nothing() {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5, "body_name": "Block"})).unwrap_or_else(|e| panic!("{e}"));
-        let undo = s.undo.len();
+        let undo = s.history.len();
         let e = s.execute("body.print_face", &json!({"point": [20, 5, 2.5]})).unwrap_err().to_string();
         assert!(e.contains("body"), "{e}");
         let e = s.execute("body.print_face", &json!({"body": "Bracket", "point": [20, 5, 2.5]})).unwrap_err().to_string();
         assert!(e.contains("Bracket"), "{e}");
         let e = s.execute("body.print_face", &json!({"body": "Block", "point": "top"})).unwrap_err().to_string();
         assert!(e.contains("point"), "{e}");
-        assert!(s.doc.print_faces.is_empty() && s.undo.len() == undo);
+        assert!(s.doc.print_faces.is_empty() && s.history.len() == undo);
     }
 
     #[test]

@@ -113,12 +113,12 @@ mod tests {
         // Upstream grounds the first occurrence. Keep that refusal explicit before
         // exercising a deliberately movable instance and its stable render binding.
         let grounded_document = session.doc.clone();
-        let grounded_history = (session.revision, session.undo.len(), session.redo.len());
+        let grounded_history = (session.revision, session.history.len(), session.history.redo_steps().len());
         let movement = json!({"occurrence":component["occurrence"],"translate":[12,0,0]});
         let error = session.execute("occurrence.move", &movement).unwrap_err().to_string();
         assert!(error.contains("is grounded"), "{error}");
         assert_eq!(session.doc, grounded_document);
-        assert_eq!((session.revision, session.undo.len(), session.redo.len()), grounded_history);
+        assert_eq!((session.revision, session.history.len(), session.history.redo_steps().len()), grounded_history);
         session.execute("occurrence.ground", &json!({"occurrence":component["occurrence"],"grounded":false})).unwrap();
         session.execute("occurrence.move", &movement).unwrap();
         let changed = crate::product_scene::extract(&session).unwrap();
@@ -139,12 +139,12 @@ mod tests {
         let mut session = Session::default();
         session.execute("solid.box", &json!({"body_name":"Panel","length":2,"width":2,"height":2})).unwrap();
         let document = session.doc.clone();
-        let history = (session.revision, session.undo.len());
+        let history = (session.revision, session.history.len());
         let request = json!({"name":"Legacy","set":{"job":{"method":"gpu_path","options":{"aging":[{"kind":"dust","target":{"body_index":0,"body_name":"Panel"}}]}}}});
         let error = session.execute("render.settings.set", &request).unwrap_err().to_string();
         assert!(error.contains("rebinding"), "{error}");
         assert_eq!(session.doc, document);
-        assert_eq!((session.revision, session.undo.len()), history);
+        assert_eq!((session.revision, session.history.len()), history);
     }
 
     /// An executor identifier is not evidence of support for optical aging.
@@ -193,7 +193,7 @@ mod tests {
         let host = ImageHost::with_executor(Arc::new(UnsupportedGpu)).unwrap();
         session.register_render_job_host(host.clone()).unwrap();
         let doc = session.doc.clone();
-        let before = (session.revision, session.undo.len(), session.redo.len());
+        let before = (session.revision, session.history.len(), session.history.redo_steps().len());
         let saved = session.doc.render.setups["Aging"].clone();
         for command in ["render.preflight", "render.start"] {
             for request in [json!({"setup":"Aging"}), json!({"settings":saved})] {
@@ -203,7 +203,7 @@ mod tests {
             }
         }
         assert!(Arc::ptr_eq(&doc, &session.doc));
-        assert_eq!(before, (session.revision, session.undo.len(), session.redo.len()));
+        assert_eq!(before, (session.revision, session.history.len(), session.history.redo_steps().len()));
         session.visibility.hidden_bodies.push("Target panel".into());
         assert!(session.execute("render.preflight", &json!({"setup":"Aging"})).unwrap_err().to_string().contains("hidden"));
     }

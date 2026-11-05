@@ -51,7 +51,7 @@ fn pixel_circle_fit_exact_half_chord_hover_click_and_model_invariance() {
     let mut h = Harness::new();
     let sid = circle(&mut h);
     let baseline = h.app.session.doc.to_json();
-    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let history = (h.app.session.history.len(), h.app.session.history.redo_steps().len());
     let state = h.app.session.world_state().unwrap();
     let ss = state.sketch(sid).unwrap();
     let plane = ss.plane;
@@ -83,7 +83,7 @@ fn pixel_circle_fit_exact_half_chord_hover_click_and_model_invariance() {
         h.app.session.selection.clear();
     }
     assert_eq!(h.app.session.doc.to_json(), baseline, "display and selection must not alter stored geometry, constraints or expressions");
-    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+    assert_eq!((h.app.session.history.len(), h.app.session.history.redo_steps().len()), history);
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn pixel_cache_full_view_resize_and_hidpi_invalidate_within_same_grid_bucket() {
     h.app.cam.distance = 5.0;
     h.app.cam.target = Vec3::ZERO;
     let baseline = h.app.session.doc.to_json();
-    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let history = (h.app.session.history.len(), h.app.session.history.redo_steps().len());
     let state = h.app.session.world_state().unwrap();
     assert_eq!(state.bodies.len(), 1, "body batch invariance needs an actual mesh");
     let ss = state.sketch(sid).unwrap();
@@ -141,7 +141,7 @@ fn pixel_cache_full_view_resize_and_hidpi_invalidate_within_same_grid_bucket() {
     assert!(d.vertex_count > c.vertex_count, "HiDPI must refine physical error, not just invalidate a key");
     assert!(dense_circle_error(&d, &plane, &resized, 1.0, 2.0) <= 1.0);
     assert_eq!(h.app.session.doc.to_json(), baseline);
-    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+    assert_eq!((h.app.session.history.len(), h.app.session.history.redo_steps().len()), history);
 }
 
 #[test]

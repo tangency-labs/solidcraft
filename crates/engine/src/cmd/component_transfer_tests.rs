@@ -42,9 +42,9 @@ fn check_captured_profile_transfer(revolve: bool) {
     };
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[40,0,0],"axis":[1,0,0],"angle":"45 deg","capture":false}));
     assert_pose(&s);
-    let undo = s.undo.len();
+    let undo = s.history.len();
     run(&mut s, "component.capture_position", json!({}));
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     assert!(s.pending_moves.is_empty());
     assert_pose(&s);
     let mut reopened = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Session::default() };
@@ -387,12 +387,12 @@ fn transfer_checkpoint_restores_pending_world_pose_and_history() {
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[10,0,0],"capture":false}));
     let pending = s.pending_moves.clone();
     let before = s.world_state().unwrap().body("Block").unwrap().mesh().bounds();
-    let undo_count = s.undo.len();
+    let undo_count = s.history.len();
     let checkpoint = s.checkpoint();
     run(&mut s, "component.move_bodies", json!({"component":0,"bodies":["Block"]}));
     s.restore_checkpoint(checkpoint).unwrap();
     assert_eq!(s.pending_moves, pending);
-    assert_eq!(s.undo.len(), undo_count);
+    assert_eq!(s.history.len(), undo_count);
     assert_eq!(s.world_state().unwrap().body("Block").unwrap().component, source);
     assert!(s.world_state().unwrap().body("Block").unwrap().mesh().bounds().min.dist(before.min) < 1e-6);
 }
@@ -495,10 +495,10 @@ fn move_features_refuses_a_move_that_would_break_a_feature() {
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.extrude", json!({"sketch": "S2", "distance": 4, "operation": "cut", "name": "Cut1"}));
         let part = run(&mut s, "component.create", json!({"name": "Part", "activate": false}))["component"].as_u64().unwrap();
-        let (before, steps) = (s.doc.to_json(), s.undo.len());
+        let (before, steps) = (s.doc.to_json(), s.history.len());
         let e = s.execute("component.move_features", &json!({"features": moves, "component": part})).unwrap_err().to_string();
         assert!(e.contains("moving would"), "{moves:?}: {e}");
-        assert_eq!((s.doc.to_json(), s.undo.len()), (before, steps), "{moves:?}");
+        assert_eq!((s.doc.to_json(), s.history.len()), (before, steps), "{moves:?}");
     }
 }
 
@@ -506,10 +506,10 @@ fn move_features_refuses_a_move_that_would_break_a_feature() {
 fn move_features_refusals_change_nothing() {
     let (mut s, part) = block_and_part();
     let refused = |s: &mut Session, params: Value, why: &str| {
-        let (before, steps) = (s.doc.to_json(), s.undo.len());
+        let (before, steps) = (s.doc.to_json(), s.history.len());
         let e = s.execute("component.move_features", &params).unwrap_err().to_string();
         assert!(e.contains(why), "{e}");
-        assert_eq!((s.doc.to_json(), s.undo.len()), (before, steps));
+        assert_eq!((s.doc.to_json(), s.history.len()), (before, steps));
     };
     refused(&mut s, json!({"features": ["S"], "component": 0}), "already in that component");
     refused(&mut s, json!({"features": ["Nope"], "component": part}), "no feature");
@@ -557,17 +557,17 @@ fn reparent_items_moves_each_kind_all_or_nothing() {
     );
     let sub = run(&mut s, "component.create", json!({"name": "Sub", "activate": false}));
     let sub_occurrence = sub["occurrence"].as_u64().unwrap();
-    let (before, steps, corners) = (s.doc.to_json(), s.undo.len(), world_corners(&s));
+    let (before, steps, corners) = (s.doc.to_json(), s.history.len(), world_corners(&s));
     let moves = |features: Value| json!({"occurrences": [sub_occurrence], "features": features, "bodies": ["Block", "Plate"], "component": part});
     // Cut1 would be left without its body: nothing moves, the placement included.
     let e = s.execute("browser.reparent", &moves(json!(["S", "Extrude1"]))).unwrap_err().to_string();
     assert!(e.contains("moving would"), "{e}");
-    assert_eq!((s.doc.to_json(), s.undo.len()), (before, steps));
+    assert_eq!((s.doc.to_json(), s.history.len()), (before, steps));
     let r = run(&mut s, "browser.reparent", moves(json!(["S", "Extrude1", "S2", "Cut1"])));
     assert_eq!(r["occurrences"], json!([sub_occurrence]), "{r}");
     assert_eq!(r["features"], json!(["S", "Extrude1", "S2", "Cut1"]), "{r}");
     assert_eq!(r["bodies"], json!(["Plate"]), "Block went with its features: {r}");
-    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+    assert_eq!(s.history.len(), steps + 1, "one undo step");
     assert_eq!(s.doc.occurrences.iter().find(|o| o.id == sub_occurrence).map(|o| o.parent), Some(part));
     assert_eq!(world_corners(&s), corners, "everything is where it was in the world");
 }
@@ -591,10 +591,10 @@ fn reparent_items_leaves_the_contents_of_a_moved_component_alone() {
 fn reparent_items_refusals_change_nothing() {
     let (mut s, part) = block_and_part();
     let refused = |s: &mut Session, params: Value, why: &str| {
-        let (before, steps) = (s.doc.to_json(), s.undo.len());
+        let (before, steps) = (s.doc.to_json(), s.history.len());
         let e = s.execute("browser.reparent", &params).unwrap_err().to_string();
         assert!(e.contains(why), "{e}");
-        assert_eq!((s.doc.to_json(), s.undo.len()), (before, steps));
+        assert_eq!((s.doc.to_json(), s.history.len()), (before, steps));
     };
     refused(&mut s, json!({"component": part}), "give `occurrences`");
     refused(&mut s, json!({"features": ["S"], "component": 0}), "already in that component");

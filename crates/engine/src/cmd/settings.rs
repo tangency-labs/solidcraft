@@ -161,6 +161,6 @@ mod tests {
             s.execute(id, &p).unwrap();
         }
         assert_eq!(s.doc.to_json(), doc);
-        assert!(s.undo.is_empty());
+        assert!(s.history.is_empty());
     }
 }

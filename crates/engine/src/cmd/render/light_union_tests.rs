@@ -31,7 +31,7 @@ fn normalized_twenty_source_preflight_has_one_metadata_authority_and_no_reservat
     let mut s = Session::default();
     s.set_render_job_host(Some(host.clone())).unwrap();
     let doc = s.doc.clone();
-    let before = (s.revision, s.evaluations, s.undo.len(), s.redo.len());
+    let before = (s.revision, s.evaluations, s.history.len(), s.history.redo_steps().len());
     let input = params();
     let unchanged = input.clone();
     let reply = s.execute("render.preflight", &input).unwrap();
@@ -43,7 +43,7 @@ fn normalized_twenty_source_preflight_has_one_metadata_authority_and_no_reservat
     assert_eq!(host.admitted_bytes(), 0);
     assert_eq!(input, unchanged);
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(before, (s.revision, s.evaluations, s.undo.len(), s.redo.len()));
+    assert_eq!(before, (s.revision, s.evaluations, s.history.len(), s.history.redo_steps().len()));
 }
 
 #[test]
@@ -63,7 +63,7 @@ fn invalid_or_unavailable_union_preserves_stale_scene_before_capture_or_replacem
     }
     assert!(s.model.is_stale());
     let doc = s.doc.clone();
-    let before = (s.revision, s.evaluations, s.undo.len(), s.redo.len());
+    let before = (s.revision, s.evaluations, s.history.len(), s.history.redo_steps().len());
     for command in ["render.preflight", "render.start"] {
         let mut input = params();
         input["replace"] = json!(true);
@@ -72,7 +72,7 @@ fn invalid_or_unavailable_union_preserves_stale_scene_before_capture_or_replacem
         assert!(error.contains("area_samples") || error.contains("raytrac"), "{error}");
         assert!(s.model.is_stale());
         assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
-        assert_eq!(before, (s.revision, s.evaluations, s.undo.len(), s.redo.len()));
+        assert_eq!(before, (s.revision, s.evaluations, s.history.len(), s.history.redo_steps().len()));
         assert_eq!(host.admitted_bytes(), 0);
     }
 }

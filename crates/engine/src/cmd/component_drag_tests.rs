@@ -90,12 +90,12 @@ fn dragging_moves_a_free_part_by_the_grabbed_point_in_one_undo_step() {
     let mut s = Session::default();
     let (_, base) = part(&mut s, "Base", [0.0, 0.0, 0.0]);
     let (_, free) = part(&mut s, "Free", [20.0, 0.0, 0.0]);
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let r = run(&mut s, "occurrence.drag", json!({"occurrence": free, "at": [25, 5, 10], "point": [35, 10, 10]}));
     assert_eq!(r["moved"], json!([free]));
     near(origin(&s, &[free]), [10.0, 5.0, 0.0]);
-    assert_eq!(s.undo.len(), undo + 1);
-    assert_eq!(s.undo.last().map(|u| u.label.as_str()), Some("Drag Occurrence"));
+    assert_eq!(s.history.len(), undo + 1);
+    assert_eq!(s.history.last().map(|u| u.label.as_str()), Some("Drag Occurrence"));
     // Saved and opened again, it is where it was dragged.
     let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
     let t = back.occurrences.iter().find(|o| o.id == free).unwrap().transform;
@@ -248,7 +248,7 @@ fn shared_joint_chains_follow_the_selected_frame_and_survive_solving() {
     let second = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [100, 0, 0]}))["occurrence"].as_u64().unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence": second, "angle": std::f64::consts::FRAC_PI_2, "origin": [100, 0, 0]}));
     run(&mut s, "occurrence.ground", json!({"occurrence": first, "grounded": true}));
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let before = s.doc.to_json();
     let values = s.doc.assembly.joints[0].values.clone();
     // Drag the non-root side, through the second assembly's rotated frame.
@@ -262,7 +262,7 @@ fn shared_joint_chains_follow_the_selected_frame_and_survive_solving() {
     assert_eq!(solution["conflicts"], json!([]));
     assert_eq!(s.doc.to_json(), dragged, "solving preserves the dragged pose");
     assert_eq!(s.doc.assembly.joints[0].values, values);
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.doc.to_json(), before);
 }

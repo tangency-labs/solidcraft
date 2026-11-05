@@ -35,26 +35,26 @@ fn parameter_enter_adds_once_and_focuses_next_name() {
     let mut h = open();
     fill(&mut h, "expression", "25 mm");
     fill(&mut h, "name", "width");
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     enter(&mut h, false);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert!(h.app.params.as_ref().unwrap().new_name.is_empty());
     assert!(h.app.params.as_ref().unwrap().error.is_none());
     let saved = h.app.session.doc.to_json();
     enter(&mut h, true);
     assert_eq!(h.app.session.doc.to_json(), saved);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     // Name has focus after successful creation; no mouse needed for the next name.
     h.run(&json!([{"text":"height"}])).unwrap();
     assert_eq!(h.app.params.as_ref().unwrap().new_name, "height");
     // The new row's expression starts blank: Enter after the name goes on to it, and Enter
     // there adds the parameter.
     enter(&mut h, false);
-    assert_eq!(h.app.session.undo.len(), undo + 1, "nothing added without an expression");
+    assert_eq!(h.app.session.history.len(), undo + 1, "nothing added without an expression");
     h.run(&json!([{"text":"10 mm"}])).unwrap();
     assert_eq!(h.app.params.as_ref().unwrap().new_expr, "10 mm");
     enter(&mut h, false);
-    assert_eq!(h.app.session.undo.len(), undo + 2);
+    assert_eq!(h.app.session.history.len(), undo + 2);
     let result = h.app.session.execute("parameters.list", &json!({})).unwrap();
     assert!(result["parameters"].as_array().unwrap().iter().any(|p| p["name"] == "height"));
 }
@@ -66,10 +66,10 @@ fn parameter_enter_invalid_preserves_draft_and_other_rows() {
     fill(&mut h, "expression", "missing + 1 mm");
     fill(&mut h, "name", "bad");
     let saved = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     enter(&mut h, false);
     assert_eq!(h.app.session.doc.to_json(), saved);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     let d = h.app.params.as_ref().unwrap();
     assert_eq!(d.new_name, "bad");
     assert_eq!(d.new_expr, "missing + 1 mm");
@@ -88,10 +88,10 @@ fn parameter_enter_edits_expression_without_adding_draft() {
     // A named draft with an invalid expression stays pending on focus loss.
     fill(&mut h, "expression", "missing + 1 mm");
     fill(&mut h, "name", "unsubmitted");
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.run(&json!([{"click":{"handle":"param:width"}}, {"key":"A","cmd":true}, {"text":"20 mm"}])).unwrap();
     enter(&mut h, false);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert_eq!(h.app.params.as_ref().unwrap().new_name, "unsubmitted");
     assert!(h.app.params.as_ref().unwrap().error.is_none(), "Enter in the existing row never attempts the invalid draft");
     let result = h.app.session.execute("parameters.list", &json!({})).unwrap();
@@ -114,19 +114,19 @@ fn parameter_enter_comment_uses_selected_unit_and_unrelated_focus_does_not_submi
     fill(&mut h, "comment", "Overall length");
     fill(&mut h, "expression", "missing + 1 mm");
     fill(&mut h, "name", "length");
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.run(&json!([{"click":{"handle":"params:title"}}])).unwrap();
     // Make the pending expression valid while unrelated focus is retained, without firing
     // the newly approved focus-loss commit route. Unrelated Enter must still do nothing.
     h.app.params.as_mut().unwrap().new_expr = "2 cm".into();
     enter(&mut h, false);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     assert!(h.app.params.as_ref().unwrap().error.is_none(), "unrelated Enter never attempts the pending draft");
     h.run(&json!([{"click":{"handle":"param:new:comment"}}])).unwrap();
     enter(&mut h, false);
     let result = h.app.session.execute("parameters.list", &json!({})).unwrap();
     assert!(result["parameters"].as_array().unwrap().iter().any(|p| p["name"] == "length" && p["unit"] == "cm" && p["comment"] == "Overall length"));
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
 }
 #[test]
 fn parameter_rename_arrow_keys_move_cursor_and_keep_editing() {

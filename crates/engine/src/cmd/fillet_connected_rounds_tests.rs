@@ -56,9 +56,9 @@ fn issue1557_failed_radius_keeps_the_existing_rounds() {
     let mut s = bottom_rounds();
     let before = s.doc.to_json();
     let v = volume(&mut s);
-    let undo = s.undo.len();
+    let undo = s.history.len();
     assert!(s.execute("solid.fillet", &json!({"edges":[[25,0,6]], "radius":"1000 mm"})).is_err());
     assert_eq!(s.doc.to_json(), before);
-    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.history.len(), undo);
     assert!((volume(&mut s) - v).abs() < 1e-6);
 }

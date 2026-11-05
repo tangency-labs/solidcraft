@@ -1748,7 +1748,7 @@ mod studio_browser_tests {
         assert_eq!(request["provenance"]["source"], "Original synthetic fixture");
         let before = h.app.session.doc.to_json();
         let physical = (h.app.session.doc.features.clone(), h.app.session.doc.materials.clone());
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let pending = prepared_image_import(&mut h, view);
         std::fs::remove_file(h.dir.join("original-wood.png")).unwrap();
         h.app.render_workspace.view.library.imported.pending = Some(pending);
@@ -1756,7 +1756,7 @@ mod studio_browser_tests {
         assert!(h.app.render_workspace.view.library.imported.pending.is_none());
         assert_eq!(h.app.session.doc.render.texture_resources.len(), 1);
         assert_eq!(h.app.session.doc.render.setups["Imported wood"].surfaces.len(), 1);
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         assert_eq!((h.app.session.doc.features.clone(), h.app.session.doc.materials.clone()), physical);
         assert!(!h.app.session.doc.to_json().contains("original-wood.png"));
         assert_eq!(h.app.render_workspace.view.draft.surfaces.len(), 1);
@@ -1868,10 +1868,10 @@ mod studio_browser_tests {
         h.app.render_workspace.view.library.loaded = false;
         h.frames(3);
         assert_eq!(h.app.session.doc.to_json(), before);
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"click":{"handle":format!("render:library:{}", appearance_id(blue))}})).unwrap();
         assert_eq!(h.app.session.doc.appearances.bodies.get("Sample").unwrap().name, "ABS - Blue");
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         if let Some(dir) = std::env::var_os("SOLIDCRAFT_LIBRARY_EVIDENCE") {
             std::fs::create_dir_all(&dir).unwrap();
             h.app.run("appearance.assign", json!({"bodies":["Sample"],"appearance":"Aluminum - Anodized Blue"})).unwrap();
@@ -1996,10 +1996,10 @@ mod studio_browser_tests {
         let blue = h.app.render_workspace.view.library.entries.iter().find(|e| e["name"] == "ABS - Blue").unwrap().clone();
         h.app.render_workspace.view.library.query = "ABS - Blue".into();
         h.frames(3);
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"click":{"handle":format!("render:library:{}",appearance_id(&blue))}})).unwrap();
         assert_eq!(h.app.session.doc.appearances.bodies["Sample"].name, "ABS - Blue");
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         h.app.run("edit.undo", json!({})).unwrap();
         assert!(!h.app.session.doc.appearances.bodies.contains_key("Sample"));
     }
@@ -2014,15 +2014,15 @@ mod studio_browser_tests {
         super::super::select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
         h.app.run("view.render_stage", json!({"stage":"light"})).unwrap();
         h.frames(4);
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"click":{"handle":"render:light:NATIVE-STUDIO-001"}})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), unchanged);
         h.step(&json!({"click":{"handle":"render:light:review"}})).unwrap();
         assert!(h.app.render_workspace.view.library.review.is_some());
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         h.step(&json!({"click":{"handle":"render:review:acknowledge"}})).unwrap();
         h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         assert!(!h.app.render_workspace.view.draft.stage.is_empty());
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), unchanged);
@@ -2121,7 +2121,7 @@ mod studio_browser_tests {
         assert_eq!(view.statuses.len(), 33);
         assert_eq!(view.statuses.get(&native).map(String::as_str), Some("native_composition"));
         assert_eq!(h.app.session.doc.to_json(), before);
-        assert!(h.app.session.undo.is_empty());
+        assert!(h.app.session.history.is_empty());
     }
     #[test]
     fn physical_reference_navigation_uses_the_same_category_history() {
@@ -2174,7 +2174,7 @@ mod studio_browser_tests {
         }
         assert_eq!(h.app.preferences.render_library_recent.len(), 32);
         assert_eq!(h.app.session.doc.to_json(), before);
-        assert!(h.app.session.undo.is_empty());
+        assert!(h.app.session.history.is_empty());
         choose(&mut h.app, &mut view, "surfaces", "SURF-048").unwrap();
         assert_eq!(h.app.preferences.render_library_recent.len(), 32);
         assert_eq!(super::super::inspector::selected_editor(&h.app), super::super::inspector::Editor::Scene);

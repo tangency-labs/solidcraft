@@ -150,7 +150,7 @@ fn reused_design_insertion_is_free_even_before_a_link_exists() {
         let occurrence = inserted["occurrence"].as_u64().unwrap();
         assert!(!s.doc.occurrences.iter().find(|o| o.id == occurrence).unwrap().grounded);
         assert_eq!(s.doc.links.len(), 1);
-        assert_eq!(s.undo.len(), count, "each paste is one undo step");
+        assert_eq!(s.history.len(), count, "each paste is one undo step");
         run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [10, 0, 0]}));
         run(&mut s, "edit.undo", json!({}));
     }
@@ -170,12 +170,12 @@ fn reused_design_insertion_uses_the_requested_position_and_survives_undo_and_reo
         let mut s = Session::default();
         let first = run(&mut s, "component.insert_design", json!({"path": file, "translate": [20, 0, 0], "reuse": first_reuses}));
         let before = s.doc.to_json();
-        let undo = s.undo.len();
+        let undo = s.history.len();
         let second = run(&mut s, "component.insert_design", json!({"path": file, "translate": [40, 5, 7], "reuse": true}));
         assert_eq!(first["component"], second["component"]);
         assert_eq!(s.doc.links.len(), 1);
         assert_eq!(s.doc.features.len(), 1);
-        assert_eq!(s.undo.len(), undo + 1);
+        assert_eq!(s.history.len(), undo + 1);
         let occurrence = second["occurrence"].as_u64().unwrap();
         assert_linked_bounds(&mut s, occurrence, [40.0, 5.0, 7.0], [50.0, 25.0, 37.0]);
         assert_linked_bounds(&mut s, first["occurrence"].as_u64().unwrap(), [20.0, 0.0, 0.0], [30.0, 20.0, 30.0]);
@@ -528,7 +528,7 @@ fn relink_repairs_a_moved_source_for_every_instance_in_one_undo_step() {
     let occurrences = s.doc.occurrences.clone();
     let pending = s.pending_moves.clone();
     let before = serde_json::to_value(&*s.doc).unwrap();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     std::fs::rename(&old, &moved).unwrap();
     part(&moved, 45);
     let result = run(&mut s, "component.relink", json!({"component": component, "path": moved}));
@@ -538,7 +538,7 @@ fn relink_repairs_a_moved_source_for_every_instance_in_one_undo_step() {
     assert_eq!(result["warnings"], json!([]));
     assert_eq!(s.doc.occurrences, occurrences);
     assert_eq!(s.pending_moves, pending);
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     assert!((volume(&mut s) - 18000.0).abs() < 1e-5);
     let after = serde_json::to_value(&*s.doc).unwrap();
     run(&mut s, "edit.undo", json!({}));
@@ -572,7 +572,7 @@ fn relink_rejects_bad_sources_and_targets_without_touching_the_design_or_undo() 
     run(&mut Session::default(), "file.save", json!({"path": empty}));
     std::fs::write(&corrupt, b"not a design").unwrap();
     let before = serde_json::to_value(&*s.doc).unwrap();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for params in [
         json!({}),
         json!({"component": component}),
@@ -589,7 +589,7 @@ fn relink_rejects_bad_sources_and_targets_without_touching_the_design_or_undo() 
     ] {
         assert!(s.execute("component.relink", &params).is_err(), "{params}");
         assert_eq!(serde_json::to_value(&*s.doc).unwrap(), before, "{params}");
-        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.history.len(), undo);
         assert!((volume(&mut s) - 6000.0).abs() < 1e-5);
     }
     let _ = std::fs::remove_dir_all(dir);

@@ -65,10 +65,10 @@ fn imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resour
     input["maps"]["roughness_linear"] = input["maps"]["base_color_srgb"].clone();
     let before = s.doc.to_json();
     let physical = (s.doc.materials.clone(), s.doc.features.clone());
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let result = s.execute("render.surface.import", &input).unwrap();
     assert_eq!(result["self_contained"], true);
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     assert_eq!((s.doc.materials.clone(), s.doc.features.clone()), physical);
     assert_eq!(s.doc.render.texture_resources.len(), 1);
     let digest = HdrId::of(&bytes);
@@ -120,7 +120,7 @@ fn imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resour
 fn imported_surface_refusals_are_atomic_and_validate_identity_before_source_access() {
     let (mut s, path, _, input) = custom_surface_fixture();
     let before = s.doc.to_json();
-    let history = (s.revision, s.undo.len());
+    let history = (s.revision, s.history.len());
     for patch in [
         json!({"body_name":"Wrong", "maps":{"base_color_srgb":{"path":"missing-file.png"}}}),
         json!({"normal_strength":2.0}),
@@ -136,7 +136,7 @@ fn imported_surface_refusals_are_atomic_and_validate_identity_before_source_acce
         }
         assert!(s.execute("render.surface.import", &request).is_err(), "{request}");
         assert_eq!(s.doc.to_json(), before);
-        assert_eq!((s.revision, s.undo.len()), history);
+        assert_eq!((s.revision, s.history.len()), history);
     }
     let mut request = input.clone();
     request["maps"]["normal_opengl"] = json!({"path":"missing-later-map.png"});
@@ -155,10 +155,10 @@ fn cpu_surface_import_and_method_switch_reject_unsupported_encoding_without_losi
     input["maps"]["base_color_srgb"]["expected_sha256"] = json!(HdrId::of(&jpeg));
     input["set"]["job"]["method"] = json!("cpu_raytrace");
     let before = s.doc.to_json();
-    let history = (s.revision, s.undo.len());
+    let history = (s.revision, s.history.len());
     assert!(s.execute("render.surface.import", &input).unwrap_err().to_string().contains("noninterlaced 8-bit PNG"));
     assert_eq!(s.doc.to_json(), before);
-    assert_eq!((s.revision, s.undo.len()), history);
+    assert_eq!((s.revision, s.history.len()), history);
     input["set"]["job"]["method"] = json!("gpu_path");
     s.execute("render.surface.import", &input).unwrap();
     let saved = s.doc.to_json();
@@ -217,14 +217,14 @@ fn builtin_hdr_capture_is_atomic_undoable_deduplicated_and_path_independent() {
     let saved = s.doc.to_json();
     let reopened = solidcraft_doc::Document::from_json(&saved).unwrap();
     assert_eq!(reopened.render.resources.required(&id).unwrap().id(), id);
-    let before = s.undo.len();
+    let before = s.history.len();
     assert!(s.execute("render.library.environment.apply", &request).is_err(), "replacement must be explicit");
     assert_eq!(s.doc.to_json(), saved);
-    assert_eq!(s.undo.len(), before);
+    assert_eq!(s.history.len(), before);
     let mut identical = request;
     identical["replace_environment"] = json!(true);
     s.execute("render.library.environment.apply", &identical).unwrap();
-    assert_eq!(s.undo.len(), before, "identical resource application is a no-op");
+    assert_eq!(s.history.len(), before, "identical resource application is a no-op");
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(s.doc.to_json(), empty);
 }
@@ -252,7 +252,7 @@ fn explicit_surface_prepare_has_physical_scale_and_does_not_assign_materials() {
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length":10,"width":20,"height":5,"body_name":"Target"})).unwrap();
     let before = s.doc.to_json();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let reply = s.execute("render.library.surface.prepare", &json!({"id":"SURF-001","body_index":0,"body_name":"Target","scale":2.0})).unwrap();
     assert_eq!(reply["texture"]["frame"]["u"], json!([200.0, 0.0, 0.0]));
     assert_eq!(reply["texture"]["flip_v"], true);
@@ -268,7 +268,7 @@ fn explicit_surface_prepare_has_physical_scale_and_does_not_assign_materials() {
     }
     assert_eq!(binding.base_color_mode, BaseColorMode::Replace);
     assert_eq!(s.doc.to_json(), before);
-    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.history.len(), undo);
     assert!(s.execute("render.library.surface.prepare", &json!({"id":"SURF-001","body_index":0,"body_name":"Old name"})).is_err());
 }
 
@@ -279,7 +279,7 @@ fn wood_grain_rotation_preserves_non_square_repeats_in_each_plane() {
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length":100,"width":100,"height":20,"body_name":"Board"})).unwrap();
     let before = s.doc.to_json();
-    let history = (s.undo.len(), s.redo.len());
+    let history = (s.history.len(), s.history.redo_steps().len());
     for (plane, expected_u, expected_v) in
         [("xy", [0.0, 60.0, 0.0], [-120.0, 0.0, 0.0]), ("yz", [0.0, 0.0, 60.0], [0.0, -120.0, 0.0]), ("zx", [60.0, 0.0, 0.0], [0.0, 0.0, -120.0])]
     {
@@ -314,7 +314,7 @@ fn wood_grain_rotation_preserves_non_square_repeats_in_each_plane() {
         );
     }
     assert_eq!(s.doc.to_json(), before);
-    assert_eq!((s.undo.len(), s.redo.len()), history);
+    assert_eq!((s.history.len(), s.history.redo_steps().len()), history);
 }
 
 #[cfg(feature = "bundled-render-library")]
@@ -367,7 +367,7 @@ fn uniform_appearance_requires_acknowledged_projection_and_preserves_physical_da
     s.execute("solid.box", &json!({"length":10,"width":20,"height":5,"body_name":"Target"})).unwrap();
     let before = s.doc.to_json();
     let before_value: Value = serde_json::from_str(&before).unwrap();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     assert!(s.execute("render.library.appearance.apply", &json!({"id":"MAT-001","variant":"uniform_opaque","bodies":["Target"]})).is_err());
     assert_eq!(s.doc.to_json(), before);
     let reply = s.execute("render.library.appearance.apply", &json!({"id":"SURF-001","variant":"uniform_opaque","bodies":["Target"]})).unwrap();
@@ -376,7 +376,7 @@ fn uniform_appearance_requires_acknowledged_projection_and_preserves_physical_da
     assert_eq!(reply["appearance"]["color"], json!([196, 202, 207]));
     let after: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
     assert_eq!(after["user_materials"], before_value["user_materials"]);
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(s.doc.to_json(), before);
 }
@@ -419,11 +419,11 @@ fn saved_authored_maps_roundtrip_and_resolve_without_paths_or_captured_ordinals(
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length":10,"width":20,"height":5,"body_name":"Coupon"})).unwrap();
     let before = s.doc.clone();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let input = json!({"name":"Portable","set":{"job":{"method":"gpu_path","options":{}},"width":32,"height":32},
         "surface":{"id":"SURF-001","body_index":0,"body_name":"Coupon"}});
     s.execute("render.library.surface.bind", &input).unwrap();
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     assert_eq!(s.doc.materials, before.materials);
     assert_eq!(s.doc.appearances, before.appearances);
     assert_eq!(s.doc.features, before.features);
@@ -479,12 +479,12 @@ fn saved_surface_follows_its_occurrence_without_rebinding_another_instance() {
     // Upstream grounds the first occurrence. Keep that refusal explicit before
     // exercising a deliberately movable instance and its stable render binding.
     let grounded_document = s.doc.clone();
-    let grounded_history = (s.revision, s.undo.len(), s.redo.len());
+    let grounded_history = (s.revision, s.history.len(), s.history.redo_steps().len());
     let movement = json!({"occurrence":component["occurrence"],"translate":[12,0,0]});
     let error = s.execute("occurrence.move", &movement).unwrap_err().to_string();
     assert!(error.contains("is grounded"), "{error}");
     assert_eq!(s.doc, grounded_document);
-    assert_eq!((s.revision, s.undo.len(), s.redo.len()), grounded_history);
+    assert_eq!((s.revision, s.history.len(), s.history.redo_steps().len()), grounded_history);
     s.execute("occurrence.ground", &json!({"occurrence":component["occurrence"],"grounded":false})).unwrap();
     s.execute("occurrence.move", &movement).unwrap();
     let moved = capture(&s);
@@ -533,10 +533,10 @@ fn saved_passive_ground_keeps_cad_unchanged_and_is_revalidated_after_product_mot
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length":10,"width":20,"height":5,"body_name":"Subject"})).unwrap();
     let before = s.doc.clone();
-    let history = s.undo.len();
+    let history = s.history.len();
     let request = json!({"name":"Stage","set":{"job":{"method":"cpu_raytrace","options":{"budget":"studio"}}}});
     s.execute("render.stage.ground", &request).unwrap();
-    assert_eq!(s.undo.len(), history + 1);
+    assert_eq!(s.history.len(), history + 1);
     assert_eq!(s.doc.features, before.features);
     assert_eq!(s.doc.materials, before.materials);
     let setup = s.doc.render.setups["Stage"].clone();
@@ -618,7 +618,7 @@ fn patch_cannot_hide_existing_resources_from_replacement_consent() {
 fn omitted_optional_pack_keeps_discovery_but_refuses_resource_mutation() {
     let mut session = Session::default();
     let before = session.doc.clone();
-    let history = (session.revision, session.undo.len());
+    let history = (session.revision, session.history.len());
     let hdr = session.execute("render.library.list", &json!({"kind":"hdr","availability":"usable"})).unwrap();
     assert_eq!(hdr["total"], 0);
     assert!(
@@ -631,5 +631,5 @@ fn omitted_optional_pack_keeps_discovery_but_refuses_resource_mutation() {
     assert!(session.execute("render.library.environment.apply", &request).unwrap_err().to_string().contains("bundled-render-library"));
     assert!(session.execute("render.library.surface.bind", &json!({})).unwrap_err().to_string().contains("bundled-render-library"));
     assert_eq!(session.doc, before);
-    assert_eq!((session.revision, session.undo.len()), history);
+    assert_eq!((session.revision, session.history.len()), history);
 }

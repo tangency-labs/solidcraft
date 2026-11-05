@@ -844,7 +844,7 @@ fn solve_app_integration_is_opt_in_and_cannot_dirty_or_mutate_document() {
     let doc = app.session.doc.clone();
     let model = app.session.model.state();
     let revision = app.session.revision;
-    let undo = app.session.undo.len();
+    let undo = app.session.history.len();
     let dirty = app.session.is_dirty();
     let recomputed = app.session.model.recomputed;
     let mut h = PanelMountHarness::new(false).unwrap();
@@ -864,7 +864,7 @@ fn solve_app_integration_is_opt_in_and_cannot_dirty_or_mutate_document() {
     assert!(std::sync::Arc::ptr_eq(&doc, &app.session.doc));
     assert!(std::sync::Arc::ptr_eq(&model, &app.session.model.state()));
     assert_eq!(app.session.revision, revision);
-    assert_eq!(app.session.undo.len(), undo);
+    assert_eq!(app.session.history.len(), undo);
     assert_eq!(app.session.is_dirty(), dirty);
     assert_eq!(app.session.model.recomputed, recomputed);
     app.disable_panel_runtime().unwrap();
@@ -1339,7 +1339,7 @@ fn solve_app_panel_commands_use_injected_services_without_document_camera_or_cac
     let revision = app.session.revision;
     let doc = app.session.doc.clone();
     let model = app.session.model.state();
-    let undo = app.session.undo.len();
+    let undo = app.session.history.len();
     let dirty = app.session.is_dirty();
     let camera = app.cam;
     app.enable_panel_runtime(
@@ -1366,7 +1366,7 @@ fn solve_app_panel_commands_use_injected_services_without_document_camera_or_cac
     assert_eq!(probe.state(&key).unwrap().cancels, 0);
     assert!(trace.borrow().service_borrows >= 6);
     assert_eq!(app.session.revision, revision);
-    assert_eq!(app.session.undo.len(), undo);
+    assert_eq!(app.session.history.len(), undo);
     assert_eq!(app.session.is_dirty(), dirty);
     assert_eq!(app.cam, camera);
     assert!(std::sync::Arc::ptr_eq(&doc, &app.session.doc));
@@ -1395,7 +1395,7 @@ fn solve_app_forwards_dispatch_mount_content_switch_and_ticks_to_its_injected_pr
     let revision = app.session.revision;
     let doc = app.session.doc.clone();
     let model = app.session.model.state();
-    let undo = app.session.undo.len();
+    let undo = app.session.history.len();
     let dirty = app.session.is_dirty();
     app.enable_panel_runtime(
         runtime,
@@ -1446,7 +1446,7 @@ fn solve_app_forwards_dispatch_mount_content_switch_and_ticks_to_its_injected_pr
     assert!(trace.service_borrows >= 10);
     assert!(trace.refreshes >= 4);
     assert_eq!(app.session.revision, revision);
-    assert_eq!(app.session.undo.len(), undo);
+    assert_eq!(app.session.history.len(), undo);
     assert_eq!(app.session.is_dirty(), dirty);
     assert!(std::sync::Arc::ptr_eq(&doc, &app.session.doc));
     assert!(std::sync::Arc::ptr_eq(&model, &app.session.model.state()));
@@ -1522,7 +1522,7 @@ fn application_command_query_and_failure_refresh_same_named_document_before_any_
     let document = app.session.doc.clone();
     let model = app.session.model.state();
     let camera = app.cam;
-    let before = (app.session.revision, app.session.undo.len(), app.session.is_dirty());
+    let before = (app.session.revision, app.session.history.len(), app.session.is_dirty());
     let query = app.run("panel.list", serde_json::json!({})).unwrap();
     assert_eq!(query["state"]["availability"]["editor"]["state"], "unavailable");
     let failure = app.run("panel.focus", serde_json::json!({"target":panel_command_editor_target()})).unwrap_err();
@@ -1530,7 +1530,7 @@ fn application_command_query_and_failure_refresh_same_named_document_before_any_
     assert_eq!(app.panel_runtime().unwrap().environment().document, Some(DocumentId::new("context-b").unwrap()));
     assert_eq!(probe.state(&a).unwrap().draft, "document A draft");
     assert_eq!(probe.state(&a).unwrap().cancels, 0);
-    assert_eq!((app.session.revision, app.session.undo.len(), app.session.is_dirty()), before);
+    assert_eq!((app.session.revision, app.session.history.len(), app.session.is_dirty()), before);
     assert!(std::sync::Arc::ptr_eq(&document, &app.session.doc));
     assert!(std::sync::Arc::ptr_eq(&model, &app.session.model.state()));
     assert_eq!(app.cam, camera);

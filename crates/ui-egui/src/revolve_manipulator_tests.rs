@@ -45,7 +45,7 @@ fn actual_positive_negative_axis_and_negative_sweep_drags_follow_geometry() {
         let mut h = fixture(Harness::new(), params.clone());
         let original = serde_json::to_value(&h.app.session.doc.find_feature("Turn").unwrap().kind).unwrap();
         let names = h.app.session.doc.find_feature("Turn").unwrap().param_names.clone();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         open(&mut h);
         handle_at(&mut h, "revolve", at_angle(sign * 90.0));
         h.step(&json!({"drag":[{"handle":"revolve"},{"world":at_angle(sign * 60.0)}]})).unwrap();
@@ -62,7 +62,7 @@ fn actual_positive_negative_axis_and_negative_sweep_drags_follow_geometry() {
         assert_eq!(angle(&h), if params.get("angle").is_some() { "-60 deg" } else { "60 deg" });
         assert_eq!(h.app.session.doc.find_feature("Turn").unwrap().param_names, names);
         assert!((volume(&h) - expected_volume(60.0)).abs() < 0.03);
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(serde_json::to_value(&h.app.session.doc.find_feature("Turn").unwrap().kind).unwrap(), original);
     }
@@ -73,7 +73,7 @@ fn symmetric_boundary_drags_edit_included_angle_and_cancel_is_lossless() {
     for (handle, sign) in [("revolve", 1.0), ("revolve2", -1.0)] {
         let mut h = fixture(Harness::new(), json!({"angle":"120 deg","direction":"symmetric"}));
         let original = serde_json::to_value(&*h.app.session.doc).unwrap();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         open(&mut h);
         handle_at(&mut h, "revolve", at_angle(60.0));
         handle_at(&mut h, "revolve2", at_angle(-60.0));
@@ -82,7 +82,7 @@ fn symmetric_boundary_drags_edit_included_angle_and_cancel_is_lossless() {
         assert_eq!(entered, "90 deg");
         h.step(&json!({"widget":"Cancel"})).unwrap();
         assert_eq!(serde_json::to_value(&*h.app.session.doc).unwrap(), original);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         open(&mut h);
         h.step(&json!({"drag":[{"handle":handle},{"world":at_angle(sign * 45.0)}]})).unwrap();
         let crate::dialogs::Kind::Revolve { angle: entered, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("revolve") };

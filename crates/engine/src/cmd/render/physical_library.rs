@@ -204,7 +204,7 @@ mod tests {
     fn all_profiles_and_bindings_are_accessible_without_changing_a_design() {
         let mut s = Session::default();
         let before = s.doc.clone();
-        let history = (s.undo.len(), s.revision);
+        let history = (s.history.len(), s.revision);
         let listing = list(&json!({"limit":128})).unwrap();
         assert_eq!(listing["total"], 59);
         for item in listing["items"].as_array().unwrap() {
@@ -227,7 +227,7 @@ mod tests {
         assert_eq!(plan["command"]["params"]["density_g_cm3"], 7.9);
         assert_eq!(plan["status"], "plan_only_not_executed");
         assert_eq!(s.doc, before);
-        assert_eq!((s.undo.len(), s.revision), history);
+        assert_eq!((s.history.len(), s.revision), history);
     }
     #[test]
     fn reference_plans_require_acknowledgement_and_do_not_guess_missing_density() {

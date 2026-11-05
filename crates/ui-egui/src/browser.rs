@@ -234,7 +234,7 @@ pub struct TreeState {
     pub capture_prompt: Option<String>,
     /// The design, undo depth and visibility when the button last went down: a drag over the eyes
     /// merges the steps it made into one (`eye_drag_frame`).
-    eye_press: Option<(u64, Arc<Document>, usize, solidcraft_engine::Visibility)>,
+    eye_press: Option<(u64, Arc<Document>, solidcraft_engine::Mark, solidcraft_engine::Visibility)>,
     pub(crate) content: crate::semantic_content::Frame,
     cache: Option<cache::Cache>,
 }
@@ -605,14 +605,15 @@ pub fn toggle_folder(app: &mut SolveApp, key: &str) {
     let _ = app.run("browser.visibility", json!({ "tree_folders": [key], "visible": app.session.folder_hidden(key) }));
 }
 
-/// A drag over the eyes is one undo step (#9680). When the button goes down the undo depth and the
-/// hidden items are noted; when it comes up, the steps the drag made are merged into the first of
-/// them. Runs every frame, whatever else is open, so a release is never missed.
+/// A drag over the eyes is one undo step (#9680). When the button goes down a mark and the hidden
+/// items are noted; when it comes up, the steps the drag made are folded into the first of them.
+/// Runs every frame, whatever else is open, so a release is never missed.
 pub(crate) fn eye_drag_frame(app: &mut SolveApp, ctx: &egui::Context) {
     crate::semantic_content::ensure_session(app, ctx);
     let (pressed, down) = ctx.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_down()));
     if pressed && app.tree.eye_press.is_none() {
-        app.tree.eye_press = Some((app.session.uid, app.session.doc.clone(), app.session.undo.len(), without_origin(app.session.visibility.clone())));
+        app.tree.eye_press =
+            Some((app.session.uid, app.session.doc.clone(), app.session.history.mark(), without_origin(app.session.visibility.clone())));
     }
     if down {
         return;
@@ -624,7 +625,7 @@ pub(crate) fn eye_drag_frame(app: &mut SolveApp, ctx: &egui::Context) {
 pub(crate) fn end_eye_drag(app: &mut SolveApp, ctx: &egui::Context) {
     let capture = crate::semantic_content::release_eye(ctx);
     let dragged = ctx.data_mut(|d| d.remove_temp::<bool>(crate::ui_kit::eye_drag_id())).is_some();
-    let Some((_, doc, depth, visibility)) = app
+    let Some((_, doc, mark, visibility)) = app
         .tree
         .eye_press
         .take()
@@ -632,12 +633,12 @@ pub(crate) fn end_eye_drag(app: &mut SolveApp, ctx: &egui::Context) {
     else {
         return;
     };
-    // shortcut: once the history is full (200 steps) its length stops growing, so the drag is left as
-    // separate steps, like the point-cloud and canvas drags; the visibility test keeps a trimmed front
-    // from being merged wrongly.
-    let undo = &mut app.session.undo;
-    if undo.len() > depth + 1 && undo.get(depth).is_some_and(|s| Arc::ptr_eq(&s.doc, &doc) && without_origin(s.visibility.clone()) == visibility) {
-        undo.truncate(depth + 1);
+    // Only when the first step holds what the press saw: nothing else ran before the drag.
+    let history = &mut app.session.history;
+    let steps = history.steps_since(mark);
+    let first = history.steps().len().checked_sub(steps).and_then(|at| history.steps().get(at));
+    if steps > 1 && first.is_some_and(|s| Arc::ptr_eq(&s.doc, &doc) && without_origin(s.visibility.clone()) == visibility) {
+        history.fold_since(mark);
     }
 }
 
@@ -2460,8 +2461,8 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
 pub struct CanvasPanel {
     pub canvas: u64,
     pub calibrate: bool,
-    /// Undo depth when the panel opened.
-    pub(crate) depth: usize,
+    /// The undo history's mark when the panel opened: its edits fold into one step.
+    pub(crate) mark: solidcraft_engine::Mark,
     pub a: [f64; 2],
     pub b: [f64; 2],
     pub distance: f64,
@@ -2480,7 +2481,7 @@ impl CanvasPanel {
             .find(|c| c.id == canvas)
             .map(|c| ([c.center.x - c.width / 2.0, c.center.y], [c.center.x + c.width / 2.0, c.center.y], c.width))
             .unwrap_or(([0.0, 0.0], [100.0, 0.0], 100.0));
-        CanvasPanel { canvas, calibrate, depth: app.session.undo.len(), a, b, distance: d, next: 0 }
+        CanvasPanel { canvas, calibrate, mark: app.session.history.mark(), a, b, distance: d, next: 0 }
     }
 }
 

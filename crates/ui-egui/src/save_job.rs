@@ -87,7 +87,7 @@ mod tests {
         let cmds = crate::dialogs::apply_commands(&h.app, &dialog).unwrap();
         let prepared = h.app.session.scratch().compute_commands(&cmds, None).unwrap();
         let document = h.app.session.doc.clone();
-        let history = h.app.session.undo.len();
+        let history = h.app.session.history.len();
         let (_save_finish, save_done) = std::sync::mpsc::channel();
         h.app.saving = Some(super::Saving { command: "file.save", done: save_done });
         h.app.apply_off_thread = Some(std::time::Duration::ZERO);
@@ -109,7 +109,7 @@ mod tests {
         // Not drawn: discard the texture updates explicitly.
         out.textures_delta.clear();
         assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
-        assert_eq!(h.app.session.undo.len(), history);
+        assert_eq!(h.app.session.history.len(), history);
         assert!(h.app.dialog.as_ref().unwrap().error.as_ref().unwrap().contains("file operation"));
     }
 

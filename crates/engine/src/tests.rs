@@ -914,7 +914,7 @@ pub(crate) fn hostile_values() -> Vec<Value> {
 /// A copy of `s` as it stands: its design and model (sharing their bodies, as undo does), its
 /// undo and redo, its open sketch and the design it was entered from, and its log.
 fn copy_with_history(s: &Session) -> Session {
-    Session { undo: s.undo.clone(), redo: s.redo.clone(), sketch_entry: s.sketch_entry.clone(), log: s.log.clone(), ..s.scratch() }
+    Session { history: s.history.clone(), sketch_entry: s.sketch_entry.clone(), log: s.log.clone(), ..s.scratch() }
 }
 
 /// The hostile-parameter test's copy starts where a session built afresh stands: cancelling its
@@ -1355,9 +1355,9 @@ fn timeline_inspect_shows_what_timeline_edit_changes() {
     assert!(k["definition"].get("sketch").is_none() && k["definition"].get("plane").is_some(), "{k}");
     assert_eq!(k["omitted"][0]["field"], "sketch", "{k}");
     // Read-only: no undo step; bad input is refused.
-    let undo = s.undo.len();
+    let undo = s.history.len();
     run(&mut s, "timeline.inspect", json!({"feature": "Slab"}));
-    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.history.len(), undo);
     for bad in [json!({}), json!({"feature": "Nope"}), json!({"feature": [1]}), json!({"feature": 1e300}), json!({"feature": null})] {
         assert!(s.execute("timeline.inspect", &bad).is_err(), "{bad}");
     }
@@ -1425,7 +1425,7 @@ fn step_open_then_model_on_it() {
     assert_eq!(s.doc.name, "Block");
     assert_eq!(s.doc.features[0].kind.type_name(), "BaseFeature");
     assert!(matches!(&s.doc.features[0].kind, doc::FeatureKind::Import { file, .. } if file == "Block.step"));
-    assert!(s.is_dirty() && s.path.is_none() && s.undo.is_empty());
+    assert!(s.is_dirty() && s.path.is_none() && s.history.is_empty());
     assert!(rel(volume(&mut s), 24000.0) < 1e-6);
     let corner = run(&mut s, "inspect.measure", json!({}))["bodies"][0]["bbox"]["min"].clone();
     let (x0, y0, z0) = (corner[0].as_f64().unwrap(), corner[1].as_f64().unwrap(), corner[2].as_f64().unwrap());
@@ -1567,10 +1567,10 @@ fn step_insert_delete_removes_assembly_and_undo_restores_it() {
     assert!(!s.doc.assembly.joints.is_empty());
     assert!(!s.doc.body_components.is_empty());
     let before = s.doc.clone();
-    let history = s.undo.len();
+    let history = s.history.len();
 
     run(&mut s, "timeline.delete", json!({"feature": "Imported"}));
-    assert_eq!(s.undo.len(), history + 1);
+    assert_eq!(s.history.len(), history + 1);
     assert_eq!(s.doc.components.iter().map(|c| c.id).collect::<Vec<_>>(), [kept]);
     assert_eq!(s.doc.occurrences, [kept_occurrence]);
     assert!(s.doc.assembly.joints.is_empty());
@@ -1599,12 +1599,12 @@ fn preview_has_no_side_effects() {
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
     run(&mut s, "sketch.finish", json!({}));
     let doc = s.doc.clone();
-    let (undo, rev) = (s.undo.len(), s.revision);
+    let (undo, rev) = (s.history.len(), s.revision);
     let p = s.preview(&[("solid.extrude".into(), json!({"distance": 15}))]).unwrap();
     assert!(p.before.bodies.is_empty());
     assert!(rel(body_volume(&p.after), 40.0 * 30.0 * 15.0) < 1e-9);
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!((s.undo.len(), s.revision), (undo, rev));
+    assert_eq!((s.history.len(), s.revision), (undo, rev));
     assert!(s.model.state().bodies.is_empty());
     // Errors come back as errors and change nothing either.
     assert!(s.preview(&[("solid.extrude".into(), json!({"distance": "nonsense"}))]).is_err());
@@ -1612,13 +1612,13 @@ fn preview_has_no_side_effects() {
 
     // Fillet preview on a real body.
     run(&mut s, "solid.extrude", json!({"distance": 20}));
-    let (doc, undo) = (s.doc.clone(), s.undo.len());
+    let (doc, undo) = (s.doc.clone(), s.history.len());
     let p = s.preview(&[("solid.fillet".into(), json!({"edges": [[0, 0, 10]], "radius": 3}))]).unwrap();
     let filleted = 24000.0 - (9.0 - PI * 9.0 / 4.0) * 20.0;
     assert!(rel(body_volume(&p.after), filleted) < 2e-4);
     assert!(rel(body_volume(&p.before), 24000.0) < 1e-9);
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.history.len(), undo);
 }
 
 /// Previewing an edit shows the rebuilt feature although the timeline is rolled back to it.
@@ -1937,7 +1937,7 @@ fn measure_items() {
 fn section_analysis() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
-    let (doc, undo) = (s.doc.clone(), s.undo.len());
+    let (doc, undo) = (s.doc.clone(), s.history.len());
     let r = run(&mut s, "inspect.section", json!({"plane": "XZ", "offset": 15}));
     let (o, n) = s.section.unwrap();
     assert!((o - n * 15.0).len() < 1e-12 && (n.y.abs() - 1.0).abs() < 1e-12);
@@ -1967,7 +1967,7 @@ fn section_analysis() {
     assert!(s.execute("inspect.section", &json!({"plane": {"normal": [0, 1, 0]}, "at": 1})).is_err());
     run(&mut s, "inspect.section", json!({"clear": true}));
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.history.len(), undo);
 }
 
 /// A section index finds the same cut segments, in the same order and to the bit, as cutting
@@ -2205,8 +2205,8 @@ fn checkpoint_restores_with_a_full_undo_history() {
     for i in 0..MAX_UNDO + 5 {
         run(&mut s, "parameters.add", json!({"name": format!("p{i}"), "expression": "1 mm"}));
     }
-    assert_eq!(s.undo.len(), MAX_UNDO);
-    let labels: Vec<String> = s.undo.iter().map(|u| u.label.clone()).collect();
+    assert_eq!(s.history.len(), MAX_UNDO);
+    let labels: Vec<String> = s.history.steps().iter().map(|u| u.label.clone()).collect();
     let doc = s.doc.clone();
     let id = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "TapHole"}));
@@ -2215,7 +2215,7 @@ fn checkpoint_restores_with_a_full_undo_history() {
     run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": id}));
     assert!(Arc::ptr_eq(&s.doc, &doc) && s.active_sketch.is_none());
     assert!(s.doc.find_feature("TapHole").is_none());
-    assert_eq!(s.undo.iter().map(|u| u.label.clone()).collect::<Vec<_>>(), labels);
+    assert_eq!(s.history.steps().iter().map(|u| u.label.clone()).collect::<Vec<_>>(), labels);
     // Used up: a second restore is an error, not a jump somewhere else.
     assert!(s.execute("edit.restore_checkpoint", &json!({"checkpoint": id})).is_err());
     // Forgetting one leaves the design alone.
@@ -5348,7 +5348,7 @@ fn a_command_check_refuses_a_command_and_leaves_the_design() {
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
     s.set_command_check(Some(refusing("solid.box")));
     let doc = s.doc.clone();
-    let (undo, revision) = (s.undo.len(), s.revision);
+    let (undo, revision) = (s.history.len(), s.revision);
     let r = s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]}));
     match r {
         Err(EngineError::Refused { cmd, reason }) => {
@@ -5358,7 +5358,7 @@ fn a_command_check_refuses_a_command_and_leaves_the_design() {
         other => panic!("expected a refusal, got {other:?}"),
     }
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc), "the design is unchanged");
-    assert_eq!((s.undo.len(), s.revision), (undo, revision));
+    assert_eq!((s.history.len(), s.revision), (undo, revision));
     // Other commands still run, and the check stays with the session across new designs,
     // scripts and previews.
     run(&mut s, "file.new", json!({"name": "Next"}));

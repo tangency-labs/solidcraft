@@ -105,7 +105,7 @@ fn a_y_up_step_file_comes_in_standing_up() {
 
     // y: (x, y, z) goes to (x, -z, y), so the frame, 34 high in Y, stands 34 high in Z.
     let mut d = Session::default();
-    let undo = d.undo.len();
+    let undo = d.history.len();
     let r = run(&mut d, "file.insert_step", json!({"path": path, "up": "y"}));
     let (lo, hi) = extent(&d);
     assert!(near(lo, [0.0, -20.0, 0.0]) && near(hi, [40.0, 0.0, 34.0]), "stood up: {lo:?} {hi:?}");
@@ -115,7 +115,7 @@ fn a_y_up_step_file_comes_in_standing_up() {
     assert_eq!(r["created_bodies"].as_array().unwrap().len(), 2, "the plate, and the post placed twice: {r}");
     assert!((total_volume(&mut d) - (40.0 * 4.0 * 20.0 + 2.0 * 4.0 * 30.0 * 4.0)).abs() < 1e-6);
     // The Import and the turn are one undo step.
-    assert_eq!(d.undo.len(), undo + 1);
+    assert_eq!(d.history.len(), undo + 1);
     run(&mut d, "edit.undo", json!({}));
     assert!(d.doc.features.is_empty());
 
@@ -144,7 +144,7 @@ fn opening_a_y_up_step_file_can_stand_it_up() {
     let r = run(&mut s, "doc.open", json!({"path": path, "up": "y"}));
     assert_eq!(r["features"], 1, "{r}");
     assert!(near(extent(&s).1, [40.0, 0.0, 34.0]));
-    assert!(s.undo.is_empty(), "a freshly opened design has no history");
+    assert!(s.history.is_empty(), "a freshly opened design has no history");
     run(&mut s, "doc.open", json!({"path": path}));
     assert_eq!(kinds(&s), ["BaseFeature"]);
 
@@ -235,7 +235,7 @@ fn a_step_file_can_be_inserted_at_a_matrix() {
     let (lo, hi) = extent(&s);
     assert!(near(lo, [66.0, 0.0, 0.0]) && near(hi, [100.0, 40.0, 20.0]), "{lo:?} {hi:?} {r}");
     assert_eq!(r["transform"][3][0], json!(100.0), "{r}");
-    assert_eq!(s.undo.len(), 1);
+    assert_eq!(s.history.len(), 1);
 
     // Stood up first ((0..40, -20..0, 0..34)), then turned and moved.
     let mut d = Session::default();
