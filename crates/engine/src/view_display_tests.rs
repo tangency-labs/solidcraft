@@ -192,6 +192,25 @@ fn scene_sampler_uses_exact_active_occurrence_plane_and_preserves_other_scene_co
 }
 
 #[test]
+fn headless_scenes_keep_inactive_datum_references_visible() {
+    let mut s = Session::default();
+    s.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
+    s.execute("sketch.project", &json!({"refs":[{"axis":"X"}]})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+    let cam = Camera::default();
+    let p = &Palette::DEFAULT;
+    let guides = Guides { grid: false, axes: false };
+    let scenes = [
+        scene_with_palette(&s, &cam, None, world_curve_parts, p).unwrap(),
+        scene_with_palette_and_guides(&s, &cam, None, world_curve_parts, p, guides).unwrap(),
+        scene_with_thread_markings(&s, &cam, None, world_curve_parts, p, guides, false).unwrap(),
+    ];
+    for scene in scenes {
+        assert_eq!(scene.lines.iter().filter(|line| line.color == p.sketch_projected).count(), 1);
+    }
+}
+
+#[test]
 fn colored_components_toggle_is_stable_and_does_not_change_the_design() {
     let mut s = Session::default();
     let first_id = s.doc_mut().add_component(Some("First"), 0).unwrap();

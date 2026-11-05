@@ -560,7 +560,7 @@ pub fn sketch_lines_with_sampler_mode(
     sketch_lines_in_mode(sk, plane, active, determined, sampler, &Palette::DEFAULT, mode)
 }
 
-/// [`sketch_lines_with_sampler`] in the colours of `p`.
+/// Headless sketch lines in the colours of `p`, retaining datum references outside sketch editing.
 fn sketch_lines_in(
     sk: &Sketch,
     plane: &Plane,
@@ -569,7 +569,7 @@ fn sketch_lines_in(
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
-    sketch_lines_in_mode(sk, plane, active, determined, sampler, p, InfiniteLineVisibility::default())
+    sketch_lines_in_mode(sk, plane, active, determined, sampler, p, InfiniteLineVisibility::AlwaysVisible)
 }
 
 fn sketch_lines_in_mode(
