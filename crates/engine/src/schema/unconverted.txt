@@ -85,10 +85,6 @@ joint.screw
 joint.solve
 joint.sweep
 material.assign
-material.create
-material.delete
-material.edit
-material.inspect
 material.list
 mesh.convert
 motion.delete
