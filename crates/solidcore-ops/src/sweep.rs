@@ -154,9 +154,18 @@ pub enum Curve {
 }
 
 impl Curve {
-    /// A planar profile segment placed on `plane` as a sweep curve: a line, or
-    /// an arc about the plane's normal. The cubic, conic and spline profile
-    /// segment forms have no [`Curve`] form yet.
+    /// A planar profile segment placed on `plane` as a sweep curve.
+    ///
+    /// Lines and arcs stay analytic: a line keeps its two ends, and an arc keeps
+    /// its centre, radius and angles, with a negative sweep expressed about the
+    /// reversed normal. Cubic and higher Bézier segments become non-rational
+    /// [`Curve::Nurbs`] curves; a conic becomes a rational quadratic NURBS that
+    /// keeps its weight. Every control point is placed through the plane's
+    /// sketch frame: `plane.x` is sketch x, `plane.y` is sketch y and
+    /// `plane.origin` is sketch zero.
+    ///
+    /// Returns `None` for a zero-sweep arc, a conic whose weight is not finite
+    /// and positive, and a Bézier whose degree is outside `1..=`[`solidcore_record::MAX_BEZIER_DEGREE`].
     #[must_use]
     pub fn from_seg2(
         segment: &solidcore_record::Seg2,
@@ -206,7 +215,55 @@ impl Curve {
                     end,
                 })
             }
-            _ => None,
+            solidcore_record::Seg2::Cubic { p0, p1, p2, p3 } => {
+                let points = [p0, p1, p2, p3]
+                    .iter()
+                    .map(|p| {
+                        let q = world(*p);
+                        [q[0], q[1], q[2], 1.0]
+                    })
+                    .collect();
+                Some(Curve::Nurbs {
+                    degree: 3,
+                    points,
+                    knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+                })
+            }
+            solidcore_record::Seg2::Conic { a, apex, b, w } => {
+                if !w.is_finite() || w <= 0.0 {
+                    return None;
+                }
+                let point = |p: solidcore_record::Vec2, weight: f64| {
+                    let q = world(p);
+                    [q[0], q[1], q[2], weight]
+                };
+                Some(Curve::Nurbs {
+                    degree: 2,
+                    points: vec![point(a, 1.0), point(apex, w), point(b, 1.0)],
+                    knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                })
+            }
+            solidcore_record::Seg2::Bezier { n, p } => {
+                let degree = usize::from(n);
+                if !(1..=solidcore_record::MAX_BEZIER_DEGREE).contains(&degree) {
+                    return None;
+                }
+                let points = p
+                    .iter()
+                    .take(degree + 1)
+                    .map(|p| {
+                        let q = world(*p);
+                        [q[0], q[1], q[2], 1.0]
+                    })
+                    .collect();
+                let mut knots = vec![0.0; degree + 1];
+                knots.extend(std::iter::repeat_n(1.0, degree + 1));
+                Some(Curve::Nurbs {
+                    degree,
+                    points,
+                    knots,
+                })
+            }
         }
     }
 }
@@ -1308,9 +1365,12 @@ pub fn face_section(
 
 #[cfg(test)]
 mod tests {
+    //! Tests for profile-segment placement and the loft it feeds.
+
     use super::*;
     use solidcore_record::profile::Seg2;
 
+    /// The four lines of a square profile with the given half-width, in order.
     fn square(half: f64) -> Vec<Seg2> {
         let p = [
             solidcore_record::Vec2::new(-half, -half),
@@ -1326,6 +1386,7 @@ mod tests {
             .collect()
     }
 
+    /// A profile line and arc take the plane's origin, axes and normal.
     #[test]
     fn a_profile_line_and_arc_place_on_the_plane() {
         let line = Curve::from_seg2(
@@ -1364,6 +1425,112 @@ mod tests {
         assert!((end - start - std::f64::consts::FRAC_PI_2).abs() < 1.0e-12);
     }
 
+    /// Cubic, conic and higher Bézier segments become NURBS curves.
+    #[test]
+    fn curved_profile_segments_become_nurbs() {
+        let v = |x, y| solidcore_record::Vec2::new(x, y);
+        let cubic = Curve::from_seg2(
+            &Seg2::Cubic {
+                p0: v(0.0, 0.0),
+                p1: v(1.0, 0.0),
+                p2: v(1.0, 1.0),
+                p3: v(0.0, 1.0),
+            },
+            &solidcore_record::Plane::XY,
+        )
+        .expect("cubic");
+        let Curve::Nurbs {
+            degree,
+            points,
+            knots,
+        } = cubic
+        else {
+            panic!("cubic is a NURBS");
+        };
+        assert_eq!(degree, 3);
+        assert_eq!(points.len(), 4);
+        assert_eq!(knots, [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(points[1], [1.0, 0.0, 0.0, 1.0]);
+
+        let conic = Curve::from_seg2(
+            &Seg2::Conic {
+                a: v(0.0, 0.0),
+                apex: v(1.0, 1.0),
+                b: v(2.0, 0.0),
+                w: 0.5,
+            },
+            &solidcore_record::Plane::XY,
+        )
+        .expect("conic");
+        let Curve::Nurbs {
+            degree,
+            points,
+            knots,
+        } = conic
+        else {
+            panic!("conic is a NURBS");
+        };
+        assert_eq!(degree, 2);
+        assert_eq!(points[1], [1.0, 1.0, 0.0, 0.5]);
+        assert_eq!(knots, [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+        // At t = 1/2 the rational quadratic's Euclidean point is
+        // (a + 2 w apex + b) / (2 + 2 w), with the ends at weight 1.
+        let at = |index: usize| points[index][..3].to_vec();
+        let weight = points[1][3];
+        let mid = [
+            (at(0)[0] + 2.0 * weight * at(1)[0] + at(2)[0]) / (2.0 + 2.0 * weight),
+            (at(0)[1] + 2.0 * weight * at(1)[1] + at(2)[1]) / (2.0 + 2.0 * weight),
+            (at(0)[2] + 2.0 * weight * at(1)[2] + at(2)[2]) / (2.0 + 2.0 * weight),
+        ];
+        assert!((mid[0] - 1.0).abs() < 1.0e-12);
+        assert!((mid[1] - 1.0 / 3.0).abs() < 1.0e-12);
+
+        let mut bezier_points = [v(0.0, 0.0); solidcore_record::MAX_BEZIER_CTRL];
+        for (index, point) in bezier_points.iter_mut().enumerate().take(5) {
+            *point = v(index as f64, 0.0);
+        }
+        let bezier = Curve::from_seg2(
+            &Seg2::Bezier {
+                n: 4,
+                p: bezier_points,
+            },
+            &solidcore_record::Plane::XY,
+        )
+        .expect("bezier");
+        let Curve::Nurbs {
+            degree,
+            points,
+            knots,
+        } = bezier
+        else {
+            panic!("bezier is a NURBS");
+        };
+        assert_eq!(degree, 4);
+        assert_eq!(points.len(), 5);
+        assert_eq!(points[4], [4.0, 0.0, 0.0, 1.0]);
+        assert_eq!(knots.len(), 10);
+
+        assert!(Curve::from_seg2(
+            &Seg2::Bezier {
+                n: 0,
+                p: bezier_points,
+            },
+            &solidcore_record::Plane::XY,
+        )
+        .is_none());
+        assert!(Curve::from_seg2(
+            &Seg2::Conic {
+                a: v(0.0, 0.0),
+                apex: v(1.0, 1.0),
+                b: v(2.0, 0.0),
+                w: 0.0,
+            },
+            &solidcore_record::Plane::XY,
+        )
+        .is_none());
+    }
+
+    /// Two square profile sections loft into the expected closed box.
     #[test]
     fn two_profile_sections_loft_to_a_closed_box() {
         let lower: Vec<Curve> = square(2.0)
