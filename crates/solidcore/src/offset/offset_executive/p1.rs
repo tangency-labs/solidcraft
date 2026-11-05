@@ -621,7 +621,8 @@ impl OffsetExecutive {
         Ok(out)
     }
 
-    /// Returns a cached extension, creating it with distance `offset_distance * 5.0`, every
+    /// Returns a cached extension, creating it with distance `|offset_distance| * 5.0` (none
+    /// for a zero offset), every
     /// side exactly ruled ([`Surface::extended_sides_keeping_parameters`], [`Continuity::Ruled`]): a plane, cone,
     /// sphere, torus or ball patch as itself, a procedural blend by its definition, an
     /// offset surface as the offset of its base extended. A hit never re-extends or replaces
@@ -646,15 +647,21 @@ impl OffsetExecutive {
             std::collections::btree_map::Entry::Vacant(entry) => {
                 // The obsolete offset-specific `else` at cpp:2158 is unreachable:
                 // NER(pBase) already established pOrigSurf == pBase != NULL.
-                let dist = self.offset_distance * 5.0;
-                let extension = base
-                    .extended_sides_keeping_parameters(
+                // The extension is a margin round the base for the offset to be trimmed in:
+                // its size is five offsets either way (an inward offset's distance is
+                // negative), and an offset of zero needs none.
+                let dist = (self.offset_distance * 5.0).abs();
+                let extension = if dist == 0.0 {
+                    base.clone()
+                } else {
+                    base.extended_sides_keeping_parameters(
                         kernel,
                         &BoxSide::ALL,
                         Continuity::Ruled,
                         dist,
                     )?
-                    .surface;
+                    .surface
+                };
                 Ok(entry.insert(extension))
             }
         }
@@ -3817,6 +3824,35 @@ mod tests {
             7.0
         );
         assert_eq!(executive.extended_surfaces.len(), 2);
+    }
+
+    #[test]
+    fn an_inward_offset_extends_by_five_offsets_and_a_zero_one_not_at_all() {
+        let kernel = Kernel::default();
+        let base = plane(0.0);
+        let expected = base
+            .extended_sides_keeping_parameters(
+                &kernel,
+                &BoxSide::ALL,
+                Continuity::Ruled,
+                0.125 * 5.0,
+            )
+            .unwrap()
+            .surface;
+        let mut inward = OffsetExecutive::new(OffsetOperation::SolidOffset, -0.125, 1.0e-6);
+        let got = inward
+            .get_create_extended_surface(&kernel, 1, &base)
+            .unwrap();
+        assert_eq!(
+            got.natural_uv_domain_if_built(),
+            expected.natural_uv_domain_if_built()
+        );
+        let mut zero = OffsetExecutive::new(OffsetOperation::SolidOffset, 0.0, 1.0e-6);
+        let same = zero.get_create_extended_surface(&kernel, 1, &base).unwrap();
+        assert_eq!(
+            same.natural_uv_domain_if_built(),
+            base.natural_uv_domain_if_built()
+        );
     }
 
     #[test]
