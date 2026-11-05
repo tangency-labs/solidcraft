@@ -4255,13 +4255,16 @@ pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) 
     // Keep small scroll steps so a target cannot be skipped on a long Preferences page.
     for _ in 0..32 {
         let page = crate::scenario::rect_of("dialog:page_body").expect("preference body");
-        let visible = crate::scenario::rect_of(handle)
+        let target_rect = crate::scenario::rect_of(handle);
+        let target_point = crate::scenario::handle_at(handle);
+        let visible = target_rect
             .map(|r| page.contains_rect(r))
-            .unwrap_or_else(|| crate::scenario::handle_at(handle).is_some_and(|p| page.shrink(crate::theme::Tokens::get().space_16).contains(p)));
+            .unwrap_or_else(|| target_point.is_some_and(|p| page.shrink(crate::theme::Tokens::get().space_16).contains(p)));
         if visible {
             return;
         }
-        h.call("ui.scroll", json!({"x":page.center().x,"y":page.center().y,"delta":-100}));
+        let above = target_rect.map(|r| r.top() < page.top()).unwrap_or_else(|| target_point.is_some_and(|p| p.y < page.top()));
+        h.call("ui.scroll", json!({"x":page.center().x,"y":page.center().y,"delta":if above { 100 } else { -100 }}));
         h.frames(20);
     }
     panic!(

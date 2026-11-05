@@ -794,7 +794,7 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
         assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect == desk && rect.fill == t.selected_bg && rect.stroke.color == t.form_primary)));
         assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if desk.contains(text.pos) && text.galley.job.text == "Desk" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::fonts::semibold(t.font_label)))));
         let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-        assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if body.contains(text.pos) && text.galley.job.text == "Appearance" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::fonts::semibold(t.font_caption)))));
+        assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if body.contains(text.pos) && text.galley.job.text == "Appearance (some)" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::fonts::semibold(t.font_caption)))));
         assert!(laptop.contains_rect(crate::scenario::rect_of("prefs:profile:Laptop:apply").unwrap()));
         h.step(&json!({"click":{"handle":"prefs:profile:Laptop:apply"}})).unwrap();
         h.frames(3);
