@@ -1152,11 +1152,12 @@ fn ui_set(app: &mut SolveApp, p: &Value) -> Outcome {
 /// `ui.view {view, animate?}`: a standard view, snapped or animated.
 fn ui_view(app: &mut SolveApp, q: params::View) -> Outcome {
     let v = q.view.as_str();
+    // A name it doesn't know is refused before the view changes at all.
+    if v != "fit" && v != "home" && StandardView::parse(v).is_none() {
+        return err(format!("unknown view `{v}`"));
+    }
     app.viewport.orbit_free = None;
     if q.animate {
-        if v != "fit" && v != "home" && StandardView::parse(v).is_none() {
-            return err(format!("unknown view `{v}`"));
-        }
         app.animate_view(v);
         return ok(json!({ "animating": true, "to": app.cam_anim.map(|a| a.to) }));
     }
@@ -1167,10 +1168,11 @@ fn ui_view(app: &mut SolveApp, q: params::View) -> Outcome {
             app.cam.set_view(StandardView::Iso);
             app.fit_view();
         }
-        v => match StandardView::parse(v) {
-            Some(sv) => app.cam.set_view(sv),
-            None => return err(format!("unknown view `{v}`")),
-        },
+        v => {
+            if let Some(sv) = StandardView::parse(v) {
+                app.cam.set_view(sv);
+            }
+        }
     }
     ok(json!(app.cam))
 }

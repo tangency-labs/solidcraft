@@ -422,7 +422,11 @@ reply without `param_check` as unchecked. The bridged MCP server asks once per c
 
 A field may be left out where a method marks it optional (`?`), but a field that is present must
 have the documented type: a wrong type, or `null` for a field with a default (such as `shift` or
-`delta`), is refused with an error naming the field, and nothing runs. Screen points (`x`, `y`)
+`delta`), is refused with an error naming the field, and nothing runs. An optional field without a
+default takes `null` as left out (not `ui.scroll`'s `unit` or `ui.home`'s `sample`, which refuse
+it), and `params` of `engine.execute` and `ui.start` take it as `{}`.
+`ui.set`, `ui.palette`, `ui.agent_cursor` and `ui.icon_audit` still read their fields one by one:
+`ui.set` refuses a wrong type, the other three pass over it. Screen points (`x`, `y`)
 must lie within ±1 000 000. In particular, `engine.execute` takes `command` or its alias `id`,
 not both; `ui.help` refuses an item it doesn't know; and `ui.menu` needs both `x` and `y` to open
 a menu (neither describes the open one).
