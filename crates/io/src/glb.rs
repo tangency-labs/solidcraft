@@ -114,6 +114,7 @@ pub fn export_glb(doc: &Document, state: &ModelState, bodies: &[String], name: &
         })
     };
     let mut out = Vec::with_capacity(sel.len());
+    let mut total = 0;
     for b in sel {
         let opacity = doc.model_body_opacity(b);
         if !(opacity >= 1.0) {
@@ -134,7 +135,10 @@ pub fn export_glb(doc: &Document, state: &ModelState, bodies: &[String], name: &
             let face = u32::try_from(face).map_err(|_| IoError::Invalid(format!("{}: face {face} is out of range for GLB", b.name)))?;
             faces.insert(face, add(m));
         }
-        out.push(GlbBody { name: b.name.clone(), mesh: export_mesh_at(&b.body, quality)?, material, faces });
+        let body = GlbBody { name: b.name.clone(), mesh: export_mesh_at(&b.body, quality)?, material, faces };
+        // Refused as soon as the meshes kept so far are too large, not after meshing them all.
+        total = add_to_budget(total, &body)?;
+        out.push(body);
     }
     glb(name, &out, &materials)
 }
@@ -219,18 +223,19 @@ fn too_large(body: &str) -> IoError {
 /// The size of each body's arrays in the binary chunk, refused when the sum is larger than
 /// [`MAX_GLB_BYTES`], before anything is built.
 fn check_budget(bodies: &[GlbBody]) -> Result<()> {
-    let mut total: usize = 0;
-    for b in bodies {
-        let vertices = b.mesh.positions.len().checked_mul(24);
-        let triangles = b.mesh.triangles.len().checked_mul(12);
-        total = vertices
-            .zip(triangles)
-            .and_then(|(v, t)| v.checked_add(t))
-            .and_then(|n| total.checked_add(n))
-            .filter(|n| *n <= MAX_GLB_BYTES)
-            .ok_or_else(|| too_large(&b.name))?;
-    }
-    Ok(())
+    bodies.iter().try_fold(0, add_to_budget).map(|_| ())
+}
+
+/// `total` with `b`'s arrays added, refused when that is larger than [`MAX_GLB_BYTES`].
+fn add_to_budget(total: usize, b: &GlbBody) -> Result<usize> {
+    let vertices = b.mesh.positions.len().checked_mul(24);
+    let triangles = b.mesh.triangles.len().checked_mul(12);
+    vertices
+        .zip(triangles)
+        .and_then(|(v, t)| v.checked_add(t))
+        .and_then(|n| total.checked_add(n))
+        .filter(|n| *n <= MAX_GLB_BYTES)
+        .ok_or_else(|| too_large(&b.name))
 }
 
 /// The binary chunk being built, with the glTF buffer views and accessors that describe it.

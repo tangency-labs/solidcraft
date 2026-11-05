@@ -532,3 +532,12 @@ fn round_trip_preserves_box_bounds_in_importer_frame() {
         assert!((max[i] - [10.0, 30.0, 0.0][i]).abs() < 1e-5, "max={max:?}");
     }
 }
+
+/// The size budget is refused once the bodies kept so far pass it, before more are meshed.
+#[test]
+fn a_body_past_the_size_budget_is_refused_naming_it() {
+    let body = triangle();
+    assert_eq!(add_to_budget(0, &body).unwrap(), 3 * 24 + 12);
+    assert_invalid(add_to_budget(MAX_GLB_BYTES - 10, &body).map(|_| Vec::new()), &["triangle", "too large"]);
+    assert_invalid(add_to_budget(usize::MAX, &body).map(|_| Vec::new()), &["too large"]);
+}
