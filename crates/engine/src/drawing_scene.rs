@@ -14,9 +14,10 @@
 //!
 //! The sheet page draws through the provider instead, which keeps each view's lines between frames:
 //! [`extract`] returns the last scene at once and says which views are out of date, and [`step`]
-//! brings one of them up to date, a short piece of work for the UI's tick: a view's projection, or,
-//! once the views are, the dimensions of one view that changed. A view moved across its sheet is
-//! moved, never projected again, and an edited dimension is read again alone. The provider
+//! brings one of them up to date, a short piece of work for the UI's tick: a view's projection with
+//! its dimensions in the same swap, so new lines never show under old dimensions, or, once the views
+//! are, the dimensions of one view that changed. A view moved across its sheet is moved, never
+//! projected again, and an edited dimension is read again alone. The provider
 //! evaluates no model either. Its cache is the
 //! session's view state, beside the drawing: never saved, never an undo step, and dropped when its
 //! drawing closes.
@@ -608,6 +609,15 @@ impl Cache {
         (self.inputs(d, sheet_of(d, last.sheet).ok()?, &on) == last.inputs).then_some(last.answer.views.as_slice())
     }
 
+    /// Keeps `records` as `lines` drew them, numbered with the cache's serial.
+    fn keep_dimensions(&mut self, records: Vec<Arc<Dimension>>, lines: Vec<DrawnDimension>, state: &Arc<ModelState>, view_serial: u64, units: &str) {
+        let serial = self.serial;
+        for (record, drawn) in records.into_iter().zip(lines) {
+            let entry = DimensionEntry { state: state.clone(), record, view_serial, units: units.to_string(), drawn, serial };
+            self.dimensions.insert(entry.record.id, entry);
+        }
+    }
+
     /// The dimensions of the views `on`, by view and id, to read again: each whose view is up to
     /// date, last drawn from another record, model, drawing of its view, or units.
     fn stale_dimensions(&self, d: &Drawing, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>, units: &str) -> Vec<Arc<Dimension>> {
@@ -720,10 +730,16 @@ pub fn step(s: &mut Session) -> bool {
         _ => crate::drawing_view::shown(s),
     };
     let drawn = draw(s, &shown, id, &view);
+    // The view's dimensions through its new frame, in the same swap as its lines.
+    let frame = drawn.frame;
+    let these = dimensions_on(&d, std::iter::once(id));
+    let lines = draw_dimensions(s, &d, &these, |_| frame);
     let cache = &mut s.drawing_scenes;
     cache.shown = Some((state.clone(), shown));
     cache.serial += 1;
-    cache.views.insert(id, Entry { state: state.clone(), view, drawn, serial: cache.serial });
+    let serial = cache.serial;
+    cache.views.insert(id, Entry { state: state.clone(), view, drawn, serial });
+    cache.keep_dimensions(these, lines, &state, serial, &units);
     #[cfg(test)]
     {
         cache.projections += 1;
@@ -739,14 +755,10 @@ fn step_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)
     let (these, others): (Vec<_>, Vec<_>) = stale.into_iter().partition(|record| record.view == view);
     let entry = s.drawing_scenes.views.get(&view);
     let (frame, view_serial) = (entry.and_then(|e| e.drawn.frame), entry.map_or(0, |e| e.serial));
-    let drawn = draw_dimensions(s, d, &these, |_| frame);
+    let lines = draw_dimensions(s, d, &these, |_| frame);
     let cache = &mut s.drawing_scenes;
     cache.serial += 1;
-    let serial = cache.serial;
-    for (record, drawn) in these.into_iter().zip(drawn) {
-        let entry = DimensionEntry { state: state.clone(), record, view_serial, units: units.clone(), drawn, serial };
-        cache.dimensions.insert(entry.record.id, entry);
-    }
+    cache.keep_dimensions(these, lines, state, view_serial, &units);
     !others.is_empty()
 }
 
