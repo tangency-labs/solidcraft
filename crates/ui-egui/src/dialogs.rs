@@ -820,6 +820,8 @@ impl Dialog {
         self.error = Some(error);
     }
 
+    /// A dialog of `kind` with these inputs and every other field at its starting value: no picks
+    /// taken yet beyond the inputs' own, no error, and not standing in for Plane, Axis or Point.
     pub(crate) fn new(kind: Kind, inputs: Vec<SelInput>) -> Dialog {
         let chain_applied = matches!(kind, Kind::Fillet { chain: true, .. });
         Dialog {
@@ -898,6 +900,9 @@ impl Dialog {
         }
     }
 
+    /// The dialog a toolbar click on command `id` opens, filled from the current selection where
+    /// its inputs take it; Plane, Axis and Point open as the method their picks call for
+    /// (`dialogs_auto`). `None` for a command that has no dialog.
     pub fn for_command(app: &SolveApp, id: &str) -> Option<Dialog> {
         let s = &app.session;
         let has_bodies = !crate::open_meshing::session_world(s).bodies.is_empty();
@@ -2644,6 +2649,7 @@ fn publish_check(ui: &egui::Ui, response: &egui::Response, selected: bool) {
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), selected, tr(crate::ui_kit::row_label(ui))));
 }
 
+/// The dialog's heading for `k`: a message id or label the header translates.
 fn title(k: &Kind) -> &'static str {
     match k {
         Kind::Sketch => "CREATE SKETCH",
