@@ -102,13 +102,14 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     let author_path = match given_path {
         Some(path) => path,
         None if comp == s.active_component => s.active_occurrence_path.clone().unwrap_or_else(|| s.doc.first_path(comp)),
-        None => super::component::placing::placement_of(s, &s.placed_document(), comp, None, "component_path", cmd)?.0,
+        None => super::component::placing::placement_of(s, &s.design_document(), comp, None, "component_path", cmd)?.0,
     };
-    solidcraft_doc::EmbossFace::component_frame(&s.placed_document(), comp, &author_path)?;
+    solidcraft_doc::EmbossFace::component_frame(&s.design_document(), comp, &author_path)?;
     // A copy from another component goes where its original is in the world: its geometry moves
     // from its component's frame (its first placement, where its bodies have their own names)
-    // into the target's.
-    let placed = s.placed_document();
+    // into the target's. The design's placements: an exploded view shown is left out, or the copy
+    // would keep its offset once the view is closed.
+    let placed = s.design_document();
     let target_frame = placed.path_transform(comp, &author_path).ok_or_else(|| bad(cmd, "that path is not a placement of the target"))?;
     let to_target = solidcraft_doc::mat_inverse(&target_frame).ok_or_else(|| bad(cmd, "the target's frame is not invertible"))?;
     let frame_change: BTreeMap<u64, solidcraft_doc::Mat> = feats
