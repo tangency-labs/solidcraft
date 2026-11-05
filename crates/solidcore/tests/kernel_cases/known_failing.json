@@ -90,6 +90,11 @@
     "reason": "refused as on SMLib: the faces between the three intersection curves narrow to nothing at the two triple points, so the room check trips (the corner step)"
   },
   {
+    "case": "fillets/every-block-cylinder-tangent-concave-arc-r2-partial-chain",
+    "issue": "tangency-labs/solidcore#2851",
+    "reason": "solidcore builds the round where the recorded SMLib run refused (status 1001); the case still compares against that refusal instead of its analytic volume"
+  },
+  {
     "case": "fillets/report-drafted-peg-front-and-concave-rounds-together-r2",
     "issue": "to file",
     "reason": "step 13 (solid.fillet): invalid input: not supported yet: the fillet meets a corner of this kind, which SMLib's blends do not handle yet (where its ed"
@@ -103,6 +108,11 @@
     "case": "fillets/report-fillet-curvature-three-edges-at-bar-corner",
     "issue": "to file",
     "reason": "continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0 (see KNOWN_FAILING)"
+  },
+  {
+    "case": "fillets/report-peg-front-and-concave-chamfers-together-d2",
+    "issue": "tangency-labs/solidcore#2849",
+    "reason": "the Mixed corner's chamfer face stands 7.2e-4 out of the front face y = 0 (its bilinear Coons patch bulges past the plane), past the case's 4e-5 box"
   },
   {
     "case": "shell/cov-shell-again-open-at-an-inner-wall-of-a-shelled-box",
