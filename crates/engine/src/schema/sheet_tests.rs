@@ -51,6 +51,7 @@ fn schemas_and_the_key_check_agree() {
             "curves",
             "distance",
             "edges",
+            "end_setback",
             "flip",
             "height",
             "height_from",
@@ -60,6 +61,7 @@ fn schemas_and_the_key_check_agree() {
             "reverse",
             "rule",
             "sketch",
+            "start_setback",
             "then",
             "type",
         ]),
@@ -325,6 +327,9 @@ fn replies_match_the_output_schema() {
     ] {
         check(ok(&mut s, id, p));
     }
+    // A flange that stops short of both ends of its edge.
+    let mut s = warn();
+    check(ok(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20, "start_setback": "10 mm", "end_setback": 5})));
     let mut s = warn();
     for (id, p) in [
         ("sketch.create", json!({"plane": "XY", "offset": 2.5, "name": "FoldLine"})),

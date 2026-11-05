@@ -413,6 +413,15 @@ pub struct FlangeParams {
     /// on a base or contour flange.
     #[serde(default)]
     pub then: Option<ThenSteps>,
+    /// Edge: how far each flange stops short of the start of its edge, which runs the way its
+    /// panel's outline does (counter-clockwise seen from the top face); the sheet is notched and
+    /// relieved there. Default: 0. Refused on a base or contour flange.
+    #[serde(default)]
+    pub start_setback: Option<LengthExpr>,
+    /// Edge: how far each flange stops short of the end of its edge, as `start_setback` does at
+    /// the start. Default: 0. Refused on a base or contour flange.
+    #[serde(default)]
+    pub end_setback: Option<LengthExpr>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
