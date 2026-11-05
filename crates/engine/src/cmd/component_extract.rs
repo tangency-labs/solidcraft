@@ -18,8 +18,9 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::{DesignLink, Document, FeatureKind, ModelBody, ModelState};
 
-use super::{absolute, component_key, file_sha256, inherit_properties, resolve, session_bodies, stored};
+use super::{absolute, component_key, file_sha256, inherit_properties, reply, resolve, session_bodies, stored};
 use crate::params::{bad, str_};
+use crate::schema::component_link::{CopiesResult, CopyInfo, ExtractResult, ReplaceWithLinkResult};
 use crate::{EngineError, Result, Session};
 
 const CMD: &str = "component.extract";
@@ -544,8 +545,8 @@ fn copies_of(s: &Session, linked: u64) -> Result<Vec<u64>> {
     Ok(out)
 }
 
-fn named(s: &Session, ids: &[u64]) -> Vec<Value> {
-    ids.iter().map(|id| json!({"component": id, "name": s.doc.components.iter().find(|c| c.id == *id).map(|c| c.name.clone())})).collect()
+fn named(s: &Session, ids: &[u64]) -> Vec<CopyInfo> {
+    ids.iter().map(|id| CopyInfo { component: *id, name: s.doc.components.iter().find(|c| c.id == *id).map(|c| c.name.clone()) }).collect()
 }
 
 impl Session {
@@ -618,8 +619,21 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     {
         link.file_sha256 = Some(read);
     }
-    Ok(json!({"component": comp, "feature": id, "path": path, "file": shown, "bodies": sc.bodies, "notices": notices, "warnings": warnings,
-        "copies": named(s, &copies)}))
+    let copies = named(s, &copies);
+    reply(
+        CMD,
+        ExtractResult {
+            component: comp,
+            feature: id,
+            path,
+            file: shown,
+            bodies: sc.bodies.iter().cloned().collect(),
+            notices,
+            warnings,
+            copies,
+            param_warnings: Vec::new(),
+        },
+    )
 }
 
 pub(super) fn copies(s: &mut Session, p: &Value) -> Result<Value> {
@@ -629,7 +643,7 @@ pub(super) fn copies(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "that component is not linked to a design"));
     }
     let found = copies_of(s, linked)?;
-    Ok(json!({"copies": named(s, &found)}))
+    reply(cmd, CopiesResult { copies: named(s, &found), param_warnings: Vec::new() })
 }
 
 pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
@@ -711,7 +725,7 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc_mut().occurrences.retain(|x| x.id != o);
         s.refresh();
     }
-    Ok(json!({"component": linked, "name": lname, "replaced": replaced, "warnings": warnings}))
+    reply(cmd, ReplaceWithLinkResult { component: linked, name: lname, replaced, warnings, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]
