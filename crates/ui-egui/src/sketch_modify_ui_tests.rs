@@ -1072,3 +1072,65 @@ fn mirror_sends_an_origin_axis_outside_the_sketch_plane_for_its_projection() {
         "{start:?} {end:?}"
     );
 }
+
+/// Open Rectangular Pattern on a circle `seed` with the two quantities typed in.
+fn rect_pattern(h: &mut Harness, count: &str, count2: &str) {
+    h.app.start("sketch.pattern.rectangular");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![Sel::SketchCurve { id: "seed".into(), sketch: None }];
+    if let Kind::SketchModify(Mod::PatternRect { count: c1, count2: c2, .. }) = &mut d.kind {
+        *c1 = count.into();
+        *c2 = count2.into();
+    } else {
+        panic!("expected rectangular pattern");
+    }
+}
+
+fn seeded_sketch() -> Harness {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":1,"id":"seed"})).unwrap();
+    h
+}
+
+/// #7824: the window holds the quantities to the user's pattern limit, 500 out of the box.
+#[test]
+fn dialog_caps_quantities_at_the_session_limit() {
+    let mut h = seeded_sketch();
+    rect_pattern(&mut h, "38", "38");
+    let d = h.app.dialog.clone().unwrap();
+    let error = apply_commands(&h.app, &d).unwrap_err();
+    assert_eq!(error, "Quantity and Quantity 2 together must make at most 500 instances");
+    h.app.dialog = None;
+    h.app.run("sketch.pattern_limit", json!({"value": 1500})).unwrap();
+    rect_pattern(&mut h, "38", "38");
+    let d = h.app.dialog.clone().unwrap();
+    assert!(apply_commands(&h.app, &d).is_ok(), "1444 is within the raised limit");
+    // 1444 circles are more unknowns than the solver takes in one group (4000); 1200 solve.
+    rect_pattern(&mut h, "30", "40");
+    let d = h.app.dialog.clone().unwrap();
+    let commands = apply_commands(&h.app, &d).unwrap();
+    let out = h.app.run(&commands[0].0, commands[0].1.clone()).unwrap();
+    assert_eq!(out["curves"].as_array().map(Vec::len), Some(1199));
+}
+
+/// A pattern made under a higher limit can be edited in the window after the limit is lowered,
+/// but not grown past its own size.
+#[test]
+fn dialog_allows_an_existing_larger_pattern() {
+    let mut h = seeded_sketch();
+    h.app.run("sketch.pattern_limit", json!({"value": 700})).unwrap();
+    let out = h.app.run("sketch.pattern.rectangular", json!({"entities":["seed"],"count":20,"spacing":5,"count2":30,"spacing2":5})).unwrap();
+    h.app.run("sketch.pattern_limit", json!({"value": 500})).unwrap();
+    assert!(crate::sketch_modify_ui::edit_pattern(&mut h.app, out["pattern"].as_str().unwrap()));
+    if let Some(Kind::SketchModify(Mod::PatternRect { spacing, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *spacing = "4 mm".into();
+    }
+    let d = h.app.dialog.clone().unwrap();
+    assert!(apply_commands(&h.app, &d).is_ok(), "the pattern keeps its own 600 instances");
+    if let Some(Kind::SketchModify(Mod::PatternRect { count, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *count = "21".into();
+    }
+    let d = h.app.dialog.clone().unwrap();
+    assert_eq!(apply_commands(&h.app, &d).unwrap_err(), "Quantity and Quantity 2 together must make at most 600 instances");
+}

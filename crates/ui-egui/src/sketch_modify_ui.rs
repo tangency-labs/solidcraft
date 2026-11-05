@@ -72,10 +72,19 @@ pub(crate) const EQUATION_FORMS: [&str; 2] = ["Parametric", "Explicit"];
 /// The three chamfer types, drawn as the cut each one makes, in `CHAMFER_TYPES` order.
 const CHAMFER_TYPE_ICONS: [&str; 3] = ["sketch_chamfer_equal", "sketch_chamfer_two", "sketch_chamfer_angle"];
 
-/// The engine's own cap on the copies one sketch pattern may make.
-const MAX_COPIES: f64 = 500.0;
 /// The engine's own cap on the pieces Divide Curve cuts one curve into.
 const DIVIDE_MAX: i64 = 500;
+
+/// The most instances, the original included, the pattern window may ask for: the user's
+/// pattern limit, or the edited pattern's own size when that is larger (#7824).
+pub fn pattern_limit(app: &SolveApp, extra: &Map<String, Value>) -> usize {
+    let existing = extra.get("pattern").and_then(Value::as_str).and_then(|id| {
+        let sid = app.session.active_sketch?;
+        let state = crate::open_meshing::session_world(&app.session);
+        state.sketch(sid)?.sketch.patterns.iter().find(|p| p.id == id).cloned()
+    });
+    app.session.pattern_limit_for(existing.as_ref())
+}
 
 /// The engine's own cap on the offsets `sketch.offset` stacks one behind the other.
 const MAX_OFFSET_INSTANCES: i64 = 100;
@@ -512,10 +521,10 @@ fn quantity(ui: &mut egui::Ui, doc: &Document, label: &str, value: &mut String, 
 }
 
 /// How many copies the other direction of a rectangular pattern leaves this one, so that
-/// both together stay within `MAX_COPIES`. All of them while the other count is not a number.
-fn copies_left(doc: &Document, other: &str) -> i64 {
+/// both together stay within `limit`. All of them while the other count is not a number.
+fn copies_left(doc: &Document, other: &str, limit: usize) -> i64 {
     let other = doc.eval(other.trim(), ValueKind::Unitless).ok().filter(|v| v.is_finite() && *v >= 1.0).map_or(1.0, f64::round);
-    (MAX_COPIES / other).floor() as i64
+    (limit as f64 / other).floor() as i64
 }
 
 fn icons(ui: &mut egui::Ui, label: &str, labels: &[&'static str], icons: &[&'static str], selected: &mut usize) {
@@ -544,8 +553,9 @@ fn pattern_hint(ui: &mut egui::Ui) {
 }
 
 /// Dense rows after the selection inputs; true when an expression field accepts Enter.
-/// `doc` evaluates the pattern counts the step arrows change.
-pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
+/// `doc` evaluates the pattern counts the step arrows change; `limit` caps them
+/// ([`pattern_limit`]).
+pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document, limit: usize) -> bool {
     let mut enter = false;
     match k {
         Mod::Scale { factor } => enter |= number(ui, "Factor", factor),
@@ -592,7 +602,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             enter |= number(ui, "Angle", angle);
         }
         Mod::PatternRect { count, spacing, count2, spacing2, alignment: a, alignment2, reversed, reversed2 } => {
-            let (left1, left2) = (copies_left(doc, count2), copies_left(doc, count));
+            let (left1, left2) = (copies_left(doc, count2, limit), copies_left(doc, count, limit));
             for (key, title, count, spacing, align, reverse, label, distance, align_label, left) in [
                 ("direction1", "Direction 1", count, spacing, a, reversed, "Quantity", "Spacing", "Alignment", left1),
                 ("direction2", "Direction 2", count2, spacing2, alignment2, reversed2, "Quantity 2", "Spacing 2", "Alignment 2", left2),
@@ -606,7 +616,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             pattern_hint(ui);
         }
         Mod::PatternCirc { count, angle, alignment: a, reversed } => {
-            enter |= quantity(ui, doc, "Quantity", count, 2, MAX_COPIES as i64);
+            enter |= quantity(ui, doc, "Quantity", count, 2, i64::try_from(limit).unwrap_or(i64::MAX));
             enter |= number(ui, "Total angle", angle);
             alignment(ui, "Alignment", a, reversed);
             pattern_hint(ui);
@@ -820,10 +830,10 @@ fn signed_length(app: &SolveApp, label: &str, text: &str, flip: bool) -> Result<
 }
 
 /// Validate a typed count before sending its expression to the command.
-fn whole(app: &SolveApp, label: &str, text: &str) -> Result<u64, String> {
+fn whole(app: &SolveApp, label: &str, text: &str, limit: usize) -> Result<u64, String> {
     let v = app.session.doc.eval(text.trim(), ValueKind::Unitless).map_err(|e| format!("{label}: {e}"))?;
-    if !v.is_finite() || !(1.0..=MAX_COPIES).contains(&v) || (v - v.round()).abs() > 1e-9 {
-        return Err(format!("{label} must be a whole number from 1 to {MAX_COPIES:.0}"));
+    if !v.is_finite() || !(1.0..=limit as f64).contains(&v) || (v - v.round()).abs() > 1e-9 {
+        return Err(format!("{label} must be a whole number from 1 to {limit}"));
     }
     Ok(v.round() as u64)
 }
@@ -1019,9 +1029,10 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to pattern first".into());
             }
-            let n1 = whole(app, "Quantity", count)?;
+            let limit = pattern_limit(app, extra);
+            let n1 = whole(app, "Quantity", count, limit)?;
             let s1 = length(app, "Spacing", spacing)?;
-            let n2 = whole(app, "Quantity 2", count2)?;
+            let n2 = whole(app, "Quantity 2", count2, limit)?;
             let s2 = length(app, "Spacing 2", spacing2)?;
             if n1 > 1 && s1.abs() <= 1e-9 {
                 return Err("Spacing must be a non-zero number".into());
@@ -1029,8 +1040,8 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             if n2 > 1 && s2.abs() <= 1e-9 {
                 return Err("Spacing 2 must be a non-zero number".into());
             }
-            if n1.saturating_mul(n2) > MAX_COPIES as u64 {
-                return Err(format!("Quantity and Quantity 2 together must make at most {MAX_COPIES:.0} instances"));
+            if n1.saturating_mul(n2) > limit as u64 {
+                return Err(format!("Quantity and Quantity 2 together must make at most {limit} instances"));
             }
             let mut p = json!({"entities": entities, "count": count, "spacing": spacing, "count2": count2, "spacing2": spacing2, "alignment": alignment, "alignment2": alignment2, "reversed": reversed, "reversed2": reversed2});
             // A picked direction that has no component in the sketch plane is reported rather
@@ -1076,7 +1087,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 }
                 _ => json!(picked_point(&app.session, inputs, 1).ok_or("Select the centre the pattern turns around first")?),
             };
-            let n = whole(app, "Quantity", count)?;
+            let n = whole(app, "Quantity", count, pattern_limit(app, extra))?;
             if n < 2 {
                 return Err("Quantity must be at least 2".into());
             }
