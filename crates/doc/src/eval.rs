@@ -3143,6 +3143,33 @@ pub(crate) fn empty_intersection(bodies: &[&str]) -> DocError {
     DocError::Invalid(format!("the intersection is empty: nothing of {body} would remain; check that the profile overlaps the body"))
 }
 
+/// The body a feature's target name `name` picks. Body names are unique, so a body of the
+/// feature's component asked to be called a name another component's body already has (a
+/// linked component's `AS5047P_PCB`) was named otherwise (`Body1`), and the name still picks the
+/// other component's body. That is refused with both bodies listed, instead of running the
+/// boolean on the other component's body and failing there with a kernel error (#12141).
+pub(crate) fn named_target(doc: &Document, state: &ModelState, f: &Feature, name: &str) -> Result<usize> {
+    let i = state.bodies.iter().position(|b| b.name == name).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?;
+    let Some(found) = state.bodies.get(i).filter(|b| b.component != f.component) else { return Ok(i) };
+    let asked: Vec<&str> = state
+        .bodies
+        .iter()
+        .filter(|b| b.component == f.component && doc.feature(b.feature).is_some_and(|m| m.body_names.iter().any(|n| n == name)))
+        .map(|b| b.name.as_str())
+        .collect();
+    if asked.is_empty() {
+        return Ok(i);
+    }
+    let component = |id: u64| doc.components.iter().find(|c| c.id == id).map_or_else(|| "the root".to_string(), |c| format!("`{}`", c.name));
+    Err(DocError::Invalid(format!(
+        "the body name `{name}` is ambiguous: it names the body of component {}, while this feature's component {} has {} that was asked to be called `{name}` (the name was taken); target {} or rename the bodies so each name is used once",
+        component(found.component),
+        component(f.component),
+        asked.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", "),
+        asked.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(" or "),
+    )))
+}
+
 /// The bodies a feature's boolean takes part in, and whether they were named rather than taken
 /// by default (every body, or the feature's component).
 pub(crate) fn boolean_scope(state: &ModelState, f: &Feature, targets: &[String]) -> (bool, Vec<String>) {
@@ -3238,7 +3265,7 @@ fn apply_traced_with(
     } else {
         let mut v = Vec::new();
         for t in targets {
-            v.push(state.bodies.iter().position(|b| &b.name == t).ok_or_else(|| DocError::Unknown(format!("body `{t}`")))?);
+            v.push(named_target(doc, state, f, t)?);
         }
         v
     };
@@ -9067,6 +9094,53 @@ mod world_placement_cache_tests {
         let mapped: Vec<_> = local.positions.iter().map(|p| crate::apply_point(&matrix, *p)).collect();
         assert!(mapped.iter().all(|p| placed.positions.iter().any(|q| p.dist(*q) < 1e-8)));
         assert!(placed.positions.iter().all(|p| mapped.iter().any(|q| p.dist(*q) < 1e-8)));
+    }
+
+    /// A body asked to be called a name a linked component's body has is named otherwise; a
+    /// later feature of its component that targets the name is refused with both bodies listed,
+    /// not run on the other component's body (#12141).
+    #[test]
+    fn a_target_name_taken_by_another_component_is_refused_as_ambiguous() {
+        let mut doc = Document::new("names");
+        let linked = doc.add_component(Some("Encoder"), 0).unwrap();
+        let local = doc.add_component(Some("Assembly"), 0).unwrap();
+        let mut boxes = |comp: u64, operation: Operation, corner: Vec3| {
+            let id = doc
+                .add_feature(
+                    FeatureKind::Box { corner: crate::point_expr(corner), length: "10".into(), width: "10".into(), height: "2".into(), operation },
+                    None,
+                )
+                .unwrap();
+            let f = doc.feature_mut(id).unwrap();
+            f.component = comp;
+            id
+        };
+        let a = boxes(linked, Operation::NewBody, Vec3::new(100., 0., 0.));
+        let b = boxes(local, Operation::NewBody, Vec3::ZERO);
+        let cut = boxes(local, Operation::Cut, Vec3::new(2., 2., -1.));
+        doc.feature_mut(a).unwrap().body_names = vec!["AS5047P_PCB".into()];
+        doc.feature_mut(b).unwrap().body_names = vec!["AS5047P_PCB".into()];
+        if let FeatureKind::Box { length, width, .. } = &mut doc.feature_mut(cut).unwrap().kind {
+            *length = "2".into();
+            *width = "2".into();
+        }
+        doc.feature_mut(cut).unwrap().participants = vec!["AS5047P_PCB".into()];
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        let st = model.state();
+        let own = st.bodies.iter().find(|x| x.component == local).unwrap().name.clone();
+        assert_ne!(own, "AS5047P_PCB", "names stay unique");
+        let err = model.result(cut).and_then(|r| r.error.clone()).expect("the cut is refused");
+        assert!(err.contains("ambiguous") && err.contains("`Encoder`") && err.contains(&format!("`{own}`")), "{err}");
+        // The linked body is left alone.
+        let linked_body = st.body("AS5047P_PCB").unwrap();
+        assert_eq!(linked_body.component, linked);
+
+        // Targeting the local body by the name it has works.
+        doc.feature_mut(cut).unwrap().participants = vec![own.clone()];
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        assert!(model.result(cut).and_then(|r| r.error.clone()).is_none());
     }
 
     #[test]
