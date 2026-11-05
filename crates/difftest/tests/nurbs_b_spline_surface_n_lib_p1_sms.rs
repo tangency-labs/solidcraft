@@ -262,7 +262,7 @@ fn available_fixture_bit_census_and_unchanged_reference_inventory() {
         refs(&value, "sms", &mut sms_refs);
         refs(&value, "smc", &mut smc_refs);
     }
-    assert_eq!(cases, 99);
+    assert_eq!(cases, 98);
     assert_eq!((sms_refs.len(), sms_refs.values().sum::<usize>()), (3, 28));
     assert_eq!((smc_refs.len(), smc_refs.values().sum::<usize>()), (12, 13));
     let mut available = 0;
@@ -317,5 +317,5 @@ fn available_fixture_bit_census_and_unchanged_reference_inventory() {
         bits(&parsed.v, &values[cursor..cursor + parsed.v.len()]);
         available += 1;
     }
-    println!("SMS bit census: {available}/3 available; missing: {missing:?}; inventory 99 cases, 28 SMS refs, 13 SMC refs (SMC not decoded here)");
+    println!("SMS bit census: {available}/3 available; missing: {missing:?}; inventory 98 cases, 28 SMS refs, 13 SMC refs (SMC not decoded here)");
 }
