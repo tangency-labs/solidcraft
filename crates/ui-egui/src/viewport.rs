@@ -6927,6 +6927,8 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         if let Sel::SketchPoint { id } = item
             && let Some((sketch, point)) = id.split_once(':')
             && let Ok(sketch) = sketch.parse::<u64>()
+            // Only a drawn wire's node: a planar point's ring is drawn with the sketch's own points.
+            && st.sketch(sketch).is_some_and(|ss| ss.sketch.point_index(point).is_none())
             && let Some(at) = solidcraft_engine::doc::construct::sketch_point_position(&st, sketch, point)
             && let Some(pos) = proj.to_screen(at)
         {
