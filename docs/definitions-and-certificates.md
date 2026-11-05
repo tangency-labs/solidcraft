@@ -64,7 +64,7 @@ geometry is built is in their own pages.
 
 ![S and its certified net B inside the ε band.](definitions-and-certificates/s-and-net.svg)
 
-*Figure 1. Look at the blue net B staying inside the pale ε band around the red definition S, though it crosses S and its control points lie far off it.*
+*Figure 1. Look at the net B staying inside the pale ε band around the definition S, though it crosses S and its control points lie far off it.*
 
 ### 3.1 The kinds
 
@@ -190,7 +190,7 @@ stays exact to rounding inside any scope. `SweepRef` follows the same contract.
 
 ![Interval enclosures shrinking under subdivision, and a Krawczyk box mapped into itself.](definitions-and-certificates/enclosures-and-krawczyk.svg)
 
-*Figure 2. Look at the boxes tightening level by level until they certify, and at the green K(X) lying strictly inside X, which proves the one root.*
+*Figure 2. Look at the boxes tightening level by level until they certify, and at K(X) lying strictly inside X, which proves the one root.*
 
 ### 4.1 What a certificate proves
 
