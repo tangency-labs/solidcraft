@@ -1603,7 +1603,7 @@ preference_settings! {
     sketch_state_icons: bool = true, PAGE_SKETCH;
     /// Show a sketch's current contents below its browser row. Off: the row's fold shows the
     /// sketch's pattern list, as it did before (#7917).
-    sketch_contents: bool = true, PAGE_SKETCH => check_tr("prefs.sketch.contents");
+    sketch_contents: bool = true, PAGE_SKETCH;
     /// Show the construction-line family in Sketch CREATE; off restores the earlier menu.
     sketch_construction_lines: bool = true, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.
