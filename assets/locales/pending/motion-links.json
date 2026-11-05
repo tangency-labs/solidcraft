@@ -1,0 +1,17 @@
+{
+  "en": {
+    "browser.link.lift": "Lift",
+    "browser.link.rise": "rise",
+    "browser.link.no_profile": "No cam profile"
+  },
+  "ja": {
+    "browser.link.lift": "リフト",
+    "browser.link.rise": "上昇",
+    "browser.link.no_profile": "カム輪郭がありません"
+  },
+  "zh": {
+    "browser.link.lift": "升程",
+    "browser.link.rise": "升程变化",
+    "browser.link.no_profile": "没有凸轮轮廓"
+  }
+}
