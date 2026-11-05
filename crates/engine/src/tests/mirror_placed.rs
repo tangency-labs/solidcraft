@@ -464,3 +464,24 @@ fn a_joint_drive_evaluates_only_what_reads_the_mirrored_copy() {
         }
     }
 }
+
+/// A saved model's pose-only mirror was made at the pose the design had when it was saved: one
+/// adopted for a design posed otherwise is evaluated again, not taken from the cache (#12139).
+#[test]
+fn an_adopted_model_mirrors_at_the_designs_own_pose() {
+    let mut s = Session::default();
+    moved_arm(&mut s);
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"type": "revolute", "name": "Pan", "a": 0, "b": "Arm", "at": {"occurrence": 0, "point": [0, 0, 0], "z": [0, 0, 1]}}),
+    );
+    run(&mut s, "solid.mirror", json!({"bodies": ["ArmBody"], "plane": "YZ"}));
+    run(&mut s, "solid.box", json!({"corner": [0, -100, 0], "length": 10, "width": 10, "height": 10, "body_name": "Later"}));
+    let saved = s.model.saved(&s.doc).unwrap();
+    run(&mut s, "joint.drive", json!({"joint": "Pan", "value": 40, "quiet": true}));
+    let mut adopted = solidcraft_doc::Model::adopt(&s.doc, &saved).unwrap();
+    adopted.evaluate(&s.doc);
+    s.model = adopted;
+    assert_model_as_evaluated_afresh(&s);
+}
