@@ -1,7 +1,8 @@
+use solidcraft_geom::prelude::*;
 use std::f64::consts::FRAC_PI_2;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::Session;
 
@@ -123,6 +124,27 @@ fn revolute_hinge_turns_about_the_knuckle() {
     assert!(near(place(&s, "LeafB", p), Vec3::new(20.0, 29.0, 37.0)));
 }
 
+/// A joint value too large says so, rather than that it is not a number (#9625).
+#[test]
+fn a_joint_value_out_of_range_says_so() {
+    let mut s = Session::default();
+    leaf(&mut s, "LeafA");
+    leaf(&mut s, "LeafB");
+    let o = occ(&s, "LeafA");
+    run(&mut s, "occurrence.ground", json!({"occurrence": o, "grounded": true}));
+    let hinge = json!({"type": "revolute", "a": {"occurrence": "LeafA", "circle": [1, 37, 4]}, "b": {"occurrence": "LeafB", "circle": [1, 37, 4]}, "flip": true, "name": "Hinge"});
+    run(&mut s, "joint.create", hinge);
+    for value in [json!(1e9), json!(-5e15)] {
+        let e = s.execute("joint.drive", &json!({"joint": "Hinge", "value": value})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(
+            e.contains("a joint value must be a number between -1e9 and 1e9") && !e.contains("a joint value must be a number or"),
+            "{value}: {e}"
+        );
+    }
+    let e = s.execute("joint.drive", &json!({"joint": "Hinge", "value": true})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("a joint value must be a number or an expression") && !e.contains("between"), "{e}");
+}
+
 /// Two 10 mm cubes in components A (grounded) and B.
 fn two_cubes() -> Session {
     let mut s = Session::default();
@@ -238,21 +260,40 @@ fn interference_finds_a_peg_overlapping_a_small_rib() {
     assert!((lo[0].as_f64().unwrap_or(0.0) - 19.7).abs() < 1e-6 && (hi[0].as_f64().unwrap_or(0.0) - 19.85).abs() < 1e-6, "{i}");
 }
 
-/// An arc revolved up to a post ends on the post's wall, where the two bodies can't be
-/// intersected: the pair is listed as unchecked instead of passing as clear.
+/// A pair interference can't check is listed as unchecked, with its reason, instead of passing
+/// as clear. Truck could not intersect an arc revolved up to a post's wall; SMLib does, exactly,
+/// so the pair that can't be checked is now an imported mesh beside a solid.
 #[test]
 fn interference_lists_a_pair_it_could_not_check() {
+    // A quarter ring revolved round z through the post, brought in as an imported mesh (an STL
+    // of it): a mesh body has no exact surfaces to intersect, so its pair with the post is listed
+    // as not checked, with the reason, rather than read as clear.
+    let dir = std::env::temp_dir().join(format!("solidcraft-unchecked-pair-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("arc.stl");
+    let mut source = Session::default();
+    run(&mut source, "sketch.create", json!({"name": "Profile", "plane": "XZ"}));
+    run(&mut source, "sketch.rectangle.two_point", json!({"p0": [10, 0], "p1": [15, 5]}));
+    run(&mut source, "sketch.finish", json!({}));
+    run(
+        &mut source,
+        "solid.revolve",
+        json!({"sketch": "Profile", "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}, "angle": "90 deg", "body_name": "Arc"}),
+    );
+    run(&mut source, "file.export", json!({"path": stl.to_string_lossy()}));
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"base": [0, 14, -5], "radius": 4, "height": 15, "body_name": "Post"}));
-    run(&mut s, "sketch.create", json!({"name": "Profile", "plane": "XZ"}));
-    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 0], "p1": [15, 5]}));
-    run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "solid.revolve", json!({"sketch": "Profile", "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}, "to": [4, 14, 2], "body_name": "Arc"}));
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mesh: Vec<String> = s.world_state().unwrap().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect();
+    assert_eq!(mesh.len(), 1, "{mesh:?}");
     let i = run(&mut s, "inspect.interference", json!({}));
     assert_eq!(i["count"], 0, "{i}");
     let unchecked = i["unchecked"].as_array().cloned().unwrap_or_default();
     assert_eq!(unchecked.len(), 1, "{i}");
-    assert!(unchecked[0]["reason"].as_str().is_some_and(|r| r.starts_with("not verified") && !r.contains("displacement")), "{i}");
+    assert_eq!(unchecked[0]["a"].as_str(), mesh.first().map(String::as_str), "{i}");
+    assert_eq!(unchecked[0]["reason"], "mesh body: not checked", "{i}");
     // Bodies that are clear of each other, or overlap plainly, leave the list empty.
     let mut s = two_cubes();
     let i = run(&mut s, "inspect.interference", json!({}));
@@ -775,6 +816,99 @@ fn any_two_sides_of_turned_boards_meet_on_a_second_planar_joint() {
                 assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "turned {turn} degrees, {yn} against {rn}: {r}");
             }
         }
+    }
+}
+
+/// #9687: a second planar joint left as a conflict, as a design saved before joint.create turned
+/// its part a half turn keeps it, meets when Edit Joint's OK places it again, and one unsuppressed
+/// after its part was turned away on the first joint meets too. A rename alone moves nothing.
+#[test]
+fn editing_or_unsuppressing_a_conflicting_second_planar_joint_turns_its_part_to_meet() {
+    let conflicts = |r: &Value| r["conflicts"].as_array().map(Vec::len);
+    let values = |s: &Session, name: &str| s.doc.assembly.joints.iter().find(|j| j.name == name).map(|j| j.values.clone()).unwrap_or_default();
+    let pose = |s: &Session| [Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z].map(|p| place(s, "Red", p));
+    let mut s = boards();
+    let planar = |s: &mut Session, name: &str, yellow: [f64; 3], red: [f64; 3]| {
+        run(
+            s,
+            "joint.create",
+            json!({"type": "planar", "a": {"occurrence": "Yellow", "face": yellow}, "b": {"occurrence": "Red", "face": red}, "name": name}),
+        )
+    };
+    planar(&mut s, "Top", [200.0, 50.0, 20.0], [200.0, 350.0, 0.0]);
+    let on_top = values(&s, "Top");
+    // The fronts point the same way: Side meets with Red turned a half turn on Top.
+    let r = planar(&mut s, "Side", [200.0, 0.0, 10.0], [200.0, 0.0, 30.0]);
+    assert_eq!(conflicts(&r), Some(0), "{r}");
+    let met = pose(&s);
+    // Red as it met, slid along the line the two planes share (X) at most.
+    let meets = |s: &Session| {
+        let now = pose(s);
+        let dx = Vec3::new(now[0].x - met[0].x, 0.0, 0.0);
+        now.iter().zip(&met).all(|(p, q)| near(*p, *q + dx))
+    };
+    // As a design saved before joint.create turned Red: Top's values from before Side.
+    if let Some(j) = s.doc_mut().assembly.joints.iter_mut().find(|j| j.name == "Top") {
+        j.values = on_top;
+    }
+    let r = run(&mut s, "joint.solve", json!({}));
+    assert_eq!(conflicts(&r), Some(1), "{r}");
+    let saved = pose(&s);
+    assert!(!meets(&s), "{saved:?}");
+    let r = run(&mut s, "joint.edit", json!({"joint": "Side", "name": "Front"}));
+    assert_eq!(conflicts(&r), Some(1), "a rename: {r}");
+    assert!(pose(&s).iter().zip(&saved).all(|(p, q)| near(*p, *q)), "a rename moved Red: {:?}", pose(&s));
+    // Edit Joint's OK sends the type, flip and offset.
+    let r = run(&mut s, "joint.edit", json!({"joint": "Front", "type": "planar", "flip": false, "offset": 0}));
+    assert_eq!(conflicts(&r), Some(0), "Edit Joint's OK: {r}");
+    assert!(meets(&s), "Edit Joint's OK: {:?}", pose(&s));
+    assert_eq!(dof_of(&mut s, "Red"), 1);
+    // Suppressed, Red turned a half turn away on Top, then unsuppressed.
+    run(&mut s, "joint.edit", json!({"joint": "Front", "suppressed": true}));
+    let angle = values(&s, "Top").get(2).copied().unwrap_or(f64::NAN).to_degrees();
+    run(&mut s, "joint.drive", json!({"joint": "Top", "index": 2, "value": angle + 180.0}));
+    assert!(!meets(&s), "turned away: {:?}", pose(&s));
+    let r = run(&mut s, "joint.edit", json!({"joint": "Front", "suppressed": false}));
+    assert_eq!(conflicts(&r), Some(0), "unsuppressed: {r}");
+    assert!(meets(&s), "unsuppressed: {:?}", pose(&s));
+}
+
+/// #9687: a frame held by many planar joints ties its loops into one group with more values than
+/// the loop solver moves at once, which was then only checked: a new joint closing a loop in it
+/// stayed a conflict, and a drive in it moved nothing. A table on the ground, parts each on the
+/// table and on the ground (11 parts: 70 values with the peg), and a peg 10 mm from where P0's
+/// pin point sits: P0 slides onto it as it does with one part, and turns about it when driven.
+#[test]
+fn a_loop_in_a_group_over_the_solvers_values_still_closes_and_drives() {
+    let conflicts = |r: &Value| r["conflicts"].as_array().map(Vec::len);
+    for parts in [1usize, 11] {
+        let mut s = Session::default();
+        part(&mut s, "Ground", [-1.0, -1.0, -2.0]);
+        let g = occ(&s, "Ground");
+        run(&mut s, "occurrence.ground", json!({"occurrence": g, "grounded": true}));
+        part(&mut s, "Table", [-1.0, -1.0, 0.0]);
+        pin(&mut s, "planar", "Base", "Ground", "Table", Vec3::ZERO, Vec3::Z);
+        for k in 0..parts {
+            let (name, c) = (format!("P{k}"), Vec3::new(10.0 * k as f64, 20.0, 0.0));
+            part(&mut s, &name, [c.x - 1.0, c.y - 1.0, 0.0]);
+            pin(&mut s, "planar", &format!("{name} on table"), "Table", &name, c, Vec3::Z);
+            pin(&mut s, "planar", &format!("{name} on ground"), "Ground", &name, c, Vec3::Z);
+        }
+        let at = |o: &str, p: [f64; 3]| json!({"occurrence": o, "point": p, "z": [0, 0, 1]});
+        let peg = json!({"type": "revolute", "name": "Peg", "a": at("Ground", [10.0, 20.0, 0.0]), "b": at("P0", [0.0, 20.0, 0.0]), "flip": true});
+        let r = run(&mut s, "joint.create", peg);
+        assert_eq!(conflicts(&r), Some(0), "{parts} parts: {r}");
+        let pin_point = Vec3::new(10.0, 20.0, 0.0);
+        assert!(near(place(&s, "P0", Vec3::new(0.0, 20.0, 0.0)), pin_point), "{parts} parts: {:?}", place(&s, "P0", Vec3::new(0.0, 20.0, 0.0)));
+        // P0's point 1 mm along X from its pin point (closing the loop may have turned P0 a little
+        // about the peg), then 30 degrees further round.
+        let (p, q0) = (Vec3::new(1.0, 20.0, 0.0), place(&s, "P0", Vec3::new(1.0, 20.0, 0.0)));
+        let turn = s.doc.assembly.joints.iter().find(|j| j.name == "Peg").and_then(|j| j.values.first().copied()).unwrap_or(f64::NAN);
+        let r = run(&mut s, "joint.drive", json!({"joint": "Peg", "value": turn.to_degrees() + 30.0}));
+        assert!(r["stopped_by_loop"].is_null() && conflicts(&r) == Some(0), "{parts} parts: {r}");
+        let (a, b) = (q0 - pin_point, place(&s, "P0", p) - pin_point);
+        let sin = a.x * b.y - a.y * b.x;
+        assert!((b.len() - 1.0).abs() < 1e-6 && (sin.abs() - 0.5).abs() < 1e-6 && b.z.abs() < 1e-6, "{parts} parts: {a:?} to {b:?}");
     }
 }
 
@@ -2192,10 +2326,9 @@ mod motion_analysis;
 mod motion_sweep;
 
 /// A pin through a hole of its own radius whose axis is a hair off the hole's (parts placed from
-/// rounded coordinates): the walls are all but tangent along two lines, which the boolean can't
-/// intersect. Each offset gets a checked answer: clear on the axis and within the kernel's
-/// same-surface tolerance, and otherwise the crescent the pin shares with the plate, against
-/// the textbook lens of two circles. The pin is chamfered, so it is not a plain prism.
+/// rounded coordinates): the walls are all but tangent along two lines. Each offset gets a
+/// checked answer: clear on the axis and within the kernel's same-surface tolerance, and
+/// otherwise the crescent the pin shares with the plate, against the textbook lens of two circles. The pin is chamfered, so it is not a plain prism.
 #[test]
 fn interference_of_a_pin_a_hair_off_its_hole() {
     let crescent = |r: f64, e: f64| std::f64::consts::PI * r * r - (2.0 * r * r * (e / (2.0 * r)).acos() - e / 2.0 * (4.0 * r * r - e * e).sqrt());
@@ -2215,7 +2348,6 @@ fn interference_of_a_pin_a_hair_off_its_hole() {
         let want = 5.0 * crescent(3.0, offset);
         let got = i["interferences"][0]["volume_mm3"].as_f64().unwrap_or(0.0);
         assert!((got - want).abs() < 1e-6 * want, "{offset}: {got} against {want}: {i}");
-        assert!((i["interferences"][0]["near_coaxial"]["offset_mm"].as_f64().unwrap_or(0.0) - offset).abs() < 1e-9, "{i}");
     }
 }
 
@@ -2236,7 +2368,6 @@ fn interference_of_a_headed_pin_a_hair_off_a_bush_of_its_heads_radius() {
     let want = 5.0 * crescent(3.0, offset);
     let got = i["interferences"][0]["volume_mm3"].as_f64().unwrap_or(0.0);
     assert!((got - want).abs() < 1e-6 * want, "{got} against {want}: {i}");
-    assert!(i["interferences"][0]["near_coaxial"].is_object(), "{i}");
 }
 
 /// A headed pin made before the plate it sits in, a hair off the plate's hole: the crescent
@@ -2569,4 +2700,22 @@ fn driving_one_cylindrical_coordinate_preserves_the_other_expression_and_reports
     for bad in [json!(-1), json!(2), json!(1000000), json!("0")] {
         assert!(s.execute("joint.drive", &json!({"joint":joint,"index":bad,"value":0})).is_err());
     }
+}
+
+/// #10747: driving a joint to 30 reports 30, not 29.999999999999996; the joint keeps
+/// full precision.
+#[test]
+fn driving_an_angle_reports_the_number_a_person_would_read() {
+    let mut s = two_cubes();
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": "A", "point": [5.0, 5.0, 10.0]}, "b": {"occurrence": "B", "point": [25.0, 5.0, 10.0]}, "name": "Turn"}),
+    );
+    let r = run(&mut s, "joint.drive", json!({"joint": "Turn", "value": 30}));
+    assert_eq!(r["values"][0]["value"], json!(30.0), "{r}");
+    assert_eq!(r["requested"][0]["value"], json!(30.0), "{r}");
+    // Only what is reported is rounded: the stored value keeps full precision.
+    let j = s.doc.assembly.joints.iter().find(|j| j.name == "Turn").unwrap();
+    assert_ne!(j.values[0].to_degrees(), 30.0, "the stored angle keeps its bits");
 }

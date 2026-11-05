@@ -8,9 +8,10 @@
 use crate::ui_kit::{Container, Surface};
 use egui::{Pos2, vec2};
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_engine::doc::Document;
 use solidcraft_engine::doc::expr::{Kind as ValueKind, definition};
-use solidcraft_engine::geom::Vec2;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::theme::Tokens;
@@ -63,6 +64,8 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 1) => vec![b("Radius", Length)],
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 2) => vec![b("Sweep", Angle)],
         ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => vec![b("Radius", Length), b("Sides", Unitless)],
+        // By side: the side from the first click to the second (#11271).
+        ("sketch.polygon.edge", 1) => vec![b("Length", Length), b("Sides", Unitless)],
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 1) => vec![b("Length", Length)],
         ("sketch.conic", 2) => vec![b("Rho", Unitless)],
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 2)
@@ -147,6 +150,7 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
             c + Vec2::from_angle(a0 + sweep) * r
         }
         ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => a + dir_or_x(h - a) * lk("Radius").unwrap_or((h - a).len()),
+        ("sketch.polygon.edge", 1) => a + dir_or_x(h - a) * lk("Length").unwrap_or((h - a).len()),
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 2) => match lk("Width") {
             Some(w) => {
                 let c0 = t.pts.first().map(|p| p.0).unwrap_or(a);
@@ -223,7 +227,7 @@ fn on_curve_axis(app: &SolveApp, t: &Tool, p: &(Vec2, Option<String>)) -> Option
     if ang == v.angle() {
         return None;
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let sk = &st.sketch(app.session.active_sketch?)?.sketch;
     let shape = sk.shape(sk.curve_index(curve)?)?;
     let dir = Vec2::from_angle(ang);
@@ -337,7 +341,8 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
         ("sketch.circle.two_tangent", 2) => {
             vec![(crate::sketch_tools::two_tangent_default_radius(app, t), (first + a) * 0.5 + dir_or_x(a - first).perp() * off)]
         }
-        ("sketch.arc.center_point" | "sketch.slot.arc_center", 1) | ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => {
+        ("sketch.arc.center_point" | "sketch.slot.arc_center", 1)
+        | ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed" | "sketch.polygon.edge", 1) => {
             vec![((e - a).len(), (a + e) * 0.5), (6.0, a + (e - a) * 0.5 + (e - a).perp() * 0.3)]
         }
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 2) => {
@@ -567,7 +572,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
 fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option<Vec2> {
     let tk = Tokens::get();
     let sid = app.session.active_sketch?;
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let plane = st.sketch(sid)?.plane;
     // When the pointer is over the value box itself after releasing on a shared centre (#8899),
     // the tool may have no hover for a frame: still show the boxes from the first point.
@@ -613,7 +618,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     // Polygon values used to sit inside the radius, so both boxes covered a small polygon
     // and each other. Place them together outside its projected outline, in screen space:
     // their separation must not shrink with the shape or a tilted sketch plane.
-    let polygon_positions = if matches!(t.cmd, "sketch.polygon.inscribed" | "sketch.polygon.circumscribed") {
+    let polygon_positions = if matches!(t.cmd, "sketch.polygon.inscribed" | "sketch.polygon.circumscribed" | "sketch.polygon.edge") {
         let corners = crate::tools::polygon_outline(t, e, locked(app, t, "Sides").unwrap_or(6.0))
             .unwrap_or_else(|| t.pts.iter().map(|p| p.0).chain(std::iter::once(e)).collect());
         let points: Vec<_> = corners.iter().filter_map(|p| proj.to_screen(plane.to_world(*p))).collect();
@@ -648,7 +653,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             ui.ctx(),
             |ui| {
                 let fill = if b.locked { tk.accent_soft } else { tk.panel };
-                field_frame.fill(fill).show(ui, |ui| {
+                Container::show_backing(ui, field_frame.fill(fill), |ui| {
                     let r = crate::ui_kit::placement_field(ui, id, &mut b.value, b.label);
                     // A completion gets first use of forward Tab. Shift+Tab always moves back;
                     // the box reached by egui's generic traversal must not complete its text.

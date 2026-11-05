@@ -10,7 +10,7 @@ fn run(s: &mut Session, id: &str, params: Value) -> Value {
 
 #[test]
 fn select_geometry_resolves_points_and_indices_without_changing_history() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
 
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"body_name":"Block", "corner":[20,30,40], "length":10, "width":10, "height":10}));
@@ -47,7 +47,7 @@ fn select_geometry_curved_picks_round_trip_and_add_without_duplicates() {
         let index = serde_json::to_value(&s.selection[0]).unwrap()["index"].clone();
         run(&mut s, "select.set", json!({"items":[{"type":kind,"body":"Round","index":index}]}));
         let complete = serde_json::to_value(&s.selection[0]).unwrap();
-        let pick: solidcraft_geom::Vec3 = serde_json::from_value(complete["point"].clone()).unwrap();
+        let pick: solidcore_record::Vec3 = serde_json::from_value(complete["point"].clone()).unwrap();
         assert!((pick.x.hypot(pick.y) - 5.0).abs() < 1e-6, "the inferred point lies on the cylinder: {complete}");
         let mut partial = complete.clone();
         partial.as_object_mut().unwrap().remove("index");
@@ -73,7 +73,7 @@ fn select_geometry_uses_the_placed_body_in_world_coordinates() {
         assert_eq!(complete["body"], name);
         run(&mut s, "select.set", json!({"items":[{"type":kind,"body":name,"index":complete["index"]}]}));
         let inferred = serde_json::to_value(&s.selection[0]).unwrap();
-        let pick: solidcraft_geom::Vec3 = serde_json::from_value(inferred["point"].clone()).unwrap();
+        let pick: solidcore_record::Vec3 = serde_json::from_value(inferred["point"].clone()).unwrap();
         assert!((pick.z - 4.0).abs() < 1e-9 && (7.0..=10.0).contains(&pick.x) && (20.0..=22.0).contains(&pick.y), "{inferred}");
         assert!(s.execute("select.set", &json!({"items":[{"type":kind,"body":name,"point":[1,1,4]}]})).is_err());
         assert_eq!(serde_json::to_value(&s.selection[0]).unwrap(), inferred);
@@ -249,9 +249,11 @@ fn redefining_a_fillet_as_g2_on_sloped_ends_survives_undo_and_reopen() {
     let volume = |s: &Session| {
         let bodies = &s.model.state().bodies;
         assert_eq!(bodies.len(), 1);
-        bodies.first().unwrap().body.tessellate(0.0001).unwrap().measure().volume
+        bodies.first().unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.0001)).unwrap().measure().volume
     };
-    let expected = |r: f64| 12000.0 - 40.0 * 113.0 / 756.0 * r.powi(2) + 13711.0 / 486486.0 * r.powi(3);
+    // The curvature section at its equal-area thumbweight removes (1 - pi/4) r² at the square
+    // corner, first moment 0.0474559669443 r³ (Green's theorem on the section).
+    let expected = |r: f64| 12000.0 - 40.0 * (1.0 - std::f64::consts::FRAC_PI_4) * r.powi(2) + 0.0474559669443 * r.powi(3);
     let actual = volume(&s);
     assert!((actual - expected(5.0)).abs() < 0.05, "{actual} vs {}", expected(5.0));
     let edited = s.doc.clone();
@@ -489,17 +491,17 @@ fn redefine_keeps_allocator_above_component_and_occurrence_ids() {
     assert!(
         matches!(&s.doc.features[combine_index + 1].kind, solidcraft_doc::FeatureKind::BodyTransfer { bodies, to, .. } if bodies == &["Base"] && *to == destination)
     );
-    assert!((solidcraft_kernel::measure(&s.world_state().body("Base").unwrap().body).unwrap().volume - 6000.0).abs() < 1e-6);
-    assert_eq!(s.world_state().bodies.len(), 1);
+    assert!((solidcraft_kernel::measure(&s.world_state().unwrap().body("Base").unwrap().body).unwrap().volume - 6000.0).abs() < 1e-6);
+    assert_eq!(s.world_state().unwrap().bodies.len(), 1);
     run(&mut s, "timeline.rollback", json!({"position":combine_index + 1}));
-    assert_eq!(s.world_state().body("Base").unwrap().component, 0, "the result transfers only AFTER Combine");
+    assert_eq!(s.world_state().unwrap().body("Base").unwrap().component, 0, "the result transfers only AFTER Combine");
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(*s.doc, *original);
     run(&mut s, "edit.redo", json!({}));
     let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-    assert_eq!(reopened.world_state().body("Base").unwrap().component, destination);
-    assert!((solidcraft_kernel::measure(&reopened.world_state().body("Base").unwrap().body).unwrap().volume - 6000.0).abs() < 1e-6);
+    assert_eq!(reopened.world_state().unwrap().body("Base").unwrap().component, destination);
+    assert!((solidcraft_kernel::measure(&reopened.world_state().unwrap().body("Base").unwrap().body).unwrap().volume - 6000.0).abs() < 1e-6);
     let max_id =
         s.doc.components.iter().map(|c| c.id).chain(s.doc.occurrences.iter().map(|o| o.id)).chain(s.doc.features.iter().map(|f| f.id)).max().unwrap();
     assert!(s.doc.next_id > max_id);
@@ -531,7 +533,7 @@ fn redefine_cannot_publish_a_second_transfer_that_breaks_existing_ownership() {
         assert_eq!(s.pending_moves, pending);
     }
     let reopened = Session::new(solidcraft_doc::Document::from_json(&full).unwrap());
-    assert_eq!(reopened.world_state().body("Base").unwrap().component, reopened.doc.find_component("Original").unwrap());
+    assert_eq!(reopened.world_state().unwrap().body("Base").unwrap().component, reopened.doc.find_component("Original").unwrap());
     assert!(reopened.doc.features.iter().all(|feature| reopened.model.result(feature.id).is_some_and(|result| result.error.is_none())));
 }
 
@@ -1513,8 +1515,8 @@ fn select_same_look_uses_resolved_looks_without_document_history_edits_and_refus
     let history = (s.undo.len(), s.redo.len(), s.evaluations);
     run(&mut s, "select.same_look", json!({"body":"A"}));
     assert_eq!(s.selection.len(), 3);
-    let point = solidcraft_geom::Vec3::new(40.0, 5.0, 5.0);
-    let face = solidcraft_doc::appearance::face_index_at(s.world_state().body("C").unwrap(), point).unwrap();
+    let point = solidcore_record::Vec3::new(40.0, 5.0, 5.0);
+    let face = solidcraft_doc::appearance::face_index_at(s.world_state().unwrap().body("C").unwrap(), point).unwrap();
     run(&mut s, "select.set", json!({"items":[Sel::Face {body:"C".into(),index:face,point}]}));
     run(&mut s, "select.same_look", json!({}));
     assert_eq!(s.selection.len(), 3);

@@ -87,6 +87,7 @@ Distances are unsigned. Draw the geometry on the correct side first, and the dim
 
 - **Names:** name every feature (`"name":"Standoff"`) and keep names unique across sketches and features. `timeline.roll_to {"feature":"Plate"}` picks the first match, which can be the sketch.
 - **Counts as parameters:** `parameters.add {"name":"n","expression":"6","unit":""}` creates a unitless parameter, and `"count":"n"` uses it in a pattern.
+- **Names of pattern and mirror copies:** `solid.pattern.rectangular` and `solid.pattern.circular` take `bodies` as well as `features`, and name copies like `solid.mirror` does. `solid.pattern.circular {"bodies":["Groove end"],"axis":"Z","count":3}` keeps the original and makes the copies `Groove end (2)` and `Groove end (3)`. A name already taken is skipped: with `Groove end (2)` present, the copies are `Groove end (3)` and `Groove end (4)`. With `features`, the pattern makes a new `BodyN`, as in the `solid.mirror` row. Read the names from `created_bodies`. Mirroring a copy adds a suffix: `Groove end (2)` mirrored is `Groove end (2) (2)`. The pattern commands list no body-name parameter, so use `body.rename` for stable names. There is no way yet to refer to every copy at once, for example in `solid.combine` (#8194).
 - **Holes on a parametric bolt circle:**
   1. Cut one hole with `solid.cylinder {"diameter":6.6,"height":"T + 2","base":["bcd/2",0,-1],"operation":"cut","name":"BoltHole"}`.
   2. Repeat it with `solid.pattern.circular {"features":["BoltHole"],"axis":"Z","count":"n"}`.

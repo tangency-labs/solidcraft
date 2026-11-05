@@ -1,0 +1,31 @@
+{
+ "sources": [],
+ "what": "config.activate of a row with W = 60",
+ "method": "60x30x10 with the 10 mm hole: V = 18000 - pi 25 10; faces 7",
+ "body_count": 1,
+ "volume_mm3": 17214.601836602553,
+ "faces": 7,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   30,
+   10
+  ]
+ },
+ "results": [
+  {
+   "step": 7,
+   "json": {
+    "active": "Long",
+    "errors": [],
+    "matches": true
+   }
+  }
+ ],
+ "source": "analytic"
+}

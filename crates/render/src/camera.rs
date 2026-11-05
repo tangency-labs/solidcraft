@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Aabb3;
+use solidcraft_geom::prelude::*;
 
 /// Column-major 4×4 matrix.
 #[derive(Clone, Copy, Debug, PartialEq)]

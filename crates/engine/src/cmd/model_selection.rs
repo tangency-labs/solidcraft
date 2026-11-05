@@ -13,7 +13,7 @@ use crate::Session;
 /// Most entities a model command takes from the selection.
 const MOST: usize = 500;
 
-fn xyz(p: &crate::geom::Vec3) -> Value {
+fn xyz(p: &solidcore_record::Vec3) -> Value {
     json!([p.x, p.y, p.z])
 }
 

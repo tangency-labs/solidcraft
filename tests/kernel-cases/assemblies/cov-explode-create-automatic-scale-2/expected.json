@@ -1,0 +1,43 @@
+{
+ "sources": [],
+ "what": "an automatic exploded view of scale 2",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); each occurrence moves scale \u00d7 (its centre - the mean of the centres): centres (0,0,-5) and (20,0,5), mean (10,0,0): Base by (-20,0,-10), Arm by (20,0,10); shown only (the design keeps its placements), so occurrence.properties reports Arm where the design places it: centre (20,0,5)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 8,
+   "json": {
+    "moves": [
+     {
+      "translate": [
+       -20.0,
+       0.0,
+       -10.0
+      ]
+     },
+     {
+      "translate": [
+       20.0,
+       0.0,
+       10.0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "step": 10,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

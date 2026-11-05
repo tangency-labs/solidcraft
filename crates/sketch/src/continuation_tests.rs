@@ -2,7 +2,8 @@
 //! triangles joined by three links, left to the iteration by the construction) under random
 //! dimension edits from its previous solved state, with every failure that remains proven
 //! infeasible; and the solve without continuation when nothing it could help with changed.
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 use crate::construct::switch;
 use crate::model::{ConstraintKind, Sketch};

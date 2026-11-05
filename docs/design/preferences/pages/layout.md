@@ -60,7 +60,7 @@ The interaction states (drag onto the bar, drop targets, reorder) stay as in `Na
 
 | Label | Control | Edits | Default | Hover | Figure | Notes |
 |---|---|---|---|---|---|---|
-| Preview as | Tabs: Design / Render | which workspace's bar is edited | Design | none | none | The Render tab edits the Render workspace's slots. |
+| Preview as | Tabs: Design / Render | previews the shared bar as Design or Render | Design | none | none | Preview modes use the Design or Render capabilities; edits affect the one shared bar in both workspaces. |
 | Preview strip | The bar drawn as it will look, with the slots in order | `navigation_bar.slots` (plus `slot_options`) | orbit, pan, zoom, separator, fit, look_at, home, separator, visual_style, display | none | none | Slot icons on the board are stand-ins; use the app's icons. |
 | Show navigation bar | Checkbox | `app.ui.show_navigation_bar` (session; in the Snapshot) | per session | none | none | |
 | Reset to default | Button | resets `navigation_bar` | n/a | none | none | |
@@ -74,6 +74,7 @@ The interaction states (drag onto the bar, drop targets, reorder) stay as in `Na
 
 ## Mismatches
 
+* The board implies per-workspace navigation bars; the app stores one shared slot list. Design/Render only changes its preview.
 * "Compact" on the board is `LayoutMode::Docked` (serialised `compact`) in the code.
 * The History choice is three booleans in the code, one card group on the board.
 * The status chips ("Analysis", "Section", "Live details", "Fold items") are not on this page; they

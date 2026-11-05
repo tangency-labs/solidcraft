@@ -2,6 +2,7 @@
 //! (#2548): a graph of the last frames' times with the triangles drawn over it, a histogram of
 //! frame times, and what the GPU drew. Click the readout to show or hide the details.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use std::collections::VecDeque;
 
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
@@ -192,7 +193,7 @@ pub(crate) fn paint(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, 
         r = r.translate(vec2(0.0, nav.top() - 6.0 - r.bottom()));
     }
     let id = egui::Id::new("sc_frame_rate");
-    let clicked = ui.interact(r, id, Sense::click()).on_hover_text(tr("perf.click_for_details")).clicked();
+    let clicked = ui.interact(r, id, Sense::click()).backing_on_hover_text(tr("perf.click_for_details")).clicked();
     if clicked {
         app.preferences.frame_rate_details = !app.preferences.frame_rate_details;
     }

@@ -35,6 +35,8 @@ pub struct AcpBackend {
     bridge: Option<acp::McpBridge>,
     /// The agent's `initialize` reply: which routes the system note can take into a session.
     init: Value,
+    /// The system note the next session gets ([`acp::system_note`]).
+    note: String,
     next_id: u64,
     pending: HashMap<u64, Pending>,
     session: Option<String>,
@@ -64,6 +66,7 @@ impl AcpBackend {
             cwd,
             bridge,
             init: Value::Null,
+            note: acp::SYSTEM_NOTE.to_string(),
             next_id: 0,
             pending: HashMap::new(),
             session: None,
@@ -91,7 +94,7 @@ impl AcpBackend {
     fn new_session(&mut self) {
         self.config_pending = None;
         self.pending.retain(|_, request| *request != Pending::SetConfig);
-        let params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init);
+        let params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init, &self.note);
         self.request(Pending::SessionNew, "session/new", params);
     }
 
@@ -195,10 +198,10 @@ impl AcpBackend {
             Incoming::Text { thought, text } => out.push(Event::Text { thought, text }),
             Incoming::Tool { id, title, kind, status, input, output } => out.push(Event::Tool { id, title, kind, status, input, output }),
             Incoming::Plan(p) => out.push(Event::Plan(p)),
-            Incoming::Permission { rpc, title, options } => {
+            Incoming::Permission { rpc, title, kind, options } => {
                 self.next_key += 1;
                 self.permissions.insert(self.next_key, rpc);
-                out.push(Event::Permission { key: self.next_key, title, options });
+                out.push(Event::Permission { key: self.next_key, title, kind, options });
             }
             Incoming::AuthStatus(s) => out.push(Event::AuthStatus(s)),
             Incoming::ModeChanged(m) if !self.modern_config => out.push(Event::Modes { current: m, available: Vec::new() }),
@@ -288,6 +291,10 @@ impl ChatBackend for AcpBackend {
         self.new_session();
     }
 
+    fn set_instructions(&mut self, text: &str) {
+        self.note = acp::system_note(text);
+    }
+
     fn answer_permission(&mut self, key: u64, option: Option<&str>) {
         if let Some(rpc) = self.permissions.remove(&key) {
             self.proc.send(&acp::permission_reply(rpc, option));
@@ -362,7 +369,7 @@ pub fn test_agent(argv: &[String], cwd: &std::path::Path) -> Result<String, Test
     let init = wait_for(&p, 1);
     let session_cwd = if acp::runs_in_wsl(argv) { acp::wsl_path(cwd) } else { cwd.to_path_buf() };
     let result = init.and_then(|v| {
-        p.send(&acp::request(2, "session/new", acp::session_new_params(&session_cwd, None, &v)));
+        p.send(&acp::request(2, "session/new", acp::session_new_params(&session_cwd, None, &v, acp::SYSTEM_NOTE)));
         wait_for(&p, 2).map(|_| {
             let who = acp::agent_info(&v);
             crate::i18n::format("ui.ai_test_acp_ok", &[("agent", if who.is_empty() { "?" } else { &who })])

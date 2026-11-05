@@ -140,7 +140,7 @@ pub fn kinds_fit(command: &str, selection: &[Sel], sketch: &Sketch) -> bool {
 /// [`constraint_params`] for the session's selection in the sketch being edited, when the
 /// kinds of the selected entities suit the command ([`kinds_fit`]).
 fn from_session(command: &str, s: &Session) -> Option<Value> {
-    let state = s.world_state();
+    let state = s.world_state().ok()?;
     let sketch = super::sketch_store::active(s).and_then(|id| state.sketch(id)).map(|ss| &ss.sketch)?;
     if !kinds_fit(command, &s.selection, sketch) {
         return None;

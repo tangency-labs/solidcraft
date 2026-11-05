@@ -1,9 +1,10 @@
 //! Sketch drawing exchange: Insert DXF, Insert SVG and sketch DXF export.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 use solidcraft_io::{Geom2, MAX_DRAWING_BYTES};
 use solidcraft_sketch::{CurveKind, LinkKind, LinkSource, Sketch};
 
@@ -115,7 +116,7 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
                         idx.push(i);
                     }
                 }
-                (idx.len() >= 2).then_some(CurveKind::Spline { pts: idx, control: *control, degree: *degree, periodic: false })
+                (idx.len() >= 2).then_some(CurveKind::Spline { pts: idx, control: *control, degree: *degree, periodic: false, nurbs: None })
             }
             Geom2::Conic { a, apex, b, rho } => {
                 let (a, x, b) = (pt(sk, *a)?, pt(sk, *apex)?, pt(sk, *b)?);
@@ -169,7 +170,7 @@ fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
             // Points along the curve, not its apex, which can lie well outside it (an elliptical
             // arc of a DXF comes in as conics, #8155).
             Geom2::Conic { a, apex, b, rho } if *rho > 0.0 && *rho < 1.0 => {
-                let seg = solidcraft_geom::Seg2::Conic { a: *a, apex: *apex, b: *b, w: rho / (1.0 - rho) };
+                let seg = solidcore_record::Seg2::Conic { a: *a, apex: *apex, b: *b, w: rho / (1.0 - rho) };
                 pts.extend((0..=64).map(|i| seg.point_at(f64::from(i) / 64.0)));
             }
             Geom2::Conic { a, apex, b, .. } => pts.extend([*a, *apex, *b]),

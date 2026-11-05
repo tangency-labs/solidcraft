@@ -336,6 +336,15 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
         None
     };
     let mut scene = crate::product_scene::extract(s)?;
+    let textures = if let Some(bindings) = normalized.as_ref().map(|saved| &saved.surfaces).filter(|bindings| !bindings.is_empty()) {
+        if input.integrator != Integrator::Raytrace {
+            return Err(bad(command, "saved surface maps require a raytrace executor"));
+        }
+        let overrides = super::surface_bindings::resolve(s, &scene, bindings, command)?;
+        super::textures::capture_with_resources(&scene, &overrides, Some(&s.doc.render.texture_resources), command)?
+    } else {
+        None
+    };
     if environment.is_some() {
         input.raytrace.as_ref().unwrap_or(&RaytraceOptions::default()).validate_environment_reflections(&scene).map_err(job_error)?;
     }
@@ -410,7 +419,7 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
     let request = ImageRequest {
         studio_weights: validate_studio_weights(input.studio_weights, command)?,
         environment: None,
-        textures: None,
+        textures,
         integrator: input.integrator,
         raytrace: input.raytrace.take(),
         camera: settings.camera,
@@ -624,7 +633,7 @@ fn prepare_progressive(
         height: settings.height,
         background: settings.background,
         transparent_background: input.transparent_background,
-        textures: super::textures::capture(&scene, &input.raytrace.textures, command)?,
+        textures: super::textures::capture_with_resources(&scene, &input.raytrace.textures, Some(&s.doc.render.texture_resources), command)?,
     };
     let mut admission = host.admit(&scene, &request, options).map_err(job_error)?;
     admission.estimated_total_bytes = admission

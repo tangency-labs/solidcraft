@@ -440,6 +440,18 @@ The ordered list of a design's features, which SolidCraft computes from first to
 - **Elsewhere:** timeline, history, feature tree.
 - **For translators:** not the undo history.
 
+### turn (of two rounds)
+
+How two rounds of a fillet continue where they turn round a sharp corner edge between them, such
+as the rounds along a boss's base at its upright edges: in a mitre, or swept round the corner
+edge as a torus.
+
+- **In SolidCraft:** the `turn` parameter of `solid.fillet` and its design-file key, `mitre`
+  (the default) or `swept`; the Fillet dialog's Turns row.
+- **Don't use:** corner (that is what fills a corner where three rounded edges meet, `corner`).
+- **Elsewhere:** mitred corner, swept corner, corner sweep.
+- **For translators:** "Mitre" and "Swept" name the two shapes, not a direction of travel.
+
 ### view angles
 
 The yaw, pitch and roll, in degrees, that give the direction a view looks along and how its

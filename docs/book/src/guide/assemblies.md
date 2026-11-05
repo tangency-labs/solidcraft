@@ -16,11 +16,39 @@ plane, on a body of the design itself, on a face without an exact attachment, or
 part. The status bar says how many moved and why the others stayed; the command's reply lists
 each sketch. With no `sketches` it looks at every sketch in the design.
 
+## Step by step
+
+A two-leaf hinge: each leaf is a plate with a barrel along one edge, modelled as a body.
+
+**1. Make components.** Right-click the **Bodies** folder in the browser and choose **Create
+Components from Bodies**. Each body becomes a component of its own. The first is grounded (the pin
+beside it): it stays where it is while the others move.
+
+<video src="../media/assemblies/components.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Right-clicking the Bodies folder and choosing Create Components from Bodies: Leaf A and Leaf B become components, Leaf A grounded"></video>
+
+**2. Join them.** On the **ASSEMBLE** tab, click **Joint**. Click the end of Leaf B's barrel, then
+the same end of Leaf A's: Leaf B moves so the two circles meet. Choose **Revolute** for a hinge. If
+the part lands the wrong way round, tick **Flip**. Click **OK**.
+
+<video src="../media/assemblies/joint.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Creating a revolute joint between the barrel ends of Leaf B and Leaf A, flipping Leaf B so it lies beside Leaf A, then OK"></video>
+
+**3. Move it.** Drag Leaf B: it turns about the hinge and nothing else. Leaf A is grounded, so it
+doesn't move.
+
+<video src="../media/assemblies/drag.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Dragging Leaf B, which swings about the hinge, then trying to drag grounded Leaf A, which stays where it is"></video>
+
+**4. Drive it.** **Drive Joints** turns a joint through its values: drag the slider, or type the
+angle. A ghost shows where the part started. **OK** keeps the new angle.
+
+<video src="../media/assemblies/drive.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Drive Joints: dragging the angle slider swings Leaf B about the hinge while a ghost shows where it started, then OK"></video>
+
+## Components, placement and joints
+
 A component is placed by its **occurrences**. Paste creates another instance of the same
 component, and **Paste New** creates an independent copy. Move an occurrence with the move
 triad, then **Capture Position** to keep it or **Revert** to put it back. SolidCraft asks before
 the next command if a move wasn't captured. **Ground** fixes an occurrence in place, and
-**Unground** (the same row of the browser's context menu) frees it again.
+**Unground** (the same row of **Placement** in the browser's context menu) frees it again.
 
 The design's first part is grounded when it is made: the first occurrence placed directly in the
 design by **New Component**, **Create Components from Bodies** or an import. Parts made after it,
@@ -73,7 +101,7 @@ user parameters remain shared; retained external links and omitted cross-boundar
 records are reported. Unsupported destructive links refuse the entire copy. See
 [individual-instance and copy details](https://github.com/tangency-labs/solidcraft/blob/main/docs/occurrence-workflows.md).
 
-**Extract to File** (`component.extract`, in a component's right-click menu) moves a component
+**Extract to File** (`component.extract`, under **Component** in a component's right-click menu) moves a component
 into a design of its own: its sketches, features, bodies, subcomponents and the joints among them
 go to the new `.sc` file at its origin, with the parameters they use, and the component
 becomes linked to that file, as **Insert Design** makes it. Its placements and the joints to the
@@ -357,9 +385,12 @@ accelerations are finite differences between samples, central inside and one-sid
 so they are as smooth as the samples are dense (up to 1000, one per step by default). Angles are
 unwrapped, so a joint that turns on past half a turn keeps counting.
 `motion.interference {study, occurrences?, against?, contact_sets?, samples?, budget_s?}` answers each
-colliding pair with its `first_step`, `last_step`, the `steps` ranges where they overlap, how
-far into each other (`depth_mm`, the most at `deepest_step`) and their shared `volume_mm3`
-there (null when it is not cheap to work out). It plays the study as `motion.play` does, but
+colliding pair with its `first_step`, `last_step`, the `steps` ranges where they overlap, the
+most volume they share at a sample (`volume_mm3`, worked out exactly from the bodies), the first
+sample sharing that much (`deepest_step`) and how far into each other they reach (`depth_mm`, an
+estimate from points of the bodies' contact meshes). When the volume could not be worked out at
+every sample they overlap (more than 16 colliding pairs, or past the check's 256 body
+intersections), `volume_mm3` and `deepest_step` are null and `not_measured` says why. It plays the study as `motion.play` does, but
 contact sets don't stop it, and parts are tested at the samples only: a part that passes right
 through another between two samples is missed. Parts are told apart by occurrence, as contact
 sets tell them apart: an occurrence inside a sub-assembly placed twice is one part, so its two
@@ -382,6 +413,25 @@ already touching at `from`, such as parts joined face to face or a door resting 
 listed in `touching_at_start` and stop the sweep only once they pass into each other, deeper than
 they start. The sweep runs on a copy (closed loops follow, contact sets don't stop it) and
 leaves the design as it was unless `apply` is true.
+
+**Find Limits.** In **Edit Joint**, the **Limits** section's **Find Limits** button fills in each
+value's Minimum and Maximum from where the parts the joint moves first touch another part,
+turning or sliding each way from where the joint is now, and ticks its limits. It searches the
+joint as the dialog has it (a type, flip or offset changed but not yet applied included), on a
+copy: nothing changes until **OK**, so the values can still be rounded or edited. They are
+rounded toward the joint's value (a tenth of a degree, a hundredth of the length unit) so they
+stay clear, and a line under each value says what stopped each side. An angle is searched a turn
+each way: a side that meets nothing is set a turn from the other side, or half a turn each way
+when nothing is met at all. A distance is searched as far as the parts reach; a side that meets
+nothing there keeps what it had, and the limits stay off until both sides are found. Parts
+already in each other where the joint is now are named, and stop the search only once they go
+deeper. The search runs while the window goes on (Cancel drops it). `joint.find_limits {joint,
+index?, refine?, step?, occurrences?, against?, contact_sets?}` answers the same: for each value
+its `min` and `max` (`null` where a distance meets nothing), what stopped each side (`min_by`,
+`max_by`: the two parts and where they touch, or `"loop"`, `"limit"` (the limit of
+another of its values, or of another joint through a motion link), `"turn"` or `"range"`), the `range` searched, and the parts `touching_at_start`
+and `overlapping_at_start` (with `depth_mm`). The joint's own limits are left out of the search,
+closed loops follow, and each side is bisected to `refine` as `joint.sweep` does.
 
 **Insert Design** (`component.insert_design {path, translate?}`, on the **ASSEMBLE** panel and
 in the **File** menu) adds a component linked to another saved design, so each part can live in
@@ -428,7 +478,7 @@ place** (Preferences, Design, `double_click_components`) turns this off: a doubl
 Browser then activates every component, and one in the view does nothing.
 
 If a source file moves or is renamed, right-click its linked component or occurrence in the
-Browser and choose **Relink Source (All Instances)…**. Choose the saved `.sc` design
+Browser and choose **Component → Relink Source (All Instances)…**. Choose the saved `.sc` design
 to use. Relinking updates that component's stored path and solid bodies for **all its
 instances**, keeping their identities and placements. Cancelling or choosing a missing,
 invalid, empty or self-referencing design leaves the assembly unchanged. The operation is
@@ -445,7 +495,7 @@ joint still describes the intended connection.
 
 STEP export writes the component tree as an assembly.
 
-Right-click a component in the Browser and choose **Properties**, or use **Inspect → Measure →
+Right-click a component in the Browser and choose **Component → Properties**, or use **Inspect → Measure →
 Properties** for the selected placement or the active component, to inspect material-aware
 mass, volume, surface area, centre of mass, first moments, moment of inertia and world bounds.
 While the window is open, the view marks the centre of mass with the three principal axes

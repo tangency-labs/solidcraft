@@ -5,7 +5,9 @@
 //! have a direction (planar faces, straight edges), the angle.
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Mesh, UnitVec3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
+use solidcraft_geom::{Mesh, UnitVec3};
 
 use super::measure_shape::{Shape, Slot, add_round, centre};
 use crate::params::bad;
@@ -216,7 +218,7 @@ fn sketch_curve(ss: &solidcraft_doc::SolvedSketch, id: &str) -> Option<Item> {
 /// A profile (closed region of a sketch): its area, and when it is a circle or a slot, its
 /// sizes.
 fn profile(ss: &solidcraft_doc::SolvedSketch, index: usize) -> Option<Item> {
-    use solidcraft_geom::{Seg2, Vec2};
+    use solidcore_record::{Seg2, Vec2};
     let pr = ss.profiles.get(index)?;
     let outline: Vec<Vec3> = pr.region.outer.polyline(1e-3).iter().map(|p| ss.plane.to_world(*p)).collect();
     let mut json = json!({"type": "profile", "area_mm2": pr.region.area()});
@@ -282,8 +284,8 @@ fn face_slot(b: &solidcraft_doc::ModelBody, m: &Mesh, shape: &Shape, pts: &[Vec3
     super::measure_shape::slot_from_faces(shape, pts, &surfaces)
 }
 
-fn describe(s: &Session, sel: &Sel) -> Option<Item> {
-    let st = s.world_state();
+/// `sel` in the placed model `st`.
+fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<Item> {
     let plain = |geo, dir, json| Some(Item { geo, dir, json, shape: Shape::Other, slot: None });
     match sel {
         Sel::Plane { name } => {
@@ -348,7 +350,10 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
             let m = b.mesh();
             let patch = m.surface_patch(*index);
             let tris = patch.iter().flat_map(|f| face_tris(&m, *f)).collect::<Vec<_>>();
-            let area: f64 = tris.iter().map(|[a, b, c]| (*b - *a).cross(*c - *a).len() * 0.5).sum();
+            let on_mesh: f64 = tris.iter().map(|[a, b, c]| (*b - *a).cross(*c - *a).len() * 0.5).sum();
+            // A curved face is measured on the surface it lies on, not on the triangles of
+            // the display mesh, which run inside the curve.
+            let area = super::measure_exact::patch_area(&b.body, &m, &patch).unwrap_or(on_mesh);
             let normals: Vec<UnitVec3> = tris.iter().filter_map(|[a, b, c]| (*b - *a).cross(*c - *a).unit()).collect();
             let planar = normals.first().copied().filter(|n0| normals.iter().all(|n| n.dot(*n0) > 1.0 - 1e-6));
             let mut json = json!({"type": "face", "area_mm2": area, "planar": planar.is_some()});
@@ -378,11 +383,16 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
             let closed = crate::cmd::inspect::encloses_volume(&body.body);
             let m = body.mesh();
             let tris: Vec<[Vec3; 3]> = m.triangles.iter().filter_map(|t| m.tri(t)).collect();
-            let v = m.measure().volume;
+            let definitions = s.model.state();
+            let v = if definitions.sheets.iter().any(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty()) {
+                super::inspect::measure_body(body, Some(&definitions)).ok()?.volume
+            } else {
+                m.measure().volume
+            };
             plain(Geo::Tris(tris), None, json!({"type": "body", "name": name, "closed": closed, "volume_mm3": closed.then_some(v)}))
         }
-        Sel::SketchCurve { id, sketch } => sketch_curve(sketch_of(s, &st, *sketch, |sk| sk.curve_index(id).is_some())?, id),
-        Sel::ExternalSketchCurve { sketch, id } => sketch_curve(sketch_of(s, &st, Some(*sketch), |_| true)?, id),
+        Sel::SketchCurve { id, sketch } => sketch_curve(sketch_of(s, st, *sketch, |sk| sk.curve_index(id).is_some())?, id),
+        Sel::ExternalSketchCurve { sketch, id } => sketch_curve(sketch_of(s, st, Some(*sketch), |_| true)?, id),
         Sel::SketchPoint { id } | Sel::ExternalSketchPoint { id, .. } => {
             let given = match sel {
                 Sel::ExternalSketchPoint { sketch, .. } => Some(*sketch),
@@ -393,7 +403,7 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
                 Some((k, p)) if given.is_none() => (Some(k), p),
                 _ => (given, id.as_str()),
             };
-            let ss = sketch_of(s, &st, given, |sk| sk.point_index(id).is_some())?;
+            let ss = sketch_of(s, st, given, |sk| sk.point_index(id).is_some())?;
             let p = ss.plane.to_world(ss.sketch.points.get(ss.sketch.point_index(id)?)?.pos);
             Some(Item {
                 geo: Geo::Points(vec![p]),
@@ -411,7 +421,8 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
 /// A picked item's exact shape with its points (an edge's polyline) and triangles (a face's),
 /// as Measure sees it: what [`crate::snap`] takes an item's centres, middle and ends from.
 pub(crate) fn shape_of(s: &Session, sel: &Sel) -> Option<(Shape, Vec<Vec3>, Vec<[Vec3; 3]>)> {
-    let item = describe(s, sel)?;
+    let world = s.world_state().ok()?;
+    let item = describe(s, &world, sel)?;
     Some(match item.geo {
         Geo::Points(p) => (item.shape, p, Vec::new()),
         Geo::Tris(t) => (item.shape, Vec::new(), t),
@@ -634,7 +645,7 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
     if list.is_empty() || list.len() > 1000 {
         return Err(bad(cmd, "measure one or two items"));
     }
-    let st = s.world_state();
+    let st = s.world_state()?;
     let mut sels = Vec::new();
     for value in list {
         let sel = match value.get("type").and_then(Value::as_str) {
@@ -653,10 +664,12 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
             return Err(bad(cmd, "measure one or two items"));
         }
     }
+    let world = s.world_state()?;
     let mut described = Vec::new();
     for x in &sels {
         described.push(
-            describe(s, x).ok_or_else(|| bad(cmd, "an item can't be measured (pick vertices, edges, faces, bodies, sketch curves or profiles)"))?,
+            describe(s, &world, x)
+                .ok_or_else(|| bad(cmd, "an item can't be measured (pick vertices, edges, faces, bodies, sketch curves or profiles)"))?,
         );
     }
     let mut out = json!({"items": described.iter().map(|d| d.json.clone()).collect::<Vec<_>>()});

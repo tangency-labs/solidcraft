@@ -1,7 +1,8 @@
 //! A tightly framed, view-aligned union of the projected body meshes.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::bad;
@@ -55,7 +56,7 @@ pub(crate) struct Silhouette {
 }
 
 pub(crate) fn outline(s: &Session, camera: &Camera, wanted: Option<&[String]>, rows: usize) -> Result<Silhouette> {
-    let state = s.world_state();
+    let state = s.world_state()?;
     if let Some(names) = wanted {
         for name in names {
             if !state.bodies.iter().any(|b| b.name == *name) {

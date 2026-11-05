@@ -4,7 +4,7 @@ use super::*;
 #[derive(Clone, Debug)]
 pub(in crate::render_workspace) enum Apply {
     Command { id: String, params: Value },
-    Maps { id: String, target: materials::Target, plane: String, scale: f64 },
+    Maps { id: String, target: materials::Target, plane: String, scale: f64, rotation_rad: f64 },
     Quality(Value),
     Physical(Value),
 }
@@ -139,7 +139,9 @@ fn apply(app: &mut SolveApp, draft: &mut Draft) -> Result<(), String> {
                 setups::load(app);
             }
         }
-        Apply::Maps { id, target, plane, scale } => materials::install_library_surface(app, id, target.clone(), plane, *scale)?,
+        Apply::Maps { id, target, plane, scale, rotation_rad } => {
+            materials::install_library_surface(app, id, target.clone(), plane, *scale, *rotation_rad)?
+        }
         Apply::Quality(plan) => {
             super::super::inspector::apply_quality(app, plan)?;
             setups::save(app)?;

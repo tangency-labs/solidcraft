@@ -1,0 +1,74 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 20,
+    "height": 30,
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": "Z",
+    "body_name": "Blank"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Cut"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      20,
+      0
+     ],
+     [
+      20,
+      30
+     ],
+     [
+      0,
+      30
+     ]
+    ],
+    "infer": false,
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "axis": "y",
+    "angle": "360 deg",
+    "operation": "cut"
+   }
+  }
+ ]
+}

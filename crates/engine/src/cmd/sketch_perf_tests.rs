@@ -19,7 +19,7 @@ fn big(n: usize) -> Session {
     let id = s.active_sketch.unwrap();
     let mut doc = (*s.doc).clone();
     let sk = doc.sketch_mut(id).unwrap();
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
     use solidcraft_sketch::ConstraintKind::*;
     let side = (n as f64).sqrt().ceil() as usize;
     for k in 0..n {
@@ -86,7 +86,7 @@ fn sketch_perf() {
 
 /// Fill sketch `id` with `n` constrained rectangles, each with a circle inside.
 fn fill(doc: &mut solidcraft_doc::Document, id: u64, n: usize, x0: f64) {
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
     use solidcraft_sketch::ConstraintKind::*;
     let Ok(sk) = doc.sketch_mut(id) else { return };
     for k in 0..n {

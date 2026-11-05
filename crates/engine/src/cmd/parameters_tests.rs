@@ -1,4 +1,5 @@
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 
 use crate::{EngineError, Session};
 
@@ -60,7 +61,9 @@ fn width_follows_an_expression() {
     run(&mut s, "parameters.change", json!({"name": "len", "expression": "5", "unit": "in"}));
     assert!(rel(volume(&mut s), 40.0 * 63.5 * 10.0) < 1e-9);
     let l = run(&mut s, "parameters.list", json!({}));
-    assert_eq!(row(&l, "len")["value"], 5.0, "{l}");
+    // `value` is mm in every reply; the own-unit number is `display_value` (#10747).
+    assert_eq!(row(&l, "len")["value"], 127.0, "{l}");
+    assert_eq!(row(&l, "len")["display_value"], 5.0, "{l}");
     assert_eq!(row(&l, "len")["unit"], "in");
     // A failing parameter fails the features using it, with its error.
     let e = err(&mut s, "parameters.change", json!({"name": "len", "expression": "5 deg"}));
@@ -254,6 +257,41 @@ fn rules_and_canvases_follow_a_renamed_parameter() {
     assert_eq!(s.doc.sheet.rules[0].thickness, "gauge");
 }
 
+/// #9623: outside a rule's own `thickness`, `Thickness` is the rule's thickness, not a design
+/// parameter of that name: renaming that parameter leaves it, and it doesn't count as a user.
+#[test]
+fn a_rules_own_thickness_is_not_a_parameter_named_thickness() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Thickness", "expression": "2 mm"}));
+    run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": "Thickness", "bend_radius": "Thickness", "active": true}));
+    run(&mut s, "plastic.manage_rules", json!({"name": "Housing", "thickness": "3 mm", "clearance": "Thickness / 10"}));
+    let u = run(&mut s, "parameters.users", json!({"name": "Thickness"}));
+    let fields: Vec<String> = u["users"].as_array().unwrap().iter().map(|x| x.to_string()).collect();
+    assert_eq!(fields.len(), 1, "only the sheet metal rule's thickness: {u}");
+    run(&mut s, "parameters.rename", json!({"name": "Thickness", "new_name": "Gauge"}));
+    let r = &s.doc.sheet.rules[0];
+    assert_eq!((r.thickness.as_str(), r.bend_radius.as_str(), r.gap.as_str()), ("Gauge", "Thickness", "Thickness"));
+    let housing = s.doc.plastic.rules.iter().find(|r| r.name == "Housing").unwrap();
+    assert_eq!(housing.clearance, "Thickness / 10");
+}
+
+/// #9623: renaming a parameter to `Thickness` is refused while a rule field other than its own
+/// thickness uses it (that field would then read the rule's thickness), and nothing changes.
+#[test]
+fn renaming_to_thickness_is_refused_where_a_rule_would_read_its_own() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Factor", "expression": "0.3", "unit": ""}));
+    run(&mut s, "parameters.add", json!({"name": "Gauge", "expression": "2 mm"}));
+    run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": "Gauge", "k_factor": "Factor", "active": true}));
+    let before = s.doc.clone();
+    let e = err(&mut s, "parameters.rename", json!({"name": "Factor", "new_name": "Thickness"}));
+    assert!(e.contains("sheet metal rule R (k_factor)"), "{e}");
+    assert!(s.doc == before, "a refused rename changes nothing");
+    // Used only by a rule's own thickness, the rename goes through.
+    run(&mut s, "parameters.rename", json!({"name": "Gauge", "new_name": "Thickness"}));
+    assert_eq!((s.doc.sheet.rules[0].thickness.as_str(), s.doc.sheet.rules[0].k_factor.as_str()), ("Thickness", "Factor"));
+}
+
 #[test]
 fn favorites_comments_and_completion() {
     let mut s = Session::default();
@@ -389,7 +427,8 @@ fn text_parameter_imports_accept_mixed_case_units() {
                 assert_eq!(label["comment"], "quoted label");
                 assert!(label["value"].is_null());
                 assert_eq!(row(&list, "width")["unit"], "in");
-                assert_eq!(row(&list, "width")["value"], 1.0);
+                assert_eq!(row(&list, "width")["value"], 25.4);
+                assert_eq!(row(&list, "width")["display_value"], 1.0);
                 assert_eq!(s.doc.param_values().0["width"].v, 25.4);
             }
             // Export still uses the canonical marker and round-trips the unquoted text.
@@ -665,7 +704,7 @@ fn a_failed_auto_constrain_keeps_the_stored_sketch_consistent() {
 }
 
 /// The stored sketch's points, by id.
-fn stored_points(s: &Session, feature: u64) -> Vec<solidcraft_geom::Vec2> {
+fn stored_points(s: &Session, feature: u64) -> Vec<solidcore_record::Vec2> {
     s.doc.sketch(feature).unwrap().points.iter().map(|p| p.pos).collect()
 }
 
@@ -696,7 +735,7 @@ fn an_unsolvable_value_edit_is_refused_and_changes_nothing() {
 fn value_edits_continue_from_the_last_solved_state() {
     // A → B → C, each a small edit solved in one jump; C is solved from B (the stored state),
     // and setting both values back reproduces A (the linkage is fully constrained).
-    let close = |a: &[solidcraft_geom::Vec2], b: &[solidcraft_geom::Vec2], tol: f64| a.iter().zip(b).all(|(p, q)| p.dist(*q) < tol);
+    let close = |a: &[solidcore_record::Vec2], b: &[solidcore_record::Vec2], tol: f64| a.iter().zip(b).all(|(p, q)| p.dist(*q) < tol);
     let (mut s, feature, params) = linkage_session();
     run(&mut s, "sketch.finish", json!({}));
     let a = stored_points(&s, feature);
@@ -933,8 +972,8 @@ fn a_parameter_added_without_a_unit_takes_the_design_unit() {
         let r = run(s, "parameters.add", p);
         (r["unit"].as_str().unwrap_or("?").to_string(), r["value"].as_f64().unwrap_or(f64::NAN), r["display_value"].as_f64().unwrap_or(f64::NAN))
     };
-    let close = |got: (String, f64, f64), unit: &str, mm: f64, shown: f64| {
-        assert!(got.0 == unit && rel(got.1, mm) < 1e-9 && rel(got.2, shown) < 1e-9, "{got:?}, expected {unit} {mm} mm ({shown})");
+    let close = |got: (String, f64, f64), unit: &str, val: f64, shown: f64| {
+        assert!(got.0 == unit && rel(got.1, val) < 1e-9 && rel(got.2, shown) < 1e-9, "{got:?}, expected {unit} {val} ({shown})");
     };
     // A millimetre design is as it was.
     let mut s = Session::default();
@@ -951,8 +990,8 @@ fn a_parameter_added_without_a_unit_takes_the_design_unit() {
     // One that refers to another parameter: its bare number is an inch too.
     close(added(&mut s, json!({"name": "more", "expression": "v + 1"})), "in", 533.4, 21.0);
     close(added(&mut s, json!({"name": "half", "expression": "v / 2"})), "in", 254.0, 10.0);
-    // An angle stays in degrees, a unit-less count stays unit-less.
-    close(added(&mut s, json!({"name": "turn", "expression": "30 deg"})), "deg", 30f64.to_radians(), 30.0);
+    // An angle reports degrees like every other reply, a unit-less count stays unit-less.
+    close(added(&mut s, json!({"name": "turn", "expression": "30 deg"})), "deg", 30.0, 30.0);
     close(added(&mut s, json!({"name": "n", "expression": "4", "unit": ""})), "", 4.0, 4.0);
     close(added(&mut s, json!({"name": "twice", "expression": "n * 2"})), "", 8.0, 8.0);
     // parameters.change and parameters.import make a new parameter the same way.
@@ -1194,4 +1233,52 @@ fn a_configuration_row_that_shrinks_a_dimensioned_line_to_a_point_is_refused() {
     // The Default row still activates and the line is untouched.
     run(&mut s, "config.activate", json!({"row": "Default"}));
     assert!((far_x(&s, feature) - 30.0).abs() < 1e-6);
+}
+
+/// #10747: `value` means millimetres (and degrees) in every reply — add, change and list —
+/// with the parameter's own unit in `display_value`. Reported numbers carry no float noise;
+/// stored values keep full precision.
+#[test]
+fn value_means_the_same_unit_in_every_reply() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    let a = run(&mut s, "parameters.add", json!({"name": "L", "expression": "2"}));
+    assert_eq!((a["value"].as_f64(), a["display_value"].as_f64()), (Some(50.8), Some(2.0)), "{a}");
+    // The change reply is rounded too: 3 in is 76.2, not 76.19999999999999.
+    let c = run(&mut s, "parameters.change", json!({"name": "L", "expression": "3"}));
+    assert_eq!((c["value"].as_f64(), c["display_value"].as_f64()), (Some(76.2), Some(3.0)), "{c}");
+    run(&mut s, "parameters.add", json!({"name": "d1", "expression": "L"}));
+    run(&mut s, "parameters.add", json!({"name": "d2", "expression": "1 in"}));
+    let l = run(&mut s, "parameters.list", json!({}));
+    // Every row's `value` is mm, whatever the parameter's own unit (#10747).
+    for (name, mm) in [("L", 76.2), ("d1", 76.2), ("d2", 25.4)] {
+        assert_eq!(row(&l, name)["value"], mm, "{name}: {l}");
+    }
+    assert_eq!(row(&l, "L")["display_value"], 3.0, "{l}");
+    assert_eq!(row(&l, "d2")["display_value"], 1.0, "{l}");
+    // An angle reports degrees like every other reply, without the noise.
+    let a = run(&mut s, "parameters.add", json!({"name": "ang", "expression": "30 deg"}));
+    assert_eq!((a["value"].as_f64(), a["display_value"].as_f64()), (Some(30.0), Some(30.0)), "{a}");
+    // Only what is reported is rounded: the stored value keeps full precision — the raw
+    // own-unit conversion still says 29.999999999999996.
+    let (vals, _) = s.doc.param_values();
+    assert_eq!(s.doc.param_display_value(&vals, "ang"), Some(29.999999999999996), "the stored angle keeps its bits");
+}
+
+/// #10747: exports carry the numbers a person would read, not float noise. The `value`
+/// column keeps the number in the parameter's own unit, as it always did.
+#[test]
+fn exports_round_reported_numbers() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "ang", "expression": "30 deg"}));
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "1.2 in"}));
+    run(&mut s, "parameters.add", json!({"name": "s", "expression": "0.1 + 0.2"}));
+    let csv = run(&mut s, "parameters.export", json!({"format": "csv"}))["text"].as_str().unwrap_or_default().to_string();
+    assert!(csv.contains("ang,deg,30 deg,30,,false"), "{csv}");
+    assert!(csv.contains("w,mm,1.2 in,30.48,,false"), "{csv}");
+    assert!(csv.contains("s,mm,0.1 + 0.2,0.3,,false"), "{csv}");
+    let json_text = run(&mut s, "parameters.export", json!({"format": "json"}))["text"].as_str().unwrap_or_default().to_string();
+    let rows: Vec<Value> = serde_json::from_str(&json_text).unwrap_or_default();
+    let vals: Vec<f64> = rows.iter().filter_map(|r| r["value"].as_f64()).collect();
+    assert_eq!(vals, vec![30.0, 30.48, 0.3], "{json_text}");
 }

@@ -24,12 +24,14 @@ mod look;
 mod rest;
 mod snap_fit;
 
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Pos2, vec2};
 use look::{
     CrossStyle, DIM, DIM_S, MARKER_ACTIVE, MARKER_HOT, RING_ACTIVE, RING_OPEN, RING_PX, RingStyle, angle_label, compass, crosshair, footprint, ring,
 };
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::dialogs::Dialog;
@@ -219,6 +221,19 @@ fn on_plane(proj: &Proj, pos: Pos2, base: Vec3, n: Vec3) -> Option<Vec3> {
     crate::gizmo::on_plane(proj, pos, base, n).filter(|p| p.is_finite())
 }
 
+/// The move marker alone, for a handle another module owns (a Single hole's, #6818): drawn as
+/// [`show`] draws its own, from the handle's hovered and dragged state, so a hole and a Rest on
+/// the same model show one language for the same action. `id` is the handle's; the motions keep
+/// their state under it. Nothing to step back for, so it is never dimmed.
+pub(crate) fn marker(ui: &egui::Ui, painter: &egui::Painter, id: egui::Id, c: Pos2, hovered: bool, dragging: bool) {
+    let style = CrossStyle {
+        hot: MARKER_HOT.run(ui.ctx(), id.with("hot"), hovered || dragging).t,
+        active: MARKER_ACTIVE.run(ui.ctx(), id.with("active"), dragging).t,
+        alpha: 1.0,
+    };
+    crosshair(painter, c, &style, &Tokens::get());
+}
+
 /// Draw the handles and take their drags (after the dialog's own arrow, so the marker wins
 /// the pointer near the base).
 pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) {
@@ -249,7 +264,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let (hovered, dragging) = (r.hovered(), r.dragged());
     // The tip while pointing, not while dragging: the hand is busy and the footprint says it all.
     if hovered && !dragging {
-        r.clone().on_hover_text(crate::i18n::tr_label(sp.move_tip));
+        r.clone().backing_on_hover_text(crate::i18n::tr_label(sp.move_tip));
     }
     // The handle not in use steps back while the other one works (the ring's drag is last frame's).
     let turning = ui.data(|m| m.get_temp::<bool>(id("turning"))).unwrap_or(false);
@@ -339,7 +354,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         compass(painter, &on, &dirs, style.active);
     }
     if hovered && !dragging {
-        r.clone().on_hover_text(crate::i18n::tr_label(turn.tip));
+        r.clone().backing_on_hover_text(crate::i18n::tr_label(turn.tip));
     }
     if hovered || dragging {
         ui.ctx().set_cursor_icon(if dragging { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });

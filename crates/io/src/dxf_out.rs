@@ -11,10 +11,11 @@
 //! subclass markers of each entity; the root dictionary and its group dictionary. Layers can be dashed and a drawing can carry TEXT (for annotations). Group
 //! codes follow Autodesk's public DXF reference.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 use std::fmt::Write as _;
 
-use solidcraft_geom::{Loop2, MAX_BEZIER_DEGREE, Seg2, Vec2};
+use solidcore_record::{Loop2, MAX_BEZIER_DEGREE, Seg2, Vec2};
 
 use crate::{IoError, Result};
 
@@ -763,7 +764,7 @@ mod tests {
         assert!(degree_2(&conic(2.0), Some(vec![1.0, 2.0, 1.0])));
         assert!(degree_2(&conic(1.0 - 1e-9), Some(vec![1.0, 1.0 - 1e-9, 1.0])));
         // A quintic piece: six control points and twelve knots.
-        let mut q = [Vec2::ZERO; solidcraft_geom::MAX_BEZIER_CTRL];
+        let mut q = [Vec2::ZERO; solidcore_record::MAX_BEZIER_CTRL];
         for (i, s) in q.iter_mut().enumerate() {
             *s = Vec2::new(i as f64, (i * i) as f64);
         }
@@ -774,13 +775,13 @@ mod tests {
 
     #[test]
     fn a_bezier_is_a_spline_of_its_own_degree_over_all_its_control_points() {
-        let mut q = [Vec2::ZERO; solidcraft_geom::MAX_BEZIER_CTRL];
+        let mut q = [Vec2::ZERO; solidcore_record::MAX_BEZIER_CTRL];
         for (i, s) in q.iter_mut().enumerate() {
             *s = Vec2::new(i as f64, (i * i) as f64);
         }
         // Every degree a Bézier piece can have, up to a G4 blend's 9: n + 1 control points, all of
         // them, and 2(n + 1) clamped knots.
-        for n in 4..=solidcraft_geom::MAX_BEZIER_DEGREE as u8 {
+        for n in 4..=solidcore_record::MAX_BEZIER_DEGREE as u8 {
             let k = usize::from(n) + 1;
             let DxfShape::Spline { degree, knots, ctrl, weights } = seg_shape(&Seg2::Bezier { n, p: q }) else { panic!("degree {n}") };
             assert_eq!((degree, knots.len(), weights), (n, 2 * k, None), "degree {n}");
@@ -875,7 +876,7 @@ mod tests {
         let Geom2::Spline { pts, control: true, degree: 3 } = &back[5] else { panic!("{:?}", back[5]) };
         assert!(pts.iter().zip(&cubic).all(|(a, b)| a.dist(*b) < 1e-9) && pts.len() == 4);
         // A degree-9 Bézier (a G4 blend) comes back at its own degree over all ten points.
-        let mut q = [Vec2::ZERO; solidcraft_geom::MAX_BEZIER_CTRL];
+        let mut q = [Vec2::ZERO; solidcore_record::MAX_BEZIER_CTRL];
         for (i, s) in q.iter_mut().enumerate() {
             *s = Vec2::new(i as f64, (i % 3) as f64);
         }

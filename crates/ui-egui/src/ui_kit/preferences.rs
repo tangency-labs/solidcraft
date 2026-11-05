@@ -1,6 +1,8 @@
 //! Shared preference compositions and explanatory figures. Figures are cheap painter content,
 //! never additional application viewports; every colour and control metric comes from tokens.
+pub(crate) use super::preferences_figure_data::{paint_assembly_move, paint_direct_interaction, paint_measure_axis_distances, paint_tool_cursor};
 use super::{metrics::dimension, text::paint_text};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{
     scenario,
     theme::{ColorVision, Tokens},
@@ -9,6 +11,79 @@ use egui::{Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, pos2, vec2}
 
 pub(super) const PAGE_SCROLL_GUTTER: &str = "sc_page_scroll_gutter";
 
+pub(crate) fn blur_cost_bars(radius: f32) -> usize {
+    if radius.is_finite() && radius > 0.0 { (radius / 8.0).ceil().clamp(1.0, 5.0) as usize } else { 0 }
+}
+
+fn blur_meter_width(t: &Tokens) -> f32 {
+    t.space_4 * 5.0 + t.space_2 * 4.0
+}
+
+fn blur_cost_meter(ui: &mut Ui, radius: f32) {
+    let t = Tokens::get();
+    let (rect, response) = ui.allocate_exact_size(vec2(blur_meter_width(&t), t.control_height), Sense::hover());
+    let filled = blur_cost_bars(radius);
+    if filled == 0 {
+        ui.painter().rect_filled(Rect::from_center_size(rect.center(), vec2(rect.width(), t.space_2)), t.radius_sm, t.form_dim);
+    } else {
+        let heights = [t.space_4, t.space_6, t.space_8, t.space_8 + t.space_3, t.space_14];
+        for (i, height) in heights.into_iter().enumerate() {
+            let bar = Rect::from_min_size(
+                pos2(rect.left() + i as f32 * (t.space_4 + t.space_2), rect.center().y + t.space_8 - height),
+                vec2(t.space_4, height),
+            );
+            ui.painter().rect_filled(bar, t.radius_sm, if i < filled { t.form_primary } else { t.dialog_rule });
+        }
+    }
+    scenario::publish_rect("prefs:blur_cost", rect);
+    response.backing_on_hover_text(crate::i18n::tr("prefs.blur_cost"));
+}
+
+/// Theme problems stay inline when space permits, with stacked text and wrapping actions otherwise.
+pub(crate) fn theme_option_notice(ui: &mut Ui, id: &str, text: &str, can_undo: bool) -> (bool, bool) {
+    let mut undo = false;
+    let mut dismiss = false;
+    let response = ui.push_id(("theme_notice", id, text), |ui| {
+        let t = Tokens::get();
+        let dismiss_label = crate::i18n::tr("prefs.theme_notice_dismiss");
+        let actions = super::ContentWidth::button(ui, dismiss_label)
+            + t.space_8
+            + if can_undo { super::ContentWidth::button(ui, crate::i18n::tr("ui.undo")) + t.space_8 } else { 0.0 };
+        let mut draw_actions = |ui: &mut Ui| {
+            if can_undo {
+                let response = super::text_button(ui, crate::i18n::tr("ui.undo"), true);
+                scenario::publish_target("prefs:theme_notice_undo:guard", response.rect);
+                undo = response.clicked();
+            }
+            let response = super::text_button(ui, dismiss_label, true);
+            scenario::publish_target(&format!("prefs:theme_notice_dismiss:{id}"), response.rect);
+            dismiss = response.clicked();
+        };
+        let width = dimension(ui.available_width());
+        let text_minimum =
+            ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(t.font_body), t.form_dim).size().x.min(t.form_label_width);
+        if width >= actions + text_minimum {
+            ui.horizontal_top(|ui| {
+                let width = dimension(ui.available_width() - actions);
+                ui.allocate_ui_with_layout(vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                    super::text(ui, text, super::Text::Hint(id));
+                });
+                draw_actions(ui);
+            });
+        } else {
+            ui.allocate_ui_with_layout(vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_width(width);
+                // The form normally truncates controls; a long translated action may wrap here.
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                super::text(ui, text, super::Text::Hint(id));
+                ui.horizontal_wrapped(draw_actions);
+            });
+        }
+    });
+    scenario::publish_rect(&format!("prefs:theme_notice:{id}"), response.response.rect);
+    (undo, dismiss)
+}
+
 /// Presentation data is resolved by the caller; controls never distinguish standard/custom ids.
 pub(crate) struct ThemeOptionRow<'a> {
     pub definition: &'a crate::theme_files::OptionDef,
@@ -16,6 +91,7 @@ pub(crate) struct ThemeOptionRow<'a> {
     pub help: String,
     pub choices: Vec<String>,
     pub reason: Option<String>,
+    pub blur: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -48,7 +124,10 @@ fn theme_option_metrics(ui: &Ui, option: &ThemeOptionRow<'_>, value: Option<&cra
                 .into_iter()
                 .map(|n| super::ContentWidth::label(ui, &format!("{n}{}", unit.as_deref().unwrap_or(""))))
                 .fold(0.0, f32::max);
-            theme_option_slider_minimum(&t) + t.space_8 + readout
+            if option.blur {
+                readout = readout.max(super::ContentWidth::label(ui, crate::i18n::tr("prefs.blur_off")));
+            }
+            theme_option_slider_minimum(&t) + t.space_8 + readout + if option.blur { blur_meter_width(&t) + t.space_8 } else { 0.0 }
         }
         OptionKind::Choice { values, .. } => {
             if values.len() > 5 {
@@ -67,17 +146,6 @@ fn theme_option_metrics(ui: &Ui, option: &ThemeOptionRow<'_>, value: Option<&cra
         .map_or(0.0, |reason| ui.painter().layout_no_wrap(reason.clone(), FontId::proportional(t.font_body), t.form_dim).size().x.ceil() + t.space_8);
     // settings_form/row use the measured label plus a fixed space_14 gutter.
     ThemeOptionMetrics { label, readout, reason, minimum: label + t.space_14 + control + reason }
-}
-
-/// A quiet badge drawn within the existing theme card, without changing its hit target or size.
-pub(crate) fn theme_options_badge(ui: &Ui, card: Rect, label: &str) {
-    let t = Tokens::get();
-    let text = ui.painter().layout_no_wrap(label.to_owned(), FontId::proportional(t.font_micro), t.form_ink);
-    let size = vec2(text.size().x + t.space_8, t.space_16);
-    let rect = Rect::from_min_size(card.left_top() + vec2(t.space_6, t.space_6), size);
-    ui.painter().rect_filled(rect, t.radius_sm, t.dialog_body);
-    ui.painter().galley(rect.center() - text.size() / 2.0, text, t.form_ink);
-    scenario::publish_rect("prefs:theme_options_badge", rect);
 }
 
 /// Ordered two-column list, with composite children sharing their parent's cell and hit row.
@@ -124,6 +192,9 @@ pub(crate) fn theme_options_list(
             for &index in cell {
                 let Some(option) = options.get(index) else { continue };
                 advanced |= option.definition.advanced;
+                if option.blur && cell.len() == 1 {
+                    width = Width::Wide;
+                }
                 if let OptionKind::Choice { values, .. } = &option.definition.kind
                     && choice_width(values.len()) == Width::Wide
                 {
@@ -136,8 +207,15 @@ pub(crate) fn theme_options_list(
         .collect();
     let plan = layout(&entries, dimension(ui.available_width()) - t.space_16);
     let mut reset = false;
-    let header = ui.horizontal(|ui| {
+    let header = ui.horizontal_wrapped(|ui| {
         super::text(ui, name, super::Text::Inline);
+        super::settings_inline_note(
+            ui,
+            &crate::i18n::format(
+                if options.len() == 1 { "prefs.appearance.option_count_one" } else { "prefs.appearance.option_count" },
+                &[("count", &options.len().to_string())],
+            ),
+        );
         if options.iter().any(|option| values.get(&option.definition.id).is_some_and(|v| *v != option.definition.default_value())) {
             let response = super::text_button(ui, crate::i18n::tr("prefs.theme_options_reset"), true);
             scenario::publish_target("prefs:theme_options_reset", response.rect);
@@ -242,7 +320,8 @@ fn theme_option_control(
                                 theme_option_switch(ui, &option.label, on);
                             }
                             (OptionKind::Range { min, max, step, unit, .. }, OptionValue::Num(n)) => {
-                                let available = dimension(ui.available_width() - metrics.readout - t.space_8);
+                                let meter = if option.blur { blur_meter_width(&t) + t.space_8 } else { 0.0 };
+                                let available = dimension(ui.available_width() - metrics.readout - t.space_8 - meter);
                                 // Standalone ranges fill their cell; composites retain their compact control alignment.
                                 let width =
                                     if fill_range { available } else { available.min(t.form_label_width.max(theme_option_slider_minimum(&t))) };
@@ -251,7 +330,12 @@ fn theme_option_control(
                                         ui,
                                         n,
                                         *min..=*max,
-                                        super::Slider { step: Some(f64::from(*step)), show_value: false, ..Default::default() },
+                                        super::Slider {
+                                            step: Some(f64::from(*step)),
+                                            show_value: false,
+                                            off_endpoint: option.blur,
+                                            ..Default::default()
+                                        },
                                     );
                                 });
                                 // Keep fractional theme values visible, including sliders with fractional steps.
@@ -259,10 +343,18 @@ fn theme_option_control(
                                     vec2(metrics.readout, t.control_height),
                                     egui::Layout::left_to_right(egui::Align::Center),
                                     |ui| {
-                                        super::text(ui, &format!("{}{}", *n, unit.as_deref().unwrap_or("")), super::Text::Inline);
+                                        let label = if option.blur && *n == 0.0 {
+                                            crate::i18n::tr("prefs.blur_off").to_owned()
+                                        } else {
+                                            format!("{}{}", *n, unit.as_deref().unwrap_or(""))
+                                        };
+                                        super::text(ui, &label, super::Text::Inline);
                                     },
                                 );
                                 scenario::publish_rect(&format!("prefs:theme_option_readout:{}", def.id), readout.response.rect);
+                                if option.blur {
+                                    blur_cost_meter(ui, *n);
+                                }
                             }
                             (OptionKind::Choice { values, .. }, OptionValue::Choice(selected)) => {
                                 let labels: Vec<_> = option.choices.iter().map(String::as_str).collect();
@@ -285,7 +377,7 @@ fn theme_option_control(
         .inner
         .response
     });
-    let response = response.inner.on_hover_text(&option.help);
+    let response = response.inner.backing_on_hover_text(&option.help);
     scenario::publish_target(&format!("prefs:theme_option:{}", def.id), response.rect);
     if let Some(reason) = &option.reason {
         let note = ui.horizontal(|ui| super::settings_inline_note(ui, reason));
@@ -363,23 +455,56 @@ pub(crate) fn settings_heading_with_tag(ui: &mut Ui, title: &str, description: &
         return;
     }
     let t = Tokens::get();
-    ui.scope(|ui| {
+    let page = super::settings_page_active(ui);
+    let heading = ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = t.space_3;
-        let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_16 + t.space_3), Sense::hover());
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(dimension(ui.available_width()), if page { t.space_24 } else { t.space_16 + t.space_3 }), Sense::hover());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
-        paint_text(ui, rect, title, crate::fonts::semibold(t.font_intro), t.form_ink, false);
+        paint_text(ui, rect, title, crate::fonts::semibold(if page { t.font_page_heading } else { t.font_intro }), t.form_ink, false);
         if let Some(tag) = tag {
-            let width = ui.painter().layout_no_wrap(title.to_owned(), crate::fonts::semibold(t.font_intro), t.form_ink).size().x;
+            let width = ui
+                .painter()
+                .layout_no_wrap(title.to_owned(), crate::fonts::semibold(if page { t.font_page_heading } else { t.font_intro }), t.form_ink)
+                .size()
+                .x;
             let start = (rect.left() + width + t.space_8).min(rect.right());
             let tag_rect = Rect::from_min_max(egui::pos2(start, rect.top()), rect.max);
-            ui.scope_builder(egui::UiBuilder::new().max_rect(tag_rect), tag);
+            ui.scope_builder(
+                egui::UiBuilder::new().max_rect(tag_rect).layout(if page { egui::Layout::right_to_left(egui::Align::Center) } else { *ui.layout() }),
+                tag,
+            );
         }
         super::text(ui, description, super::Text::Hint("settings_heading"));
     });
+    if page {
+        scenario::publish_rect("prefs:page_heading", heading.response.rect);
+    }
 }
 
 /// Settings reuse the same disclosure, uppercase typography and rule as the design system.
-pub(crate) fn settings_section<R>(ui: &mut Ui, key: &str, title: &str, mut add: impl FnMut(&mut Ui) -> R) -> Option<R> {
+pub(crate) fn settings_section<R>(ui: &mut Ui, key: &str, title: &str, add: impl FnMut(&mut Ui) -> R) -> Option<R> {
+    settings_section_count(ui, key, title, None, add)
+}
+
+/// A settings disclosure with a real item count, using the shared section badge.
+pub(crate) fn settings_section_count<R>(ui: &mut Ui, key: &str, title: &str, count: Option<&str>, add: impl FnMut(&mut Ui) -> R) -> Option<R> {
+    settings_section_count_spaced(ui, key, title, count, false, add)
+}
+
+/// A list section directly following its search toolbar uses the compact page rhythm.
+pub(crate) fn settings_list_section<R>(ui: &mut Ui, key: &str, title: &str, count: Option<&str>, add: impl FnMut(&mut Ui) -> R) -> Option<R> {
+    settings_section_count_spaced(ui, key, title, count, true, add)
+}
+
+fn settings_section_count_spaced<R>(
+    ui: &mut Ui,
+    key: &str,
+    title: &str,
+    count: Option<&str>,
+    compact: bool,
+    mut add: impl FnMut(&mut Ui) -> R,
+) -> Option<R> {
     if crate::prefs_search::querying(ui) {
         crate::prefs_search::begin_section(ui, title);
         if !ui.is_visible() {
@@ -402,20 +527,39 @@ pub(crate) fn settings_section<R>(ui: &mut Ui, key: &str, title: &str, mut add: 
         if !gained {
             return Some(missed);
         }
+        // Keep search headings outside wrapped rows in this section.
+        crate::prefs_search::reveal(ui);
         let mut child = crate::prefs_search::detached_child(ui, ("prefs-search-section", key), false);
         let result = add(&mut child);
         crate::prefs_search::place_search_child(ui, &child);
         return Some(result);
     }
     let t = Tokens::get();
-    ui.add_space(t.space_8);
-    super::section(ui, key, title, true, |ui| {
+    let page = super::settings_page_active(ui);
+    if page {
+        // The page's 10 pt item gap plus the shared disclosure's 2 pt inset complete 38 pt.
+        ui.add_space(if compact { 0.0 } else { t.space_24 + t.space_14 - t.space_10 - t.space_2 });
+    } else {
+        ui.add_space(t.space_8);
+    }
+    let gap = ui.spacing().item_spacing.y;
+    if page {
+        ui.spacing_mut().item_spacing.y = t.space_10;
+    }
+    let result = super::section_count(ui, key, title, true, count, |ui| {
         if let Some(rect) = scenario::rect_of(&format!("dialog:section:{title}")) {
             scenario::publish_rect(&format!("prefs:section:{key}"), rect);
         }
-        ui.spacing_mut().item_spacing.y = t.space_8;
-        add(ui)
-    })
+        ui.spacing_mut().item_spacing.y = if page { t.space_14 } else { t.space_8 };
+        let start = ui.next_widget_position();
+        let result = add(ui);
+        if page {
+            scenario::publish_rect(&format!("prefs:section:{key}:body"), Rect::from_min_max(start, ui.min_rect().max));
+        }
+        result
+    });
+    ui.spacing_mut().item_spacing.y = gap;
+    result
 }
 
 /// Full-width settings detail group. Container owns its surface; content cannot shrink the card.
@@ -429,21 +573,6 @@ pub(crate) fn settings_card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> e
         ui.set_min_width(dimension(ui.available_width()));
         add(ui)
     })
-}
-
-/// Only the four palette roles needed by a swatch, avoiding a copy of the full theme.
-#[derive(Clone, Copy)]
-pub(crate) struct ThemeSwatch {
-    background: Color32,
-    panel: Color32,
-    accent: Color32,
-    dim: Color32,
-    radius: u8,
-}
-impl From<Tokens> for ThemeSwatch {
-    fn from(t: Tokens) -> Self {
-        Self { background: t.viewport_top, panel: t.panel, accent: t.accent, dim: t.text_dim, radius: t.control_radius }
-    }
 }
 
 /// Controls and one explanatory specimen side by side, stacked on narrow viewports.
@@ -473,116 +602,14 @@ pub(crate) fn settings_pair<R>(ui: &mut Ui, controls: impl FnOnce(&mut Ui) -> R,
     }
 }
 
-/// A horizontally scrollable, draggable tile rail with its import action pinned outside it.
-/// The hidden scrollbar never reserves vertical space; a vertical wheel also moves the rail.
-pub(crate) fn theme_rail(ui: &mut Ui, tiles: impl FnOnce(&mut Ui), import: impl FnOnce(&mut Ui)) {
-    if crate::prefs_search::suppress_chrome(ui) {
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = Tokens::get().space_8;
-            tiles(ui);
-        });
-        import(ui);
-        return;
-    }
-    let t = Tokens::get();
-    let action_width = t.form_label_width + t.space_24 + t.space_6;
-    let rail_width = (dimension(ui.available_width()) - action_width - t.space_8).max(0.0);
-    ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = t.space_8;
-        ui.allocate_ui_with_layout(vec2(rail_width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-            ui.style_mut().always_scroll_the_only_direction = true;
-            // This rail paints its own fully opaque, page-coloured edge cues.
-            ui.spacing_mut().scroll.fade.strength = 0.0;
-            let mut rail = egui::ScrollArea::horizontal()
-                .id_salt("settings_theme_rail")
-                .max_width(rail_width)
-                .auto_shrink([false, true])
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                .scroll_source(egui::scroll_area::ScrollSource { drag: egui::scroll_area::DragScroll::Always, ..Default::default() })
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = t.space_8;
-                        tiles(ui);
-                    });
-                });
-            let max_offset = (rail.content_size.x - rail.inner_rect.width()).max(0.0);
-            let (left, right) = theme_rail_cues(rail.state.offset.x, max_offset);
-            let arrow_size = t.control_height.min(rail.inner_rect.width() / 2.0);
-            for (visible, direction, label) in [(left, -1.0, "Scroll left"), (right, 1.0, "Scroll right")] {
-                if !visible || arrow_size <= 0.0 {
-                    continue;
-                }
-                // The horizontal host starts with zero requested height; use the measured
-                // cards' height rather than the scroll area's initial viewport height.
-                let rail_rect = Rect::from_min_size(rail.inner_rect.min, vec2(rail.inner_rect.width(), rail.content_size.y));
-                theme_rail_fade(ui, rail_rect, direction);
-                let center = pos2(
-                    if direction < 0.0 { rail.inner_rect.left() + arrow_size / 2.0 } else { rail.inner_rect.right() - arrow_size / 2.0 },
-                    rail.inner_rect.top() + rail.content_size.y / 2.0,
-                );
-                let rect = Rect::from_center_size(center, vec2(arrow_size, t.control_height));
-                if theme_rail_arrow(ui, rect, direction, label).clicked() {
-                    rail.state.offset.x = (rail.state.offset.x + direction * (action_width + t.space_8)).clamp(0.0, max_offset);
-                    rail.state.store(ui.ctx(), rail.id);
-                    ui.ctx().request_repaint();
-                }
-            }
-        });
-        ui.allocate_ui_with_layout(vec2(action_width, 0.0), egui::Layout::top_down(egui::Align::Min), import);
-    });
-}
-
-/// Ignore subpixel rounding at either end so cues do not flicker on a fully visible rail.
-pub(super) fn theme_rail_cues(offset: f32, max_offset: f32) -> (bool, bool) {
-    (offset > 0.5, max_offset - offset > 0.5)
-}
-
-/// Preferences pages inherit the Window card's opaque dialog_body surface.
-/// Paint after the cards and before the arrows so the outer edge fully conceals content.
-fn theme_rail_fade(ui: &Ui, rail: Rect, direction: f32) {
-    let t = Tokens::get();
-    let width = (t.space_24 * 2.0 + t.space_8).min(rail.width() / 2.0);
-    let outer = if direction < 0.0 { rail.left() } else { rail.right() };
-    let inner = outer - direction * width;
-    let mut mesh = egui::Mesh::default();
-    for (x, color) in [(outer, t.dialog_body), (inner, Color32::TRANSPARENT)] {
-        mesh.colored_vertex(pos2(x, rail.top()), color);
-        mesh.colored_vertex(pos2(x, rail.bottom()), color);
-    }
-    mesh.add_triangle(0, 1, 2);
-    mesh.add_triangle(2, 1, 3);
-    ui.painter().with_clip_rect(ui.clip_rect().intersect(rail)).add(mesh);
-}
-
-pub(super) fn theme_rail_arrow(ui: &mut Ui, rect: Rect, direction: f32, label: &str) -> Response {
-    let t = Tokens::get();
-    let response = ui.interact(rect, ui.make_persistent_id(("theme_rail_arrow", label)), Sense::click());
-    if response.hovered() {
-        ui.painter().circle_filled(rect.center(), rect.width().min(rect.height()) / 2.0, t.hover);
-    }
-    let ink = if response.hovered() { t.form_ink } else { t.form_ink.gamma_multiply(0.65) };
-    let icon = Rect::from_center_size(rect.center(), vec2(t.space_16, t.space_16));
-    if direction < 0.0 {
-        crate::icons::paint_ink_mirrored(ui.painter(), icon, "chevron_right", ink);
-    } else {
-        crate::icons::paint_ink(ui.painter(), icon, "chevron_right", ink);
-    }
-    if response.has_focus() {
-        ui.painter().rect_stroke(rect, t.control_radius, Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Inside);
-    }
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), crate::i18n::tr_label(label)));
-    scenario::publish_target(&format!("prefs:theme_rail:{label}"), rect);
-    response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(crate::i18n::tr_label(label))
-}
-
-/// Dashed import tile matches the swatch tiles, while remaining permanently visible.
+/// Dashed import tile, bounded by its carousel cell.
 pub(crate) fn theme_import_tile(ui: &mut Ui, label: &str, note: &str) -> Response {
     if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[label, note]) {
         return crate::prefs_search::hidden_response(ui);
     }
     let t = Tokens::get();
-    let width = t.form_label_width + t.space_24 + t.space_6;
-    let height = t.control_height + t.space_6 * 2.0 + t.space_4 + t.space_16 * 2.0;
+    let width = t.space_24 * 3.0 + t.space_16;
+    let height = t.space_24 * 4.0;
     let (r, response) = ui.allocate_exact_size(vec2(width.min(dimension(ui.available_width())), height), Sense::click());
     if response.hovered() {
         ui.painter().rect_filled(r, t.radius_lg, t.hover);
@@ -619,6 +646,10 @@ pub(crate) fn settings_badge(ui: &mut Ui, text: &str, warning: bool) {
         return;
     }
     let t = Tokens::get();
+    if super::settings_page_active(ui) {
+        super::settings_state_badge(ui, text, if warning { super::SettingsBadgeTone::Warning } else { super::SettingsBadgeTone::Success });
+        return;
+    }
     let ink =
         if warning { if crate::theme::contrast_ratio(t.warning, t.dialog_body) >= 4.5 { t.warning } else { t.form_ink } } else { t.form_success };
     let fill = if warning { t.warning.gamma_multiply(0.1) } else { t.form_success_fill };
@@ -628,9 +659,14 @@ pub(crate) fn settings_badge(ui: &mut Ui, text: &str, warning: bool) {
     ui.painter().galley(r.center() - galley.size() / 2.0, galley, ink);
 }
 
+pub(crate) use super::preferences_figure_data::{
+    paint_select_bodies, paint_select_faces_edges, paint_sketch_conflict, paint_sketch_exit_keep, paint_sketch_exit_previous,
+    paint_sketch_exit_unless_turned, paint_sketch_guides, paint_sketch_hide_glyphs, paint_sketch_state_icons,
+};
+
 #[derive(Clone, Copy)]
 pub(crate) enum PreferenceFigure {
-    Theme { palette: ThemeSwatch, system: bool },
+    #[cfg(test)]
     Pivot(usize),
     Quality(usize),
     Antialiasing(u32),
@@ -651,26 +687,21 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
         }
     }
     let t = Tokens::get();
-    let theme = matches!(figure, PreferenceFigure::Theme { .. });
     let width = match figure {
-        PreferenceFigure::Theme { .. } => t.form_label_width + t.space_24 + t.space_6,
         PreferenceFigure::Antialiasing(_) => t.space_24 * 3.0 + t.space_16,
+        PreferenceFigure::UpAxis(_) => t.space_24 * 6.0 + t.space_6,
         _ => t.form_label_width + t.space_24 * 2.0 + t.space_6,
     };
-    let preview_height = if theme {
-        t.control_height
-    } else if matches!(figure, PreferenceFigure::Antialiasing(_)) {
-        t.space_24 * 3.0
-    } else {
-        t.space_24 * 3.0 + t.space_3
+    let preview_height = match figure {
+        PreferenceFigure::UpAxis(_) => t.space_24 * 4.0 + t.space_2,
+        PreferenceFigure::Antialiasing(_) => t.space_24 * 3.0,
+        _ => t.space_24 * 3.0 + t.space_3,
     };
     let label_height = if matches!(figure, PreferenceFigure::ContactShading(_)) { t.space_16 * 2.0 } else { t.space_16 };
     let height = preview_height + t.space_6 * 2.0 + t.space_4 + label_height + if note.is_some() { t.space_16 } else { 0.0 };
     let enabled = enabled && ui.is_enabled();
-    let (rect, response) = ui.allocate_exact_size(
-        vec2(if theme { width } else { width.min(dimension(ui.available_width())) }, height),
-        if enabled { Sense::click() } else { Sense::hover() },
-    );
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(width.min(dimension(ui.available_width())), height), if enabled { Sense::click() } else { Sense::hover() });
     let hover = enabled && response.hovered();
     let ink = if !enabled {
         t.form_dim
@@ -696,7 +727,12 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
     if matches!(figure, PreferenceFigure::Antialiasing(_)) {
         preview = Rect::from_center_size(preview.center(), vec2(preview.height(), preview.height()));
     }
-    paint_preference_figure(ui.painter(), preview, figure, enabled);
+    let figure_rect = if matches!(figure, PreferenceFigure::UpAxis(_)) {
+        Rect::from_center_size(preview.center(), vec2(preview.width(), preview.width() * 80.0 / 120.0))
+    } else {
+        preview
+    };
+    paint_preference_figure(ui.painter(), figure_rect, figure, enabled);
     let label_rect =
         Rect::from_min_size(pos2(rect.left() + t.space_4, preview.bottom() + t.space_4), vec2((rect.width() - t.space_8).max(0.0), label_height));
     centred_text_rows(
@@ -725,7 +761,7 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
     }
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, enabled, selected, label));
     scenario::publish_target(&format!("prefs:option:{label}"), rect);
-    let response = response.on_hover_text(label);
+    let response = response.backing_on_hover_text(label);
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
 
@@ -745,7 +781,7 @@ fn point(r: Rect, x: f32, y: f32) -> Pos2 {
     pos2(r.left() + r.width() * x, r.top() + r.height() * y)
 }
 
-fn paint_preference_figure(p: &egui::Painter, rect: Rect, figure: PreferenceFigure, enabled: bool) {
+pub(crate) fn paint_preference_figure(p: &egui::Painter, rect: Rect, figure: PreferenceFigure, enabled: bool) {
     if !p.clip_rect().intersects(rect) {
         return;
     }
@@ -753,17 +789,9 @@ fn paint_preference_figure(p: &egui::Painter, rect: Rect, figure: PreferenceFigu
     let p = p.with_clip_rect(rect);
     let alpha = if enabled { 1.0 } else { 0.4 };
     let accent = t.form_primary.gamma_multiply(alpha);
-    if let PreferenceFigure::Theme { palette, system } = figure {
-        theme_swatch(&p, rect, palette, false);
-        if system {
-            theme_swatch(&p, rect, Tokens::dark().into(), true);
-        }
-        return;
-    }
     p.rect_filled(rect, t.control_radius, t.viewport_top);
     t.container_rect(&p, rect, t.control_radius, egui::Color32::TRANSPARENT, t.dialog_rule);
     match figure {
-        PreferenceFigure::Theme { .. } => {}
         PreferenceFigure::Quality(sides) => {
             let n = sides.clamp(3, 96);
             let centre = rect.center();
@@ -807,6 +835,7 @@ fn paint_preference_figure(p: &egui::Painter, rect: Rect, figure: PreferenceFigu
             }
         }
         PreferenceFigure::UpAxis(y_up) => super::preferences_figures::paint_orientation(&p, rect, y_up),
+        #[cfg(test)]
         PreferenceFigure::Pivot(pivot) => super::preferences_figures::paint_orbit(&p, rect, pivot),
         PreferenceFigure::ContactShading(on) => super::preferences_figures::paint_contact_shading(&p, rect, on),
     }
@@ -832,59 +861,9 @@ pub(super) fn rounded_perimeter(r: Rect, radius: f32) -> Vec<Pos2> {
         .collect()
 }
 
-fn clip_half_plane(vertices: Vec<Pos2>, side: impl Fn(Pos2) -> f32) -> Vec<Pos2> {
-    let Some(mut previous) = vertices.last().copied() else { return vertices };
-    let mut clipped = Vec::with_capacity(vertices.len() + 2);
-    for current in vertices {
-        let a = side(previous);
-        let b = side(current);
-        if (a >= 0.0) != (b >= 0.0) {
-            clipped.push(previous + (current - previous) * (a / (a - b)));
-        }
-        if b >= 0.0 {
-            clipped.push(current);
-        }
-        previous = current;
-    }
-    clipped
-}
-
-fn theme_swatch(p: &egui::Painter, r: Rect, c: ThemeSwatch, diagonal: bool) {
-    let boundary = rounded_perimeter(r, f32::from(c.radius));
-    let fill = |mut vertices: Vec<Pos2>, color: Color32| {
-        if diagonal {
-            vertices = clip_half_plane(vertices, |v| (v.x - r.left()) / r.width() + (v.y - r.top()) / r.height() - 1.0);
-        }
-        for (index, &a) in boundary.iter().enumerate() {
-            let b = boundary.get(index + 1).copied().unwrap_or_else(|| boundary.first().copied().unwrap_or(a));
-            vertices = clip_half_plane(vertices, |v| (b.x - a.x) * (v.y - a.y) - (b.y - a.y) * (v.x - a.x));
-            if vertices.is_empty() {
-                break;
-            }
-        }
-        if vertices.len() >= 3 {
-            p.add(egui::Shape::convex_polygon(vertices, color, Stroke::NONE));
-        }
-    };
-    let rect =
-        |a: (f32, f32), b: (f32, f32), color| fill(vec![point(r, a.0, a.1), point(r, b.0, a.1), point(r, b.0, b.1), point(r, a.0, b.1)], color);
-    rect((0.0, 0.0), (1.0, 1.0), c.background);
-    rect((0.0, 0.0), (0.34, 1.0), c.panel);
-    rect((0.07, 0.29), (0.27, 0.40), c.dim);
-    rect((0.07, 0.54), (0.20, 0.65), c.dim);
-    let centre = point(r, 0.66, 0.5);
-    let radius = r.height() * 0.25;
-    fill(
-        (0..48)
-            .map(|i| {
-                let a = std::f32::consts::TAU * i as f32 / 48.0;
-                centre + vec2(a.cos(), a.sin()) * radius
-            })
-            .collect(),
-        c.accent,
-    );
-    rect((0.8, 0.39), (0.94, 0.61), c.panel);
-}
+pub(crate) use super::preferences_figure_data::{
+    paint_browser_card, paint_browser_column, paint_history_bottom, paint_history_in_browser, paint_history_left, paint_history_under_browser,
+};
 
 #[derive(Clone, Copy)]
 pub(crate) struct LayoutPreview {
@@ -892,30 +871,12 @@ pub(crate) struct LayoutPreview {
     pub labels: bool,
     pub history: usize,
     pub translucent: bool,
+    pub dialog_left: bool,
 }
 
-/// One live shell specimen follows all four layout choices; it is a schematic, not a second scene.
+/// One live shell specimen follows workspace, toolbar, panel and dialog placement choices.
 pub(crate) fn layout_preview(ui: &mut Ui, state: LayoutPreview) {
     super::preferences_figures::paint_layout(ui, state);
-}
-
-pub(crate) fn tab_accent_strip(ui: &mut Ui) {
-    if crate::prefs_search::suppress_chrome(ui) {
-        return;
-    }
-    let t = Tokens::get();
-    super::text(ui, crate::i18n::tr("prefs.tab_accent_note"), super::Text::Hint("tab_accent"));
-    // Named as the ribbon names its tabs, so each reads as its tab does in every language.
-    let names = ["MODEL", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER"];
-    let (r, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_24 + t.space_8), Sense::hover());
-    let width = r.width() / names.len() as f32;
-    for (i, name) in names.iter().enumerate() {
-        let rect = Rect::from_min_size(r.min + vec2(i as f32 * width, 0.0), vec2((width - t.space_6).max(0.0), t.space_6));
-        let accent = crate::theme::TabAccent::for_tab(&t, name);
-        ui.painter().rect_filled(rect, t.radius_sm, accent.color);
-        let label = Rect::from_min_size(pos2(rect.left(), rect.bottom() + t.space_4), vec2(rect.width(), t.space_16));
-        centred_text(ui.painter(), label, &crate::workspace::tab_name(name), FontId::proportional(t.font_small), t.form_dim);
-    }
 }
 
 pub(crate) fn scale_specimen(ui: &mut Ui, scale: f32) {
@@ -972,6 +933,20 @@ pub(crate) fn scale_specimen(ui: &mut Ui, scale: f32) {
 /// Font picker and auxiliary actions share one line, with the specimen below.
 pub(crate) fn settings_font_row(ui: &mut Ui, label: &str, mut add: impl FnMut(&mut Ui, usize)) {
     let t = Tokens::get();
+    if dimension(ui.available_width()) < t.form_label_width + t.space_24 * 14.0 {
+        super::settings_form(ui, t.form_label_width, |ui| {
+            let shown = super::row(ui, label, |ui| {
+                add(ui, 0);
+                ui.is_visible()
+            });
+            if shown {
+                super::below_row_control(ui, label, ui.available_width(), |ui| {
+                    ui.horizontal_wrapped(|ui| add(ui, 1));
+                });
+            }
+        });
+        return;
+    }
     super::settings_form(ui, t.form_label_width, |ui| {
         super::row(ui, label, |ui| {
             let actions = t.space_24 * 8.0 + t.space_8;
@@ -989,7 +964,11 @@ pub(crate) fn settings_inline_note(ui: &mut Ui, text: &str) {
         return;
     }
     let t = Tokens::get();
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(t.font_body), t.form_dim);
+    let galley = if super::settings_page_active(ui) && ui.layout().main_wrap() {
+        ui.painter().layout(text.to_owned(), FontId::proportional(t.font_body), t.form_dim, dimension(ui.max_rect().width()))
+    } else {
+        ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(t.font_body), t.form_dim)
+    };
     let (r, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
     ui.painter().galley(r.min, galley, t.form_dim);
@@ -1041,6 +1020,7 @@ pub(crate) fn status_palette_sample(ui: &mut Ui, mode: ColorVision) {
             let label = crate::i18n::tr(label);
             let galley = ui.painter().layout_no_wrap(label.to_owned(), crate::fonts::semibold(t.font_small), ink);
             let (r, _) = ui.allocate_exact_size(vec2(galley.size().x + t.space_24 + t.space_16, t.space_24), Sense::hover());
+            scenario::publish_rect(&format!("prefs:status_sample:{label}"), r);
             ui.painter().rect_filled(r, t.radius_xl, fill);
             crate::icons::paint_ink(
                 ui.painter(),
@@ -1062,72 +1042,20 @@ pub(crate) const COLOUR_VISION_SAMPLE: [&str; 6] =
 /// colours of `t` (the preference passes the mode being chosen, #7152). The six cells share one
 /// responsive, clipped area.
 pub(crate) fn colour_vision_sample(ui: &mut egui::Ui, t: &Tokens) {
-    let width = (dimension(ui.available_width()) / COLOUR_VISION_SAMPLE.len() as f32).min(t.space_24 * 3.0);
-    let line_width = t.space_4;
-    let (area, _) = ui.allocate_exact_size(egui::vec2(width * COLOUR_VISION_SAMPLE.len() as f32, t.space_24 * 2.0 + t.space_2), egui::Sense::hover());
+    if crate::prefs_search::suppress_chrome(ui) {
+        return;
+    }
+    let count = COLOUR_VISION_SAMPLE.len() as f32;
+    let gap = t.space_8.min(dimension(ui.available_width()) / (count - 1.0));
+    let width = ((dimension(ui.available_width()) - gap * (count - 1.0)) / count).min(t.space_24 * 3.0 + t.space_12);
+    let figure_height = t.space_24 + t.space_16 + t.space_4;
+    let (area, _) = ui.allocate_exact_size(vec2(width * count + gap * (count - 1.0), figure_height + t.space_3 + t.space_16), Sense::hover());
+    scenario::publish_rect("prefs:colour_vision_samples", area);
     let p = ui.painter_at(area);
-    let line = |c| egui::Stroke::new(line_width, c);
     for (i, name) in COLOUR_VISION_SAMPLE.iter().enumerate() {
-        let cell = egui::Rect::from_min_size(
-            area.min + egui::vec2(width * i as f32, 0.0),
-            egui::vec2((width - t.space_8).max(0.0), t.control_height + t.space_4),
-        );
-        let (a, b) = (cell.left_center() + egui::vec2(t.space_8, 0.0), cell.right_center() - egui::vec2(t.space_8, 0.0));
-        match i {
-            0 | 1 => {
-                p.rect_filled(cell, t.radius_sm, t.viewport_top);
-                p.line_segment([a, b], line(if i == 0 { t.sketch_locked } else { t.sketch_projected }));
-            }
-            2 => {
-                // X along and Y up from one corner, as the view triad draws them.
-                p.rect_filled(cell, t.radius_sm, t.viewport_top);
-                let o = cell.left_bottom() + egui::vec2(t.space_12, -(t.space_4 + t.space_3));
-                p.line_segment([o, egui::pos2(cell.right() - t.space_10, o.y)], line(t.axis_x));
-                p.line_segment([o, egui::pos2(o.x, cell.top() + t.space_6)], line(t.axis_y));
-            }
-            3 => {
-                // Dashed, as the flat pattern draws them.
-                p.rect_filled(cell, t.radius_sm, t.viewport_top);
-                for (dy, c) in [(-(t.space_4 + t.space_3), t.bend_up), (t.space_4 + t.space_3, t.bend_down)] {
-                    p.extend(egui::Shape::dashed_line(
-                        &[a + egui::vec2(0.0, dy), b + egui::vec2(0.0, dy)],
-                        line(c),
-                        t.space_8,
-                        t.space_3 + t.space_2,
-                    ));
-                }
-            }
-            4 => {
-                // The three bands of Draft Analysis; in a mode the negative one is striped.
-                let w = cell.width() / 3.0;
-                for (k, c) in t.analysis.draft.iter().enumerate() {
-                    let band = egui::Rect::from_min_size(cell.min + egui::vec2(w * k as f32, 0.0), egui::vec2(w, cell.height()));
-                    p.rect_filled(band, 0.0, crate::theme::srgb(*c));
-                    if k == 2 && t.analysis.hatch {
-                        let stripes = p.with_clip_rect(band);
-                        let dark = crate::theme::srgb(c.map(|x| x * 0.6));
-                        let mut x = band.left() - band.height();
-                        while x < band.right() {
-                            stripes.line_segment(
-                                [egui::pos2(x, band.bottom()), egui::pos2(x + band.height(), band.top())],
-                                egui::Stroke::new(2.0, dark),
-                            );
-                            x += t.space_6 + t.space_3;
-                        }
-                    }
-                }
-            }
-            _ => {
-                // A failed feature on the timeline.
-                p.rect(
-                    cell.shrink2(egui::vec2(t.space_10, t.space_3)),
-                    t.radius_sm,
-                    t.timeline_item_error,
-                    egui::Stroke::new(1.0, t.error),
-                    egui::StrokeKind::Inside,
-                );
-            }
-        }
+        let cell = egui::Rect::from_min_size(area.min + vec2((width + gap) * i as f32, 0.0), vec2(width, figure_height));
+        scenario::publish_rect(&format!("prefs:colour_vision_sample:{i}"), cell);
+        super::preferences_figure_ops::paint_colour_vision(&p, cell, i, t);
         centred_text(
             &p,
             Rect::from_min_size(cell.left_bottom() + vec2(0.0, t.space_3), vec2(cell.width(), t.space_16)),

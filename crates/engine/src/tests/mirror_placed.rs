@@ -3,13 +3,13 @@
 //! geometry and put the copy in the active component, so the copy lost the placement.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use super::run;
 use crate::*;
 
 fn world_box(s: &Session, body: &str) -> (Vec3, Vec3) {
-    let b = s.world_state().body(body).unwrap_or_else(|| panic!("no body `{body}`")).mesh().bounds();
+    let b = s.world_state().unwrap().body(body).unwrap_or_else(|| panic!("no body `{body}`")).mesh().bounds();
     (b.min, b.max)
 }
 
@@ -56,7 +56,7 @@ fn a_further_instance_is_mirrored_at_its_own_placement() {
     let mut s = Session::default();
     let (component, _) = moved_arm(&mut s);
     run(&mut s, "occurrence.copy", json!({"component": component, "translate": [0, 0, 40]}));
-    let names: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
     let instance = names.iter().find(|n| n.starts_with("ArmBody (")).cloned().unwrap();
     let r = run(&mut s, "solid.mirror", json!({"bodies": ["ArmBody", instance], "plane": "YZ"}));
     let copies: Vec<String> = r["created_bodies"].as_array().unwrap().iter().map(|n| n.as_str().unwrap().to_string()).collect();
@@ -230,7 +230,7 @@ fn a_placement_leading_to_another_component_is_reported_lost() {
     s.refresh();
     let e = s.model.result(mirror).and_then(|r| r.error.clone()).unwrap_or_else(|| panic!("mirrored at the wrong placement"));
     assert!(e.contains("no longer exists"), "{e}");
-    assert!(s.world_state().body(&copy).is_none());
+    assert!(s.world_state().unwrap().body(&copy).is_none());
 }
 
 /// A carriage-like part (a bored block and a ring) placed once, free to move: its occurrence and
@@ -247,7 +247,7 @@ fn curved_part(s: &mut Session) -> (u64, Vec<String>) {
 
 /// The shown bodies drawn, as a viewport does, and the tessellation that took.
 fn drawn(s: &Session) -> f64 {
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let (_, work) = solidcraft_kernel::profile::capture(|| {
         for b in &world.bodies {
             b.mesh_in_place();
@@ -265,7 +265,7 @@ fn assert_as_evaluated_afresh(s: &Session) {
     fresh.no_cache = true;
     fresh.evaluate(&s.doc);
     assert!(fresh.results.iter().all(|r| r.error.is_none()));
-    let (shown, want) = (s.world_state(), solidcraft_doc::world_state(&s.doc, &fresh.state()));
+    let (shown, want) = (s.world_state().unwrap(), solidcraft_doc::world_state(&s.doc, &fresh.state()).unwrap());
     assert_eq!(shown.bodies.len(), want.bodies.len());
     for (a, b) in shown.bodies.iter().zip(&want.bodies) {
         assert_eq!(a.name, b.name);
@@ -329,7 +329,7 @@ fn a_mirrored_copys_shared_triangles_are_display_only() {
     let r = run(&mut s, "solid.mirror", json!({"bodies": bodies, "plane": "XZ"}));
     run(&mut s, "occurrence.drag", json!({"occurrence": occurrence, "at": [0, 0, 0], "point": [0, 3, 0], "continuous": true}));
     drawn(&s);
-    let (state, world) = (s.model.state(), s.world_state());
+    let (state, world) = (s.model.state(), s.world_state().unwrap());
     for copy in r["created_bodies"].as_array().unwrap().iter().map(|n| n.as_str().unwrap()) {
         assert!(world.body(copy).is_some_and(|b| b.cached_mesh().is_some()), "{copy} was drawn");
         assert!(state.body(copy).unwrap().cached_mesh().is_none(), "{copy}: the model's own mesh is its own");

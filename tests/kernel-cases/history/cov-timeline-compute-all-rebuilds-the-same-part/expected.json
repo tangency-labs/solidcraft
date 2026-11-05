@@ -1,0 +1,18 @@
+{
+ "sources": [],
+ "what": "timeline.compute_all rebuilds every feature from nothing to the same part",
+ "method": "the notch first splits the front top edge; the round R2 on the piece at (5,0,10), x 0..15: V = 12000 - 500 - (1-pi/4) 4 15; faces 6 + 4 + 1 round = 11; 4 features, none failing",
+ "body_count": 1,
+ "volume_mm3": 11487.123889803846,
+ "faces": 11,
+ "results": [
+  {
+   "step": 7,
+   "json": {
+    "features": 4,
+    "errors": 0
+   }
+  }
+ ],
+ "source": "analytic"
+}

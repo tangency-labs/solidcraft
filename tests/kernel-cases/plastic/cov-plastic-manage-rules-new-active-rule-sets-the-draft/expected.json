@@ -1,0 +1,31 @@
+{
+ "sources": [],
+ "what": "plastic.manage_rules makes a rule from the Polypropylene library rule with a 1 degree draft and makes it active; a round rest with no draft of its own takes it",
+ "source": "analytic",
+ "method": "the new rule starts from Polypropylene (PP) (3 mm): thickness 3, nominal radius 0.5*Thickness = 1.5, thickness variation 0.15*Thickness = 0.45, clearance 0.1, min/max 0.8/3.8, its draft set to 1 deg. A solid round rest 10 across and 5 high drafted 1 deg: V = 60*40*3 + (pi*5/3)(5^2 + 5 r1 + r1^2), r1 = 5 - 5 tan 1 deg, = 7585.884376",
+ "body_count": 1,
+ "volume_mm3": 7585.884376156436,
+ "results": [
+  {
+   "step": 2,
+   "json": {
+    "active": "PP draft 1",
+    "rule": {
+     "name": "PP draft 1",
+     "material": "Polypropylene",
+     "library": false,
+     "values": {
+      "thickness": 3.0,
+      "nominal_radius": 1.5,
+      "thickness_variation": 0.45,
+      "clearance": 0.1,
+      "draft_deg": 1.0,
+      "min_thickness": 0.8,
+      "max_thickness": 3.8,
+      "min_draft_deg": 0.5
+     }
+    }
+   }
+  }
+ ]
+}

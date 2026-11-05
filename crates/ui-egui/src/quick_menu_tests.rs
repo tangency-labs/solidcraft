@@ -60,8 +60,8 @@ fn model_picks_offer_their_commands_to_start() {
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
     h.app.run("solid.box", json!({"length": 10, "width": 20, "height": 30})).unwrap();
-    let body = h.app.session.world_state().bodies.first().map(|b| b.name.clone()).unwrap();
-    let edge = |x: f64| Sel::Edge { body: body.clone(), index: 0, point: solidcraft_engine::geom::Vec3::new(x, 0.0, 0.0) };
+    let body = h.app.session.world_state().unwrap().bodies.first().map(|b| b.name.clone()).unwrap();
+    let edge = |x: f64| Sel::Edge { body: body.clone(), index: 0, point: solidcore_record::Vec3::new(x, 0.0, 0.0) };
     h.app.session.selection = vec![edge(5.0)];
     let fit = fitting(&h.app);
     for id in ["solid.fillet", "solid.chamfer"] {
@@ -69,9 +69,9 @@ fn model_picks_offer_their_commands_to_start() {
         assert!(item.params.is_none(), "{id} starts its dialog, which takes the edge");
     }
     assert!(!ids(&fit).iter().any(|id| id.starts_with("sketch.constraint.")), "{:?}", ids(&fit));
-    h.app.session.selection = vec![Sel::Face { body: body.clone(), index: 0, point: solidcraft_engine::geom::Vec3::new(5.0, 10.0, 30.0) }];
+    h.app.session.selection = vec![Sel::Face { body: body.clone(), index: 0, point: solidcore_record::Vec3::new(5.0, 10.0, 30.0) }];
     assert!(ids(&fitting(&h.app)).contains(&"solid.shell"), "{:?}", ids(&fitting(&h.app)));
-    h.app.session.selection = vec![edge(5.0), Sel::Edge { body: "Other".into(), index: 1, point: solidcraft_engine::geom::Vec3::new(0.0, 0.0, 0.0) }];
+    h.app.session.selection = vec![edge(5.0), Sel::Edge { body: "Other".into(), index: 1, point: solidcore_record::Vec3::new(0.0, 0.0, 0.0) }];
     assert!(!ids(&fitting(&h.app)).contains(&"solid.fillet"));
 }
 

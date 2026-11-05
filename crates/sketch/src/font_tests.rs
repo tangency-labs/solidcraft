@@ -2,9 +2,10 @@
 //! known by hand; the repository's second font (BIZ UDPGothic, `assets/fonts/biz-udp-gothic`) stands for
 //! a real one.
 
+use solidcraft_geom::prelude::*;
 use std::path::PathBuf;
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 
 use crate::fonts::find_family_in;
 use crate::tests::v;

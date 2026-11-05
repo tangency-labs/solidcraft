@@ -1,4 +1,5 @@
 //! Shot strip adapters. Commands own saved intent; the kit owns every control and layout.
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, ui_kit};
 use serde_json::json;
 use solidcraft_engine::{doc::render_settings::RenderSettings, render::job::Phase};
@@ -7,13 +8,6 @@ pub(super) const SIZE_PRESETS: [(&str, u32, u32); 3] = [("HD", 1280, 720), ("Ful
 
 pub(super) fn camera_modified(app: &SolveApp, name: &str) -> bool {
     app.session.doc.render.setups.get(name).is_some_and(|setup| setup.camera != app.cam)
-}
-
-/// Update just the saved camera, preserving all the shot's other saved intent.
-pub(super) fn update_camera(app: &mut SolveApp) -> Result<(), String> {
-    let name = app.render_workspace.view.name.clone();
-    app.run("render.settings.set", json!({"name":name,"set":{"camera":app.cam}}))?;
-    Ok(())
 }
 
 pub(crate) fn contents(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -58,7 +52,7 @@ pub(crate) fn contents(app: &mut SolveApp, ui: &mut egui::Ui) {
             let response = ui_kit::completion_text(ui, &queue_label, false);
             crate::scenario::publish_rect("render:shots:queue", response.rect);
             let response = ui_kit::icon_label_action(ui, app.tr("cmd.render_start"), Some("play"), ready.is_ok(), true);
-            let response = if let Err(reason) = &ready { response.on_disabled_hover_text(reason) } else { response };
+            let response = if let Err(reason) = &ready { response.backing_on_disabled_hover_text(reason) } else { response };
             crate::scenario::publish_target("render:shots:render", response.rect);
             start = response.clicked();
             let response = ui_kit::compact_dropdown_menu(ui, "render_shots_size", &size_label, |ui| {
@@ -68,7 +62,7 @@ pub(crate) fn contents(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let mut response =
                         ui_kit::list_picker(ui, label, mark.as_deref().unwrap_or(&text), draft.width == width && draft.height == height);
                     if mark.is_some() {
-                        response = response.on_hover_text(super::inspector::size_limit_reason(app, width, height));
+                        response = response.backing_on_hover_text(super::inspector::size_limit_reason(app, width, height));
                     }
                     if response.clicked() {
                         size = Some((width, height));

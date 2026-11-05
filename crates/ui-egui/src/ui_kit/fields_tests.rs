@@ -5,8 +5,42 @@ use crate::scenario;
 use egui::Ui;
 
 #[test]
+fn combo_backing_zero_preserves_stock_shapes_and_semantics() {
+    let fixture = |stock: bool| {
+        let ctx = crate::fonts::test_context();
+        let mut id = egui::Id::NULL;
+        let mut semantics = String::new();
+        let mut output = egui::FullOutput::default();
+        for pass in 0..4 {
+            if pass > 0 {
+                egui::Popup::open_id(&ctx, id.with("popup"));
+            }
+            output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+                let salt = egui::IdSalt::new("stock combo");
+                let widget = ui.make_persistent_id(salt);
+                let combo = egui::ComboBox::from_id_salt("stock combo").selected_text("One");
+                let mut body = |ui: &mut Ui| {
+                    let response = ui.button("Two");
+                    semantics = format!("{:?}", (ui.id(), ui.max_rect(), ui.clip_rect(), response.id, response.rect));
+                };
+                let response = if stock { combo.show_ui(ui, &mut body) } else { container::show_combo(ui, widget, combo, &mut body) };
+                id = response.response.id;
+                assert_eq!(widget, id);
+                semantics.push_str(&format!("{:?}", (id, response.response.rect, response.inner)));
+            });
+        }
+        let mut shapes = Vec::new();
+        for clipped in &output.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| shapes.push(format!("{:?} {shape:?}", clipped.clip_rect)));
+        }
+        (semantics, shapes)
+    };
+    assert_eq!(fixture(true), fixture(false), "zero adds no shapes or slots and keeps native IDs, geometry and clip");
+}
+
+#[test]
 fn every_text_input_centres_its_galley_for_mono_and_proportional_fonts() {
-    for case in ["expression", "plain", "cell", "invalid", "library", "placement", "password", "multiline", "area", "message"] {
+    for case in ["expression", "plain", "cell", "invalid", "library", "placement", "password", "multiline", "area", "message", "search"] {
         let ctx = crate::fonts::test_context();
         let mut value = "Centred".to_owned();
         let mut rect = egui::Rect::NOTHING;
@@ -16,6 +50,7 @@ fn every_text_input_centres_its_galley_for_mono_and_proportional_fonts() {
                 let id = ui.id().with(case);
                 rect = match case {
                     "expression" | "plain" => super::editor(ui, &mut value, "", case == "expression").2.rect,
+                    "search" => search_field(ui, id, &mut value, "Search").rect,
                     "cell" | "invalid" => cell_editor(ui, id, &mut value, "", case == "invalid").rect,
                     "library" => library_cell(ui, id, &mut value, "", |_| {}).rect,
                     "placement" => placement_field(ui, id, &mut value, "").rect,
@@ -37,6 +72,9 @@ fn every_text_input_centres_its_galley_for_mono_and_proportional_fonts() {
             .unwrap_or_else(|| panic!("{case}: missing text"));
         let center = galley.pos.y + galley.galley.rect.center().y;
         assert!((center - rect.center().y).abs() < 0.01, "{case}: galley centre {center} differs from field {rect:?}");
+        if case == "search" {
+            assert!(galley.pos.x >= rect.left() + crate::theme::Tokens::get().space_24, "search text leaves room for its icon");
+        }
         if case == "placement" {
             let font = egui::FontId::proportional(crate::theme::Tokens::get().font_body);
             let native = ctx.fonts_mut(|fonts| fonts.row_height(&font))
@@ -521,6 +559,96 @@ fn preference_dropdown_keeps_disabled_choices_inert_and_closes_after_selection()
 }
 
 #[test]
+fn dropdown_popups_own_escape_and_return_focus_without_canceling_the_window() {
+    use std::cell::Cell;
+    let previous = crate::theme::is_dark();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        for kind in ["plain", "icons", "compact", "editable"] {
+            let ctx = crate::fonts::test_context();
+            let action = Cell::new(Action::None);
+            let trigger = Cell::new(None);
+            let selected = Cell::new(0);
+            let mut draw = |ui: &mut Ui| {
+                let ctx = ui.ctx().clone();
+                action.set(
+                    Window::new(egui::Id::new(("dropdown_escape", kind)), "settings", "Preferences")
+                        .cards(1.0)
+                        .fields()
+                        .actions("OK", "Cancel", None)
+                        .show(&ctx, true, |ui| {
+                            // An earlier, closed dropdown must not steal this popup's Escape or focus.
+                            row(ui, "Units", |ui| {
+                                dropdown(ui, "units", &mut 0, &["mm", "in"]);
+                            });
+                            row(ui, "Visual style", |ui| {
+                                let options = crate::navigation_bar::VISUAL_STYLES.map(|(_, label)| label);
+                                let icons = crate::navigation_bar::VISUAL_STYLES
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(index, (_, label))| (*label, crate::navigation_bar::visual_style_icon(index as u8)))
+                                    .collect::<Vec<_>>();
+                                let mut choice = selected.get();
+                                let choices = |ui: &mut Ui| {
+                                    for (index, option) in options.iter().enumerate() {
+                                        let response = ui.selectable_label(selected.get() == index, *option);
+                                        scenario::publish_target(&format!("dialog:Visual style:{option}"), response.rect);
+                                        if response.clicked() {
+                                            selected.set(index);
+                                        }
+                                    }
+                                };
+                                let response = match kind {
+                                    "plain" => dropdown(ui, "styles", &mut choice, &options),
+                                    "icons" => dropdown_icons(ui, "styles", &mut choice, &icons),
+                                    "compact" => compact_dropdown_menu(ui, "styles", options[selected.get()], choices),
+                                    _ => dropdown_menu_with_close_behavior(
+                                        ui,
+                                        "styles",
+                                        options[selected.get()],
+                                        egui::PopupCloseBehavior::CloseOnClickOutside,
+                                        choices,
+                                    ),
+                                };
+                                trigger.set(Some(response.id));
+                                if matches!(kind, "plain" | "icons") {
+                                    selected.set(choice);
+                                }
+                            });
+                        })
+                        .1,
+                );
+            };
+            for _ in 0..3 {
+                frame(&ctx, vec![], &mut draw);
+            }
+            let at = scenario::handle_at("dialog:Visual style").unwrap();
+            frame(&ctx, pointer(at, true), &mut draw);
+            frame(&ctx, pointer(at, false), &mut draw);
+            frame(&ctx, vec![], &mut draw);
+            assert!(scenario::handle_at("dialog:Visual style:Wireframe").is_some(), "{kind}: popup opens");
+            frame(&ctx, key(egui::Key::Escape), &mut draw);
+            assert_eq!(action.get(), Action::None, "{kind}: first Escape belongs to the popup");
+            assert!(ctx.memory(|m| m.has_focus(trigger.get().unwrap())), "{kind}: Escape refocuses its own trigger");
+            frame(&ctx, vec![], &mut draw);
+            assert!(scenario::handle_at("dialog:Visual style:Wireframe").is_none());
+            frame(&ctx, key(egui::Key::Enter), &mut draw);
+            assert_eq!(action.get(), Action::None, "{kind}: Enter reopens rather than submitting");
+            frame(&ctx, vec![], &mut draw);
+            assert!(scenario::handle_at("dialog:Visual style:Wireframe").is_some(), "{kind}: focused trigger reopens on Enter");
+            frame(&ctx, key(egui::Key::Escape), &mut draw);
+            assert_eq!(action.get(), Action::None);
+            frame(&ctx, vec![], &mut draw);
+            assert!(scenario::handle_at("dialog:Visual style:Wireframe").is_none());
+            frame(&ctx, key(egui::Key::Escape), &mut draw);
+            assert_eq!(action.get(), Action::Cancel, "{kind}: Escape without a popup cancels normally");
+            assert_eq!(selected.get(), 0, "dismissal does not select an option");
+        }
+    }
+    crate::theme::set_dark(previous);
+}
+
+#[test]
 fn secret_field_retains_focus_and_masks_paint_and_accessibility_events() {
     let ctx = crate::fonts::test_context();
     let id = egui::Id::new("secret_test");
@@ -801,6 +929,90 @@ fn selection_field_has_three_distinct_looks_in_every_theme() {
         assert_eq!(empty.1, Some(t.form_dim), "{name}: an empty input's prompt is dim");
     }
     crate::theme::set_custom(None);
+    crate::theme::set_dark(previous);
+}
+
+#[test]
+fn navigation_dropdown_popups_own_escape_and_return_focus_without_canceling_the_window() {
+    use std::cell::Cell;
+    let previous = crate::theme::is_dark();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        for kind in ["plain", "compact", "editable"] {
+            let ctx = crate::fonts::test_context();
+            let action = Cell::new(Action::None);
+            let trigger = Cell::new(None);
+            let selected = Cell::new(0);
+            let mut draw = |ui: &mut Ui| {
+                let ctx = ui.ctx().clone();
+                action.set(
+                    Window::new(egui::Id::new(("dropdown_escape", kind)), "settings", "Preferences")
+                        .cards(1.0)
+                        .fields()
+                        .actions("OK", "Cancel", None)
+                        .show(&ctx, true, |ui| {
+                            // An earlier, closed dropdown must not steal this popup's Escape or focus.
+                            row(ui, "Units", |ui| {
+                                dropdown(ui, "units", &mut 0, &["mm", "in"]);
+                            });
+                            row(ui, "Visual style", |ui| {
+                                let options = crate::navigation_bar::VISUAL_STYLES.map(|(_, label)| label);
+                                let mut choice = selected.get();
+                                let choices = |ui: &mut Ui| {
+                                    for (index, option) in options.iter().enumerate() {
+                                        let response = ui.selectable_label(selected.get() == index, *option);
+                                        scenario::publish_target(&format!("dialog:Visual style:{option}"), response.rect);
+                                        if response.clicked() {
+                                            selected.set(index);
+                                        }
+                                    }
+                                };
+                                let response = match kind {
+                                    "plain" => dropdown(ui, "styles", &mut choice, &options),
+                                    "compact" => compact_dropdown_menu(ui, "styles", options[selected.get()], choices),
+                                    _ => dropdown_menu_with_close_behavior(
+                                        ui,
+                                        "styles",
+                                        options[selected.get()],
+                                        egui::PopupCloseBehavior::CloseOnClickOutside,
+                                        choices,
+                                    ),
+                                };
+                                trigger.set(Some(response.id));
+                                if kind == "plain" {
+                                    selected.set(choice);
+                                }
+                            });
+                        })
+                        .1,
+                );
+            };
+            for _ in 0..3 {
+                frame(&ctx, vec![], &mut draw);
+            }
+            let at = scenario::handle_at("dialog:Visual style").unwrap();
+            frame(&ctx, pointer(at, true), &mut draw);
+            frame(&ctx, pointer(at, false), &mut draw);
+            frame(&ctx, vec![], &mut draw);
+            assert!(scenario::handle_at("dialog:Visual style:Wireframe").is_some(), "{kind}: popup opens");
+            frame(&ctx, key(egui::Key::Escape), &mut draw);
+            assert_eq!(action.get(), Action::None, "{kind}: first Escape belongs to the popup");
+            assert!(ctx.memory(|m| m.has_focus(trigger.get().unwrap())), "{kind}: Escape refocuses its own trigger");
+            frame(&ctx, vec![], &mut draw);
+            assert!(scenario::handle_at("dialog:Visual style:Wireframe").is_none());
+            frame(&ctx, key(egui::Key::Enter), &mut draw);
+            assert_eq!(action.get(), Action::None, "{kind}: Enter reopens rather than submitting");
+            frame(&ctx, vec![], &mut draw);
+            assert!(scenario::handle_at("dialog:Visual style:Wireframe").is_some(), "{kind}: focused trigger reopens on Enter");
+            frame(&ctx, key(egui::Key::Escape), &mut draw);
+            assert_eq!(action.get(), Action::None);
+            frame(&ctx, vec![], &mut draw);
+            assert!(scenario::handle_at("dialog:Visual style:Wireframe").is_none());
+            frame(&ctx, key(egui::Key::Escape), &mut draw);
+            assert_eq!(action.get(), Action::Cancel, "{kind}: Escape without a popup cancels normally");
+            assert_eq!(selected.get(), 0, "dismissal does not select an option");
+        }
+    }
     crate::theme::set_dark(previous);
 }
 
@@ -1090,4 +1302,72 @@ fn a_track_number_adds_up_and_a_sign_adds_to_the_value_now() {
     assert_eq!(typed("0-5", 100.0), Some(-5.0));
     assert_eq!(typed("1e-3+1", 0.0), Some(1.001));
     assert_eq!(typed("abc", 1.0), None);
+}
+
+#[test]
+fn a_label_drag_reads_only_literal_values_and_moves_them_on_the_step_grid() {
+    let literal = |text: &str| super::literal(text).map(|l| (l.number, l.unit, l.comma));
+    assert_eq!(literal("20 mm"), Some((20.0, " mm".into(), false)));
+    assert_eq!(literal(" 1,5in "), Some((1.5, "in".into(), true)));
+    assert_eq!(literal("-3"), Some((-3.0, String::new(), false)));
+    for not_a_value in ["width", "width + 2 mm", "2 * 3 mm", "", "1e3", "1e400 mm", "20 bananas"] {
+        assert_eq!(literal(not_a_value), None, "{not_a_value:?} is left alone");
+    }
+    assert_eq!(super::scrub_step(20.0), 0.1);
+    assert_eq!(super::scrub_step(250.0), 1.0);
+    assert_eq!(super::scrub_step(0.0), 0.01);
+    assert_eq!(super::scrub_step(-45.0), 0.1);
+    assert!((super::scrubbed(20.0, 30.0, 0.1) - 23.0).abs() < 1e-9);
+    assert!((super::scrubbed(20.37, 1.0, 0.1) - 20.5).abs() < 1e-9, "the value lands on the step's grid");
+    assert_eq!(super::scrubbed(2.0, -500.0, 0.1), 0.0, "a size stops at zero");
+    assert!((super::scrubbed(-2.0, -10.0, 0.1) + 3.0).abs() < 1e-9, "a negative offset keeps moving");
+    assert_eq!(super::scrubbed(1.0, f32::MAX, 1e8), 1.0, "an overflowing drag keeps the value");
+    let text = |n, step, typed: &str| super::scrub_text(n, step, &super::literal(typed).unwrap());
+    assert_eq!(text(23.0, 0.1, "20 mm"), "23.0 mm");
+    assert_eq!(text(1.75, 0.01, "1,5 in"), "1,75 in");
+    assert_eq!(text(-0.0001, 0.01, "-1"), "0.00");
+    assert_eq!(text(300.0, 1.0, "250 mm"), "300 mm");
+}
+
+#[test]
+fn dragging_a_value_rows_label_changes_its_literal_and_leaves_expressions_alone() {
+    fn frame(ctx: &egui::Context, events: Vec<egui::Event>, modifiers: egui::Modifiers, values: &mut [String; 2]) {
+        scenario::clear_handles();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0))),
+            events: std::iter::once(egui::Event::ModifiersChanged(modifiers)).chain(events).collect(),
+            focused: true,
+            ..Default::default()
+        };
+        crate::test_support::frame(ctx, input, |ui| {
+            ui.set_width(280.0);
+            scope(ui, |ui| {
+                let [distance, offset] = &mut *values;
+                expr_row(ui, "Distance", distance);
+                expr_row(ui, "Offset", offset);
+            });
+        });
+    }
+    fn drag(ctx: &egui::Context, row: &str, dx: f32, modifiers: egui::Modifiers, values: &mut [String; 2]) {
+        let start = scenario::rect_of(&format!("dialog:label:{row}")).unwrap().center();
+        let end = start + egui::vec2(dx, 0.0);
+        let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers };
+        frame(ctx, vec![egui::Event::PointerMoved(start), button(start, true)], modifiers, values);
+        for step in 1..=4 {
+            frame(ctx, vec![egui::Event::PointerMoved(start + egui::vec2(dx * step as f32 / 4.0, 0.0))], modifiers, values);
+        }
+        frame(ctx, vec![button(end, false)], modifiers, values);
+        frame(ctx, vec![], modifiers, values);
+    }
+    let ctx = crate::fonts::test_context();
+    let mut values = ["20 mm".to_owned(), "depth + 2 mm".to_owned()];
+    frame(&ctx, vec![], Default::default(), &mut values);
+    drag(&ctx, "Distance", 40.0, Default::default(), &mut values);
+    assert_eq!(values[0], "24.0 mm", "40 points at 0.1 mm a point");
+    drag(&ctx, "Distance", 40.0, egui::Modifiers::SHIFT, &mut values);
+    assert_eq!(values[0], "24.40 mm", "Shift is ten times finer");
+    drag(&ctx, "Distance", -20.0, egui::Modifiers::COMMAND, &mut values);
+    assert_eq!(values[0], "4 mm", "Ctrl is ten times coarser");
+    drag(&ctx, "Offset", 60.0, Default::default(), &mut values);
+    assert_eq!(values[1], "depth + 2 mm", "an expression keeps its parameter");
 }

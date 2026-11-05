@@ -15,13 +15,15 @@
 //! drawn triangles (#1064). Display only: the reference mesh the model reads, exports and the
 //! B-rep never change.
 
+use solidcraft_engine::geom::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::ModelBody;
 use solidcraft_engine::doc::display_quality::{DisplayQuality, MAX_REFINE, refinement_for};
 use solidcraft_engine::geom::tess::TessPlan;
-use solidcraft_engine::geom::{Aabb3, Mesh, Vec3};
+use solidcraft_engine::geom::{Aabb3, Mesh};
 
 /// Most triangles all refined bodies may draw together (on top of the rest of the model).
 pub(crate) const TRIANGLE_BUDGET: usize = 6_000_000;

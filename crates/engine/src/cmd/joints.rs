@@ -3,13 +3,15 @@
 //! joint graph and moves the occurrences it places; the session re-solves after any edit too,
 //! so joints follow the geometry their origins snap to.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
-use solidcraft_doc::expr::Kind;
+use solidcore_record::Vec3;
+use solidcraft_doc::expr::{self, Kind};
 use solidcraft_doc::joints::cam::{self, Cam, CamProfile, Follower};
 use solidcraft_doc::joints::{self, Coupling, Joint, JointExprs, JointKind, JointOrigin, MotionLink, NamedOrigin, Size, Snap, XRef};
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcraft_geom::Aabb3;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec3};
@@ -89,7 +91,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "joint; a?, b?: joint origins as joint.create takes them (a side left out keeps its place; the two must stay on different occurrences); \
              type?, flip?, offset?, angle? (a number, or an expression the joint then follows), suppressed?, name?; the joint re-solves, keeping \
-             its limits and expressions (a relation's values start again where its parts are)",
+             its limits and expressions (a relation's values start again where its parts are); an edit that places it again (not a rename alone) \
+             meets a loop it closes as joint.create does, turning an angle a half turn where only that meets it",
         ),
     CommandSpec::new("joint.delete", "Delete Joint", delete).icon("delete").params("joint: id|name (or origin: name, link: index)"),
     CommandSpec::new("joint.list", "List Joints", list).icon("list").noundo().params(
@@ -107,7 +110,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("joint.solve", "Solve Joints", solve_cmd).icon("compute").params("re-place the occurrences from the joints → conflicts, errors, dof"),
     CommandSpec::new("inspect.interference", "Interference", super::interference::interference).at("SOLID", "INSPECT").icon("interference").noundo().params(
-        "bodies?: [names] (default: all, in world placement; a name that is no body is refused); budget_s?: seconds (default 240, at most 86400: pairs not finished by then are listed in unchecked as \"not checked: the time budget … ran out\" and the call returns) → interferences: pairs that overlap with the overlap volume, area, bounding box and centre (a pin a hair off the axis of a hole of its size also has near_coaxial: {offset_mm, length_mm}, its volume the crescent the walls share); unchecked: [{a, b, reason}], the pairs that could not be checked, with the reason, and each mesh body (STL, 3MF or OBJ import: not intersected) as {a: name, b: null, reason: \"mesh body: not checked\"}, so count: 0 is not read as no overlap (checked counts the solid bodies). Bodies are pruned by bounding box first, then by their display meshes (pairs whose meshes stay apart by more than their chord tolerances, neither inside the other, are clear without a boolean), so any number of bodies is fine; the pairs left are intersected exactly, in parallel on desktop, the slowest first; at most 20000 pairs whose boxes overlap are intersected per call (truncated: true and skipped_pairs: n say when more were left out). Also: pairs_candidate (boxes overlap), pairs_cleared (by the meshes), pairs_intersected, pairs_not_checked, budget_exceeded, threads (worker threads; 0: on the calling thread), boolean_ms and tessellate_ms (kernel time summed over the pairs), slowest: [{a, b, ms, boolean_ms, tessellate_ms}] and ms",
+        "bodies?: [names] (default: all, in world placement; a name that is no body is refused); budget_s?: seconds (default 240, at most 86400: pairs not finished by then are listed in unchecked as \"not checked: the time budget … ran out\" and the call returns) → interferences: pairs that overlap with the overlap volume, area, bounding box and centre; unchecked: [{a, b, reason}], the pairs that could not be checked, with the reason, and each mesh body (STL, 3MF or OBJ import: not intersected) as {a: name, b: null, reason: \"mesh body: not checked\"}, so count: 0 is not read as no overlap (checked counts the solid bodies). Bodies are pruned by bounding box first, then by their display meshes (pairs whose meshes stay apart by more than their chord tolerances, neither inside the other, are clear without a boolean), so any number of bodies is fine; the pairs left are intersected exactly, in parallel on desktop, the slowest first; at most 20000 pairs whose boxes overlap are intersected per call (truncated: true and skipped_pairs: n say when more were left out). Also: pairs_candidate (boxes overlap), pairs_cleared (by the meshes), pairs_intersected, pairs_not_checked, budget_exceeded, threads (worker threads; 0: on the calling thread), boolean_ms and tessellate_ms (kernel time summed over the pairs), slowest: [{a, b, ms, boolean_ms, tessellate_ms}] and ms",
     ),
 ];
 
@@ -232,7 +235,8 @@ fn sol_json(sol: &joints::Solution, p: &Value) -> Value {
 }
 
 /// A joint's values as `joint.list` gives them: degrees for angles, mm for distances, each with
-/// its name and limits.
+/// its name and limits. The numbers are rounded for reading (#10747); the joint keeps full
+/// precision.
 pub(crate) fn named_values(j: &Joint, q: &[f64]) -> Vec<Value> {
     j.kind
         .dofs()
@@ -240,8 +244,8 @@ pub(crate) fn named_values(j: &Joint, q: &[f64]) -> Vec<Value> {
         .enumerate()
         .map(|(i, n)| {
             let (v, angle) = (q.get(i).copied().unwrap_or(0.0), j.kind.is_angle(i));
-            json!({"name": n, "value": if angle { v.to_degrees() } else { v }, "unit": if angle { "deg" } else { "mm" },
-                "limits": j.limits.get(i).copied().flatten().map(|(a, b)| if angle { [a.to_degrees(), b.to_degrees()] } else { [a, b] })})
+            json!({"name": n, "value": expr::round_reported(if angle { v.to_degrees() } else { v }), "unit": if angle { "deg" } else { "mm" },
+                "limits": j.limits.get(i).copied().flatten().map(|(a, b)| if angle { [expr::round_reported(a.to_degrees()), expr::round_reported(b.to_degrees())] } else { [expr::round_reported(a), expr::round_reported(b)] })})
         })
         .collect()
 }
@@ -494,7 +498,7 @@ fn same_frame(s: &Session, o: &JointOrigin, at: Vec3, z: Vec3) -> bool {
 const MAX_FACE_NAME: usize = 16_384;
 
 /// The component an occurrence places (0 for the root, or an unknown occurrence).
-fn component_of(s: &Session, occurrence: u64) -> u64 {
+pub(crate) fn component_of(s: &Session, occurrence: u64) -> u64 {
     if occurrence == 0 { 0 } else { s.doc.occurrences.iter().find(|o| o.id == occurrence).map_or(0, |o| o.component) }
 }
 
@@ -616,12 +620,13 @@ pub(crate) fn joint_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64>
 /// A joint value: numbers are degrees for angles and mm for distances; text is an expression.
 pub(crate) fn value(s: &Session, v: &Value, angle: bool, cmd: &str) -> Result<f64> {
     let kind = if angle { Kind::Angle } else { Kind::Length };
+    // A number out of range says so, rather than that it is not a number (#9625).
     let e = match v {
         Value::Number(n) => n.as_f64().filter(|x| x.is_finite() && x.abs() < 1e9).map(|x| x.to_string()),
         Value::String(t) => Some(t.clone()),
         _ => None,
     }
-    .ok_or_else(|| bad(cmd, "values must be numbers or expressions"))?;
+    .ok_or_else(|| bad(cmd, format!("a joint value {}", crate::params::expr_problem(Some(v)))))?;
     s.doc.eval(&e, kind).map_err(|e| bad(cmd, e.to_string()))
 }
 
@@ -791,7 +796,8 @@ const HALF_TURN_TRIALS: usize = 16;
 /// on the shortest joint path between its two parts, or one of each, a half turn, and keep the
 /// first that meets it with no new conflict or error elsewhere than `before` had (stored, for
 /// the caller's resolve). False, and nothing changed, when none does. Values a motion link or an
-/// expression sets, and turns their limits stop short, are left alone.
+/// expression sets, and turns their limits stop short, are left alone. `joint.edit` does the same
+/// for a joint it places again (#9687).
 fn close_by_half_turn(s: &mut Session, id: u64, before: &joints::Solution) -> bool {
     let asm = &s.doc.assembly;
     let Some(new) = asm.joints.iter().find(|j| j.id == id) else { return false };
@@ -1103,7 +1109,7 @@ fn held_values(s: &Session, j: &Joint, requested: &[f64], driven: &[usize], r: &
             continue;
         }
         let angle = j.kind.is_angle(i);
-        let shown = |v: f64| if angle { v.to_degrees() } else { v };
+        let shown = |v: f64| expr::round_reported(if angle { v.to_degrees() } else { v });
         let name = names.get(i).copied().unwrap_or("value");
         let why = if let Some(l) = s.doc.assembly.links.iter().find(|l| l.b == j.id && l.ib == i) {
             let coupling = match &l.coupling {
@@ -1643,7 +1649,14 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
             j.values = q;
         }
     }
-    let sol = resolve(s);
+    let mut sol = resolve(s);
+    // An edit that places the joint again (Edit Joint's OK, Unsuppress) meets a loop it closes as
+    // joint.create does: a joint saved as a conflict before create turned its part (#9687), or
+    // unsuppressed after its part was turned away, is met then. A rename alone moves nothing.
+    let placed = reseat || bool_(p, "suppressed") == Some(false);
+    if placed && sol.conflicts.iter().any(|(c, ..)| *c == id) && close_by_half_turn(s, id, &sol) {
+        sol = resolve(s);
+    }
     Ok(sol_json(&sol, p))
 }
 
