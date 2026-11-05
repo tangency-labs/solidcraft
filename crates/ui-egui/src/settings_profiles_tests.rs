@@ -17,7 +17,7 @@ fn error(h: &mut Harness, id: &str, params: Value) -> String {
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 99, "page presentation must not alter profile membership");
+    assert_eq!(keys.len(), 100, "page presentation must not alter profile membership");
     for key in [
         "nav",
         "mouse_gestures",
@@ -795,6 +795,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "ribbon_menus_follow_hover",
         "ribbon_menus_skip_pinned",
         "ribbon_reveal",
+        "ribbon_tabs_only",
         "right_drag_orbits",
         "select_other_hidden",
         "selection_shift_add_only",
@@ -843,7 +844,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 99);
+    assert_eq!(expected.len(), 100);
     assert_eq!(actual, expected);
 }
 

@@ -342,6 +342,7 @@ view.render_frame                 the view: camera, layout, display
 view.render_inspector             the view: camera, layout, display
 view.render_select                the view: camera, layout, display
 view.render_stage                 the view: camera, layout, display
+view.ribbon_tabs_only             the view: camera, layout, display
 view.right                        the view: camera, layout, display
 view.save                         the view: camera, layout, display
 view.shots_strip                  the view: camera, layout, display
