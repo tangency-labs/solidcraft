@@ -112,7 +112,6 @@
           version = (pkgs.lib.importTOML ./Cargo.toml).workspace.package.version;
           src = self;
 
-          #Automatically retrieves 
           cargoLock = {
             lockFile = ./Cargo.lock;
             allowBuiltinFetchGit = true;
