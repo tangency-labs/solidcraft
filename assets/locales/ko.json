@@ -1815,6 +1815,8 @@
   "prefs.layout_page.card": "카드",
   "prefs.layout_page.column": "열",
   "prefs.layout_page.hover": "마우스를 올릴 때",
+  "prefs.layout_page.hover_panel_menus": "포인터를 올려 패널 메뉴 전환",
+  "prefs.layout_page.hover_panel_menus_help": "리본의 패널 이름을 클릭하여 메뉴를 엽니다. 다른 패널 이름에 포인터를 올리면 메뉴가 전환됩니다. 리본과 열린 메뉴 밖으로 포인터를 이동하면 메뉴가 닫힙니다.",
   "prefs.layout_page.icons_labels": "아이콘 + 레이블",
   "prefs.layout_page.ok_cancel": "확인과 취소",
   "prefs.layout_page.on_hover": "마우스를 올릴 때",

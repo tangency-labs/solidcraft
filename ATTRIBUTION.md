@@ -799,6 +799,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | docs/book/src/media/ui-tour/navigate.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (`--sample`, default dark theme, software renderer) orbiting, panning and zooming, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
 | assets/locales/pending/sketch-tool-hints.json | carlymx | Original sketch tool hints and engine error translations | MIT OR Apache-2.0 |
 | assets/locales/pending/primitive-pick-field-tips.json | SolidCraft contributors | Original primitive pick-field tooltip translations | MIT OR Apache-2.0 |
+| assets/locales/pending/ribbon-panel-hover.json | SolidCraft contributors | Original ribbon panel menu preference labels and translations | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
