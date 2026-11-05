@@ -688,6 +688,33 @@ fn an_edge_flange_bends_from_a_free_edge_of_a_thickened_plate() {
     assert!(s.execute("sheet.flange", &json!({"edges": [[50, 0, t]], "height": 20})).is_err());
 }
 
+/// An edge flange is the metal a contour flange makes from the same L (#6748): the flange above,
+/// and an L drawn along the part's outside (60 along the floor, 20 up the front, its corner the
+/// outer sharp) bent at the rule's radius and run 100 along X, give one flat, one bend, one box
+/// and one volume. (Which way the bend reads, up or down, depends on the face each sheet's
+/// surface is: the plate's top, the L's outside.)
+#[test]
+fn an_edge_flange_is_the_contour_flange_of_its_l() {
+    let t = TEST.thickness;
+    let mut flanged = thickened_plate(t);
+    run(&mut flanged, "sheet.flange", json!({"edges": [[50, 0, t]], "height": 20}));
+    let mut drawn = Session::default();
+    rule(&mut drawn, "Test", t, TEST.k_factor, TEST.bend_radius, TEST.gap);
+    run(&mut drawn, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "L"}));
+    run(&mut drawn, "sketch.line", json!({"points": [[60, 0], [0, 0], [0, 20]], "ids": ["floor", "front"]}));
+    run(&mut drawn, "sketch.finish", json!({}));
+    run(&mut drawn, "sheet.flange", json!({"sketch": "L", "curves": ["floor", "front"], "distance": 100}));
+    let (got, want) = (flat_size(&mut flanged), flat_size(&mut drawn));
+    assert!(same_size(got, want, 1e-6), "{got:?} vs {want:?}");
+    let (got, want) = (bend_rows(&mut flanged), bend_rows(&mut drawn));
+    assert!(got.len() == 1 && want.len() == 1 && got[0].0 == want[0].0 && (got[0].2 - want[0].2).abs() < 1e-6, "{got:?} vs {want:?}");
+    let (got, want) = (bbox(&mut flanged), bbox(&mut drawn));
+    assert!(got.0.iter().zip(want.0).chain(got.1.iter().zip(want.1)).all(|(a, b)| (a - b).abs() < 1e-6), "{got:?} vs {want:?}");
+    let volume = |s: &Session| s.model.state().bodies.first().map_or(f64::NAN, |b| fine_volume(&b.body));
+    let (got, want) = (volume(&flanged), volume(&drawn));
+    assert!((got - want).abs() < 1e-9 * want, "{got} vs {want}");
+}
+
 /// A hem on a sheet made from surfaces (#6748): picked on the plate's top, it turns half a turn
 /// at the front edge back under the plate, its leg the gap 0.5 below it (so the bend's inside
 /// radius is 0.25), 10 to its outer face: its leg is 10 − (0.25 + t). Flat: 60 + π (0.25 + K T)
