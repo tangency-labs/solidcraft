@@ -3,7 +3,7 @@
 
 use crate::test_support::app_with_script as app_with;
 use serde_json::json;
-use solidcore_record::Vec3;
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{Sel, Session};
@@ -2845,6 +2845,157 @@ fn offset_plane_through_a_picked_vertex() {
     let reopened = crate::dialogs::for_feature(&h.app, id, None).unwrap();
     assert_eq!(reopened.inputs[0].items, vec![Sel::Plane { name: "XY".into() }]);
     assert!(matches!(reopened.inputs[1].items.as_slice(), [Sel::Vertex { body, .. }] if body == "Box"), "{:?}", reopened.inputs[1].items);
+}
+
+#[test]
+fn offset_plane_picks_a_3d_spline_tip_and_keeps_its_reference() {
+    check_offset_plane_wire_point(2, Vec3::new(50., 40., 30.));
+}
+
+#[test]
+fn offset_plane_picks_a_3d_spline_interior_point_and_keeps_its_reference() {
+    check_offset_plane_wire_point(1, Vec3::new(30., 25., 10.));
+}
+
+fn check_offset_plane_wire_point(index: usize, point: Vec3) {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.options", json!({"sketch_3d":true})).unwrap();
+    let wire = h.app.run("sketch.spline3d", json!({"points":[[10,10,0],[30,25,10],[50,40,30]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.set_origin_shown(false);
+    h.call("ui.view", json!({"view":"home"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.app.start("construct.plane.offset");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+        d.active = 1;
+    }
+    h.frames(2);
+    let [x, y] = h.at(&json!({"world":[point.x,point.y,point.z]})).unwrap();
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    assert!(!h.app.preferences.select_3d_curve_points, "new point targets are opt-in");
+    assert!(!crate::viewport::standalone_points(&h.app).contains(&point));
+    assert!(
+        crate::viewport::pick(&h.app, &proj, egui::pos2(x as f32, y as f32))
+            .iter()
+            .all(|hit| !matches!(hit, crate::viewport::Hit::SketchPoint3d { .. }))
+    );
+    h.call("ui.prefs", json!({"select_3d_curve_points":true}));
+    h.frames(2);
+    assert!(crate::viewport::standalone_points(&h.app).contains(&point));
+    let hits = crate::viewport::pick(&h.app, &proj, egui::pos2(x as f32, y as f32));
+    let hit = hits.iter().find(|hit| matches!(hit, crate::viewport::Hit::SketchPoint3d { .. })).expect("pickable 3D point");
+    let picked = h.app.dialog.as_ref().unwrap().candidate(&h.app.session, hit).expect("accepted point reference");
+    assert_eq!(picked, Sel::SketchPoint { id: format!("{sketch}:{wire}:{index}") });
+    h.app.dialog.as_mut().unwrap().inputs[1].items = vec![picked];
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["through"], json!({"sketch":sketch,"point":format!("{wire}:{index}")}));
+    axis_point_evidence(&mut h, &format!("3d-node-offset-plane-{index}"));
+    h.step(&json!({"key":"Enter"})).unwrap();
+    let (feature, _, plane) = solidcraft_engine::view::construction_planes(&h.app.session).into_iter().next().unwrap();
+    assert!((plane.origin.z - point.z).abs() < 1e-9);
+    let reopened = crate::dialogs::for_feature(&h.app, feature, None).unwrap();
+    assert_eq!(reopened.inputs[1].items, vec![Sel::SketchPoint { id: format!("{sketch}:{wire}:{index}") }]);
+    h.call("ui.prefs", json!({"select_3d_curve_points":false}));
+    assert!(!crate::viewport::standalone_points(&h.app).contains(&point));
+}
+
+/// A nearer wire node must not hide the planar point that Hole can retain as a reference.
+#[test]
+fn hole_keeps_planar_point_when_a_3d_wire_point_is_nearer() {
+    use crate::viewport::{Hit, pick_cached, projection};
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane":{"face":[20,15,20]}})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.point", json!({"point":[10,10],"id":"hole_point"})).unwrap();
+    let point = h.app.session.model.state().sketch(sketch).unwrap().plane.to_world(Vec2::new(10., 10.));
+    let node = point + Vec3::new(0.1, 0., 0.);
+    h.app.run("sketch.options", json!({"sketch_3d":true})).unwrap();
+    h.app.run("sketch.spline3d", json!({"points":[[node.x,node.y,node.z],[25,20,25],[30,25,30]]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.set_origin_shown(false);
+    h.call("ui.prefs", json!({"select_3d_curve_points":true}));
+    h.call("ui.view", json!({"view":"home"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(2);
+    let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+    let pos = proj.to_screen(node).unwrap();
+    let separation = pos.distance(proj.to_screen(point).unwrap());
+    assert!(separation > 0.01 && separation < 8., "both points are within the pick radius: {separation}");
+    assert!(
+        pick_cached(&mut h.app, &proj, pos).iter().any(|hit| matches!(hit, Hit::SketchPoint3d { .. })),
+        "idle picking still takes the nearer wire node"
+    );
+
+    h.app.start("solid.hole");
+    let hits = pick_cached(&mut h.app, &proj, pos);
+    let planar =
+        hits.iter().find(|hit| matches!(hit, Hit::SketchPoint { id, .. } if id == "hole_point")).expect("Hole retains the nearby planar point");
+    assert!(!hits.iter().any(|hit| matches!(hit, Hit::SketchPoint3d { .. })));
+    let d = h.app.dialog.as_ref().unwrap();
+    let snap = d.face_snap(&h.app.session, &hits);
+    let selected = d.candidate_on(&h.app.session, planar, snap.as_ref()).expect("point snaps onto the face");
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![selected];
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["sketch"], sketch);
+    assert_eq!(commands[0].1["points"], json!(["hole_point"]));
+    assert!(commands[0].1.get("position").is_none(), "Hole remains linked to the planar point");
+    axis_point_evidence(&mut h, "hole-near-wire-point");
+
+    // Deliberately share a point mask to isolate the dialog policy in the pick cache.
+    // Switching without moving the cursor must invalidate the construction hit.
+    let mut construction = crate::dialogs::Dialog::for_command(&h.app, "construct.plane.offset").unwrap();
+    construction.active = 1;
+    let accept = construction.active_input().unwrap().accept;
+    let mut hole = crate::dialogs::Dialog::for_command(&h.app, "solid.hole").unwrap();
+    if let Kind::Hole { opts, .. } = &mut hole.kind {
+        opts.multiple = true;
+    }
+    hole.inputs = vec![crate::selection::SelInput::new("Points", accept, true)];
+    for _ in 0..2 {
+        h.app.dialog = Some(construction.clone());
+        assert!(pick_cached(&mut h.app, &proj, pos).iter().any(|hit| matches!(hit, Hit::SketchPoint3d { .. })));
+        h.app.dialog = Some(hole.clone());
+        let hits = pick_cached(&mut h.app, &proj, pos);
+        assert!(!hits.iter().any(|hit| matches!(hit, Hit::SketchPoint3d { .. })));
+        let selected = hits.iter().find_map(|hit| hole.candidate(&h.app.session, hit)).expect("Multiple Hole keeps its point target");
+        assert_eq!(selected, Sel::SketchPoint { id: format!("{sketch}:hole_point") });
+    }
+    // Multiple Hole normally accepts points only, without Offset Plane's vertex targets.
+    hole.inputs = vec![crate::selection::SelInput::new("Points", crate::selection::POINTS, true)];
+    h.app.dialog = Some(hole.clone());
+    let hits = pick_cached(&mut h.app, &proj, pos);
+    let selected = hits.iter().find_map(|hit| hole.candidate(&h.app.session, hit)).expect("the normal Multiple Hole input keeps the planar point");
+    assert_eq!(selected, Sel::SketchPoint { id: format!("{sketch}:hole_point") });
+}
+
+#[test]
+fn hole_does_not_freeze_or_preselect_a_drawn_3d_wire_point() {
+    use crate::viewport::Hit;
+    let mut app = boxed();
+    let sketch = app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    app.run("sketch.options", json!({"sketch_3d":true})).unwrap();
+    let wire = app.run("sketch.spline3d", json!({"points":[[10,10,0],[15,12,10],[20,15,20]]})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+    app.run("sketch.finish", json!({})).unwrap();
+    let selected = Sel::SketchPoint { id: format!("{sketch}:{wire}:2") };
+    let mut d = start(&mut app, vec![selected], "solid.hole");
+    assert!(d.inputs.iter().all(|input| input.items.is_empty()));
+    let at = Vec3::new(20., 15., 20.);
+    let Sel::Face { body, index, point } = face(&app, at) else { panic!("top face") };
+    let face = Hit::Face { body, index, point };
+    let node = Hit::SketchPoint3d { sketch, id: format!("{wire}:2"), at };
+    assert!(d.face_snap(&app.session, &[face.clone(), node.clone()]).is_none());
+    assert!(d.candidate(&app.session, &node).is_none());
+    assert!(d.candidate(&app.session, &face).is_some(), "ordinary face placement still works");
+    if let Kind::Hole { opts, .. } = &mut d.kind {
+        opts.multiple = true;
+    }
+    d.inputs = vec![crate::selection::SelInput::new("Points", crate::selection::POINTS, true)];
+    assert!(d.candidate(&app.session, &node).is_none());
 }
 
 /// Plane at Angle draws the tilted plane while its dialog is open, when created and when edited,
