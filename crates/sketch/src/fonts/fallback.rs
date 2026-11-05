@@ -509,23 +509,54 @@ fn store(found: Vec<(Query, Answer)>) {
     search.answers.extend(found);
 }
 
+/// The search thread's mark while it runs, with the queries it is searching for. The thread clears
+/// the mark itself when nothing is left to ask. Dropped before that, as when a search stops part-way
+/// (a panic), it clears the mark too, and what it held is answered as a miss: text waiting for it is
+/// set as text no font has, instead of waiting for the rest of the session. What was asked meanwhile
+/// was never searched, so it stays asked, and the next request for it starts a search.
+pub(crate) struct Running {
+    pub(crate) held: Vec<Query>,
+    done: bool,
+}
+
+impl Running {
+    pub(crate) fn start() -> Running {
+        state().running = true;
+        Running { held: Vec::new(), done: false }
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        if self.done {
+            return;
+        }
+        state().running = false;
+        store(self.held.drain(..).map(|query| (query, None)).collect());
+    }
+}
+
 /// The thread's work: what has been asked, until nothing is left.
 fn run_asked() {
+    let mut running = Running::start();
     loop {
-        let asked: Vec<Query> = {
+        {
             let mut search = state();
             if search.asked.is_empty() {
+                // Cleared under the same lock as the look, so a query asked just after starts a thread.
                 search.running = false;
+                running.done = true;
                 return;
             }
-            search.asked.drain().collect()
-        };
-        let found = search(&asked);
+            running.held = search.asked.drain().collect();
+        }
+        let found = search(&running.held);
         // Admitted here, so the window doesn't read and hash them when it asks again.
         for (path, index) in found.iter().filter_map(|(_, answer)| answer.as_ref()) {
             crate::paper_text::warm(path, *index);
         }
         store(found);
+        running.held.clear();
     }
 }
 
