@@ -43,6 +43,19 @@ checklist is [`PROGRESS.md`](https://tangency-labs.github.io/solidcore/PROGRESS.
 [`plan/STATUS.md`](plan/STATUS.md). The progress site is built by
 [`site/build.py`](site/README.md) (`python3 site/build.py` -> `bin/site/`).
 
+## Reference docs
+
+How the kernel's constructions work, the theory behind them and the invariants they keep, with
+schematics. Start with the first; each ends with "If you're stuck".
+
+| Doc | What it covers |
+|-----|----------------|
+| [Definitions and certificates](docs/definitions-and-certificates.md) | A surface is its definition and its B-spline a certified approximation; the certificate; exactness classes; the exact extension; the invariants every construction keeps |
+| [The generic blend](docs/generic-blend.md) | Fillets, chamfers, corners and setbacks |
+| [The procedural sweep](docs/procedural-sweep.md) | Swept surfaces, their rotation-minimizing frames, threads |
+| [Surface-surface intersection](docs/ssi.md) | The SSI pipeline, its exact classes, and what the boolean takes from it |
+| [Layers](docs/layers.md) | Which layer each job lives in |
+
 ## Layout
 
 | Path                    | Contents                                                     |
