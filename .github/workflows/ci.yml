@@ -245,7 +245,7 @@ jobs:
   # `difftest` (the required check's name) fails unless every part succeeded.
   difftest-baseline:
     needs: changes
-    if: needs.changes.outputs.full == 'true' && github.event_name == 'workflow_dispatch' && inputs.difftest
+    if: needs.changes.outputs.full == 'true' && (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.difftest))
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
       contents: read
@@ -289,7 +289,7 @@ jobs:
     # longest part. Clippy with the cpp feature and the runner tests run in the clippy and test
     # jobs, in parallel with this one.
     needs: changes
-    if: needs.changes.outputs.code == 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.difftest))
+    if: needs.changes.outputs.code == 'true' && (github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.difftest))
     runs-on: blacksmith-16vcpu-ubuntu-2404
     permissions:
       contents: read
@@ -421,7 +421,7 @@ jobs:
   # job fails or is skipped, this job is skipped and `difftest` fails.
   difftest-compare:
     needs: [changes, difftest-baseline, difftest-sweep]
-    if: needs.changes.outputs.full == 'true' && github.event_name == 'workflow_dispatch' && inputs.difftest
+    if: needs.changes.outputs.full == 'true' && (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.difftest))
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
@@ -467,12 +467,23 @@ jobs:
           FULL: ${{ needs.changes.outputs.full }}
           SWEEP: ${{ needs.difftest-sweep.result }}
           REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.difftest }}
+          PR: ${{ github.event_name == 'pull_request' }}
+          PERTURB: ${{ needs.difftest-perturb.result }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           echo "changes difftest-baseline difftest-sweep difftest-perturb difftest-compare: $RESULTS"
           [ "$CHANGES" = success ] || { echo "the changes job did not succeed"; exit 1; }
+          if [ "$PR" = true ] && [ "$FULL" = true ]; then
+            # a pull request runs the sweep against its exact base, so a change that moves a
+            # case shows it before it merges; the perturbation check stays on request
+            for part in "${{ needs.difftest-baseline.result }}" "$SWEEP" "${{ needs.difftest-compare.result }}"; do
+              [ "$part" = success ] || { echo "a difftest part did not succeed"; exit 1; }
+            done
+            [ "$PERTURB" = skipped ] || [ "$PERTURB" = success ] || { echo "difftest-perturb: $PERTURB"; exit 1; }
+            exit 0
+          fi
           if [ "$REQUESTED" != true ]; then
-            echo "difftest not requested: it runs when a maintainer starts the workflow with difftest set"; exit 0
+            echo "difftest not requested: it runs on pull requests, and when a maintainer starts the workflow with difftest set"; exit 0
           fi
           if [ "$FULL" != true ]; then
             # docs-only change (everything skipped), or a push to main (only the sweep, which
