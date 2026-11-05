@@ -434,13 +434,16 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     );
     let copy = shown_tensor(app, total).map(|t| tensor_text(&t));
     let copy_label = app.tr("ui.properties.copy_matrix").to_string();
+    let copy_hint = app.tr("ui.properties.copy_value").to_string();
+    let mut copied = false;
     let heading = window_title(&title, &v);
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
+        // Each value copies itself as shown, unit and all, when clicked (#12218).
         for (label, value) in &rows {
-            ui_kit::row(ui, crate::i18n::tr_label(label), |ui| ui_kit::text(ui, value, ui_kit::Text::Cell));
+            ui_kit::row(ui, crate::i18n::tr_label(label), |ui| copied |= ui_kit::copy_cell(ui, value, false, &copy_hint));
         }
         if let Some(first) = &first {
-            ui_kit::row(ui, &first_label, |ui| ui_kit::text(ui, first, ui_kit::Text::Cell));
+            ui_kit::row(ui, &first_label, |ui| copied |= ui_kit::copy_cell(ui, first, false, &copy_hint));
         }
         if !inertia.is_empty() || unavailable {
             ui_kit::section(ui, "sc_props_inertia", &section, true, |ui| {
@@ -453,7 +456,7 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::row(ui, label, |ui| {
                         ui.columns(cells.len(), |columns| {
                             for (column, cell) in columns.iter_mut().zip(cells) {
-                                ui_kit::text(column, cell, ui_kit::Text::MonoCell);
+                                copied |= ui_kit::copy_cell(column, cell, true, &copy_hint);
                             }
                         })
                     });
@@ -473,6 +476,9 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
             });
         }
     });
+    if copied {
+        app.set_status(crate::i18n::tr("ui.properties.value_copied"), false);
+    }
     if closed || action == ui_kit::Action::Cancel {
         close_object(app);
     }
@@ -619,6 +625,22 @@ mod tests {
         assert_eq!(rows, want.map(|r| r.to_vec()).to_vec(), "{text}");
         let m = v["total"]["mass_g"].as_f64().unwrap();
         assert!((rows[0][0] - m * (400.0 + 900.0) / 12.0).abs() < 1e-6 * rows[0][0] && rows[0][1] == 0.0, "{text}");
+
+        // #12218: a click on a value copies it as shown, and the status bar says so.
+        let mass = format!("{m:.3} g");
+        let [x, y] = h.widget(&mass).expect("the mass cell");
+        let (request, _reply) = crate::control::ControlRequest::new("ui.click", json!({"x": x, "y": y}));
+        crate::control::handle(&mut h.app, &h.ctx, &request);
+        let mut copied = Vec::new();
+        for _ in 0..4 {
+            h.frame();
+            copied.extend(h.output.commands.iter().filter_map(|c| match c {
+                egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                _ => None,
+            }));
+        }
+        assert_eq!(copied.last(), Some(&mass), "the mass cell copies its text");
+        assert_eq!(h.app.status.as_ref().map(|(text, ..)| text.as_str()), Some("Value copied"));
         h.step(&json!({"widget": "Close"})).unwrap();
         assert!(h.app.menu.props.is_none());
 

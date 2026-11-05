@@ -836,6 +836,17 @@ pub(crate) fn name_cell_with_hint(ui: &mut Ui, name: &str, strong: bool, hint: &
     text_impl(ui, name, Text::NameCell(strong), Some(hint))
 }
 
+/// A value cell that puts its text on the clipboard when clicked (the Properties card's values,
+/// #12218), in the monospaced cell font when `mono`. Its tooltip is `hint`, with the whole value
+/// only if the cell clips it. True on the click that copied.
+pub(crate) fn copy_cell(ui: &mut Ui, value: &str, mono: bool, hint: &str) -> bool {
+    let copied = text_impl(ui, value, if mono { Text::MonoCell } else { Text::Cell }, Some(hint)).clicked();
+    if copied {
+        ui.ctx().copy_text(value.to_owned());
+    }
+    copied
+}
+
 fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>) -> Response {
     if crate::prefs_search::querying(ui) {
         let heading = matches!(style, Text::Heading(_));
