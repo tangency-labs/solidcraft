@@ -87,7 +87,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("timeline.roll_to", "Roll History Marker", roll_to).icon("rollback")
         .params("position: number of features to keep active, or \"end\" (omit = end) | feature: id|name (the marker goes right after it)"),
     CommandSpec::new("timeline.reorder", "Reorder Feature", reorder).icon("reorder")
-        .params("feature: id|name, position: its new index, active?: bool (true = it ends up before the history marker, false = behind it; other features keep their state); refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke"),
+        .params("feature: id|name, position: its new index, active?: bool (true = it ends up before the history marker, false = behind it; other features keep their state); refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke → feature, position: its index now, from: its index before, moved: bool, note?: why nothing moved, or that a position past the end meant the last slot"),
     CommandSpec::new("timeline.reorder_many", "Reorder Features", reorder_many).icon("reorder").params(
         "features: [id|name], position: insertion slot in the current history; selected features keep their relative order; active?: bool (as timeline.reorder's); refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke",
     ),
@@ -1521,11 +1521,15 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.reorder";
     let id = feature_id(s, p.get("feature"), cmd)?;
     let n = s.doc.features.len();
-    let to = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?.min(n.saturating_sub(1));
+    let asked = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
+    // A position past the end means the last slot; the reply says so (#12140).
+    let to = asked.min(n.saturating_sub(1));
+    let capped = (asked != to).then(|| format!("position {asked} is past the end, so the last slot, {to}, was used"));
     let from = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "feature"))?;
     let active = active_param(p, cmd)?;
     if from == to && active.is_none() {
-        return Ok(json!({"feature": id, "position": to}));
+        let why = capped.map_or_else(|| format!("it is already at position {to}"), |c| format!("{c}, where it already is"));
+        return Ok(json!({"feature": id, "position": to, "from": from, "moved": false, "note": format!("nothing moved: {why}")}));
     }
     let mut next = (*s.doc).clone();
     let f = next.features.remove(from);
@@ -1540,11 +1544,27 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     // `allow_errors`: made anyway, with what it broke said (#5962).
     let allow = allow_errors(p, cmd)?;
     if !broken.is_empty() && !allow {
+        // The moved feature itself failing: say why, and only when it moved earlier suggest that
+        // it now comes before something it uses, such as an extrude ahead of its sketch (#12140).
+        // Moved later, it fails for another reason, such as a feature that removed its body.
+        if let Some((_, error)) = broken.iter().find(|(n, _)| *n == name) {
+            let hint = if to < from {
+                "; if it uses a feature that would now come after it, move that feature earlier first"
+            } else {
+                "; a feature it would now come after changes what it works on"
+            };
+            return Err(bad(cmd, format!("moving {name} to position {to} breaks {name} ({error}){hint}")));
+        }
         let list: Vec<String> = broken.iter().map(|(n, e)| format!("{n} ({e})")).collect();
         return Err(bad(cmd, format!("moving {name} there breaks {}", list.join("; "))));
     }
     let marker = next.marker;
     place_marker(s, &mut next, &[id], active, cmd)?;
+    // Never report a move that didn't happen (#12140): the reply gives where the feature is now.
+    let now = next.feature_index(id).ok_or_else(|| bad(cmd, "feature"))?;
+    if now != to {
+        return Err(bad(cmd, format!("{name} would stay at position {now}, not {to}")));
+    }
     if next != *s.doc {
         // The check evaluated the new order: keep its results, so setting the design doesn't
         // evaluate the moved part of the timeline a second time (#6186). Placing the marker
@@ -1554,7 +1574,16 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
         }
         *s.doc_mut() = next;
     }
-    let mut out = json!({"feature": id, "position": to});
+    let mut out = json!({"feature": id, "position": now, "from": from, "moved": now != from});
+    // With `active`, a feature left in place may still cross the history marker: say which.
+    let stayed = (now == from).then(|| {
+        let what = if s.doc.marker == marker { "nothing moved" } else { "only the history marker moved" };
+        format!("{what}: {name} is already at position {now}")
+    });
+    let note: Vec<String> = [capped, stayed].into_iter().flatten().collect();
+    if !note.is_empty() {
+        out["note"] = json!(note.join("; "));
+    }
     if allow {
         out["broken"] = broken_json(&broken);
     }

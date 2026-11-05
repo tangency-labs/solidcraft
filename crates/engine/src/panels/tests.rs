@@ -265,6 +265,226 @@ fn unavailable_requests_fail_but_saved_open_layout_stays_dormant() {
     assert_eq!(resolve_geometry(&service, rect(1000.0, 800.0), Direction::Ltr, 48.0).unwrap().panels.len(), 1);
 }
 
+fn floating_group_service() -> LayoutService {
+    let mut service = fixture_service(false).unwrap();
+    service
+        .dispatch(transaction(vec![
+            fixture_open("fixture.log", "one", "floating-group", Zone::Floating, 0).unwrap(),
+            Mutation::Open {
+                kind: PanelKind::new("fixture.log").unwrap(),
+                instance: id("two"),
+                destination: Some(Destination::JoinTab { section: section("floating-group"), index: 1 }),
+            },
+            Mutation::Activate { instance: id("two") },
+        ]))
+        .unwrap();
+    service
+}
+
+#[test]
+fn floating_rect_prepares_atomically_preserving_group_focus_peek_and_other_sections() {
+    let mut service = floating_group_service();
+    open(&mut service, "three", "other-section");
+    open(&mut service, "four", "peek-section");
+    service
+        .dispatch(transaction(vec![
+            Mutation::Focus { instance: id("two") },
+            Mutation::Collapse { section: section("peek-section"), collapsed: true },
+            Mutation::Peek { instance: id("four") },
+        ]))
+        .unwrap();
+    let before = service.inspect();
+    let origin = Point { x: 520.0, y: 0.0 };
+    let dimensions = size(250.0, 240.0);
+    let action = LayoutAction::Apply {
+        expected_revision: Some(before.revision),
+        mutations: vec![Mutation::SetFloatingRect { section: section("floating-group"), origin, size: dimensions }],
+    };
+    assert_eq!(decode_action(&serde_json::to_vec(&action).unwrap()).unwrap(), action);
+    let prepared = service.prepare(action.clone()).unwrap();
+    assert_eq!(service.inspect(), before, "preparing a rect has no saved or interaction effects");
+    assert!(prepared.effects().is_empty());
+    let reply = service.commit(prepared).unwrap();
+    assert_eq!(reply.revision, before.revision + 1);
+    assert!(reply.effects.is_empty());
+    assert_eq!(reply.interaction, before.interaction);
+    let group = reply.layout.section(&section("floating-group")).unwrap();
+    assert_eq!(group.id, section("floating-group"));
+    assert_eq!(group.tabs, vec![id("one"), id("two")]);
+    assert_eq!(group.active, id("two"));
+    assert_eq!(group.location, SectionLocation::Floating { origin });
+    assert_eq!(group.size, dimensions);
+    assert!(!group.collapsed);
+    assert_eq!(reply.layout.sections.len(), before.layout.sections.len());
+    assert_eq!(reply.layout.instances.len(), before.layout.instances.len());
+    for (index, instance) in [id("one"), id("two")].iter().enumerate() {
+        let memory = &reply.layout.instance(instance).unwrap().memory;
+        assert_eq!(memory.section, group.id);
+        assert_eq!(memory.location, group.location);
+        assert_eq!(memory.size, dimensions);
+        assert_eq!(memory.section_index, 0);
+        assert_eq!(memory.tab_index, index);
+        assert!(!memory.collapsed);
+    }
+    for name in ["other-section", "peek-section"] {
+        assert_eq!(reply.layout.section(&section(name)).unwrap(), before.layout.section(&section(name)).unwrap());
+    }
+    for name in ["three", "four"] {
+        assert_eq!(reply.layout.instance(&id(name)).unwrap(), before.layout.instance(&id(name)).unwrap());
+    }
+    assert_eq!(service.dispatch(action).unwrap_err().rule, Rule::Revision);
+    assert_eq!(service.inspect().revision, reply.revision);
+    service
+        .dispatch(transaction(vec![
+            Mutation::Collapse { section: section("floating-group"), collapsed: true },
+            Mutation::Peek { instance: id("two") },
+        ]))
+        .unwrap();
+    let peek = service.interaction().clone();
+    let reply = service
+        .dispatch(transaction(vec![Mutation::SetFloatingRect {
+            section: section("floating-group"),
+            origin: Point { x: 521.0, y: 0.0 },
+            size: dimensions,
+        }]))
+        .unwrap();
+    assert_eq!(reply.interaction, peek);
+    assert!(reply.effects.is_empty());
+    assert!(reply.layout.section(&section("floating-group")).unwrap().collapsed);
+    assert!(reply.layout.instance(&id("one")).unwrap().memory.collapsed);
+    assert!(reply.layout.instance(&id("two")).unwrap().memory.collapsed);
+    validate(service.layout(), service.registry()).unwrap();
+}
+
+#[test]
+fn floating_rect_enforces_group_intersection_hostile_numbers_and_atomic_failure() {
+    let mut registry = synthetic_registry().unwrap();
+    let mut narrow = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    narrow.kind = PanelKind::new("fixture.rect-bounds").unwrap();
+    narrow.min_size = size(200.0, 180.0);
+    narrow.max_size = size(300.0, 260.0);
+    registry.register(narrow).unwrap();
+    let mut service =
+        LayoutService::new(registry, Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+    service
+        .dispatch(transaction(vec![
+            fixture_open("fixture.log", "one", "floating-group", Zone::Floating, 0).unwrap(),
+            Mutation::Open {
+                kind: PanelKind::new("fixture.rect-bounds").unwrap(),
+                instance: id("two"),
+                destination: Some(Destination::JoinTab { section: section("floating-group"), index: 1 }),
+            },
+        ]))
+        .unwrap();
+    let origin = Point { x: 520.0, y: 0.0 };
+    service.dispatch(transaction(vec![Mutation::SetFloatingRect { section: section("floating-group"), origin, size: size(250.0, 220.0) }])).unwrap();
+    for dimensions in [size(199.0, 220.0), size(301.0, 220.0), size(250.0, 179.0), size(250.0, 261.0)] {
+        reject(&mut service, vec![Mutation::SetFloatingRect { section: section("floating-group"), origin, size: dimensions }], Rule::Bounds);
+    }
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, MAX_LOGICAL + 1.0, -MAX_LOGICAL - 1.0] {
+        for hostile_origin in [Point { x: bad, y: 0.0 }, Point { x: 0.0, y: bad }] {
+            reject(
+                &mut service,
+                vec![Mutation::SetFloatingRect { section: section("floating-group"), origin: hostile_origin, size: size(250.0, 220.0) }],
+                Rule::Bounds,
+            );
+        }
+    }
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0, 0.0, MAX_LOGICAL + 1.0] {
+        for dimensions in [size(bad, 220.0), size(250.0, bad)] {
+            reject(&mut service, vec![Mutation::SetFloatingRect { section: section("floating-group"), origin, size: dimensions }], Rule::Bounds);
+        }
+    }
+    reject(
+        &mut service,
+        vec![Mutation::SetFloatingRect { section: section("floating-group"), origin: Point { x: MAX_LOGICAL, y: 0.0 }, size: size(250.0, 220.0) }],
+        Rule::Bounds,
+    );
+    reject(&mut service, vec![Mutation::SetFloatingRect { section: SectionId("UPPER".into()), origin, size: size(250.0, 220.0) }], Rule::Id);
+    reject(&mut service, vec![Mutation::SetFloatingRect { section: section("missing"), origin, size: size(250.0, 220.0) }], Rule::MissingTarget);
+    reject(
+        &mut service,
+        vec![
+            Mutation::SetFloatingRect { section: section("floating-group"), origin: Point { x: 10.0, y: 20.0 }, size: size(260.0, 230.0) },
+            Mutation::SetSize { section: section("floating-group"), size: size(301.0, 230.0) },
+        ],
+        Rule::Bounds,
+    );
+    for boundary in [Point { x: MAX_LOGICAL - 250.0, y: MAX_LOGICAL - 220.0 }, Point { x: -MAX_LOGICAL, y: -MAX_LOGICAL }] {
+        service
+            .dispatch(transaction(vec![Mutation::SetFloatingRect { section: section("floating-group"), origin: boundary, size: size(250.0, 220.0) }]))
+            .unwrap();
+        assert_eq!(service.layout().section(&section("floating-group")).unwrap().location, SectionLocation::Floating { origin: boundary });
+        validate(service.layout(), service.registry()).unwrap();
+    }
+}
+
+#[test]
+fn floating_rect_cannot_reparent_a_dock_or_bypass_native_close() {
+    let mut service = fixture_service(true).unwrap();
+    open(&mut service, "one", "docked");
+    open(&mut service, "two", "native");
+    let host = HostId::new("rect-native-host").unwrap();
+    service
+        .dispatch(transaction(vec![Mutation::Move {
+            instance: id("two"),
+            destination: Destination::NewSection {
+                section: section("native"),
+                index: 1,
+                location: SectionLocation::Window {
+                    host: host.clone(),
+                    origin: Point { x: 0.0, y: 0.0 },
+                    return_to: DockReturn {
+                        zone: Zone::Left,
+                        index: 1,
+                        size: size(280.0, 240.0),
+                        collapsed: false,
+                        join: None,
+                        section: None,
+                        column: None,
+                        column_index: 0,
+                        column_width: None,
+                        weight: 1.0,
+                        preferred_extent: None,
+                        extent_priority: 0,
+                    },
+                },
+                size: size(280.0, 240.0),
+            },
+        }]))
+        .unwrap();
+    for target in ["docked", "native"] {
+        reject(
+            &mut service,
+            vec![Mutation::SetFloatingRect { section: section(target), origin: Point { x: 20.0, y: 30.0 }, size: size(250.0, 220.0) }],
+            Rule::Placement,
+        );
+    }
+    assert!(
+        matches!(&service.layout().section(&section("native")).unwrap().location, SectionLocation::Window { host: actual, .. } if *actual == host)
+    );
+}
+
+#[test]
+fn floating_rect_updates_each_tab_reopen_memory_without_section_identity_churn() {
+    let mut service = floating_group_service();
+    let origin = Point { x: 520.0, y: 0.0 };
+    service.dispatch(transaction(vec![Mutation::SetFloatingRect { section: section("floating-group"), origin, size: size(250.0, 240.0) }])).unwrap();
+    service.dispatch(transaction(vec![Mutation::Close { instance: id("one") }, Mutation::Close { instance: id("two") }])).unwrap();
+    assert!(service.layout().sections.is_empty());
+    for name in ["two", "one"] {
+        service
+            .dispatch(transaction(vec![Mutation::Open { kind: PanelKind::new("fixture.log").unwrap(), instance: id(name), destination: None }]))
+            .unwrap();
+    }
+    let group = service.layout().section(&section("floating-group")).unwrap();
+    assert_eq!(group.tabs, vec![id("one"), id("two")]);
+    assert_eq!(group.active, id("two"));
+    assert_eq!(group.location, SectionLocation::Floating { origin });
+    assert_eq!(group.size, size(250.0, 240.0));
+    validate(service.layout(), service.registry()).unwrap();
+}
+
 #[test]
 fn closed_state_reopens_with_placement_size_and_collapse_memory() {
     let mut service = fixture_service(false).unwrap();
@@ -295,10 +515,15 @@ fn peek_never_rewrites_saved_collapse_or_sizes_and_focus_restores_content() {
     let layout = service.layout().clone();
     service.dispatch(transaction(vec![Mutation::Peek { instance: id("one") }])).unwrap();
     assert_eq!(*service.layout(), layout);
-    assert_eq!(resolve_geometry(&service, rect(1000.0, 800.0), Direction::Ltr, 48.0).unwrap().panels.len(), 1);
+    let peek = resolve_geometry(&service, rect(1000.0, 800.0), Direction::Ltr, 48.0).unwrap();
+    let header = peek.panels.first().unwrap();
+    assert_eq!(header.outer.size, size(280.0, 24.0));
+    assert!(header.body.is_none());
     service.dispatch(transaction(vec![Mutation::DismissPeek])).unwrap();
-    assert!(resolve_geometry(&service, rect(1000.0, 800.0), Direction::Ltr, 48.0).unwrap().panels.is_empty());
+    assert_eq!(resolve_geometry(&service, rect(1000.0, 800.0), Direction::Ltr, 48.0).unwrap(), peek);
+    assert_eq!(*service.layout(), layout);
     service.dispatch(transaction(vec![Mutation::Focus { instance: id("one") }])).unwrap();
+    assert!(resolve_geometry(&service, rect(1000.0, 800.0), Direction::Ltr, 48.0).unwrap().panels[0].body.is_some());
     service.dispatch(transaction(vec![Mutation::Close { instance: id("one") }])).unwrap();
     assert!(service.interaction().focused.is_none());
 }
@@ -309,21 +534,32 @@ fn overflow_is_transient_and_never_squeezes_or_rewrites_desired_dimensions() {
     open(&mut service, "one", "first");
     let before = service.inspect();
     let small = resolve_geometry(&service, rect(80.0, 80.0), Direction::Ltr, 48.0).unwrap();
-    assert!(small.panels.is_empty());
-    assert_eq!(small.unpresented.first().unwrap().reason, UnpresentedReason::MinimumOverflow);
+    let card = small.panels.first().unwrap();
+    assert!(card.outer.size.width >= 160.0 && card.outer.size.height >= 120.0);
+    assert!(card.painted.iter().all(|painted| rect(80.0, 80.0).contains_rect(*painted)));
+    assert!(small.unpresented.is_empty());
+    let mut env = allocated_pair_environment(&service, 80.0);
+    env.capacity = rect(80.0, 80.0);
+    env.scroll = Point { x: MAX_LOGICAL, y: MAX_LOGICAL };
+    for request in allocation_measure_requests(service.layout(), service.registry(), &env).unwrap() {
+        env.content.push(SideContentMeasure { request, needed_height: 240.0, policy: SideHeightPolicy::Content });
+    }
+    let scrolled = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+    assert_eq!(scrolled.scroll.x, (scrolled.extent.width - 80.0).max(0.0));
+    assert_eq!(scrolled.scroll.y, (scrolled.extent.height - 80.0).max(0.0));
     let large = resolve_geometry(&service, rect(1000.0, 800.0), Direction::Ltr, 48.0).unwrap();
     assert_eq!(large.panels.first().unwrap().outer.size, size(280.0, 240.0));
     assert_eq!(service.inspect(), before);
 }
 
 #[test]
-fn logical_rtl_flow_hysteresis_and_size_classes_use_usable_units() {
+fn logical_rtl_flow_aspect_and_size_classes_use_usable_units() {
     assert_eq!(Direction::Rtl.edge(Zone::Left).unwrap(), PhysicalEdge::Right);
     for (width, expected) in [(239.0, SizeClass::Compact), (240.0, SizeClass::Regular), (480.0, SizeClass::Regular), (481.0, SizeClass::Wide)] {
         assert_eq!(responsive(Zone::Floating, size(width, 600.0), None).unwrap().1, expected);
     }
-    assert_eq!(responsive(Zone::Floating, size(105.0, 100.0), Some(Flow::Tall)).unwrap().0, Flow::Tall);
-    assert_eq!(responsive(Zone::Window, size(95.0, 100.0), Some(Flow::Wide)).unwrap().0, Flow::Wide);
+    assert_eq!(responsive(Zone::Floating, size(105.0, 100.0), Some(Flow::Tall)).unwrap().0, Flow::Wide);
+    assert_eq!(responsive(Zone::Window, size(95.0, 100.0), Some(Flow::Wide)).unwrap().0, Flow::Tall);
     assert_eq!(responsive(Zone::Window, size(89.0, 100.0), Some(Flow::Wide)).unwrap().0, Flow::Tall);
     assert_eq!(responsive(Zone::Bottom, size(100.0, 400.0), None).unwrap().0, Flow::Wide);
 }
@@ -349,7 +585,20 @@ fn native_capabilities_and_close_redock_are_atomic() {
         location: SectionLocation::Window {
             host: HostId::new("native-host").unwrap(),
             origin: Point { x: 0.0, y: 0.0 },
-            return_to: DockReturn { zone: Zone::Left, index: 0, size: size(280.0, 240.0), collapsed: false, join: None },
+            return_to: DockReturn {
+                zone: Zone::Left,
+                index: 0,
+                size: size(280.0, 240.0),
+                collapsed: false,
+                join: None,
+                section: None,
+                column: None,
+                column_index: 0,
+                column_width: None,
+                weight: 1.0,
+                preferred_extent: None,
+                extent_priority: 0,
+            },
         },
         size: size(300.0, 250.0),
     };
@@ -526,6 +775,10 @@ fn versioned_fixture_and_action_schema_are_consumable_without_a_ui() {
     let service = fixture_service(false).unwrap();
     let loaded = decode(FIXTURE_LAYOUT_V1, service.registry(), service.layout()).unwrap();
     assert!(loaded.notice.is_none());
+    assert_eq!(loaded.envelope.version, 2);
+    assert_eq!(loaded.envelope.layout.version, 2);
+    assert_eq!(loaded.envelope.layout.columns.len(), 1);
+    assert_eq!(loaded.envelope.layout.sections[0].weight, 240.0);
     assert_eq!(loaded.envelope.layout.instances.len(), 1);
     let mut live = LayoutService::new(service.registry().clone(), loaded.envelope.layout, HostCapabilities::default()).unwrap();
     let action = decode_action(br#"{"type":"apply","expected_revision":0,"mutations":[{"type":"focus","instance":"editor"}]}"#).unwrap();
@@ -632,6 +885,13 @@ fn native_close_returns_to_a_stable_tab_group_without_stealing_activation() {
                         size: size(280.0, 240.0),
                         collapsed: false,
                         join: Some(ReturnTab { section: section("first"), index: 1 }),
+                        section: None,
+                        column: None,
+                        column_index: 0,
+                        column_width: None,
+                        weight: 1.0,
+                        preferred_extent: None,
+                        extent_priority: 0,
                     },
                 },
                 size: size(280.0, 240.0),
@@ -864,8 +1124,22 @@ fn complete_layout_wire_contract_checks_native_capacity_and_destroyed_identity_r
     native.sections.first_mut().unwrap().location = SectionLocation::Window {
         host: HostId::new("native").unwrap(),
         origin: Point { x: 0.0, y: 0.0 },
-        return_to: DockReturn { zone: Zone::Left, index: 0, size: size(280.0, 240.0), collapsed: false, join: None },
+        return_to: DockReturn {
+            zone: Zone::Left,
+            index: 0,
+            size: size(280.0, 240.0),
+            collapsed: false,
+            join: None,
+            section: None,
+            column: None,
+            column_index: 0,
+            column_width: None,
+            weight: 1.0,
+            preferred_extent: None,
+            extent_priority: 0,
+        },
     };
+    native.sections.first_mut().unwrap().column = None;
     let before = service.inspect();
     assert_eq!(service.dispatch(LayoutAction::Replace { expected_revision: None, layout: native }).unwrap_err().rule, Rule::Capability);
     assert_eq!(service.inspect(), before);
@@ -969,6 +1243,7 @@ fn command_inputs() -> Vec<(&'static str, serde_json::Value)> {
         ("layout.reset", json!({})),
         ("layout.save", json!({"name":"Saved"})),
         ("layout.workspace.select", json!({"workspace":"fixture.other"})),
+        ("panel.action", json!({"target":command_target("one"),"action":"refresh"})),
         ("panel.activate", selected.clone()),
         ("panel.close", selected.clone()),
         ("panel.collapse", json!({"target":command_target("one"),"collapsed":true})),
@@ -1021,7 +1296,7 @@ fn every_panel_command_has_strict_input_output_contracts_and_hostile_field_rejec
             assert_eq!(backend.service.inspect(), before, "{id}");
             assert_eq!(backend.catalogue.state(), &catalogue, "{id}");
         }
-        for field in ["id", "instance", "kind", "first", "second", "workspace"] {
+        for field in ["action", "id", "instance", "kind", "first", "second", "workspace"] {
             if input.get(field).is_some() {
                 let mut hostile = input.clone();
                 hostile[field] = serde_json::json!("UPPER/invalid");
@@ -1042,6 +1317,10 @@ fn panel_command_success_replies_describe_committed_state_for_every_executable_o
             backend.execute("panel.collapse", &serde_json::json!({"target":command_target("one"),"collapsed":true})).unwrap();
         }
         let result = backend.execute(id, &input);
+        if id == "panel.action" {
+            assert_eq!(result.unwrap_err().rule, Rule::Capability, "headless cannot invoke an unbound controller");
+            continue;
+        }
         if matches!(id, "panel.popout" | "panel.native_close") {
             assert!(result.is_err(), "{id}");
             continue;
@@ -1091,6 +1370,296 @@ fn panel_commands_reject_nested_unknowns_sizes_indices_and_nonfinite_values_befo
         let mutation = Mutation::SetSize { section: section("s-one"), size: size(hostile, 240.0) };
         assert!(backend.service.project(transaction(vec![mutation])).is_err());
     }
+}
+
+#[test]
+fn thickness_only_bottom_command_matches_pointer_mutation_and_preserves_saved_width_intent() {
+    use commands::LayoutCatalogue;
+    use serde_json::json;
+    for selector in [json!({"target":{"type":"section","id":"first"}}), json!({"target":command_target("one")}), json!({"id":"one"})] {
+        let mut registry = synthetic_registry().unwrap();
+        let mut constrained = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+        constrained.kind = PanelKind::new("fixture.short-height").unwrap();
+        constrained.min_size.height = 140.0;
+        constrained.max_size.height = 300.0;
+        registry.register(constrained).unwrap();
+        let mut service =
+            LayoutService::new(registry.clone(), Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+        service
+            .dispatch(transaction(vec![
+                fixture_open("fixture.log", "one", "first", Zone::Bottom, 0).unwrap(),
+                fixture_open("fixture.log", "two", "second", Zone::Bottom, 1).unwrap(),
+                Mutation::Open {
+                    kind: PanelKind::new("fixture.short-height").unwrap(),
+                    instance: id("inactive"),
+                    destination: Some(Destination::JoinTab { section: section("first"), index: 1 }),
+                },
+                Mutation::SetSize { section: section("first"), size: size(320.0, 240.0) },
+                Mutation::SetSize { section: section("second"), size: size(450.0, 500.0) },
+            ]))
+            .unwrap();
+        let mut imported = service.layout().clone();
+        let memory = &mut imported.instances.iter_mut().find(|p| p.id == id("one")).unwrap().memory;
+        memory.size.width = 800.0;
+        memory.preferred_extent = Some(600.0);
+        memory.extent_priority = 77;
+        memory.weight = 3.0;
+        let service = LayoutService::new(registry.clone(), imported.clone(), HostCapabilities::default()).unwrap();
+        let expected = service.prepare(transaction(vec![Mutation::SetBottomHeight { section: section("first"), height: 180.0 }])).unwrap();
+        let mut backend = commands::InMemoryPanelBackend::new(service, fixture_command_catalogue(&registry).unwrap());
+        let mut params = selector;
+        // The valid ignored width is outside every panel's width bounds.
+        params["size"] = json!({"width":1,"height":180});
+        params["thickness_only"] = json!(true);
+        backend.execute("panel.resize", &params).unwrap();
+        assert_eq!(backend.service.layout(), expected.layout());
+        for (old, new) in imported.sections.iter().zip(&backend.service.layout().sections) {
+            let mut expected = old.clone();
+            expected.size.height = 180.0;
+            assert_eq!(new, &expected, "row thickness preserves section width preference, tier and weight");
+        }
+        for (old, new) in imported.instances.iter().zip(&backend.service.layout().instances) {
+            let mut expected = old.clone();
+            expected.memory.size.height = 180.0;
+            assert_eq!(new, &expected, "inactive and divergent live memories retain width intent");
+        }
+        let stored = backend.catalogue.state().remembered(&imported.workspace).unwrap().project_envelope(&registry, &imported.workspace).unwrap();
+        assert_eq!(stored.layout.instances, backend.service.layout().instances);
+        assert_eq!(stored.layout.sections, backend.service.layout().sections);
+        let before = backend.service.inspect();
+        let catalogue = backend.catalogue.state().clone();
+        params["size"]["height"] = json!(301);
+        assert_eq!(backend.execute("panel.resize", &params).unwrap_err().rule, Rule::Bounds, "inactive tab limits the common row");
+        assert_eq!(backend.service.inspect(), before);
+        assert_eq!(backend.catalogue.state(), &catalogue);
+    }
+}
+
+#[test]
+fn thickness_only_side_command_resolves_columns_sections_instances_and_legacy_selectors() {
+    use serde_json::json;
+    for zone in [Zone::Left, Zone::Right] {
+        for selector in ["column", "section", "instance", "legacy"] {
+            let mut service = fixture_service(false).unwrap();
+            service
+                .dispatch(transaction(vec![
+                    fixture_open("fixture.log", "one", "first", zone, 0).unwrap(),
+                    fixture_open("fixture.log", "two", "second", zone, 1).unwrap(),
+                    Mutation::SetSize { section: section("first"), size: size(280.0, 300.0) },
+                    Mutation::SetSize { section: section("second"), size: size(280.0, 500.0) },
+                ]))
+                .unwrap();
+            let before = service.layout().clone();
+            let column = before.section(&section("first")).unwrap().column.clone().unwrap();
+            assert_eq!(before.section(&section("second")).unwrap().column, Some(column.clone()));
+            let expected = service.prepare(transaction(vec![Mutation::SetColumnWidth { column: column.clone(), width: 360.0 }])).unwrap();
+            let catalogue = fixture_command_catalogue(service.registry()).unwrap();
+            let mut backend = commands::InMemoryPanelBackend::new(service, catalogue);
+            let mut params = match selector {
+                "column" => json!({"target":{"type":"column","id":column}}),
+                "section" => json!({"target":{"type":"section","id":"first"}}),
+                "instance" => json!({"target":command_target("one")}),
+                _ => json!({"id":"one"}),
+            };
+            params["size"] = json!({"width":360,"height":1});
+            params["thickness_only"] = json!(true);
+            backend.execute("panel.resize", &params).unwrap();
+            assert_eq!(backend.service.layout(), expected.layout());
+            for (old, new) in before.sections.iter().zip(&backend.service.layout().sections) {
+                let mut expected = old.clone();
+                expected.size.width = 360.0;
+                assert_eq!(new, &expected, "side thickness must not author a height preference or tier");
+            }
+            for (old, new) in before.instances.iter().zip(&backend.service.layout().instances) {
+                let mut expected = old.clone();
+                expected.memory.size.width = 360.0;
+                expected.memory.column_width = Some(360.0);
+                assert_eq!(new, &expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn resize_omission_and_false_keep_full_size_behavior_in_dock_and_floating_hosts() {
+    use serde_json::json;
+    for zone in [Zone::Left, Zone::Bottom, Zone::Floating] {
+        for flag in [None, Some(false)] {
+            let mut service = fixture_service(false).unwrap();
+            service.dispatch(transaction(vec![fixture_open("fixture.log", "one", "first", zone, 0).unwrap()])).unwrap();
+            let expected = service.prepare(transaction(vec![Mutation::SetSize { section: section("first"), size: size(360.0, 320.0) }])).unwrap();
+            let catalogue = fixture_command_catalogue(service.registry()).unwrap();
+            let mut backend = commands::InMemoryPanelBackend::new(service, catalogue);
+            let mut params = json!({"target":command_target("one"),"size":{"width":360,"height":320}});
+            if let Some(flag) = flag {
+                params["thickness_only"] = json!(flag);
+            }
+            backend.execute("panel.resize", &params).unwrap();
+            assert_eq!(backend.service.layout(), expected.layout());
+            let group = backend.service.layout().section(&section("first")).unwrap();
+            assert_eq!(group.size, size(360.0, 320.0));
+            if zone.docked() {
+                assert_eq!(group.preferred_extent, Some(if zone == Zone::Bottom { 360.0 } else { 320.0 }));
+                assert!(group.extent_priority > 0);
+            }
+        }
+    }
+}
+
+#[test]
+fn thickness_only_refuses_free_native_and_nondock_targets_without_layout_or_storage_effects() {
+    use commands::LayoutCatalogue;
+    use serde_json::json;
+    for native in [false, true] {
+        let mut service = fixture_service(native).unwrap();
+        if native {
+            open(&mut service, "one", "first");
+            service
+                .dispatch(transaction(vec![Mutation::Move {
+                    instance: id("one"),
+                    destination: Destination::NewSection {
+                        section: section("free"),
+                        index: 0,
+                        size: size(280.0, 240.0),
+                        location: SectionLocation::Window {
+                            host: HostId::new("thickness-native").unwrap(),
+                            origin: Point { x: 0.0, y: 0.0 },
+                            return_to: DockReturn {
+                                zone: Zone::Left,
+                                index: 0,
+                                size: size(280.0, 240.0),
+                                collapsed: false,
+                                join: None,
+                                section: None,
+                                column: None,
+                                column_index: 0,
+                                column_width: None,
+                                weight: 1.0,
+                                preferred_extent: None,
+                                extent_priority: 0,
+                            },
+                        },
+                    },
+                }]))
+                .unwrap();
+        } else {
+            service.dispatch(transaction(vec![fixture_open("fixture.log", "one", "free", Zone::Floating, 0).unwrap()])).unwrap();
+        }
+        let catalogue = fixture_command_catalogue(service.registry()).unwrap();
+        let mut backend = commands::InMemoryPanelBackend::new(service, catalogue);
+        for target in [
+            command_target("one"),
+            json!({"type":"section","id":"free"}),
+            json!({"type":"native_host","id":"thickness-native"}),
+            json!({"type":"workspace","id":"fixture.workspace"}),
+        ] {
+            let before = backend.service.inspect();
+            let catalogue = backend.catalogue.state().clone();
+            let result = backend.execute("panel.resize", &json!({"target":target,"size":{"width":300,"height":200},"thickness_only":true}));
+            assert_eq!(
+                result.unwrap_err().rule,
+                if target["type"] == "instance" || target["type"] == "section" { Rule::Placement } else { Rule::Schema }
+            );
+            assert_eq!(backend.service.inspect(), before);
+            assert_eq!(backend.catalogue.state(), &catalogue);
+        }
+    }
+}
+
+#[test]
+fn thickness_only_schema_unused_dimensions_and_atomic_failures_use_existing_command_boundaries() {
+    use commands::LayoutCatalogue;
+    use serde_json::json;
+    let spec = crate::find_command("panel.resize").unwrap();
+    let contract = spec.contract.unwrap();
+    let schema = contract.input_schema();
+    assert_eq!(schema.as_value()["properties"]["thickness_only"]["default"], false);
+    assert_eq!(schema.as_value()["properties"]["thickness_only"]["type"], "boolean");
+    let mut backend = command_ready_backend();
+    for (field, value) in [
+        ("thickness_only", json!(null)),
+        ("thickness_only", json!(1)),
+        ("thickness_only", json!("true")),
+        ("thickness_only", json!([])),
+        ("thickness_only", json!({})),
+        ("unknown", json!(true)),
+    ] {
+        let mut params = json!({"target":command_target("one"),"size":{"width":300,"height":200},"thickness_only":true});
+        params[field] = value;
+        assert!(!contract.check(&params).is_empty());
+        assert_eq!(commands::parse_command("panel.resize", &params).unwrap_err().rule, Rule::Schema);
+        let before = backend.service.inspect();
+        let catalogue = backend.catalogue.state().clone();
+        assert!(backend.execute("panel.resize", &params).is_err());
+        assert_eq!(backend.service.inspect(), before);
+        assert_eq!(backend.catalogue.state(), &catalogue);
+    }
+    backend.execute("panel.open", &json!({"kind":"fixture.log","instance":"bottom","destination":command_destination("bottom",2,"bottom")})).unwrap();
+    let column = backend.service.layout().section(&section("s-one")).unwrap().column.clone().unwrap();
+    for (target, axis) in [(command_target("one"), "height"), (json!({"type":"column","id":column}), "height"), (command_target("bottom"), "width")] {
+        for value in [json!(0), json!(-1), json!(MAX_LOGICAL + 1.0), json!(1e100), json!(null), json!("NaN")] {
+            let mut params = json!({"target":target,"size":{"width":300,"height":200},"thickness_only":true});
+            params["size"][axis] = value;
+            let before = backend.service.inspect();
+            let catalogue = backend.catalogue.state().clone();
+            assert!(!contract.check(&params).is_empty(), "unused {axis} remains hostile input");
+            assert!(backend.execute("panel.resize", &params).is_err());
+            assert_eq!(backend.service.inspect(), before);
+            assert_eq!(backend.catalogue.state(), &catalogue);
+        }
+    }
+    for (panel, unused_width) in [("one", false), ("bottom", true)] {
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let params = crate::schema::panels::Resize {
+                target: Some(crate::schema::panels::Target::Instance(id(panel))),
+                id: None,
+                size: crate::schema::panels::OuterSize {
+                    width: if unused_width { value } else { 300.0 },
+                    height: if unused_width { 200.0 } else { value },
+                },
+                thickness_only: true,
+                expected_revision: None,
+            };
+            let before = backend.service.inspect();
+            let catalogue = backend.catalogue.state().clone();
+            let registry = backend.service.registry().clone();
+            let result = commands::execute_command(
+                commands::PanelCommand::Resize(params),
+                &mut commands::PanelCommandContext { sink: &mut backend.service, registry: &registry, catalogue: &mut backend.catalogue, web: false },
+            );
+            assert_eq!(result.unwrap_err().rule, Rule::Bounds);
+            assert_eq!(backend.service.inspect(), before);
+            assert_eq!(backend.catalogue.state(), &catalogue);
+        }
+    }
+    for params in [
+        json!({"target":command_target("one"),"thickness_only":true}),
+        json!({"target":command_target("one"),"size":{"width":300,"height":200,"unknown":true},"thickness_only":true}),
+    ] {
+        assert_eq!(commands::parse_command("panel.resize", &params).unwrap_err().rule, Rule::Schema);
+    }
+    let before = backend.service.inspect();
+    let catalogue = backend.catalogue.state().clone();
+    assert!(
+        backend
+            .batch(&[
+                json!({"command":"panel.resize","params":{"target":command_target("bottom"),"size":{"width":1,"height":180},"thickness_only":true}}),
+                json!({"command":"panel.resize","params":{"target":command_target("one"),"size":{"width":1,"height":1},"thickness_only":true}}),
+            ])
+            .is_err()
+    );
+    assert_eq!(backend.service.inspect(), before);
+    assert_eq!(backend.catalogue.state(), &catalogue);
+    backend.catalogue.fail_stage = true;
+    assert_eq!(
+        backend
+            .execute("panel.resize", &json!({"target":command_target("bottom"),"size":{"width":1,"height":180},"thickness_only":true}))
+            .unwrap_err()
+            .rule,
+        Rule::Capability
+    );
+    assert_eq!(backend.service.inspect(), before);
+    assert_eq!(backend.catalogue.state(), &catalogue);
 }
 
 #[test]
@@ -2018,6 +2587,10 @@ mod catalogue_consumer {
         let mut wire = serde_json::to_value(LayoutEnvelope::new(pin_service.layout().clone())).unwrap();
         wire["layout"]["sections"].as_array_mut().unwrap().reverse();
         wire["layout"]["sections"][0]["location"] = serde_json::json!({"type":"dock","zone":"left"});
+        let column = wire["layout"]["sections"][0]["column"].clone();
+        let columns = wire["layout"]["columns"].as_array_mut().unwrap();
+        columns.iter_mut().find(|saved| saved["id"] == column).unwrap()["zone"] = serde_json::json!("left");
+        columns.reverse();
         let bytes = serde_json::to_vec(&wire).unwrap();
         assert_eq!(CatalogueState::hydrate(&snapshot(&[], &[("Pinned", &bytes, None)], &[], &[]), &absent).unwrap_err().rule, Rule::PinOrder);
     }
@@ -2192,6 +2765,90 @@ mod catalogue_consumer {
     }
 
     #[test]
+    fn maximum_original_v1_record_hydrates_and_projects_without_claiming_expanded_encodability() {
+        use crate::panels::commands::StoredEnvelope;
+        let registry = synthetic_registry().unwrap();
+        let absent = without_kind(&registry, "fixture.editor");
+        let fallback = Layout::empty(WorkspaceId::new("fixture.workspace").unwrap());
+        let mut raw: serde_json::Value = serde_json::from_slice(FIXTURE_LAYOUT_V1).unwrap();
+        raw["future_envelope"] = serde_json::json!({"intent":"keep exact legacy bytes"});
+        raw["retained_data"]["padding"] = serde_json::json!("");
+        let overhead = serde_json::to_vec(&raw).unwrap().len();
+        raw["retained_data"]["padding"] = serde_json::json!("x".repeat(MAX_ENVELOPE_BYTES - overhead));
+        let legacy = serde_json::to_vec(&raw).unwrap();
+        assert_eq!(legacy.len(), MAX_ENVELOPE_BYTES);
+        bounded_json(&raw).unwrap(); // Original v1 validity, not a padded v2 record.
+        let source = snapshot(
+            &[("Legacy", &legacy, None)],
+            &[],
+            &[("fixture.workspace", "ui.panel", "Legacy")],
+            &[("fixture.workspace", &legacy, Some(b"original recovery"))],
+        );
+        for current in [&registry, &absent] {
+            let retained = decode_retained_record(&legacy, current).unwrap();
+            assert_eq!(retained.retained_v1_bytes(), Some(legacy.as_slice()));
+            assert!(retained.layout.sections.iter().all(|s| s.preferred_extent.is_none()));
+            assert!(retained.layout.instances.iter().all(|p| p.memory.preferred_extent.is_none()));
+            assert!(retained.layout.sections.iter().all(|s| s.extent_priority == 0));
+            assert!(retained.layout.instances.iter().all(|p| p.memory.extent_priority == 0));
+            let typed = serde_json::to_value(&retained).unwrap();
+            assert!(typed["layout"]["sections"][0].get("preferred_extent").is_none());
+            assert!(typed["layout"]["instances"][0]["memory"].get("preferred_extent").is_none());
+            assert!(typed["layout"]["sections"][0].get("extent_priority").is_none());
+            assert!(typed["layout"]["instances"][0]["memory"].get("extent_priority").is_none());
+            assert_eq!(decode_retained(&legacy, current, &fallback.workspace).unwrap().retained_v1_bytes(), Some(legacy.as_slice()));
+            let projected = project_retained_record(&legacy, current, &fallback.workspace).unwrap();
+            let loaded = decode(&legacy, current, &fallback).unwrap();
+            assert!(loaded.notice.is_none() && loaded.rejected.is_none());
+            assert_eq!(loaded.envelope.retained_v1_bytes(), Some(legacy.as_slice()));
+            assert_eq!(projected.retained_v1_bytes(), Some(legacy.as_slice()));
+            assert_eq!(encode(&projected, current).unwrap_err().rule, Rule::CollectionLimit);
+            assert_eq!(StoredEnvelope::new(&projected, None, current).unwrap_err().rule, Rule::CollectionLimit);
+            assert_eq!(with_live_layout(&projected, projected.layout.clone(), current).unwrap_err().rule, Rule::CollectionLimit);
+            let catalogue = CatalogueState::hydrate(&source, current).unwrap();
+            assert_eq!(catalogue.export().unwrap(), source);
+            let stored = catalogue.preset("Legacy").unwrap();
+            assert_eq!(stored.bytes(), legacy.as_slice());
+            assert_eq!(stored.project_envelope(current, &fallback.workspace).unwrap().retained_v1_bytes(), Some(legacy.as_slice()));
+            assert_eq!(catalogue.remembered(&fallback.workspace).unwrap().rejected(), Some(b"original recovery".as_slice()));
+            let catalogue = InMemoryCatalogue::from_snapshot(&source, current).unwrap();
+            let service = LayoutService::new(current.clone(), projected.layout.clone(), HostCapabilities::default()).unwrap();
+            let captured = commands::current_envelope_snapshot(&catalogue, &service.inspect(), current).unwrap();
+            assert_eq!(captured.retained_v1_bytes(), Some(legacy.as_slice()));
+            assert_eq!(encode(&captured, current).unwrap_err().rule, Rule::CollectionLimit);
+            assert_eq!(catalogue.state().export().unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn maximum_priority_record_hydrates_without_overhead_and_expanded_shadow_staging_is_atomic() {
+        let (registry, envelope) = super::priority_recovery_envelope(u16::MAX, false);
+        let envelope = maximum_record(envelope, &registry, MAX_ENVELOPE_BYTES);
+        let bytes = encode(&envelope, &registry).unwrap();
+        assert_eq!(bytes.len(), MAX_ENVELOPE_BYTES);
+        let retained = decode_retained_record(&bytes, &registry).unwrap();
+        assert!(retained.layout.extent_priority_context.complete);
+        assert!(retained.extent_priority_overrides.is_empty());
+        assert_eq!(encode(&retained, &registry).unwrap(), bytes);
+        let context = preparation_context(&retained).unwrap();
+        let service = LayoutService::new(registry.clone(), retained.layout.clone(), HostCapabilities::default()).unwrap();
+        let before = service.inspect();
+        let prepared = service
+            .prepare_with_context(
+                transaction(vec![Mutation::SetSize { section: SectionId::new("a").unwrap(), size: Size { width: 280.0, height: 350.0 } }]),
+                &AvailabilityMap::new(),
+                &context,
+            )
+            .unwrap();
+        assert_eq!(with_live_layout(&retained, prepared.layout().clone(), &registry).unwrap_err().rule, Rule::CollectionLimit);
+        assert_eq!(service.inspect(), before);
+        assert_eq!(encode(&retained, &registry).unwrap(), bytes);
+        let source = snapshot(&[("Full", &bytes, None)], &[], &[], &[("fixture.workspace", &bytes, None)]);
+        let catalogue = InMemoryCatalogue::from_snapshot(&source, &registry).unwrap();
+        assert_eq!(catalogue.state().export().unwrap(), source);
+    }
+
+    #[test]
     fn catalogue_hydration_rejects_duplicate_names_workspaces_and_corrupt_framing_before_publication() {
         let registry = synthetic_registry().unwrap();
         let envelope = LayoutEnvelope::new(fixture_service(false).unwrap().layout().clone());
@@ -2356,12 +3013,22 @@ fn a_new_quarantine_episode_refreshes_saved_tab_order_activation_and_outer_seman
     for initial_active in ["a", "b"] {
         let mut envelope = decode(&serde_json::to_vec(&future_pair(initial_active)).unwrap(), &a, &fallback).unwrap().envelope;
         restore_quarantine(&mut envelope, &all).unwrap();
-        let group = envelope.layout.sections.first_mut().unwrap();
-        group.tabs = vec![id("b"), id("a")];
-        group.active = id("b");
-        group.size = size(400.0, 300.0);
-        group.collapsed = true;
-        group.location = SectionLocation::Dock { zone: Zone::Right };
+        let mut service = LayoutService::new(all.clone(), envelope.layout.clone(), HostCapabilities::default()).unwrap();
+        service.dispatch(transaction(vec![Mutation::Close { instance: id("a") }, Mutation::Close { instance: id("b") }])).unwrap();
+        service
+            .dispatch(transaction(vec![
+                fixture_open("extension.b", "b", "group", Zone::Right, 0).unwrap(),
+                Mutation::Open {
+                    kind: PanelKind::new("extension.a").unwrap(),
+                    instance: id("a"),
+                    destination: Some(Destination::JoinTab { section: section("group"), index: 1 }),
+                },
+                Mutation::Activate { instance: id("b") },
+                Mutation::SetSize { section: section("group"), size: size(400.0, 300.0) },
+                Mutation::Collapse { section: section("group"), collapsed: true },
+            ]))
+            .unwrap();
+        envelope = with_live_layout(&envelope, service.layout().clone(), &all).unwrap();
         let mut saved: serde_json::Value = serde_json::from_slice(&encode(&envelope, &all).unwrap()).unwrap();
         saved["layout"]["sections"][0]["new_future_field"] = serde_json::json!("latest opaque intent");
         let loaded = decode(&serde_json::to_vec(&saved).unwrap(), &a, &fallback).unwrap();
@@ -2473,4 +3140,4070 @@ fn earlier_v1_rank_metadata_and_new_order_projection_bounds_are_supported() {
     let snapshot = restored.section_snapshots.get_mut(&section("s0")).unwrap();
     snapshot.projected.as_mut().unwrap().tabs = vec![id("a"); MAX_TABS + 1];
     assert_eq!(encode(&restored, &all).unwrap_err().rule, Rule::CollectionLimit);
+}
+
+#[test]
+fn amended_registration_defaults_are_generic_and_header_metadata_is_bounded() {
+    let registry = synthetic_registry().unwrap();
+    let base = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap();
+    let mut raw = serde_json::to_value(base).unwrap();
+    for field in ["allowed_zones", "side_height_policy", "header_actions", "text_heavy"] {
+        raw.as_object_mut().unwrap().remove(field);
+    }
+    raw["features"].as_object_mut().unwrap().remove("hot_closable");
+    let spec: PanelSpec = serde_json::from_value(raw).unwrap();
+    assert_eq!(spec.allowed_zones, all_zones());
+    assert_eq!(spec.side_height_policy, SideHeightPolicy::Content);
+    assert!(!spec.text_heavy && !spec.features.hot_closable && spec.header_actions.is_empty());
+    let mut duplicate = base.clone();
+    let action = HeaderActionSpec { id: ControlId::new("refresh").unwrap(), label_key: "ui.refresh".into(), icon: "restore".into() };
+    duplicate.header_actions = vec![action.clone(), action.clone()];
+    assert_eq!(PanelRegistry::default().register(duplicate).unwrap_err().rule, Rule::DuplicateId);
+    let mut oversized = base.clone();
+    oversized.header_actions = vec![action; MAX_HEADER_ACTIONS + 1];
+    assert_eq!(PanelRegistry::default().register(oversized).unwrap_err().rule, Rule::CollectionLimit);
+    let mut visible_disabled = base.clone();
+    visible_disabled.features.closable = false;
+    visible_disabled.features.hot_closable = true;
+    let mut registry = PanelRegistry::default();
+    registry.register(visible_disabled.clone()).unwrap();
+    assert!(registry.get(&visible_disabled.kind).unwrap().features.hot_closable);
+    let mut service =
+        LayoutService::new(registry, Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+    service.dispatch(transaction(vec![fixture_open("fixture.log", "fixed", "fixed-group", Zone::Left, 0).unwrap()])).unwrap();
+    reject(&mut service, vec![Mutation::Close { instance: id("fixed") }], Rule::FeatureDisabled);
+}
+
+#[test]
+fn all_relative_placements_keep_exact_prepared_columns_and_stack_order() {
+    for placement in [RelativePlacement::BeforeColumn, RelativePlacement::AfterColumn, RelativePlacement::Above, RelativePlacement::Below] {
+        let mut service = fixture_service(false).unwrap();
+        open(&mut service, "anchor", "anchor-group");
+        open(&mut service, "mover", "source");
+        let before = service.inspect();
+        let column = next_column_id(service.layout()).unwrap();
+        let split = matches!(placement, RelativePlacement::BeforeColumn | RelativePlacement::AfterColumn);
+        let action = transaction(vec![
+            Mutation::Move {
+                instance: id("mover"),
+                destination: Destination::Relative {
+                    section: section("anchor-group"),
+                    placement,
+                    new_section: section("landing"),
+                    new_column: split.then_some(column.clone()),
+                    size: size(280.0, 240.0),
+                },
+            },
+            Mutation::Activate { instance: id("mover") },
+        ]);
+        let first = service.prepare(action.clone()).unwrap();
+        let second = service.prepare(action).unwrap();
+        assert_eq!(first.layout(), second.layout());
+        assert_eq!(service.inspect(), before, "preview must not publish IDs or state");
+        let shown = second.layout().clone();
+        drop(first);
+        let committed = service.commit(second).unwrap();
+        assert_eq!(committed.layout, shown);
+        let anchor = committed.layout.section(&section("anchor-group")).unwrap();
+        let landing = committed.layout.section(&section("landing")).unwrap();
+        assert_eq!(landing.active, id("mover"));
+        assert_eq!(anchor.column == landing.column, !split);
+        let ordered: Vec<_> = committed.layout.sections.iter().map(|s| s.id.clone()).collect();
+        let before_anchor = matches!(placement, RelativePlacement::BeforeColumn | RelativePlacement::Above);
+        assert_eq!(
+            ordered,
+            if before_anchor { vec![section("landing"), section("anchor-group")] } else { vec![section("anchor-group"), section("landing")] }
+        );
+        if split {
+            assert_eq!(landing.column, Some(column));
+        }
+    }
+}
+
+#[test]
+fn relative_stacks_allocate_equal_heights_across_source_and_anchor_weight_scales() {
+    for placement in [RelativePlacement::Above, RelativePlacement::Below] {
+        for anchor_weight in [1.0, 240.0, 0.0001] {
+            for source_weight in [1.0, 240.0, 0.0001] {
+                let mut service = fixture_service(false).unwrap();
+                open(&mut service, "anchor", "anchor-group");
+                service.dispatch(transaction(vec![fixture_open("fixture.log", "mover", "source", Zone::Floating, 1).unwrap()])).unwrap();
+                let mut layout = service.layout().clone();
+                layout.sections[0].weight = anchor_weight;
+                layout.sections[1].weight = source_weight;
+                layout.instances[0].memory.weight = anchor_weight;
+                layout.instances[1].memory.weight = source_weight;
+                let mut service = LayoutService::new(service.registry().clone(), layout, HostCapabilities::default()).unwrap();
+                let mut env = allocated_pair_environment(&service, 800.0);
+                env.gap = 4.0;
+                let before = service.inspect();
+                let prepared = service
+                    .prepare(transaction(vec![Mutation::Move {
+                        instance: id("mover"),
+                        destination: Destination::Relative {
+                            section: section("anchor-group"),
+                            placement,
+                            new_section: section("landing"),
+                            new_column: None,
+                            size: size(280.0, 240.0),
+                        },
+                    }]))
+                    .unwrap();
+                assert_eq!(service.inspect(), before, "preparation cannot publish the stack");
+                let anchor = prepared.layout().section(&section("anchor-group")).unwrap();
+                let landing = prepared.layout().section(&section("landing")).unwrap();
+                assert_eq!(anchor, before.layout.section(&section("anchor-group")).unwrap());
+                assert_eq!(landing.weight, anchor_weight);
+                assert_eq!(landing.size.height, 240.0, "desired height remains independent of surplus weight");
+                let shown = allocate_layout(prepared.layout(), service.registry(), &env).unwrap();
+                assert_eq!(shown.sections.len(), 2);
+                assert_eq!(
+                    shown.sections.iter().map(|s| s.section.clone()).collect::<Vec<_>>(),
+                    if placement == RelativePlacement::Above {
+                        vec![section("landing"), section("anchor-group")]
+                    } else {
+                        vec![section("anchor-group"), section("landing")]
+                    }
+                );
+                for (index, actual) in shown.sections.iter().enumerate() {
+                    assert!(
+                        (actual.outer.size.height - 398.0).abs() < 0.001,
+                        "{placement:?}, anchor {anchor_weight}, source {source_weight}: {actual:?}"
+                    );
+                    assert!((actual.outer.origin.y - (17.0 + index as f32 * 402.0)).abs() < 0.001);
+                }
+                service.commit(prepared).unwrap();
+                assert_eq!(allocate_layout(service.layout(), service.registry(), &env).unwrap(), shown);
+                assert_eq!(service.layout().instance(&id("mover")).unwrap().memory.weight, anchor_weight);
+            }
+        }
+    }
+}
+
+#[test]
+fn relative_stacks_keep_zero_anchor_at_minimum_and_give_new_section_surplus() {
+    for placement in [RelativePlacement::Above, RelativePlacement::Below] {
+        let mut service = fixture_service(false).unwrap();
+        open(&mut service, "anchor", "anchor-group");
+        let mut layout = service.layout().clone();
+        layout.sections[0].weight = 0.0;
+        layout.instances[0].memory.weight = 0.0;
+        let mut service = LayoutService::new(service.registry().clone(), layout, HostCapabilities::default()).unwrap();
+        service
+            .dispatch(transaction(vec![Mutation::Open {
+                kind: PanelKind::new("fixture.log").unwrap(),
+                instance: id("new"),
+                destination: Some(Destination::Relative {
+                    section: section("anchor-group"),
+                    placement,
+                    new_section: section("landing"),
+                    new_column: None,
+                    size: size(280.0, 240.0),
+                }),
+            }]))
+            .unwrap();
+        let mut env = allocated_pair_environment(&service, 800.0);
+        env.gap = 4.0;
+        let geometry = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+        assert_eq!(geometry.sections.len(), 2);
+        assert_eq!(service.layout().section(&section("anchor-group")).unwrap().weight, 0.0);
+        assert_eq!(service.layout().section(&section("landing")).unwrap().weight, 1.0);
+        assert_eq!(service.layout().instance(&id("anchor")).unwrap().memory.weight, 0.0);
+        for actual in &geometry.sections {
+            let expected = if actual.section == section("anchor-group") { 120.0 } else { 676.0 };
+            assert!((actual.outer.size.height - expected).abs() < 0.001);
+        }
+    }
+}
+
+#[test]
+fn relative_same_column_moves_preserve_authored_extents_ranks_and_other_saved_weights() {
+    for placement in [RelativePlacement::Above, RelativePlacement::Below] {
+        let mut service = fixture_service(false).unwrap();
+        for (panel, group) in [("anchor", "anchor-group"), ("other", "other-group"), ("mover", "source"), ("closed", "closed-group")] {
+            open(&mut service, panel, group);
+        }
+        service
+            .dispatch(transaction(vec![
+                Mutation::SetSize { section: section("anchor-group"), size: size(280.0, 300.0) },
+                Mutation::SetSize { section: section("source"), size: size(280.0, 200.0) },
+                Mutation::SetSize { section: section("closed-group"), size: size(280.0, 350.0) },
+                Mutation::Close { instance: id("closed") },
+            ]))
+            .unwrap();
+        let mut layout = service.layout().clone();
+        for (group, weight) in layout.sections.iter_mut().zip([0.0002, 0.0004, 0.0009]) {
+            group.weight = weight;
+        }
+        for panel in &mut layout.instances {
+            if let Some(group) = layout.sections.iter().find(|s| s.tabs.contains(&panel.id)) {
+                panel.memory.weight = group.weight;
+            }
+        }
+        let mut service = LayoutService::new(service.registry().clone(), layout, HostCapabilities::default()).unwrap();
+        let before = service.layout().clone();
+        let mut env = allocated_pair_environment(&service, 800.0);
+        env.gap = 4.0;
+        let prepared = service
+            .prepare(transaction(vec![Mutation::Move {
+                instance: id("mover"),
+                destination: Destination::Relative {
+                    section: section("anchor-group"),
+                    placement,
+                    new_section: section("landing"),
+                    new_column: None,
+                    size: size(280.0, 200.0),
+                },
+            }]))
+            .unwrap();
+        let mut expected = before.section(&section("source")).unwrap().clone();
+        expected.id = section("landing");
+        expected.weight = before.section(&section("anchor-group")).unwrap().weight;
+        assert_eq!(prepared.layout().section(&section("landing")).unwrap(), &expected);
+        for name in ["anchor-group", "other-group"] {
+            assert_eq!(prepared.layout().section(&section(name)).unwrap(), before.section(&section(name)).unwrap());
+        }
+        assert_eq!(prepared.layout().instance(&id("closed")).unwrap(), before.instance(&id("closed")).unwrap());
+        let shown = allocate_layout(prepared.layout(), service.registry(), &env).unwrap();
+        assert_eq!(shown.sections.len(), 3);
+        for actual in &shown.sections {
+            let expected = match actual.section.0.as_str() {
+                "anchor-group" => 300.0,
+                "landing" => 200.0,
+                "other-group" => 292.0,
+                _ => panic!("unexpected section"),
+            };
+            assert!((actual.outer.size.height - expected).abs() < 0.001);
+        }
+        service.commit(prepared).unwrap();
+        assert_eq!(allocate_layout(service.layout(), service.registry(), &env).unwrap(), shown);
+        service.dispatch(transaction(vec![Mutation::Collapse { section: section("landing"), collapsed: true }])).unwrap();
+        let folded = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+        assert_eq!(folded.sections.iter().find(|s| s.section == section("landing")).unwrap().outer.size.height, 20.0);
+        assert_eq!(service.layout().section(&section("landing")).unwrap(), &Section { collapsed: true, ..expected.clone() });
+        service.dispatch(transaction(vec![Mutation::Collapse { section: section("landing"), collapsed: false }])).unwrap();
+        assert_eq!(service.layout().section(&section("landing")).unwrap(), &expected);
+        assert_eq!(allocate_layout(service.layout(), service.registry(), &env).unwrap(), shown);
+    }
+}
+
+#[test]
+fn relative_requests_reject_self_targets_and_malformed_column_intents_atomically() {
+    let mut service = fixture_service(false).unwrap();
+    open(&mut service, "one", "first");
+    open(&mut service, "two", "second");
+    let before = service.inspect();
+    for (target, placement, column) in [
+        ("second", RelativePlacement::Above, None),
+        ("first", RelativePlacement::BeforeColumn, None),
+        ("first", RelativePlacement::Below, Some(ColumnId::new("unexpected").unwrap())),
+    ] {
+        reject(
+            &mut service,
+            vec![Mutation::Move {
+                instance: id("two"),
+                destination: Destination::Relative {
+                    section: section(target),
+                    placement,
+                    new_section: section("new"),
+                    new_column: column,
+                    size: size(280.0, 240.0),
+                },
+            }],
+            Rule::Placement,
+        );
+    }
+    assert_eq!(service.inspect(), before);
+}
+
+#[test]
+fn shared_column_width_includes_inactive_tabs_and_all_stacked_sections() {
+    let mut registry = synthetic_registry().unwrap();
+    let mut tight = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    tight.kind = PanelKind::new("fixture.tight").unwrap();
+    tight.min_size.width = 200.0;
+    tight.max_size.width = 320.0;
+    registry.register(tight).unwrap();
+    let mut service =
+        LayoutService::new(registry, Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+    open(&mut service, "one", "first");
+    open(&mut service, "two", "second");
+    service
+        .dispatch(transaction(vec![Mutation::Open {
+            kind: PanelKind::new("fixture.tight").unwrap(),
+            instance: id("tight"),
+            destination: Some(Destination::JoinTab { section: section("second"), index: 1 }),
+        }]))
+        .unwrap();
+    let column = service.layout().section(&section("first")).unwrap().column.clone().unwrap();
+    assert_eq!(column_bounds(service.layout(), service.registry(), &column).unwrap(), (200.0, 320.0));
+    assert_eq!(service.layout().section(&section("second")).unwrap().active, id("two"));
+    reject(&mut service, vec![Mutation::SetColumnWidth { column: column.clone(), width: 321.0 }], Rule::Bounds);
+    reject(&mut service, vec![Mutation::SetSize { section: section("first"), size: size(321.0, 240.0) }], Rule::Bounds);
+    service.dispatch(transaction(vec![Mutation::SetColumnWidth { column: column.clone(), width: 300.0 }])).unwrap();
+    assert_eq!(service.layout().column(&column).unwrap().width, 300.0);
+    for name in ["one", "two", "tight"] {
+        let memory = &service.layout().instance(&id(name)).unwrap().memory;
+        assert_eq!(memory.column_width, Some(300.0));
+        assert_eq!(memory.size.width, 300.0);
+    }
+}
+
+#[test]
+fn column_pairs_preserve_saved_proportions_and_reject_cross_column_or_collapsed_sashes() {
+    let mut service = fixture_service(false).unwrap();
+    open(&mut service, "one", "first");
+    open(&mut service, "two", "second");
+    service
+        .dispatch(transaction(vec![Mutation::ResizePair {
+            first: section("first"),
+            second: section("second"),
+            first_size: size(280.0, 180.0),
+            second_size: size(280.0, 300.0),
+        }]))
+        .unwrap();
+    let a = service.layout().section(&section("first")).unwrap().weight;
+    let b = service.layout().section(&section("second")).unwrap().weight;
+    assert!((a / b - 0.6).abs() < 0.0001);
+    service.dispatch(transaction(vec![Mutation::Collapse { section: section("first"), collapsed: true }])).unwrap();
+    reject(&mut service, vec![Mutation::ResetPair { first: section("first"), second: section("second") }], Rule::Placement);
+    service.dispatch(transaction(vec![Mutation::Collapse { section: section("first"), collapsed: false }])).unwrap();
+    assert_eq!(service.layout().section(&section("first")).unwrap().weight, a);
+    assert_eq!(service.layout().section(&section("second")).unwrap().weight, b);
+    let column = next_column_id(service.layout()).unwrap();
+    service
+        .dispatch(transaction(vec![Mutation::Move {
+            instance: id("two"),
+            destination: Destination::Relative {
+                section: section("first"),
+                placement: RelativePlacement::AfterColumn,
+                new_section: section("other"),
+                new_column: Some(column),
+                size: size(280.0, 300.0),
+            },
+        }]))
+        .unwrap();
+    reject(&mut service, vec![Mutation::ResetPair { first: section("first"), second: section("other") }], Rule::Placement);
+}
+
+#[test]
+fn closed_panel_reopens_with_column_identity_width_rank_and_saved_weight() {
+    let mut service = fixture_service(false).unwrap();
+    open(&mut service, "one", "first");
+    open(&mut service, "two", "second");
+    let column = next_column_id(service.layout()).unwrap();
+    service
+        .dispatch(transaction(vec![Mutation::Move {
+            instance: id("two"),
+            destination: Destination::Relative {
+                section: section("first"),
+                placement: RelativePlacement::AfterColumn,
+                new_section: section("inner"),
+                new_column: Some(column.clone()),
+                size: size(310.0, 300.0),
+            },
+        }]))
+        .unwrap();
+    service
+        .dispatch(transaction(vec![Mutation::Collapse { section: section("inner"), collapsed: true }, Mutation::Close { instance: id("two") }]))
+        .unwrap();
+    let memory = service.layout().instance(&id("two")).unwrap().memory.clone();
+    assert_eq!(memory.column, Some(column.clone()));
+    assert_eq!(memory.column_index, 1);
+    assert_eq!(memory.column_width, Some(310.0));
+    assert_eq!(memory.weight, 300.0);
+    assert_ne!(next_column_id(service.layout()).unwrap(), column);
+    service
+        .dispatch(transaction(vec![Mutation::Open { kind: PanelKind::new("fixture.log").unwrap(), instance: id("two"), destination: None }]))
+        .unwrap();
+    let restored = service.layout().containing(&id("two")).unwrap();
+    assert_eq!(restored.id, memory.section);
+    assert_eq!(restored.column, memory.column);
+    assert_eq!(restored.weight, memory.weight);
+    assert!(restored.collapsed);
+}
+
+#[test]
+fn native_redock_preserves_original_section_column_width_and_proportion() {
+    let mut service = fixture_service(true).unwrap();
+    open(&mut service, "one", "first");
+    let original = service.layout().section(&section("first")).unwrap().clone();
+    let column = original.column.clone().unwrap();
+    service
+        .dispatch(transaction(vec![Mutation::Move {
+            instance: id("one"),
+            destination: Destination::NewSection {
+                section: section("native"),
+                index: 0,
+                size: size(320.0, 280.0),
+                location: SectionLocation::Window {
+                    host: HostId::new("host").unwrap(),
+                    origin: Point { x: 10.0, y: 10.0 },
+                    return_to: DockReturn {
+                        zone: Zone::Left,
+                        index: 0,
+                        size: original.size,
+                        collapsed: original.collapsed,
+                        join: None,
+                        section: None,
+                        column: None,
+                        column_index: 0,
+                        column_width: None,
+                        weight: 1.0,
+                        preferred_extent: None,
+                        extent_priority: 0,
+                    },
+                },
+            },
+        }]))
+        .unwrap();
+    let SectionLocation::Window { return_to, .. } = &service.layout().containing(&id("one")).unwrap().location else {
+        panic!("native destination");
+    };
+    assert_eq!(return_to.section, Some(original.id.clone()));
+    assert_eq!(return_to.column, Some(column.clone()));
+    assert_eq!(return_to.weight, original.weight);
+    assert_ne!(next_section_id(service.layout()).unwrap(), original.id);
+    assert_ne!(next_column_id(service.layout()).unwrap(), column);
+    service.dispatch(transaction(vec![Mutation::NativeClose { host: HostId::new("host").unwrap() }])).unwrap();
+    assert_eq!(service.layout().containing(&id("one")).unwrap(), &original);
+}
+
+#[test]
+fn command_drag_activation_is_atomic_and_background_join_keeps_destination_active() {
+    let mut backend = command_ready_backend();
+    let before = backend.service.inspect();
+    backend
+        .execute("panel.move", &serde_json::json!({"target":command_target("two"),"destination":{"type":"join_tab","section":"s-one","index":1}}))
+        .unwrap();
+    assert_eq!(backend.service.layout().section(&section("s-one")).unwrap().active, id("one"));
+    let revision = backend.service.inspect().revision;
+    backend
+        .execute(
+            "panel.move",
+            &serde_json::json!({"target":command_target("two"),"activate":true,"destination":{"type":"join_tab","section":"s-one","index":0}}),
+        )
+        .unwrap();
+    assert_eq!(backend.service.inspect().revision, revision + 1);
+    assert_eq!(backend.service.layout().section(&section("s-one")).unwrap().active, id("two"));
+    assert_eq!(backend.service.inspect().revision, before.revision + 2);
+    let committed = backend.service.inspect();
+    assert!(
+        backend
+            .execute(
+                "panel.move",
+                &serde_json::json!({"target":command_target("one"),"activate":true,"destination":{"type":"join_tab","section":"s-one","index":9}})
+            )
+            .is_err()
+    );
+    assert_eq!(backend.service.inspect(), committed);
+}
+
+#[test]
+fn pin_follows_other_side_allows_ordinary_tabs_and_rejects_column_displacement() {
+    let mut service = fixture_service(false).unwrap();
+    service.dispatch(transaction(vec![fixture_open("fixture.pin", "pin", "pinned", Zone::Left, 0).unwrap()])).unwrap();
+    open(&mut service, "ordinary", "ordinary-section");
+    service
+        .dispatch(transaction(vec![Mutation::Move {
+            instance: id("ordinary"),
+            destination: Destination::JoinTab { section: section("pinned"), index: 1 },
+        }]))
+        .unwrap();
+    service
+        .dispatch(transaction(vec![Mutation::Move {
+            instance: id("pin"),
+            destination: Destination::NewSection {
+                section: section("right-pin"),
+                index: 1,
+                location: SectionLocation::Dock { zone: Zone::Right },
+                size: size(280.0, 240.0),
+            },
+        }]))
+        .unwrap();
+    let column = next_column_id(service.layout()).unwrap();
+    reject(
+        &mut service,
+        vec![Mutation::Move {
+            instance: id("ordinary"),
+            destination: Destination::Relative {
+                section: section("right-pin"),
+                placement: RelativePlacement::BeforeColumn,
+                new_section: section("displacing"),
+                new_column: Some(column),
+                size: size(280.0, 240.0),
+            },
+        }],
+        Rule::PinOrder,
+    );
+    assert_eq!(service.layout().containing(&id("pin")).unwrap().location.zone(), Zone::Right);
+}
+
+#[test]
+fn header_action_intents_validate_registration_active_state_and_availability() {
+    let mut registry = synthetic_registry().unwrap();
+    let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    spec.kind = PanelKind::new("fixture.action").unwrap();
+    spec.header_actions = vec![HeaderActionSpec { id: ControlId::new("refresh").unwrap(), label_key: "ui.refresh".into(), icon: "restore".into() }];
+    registry.register(spec).unwrap();
+    let mut service =
+        LayoutService::new(registry.clone(), Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+    service.dispatch(transaction(vec![fixture_open("fixture.action", "action", "actions", Zone::Left, 0).unwrap()])).unwrap();
+    let action = ControlId::new("refresh").unwrap();
+    let reply = service.dispatch(transaction(vec![Mutation::HeaderAction { instance: id("action"), action: action.clone() }])).unwrap();
+    assert_eq!(reply.effects, vec![HostEffect::HeaderAction { instance: id("action"), action: action.clone() }]);
+    reject(&mut service, vec![Mutation::HeaderAction { instance: id("action"), action: ControlId::new("unknown").unwrap() }], Rule::Capability);
+    service.dispatch(transaction(vec![Mutation::Collapse { section: section("actions"), collapsed: true }])).unwrap();
+    assert!(
+        service.dispatch(transaction(vec![Mutation::HeaderAction { instance: id("action"), action: action.clone() }])).is_ok(),
+        "collapsed headers retain custom actions"
+    );
+    service
+        .dispatch(transaction(vec![
+            Mutation::Open {
+                kind: PanelKind::new("fixture.log").unwrap(),
+                instance: id("other"),
+                destination: Some(Destination::JoinTab { section: section("actions"), index: 1 }),
+            },
+            Mutation::Activate { instance: id("other") },
+        ]))
+        .unwrap();
+    reject(&mut service, vec![Mutation::HeaderAction { instance: id("action"), action: action.clone() }], Rule::Availability);
+    service.dispatch(transaction(vec![Mutation::Activate { instance: id("action") }])).unwrap();
+    service.set_availability([(id("action"), Availability::Unavailable { reason: "owner unavailable".into() })].into()).unwrap();
+    reject(&mut service, vec![Mutation::HeaderAction { instance: id("action"), action: action.clone() }], Rule::Availability);
+    service.set_availability(AvailabilityMap::new()).unwrap();
+    let catalogue = fixture_command_catalogue(&registry).unwrap();
+    let mut backend = commands::InMemoryPanelBackend::new(service, catalogue);
+    let before = backend.service.inspect();
+    assert_eq!(
+        backend.execute("panel.action", &serde_json::json!({"target":command_target("action"),"action":"refresh"})).unwrap_err().rule,
+        Rule::Capability
+    );
+    assert_eq!(backend.service.inspect(), before, "missing controller cannot publish an action effect");
+}
+
+#[test]
+fn geometry_admission_failure_keeps_candidate_private_and_consumes_no_identity() {
+    let mut service = fixture_service(false).unwrap();
+    let before = service.inspect();
+    let section_id = next_section_id(service.layout()).unwrap();
+    let mutation = fixture_open("fixture.log", "one", &section_id.0, Zone::Left, 0).unwrap();
+    let proposed = service.prepare_admitted(transaction(vec![mutation.clone()]), |committed, next| {
+        assert!(committed.sections.is_empty());
+        assert_eq!(next.sections.len(), 1);
+        Err(error(Rule::NoSpace, "minimums cannot fit destination"))
+    });
+    assert!(matches!(proposed, Err(PanelError { rule: Rule::NoSpace, .. })));
+    assert_eq!(service.inspect(), before);
+    assert_eq!(next_section_id(service.layout()).unwrap(), section_id);
+    let admitted = service.prepare_admitted(transaction(vec![mutation]), |_, _| Ok(())).unwrap();
+    service.commit(admitted).unwrap();
+    assert_eq!(service.layout().sections[0].id, section_id);
+}
+
+#[test]
+fn v1_migration_preserves_unknown_wire_fields_and_explicit_saved_proportions() {
+    let registry = synthetic_registry().unwrap();
+    let fallback = persistence_fallback();
+    let mut raw: serde_json::Value = serde_json::from_slice(FIXTURE_LAYOUT_V1).unwrap();
+    raw["future_envelope"] = serde_json::json!({"version":37,"keep":[1,2,3]});
+    raw["layout"]["future_layout"] = serde_json::json!({"intent":"preserve"});
+    raw["layout"]["sections"][0]["future_section"] = serde_json::json!({"keep":true});
+    raw["layout"]["sections"][0]["weight"] = serde_json::json!(2.5);
+    raw["layout"]["instances"][0]["memory"]["future_memory"] = serde_json::json!({"draft":"saved"});
+    raw["layout"]["instances"][0]["memory"]["weight"] = serde_json::json!(2.5);
+    let mut unknown = raw["layout"]["instances"][0].clone();
+    unknown["id"] = serde_json::json!("unknown");
+    unknown["kind"] = serde_json::json!("extension.panel");
+    unknown["memory"]["section"] = serde_json::json!("unknown-section");
+    unknown["memory"]["section_index"] = serde_json::json!(1);
+    unknown["future_payload"] = serde_json::json!({"draft":"retained"});
+    raw["layout"]["instances"].as_array_mut().unwrap().push(unknown);
+    let mut unknown_section = raw["layout"]["sections"][0].clone();
+    unknown_section["id"] = serde_json::json!("unknown-section");
+    unknown_section["tabs"] = serde_json::json!(["unknown"]);
+    unknown_section["active"] = serde_json::json!("unknown");
+    raw["layout"]["sections"].as_array_mut().unwrap().push(unknown_section);
+    raw["section_order"].as_array_mut().unwrap().push(serde_json::json!("unknown-section"));
+    let loaded = decode(&serde_json::to_vec(&raw).unwrap(), &registry, &fallback).unwrap();
+    assert!(loaded.notice.is_none());
+    assert!(loaded.rejected.is_none());
+    assert_eq!(loaded.envelope.layout.sections[0].weight, 2.5);
+    assert_eq!(loaded.envelope.quarantine.len(), 1);
+    assert!(loaded.envelope.layout.instance(&id("unknown")).is_err());
+    let pending = loaded.envelope.quarantine[0].instance_data.clone();
+    assert_eq!(pending["future_payload"]["draft"], "retained");
+    let mut service = LayoutService::new(registry.clone(), loaded.envelope.layout.clone(), HostCapabilities::default()).unwrap();
+    service.dispatch(transaction(vec![Mutation::Collapse { section: section("editor-section"), collapsed: true }])).unwrap();
+    let edited = with_live_layout(&loaded.envelope, service.layout().clone(), &registry).unwrap();
+    assert_eq!(edited.quarantine[0].instance_data, pending);
+    let mut unexplained = loaded.envelope.clone();
+    unexplained.recovery_wire.as_mut().unwrap()["layout"]["instances"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"id":"unexplained","future_payload":true}));
+    assert_eq!(with_live_layout(&unexplained, service.layout().clone(), &registry).unwrap_err().rule, Rule::MissingTarget);
+    let encoded: serde_json::Value = serde_json::from_slice(&encode(&edited, &registry).unwrap()).unwrap();
+    assert_eq!(encoded["future_envelope"], raw["future_envelope"]);
+    assert_eq!(encoded["layout"]["future_layout"], raw["layout"]["future_layout"]);
+    assert_eq!(encoded["layout"]["sections"][0]["future_section"], raw["layout"]["sections"][0]["future_section"]);
+    assert_eq!(encoded["layout"]["instances"][0]["memory"]["future_memory"], raw["layout"]["instances"][0]["memory"]["future_memory"]);
+    assert_eq!(encoded["layout"]["sections"][0]["weight"], 2.5);
+    assert_eq!(encoded["layout"]["sections"][0]["collapsed"], true);
+    let roundtrip = decode(&serde_json::to_vec(&encoded).unwrap(), &registry, &fallback).unwrap();
+    assert!(roundtrip.notice.is_none());
+    assert_eq!(roundtrip.envelope.quarantine[0].instance_data, pending);
+    let mut restored = roundtrip.envelope;
+    let mut grown = registry.clone();
+    let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    spec.kind = PanelKind::new("extension.panel").unwrap();
+    grown.register(spec).unwrap();
+    restore_quarantine(&mut restored, &grown).unwrap();
+    assert!(restored.quarantine.is_empty());
+    assert_eq!(restored.layout.section(&section("unknown-section")).unwrap().tabs, vec![id("unknown")]);
+    assert!(restored.layout.section(&section("editor-section")).unwrap().collapsed);
+    assert_eq!(restored.retained_data[&id("unknown")]["instance"], pending);
+    let restored = decode(&encode(&restored, &grown).unwrap(), &grown, &fallback).unwrap();
+    assert!(restored.notice.is_none());
+    assert_eq!(restored.envelope.retained_data[&id("unknown")]["instance"], pending);
+    let mut future = encoded;
+    future["layout"]["columns"][0]["future_column"] = serde_json::json!({"keep":"column intent"});
+    let loaded = decode(&serde_json::to_vec(&future).unwrap(), &registry, &fallback).unwrap();
+    assert!(loaded.notice.is_none());
+    let replaced = with_live_layout(&loaded.envelope, Layout::empty(fallback.workspace.clone()), &registry).unwrap();
+    assert!(replaced.layout.instances.is_empty() && replaced.layout.sections.is_empty());
+    let preserved: serde_json::Value = serde_json::from_slice(&encode(&replaced, &registry).unwrap()).unwrap();
+    assert_eq!(preserved["retained_data"]["editor"]["instance"]["memory"]["future_memory"]["draft"], "saved");
+    assert_eq!(preserved["section_snapshots"]["editor-section"]["data"]["future_section"]["keep"], true);
+    assert_eq!(preserved["layout"]["columns"][0]["future_column"]["keep"], "column intent");
+}
+
+#[test]
+fn quarantined_and_closed_memories_reserve_section_and_column_allocation() {
+    let mut raw = future_group();
+    raw["layout"]["sections"][0]["id"] = serde_json::json!("section-1");
+    raw["layout"]["sections"][0]["column"] = serde_json::json!("column-1");
+    raw["layout"]["columns"][0]["id"] = serde_json::json!("column-1");
+    raw["section_order"] = serde_json::json!(["section-1"]);
+    for instance in raw["layout"]["instances"].as_array_mut().unwrap() {
+        instance["memory"]["section"] = serde_json::json!("section-1");
+        instance["memory"]["column"] = serde_json::json!("column-1");
+    }
+    let none = future_registry(&[]);
+    let fallback = persistence_fallback();
+    let loaded = decode(&serde_json::to_vec(&raw).unwrap(), &none, &fallback).unwrap();
+    assert!(loaded.notice.is_none());
+    assert_eq!(loaded.envelope.quarantine.len(), 3);
+    let reserved = reserve_envelope_identities(&loaded.envelope).unwrap();
+    assert_eq!(next_section_id(&reserved).unwrap(), section("section-2"));
+    assert_eq!(next_column_id(&reserved).unwrap(), ColumnId::new("column-2").unwrap());
+    let mut restored = loaded.envelope;
+    restore_quarantine(&mut restored, &future_registry(&["a", "b", "c"])).unwrap();
+    assert!(restored.quarantine.is_empty());
+    assert_eq!(restored.layout.sections[0].id, section("section-1"));
+    assert_eq!(restored.layout.sections[0].column, Some(ColumnId::new("column-1").unwrap()));
+}
+
+#[test]
+fn v1_live_native_closed_and_quarantined_snapshots_migrate_without_losing_weights() {
+    use serde_json::json;
+    let registry = synthetic_registry().unwrap();
+    let fallback = persistence_fallback();
+    let mut raw: serde_json::Value = serde_json::from_slice(FIXTURE_LAYOUT_V1).unwrap();
+    let closed = json!({"id":"closed","kind":"fixture.log","requested_open":false,"memory":{
+        "section":"closed-section","location":{"type":"dock","zone":"left"},"section_index":1,"tab_index":0,
+        "size":{"width":280,"height":360},"collapsed":true
+    }});
+    let native_location = json!({"type":"window","host":"native-host","origin":{"x":20,"y":30},"return_to":{
+        "zone":"left","index":1,"size":{"width":280,"height":260},"collapsed":false,
+        "join":{"section":"editor-section","index":1},"weight":7.0,"future_monitor":"keep"
+    }});
+    let native = json!({"id":"native","kind":"fixture.log","requested_open":true,"memory":{
+        "section":"native-section","location":native_location,"section_index":1,"tab_index":0,
+        "size":{"width":300,"height":260},"collapsed":false,"weight":3.5
+    }});
+    let native_section = json!({"id":"native-section","location":native["memory"]["location"],"tabs":["native"],"active":"native",
+        "size":{"width":300,"height":260},"collapsed":false,"weight":3.5});
+    raw["layout"]["instances"].as_array_mut().unwrap().extend([closed, native]);
+    raw["layout"]["sections"].as_array_mut().unwrap().push(native_section);
+    let unknown = json!({"id":"unknown","kind":"extension.panel","requested_open":true,"future_payload":{"draft":"retained"},"memory":{
+        "section":"dormant-section","location":{"type":"dock","zone":"right"},"section_index":2,"tab_index":0,
+        "size":{"width":280,"height":180},"collapsed":false,"weight":9.0
+    }});
+    raw["quarantine"] = json!([{"instance":"unknown","kind":"extension.panel","instance_data":unknown,"section":"dormant-section"}]);
+    raw["section_snapshots"] = json!({"dormant-section":{"index":2,"data":{
+        "id":"dormant-section","location":{"type":"dock","zone":"right"},"tabs":["unknown"],"active":"unknown",
+        "size":{"width":280,"height":180},"collapsed":false,"weight":9.0,"future_snapshot":"keep"
+    }}});
+    raw["section_order"] = json!(["editor-section", "native-section", "dormant-section"]);
+    let loaded = decode(&serde_json::to_vec(&raw).unwrap(), &registry, &fallback).unwrap();
+    assert!(loaded.notice.is_none(), "{:?}", loaded.notice);
+    let mut envelope = loaded.envelope;
+    let closed = &envelope.layout.instance(&id("closed")).unwrap().memory;
+    assert_eq!(closed.weight, 360.0);
+    assert!(closed.column.is_some());
+    assert_eq!(closed.column_width, Some(280.0));
+    let native = envelope.layout.instance(&id("native")).unwrap();
+    assert_eq!(native.memory.weight, 3.5);
+    let SectionLocation::Window { return_to, .. } = &native.memory.location else {
+        panic!("native memory");
+    };
+    assert_eq!(return_to.weight, 7.0);
+    assert_eq!(return_to.column, envelope.layout.sections[0].column);
+    let pending: PanelInstance = serde_json::from_value(envelope.quarantine[0].instance_data.clone()).unwrap();
+    assert_eq!(pending.memory.weight, 9.0);
+    assert!(pending.memory.column.is_some());
+    let mut with_extension = registry.clone();
+    let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    spec.kind = PanelKind::new("extension.panel").unwrap();
+    with_extension.register(spec).unwrap();
+    restore_quarantine(&mut envelope, &with_extension).unwrap();
+    assert!(envelope.quarantine.is_empty());
+    assert_eq!(envelope.layout.section(&section("dormant-section")).unwrap().weight, 9.0);
+    let encoded: serde_json::Value = serde_json::from_slice(&encode(&envelope, &with_extension).unwrap()).unwrap();
+    assert_eq!(encoded["section_snapshots"]["dormant-section"]["data"]["future_snapshot"], "keep");
+    assert_eq!(encoded["layout"]["instances"][2]["memory"]["location"]["return_to"]["future_monitor"], "keep");
+    assert_eq!(envelope.retained_data[&id("unknown")]["instance"]["future_payload"]["draft"], "retained");
+}
+
+#[test]
+fn v1_distinct_preferred_widths_remain_saved_in_the_original_vertical_stack() {
+    use serde_json::json;
+    let mut raw: serde_json::Value = serde_json::from_slice(FIXTURE_LAYOUT_V1).unwrap();
+    for (index, width) in [(1, 320), (2, 280)] {
+        let name = format!("log-{index}");
+        let group = format!("group-{index}");
+        raw["layout"]["instances"].as_array_mut().unwrap().push(json!({"id":name,"kind":"fixture.log","requested_open":true,"memory":{
+            "section":group,"location":{"type":"dock","zone":"left"},"section_index":index,"tab_index":0,
+            "size":{"width":width,"height":200},"collapsed":false
+        }}));
+        raw["layout"]["sections"].as_array_mut().unwrap().push(json!({"id":group,"location":{"type":"dock","zone":"left"},
+            "tabs":[name],"active":name,"size":{"width":width,"height":200},"collapsed":false}));
+        raw["section_order"].as_array_mut().unwrap().push(json!(group));
+    }
+    let loaded = decode(&serde_json::to_vec(&raw).unwrap(), &synthetic_registry().unwrap(), &persistence_fallback()).unwrap();
+    assert!(loaded.notice.is_none());
+    let layout = loaded.envelope.layout;
+    assert_eq!(layout.columns.iter().map(|c| c.width).collect::<Vec<_>>(), vec![280.0]);
+    assert_eq!(layout.sections.iter().map(|s| s.weight).collect::<Vec<_>>(), vec![240.0, 200.0, 200.0]);
+    assert_eq!(layout.sections.iter().map(|s| s.size.width).collect::<Vec<_>>(), vec![280.0, 320.0, 280.0]);
+    assert!(layout.sections.iter().all(|s| s.column.as_ref() == Some(&layout.columns[0].id)));
+}
+
+fn allocated_pair_environment(service: &LayoutService, height: f32) -> AllocationEnvironment {
+    AllocationEnvironment {
+        capacity: LogicalRect { origin: Point { x: 11.0, y: 17.0 }, size: size(1200.0, height) },
+        direction: Direction::Ltr,
+        header_height: 20.0,
+        footer_height: 0.0,
+        gap: 0.0,
+        inline_max_height: 88.0,
+        min_viewport: size(1.0, 1.0),
+        scroll: Point { x: 0.0, y: 0.0 },
+        available: service.layout().instances.iter().map(|p| p.id.clone()).collect(),
+        content: Vec::new(),
+        content_revision: 0,
+    }
+}
+
+#[test]
+fn oversubscribed_highest_tier_fractional_residue_never_reaches_lower_preference_or_weight() {
+    for weighted_lower in [false, true] {
+        let mut registry = PanelRegistry::default();
+        let mut spec = synthetic_registry().unwrap().get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+        spec.min_size.height = 1.0;
+        registry.register(spec).unwrap();
+        let mut service =
+            LayoutService::new(registry.clone(), Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+        for (panel, group) in [("one", "first"), ("two", "second"), ("three", "third")] {
+            open(&mut service, panel, group);
+        }
+        let mut layout = service.layout().clone();
+        for (group, extent) in layout.sections.iter_mut().zip([2.0, 3.0, 2.0]) {
+            let lower = group.id == section("third");
+            group.preferred_extent = if lower && weighted_lower { None } else { Some(extent) };
+            group.extent_priority = if lower { if weighted_lower { 0 } else { 1 } } else { 2 };
+            group.weight = if lower { 1000.0 } else { 1.0 };
+        }
+        for panel in &mut layout.instances {
+            let group = layout.sections.iter().find(|s| s.tabs.contains(&panel.id)).unwrap();
+            panel.memory.preferred_extent = group.preferred_extent;
+            panel.memory.extent_priority = group.extent_priority;
+            panel.memory.weight = group.weight;
+        }
+        let service = LayoutService::new(registry.clone(), layout, HostCapabilities::default()).unwrap();
+        let mut environment = allocated_pair_environment(&service, 4.0);
+        environment.header_height = 1.0;
+        let geometry = allocate_layout(service.layout(), &registry, &environment).unwrap();
+        assert_eq!(geometry.sections.len(), 3);
+        let height = |name| geometry.sections.iter().find(|s| s.section == section(name)).unwrap().outer.size.height;
+        // Minima consume three units. The highest tier requests three surplus
+        // units and receives the remaining one in the ratio 1:2. Inward f32
+        // rounding must not turn its residue into a lower tier allocation.
+        assert!((height("first") - 4.0 / 3.0).abs() < 0.000001);
+        assert!((height("second") - 5.0 / 3.0).abs() < 0.000001);
+        assert_eq!(height("third"), 1.0, "an oversubscribed tier exhausts all surplus, including fractional residue");
+        assert!(geometry.sections.iter().map(|s| f64::from(s.outer.size.height)).sum::<f64>() <= 4.0);
+    }
+}
+
+#[test]
+fn allocated_pair_reaches_actual_minimum_and_maximum_endpoints_and_returns_without_drift() {
+    for (height, low, high) in [(800.0, 120.0, 680.0), (1320.0, 120.0, 1200.0)] {
+        for swapped in [false, true] {
+            let mut service = fixture_service(false).unwrap();
+            open(&mut service, "one", "first");
+            open(&mut service, "two", "second");
+            let env = allocated_pair_environment(&service, height);
+            let initial = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+            let (a, b) = normalized_pair_weights(service.layout(), &section("first"), &section("second")).unwrap();
+            assert_eq!((a, b), (0.5, 0.5));
+            let (first_height, second_height, first_weight, second_weight) = if swapped { (high, low, 1.0, 0.0) } else { (low, high, 0.0, 1.0) };
+            let before = service.inspect();
+            let prepared = service
+                .prepare(transaction(vec![Mutation::ResizeAllocatedPair {
+                    first: section("first"),
+                    second: section("second"),
+                    first_size: size(280.0, first_height),
+                    second_size: size(280.0, second_height),
+                    first_weight,
+                    second_weight,
+                    other_weight_scale: 1.0,
+                    prefer_allocated: false,
+                }]))
+                .unwrap();
+            assert_eq!(service.inspect(), before);
+            let shown = allocate_layout(prepared.layout(), service.registry(), &env).unwrap();
+            assert!((shown.sections[0].outer.size.height - first_height).abs() < 0.001);
+            assert!((shown.sections[1].outer.size.height - second_height).abs() < 0.001);
+            service.commit(prepared).unwrap();
+            assert_eq!(allocate_layout(service.layout(), service.registry(), &env).unwrap(), shown);
+            service
+                .dispatch(transaction(vec![Mutation::ResizeAllocatedPair {
+                    first: section("first"),
+                    second: section("second"),
+                    first_size: size(280.0, height / 2.0),
+                    second_size: size(280.0, height / 2.0),
+                    first_weight: 0.5,
+                    second_weight: 0.5,
+                    other_weight_scale: 1.0,
+                    prefer_allocated: false,
+                }]))
+                .unwrap();
+            assert_eq!(allocate_layout(service.layout(), service.registry(), &env).unwrap(), initial);
+        }
+    }
+}
+
+#[test]
+fn allocated_pair_preserves_saturated_third_rectangle_and_all_saved_group_shares() {
+    let mut registry = synthetic_registry().unwrap();
+    let mut short = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    short.kind = PanelKind::new("fixture.short").unwrap();
+    short.default_size.height = 180.0;
+    short.max_size.height = 180.0;
+    registry.register(short).unwrap();
+    let mut service =
+        LayoutService::new(registry, Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+    open(&mut service, "one", "first");
+    open(&mut service, "two", "second");
+    service
+        .dispatch(transaction(vec![Mutation::Open {
+            kind: PanelKind::new("fixture.short").unwrap(),
+            instance: id("short"),
+            destination: Some(Destination::NewSection {
+                section: section("third"),
+                index: 2,
+                location: SectionLocation::Dock { zone: Zone::Left },
+                size: size(280.0, 180.0),
+            }),
+        }]))
+        .unwrap();
+    open(&mut service, "closed", "remembered");
+    service.dispatch(transaction(vec![Mutation::Close { instance: id("closed") }])).unwrap();
+    let env = allocated_pair_environment(&service, 1000.0);
+    let initial = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+    let (a, b) = normalized_pair_weights(service.layout(), &section("first"), &section("second")).unwrap();
+    let total = 240.0 + 240.0 + 180.0 + 240.0;
+    assert!((a - 240.0 / total).abs() < WEIGHT_SHARE_TOLERANCE);
+    service
+        .dispatch(transaction(vec![Mutation::ResizeAllocatedPair {
+            first: section("first"),
+            second: section("second"),
+            first_size: size(280.0, 120.0),
+            second_size: size(280.0, 700.0),
+            first_weight: 0.0,
+            second_weight: a + b,
+            other_weight_scale: 1.0,
+            prefer_allocated: false,
+        }]))
+        .unwrap();
+    let after = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+    assert_eq!(after.sections[2].outer.size, initial.sections[2].outer.size);
+    assert_eq!(after.sections[2].outer.origin.x, initial.sections[2].outer.origin.x);
+    assert!(
+        (after.sections[2].outer.origin.y - initial.sections[2].outer.origin.y).abs() < 0.001,
+        "unrelated saturated neighbour keeps its rectangle within float precision"
+    );
+    assert!((after.sections[0].outer.size.height - 120.0).abs() < 0.001);
+    assert!((after.sections[1].outer.size.height - 700.0).abs() < 0.001);
+    assert!((service.layout().sections[2].weight - 180.0 / total).abs() < WEIGHT_SHARE_TOLERANCE);
+    assert!((service.layout().instance(&id("closed")).unwrap().memory.weight - 240.0 / total).abs() < WEIGHT_SHARE_TOLERANCE);
+    let before_collapse = service.layout().sections[0].weight;
+    service
+        .dispatch(transaction(vec![
+            Mutation::Collapse { section: section("first"), collapsed: true },
+            Mutation::Collapse { section: section("first"), collapsed: false },
+        ]))
+        .unwrap();
+    assert_eq!(service.layout().sections[0].weight, before_collapse);
+}
+
+#[test]
+fn allocated_pair_rejects_hostile_shares_and_bounds_atomically_and_handles_large_legacy_weights() {
+    let mut service = fixture_service(false).unwrap();
+    open(&mut service, "one", "first");
+    open(&mut service, "two", "second");
+    for (first_weight, second_weight) in [(f32::NAN, 0.5), (0.5, f32::INFINITY), (-0.1, 1.1), (0.0, 0.0)] {
+        reject(
+            &mut service,
+            vec![Mutation::ResizeAllocatedPair {
+                first: section("first"),
+                second: section("second"),
+                first_size: size(280.0, 120.0),
+                second_size: size(280.0, 680.0),
+                first_weight,
+                second_weight,
+                other_weight_scale: 1.0,
+                prefer_allocated: false,
+            }],
+            Rule::Bounds,
+        );
+    }
+    reject(
+        &mut service,
+        vec![Mutation::ResizeAllocatedPair {
+            first: section("first"),
+            second: section("second"),
+            first_size: size(280.0, 119.0),
+            second_size: size(280.0, 681.0),
+            first_weight: 0.0,
+            second_weight: 1.0,
+            other_weight_scale: 1.0,
+            prefer_allocated: false,
+        }],
+        Rule::Bounds,
+    );
+    let mut large = service.layout().clone();
+    for group in &mut large.sections {
+        group.weight = MAX_LOGICAL;
+    }
+    let mut large = LayoutService::new(service.registry().clone(), large, HostCapabilities::default()).unwrap();
+    assert_eq!(normalized_pair_weights(large.layout(), &section("first"), &section("second")).unwrap(), (0.5, 0.5));
+    large
+        .dispatch(transaction(vec![Mutation::ResizeAllocatedPair {
+            first: section("first"),
+            second: section("second"),
+            first_size: size(280.0, 120.0),
+            second_size: size(280.0, 680.0),
+            first_weight: 0.0,
+            second_weight: 1.0,
+            other_weight_scale: 1.0,
+            prefer_allocated: false,
+        }]))
+        .unwrap();
+    assert_eq!(large.layout().sections.iter().map(|s| s.weight).collect::<Vec<_>>(), vec![0.0, 1.0]);
+    let mut zero = service.layout().clone();
+    for group in &mut zero.sections {
+        group.weight = 0.0;
+    }
+    for p in &mut zero.instances {
+        p.memory.weight = 0.0;
+    }
+    assert_eq!(normalized_pair_weights(&zero, &section("first"), &section("second")).unwrap_err().rule, Rule::Bounds);
+}
+
+#[test]
+fn allocated_bottom_pair_reaches_minimum_in_rtl_with_fractional_actual_sizes() {
+    let mut service = fixture_service(false).unwrap();
+    service
+        .dispatch(transaction(vec![
+            fixture_open("fixture.log", "one", "first", Zone::Bottom, 0).unwrap(),
+            fixture_open("fixture.log", "two", "second", Zone::Bottom, 1).unwrap(),
+        ]))
+        .unwrap();
+    let mut env = allocated_pair_environment(&service, 600.0);
+    env.direction = Direction::Rtl;
+    env.capacity.size.width = 800.5;
+    service
+        .dispatch(transaction(vec![Mutation::ResizeAllocatedPair {
+            first: section("first"),
+            second: section("second"),
+            first_size: size(160.0, 240.0),
+            second_size: size(640.5, 240.0),
+            first_weight: 0.0,
+            second_weight: 1.0,
+            other_weight_scale: 1.0,
+            prefer_allocated: false,
+        }]))
+        .unwrap();
+    let geometry = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+    assert!((geometry.sections[0].outer.size.width - 160.0).abs() < 0.001);
+    assert!((geometry.sections[1].outer.size.width - 640.5).abs() < 0.001);
+    assert!(geometry.sections[0].outer.origin.x > geometry.sections[1].outer.origin.x);
+    assert_eq!(geometry.sections[1].outer.origin.x, env.capacity.origin.x);
+}
+
+#[test]
+fn allocated_pair_normalizes_collapsed_and_unavailable_surrounding_sections_without_resizing_them() {
+    let mut service = fixture_service(false).unwrap();
+    for (instance, group) in [("one", "first"), ("two", "second"), ("folded", "folded"), ("dormant", "dormant")] {
+        open(&mut service, instance, group);
+    }
+    service.dispatch(transaction(vec![Mutation::Collapse { section: section("folded"), collapsed: true }])).unwrap();
+    service.set_availability([(id("dormant"), Availability::Unavailable { reason: "owner unavailable".into() })].into()).unwrap();
+    let mut env = allocated_pair_environment(&service, 800.0);
+    env.available.retain(|instance| *instance != id("dormant"));
+    let before = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+    let shares = normalized_pair_weights(service.layout(), &section("first"), &section("second")).unwrap();
+    service
+        .dispatch(transaction(vec![Mutation::ResizeAllocatedPair {
+            first: section("first"),
+            second: section("second"),
+            first_size: size(280.0, 120.0),
+            second_size: size(280.0, 660.0),
+            first_weight: 0.0,
+            second_weight: shares.0 + shares.1,
+            other_weight_scale: 1.0,
+            prefer_allocated: false,
+        }]))
+        .unwrap();
+    let after = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+    assert_eq!(after.sections.len(), 3);
+    assert_eq!(after.sections[2].outer, before.sections[2].outer);
+    assert_eq!(service.layout().section(&section("folded")).unwrap().weight, 0.25);
+    assert_eq!(service.layout().section(&section("dormant")).unwrap().weight, 0.25);
+    assert_eq!(service.layout().section(&section("dormant")).unwrap().size, size(280.0, 240.0));
+}
+
+fn legacy_instance_wire(
+    instance: &str,
+    kind: &str,
+    group: &str,
+    location: serde_json::Value,
+    preferred: Size,
+    index: usize,
+    requested_open: bool,
+) -> serde_json::Value {
+    serde_json::json!({"id":instance,"kind":kind,"requested_open":requested_open,"memory":{
+        "section":group,"location":location,"section_index":index,"tab_index":0,"size":preferred,"collapsed":false
+    }})
+}
+
+fn legacy_section_wire(group: &str, instance: &str, location: serde_json::Value, preferred: Size) -> serde_json::Value {
+    serde_json::json!({"id":group,"location":location,"tabs":[instance],"active":instance,"size":preferred,"collapsed":false})
+}
+
+#[test]
+fn complete_v1_order_splits_compatible_live_peers_around_a_disjoint_dormant_section() {
+    use serde_json::json;
+    let mut registry = synthetic_registry().unwrap();
+    for (kind, min, preferred, max) in [("fixture.narrow", 160.0, 200.0, 240.0), ("extension.wide", 360.0, 400.0, 440.0)] {
+        let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+        spec.kind = PanelKind::new(kind).unwrap();
+        spec.min_size.width = min;
+        spec.default_size.width = preferred;
+        spec.max_size.width = max;
+        registry.register(spec).unwrap();
+    }
+    let dock = json!({"type":"dock","zone":"left"});
+    let mut raw: serde_json::Value = serde_json::from_slice(FIXTURE_LAYOUT_V1).unwrap();
+    raw["layout"]["instances"] = json!([
+        legacy_instance_wire("a", "fixture.narrow", "a-section", dock.clone(), size(200.0, 240.0), 0, true),
+        legacy_instance_wire("c", "fixture.narrow", "c-section", dock.clone(), size(200.0, 240.0), 2, true)
+    ]);
+    raw["layout"]["sections"] = json!([
+        legacy_section_wire("a-section", "a", dock.clone(), size(200.0, 240.0)),
+        legacy_section_wire("c-section", "c", dock.clone(), size(200.0, 240.0))
+    ]);
+    let mut pending = legacy_instance_wire("b", "extension.wide", "b-section", dock.clone(), size(400.0, 240.0), 1, true);
+    pending["future_payload"] = json!({"keep":"draft"});
+    raw["quarantine"] = json!([{"instance":"b","kind":"extension.wide","section":"b-section","instance_data":pending}]);
+    let mut snapshot = legacy_section_wire("b-section", "b", dock, size(400.0, 240.0));
+    snapshot["location"]["future_monitor"] = json!({"keep":"monitor"});
+    raw["section_snapshots"] = json!({"b-section":{"index":1,"data":snapshot}});
+    raw["section_order"] = json!(["a-section", "b-section", "c-section"]);
+    let bytes = serde_json::to_vec(&raw).unwrap();
+    let mut absent = PanelRegistry::default();
+    for spec in registry.specs().filter(|spec| spec.kind.0 != "extension.wide") {
+        absent.register(spec.clone()).unwrap();
+    }
+    for current in [&registry, &absent] {
+        let loaded = decode(&bytes, current, &persistence_fallback()).unwrap();
+        assert!(loaded.notice.is_none(), "{:?}", loaded.notice);
+        assert_eq!(loaded.envelope.retained_v1_bytes(), Some(bytes.as_slice()));
+        let mut envelope = loaded.envelope;
+        restore_quarantine(&mut envelope, &registry).unwrap();
+        assert!(envelope.quarantine.is_empty());
+        assert_eq!(
+            envelope.layout.sections.iter().map(|s| s.id.clone()).collect::<Vec<_>>(),
+            vec![section("a-section"), section("b-section"), section("c-section")]
+        );
+        assert_eq!(envelope.layout.columns.iter().map(|c| c.width).collect::<Vec<_>>(), vec![200.0, 400.0, 200.0]);
+        assert_eq!(
+            envelope.layout.sections.iter().map(|s| s.column.clone().unwrap()).collect::<Vec<_>>(),
+            envelope.layout.columns.iter().map(|c| c.id.clone()).collect::<Vec<_>>()
+        );
+        assert_eq!(envelope.retained_data[&id("b")]["instance"]["future_payload"]["keep"], "draft");
+        assert_eq!(envelope.section_snapshots[&section("b-section")].data["location"]["future_monitor"]["keep"], "monitor");
+    }
+}
+
+#[test]
+fn closed_quarantine_section_and_native_return_reservations_reject_unrelated_commands_then_restore() {
+    use serde_json::json;
+    for native_memory in [false, true] {
+        let registry = synthetic_registry().unwrap();
+        let mut raw: serde_json::Value = serde_json::from_slice(FIXTURE_LAYOUT_V1).unwrap();
+        raw["layout"]["instances"] = json!([]);
+        raw["layout"]["sections"] = json!([]);
+        raw["section_order"] = json!([]);
+        let location = if native_memory {
+            json!({"type":"window","host":"remembered-host","origin":{"x":20,"y":30},
+            "return_to":{"zone":"left","index":0,"section":"section-1","size":{"width":280,"height":240},"collapsed":false}})
+        } else {
+            json!({"type":"floating","origin":{"x":20,"y":30}})
+        };
+        let remembered = if native_memory { "native-memory" } else { "section-1" };
+        let pending = legacy_instance_wire("extension", "extension.panel", remembered, location, size(280.0, 240.0), 0, false);
+        raw["quarantine"] = json!([{"instance":"extension","kind":"extension.panel","section":null,"instance_data":pending}]);
+        let loaded = decode(&serde_json::to_vec(&raw).unwrap(), &registry, &persistence_fallback()).unwrap();
+        assert!(loaded.notice.is_none());
+        let envelope = loaded.envelope;
+        let service = LayoutService::new(registry.clone(), envelope.layout.clone(), HostCapabilities::default()).unwrap();
+        let mut catalogue = commands::InMemoryCatalogue::default();
+        catalogue.remember(&envelope, None, &registry).unwrap();
+        let mut backend = commands::InMemoryPanelBackend::new(service, catalogue);
+        let before = backend.service.inspect();
+        let command = json!({"kind":"fixture.log","instance":"unrelated","destination":{"type":"new_section","section":"section-1","index":0,
+            "location":{"type":"floating","origin":{"x":40,"y":40}},"size":{"width":280,"height":240}}});
+        assert_eq!(backend.execute("panel.open", &command).unwrap_err().rule, Rule::DuplicateId);
+        assert_eq!(backend.service.inspect(), before);
+        let mut grown = registry.clone();
+        let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+        spec.kind = PanelKind::new("extension.panel").unwrap();
+        grown.register(spec).unwrap();
+        let mut restored = envelope;
+        restore_quarantine(&mut restored, &grown).unwrap();
+        assert!(restored.quarantine.is_empty());
+        assert!(!restored.layout.instance(&id("extension")).unwrap().requested_open);
+        if !native_memory {
+            let mut service = LayoutService::new(grown.clone(), restored.layout.clone(), HostCapabilities::default()).unwrap();
+            service
+                .dispatch(transaction(vec![Mutation::Open {
+                    kind: PanelKind::new("extension.panel").unwrap(),
+                    instance: id("extension"),
+                    destination: None,
+                }]))
+                .unwrap();
+            assert_eq!(service.layout().containing(&id("extension")).unwrap().id, section("section-1"));
+            with_live_layout(&restored, service.layout().clone(), &grown).unwrap();
+        }
+    }
+}
+
+#[test]
+fn missing_v1_native_return_weights_use_saved_extent_for_live_closed_and_redocked_groups() {
+    use serde_json::json;
+    let registry = synthetic_registry().unwrap();
+    let dock = json!({"type":"dock","zone":"left"});
+    let native_location = json!({"type":"window","host":"host","origin":{"x":20,"y":30},"return_to":{
+        "zone":"left","section":"returned","index":1,"size":{"width":280,"height":360},"collapsed":false}});
+    let closed_location = json!({"type":"window","host":"closed-host","origin":{"x":20,"y":30},"return_to":{
+        "zone":"left","section":"closed-return","index":2,"size":{"width":280,"height":300},"collapsed":false}});
+    let mut raw: serde_json::Value = serde_json::from_slice(FIXTURE_LAYOUT_V1).unwrap();
+    raw["layout"]["instances"] = json!([
+        legacy_instance_wire("sibling", "fixture.log", "sibling", dock.clone(), size(280.0, 240.0), 0, true),
+        legacy_instance_wire("native", "fixture.log", "native", native_location.clone(), size(280.0, 360.0), 1, true),
+        legacy_instance_wire("closed", "fixture.log", "closed", closed_location, size(280.0, 300.0), 2, false)
+    ]);
+    raw["layout"]["sections"] = json!([
+        legacy_section_wire("sibling", "sibling", dock, size(280.0, 240.0)),
+        legacy_section_wire("native", "native", native_location, size(280.0, 360.0))
+    ]);
+    raw["section_order"] = json!(["sibling", "native"]);
+    let loaded = decode(&serde_json::to_vec(&raw).unwrap(), &registry, &persistence_fallback()).unwrap();
+    assert!(loaded.notice.is_none());
+    for (name, expected) in [("native", 360.0), ("closed", 300.0)] {
+        let SectionLocation::Window { return_to, .. } = &loaded.envelope.layout.instance(&id(name)).unwrap().memory.location else {
+            panic!("native memory");
+        };
+        assert_eq!(return_to.weight, expected);
+    }
+    let mut service = LayoutService::new(registry, loaded.envelope.layout, HostCapabilities::default()).unwrap();
+    service.dispatch(transaction(vec![Mutation::NativeClose { host: HostId::new("host").unwrap() }])).unwrap();
+    assert_eq!(service.layout().section(&section("returned")).unwrap().weight, 360.0);
+    assert_eq!(service.layout().section(&section("sibling")).unwrap().weight, 240.0);
+}
+
+#[test]
+fn unchanged_snapshot_refresh_preserves_nested_opaque_locations_and_current_known_fields() {
+    use serde_json::json;
+    let mut service = fixture_service(false).unwrap();
+    open(&mut service, "one", "first");
+    let registry = service.registry().clone();
+    let mut envelope = LayoutEnvelope::new(service.layout().clone());
+    let mut data = serde_json::to_value(&envelope.layout.sections[0]).unwrap();
+    data["location"]["future_monitor"] = json!({"id":"monitor-a","dpi":{"scale":2.0}});
+    data["size"]["future_units"] = json!({"keep":"logical"});
+    envelope.section_snapshots.insert(section("first"), SectionSnapshot { data, index: 0, projected: None });
+    let bytes = encode(&envelope, &registry).unwrap();
+    let loaded = decode(&bytes, &registry, &persistence_fallback()).unwrap();
+    assert!(loaded.notice.is_none());
+    let unchanged = with_live_layout(&loaded.envelope, loaded.envelope.layout.clone(), &registry).unwrap();
+    let reloaded = decode(&encode(&unchanged, &registry).unwrap(), &registry, &persistence_fallback()).unwrap();
+    assert!(reloaded.notice.is_none());
+    assert_eq!(reloaded.envelope.section_snapshots[&section("first")].data["location"]["future_monitor"]["dpi"]["scale"], 2.0);
+    assert_eq!(reloaded.envelope.section_snapshots[&section("first")].data["size"]["future_units"]["keep"], "logical");
+    service.dispatch(transaction(vec![Mutation::SetSize { section: section("first"), size: size(300.0, 260.0) }])).unwrap();
+    let edited = with_live_layout(&reloaded.envelope, service.layout().clone(), &registry).unwrap();
+    assert_eq!(edited.section_snapshots[&section("first")].data["size"]["width"], 300.0);
+    assert_eq!(edited.section_snapshots[&section("first")].data["size"]["future_units"]["keep"], "logical");
+    assert_eq!(edited.section_snapshots[&section("first")].data["location"]["future_monitor"]["id"], "monitor-a");
+}
+
+#[test]
+fn header_action_accepts_the_available_fallback_without_rewriting_saved_activation() {
+    let mut registry = synthetic_registry().unwrap();
+    let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    spec.kind = PanelKind::new("fixture.fallback").unwrap();
+    spec.header_actions = vec![HeaderActionSpec { id: ControlId::new("refresh").unwrap(), label_key: "ui.refresh".into(), icon: "restore".into() }];
+    registry.register(spec).unwrap();
+    let mut service =
+        LayoutService::new(registry, Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+    open(&mut service, "unavailable-active", "group");
+    service
+        .dispatch(transaction(vec![Mutation::Open {
+            kind: PanelKind::new("fixture.fallback").unwrap(),
+            instance: id("fallback"),
+            destination: Some(Destination::JoinTab { section: section("group"), index: 1 }),
+        }]))
+        .unwrap();
+    service.set_availability([(id("unavailable-active"), Availability::Unavailable { reason: "owner unavailable".into() })].into()).unwrap();
+    let availability = [(id("unavailable-active"), Availability::Unavailable { reason: "owner unavailable".into() })].into();
+    assert_eq!(presented_tab(&service.layout().sections[0], &availability), Some(&id("fallback")));
+    assert_eq!(presented_tab(&service.layout().sections[0], &AvailabilityMap::new()), Some(&id("unavailable-active")));
+    let all_unavailable = [
+        (id("unavailable-active"), Availability::Unavailable { reason: "owner unavailable".into() }),
+        (id("fallback"), Availability::Unavailable { reason: "owner unavailable".into() }),
+    ]
+    .into();
+    assert_eq!(presented_tab(&service.layout().sections[0], &all_unavailable), None);
+    let reply =
+        service.dispatch(transaction(vec![Mutation::HeaderAction { instance: id("fallback"), action: ControlId::new("refresh").unwrap() }])).unwrap();
+    assert_eq!(reply.effects, vec![HostEffect::HeaderAction { instance: id("fallback"), action: ControlId::new("refresh").unwrap() }]);
+    assert_eq!(service.layout().sections[0].active, id("unavailable-active"));
+}
+
+#[test]
+fn explicit_side_extent_means_requested_height_and_survives_sole_stack_and_collapse_transitions() {
+    let mut service = fixture_service(false).unwrap();
+    open(&mut service, "one", "first");
+    open(&mut service, "two", "second");
+    let mut env = allocated_pair_environment(&service, 800.0);
+    env.gap = 4.0;
+    let initial = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+    assert_eq!(initial.sections.iter().map(|s| s.outer.size.height).collect::<Vec<_>>(), vec![398.0, 398.0]);
+    let weights: Vec<_> = service.layout().sections.iter().map(|s| s.weight).collect();
+    let before = service.inspect();
+    let prepared = service.prepare(transaction(vec![Mutation::SetSize { section: section("first"), size: size(280.0, 400.0) }])).unwrap();
+    assert_eq!(service.inspect(), before);
+    assert_eq!(prepared.layout().sections[0].preferred_extent, Some(400.0));
+    assert_eq!(prepared.layout().sections.iter().map(|s| s.weight).collect::<Vec<_>>(), weights);
+    let shown = allocate_layout(prepared.layout(), service.registry(), &env).unwrap();
+    assert_eq!(
+        shown.sections.iter().map(|s| s.outer.size.height).collect::<Vec<_>>(),
+        vec![400.0, 396.0],
+        "requested feasible dimensions, not a derived weight ratio"
+    );
+    service.commit(prepared).unwrap();
+    assert_eq!(allocate_layout(service.layout(), service.registry(), &env).unwrap(), shown);
+    service.dispatch(transaction(vec![Mutation::Collapse { section: section("first"), collapsed: true }])).unwrap();
+    let folded = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+    assert_eq!(folded.sections[0].outer.size.height, env.header_height);
+    assert_eq!(folded.sections[1].outer.size.height, 776.0);
+    service
+        .dispatch(transaction(vec![Mutation::Collapse { section: section("first"), collapsed: false }, Mutation::Close { instance: id("two") }]))
+        .unwrap();
+    service
+        .dispatch(transaction(vec![Mutation::Open {
+            kind: PanelKind::new("fixture.log").unwrap(),
+            instance: id("tab-peer"),
+            destination: Some(Destination::JoinTab { section: section("first"), index: 1 }),
+        }]))
+        .unwrap();
+    env.available.push(id("tab-peer"));
+    for request in allocation_measure_requests(service.layout(), service.registry(), &env).unwrap() {
+        assert_eq!(request.chrome_height, env.header_height + env.footer_height, "tab groups share one header row");
+        env.content.push(SideContentMeasure { request, needed_height: 180.0, policy: SideHeightPolicy::Content });
+    }
+    let sole = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+    assert_eq!(sole.sections[0].outer.size.height, 180.0, "sole Content uses captured needed height despite the stored stack request");
+    assert_eq!(service.layout().sections[0].preferred_extent, Some(400.0));
+    service
+        .dispatch(transaction(vec![Mutation::Open { kind: PanelKind::new("fixture.log").unwrap(), instance: id("two"), destination: None }]))
+        .unwrap();
+    let stacked = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+    assert_eq!(stacked.sections.iter().map(|s| s.outer.size.height).collect::<Vec<_>>(), vec![400.0, 396.0]);
+    assert_eq!(service.layout().sections.iter().map(|s| s.weight).collect::<Vec<_>>(), weights);
+    let mut tiny = env;
+    tiny.capacity.size.height = 150.0;
+    let overflow = allocate_layout(service.layout(), service.registry(), &tiny).unwrap();
+    assert!(overflow.sections.iter().all(|s| s.outer.size.height >= 120.0));
+    assert_eq!(service.layout().sections[0].preferred_extent, Some(400.0));
+}
+
+#[test]
+fn explicit_bottom_extent_uses_width_without_replacing_surplus_proportions() {
+    let mut service = fixture_service(false).unwrap();
+    service
+        .dispatch(transaction(vec![
+            fixture_open("fixture.log", "one", "first", Zone::Bottom, 0).unwrap(),
+            fixture_open("fixture.log", "two", "second", Zone::Bottom, 1).unwrap(),
+        ]))
+        .unwrap();
+    let mut env = allocated_pair_environment(&service, 600.0);
+    env.capacity.size.width = 800.0;
+    env.gap = 4.0;
+    env.direction = Direction::Rtl;
+    let weights: Vec<_> = service.layout().sections.iter().map(|s| s.weight).collect();
+    service.dispatch(transaction(vec![Mutation::SetSize { section: section("first"), size: size(400.0, 240.0) }])).unwrap();
+    let geometry = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+    assert_eq!(geometry.sections.iter().map(|s| s.outer.size.width).collect::<Vec<_>>(), vec![400.0, 396.0]);
+    assert_eq!(service.layout().sections[0].preferred_extent, Some(400.0));
+    assert_eq!(service.layout().sections.iter().map(|s| s.weight).collect::<Vec<_>>(), weights);
+}
+
+#[test]
+fn dock_moves_and_explicit_reopens_clear_cross_axis_extent_intent_but_preserve_same_axis_intent() {
+    for (source, target) in [(Zone::Left, Zone::Bottom), (Zone::Bottom, Zone::Left), (Zone::Left, Zone::Right), (Zone::Bottom, Zone::Bottom)] {
+        for closed in [false, true] {
+            for reuse_section in [false, true] {
+                let mut service = fixture_service(false).unwrap();
+                service
+                    .dispatch(transaction(vec![
+                        fixture_open("fixture.log", "one", "source", source, 0).unwrap(),
+                        fixture_open("fixture.log", "peer", "peer", target, 1).unwrap(),
+                        Mutation::SetSize { section: section("source"), size: size(400.0, 400.0) },
+                    ]))
+                    .unwrap();
+                let saved = service.layout().containing(&id("one")).unwrap();
+                let inherited = (saved.preferred_extent, saved.extent_priority);
+                assert_eq!(inherited, (Some(400.0), 1));
+                if closed {
+                    service.dispatch(transaction(vec![Mutation::Close { instance: id("one") }])).unwrap();
+                }
+                let group = section(if reuse_section { "source" } else { "landing" });
+                let destination = Destination::NewSection {
+                    section: group.clone(),
+                    index: 1,
+                    location: SectionLocation::Dock { zone: target },
+                    size: size(280.0, 240.0),
+                };
+                let mutation = if closed {
+                    Mutation::Open { kind: PanelKind::new("fixture.log").unwrap(), instance: id("one"), destination: Some(destination) }
+                } else {
+                    Mutation::Move { instance: id("one"), destination }
+                };
+                service.dispatch(transaction(vec![mutation])).unwrap();
+                let expected = if source.side() == target.side() { inherited } else { (None, 0) };
+                let moved = service.layout().section(&group).unwrap();
+                let memory = &service.layout().instance(&id("one")).unwrap().memory;
+                assert_eq!((moved.preferred_extent, moved.extent_priority), expected);
+                assert_eq!((memory.preferred_extent, memory.extent_priority), expected);
+                let mut env = allocated_pair_environment(&service, 800.0);
+                env.capacity.size.width = 800.0;
+                env.gap = 4.0;
+                let geometry = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+                assert_eq!(geometry.sections.len(), 2);
+                for actual in &geometry.sections {
+                    let expected_extent = if expected.0.is_none() {
+                        398.0
+                    } else if actual.section == group {
+                        400.0
+                    } else {
+                        396.0
+                    };
+                    assert_eq!(dock_stack_extent(target, actual.outer.size), Some(expected_extent));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn relative_moves_and_explicit_reopens_clear_bottom_width_intent_in_side_sections() {
+    for placement in [RelativePlacement::Above, RelativePlacement::Below, RelativePlacement::BeforeColumn, RelativePlacement::AfterColumn] {
+        for closed in [false, true] {
+            let mut service = fixture_service(false).unwrap();
+            service
+                .dispatch(transaction(vec![
+                    fixture_open("fixture.log", "anchor", "anchor", Zone::Left, 0).unwrap(),
+                    fixture_open("fixture.log", "one", "source", Zone::Bottom, 1).unwrap(),
+                    Mutation::SetSize { section: section("source"), size: size(400.0, 240.0) },
+                ]))
+                .unwrap();
+            if closed {
+                service.dispatch(transaction(vec![Mutation::Close { instance: id("one") }])).unwrap();
+            }
+            let destination = Destination::Relative {
+                section: section("anchor"),
+                placement,
+                new_section: section("landing"),
+                new_column: matches!(placement, RelativePlacement::BeforeColumn | RelativePlacement::AfterColumn)
+                    .then(|| ColumnId::new("landing-column").unwrap()),
+                size: size(280.0, 240.0),
+            };
+            let mutation = if closed {
+                Mutation::Open { kind: PanelKind::new("fixture.log").unwrap(), instance: id("one"), destination: Some(destination) }
+            } else {
+                Mutation::Move { instance: id("one"), destination }
+            };
+            service.dispatch(transaction(vec![mutation])).unwrap();
+            let moved = service.layout().section(&section("landing")).unwrap();
+            let memory = &service.layout().instance(&id("one")).unwrap().memory;
+            assert_eq!((moved.preferred_extent, moved.extent_priority), (None, 0));
+            assert_eq!((memory.preferred_extent, memory.extent_priority), (None, 0));
+        }
+    }
+}
+
+#[test]
+fn native_return_extent_inheritance_checks_dock_axes_and_keeps_explicit_return_intent() {
+    for target in [Zone::Bottom, Zone::Right] {
+        for explicit in [false, true] {
+            for closed in [false, true] {
+                let mut service = fixture_service(true).unwrap();
+                open(&mut service, "one", "source");
+                service.dispatch(transaction(vec![Mutation::SetSize { section: section("source"), size: size(280.0, 400.0) }])).unwrap();
+                if closed {
+                    service.dispatch(transaction(vec![Mutation::Close { instance: id("one") }])).unwrap();
+                }
+                let destination = Destination::NewSection {
+                    section: section("native"),
+                    index: 0,
+                    size: size(320.0, 280.0),
+                    location: SectionLocation::Window {
+                        host: HostId::new("host").unwrap(),
+                        origin: Point { x: 20.0, y: 30.0 },
+                        return_to: DockReturn {
+                            zone: target,
+                            index: 0,
+                            size: size(280.0, 240.0),
+                            collapsed: false,
+                            section: None,
+                            column: None,
+                            column_index: 0,
+                            column_width: None,
+                            weight: 1.0,
+                            join: None,
+                            preferred_extent: explicit.then_some(500.0),
+                            extent_priority: if explicit { 7 } else { 0 },
+                        },
+                    },
+                };
+                let mutation = if closed {
+                    Mutation::Open { kind: PanelKind::new("fixture.log").unwrap(), instance: id("one"), destination: Some(destination) }
+                } else {
+                    Mutation::Move { instance: id("one"), destination }
+                };
+                service.dispatch(transaction(vec![mutation])).unwrap();
+                let native = service.layout().containing(&id("one")).unwrap();
+                assert_eq!((native.preferred_extent, native.extent_priority), (Some(400.0), 1));
+                let SectionLocation::Window { return_to, .. } = &native.location else {
+                    panic!("native section");
+                };
+                let expected = if explicit {
+                    (Some(500.0), 7)
+                } else if target.side() {
+                    (Some(400.0), 1)
+                } else {
+                    (None, 0)
+                };
+                assert_eq!((return_to.preferred_extent, return_to.extent_priority), expected);
+                assert_eq!(service.layout().instance(&id("one")).unwrap().memory.location, native.location);
+                service.dispatch(transaction(vec![Mutation::NativeClose { host: HostId::new("host").unwrap() }])).unwrap();
+                let returned = service.layout().containing(&id("one")).unwrap();
+                let memory = &service.layout().instance(&id("one")).unwrap().memory;
+                assert_eq!((returned.preferred_extent, returned.extent_priority), expected);
+                assert_eq!((memory.preferred_extent, memory.extent_priority), expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn preferred_extent_defaults_omit_wire_fields_and_reject_hostile_values_in_live_and_retained_records() {
+    let mut service = fixture_service(false).unwrap();
+    open(&mut service, "one", "first");
+    assert_eq!(dock_stack_extent(Zone::Left, size(280.0, 400.0)), Some(400.0));
+    assert_eq!(dock_stack_extent(Zone::Bottom, size(280.0, 400.0)), Some(280.0));
+    assert_eq!(dock_stack_extent(Zone::Window, size(280.0, 400.0)), None);
+    let wire = serde_json::to_value(service.layout()).unwrap();
+    assert!(wire["sections"][0].get("preferred_extent").is_none());
+    assert!(wire["instances"][0]["memory"].get("preferred_extent").is_none());
+    let mut null_wire = serde_json::to_value(LayoutEnvelope::new(service.layout().clone())).unwrap();
+    null_wire["layout"]["sections"][0]["preferred_extent"] = serde_json::Value::Null;
+    null_wire["layout"]["instances"][0]["memory"]["preferred_extent"] = serde_json::Value::Null;
+    let normalized = decode(&serde_json::to_vec(&null_wire).unwrap(), service.registry(), &persistence_fallback()).unwrap();
+    assert!(normalized.notice.is_none());
+    let normalized: serde_json::Value = serde_json::from_slice(&encode(&normalized.envelope, service.registry()).unwrap()).unwrap();
+    assert!(normalized["layout"]["sections"][0].get("preferred_extent").is_none());
+    assert!(normalized["layout"]["instances"][0]["memory"].get("preferred_extent").is_none());
+    for bad in [0.0, -1.0, f32::NAN, f32::INFINITY, MAX_LOGICAL + 1.0] {
+        assert_eq!(validate_preferred_extent(Some(bad)).unwrap_err().rule, Rule::Bounds);
+        let mut broken = service.layout().clone();
+        broken.sections[0].preferred_extent = Some(bad);
+        assert_eq!(validate(&broken, service.registry()).unwrap_err().rule, Rule::Bounds);
+        let mut broken = service.layout().clone();
+        broken.instances[0].memory.preferred_extent = Some(bad);
+        assert_eq!(validate(&broken, service.registry()).unwrap_err().rule, Rule::Bounds);
+        let native = DockReturn {
+            zone: Zone::Left,
+            index: 0,
+            size: size(280.0, 240.0),
+            collapsed: false,
+            section: None,
+            column: None,
+            column_index: 0,
+            column_width: None,
+            weight: 1.0,
+            join: None,
+            preferred_extent: Some(bad),
+            extent_priority: 0,
+        };
+        assert_eq!(native.validate().unwrap_err().rule, Rule::Bounds);
+    }
+    let fallback = persistence_fallback();
+    let migrated = decode(FIXTURE_LAYOUT_V1, service.registry(), &fallback).unwrap();
+    assert!(migrated.notice.is_none());
+    assert_eq!(migrated.envelope.layout.sections[0].weight, 240.0);
+    assert_eq!(migrated.envelope.layout.sections[0].preferred_extent, None);
+    assert_eq!(migrated.envelope.layout.instances[0].memory.preferred_extent, None);
+    let mut snapshot = serde_json::to_value(&service.layout().sections[0]).unwrap();
+    snapshot["preferred_extent"] = serde_json::json!(0);
+    let mut envelope = LayoutEnvelope::new(service.layout().clone());
+    envelope.section_snapshots.insert(section("first"), SectionSnapshot { data: snapshot, index: 0, projected: None });
+    assert_eq!(encode(&envelope, service.registry()).unwrap_err().rule, Rule::Bounds);
+}
+
+#[test]
+fn paired_resize_and_reset_clear_explicit_overrides_without_snapshot_resurrection() {
+    for operation in 0..3 {
+        let mut service = fixture_service(false).unwrap();
+        open(&mut service, "one", "first");
+        open(&mut service, "two", "second");
+        service
+            .dispatch(transaction(vec![
+                Mutation::SetSize { section: section("first"), size: size(280.0, 400.0) },
+                Mutation::SetSize { section: section("second"), size: size(280.0, 396.0) },
+            ]))
+            .unwrap();
+        let mut envelope = LayoutEnvelope::new(service.layout().clone());
+        for (index, group) in service.layout().sections.iter().enumerate() {
+            let mut data = serde_json::to_value(group).unwrap();
+            data["location"]["future_monitor"] = serde_json::json!({"keep":"monitor intent"});
+            envelope.section_snapshots.insert(group.id.clone(), SectionSnapshot { data, index, projected: Some(group.clone()) });
+        }
+        let mutation = match operation {
+            0 => Mutation::ResizeAllocatedPair {
+                first: section("first"),
+                second: section("second"),
+                first_size: size(280.0, 120.0),
+                second_size: size(280.0, 676.0),
+                first_weight: 0.0,
+                second_weight: 1.0,
+                other_weight_scale: 1.0,
+                prefer_allocated: false,
+            },
+            1 => Mutation::ResetPair { first: section("first"), second: section("second") },
+            _ => Mutation::ResizePair {
+                first: section("first"),
+                second: section("second"),
+                first_size: size(280.0, 120.0),
+                second_size: size(280.0, 676.0),
+            },
+        };
+        service.dispatch(transaction(vec![mutation])).unwrap();
+        assert!(service.layout().sections.iter().all(|s| s.preferred_extent.is_none()));
+        assert!(service.layout().instances.iter().all(|p| p.memory.preferred_extent.is_none()));
+        assert!(service.layout().sections.iter().all(|s| s.extent_priority == 0));
+        assert!(service.layout().instances.iter().all(|p| p.memory.extent_priority == 0));
+        let staged = with_live_layout(&envelope, service.layout().clone(), service.registry()).unwrap();
+        let bytes = encode(&staged, service.registry()).unwrap();
+        let raw: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        for group in ["first", "second"] {
+            assert!(raw["section_snapshots"][group]["data"].get("preferred_extent").is_none());
+            assert!(raw["section_snapshots"][group]["data"].get("extent_priority").is_none());
+            assert_eq!(raw["section_snapshots"][group]["data"]["location"]["future_monitor"]["keep"], "monitor intent");
+        }
+        let restored = decode(&bytes, service.registry(), &persistence_fallback()).unwrap();
+        assert!(restored.notice.is_none());
+        assert!(restored.envelope.layout.sections.iter().all(|s| s.preferred_extent.is_none()));
+    }
+}
+
+#[test]
+fn explicit_extent_survives_native_sizing_closed_quarantine_reopen_and_redock() {
+    use serde_json::json;
+    let mut service = fixture_service(true).unwrap();
+    open(&mut service, "one", "first");
+    open(&mut service, "two", "second");
+    service.dispatch(transaction(vec![Mutation::SetSize { section: section("first"), size: size(280.0, 400.0) }])).unwrap();
+    let saved_weight = service.layout().sections[0].weight;
+    let saved_priority = service.layout().sections[0].extent_priority;
+    service
+        .dispatch(transaction(vec![Mutation::Move {
+            instance: id("one"),
+            destination: Destination::NewSection {
+                section: section("native"),
+                index: 1,
+                size: size(320.0, 280.0),
+                location: SectionLocation::Window {
+                    host: HostId::new("host").unwrap(),
+                    origin: Point { x: 20.0, y: 30.0 },
+                    return_to: DockReturn {
+                        zone: Zone::Left,
+                        section: None,
+                        column: None,
+                        column_index: 0,
+                        column_width: None,
+                        index: 0,
+                        size: size(280.0, 400.0),
+                        collapsed: false,
+                        join: None,
+                        weight: 1.0,
+                        preferred_extent: None,
+                        extent_priority: 0,
+                    },
+                },
+            },
+        }]))
+        .unwrap();
+    service.dispatch(transaction(vec![Mutation::SetSize { section: section("native"), size: size(350.0, 300.0) }])).unwrap();
+    assert_eq!(service.layout().section(&section("native")).unwrap().preferred_extent, Some(400.0));
+    service.dispatch(transaction(vec![Mutation::Close { instance: id("one") }])).unwrap();
+    let mut raw = serde_json::to_value(LayoutEnvelope::new(service.layout().clone())).unwrap();
+    raw["layout"]["instances"][0]["kind"] = json!("extension.panel");
+    raw["layout"]["instances"][0]["future_preference"] = json!({"keep":"draft"});
+    let registry = service.registry().clone();
+    let mut loaded = decode(&serde_json::to_vec(&raw).unwrap(), &registry, &persistence_fallback()).unwrap();
+    assert!(loaded.notice.is_none());
+    let pending: PanelInstance = serde_json::from_value(loaded.envelope.quarantine[0].instance_data.clone()).unwrap();
+    assert_eq!(pending.memory.preferred_extent, Some(400.0));
+    assert_eq!(pending.memory.extent_priority, saved_priority);
+    let SectionLocation::Window { return_to, .. } = &pending.memory.location else {
+        panic!("native closed memory");
+    };
+    assert_eq!(return_to.preferred_extent, Some(400.0));
+    assert_eq!(return_to.extent_priority, saved_priority);
+    let mut grown = registry.clone();
+    let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    spec.kind = PanelKind::new("extension.panel").unwrap();
+    grown.register(spec).unwrap();
+    restore_quarantine(&mut loaded.envelope, &grown).unwrap();
+    let mut service = LayoutService::new(
+        grown.clone(),
+        loaded.envelope.layout.clone(),
+        HostCapabilities { native_windows: true, max_native_hosts: 8, persistence: true },
+    )
+    .unwrap();
+    service
+        .dispatch(transaction(vec![Mutation::Open { kind: PanelKind::new("extension.panel").unwrap(), instance: id("one"), destination: None }]))
+        .unwrap();
+    let opened = with_live_layout(&loaded.envelope, service.layout().clone(), &grown).unwrap();
+    service.dispatch(transaction(vec![Mutation::NativeClose { host: HostId::new("host").unwrap() }])).unwrap();
+    let returned = service.layout().section(&section("first")).unwrap();
+    assert_eq!(returned.preferred_extent, Some(400.0));
+    assert_eq!(returned.weight, saved_weight);
+    let persisted = with_live_layout(&opened, service.layout().clone(), &grown).unwrap();
+    assert_eq!(persisted.retained_data[&id("one")]["instance"]["future_preference"]["keep"], "draft");
+    assert_eq!(persisted.layout.instance(&id("one")).unwrap().memory.preferred_extent, Some(400.0));
+    assert_eq!(persisted.layout.instance(&id("one")).unwrap().memory.extent_priority, saved_priority);
+}
+
+#[test]
+fn nested_quarantined_native_column_reservation_rejects_theft_and_allows_owner_redock() {
+    use commands::LayoutCatalogue;
+    use serde_json::json;
+    let mut service = fixture_service(false).unwrap();
+    open(&mut service, "anchor", "anchor");
+    let registry = service.registry().clone();
+    let mut raw = serde_json::to_value(LayoutEnvelope::new(service.layout().clone())).unwrap();
+    raw["quarantine"] = json!([{"instance":"extension","kind":"extension.panel","section":null,"instance_data":{
+        "id":"extension","kind":"extension.panel","requested_open":false,"memory":{
+            "section":"native-memory","section_index":1,"tab_index":0,"size":{"width":280,"height":240},"collapsed":false,"weight":240,
+            "preferred_extent":350,"location":{"type":"window","host":"return-host","origin":{"x":20,"y":30},"return_to":{
+                "section":"return-section","zone":"left","index":1,"column":"column-2","column_index":1,"column_width":280,
+                "size":{"width":280,"height":240},"collapsed":false,"weight":240,"preferred_extent":350
+            }}
+        }
+    }}]);
+    let loaded = decode(&serde_json::to_vec(&raw).unwrap(), &registry, &persistence_fallback()).unwrap();
+    assert!(loaded.notice.is_none());
+    let envelope = loaded.envelope;
+    assert!(envelope.layout.column(&ColumnId::new("column-2").unwrap()).is_err());
+    let reserved = reserve_envelope_identities(&envelope).unwrap();
+    assert_eq!(next_column_id(&reserved).unwrap(), ColumnId::new("column-3").unwrap());
+    let mut catalogue = commands::InMemoryCatalogue::default();
+    catalogue.remember(&envelope, None, &registry).unwrap();
+    let mut backend = commands::InMemoryPanelBackend::new(service, catalogue);
+    let before = backend.service.inspect();
+    let stored_before = backend.catalogue.state().export().unwrap();
+    assert_eq!(backend.execute("panel.open", &json!({"kind":"fixture.log","instance":"unrelated","destination":{
+        "type":"relative","section":"anchor","placement":"after_column","new_section":"intruder","new_column":"column-2","size":{"width":280,"height":240}
+    }})).unwrap_err().rule, Rule::DuplicateId);
+    assert_eq!(backend.service.inspect(), before);
+    assert_eq!(backend.catalogue.state().export().unwrap(), stored_before);
+    let mut grown = registry.clone();
+    let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    spec.kind = PanelKind::new("extension.panel").unwrap();
+    grown.register(spec).unwrap();
+    let mut envelope = envelope;
+    restore_quarantine(&mut envelope, &grown).unwrap();
+    let mut owner =
+        LayoutService::new(grown.clone(), envelope.layout.clone(), HostCapabilities { native_windows: true, max_native_hosts: 8, persistence: true })
+            .unwrap();
+    owner
+        .dispatch(transaction(vec![Mutation::Open {
+            kind: PanelKind::new("extension.panel").unwrap(),
+            instance: id("extension"),
+            destination: None,
+        }]))
+        .unwrap();
+    let opened = with_live_layout(&envelope, owner.layout().clone(), &grown).unwrap();
+    owner.dispatch(transaction(vec![Mutation::NativeClose { host: HostId::new("return-host").unwrap() }])).unwrap();
+    let redocked = with_live_layout(&opened, owner.layout().clone(), &grown).unwrap();
+    assert_eq!(redocked.layout.section(&section("return-section")).unwrap().column, Some(ColumnId::new("column-2").unwrap()));
+    assert_eq!(redocked.layout.section(&section("return-section")).unwrap().preferred_extent, Some(350.0));
+}
+
+#[test]
+fn allocated_pair_uncaps_a_member_without_moving_the_third_or_preserving_old_pair_share() {
+    let mut registry = synthetic_registry().unwrap();
+    let mut capped = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    capped.kind = PanelKind::new("fixture.capped").unwrap();
+    capped.default_size.height = 180.0;
+    capped.max_size.height = 200.0;
+    registry.register(capped).unwrap();
+    let mut service =
+        LayoutService::new(registry.clone(), Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+    service
+        .dispatch(transaction(vec![Mutation::Open {
+            kind: PanelKind::new("fixture.capped").unwrap(),
+            instance: id("one"),
+            destination: Some(Destination::NewSection {
+                section: section("first"),
+                index: 0,
+                location: SectionLocation::Dock { zone: Zone::Left },
+                size: size(280.0, 180.0),
+            }),
+        }]))
+        .unwrap();
+    open(&mut service, "two", "second");
+    open(&mut service, "three", "third");
+    let mut layout = service.layout().clone();
+    for group in &mut layout.sections {
+        group.weight = 240.0;
+    }
+    for panel in &mut layout.instances {
+        panel.memory.weight = 240.0;
+    }
+    let mut service = LayoutService::new(registry, layout, HostCapabilities::default()).unwrap();
+    let mut env = allocated_pair_environment(&service, 800.0);
+    env.gap = 4.0;
+    let before = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+    for (group, expected) in before.sections.iter().zip([200.0, 296.0, 296.0]) {
+        assert!((group.outer.size.height - expected).abs() < 0.001);
+    }
+    let old = normalized_pair_weights(service.layout(), &section("first"), &section("second")).unwrap();
+    // The third's normalized saved weight doubles. Derive the pair from its
+    // actual 176 surplus units; this needs a different combined pair share.
+    let first_weight = (2.0 / 3.0) * 60.0 / 176.0;
+    let second_weight = (2.0 / 3.0) * 196.0 / 176.0;
+    assert!((first_weight + second_weight - old.0 - old.1).abs() > 0.01);
+    let prepared = service
+        .prepare(transaction(vec![Mutation::ResizeAllocatedPair {
+            first: section("first"),
+            second: section("second"),
+            first_size: size(280.0, 180.0),
+            second_size: size(280.0, 316.0),
+            first_weight,
+            second_weight,
+            other_weight_scale: 2.0,
+            prefer_allocated: false,
+        }]))
+        .unwrap();
+    let shown = allocate_layout(prepared.layout(), service.registry(), &env).unwrap();
+    assert!((shown.sections[0].outer.size.height - 180.0).abs() < 0.001);
+    assert!((shown.sections[1].outer.size.height - 316.0).abs() < 0.001);
+    assert!((shown.sections[2].outer.size.height - 296.0).abs() < 0.001);
+    assert!((shown.sections[2].outer.origin.y - before.sections[2].outer.origin.y).abs() < 0.001);
+    service.commit(prepared).unwrap();
+    assert_eq!(allocate_layout(service.layout(), service.registry(), &env).unwrap(), shown);
+    assert!((service.layout().sections[2].weight - 2.0 / 3.0).abs() < 0.00001);
+}
+
+#[test]
+fn allocated_pair_scales_unpaired_closed_and_native_ratios_and_preserves_their_preferences() {
+    let mut service = fixture_service(true).unwrap();
+    for (panel, group) in [("one", "first"), ("two", "second"), ("three", "third"), ("closed", "closed"), ("native", "return")] {
+        open(&mut service, panel, group);
+    }
+    service
+        .dispatch(transaction(vec![
+            Mutation::SetSize { section: section("third"), size: size(280.0, 300.0) },
+            Mutation::SetSize { section: section("closed"), size: size(280.0, 350.0) },
+            Mutation::SetSize { section: section("return"), size: size(280.0, 400.0) },
+        ]))
+        .unwrap();
+    service.dispatch(transaction(vec![Mutation::Close { instance: id("closed") }])).unwrap();
+    service
+        .dispatch(transaction(vec![Mutation::Move {
+            instance: id("native"),
+            destination: Destination::NewSection {
+                section: section("window"),
+                index: 3,
+                size: size(280.0, 400.0),
+                location: SectionLocation::Window {
+                    host: HostId::new("host").unwrap(),
+                    origin: Point { x: 0.0, y: 0.0 },
+                    return_to: DockReturn {
+                        zone: Zone::Left,
+                        index: 4,
+                        size: size(280.0, 400.0),
+                        collapsed: false,
+                        join: None,
+                        section: None,
+                        column: None,
+                        column_index: 0,
+                        column_width: None,
+                        weight: 240.0,
+                        preferred_extent: None,
+                        extent_priority: 0,
+                    },
+                },
+            },
+        }]))
+        .unwrap();
+    let old = service.layout().clone();
+    service
+        .dispatch(transaction(vec![Mutation::ResizeAllocatedPair {
+            first: section("first"),
+            second: section("second"),
+            first_size: size(280.0, 200.0),
+            second_size: size(280.0, 300.0),
+            first_weight: 0.1,
+            second_weight: 0.2,
+            other_weight_scale: 2.0,
+            prefer_allocated: false,
+        }]))
+        .unwrap();
+    assert_eq!(service.layout().sections[0].weight, 0.1);
+    assert_eq!(service.layout().sections[1].weight, 0.2);
+    assert!((service.layout().section(&section("third")).unwrap().weight - 0.4).abs() < 0.00001);
+    assert!((service.layout().instance(&id("closed")).unwrap().memory.weight - 0.4).abs() < 0.00001);
+    let SectionLocation::Window { return_to, .. } = &service.layout().section(&section("window")).unwrap().location else {
+        panic!("native retained");
+    };
+    assert!((return_to.weight - 0.4).abs() < 0.00001);
+    assert_eq!(return_to.preferred_extent, Some(400.0));
+    assert_eq!(service.layout().instance(&id("closed")).unwrap().memory.preferred_extent, Some(350.0));
+    assert_eq!(service.layout().section(&section("third")).unwrap().preferred_extent, Some(300.0));
+    assert_eq!(service.layout().section(&section("third")).unwrap().size, old.section(&section("third")).unwrap().size);
+    assert_eq!(service.layout().instance(&id("native")).unwrap().memory.location, service.layout().section(&section("window")).unwrap().location);
+}
+
+#[test]
+fn allocated_pair_skips_unavailable_sections_but_never_a_presented_collapsed_header() {
+    let mut service = fixture_service(false).unwrap();
+    for (panel, group) in [("one", "first"), ("hidden", "middle"), ("two", "second")] {
+        open(&mut service, panel, group);
+    }
+    assert!(normalized_pair_weights(service.layout(), &section("first"), &section("second")).is_ok());
+    let mutation = Mutation::ResizeAllocatedPair {
+        first: section("first"),
+        second: section("second"),
+        first_size: size(280.0, 180.0),
+        second_size: size(280.0, 300.0),
+        first_weight: 0.2,
+        second_weight: 0.3,
+        other_weight_scale: 1.0,
+        prefer_allocated: false,
+    };
+    reject(&mut service, vec![mutation.clone()], Rule::Placement);
+    service.set_availability([(id("hidden"), Availability::Unavailable { reason: "absent".into() })].into()).unwrap();
+    service.dispatch(transaction(vec![mutation.clone()])).unwrap();
+    reject(
+        &mut service,
+        vec![Mutation::ResizePair {
+            first: section("first"),
+            second: section("second"),
+            first_size: size(280.0, 180.0),
+            second_size: size(280.0, 300.0),
+        }],
+        Rule::Placement,
+    );
+    service.dispatch(transaction(vec![Mutation::Collapse { section: section("middle"), collapsed: true }])).unwrap();
+    service.set_availability(AvailabilityMap::new()).unwrap();
+    reject(&mut service, vec![mutation.clone()], Rule::Placement);
+    service.set_availability([(id("hidden"), Availability::Unavailable { reason: "absent".into() })].into()).unwrap();
+    service.dispatch(transaction(vec![mutation])).unwrap();
+    reject(
+        &mut service,
+        vec![Mutation::ResizeAllocatedPair {
+            first: section("second"),
+            second: section("first"),
+            first_size: size(280.0, 300.0),
+            second_size: size(280.0, 180.0),
+            first_weight: 0.3,
+            second_weight: 0.2,
+            other_weight_scale: 1.0,
+            prefer_allocated: false,
+        }],
+        Rule::Placement,
+    );
+}
+
+#[test]
+fn allocated_pair_bounds_scale_and_total_without_old_share_equality_and_defaults_scale_on_wire() {
+    let mut service = fixture_service(false).unwrap();
+    open(&mut service, "one", "first");
+    open(&mut service, "two", "second");
+    for scale in [0.0, -1.0, f32::NAN, f32::INFINITY, MAX_LOGICAL + 1.0] {
+        reject(
+            &mut service,
+            vec![Mutation::ResizeAllocatedPair {
+                first: section("first"),
+                second: section("second"),
+                first_size: size(280.0, 120.0),
+                second_size: size(280.0, 680.0),
+                first_weight: 0.4,
+                second_weight: 0.4,
+                other_weight_scale: scale,
+                prefer_allocated: false,
+            }],
+            Rule::Bounds,
+        );
+    }
+    let mutation: Mutation = serde_json::from_value(serde_json::json!({"type":"resize_allocated_pair","first":"first","second":"second",
+        "first_size":{"width":280,"height":120},"second_size":{"width":280,"height":680},"first_weight":0.4,"second_weight":0.4}))
+    .unwrap();
+    assert!(
+        matches!(&mutation, Mutation::ResizeAllocatedPair { other_weight_scale, prefer_allocated, .. } if *other_weight_scale == 1.0 && !prefer_allocated)
+    );
+    service.dispatch(transaction(vec![mutation])).unwrap();
+    assert_eq!(service.layout().sections.iter().map(|s| s.weight).collect::<Vec<_>>(), vec![0.4, 0.4]);
+    open(&mut service, "three", "third");
+    let mut layout = service.layout().clone();
+    for group in &mut layout.sections {
+        group.weight = if group.id == section("third") { MAX_LOGICAL } else { 0.000001 };
+    }
+    for panel in &mut layout.instances {
+        panel.memory.weight = if panel.id == id("three") { MAX_LOGICAL } else { 0.000001 };
+    }
+    let mut service = LayoutService::new(service.registry().clone(), layout, HostCapabilities::default()).unwrap();
+    reject(
+        &mut service,
+        vec![Mutation::ResizeAllocatedPair {
+            first: section("first"),
+            second: section("second"),
+            first_size: size(280.0, 120.0),
+            second_size: size(280.0, 680.0),
+            first_weight: 1.0,
+            second_weight: 1.0,
+            other_weight_scale: MAX_LOGICAL,
+            prefer_allocated: false,
+        }],
+        Rule::Bounds,
+    );
+}
+
+#[test]
+fn reservation_aware_prepare_skips_external_ids_and_rejects_explicit_theft_without_mutation() {
+    let mut service = fixture_service(false).unwrap();
+    let sections = [section("section-1")].into();
+    let columns = [ColumnId::new("column-1").unwrap()].into();
+    let before = service.inspect();
+    let action = transaction(vec![fixture_open("fixture.log", "one", "first", Zone::Left, 0).unwrap()]);
+    let prepared = service.prepare_with_reservations(action.clone(), &sections, &columns).unwrap();
+    assert_eq!(prepared.layout().columns[0].id, ColumnId::new("column-2").unwrap());
+    assert_eq!(service.prepare_with_reservations(action, &sections, &columns).unwrap().layout(), prepared.layout());
+    assert_eq!(service.inspect(), before);
+    assert_eq!(
+        service
+            .prepare_with_reservations(
+                transaction(vec![fixture_open("fixture.log", "thief", "section-1", Zone::Left, 0).unwrap()]),
+                &sections,
+                &columns
+            )
+            .err()
+            .unwrap()
+            .rule,
+        Rule::DuplicateId
+    );
+    service.commit(prepared).unwrap();
+    let before = service.inspect();
+    let theft = transaction(vec![Mutation::Open {
+        kind: PanelKind::new("fixture.log").unwrap(),
+        instance: id("thief"),
+        destination: Some(Destination::Relative {
+            section: section("first"),
+            placement: RelativePlacement::BeforeColumn,
+            new_section: section("new"),
+            new_column: Some(ColumnId::new("column-1").unwrap()),
+            size: size(280.0, 240.0),
+        }),
+    }]);
+    assert_eq!(service.prepare_with_reservations(theft, &sections, &columns).err().unwrap().rule, Rule::DuplicateId);
+    let prepared = service
+        .prepare_with_reservations(transaction(vec![fixture_open("fixture.log", "right", "right", Zone::Right, 1).unwrap()]), &sections, &columns)
+        .unwrap();
+    assert_eq!(prepared.layout().section(&section("right")).unwrap().column, Some(ColumnId::new("column-3").unwrap()));
+    assert_eq!(service.inspect(), before);
+}
+
+#[test]
+fn replacement_context_admits_typed_owners_and_refuses_changed_owner_sets() {
+    let mut source = fixture_service(true).unwrap();
+    open(&mut source, "one", "first");
+    source
+        .dispatch(transaction(vec![Mutation::Open {
+            kind: PanelKind::new("fixture.log").unwrap(),
+            instance: id("two"),
+            destination: Some(Destination::JoinTab { section: section("first"), index: 1 }),
+        }]))
+        .unwrap();
+    open(&mut source, "closed", "remembered");
+    source.dispatch(transaction(vec![Mutation::Close { instance: id("closed") }])).unwrap();
+    let mut incoming = source.layout().clone();
+    let memory = &mut incoming.instances.iter_mut().find(|panel| panel.id == id("closed")).unwrap().memory;
+    memory.column = None;
+    memory.column_index = 0;
+    memory.column_width = None;
+    memory.location = SectionLocation::Window {
+        host: HostId::new("closed-host").unwrap(),
+        origin: Point { x: 0.0, y: 0.0 },
+        return_to: DockReturn {
+            zone: Zone::Left,
+            index: 0,
+            size: size(280.0, 240.0),
+            collapsed: false,
+            section: Some(section("return-section")),
+            join: Some(ReturnTab { section: section("return-group"), index: 0 }),
+            column: Some(ColumnId::new("return-column").unwrap()),
+            column_index: 0,
+            column_width: Some(280.0),
+            weight: 240.0,
+            preferred_extent: None,
+            extent_priority: 0,
+        },
+    };
+    let dormant = ColumnId::new("dormant").unwrap();
+    incoming.columns.push(Column { id: dormant.clone(), zone: Zone::Left, width: 280.0 });
+    let service = fixture_service(true).unwrap();
+    validate(&incoming, service.registry()).unwrap();
+    let context = preparation_context(&LayoutEnvelope::new(incoming.clone())).unwrap();
+    let ownership = context.replacement_ownership.as_ref().unwrap();
+    assert_eq!(ownership.sections[&section("first")], std::collections::BTreeSet::from([id("one"), id("two")]));
+    for name in ["remembered", "return-section", "return-group"] {
+        assert_eq!(ownership.sections[&section(name)], std::collections::BTreeSet::from([id("closed")]));
+    }
+    assert_eq!(ownership.columns[&ColumnId::new("return-column").unwrap()], std::collections::BTreeSet::from([id("closed")]));
+    assert!(ownership.columns[&dormant].is_empty());
+    let action = LayoutAction::Replace { expected_revision: Some(service.inspect().revision), layout: incoming.clone() };
+    let before = service.inspect();
+    let mut reservations_only = context.clone();
+    reservations_only.replacement_ownership = None;
+    assert_eq!(service.prepare_with_context(action.clone(), &AvailabilityMap::new(), &reservations_only).err().unwrap().rule, Rule::DuplicateId);
+    let prepared = service.prepare_with_context(action, &AvailabilityMap::new(), &context).unwrap();
+    assert_eq!(prepared.layout(), &incoming);
+    for attack in 0..3 {
+        let mut stolen = incoming.clone();
+        match attack {
+            0 => stolen.instances.retain(|panel| panel.id != id("two")),
+            1 => {
+                let mut thief = stolen.instances[0].clone();
+                thief.id = id("thief");
+                stolen.instances.push(thief);
+                stolen.sections[0].tabs.push(id("thief"));
+            }
+            _ => stolen.sections[0].column = Some(dormant.clone()),
+        }
+        if attack == 0 {
+            stolen.sections[0].tabs.retain(|panel| *panel != id("two"));
+        }
+        validate(&stolen, service.registry()).unwrap();
+        assert_eq!(
+            service
+                .prepare_with_context(LayoutAction::Replace { expected_revision: None, layout: stolen }, &AvailabilityMap::new(), &context)
+                .err()
+                .unwrap()
+                .rule,
+            Rule::DuplicateId
+        );
+    }
+    assert_eq!(service.inspect(), before, "preparation and refused takeovers must not publish state");
+}
+
+#[test]
+fn replacement_ownership_bounds_identities_and_owner_sets() {
+    let mut ownership = ReplacementIdentityOwnership::default();
+    ownership.sections.insert(SectionId("INVALID".into()), Default::default());
+    assert_eq!(ownership.validate().unwrap_err().rule, Rule::Id);
+    ownership.sections.clear();
+    ownership.columns.insert(ColumnId("INVALID".into()), Default::default());
+    assert_eq!(ownership.validate().unwrap_err().rule, Rule::Id);
+    ownership.columns.clear();
+    ownership.sections.insert(section("first"), [InstanceId("INVALID".into())].into());
+    assert_eq!(ownership.validate().unwrap_err().rule, Rule::Id);
+    ownership.sections.insert(section("first"), (0..=MAX_INSTANCES).map(|n| id(&format!("owner-{n}"))).collect());
+    assert_eq!(ownership.validate().unwrap_err().rule, Rule::CollectionLimit);
+    ownership.sections = (0..=MAX_RESERVED_IDENTITIES).map(|n| (section(&format!("reserved-{n}")), Default::default())).collect();
+    assert_eq!(ownership.validate().unwrap_err().rule, Rule::CollectionLimit);
+    let owners = (0..MAX_INSTANCES).map(|n| id(&format!("owner-{n}"))).collect::<std::collections::BTreeSet<_>>();
+    ownership.sections = (0..=MAX_RESERVED_IDENTITIES / MAX_INSTANCES).map(|n| (section(&format!("reserved-{n}")), owners.clone())).collect();
+    assert_eq!(ownership.validate().unwrap_err().rule, Rule::CollectionLimit);
+}
+
+#[test]
+fn reservation_aware_prepare_preserves_owner_closed_reopen_and_native_redock() {
+    let mut service = fixture_service(true).unwrap();
+    open(&mut service, "one", "first");
+    let column = service.layout().sections[0].column.clone().unwrap();
+    let sections = [section("first")].into();
+    let columns = [column.clone()].into();
+    service.dispatch(transaction(vec![Mutation::Close { instance: id("one") }])).unwrap();
+    let prepared = service
+        .prepare_with_reservations(
+            transaction(vec![Mutation::Open { kind: PanelKind::new("fixture.log").unwrap(), instance: id("one"), destination: None }]),
+            &sections,
+            &columns,
+        )
+        .unwrap();
+    service.commit(prepared).unwrap();
+    let prepared = service
+        .prepare_with_reservations(
+            transaction(vec![Mutation::Move {
+                instance: id("one"),
+                destination: Destination::NewSection {
+                    section: section("window"),
+                    index: 0,
+                    size: size(280.0, 240.0),
+                    location: SectionLocation::Window {
+                        host: HostId::new("host").unwrap(),
+                        origin: Point { x: 0.0, y: 0.0 },
+                        return_to: DockReturn {
+                            zone: Zone::Left,
+                            index: 0,
+                            size: size(280.0, 240.0),
+                            collapsed: false,
+                            join: None,
+                            section: Some(section("first")),
+                            column: Some(column.clone()),
+                            column_index: 0,
+                            column_width: Some(280.0),
+                            weight: 240.0,
+                            preferred_extent: None,
+                            extent_priority: 0,
+                        },
+                    },
+                },
+            }]),
+            &sections,
+            &columns,
+        )
+        .unwrap();
+    service.commit(prepared).unwrap();
+    let before = service.inspect();
+    let context = preparation_context(&LayoutEnvelope::new(before.layout.clone())).unwrap();
+    let ownership = context.replacement_ownership.as_ref().unwrap();
+    assert_eq!(ownership.sections[&section("window")], std::collections::BTreeSet::from([id("one")]));
+    assert_eq!(ownership.sections[&section("first")], std::collections::BTreeSet::from([id("one")]));
+    assert_eq!(ownership.columns[&column], std::collections::BTreeSet::from([id("one")]));
+    let empty = fixture_service(true).unwrap();
+    empty
+        .prepare_with_context(LayoutAction::Replace { expected_revision: None, layout: before.layout.clone() }, &AvailabilityMap::new(), &context)
+        .unwrap();
+    let prepared = service
+        .prepare_with_reservations(transaction(vec![Mutation::NativeClose { host: HostId::new("host").unwrap() }]), &sections, &columns)
+        .unwrap();
+    assert_eq!(service.inspect(), before);
+    assert_eq!(prepared.layout().sections[0].id, section("first"));
+    assert_eq!(prepared.layout().sections[0].column, Some(column));
+    service.commit(prepared).unwrap();
+}
+
+#[test]
+fn reservation_aware_prepare_bounds_and_validates_borrowed_sets_before_proposing() {
+    let service = fixture_service(false).unwrap();
+    let before = service.inspect();
+    let too_many = (0..=MAX_RESERVED_IDENTITIES).map(|n| section(&format!("reserved-{n}"))).collect();
+    let empty = std::collections::BTreeSet::new();
+    assert_eq!(service.prepare_with_reservations(LayoutAction::Inspect, &too_many, &empty).err().unwrap().rule, Rule::CollectionLimit);
+    let bad_sections = [SectionId("UPPER".into())].into();
+    assert_eq!(service.prepare_with_reservations(LayoutAction::Inspect, &bad_sections, &empty).err().unwrap().rule, Rule::Id);
+    let bad_columns = [ColumnId("UPPER".into())].into();
+    assert_eq!(
+        service.prepare_with_reservations(LayoutAction::Inspect, &std::collections::BTreeSet::new(), &bad_columns).err().unwrap().rule,
+        Rule::Id
+    );
+    assert_eq!(service.inspect(), before);
+}
+
+#[test]
+fn reservation_aware_native_destinations_skip_implicit_columns_and_refuse_explicit_nested_theft() {
+    let service = fixture_service(true).unwrap();
+    let sections = [section("section-1")].into();
+    let column = ColumnId::new("column-1").unwrap();
+    let columns = [column.clone()].into();
+    let returning = |return_column, return_section| {
+        transaction(vec![Mutation::Open {
+            kind: PanelKind::new("fixture.log").unwrap(),
+            instance: id("one"),
+            destination: Some(Destination::NewSection {
+                section: section("native"),
+                index: 0,
+                size: size(280.0, 240.0),
+                location: SectionLocation::Window {
+                    host: HostId::new("host").unwrap(),
+                    origin: Point { x: 0.0, y: 0.0 },
+                    return_to: DockReturn {
+                        zone: Zone::Left,
+                        index: 0,
+                        size: size(280.0, 240.0),
+                        collapsed: false,
+                        join: None,
+                        section: return_section,
+                        column: return_column,
+                        column_index: 0,
+                        column_width: None,
+                        weight: 240.0,
+                        preferred_extent: None,
+                        extent_priority: 0,
+                    },
+                },
+            }),
+        }])
+    };
+    let before = service.inspect();
+    assert_eq!(service.prepare_with_reservations(returning(Some(column), None), &sections, &columns).err().unwrap().rule, Rule::DuplicateId);
+    assert_eq!(
+        service.prepare_with_reservations(returning(None, Some(section("section-1"))), &sections, &columns).err().unwrap().rule,
+        Rule::DuplicateId
+    );
+    let prepared = service.prepare_with_reservations(returning(None, None), &sections, &columns).unwrap();
+    let SectionLocation::Window { return_to, .. } = &prepared.layout().sections[0].location else {
+        panic!("window");
+    };
+    assert_eq!(return_to.column, Some(ColumnId::new("column-2").unwrap()));
+    assert_eq!(service.inspect(), before);
+    assert_eq!(next_section_id_with_reservations(service.layout(), &sections).unwrap(), section("section-2"));
+    assert_eq!(next_column_id_with_reservations(service.layout(), &columns).unwrap(), ColumnId::new("column-2").unwrap());
+}
+
+#[test]
+fn current_workspace_action_preflights_catalogue_then_consumes_the_exact_private_candidate_once() {
+    use commands::LayoutCatalogue;
+    use std::cell::{Cell, RefCell};
+    struct CandidateSink {
+        service: LayoutService,
+        action: LayoutAction,
+        prepared: RefCell<Option<PreparedLayout>>,
+        projections: Cell<usize>,
+        dispatches: usize,
+    }
+    impl ActionSink for CandidateSink {
+        fn inspect(&self) -> LayoutReply {
+            self.service.inspect()
+        }
+        fn project(&self, action: LayoutAction) -> PanelResult<Layout> {
+            assert_eq!(action, self.action);
+            self.projections.set(self.projections.get() + 1);
+            Ok(self.prepared.borrow().as_ref().unwrap().layout().clone())
+        }
+        fn dispatch(&mut self, action: LayoutAction) -> PanelResult<LayoutReply> {
+            assert_eq!(action, self.action);
+            self.dispatches += 1;
+            self.service.commit(self.prepared.get_mut().take().unwrap())
+        }
+    }
+    let mut service = fixture_service(false).unwrap();
+    open(&mut service, "one", "first");
+    let registry = service.registry().clone();
+    let action = LayoutAction::Apply {
+        expected_revision: Some(service.inspect().revision),
+        mutations: vec![Mutation::SetSize { section: section("first"), size: size(280.0, 400.0) }],
+    };
+    let prepared = service.prepare(action.clone()).unwrap();
+    let shown = prepared.layout().clone();
+    let mut sink =
+        CandidateSink { service, action: action.clone(), prepared: RefCell::new(Some(prepared)), projections: Cell::new(0), dispatches: 0 };
+    let mut catalogue = fixture_command_catalogue(&registry).unwrap();
+    let original = catalogue.state().clone();
+    let before = sink.inspect();
+    catalogue.fail_stage = true;
+    let failed = commands::execute_layout_action(
+        action.clone(),
+        &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut catalogue, web: false },
+    )
+    .unwrap_err();
+    assert_eq!(failed.rule, Rule::Capability);
+    assert_eq!(sink.inspect(), before);
+    assert_eq!(sink.dispatches, 0);
+    assert!(sink.prepared.borrow().is_some());
+    assert_eq!(catalogue.state(), &original);
+    catalogue.fail_stage = false;
+    let reply = commands::execute_layout_action(
+        action,
+        &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut catalogue, web: false },
+    )
+    .unwrap();
+    assert_eq!(reply.layout, shown);
+    assert_eq!(sink.dispatches, 1);
+    assert_eq!(sink.projections.get(), 2);
+    assert!(sink.prepared.borrow().is_none());
+    assert_eq!(
+        catalogue.state().remembered(&reply.layout.workspace).unwrap().project_envelope(&registry, &reply.layout.workspace).unwrap().layout,
+        shown
+    );
+    let mut other = shown;
+    other.workspace = WorkspaceId::new("fixture.other").unwrap();
+    assert_eq!(
+        commands::execute_layout_action(
+            LayoutAction::Replace { expected_revision: None, layout: other },
+            &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut catalogue, web: false }
+        )
+        .unwrap_err()
+        .rule,
+        Rule::Capability
+    );
+    assert_eq!(sink.dispatches, 1);
+}
+
+#[test]
+fn standalone_header_commands_bypass_catalogue_and_no_space_projection_but_keep_authoritative_validation() {
+    use commands::{CatalogueState, LayoutCatalogue, PreparedCatalogue};
+    use std::cell::Cell;
+    struct RefusingPlacementSink {
+        service: LayoutService,
+        projects: Cell<usize>,
+        dispatches: usize,
+        controller_enabled: bool,
+    }
+    impl ActionSink for RefusingPlacementSink {
+        fn inspect(&self) -> LayoutReply {
+            self.service.inspect()
+        }
+        fn project(&self, _action: LayoutAction) -> PanelResult<Layout> {
+            self.projects.set(self.projects.get() + 1);
+            Err(error(Rule::NoSpace, "captured placement overflows"))
+        }
+        fn dispatch(&mut self, action: LayoutAction) -> PanelResult<LayoutReply> {
+            self.dispatches += 1;
+            if !self.controller_enabled {
+                return Err(error(Rule::Capability, "owning controller disabled"));
+            }
+            self.service.dispatch(action)
+        }
+    }
+    struct UnavailableCatalogue {
+        state: CatalogueState,
+        reads: Cell<usize>,
+        prepares: usize,
+        publishes: usize,
+    }
+    impl LayoutCatalogue for UnavailableCatalogue {
+        fn state(&self) -> &CatalogueState {
+            self.reads.set(self.reads.get() + 1);
+            &self.state
+        }
+        fn prepare(&mut self, _state: CatalogueState) -> PanelResult<PreparedCatalogue> {
+            self.prepares += 1;
+            Err(error(Rule::Capability, "storage unavailable"))
+        }
+        fn publish(&mut self, _prepared: PreparedCatalogue) {
+            self.publishes += 1;
+        }
+    }
+    let mut registry = synthetic_registry().unwrap();
+    let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    spec.kind = PanelKind::new("fixture.action").unwrap();
+    spec.header_actions = vec![HeaderActionSpec { id: ControlId::new("refresh").unwrap(), label_key: "ui.refresh".into(), icon: "restore".into() }];
+    registry.register(spec).unwrap();
+    let mut service =
+        LayoutService::new(registry.clone(), Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+    service.dispatch(transaction(vec![fixture_open("fixture.action", "one", "first", Zone::Left, 0).unwrap()])).unwrap();
+    let mut imported = service.layout().clone();
+    let memory = &mut imported.instances[0].memory;
+    memory.section = section("divergent-memory");
+    memory.location = SectionLocation::Floating { origin: Point { x: 31.0, y: 47.0 } };
+    memory.size = size(320.0, 280.0);
+    memory.collapsed = true;
+    memory.weight = 7.0;
+    memory.preferred_extent = Some(220.0);
+    memory.column = None;
+    memory.column_width = None;
+    memory.column_index = 0;
+    imported.columns.push(Column { id: ColumnId::new("quarantine-column").unwrap(), zone: Zone::Right, width: 280.0 });
+    let mut raw = serde_json::to_value(LayoutEnvelope::new(imported.clone())).unwrap();
+    let mut extension = legacy_instance_wire(
+        "extension",
+        "extension.panel",
+        "extension-memory",
+        serde_json::json!({"type":"dock","zone":"right"}),
+        size(280.0, 240.0),
+        1,
+        false,
+    );
+    extension["memory"]["column"] = serde_json::json!("quarantine-column");
+    raw["quarantine"] = serde_json::json!([{"instance":"extension","kind":"extension.panel","section":null,"instance_data":extension}]);
+    let loaded = decode(&serde_json::to_vec(&raw).unwrap(), &registry, &persistence_fallback()).unwrap();
+    assert!(loaded.notice.is_none());
+    assert_eq!(loaded.envelope.layout, imported);
+    let service = LayoutService::new(registry.clone(), loaded.envelope.layout.clone(), HostCapabilities::default()).unwrap();
+    let mut stored = commands::InMemoryCatalogue::default();
+    stored.remember(&loaded.envelope, None, &registry).unwrap();
+    let mut sink = RefusingPlacementSink { service, projects: Cell::new(0), dispatches: 0, controller_enabled: true };
+    let mut catalogue = UnavailableCatalogue { state: stored.state().clone(), reads: Cell::new(0), prepares: 0, publishes: 0 };
+    let original_catalogue = catalogue.state.clone();
+    let original_layout_bytes = serde_json::to_vec(&imported).unwrap();
+    let header = Mutation::HeaderAction { instance: id("one"), action: ControlId::new("refresh").unwrap() };
+    commands::execute_layout_action(
+        transaction(vec![header.clone()]),
+        &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut catalogue, web: false },
+    )
+    .unwrap();
+    let params = serde_json::json!({"target":{"type":"instance","id":"one"},"action":"refresh"});
+    commands::execute(
+        "panel.action",
+        &params,
+        &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut catalogue, web: false },
+    )
+    .unwrap();
+    let batch = [serde_json::json!({"command":"panel.action","params":params})];
+    let result = commands::execute_batch(
+        &batch,
+        &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut catalogue, web: false },
+    )
+    .unwrap();
+    assert_eq!(result["completed"], 1);
+    assert_eq!(sink.dispatches, 3);
+    assert_eq!(sink.projects.get(), 0);
+    assert_eq!((catalogue.reads.get(), catalogue.prepares, catalogue.publishes), (0, 0, 0));
+    assert_eq!(sink.inspect().layout, imported);
+    assert_eq!(serde_json::to_vec(&sink.inspect().layout).unwrap(), original_layout_bytes);
+    assert_eq!(catalogue.state, original_catalogue);
+    let before = sink.inspect();
+    let mixed = transaction(vec![header.clone(), Mutation::SetSize { section: section("first"), size: size(280.0, 300.0) }]);
+    assert_eq!(
+        commands::execute_layout_action(
+            mixed.clone(),
+            &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut catalogue, web: false }
+        )
+        .unwrap_err()
+        .rule,
+        Rule::Capability
+    );
+    assert_eq!(sink.service.dispatch(mixed).unwrap_err().rule, Rule::Capability);
+    assert_eq!(
+        commands::preflight_batch(
+            &[
+                serde_json::json!({"command":"panel.action","params":{"target":{"type":"instance","id":"one"},"action":"refresh"}}),
+                serde_json::json!({"command":"layout.get"}),
+            ],
+            &before.layout.workspace
+        )
+        .unwrap_err()
+        .rule,
+        Rule::Capability
+    );
+    assert_eq!(sink.dispatches, 3);
+    assert_eq!(sink.inspect(), before);
+    let unknown = transaction(vec![Mutation::HeaderAction { instance: id("one"), action: ControlId::new("unknown").unwrap() }]);
+    assert_eq!(
+        commands::execute_layout_action(
+            unknown,
+            &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut catalogue, web: false }
+        )
+        .unwrap_err()
+        .rule,
+        Rule::Capability
+    );
+    sink.controller_enabled = false;
+    assert_eq!(
+        commands::execute_layout_action(
+            transaction(vec![header.clone()]),
+            &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut catalogue, web: false }
+        )
+        .unwrap_err()
+        .rule,
+        Rule::Capability
+    );
+    sink.controller_enabled = true;
+    sink.service.set_availability([(id("one"), Availability::Unavailable { reason: "not available".into() })].into()).unwrap();
+    assert_eq!(
+        commands::execute_layout_action(
+            transaction(vec![header]),
+            &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut catalogue, web: false }
+        )
+        .unwrap_err()
+        .rule,
+        Rule::Availability
+    );
+    assert_eq!(sink.projects.get(), 0);
+    assert_eq!((catalogue.reads.get(), catalogue.prepares, catalogue.publishes), (0, 0, 0));
+}
+
+#[test]
+fn current_envelope_snapshot_without_remembered_state_returns_live_data_without_persisting() {
+    use commands::LayoutCatalogue;
+    let mut service = fixture_service(false).unwrap();
+    open(&mut service, "one", "first");
+    let catalogue = commands::InMemoryCatalogue::default();
+    let before = catalogue.state().clone();
+    let envelope = commands::current_envelope_snapshot(&catalogue, &service.inspect(), service.registry()).unwrap();
+    assert_eq!(envelope.layout, *service.layout());
+    assert_eq!(catalogue.state(), &before);
+}
+
+#[test]
+fn persistence_rejects_new_latent_section_and_column_claims_before_native_close_and_preserves_owner_recovery() {
+    use serde_json::json;
+    for column_only in [false, true] {
+        let registry = synthetic_registry().unwrap();
+        let mut raw = serde_json::to_value(LayoutEnvelope::new(Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()))).unwrap();
+        let location = if column_only {
+            json!({"type":"window","host":"extension-host","origin":{"x":20,"y":30},"return_to":{
+                "zone":"left","index":0,"column":"reserved-column","column_width":280,"size":{"width":280,"height":240},"collapsed":false
+            }})
+        } else {
+            json!({"type":"floating","origin":{"x":20,"y":30}})
+        };
+        let mut extension = legacy_instance_wire("extension", "extension.panel", "saved", location, size(280.0, 240.0), 0, false);
+        extension["future_draft"] = json!({"keep":"closed extension draft"});
+        raw["quarantine"] = json!([{"instance":"extension","kind":"extension.panel","section":null,"instance_data":extension}]);
+        let loaded = decode(&serde_json::to_vec(&raw).unwrap(), &registry, &persistence_fallback()).unwrap();
+        assert!(loaded.notice.is_none());
+        let envelope = loaded.envelope;
+        let original = encode(&envelope, &registry).unwrap();
+        let context = preparation_context(&envelope).unwrap();
+        let ownership = context.replacement_ownership.as_ref().unwrap();
+        assert!(!ownership.sections.contains_key(&section("saved")));
+        assert!(!ownership.columns.contains_key(&ColumnId::new("reserved-column").unwrap()));
+        let service = LayoutService::new(
+            registry.clone(),
+            envelope.layout.clone(),
+            HostCapabilities { native_windows: true, max_native_hosts: 8, persistence: true },
+        )
+        .unwrap();
+        let before = service.inspect();
+        let destination = Destination::NewSection {
+            section: section("window"),
+            index: 0,
+            size: size(280.0, 240.0),
+            location: SectionLocation::Window {
+                host: HostId::new("unrelated-host").unwrap(),
+                origin: Point { x: 40.0, y: 50.0 },
+                return_to: DockReturn {
+                    zone: Zone::Left,
+                    index: 0,
+                    size: size(280.0, 240.0),
+                    collapsed: false,
+                    join: None,
+                    section: if column_only { None } else { Some(section("saved")) },
+                    column: if column_only { Some(ColumnId::new("reserved-column").unwrap()) } else { None },
+                    column_index: 0,
+                    column_width: None,
+                    weight: 240.0,
+                    preferred_extent: None,
+                    extent_priority: 0,
+                },
+            },
+        };
+        // Deliberately omit preparation reservations: persistence is independently
+        // responsible for refusing these incoming, still-unmaterialized claims.
+        let prepared = service
+            .prepare(transaction(vec![Mutation::Open {
+                kind: PanelKind::new("fixture.log").unwrap(),
+                instance: id("unrelated"),
+                destination: Some(destination),
+            }]))
+            .unwrap();
+        let incoming = prepared.layout().clone();
+        assert!(incoming.section(&section("saved")).is_err());
+        assert!(incoming.column(&ColumnId::new("reserved-column").unwrap()).is_err());
+        assert_eq!(
+            service
+                .prepare_with_context(LayoutAction::Replace { expected_revision: None, layout: incoming.clone() }, &AvailabilityMap::new(), &context)
+                .err()
+                .unwrap()
+                .rule,
+            Rule::DuplicateId
+        );
+        assert_eq!(with_live_layout(&envelope, incoming.clone(), &registry).unwrap_err().rule, Rule::DuplicateId);
+        let mut closed = incoming.clone();
+        closed.instances[0].requested_open = false;
+        closed.sections.clear();
+        validate(&closed, &registry).unwrap();
+        assert_eq!(
+            with_live_layout(&envelope, closed, &registry).unwrap_err().rule,
+            Rule::DuplicateId,
+            "closed native memory must not evade staging"
+        );
+        if !column_only {
+            let mut remembered = incoming.clone();
+            remembered.instances[0].requested_open = false;
+            remembered.instances[0].memory.section = section("saved");
+            remembered.instances[0].memory.location = SectionLocation::Floating { origin: Point { x: 4.0, y: 8.0 } };
+            remembered.sections.clear();
+            validate(&remembered, &registry).unwrap();
+            assert_eq!(with_live_layout(&envelope, remembered, &registry).unwrap_err().rule, Rule::DuplicateId);
+            let mut joining = incoming;
+            for location in [&mut joining.sections[0].location, &mut joining.instances[0].memory.location] {
+                let SectionLocation::Window { return_to, .. } = location else {
+                    panic!("native descriptor");
+                };
+                return_to.section = None;
+                return_to.join = Some(ReturnTab { section: section("saved"), index: 0 });
+            }
+            assert_eq!(with_live_layout(&envelope, joining, &registry).unwrap_err().rule, Rule::DuplicateId);
+        }
+        assert_eq!(service.inspect(), before);
+        assert_eq!(encode(&envelope, &registry).unwrap(), original);
+        let mut grown = registry.clone();
+        let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+        spec.kind = PanelKind::new("extension.panel").unwrap();
+        grown.register(spec).unwrap();
+        let mut restored = envelope;
+        restore_quarantine(&mut restored, &grown).unwrap();
+        let mut owner = LayoutService::new(
+            grown.clone(),
+            restored.layout.clone(),
+            HostCapabilities { native_windows: true, max_native_hosts: 8, persistence: true },
+        )
+        .unwrap();
+        owner
+            .dispatch(transaction(vec![Mutation::Open {
+                kind: PanelKind::new("extension.panel").unwrap(),
+                instance: id("extension"),
+                destination: None,
+            }]))
+            .unwrap();
+        let group = owner.layout().containing(&id("extension")).unwrap().id.clone();
+        owner
+            .dispatch(transaction(vec![Mutation::Open {
+                kind: PanelKind::new("fixture.log").unwrap(),
+                instance: id("companion"),
+                destination: Some(Destination::JoinTab { section: group, index: 1 }),
+            }]))
+            .unwrap();
+        let opened = with_live_layout(&restored, owner.layout().clone(), &grown).unwrap();
+        let recovered = if column_only {
+            owner.dispatch(transaction(vec![Mutation::NativeClose { host: HostId::new("extension-host").unwrap() }])).unwrap();
+            let recovered = with_live_layout(&opened, owner.layout().clone(), &grown).unwrap();
+            assert_eq!(recovered.layout.containing(&id("extension")).unwrap().column, Some(ColumnId::new("reserved-column").unwrap()));
+            recovered
+        } else {
+            assert_eq!(opened.layout.containing(&id("extension")).unwrap().id, section("saved"));
+            opened
+        };
+        assert_eq!(recovered.retained_data[&id("extension")]["instance"]["future_draft"]["keep"], "closed extension draft");
+    }
+}
+
+#[test]
+fn deferred_projection_and_captured_prepare_admit_a_new_owner_without_mutating_the_service() {
+    let mut service = fixture_service(false).unwrap();
+    service.set_availability([(id("incoming"), Availability::Unavailable { reason: "outgoing owner".into() })].into()).unwrap();
+    let sections = [section("section-1")].into();
+    let columns = [ColumnId::new("column-1").unwrap()].into();
+    let action = LayoutAction::Apply {
+        expected_revision: Some(service.inspect().revision),
+        mutations: vec![fixture_open("fixture.log", "incoming", "incoming-section", Zone::Left, 0).unwrap()],
+    };
+    let before = service.inspect();
+    assert_eq!(service.prepare(action.clone()).err().unwrap().rule, Rule::Availability);
+    assert_eq!(service.prepare_with_reservations(action.clone(), &sections, &columns).err().unwrap().rule, Rule::Availability);
+    let projection: Layout = service.project_with_deferred_availability(action.clone(), &sections, &columns).unwrap();
+    assert_eq!(projection.columns[0].id, ColumnId::new("column-2").unwrap());
+    let captured = [(id("incoming"), Availability::Available)].into();
+    let prepared = service.prepare_with_availability_and_reservations(action.clone(), &captured, &sections, &columns).unwrap();
+    assert_eq!(prepared.layout(), &projection);
+    assert_eq!(service.inspect(), before);
+    let blocked = [(id("incoming"), Availability::Unavailable { reason: "proposed owner refuses".into() })].into();
+    assert_eq!(service.prepare_with_availability_and_reservations(action, &blocked, &sections, &columns).err().unwrap().rule, Rule::Availability);
+    assert_eq!(service.inspect(), before);
+    let reply = service.commit(prepared).unwrap();
+    assert_eq!(reply.layout, projection);
+    assert_eq!(reply.availability, captured);
+}
+
+#[test]
+fn proposed_owner_capture_controls_open_move_focus_activate_peek_and_header_permission() {
+    for operation in 0..6 {
+        let mut registry = synthetic_registry().unwrap();
+        let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+        spec.kind = PanelKind::new("fixture.action").unwrap();
+        spec.header_actions =
+            vec![HeaderActionSpec { id: ControlId::new("refresh").unwrap(), label_key: "ui.refresh".into(), icon: "restore".into() }];
+        registry.register(spec).unwrap();
+        let mut service =
+            LayoutService::new(registry, Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+        service
+            .dispatch(transaction(vec![
+                fixture_open("fixture.action", "one", "first", Zone::Left, 0).unwrap(),
+                Mutation::Collapse { section: section("first"), collapsed: true },
+            ]))
+            .unwrap();
+        let blocked: AvailabilityMap = [(id("one"), Availability::Unavailable { reason: "old owner".into() })].into();
+        service.set_availability(blocked.clone()).unwrap();
+        let mutation = match operation {
+            0 => Mutation::Open { kind: PanelKind::new("fixture.action").unwrap(), instance: id("one"), destination: None },
+            1 => Mutation::Focus { instance: id("one") },
+            2 => Mutation::Activate { instance: id("one") },
+            3 => Mutation::Peek { instance: id("one") },
+            4 => Mutation::Move {
+                instance: id("one"),
+                destination: Destination::NewSection {
+                    section: section("moved"),
+                    index: 0,
+                    location: SectionLocation::Dock { zone: Zone::Right },
+                    size: size(280.0, 240.0),
+                },
+            },
+            _ => Mutation::HeaderAction { instance: id("one"), action: ControlId::new("refresh").unwrap() },
+        };
+        let action = transaction(vec![mutation]);
+        let sections = std::collections::BTreeSet::new();
+        let columns = std::collections::BTreeSet::new();
+        let before = service.inspect();
+        assert_eq!(service.prepare(action.clone()).err().unwrap().rule, Rule::Availability);
+        let projection = service.project_with_deferred_availability(action.clone(), &sections, &columns).unwrap();
+        assert_eq!(
+            service.prepare_with_availability_and_reservations(action.clone(), &blocked, &sections, &columns).err().unwrap().rule,
+            Rule::Availability
+        );
+        let captured = [(id("one"), Availability::Available)].into();
+        let prepared = service.prepare_with_availability_and_reservations(action, &captured, &sections, &columns).unwrap();
+        assert_eq!(prepared.layout(), &projection);
+        assert_eq!(service.inspect(), before);
+        let reply = service.commit(prepared).unwrap();
+        assert_eq!(reply.layout, projection);
+        assert_eq!(reply.availability, captured);
+    }
+}
+
+#[test]
+fn captured_header_fallback_is_validated_without_changing_requested_activation_or_layout() {
+    let mut registry = synthetic_registry().unwrap();
+    let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    spec.kind = PanelKind::new("fixture.action").unwrap();
+    spec.header_actions = vec![HeaderActionSpec { id: ControlId::new("refresh").unwrap(), label_key: "ui.refresh".into(), icon: "restore".into() }];
+    registry.register(spec).unwrap();
+    let mut service =
+        LayoutService::new(registry, Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+    service
+        .dispatch(transaction(vec![
+            fixture_open("fixture.action", "one", "first", Zone::Left, 0).unwrap(),
+            Mutation::Open {
+                kind: PanelKind::new("fixture.action").unwrap(),
+                instance: id("two"),
+                destination: Some(Destination::JoinTab { section: section("first"), index: 1 }),
+            },
+        ]))
+        .unwrap();
+    let action = transaction(vec![Mutation::HeaderAction { instance: id("two"), action: ControlId::new("refresh").unwrap() }]);
+    let sections = std::collections::BTreeSet::new();
+    let columns = std::collections::BTreeSet::new();
+    let before = service.inspect();
+    assert_eq!(service.prepare(action.clone()).err().unwrap().rule, Rule::Availability);
+    let projection = service.project_with_deferred_availability(action.clone(), &sections, &columns).unwrap();
+    assert_eq!(projection, before.layout);
+    let captured = [(id("one"), Availability::Unavailable { reason: "incoming owner".into() }), (id("two"), Availability::Available)].into();
+    let prepared = service.prepare_with_availability_and_reservations(action.clone(), &captured, &sections, &columns).unwrap();
+    assert_eq!(
+        service.prepare_with_availability_and_reservations(action, &AvailabilityMap::new(), &sections, &columns).err().unwrap().rule,
+        Rule::Availability
+    );
+    assert_eq!(service.inspect(), before);
+    let reply = service.commit(prepared).unwrap();
+    assert_eq!(reply.layout, before.layout);
+    assert_eq!(reply.layout.sections[0].active, id("one"));
+    assert_eq!(reply.effects, vec![HostEffect::HeaderAction { instance: id("two"), action: ControlId::new("refresh").unwrap() }]);
+}
+
+#[test]
+fn captured_replace_retains_new_owner_availability_while_legacy_replace_still_clears_it() {
+    let mut service = fixture_service(false).unwrap();
+    open(&mut service, "one", "first");
+    service.set_availability([(id("one"), Availability::Unavailable { reason: "old workspace".into() })].into()).unwrap();
+    let action = LayoutAction::Replace { expected_revision: Some(service.inspect().revision), layout: service.layout().clone() };
+    let empty = std::collections::BTreeSet::new();
+    let columns = std::collections::BTreeSet::new();
+    let before = service.inspect();
+    let projection = service.project_with_deferred_availability(action.clone(), &empty, &columns).unwrap();
+    let captured = [(id("one"), Availability::Unavailable { reason: "incoming workspace".into() })].into();
+    let prepared = service.prepare_with_availability_and_reservations(action.clone(), &captured, &empty, &columns).unwrap();
+    let legacy = service.prepare(action).unwrap();
+    assert_eq!(prepared.layout(), &projection);
+    assert_eq!(service.inspect(), before);
+    assert_eq!(service.commit(prepared).unwrap().availability, captured);
+    assert_eq!(service.commit(legacy).unwrap_err().rule, Rule::Revision);
+    let legacy = service.prepare(LayoutAction::Replace { expected_revision: None, layout: projection }).unwrap();
+    assert!(service.commit(legacy).unwrap().availability.is_empty());
+}
+
+#[test]
+fn deferred_projection_preserves_presented_pair_metadata_and_final_prepare_rechecks_captured_adjacency() {
+    let mut service = fixture_service(false).unwrap();
+    for (panel, group) in [("one", "first"), ("hidden", "middle"), ("two", "second")] {
+        open(&mut service, panel, group);
+    }
+    let current: AvailabilityMap = [(id("hidden"), Availability::Unavailable { reason: "old owner".into() })].into();
+    service.set_availability(current.clone()).unwrap();
+    let action = transaction(vec![Mutation::ResizeAllocatedPair {
+        first: section("first"),
+        second: section("second"),
+        first_size: size(280.0, 180.0),
+        second_size: size(280.0, 300.0),
+        first_weight: 0.2,
+        second_weight: 0.3,
+        other_weight_scale: 1.0,
+        prefer_allocated: false,
+    }]);
+    let sections = std::collections::BTreeSet::new();
+    let columns = std::collections::BTreeSet::new();
+    let before = service.inspect();
+    let projection = service.project_with_deferred_availability(action.clone(), &sections, &columns).unwrap();
+    assert_eq!(
+        service.prepare_with_availability_and_reservations(action.clone(), &AvailabilityMap::new(), &sections, &columns).err().unwrap().rule,
+        Rule::Placement
+    );
+    let prepared = service.prepare_with_availability_and_reservations(action, &current, &sections, &columns).unwrap();
+    assert_eq!(prepared.layout(), &projection);
+    assert_eq!(service.inspect(), before);
+}
+
+#[test]
+fn deferred_projection_keeps_identity_capability_lifecycle_and_input_limits_and_captured_maps_are_validated() {
+    let service = fixture_service(false).unwrap();
+    let sections = [section("reserved")].into();
+    let columns = std::collections::BTreeSet::new();
+    let before = service.inspect();
+    let theft = transaction(vec![fixture_open("fixture.log", "one", "reserved", Zone::Left, 0).unwrap()]);
+    assert_eq!(service.project_with_deferred_availability(theft.clone(), &sections, &columns).unwrap_err().rule, Rule::DuplicateId);
+    assert_eq!(
+        service.prepare_with_availability_and_reservations(theft, &AvailabilityMap::new(), &sections, &columns).err().unwrap().rule,
+        Rule::DuplicateId
+    );
+    let lifecycle = transaction(vec![fixture_open("fixture.log", "one", "new", Zone::Left, 0).unwrap(), Mutation::Close { instance: id("one") }]);
+    assert_eq!(service.project_with_deferred_availability(lifecycle, &sections, &columns).unwrap_err().rule, Rule::Lifecycle);
+    let missing = transaction(vec![Mutation::Open { kind: PanelKind::new("missing.kind").unwrap(), instance: id("one"), destination: None }]);
+    assert_eq!(service.project_with_deferred_availability(missing, &sections, &columns).unwrap_err().rule, Rule::MissingTarget);
+    let bad_map = [(InstanceId("UPPER".into()), Availability::Available)].into();
+    assert_eq!(
+        service.prepare_with_availability_and_reservations(LayoutAction::Inspect, &bad_map, &sections, &columns).err().unwrap().rule,
+        Rule::Id
+    );
+    let oversized = (0..=MAX_INSTANCES).map(|n| (id(&format!("instance-{n}")), Availability::Available)).collect();
+    assert_eq!(
+        service.prepare_with_availability_and_reservations(LayoutAction::Inspect, &oversized, &sections, &columns).err().unwrap().rule,
+        Rule::CollectionLimit
+    );
+    let native = transaction(vec![Mutation::Open {
+        kind: PanelKind::new("fixture.log").unwrap(),
+        instance: id("one"),
+        destination: Some(Destination::NewSection {
+            section: section("window"),
+            index: 0,
+            size: size(280.0, 240.0),
+            location: SectionLocation::Window {
+                host: HostId::new("host").unwrap(),
+                origin: Point { x: 0.0, y: 0.0 },
+                return_to: DockReturn {
+                    zone: Zone::Left,
+                    index: 0,
+                    size: size(280.0, 240.0),
+                    collapsed: false,
+                    section: None,
+                    column: None,
+                    column_index: 0,
+                    column_width: None,
+                    weight: 240.0,
+                    preferred_extent: None,
+                    extent_priority: 0,
+                    join: None,
+                },
+            },
+        }),
+    }]);
+    assert_eq!(service.project_with_deferred_availability(native, &sections, &columns).unwrap_err().rule, Rule::Capability);
+    assert_eq!(service.inspect(), before);
+}
+
+#[test]
+fn extent_priority_defaults_omit_zero_and_reject_untyped_or_orphaned_ranks() {
+    let mut service = fixture_service(false).unwrap();
+    open(&mut service, "one", "first");
+    let wire = serde_json::to_value(service.layout()).unwrap();
+    assert!(wire["sections"][0].get("extent_priority").is_none());
+    assert!(wire["instances"][0]["memory"].get("extent_priority").is_none());
+    let native = DockReturn {
+        zone: Zone::Left,
+        index: 0,
+        size: size(280.0, 240.0),
+        collapsed: false,
+        section: None,
+        column: None,
+        column_index: 0,
+        column_width: None,
+        weight: 1.0,
+        preferred_extent: None,
+        extent_priority: 0,
+        join: None,
+    };
+    assert!(serde_json::to_value(&native).unwrap().get("extent_priority").is_none());
+    for rank in [serde_json::json!(-1), serde_json::json!(65536), serde_json::json!(1.5), serde_json::json!("future"), serde_json::Value::Null] {
+        let mut group = wire["sections"][0].clone();
+        group["extent_priority"] = rank.clone();
+        assert!(serde_json::from_value::<Section>(group).is_err());
+        let mut memory = wire["instances"][0]["memory"].clone();
+        memory["extent_priority"] = rank.clone();
+        assert!(serde_json::from_value::<PlacementMemory>(memory).is_err());
+        let mut returning = serde_json::to_value(&native).unwrap();
+        returning["extent_priority"] = rank;
+        assert!(serde_json::from_value::<DockReturn>(returning).is_err());
+    }
+    assert!(validate_extent_priority(Some(240.0), u16::MAX).is_ok());
+    assert_eq!(validate_extent_priority(None, 1).unwrap_err().rule, Rule::Bounds);
+    let mut invalid = service.layout().clone();
+    invalid.sections[0].extent_priority = 1;
+    assert_eq!(validate(&invalid, service.registry()).unwrap_err().rule, Rule::Bounds);
+    let mut invalid = service.layout().clone();
+    invalid.instances[0].memory.extent_priority = 1;
+    assert_eq!(validate(&invalid, service.registry()).unwrap_err().rule, Rule::Bounds);
+    let mut invalid = native;
+    invalid.extent_priority = 1;
+    assert_eq!(invalid.validate().unwrap_err().rule, Rule::Bounds);
+    let mut native_service = fixture_service(true).unwrap();
+    open(&mut native_service, "one", "first");
+    native_service.dispatch(transaction(vec![Mutation::SetSize { section: section("first"), size: size(280.0, 400.0) }])).unwrap();
+    reject(
+        &mut native_service,
+        vec![Mutation::Move {
+            instance: id("one"),
+            destination: Destination::NewSection {
+                section: section("window"),
+                index: 0,
+                size: size(280.0, 240.0),
+                location: SectionLocation::Window { host: HostId::new("host").unwrap(), origin: Point { x: 0.0, y: 0.0 }, return_to: invalid },
+            },
+        }],
+        Rule::Bounds,
+    );
+    let mut raw = serde_json::to_value(LayoutEnvelope::new(service.layout().clone())).unwrap();
+    raw["layout"]["sections"][0]["extent_priority"] = serde_json::json!(0);
+    raw["layout"]["instances"][0]["memory"]["extent_priority"] = serde_json::json!(0);
+    let loaded = decode(&serde_json::to_vec(&raw).unwrap(), service.registry(), &persistence_fallback()).unwrap();
+    assert!(loaded.notice.is_none());
+    let encoded: serde_json::Value = serde_json::from_slice(&encode(&loaded.envelope, service.registry()).unwrap()).unwrap();
+    assert!(encoded["layout"]["sections"][0].get("extent_priority").is_none());
+    assert!(encoded["layout"]["instances"][0]["memory"].get("extent_priority").is_none());
+    let mut data = serde_json::to_value(&service.layout().sections[0]).unwrap();
+    data["extent_priority"] = serde_json::json!(1);
+    let mut invalid = LayoutEnvelope::new(service.layout().clone());
+    invalid.section_snapshots.insert(section("first"), SectionSnapshot { data, index: 0, projected: None });
+    assert_eq!(encode(&invalid, service.registry()).unwrap_err().rule, Rule::Bounds);
+}
+
+#[test]
+fn dock_set_size_authors_a_new_tier_and_free_window_sizing_retains_its_latent_rank() {
+    let mut service = fixture_service(false).unwrap();
+    open(&mut service, "one", "first");
+    open(&mut service, "two", "second");
+    let weights: Vec<_> = service.layout().sections.iter().map(|s| s.weight).collect();
+    for (group, extent, rank) in [("first", 400.0, 1), ("second", 300.0, 2), ("first", 350.0, 3)] {
+        service.dispatch(transaction(vec![Mutation::SetSize { section: section(group), size: size(280.0, extent) }])).unwrap();
+        let saved = service.layout().section(&section(group)).unwrap();
+        assert_eq!((saved.preferred_extent, saved.extent_priority), (Some(extent), rank));
+        for panel in service.layout().instances.iter().filter(|p| saved.tabs.contains(&p.id)) {
+            assert_eq!((panel.memory.preferred_extent, panel.memory.extent_priority), (Some(extent), rank));
+        }
+    }
+    assert_eq!(service.layout().sections.iter().map(|s| s.weight).collect::<Vec<_>>(), weights);
+    service
+        .dispatch(transaction(vec![Mutation::Move {
+            instance: id("one"),
+            destination: Destination::NewSection {
+                section: section("float"),
+                index: 1,
+                location: SectionLocation::Floating { origin: Point { x: 20.0, y: 30.0 } },
+                size: size(300.0, 280.0),
+            },
+        }]))
+        .unwrap();
+    service.dispatch(transaction(vec![Mutation::SetSize { section: section("float"), size: size(500.0, 600.0) }])).unwrap();
+    let floating = service.layout().section(&section("float")).unwrap();
+    assert_eq!(floating.size, size(500.0, 600.0));
+    assert_eq!((floating.preferred_extent, floating.extent_priority), (Some(350.0), 3));
+    service.dispatch(transaction(vec![Mutation::Close { instance: id("one") }])).unwrap();
+    service.dispatch(transaction(vec![Mutation::Focus { instance: id("one") }])).unwrap();
+    assert_eq!(service.layout().containing(&id("one")).unwrap().extent_priority, 3);
+}
+
+#[test]
+fn exhausted_extent_tiers_compact_live_closed_native_ties_and_preserve_other_group_intent_atomically() {
+    let mut service = fixture_service(true).unwrap();
+    for (panel, group) in [("one", "first"), ("two", "second"), ("zero", "zero"), ("closed", "closed"), ("native", "native-source")] {
+        open(&mut service, panel, group);
+    }
+    service.dispatch(transaction(vec![Mutation::Close { instance: id("closed") }])).unwrap();
+    service
+        .dispatch(transaction(vec![Mutation::Move {
+            instance: id("native"),
+            destination: Destination::NewSection {
+                section: section("window"),
+                index: 3,
+                size: size(280.0, 240.0),
+                location: SectionLocation::Window {
+                    host: HostId::new("host").unwrap(),
+                    origin: Point { x: 0.0, y: 0.0 },
+                    return_to: DockReturn {
+                        zone: Zone::Left,
+                        index: 3,
+                        size: size(280.0, 240.0),
+                        collapsed: false,
+                        section: None,
+                        column: None,
+                        column_index: 0,
+                        column_width: None,
+                        weight: 240.0,
+                        preferred_extent: None,
+                        extent_priority: 0,
+                        join: None,
+                    },
+                },
+            },
+        }]))
+        .unwrap();
+    service.dispatch(transaction(vec![fixture_open("fixture.log", "right", "right", Zone::Right, 4).unwrap()])).unwrap();
+    let mut layout = service.layout().clone();
+    for group in &mut layout.sections {
+        match group.id.0.as_str() {
+            "first" => {
+                group.preferred_extent = Some(200.0);
+                group.extent_priority = 40000;
+            }
+            "second" => {
+                group.preferred_extent = Some(200.0);
+                group.extent_priority = 17;
+            }
+            "zero" => {
+                group.preferred_extent = Some(200.0);
+            }
+            "right" => {
+                group.preferred_extent = Some(500.0);
+                group.extent_priority = u16::MAX;
+            }
+            _ => {}
+        }
+        if let SectionLocation::Window { return_to, .. } = &mut group.location {
+            return_to.preferred_extent = Some(260.0);
+            return_to.extent_priority = u16::MAX;
+        }
+    }
+    for panel in &mut layout.instances {
+        if let Some(group) = layout.sections.iter().find(|s| s.tabs.contains(&panel.id)) {
+            panel.memory.preferred_extent = group.preferred_extent;
+            panel.memory.extent_priority = group.extent_priority;
+            panel.memory.location = group.location.clone();
+        } else {
+            panel.memory.preferred_extent = Some(250.0);
+            panel.memory.extent_priority = 17;
+        }
+    }
+    let mut service = LayoutService::new(service.registry().clone(), layout, service.capabilities().clone()).unwrap();
+    let before = service.inspect();
+    reject(
+        &mut service,
+        vec![
+            Mutation::SetSize { section: section("first"), size: size(280.0, 350.0) },
+            Mutation::SetBottomHeight { section: section("first"), height: 200.0 },
+        ],
+        Rule::Placement,
+    );
+    let prepared = service.prepare(transaction(vec![Mutation::SetSize { section: section("first"), size: size(280.0, 350.0) }])).unwrap();
+    assert_eq!(service.inspect(), before);
+    let next = prepared.layout();
+    assert_eq!(next.section(&section("first")).unwrap().extent_priority, 4);
+    assert_eq!(next.section(&section("second")).unwrap().extent_priority, 1);
+    assert_eq!(next.instance(&id("closed")).unwrap().memory.extent_priority, 1);
+    assert_eq!(next.section(&section("zero")).unwrap().extent_priority, 0);
+    let mut right = before.layout.section(&section("right")).unwrap().clone();
+    right.extent_priority = 3; // Global compaction preserves its tier tie with the native return.
+    assert_eq!(next.section(&section("right")).unwrap(), &right);
+    let SectionLocation::Window { return_to, .. } = &next.section(&section("window")).unwrap().location else {
+        panic!("window");
+    };
+    assert_eq!((return_to.preferred_extent, return_to.extent_priority), (Some(260.0), 3));
+    let SectionLocation::Window { return_to, .. } = &next.instance(&id("native")).unwrap().memory.location else {
+        panic!("memory");
+    };
+    assert_eq!(return_to.extent_priority, 3);
+    assert_eq!(next.sections.iter().map(|s| s.weight).collect::<Vec<_>>(), before.layout.sections.iter().map(|s| s.weight).collect::<Vec<_>>());
+    service.commit(prepared).unwrap();
+    service.dispatch(transaction(vec![Mutation::SetSize { section: section("second"), size: size(280.0, 300.0) }])).unwrap();
+    assert_eq!(service.layout().section(&section("second")).unwrap().extent_priority, 5);
+}
+
+#[test]
+fn ranked_allocated_pairs_represent_explicit_underfill_compression_and_repeated_overlap() {
+    for height in [1000.0, 400.0] {
+        let mut service = fixture_service(false).unwrap();
+        for (panel, group) in [("one", "first"), ("two", "second"), ("three", "third")] {
+            open(&mut service, panel, group);
+        }
+        let mut layout = service.layout().clone();
+        for group in &mut layout.sections {
+            group.preferred_extent = Some(200.0);
+        }
+        for panel in &mut layout.instances {
+            panel.memory.preferred_extent = Some(200.0);
+        }
+        let mut service = LayoutService::new(service.registry().clone(), layout, HostCapabilities::default()).unwrap();
+        let mut env = allocated_pair_environment(&service, height);
+        env.gap = 4.0;
+        let initial = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+        let expected = if height == 1000.0 { 200.0 } else { 392.0 / 3.0 };
+        for group in &initial.sections {
+            assert!((group.outer.size.height - expected).abs() < 0.002);
+        }
+        let first = if height == 1000.0 { 180.0 } else { 120.0 };
+        let second = initial.sections[0].outer.size.height + initial.sections[1].outer.size.height - first;
+        let action = transaction(vec![Mutation::ResizeAllocatedPair {
+            first: section("first"),
+            second: section("second"),
+            first_size: size(280.0, first),
+            second_size: size(280.0, second),
+            first_weight: 0.1,
+            second_weight: 0.2,
+            other_weight_scale: 1.0,
+            prefer_allocated: true,
+        }]);
+        let before = service.inspect();
+        let prepared = service.prepare(action).unwrap();
+        assert_eq!(service.inspect(), before);
+        let shown = allocate_layout(prepared.layout(), service.registry(), &env).unwrap();
+        assert!((shown.sections[0].outer.size.height - first).abs() < 0.002);
+        assert!((shown.sections[1].outer.size.height - second).abs() < 0.002);
+        assert!((shown.sections[2].outer.size.height - initial.sections[2].outer.size.height).abs() < 0.002);
+        assert!((shown.sections[2].outer.origin.y - initial.sections[2].outer.origin.y).abs() < 0.002);
+        assert_eq!(prepared.layout().sections.iter().map(|s| s.extent_priority).collect::<Vec<_>>(), vec![1, 1, 0]);
+        service.commit(prepared).unwrap();
+        assert_eq!(allocate_layout(service.layout(), service.registry(), &env).unwrap(), shown);
+        let saved = service.layout().clone();
+        service
+            .dispatch(transaction(vec![
+                Mutation::Collapse { section: section("first"), collapsed: true },
+                Mutation::Collapse { section: section("first"), collapsed: false },
+            ]))
+            .unwrap();
+        assert_eq!(service.layout(), &saved);
+        let overlap_first = if height == 1000.0 { 210.0 } else { 130.0 };
+        let overlap_second = shown.sections[1].outer.size.height + shown.sections[2].outer.size.height - overlap_first;
+        service
+            .dispatch(transaction(vec![Mutation::ResizeAllocatedPair {
+                first: section("second"),
+                second: section("third"),
+                first_size: size(280.0, overlap_first),
+                second_size: size(280.0, overlap_second),
+                first_weight: 0.2,
+                second_weight: 0.3,
+                other_weight_scale: 1.0,
+                prefer_allocated: true,
+            }]))
+            .unwrap();
+        let overlap = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+        assert!((overlap.sections[0].outer.size.height - first).abs() < 0.002);
+        assert!((overlap.sections[1].outer.size.height - overlap_first).abs() < 0.002);
+        assert!((overlap.sections[2].outer.size.height - overlap_second).abs() < 0.002);
+        assert_eq!(service.layout().sections.iter().map(|s| s.extent_priority).collect::<Vec<_>>(), vec![1, 2, 2]);
+        let mut expanded = env.clone();
+        expanded.capacity.size.height = 1400.0;
+        let roomy = allocate_layout(service.layout(), service.registry(), &expanded).unwrap();
+        for (actual, saved) in roomy.sections.iter().zip(&service.layout().sections) {
+            assert!((actual.outer.size.height - saved.preferred_extent.unwrap()).abs() < 0.002);
+        }
+    }
+    let mut service = fixture_service(false).unwrap();
+    for (panel, group) in [("one", "first"), ("two", "second"), ("three", "third")] {
+        open(&mut service, panel, group);
+    }
+    let mut layout = service.layout().clone();
+    for (group, extent) in layout.sections.iter_mut().zip([1200.0, 120.0, 200.0]) {
+        group.preferred_extent = Some(extent);
+    }
+    for panel in &mut layout.instances {
+        panel.memory.preferred_extent = layout.sections.iter().find(|s| s.tabs.contains(&panel.id)).unwrap().preferred_extent;
+    }
+    let mut service = LayoutService::new(service.registry().clone(), layout, HostCapabilities::default()).unwrap();
+    let mut env = allocated_pair_environment(&service, 1528.0);
+    env.gap = 4.0;
+    let initial = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+    for (first, second) in [(120.0, 1200.0), (1200.0, 120.0)] {
+        service
+            .dispatch(transaction(vec![Mutation::ResizeAllocatedPair {
+                first: section("first"),
+                second: section("second"),
+                first_size: size(280.0, first),
+                second_size: size(280.0, second),
+                first_weight: 0.0,
+                second_weight: 1.0,
+                other_weight_scale: 1.0,
+                prefer_allocated: true,
+            }]))
+            .unwrap();
+        let actual = allocate_layout(service.layout(), service.registry(), &env).unwrap();
+        assert!((actual.sections[0].outer.size.height - first).abs() < 0.002);
+        assert!((actual.sections[1].outer.size.height - second).abs() < 0.002);
+        assert!((actual.sections[2].outer.origin.y - initial.sections[2].outer.origin.y).abs() < 0.002);
+        assert_eq!(actual.sections[2].outer.size, initial.sections[2].outer.size);
+    }
+}
+
+#[test]
+fn ranked_pair_intent_roundtrips_and_false_clears_rank_without_snapshot_resurrection() {
+    let mut service = fixture_service(false).unwrap();
+    open(&mut service, "one", "first");
+    open(&mut service, "two", "second");
+    service
+        .dispatch(transaction(vec![Mutation::ResizeAllocatedPair {
+            first: section("first"),
+            second: section("second"),
+            first_size: size(280.0, 180.0),
+            second_size: size(280.0, 220.0),
+            first_weight: 0.4,
+            second_weight: 0.6,
+            other_weight_scale: 1.0,
+            prefer_allocated: true,
+        }]))
+        .unwrap();
+    let mut envelope = LayoutEnvelope::new(service.layout().clone());
+    for (index, group) in service.layout().sections.iter().enumerate() {
+        let mut data = serde_json::to_value(group).unwrap();
+        data["future"] = serde_json::json!({"extent_priority":"opaque payload"});
+        envelope.section_snapshots.insert(group.id.clone(), SectionSnapshot { data, index, projected: Some(group.clone()) });
+    }
+    let loaded = decode(&encode(&envelope, service.registry()).unwrap(), service.registry(), &persistence_fallback()).unwrap();
+    assert!(loaded.notice.is_none());
+    assert_eq!(loaded.envelope.layout, *service.layout());
+    for group in &loaded.envelope.layout.sections {
+        assert_eq!(group.extent_priority, 1);
+    }
+    service
+        .dispatch(transaction(vec![Mutation::ResizeAllocatedPair {
+            first: section("first"),
+            second: section("second"),
+            first_size: size(280.0, 120.0),
+            second_size: size(280.0, 280.0),
+            first_weight: 0.0,
+            second_weight: 1.0,
+            other_weight_scale: 1.0,
+            prefer_allocated: false,
+        }]))
+        .unwrap();
+    let staged = with_live_layout(&loaded.envelope, service.layout().clone(), service.registry()).unwrap();
+    let raw: serde_json::Value = serde_json::from_slice(&encode(&staged, service.registry()).unwrap()).unwrap();
+    for name in ["first", "second"] {
+        assert!(raw["section_snapshots"][name]["data"].get("extent_priority").is_none());
+        assert!(raw["section_snapshots"][name]["data"].get("preferred_extent").is_none());
+        assert_eq!(raw["section_snapshots"][name]["data"]["future"]["extent_priority"], "opaque payload");
+    }
+}
+
+#[test]
+fn bottom_height_updates_the_common_row_and_preserves_width_intent_rank_and_weight() {
+    let mut registry = synthetic_registry().unwrap();
+    let mut constrained = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    constrained.kind = PanelKind::new("fixture.short-height").unwrap();
+    constrained.min_size.height = 140.0;
+    constrained.max_size.height = 300.0;
+    registry.register(constrained).unwrap();
+    let mut service =
+        LayoutService::new(registry.clone(), Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+    service
+        .dispatch(transaction(vec![
+            fixture_open("fixture.log", "one", "first", Zone::Bottom, 0).unwrap(),
+            fixture_open("fixture.log", "two", "second", Zone::Bottom, 1).unwrap(),
+            Mutation::Open {
+                kind: PanelKind::new("fixture.short-height").unwrap(),
+                instance: id("inactive"),
+                destination: Some(Destination::JoinTab { section: section("first"), index: 1 }),
+            },
+        ]))
+        .unwrap();
+    service
+        .dispatch(transaction(vec![
+            Mutation::SetSize { section: section("first"), size: size(320.0, 240.0) },
+            Mutation::SetSize { section: section("second"), size: size(450.0, 500.0) },
+        ]))
+        .unwrap();
+    let mut imported = service.layout().clone();
+    let memory = &mut imported.instances.iter_mut().find(|p| p.id == id("one")).unwrap().memory;
+    memory.size.width = 800.0;
+    memory.preferred_extent = Some(600.0);
+    memory.extent_priority = 77;
+    memory.weight = 3.0;
+    let mut service = LayoutService::new(registry.clone(), imported, HostCapabilities::default()).unwrap();
+    assert_eq!(bottom_height_bounds(service.layout(), &registry).unwrap(), (140.0, 300.0));
+    let before = service.layout().clone();
+    let prepared = service.prepare(transaction(vec![Mutation::SetBottomHeight { section: section("first"), height: 180.0 }])).unwrap();
+    assert_eq!(service.layout(), &before);
+    for (old, new) in before.sections.iter().zip(&prepared.layout().sections) {
+        assert_eq!(new.size.height, 180.0);
+        assert_eq!(
+            (new.size.width, new.preferred_extent, new.extent_priority, new.weight),
+            (old.size.width, old.preferred_extent, old.extent_priority, old.weight)
+        );
+        assert_eq!(new.active, old.active);
+    }
+    for (old, new) in before.instances.iter().zip(&prepared.layout().instances) {
+        let mut expected = old.memory.clone();
+        expected.size.height = 180.0;
+        assert_eq!(new.memory, expected, "height-only edit preserves divergent remembered width intent");
+    }
+    service.commit(prepared).unwrap();
+    assert!(service.layout().instances.iter().all(|p| p.memory.size.height == 180.0));
+    for height in [0.0, -1.0, f32::NAN, f32::INFINITY, 139.0, 301.0, MAX_LOGICAL + 1.0] {
+        reject(&mut service, vec![Mutation::SetBottomHeight { section: section("second"), height }], Rule::Bounds);
+    }
+    service.dispatch(transaction(vec![fixture_open("fixture.log", "side", "side", Zone::Left, 2).unwrap()])).unwrap();
+    reject(&mut service, vec![Mutation::SetBottomHeight { section: section("side"), height: 180.0 }], Rule::Placement);
+    reject(&mut service, vec![Mutation::SetBottomHeight { section: section("missing"), height: 180.0 }], Rule::MissingTarget);
+    assert_eq!(
+        commands::parse_command("panel.set_bottom_height", &serde_json::json!({"section":"first","height":180})).unwrap_err().rule,
+        Rule::MissingTarget
+    );
+}
+
+#[test]
+fn bottom_height_refuses_disjoint_registered_card_intervals_atomically() {
+    let mut registry = synthetic_registry().unwrap();
+    for (kind, min, max, default) in [("fixture.low", 120.0, 200.0, 180.0), ("fixture.high", 400.0, 600.0, 450.0)] {
+        let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+        spec.kind = PanelKind::new(kind).unwrap();
+        spec.min_size.height = min;
+        spec.max_size.height = max;
+        spec.default_size.height = default;
+        registry.register(spec).unwrap();
+    }
+    let mut service =
+        LayoutService::new(registry, Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+    for (kind, group, height) in [("fixture.low", "low", 180.0), ("fixture.high", "high", 450.0)] {
+        let index = service.layout().sections.len();
+        service
+            .dispatch(transaction(vec![Mutation::Open {
+                kind: PanelKind::new(kind).unwrap(),
+                instance: id(group),
+                destination: Some(Destination::NewSection {
+                    section: section(group),
+                    index,
+                    size: size(280.0, height),
+                    location: SectionLocation::Dock { zone: Zone::Bottom },
+                }),
+            }]))
+            .unwrap();
+    }
+    assert_eq!(bottom_height_bounds(service.layout(), service.registry()).unwrap_err().rule, Rule::IncompatibleTabs);
+    reject(&mut service, vec![Mutation::SetBottomHeight { section: section("low"), height: 180.0 }], Rule::IncompatibleTabs);
+}
+
+#[test]
+fn raw_quarantine_priority_and_nested_opaque_fields_survive_known_compaction_then_native_reappearance() {
+    use commands::LayoutCatalogue;
+    use serde_json::json;
+    let mut service = fixture_service(true).unwrap();
+    open(&mut service, "one", "first");
+    open(&mut service, "two", "second");
+    let mut layout = service.layout().clone();
+    for (group, rank) in layout.sections.iter_mut().zip([u16::MAX, 17]) {
+        group.preferred_extent = Some(300.0);
+        group.extent_priority = rank;
+    }
+    for panel in &mut layout.instances {
+        let group = layout.sections.iter().find(|s| s.tabs.contains(&panel.id)).unwrap();
+        panel.memory.preferred_extent = group.preferred_extent;
+        panel.memory.extent_priority = group.extent_priority;
+    }
+    let registry = service.registry().clone();
+    let column = layout.sections[0].column.clone().unwrap();
+    let mut raw = serde_json::to_value(LayoutEnvelope::new(layout)).unwrap();
+    raw["quarantine"] = json!([{"instance":"extension","kind":"extension.panel","section":null,"instance_data":{
+        "id":"extension","kind":"extension.panel","requested_open":false,"future":{"extent_priority":"opaque rank payload"},"memory":{
+            "section":"native-memory","section_index":2,"tab_index":0,"size":{"width":280,"height":400},"collapsed":false,"weight":240,
+            "preferred_extent":400,"extent_priority":41,"location":{"type":"window","host":"extension-host","origin":{"x":20,"y":30},
+                "future_monitor":{"extent_priority":"monitor metadata"},"return_to":{
+                    "section":"extension-return","zone":"left","index":2,"column":column,"column_index":0,"column_width":280,
+                    "size":{"width":280,"height":350},"collapsed":false,"weight":240,"preferred_extent":350,"extent_priority":42
+                }
+            }
+        }
+    }}]);
+    let pending: PanelInstance = serde_json::from_value(raw["quarantine"][0]["instance_data"].clone()).unwrap();
+    let snapshot = Section {
+        id: pending.memory.section.clone(),
+        location: pending.memory.location.clone(),
+        tabs: vec![pending.id.clone()],
+        active: pending.id,
+        size: pending.memory.size,
+        collapsed: false,
+        column: None,
+        weight: pending.memory.weight,
+        preferred_extent: pending.memory.preferred_extent,
+        extent_priority: pending.memory.extent_priority,
+    };
+    let snapshot_data = serde_json::to_value(snapshot).unwrap();
+    raw["section_snapshots"]["native-memory"] = json!({"index":2,"data":snapshot_data});
+    let loaded = decode(&serde_json::to_vec(&raw).unwrap(), &registry, &persistence_fallback()).unwrap();
+    assert!(loaded.notice.is_none());
+    let opaque = loaded.envelope.quarantine[0].instance_data.clone();
+    let mut service = LayoutService::new(
+        registry.clone(),
+        loaded.envelope.layout.clone(),
+        HostCapabilities { native_windows: true, max_native_hosts: 8, persistence: true },
+    )
+    .unwrap();
+    service.dispatch(transaction(vec![Mutation::SetSize { section: section("first"), size: size(280.0, 350.0) }])).unwrap();
+    assert_eq!(service.layout().section(&section("first")).unwrap().extent_priority, 5);
+    let mut staged = with_live_layout(&loaded.envelope, service.layout().clone(), &registry).unwrap();
+    assert_eq!(staged.quarantine[0].instance_data, opaque);
+    let shadow = staged.extent_priority_overrides.iter().find(|record| record.target == ExtentPriorityTarget::MemoryReturn(id("extension"))).unwrap();
+    assert_eq!((shadow.stored_priority, shadow.priority), (42, 3));
+    let shared = staged
+        .extent_priority_overrides
+        .iter()
+        .find(|record| record.target == ExtentPriorityTarget::SectionReturn(section("native-memory")))
+        .unwrap();
+    assert_eq!((shared.stored_priority, shared.priority), (42, 3));
+    assert_eq!(staged.section_snapshots[&section("native-memory")].data, snapshot_data);
+    let roundtrip = decode(&encode(&staged, &registry).unwrap(), &registry, &persistence_fallback()).unwrap();
+    assert!(roundtrip.notice.is_none());
+    assert_eq!(roundtrip.envelope.quarantine[0].instance_data, opaque);
+    let mut preset = LayoutEnvelope::new(staged.layout.clone());
+    preset.layout.extent_priority_context = ExtentPriorityContext::default();
+    let mut catalogue = commands::InMemoryCatalogue::default();
+    catalogue.register_builtin("Without native peer", &preset, &registry).unwrap();
+    catalogue.remember(&staged, None, &registry).unwrap();
+    let mut backend = commands::InMemoryPanelBackend::new(
+        LayoutService::new(registry.clone(), staged.layout.clone(), HostCapabilities::default()).unwrap(),
+        catalogue,
+    );
+    backend.execute("layout.apply", &json!({"name":"Without native peer"})).unwrap();
+    staged = backend.catalogue.state().remembered(&staged.layout.workspace).unwrap().project_envelope(&registry, &staged.layout.workspace).unwrap();
+    assert_eq!(staged.quarantine[0].instance_data, opaque);
+    assert_eq!(staged.section_snapshots[&section("native-memory")].data, snapshot_data);
+    for target in [ExtentPriorityTarget::MemoryReturn(id("extension")), ExtentPriorityTarget::SectionReturn(section("native-memory"))] {
+        let shadow = staged.extent_priority_overrides.iter().find(|record| record.target == target).unwrap();
+        assert_eq!((shadow.stored_priority, shadow.priority), (42, 3), "preset merge retains native recovery precedence");
+    }
+    let mut grown = registry.clone();
+    let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    spec.kind = PanelKind::new("extension.panel").unwrap();
+    grown.register(spec).unwrap();
+    restore_quarantine(&mut staged, &grown).unwrap();
+    let mut owner =
+        LayoutService::new(grown.clone(), staged.layout.clone(), HostCapabilities { native_windows: true, max_native_hosts: 8, persistence: true })
+            .unwrap();
+    owner
+        .dispatch(transaction(vec![Mutation::Open {
+            kind: PanelKind::new("extension.panel").unwrap(),
+            instance: id("extension"),
+            destination: None,
+        }]))
+        .unwrap();
+    let window = owner.layout().containing(&id("extension")).unwrap();
+    assert_eq!((window.preferred_extent, window.extent_priority), (Some(400.0), 2));
+    let opened = with_live_layout(&staged, owner.layout().clone(), &grown).unwrap();
+    assert_eq!(opened.section_snapshots[&section("native-memory")].data, snapshot_data);
+    owner.dispatch(transaction(vec![Mutation::NativeClose { host: HostId::new("extension-host").unwrap() }])).unwrap();
+    let dock = owner.layout().containing(&id("extension")).unwrap();
+    assert_eq!((dock.preferred_extent, dock.extent_priority), (Some(350.0), 3));
+    let mut environment = allocated_pair_environment(&owner, 400.0);
+    environment.gap = 4.0;
+    let geometry = allocate_layout(owner.layout(), owner.registry(), &environment).unwrap();
+    for (name, expected) in [("first", 152.0), ("second", 120.0), ("extension-return", 120.0)] {
+        let actual = geometry.sections.iter().find(|s| s.section == section(name)).unwrap();
+        assert!((actual.outer.size.height - expected).abs() < 0.002, "new authored precedence survives opaque native recovery");
+    }
+    let saved = with_live_layout(&opened, owner.layout().clone(), &grown).unwrap();
+    assert_eq!(saved.retained_data[&id("extension")]["instance"]["future"]["extent_priority"], "opaque rank payload");
+    assert_eq!(saved.retained_data[&id("extension")]["instance"]["memory"]["location"]["future_monitor"]["extent_priority"], "monitor metadata");
+}
+
+fn priority_recovery_envelope(first_rank: u16, snapshot: bool) -> (PanelRegistry, LayoutEnvelope) {
+    use serde_json::json;
+    let mut service = fixture_service(false).unwrap();
+    open(&mut service, "a", "a");
+    open(&mut service, "b", "b");
+    let mut layout = service.layout().clone();
+    for (group, rank) in layout.sections.iter_mut().zip([first_rank, 17]) {
+        group.preferred_extent = Some(300.0);
+        group.extent_priority = rank;
+    }
+    for panel in &mut layout.instances {
+        let group = layout.sections.iter().find(|s| s.id == panel.memory.section).unwrap();
+        panel.memory.preferred_extent = group.preferred_extent;
+        panel.memory.extent_priority = group.extent_priority;
+    }
+    let column = layout.columns[0].id.clone();
+    let mut raw = serde_json::to_value(LayoutEnvelope::new(layout)).unwrap();
+    raw["quarantine"] = json!([{"instance":"q","kind":"extension.priority","section":if snapshot { json!("q") } else { serde_json::Value::Null },
+        "instance_data":{"id":"q","kind":"extension.priority","requested_open":snapshot,"memory":{
+            "section":"q","location":{"type":"dock","zone":"left"},"column":column,"column_width":280,
+            "section_index":2,"tab_index":0,"size":{"width":280,"height":350},"collapsed":false,"weight":240,
+            "preferred_extent":350,"extent_priority":42},"future":{"draft":"keep Q raw","extent_priority":"opaque"}}}]);
+    if snapshot {
+        raw["section_snapshots"]["q"] = json!({"index":2,"data":{"id":"q","location":{"type":"dock","zone":"left"},
+            "column":column,"tabs":["q"],"active":"q","size":{"width":280,"height":350},"collapsed":false,
+            "weight":240,"preferred_extent":350,"extent_priority":42,"future_surface":{"keep":true}}});
+        raw["section_order"].as_array_mut().unwrap().push(json!("q"));
+    }
+    let registry = service.registry().clone();
+    let loaded = decode(&serde_json::to_vec(&raw).unwrap(), &registry, &persistence_fallback()).unwrap();
+    assert!(loaded.notice.is_none());
+    (registry, loaded.envelope)
+}
+
+fn restored_priority_owner(mut envelope: LayoutEnvelope, registry: &PanelRegistry) -> (PanelRegistry, LayoutEnvelope, LayoutService) {
+    let mut grown = registry.clone();
+    let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    spec.kind = PanelKind::new("extension.priority").unwrap();
+    grown.register(spec).unwrap();
+    restore_quarantine(&mut envelope, &grown).unwrap();
+    let mut owner = LayoutService::new(grown.clone(), envelope.layout.clone(), HostCapabilities::default()).unwrap();
+    owner
+        .dispatch(transaction(vec![Mutation::Open { kind: PanelKind::new("extension.priority").unwrap(), instance: id("q"), destination: None }]))
+        .unwrap();
+    (grown, envelope, owner)
+}
+
+#[test]
+fn recovery_priority_context_preserves_latest_resize_with_and_without_exhaustion_and_shared_snapshots() {
+    for initial in [u16::MAX, 10] {
+        for snapshot in [false, true] {
+            let (registry, envelope) = priority_recovery_envelope(initial, snapshot);
+            let raw = envelope.quarantine[0].instance_data.clone();
+            let original_snapshot = envelope.section_snapshots.get(&section("q")).map(|s| s.data.clone());
+            let context = preparation_context(&envelope).unwrap();
+            assert!(context.extent_priorities.complete);
+            assert_eq!(envelope.layout.instances.len(), 2);
+            assert_eq!(envelope.layout.sections.len(), 2, "priority metadata creates no placed surrogates");
+            let mut service = LayoutService::new(registry.clone(), envelope.layout.clone(), HostCapabilities::default()).unwrap();
+            let action = transaction(vec![Mutation::SetSize { section: section("a"), size: size(280.0, 350.0) }]);
+            let before = service.inspect();
+            let projected = service.project_with_context(action.clone(), &context).unwrap();
+            let prepared = service.prepare_with_context(action.clone(), &AvailabilityMap::new(), &context).unwrap();
+            assert_eq!(prepared.layout(), &projected);
+            assert_eq!(service.prepare(action.clone()).unwrap().layout(), &projected, "full-envelope hydration seeds bare preparation too");
+            assert_eq!(service.inspect(), before);
+            let mut incomplete = context.clone();
+            incomplete.extent_priorities.records.clear();
+            assert_eq!(service.prepare_with_context(action.clone(), &AvailabilityMap::new(), &incomplete).err().unwrap().rule, Rule::Capability);
+            assert_eq!(service.prepare_with_reservations(action, &context.sections, &context.columns).err().unwrap().rule, Rule::Capability);
+            let staged = with_live_layout(&envelope, prepared.layout().clone(), &registry).unwrap();
+            assert_eq!(staged.quarantine[0].instance_data, raw);
+            assert_eq!(staged.section_snapshots.get(&section("q")).map(|s| s.data.clone()), original_snapshot);
+            let authored = if initial == u16::MAX { 4 } else { 43 };
+            assert_eq!(prepared.layout().section(&section("a")).unwrap().extent_priority, authored);
+            if initial == u16::MAX {
+                assert!(
+                    staged
+                        .extent_priority_overrides
+                        .iter()
+                        .any(|r| r.target == ExtentPriorityTarget::Memory(id("q")) && r.stored_priority == 42 && r.priority == 2)
+                );
+            } else {
+                assert!(staged.extent_priority_overrides.is_empty());
+            }
+            let encoded = encode(&staged, &registry).unwrap();
+            let loaded = decode(&encoded, &registry, &persistence_fallback()).unwrap();
+            assert!(loaded.notice.is_none());
+            let (grown, recovered, owner) = restored_priority_owner(loaded.envelope, &registry);
+            let effective_q = if initial == u16::MAX { 2 } else { 42 };
+            assert_eq!(owner.layout().containing(&id("q")).unwrap().extent_priority, effective_q);
+            let mut environment = allocated_pair_environment(&owner, 400.0);
+            environment.gap = 4.0;
+            let allocated = allocate_layout(owner.layout(), &grown, &environment).unwrap();
+            for (name, expected) in [("a", 152.0), ("b", 120.0), ("q", 120.0)] {
+                assert!((allocated.sections.iter().find(|s| s.section == section(name)).unwrap().outer.size.height - expected).abs() < 0.002);
+            }
+            let saved = with_live_layout(&recovered, owner.layout().clone(), &grown).unwrap();
+            assert_eq!(saved.retained_data[&id("q")]["instance"], raw);
+            if snapshot {
+                assert_eq!(saved.section_snapshots[&section("q")].data["extent_priority"], 42);
+            }
+            service.commit(prepared).unwrap();
+            if initial == u16::MAX {
+                assert_eq!(
+                    service
+                        .prepare_with_context(
+                            transaction(vec![Mutation::SetSize { section: section("a"), size: size(280.0, 360.0) }]),
+                            &AvailabilityMap::new(),
+                            &context
+                        )
+                        .err()
+                        .unwrap()
+                        .rule,
+                    Rule::Revision
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn catalogue_only_recovery_priorities_reach_headless_single_and_atomic_batch_preparation() {
+    use commands::LayoutCatalogue;
+    for batch in [false, true] {
+        let (registry, envelope) = priority_recovery_envelope(u16::MAX, false);
+        let raw = envelope.quarantine[0].instance_data.clone();
+        let mut bare = envelope.layout.clone();
+        bare.extent_priority_context = ExtentPriorityContext::default();
+        let service = LayoutService::new(registry.clone(), bare, HostCapabilities::default()).unwrap();
+        let mut catalogue = commands::InMemoryCatalogue::default();
+        catalogue.remember(&envelope, None, &registry).unwrap();
+        let mut backend = commands::InMemoryPanelBackend::new(service, catalogue);
+        let params = serde_json::json!({"target":{"type":"section","id":"a"},"size":{"width":280,"height":350}});
+        if batch {
+            backend
+                .batch(&[
+                    serde_json::json!({"command":"panel.resize","params":params}),
+                    serde_json::json!({"command":"panel.resize","params":{"target":{"type":"section","id":"a"},"size":{"width":280,"height":360}}}),
+                ])
+                .unwrap();
+        } else {
+            backend.execute("panel.resize", &params).unwrap();
+        }
+        let stored = backend.catalogue.state().remembered(&backend.service.layout().workspace).unwrap();
+        let remembered = stored.project_envelope(&registry, &backend.service.layout().workspace).unwrap();
+        assert_eq!(remembered.quarantine[0].instance_data, raw);
+        let (grown, _, owner) = restored_priority_owner(remembered, &registry);
+        let mut environment = allocated_pair_environment(&owner, 400.0);
+        environment.gap = 4.0;
+        let allocated = allocate_layout(owner.layout(), &grown, &environment).unwrap();
+        assert!((allocated.sections.iter().find(|s| s.section == section("a")).unwrap().outer.size.height - 152.0).abs() < 0.002);
+        assert!((allocated.sections.iter().find(|s| s.section == section("q")).unwrap().outer.size.height - 120.0).abs() < 0.002);
+    }
+}
+
+#[test]
+fn incomplete_priority_proposals_and_hostile_shadow_metadata_cannot_publish_wrong_order() {
+    let (registry, envelope) = priority_recovery_envelope(u16::MAX, false);
+    let original = encode(&envelope, &registry).unwrap();
+    let mut bare = envelope.layout.clone();
+    bare.extent_priority_context = ExtentPriorityContext::default();
+    let service = LayoutService::new(registry.clone(), bare, HostCapabilities::default()).unwrap();
+    let bad = service.prepare(transaction(vec![Mutation::SetSize { section: section("a"), size: size(280.0, 350.0) }])).unwrap();
+    assert_eq!(with_live_layout(&envelope, bad.layout().clone(), &registry).unwrap_err().rule, Rule::Capability);
+    assert_eq!(encode(&envelope, &registry).unwrap(), original);
+    let full = preparation_context(&envelope).unwrap();
+    let good = service
+        .prepare_with_context(
+            transaction(vec![Mutation::SetSize { section: section("a"), size: size(280.0, 350.0) }]),
+            &AvailabilityMap::new(),
+            &full,
+        )
+        .unwrap();
+    let staged = with_live_layout(&envelope, good.layout().clone(), &registry).unwrap();
+    let mut bare = staged.layout.clone();
+    bare.extent_priority_context = ExtentPriorityContext::default();
+    let bare = LayoutService::new(registry.clone(), bare, HostCapabilities::default()).unwrap();
+    let stale = bare
+        .prepare_with_context(
+            transaction(vec![Mutation::SetSize { section: section("a"), size: size(280.0, 360.0) }]),
+            &AvailabilityMap::new(),
+            &full,
+        )
+        .unwrap();
+    assert_eq!(with_live_layout(&staged, stale.layout().clone(), &registry).unwrap_err().rule, Rule::Revision);
+    let mut wrong = envelope.clone();
+    wrong.extent_priority_overrides.push(ExtentPriorityRecord {
+        target: ExtentPriorityTarget::Memory(id("q")),
+        zone: Zone::Left,
+        column: wrong.layout.columns.first().map(|c| c.id.clone()),
+        stored_priority: 41,
+        priority: 2,
+    });
+    assert_eq!(encode(&wrong, &registry).unwrap_err().rule, Rule::Schema);
+    wrong.extent_priority_overrides[0].stored_priority = 42;
+    wrong.extent_priority_overrides.push(wrong.extent_priority_overrides[0].clone());
+    assert_eq!(encode(&wrong, &registry).unwrap_err().rule, Rule::DuplicateId);
+    let mut too_many = ExtentPriorityContext { complete: true, records: Vec::new() };
+    for n in 0..=MAX_EXTENT_PRIORITY_RECORDS {
+        too_many.records.push(ExtentPriorityRecord {
+            target: ExtentPriorityTarget::Memory(id(&format!("q-{n}"))),
+            zone: Zone::Bottom,
+            column: None,
+            stored_priority: 42,
+            priority: 2,
+        });
+    }
+    assert_eq!(too_many.validate().unwrap_err().rule, Rule::CollectionLimit);
+}
+
+#[test]
+fn preset_apply_and_reset_retain_opaque_effective_priorities_order_and_rejected_bytes() {
+    use commands::LayoutCatalogue;
+    use serde_json::json;
+    for initial in [u16::MAX, 10] {
+        for snapshot in [false, true] {
+            for operation in ["layout.apply", "layout.reset"] {
+                let (registry, original) = priority_recovery_envelope(initial, snapshot);
+                let service = LayoutService::new(registry.clone(), original.layout.clone(), HostCapabilities::default()).unwrap();
+                let prepared = service.prepare(transaction(vec![Mutation::SetSize { section: section("a"), size: size(280.0, 350.0) }])).unwrap();
+                let current = with_live_layout(&original, prepared.layout().clone(), &registry).unwrap();
+                let raw_q = current.quarantine[0].instance_data.clone();
+                let raw_snapshot = current.section_snapshots.get(&section("q")).map(|s| s.data.clone());
+                let mut preset = LayoutEnvelope::new(current.layout.clone());
+                preset.layout.extent_priority_context = ExtentPriorityContext::default();
+                assert!(preset.quarantine.is_empty() && preset.section_snapshots.is_empty());
+                let mut catalogue = commands::InMemoryCatalogue::default();
+                catalogue.register_builtin("Without Q", &preset, &registry).unwrap();
+                catalogue
+                    .register_workspace(commands::WorkspaceDescriptor {
+                        id: current.layout.workspace.clone(),
+                        title_key: "ui.panel".into(),
+                        default_preset: "Without Q".into(),
+                    })
+                    .unwrap();
+                let rejected = [0, 255, 128, 17];
+                catalogue.remember(&current, Some(&rejected), &registry).unwrap();
+                let preset_bytes = catalogue.state().preset("Without Q").unwrap().bytes().to_vec();
+                let service = LayoutService::new(registry.clone(), current.layout.clone(), HostCapabilities::default()).unwrap();
+                let mut backend = commands::InMemoryPanelBackend::new(service, catalogue);
+                backend.execute(operation, &if operation == "layout.apply" { json!({"name":"Without Q"}) } else { json!({}) }).unwrap();
+                assert_eq!(backend.catalogue.state().preset("Without Q").unwrap().bytes(), preset_bytes);
+                let stored = backend.catalogue.state().remembered(&current.layout.workspace).unwrap();
+                assert_eq!(stored.rejected(), Some(rejected.as_slice()));
+                let merged = stored.project_envelope(&registry, &current.layout.workspace).unwrap();
+                assert_eq!(merged.quarantine[0].instance_data, raw_q);
+                assert_eq!(merged.section_snapshots.get(&section("q")).map(|s| s.data.clone()), raw_snapshot);
+                assert_eq!(merged.section_order, current.section_order);
+                let effective_q = if initial == u16::MAX { 2 } else { 42 };
+                let context = preparation_context(&merged).unwrap();
+                let q = context.extent_priorities.records.iter().find(|r| r.target == ExtentPriorityTarget::Memory(id("q"))).unwrap();
+                assert_eq!((q.stored_priority, q.priority), (42, effective_q));
+                if initial == u16::MAX {
+                    assert_eq!(merged.layout.section(&section("a")).unwrap().extent_priority, 4);
+                    assert_eq!(merged.layout.section(&section("b")).unwrap().extent_priority, 1);
+                    assert!(merged.extent_priority_overrides.windows(2).all(|pair| pair[0].target < pair[1].target));
+                }
+                let (grown, recovered, owner) = restored_priority_owner(merged, &registry);
+                assert_eq!(owner.layout().containing(&id("q")).unwrap().extent_priority, effective_q);
+                assert_eq!(owner.layout().sections.iter().map(|s| s.id.clone()).collect::<Vec<_>>(), vec![section("a"), section("b"), section("q")]);
+                assert_eq!(recovered.retained_data[&id("q")]["instance"], raw_q);
+                let mut environment = allocated_pair_environment(&owner, 400.0);
+                environment.gap = 4.0;
+                let geometry = allocate_layout(owner.layout(), &grown, &environment).unwrap();
+                for (name, expected) in [("a", 152.0), ("b", 120.0), ("q", 120.0)] {
+                    assert!((geometry.sections.iter().find(|s| s.section == section(name)).unwrap().outer.size.height - expected).abs() < 0.002);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn preset_merge_refuses_conflicting_effective_tiers_for_identical_raw_recovery_sources() {
+    use commands::LayoutCatalogue;
+    for snapshot in [false, true] {
+        for incoming_wins in [false, true] {
+            let (registry, original) = priority_recovery_envelope(u16::MAX, snapshot);
+            let service = LayoutService::new(registry.clone(), original.layout.clone(), HostCapabilities::default()).unwrap();
+            let prepared = service.prepare(transaction(vec![Mutation::SetSize { section: section("a"), size: size(280.0, 350.0) }])).unwrap();
+            let mut current = with_live_layout(&original, prepared.layout().clone(), &registry).unwrap();
+            let mut incoming = current.clone();
+            let changed = if incoming_wins { &mut incoming } else { &mut current };
+            for record in &mut changed.extent_priority_overrides {
+                if matches!(&record.target, ExtentPriorityTarget::Memory(owner) if *owner == id("q"))
+                    || matches!(&record.target, ExtentPriorityTarget::Section(owner) if *owner == section("q"))
+                {
+                    record.priority = 3;
+                }
+            }
+            changed.layout.extent_priority_context = preparation_context(changed).unwrap().extent_priorities;
+            assert_eq!(current.quarantine, incoming.quarantine);
+            assert_eq!(current.section_snapshots, incoming.section_snapshots);
+            let mut catalogue = commands::InMemoryCatalogue::default();
+            catalogue.register_builtin("Same recovery", &current, &registry).unwrap();
+            catalogue.register_builtin("Conflicting recovery", &incoming, &registry).unwrap();
+            catalogue.remember(&current, None, &registry).unwrap();
+            let service = LayoutService::new(registry.clone(), current.layout.clone(), HostCapabilities::default()).unwrap();
+            let mut backend = commands::InMemoryPanelBackend::new(service, catalogue);
+            backend.execute("layout.apply", &serde_json::json!({"name":"Same recovery"})).unwrap();
+            let before = backend.service.inspect();
+            let catalogue = backend.catalogue.state().export().unwrap();
+            let failure = backend.execute("layout.apply", &serde_json::json!({"name":"Conflicting recovery"})).unwrap_err();
+            assert_eq!(failure.rule, Rule::DuplicateId);
+            assert_eq!(failure.detail, "retained effective priority collision");
+            assert_eq!(backend.service.inspect(), before);
+            assert_eq!(backend.catalogue.state().export().unwrap(), catalogue);
+        }
+    }
+}
+
+#[test]
+fn staging_new_authored_sections_and_closed_memories_requires_complete_recovery_context() {
+    for was_closed in [false, true] {
+        for close_after in [false, true] {
+            for exhausted in [false, true] {
+                let (registry, mut envelope) = priority_recovery_envelope(10, false);
+                envelope.layout.sections.retain(|s| s.id != section("a"));
+                if was_closed {
+                    envelope.layout.instances.iter_mut().find(|p| p.id == id("a")).unwrap().requested_open = false;
+                } else {
+                    envelope.layout.instances.retain(|p| p.id != id("a"));
+                }
+                if exhausted {
+                    envelope.layout.sections.iter_mut().find(|s| s.id == section("b")).unwrap().extent_priority = u16::MAX;
+                    envelope.layout.instances.iter_mut().find(|p| p.id == id("b")).unwrap().memory.extent_priority = u16::MAX;
+                }
+                envelope.section_snapshots.remove(&section("a"));
+                envelope.section_order.retain(|id| *id != section("a"));
+                envelope.layout.extent_priority_context = ExtentPriorityContext::default();
+                let original = encode(&envelope, &registry).unwrap();
+                let loaded = decode(&original, &registry, &persistence_fallback()).unwrap();
+                assert!(loaded.notice.is_none());
+                let envelope = loaded.envelope;
+                let raw_q = envelope.quarantine[0].instance_data.clone();
+                let mut bare = envelope.layout.clone();
+                bare.extent_priority_context = ExtentPriorityContext::default();
+                let service = LayoutService::new(registry.clone(), bare, HostCapabilities::default()).unwrap();
+                let action = transaction(vec![
+                    if was_closed {
+                        Mutation::Open { kind: PanelKind::new("fixture.log").unwrap(), instance: id("a"), destination: None }
+                    } else {
+                        fixture_open("fixture.log", "a", "a", Zone::Left, 0).unwrap()
+                    },
+                    Mutation::SetSize { section: section("a"), size: size(280.0, 350.0) },
+                ]);
+                let close = |layout: &Layout| {
+                    if close_after {
+                        let mut closer = LayoutService::new(registry.clone(), layout.clone(), HostCapabilities::default()).unwrap();
+                        closer.dispatch(transaction(vec![Mutation::Close { instance: id("a") }])).unwrap();
+                        assert!(closer.layout().section(&section("a")).is_err());
+                        closer.layout().clone()
+                    } else {
+                        layout.clone()
+                    }
+                };
+                let before = service.inspect();
+                let bad = close(service.prepare(action.clone()).unwrap().layout());
+                assert_eq!(with_live_layout(&envelope, bad, &registry).unwrap_err().rule, Rule::Capability);
+                assert_eq!(service.inspect(), before);
+                assert_eq!(encode(&envelope, &registry).unwrap(), original);
+                let context = preparation_context(&envelope).unwrap();
+                let good = service.prepare_with_context(action, &AvailabilityMap::new(), &context).unwrap();
+                let staged = with_live_layout(&envelope, close(good.layout()), &registry).unwrap();
+                assert_eq!(staged.quarantine[0].instance_data, raw_q);
+                let (grown, recovered, mut owner) = restored_priority_owner(staged, &registry);
+                if close_after {
+                    owner
+                        .dispatch(transaction(vec![Mutation::Open {
+                            kind: PanelKind::new("fixture.log").unwrap(),
+                            instance: id("a"),
+                            destination: None,
+                        }]))
+                        .unwrap();
+                }
+                assert!(owner.layout().containing(&id("a")).unwrap().extent_priority > owner.layout().containing(&id("q")).unwrap().extent_priority);
+                let mut environment = allocated_pair_environment(&owner, 400.0);
+                environment.gap = 4.0;
+                let geometry = allocate_layout(owner.layout(), &grown, &environment).unwrap();
+                for (name, expected) in [("a", 152.0), ("b", 120.0), ("q", 120.0)] {
+                    assert!((geometry.sections.iter().find(|s| s.section == section(name)).unwrap().outer.size.height - expected).abs() < 0.002);
+                }
+                let saved = with_live_layout(&recovered, owner.layout().clone(), &grown).unwrap();
+                assert_eq!(saved.retained_data[&id("q")]["instance"], raw_q);
+            }
+        }
+    }
+}
+
+#[test]
+fn inherited_closed_reopen_and_native_return_tiers_remain_stageable_without_authored_intent() {
+    for native in [false, true] {
+        let (registry, envelope) = priority_recovery_envelope(60, false);
+        let caps = HostCapabilities { native_windows: true, max_native_hosts: 8, persistence: true };
+        let mut service = LayoutService::new(registry.clone(), envelope.layout.clone(), caps.clone()).unwrap();
+        if native {
+            service
+                .dispatch(transaction(vec![Mutation::Move {
+                    instance: id("a"),
+                    destination: Destination::NewSection {
+                        section: section("native-a"),
+                        index: 0,
+                        size: size(280.0, 300.0),
+                        location: SectionLocation::Window {
+                            host: HostId::new("inherited-tier").unwrap(),
+                            origin: Point { x: 0.0, y: 0.0 },
+                            return_to: DockReturn {
+                                zone: Zone::Left,
+                                index: 0,
+                                section: None,
+                                column: None,
+                                column_index: 0,
+                                column_width: None,
+                                size: size(280.0, 300.0),
+                                collapsed: false,
+                                join: None,
+                                weight: 1.0,
+                                preferred_extent: None,
+                                extent_priority: 0,
+                            },
+                        },
+                    },
+                }]))
+                .unwrap();
+        } else {
+            service.dispatch(transaction(vec![Mutation::Close { instance: id("a") }])).unwrap();
+        }
+        let saved = with_live_layout(&envelope, service.layout().clone(), &registry).unwrap();
+        let mut bare = saved.layout.clone();
+        bare.extent_priority_context = ExtentPriorityContext::default();
+        let service = LayoutService::new(registry.clone(), bare, caps).unwrap();
+        let mutation = if native {
+            Mutation::NativeClose { host: HostId::new("inherited-tier").unwrap() }
+        } else {
+            Mutation::Open { kind: PanelKind::new("fixture.log").unwrap(), instance: id("a"), destination: None }
+        };
+        let prepared = service.prepare(transaction(vec![mutation])).unwrap();
+        let staged = with_live_layout(&saved, prepared.layout().clone(), &registry).unwrap();
+        assert_eq!(staged.layout.containing(&id("a")).unwrap().extent_priority, 60);
+        assert_eq!(staged.quarantine[0].instance_data, envelope.quarantine[0].instance_data);
+        let (grown, _, owner) = restored_priority_owner(staged, &registry);
+        let mut environment = allocated_pair_environment(&owner, 400.0);
+        environment.gap = 4.0;
+        let geometry = allocate_layout(owner.layout(), &grown, &environment).unwrap();
+        for (panel, expected) in [("a", 152.0), ("b", 120.0), ("q", 120.0)] {
+            let group = owner.layout().containing(&id(panel)).unwrap();
+            assert!((geometry.sections.iter().find(|s| s.section == group.id).unwrap().outer.size.height - expected).abs() < 0.002);
+        }
+    }
+}
+
+#[test]
+fn native_close_then_resize_cannot_inherit_a_reused_window_primary_priority() {
+    for close_after in [false, true] {
+        let (registry, mut envelope) = priority_recovery_envelope(18, false);
+        let host = HostId::new("rank-reuse").unwrap();
+        let original_a = envelope.layout.section(&section("a")).unwrap().clone();
+        let native = SectionLocation::Window {
+            host: host.clone(),
+            origin: Point { x: 20.0, y: 30.0 },
+            return_to: DockReturn {
+                zone: Zone::Left,
+                section: Some(section("a")),
+                index: 0,
+                join: None,
+                column: original_a.column.clone(),
+                column_index: 0,
+                column_width: Some(280.0),
+                size: size(280.0, 300.0),
+                collapsed: false,
+                weight: original_a.weight,
+                preferred_extent: Some(300.0),
+                extent_priority: 18,
+            },
+        };
+        let group = envelope.layout.sections.iter_mut().find(|s| s.id == section("a")).unwrap();
+        group.id = section("window-a");
+        group.location = native.clone();
+        group.column = None;
+        group.size.height = 350.0;
+        group.preferred_extent = Some(350.0);
+        group.extent_priority = 19;
+        let memory = &mut envelope.layout.instances.iter_mut().find(|p| p.id == id("a")).unwrap().memory;
+        memory.section = section("window-a");
+        memory.location = native;
+        memory.column = None;
+        memory.column_width = None;
+        memory.column_index = 0;
+        memory.size.height = 350.0;
+        memory.preferred_extent = Some(350.0);
+        memory.extent_priority = 19;
+        for group in &mut envelope.section_order {
+            if *group == section("a") {
+                *group = section("window-a");
+            }
+        }
+        envelope.layout.extent_priority_context = ExtentPriorityContext::default();
+        let bytes = encode(&envelope, &registry).unwrap();
+        let loaded = decode(&bytes, &registry, &persistence_fallback()).unwrap();
+        assert!(loaded.notice.is_none());
+        let envelope = loaded.envelope;
+        let raw_q = envelope.quarantine[0].instance_data.clone();
+        let caps = HostCapabilities { native_windows: true, max_native_hosts: 8, persistence: true };
+        let mut bare = envelope.layout.clone();
+        bare.extent_priority_context = ExtentPriorityContext::default();
+        let service = LayoutService::new(registry.clone(), bare, caps.clone()).unwrap();
+        let before = service.inspect();
+        // Matching the actual return descriptor remains an inherited operation
+        // even though its primary Window extent and tier differ.
+        let returned = service.prepare(transaction(vec![Mutation::NativeClose { host: host.clone() }])).unwrap();
+        let inherited = with_live_layout(&envelope, returned.layout().clone(), &registry).unwrap();
+        let a = inherited.layout.section(&section("a")).unwrap();
+        assert_eq!((a.preferred_extent, a.extent_priority, &a.column), (Some(300.0), 18, &original_a.column));
+        assert_eq!(inherited.quarantine[0].instance_data, raw_q);
+
+        let action = transaction(vec![Mutation::NativeClose { host }, Mutation::SetSize { section: section("a"), size: size(280.0, 350.0) }]);
+        let close = |layout: &Layout| {
+            if close_after {
+                let mut closer = LayoutService::new(registry.clone(), layout.clone(), caps.clone()).unwrap();
+                closer.dispatch(transaction(vec![Mutation::Close { instance: id("a") }])).unwrap();
+                assert!(closer.layout().section(&section("a")).is_err());
+                closer.layout().clone()
+            } else {
+                layout.clone()
+            }
+        };
+        let bad = service.prepare(action.clone()).unwrap();
+        let a = bad.layout().section(&section("a")).unwrap();
+        assert_eq!((a.preferred_extent, a.extent_priority), (Some(350.0), 19), "bare redock removes the former primary tier before reusing 19");
+        assert_eq!(with_live_layout(&envelope, close(bad.layout()), &registry).unwrap_err().rule, Rule::Capability);
+        assert_eq!(service.inspect(), before);
+        assert_eq!(encode(&envelope, &registry).unwrap(), bytes);
+
+        let context = preparation_context(&envelope).unwrap();
+        let good = service.prepare_with_context(action, &AvailabilityMap::new(), &context).unwrap();
+        assert_eq!(good.layout().section(&section("a")).unwrap().extent_priority, 43);
+        let staged = with_live_layout(&envelope, close(good.layout()), &registry).unwrap();
+        assert_eq!(staged.quarantine[0].instance_data, raw_q);
+        let (grown, recovered, mut owner) = restored_priority_owner(staged, &registry);
+        if close_after {
+            owner
+                .dispatch(transaction(vec![Mutation::Open { kind: PanelKind::new("fixture.log").unwrap(), instance: id("a"), destination: None }]))
+                .unwrap();
+        }
+        let mut environment = allocated_pair_environment(&owner, 400.0);
+        environment.gap = 4.0;
+        let geometry = allocate_layout(owner.layout(), &grown, &environment).unwrap();
+        for (name, expected) in [("a", 152.0), ("b", 120.0), ("q", 120.0)] {
+            assert!((geometry.sections.iter().find(|s| s.section == section(name)).unwrap().outer.size.height - expected).abs() < 0.002);
+        }
+        let saved = with_live_layout(&recovered, owner.layout().clone(), &grown).unwrap();
+        assert_eq!(saved.retained_data[&id("q")]["instance"], raw_q);
+    }
 }

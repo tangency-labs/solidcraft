@@ -61,6 +61,9 @@ pub struct Request {
     pub design: Option<String>,
     /// The chat turn that requested the load. It must still be current when the file lands.
     pub(crate) chat_turn: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// Insert the file as a mesh whatever its extension says: a PLY goes to `pointcloud.insert`
+    /// unless the person chose Insert Mesh for it (then it needs its faces).
+    pub mesh: bool,
 }
 
 impl Request {
@@ -74,6 +77,7 @@ impl Request {
             allow_hosts: Vec::new(),
             design: None,
             chat_turn: None,
+            mesh: false,
         }
     }
     fn insert(&self) -> bool {
@@ -88,7 +92,7 @@ impl Request {
     fn command(&self) -> (&'static str, Value) {
         match &self.kind {
             Kind::Open => ("doc.open", self.params()),
-            Kind::Insert if solidcraft_engine::io::is_mesh_path(&self.path) => ("file.insert_mesh", self.params()),
+            Kind::Insert if self.mesh || solidcraft_engine::io::is_mesh_path(&self.path) => ("file.insert_mesh", self.params()),
             Kind::Insert if solidcraft_engine::io::is_point_cloud_path(&self.path) => ("pointcloud.insert", self.params()),
             Kind::Insert => (insert_command(&self.path), self.params()),
             Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir})),
@@ -265,6 +269,10 @@ impl FileLoad {
 }
 
 pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
+    // An STL or OBJ file states no unit: ask which, then import (see `crate::mesh_units`).
+    if crate::mesh_units::ask(app, path, insert) {
+        return;
+    }
     let _ = begin_request(app, Request::new(path, if insert { Kind::Insert } else { Kind::Open }));
 }
 
@@ -286,11 +294,11 @@ pub fn begin_request(app: &mut SolveApp, request: Request) -> Result<(), String>
         }
         let r = match &request.kind {
             Kind::Insert => {
-                app.insert_path(&request.path);
+                app.insert_path_with(&request.path, &request.options, request.mesh);
                 Ok(Value::Null)
             }
             Kind::Open => {
-                app.open_path(&request.path);
+                app.open_path_with(&request.path, &request.options);
                 // Opened in place of the blank tab it made, with no switch to it.
                 crate::edit_in_place::attach(app);
                 Ok(Value::Null)
@@ -413,6 +421,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         allow_hosts: Vec::new(),
         design: None,
         chat_turn: req.chat_turn,
+        mesh: false,
     };
     let _ = begin_request(app, request);
     None
@@ -1268,8 +1277,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let id = egui::Id::unique("file_loading");
     let card_id = id.with("card");
     // Above the dialogs over the design; menus, tooltips and the resize edges stay above it.
-    ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, id));
-    ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, card_id));
+    Container::bring_to_front(ctx, egui::LayerId::new(egui::Order::Middle, id));
+    Container::bring_to_front(ctx, egui::LayerId::new(egui::Order::Middle, card_id));
     Container::new(ctx, Surface::InputShield).area(id).order(egui::Order::Middle).fixed_pos(cover.min).interactable(true).show(ctx, |ui| {
         ui.set_min_size(cover.size());
         ui.interact(cover, egui::Id::unique("file_loading_block"), egui::Sense::click_and_drag());
@@ -1456,6 +1465,15 @@ mod tests {
         assert!(error && status.contains(&crate::documents::MAX_OPEN.to_string()), "{status}");
         assert_eq!(app.docs.count(), crate::documents::MAX_OPEN);
         assert!(reply.try_recv().is_ok_and(|r| r["ok"] == json!(false)), "the caller hears it failed");
+    }
+
+    #[test]
+    fn a_ply_is_a_point_cloud_unless_inserted_as_a_mesh() {
+        let mut request = Request::new("scan.ply", Kind::Insert);
+        assert_eq!(request.command().0, "pointcloud.insert");
+        assert_eq!(Request::new("scan.ply", Kind::Open).command().0, "doc.open");
+        request.mesh = true;
+        assert_eq!(request.command().0, "file.insert_mesh");
     }
 
     #[test]

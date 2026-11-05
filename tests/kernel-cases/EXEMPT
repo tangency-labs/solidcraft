@@ -114,6 +114,7 @@ motion.delete                     removes a motion study
 motion.export                     writes a study's results to a file
 motion.export_animation           writes an animation
 motion.list                       a listing of motion studies
+panel.action                      controller actions; no geometry (crates/engine/src/panels/tests.rs and crates/ui-egui/src/panel_runtime/tests.rs)
 panel.activate                    application panel layout; no geometry (engine/UI/MCP tests)
 panel.close                       application panel layout; no geometry (engine/UI/MCP tests)
 panel.collapse                    application panel layout; no geometry (engine/UI/MCP tests)
@@ -284,6 +285,7 @@ sketch.loose_ends.tie             2D sketch only (the sketch solver and engine t
 sketch.mirror                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.move                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.move3d                     2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.move_points                2D sketch only; crates/engine/src/cmd/sketch_ux_tests.rs: move_points_moves_each_point_to_its_own_target and move_points_refuses_a_near_that_two_points_answer
 sketch.offset                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.offset.break               2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.paste                      2D sketch only (the sketch solver and engine tests); no kernel operation

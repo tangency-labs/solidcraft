@@ -2,42 +2,18 @@
 
 use std::sync::Arc;
 
-use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_doc::{
     render_resources::{CpuHdrEnvironment, GpuHdrEnvironment, HdrId, HdrResource},
     render_settings::RenderJob,
 };
 
+use crate::schema::TypedContract;
+use crate::schema::render_hdr::{HdrCaptureParams, HdrCaptured, HdrInspectParams, HdrInspected, HdrSourceInfo};
 use crate::{Result, Session, params::bad};
 
-fn unit() -> f64 {
-    1.0
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Inspect {
-    path: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Capture {
-    name: String,
-    set: Value,
-    path: String,
-    #[serde(default)]
-    expected_sha256: Option<HdrId>,
-    #[serde(default)]
-    rotation_rad: f64,
-    #[serde(default = "unit")]
-    intensity: f64,
-    #[serde(default)]
-    samples: Option<u32>,
-    #[serde(default)]
-    assume_linear_srgb: Option<bool>,
-}
+pub(super) const INSPECT_CONTRACT: TypedContract<HdrInspectParams> = TypedContract::new();
+pub(super) const CAPTURE_CONTRACT: TypedContract<HdrCaptureParams> = TypedContract::new();
 
 fn capture(path: &str, expected: Option<HdrId>, command: &str) -> Result<HdrResource> {
     if path.is_empty() || path.len() > 4096 || path.chars().any(char::is_control) {
@@ -50,20 +26,28 @@ fn capture(path: &str, expected: Option<HdrId>, command: &str) -> Result<HdrReso
     HdrResource::new(bytes).map_err(|e| bad(command, e.to_string()))
 }
 
-fn metadata(resource: &HdrResource) -> Value {
+/// What both commands report about an HDR source.
+fn metadata(resource: &HdrResource) -> HdrSourceInfo {
     let info = resource.info();
-    json!({"sha256":resource.id(),"width":info.width,"height":info.height,"encoded_bytes":info.encoded_bytes,"primaries":info.primaries})
+    HdrSourceInfo {
+        sha256: resource.id().to_string(),
+        width: info.width,
+        height: info.height,
+        encoded_bytes: info.encoded_bytes,
+        primaries: info.primaries,
+    }
 }
 
 pub(super) fn inspect(_s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.hdr.inspect";
-    let input: Inspect = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
-    capture(&input.path, None, command).map(|source| metadata(&source))
+    let input: HdrInspectParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    let source = metadata(&capture(&input.path, None, command)?);
+    serde_json::to_value(HdrInspected { source, param_warnings: Vec::new() }).map_err(|e| bad(command, e.to_string()))
 }
 
 pub(super) fn capture_settings(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.settings.capture_hdr";
-    let input: Capture = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    let input: HdrCaptureParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     let mut setup = super::patched_settings(s, &input.name, &input.set, command)?;
     // Every numerical and method-dependent rejection happens before touching the source.
     match &setup.job {
@@ -109,8 +93,11 @@ pub(super) fn capture_settings(s: &mut Session, params: &Value) -> Result<Value>
     }
     settings.setups.insert(input.name.clone(), setup.clone());
     settings.validate().map_err(|e| bad(command, e.to_string()))?;
+    // Serialized before the document changes, so a setup that can't be written leaves it as it was.
+    let setup = serde_json::to_value(&setup).map_err(|e| bad(command, e.to_string()))?;
     if settings != *s.doc.render {
         s.doc_mut().render = Arc::new(settings);
     }
-    Ok(json!({"name":input.name,"setup":setup,"resource":info}))
+    let reply = HdrCaptured { name: input.name, setup, resource: info, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| bad(command, e.to_string()))
 }
