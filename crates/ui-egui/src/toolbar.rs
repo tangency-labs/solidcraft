@@ -485,6 +485,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             enabled && clicked
         };
         // Save / Undo / Redo: the icon runs the usual action; the group arrow opens a menu (#9928).
+        let step = if compact_actions { 22.0 } else { 34.0 };
         let shown = design_shown(app) && idle;
         let tip = |id: &str, key: &str| {
             let label = app.tr(id);
