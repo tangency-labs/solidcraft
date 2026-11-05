@@ -6,6 +6,16 @@ use solidcraft_geom::prelude::*;
 
 use crate::{ConstraintKind, Curve, CurveKind, Sketch, SketchError};
 
+/// The most instances, the original included, one sketch pattern makes unless the user raises
+/// the limit (the engine's session holds the user's limit, #7824).
+pub const DEFAULT_PATTERN_COPIES: usize = 500;
+
+/// The most instances, the original included, any sketch pattern may hold, whatever the user's
+/// limit. Each copy adds at least one point, so this equals [`crate::MAX_POINTS`]: a larger
+/// ceiling could never be reached. Stored designs and parameter-driven rebuilds are checked
+/// against this, never against a preference, so a design opens the same for everyone.
+pub const MAX_PATTERN_COPIES: usize = crate::MAX_POINTS;
+
 /// Placement relative to the original, along a pattern direction's oriented line.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -90,10 +100,15 @@ impl SketchPattern {
     /// Resolve an evaluated circular Quantity with the dialog's whole-number tolerance.
     pub fn circular_quantity(value: f64) -> Result<usize, SketchError> {
         let count = value.round();
-        if !value.is_finite() || !(1.0..=500.0).contains(&value) || count < 2.0 || (value - count).abs() > 1e-9 {
-            return Err(SketchError::Invalid("circular pattern Quantity must be a whole number from 2 to 500".into()));
+        if !value.is_finite() || !(1.0..=MAX_PATTERN_COPIES as f64).contains(&value) || count < 2.0 || (value - count).abs() > 1e-9 {
+            return Err(SketchError::Invalid(format!("circular pattern Quantity must be a whole number from 2 to {MAX_PATTERN_COPIES}")));
         }
         Ok(count as usize)
+    }
+
+    /// Instances in total, the original included (what the pattern limits count).
+    pub fn total(&self) -> usize {
+        self.instances.len().saturating_add(1)
     }
 
     pub fn contains(&self, entity: &str) -> bool {
@@ -111,8 +126,8 @@ impl SketchPattern {
 impl Sketch {
     /// Rebuild a circular Quantity while retaining surviving copy ids.
     pub fn resize_circular_pattern(&mut self, id: &str, count: usize) -> Result<(), SketchError> {
-        if !(2..=500).contains(&count) {
-            return Err(SketchError::Invalid("circular pattern Quantity must be 2…500".into()));
+        if !(2..=MAX_PATTERN_COPIES).contains(&count) {
+            return Err(SketchError::Invalid(format!("circular pattern Quantity must be 2…{MAX_PATTERN_COPIES}")));
         }
         self.validate_patterns()?;
         let index = self.patterns.iter().position(|p| p.id == id).ok_or_else(|| SketchError::Invalid("missing sketch pattern".into()))?;
@@ -131,7 +146,11 @@ impl Sketch {
     pub fn update_pattern(&mut self, index: usize, kind: SketchPatternKind) -> Result<(), SketchError> {
         let old = self.patterns.get(index).cloned().ok_or_else(|| SketchError::Invalid("missing sketch pattern".into()))?;
         let check_count = |n: usize| {
-            if !(1..=500).contains(&n) { Err(SketchError::Invalid("pattern count must be a positive integer from 1 to 500".into())) } else { Ok(()) }
+            if !(1..=MAX_PATTERN_COPIES).contains(&n) {
+                Err(SketchError::Invalid(format!("pattern count must be a positive integer from 1 to {MAX_PATTERN_COPIES}")))
+            } else {
+                Ok(())
+            }
         };
         match &kind {
             SketchPatternKind::Circular { count, angle, .. } => {
@@ -143,8 +162,8 @@ impl Sketch {
             SketchPatternKind::Rectangular { count, count2, spacing, spacing2, .. } => {
                 check_count(*count)?;
                 check_count(*count2)?;
-                if count.checked_mul(*count2).is_none_or(|n| n > 500) {
-                    return Err(SketchError::Invalid("pattern counts must make at most 500 instances total".into()));
+                if count.checked_mul(*count2).is_none_or(|n| n > MAX_PATTERN_COPIES) {
+                    return Err(SketchError::Invalid(format!("pattern counts must make at most {MAX_PATTERN_COPIES} instances total")));
                 }
                 if ![spacing, spacing2].iter().all(|v| v.is_finite() && v.abs() <= crate::MAX_COORD) {
                     return Err(SketchError::Invalid("pattern spacing must be finite and in range".into()));
@@ -411,11 +430,11 @@ impl Sketch {
                 || !ids.insert(&pattern.id)
                 || pattern.entities.is_empty()
                 || pattern.entities.len() > crate::MAX_CURVES + crate::MAX_POINTS
-                || pattern.instances.len() >= 500
+                || pattern.instances.len() >= MAX_PATTERN_COPIES
             {
                 return Err(SketchError::Invalid("invalid sketch pattern".into()));
             }
-            let valid_count = |n| (1..=500).contains(&n);
+            let valid_count = |n| (1..=MAX_PATTERN_COPIES).contains(&n);
             let finite = |v: f64| v.is_finite() && v.abs() <= crate::MAX_COORD;
             let valid = match &pattern.kind {
                 SketchPatternKind::Circular { count, angle, center, .. } => {
@@ -424,7 +443,7 @@ impl Sketch {
                 SketchPatternKind::Rectangular { count, count2, spacing, spacing2, dir, dir2, direction, direction2, .. } => {
                     valid_count(*count)
                         && valid_count(*count2)
-                        && count.checked_mul(*count2).is_some_and(|n| n <= 500)
+                        && count.checked_mul(*count2).is_some_and(|n| n <= MAX_PATTERN_COPIES)
                         && finite(*spacing)
                         && finite(*spacing2)
                         && finite(dir.x)
