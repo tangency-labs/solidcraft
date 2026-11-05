@@ -244,8 +244,10 @@ fn a_definition_off_its_net_s_domain_is_refused() {
 /// The faces the definition rolls on are enclosed piece by piece over the feet's boxes,
 /// so no station invariant is needed: at the net's knot lines along s, the stations, where a
 /// foot sits on a face's knot line and its box straddles it, the point is still enclosed (a
-/// check of the feet against one piece refused 67 of these 188), and so is every point
-/// between two stations; each enclosure holds the evaluator's point.
+/// check of the feet against one piece refused 67 of the 188 the net then had), and so is
+/// every point between two stations; each enclosure holds the evaluator's point. The net
+/// has 181 inner knots since #2690: the certificate accepts a level by each uv parameter's
+/// own error, so some spans certify without being halved.
 #[test]
 fn every_station_and_every_point_between_is_enclosed() {
     let mut k = solidcraft_kernel();
@@ -279,7 +281,7 @@ fn every_station_and_every_point_between_is_enclosed() {
         .filter(|&x| x > lo && x < hi)
         .collect();
     inner.dedup();
-    assert_eq!(inner.len(), 188);
+    assert_eq!(inner.len(), 181);
     let mut points = Vec::new();
     for w in inner.windows(2) {
         points.push(w[0]);

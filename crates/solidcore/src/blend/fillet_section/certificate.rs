@@ -49,6 +49,16 @@
 //!   once per level, per piece's end station and per piece's bound; a cancel passes through
 //!   `SM_GN_TRY` and the unsolved-piece fallback as `Cancelled` instead of proving
 //!   nothing. A token that never fires changes nothing.
+//! - **The uv curves' term (#2690).** Not the fork's: a face's point on a foot's uv curve
+//!   is off the true foot by at most `|S_u| |du| + |S_v| |dv|`, each uv error `du`, `dv`
+//!   bounded by its own parameter's fourth derivative, where the fork takes
+//!   `(|S_u| + |S_v|) max(|du|, |dv|)`. The fork's form is never smaller, and on a face
+//!   whose `u` (say) moves little while `|S_u|` is large it pairs that large partial with
+//!   the other parameter's error and refines spans the tolerance does not need.
+//!   `gn_certify_span` certifies a level by this bound but steers its levels (the least
+//!   value it stops on, the halving it goes on with) by the fork's form, so a span takes no
+//!   more levels or pieces than the fork's, and is certified at the same level or sooner;
+//!   steered by the tighter bound, a round on a round took more spans and solves.
 //! - **Indices.** Knots and nets are read by checked indices (a knot or a coordinate
 //!   outside reads NaN, which shows in the result); the fork's indices stay inside.
 
@@ -616,11 +626,11 @@ pub struct Enclosure {
     pub f: [VSer<Ivl>; 2],
     /// The feet's parameters' series (`pX`).
     pub x: [Ser<Ivl>; 4],
-    /// Per face, `|S_u| + |S_v|` over the feet's box (`pDS`): it bounds `|dS|` per unit uv
-    /// step (max norm).
-    pub ds: [f64; 2],
-    /// The same, least (`pDSLo`): `|S_u| + |S_v|` no smaller anywhere in the box.
-    pub ds_lo: [f64; 2],
+    /// Per face, `[|S_u|, |S_v|]` over the feet's box (the fork's `pDS` is their sum):
+    /// `|S_u| |du| + |S_v| |dv|` bounds `|dS|` for a uv step `(du, dv)` in the box (#2690).
+    pub ds: [[f64; 2]; 2],
+    /// The same, least (the fork's `pDSLo`, their sum): no smaller anywhere in the box.
+    pub ds_lo: [[f64; 2]; 2],
     /// The point V's series over the span (`pV`, 7102bc5).
     pub v: VSer<Ivl>,
 }
@@ -1106,10 +1116,10 @@ pub fn gn_enclose_over(
     }
     let (_, mut f, v, nrm) = gn_try!(gn_evaluate_vn(&sysk, &sx, tr), None);
     gn_top_jets(n, tr, &nrm, &mut f);
-    // the faces' first partials over the box: |S_u| + |S_v| bounds |dS| per unit uv step
-    // (max norm)
-    let mut ds = [0.0_f64; 2];
-    let mut ds_lo = [0.0_f64; 2];
+    // the faces' first partials over the box: |S_u| |du| + |S_v| |dv| bounds |dS| for a uv
+    // step (du, dv) (#2690: kept apart, where the fork sums them)
+    let mut ds = [[0.0_f64; 2]; 2];
+    let mut ds_lo = [[0.0_f64; 2]; 2];
     for ((dsf, dsl), pf) in ds.iter_mut().zip(ds_lo.iter_mut()).zip(&pk) {
         let su = pf.at(1, 0);
         let sv = pf.at(0, 1);
@@ -1119,14 +1129,14 @@ pub fn gn_enclose_over(
         let dv = crate::geom::vector3d::sqrt(
             sv.x.mag() * sv.x.mag() + sv.y.mag() * sv.y.mag() + sv.z.mag() * sv.z.mag(),
         );
-        *dsf = du + dv;
+        *dsf = [du, dv];
         let lu = crate::geom::vector3d::sqrt(
             su.x.mig() * su.x.mig() + su.y.mig() * su.y.mig() + su.z.mig() * su.z.mig(),
         );
         let lv = crate::geom::vector3d::sqrt(
             sv.x.mig() * sv.x.mig() + sv.y.mig() * sv.y.mig() + sv.z.mig() * sv.z.mig(),
         );
-        *dsl = lu + lv;
+        *dsl = [lu, lv];
     }
     Ok(Some(Enclosure {
         f,
@@ -1149,11 +1159,16 @@ fn cmin_usize(a: usize, b: usize) -> usize {
 
 /// The fourth s-derivatives' bounds of a span: `m4[f][k]` per face and jet, `uv4[f]` per
 /// face's uv curves (infinite where not proved), then the same bounds' least values at the
-/// span's middle (`pM4Lo`, `pUV4Lo`): no piece holding the middle bounds them lower.
+/// span's middle (`pM4Lo`, `pUV4Lo`): no piece holding the middle bounds them lower. Then
+/// the uv curves' bound and least value as the fork takes them,
+/// `(|S_u| + |S_v|) max(|u''''|, |v''''|)` (#2690: `gn_certify_span` steers its levels by
+/// these, and certifies by `uv4`).
 pub type Fourth = (
     [[f64; MAX_E + 1]; 2],
     [f64; 2],
     [[f64; MAX_E + 1]; 2],
+    [f64; 2],
+    [f64; 2],
     [f64; 2],
 );
 
@@ -1180,8 +1195,10 @@ fn taylor_bound(mid: impl Fn(usize) -> f64, rem: f64, h: f64) -> f64 {
 }
 
 /// `sm_GnFourthOver`: the bound on the jets' fourth s-derivatives over `[a.s, b.s]`, per
-/// face and jet (`m4[f][k]`, infinite where not proved), and on the feet's uv curves' times
-/// the faces' `|S_u| + |S_v|` over the span's box (`uv4[f]`), in their Taylor form at the
+/// face and jet (`m4[f][k]`, infinite where not proved), and on the feet's uv curves',
+/// each parameter's times the face's partial in it over the span's box,
+/// `|S_u| |u''''| + |S_v| |v''''|` (`uv4[f]`; the fork's is
+/// `(|S_u| + |S_v|) max(|u''''|, |v''''|)`, #2690), in their Taylor form at the
 /// interval's middle m: `c''''(s)` is within `sum_{j<M} c^(4+j)(m) (s - m)^j / j!` plus the
 /// remainder `c^(4+M)(interval) (h/2)^M / M!`, `M = SM_GN_TAYLOR`, the derivatives at the
 /// middle enclosed on that one point and the remainder's over the interval.
@@ -1257,6 +1274,8 @@ pub fn gn_fourth_over_series(
             [f64::INFINITY; 2],
             [[0.0; MAX_E + 1]; 2],
             [0.0; 2],
+            [f64::INFINITY; 2],
+            [0.0; 2],
         ),
         None,
     );
@@ -1328,30 +1347,45 @@ pub fn gn_fourth_over_series(
         vm: e4.v,
         mid,
     };
-    let (mut m4, mut uv4, mut m4_lo, mut uv4_lo) = none.0;
-    // the uv curves' fourth derivatives, in the same Taylor form, times the faces'
-    // |S_u| + |S_v| over the span's box
-    for (f, (uvf, &dsf)) in uv4.iter_mut().zip(&e5.ds).enumerate() {
-        let mut dmax = 0.0_f64;
-        for c in (2 * f)..(2 * f + 2) {
+    let (mut m4, mut uv4, mut m4_lo, mut uv4_lo, mut uv4_fork, mut uv4_lo_fork) = none.0;
+    // the uv curves' fourth derivatives, in the same Taylor form, each times the face's
+    // partial in its parameter over the span's box (#2690)
+    for (f, ((uvf, uvk), dsf)) in uv4
+        .iter_mut()
+        .zip(uv4_fork.iter_mut())
+        .zip(&e5.ds)
+        .enumerate()
+    {
+        let (mut sum, mut dmax) = (0.0_f64, 0.0_f64);
+        for (c, &dsc) in ((2 * f)..(2 * f + 2)).zip(dsf) {
             let (Some(x4), Some(x5)) = (e4.x.get(c), e5.x.get(c)) else {
                 return Ok((none.0, Some(series)));
             };
             let m = taylor_bound(|i| x4.at(i, 0).mag(), x5.at(4 + TAYLOR, 0).mag(), h);
+            sum += m * dsc;
             dmax = cmax(dmax, m);
         }
-        *uvf = dmax * dsf;
+        *uvf = sum;
+        // (the fork's: the largest fourth derivative times |S_u| + |S_v|)
+        *uvk = dmax * dsf.iter().sum::<f64>();
     }
-    // the same, least: the middle's 4! c[4] alone, times the faces' least |S_u| + |S_v|
-    for (f, (uvl, &dsl)) in uv4_lo.iter_mut().zip(&e4.ds_lo).enumerate() {
-        let mut dlo = 0.0_f64;
-        for c in (2 * f)..(2 * f + 2) {
+    // the same, least: the middle's 4! c[4] alone, each times the face's least partial
+    for (f, ((uvl, uvk), dsl)) in uv4_lo
+        .iter_mut()
+        .zip(uv4_lo_fork.iter_mut())
+        .zip(&e4.ds_lo)
+        .enumerate()
+    {
+        let (mut sum, mut dlo) = (0.0_f64, 0.0_f64);
+        for (c, &dsc) in ((2 * f)..(2 * f + 2)).zip(dsl) {
             let Some(x4) = e4.x.get(c) else {
                 return Ok((none.0, Some(series)));
             };
+            sum += 24.0 * x4.at(4, 0).mig() * dsc;
             dlo = cmax(dlo, 24.0 * x4.at(4, 0).mig());
         }
-        *uvl = dlo * dsl;
+        *uvl = sum;
+        *uvk = dlo * dsl.iter().sum::<f64>();
     }
     for ((m4f, f4), f5) in m4.iter_mut().zip(&e4.f).zip(&e5.f) {
         for (kk, m4fk) in m4f.iter_mut().enumerate().take(n + 1) {
@@ -1375,7 +1409,10 @@ pub fn gn_fourth_over_series(
             *m4lfk = crate::geom::vector3d::sqrt(sq);
         }
     }
-    Ok(((m4, uv4, m4_lo, uv4_lo), Some(series)))
+    Ok((
+        (m4, uv4, m4_lo, uv4_lo, uv4_fork, uv4_lo_fork),
+        Some(series),
+    ))
 }
 
 /// `sm_GnVarying`: a section whose thumbweight varies along s (the equal area one,
@@ -1744,13 +1781,19 @@ pub fn arc_row_terms_over(
 /// most) until every piece is proved and, over the target, while that halves the bound, so
 /// that a long span's bound follows its derivatives, not the width of one enclosure over
 /// it. The feet's uv curves are Hermite interpolants of the same stations, and the face at
-/// a uv curve's point is off the face's true foot by at most `|S_u, S_v|` times the uv
-/// error, `h^4 / 384 |x''''|`: that bound counts too (an edge's curve against its face).
+/// a uv curve's point is off the face's true foot by at most `|S_u| |du| + |S_v| |dv|`,
+/// each uv error `h^4 / 384 |x''''|` of its own parameter: that bound counts too (an
+/// edge's curve against its face).
 ///
 /// Every level's bound is at least the same sum with each term's least value at the
 /// pieces' middles (every piece's enclosure holds its middle's value): once that is over
 /// the target no finer level certifies the span, and the bound so far is returned for the
 /// caller to halve the span.
+///
+/// Not the fork's (#2690): a level is certified by the uv curves' term taken per parameter
+/// (`|S_u| |du| + |S_v| |dv|`), never larger than the fork's; the levels are steered (that
+/// least value, and going on only where a level halved the bound) by the fork's term, so
+/// a span takes at most the fork's levels and is certified at the same level or sooner.
 ///
 /// # Errors
 ///
@@ -1854,7 +1897,8 @@ pub fn gn_certify_span(
         let mut m4 = [[0.0_f64; MAX_E + 1]; 2];
         let mut uv4 = [0.0_f64; 2];
         let mut m4_lo = [[0.0_f64; MAX_E + 1]; 2];
-        let mut uv4_lo = [0.0_f64; 2];
+        let mut uv4_fork = [0.0_f64; 2];
+        let mut uv4_lo_fork = [0.0_f64; 2];
         let mut proved = true;
         let ld = bar.w.len();
         let mut rows = GnRowTerms {
@@ -1871,7 +1915,7 @@ pub fn gn_certify_span(
             let [ea, eb] = pair else {
                 return Err(SolidError::sm_err(OP));
             };
-            let ((pm, puv, pm_lo, puv_lo), series) = gn_try!(
+            let ((pm, puv, pm_lo, _, puv_fork, puv_lo_fork), series) = gn_try!(
                 gn_fourth_over_series(
                     k,
                     faces_n,
@@ -1910,7 +1954,10 @@ pub fn gn_certify_span(
                     *l = cmax(*l, pl);
                 }
             }
-            for (l, &pl) in uv4_lo.iter_mut().zip(&puv_lo) {
+            for (u, &pu) in uv4_fork.iter_mut().zip(&puv_fork) {
+                *u = cmax(*u, pu);
+            }
+            for (l, &pl) in uv4_lo_fork.iter_mut().zip(&puv_lo_fork) {
                 *l = cmax(*l, pl);
             }
             if proved {
@@ -1952,52 +1999,61 @@ pub fn gn_certify_span(
         if !proved {
             continue;
         }
-        let mut bound = 0.0_f64;
-        let mut da = 0.0_f64;
-        for (m4f, &uvf) in m4.iter().zip(&uv4) {
-            let mut sum = 0.0_f64;
-            for &m4fk in m4f.iter().take(l_jets + 1) {
-                sum += h * h * h * h / 384.0 * m4fk;
+        // the level's bound with the uv curves' term `uv` (#2690: taken with each
+        // parameter's own term, `uv4`, to certify, and with the fork's, `uv4_fork`, to steer
+        // the levels as the fork does, so that no span takes more levels or pieces than
+        // there)
+        let level_bound = |uv: &[f64; 2]| -> f64 {
+            let mut bound = 0.0_f64;
+            let mut da = 0.0_f64;
+            for (m4f, &uvf) in m4.iter().zip(uv) {
+                let mut sum = 0.0_f64;
+                for &m4fk in m4f.iter().take(l_jets + 1) {
+                    sum += h * h * h * h / 384.0 * m4fk;
+                }
+                da = cmax(da, sum);
+                bound = cmax(
+                    bound,
+                    cmax(
+                        if rows_vary { 0.0 } else { sum },
+                        h * h * h * h / 384.0 * uvf,
+                    ),
+                );
             }
-            da = cmax(da, sum);
-            bound = cmax(
-                bound,
-                cmax(
-                    if rows_vary { 0.0 } else { sum },
-                    h * h * h * h / 384.0 * uvf,
-                ),
-            );
-        }
-        // the arc: no fixed section, every row's remainder (the varying rows' bound with
-        // A = 0)
-        if arc {
-            da = 0.0;
-        }
-        if rows_vary {
-            let kh = h * h * h * h / 384.0;
-            for (j, wj) in bar.w.iter().enumerate() {
-                let (Some(&lj), Some(&yj), Some(&xj)) =
-                    (rows.w_lo.get(j), rows.y.get(j), rows.x.get(j))
-                else {
-                    break;
-                };
-                let den = lj - kh * yj;
-                let num = wj.hi * da + kh * xj + kh * yj * rows.r;
-                let positive = den > 0.0;
-                bound = if positive {
-                    cmax(bound, num / den)
-                } else {
-                    f64::INFINITY
-                };
-                if !positive {
-                    break;
+            // the arc: no fixed section, every row's remainder (the varying rows' bound with
+            // A = 0)
+            if arc {
+                da = 0.0;
+            }
+            if rows_vary {
+                let kh = h * h * h * h / 384.0;
+                for (j, wj) in bar.w.iter().enumerate() {
+                    let (Some(&lj), Some(&yj), Some(&xj)) =
+                        (rows.w_lo.get(j), rows.y.get(j), rows.x.get(j))
+                    else {
+                        break;
+                    };
+                    let den = lj - kh * yj;
+                    let num = wj.hi * da + kh * xj + kh * yj * rows.r;
+                    let positive = den > 0.0;
+                    bound = if positive {
+                        cmax(bound, num / den)
+                    } else {
+                        f64::INFINITY
+                    };
+                    if !positive {
+                        break;
+                    }
                 }
             }
-        }
+            bound
+        };
+        let bound = level_bound(&uv4_fork);
         if !bound.is_finite() {
             continue;
         }
-        bound_out = cmin(bound_out, round_up(bound * (1.0 + 1.0e-12)));
+        // certified by each parameter's own term, never larger than the fork's
+        bound_out = cmin(bound_out, round_up(level_bound(&uv4) * (1.0 + 1.0e-12)));
         if bound_out <= target {
             break;
         }
@@ -2006,7 +2062,7 @@ pub fn gn_certify_span(
         // varying rows, whose own least terms are not ported: the fork's f916a8d)
         let k4 = h * h * h * h / 384.0;
         let mut lower = 0.0_f64;
-        for (m4lf, &uvl) in m4_lo.iter().zip(&uv4_lo) {
+        for (m4lf, &uvl) in m4_lo.iter().zip(&uv4_lo_fork) {
             let mut sum = 0.0_f64;
             for &m in m4lf.iter().take(l_jets + 1) {
                 sum += k4 * m;
@@ -2203,9 +2259,11 @@ mod tests {
             assert!(contains(e.x[q].c[1][0], len), "{q}");
         }
         assert!(contains(e.x[0].c[0][1], r) && contains(e.x[3].c[0][1], r));
-        // |S_u| + |S_v| of a unit plane is 2
-        assert!((e.ds[0] - 2.0).abs() < 1e-12 && (e.ds[1] - 2.0).abs() < 1e-12);
-        let (m4, uv4, _, _) =
+        // |S_u| and |S_v| of a unit plane are 1
+        for dsf in e.ds {
+            assert!(dsf.iter().all(|d| (d - 1.0).abs() < 1e-12), "{dsf:?}");
+        }
+        let (m4, uv4, ..) =
             gn_fourth_over(&k, [&n1, &n2], &ln, faces, &leader, &a, &b, rr, side, n).unwrap();
         for f in 0..2 {
             assert!(uv4[f] >= 0.0 && uv4[f] < 1e-9, "{uv4:?}");
@@ -2259,7 +2317,8 @@ mod tests {
     /// the plane and `F2 = (L_xy R / (R + r), tau r)` on the cylinder. So the jets' fourth
     /// s-derivatives are, exactly, `|c10''''| = |L''''|`, `|c11''''| = r / (R + r) |L''''|`,
     /// `|c20''''| = R / (R + r) |L''''|` and 0 for the rest, and the plane's uv curve is
-    /// `L_xy` (`uv4 >= 2 max(|L_x''''|, |L_y''''|)`). Checked against that closed form, with
+    /// `L_xy` (`uv4 >= |L_x''''| + |L_y''''|`, the plane's partials of length 1). Checked
+    /// against that closed form, with
     /// L'''' from the leader's own evaluator: at the span's middle (one point, a tight
     /// enclosure) `4! c[4][k]` of every jet and of the plane's (u, v) holds the closed
     /// form's value; over the span every `m4`, `uv4` is finite and at least the closed
@@ -2385,7 +2444,7 @@ mod tests {
         }
         // the plane's (u, v) is the foot's (x, y)
         assert!(holds(em.x[0].c[4][0], dm.x) && holds(em.x[1].c[4][0], dm.y));
-        let (m4, uv4, _, _) =
+        let (m4, uv4, ..) =
             gn_fourth_over(&k, [&np, &nc], &ln, faces, &leader, &a, &b, rr, side, n).unwrap();
         let want = [
             [l4, r / (big_r + r) * l4, 0.0],
@@ -2397,7 +2456,7 @@ mod tests {
                 assert!(got.is_finite() && w <= got, "{f} {kk} {got} {w}");
             }
         }
-        let wuv = 2.0 * l4x.max(l4y);
+        let wuv = l4x + l4y;
         assert!(wuv <= uv4[0] && uv4[0].is_finite(), "{} {wuv}", uv4[0]);
         assert!(uv4[1].is_finite());
 
