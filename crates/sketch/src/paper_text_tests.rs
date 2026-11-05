@@ -922,6 +922,126 @@ fn hostile_numbers_and_sizes_are_refused() {
     assert!(paper_text("A", None, "", AT, 5.0, 0.0, &TextStyle { letter_spacing: f64::NAN, ..TextStyle::default() }).is_err());
 }
 
+/// The marks dimensions and tolerances write that the built-in font has are set as its own glyphs,
+/// never its missing-glyph box: Ø ° ± ′ ″ × ≤ ≥ (#4890 B3b).
+#[test]
+fn dimension_marks_are_the_built_in_fonts_own_glyphs() {
+    let (runs, font) = set("\u{d8}12 30\u{b0} \u{b1}0.1 5\u{2032} 7\u{2033} 2\u{d7} \u{2264} \u{2265}", &TextStyle::default());
+    assert!(runs.iter().flat_map(|r| &r.glyphs).all(|g| g.id != 0), "{runs:?}");
+    scene(&runs, &font).validate().unwrap();
+}
+
+fn texts(lines: &PaperLines) -> Vec<&str> {
+    lines.lines.iter().map(|(l, _)| l.as_str()).collect()
+}
+
+/// A text measured before it is set: broken at each line break, and given a width between words,
+/// each line as many words as fit, a word never cut; set as measured (#4890 B3b).
+#[test]
+fn lines_wrap_between_words_to_a_width_and_never_cut_one() {
+    let plain = TextStyle::default();
+    let lines = |text: &str, wrap| paper_lines(text, None, "", 5.0, wrap, &plain).unwrap();
+    let text = "Bracket for the left hand side";
+    let wrapped = lines(text, Some(40.0));
+    assert!(wrapped.lines.len() > 1, "{wrapped:?}");
+    for (i, (line, w)) in wrapped.lines.iter().enumerate() {
+        assert_eq!(*w, width(line), "{line}");
+        assert!(*w <= 40.0, "{line}: {w}");
+        // Each line holds as many words as fit: the next line's first word would take it past the width.
+        if let Some((next, _)) = wrapped.lines.get(i + 1) {
+            let first = next.split(' ').next().unwrap();
+            assert!(width(&format!("{line} {first}")) > 40.0, "{line} | {first}");
+        }
+    }
+    assert_eq!(texts(&wrapped).join(" "), text);
+    assert_eq!(wrapped.pitch, TextMetrics::new(&font_data(None).unwrap(), &plain).unwrap().line_pitch(5.0).unwrap());
+    // Set as measured: the runs `paper_text` sets for the same lines joined by breaks.
+    let joined = texts(&wrapped).join("\n");
+    assert_eq!(wrapped.set(AT, 0.3).unwrap(), paper_text(&joined, None, "", AT, 5.0, 0.3, &plain).unwrap());
+    // A line exactly the width fits; a hair less and its last word moves down.
+    let two = width("Bracket for");
+    assert_eq!(texts(&lines("Bracket for", Some(two))), ["Bracket for"]);
+    assert_eq!(texts(&lines("Bracket for", Some(two - 1e-9))), ["Bracket", "for"]);
+    // A word wider than the width is a line of its own, whole.
+    let long = lines("a Bracketforthelefthandside b", Some(20.0));
+    assert_eq!(texts(&long), ["a", "Bracketforthelefthandside", "b"]);
+    assert!(long.lines[1].1 > 20.0);
+    // Line breaks always break; spaces between words become one; without a width only the breaks do.
+    assert_eq!(texts(&lines("A  B\n\nC", Some(1000.0))), ["A B", "", "C"]);
+    assert_eq!(lines("A  B\nC", None).lines, vec![("A  B".to_string(), width("A  B")), ("C".to_string(), width("C"))]);
+    // No width to speak of: every word on its own line.
+    for wrap in [0.0, -5.0] {
+        assert_eq!(texts(&lines("A B C", Some(wrap))), ["A", "B", "C"], "{wrap}");
+    }
+}
+
+/// A wrapped line with words the text's font lacks measures them in the font they fall back to, so
+/// it is set as it was measured (#4890 B3b).
+#[test]
+fn a_wrapped_line_measures_its_fallback_words_in_their_font() {
+    let plain = TextStyle::default();
+    let text = "Plate \u{4e2d}\u{6587}\u{4e2d}\u{6587} for \u{4e2d}\u{6587} left side";
+    let wrapped = paper_lines_in(&repo_fonts(), text, None, "ja", 5.0, Some(25.0), &plain).unwrap();
+    assert!(wrapped.lines.len() > 1, "{wrapped:?}");
+    assert_eq!(texts(&wrapped).join(" "), text);
+    for (line, w) in &wrapped.lines {
+        let alone = paper_lines_in(&repo_fonts(), line, None, "ja", 5.0, None, &plain).unwrap();
+        assert_eq!(alone.lines, [(line.clone(), *w)], "{line}");
+        assert!(*w <= 25.0 || !line.contains(' '), "{line}: {w}");
+    }
+    let joined = texts(&wrapped).join("\n");
+    let measured = mixed(wrapped.set(AT, 0.0).unwrap().unwrap());
+    assert_eq!(measured, mixed(paper_text_in(&repo_fonts(), &joined, None, "ja", AT, 5.0, 0.0, &plain).unwrap().unwrap()));
+}
+
+/// Measuring refuses what setting would, and a width that isn't a number (#4890 B3b).
+#[test]
+fn measuring_refuses_what_setting_would() {
+    let plain = TextStyle::default();
+    for wrap in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(paper_lines("A", None, "", 5.0, Some(wrap), &plain).is_err(), "{wrap}");
+    }
+    assert!(paper_lines("A", None, "", f64::NAN, None, &plain).is_err());
+    assert!(matches!(paper_lines(&"A ".repeat(MAX_TEXT_CHARS), None, "", 5.0, Some(10.0), &plain), Err(SketchError::TooLarge)));
+    assert!(paper_lines_in(&repo_fonts(), "A \u{e000}", None, "", 5.0, Some(40.0), &plain).unwrap_err().to_string().contains("no glyph for"));
+    assert!(paper_lines("A", None, "", 5.0, None, &TextStyle { bold: true, ..plain.clone() }).is_err());
+    assert!(paper_lines("A", None, "", 5.0, None, &plain).unwrap().set(AT, f64::NAN).is_err());
+    assert_eq!(paper_lines("\n", None, "", 5.0, Some(10.0), &plain).unwrap().set(AT, 0.0).unwrap(), None);
+}
+
+/// Random lines of words in each font, wrapped to random widths: set as measured into runs a scene
+/// takes, or refused by name, never a panic (#4890 B3b).
+#[test]
+fn fuzz_wrapped_lines_are_set_as_measured() {
+    let chars: Vec<char> = "Ab9 .  \n\u{5e9}\u{5dc}\u{5b8}\u{301}\u{30c6}\u{4e2d}\u{d55c}\t".chars().collect();
+    let mut seed = 0x51ed_270b_27c1_9f3du64;
+    let mut next = |n: usize| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed % n as u64) as usize
+    };
+    let plain = TextStyle::default();
+    for _ in 0..200 {
+        let text: String = (0..next(32)).map(|_| chars[next(chars.len())]).collect();
+        let wrap = [None, Some(-5.0), Some(0.0), Some(3.0), Some(12.0), Some(40.0)][next(6)];
+        match paper_lines_in(&repo_fonts(), &text, None, ["", "ja"][next(2)], 3.5, wrap, &plain) {
+            Ok(lines) => {
+                let words = |t: &str| t.split([' ', '\n']).filter(|w| !w.is_empty()).map(str::to_string).collect::<Vec<_>>();
+                assert_eq!(words(&texts(&lines).join("\n")), words(&text), "{text:?} {wrap:?}");
+                match lines.set(AT, 0.5).unwrap() {
+                    Some(set) => {
+                        mixed(set);
+                    }
+                    None => assert!(lines.lines.iter().all(|(l, _)| l.is_empty()), "{text:?}"),
+                }
+            }
+            Err(SketchError::Invalid(why)) => assert!(why.contains("no glyph for"), "{text:?}: {why}"),
+            Err(e) => panic!("{text:?}: {e}"),
+        }
+    }
+}
+
 /// Random lines of Latin, Hebrew with its points, digits, spaces and breaks, in random styles:
 /// each is set into runs the scene accepts, or refused, never a panic.
 #[test]
