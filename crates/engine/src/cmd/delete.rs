@@ -1,8 +1,8 @@
 //! Delete for everything that can be selected, in one undo step: sketch entities (while
 //! sketching), timeline features and sketches (with the features that depend on them),
 //! construction planes and axes, bodies (a Remove feature from here on in the timeline), occurrences and
-//! components, canvases, point clouds and joints; or, with a drawing open, its views, dimensions,
-//! balloons and notes. `dry_run` reports what would go and what would fail without changing anything, so the UI
+//! components, canvases, point clouds and joints; or, with a drawing open, its views and
+//! annotations. `dry_run` reports what would go and what would fail without changing anything, so the UI
 //! can ask first.
 
 use std::collections::BTreeSet;
@@ -16,7 +16,7 @@ use crate::params::{bad, bool_};
 use crate::{EngineError, Result, Sel, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "Delete", delete).open_part().icon("delete").params(
-    "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views, dimensions and balloons ({type: drawing, drawing, object}); each view takes its dimensions and balloons with it; a view with views projected from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons: [the ids that went]",
+    "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views and annotations ({type: drawing, drawing, object}); each view takes its annotations with it; a view with views projected from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons, notes, centre_marks, centre_lines: [the ids that went]",
 )];
 
 /// Run another command's body inside this one (so the whole delete is one undo step).
@@ -49,7 +49,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(r)
 }
 
-/// Deletes the views, dimensions, balloons and notes `items` name in the drawing open, as one change: the
+/// Deletes the views and annotations `items` name in the drawing open, as one change: the
 /// record's removal ([`solidcraft_doc::drawing::Drawing::remove_objects`]), with no model evaluated.
 fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value> {
     let cmd = "selection.delete";
@@ -59,7 +59,8 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     }
     let with_projected = super::drawing_sheet::contents_delete(cmd, p, "a view goes with the views projected from it")?;
     let open = s.drawing(cmd)?.clone();
-    let (mut views, mut dimensions, mut balloons, mut notes) = (BTreeSet::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut views, mut dimensions, mut balloons, mut notes, mut centre_marks, mut centre_lines) =
+        (BTreeSet::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for item in items {
         let Sel::Drawing { drawing, object } = item else { return Err(model()) };
         if *drawing != open.id {
@@ -73,11 +74,15 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
             balloons.push(*object);
         } else if open.notes.by_id(*object).is_some() {
             notes.push(*object);
+        } else if open.centre_mark(*object).is_some() {
+            centre_marks.push(*object);
+        } else if open.centre_line(*object).is_some() {
+            centre_lines.push(*object);
         } else {
-            return Err(bad(cmd, format!("the drawing open has no view, dimension, balloon or note {}", ids::encode(*object))));
+            return Err(bad(cmd, format!("the drawing open has no selectable object {}", ids::encode(*object))));
         }
     }
-    if views.is_empty() && dimensions.is_empty() && balloons.is_empty() && notes.is_empty() {
+    if views.is_empty() && dimensions.is_empty() && balloons.is_empty() && notes.is_empty() && centre_marks.is_empty() && centre_lines.is_empty() {
         return Err(bad(cmd, "nothing to delete"));
     }
     let all = open.with_projected(&views);
@@ -96,15 +101,27 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     gone.notes.extend(notes);
     gone.notes.sort_unstable();
     gone.notes.dedup();
+    gone.centre_marks.extend(centre_marks);
+    gone.centre_marks.sort_unstable();
+    gone.centre_marks.dedup();
+    gone.centre_lines.extend(centre_lines);
+    gone.centre_lines.sort_unstable();
+    gone.centre_lines.dedup();
     s.edit_drawing(cmd, |d| {
         d.remove_objects(&gone);
         Ok(())
     })?;
     let listed = |objects: &[u64]| objects.iter().map(|id| ids::encode(*id)).collect::<Vec<_>>();
     let (views, dimensions, balloons) = (listed(&gone.views), listed(&gone.dimensions), listed(&gone.balloons));
-    Ok(
-        json!({ "deleted": [], "deleted_joints": [], "would_fail": [], "skipped": [], "views": views, "dimensions": dimensions, "balloons": balloons, "notes": listed(&gone.notes) }),
-    )
+    let (centre_marks, centre_lines) = (listed(&gone.centre_marks), listed(&gone.centre_lines));
+    let mut reply = json!({ "deleted": [], "deleted_joints": [], "would_fail": [], "skipped": [], "views": views, "dimensions": dimensions, "balloons": balloons, "notes": listed(&gone.notes) });
+    if !centre_marks.is_empty() {
+        reply["centre_marks"] = json!(centre_marks);
+    }
+    if !centre_lines.is_empty() {
+        reply["centre_lines"] = json!(centre_lines);
+    }
+    Ok(reply)
 }
 
 fn apply(s: &mut Session, p: &Value) -> Result<Value> {
@@ -762,8 +779,8 @@ mod tests {
         let before = s.drawing("test").unwrap().clone();
         let good = item(drawing, front);
         for (p, says) in [
-            (json!({"items": [good, item(drawing, 99)]}), "no view, dimension, balloon or note"),
-            (json!({"items": [good, item(drawing, sheet)]}), "no view, dimension, balloon or note"),
+            (json!({"items": [good, item(drawing, 99)]}), "no selectable object"),
+            (json!({"items": [good, item(drawing, sheet)]}), "no selectable object"),
             (json!({"items": [good, item(99, front)]}), "isn't the drawing open"),
             (json!({"items": [good, {"type": "body", "name": "Block"}]}), "a drawing is open"),
             (json!({"items": [{"type": "feature", "id": 1}]}), "a drawing is open"),

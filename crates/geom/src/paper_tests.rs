@@ -80,6 +80,8 @@ fn each_kind_names_its_layer_in_the_capitals_of_its_id() {
     for (kind, layer) in [
         (SheetBorder, "SHEET_BORDER"),
         (DrawingBorder, "DRAWING_BORDER"),
+        (CentreMark, "CENTRE_MARK"),
+        (CentreLine, "CENTRE_LINE"),
         (TitleBlock, "TITLE_BLOCK"),
         (PartsList, "PARTS_LIST"),
         (RevisionTable, "REVISION_TABLE"),

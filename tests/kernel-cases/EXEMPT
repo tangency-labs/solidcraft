@@ -72,6 +72,14 @@ document.revision                 document metadata and revisions
 drawing.balloon.add               a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.edit              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.inspect           a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.center_line.add          paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_line.edit         paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_line.inspect      paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_line.remove       paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_mark.add          paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_mark.edit         paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_mark.inspect      paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_mark.remove       paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
 drawing.close                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.create                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.delete                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs

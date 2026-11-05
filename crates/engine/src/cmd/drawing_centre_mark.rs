@@ -1,0 +1,124 @@
+//! Commands for manual marks on circular model edges.
+
+use super::CommandSpec;
+use super::drawing_dimension::status_words;
+use crate::params::bad;
+use crate::schema::drawing_centre_mark::{AddParams, ChangeResult, EditParams, MarkParams, MarkResult};
+use crate::schema::{TypedContract, output_schema_for};
+use crate::{EngineError, Result, Session};
+use serde_json::Value;
+use solidcraft_doc::drawing::centre_mark::CentreMark;
+use solidcraft_doc::drawing::dimension::Status;
+use solidcraft_doc::ids;
+use std::sync::Arc;
+
+const ADD: &str = "drawing.center_mark.add";
+const EDIT: &str = "drawing.center_mark.edit";
+const INSPECT: &str = "drawing.center_mark.inspect";
+const REMOVE: &str = "drawing.center_mark.remove";
+const ADD_CONTRACT: TypedContract<AddParams> = TypedContract::new();
+const EDIT_CONTRACT: TypedContract<EditParams> = TypedContract::new();
+const MARK_CONTRACT: TypedContract<MarkParams> = TypedContract::new();
+
+pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new(ADD, "Add Center Mark", crate::checked!("drawing.center_mark.add", add))
+        .icon("new").in_drawing().doc_only().contract(&ADD_CONTRACT).output(output_schema_for::<MarkResult>)
+        .params("view: saved view id; edge: model edge pick with optional occurrence path; overshoot_mm: extension on paper at each end → mark and resolved circle. One undo step."),
+    CommandSpec::new(EDIT, "Edit Center Mark", crate::checked!("drawing.center_mark.edit", edit))
+        .icon("edit").in_drawing().doc_only().contract(&EDIT_CONTRACT).output(output_schema_for::<ChangeResult>)
+        .params("mark: id; overshoot_mm: extension on paper at each end. One undo step if changed."),
+    CommandSpec::new(INSPECT, "Inspect Center Mark", crate::checked!("drawing.center_mark.inspect", inspect))
+        .icon("inspect").in_drawing().noundo().doc_only().contract(&MARK_CONTRACT).output(output_schema_for::<MarkResult>)
+        .params("mark: id → saved record and current circle or reference status."),
+    CommandSpec::new(REMOVE, "Remove Center Mark", crate::checked!("drawing.center_mark.remove", remove))
+        .icon("delete").in_drawing().doc_only().contract(&MARK_CONTRACT).output(output_schema_for::<ChangeResult>)
+        .params("mark: id → removed mark. One undo step."),
+];
+
+fn add(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: AddParams = crate::schema::read(ADD, p)?;
+    let record = s.drawing(ADD)?.clone();
+    let view = request.view.0;
+    record.view(view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))))?;
+    let edge = s.doc.edge_reference(&s.model, &request.edge.pick, &request.edge.path).map_err(|e| bad(ADD, e.to_string()))?;
+    let id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
+    let mark = CentreMark { id, view, edge, overshoot_mm: request.overshoot_mm };
+    let mut probe = (*record).clone();
+    probe.add_centre_marks([Arc::new(mark.clone())]);
+    probe.validate().map_err(|e| bad(ADD, e.to_string()))?;
+    let resolved = s.doc.resolve_centre_marks(&s.model, &probe, &[id]).map_err(|e| bad(ADD, e.to_string()))?;
+    let result = resolved.into_iter().next().ok_or_else(|| bad(ADD, "the centre mark could not be resolved"))?;
+    if !matches!(&result.status, Status::Ok) {
+        let (status, why, _) = status_words(result.status);
+        return Err(bad(ADD, why.unwrap_or_else(|| format!("the reference is {status}"))));
+    }
+    s.edit_drawing(ADD, |d| {
+        d.add_centre_marks([Arc::new(mark)]);
+        Ok(())
+    })?;
+    answer(s, ADD, id)
+}
+
+#[cfg(test)]
+#[path = "drawing_centre_mark_tests.rs"]
+mod tests;
+
+fn edit(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: EditParams = crate::schema::read(EDIT, p)?;
+    let id = request.mark.0;
+    let changed = s.edit_drawing(EDIT, |d| {
+        let index = d.centre_mark_index(id).ok_or_else(|| bad(EDIT, format!("no centre mark {}", ids::encode(id))))?;
+        let mark = d.centre_marks.get_mut(index).map(Arc::make_mut).ok_or_else(|| bad(EDIT, "centre mark no longer exists"))?;
+        if mark.overshoot_mm == request.overshoot_mm {
+            return Ok(Vec::new());
+        }
+        mark.overshoot_mm = request.overshoot_mm;
+        Ok(vec!["overshoot_mm".into()])
+    })?;
+    change_reply(id, changed)
+}
+
+fn remove(s: &mut Session, p: &Value) -> Result<Value> {
+    let id = crate::schema::read::<MarkParams>(REMOVE, p)?.mark.0;
+    s.edit_drawing(REMOVE, |d| {
+        let index = d.centre_mark_index(id).ok_or_else(|| bad(REMOVE, format!("no centre mark {}", ids::encode(id))))?;
+        d.centre_marks.remove(index);
+        Ok(())
+    })?;
+    change_reply(id, vec!["removed".into()])
+}
+
+fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
+    let id = crate::schema::read::<MarkParams>(INSPECT, p)?.mark.0;
+    answer(s, INSPECT, id)
+}
+
+fn change_reply(id: u64, changed: Vec<String>) -> Result<Value> {
+    serde_json::to_value(ChangeResult { mark: ids::encode(id), changed, param_warnings: Vec::new() }).map_err(EngineError::from)
+}
+
+fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
+    let d = s.drawing(cmd)?;
+    let mark = d.centre_mark(id).ok_or_else(|| bad(cmd, format!("no centre mark {}", ids::encode(id))))?;
+    let r = s
+        .doc
+        .resolve_centre_marks(&s.model, d, &[id])
+        .map_err(|e| bad(cmd, e.to_string()))?
+        .into_iter()
+        .next()
+        .ok_or_else(|| bad(cmd, "the centre mark could not be resolved"))?;
+    let (status, why, candidates) = status_words(r.status);
+    let reply = MarkResult {
+        mark: ids::encode(id),
+        view: ids::encode(mark.view),
+        record: serde_json::to_value(mark).map_err(EngineError::from)?,
+        status: status.into(),
+        why,
+        centre: r.centre.map(|p| [p.x, p.y, p.z]),
+        radius_mm: r.radius_mm,
+        exact: r.exact,
+        candidates,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(EngineError::from)
+}

@@ -23,8 +23,8 @@ pub struct SheetSceneParams {
 /// A sheet's paper scene: its size and its groups in paint order, in paper millimetres from the
 /// sheet's lower-left corner: the drawing border's (object: the sheet), then each image's picture
 /// (object and source: the placement), then each view's strokes (object: the view), then each
-/// dimension's lines and arrowheads (object: the dimension), then the title block's (object: the
-/// sheet).
+/// dimension's lines and arrowheads (object: the dimension), manual centre marks and lines by id,
+/// then the title block's (object: the sheet).
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct SheetPaperScene(pub solidcraft_geom::paper::Scene);
@@ -36,7 +36,15 @@ impl JsonSchema for SheetPaperScene {
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         paper_scene_schema(
             generator,
-            &[ObjectKind::DrawingBorder, ObjectKind::SheetImage, ObjectKind::View, ObjectKind::Dimension, ObjectKind::TitleBlock],
+            &[
+                ObjectKind::DrawingBorder,
+                ObjectKind::SheetImage,
+                ObjectKind::View,
+                ObjectKind::Dimension,
+                ObjectKind::CentreMark,
+                ObjectKind::CentreLine,
+                ObjectKind::TitleBlock,
+            ],
             true,
         )
     }
@@ -137,7 +145,7 @@ pub struct SheetSceneResult {
     pub scene: SheetPaperScene,
     /// Each view on the sheet, in id order.
     pub views: Vec<SheetSceneView>,
-    /// The sheet's border, then each view on it, then each dimension drawn, in paint order.
+    /// The sheet's border, views, dimensions and centre annotations, in paint order.
     pub objects: Vec<SheetObjectResult>,
     /// Each dimension of a view on the sheet, by view and id.
     pub dimensions: Vec<SheetSceneDimension>,
