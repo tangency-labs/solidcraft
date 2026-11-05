@@ -59,6 +59,17 @@ pub(crate) fn nest(s: &mut Session, level: u64) {
     doc.occurrences.push(serde_json::from_value(occurrence).unwrap());
 }
 
+/// Part `Part` with a 10 mm cube `Cube` from the origin, placed twice: the second copy 30 mm along
+/// X. The session and the two occurrences.
+pub(crate) fn two_cubes() -> (Session, [u64; 2]) {
+    let mut s = Session::default();
+    let created = run(&mut s, "component.create", json!({"name": "Part"}));
+    let first = created["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube", "operation": "new"}));
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [30, 0, 0]}))["occurrence"].as_u64().unwrap();
+    (s, [first, second])
+}
+
 /// Sheet `sheet` of the drawing open, built at once.
 fn built(s: &Session, sheet: u64) -> SheetScene {
     let d = s.drawing("test").unwrap().clone();
@@ -535,7 +546,7 @@ fn seeded_edits_and_steps_always_end_at_the_built_scene() {
             let scale = ["1:1", "1:2", "1:5"][pick(seed, 200 + i, 3) as usize];
             let tangent_edges = ["hide", "show"][pick(seed, 300 + i, 2) as usize];
             // Refused edits (nothing to undo, say) change nothing, which the end still checks.
-            let _ = match pick(seed, i, 8) {
+            let _ = match pick(seed, i, 9) {
                 0 => edit(&mut s, front, json!({"place": {"at": [along, 150.0]}})),
                 1 => edit(&mut s, top, json!({"place": {"aligned": along + 100.0}})),
                 2 => edit(&mut s, front, json!({"scale": scale})),
@@ -543,6 +554,10 @@ fn seeded_edits_and_steps_always_end_at_the_built_scene() {
                 4 => s.execute("edit.undo", &json!({})).map(|_| ()),
                 5 => s.execute("edit.redo", &json!({})).map(|_| ()),
                 6 => {
+                    let source = [json!({"occurrences": [[]]}), json!(null)][pick(seed, 400 + i, 2) as usize].clone();
+                    edit(&mut s, top, json!({"source": source}))
+                }
+                7 => {
                     step(&mut s);
                     Ok(())
                 }
@@ -1155,4 +1170,46 @@ fn replies_list_the_dimensions_and_an_export_reports_a_lost_one() {
     let exported = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
     assert_eq!((&exported["dimensions"][0]["drawn"], &exported["dimensions"][0]["status"]), (&json!(false), &json!("lost")), "{exported}");
     assert!(exported["svg"].as_str().is_some_and(|svg| svg.contains("<svg")), "still written");
+}
+
+/// A saved view draws what it shows: with the second copy hidden, one cube's outline, 10 mm across
+/// and 40 mm of line, where both copies are 40 mm across. The provider sees the change as it sees
+/// any other setting's, and ends at the built scene; a view drawing nothing is left out and says why.
+#[test]
+fn a_view_draws_what_it_shows() {
+    let (mut s, [first, second]) = two_cubes();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let made = run(&mut s, "drawing.view.base", json!({"sheet": ids::encode(sheet), "scale": "1:1", "position_mm": [150, 150]}));
+    let view = ids::decode(made["view"].as_str().unwrap()).unwrap();
+    let group = |scene: &Scene| scene.groups.iter().find(|g| g.object == view && g.kind == ObjectKind::View).cloned();
+    let across = |scene: &Scene| {
+        let (lo, hi, length) = reach(&group(scene).unwrap());
+        (hi.x - lo.x, length)
+    };
+
+    let both = settled(&mut s, sheet);
+    assert!((across(&both.scene).0 - 40.0).abs() < 1e-6, "{:?}", across(&both.scene));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"hide": [[second]]}}));
+    let waiting = extract(&mut s, sheet).unwrap();
+    assert_eq!((waiting.stale.as_slice(), bytes(&waiting.scene)), ([view].as_slice(), bytes(&both.scene)), "the last lines show until it is drawn");
+
+    let one = settled(&mut s, sheet);
+    let (wide, length) = across(&one.scene);
+    assert!((wide - 10.0).abs() < 1e-6 && (length - 40.0).abs() < 1e-6, "{wide} {length}");
+    assert_eq!(bytes(&one.scene), bytes(&built(&s, sheet).scene));
+    let left = group(&one.scene).unwrap();
+    let (lo, hi, _) = reach(&left);
+    assert!((lo.x - 145.0).abs() < 1e-6 && (hi.x - 155.0).abs() < 1e-6, "its middle on its centre: {lo:?} {hi:?}");
+
+    // The record allows a choice no occurrence is left in; a deleted one comes to the same.
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let at = d.views.iter().position(|v| v.id == view).unwrap();
+    Arc::make_mut(&mut d.views[at]).settings.occurrences = Some(vec![vec![first]].into());
+    Arc::make_mut(&mut d.views[at]).settings.hide = Some(vec![vec![first]].into());
+    s.doc_mut().put_drawing(Arc::new(d));
+    let scene = built(&s, sheet);
+    assert_eq!(scene.views[0].status, Status::Placeholder(Unmeasured::NothingChosen));
+    assert!(group(&scene.scene).is_none(), "left out, the sheet still draws");
+    assert!(Unmeasured::NothingChosen.to_string().contains("may have been deleted"));
 }

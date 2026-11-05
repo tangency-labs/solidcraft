@@ -332,7 +332,7 @@ pub struct EditParams {
     pub set: ViewSet,
 }
 
-/// The settings `drawing.view.edit` changes, each only when given. For the five that can follow
+/// The settings `drawing.view.edit` changes, each only when given. For the seven that can follow
 /// the view's parent, `null` means follow it (a base view's scale can't: it has no parent).
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
@@ -348,6 +348,12 @@ pub struct ViewSet {
     pub reference_hides_model: Option<Option<bool>>,
     #[serde(deserialize_with = "super::present")]
     pub tangent_edges: Option<Option<TangentEdgesParam>>,
+    /// The occurrence subtrees it draws.
+    #[serde(deserialize_with = "super::present")]
+    pub source: Option<Option<SourceParam>>,
+    /// Occurrence paths it leaves out, with everything under them.
+    #[serde(deserialize_with = "super::present")]
+    pub hide: Option<Option<Vec<Vec<u64>>>>,
     /// How far the view's boundary grows from the model's box towards the box that also holds its
     /// reference parts, each side on its own: 0 to 100.
     #[serde(deserialize_with = "super::present")]
@@ -395,6 +401,10 @@ pub struct SettingsResult {
     pub reference_style: SettingResult<String>,
     pub reference_hides_model: SettingResult<bool>,
     pub tangent_edges: SettingResult<String>,
+    /// The occurrence subtrees it draws: every body when null.
+    pub occurrences: SettingResult<Option<Vec<Vec<u64>>>>,
+    /// Occurrence paths it leaves out, with everything under them: none when null.
+    pub hide: SettingResult<Option<Vec<Vec<u64>>>>,
 }
 
 /// The values a window offers for a view's settings.
@@ -427,7 +437,7 @@ pub struct InspectResult {
     /// Where it sits on its sheet: its extents grown by `reference_shown_percent`, at its scale,
     /// with the model's middle on its centre; a placeholder 20 mm each way when there's nothing to measure.
     pub boundary_mm: BoxResult,
-    /// Its design's extents on its plane.
+    /// The extents on its plane of what it shows.
     pub extents: ExtentsResult,
     /// A projected view's display settings: `true` when all follow its parent, `false` when none
     /// does, `"partly"` otherwise. None for a base view.
@@ -533,6 +543,14 @@ pub struct BaseParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "TangentEdgesParam")]
     pub tangent_edges: Option<TangentEdgesParam>,
+    /// The occurrence subtrees it draws (every body the design places when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SourceParam")]
+    pub source: Option<SourceParam>,
+    /// Occurrence paths it leaves out, with everything under them (none when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Vec<Vec<u64>>")]
+    pub hide: Option<Vec<Vec<u64>>>,
 }
 
 /// What `drawing.view.projected` takes: its parent, the side of it it sits on, and where.
@@ -619,7 +637,8 @@ pub struct ExtentsResult {
     /// `approximate`: measured on the display mesh; `placeholder`: nothing to measure, so the box is
     /// the placeholder's.
     pub status: &'static str,
-    /// `display_mesh`; with a placeholder, why: `past_walk_limit`, `no_bodies` or `not_placed`.
+    /// `display_mesh`; with a placeholder, why: `past_walk_limit`, `no_bodies`, `not_placed` or
+    /// `nothing_chosen`.
     pub provenance: &'static str,
 }
 

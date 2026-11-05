@@ -28,12 +28,14 @@ fn schemas_and_the_key_check_agree() {
     ];
     assert_keys(input_schema_for::<SnapshotParams>(), &keys);
     let base = [
+        "hide",
         "position_mm",
         "reference_hides_model",
         "reference_shown_percent",
         "reference_style",
         "scale",
         "sheet",
+        "source",
         "tangent_edges",
         "view",
         "visual_style",
@@ -47,7 +49,8 @@ fn schemas_and_the_key_check_agree() {
 }
 
 /// `drawing.view.edit` changes what a saved view sets itself, field for field, and its direction,
-/// place and link, so the edit and the record keep one list of a view's settings.
+/// place and link, so the edit and the record keep one list of a view's settings. The subtrees a
+/// view draws (`occurrences`) are its `source`, as `drawing.view.snapshot` takes them.
 #[test]
 fn the_edit_contract_lists_a_saved_views_settings() {
     let all = solidcraft_doc::drawing_view::ViewOverrides {
@@ -56,9 +59,12 @@ fn the_edit_contract_lists_a_saved_views_settings() {
         reference_style: Some(Default::default()),
         reference_hides_model: Some(false),
         tangent_edges: Some(Default::default()),
+        occurrences: Some(Vec::new().into()),
+        hide: Some(Vec::new().into()),
     };
     let own = serde_json::to_value(all).unwrap_or_default();
-    let mut theirs: Vec<String> = own.as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
+    let named = |key: &String| if key == "occurrences" { "source".to_string() } else { key.clone() };
+    let mut theirs: Vec<String> = own.as_object().map(|o| o.keys().map(named).collect()).unwrap_or_default();
     theirs.extend(["linked", "place", "reference_shown_percent", "view"].map(String::from));
     theirs.sort();
     let schema = input_schema_for::<ViewSet>();
