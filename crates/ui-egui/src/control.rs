@@ -643,22 +643,36 @@ fn dispatch_checked(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &V
 /// A command that switches to another design, checked at `level` before it runs: it runs at the
 /// app's own level, since the session it leaves and the one it brings in each keep theirs.
 fn switch_checked(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value, level: ParamCheck) -> Outcome {
-    let id = command(p).unwrap_or_default();
-    let issues: Vec<String> = solidcraft_engine::schema::issues(id, p.get("params").unwrap_or(&Value::Null)).into_iter().map(|i| i.message).collect();
-    if level == ParamCheck::Strict
-        && let Some(first) = issues.first()
-    {
-        return err(solidcraft_engine::params::bad(id, first.as_str()));
-    }
+    let warnings = match contract_check_before_run(command(p).unwrap_or_default(), p.get("params").unwrap_or(&Value::Null), level) {
+        Ok(warnings) => warnings,
+        Err(e) => return err(e),
+    };
     let mut out = dispatch(app, ctx, method, p);
-    if level == ParamCheck::Warn
-        && !issues.is_empty()
-        && let Outcome::Done(v) = &mut out
-        && let Some(o) = v.get_mut("result").and_then(Value::as_object_mut)
-    {
-        o.insert("param_warnings".into(), json!(issues));
+    if let Outcome::Done(v) = &mut out {
+        add_param_warnings(v, warnings);
     }
     out
+}
+
+/// A call's parameters against its command's contract, for a command that does not run on a
+/// session at `level` (one that switches design, one the file loader runs): `Err` refuses the
+/// call, `Ok` holds the warnings for its result.
+pub(crate) fn contract_check_before_run(id: &str, params: &Value, level: ParamCheck) -> Result<Vec<String>, String> {
+    let issues: Vec<String> = solidcraft_engine::schema::issues(id, params).into_iter().map(|i| i.message).collect();
+    match (level, issues.first()) {
+        (ParamCheck::Strict, Some(first)) => Err(solidcraft_engine::params::bad(id, first.as_str()).to_string()),
+        (ParamCheck::Warn, _) => Ok(issues),
+        _ => Ok(Vec::new()),
+    }
+}
+
+/// Add what `contract_check_before_run` found to a reply's result.
+pub(crate) fn add_param_warnings(reply: &mut Value, warnings: Vec<String>) {
+    if !warnings.is_empty()
+        && let Some(o) = reply.get_mut("result").and_then(Value::as_object_mut)
+    {
+        o.insert("param_warnings".into(), json!(warnings));
+    }
 }
 
 fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) -> Outcome {

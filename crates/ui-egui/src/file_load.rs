@@ -67,6 +67,9 @@ pub struct Request {
     /// Insert the file as a mesh whatever its extension says: a PLY goes to `pointcloud.insert`
     /// unless the person chose Insert Mesh for it (then it needs its faces).
     pub mesh: bool,
+    /// The level the caller's own `param_check` named and the warnings it found before the run:
+    /// the reply says both (#9184).
+    pub(crate) param_check: Option<(solidcraft_engine::schema::ParamCheck, Vec<String>)>,
 }
 
 impl Request {
@@ -81,6 +84,7 @@ impl Request {
             design: None,
             chat_turn: None,
             mesh: false,
+            param_check: None,
         }
     }
     fn insert(&self) -> bool {
@@ -110,14 +114,21 @@ impl Request {
     }
     fn answer(&self, r: Result<Value, String>) {
         if let Some(reply) = &self.reply {
-            if crate::control::chat_turn_cancelled(self.chat_turn.as_deref()) {
-                let _ = reply.send(crate::control::cancelled_chat_response());
-                return;
+            let mut response = if crate::control::chat_turn_cancelled(self.chat_turn.as_deref()) {
+                crate::control::cancelled_chat_response()
+            } else {
+                match r {
+                    Ok(v) => json!({"ok": true, "result": v}),
+                    Err(e) => json!({"ok": false, "error": e}),
+                }
+            };
+            if let Some((level, warnings)) = &self.param_check {
+                crate::control::add_param_warnings(&mut response, warnings.clone());
+                if let Some(o) = response.as_object_mut() {
+                    o.insert("param_check".into(), json!(level.name()));
+                }
             }
-            let _ = reply.send(match r {
-                Ok(v) => json!({"ok": true, "result": v}),
-                Err(e) => json!({"ok": false, "error": e}),
-            });
+            let _ = reply.send(response);
         }
     }
 }
@@ -394,12 +405,16 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         return Some(req);
     }
     // In any spelling the engine takes: another would run on the window thread.
-    let command = req.params.get("command").or(req.params.get("id")).and_then(Value::as_str).and_then(solidcraft_engine::find_command);
-    let kind = match command.map(|spec| spec.id) {
-        Some("doc.open") => Kind::Open,
-        Some("file.insert_step" | "file.insert_mesh" | "pointcloud.insert") => Kind::Insert,
-        Some("file.export_view_dxf") => Kind::ExportDxf,
-        Some("pointcloud.reload") => Kind::ReloadCloud,
+    let Some(id) =
+        req.params.get("command").or(req.params.get("id")).and_then(Value::as_str).and_then(solidcraft_engine::find_command).map(|spec| spec.id)
+    else {
+        return Some(req);
+    };
+    let kind = match id {
+        "doc.open" => Kind::Open,
+        "file.insert_step" | "file.insert_mesh" | "pointcloud.insert" => Kind::Insert,
+        "file.export_view_dxf" => Kind::ExportDxf,
+        "pointcloud.reload" => Kind::ReloadCloud,
         _ => return Some(req),
     };
     let params = req.params.get("params");
@@ -407,6 +422,25 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         Some(path) => path,
         None if matches!(kind, Kind::ExportDxf | Kind::ReloadCloud) => "",
         None => return Some(req),
+    };
+    // This never reaches `control::handle`, so the request's own `param_check` is taken here. The
+    // worker's session goes on to be the design's, which keeps its own level: the check comes first.
+    let level = match crate::control::request_param_check(&req.method, &req.params) {
+        Ok(level) => level,
+        Err(e) => {
+            let _ = req.reply.send(json!({"ok": false, "error": e}));
+            return None;
+        }
+    };
+    let param_check = match level
+        .map(|level| crate::control::contract_check_before_run(id, params.unwrap_or(&Value::Null), level).map(|found| (level, found)))
+        .transpose()
+    {
+        Ok(param_check) => param_check,
+        Err(e) => {
+            let _ = req.reply.send(json!({"ok": false, "error": e, "param_check": level.map(|level| level.name())}));
+            return None;
+        }
     };
     let scope = match crate::control::request_scope(app, &req.params) {
         Ok(scope) => scope,
@@ -432,6 +466,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         design: None,
         chat_turn: req.chat_turn,
         mesh: false,
+        param_check,
     };
     let _ = begin_request(app, request);
     None

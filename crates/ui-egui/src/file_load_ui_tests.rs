@@ -334,6 +334,47 @@ fn reloading_a_point_cloud_runs_off_the_window_thread() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A request's own `param_check` (#9184) holds on a command the file loader runs, which never
+/// reaches `control::handle`: a word that is no level is refused, `strict` refuses a broken call
+/// before the file is read, `warn` reads it and says what it found, and every reply says the level.
+/// Any spelling the engine takes goes to the file loader too.
+#[test]
+fn a_file_load_is_checked_at_the_requests_own_level() {
+    let dir = scratch("reload-check");
+    let path = dir.join("scan.xyz");
+    std::fs::write(&path, "0 0 0\n1 0 0\n").unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let id = h.app.run("pointcloud.insert", json!({"path": path})).unwrap()["cloud"].as_u64().unwrap();
+    std::fs::write(&path, "0 0 0\n1 0 0\n2 0 0\n").unwrap();
+    let points = |app: &SolveApp| app.session.doc.point_clouds[0].len();
+    let misspelt = |level: &str| json!({"command": "pointcloud.reload", "params": {"cloud": id, "clowd": 1}, "param_check": level});
+
+    let (v, _) = h.call_queued("engine.execute", misspelt("loud"));
+    assert!(v["ok"] == false && v["error"].as_str().is_some_and(|e| e.contains("`param_check` must be off, warn or strict")), "{v}");
+    let (v, _) = h.call_queued("engine.execute", misspelt("strict"));
+    assert_eq!((&v["ok"], &v["param_check"]), (&json!(false), &json!("strict")), "{v}");
+    assert!(v["error"].as_str().is_some_and(|e| e.contains("clowd")), "{v}");
+    assert_eq!(points(&h.app), 2, "refused unread");
+
+    let (v, _) = h.call_queued("engine.execute", misspelt("warn"));
+    assert_eq!((&v["ok"], &v["param_check"]), (&json!(true), &json!("warn")), "{v}");
+    assert!(v["result"]["param_warnings"][0].as_str().is_some_and(|w| w.contains("clowd")), "{v}");
+    assert_eq!(points(&h.app), 3);
+
+    // Asked nothing, told nothing; the worker's thread shows the file loader took this spelling.
+    std::fs::write(&path, "0 0 0\n1 0 0\n2 0 0\n3 0 0\n").unwrap();
+    let (started_tx, started) = std::sync::mpsc::channel();
+    let (release, release_rx) = std::sync::mpsc::channel();
+    release.send(()).unwrap();
+    h.app.file_load.worker_gate = Some((started_tx, release_rx));
+    let (v, _) = h.call_queued("engine.execute", json!({"command": "POINTCLOUD.RELOAD", "params": {"cloud": id}}));
+    assert_eq!((&v["ok"], v.get("param_check")), (&json!(true), None), "{v}");
+    assert_ne!(started.try_recv().expect("the file loader ran it"), std::thread::current().id());
+    assert_eq!(points(&h.app), 4);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A design may link to a file on another computer (`\\host\share\…`); on Windows reading it, or
 /// only asking whether it is there, connects to that computer and may send it the user's sign-in.
 /// Update Links and Open Linked Design ask first, naming the server: Cancel reads nothing, Allow
