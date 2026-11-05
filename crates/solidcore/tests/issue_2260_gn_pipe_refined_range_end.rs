@@ -282,7 +282,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "sphere_small_circle_not_touching",
     "ssi_alignment_statuses",
     "ssi_low_angle_start_on_probation",
-    "ssi_no_reverse_of_empty_trace",
     "ssi_pole_point_keeps_its_tangent",
     "ssi_proto_topology_statuses_pass_on",
     "ssi_singular_start_inside_direction",

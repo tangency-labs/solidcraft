@@ -9,6 +9,7 @@
 //! | Rust                                                  | Upstream                      |
 //! |-------------------------------------------------------|-------------------------------|
 //! | [`SurfaceIntersector::trace_curve`]                   | `TraceCurve`                  |
+//! | [`SurfaceIntersector::trace_back`]                    | the reverse/trace/reverse block of `SmSurfaceIntersector::FindInteriorCurves` and `DoIntersection` |
 //! | [`SurfaceIntersector::find_interior_curves`], [`SurfaceIntersector::find_interior_curves_from_node_pairs`], [`InteriorNodePair`] | `FindInteriorCurves` |
 //! | [`SurfaceIntersector::do_point_intersection`], [`PointIntersectionOptions`] | `DoPointIntersection` |
 //! | [`SurfaceIntersector::do_law_intersection`], [`LawIntersectionOptions`] | `DoLawIntersection` |
@@ -83,6 +84,14 @@
 //!   passes a found curve's free end stops there, its last span shortened to that end
 //!   (`SurfaceIntersector::reaches_found_curve_end`); the SolidCraft fork's
 //!   tangency-labs/smlib@0ce09f2. Off by default (upstream behaviour).
+//! - **Empty trace (WR-80).** The trace-back of `FindInteriorCurves` and
+//!   `DoIntersection` (part 5) is one method, [`SurfaceIntersector::trace_back`], which
+//!   traces a curve back the other way only when `TraceCurve` produced points.
+//!   Upstream also reverses the empty curve of a trace whose start already lies on a
+//!   found curve, and `ReverseCurveDirection` fails the whole intersection with
+//!   `SM_ERR_NULL_POINTER` (the fork's tangency-labs/smlib@0dbe681). Upstream's two
+//!   blocks negate the direction and reverse the points in opposite orders; the two
+//!   steps touch disjoint state, so the shared method gives both the same result.
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks (graphics, dumps), the
 //!   `SM_ASSERT`s and the point-count warnings (`MSG`).
 
@@ -493,6 +502,32 @@ impl SurfaceIntersector<'_> {
         trace_curve_with(self, k, start, curves_3d)
     }
 
+    /// Traces the curve the other way from `start`: reverses the curve points,
+    /// negates the trace direction, traces ([`SurfaceIntersector::trace_curve`]) and
+    /// reverses the points back (upstream then multiplies the direction by 1.0, so it
+    /// stays negated). The trace-back of `SmSurfaceIntersector`'s
+    /// `FindInteriorCurves` and `DoIntersection`, after a first trace from an open
+    /// curve's start point (`SmAdvSurfaceIntersector` has its own).
+    ///
+    /// A trace that produced no points is not traced back (WR-80, #391): its start
+    /// point already lies on a found curve, and there is nothing to trace back from.
+    /// Upstream reverses the empty curve, which is `SM_ERR_NULL_POINTER`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`SurfaceIntersector::trace_curve`] and the reversals.
+    pub fn trace_back(&mut self, k: &Kernel, start: TsectId, curves_3d: &[Curve]) -> Result<()> {
+        if self.curve_points.is_empty() {
+            return Ok(());
+        }
+        self.reverse_curve_direction()?;
+        self.curve_trace_direction *= -1.0;
+        self.trace_curve(k, start, curves_3d)?;
+        // (upstream multiplies by 1.0 here)
+        self.curve_trace_direction *= 1.0;
+        self.reverse_curve_direction()
+    }
+
     /// True when the span from point `from` to point `to` already lies on a found
     /// curve: `to` and three points of the span (a Hermite with chord-length
     /// tangents) are all on `curves_3d` (the fork's `bSpanOnFoundCurve` of
@@ -746,20 +781,12 @@ impl SurfaceIntersector<'_> {
             self.trace_curve(k, start, &out.curves_3d)?;
 
             // an open curve from an unbounded point, not reversed by the trace: trace
-            // the other way too
-            // (opt-in, WR-80: nothing traced, nothing to reverse)
-            let traced = !k.fixes.ssi_no_reverse_of_empty_trace || !self.curve_points.is_empty();
-            if traced
-                && !self.curve_is_closed
+            // the other way too (not for an empty trace, WR-80)
+            if !self.curve_is_closed
                 && !self.point(start)?.is_bounded()
                 && input_trace_direction == self.curve_trace_direction
             {
-                self.curve_trace_direction *= -1.0;
-                self.reverse_curve_direction()?;
-                self.trace_curve(k, start, &out.curves_3d)?;
-                // (upstream multiplies by 1.0 here)
-                self.curve_trace_direction *= 1.0;
-                self.reverse_curve_direction()?;
+                self.trace_back(k, start, &out.curves_3d)?;
             }
 
             // add the curve of the curve points (which are cleared)
@@ -1879,6 +1906,93 @@ mod tests {
         assert_eq!(si.curve_points(), &[id]);
         assert!(si.curve_is_closed);
         assert_eq!(si.point(id).unwrap().curve_parameter, 0.0);
+    }
+
+    /// WR-80: a trace that produced no points (its start point already on a found
+    /// curve) is not traced back. Upstream reverses the empty curve, which is
+    /// `SM_ERR_NULL_POINTER`; the trace-back of p4 and p5 is this one call.
+    #[test]
+    fn empty_trace_is_not_traced_back() {
+        let k = &Kernel::default();
+        let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let mut si = SurfaceIntersector::new(k, &a, &unit(), &b, &unit(), false).unwrap();
+        let start = si.alloc_point(TsectPnt::zeroed());
+        si.curve_trace_direction = 1.0;
+        assert!(si.curve_points().is_empty());
+        si.trace_back(k, start, &[]).unwrap();
+        assert!(si.curve_points().is_empty());
+        assert_eq!(si.curve_trace_direction, 1.0);
+    }
+
+    /// A trace with points is traced back. The planes `z = 0` and `y = 0.5` meet in
+    /// the line `(x, 0.5, 0)`, `x` in `[0, 1]`; traced from `x = 0.5`, the first trace
+    /// reaches one end, and the trace back the other, with the points in order along
+    /// the line and their parameters rising from 0. The direction stays negated
+    /// (upstream multiplies by 1.0).
+    #[test]
+    fn trace_with_points_is_traced_back() {
+        let k = &Kernel::default();
+        let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let mut si = SurfaceIntersector::new(k, &a, &unit(), &b, &unit(), false).unwrap();
+        si.curve_trace_direction = 1.0;
+        let mut p = TsectPnt::zeroed();
+        p.point_type = IntersectionPointType::Unknown;
+        let mid = Point2::new(0.5, 0.5);
+        si.compute_point_values(k, [mid, mid], &mut p, None, None)
+            .unwrap();
+        assert_eq!(p.point_type, IntersectionPointType::Crossing);
+        let start = si.alloc_point(p);
+        let xs = |si: &SurfaceIntersector| -> Vec<f64> {
+            si.curve_points()
+                .iter()
+                .map(|&id| si.point(id).unwrap().crv_pos().x)
+                .collect()
+        };
+
+        si.trace_curve(k, start, &[]).unwrap();
+        let first = xs(&si);
+        let (lo, hi) = (
+            first.iter().copied().fold(f64::INFINITY, f64::min),
+            first.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        );
+        // one way only: from x = 0.5 to one end
+        assert!(first.len() > 1, "{first:?}");
+        assert!(
+            (lo - 0.5).abs() < 1e-9 || (hi - 0.5).abs() < 1e-9,
+            "{first:?}"
+        );
+
+        si.trace_back(k, start, &[]).unwrap();
+        let both = xs(&si);
+        assert!(both.len() > first.len(), "{both:?}");
+        // both ends, in order along the line; the curve ends with the first trace's
+        // points, from the start point on (reversed, extended, reversed back)
+        let (lo, hi) = (
+            both.iter().copied().fold(f64::INFINITY, f64::min),
+            both.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        );
+        assert!(lo < 1e-6 && hi > 1.0 - 1e-6, "{both:?}");
+        let rising = both.windows(2).all(|w| w[1] > w[0]);
+        let falling = both.windows(2).all(|w| w[1] < w[0]);
+        assert!(rising || falling, "{both:?}");
+        assert_eq!(&both[both.len() - first.len()..], &first[..], "{both:?}");
+        for p in si.curve_points() {
+            let q = si.point(*p).unwrap().crv_pos();
+            assert!(
+                (q.y - 0.5).abs() < 1e-9 && q.z.abs() < 1e-9,
+                "{q:?} is off the line"
+            );
+        }
+        let params: Vec<f64> = si
+            .curve_points()
+            .iter()
+            .map(|&id| si.point(id).unwrap().curve_parameter)
+            .collect();
+        assert_eq!(params[0], 0.0);
+        assert!(params.windows(2).all(|w| w[1] > w[0]), "{params:?}");
+        assert_eq!(si.curve_trace_direction, -1.0);
     }
 
     #[test]

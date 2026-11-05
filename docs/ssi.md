@@ -292,7 +292,8 @@ What came of it, from #17's thread:
   SolidCraft's earlier kernel completed the cases reported in the literature.
 - Step 3's policy has since been replaced: fixes change the default result, with no compatibility
   flag, and the existing `UpstreamFixes` flags are to be retired (AGENTS.md §4b, 2026-11-04). The
-  WR-74 to WR-80 fixes still sit behind flags (§4.4), which is open work.
+  WR-80 fix is the default; the WR-74 to WR-79 fixes still sit behind flags (§4.4), which is
+  open work.
 
 ## 4. The pipeline
 
@@ -425,7 +426,6 @@ point. The fork's fixes, all off by default:
 | `ssi_tangent_curve_tracer` (WR-75, #395) | traces tangent curves the marcher cannot follow: Levenberg-Marquardt on S1 − S2 = 0 with n1 ∥ n2, directions probed on a small circle in the tangent plane; traces crossing branches through tangent contact nodes and reports the nodes | `surface_intersector/tangent_curves.rs`, `tangent_tracer.rs` |
 | `ssi_tangent_contact_points` (WR-74, #394) | Newton on a 4 × 4 system (the gap along S2's tangents, S1's tangents against n2) from the leaf pairs the interior search skips, plus the poles; a root is a touch point when the gap is below 1e-7 of the tolerance and the normals agree to 1e-4 rad | `adv_surface_intersector/tangent_contacts.rs` |
 | `ssi_trace_tangent_curves_once` (WR-76, #392) | one start point per cluster of tangent boundary start points, so an open tangent curve is traced once | `surface_intersector/p5.rs` |
-| `ssi_no_reverse_of_empty_trace` (WR-80, #391) | does not reverse and retrace an empty trace | `p5.rs`, `adv_surface_intersector.rs` |
 | `ssi_singular_start_inside_direction` (WR-512) | a curve starting at a singularity leaves along a direction into both domains | `adv_surface_intersector.rs` |
 | `ssi_pole_point_keeps_its_tangent` (WR-550) | a point at a pole keeps its exact limit tangent when stepping back | `surface_intersector/p1.rs` |
 
@@ -614,7 +614,7 @@ and why the approximation tolerance is half of it.
 | plane a hair off a cylinder wall | two lines microns apart instead of one tangent line | WR-510, `cylinder_plane_tangent_within_tolerance` | | flag on by default |
 | near-miss seam | an intersection runs within tolerance of a closed surface's seam | the curve and its trims end near but not on the seam: `SmFace::Test #36` "Face Near missing Seam", or `make_faceuse` 1001 | curves split at the seam by `solidcore-ssi` | #2538, #2537, cause not traced |
 | curve across a pole | the UV coordinate along a collapsed edge names no point | `ssi_pole_point_keeps_its_tangent` | split at the pole; placed by its approach; the pole divided out of the field | |
-| empty trace reversed (#17 gap 4) | `SM_ERR_NULL_POINTER` | `ssi_no_reverse_of_empty_trace` (#391) | | #391 |
+| empty trace reversed (#17 gap 4) | `SM_ERR_NULL_POINTER` | not traced back: a trace that produced no points is not reversed (WR-80, `surface_intersector/p4.rs`, `p5.rs`) | | `adv_surface_intersector.rs`'s own trace-back is unchecked; no known case reaches it (WR-80 addendum 2026-11-05) |
 | trace that never ends | 5000 points, or a creeping boundary trace | an error at 5000; `ssi_start_loop_trace_budget` bounds all start points | `Error::Unfinished` at 100,000 steps; pair budget 2,000,000 | |
 
 **Refusals.** `ssi` refuses by name: `BOOLEAN_TANGENT` (a contact it cannot prove), `BAD_PATCH`,
@@ -693,7 +693,7 @@ boolean's side.
 | issue | topic |
 |---|---|
 | [#17](https://github.com/tangency-labs/solidcore/issues/17) | the corpus and the measured gaps of the upstream intersector |
-| [#391](https://github.com/tangency-labs/solidcore/issues/391) | an empty trace reversed (`SM_ERR_NULL_POINTER`); fix behind a flag |
+| [#391](https://github.com/tangency-labs/solidcore/issues/391) | an empty trace reversed (`SM_ERR_NULL_POINTER`); fixed on the default path |
 | [#393](https://github.com/tangency-labs/solidcore/issues/393) | curves not split at singular crossing points; fix behind a flag |
 | [#395](https://github.com/tangency-labs/solidcore/issues/395) | tangent and high-order contact curves missed or collapsed; fix behind a flag |
 | [#1552](https://github.com/tangency-labs/solidcore/issues/1552) | how `solidcore-ssi` is wired into the kernel |

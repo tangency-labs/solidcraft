@@ -256,7 +256,6 @@
   "ssi_tangent_contact_points",
   "ssi_low_angle_start_on_probation",
   "ssi_trace_tangent_curves_once",
-  "ssi_no_reverse_of_empty_trace",
   "ssi_singular_start_inside_direction",
   "point_on_start_point_squared_tolerance",
   "ssi_pole_point_keeps_its_tangent",
