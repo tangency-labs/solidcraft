@@ -11,6 +11,10 @@ mod palettes;
 use egui::{Color32, Stroke};
 use serde::{Deserialize, Serialize};
 
+/// Expanded Wide hosts compose controls and content in one total row below
+/// this logical height. Independent of pixel density and user UI scaling.
+pub const PANEL_INLINE_MAX_HEIGHT: f32 = 88.0;
+
 thread_local! {
     /// Theme state belongs to the UI thread drawing the frame. Concurrent app/test renderers
     /// must not change one another's palette while a frame or icon texture is being built.

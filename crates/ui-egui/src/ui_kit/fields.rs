@@ -1604,7 +1604,7 @@ pub(crate) fn text_area(ui: &mut Ui, label: &str, id: egui::Id, value: &mut Stri
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINES.limited(limit));
     t.input_bevel(ui, &response);
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), label);
+        let mut info = egui::WidgetInfo::labeled(egui::Role::MultilineTextInput, ui.is_enabled(), label);
         info.current_text_value = Some(value.clone());
         info
     });

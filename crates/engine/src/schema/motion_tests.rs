@@ -2,7 +2,8 @@ use serde_json::{Value, json};
 
 use super::{
     ContactCheck, ContactCreateParams, ContactEditParams, ContactEnableParams, ContactNoParams, ContactSetCreated, ContactSetEdited, ContactSets,
-    ContactSwitch, FindLimitsParams, FindLimitsResult,
+    ContactSwitch, FindLimitsParams, FindLimitsResult, MotionListParams, MotionStudies, MotionStudyDeleteParams, MotionStudyDeleted,
+    MotionStudyParams, MotionStudySaved,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -15,6 +16,9 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ContactNoParams>(), &[]);
     assert_keys(input_schema_for::<ContactCreateParams>(), &["name", "occurrences"]);
     assert_keys(input_schema_for::<ContactEditParams>(), &["delete", "name", "occurrences", "set", "suppressed"]);
+    assert_keys(input_schema_for::<MotionStudyParams>(), &["keys", "name", "steps", "study"]);
+    assert_keys(input_schema_for::<MotionListParams>(), &[]);
+    assert_keys(input_schema_for::<MotionStudyDeleteParams>(), &["study"]);
 }
 
 #[test]
@@ -147,4 +151,111 @@ fn replies_match_the_output_schema() {
     assert!(r["param_warnings"].as_array().is_some_and(|w| !w.is_empty()) && conforms(schema, schema, &r), "{r}");
     let required: Vec<&str> = schema.get("required").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
     assert!(!required.contains(&"param_warnings"));
+}
+
+/// A key driving the door's hinge from 0 to `to` degrees over the steps.
+fn hinge_key(to: Value) -> Value {
+    json!({"joint": "Hinge", "points": [[0, 0], [100, to]]})
+}
+
+/// #12155: the motion study commands refuse, in strict, what they refuse today, with the same
+/// message. They need the door's joints, so the shared helper doesn't fit.
+#[test]
+fn strict_keeps_the_motion_studys_errors() {
+    let many_keys = vec![hinge_key(json!(10)); 1001];
+    let many_points: Vec<Value> = (0..10_001).map(|i| json!([i, 0])).collect();
+    for (id, p) in [
+        ("motion.study", json!({"study": true})),
+        ("motion.study", json!({"study": null})),
+        ("motion.study", json!({"study": "Nope"})),
+        ("motion.study", json!({"steps": 0})),
+        ("motion.study", json!({"steps": "100"})),
+        ("motion.study", json!({"steps": null})),
+        ("motion.study", json!({"keys": {"joint": "Hinge"}})),
+        ("motion.study", json!({"keys": null})),
+        ("motion.study", json!({"keys": many_keys})),
+        ("motion.study", json!({"keys": [{"points": [[0, 0]]}]})),
+        ("motion.study", json!({"keys": [{"joint": "Nope", "points": [[0, 0]]}]})),
+        ("motion.study", json!({"keys": [{"joint": "Hinge", "index": 3, "points": [[0, 0]]}]})),
+        ("motion.study", json!({"keys": [{"joint": "Hinge"}]})),
+        ("motion.study", json!({"keys": [{"joint": "Hinge", "points": []}]})),
+        ("motion.study", json!({"keys": [{"joint": "Hinge", "points": many_points}]})),
+        ("motion.study", json!({"keys": [{"joint": "Hinge", "points": [[0]]}]})),
+        ("motion.study", json!({"keys": [{"joint": "Hinge", "points": [["a", 0]]}]})),
+        ("motion.study", json!({"keys": [hinge_key(json!(true))]})),
+        ("motion.study", json!({"keys": [hinge_key(json!("nope + 1"))]})),
+        ("motion.delete", json!({})),
+        ("motion.delete", json!({"study": [1]})),
+        ("motion.delete", json!({"study": "Nope"})),
+    ] {
+        let error = |level: ParamCheck| {
+            let mut s = door();
+            s.param_check = level;
+            s.execute(id, &p).err().map(|e| e.to_string())
+        };
+        let off = error(ParamCheck::Off);
+        assert!(off.is_some(), "{id} {p} should fail today");
+        assert_eq!(error(ParamCheck::Strict), off, "{id} {p}");
+    }
+}
+
+/// #12155: a key's points, in `motion.study`'s schema, take what the handler reads: a step that
+/// is a number (not text), and a value that is a number or an expression, each smaller than 1e9
+/// in size; elements after those two are ignored. Each case is checked against the contract's
+/// own key check too, so the schema and the handler can't drift apart.
+#[test]
+fn a_studys_points_schema_takes_what_the_handler_reads() {
+    let study = input_schema_for::<MotionStudyParams>();
+    let study = study.as_value();
+    for (point, takes) in [
+        (json!([0, 20]), true),
+        (json!([12.5, "10 mm"]), true),
+        (json!([0, 20, "ignored"]), true),
+        (json!(["0", 20]), false),
+        (json!([null, 20]), false),
+        (json!([2e9, 20]), false),
+        (json!([0, 2e9]), false),
+        (json!([0, true]), false),
+        (json!([0]), false),
+    ] {
+        let key = json!({"joint": "Hinge", "points": [point]});
+        assert_eq!(conforms(study, study, &json!({"keys": [key]})), takes, "schema: {point}");
+        assert_eq!(super::study_key_problem(&key).is_none(), takes, "key check: {point}");
+    }
+}
+
+/// #12155: making, changing, listing and deleting motion studies reply as the output schemas
+/// say, in Warn without warnings; a listed study's keys go back into `motion.study` unchanged.
+/// A misspelt key gets `param_warnings` in Warn, since the handlers ignore unknown keys, and
+/// strict refuses it.
+#[test]
+fn motion_studies_reply_with_their_schemas() {
+    let mut s = door();
+    s.param_check = ParamCheck::Warn;
+    let mut run = |id: &str, p: Value, schema: schemars::Schema| {
+        let r = s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        let schema = schema.as_value();
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{r}");
+        r
+    };
+    let r = run("motion.study", json!({"name": "Swing", "steps": 50, "keys": [hinge_key(json!(30))]}), output_schema_for::<MotionStudySaved>());
+    assert_eq!((r["name"].as_str(), r["steps"].as_u64(), r["keys"].as_u64()), (Some("Swing"), Some(50), Some(1)), "{r}");
+    let slide = json!({"joint": "Rail", "index": 0, "points": [[0, 0], [50, "10 mm"]]});
+    run("motion.study", json!({"study": "Swing", "keys": [hinge_key(json!(20)), slide]}), output_schema_for::<MotionStudySaved>());
+    run("motion.study", json!({}), output_schema_for::<MotionStudySaved>());
+    let list = run("motion.list", json!({}), output_schema_for::<MotionStudies>());
+    let swing = &list["studies"][0];
+    assert_eq!((swing["keys"][0]["unit"].as_str(), swing["keys"][1]["unit"].as_str()), (Some("deg"), Some("mm")), "{list}");
+    assert_eq!(swing["keys"][0]["points"], json!([[0.0, 0.0], [100.0, 20.0]]), "degrees, as given");
+    // The listed keys go back in as they are.
+    run("motion.study", json!({"study": swing["id"], "keys": swing["keys"]}), output_schema_for::<MotionStudySaved>());
+    let r = run("motion.delete", json!({"study": "Swing"}), output_schema_for::<MotionStudyDeleted>());
+    assert_eq!(r["deleted"], "Swing", "{r}");
+    let p = json!({"name": "Again", "step": 10});
+    let r = s.execute("motion.study", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+    assert!(r["param_warnings"].to_string().contains("step"), "{r}");
+    s.param_check = ParamCheck::Strict;
+    let error = s.execute("motion.study", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("`step`"), "{error}");
 }

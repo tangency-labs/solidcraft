@@ -49,6 +49,7 @@ pub mod motion;
 mod name_lookup;
 mod names;
 pub mod naming;
+mod occurrence_tree;
 mod params;
 pub mod persistent_name;
 pub mod physical_material;
