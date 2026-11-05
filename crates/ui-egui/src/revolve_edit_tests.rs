@@ -566,7 +566,7 @@ fn face_sketch_two_profiles_revolve_about_the_highlighted_edge() {
     h.app.run("sketch.create", json!({"plane": {"face": [20, 0, 10]}, "name": "Other", "project_edges": false})).unwrap();
     h.app.run("sketch.line", json!({"points": [[left_x, mid_y - 4.0], [left_x, mid_y + 4.0]], "ids": [right_id]})).unwrap();
     let other = h.app.session.active_sketch.unwrap();
-    let (other_a, other_b) = segment(&h.app, other, &cmds[0].1["axis"].as_str().unwrap());
+    let (other_a, other_b) = segment(&h.app, other, cmds[0].1["axis"].as_str().unwrap());
     let other_mid = (other_a + other_b) * 0.5;
     assert!(other_mid.dist(left_mid) < 1e-4, "the colliding line should lie on the left edge, got {other_mid:?} vs {left_mid:?}");
     assert!(other_mid.dist(right_mid) > 1.0, "it must not be the profile line");
