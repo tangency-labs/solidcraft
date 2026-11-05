@@ -72,8 +72,9 @@ impl FilletSession<'_> {
     /// before the edges are prepared. Edges without a blend edge use are left to the
     /// preparation.
     ///
-    /// The check reads a copy of the target, made once for the call: its queries build the
-    /// UV trim curves an edge use lacks and refit the edge's tolerance to them
+    /// The check runs under [`crate::topology::Brep::with_rollback`] and keeps nothing: its
+    /// queries build the UV trim curves an edge use lacks and refit the edge's tolerance to
+    /// them
     /// (`GetBlendEdgeuse`, `EvaluateBinormal`), and on the target that would change the body
     /// before upstream's preparation reads it, a refused round included (an all-edges round
     /// of `Fillet/cyl_on_box_w_fillet.smb` left edges at 1.03e-5 where they stay at 1e-5).
@@ -84,24 +85,34 @@ impl FilletSession<'_> {
         radii: &[f64],
         sections: &[FilletSurfaceGeneratorType],
     ) -> Result<()> {
-        let mut scratch: Option<crate::topology::Brep> = None;
-        for (i, &e) in edges.iter().enumerate() {
-            let radius = radii.get(i).or_else(|| radii.first()).copied();
-            let section = sections.get(i).or_else(|| sections.first()).copied();
-            let (Some(radius), Some(section)) = (radius, section) else {
-                continue; // a size list the preparation refuses
-            };
-            if section != FilletSurfaceGeneratorType::Circular
-                || !(radius.is_finite() && radius > 0.0)
-            {
-                continue;
-            }
-            let copy = scratch.get_or_insert_with(|| self.objects.target.clone());
-            if let Some(refusal) = round_too_small(k, copy, e, radius)? {
-                return Err(refusal.error(OP, SM_ERR));
-            }
+        // the check only reads: what its queries build (missing trim curves, a refitted
+        // edge tolerance) is put back with the target, never kept (#2715: a snapshot keeps
+        // the geometry's owners)
+        let refusal = self.objects.target.with_rollback(
+            |target| {
+                for (i, &e) in edges.iter().enumerate() {
+                    let radius = radii.get(i).or_else(|| radii.first()).copied();
+                    let section = sections.get(i).or_else(|| sections.first()).copied();
+                    let (Some(radius), Some(section)) = (radius, section) else {
+                        continue; // a size list the preparation refuses
+                    };
+                    if section != FilletSurfaceGeneratorType::Circular
+                        || !(radius.is_finite() && radius > 0.0)
+                    {
+                        continue;
+                    }
+                    if let Some(refusal) = round_too_small(k, target, e, radius)? {
+                        return Ok(Some(refusal));
+                    }
+                }
+                Ok(None)
+            },
+            |_| false,
+        )?;
+        match refusal {
+            Some(refusal) => Err(refusal.error(OP, SM_ERR)),
+            None => Ok(()),
         }
-        Ok(())
     }
 
     /// `DoFilleting`'s result with its refusal typed, its status unchanged: a Setback's
