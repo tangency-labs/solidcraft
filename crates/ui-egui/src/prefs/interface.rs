@@ -238,6 +238,15 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 let _ = app.run("view.layout", json!({"mode": if selected == 1 { "compact" } else { "floating" }}));
                             }
                         });
+                        if app.ui.layout == crate::shell::LayoutMode::Floating {
+                            layout_check(
+                                ui,
+                                app.tr("prefs.rounded_titlebar"),
+                                app.tr("prefs.rounded_titlebar_help"),
+                                &mut app.preferences.floating_titlebar_rounded,
+                                "floating_titlebar_rounded",
+                            );
+                        }
                         ui_kit::row(ui, app.tr("prefs.toolbar"), |ui| {
                             let mut selected = usize::from(!app.preferences.ribbon_labels);
                             if ui_kit::segmented(
