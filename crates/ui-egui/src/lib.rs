@@ -29,6 +29,7 @@ pub mod command_help;
 pub mod context_menu;
 pub mod control;
 pub mod control_job;
+mod control_params;
 pub mod crash_ui;
 pub mod deferred;
 pub mod delete;
