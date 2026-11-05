@@ -56,9 +56,7 @@
 //! - With `Kernel::fixes.gap_samples_non_bspline_v_stride` (off by default),
 //!   interior V samples for non-B-spline surfaces are normalized by
 //!   `(jj - cu) / (cv - 1)`, keeping them in `[0.0, 1.0]` (WR-88).
-//! - With `Kernel::fixes.gap_array_append_updates_longest` (off by default),
-//!   `GapArray::append_opt_in` / `GapArray::append_with_kernel` updates the
-//!   longest-gap index when appending a strictly longer gap (WR-90).
+//! - `GapArray::append` maintains the longest-gap index, unlike upstream (WR-90).
 
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::p6::DroppedPoint;
@@ -1271,35 +1269,14 @@ impl GapArray {
         self.gaps.push(gap);
     }
 
-    /// `Append`: appends every gap of `other` (the longest-gap index is not updated,
-    /// as upstream).
+    /// Appends every gap exactly as sequential calls to [`Self::add`] (WR-90).
+    ///
+    /// Finite lengths retain the earliest maximum; nonfinite lengths follow the
+    /// existing `add` comparison semantics, including a leading NaN staying selected.
     pub fn append(&mut self, other: &Self) {
-        self.append_opt_in(other, false);
-    }
-
-    /// Appends every gap of `other`, optionally updating the longest-gap index
-    /// when `fix_enabled` is true (WR-90).
-    pub fn append_opt_in(&mut self, other: &Self, fix_enabled: bool) {
-        let old_len = self.gaps.len();
-        if fix_enabled {
-            if let (Some(other_idx), Some(other_max)) = (other.max_gap_3d, other.max_gap()) {
-                let longer = match self.max_gap() {
-                    None => true,
-                    Some(cur_max) => other_max.length() > cur_max.length(),
-                };
-                if longer {
-                    self.max_gap_3d = Some(old_len + other_idx);
-                }
-            }
+        for gap in other.gaps.iter().copied() {
+            self.add(gap);
         }
-        self.gaps.extend(other.gaps.iter().copied());
-    }
-
-    /// Appends every gap of `other`, updating the longest-gap index if
-    /// [`Kernel::fixes.gap_array_append_updates_longest`](crate::kernel::UpstreamFixes::gap_array_append_updates_longest)
-    /// is enabled on the kernel (WR-90).
-    pub fn append_with_kernel(&mut self, other: &Self, k: &Kernel) {
-        self.append_opt_in(other, k.fixes.gap_array_append_updates_longest);
     }
 }
 
@@ -3198,7 +3175,7 @@ mod tests {
         b.add(g(0.5));
         b.append(&a);
         assert_eq!(b.len(), 4);
-        assert_eq!(b.max_gap_index(), Some(0));
+        assert_eq!(b.max_gap_index(), Some(2));
         b.reset();
         assert!(b.is_empty());
         assert!(g(1.0).is_less(&g(2.0)));
@@ -3251,85 +3228,116 @@ mod tests {
         assert_eq!(q, Vec3::ZERO);
     }
 
+    /// Checks finite append maxima, record order, ties and chained appends.
     #[test]
-    fn wr90_gap_array_append_default_retains_upstream_unupdated_index() {
-        let g = |l: f64| {
-            Gap::from(VertexEdgeGap {
-                gap_3d: l,
-                ..VertexEdgeGap::new()
-            })
-        };
-        let mut a = GapArray::new();
-        a.add(g(1.0));
-        a.add(g(3.0));
-        a.add(g(2.0));
-        assert_eq!(a.max_gap_index(), Some(1));
-        assert_eq!(a.max_gap_length(), 3.0);
+    fn wr90_default_append_matches_scanned_maximum() {
+        /// Builds an input through the ordinary insertion API, without appending.
+        fn array(lengths: &[f64]) -> GapArray {
+            let mut result = GapArray::new();
+            for &length in lengths {
+                result.add(Gap::from(VertexEdgeGap {
+                    gap_3d: length,
+                    ..VertexEdgeGap::new()
+                }));
+            }
+            result
+        }
+        /// Independently scans stored records rather than trusting their maximum cache.
+        fn check(array: &GapArray, expected: &[f64]) {
+            let lengths: Vec<_> = (0..array.len())
+                .map(|i| array.get(i).unwrap().length())
+                .collect();
+            assert_eq!(lengths, expected);
+            let mut max = None;
+            for (index, &length) in lengths.iter().enumerate() {
+                assert!(length.is_finite() && length >= 0.0);
+                if max.is_none_or(|(_, previous)| length > previous) {
+                    max = Some((index, length));
+                }
+            }
+            assert_eq!(array.max_gap_index(), max.map(|(index, _)| index));
+            assert_eq!(
+                array.max_gap_length(),
+                max.map_or(0.0, |(_, length)| length)
+            );
+        }
 
-        // Appending to an array with an existing max gap does not update the max index
-        let mut b = GapArray::new();
-        b.add(g(0.5));
-        b.append(&a);
-        assert_eq!(b.len(), 4);
-        assert_eq!(b.max_gap_index(), Some(0));
-        assert_eq!(b.max_gap_length(), 0.5);
-
-        // Appending to an empty array leaves max_gap_index as None
-        let mut c = GapArray::new();
-        c.append(&a);
-        assert_eq!(c.len(), 3);
-        assert_eq!(c.max_gap_index(), None);
-        assert_eq!(c.max_gap_length(), 0.0);
-
-        // Explicit append_opt_in(other, false) matches default
-        let mut d = GapArray::new();
-        d.add(g(0.5));
-        d.append_opt_in(&a, false);
-        assert_eq!(d.len(), 4);
-        assert_eq!(d.max_gap_index(), Some(0));
-        assert_eq!(d.max_gap_length(), 0.5);
+        let mut dst = array(&[0.5]);
+        let src = array(&[1.0, 3.0, 2.0]);
+        dst.append(&src);
+        check(&dst, &[0.5, 1.0, 3.0, 2.0]);
+        assert_eq!(dst.max_gap_index(), Some(2));
+        let mut empty = array(&[]);
+        empty.append(&src);
+        check(&empty, &[1.0, 3.0, 2.0]);
+        dst.append(&array(&[]));
+        check(&dst, &[0.5, 1.0, 3.0, 2.0]);
+        let mut ties = array(&[0.0, 1e-300, 1e300]);
+        ties.append(&array(&[1e300, 0.0]));
+        check(&ties, &[0.0, 1e-300, 1e300, 1e300, 0.0]);
+        let mut chain_source = array(&[0.0]);
+        chain_source.append(&array(&[1e-300, 1e300]));
+        let mut chain_target = array(&[1.0]);
+        chain_target.append(&chain_source);
+        check(&chain_target, &[1.0, 0.0, 1e-300, 1e300]);
     }
 
+    /// Checks preserved float bits and IEEE-comparison selection against an independent fold.
     #[test]
-    fn wr90_gap_array_append_opt_in_updates_longest_gap() {
-        let g = |l: f64| {
+    fn wr90_append_matches_sequential_add_for_all_float_classes() {
+        /// Constructs a gap carrying the exact requested length.
+        fn gap(length: f64) -> Gap {
             Gap::from(VertexEdgeGap {
-                gap_3d: l,
+                gap_3d: length,
                 ..VertexEdgeGap::new()
             })
-        };
-        let mut a = GapArray::new();
-        a.add(g(1.0));
-        a.add(g(3.0));
-        a.add(g(2.0));
-        assert_eq!(a.max_gap_index(), Some(1));
-
-        // When fix_enabled is true, max_gap_index shifts by old_len
-        let mut b = GapArray::new();
-        b.add(g(0.5));
-        b.append_opt_in(&a, true);
-        assert_eq!(b.len(), 4);
-        assert_eq!(b.max_gap_index(), Some(2));
-        assert_eq!(b.max_gap_length(), 3.0);
-
-        // Kernel flag control: default false retains upstream unupdated index
-        let k_default = Kernel::default();
-        let mut b_def = GapArray::new();
-        b_def.add(g(0.5));
-        b_def.append_with_kernel(&a, &k_default);
-        assert_eq!(b_def.max_gap_index(), Some(0));
-        assert_eq!(b_def.max_gap_length(), 0.5);
-
-        // Kernel flag control: enabled flag updates max gap
-        let mut k_opt = Kernel::default();
-        k_opt.fixes.gap_array_append_updates_longest = true;
-        let mut b_opt = GapArray::new();
-        b_opt.add(g(0.5));
-        b_opt.append_with_kernel(&a, &k_opt);
-        assert_eq!(b_opt.max_gap_index(), Some(2));
-        assert_eq!(b_opt.max_gap_length(), 3.0);
+        }
+        /// Builds each source array without depending on append's cached-summary behavior.
+        fn array(lengths: &[f64]) -> GapArray {
+            let mut array = GapArray::new();
+            for &length in lengths {
+                array.add(gap(length));
+            }
+            array
+        }
+        let cases: &[(&[f64], &[f64])] = &[
+            (&[1.0], &[f64::NAN, 3.0]),
+            (&[f64::NAN], &[1.0, 3.0]),
+            (&[], &[f64::NAN, 3.0]),
+            (&[1.0], &[f64::NAN, f64::NAN]),
+            (&[f64::NEG_INFINITY], &[f64::NAN, f64::INFINITY, 3.0]),
+            (&[f64::INFINITY], &[f64::NEG_INFINITY, f64::INFINITY]),
+            (&[-4.0], &[-2.0, -3.0]),
+            (&[], &[]),
+        ];
+        for &(dst, src) in cases {
+            let mut actual = array(dst);
+            actual.append(&array(src));
+            let lengths: Vec<_> = dst.iter().chain(src).copied().collect();
+            let expected = lengths.iter().copied().enumerate().fold(
+                None,
+                |max: Option<(usize, f64)>, (index, length)| match max {
+                    None => Some((index, length)),
+                    Some((_, current)) if length > current => Some((index, length)),
+                    _ => max,
+                },
+            );
+            assert_eq!(actual.len(), lengths.len());
+            for (index, length) in lengths.iter().enumerate() {
+                assert_eq!(
+                    actual.get(index).unwrap().length().to_bits(),
+                    length.to_bits()
+                );
+            }
+            assert_eq!(actual.max_gap_index(), expected.map(|(index, _)| index));
+            assert_eq!(
+                actual.max_gap_length().to_bits(),
+                expected.map_or(0.0, |(_, length)| length).to_bits()
+            );
+        }
     }
 
+    /// Checks that an empty destination takes the appended array's maximum.
     #[test]
     fn wr90_gap_array_append_to_empty_array() {
         let g = |l: f64| {
@@ -3345,12 +3353,13 @@ mod tests {
         assert_eq!(a.max_gap_index(), Some(1));
 
         let mut b = GapArray::new();
-        b.append_opt_in(&a, true);
+        b.append(&a);
         assert_eq!(b.len(), 3);
         assert_eq!(b.max_gap_index(), Some(1));
         assert_eq!(b.max_gap_length(), 4.0);
     }
 
+    /// Checks that smaller and equal appended maxima retain the earlier selected gap.
     #[test]
     fn wr90_gap_array_append_smaller_or_equal_retains_existing_max() {
         let g = |l: f64| {
@@ -3369,7 +3378,7 @@ mod tests {
         b.add(g(2.0));
         b.add(g(8.0));
         b.add(g(3.0));
-        a.append_opt_in(&b, true);
+        a.append(&b);
         assert_eq!(a.len(), 5);
         assert_eq!(a.max_gap_index(), Some(0));
         assert_eq!(a.max_gap_length(), 10.0);
@@ -3377,12 +3386,13 @@ mod tests {
         // Appending an array with an equal max gap preserves existing earlier max index
         let mut c = GapArray::new();
         c.add(g(10.0));
-        a.append_opt_in(&c, true);
+        a.append(&c);
         assert_eq!(a.len(), 6);
         assert_eq!(a.max_gap_index(), Some(0));
         assert_eq!(a.max_gap_length(), 10.0);
     }
 
+    /// Checks that an empty source preserves both populated and empty destinations.
     #[test]
     fn wr90_gap_array_append_empty_array() {
         let g = |l: f64| {
@@ -3397,13 +3407,13 @@ mod tests {
         assert_eq!(a.max_gap_index(), Some(1));
 
         let empty = GapArray::new();
-        a.append_opt_in(&empty, true);
+        a.append(&empty);
         assert_eq!(a.len(), 2);
         assert_eq!(a.max_gap_index(), Some(1));
         assert_eq!(a.max_gap_length(), 2.0);
 
         let mut empty_target = GapArray::new();
-        empty_target.append_opt_in(&empty, true);
+        empty_target.append(&empty);
         assert!(empty_target.is_empty());
         assert_eq!(empty_target.max_gap_index(), None);
         assert_eq!(empty_target.max_gap_length(), 0.0);

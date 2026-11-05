@@ -182,7 +182,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_vertex_error_diagnostics",
     "flat_corners_test_bits",
     "found_torus_sphere_keep_tested_nurb",
-    "gap_array_append_updates_longest",
     "gap_samples_non_bspline_v_stride",
     "gap_samples_use_trimmed_spans",
     "geometric_g2_continuity",

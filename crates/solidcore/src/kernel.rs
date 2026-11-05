@@ -298,12 +298,6 @@ pub struct UpstreamFixes {
     /// starts at `cu + 1` and extrapolates interior V parameters well beyond `[0.0, 1.0]`
     /// (WR-88). Off by default for pinned C++ parity.
     pub gap_samples_non_bspline_v_stride: bool,
-    /// `SmGapArray::Append` updates the longest-gap index (`m_lMaxGap3d`) when the
-    /// appended array contains a strictly longer gap (or when appending into an empty
-    /// array with a longest gap). Upstream never updates the longest gap on `Append`,
-    /// so the combined array misses any longer gap from the appended array (WR-90).
-    /// Off by default for pinned C++ parity.
-    pub gap_array_append_updates_longest: bool,
     /// `SmTransform::EvaluateBoundingBoxSimple`'s aligned-basis fast path maps parameter
     /// intervals by multiplying by each axis column's length (`|x|`, `|y|`, `|z|`) and
     /// translating by the origin's component along each transformed basis vector

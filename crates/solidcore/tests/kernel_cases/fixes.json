@@ -3,7 +3,6 @@
   "hash_table_grow_preserves_removed_records",
   "gap_samples_use_trimmed_spans",
   "gap_samples_non_bspline_v_stride",
-  "gap_array_append_updates_longest",
   "transform_aligned_bbox_image",
   "curve_loop_start_after_previous_end",
   "bspline_simple_offset_matches_parameterization",
