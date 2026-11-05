@@ -927,3 +927,43 @@ fn physical_material_draft_rejects_invalid_constants_and_stale_edits_atomically(
     assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
     assert_eq!(history, (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision));
 }
+
+/// #12219: on a new engineering property card, an added Density property starts at the
+/// material's assigned density (g/cm³ in kg/m³), and the card's first property brings a User
+/// supplied source with it, so the card can be saved without looking one up first.
+#[test]
+fn a_new_cards_density_takes_the_assigned_density_and_can_be_saved() {
+    let h = fixture();
+    let doc = h.app.session.doc.clone();
+    let mut editor = crate::material_editor::Editor::default();
+    editor.begin(&doc, None, false);
+    let draft = editor.draft.as_mut().unwrap();
+    draft.name = "V4A stainless steel".into();
+    draft.density = "7.85".into();
+    draft.card_enabled = true;
+    draft.card.designation = "1.4401".into();
+    assert!(draft.card.sources.is_empty());
+    draft.card.add_property("density", &draft.density);
+    let density = draft.card.properties.iter().find(|p| p.kind == "density").expect("a density property");
+    assert_eq!(density.values, vec!["7850".to_string()]);
+    assert_eq!(draft.card.sources.len(), 1, "{:?}", draft.card.sources);
+    let source = &draft.card.sources[0];
+    assert_eq!(source.kind, solidcraft_engine::doc::physical_material::SourceKind::UserSupplied);
+    assert_eq!(density.source_id, source.id);
+    assert!(!source.title.trim().is_empty());
+    assert!(draft.command(&doc).is_ok(), "{:?}", draft.command(&doc));
+    // A second property uses the same source; no second source is made.
+    draft.card.add_property("yield_strength", &draft.density);
+    assert_eq!(draft.card.sources.len(), 1);
+    assert!(draft.card.properties.iter().all(|p| p.source_id == source_id(&draft.card)));
+    // Without an assigned density the Density property starts empty, as before.
+    let mut empty = crate::material_editor::Editor::default();
+    empty.begin(&doc, None, false);
+    let draft = empty.draft.as_mut().unwrap();
+    draft.card.add_property("density", &draft.density);
+    assert_eq!(draft.card.properties[0].values, vec![String::new()]);
+}
+
+fn source_id(card: &crate::material_editor::CardDraft) -> String {
+    card.sources.first().map(|s| s.id.clone()).unwrap_or_default()
+}
