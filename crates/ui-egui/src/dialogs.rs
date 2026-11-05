@@ -3179,11 +3179,22 @@ fn missing_pick(error: &str) -> bool {
     awaiting_selection(error) || error.get(..5).is_some_and(|start| start.eq_ignore_ascii_case("pick "))
 }
 
+/// A refusal that is guidance, not a failure of the design, so the dialog offers nothing to
+/// report (#10181): the command is not available here, or the pick is in the sketch already.
+fn context_refusal(app: &SolveApp, d: &Dialog, error: &str) -> bool {
+    already_linked(error) || command_disabled(app, d, error)
+}
+
+/// Project's or Intersect's refusal of a pick the sketch already holds ("already intersected into
+/// this sketch: sketch curve l1"): guidance too, the pick is in the sketch already.
+fn already_linked(error: &str) -> bool {
+    ["already projected into this sketch", "already intersected into this sketch"].iter().any(|k| error.contains(k))
+}
+
 /// A refusal that says the command is not available in this context ("`sketch.project` is not
 /// available right now: no sketch is being edited"): the engine's own `Disabled` refusal for the
-/// command this dialog runs, so the sketch ended or the mode changed under it. Guidance, not a
-/// failure of the design: there is nothing to report (#10181).
-fn context_refusal(app: &SolveApp, d: &Dialog, error: &str) -> bool {
+/// command this dialog runs, so the sketch ended or the mode changed under it.
+fn command_disabled(app: &SolveApp, d: &Dialog, error: &str) -> bool {
     let Some(id) = d.command() else { return false };
     let Some(spec) = solidcraft_engine::find_command(id) else { return false };
     spec.disabled_refusal(&app.session).is_some_and(|refusal| refusal == error)
