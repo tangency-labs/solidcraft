@@ -1,7 +1,7 @@
 //! Bundled IBM Plex interface faces, user overrides, and language-specific system fallbacks
 //! (CJK, Hangul, Thai, Hebrew).
-//! The same definitions are used on desktop and web; the web shell adds Japanese and Chinese
-//! faces on demand.
+//! The same definitions are used on desktop and web; the web shell adds Japanese, Chinese
+//! and Korean faces on demand.
 
 use std::sync::Arc;
 
@@ -185,19 +185,21 @@ pub fn needs_chinese_font(language: &str) -> bool {
     matches!(language, "zh" | "zh-TW")
 }
 
-/// Which on-demand web face a CJK UI language loads: `"zh"`, `"zh-TW"`, or `"ja"` (also for
-/// Korean until a Hangul face ships). `None` when the language uses only the bundled Latin faces.
+/// Which on-demand web face a CJK UI language loads: `"zh"`, `"zh-TW"`, `"ja"`, or `"ko"`.
+/// `None` when the language uses only the bundled Latin faces.
 pub fn web_script_font_kind(language: &str) -> Option<&'static str> {
     match language {
         "zh" => Some("zh"),
         "zh-TW" => Some("zh-TW"),
-        "ja" | "ko" => Some("ja"),
+        "ja" => Some("ja"),
+        "ko" => Some("ko"),
         _ => None,
     }
 }
 
 /// Whether `text` has characters only the CJK fallback draws: kana, CJK ideographs and their
-/// punctuation, and full-width forms. Hangul is left out: the web app's font has none.
+/// punctuation, and full-width forms. This watches for the Japanese face; the Korean
+/// interface loads its Hangul face separately.
 pub fn has_cjk(text: &str) -> bool {
     text.chars().any(|c| {
         matches!(u32::from(c),
@@ -267,15 +269,38 @@ pub fn install_cjk_font_for(ctx: &egui::Context, bytes: Vec<u8>, language: &str)
 }
 
 /// Install the web shell's on-demand Japanese and/or Chinese faces, ordered for `language`.
-/// Returns false only when at least one byte blob was supplied and none of them parsed as a font.
+/// Korean requires [`install_web_script_fonts_with_hangul`] and a Hangul face.
+/// Returns false for Korean, or when at least one face was supplied and none parses.
 pub fn install_web_script_fonts(ctx: &egui::Context, cjk: Option<Vec<u8>>, chinese: Option<Vec<u8>>, language: &str) -> bool {
-    if cjk.is_none() && chinese.is_none() {
+    install_web_script_fonts_with_hangul(ctx, cjk, chinese, None, language)
+}
+
+/// Whether a downloaded Korean face parses and draws the Korean language name.
+/// A valid Japanese or Latin face must not mark the Korean download as ready.
+pub fn valid_web_hangul_font(bytes: &[u8]) -> bool {
+    ttf_parser::Face::parse(bytes, 0).is_ok_and(|face| "한국어".chars().all(|c| face.glyph_index(c).is_some()))
+}
+
+/// Install downloaded Japanese, Chinese and Korean faces, ordered for `language`.
+/// Existing interface, symbol and emoji faces remain available for glyphs those faces lack.
+/// Returns false when no supplied face parses, or a Korean UI lacks a valid Hangul face.
+pub fn install_web_script_fonts_with_hangul(
+    ctx: &egui::Context,
+    cjk: Option<Vec<u8>>,
+    chinese: Option<Vec<u8>>,
+    hangul: Option<Vec<u8>>,
+    language: &str,
+) -> bool {
+    if web_script_font_kind(language) == Some("ko") && !hangul.as_deref().is_some_and(valid_web_hangul_font) {
+        return false;
+    }
+    if cjk.is_none() && chinese.is_none() && hangul.is_none() {
         setup_fonts_for(ctx, language, "");
         return true;
     }
     let mut fonts = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap_or_else(base_font_definitions);
     // Drop prior script faces so a language change can replace them without stacking duplicates.
-    for name in [CJK_FALLBACK, CHINESE_FALLBACK] {
+    for name in [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK] {
         fonts.font_data.remove(name);
         for family in all_families() {
             if let Some(list) = fonts.families.get_mut(&family) {
@@ -284,14 +309,14 @@ pub fn install_web_script_fonts(ctx: &egui::Context, cjk: Option<Vec<u8>>, chine
         }
     }
     let mut any = false;
-    for (name, bytes) in [(CJK_FALLBACK, cjk), (CHINESE_FALLBACK, chinese)] {
+    for (name, bytes) in [(CJK_FALLBACK, cjk), (CHINESE_FALLBACK, chinese), (HANGUL_FALLBACK, hangul)] {
         let Some(bytes) = bytes else { continue };
         any = true;
         if let Some(next) = with_fallback(fonts.clone(), name, bytes) {
             fonts = next;
         }
     }
-    if any && !fonts.font_data.contains_key(CJK_FALLBACK) && !fonts.font_data.contains_key(CHINESE_FALLBACK) {
+    if any && ![CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK].iter().any(|name| fonts.font_data.contains_key(*name)) {
         return false;
     }
     if needs_cjk_font(language)
@@ -1021,7 +1046,7 @@ fn web_font_definitions(ui_font: &str, previous: Option<FontDefinitions>) -> Fon
         fonts = with_ui_font(fonts, font);
     }
     if let Some(prev) = previous {
-        for name in [CJK_FALLBACK, CHINESE_FALLBACK] {
+        for name in [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK] {
             if let Some(data) = prev.font_data.get(name).cloned() {
                 fonts.font_data.insert(name.to_owned(), data);
                 for family in all_families() {
@@ -1445,7 +1470,7 @@ mod tests {
             assert_eq!(list.last().map(String::as_str), Some(SYMBOL_FALLBACK), "{language} ends with the symbol fallback: {list:?}");
             assert!(list.iter().position(|name| name == CJK_FALLBACK).is_some_and(|at| at > 0), "{language} keeps CJK behind Latin: {list:?}");
         }
-        for language in ["ja", "zh", "ko"] {
+        for language in ["ja", "zh"] {
             let list = installed(language);
             assert_eq!(list.first().map(String::as_str), Some(CJK_FALLBACK), "{language} leads with the CJK face: {list:?}");
         }
@@ -1610,6 +1635,104 @@ mod tests {
         let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
         output.textures_delta.clear();
         assert!(ctx.fonts_mut(|f| f.has_glyphs(&semibold(14.0), "设置")));
+    }
+
+    #[test]
+    fn korean_web_interface_requests_its_own_face_and_keeps_the_saved_choice_on_failure() {
+        assert_eq!(web_script_font_kind("ko"), Some("ko"));
+        let mut loader = CjkFontLoader::default();
+        let mut language = "ja".to_owned();
+        assert!(loader.tick(&mut language, false));
+        loader.finished(true, &mut language);
+        language = "ko".to_owned();
+        assert!(loader.tick(&mut language, false), "an installed Japanese face cannot satisfy Korean");
+        loader.finished(false, &mut language);
+        assert_eq!(language, "en");
+        assert_eq!(loader.persisted_language(&language), "ko");
+        assert!(!loader.tick(&mut language, false), "failed downloads do not retry each frame");
+    }
+
+    #[test]
+    fn the_korean_web_face_covers_the_catalogs_hangul() {
+        let bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/ibm-plex-sans-kr/IBMPlexSansKR-Regular.ttf"));
+        let face = ttf_parser::Face::parse(bytes, 0).unwrap();
+        let catalog: std::collections::BTreeMap<String, String> =
+            serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/locales/ko.json"))).unwrap();
+        let hangul: std::collections::BTreeSet<char> = catalog
+            .values()
+            .flat_map(|text| text.chars())
+            .filter(|c| matches!(u32::from(*c), 0x1100..=0x11FF | 0x3130..=0x318F | 0xA960..=0xA97F | 0xAC00..=0xD7A3 | 0xD7B0..=0xD7FF))
+            .collect();
+        assert!(!hangul.is_empty(), "the real Korean catalog is checked");
+        for c in hangul {
+            assert!(face.glyph_index(c).is_some(), "Korean web face lacks {c:?}");
+        }
+    }
+
+    #[test]
+    fn web_script_faces_survive_korean_language_switches_and_keep_symbol_fallbacks() {
+        let korean = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/ibm-plex-sans-kr/IBMPlexSansKR-Regular.ttf")).to_vec();
+        let chinese = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/craft-ui-sc/CraftUI-SC.otf")).to_vec();
+        let japanese = japanese_font_bytes();
+        let baseline = test_context();
+        let _ = baseline.run_ui(egui::RawInput::default(), |_| {});
+        let ctx = test_context();
+        for (language, primary) in
+            [("ko", HANGUL_FALLBACK), ("ja", CJK_FALLBACK), ("zh", CHINESE_FALLBACK), ("ko", HANGUL_FALLBACK), ("en", "plex-sans")]
+        {
+            assert!(install_web_script_fonts_with_hangul(&ctx, Some(japanese.clone()), Some(chinese.clone()), Some(korean.clone()), language));
+            let installed = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap();
+            for name in [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, "plex-sans", SYMBOL_FALLBACK] {
+                assert!(installed.font_data.contains_key(name), "{language} retains {name}");
+            }
+            assert_eq!(installed.families[&FontFamily::Proportional].first().map(String::as_str), Some(primary));
+            for family in all_families() {
+                let names = &installed.families[&family];
+                for name in [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK] {
+                    assert_eq!(names.iter().filter(|n| n.as_str() == name).count(), 1, "no duplicated {name}");
+                }
+            }
+            let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
+            for family in all_families() {
+                let id = FontId::new(14.0, family);
+                assert!(
+                    ctx.fonts_mut(|f| f.has_glyphs(&id, "내 도면 한국어 설정 저장 Ø › ⌘")),
+                    "{language} keeps Hangul and existing symbol coverage"
+                );
+                // Preserve every symbol the bundled baseline draws. The baseline does not
+                // contain every possible symbol (for example, the option-key glyph).
+                for c in "Ø›⌘⌥".chars() {
+                    let text = c.to_string();
+                    let had = baseline.fonts_mut(|f| f.has_glyphs(&id, &text));
+                    assert!(!had || ctx.fonts_mut(|f| f.has_glyphs(&id, &text)), "{language} lost baseline glyph {c:?}");
+                }
+            }
+        }
+        let ctx = test_context();
+        assert!(!install_web_script_fonts_with_hangul(&ctx, None, None, Some(b"not a font".to_vec()), "ko"));
+    }
+
+    #[test]
+    fn only_a_parseable_hangul_face_can_mark_the_korean_download_ready() {
+        let korean = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/ibm-plex-sans-kr/IBMPlexSansKR-Regular.ttf"));
+        assert!(valid_web_hangul_font(korean));
+        assert!(!valid_web_hangul_font(b"not a font"));
+        assert!(!valid_web_hangul_font(&japanese_font_bytes()));
+        assert!(!valid_web_hangul_font(&latin_font_bytes()));
+    }
+
+    #[test]
+    fn other_cached_web_faces_cannot_mask_a_missing_or_invalid_korean_face() {
+        let japanese = japanese_font_bytes();
+        let chinese = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/craft-ui-sc/CraftUI-SC.otf")).to_vec();
+        for korean in [None, Some(b"not a font".to_vec()), Some(japanese.clone())] {
+            let ctx = test_context();
+            assert!(install_web_script_fonts_with_hangul(&ctx, Some(japanese.clone()), Some(chinese.clone()), None, "ja"));
+            assert!(
+                !install_web_script_fonts_with_hangul(&ctx, Some(japanese.clone()), Some(chinese.clone()), korean, "ko"),
+                "Korean requires its own valid Hangul face even when other script faces are cached"
+            );
+        }
     }
 
     #[test]

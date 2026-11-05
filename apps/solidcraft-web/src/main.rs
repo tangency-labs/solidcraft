@@ -338,6 +338,7 @@ mod web {
     }
 
     const JAPANESE_FONT_PATH: &str = "./fonts/BIZUDPGothic-Regular.ttf";
+    const KOREAN_FONT_PATH: &str = "./fonts/IBMPlexSansKR-Regular.ttf";
     const CHINESE_SC_FONT_PATH: &str = "./fonts/CraftUI-SC.otf";
     const CHINESE_TC_FONT_PATH: &str = "./fonts/CraftUI-TC.otf";
 
@@ -366,9 +367,11 @@ mod web {
         cjk_bytes: Option<Vec<u8>>,
         /// The fetched Chinese font's bytes (Simplified or Traditional for this session).
         chinese_bytes: Option<Vec<u8>>,
+        /// The fetched Korean face, kept independently of Japanese and Chinese faces.
+        hangul_bytes: Option<Vec<u8>>,
         /// Which Chinese face `chinese_bytes` is: `"zh"` or `"zh-TW"`.
         chinese_kind: Option<&'static str>,
-        /// Kind requested by the in-flight fetch (`"ja"`, `"zh"`, or `"zh-TW"`).
+        /// Kind requested by the in-flight fetch (`"ja"`, `"ko"`, `"zh"`, or `"zh-TW"`).
         font_fetch_kind: Option<&'static str>,
         /// The language the fonts were last set up for (a CJK UI leads with the CJK face).
         font_language: String,
@@ -939,6 +942,7 @@ mod web {
                 Some("zh") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh"),
                 Some("zh-TW") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh-TW"),
                 Some("ja") => self.cjk_bytes.is_some(),
+                Some("ko") => self.hangul_bytes.is_some(),
                 _ => true,
             }
         }
@@ -950,8 +954,17 @@ mod web {
             if let Some(res) = done {
                 let kind = self.font_fetch_kind.take();
                 let installed = match res {
+                    Ok((path, bytes)) if kind == Some("ko") && !solidcraft_ui_egui::fonts::valid_web_hangul_font(&bytes) => {
+                        // Reject a corrupt or wrong-script response before it becomes ready.
+                        self.hangul_bytes = None;
+                        log::warn!("invalid Korean script font from {path}");
+                        false
+                    }
                     Ok((path, bytes)) => {
                         match kind {
+                            Some("ko") => {
+                                self.hangul_bytes = Some(bytes);
+                            }
                             Some("zh") => {
                                 self.chinese_bytes = Some(bytes);
                                 self.chinese_kind = Some("zh");
@@ -969,6 +982,7 @@ mod web {
                     }
                     Err(err) => {
                         let path = match kind {
+                            Some("ko") => KOREAN_FONT_PATH,
                             Some("zh") => CHINESE_SC_FONT_PATH,
                             Some("zh-TW") => CHINESE_TC_FONT_PATH,
                             _ => JAPANESE_FONT_PATH,
@@ -998,13 +1012,19 @@ mod web {
         }
 
         /// Set up the UI fonts for the live language, keeping fetched script fonts as fallbacks
-        /// (Chinese leads a Chinese UI; see [`solidcraft_ui_egui::fonts::install_web_script_fonts`]).
+        /// (see [`solidcraft_ui_egui::fonts::install_web_script_fonts_with_hangul`]).
         fn apply_fonts(&mut self, ctx: &egui::Context) {
             let effective = solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language);
-            if self.cjk_bytes.is_none() && self.chinese_bytes.is_none() {
+            if self.cjk_bytes.is_none() && self.chinese_bytes.is_none() && self.hangul_bytes.is_none() {
                 solidcraft_ui_egui::fonts::setup_fonts(ctx);
             } else {
-                solidcraft_ui_egui::fonts::install_web_script_fonts(ctx, self.cjk_bytes.clone(), self.chinese_bytes.clone(), effective);
+                solidcraft_ui_egui::fonts::install_web_script_fonts_with_hangul(
+                    ctx,
+                    self.cjk_bytes.clone(),
+                    self.chinese_bytes.clone(),
+                    self.hangul_bytes.clone(),
+                    effective,
+                );
             }
             self.font_language = effective.to_owned();
         }
@@ -1019,6 +1039,7 @@ mod web {
 
         fn fetch_font(&mut self, ctx: &egui::Context, kind: &'static str) {
             let path = match kind {
+                "ko" => KOREAN_FONT_PATH,
                 "zh" => CHINESE_SC_FONT_PATH,
                 "zh-TW" => CHINESE_TC_FONT_PATH,
                 _ => JAPANESE_FONT_PATH,
@@ -1267,6 +1288,7 @@ mod web {
                             font_result: Rc::new(std::cell::RefCell::new(None)),
                             cjk_bytes: None,
                             chinese_bytes: None,
+                            hangul_bytes: None,
                             chinese_kind: None,
                             font_fetch_kind: None,
                             font_language,
