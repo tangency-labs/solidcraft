@@ -1688,3 +1688,30 @@ fn assistant_toggle_is_refused_headlessly_without_changing_the_document() {
     let spec = crate::find_command("ui.assistant").unwrap();
     assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("Ctrl+Shift+A"), "", false));
 }
+
+#[test]
+fn reorder_reports_where_the_feature_is_or_why_it_did_not_move() {
+    // #12140: a reorder never reports success while the feature stays put without saying so.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [50, 0, 0], "operation": "new_body", "name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0], [10, 10], [0, 10]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "new_body", "name": "Pad"}));
+    let names = |s: &Session| s.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    // A position past the end, where the feature already is: nothing moved, and the note says why.
+    let out = run(&mut s, "timeline.reorder", json!({"feature": "Pad", "position": 9}));
+    assert_eq!((out["position"].as_u64(), out["from"].as_u64(), out["moved"].as_bool()), (Some(2), Some(2), Some(false)));
+    assert!(out["note"].as_str().is_some_and(|n| n.contains("nothing moved") && n.contains("past the end")), "{out}");
+    // Ahead of its own sketch: refused, naming the cause.
+    let e = s.execute("timeline.reorder", &json!({"feature": "Pad", "position": 0})).unwrap_err().to_string();
+    assert!(e.contains("before something it uses") && e.contains("move that earlier first"), "{e}");
+    assert_eq!(names(&s), ["Block", "Profile", "Pad"], "a refused move leaves the order");
+    // Moving the sketch first lets the extrude follow; the reply gives the real index.
+    let out = run(&mut s, "timeline.reorder", json!({"feature": "Profile", "position": 0}));
+    assert_eq!((out["position"].as_u64(), out["from"].as_u64(), out["moved"].as_bool()), (Some(0), Some(1), Some(true)));
+    let out = run(&mut s, "timeline.reorder", json!({"feature": "Pad", "position": 1}));
+    assert_eq!((out["position"].as_u64(), out["moved"].as_bool()), (Some(1), Some(true)));
+    assert!(out.get("note").is_none(), "{out}");
+    assert_eq!(names(&s), ["Profile", "Pad", "Block"]);
+}
