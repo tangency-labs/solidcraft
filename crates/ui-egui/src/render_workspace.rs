@@ -2406,6 +2406,7 @@ fn paint_product(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, camera
                 [f32::from(c.r()) / 255.0, f32::from(c.g()) / 255.0, f32::from(c.b()) / 255.0]
             },
             hatch: Default::default(),
+            moving: None,
         });
         crate::blur::viewport(ui.painter(), rect, callback, rect, [background.viewport_top, background.viewport_bottom]);
         Ok(())

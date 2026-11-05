@@ -1673,6 +1673,11 @@ preference_settings! {
     ellipse_axes: bool = true, PAGE_SKETCH;
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
     drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
+    /// While Move's triad drags a component drawn as a layer of its own, what is under the pointer
+    /// is still picked and highlighted, as before #7273. Off by default: such a drag picks nothing,
+    /// so a step neither meshes the dragged bodies where they stand nor looks up the Browser row a
+    /// highlight follows (`drag_layer::holds_pointer`).
+    move_drag_highlights: bool = false, PAGE_TOOLS => check_id("prefs.move_drag_highlights");
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
     disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
 }
