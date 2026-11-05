@@ -461,6 +461,25 @@ fn wrap_angle(a: f64) -> f64 {
     a
 }
 
+/// Put every pierced point where the curve of the other sketch crosses this sketch's plane
+/// (#3599). The point is held there (it is locked), so the solve keeps it: the crossing is a
+/// fact about the two sketches, not something the iteration works out.
+fn place_pierced_points(sk: &mut Sketch) {
+    let places: Vec<(usize, Vec2)> = sk
+        .constraints
+        .iter()
+        .filter_map(|c| match &c.kind {
+            ConstraintKind::Pierce { p, plane, world, .. } => crate::pierce::pierce_point_world(plane, world).map(|at| (*p, at)),
+            _ => None,
+        })
+        .collect();
+    for (p, at) in places {
+        if let Some(point) = sk.points.get_mut(p) {
+            point.pos = at;
+        }
+    }
+}
+
 /// Distance from `p` to the infinite line through `a`, `b` (signed by side).
 fn line_dist(p: Vec2, a: Vec2, b: Vec2) -> f64 {
     let d = b - a;
@@ -595,6 +614,10 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
             out.push((qq - pp).dot(dir) / len);
         }
         Fix { .. } => {}
+        // A pierce holds its point where the other sketch's curve crosses this sketch's
+        // plane: the point is placed there before the solve and kept there (it is
+        // locked), so the constraint adds no rows of its own.
+        Pierce { .. } => {}
         // A distance within convergence tolerance of zero means coincidence: two
         // component rows keep both directions constrained even when the points meet.
         Distance { p, q, value } if value.abs() <= TOL => {
@@ -973,7 +996,7 @@ fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
             Tangent { a, b } => tangent(a, b).to_vec(),
             Smooth { a, b } => vec![C(a), C(b)],
             Symmetric { p, q, l } => vec![P(p), P(q), L(l)],
-            Fix { .. } | OffsetDistance { .. } => vec![],
+            Fix { .. } | OffsetDistance { .. } | Pierce { .. } => vec![],
         },
         Block::TangentAt(_, k, p) => match **k {
             ConstraintKind::Tangent { a, b } if freeform(a) || freeform(b) => vec![P(*p), C(a), C(b)],
@@ -2693,6 +2716,7 @@ fn solve_inner(
     profiling::count(|c| c.solve_calls = c.solve_calls.saturating_add(1));
     sk.prune_patterns();
     sk.refresh_pattern_shapes();
+    place_pierced_points(sk);
     let mut orientation_before = Vec::new();
     for constraint in &sk.constraints {
         if !constraint.driven

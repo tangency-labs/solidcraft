@@ -284,6 +284,16 @@ impl SheetRule {
     }
 }
 
+/// The design parameters a rule's `field` expression `e` reads: outside the rule's own
+/// `thickness`, `Thickness` is the rule's thickness (sheet metal and plastic rules alike).
+pub fn rule_references(field: &str, e: &str) -> Vec<String> {
+    let mut names = expr::references(e);
+    if field != "thickness" {
+        names.retain(|n| n != "Thickness");
+    }
+    names
+}
+
 fn rule_gap() -> String {
     "Thickness".into()
 }
@@ -451,6 +461,9 @@ pub struct RuleValues {
     pub angle_display: AngleDisplay,
 }
 
+/// A sheet rule's thickness is less than this (mm).
+const MAX_SHEET_THICKNESS: f64 = 1e4;
+
 impl Document {
     /// A rule by name, the active one, or the default steel rule.
     pub fn sheet_rule(&self, name: Option<&str>) -> SheetRule {
@@ -461,7 +474,8 @@ impl Document {
             .unwrap_or_else(SheetRule::steel)
     }
 
-    /// Evaluate a rule: `Thickness` in its expressions is the rule's thickness.
+    /// Evaluate a rule: `Thickness` in its expressions is the rule's thickness, even where the
+    /// design has a parameter of that name (#9623); only the rule's `thickness` itself reads it.
     pub fn rule_values(&self, vals: &std::collections::BTreeMap<String, Value>, r: &SheetRule) -> Result<RuleValues> {
         self.rule_values_at(vals, r, None)
     }
@@ -474,11 +488,11 @@ impl Document {
             Some(t) => t,
             None => expr::eval_with(&r.thickness, &look)?.to_kind(Kind::Length)?,
         };
-        if !(t > 0.0 && t < 1e4) {
-            return Err(DocError::Invalid("the sheet thickness must be positive".into()));
+        if !(t > 0.0 && t < MAX_SHEET_THICKNESS) {
+            return Err(DocError::Invalid("the sheet thickness must be more than 0 and less than 10000 mm".into()));
         }
         let with_t = |e: &str, k: Kind| -> Result<f64> {
-            let f = |n: &str| if n == "Thickness" && !vals.contains_key("Thickness") { Ok(Value::length(t)) } else { look(n) };
+            let f = |n: &str| if n == "Thickness" { Ok(Value::length(t)) } else { look(n) };
             expr::eval_with(e, &f)?.to_kind(k)
         };
         let v = RuleValues {
@@ -496,8 +510,12 @@ impl Document {
             angle_display: AngleDisplay::parse(&r.angle_display)
                 .ok_or_else(|| DocError::Invalid(format!("unknown bend angle display `{}` (bend or included)", r.angle_display)))?,
         };
-        if !(0.0..=1.0).contains(&v.k_factor) || v.bend_radius < 0.0 {
-            return Err(DocError::Invalid("the K-factor must be 0…1 and the bend radius positive".into()));
+        // Each value named on its own: a sharp bend (radius 0) is allowed (#9625).
+        if !(0.0..=1.0).contains(&v.k_factor) {
+            return Err(DocError::Invalid("the K-factor must be between 0 and 1".into()));
+        }
+        if !(v.bend_radius >= 0.0) {
+            return Err(DocError::Invalid("the bend radius must not be negative".into()));
         }
         Ok(v)
     }
@@ -2538,6 +2556,123 @@ impl SheetBody {
             .sum()
     }
 
+    /// Include the physical holes that perforation fields leave out of the B-rep measurement.
+    /// `placement` maps this sheet's geometry into the measurement's frame. Hole cylinders
+    /// lie on panels, clear of bends; their volume moments follow each panel's current fold.
+    /// Bounding boxes and B-rep topology are unchanged by these interior holes.
+    pub fn correct_perforation_properties(&self, measured: &mut kernel::BodyMeasure, placement: &Mat) -> Result<()> {
+        let (mut removed, mut area_delta, mut moment_delta) = (0.0, 0.0, Vec3::ZERO);
+        self.visit_perforation_cylinders(placement, |center, volume, area, _| {
+            removed += volume;
+            area_delta += area;
+            // Use distances from the measured centre, including far-away placements.
+            moment_delta += (measured.centroid - center) * volume;
+        })?;
+        if removed == 0.0 {
+            return Ok(());
+        }
+        let volume = measured.volume - removed;
+        let area = measured.area + area_delta;
+        let centroid = measured.centroid + moment_delta / volume;
+        if !(volume.is_finite() && volume > 0.0 && area.is_finite() && area >= 0.0 && centroid.is_finite()) {
+            return Err(DocError::Invalid(format!("invalid perforation physical properties for `{}`", self.body)));
+        }
+        measured.volume = volume;
+        measured.area = area;
+        measured.centroid = centroid;
+        Ok(())
+    }
+
+    /// Remove the same hole cylinders from the inertia spread as from volume and centroid.
+    /// The input and output tensors are at unit density, about their respective centroids.
+    pub fn correct_perforation_mass_properties(&self, measured: &mut solidcraft_geom::MassProperties, placement: &Mat) -> Result<()> {
+        use solidcraft_geom::inertia;
+        let (mut removed, mut moment_delta, mut removed_inertia) = (0.0, Vec3::ZERO, [[0.0; 3]; 3]);
+        self.visit_perforation_cylinders(placement, |center, volume, _, own| {
+            let delta = measured.centroid - center;
+            removed += volume;
+            moment_delta += delta * volume;
+            let about_center = inertia::shifted(&own, volume, delta);
+            for (row, hole) in removed_inertia.iter_mut().zip(about_center) {
+                for (value, h) in row.iter_mut().zip(hole) {
+                    *value += h;
+                }
+            }
+        })?;
+        if removed == 0.0 {
+            return Ok(());
+        }
+        let volume = measured.volume - removed;
+        let delta = moment_delta / volume;
+        let centroid = measured.centroid + delta;
+        let mut tensor = measured.inertia;
+        for (row, hole) in tensor.iter_mut().zip(removed_inertia) {
+            for (value, h) in row.iter_mut().zip(hole) {
+                *value -= h;
+            }
+        }
+        // Move from the old centre to the new one, reversing the parallel-axis term.
+        let tensor = inertia::shifted(&tensor, -volume, delta);
+        if !(volume.is_finite() && volume > 0.0 && centroid.is_finite() && tensor.iter().flatten().all(|v| v.is_finite())) {
+            return Err(DocError::Invalid(format!("invalid perforation inertia for `{}`", self.body)));
+        }
+        measured.volume = volume;
+        measured.centroid = centroid;
+        measured.inertia = tensor;
+        Ok(())
+    }
+
+    /// Analytic cylinders at each panel's current fold, in the requested measurement frame.
+    fn visit_perforation_cylinders(&self, placement: &Mat, mut visit: impl FnMut(Vec3, f64, f64, solidcraft_geom::inertia::Tensor3)) -> Result<()> {
+        if self.perforations.is_empty() {
+            return Ok(());
+        }
+        let invalid = || DocError::Invalid(format!("invalid perforation physical properties for `{}`", self.body));
+        if !(self.t.is_finite() && self.t > 0.0) || placement.iter().flatten().any(|v| !v.is_finite()) {
+            return Err(invalid());
+        }
+        let isometry = |m: &Mat| {
+            let [x, y, z] = [0, 1, 2].map(|i| Vec3::new(m[i][0], m[i][1], m[i][2]));
+            m.iter().flatten().all(|v| v.is_finite())
+                && m[0][3] == 0.0
+                && m[1][3] == 0.0
+                && m[2][3] == 0.0
+                && m[3][3] == 1.0
+                && [x, y, z].iter().all(|a| (a.dot(*a) - 1.0).abs() < 1e-9)
+                && x.dot(y).abs() < 1e-9
+                && x.dot(z).abs() < 1e-9
+                && y.dot(z).abs() < 1e-9
+        };
+        let panels: Vec<_> = self.panels().into_iter().map(|(i, region)| (mat_mul(placement, &self.world(i)), region)).collect();
+        let flat = mat_mul(placement, &self.world(None));
+        if !isometry(&flat) || panels.iter().any(|(world, _)| !isometry(world)) {
+            return Err(DocError::Invalid("not supported yet: perforation physical properties under scale or shear".into()));
+        }
+        for p in &self.perforations {
+            if !([p.diameter, p.pitch, p.margin].iter().all(|v| v.is_finite()) && p.diameter > 0.0 && p.pitch > p.diameter && p.margin >= 0.0) {
+                return Err(invalid());
+            }
+            let holes = self.perforation_holes(p)?;
+            let disk = std::f64::consts::PI * (p.diameter / 2.0).powi(2);
+            let volume = disk * self.t;
+            let area_delta = std::f64::consts::PI * p.diameter * self.t - 2.0 * disk;
+            let radius2 = (p.diameter / 2.0).powi(2);
+            let transverse = volume * (3.0 * radius2 + self.t * self.t) / 12.0;
+            let own = [[transverse, 0.0, 0.0], [0.0, transverse, 0.0], [0.0, 0.0, volume * radius2 / 2.0]];
+            for hole in holes {
+                let world = if self.flat || panels.len() == 1 {
+                    &flat
+                } else {
+                    &panels.iter().find(|(_, region)| region.contains(hole)).ok_or_else(invalid)?.0
+                };
+                let center = apply_point(world, v3(hole) + Vec3::Z * (self.t / 2.0));
+                let rotation = [0, 1, 2].map(|i| [0, 1, 2].map(|j| world[j][i]));
+                visit(center, volume, area_delta, solidcraft_geom::inertia::transformed(&own, &rotation));
+            }
+        }
+        Ok(())
+    }
+
     /// Topology counted by faces and loops: a round hole is one face bounded by two closed circular
     /// edges (one vertex each), where the sewn solid splits it into arcs. Returns the change to
     /// the sewn (faces, edges, vertices).
@@ -3537,7 +3672,11 @@ impl SheetBody {
                 return Err("the gap would cut a panel away".into());
             }
         }
-        // The flat pattern must stay one sheet without overlaps.
+        // The flat pattern must stay one sheet without overlaps: closing must not make the two
+        // overlap, nor add to what either already overlaps of another flange. A flange can lie
+        // over another one in the flat away from this corner (the walls on either side of a
+        // notch's inner corner both unfold into the notch, and a return on one of them lies over
+        // the other), and the corner is still closed then (#8823).
         let [new_a, new_b] = new;
         let pieces = |s: &SheetBody, f: &SheetFlange| {
             let mut v = vec![corners_of(&s.zone(f))];
@@ -3547,13 +3686,19 @@ impl SheetBody {
             v
         };
         let mine = [pieces(self, &new_a), pieces(self, &new_b)];
+        let was = [pieces(self, &fa), pieces(self, &fb)];
         let overlap = |p: &[Vec<Vec2>], q: &[Vec<Vec2>]| p.iter().any(|a| q.iter().any(|b| pieces_overlap(a, b)));
+        let shared = |p: &[Vec<Vec2>], q: &[Vec<Vec2>]| p.iter().map(|a| q.iter().map(|b| convex_overlap(a, b)).sum::<f64>()).sum::<f64>();
+        let perimeter =
+            |p: &[Vec<Vec2>]| p.iter().flat_map(|c| (0..c.len()).filter_map(move |i| Some(c.get(i)?.dist(*c.get((i + 1) % c.len())?)))).sum::<f64>();
         let [mine_a, mine_b] = &mine;
         let clash = overlap(mine_a, mine_b)
             || self.flanges.iter().enumerate().any(|(j, g)| {
                 j != k.a && j != k.b && g.shape.is_none() && {
                     let other = pieces(self, g);
-                    mine.iter().any(|p| overlap(p, &other))
+                    mine.iter().zip(&was).any(|(p, q)| {
+                        overlap(p, &other) && shared(p, &other) > shared(q, &other) + FLAT_SLIVER * perimeter(p).max(perimeter(&other)).max(1.0)
+                    })
                 }
             });
         if clash {

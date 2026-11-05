@@ -584,7 +584,7 @@ fn render_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     );
     ui_kit::completion_text(ui, &text, app.render_workspace.view.completed.is_some());
     if super::ribbon::busy(app) {
-        super::progress_pill(app, ui);
+        super::progress_pill(app, ui, "render:output-progress");
         return;
     }
     ui.horizontal_wrapped(|ui| {
@@ -1218,11 +1218,12 @@ fn reveal_section(app: &mut SolveApp, ui: &mut egui::Ui, section: &'static str) 
     }
 }
 
-fn gpu_status(app: &SolveApp, ui: &mut egui::Ui) {
+fn gpu_status(app: &mut SolveApp, ui: &mut egui::Ui) {
     match &app.render_workspace.path_host {
         super::PathHost::Preparing(_, started) => super::setup_progress(ui, app, *started),
         super::PathHost::Failed(error) => {
             ui_kit::text(ui, &format!("{}: {error}", app.tr("render.gpu_path_failed")), ui_kit::Text::Error("render.gpu_path_failed"));
+            super::retry_crashed_setup(app, ui);
         }
         super::PathHost::NotStarted if app.render_workspace.view.method == ImageMethod::GpuRaytrace => {
             ui_kit::text(ui, app.tr("render.gpu_unavailable"), ui_kit::Text::Note("render.gpu_unavailable"));

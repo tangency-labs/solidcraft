@@ -512,15 +512,127 @@ fn shaft_on_collar() -> Session {
 }
 
 /// Rig 602, ladder 06/004: a thread on a shaft ran a pitch past both ends of its face, into the
-/// collar below as into the air above. At a shoulder it stops with its widest part clear of it:
-/// the collar keeps its whole π 8² 10, and the groove takes (25 - w)/P turns, w its half width
-/// (a square stop inside material takes exactly its length over P, the section being symmetric).
+/// collar below as into the air above. It runs down to the shoulder and is trimmed at its plane
+/// (#11610): the collar keeps its whole π 8² 10, and the groove takes 25/P turns, each slice of
+/// the shaft along the axis losing the same.
 #[test]
-fn a_thread_stops_clear_of_a_shoulder() {
+fn a_thread_runs_down_to_a_shoulder_and_leaves_it_whole() {
     let mut s = shaft_on_collar();
     run(&mut s, "solid.thread", json!({"face": [5, 0, 25], "designation": "M10", "modeled": true}));
+    let want = PI * 64.0 * 10.0 + PI * 25.0 * 25.0 - 25.0 / 1.5 * ext_turn(10.0, 1.5, 5.0);
+    let got = exact_volume(&s, "Part");
+    assert!((got - want).abs() < want * 2e-4, "{got} vs {want}");
+}
+
+/// The volume of a body's part between two heights along Z, within a quadrant of X and Y when
+/// given (their signs).
+fn volume_between(s: &Session, b: &str, (z0, z1): (f64, f64), quadrant: Option<(bool, bool)>) -> f64 {
+    let st = s.model.state();
+    let mut part = st.body(b).unwrap().body.clone();
+    let on = |origin: Vec3, normal: Vec3| solidcore_record::Plane::from_normal(origin, normal.normalized().unwrap()).unwrap();
+    let z = Vec3::new(0.0, 0.0, 1.0);
+    let mut cuts = vec![(on(Vec3::new(0.0, 0.0, z0), z), true), (on(Vec3::new(0.0, 0.0, z1), z), false)];
+    if let Some((x, y)) = quadrant {
+        cuts.push((on(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0)), x));
+        cuts.push((on(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0)), y));
+    }
+    for (plane, positive) in cuts {
+        part = solidcraft_kernel::half_space(&part, &plane, positive).unwrap().0.unwrap();
+    }
+    solidcraft_kernel::measure(&part).unwrap().volume
+}
+
+/// #11610: a boss standing on a flat plate. The groove reaches the plate at every angle of the
+/// last turn, wherever the helix lands on it (each height a different gap under a pitch): a thin
+/// slice on the plate has lost as much as any slice of the thread, a pitch's slice as much in each
+/// quadrant (the uncut block of the old stop sat in some of them), and the plate is whole. Before,
+/// the last pitch kept up to a whole turn's groove uncut.
+#[test]
+fn a_thread_reaches_a_flat_shoulder_at_every_angle_and_leaves_it_whole() {
+    let (p, t, turn) = (1.5, 6.0, ext_turn(10.0, 1.5, 5.0));
+    let per_mm = PI * 25.0 - turn / p;
+    for (h, extra) in [
+        (16.0, json!({})),
+        (16.45, json!({})),
+        (16.6, json!({})),
+        (16.9, json!({})),
+        (17.4, json!({})),
+        (16.0, json!({"hand": "left"})),
+        (16.6, json!({"tip": "both"})),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [-20, -20, 0], "length": 40, "width": 40, "height": t, "body_name": "Part"}));
+        run(&mut s, "solid.cylinder", json!({"base": [0, 0, t], "radius": 5, "height": h, "operation": "join", "targets": ["Part"]}));
+        let mut ask = json!({"face": [5, 0, t + h / 2.0], "designation": "M10", "modeled": true});
+        if let (Some(a), Value::Object(e)) = (ask.as_object_mut(), &extra) {
+            a.extend(e.clone());
+        }
+        run(&mut s, "solid.thread", ask);
+        let name = format!("h {h} {extra}");
+        assert!(s.model.state().body("Part").unwrap().body.validity().is_empty(), "{name}");
+        let plate = volume_between(&s, "Part", (-1.0, t), None);
+        assert!((plate - 1600.0 * t).abs() < 1e-6 * 1600.0 * t, "{name}: the plate lost {} mm³", 1600.0 * t - plate);
+        let thin = volume_between(&s, "Part", (t, t + 0.1 * p), None);
+        let want = per_mm * 0.1 * p;
+        assert!((thin - want).abs() < want * 2e-3, "{name}: the slice on the plate is {thin}, not {want}");
+        for quadrant in [(true, true), (true, false), (false, true), (false, false)] {
+            let got = volume_between(&s, "Part", (t, t + p), Some(quadrant));
+            let want = per_mm * p / 4.0;
+            assert!((got - want).abs() < want * 2e-3, "{name}: {quadrant:?} of the last pitch is {got}, not {want}");
+        }
+    }
+}
+
+/// #11610: where a shoulder is not flat. A fillet or a chamfer at the shaft's base stays whole, the
+/// groove trimmed where the face ends above it. A shoulder that rises back along the face (a
+/// slanted plate, a boss on a round body) would be cut by a groove running to the plane of the
+/// face's lowest point, so the groove keeps its square stop there. Nothing here fails.
+#[test]
+fn a_thread_at_a_shoulder_that_is_not_flat_still_builds() {
+    let (p, turn) = (1.5, ext_turn(10.0, 1.5, 5.0));
+    let plate = |s: &mut Session| {
+        run(s, "solid.box", json!({"corner": [-20, -20, 0], "length": 40, "width": 40, "height": 6, "body_name": "Part"}));
+        run(s, "solid.cylinder", json!({"base": [0, 0, 6], "radius": 5, "height": 16, "operation": "join", "targets": ["Part"]}));
+    };
+    for finish in [("solid.fillet", json!({"edges": [[5, 0, 6]], "radius": 1})), ("solid.chamfer", json!({"edges": [[5, 0, 6]], "distance": 1}))] {
+        let mut s = Session::default();
+        plate(&mut s);
+        run(&mut s, finish.0, finish.1);
+        let (base, shaft) = (volume_between(&s, "Part", (-1.0, 7.0), None), exact_volume(&s, "Part"));
+        run(&mut s, "solid.thread", json!({"face": [5, 0, 15], "designation": "M10", "modeled": true}));
+        assert!(s.model.state().body("Part").unwrap().body.validity().is_empty(), "{}", finish.0);
+        let left = volume_between(&s, "Part", (-1.0, 7.0), None);
+        assert!((left - base).abs() < 1e-6 * base, "{}: the base lost {} mm³", finish.0, base - left);
+        let (got, want) = (exact_volume(&s, "Part"), shaft - 15.0 / p * turn);
+        assert!((got - want).abs() < want * 2e-4, "{}: {got} vs {want}", finish.0);
+    }
+    let rising = [
+        vec![("solid.cylinder", json!({"base": [0, 0, 0], "axis": [0.2, 0, 1], "radius": 20, "height": 6, "body_name": "Part"}))],
+        vec![("solid.cylinder", json!({"base": [0, -20, 0], "axis": [0, 1, 0], "radius": 10, "height": 40, "body_name": "Part"}))],
+    ];
+    for cmds in rising {
+        let mut s = Session::default();
+        for (c, ask) in cmds {
+            run(&mut s, c, ask);
+        }
+        run(&mut s, "solid.cylinder", json!({"base": [0, 0, 2], "radius": 5, "height": 26, "operation": "join", "targets": ["Part"]}));
+        let before = exact_volume(&s, "Part");
+        run(&mut s, "solid.thread", json!({"face": [5, 0, 20], "designation": "M10", "modeled": true}));
+        assert!(s.model.state().body("Part").unwrap().body.validity().is_empty());
+        assert!(exact_volume(&s, "Part") < before);
+    }
+}
+
+/// #11610: the trim is for a thread that runs the whole face. A length stopping short of the
+/// shoulder still stops there, however near.
+#[test]
+fn a_thread_of_some_length_stops_where_it_is_told_short_of_a_shoulder() {
     let (p, w) = (1.5, ext_half_width(10.0, 1.5));
-    let want = PI * 64.0 * 10.0 + PI * 25.0 * 25.0 - (25.0 - w) / p * ext_turn(10.0, p, 5.0);
+    let mut s = shaft_on_collar();
+    let before = exact_volume(&s, "Part");
+    run(&mut s, "solid.thread", json!({"face": [5, 0, 25], "designation": "M10", "length": 24.6, "modeled": true}));
+    // Its end is within half a pitch of the shoulder: the stop stays clear of it.
+    let want = before - (24.6f64).min(25.0 - w) / p * ext_turn(10.0, p, 5.0);
     let got = exact_volume(&s, "Part");
     assert!((got - want).abs() < want * 2e-4, "{got} vs {want}");
 }
@@ -528,7 +640,7 @@ fn a_thread_stops_clear_of_a_shoulder() {
 /// A d10 boss (z t..t+16) on a plate t thick, threaded M10: the plate's top is the shoulder.
 /// The groove, with or without its runout, stays on the boss: the plate keeps all of itself
 /// (what lies below z = t after the boss is cut away), and without a runout the boss loses
-/// (16 - w)/P turns, as at a collar. The owner's bug: built as the app builds it (a rounded
+/// 16/P turns, as at a collar. The owner's bug: built as the app builds it (a rounded
 /// plate, a circle sketched on its top face and extruded with Join), a plate thinner than 1.5 P
 /// had no material where the free-end test looked (1 to 1.5 pitches past the face), so its top
 /// was taken for a free end and the overrun cut a pitch into it.
@@ -562,10 +674,10 @@ fn a_thread_on_a_boss_never_cuts_into_the_plate_below() {
         exact_volume(&s, "Body1")
     };
     let plate = |t: f64| (40.0 * 40.0 - (4.0 - PI) * 25.0) * t;
-    let (p, w) = (1.5, ext_half_width(10.0, 1.5));
+    let p = 1.5;
     for t in [6.0, 1.0] {
         let s = boss(t, json!({}));
-        let want = plate(t) + PI * 25.0 * 16.0 - (16.0 - w) / p * ext_turn(10.0, p, 5.0);
+        let want = plate(t) + PI * 25.0 * 16.0 - 16.0 / p * ext_turn(10.0, p, 5.0);
         let got = exact_volume(&s, "Body1");
         assert!((got - want).abs() < want * 2e-4, "plate {t}: {got} vs {want}");
         let left = plate_left(s, t);
@@ -915,10 +1027,9 @@ fn a_chamfered_tip_tapers_the_last_teeth() {
         "solid.thread",
         json!({"face": [5, 0, 25], "designation": "M10", "tip": "both", "chamfer_angle": "30 deg", "chamfer_depth": 0.5, "modeled": true}),
     );
-    let w = ext_half_width(10.0, 1.5);
     let rf = 4.5;
     let slope = 30f64.to_radians().tan();
-    let want = PI * 64.0 * 10.0 + PI * 25.0 * w + m10_stock(10.0 + w, 35.0, |z| 5f64.min(rf + (35.0 - z) * slope));
+    let want = PI * 64.0 * 10.0 + m10_stock(10.0, 35.0, |z| 5f64.min(rf + (35.0 - z) * slope));
     let got = exact_volume(&s, "Part");
     assert!((got - want).abs() < want * 1e-4, "{got} vs {want}");
     // Internal threads take a countersink instead.
@@ -1004,7 +1115,8 @@ fn a_runout_fades_the_groove_out_before_the_shoulder() {
     let (p, w) = (1.5, ext_half_width(10.0, 1.5));
     let root = 5.0 - 5.0 * p * 3f64.sqrt() / 16.0;
     let h = 5.0 - root + 0.05 * p;
-    let turns = (35.0 - 10.0 - 2.0 * w) / p;
+    // Trimmed at the bottom collar's plane, stopped clear of the top one for its runout.
+    let turns = (35.0 - 10.0 - w) / p;
     for (ease, r_out) in [(json!("short"), 1.25), (json!("standard"), 2.5), (json!("1 mm"), 1.0 / 1.5)] {
         let mut s = shaft_on_collar();
         run(&mut s, "solid.cylinder", json!({"base": [0, 0, 35], "radius": 8, "height": 10, "operation": "join", "targets": ["Part"]}));

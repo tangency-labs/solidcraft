@@ -582,6 +582,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     let wheel_inside = inside
         || (ui.is_enabled()
             && !crate::value_step::enabled(ui.ctx())
+            && !hover.is_some_and(|p| crate::dim_view::window::covers(ui.ctx(), p))
             && hover.is_some_and(|p| {
                 rect.contains(p)
                     && !axes.contains(p)
@@ -747,6 +748,23 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // floating shell card that disables the underlying egui response.
     let captured_orbit = app.viewport.orbit_from.is_some() && button.is_some();
     let dragging = resp.dragged() || (inside && button.is_some()) || captured_orbit;
+    // A middle or right drag keeps the mode it started with until its button is released, as a
+    // left one does (`primary_nav`): letting go of Shift partway through a Shift+middle orbit
+    // doesn't turn the rest into a pan (#9557). Off in Preferences, the keys held decide on every
+    // frame, as before.
+    let button_mode = match button {
+        Some(b) if dragging && app.viewport.axis_drag.is_none() => {
+            let kept = app.viewport.button_nav.filter(|(held, _)| *held == b && app.preferences.nav_drag_keeps_mode);
+            let mode = kept.map_or_else(|| crate::prefs::nav_mode(app, b, mods), |(_, mode)| mode);
+            app.viewport.button_nav = Some((b, mode));
+            mode
+        }
+        Some(_) => None,
+        None => {
+            app.viewport.button_nav = None;
+            None
+        }
+    };
     // Without orbit (a flat page), bindings that orbit do nothing.
     let allowed = |m: NavMode| caps.orbit || m != NavMode::Orbit;
     let motion = modifier_motion(app, ui, inside, hover, mods, picking).filter(|(m, _)| allowed(*m));
@@ -755,7 +773,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         .or_else(|| {
             if dragging && app.viewport.axis_drag.is_none() {
                 match button {
-                    Some(b) => crate::prefs::nav_mode(app, b, mods),
+                    Some(_) => button_mode,
                     // A press held still that opened Select Other stays its own: egui calls it a
                     // drag after 0.8 s, and moving to a row must not turn the view under the list.
                     None if primary_down && !crate::select_other::is_open(app) => primary_nav,
@@ -817,7 +835,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
                     let press = ui.input(|i| i.pointer.press_origin());
                     let anchor = model_zoom_anchor(app, rect, press.or(hover), caps.orbit);
                     let sign = if crate::prefs::nav_preset(&app.preferences.nav).reverse_drag_zoom { -1.0 } else { 1.0 };
-                    app.cam.zoom_at((f64::from(delta.y) * 0.01 * sign).exp(), anchor);
+                    app.cam.zoom_at((f64::from(delta.y) * 0.01 * sign * crate::prefs::zoom_sign(app)).exp(), anchor);
                 }
                 _ => {}
             }
@@ -1905,6 +1923,84 @@ mod tests {
         }
         assert!(scanned > 50, "the source tree was scanned ({scanned} files)");
         assert!(offenders.is_empty(), "camera input outside navigation::handle; call it instead:\n{}", offenders.join("\n"));
+    }
+
+    /// Reverse zoom must affect mouse drags as well as the wheel (#10354).
+    #[test]
+    fn drag_zoom_respects_reverse_on_every_canvas() {
+        use crate::prefs::{NAV_PRESETS, NavButton};
+        use egui::{Event, Modifiers, PointerButton, pos2, vec2};
+        use serde_json::json;
+
+        let mut bindings = Vec::new();
+        for preset in NAV_PRESETS {
+            for binding in preset.bindings.iter().filter(|binding| binding.mode == super::NavMode::Zoom) {
+                let button = match binding.button {
+                    NavButton::Left => PointerButton::Primary,
+                    NavButton::Middle => PointerButton::Middle,
+                    NavButton::Right => PointerButton::Secondary,
+                };
+                let keys = binding.keys;
+                let mods = Modifiers { shift: keys.shift, ctrl: keys.ctrl, command: keys.ctrl, alt: keys.alt, ..Default::default() };
+                bindings.push((preset.id, button, mods, false));
+            }
+        }
+        // The navigation bar's Zoom tool also uses the shared drag handler.
+        for preset in ["fusion", "creo"] {
+            bindings.push((preset, PointerButton::Primary, Modifiers::NONE, true));
+        }
+        for (preset, button, mods, tool) in bindings {
+            for caps in [super::NavCaps::MODEL, super::NavCaps { orbit: false, pick: false }] {
+                for perspective in [false, true] {
+                    for reverse in [false, true] {
+                        for dy in [-80.0, 80.0] {
+                            let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+                            crate::prefs::set(&mut app, &json!({"nav":preset, "zoom_reverse":reverse, "zoom_stop_at_model":false})).unwrap();
+                            app.ui.perspective = perspective;
+                            app.cam.fov = if perspective { 45.0_f64.to_radians() } else { 0.0 };
+                            if tool {
+                                app.run("view.tool", json!({"tool":"zoom"})).unwrap();
+                            }
+                            let before = app.cam;
+                            let ctx = crate::fonts::test_context();
+                            let mut frame = |mut events: Vec<Event>| {
+                                events.insert(0, Event::ModifiersChanged(mods));
+                                let raw = egui::RawInput {
+                                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 600.0))),
+                                    focused: true,
+                                    events,
+                                    ..Default::default()
+                                };
+                                let mut out = ctx.run_ui(raw, |ui| {
+                                    let rect = ui.max_rect();
+                                    let resp = ui.interact(rect, ui.id().with("drag-zoom"), egui::Sense::click_and_drag());
+                                    super::handle(&mut app, ui, rect, &resp, caps);
+                                });
+                                out.textures_delta.clear();
+                            };
+                            let from = pos2(200.0, 300.0);
+                            let to = from + vec2(0.0, dy);
+                            frame(vec![Event::PointerMoved(from)]);
+                            frame(vec![Event::PointerButton { pos: from, button, pressed: true, modifiers: mods }]);
+                            frame(vec![Event::PointerMoved(to)]);
+                            frame(vec![Event::PointerButton { pos: to, button, pressed: false, modifiers: mods }]);
+                            frame(Vec::new());
+                            assert!(app.cam.is_valid());
+                            assert_ne!(app.cam.distance, before.distance, "the drag must zoom");
+                            // Creo zooms in on a downward drag by default; the preference reverses that too.
+                            let default_zooms_out = if preset == "creo" { dy < 0.0 } else { dy > 0.0 };
+                            assert_eq!(
+                                app.cam.distance > before.distance,
+                                default_zooms_out != reverse,
+                                "{preset} {button:?}, tool={tool}, {caps:?}, perspective={perspective}, reverse={reverse}, dy={dy}"
+                            );
+                            assert_eq!(app.cam.target, before.target, "drag zoom keeps the view centre");
+                            assert_eq!((app.cam.yaw, app.cam.pitch, app.cam.roll, app.cam.fov), (before.yaw, before.pitch, before.roll, before.fov));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

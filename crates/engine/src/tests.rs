@@ -410,6 +410,7 @@ mod curved_seam_round;
 mod flush_join_loft;
 mod gltf_import;
 mod import_component;
+mod kernel_pool;
 mod large_step_import;
 mod loft_ring;
 mod loft_spacing;
@@ -1638,6 +1639,39 @@ fn preview_of_an_edit() {
     assert!(Arc::ptr_eq(&doc, &s.doc));
 }
 
+/// An extrusion too long says so and gives the limit, not `end = 1000000000` (#9625), whether
+/// the distance is typed as text or as a number inside the parameter range.
+#[test]
+fn an_extrude_too_long_says_so() {
+    for distance in [json!("1e9 mm"), json!(5e8), json!("-2e7")] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let e = s.execute("solid.extrude", &json!({"distance": distance})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(
+            e.contains("the extrusion is too long: its end is") && e.contains("past the limit of 10000000 mm") && !e.contains("end ="),
+            "{distance}: {e}"
+        );
+        assert!(s.model.state().bodies.is_empty(), "{distance}");
+    }
+    // The Edit Extrude dialog previews a redefinition of the feature: the same message.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let fid = run(&mut s, "solid.extrude", json!({"distance": 10}))["feature"].as_u64().unwrap();
+    let idx = s.doc.feature_index(fid).unwrap();
+    run(&mut s, "timeline.roll_to", json!({"position": idx}));
+    let redefine = json!({"feature": fid, "command": "solid.extrude", "params": {"distance": "1e9 mm"}});
+    let e = s.preview(&[("timeline.redefine".into(), redefine)]).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("the extrusion is too long: its end is 1000000000 mm from the sketch plane, past the limit of 10000000 mm"), "{e}");
+    // The kernel's limit on a cylinder, a torus or a revolve is not an extrusion's.
+    let mut s = Session::default();
+    let e = s.execute("solid.cylinder", &json!({"radius": 2e7, "height": 10})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(!e.is_empty() && !e.contains("extrusion"), "{e}");
+}
+
 /// `operation: "auto"`: into a body cuts; additions default to Join when a solid exists.
 #[test]
 fn extrude_auto_operation() {
@@ -2521,6 +2555,34 @@ fn split_body_by_a_face() {
     assert!(s.execute("solid.split_body", &json!({"body": "Block", "tool": {"body": "Tool", "point": [100, 0, 0]}})).is_err());
 }
 
+/// Split Body by a face follows the face when a parameter moves it (#11674): the tool face is
+/// named when it is picked, as other face picks are, and found again where it went.
+#[test]
+fn split_body_by_a_face_follows_the_face() {
+    let build = |h: &str, z: f64| {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "h", "expression": h}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 200, "center": [0, 0, 100], "body_name": "Post"}));
+        run(&mut s, "solid.cylinder", json!({"diameter": 42, "height": 300, "base": [-150, 0, "h"], "axis": "X", "body_name": "Rail"}));
+        run(&mut s, "solid.split_body", json!({"body": "Post", "tool": {"body": "Rail", "point": [0, 0, z]}}));
+        s
+    };
+    let volumes = |s: &Session| {
+        let st = s.world_state().unwrap();
+        let mut v: Vec<f64> =
+            st.bodies.iter().filter(|b| b.name.starts_with("Post")).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).collect();
+        v.sort_by(f64::total_cmp);
+        v
+    };
+    let mut s = build("100 mm", 79.0);
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "150 mm"}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| format!("{}: {e}", r.name))).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    // As if the rail had been at 150 mm when the face was picked.
+    let (got, want) = (volumes(&s), volumes(&build("150 mm", 129.0)));
+    assert!(got.len() >= 2 && got.len() == want.len() && got.iter().zip(&want).all(|(a, b)| rel(*a, *b) < 1e-9), "{got:?} against {want:?}");
+}
+
 /// Split Body by a sketch line (#1552): the plane through the line along the sketch's normal
 /// splits a box; the split follows the line when the sketch changes, the design saves the line,
 /// and anything but a straight line of a sketch is refused.
@@ -3291,6 +3353,16 @@ fn unequal_chamfers_on_circular_rims() {
     assert!(rel(full - volume(&mut s), flipped) < 5e-3, "{} vs {flipped}", full - volume(&mut s));
 }
 
+/// A solid box top is not a rim: Lip says to Shell first (#10437).
+#[test]
+fn lip_on_a_solid_box_says_to_shell_first() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+    let err = s.execute("plastic.lip", &json!({"face": [20, 15, 10], "width": 1, "height": 2})).unwrap_err().to_string();
+    assert!(err.contains("Shell"), "{err}");
+    assert!(err.contains("rim") || err.contains("opening"), "{err}");
+}
+
 /// An enclosure built in the usual order: shell, bosses, then the lip on the rim.
 #[test]
 fn lip_after_boss() {
@@ -3386,6 +3458,169 @@ fn hole_as_deep_as_the_plate() {
         let v = volume(&mut s);
         assert!((before - v - cut).abs() < 4e-7 * before, "{i} {p}: {} vs {cut}", before - v);
     }
+}
+
+/// #7520: a hole that names no bodies leaves hidden ones alone, as a cut does (#3961), and keeps
+/// doing so once they are shown again. Its face is named on the body it drills, not on a hidden
+/// one whose face lies in the same plane; with nothing hidden, it still drills every body.
+#[test]
+fn a_hole_leaves_hidden_bodies_alone() {
+    let setup = |hide: bool| {
+        let mut s = Session::default();
+        // Two bodies whose bottom faces share the plane z = 0, the hidden one made first.
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "operation": "new", "body_name": "Plate"}));
+        if hide {
+            run(&mut s, "browser.visibility", json!({"items": ["Block"], "visible": false}));
+        }
+        // The name of the plate's face that is picked, before the hole takes the point away.
+        let picked =
+            solidcraft_doc::naming::face_name_at_body(s.world_state().unwrap().body("Plate").unwrap(), solidcore_record::Vec3::new(20.0, 20.0, 0.0));
+        let r = s.execute("solid.hole", &json!({"position": [20, 20, 0], "diameter": 5, "depth": 10, "name": "Hole1"})).unwrap();
+        (s, r, picked)
+    };
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(name).unwrap().body).unwrap().volume;
+    let (block, plate) = (40.0 * 40.0 * 20.0, 40.0 * 40.0 * 5.0);
+    let (mut hidden, r, picked) = setup(true);
+    assert_eq!(r["changed_bodies"], json!(["Plate"]));
+    assert!((vol(&hidden, "Block") - block).abs() < 1e-6, "the hidden body is not drilled");
+    assert!(vol(&hidden, "Plate") < plate - 1.0, "the shown one is");
+    let hole = hidden.doc.find_feature("Hole1").unwrap();
+    assert!(picked.is_some());
+    assert_eq!((hole.participants.clone(), hole.face_names.first().cloned()), (vec!["Plate".to_string()], picked));
+    run(&mut hidden, "browser.visibility", json!({"items": ["Block"], "visible": true}));
+    assert!((vol(&hidden, "Block") - block).abs() < 1e-6, "shown again, it stays as it was");
+    let (shown, r, _) = setup(false);
+    assert_eq!(r["changed_bodies"], json!(["Block", "Plate"]), "with nothing hidden, both are drilled");
+    assert!(vol(&shown, "Block") < block - 1.0 && vol(&shown, "Plate") < plate - 1.0);
+}
+
+/// #7520 (review): the body whose face is picked is drilled even while it is hidden (picked
+/// through Select Other, or hidden with the dialog open), and editing a hole made with nothing
+/// hidden keeps drilling every body, though one is hidden at the time of the edit.
+#[test]
+fn a_hole_drills_its_picked_body_and_an_edit_keeps_its_scope() {
+    let stack = || {
+        let mut s = Session::default();
+        // Two plates stacked: Lower z 0..5, Upper z 5..10.
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "body_name": "Lower"}));
+        run(&mut s, "solid.box", json!({"corner": [0, 0, 5], "length": 40, "width": 40, "height": 5, "operation": "new", "body_name": "Upper"}));
+        s
+    };
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(name).unwrap().body).unwrap().volume;
+    let plate = 40.0 * 40.0 * 5.0;
+    let hole = |d: f64| json!({"position": [20, 20, 10], "direction": [0, 0, -1], "diameter": d, "depth": 20, "name": "Hole1"});
+
+    // The picked face is on the hidden Upper: it is drilled, and so is the shown Lower below.
+    let mut s = stack();
+    run(&mut s, "browser.visibility", json!({"items": ["Upper"], "visible": false}));
+    let r = s.execute("solid.hole", &hole(5.0)).unwrap();
+    assert_eq!(r["changed_bodies"], json!(["Lower", "Upper"]), "the picked body is drilled though hidden");
+    assert!(vol(&s, "Upper") < plate - 1.0 && vol(&s, "Lower") < plate - 1.0);
+
+    // Made with nothing hidden, then edited with Lower hidden: both stay drilled, at the new size.
+    let mut s = stack();
+    run(&mut s, "solid.hole", hole(5.0));
+    let small = vol(&s, "Lower");
+    assert!(small < plate - 1.0);
+    run(&mut s, "browser.visibility", json!({"items": ["Lower"], "visible": false}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": "Hole1", "command": "solid.hole", "params": {"position": [20, 20, 10], "direction": [0, 0, -1], "diameter": 6, "depth": 20}}),
+    );
+    assert!(s.doc.find_feature("Hole1").unwrap().participants.is_empty(), "the edit keeps the hole's scope");
+    assert!(vol(&s, "Lower") < small - 1.0, "the hidden Lower keeps its hole, now wider");
+    assert!(vol(&s, "Upper") < small - 1.0);
+}
+
+/// #7520 (history): a hole made with a body hidden stores the bodies it drills, so it replays
+/// the same way: volumes match exactly after a save and reopen, a rebuild from scratch, undo and
+/// redo, showing the hidden body, renaming bodies and editing an earlier feature.
+#[test]
+fn a_hole_made_with_a_hidden_body_replays_the_same() {
+    let build = |plate_height: f64| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": plate_height, "operation": "new", "body_name": "Plate"}));
+        run(&mut s, "browser.visibility", json!({"items": ["Block"], "visible": false}));
+        run(&mut s, "solid.hole", json!({"position": [20, 20, 0], "diameter": 5, "depth": 3, "name": "Hole1"}));
+        s
+    };
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(name).unwrap().body).unwrap().volume;
+    // A new session evaluated from the saved text alone, as a rebuild from scratch does.
+    let scratch = |s: &Session| Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let s = build(5.0);
+    let (block, plate) = (vol(&s, "Block"), vol(&s, "Plate"));
+    assert_eq!(block, 40.0 * 40.0 * 20.0, "the hidden body is not drilled");
+    assert!(plate < 40.0 * 40.0 * 5.0 - 1.0, "the shown one is");
+    let same = |s: &Session, what: &str| {
+        assert_eq!(vol(s, "Block"), block, "{what}: Block");
+        assert_eq!(vol(s, "Plate"), plate, "{what}: Plate");
+    };
+    // (1) Save and reopen.
+    let dir = std::env::temp_dir().join(format!("solidcraft-hole-history-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("hole.solidcraft");
+    let mut saved = build(5.0);
+    run(&mut saved, "file.save_as", json!({"path": file.to_string_lossy()}));
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": file.to_string_lossy()}));
+    same(&reopened, "reopened");
+    let _ = std::fs::remove_dir_all(&dir);
+    // (2) Rebuild from scratch.
+    same(&scratch(&s), "rebuilt");
+    // (3) Undo and redo.
+    let mut u = build(5.0);
+    run(&mut u, "edit.undo", json!({}));
+    assert_eq!(vol(&u, "Plate"), 40.0 * 40.0 * 5.0, "undone: no hole");
+    run(&mut u, "edit.redo", json!({}));
+    same(&u, "redone");
+    same(&scratch(&u), "redone and rebuilt");
+    // (4) Show the hidden body, then rebuild.
+    let mut shown = build(5.0);
+    run(&mut shown, "browser.visibility", json!({"items": ["Block"], "visible": true}));
+    same(&shown, "shown");
+    same(&scratch(&shown), "shown and rebuilt");
+    // (5) Rename the drilled body (and the hidden one), then rebuild.
+    let mut renamed = build(5.0);
+    run(&mut renamed, "body.rename", json!({"body": "Plate", "name": "Slab"}));
+    run(&mut renamed, "body.rename", json!({"body": "Block", "name": "Core"}));
+    for r in [&renamed, &scratch(&renamed)] {
+        assert_eq!(vol(r, "Slab"), plate, "renamed: Slab");
+        assert_eq!(vol(r, "Core"), block, "renamed: Core");
+    }
+    // (6) Edit an earlier feature (the plate's own box, then the hidden block's), then rebuild:
+    // the same as a design made with the new size from the start.
+    let feature = |s: &Session, body: &str| {
+        let id = s.world_state().unwrap().body(body).unwrap().feature;
+        s.doc.features.iter().find(|f| f.id == id).unwrap().name.clone()
+    };
+    let mut edited = build(5.0);
+    let (plate_box, block_box) = (feature(&edited, "Plate"), feature(&edited, "Block"));
+    run(&mut edited, "timeline.edit", json!({"feature": plate_box, "set": {"height": "8"}}));
+    let fresh = build(8.0);
+    for r in [&edited, &scratch(&edited)] {
+        assert_eq!(vol(r, "Plate"), vol(&fresh, "Plate"), "plate edited");
+        assert_eq!(vol(r, "Block"), block, "plate edited: Block");
+    }
+    run(&mut edited, "timeline.edit", json!({"feature": block_box, "set": {"height": "30"}}));
+    for r in [&edited, &scratch(&edited)] {
+        assert_eq!(vol(r, "Block"), 40.0 * 40.0 * 30.0, "block edited stays undrilled");
+        assert_eq!(vol(r, "Plate"), vol(&fresh, "Plate"), "block edited: Plate");
+    }
+}
+
+/// #7520 (review): with every body hidden, a hole still drills all of them, as before.
+#[test]
+fn a_hole_with_every_body_hidden_drills_them_all() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "operation": "new", "body_name": "Plate"}));
+    run(&mut s, "browser.visibility", json!({"items": ["Block", "Plate"], "visible": false}));
+    let r = s.execute("solid.hole", &json!({"position": [20, 20, 0], "diameter": 5, "depth": 3, "name": "Hole1"})).unwrap();
+    assert_eq!(r["changed_bodies"], json!(["Block", "Plate"]));
+    assert!(s.doc.find_feature("Hole1").unwrap().participants.is_empty());
 }
 
 /// Appearances outlive later features: a coloured face keeps its colour after a fillet on a

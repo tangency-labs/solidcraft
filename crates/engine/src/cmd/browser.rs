@@ -64,7 +64,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          or features?: [feature id or name] (the bodies they made; path?: [occurrence ids] for only that placement's); \
          or folder?: bodies|sketches|construction|origin|joints|all (all of it; showing also shows its browser folders and groups, and `all` takes in the occurrence hides too); \
          or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, c0/g7, c0/joints, c0/canvases, c0/point_clouds] (the folder or group itself: its items keep their own state); \
-         or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (requires paths and visible:true). Saved with the design and undone like any other change (the camera is not)",
+         or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (with paths or items of bodies, and visible:true: everything else is hidden, other placements as placements). Saved with the design and undone like any other change (the camera is not)",
     ),
     CommandSpec::new("browser.expand_all", "Expand All", expand_all).icon("folder").noundo().params(
         "path?: [occurrence ids] (that placement and its descendants); component?: id (that component's own folders); \
@@ -436,6 +436,89 @@ fn tree_folder_key(k: &str) -> bool {
     k.len() <= 2048 && scope_ok && last_ok
 }
 
+/// Isolate bodies (#7896): the picked bodies stay, and so do the placements that hold them, down
+/// to their own; those placements' other bodies and the root's other bodies are hidden one by
+/// one, and every other placement is hidden as a placement, so its Browser row shows it is off and
+/// its eye brings it back.
+fn isolate_bodies(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
+    let cmd = "browser.visibility";
+    if !visible {
+        return Err(bad(cmd, "isolate requires visible:true"));
+    }
+    if ["folder", "features", "joints"].iter().any(|k| p.get(*k).is_some()) {
+        return Err(bad(cmd, "isolate takes `paths` or `items` (bodies)"));
+    }
+    let keys = keys(p, "items", cmd)?;
+    if keys.is_empty() {
+        return Err(bad(cmd, "isolate needs `paths` or `items` (bodies)"));
+    }
+    let world = s.world_state()?;
+    let keep: Vec<String> = keys
+        .iter()
+        .map(|k| match shown_item(s, &world, k) {
+            Some(Shown::Body(name)) => Ok(name),
+            _ => Err(bad(cmd, format!("no body `{k}`"))),
+        })
+        .collect::<Result<_>>()?;
+    let mut hidden_bodies: Vec<String> =
+        s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == 0 && !keep.contains(&b.name)).map(|b| b.name.clone()).collect();
+    let mut hidden = Vec::new();
+    let mut stack = vec![Vec::<u64>::new()];
+    let mut count = 0;
+    while let Some(parent) = stack.pop() {
+        for child in s.occurrence_children(&parent)? {
+            count += 1;
+            if count > 100_000 {
+                return Err(bad(cmd, "isolate exceeds 100000 placements"));
+            }
+            if s.occurrence_bodies_shared(&child.path, true)?.iter().any(|b| keep.contains(b)) {
+                hidden_bodies.extend(child.bodies.into_iter().map(|b| b.world).filter(|b| !keep.contains(b)));
+                stack.push(child.path);
+            } else {
+                hidden.push(child.path);
+            }
+        }
+    }
+    // A hidden Bodies folder or group a picked body is in would keep it hidden: those show
+    // again. Their other bodies are hidden one by one above, as the root's are.
+    let shown_folders = folders_holding(s, &keep);
+    s.visibility.hidden_folders.retain(|k| !shown_folders.contains(k));
+    s.visibility.hidden_occurrences = hidden;
+    s.visibility.hidden_bodies = hidden_bodies;
+    s.refresh_display();
+    Ok(json!({"visible":true,"isolated":keep,"visibility":s.visibility}))
+}
+
+/// The tree keys of the Bodies folders and groups (with the groups they are in) that hold the
+/// bodies named `world` in some placement.
+fn folders_holding(s: &Session, world: &[String]) -> std::collections::BTreeSet<String> {
+    let mut keys = std::collections::BTreeSet::new();
+    if s.visibility.hidden_folders.is_empty() {
+        return keys;
+    }
+    let st = s.model.state();
+    let names = solidcraft_doc::WorldNames::new(&s.doc, &st);
+    // Each body's component, found once rather than once per placement.
+    let owned: Vec<(u64, &str)> = s.doc.model_body_components(&st).into_iter().zip(st.bodies.iter().map(|b| b.name.as_str())).collect();
+    for (component, path, _) in s.doc.placements() {
+        let scope = Session::folder_scope(&path);
+        for b in owned.iter().filter(|(c, _)| *c == component).map(|(_, name)| *name) {
+            if !world.contains(&names.name(b, component, &path)) {
+                continue;
+            }
+            keys.insert(format!("{scope}/bodies"));
+            for g in s.doc.browser_groups.iter().filter(|g| g.component == component && g.folder == "bodies" && g.has_item(b)) {
+                for id in std::iter::successors(Some(g.id), |id| s.doc.browser_group(*id).and_then(|g| g.parent))
+                    .take(solidcraft_doc::MAX_GROUP_NESTING + 1)
+                {
+                    keys.insert(format!("{scope}/g{id}"));
+                }
+            }
+        }
+    }
+    keys
+}
+
 fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "browser.visibility";
     let visible = bool_(p, "visible").ok_or_else(|| bad(cmd, "`visible` must be true or false"))?;
@@ -524,6 +607,9 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
         }
         s.refresh_display();
         return Ok(json!({"visible":visible,"changed":paths.len(),"visibility":s.visibility}));
+    }
+    if bool_(p, "isolate").unwrap_or(false) {
+        return isolate_bodies(s, p, visible);
     }
     let items: Vec<Shown> = match (str_(p, "folder"), p.get("items")) {
         _ if p.get("features").is_some() => {
@@ -1116,6 +1202,7 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let previous = s.doc.clone();
     let st = s.model.state();
+    let placed = s.doc.body_frames_with_source(&st);
     let b = st.body(&old).ok_or_else(|| bad(cmd, format!("no body `{old}`")))?;
     if st.body(name).is_some() {
         return Err(bad(cmd, format!("another body is called `{name}`")));
@@ -1233,6 +1320,8 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, e));
     }
     d.rename_body_keys(&old, name);
+    // A sketch projecting the body in another placement of its component keeps it.
+    super::sketch_project::follow_placed_renames(d, &st, &placed, Some((&old, name)));
     s.remember_body_rename(&previous, &old, name);
     Ok(json!({"body": old, "name": name}))
 }

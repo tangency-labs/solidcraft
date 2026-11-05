@@ -1,7 +1,7 @@
 use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, PI};
 
-use solidcore_record::{Seg2, Vec2};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 
 use crate::*;
 
@@ -1651,6 +1651,67 @@ fn rounded_rectangles_sharing_their_sides_leave_every_profile_closed() {
             assert!(lp.is_closed(1e-6), "a loop of {:?} is open by {gap:.3e}", crate::distinct_curves(&p.outer_curves));
         }
     }
+}
+
+/// A Pierce constraint holds a point of this sketch where a curve of another sketch crosses
+/// the plane of this one (#3599): the point of the XY sketch sits where the XZ sketch's line
+/// crosses it, and stays there.
+#[test]
+fn a_pierce_constraint_holds_its_point_where_the_other_sketches_curve_crosses_this_plane() {
+    let mut sk = Sketch::new();
+    let p = sk.add_point(v(20.0, 20.0), None).unwrap();
+    // The other sketch's line on the XZ plane: it crosses the XY plane at (5, 0, 0).
+    let world = vec![Vec3::new(5.0, 0.0, -5.0), Vec3::new(5.0, 0.0, 5.0)];
+    sk.add_constraint(ConstraintKind::Pierce { p, sketch: 7, curve: "l1".into(), plane: Plane::XY, world }, None).unwrap();
+    let report = solve(&mut sk);
+    assert!(report.ok(), "{report:?}");
+    let at = sk.points[p].pos;
+    assert!((at.x - 5.0).abs() < 1e-9 && at.y.abs() < 1e-9, "{at:?}");
+    // The point sits in the plane: nothing off it.
+    assert!(Plane::XY.height(Plane::XY.to_world(at)).abs() < 1e-9);
+}
+
+/// The point follows the curve of the other sketch: the curve moves across this plane, the
+/// pierced point moves with it.
+#[test]
+fn a_pierced_point_follows_the_curve_of_the_other_sketch() {
+    let mut sk = Sketch::new();
+    let p = sk.add_point(v(20.0, 20.0), None).unwrap();
+    let world = vec![Vec3::new(5.0, 0.0, -5.0), Vec3::new(5.0, 0.0, 5.0)];
+    sk.add_constraint(ConstraintKind::Pierce { p, sketch: 7, curve: "l1".into(), plane: Plane::XY, world }, None).unwrap();
+    solve(&mut sk);
+    assert!((sk.points[p].pos.x - 5.0).abs() < 1e-9, "{:?}", sk.points[p].pos);
+
+    // The other sketch's line moves across this plane.
+    if let ConstraintKind::Pierce { world, .. } = &mut sk.constraints[0].kind {
+        *world = vec![Vec3::new(7.0, 0.0, -5.0), Vec3::new(7.0, 0.0, 5.0)];
+    }
+    solve(&mut sk);
+    assert!((sk.points[p].pos.x - 7.0).abs() < 1e-9, "{:?}", sk.points[p].pos);
+}
+
+/// A pierce needs a curve that meets this sketch's plane: a curve that never crosses it has
+/// no point to pierce, and the constraint is refused.
+#[test]
+fn a_pierce_constraint_whose_curve_never_crosses_the_plane_is_refused() {
+    let mut sk = Sketch::new();
+    let p = sk.add_point(v(20.0, 20.0), None).unwrap();
+    // A line on the XZ plane that stays above the XY plane: it never reaches it.
+    let world = vec![Vec3::new(5.0, 0.0, 1.0), Vec3::new(5.0, 0.0, 5.0)];
+    let e = sk.add_constraint(ConstraintKind::Pierce { p, sketch: 7, curve: "l1".into(), plane: Plane::XY, world }, None).unwrap_err().to_string();
+    assert!(e.contains("cross"), "{e}");
+}
+
+/// A pierce renumbers with the sketch: its point is renumbered, the curve of the other
+/// sketch is not (it has no index here).
+#[test]
+fn a_pierce_constraint_remaps_its_point() {
+    let mut kind = ConstraintKind::Pierce { p: 3, sketch: 7, curve: "l1".into(), plane: Plane::XY, world: vec![] };
+    assert!(kind.remap(&|i| Some(i + 1), &|_| Some(0)));
+    assert!(matches!(kind, ConstraintKind::Pierce { p: 4, .. }), "{kind:?}");
+    // A point with no new number leaves the constraint partly renumbered: it must go.
+    let mut kind = ConstraintKind::Pierce { p: 3, sketch: 7, curve: "l1".into(), plane: Plane::XY, world: vec![] };
+    assert!(!kind.remap(&|_| None, &|_| Some(0)));
 }
 
 /// A drag step that cannot succeed gives up once the iteration has stalled (#6606). Holding

@@ -944,3 +944,30 @@ fn mirror_origin_axis_picks_use_the_same_reference_as_symmetry() {
     assert_eq!(cmds[0].1["line"], json!({"axis":"Y"}));
     h.app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
 }
+
+/// #8201: on a sketch whose plane does not hold the picked origin axis, Mirror sends the axis
+/// and the engine mirrors about its projection into the sketch plane.
+#[test]
+fn mirror_sends_an_origin_axis_outside_the_sketch_plane_for_its_projection() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":{"origin":[0,0,0],"x_dir":[0,1,-1],"y_dir":[-2,1,1]}})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[10,3],[15,8]],"ids":["source"]})).unwrap();
+    let mut inputs = mirror_inputs();
+    inputs[0].items = vec![Sel::SketchCurve { id: "source".into(), sketch: None }];
+    inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    let cmds = commands(&h.app, &Mod::Mirror, &inputs, &serde_json::Map::new()).unwrap();
+    assert_eq!(cmds[0].1, json!({"entities":["source"], "line":{"axis":"X"}}));
+    let out = h.app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
+    assert_eq!(out["curves"].as_array().map(Vec::len), Some(1));
+    let state = h.app.session.model.state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let copy = out["curves"][0].as_str().unwrap();
+    let start = sk.point(sk.resolve_point(&format!("{copy}.start")).unwrap()).unwrap();
+    let end = sk.point(sk.resolve_point(&format!("{copy}.end")).unwrap()).unwrap();
+    let (start, end) = ((start.x, start.y), (end.x, end.y));
+    let mirrored = |p: (f64, f64), x: f64, y: f64| (p.0 - x).abs() < 1e-6 && (p.1 - y).abs() < 1e-6;
+    assert!(
+        (mirrored(start, -10.0, 3.0) && mirrored(end, -15.0, 8.0)) || (mirrored(start, -15.0, 8.0) && mirrored(end, -10.0, 3.0)),
+        "{start:?} {end:?}"
+    );
+}

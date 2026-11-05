@@ -1,4 +1,4 @@
-//! The optional AO passes. Only opaque model and preview triangles participate: their depth is
+//! The optional AO passes. Opaque model, preview and virtual ground triangles participate: their depth is
 //! drawn once into a single-sample depth map, and the occlusion term of the surface that depth
 //! holds is drawn into a texture of the same size and blurred by depth (#9327), which the lit
 //! fragment reads. The maps are independent of the window's MSAA, and the depth runs the same way
@@ -28,6 +28,78 @@ pub(super) struct Maps {
     values: wgpu::TextureView,
     raw: wgpu::TextureView,
     smooth: wgpu::TextureView,
+}
+
+/// A virtual receiver in the camera's up-axis frame. Geometry is built independently of the
+/// model batches, so moving a preview never re-uploads unchanged model colours or vertices.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GroundAo {
+    bounds: solidcraft_geom::Aabb3,
+    height: f64,
+    up: solidcraft_render::UpAxis,
+    radius: f32,
+}
+
+impl GroundAo {
+    pub(super) fn visible_from(&self, back: [f32; 3]) -> bool {
+        if !back.iter().all(|v| v.is_finite()) {
+            return false;
+        }
+        let cam = solidcraft_render::Camera { up: self.up, ..Default::default() };
+        cam.to_frame(solidcore_record::Vec3::new(f64::from(back[0]), f64::from(back[1]), f64::from(back[2]))).z > 0.0
+    }
+
+    pub fn new(bounds: solidcraft_geom::Aabb3, height: f64, up: solidcraft_render::UpAxis, radius: f32) -> Option<Self> {
+        if bounds.is_empty() || !bounds.min.is_finite() || !bounds.max.is_finite() || !height.is_finite() || !radius.is_finite() || radius <= 0.0 {
+            return None;
+        }
+        Some(Self { bounds, height, up, radius })
+    }
+
+    /// Two triangles (168 bytes), extended to cover an optional preview without moving the
+    /// existing ground height. Invalid preview bounds are ignored.
+    pub fn vertices(&self, preview: Option<solidcraft_geom::Aabb3>) -> Vec<u8> {
+        self.vertices_with_radius(preview, self.radius)
+    }
+
+    /// Cover the preview plus the current frame's sampling margin. Invalid radii draw nothing.
+    pub fn vertices_with_radius(&self, preview: Option<solidcraft_geom::Aabb3>, radius: f32) -> Vec<u8> {
+        use solidcore_record::Vec3;
+        if !radius.is_finite() || radius <= 0.0 {
+            return Vec::new();
+        }
+        let cam = solidcraft_render::Camera { up: self.up, ..Default::default() };
+        let mut coverage = self.bounds;
+        if let Some(bb) = preview.filter(|b| !b.is_empty() && b.min.is_finite() && b.max.is_finite()) {
+            for i in 0..8 {
+                coverage.add(cam.to_frame(Vec3::new(
+                    if i & 1 == 0 { bb.min.x } else { bb.max.x },
+                    if i & 2 == 0 { bb.min.y } else { bb.max.y },
+                    if i & 4 == 0 { bb.min.z } else { bb.max.z },
+                )));
+            }
+        }
+        let margin = f64::from(radius) * 2.0;
+        let points = [
+            Vec3::new(coverage.min.x - margin, coverage.min.y - margin, self.height),
+            Vec3::new(coverage.max.x + margin, coverage.min.y - margin, self.height),
+            Vec3::new(coverage.max.x + margin, coverage.max.y + margin, self.height),
+            Vec3::new(coverage.min.x - margin, coverage.max.y + margin, self.height),
+        ]
+        .map(|p| cam.from_frame(p).to_f32());
+        if !points.iter().flatten().all(|v| v.is_finite()) {
+            return Vec::new();
+        }
+        let normal = cam.from_frame(Vec3::Z).to_f32();
+        let mut bytes = Vec::with_capacity(6 * super::TRI_SIZE);
+        for i in [0, 1, 2, 0, 2, 3] {
+            for value in points[i].iter().chain(&normal) {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            bytes.extend_from_slice(&0u32.to_le_bytes());
+        }
+        bytes
+    }
 }
 
 pub(super) struct Resources {
@@ -87,7 +159,7 @@ fn draw_opaque(pass: &mut wgpu::RenderPass<'_>, pipelines: &OpaquePipelines, bin
     for (batch, bind) in batches.into_iter().zip(binds) {
         pass.set_bind_group(0, bind, &[]);
         pass.set_pipeline(&pipelines.built);
-        for tris in [&batch.tris, &batch.open_tris].into_iter().flatten() {
+        for tris in [&batch.tris, &batch.open_tris, &batch.ground_ao].into_iter().flatten() {
             for (buffer, count) in &tris.parts {
                 pass.set_vertex_buffer(0, buffer.slice(..));
                 pass.draw(0..*count, 0..1);
@@ -299,7 +371,41 @@ fn target_size(enabled: bool, pixels: [f32; 2], device_limit: u32) -> [u32; 2] {
 
 #[cfg(test)]
 mod tests {
-    use super::target_size;
+    use super::{GroundAo, target_size};
+
+    #[test]
+    fn receiver_visibility_follows_the_camera_side_in_both_up_axes() {
+        use solidcore_record::Vec3;
+        let bounds = solidcraft_geom::Aabb3 { min: Vec3::ZERO, max: Vec3::new(3.0, 4.0, 12.0) };
+        for up in [solidcraft_render::UpAxis::Y, solidcraft_render::UpAxis::Z] {
+            let cam = solidcraft_render::Camera { up, ..Default::default() };
+            let ground = GroundAo::new(bounds, 0.0, up, 1.0).unwrap();
+            assert!(ground.visible_from(cam.from_frame(Vec3::Z).to_f32()));
+            assert!(!ground.visible_from(cam.from_frame(-Vec3::Z).to_f32()));
+            assert!(!ground.visible_from(cam.from_frame(Vec3::X).to_f32()));
+            assert!(!ground.visible_from([f32::NAN; 3]));
+        }
+    }
+
+    #[test]
+    fn a_growing_preview_keeps_the_current_sampling_margin_at_the_fixed_ground_height() {
+        use solidcore_record::Vec3;
+        use solidcraft_geom::Aabb3;
+        let bounds = Aabb3 { min: Vec3::ZERO, max: Vec3::new(3.0, 4.0, 12.0) };
+        let ground = GroundAo::new(bounds, -0.014, solidcraft_render::UpAxis::Z, 1.0).unwrap();
+        let preview = Aabb3 { min: Vec3::new(100.0, 200.0, -40.0), max: Vec3::new(103.0, 204.0, -28.0) };
+        let mut drawn = Aabb3::EMPTY;
+        for vertex in ground.vertices_with_radius(Some(preview), 10.0).as_chunks::<{ crate::view::TRI_SIZE }>().0 {
+            let read = |i| f64::from(f32::from_le_bytes(vertex[i..i + 4].try_into().unwrap()));
+            drawn.add(Vec3::new(read(0), read(4), read(8)));
+        }
+        assert_eq!((drawn.min.x, drawn.min.y, drawn.max.x, drawn.max.y), (-20.0, -20.0, 123.0, 224.0));
+        assert!((drawn.min.z + 0.014).abs() < 1e-6 && (drawn.max.z + 0.014).abs() < 1e-6);
+        assert_eq!(ground.vertices(Some(preview)), ground.vertices_with_radius(Some(preview), 1.0));
+        for radius in [f32::NAN, f32::INFINITY, -1.0, 0.0] {
+            assert!(ground.vertices_with_radius(Some(preview), radius).is_empty());
+        }
+    }
     #[test]
     fn depth_map_is_bounded_and_released_when_disabled() {
         assert_eq!(target_size(true, [6000.0, 3000.0], 8192), [2048, 1024]);

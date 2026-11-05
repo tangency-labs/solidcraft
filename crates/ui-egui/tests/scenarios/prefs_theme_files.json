@@ -92,7 +92,7 @@
   {"expect":{"hidden_handles":["prefs:theme_notice_dismiss:blur"],"prefs":{"theme_options":{"scenario-blur":{"blur":18.25}},"theme_option_notices":[{"id":"blur","kind":"unknown_option"}]}}},
   {"call":"ui.prefs","params":{"theme_import":{"format":"solidcraft-theme/1","name":"Scenario Blur","base":"dark","options":[{"id":"blur","type":"range","default":0}]}}},
   {"expect":{"prefs":{"theme_option_values":{"blur":18.25},"theme_option_notices":[]}}},
-  {"call":"ui.prefs","params":{"theme_import":{"format":"solidcraft-theme/1","name":"Scenario Future Blur","base":"dark","requires":2,"options":[{"id":"blur","type":"range","default":18}]}}},
+  {"call":"ui.prefs","params":{"theme_import":{"format":"solidcraft-theme/1","name":"Scenario Future Blur","base":"dark","requires":3,"options":[{"id":"blur","type":"range","default":18}]}}},
   {"frames":2},
   {"expect":{"shown_handles":["prefs:theme_notice_dismiss:newer"],"prefs":{"theme_option_defs":[],"theme_option_values":{}}}},
   {"click":{"handle":"prefs:theme_notice_dismiss:newer"}},

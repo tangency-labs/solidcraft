@@ -60,10 +60,33 @@ fn host(url: &str) -> &str {
     rest.split(['/', '?', '#']).next().unwrap_or(rest)
 }
 
+/// A selectable label of the conversation. egui leaves a label scrolled out of view out of the
+/// text selection, so a selection whose start had scrolled away was dropped, and Copy missed the
+/// hidden text (#11527). Out of view this one still takes part: it keeps its end of the selection
+/// and gives its text to Copy, clipped to nothing so it is not drawn and never moves the selection.
+pub(super) fn selectable(ui: &mut egui::Ui, label: egui::Label) -> egui::Response {
+    use egui::text_selection::LabelSelectionState;
+    let (pos, galley, response) = label.selectable(true).layout_in_ui(ui);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), galley.text()));
+    // As `egui::Label` draws a label that is not a button.
+    let colour = ui.visuals().text_color();
+    if ui.is_rect_visible(response.rect) {
+        let underline = if response.has_focus() || response.highlighted() { Stroke::new(1.0, colour) } else { Stroke::NONE };
+        LabelSelectionState::label_text_selection(ui, &response, pos, galley, colour, underline);
+    } else if ui.ctx().plugin::<LabelSelectionState>().lock().has_selection() {
+        let clip = ui.clip_rect();
+        ui.set_clip_rect(egui::Rect::NOTHING);
+        LabelSelectionState::label_text_selection(ui, &response, pos, galley, colour, Stroke::NONE);
+        ui.set_clip_rect(clip);
+    }
+    response
+}
+
 /// A paragraph's text, then its links as buttons (a laid-out text cannot be clicked in parts).
 fn spans(ui: &mut egui::Ui, spans: &[Span], size: f32, color: Color32) {
     let t = Tokens::get();
-    ui.add(egui::Label::new(job(ui, spans, size, color)).selectable(true).wrap());
+    let text = job(ui, spans, size, color);
+    selectable(ui, egui::Label::new(text).wrap());
     let links: Vec<(&str, &str)> =
         spans.iter().filter_map(|s| if let Span::Link { label, url } = s { Some((label.as_str(), url.as_str())) } else { None }).collect();
     if !links.is_empty() {
@@ -92,7 +115,7 @@ pub fn show(ui: &mut egui::Ui, slot: usize, src: &str) {
                     _ => t.font_heading,
                 };
                 ui.add_space(4.0);
-                ui.add(egui::Label::new(RichText::new(markdown::plain(s)).size(size).semibold().color(t.text)).selectable(true).wrap());
+                selectable(ui, egui::Label::new(RichText::new(markdown::plain(s)).size(size).semibold().color(t.text)).wrap());
             }
             Block::Code { text, .. } => {
                 crate::ui_kit::Container::show_backing(
@@ -100,10 +123,9 @@ pub fn show(ui: &mut egui::Ui, slot: usize, src: &str) {
                     egui::Frame::NONE.fill(t.field).corner_radius(t.radius_sm).inner_margin(Margin::same(6)),
                     |ui| {
                         ui.set_width(ui.available_width());
-                        ui.add(
-                            egui::Label::new(RichText::new(text).monospace().size(size - (t.font_button - t.font_body)).color(t.text))
-                                .selectable(true)
-                                .wrap(),
+                        selectable(
+                            ui,
+                            egui::Label::new(RichText::new(text).monospace().size(size - (t.font_button - t.font_body)).color(t.text)).wrap(),
                         );
                         if crate::ui_kit::button(ui, tr("ui.agent_chat_copy"), crate::ui_kit::Button::Small).clicked() {
                             ui.ctx().copy_text(text.clone());
@@ -129,7 +151,7 @@ pub fn show(ui: &mut egui::Ui, slot: usize, src: &str) {
             }
             Block::Pre(text) => {
                 egui::ScrollArea::horizontal().id_salt(("agent_chat_pre", slot, text.len())).show(ui, |ui| {
-                    ui.add(egui::Label::new(RichText::new(text).monospace().size(t.font_small).color(t.text)).selectable(true));
+                    selectable(ui, egui::Label::new(RichText::new(text).monospace().size(t.font_small).color(t.text)));
                 });
             }
             Block::Rule => {

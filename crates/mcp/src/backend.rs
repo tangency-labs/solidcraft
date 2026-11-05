@@ -41,6 +41,13 @@ pub trait Backend {
     fn param_check(&self) -> ParamCheck {
         ParamCheck::Off
     }
+    /// The output options the app's Preferences ask for (its `mcp.options` reply), for a backend
+    /// bridged to the app. `Ok(None)`: nothing to ask (no app, or one from before the setting), so
+    /// the server's own options decide; `Err`: the app could not answer now (not running, busy),
+    /// ask again on a later call.
+    fn app_options(&mut self) -> Result<Option<Value>, String> {
+        Ok(None)
+    }
 }
 
 /// Longest reply line accepted from the app.
@@ -48,6 +55,10 @@ const MAX_REPLY: u64 = 64 << 20;
 
 /// How long a reply may take: kernel operations (booleans, fillets) on big parts can take a while.
 const READ_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// How long the app may take to answer `mcp.options`: the window answers it within a frame, so a
+/// longer wait means the app is busy and the server asks again on a later call.
+const OPTIONS_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// How long the app may take to run an `engine.batch`: a little longer than its control server
 /// waits (3600 s), so its "still running" reply arrives first.
@@ -363,7 +374,7 @@ impl Remote {
             }
             if told.elapsed() >= PROGRESS_EVERY {
                 let secs = self.outstanding.as_ref().map_or(0, Outstanding::secs);
-                eprintln!("solidcraft-mcp: {what} is still running in the app ({secs} s); waiting for it");
+                solidcraft_engine::note!("solidcraft-mcp: {what} is still running in the app ({secs} s); waiting for it");
                 told = Instant::now();
             }
             std::thread::sleep(self.waits.poll.min(limit.saturating_sub(waited)));
@@ -457,7 +468,7 @@ impl Remote {
         // Timed out in the app, still running (#1618): wait for its result on this connection.
         if v.get("running").and_then(Value::as_bool) == Some(true) {
             self.outstanding = Some(Outstanding { what: what.clone(), effect: Some(effect), since: sent });
-            eprintln!(
+            solidcraft_engine::note!(
                 "solidcraft-mcp: {what} is still running in the app after {} s; waiting up to {} s more for it",
                 sent.elapsed().as_secs(),
                 self.waits.pending.as_secs()
@@ -632,6 +643,34 @@ impl Backend for Remote {
     }
     fn has_ui(&self) -> bool {
         true
+    }
+    fn app_options(&mut self) -> Result<Option<Value>, String> {
+        // This runs on the serve loop before a tool call, so it never waits: not behind a request
+        // still running (ask again on a later call), and one try with no retry, because a retry
+        // reconnects with READ_TIMEOUT and could block for minutes.
+        if self.outstanding.is_some() {
+            return Err("a request is still running in the app".into());
+        }
+        if self.conn.is_none() {
+            self.reconnect().map_err(|e| self.explain(&e))?;
+        }
+        let line = self.request_line("mcp.options", json!({}));
+        self.set_read_timeout(OPTIONS_TIMEOUT);
+        let reply = self.roundtrip(&line);
+        self.set_read_timeout(READ_TIMEOUT);
+        let reply = reply.map_err(|e| self.explain(&e))?;
+        let v: Value = serde_json::from_str(&reply).map_err(|e| format!("bad reply from the app: {e}"))?;
+        let r = outcome(&v).map_err(|error| {
+            solidcraft_engine::control_auth::client_token(self.port, self.explicit_token.as_deref())
+                .map_or_else(|| error.clone(), |t| t.explain_error(&error))
+        });
+        match r {
+            Ok(v) => Ok(Some(v)),
+            // An app from before the setting (its agent chat refuses methods it doesn't know):
+            // the server's own options decide.
+            Err(e) if e.starts_with("unknown method") || e.contains("is not available in the agent chat") => Ok(None),
+            Err(e) => Err(e),
+        }
     }
     fn describe(&self) -> String {
         if self.conn.is_some() {
@@ -865,7 +904,7 @@ impl Auto {
             return;
         }
         if let Some(port) = (self.discover)() {
-            eprintln!("solidcraft mcp: the SolidCraft app is running now; bridged to 127.0.0.1:{port}");
+            solidcraft_engine::note!("solidcraft mcp: the SolidCraft app is running now; bridged to 127.0.0.1:{port}");
             let level = self.param_check();
             self.remote = Some(Remote::new(&format!("127.0.0.1:{port}"), self.token.as_deref()).with_param_check(level));
             self.headless = None;
@@ -909,6 +948,17 @@ impl Backend for Auto {
             (Some(r), _) => r.param_check(),
             (None, Some(h)) => h.param_check(),
             (None, None) => ParamCheck::Off,
+        }
+    }
+    fn app_options(&mut self) -> Result<Option<Value>, String> {
+        // The app may have started since: bridge to it first, as a tool call would.
+        if self.remote.is_none() {
+            self.look_for_app();
+        }
+        match &mut self.remote {
+            Some(r) => r.app_options(),
+            // Headless for now: the app may yet start, so ask again on a later call.
+            None => Err("no app yet".into()),
         }
     }
     fn notice(&self) -> Option<String> {

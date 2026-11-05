@@ -23,7 +23,8 @@ use crate::viewport::{Proj, projected_polygon};
 /// direction a growing value points.
 pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
     let st = crate::open_meshing::session_world(&app.session);
-    let first = &anchor_item(app, d)?;
+    let item = anchor_item(app, d);
+    let Some(first) = &item else { return section_plane(d) };
     let (at, normal) = match first {
         Sel::Profile { sketch, index } => {
             let ss = st.sketch(*sketch)?;
@@ -97,7 +98,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         }
         // A hole on a curved face drills against the face's normal where it was picked.
         Kind::Hole { .. } if matches!(first, Sel::Face { .. }) => {
-            (at, normal.or_else(|| solidcraft_engine::doc::hole_direction_at(&st, at).map(|d| -d)))
+            (at, normal.or_else(|| solidcraft_engine::doc::hole_direction_at(&st, at, &[]).map(|d| -d)))
         }
         // Holes at sketch points go into the part the sketch touches (or away, flipped): the
         // arrow shows which way.
@@ -119,7 +120,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
             (at, normal.or(dir.map(|d| -d)))
         }
         // A curved face offsets along its outward normal where it was picked.
-        Kind::OffsetFaces { .. } => (at, normal.or_else(|| solidcraft_engine::doc::hole_direction_at(&st, at).map(|d| -d))),
+        Kind::OffsetFaces { .. } => (at, normal.or_else(|| solidcraft_engine::doc::hole_direction_at(&st, at, &[]).map(|d| -d))),
         Kind::Section { .. } | Kind::OffsetPlane { .. } => (at, normal),
         // Fillet radii and chamfer distances grow the way `blend_grow_dir` gives (into the body
         // on an outside edge, into the open corner on an inside one); shell thickness grows into
@@ -251,6 +252,18 @@ fn edge_concave(m: &Mesh, index: usize, p: Vec3) -> Option<bool> {
 pub(crate) fn blend_grow_dir(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
     let n = edge_bisector(m, index, p)?;
     Some(if edge_concave(m, index, p).unwrap_or(false) { n } else { -n })
+}
+
+/// A Section Analysis dialog reopened from its section's own geometry (Show viewport section
+/// status): the plane it keeps as numbers when nothing is picked, so its arrow stands there as on
+/// a picked plane (#11423).
+fn section_plane(d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
+    if !matches!(d.kind, Kind::Section { .. }) {
+        return None;
+    }
+    let plane = d.extra.get("plane")?;
+    let point = |key: &str| serde_json::from_value::<[f64; 3]>(plane.get(key)?.clone()).ok().map(|[x, y, z]| Vec3::new(x, y, z));
+    Some((point("origin")?, Some(point("normal")?.normalized()?)))
 }
 
 /// The pick the dialog's arrow sits on: the first, or for a fillet or chamfer reopened from a

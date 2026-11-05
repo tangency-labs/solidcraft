@@ -134,6 +134,13 @@ pub struct State {
     pub setup_seconds: std::collections::BTreeMap<String, f64>,
     /// The viewport adapter the current setup runs on.
     pub setup_key: Option<String>,
+    /// The file that says a setup is running ([`SETUP_MARKER`] in the settings folder); `None`:
+    /// nowhere to keep it (browser, tests), so a setup that crashes is simply run again.
+    #[cfg(not(target_arch = "wasm32"))]
+    setup_marker: Option<std::path::PathBuf>,
+    /// The adapter whose setup was still running when the app last stopped (#9236).
+    #[cfg(not(target_arch = "wasm32"))]
+    crashed_setup: Option<String>,
     pub geometry_budget: u64,
     /// A GPU error the preview's last geometry upload caught.
     pub upload_error: crate::gpu::UploadError,
@@ -143,7 +150,13 @@ pub struct State {
     design_camera: Option<(Camera, bool)>,
     slot: SceneSlot,
     key: Option<u64>,
+    /// What the product scene was extracted from: the document's and the world state's
+    /// addresses, a hash of what decides visibility and the geometry budget
+    /// ([`State::prepare_preview`]).
     scene_signature: Option<(u64, usize, u64, u64)>,
+    /// The document and world state `scene_signature` names, held so their addresses cannot be
+    /// reused by others while the signature refers to them.
+    scene_sources: Option<(Arc<solidcraft_engine::doc::Document>, Arc<solidcraft_engine::doc::ModelState>)>,
     scene: Option<ProductScene>,
     scene_error: Option<String>,
     preview_upload_bytes: Option<usize>,
@@ -465,6 +478,10 @@ impl Default for State {
             pending_setup: None,
             setup_seconds: Default::default(),
             setup_key: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            setup_marker: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            crashed_setup: None,
             geometry_budget: WEB_GEOMETRY_BYTES,
             upload_error: Arc::new(Mutex::new(None)),
             image_host: None,
@@ -474,6 +491,7 @@ impl Default for State {
             slot: Arc::new(Mutex::new(None)),
             key: None,
             scene_signature: None,
+            scene_sources: None,
             scene: None,
             scene_error: None,
             preview_upload_bytes: None,
@@ -500,13 +518,131 @@ impl State {
         }
     }
 
+    /// Keep the running-setup marker at `path`, and read what the last launch left there: a
+    /// marker still present means the app stopped during that setup. Once per launch.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn watch_setup(&mut self, path: Option<std::path::PathBuf>) {
+        if self.setup_marker.is_some() {
+            return;
+        }
+        self.crashed_setup = path.as_deref().and_then(marker_adapter);
+        if let Some(key) = &self.crashed_setup {
+            log::warn!("the last GPU path tracer setup on {key} did not finish: the app stopped during it");
+        }
+        self.setup_marker = path;
+    }
+
+    /// Whether the deferred setup waits for the user because it stopped the app last time.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn setup_crashed(&self) -> bool {
+        self.crashed_setup.is_some() && self.crashed_setup == self.setup_key && self.pending_setup.is_some()
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn start_deferred_path_host(&mut self) {
-        if matches!(self.path_host, PathHost::NotStarted)
-            && let Some(create) = self.pending_setup.take()
-        {
-            self.path_host.start(create);
+        if !matches!(self.path_host, PathHost::NotStarted) || self.pending_setup.is_none() {
+            return;
         }
+        // A driver that takes the process down while it compiles (#9236) is beyond any error
+        // scope or unwind guard; the marker is how the next launch learns of it.
+        if self.setup_crashed() {
+            self.path_host = PathHost::failed(crate::i18n::tr("render.gpu_path_crashed").into());
+            return;
+        }
+        let Some(create) = self.pending_setup.take() else { return };
+        if let (Some(path), Some(key)) = (&self.setup_marker, &self.setup_key) {
+            write_marker(path, key);
+        }
+        self.path_host.start(create);
+        if !matches!(self.path_host, PathHost::Preparing(..)) {
+            self.clear_setup_marker();
+        }
+    }
+
+    /// Run a setup that stopped the app last time again, at the user's request.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn retry_crashed_setup(&mut self) {
+        if self.setup_crashed() && matches!(self.path_host, PathHost::Failed(_)) {
+            self.crashed_setup = None;
+            self.path_host = PathHost::NotStarted;
+            self.start_deferred_path_host();
+        }
+    }
+
+    /// Take the worker's answer if it has come: either answer means the process survived it.
+    fn poll_setup(&mut self) -> Option<std::time::Duration> {
+        let preparing = matches!(self.path_host, PathHost::Preparing(..));
+        let took = self.path_host.poll();
+        if preparing && !matches!(self.path_host, PathHost::Preparing(..)) {
+            self.clear_setup_marker();
+        }
+        took
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn clear_setup_marker(&self) {}
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn clear_setup_marker(&self) {
+        if let Some(path) = &self.setup_marker
+            && let Err(e) = std::fs::remove_file(path)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            log::warn!("could not remove {}: {e}", path.display());
+        }
+    }
+}
+
+/// The marker file a running path tracer setup keeps in the settings folder.
+pub const SETUP_MARKER: &str = "gpu-path-setup.json";
+/// A marker is a few dozen bytes; anything longer is not one.
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_MARKER_BYTES: u64 = 64 * 1024;
+
+/// The adapter a marker names, if `path` holds a readable one.
+#[cfg(not(target_arch = "wasm32"))]
+fn marker_adapter(path: &std::path::Path) -> Option<String> {
+    use std::io::Read;
+    let mut text = String::new();
+    std::fs::File::open(path).ok()?.take(MAX_MARKER_BYTES + 1).read_to_string(&mut text).ok()?;
+    if text.len() as u64 > MAX_MARKER_BYTES {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value.get("adapter")?.as_str().filter(|key| !key.is_empty()).map(str::to_owned)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn write_marker(path: &std::path::Path, key: &str) {
+    if let Some(dir) = path.parent()
+        && let Err(e) = std::fs::create_dir_all(dir)
+    {
+        log::warn!("could not create {}: {e}", dir.display());
+    }
+    if let Err(e) = std::fs::write(path, json!({"adapter": key}).to_string()) {
+        log::warn!("could not write {}: {e}", path.display());
+    }
+}
+
+/// Under the failure message: when the setup stopped the app last time (#9236), the button
+/// that runs it again. Nothing else runs it.
+pub(crate) fn retry_crashed_setup(app: &mut SolveApp, ui: &mut egui::Ui) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if app.render_workspace.setup_crashed() {
+        let response = crate::ui_kit::button(ui, app.tr("render.gpu_path_retry"), crate::ui_kit::Button::Normal);
+        crate::scenario::publish_target("render:gpu-path-retry", response.rect);
+        if response.clicked() {
+            app.render_workspace.retry_crashed_setup();
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = (app, ui);
+}
+
+/// The app is closing normally: a setup still running did not stop it.
+pub fn close(app: &mut SolveApp) {
+    if matches!(app.render_workspace.path_host, PathHost::Preparing(..)) {
+        app.render_workspace.clear_setup_marker();
     }
 }
 
@@ -586,7 +722,7 @@ pub fn sync_backend(app: &mut SolveApp) {
     if wants_path_host(app) {
         app.render_workspace.start_deferred_path_host();
     }
-    if let Some(took) = app.render_workspace.path_host.poll() {
+    if let Some(took) = app.render_workspace.poll_setup() {
         record_setup(&mut app.render_workspace, took);
     }
     if let PathHost::Ready(host) = &app.render_workspace.path_host
@@ -654,7 +790,15 @@ pub fn reset_document(app: &mut SolveApp) {
     let setup_seconds = std::mem::take(&mut app.render_workspace.setup_seconds);
     let setup_key = app.render_workspace.setup_key.take();
     let pending_setup = app.render_workspace.pending_setup.take();
+    #[cfg(not(target_arch = "wasm32"))]
+    let (setup_marker, crashed_setup) = (app.render_workspace.setup_marker.take(), app.render_workspace.crashed_setup.take());
     app.render_workspace = State { host, image_host, path_host, setup_seconds, setup_key, pending_setup, geometry_budget, ..Default::default() };
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // The running-setup marker is the application's, like the setup itself.
+        app.render_workspace.setup_marker = setup_marker;
+        app.render_workspace.crashed_setup = crashed_setup;
+    }
     if active(app) {
         app.ui.tab = "MODEL".into();
     }
@@ -672,6 +816,7 @@ pub fn invalidate_scene(app: &mut SolveApp) {
     app.render_workspace.thumbnails = Default::default();
     app.render_workspace.revision = u64::MAX;
     app.render_workspace.scene_signature = None;
+    app.render_workspace.scene_sources = None;
     app.render_workspace.scene = None;
     app.render_workspace.scene_error = None;
     app.render_workspace.preview_upload_bytes = None;
@@ -750,6 +895,8 @@ pub(crate) fn select_stage(app: &mut SolveApp, key: &str) {
     if stage == Stage::Look {
         app.tree.collapsed.remove("c0");
         app.tree.collapsed.remove("c0/bodies");
+        // The Bodies folder starts closed while the Browser's rows do (Preferences › Layout).
+        app.tree.expanded.insert("c0/bodies".into());
     }
 }
 
@@ -1105,6 +1252,7 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         PathHost::Preparing(_, started) => setup_progress(ui, app, *started),
         PathHost::Failed(error) => {
             ui.add(egui::Label::new(format!("{}: {error}", app.tr("render.gpu_path_failed"))).wrap());
+            retry_crashed_setup(app, ui);
         }
         _ => {}
     }
@@ -1756,6 +1904,20 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::navigation_bar_view::show(app, ui, rect);
 }
 
+/// What the product scene is extracted from: the document (appearances, the history marker),
+/// the world state (geometry and placements) and what decides which bodies are visible. Not the
+/// session's revision, which every command moves: a selection or a view change extracts no scene
+/// and builds no vertices. The document and world state are held while the signature names them.
+fn preview_signature(app: &mut SolveApp) -> (u64, usize, u64) {
+    let mut visibility = std::collections::hash_map::DefaultHasher::new();
+    let v = &app.session.visibility;
+    (&v.hidden_bodies, &v.hidden_occurrences, &v.hidden_folders, app.session.active_sketch).hash(&mut visibility);
+    let (doc, world) = (app.session.doc.clone(), crate::open_meshing::session_world(&app.session));
+    let signature = (Arc::as_ptr(&doc) as usize as u64, Arc::as_ptr(&world) as usize, visibility.finish());
+    app.render_workspace.scene_sources = Some((doc, world));
+    signature
+}
+
 impl State {
     fn prepare_preview(&mut self, signature: (u64, usize, u64, u64), capture: impl FnOnce() -> Result<ProductScene, String>) -> Result<(), String> {
         if self.scene_signature != Some(signature) {
@@ -2172,16 +2334,9 @@ fn paint_product(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, camera
         if app.session.model.is_stale() {
             return Err(crate::i18n::tr("render.error_finish_gesture").into());
         }
-        let mut visibility = std::collections::hash_map::DefaultHasher::new();
-        app.session.visibility.hidden_bodies.hash(&mut visibility);
-        app.session.visibility.hidden_occurrences.hash(&mut visibility);
+        let (doc, world, visibility) = preview_signature(app);
         let budget = preferred_geometry_budget(app.render_workspace.geometry_budget, app.preferences.render_previous_geometry_budget);
-        let signature = (
-            app.session.revision,
-            Arc::as_ptr(&crate::open_meshing::session_world(&app.session)) as usize,
-            visibility.finish() ^ assign::preview_key(app),
-            budget,
-        );
+        let signature = (doc, world, visibility ^ assign::preview_key(app), budget);
         let preview = assign::preview(app);
         let previous_key = app.render_workspace.key;
         app.render_workspace.prepare_preview(signature, || {
@@ -2226,6 +2381,7 @@ fn paint_product(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, camera
             pv_key: 0,
             pv_slot: slot,
             pv_hide: false,
+            preview_bounds: None,
             view_proj: product_projection(camera, radius, rect, image).to_f32(),
             back: camera.back().to_f32(),
             size_px: [rect.width() * ppp, rect.height() * ppp],
@@ -2351,7 +2507,8 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
     Ok(())
 }
 
-pub(crate) fn progress_pill(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
+/// `key` names the row's scenario handles (`ui_kit::progress_action`).
+pub(crate) fn progress_pill(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
     if !ribbon::busy(app) {
         return false;
     }
@@ -2366,8 +2523,8 @@ pub(crate) fn progress_pill(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let fraction = (done as f64 / total as f64).clamp(0.0, 1.0) as f32;
     let phase_key = format!("render.image_{phase}");
     let name = app.render_workspace.view.job_shot.as_ref().unwrap_or(&app.render_workspace.view.name).clone();
-    let cancel =
-        crate::ui_kit::progress_action(ui, &format!("{name} · {} · {:.0}%", app.tr(&phase_key), fraction * 100.0), fraction, app.tr_label("Cancel"));
+    let status = format!("· {} · {:.0}%", app.tr(&phase_key), fraction * 100.0);
+    let cancel = crate::ui_kit::progress_action(ui, key, &name, &status, fraction, app.tr_label("Cancel"));
     crate::scenario::publish_target("render:progress-cancel", cancel.rect);
     if cancel.clicked() {
         app.start("render.cancel");

@@ -435,6 +435,13 @@ fn hook(info: &std::panic::PanicHookInfo<'_>) -> bool {
     }
     let message = limited(info.payload_as_str().unwrap_or("(not a text message)"), MAX_MESSAGE);
     let location = info.location().map_or_else(|| "(unknown)".to_string(), |l| format!("{}:{}", l.file(), l.line()));
+    if graphics_device_lost(&message, &location) {
+        // What met the loss survives it (the window's painter, a command), and the app starts
+        // again as for any lost device: not a crash to report.
+        eprintln!("SolidCraft graphics: the device was lost during GPU work ({location}); starting again");
+        IN_HOOK.store(false, Ordering::SeqCst);
+        return true;
+    }
     let sig = signature(&location, &message);
     let recovered = solidcraft_kernel::guarded();
     let in_command = IN_COMMAND.with(Cell::get) > 0;
@@ -478,12 +485,12 @@ fn hook(info: &std::panic::PanicHookInfo<'_>) -> bool {
                 q.push(p);
             }
         });
-        eprintln!("SolidCraft: internal error caught in a command; a crash report will be written");
+        solidcraft_geom::note!("SolidCraft: internal error caught in a command; a crash report will be written");
     } else {
         // Outside any command: what the journal knows has to do.
         let kind = if recovered { "kernel_panic_recovered" } else { "panic" };
         if let Some(id) = write_from_journal(state, kind, Some(&p)) {
-            eprintln!("SolidCraft: internal error; crash report {}", state.dir.join(&id).display());
+            solidcraft_geom::note!("SolidCraft: internal error; crash report {}", state.dir.join(&id).display());
             if !recovered && let Ok(mut j) = state.journal.try_lock() {
                 j.record(&json!({ "reported": id }));
             }
@@ -491,6 +498,13 @@ fn hook(info: &std::panic::PanicHookInfo<'_>) -> bool {
     }
     IN_HOOK.store(false, Ordering::SeqCst);
     quiet
+}
+
+/// A panic inside wgpu that unwraps the driver's `Lost`: a graphics device reset (Windows' TDR)
+/// met first by a queue write or a present, which wgpu-core unwraps instead of losing the device
+/// (`PendingWrites::activate`, #10240). It is the device loss, not a SolidCraft bug.
+fn graphics_device_lost(message: &str, location: &str) -> bool {
+    location.contains("wgpu-core") && message.ends_with(": Lost")
 }
 
 /// Marks a command running on this thread; panics inside it wait for [`command_done`].

@@ -130,7 +130,7 @@ fn device(app: &mut SolveApp, ui: &mut egui::Ui) {
                         ui,
                         &mut app.preferences.space_mouse_speed,
                         0.25..=5.0,
-                        ui_kit::Slider { step: Some(0.05), format: |value| format!("{value:.2}Ã—"), ..Default::default() },
+                        ui_kit::Slider { step: Some(0.05), format: |value| format!("{value:.2}×"), ..Default::default() },
                     );
                     crate::scenario::publish_target("prefs:space_mouse_speed", response.rect);
                 });

@@ -343,7 +343,16 @@ The solver is SolidCraft's own (damped Gauss–Newton with degree-of-freedom ana
 coincident, horizontal/vertical, parallel, perpendicular, tangent, equal, concentric, collinear,
 midpoint, symmetry, fix, curvature (G2) and polygon. **Sketch Dimension** (D) adds linear,
 aligned, horizontal, vertical, point-to-line, line-to-circle, point-to-circle, circle-to-circle,
-radius, diameter, arc length and angle dimensions. For an arc's length, click the arc and then one of its end points. Each is a parameter
+radius, diameter, arc length and angle dimensions. For an arc's length, click the arc and then one of its end points.
+An ellipse is drawn with its major and minor axes as construction lines through its centre
+(Preferences › Sketch › Draw ellipses with their axes; turned off, the ellipse is drawn alone,
+and D on an ellipse gives its minor radius wherever the value is pulled, as before).
+As with a Center Rectangle's diagonals, trim, extend and break stop at them, and they stay when the
+ellipse is deleted.
+Click the ellipse and pull the value across its major axis for the major half-axis, or out past an
+end of the major axis for the minor half-axis, also on an ellipse whose axis lines were deleted;
+once one half-axis has a dimension, the next click on the ellipse gives the other;
+click an axis line for the whole axis. Each is a parameter
 (`d1`, `d2`, …), so it can hold an expression.
 
 **Concentric** accepts two circles or arcs, or a circle or arc and a sketch point (including the
@@ -367,6 +376,16 @@ To change a dimension you already have, double-click it, or, with Sketch Dimensi
 nothing picked yet, click it once: its value box opens with the value selected, Enter applies,
 and the tool stays on for the next dimension. The dimension's text always takes the click; its
 lines take it only away from sketch points and curves, which still start a new dimension.
+
+To type values in a small window instead, set **Preferences › Sketch › Dimension values** to
+**In a window**. The Dimension tool then places the text first: click what you want to
+measure, then where the text goes, and the window opens there (double-clicking a dimension
+opens it too). Its field takes the same numbers, units, expressions and parameter names as the
+box, and the sketch shows the value as you type. The arrows beside the field, Up and Down, and
+the mouse wheel over the field step a number by **Window steps** (1 mm and 1° unless you change
+them; Shift steps ten times as far, Alt a tenth), keeping the unit it is written in. The check
+(or Enter) applies the value as one undo step and the tool stays on for the next dimension; the
+cross (or Esc) drops this dimension only, and Esc with no window open puts the tool down.
 
 To have shapes dimensioned as you draw them, turn on **Dimension new shapes** in Preferences ›
 Sketch (it is off by default). Each line, rectangle, circle, arc, slot, polygon or ellipse you draw

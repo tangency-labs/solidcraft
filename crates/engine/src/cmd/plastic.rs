@@ -404,7 +404,7 @@ mod tests {
         s.run_script(&crate::sample::script()).unwrap();
         let lip = json!({"body": "Plate", "face": [51.89, 45.2, 8.0], "width": "1.5 mm", "height": "3.5 mm", "side": "inside", "type": "lip"});
         let e = s.execute("plastic.lip", &lip).unwrap_err().to_string();
-        assert!(e.contains("rim face") && e.contains("2 openings alike"), "{e}");
+        assert!(e.contains("one clear opening") && e.contains("2 openings alike"), "{e}");
         // The boss alone, no holes: its foot is not an opening either.
         let mut b = Session::default();
         run(&mut b, "solid.box", json!({"length": 80, "width": 50, "height": 8, "body_name": "Plate"}));
@@ -592,6 +592,26 @@ mod tests {
         assert!(rel(volume(&mut s) - v0, PI * 25.0 * 12.0) < 1e-3, "{}", volume(&mut s) - v0);
         assert!(s.execute("plastic.assign_rule", &json!({"bodies": [body], "rule": "Nope"})).is_err());
         assert!(s.execute("plastic.assign_rule", &json!({"bodies": ["Nope"], "rule": "Thick ABS"})).is_err());
+    }
+
+    /// #9623: `Thickness` in a rule's expressions is the rule's thickness, also when the design
+    /// has a parameter of that name; the rule's own `thickness` may still use that parameter.
+    #[test]
+    fn thickness_in_a_plastic_rule_is_the_rules_even_beside_a_parameter_of_that_name() {
+        let values = |param: Option<&str>, thickness: &str| -> Value {
+            let mut s = Session::default();
+            if let Some(e) = param {
+                run(&mut s, "parameters.add", json!({"name": "Thickness", "expression": e}));
+            }
+            run(&mut s, "plastic.manage_rules", json!({"name": "Thick ABS", "thickness": thickness, "clearance": "Thickness / 10"}))["rule"]["values"]
+                .clone()
+        };
+        let want = values(None, "3 mm");
+        assert_eq!((want["thickness"].as_f64(), want["nominal_radius"].as_f64()), (Some(3.0), Some(1.5)), "{want}");
+        assert!(want["clearance"].as_f64().is_some_and(|c| (c - 0.3).abs() < 1e-12), "{want}");
+        assert!(want["thickness_variation"].as_f64().is_some_and(|v| (v - 0.45).abs() < 1e-12), "{want}");
+        assert_eq!(values(Some("10 mm"), "3 mm"), want);
+        assert_eq!(values(Some("3 mm"), "Thickness"), want);
     }
 
     #[test]

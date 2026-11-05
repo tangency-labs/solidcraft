@@ -1131,6 +1131,128 @@ mod async_path_host {
         assert!(h.widget(&format!("GPU path tracer unavailable: {message}")).is_some());
         assert!(image_host(&h.app, ImageMethod::GpuRaytrace).is_err());
     }
+
+    fn marker_adapter_in(path: &std::path::Path) -> Option<String> {
+        let text = std::fs::read_to_string(path).ok()?;
+        serde_json::from_str::<serde_json::Value>(&text).ok()?["adapter"].as_str().map(str::to_owned)
+    }
+
+    /// A driver that takes the process down while it compiles the path tracer (#9236) can't be
+    /// caught: the marker it leaves keeps the next launch from running that setup by itself.
+    #[test]
+    fn a_setup_that_stopped_the_app_is_not_run_again_until_asked() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let mut h = panel_fixture();
+        let marker = h.dir.join(SETUP_MARKER);
+        let key = "AMD Radeon RX 7600 (RADV NAVI33) | Vulkan | radv Mesa 25.2.8";
+        std::fs::write(&marker, json!({"adapter": key}).to_string()).unwrap();
+        h.app.render_workspace.watch_setup(Some(marker.clone()));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        h.app.render_workspace.defer_path_host(key.into(), move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            job::ImageHost::with_executor(Arc::new(TestExecutor)).map_err(|e| e.to_string())
+        });
+        h.app.render_workspace.view.method = ImageMethod::GpuRaytrace;
+        sync_backend(&mut h.app);
+        h.frames(5);
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "the setup that stopped the app must not run by itself");
+        let PathHost::Failed(message) = &h.app.render_workspace.path_host else { panic!("expected the crash to be reported") };
+        assert_eq!(message, h.app.tr("render.gpu_path_crashed"));
+        assert!(h.widget(&format!("GPU path tracer unavailable: {message}")).is_some());
+        assert!(image_host(&h.app, ImageMethod::GpuRaytrace).is_err());
+        // The other image methods stay available.
+        assert!(h.app.session.render_job_host().is_some());
+        assert_eq!(marker_adapter_in(&marker).as_deref(), Some(key), "the marker stays until the setup answers");
+
+        // Opening another design keeps both the crash and the offer to try again.
+        crate::documents::adopt(&mut h.app, Session::default());
+        enter(&mut h.app, true).unwrap();
+        inspector::select_editor(&mut h.app, inspector::Editor::Output);
+        h.app.render_workspace.view.method = ImageMethod::GpuRaytrace;
+        h.frames(3);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(h.app.render_workspace.setup_crashed());
+        let retry = h.app.tr("render.gpu_path_retry").to_string();
+        assert!(h.widget(&retry).is_some(), "the panel offers to try again");
+        h.step(&json!({"widget": retry})).unwrap();
+        finish_setup(&mut h);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(matches!(h.app.render_workspace.path_host, PathHost::Ready(_)));
+        assert!(!marker.exists(), "a setup that answered removes its marker");
+        assert!(!h.app.render_workspace.setup_crashed());
+    }
+
+    #[test]
+    fn a_running_setup_keeps_a_marker_until_it_answers() {
+        for answer in [true, false] {
+            let mut h = panel_fixture();
+            let marker = h.dir.join("settings").join(SETUP_MARKER);
+            h.app.render_workspace.watch_setup(Some(marker.clone()));
+            let (release, wait) = mpsc::channel::<()>();
+            h.app.render_workspace.defer_path_host("Test GPU | Vulkan | 1.0".into(), move || {
+                wait.recv_timeout(Duration::from_secs(10)).unwrap();
+                if answer { job::ImageHost::with_executor(Arc::new(TestExecutor)).map_err(|e| e.to_string()) } else { Err("refused".into()) }
+            });
+            // Raster does not ask for the setup (#9041), so nothing runs and no marker is kept.
+            sync_backend(&mut h.app);
+            assert!(matches!(h.app.render_workspace.path_host, PathHost::NotStarted));
+            assert!(!marker.exists());
+            h.app.render_workspace.view.method = ImageMethod::GpuRaytrace;
+            sync_backend(&mut h.app);
+            assert!(matches!(h.app.render_workspace.path_host, PathHost::Preparing(..)));
+            assert_eq!(marker_adapter_in(&marker).as_deref(), Some("Test GPU | Vulkan | 1.0"));
+            release.send(()).unwrap();
+            finish_setup(&mut h);
+            assert_eq!(matches!(h.app.render_workspace.path_host, PathHost::Ready(_)), answer);
+            assert!(!marker.exists(), "answer {answer}: the process survived, so the marker goes");
+        }
+    }
+
+    #[test]
+    fn closing_during_setup_is_not_a_crash() {
+        let mut h = panel_fixture();
+        let marker = h.dir.join(SETUP_MARKER);
+        h.app.render_workspace.watch_setup(Some(marker.clone()));
+        let (release, wait) = mpsc::channel::<()>();
+        h.app.render_workspace.defer_path_host("Test GPU | Vulkan | 1.0".into(), move || {
+            let _ = wait.recv_timeout(Duration::from_secs(10));
+            Err("closed".into())
+        });
+        h.app.render_workspace.view.method = ImageMethod::GpuRaytrace;
+        sync_backend(&mut h.app);
+        assert!(marker.exists());
+        close(&mut h.app);
+        assert!(!marker.exists());
+        release.send(()).unwrap();
+    }
+
+    #[test]
+    fn markers_for_other_adapters_or_unreadable_ones_never_block_the_setup() {
+        let other = || json!({"adapter": "Another GPU | Vulkan | 1.0"}).to_string().into_bytes();
+        let hostile: [Vec<u8>; 6] = [
+            other(),
+            b"\xff\xfe not text".to_vec(),
+            b"{\"adapter\": 42}".to_vec(),
+            b"{\"adapter\": \"\"}".to_vec(),
+            b"[\"Test GPU | Vulkan | 1.0\"]".to_vec(),
+            format!("{{\"adapter\": \"Test GPU | Vulkan | 1.0\", \"pad\": \"{}\"}}", "x".repeat(70_000)).into_bytes(),
+        ];
+        for bytes in hostile {
+            let mut h = panel_fixture();
+            let marker = h.dir.join(SETUP_MARKER);
+            std::fs::write(&marker, &bytes).unwrap();
+            h.app.render_workspace.watch_setup(Some(marker.clone()));
+            h.app.render_workspace.defer_path_host("Test GPU | Vulkan | 1.0".into(), || {
+                job::ImageHost::with_executor(Arc::new(TestExecutor)).map_err(|e| e.to_string())
+            });
+            h.app.render_workspace.view.method = ImageMethod::GpuRaytrace;
+            sync_backend(&mut h.app);
+            finish_setup(&mut h);
+            assert!(matches!(h.app.render_workspace.path_host, PathHost::Ready(_)), "{:?}", String::from_utf8_lossy(&bytes[..bytes.len().min(40)]));
+            assert!(!marker.exists());
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -2607,7 +2729,8 @@ fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
         off(&mut h);
         let handle = match style {
             crate::prefs::NavigatorStyle::Axes => "axis_view:home",
-            crate::prefs::NavigatorStyle::Cube => "navigation_cube:control:home",
+            // Custom draws the cube until a body is chosen.
+            crate::prefs::NavigatorStyle::Cube | crate::prefs::NavigatorStyle::Custom => "navigation_cube:control:home",
         };
         h.step(&json!({"click":{"handle":handle}})).unwrap();
         h.settle();
@@ -3840,6 +3963,31 @@ fn full_detail_preview_source_can_exceed_legacy_128_mib_without_mesh_reduction()
     assert!(Arc::ptr_eq(&scene.meshes[0].mesh, &mesh));
     let mut maximum = PreviewUploadPlan::default();
     assert!(maximum.add(true, false, MAX_GEOMETRY_BYTES / (3 * crate::gpu::PBR_SIZE) + 1, MAX_GEOMETRY_BYTES).is_err());
+}
+
+/// The product scene is extracted again only when what it shows can change: a selection or a
+/// view change keeps its signature (they extracted every body and built every vertex again),
+/// an appearance edit, hiding a body or a geometry edit changes it.
+#[test]
+fn product_preview_signature_follows_what_the_preview_shows() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    let body = crate::open_meshing::session_world(&h.app.session).bodies[0].name.clone();
+    let first = preview_signature(&mut h.app);
+    assert_eq!(preview_signature(&mut h.app), first, "nothing changed");
+    h.app.run("select.set", json!({"items": [{"type": "body", "name": &body}]})).unwrap();
+    assert_eq!(preview_signature(&mut h.app), first, "a selection");
+    h.app.run("select.clear", json!({})).unwrap();
+    let _ = h.call("ui.view", json!({"view": "top"}));
+    assert_eq!(preview_signature(&mut h.app), first, "a view change");
+    h.app.run("appearance.assign", json!({"bodies": [&body], "color": "#336699"})).unwrap();
+    let painted = preview_signature(&mut h.app);
+    assert_ne!(painted, first, "an appearance edit");
+    h.app.run("browser.visibility", json!({"items": [&body], "visible": false})).unwrap();
+    assert_ne!(preview_signature(&mut h.app), painted, "hiding a body");
+    h.app.run("browser.visibility", json!({"items": [&body], "visible": true})).unwrap();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "operation": "new"})).unwrap();
+    assert_ne!(preview_signature(&mut h.app), painted, "a geometry edit");
 }
 
 #[test]
@@ -5922,6 +6070,60 @@ fn output_viewer_copy_uses_retained_final_pixels_and_refuses_missing_or_oversize
     assert!(h.output.commands.iter().any(|command| matches!(command, egui::OutputCommand::CopyImage(image) if image.size == [16,16])));
     assert!(Arc::ptr_eq(&document, &h.app.session.doc));
     assert_eq!(undo, h.app.session.undo.len());
+}
+
+/// #11222: during a render, Cancel keeps its whole label below and from 10 %. A name that fits
+/// is shown whole as the percentage grows; a long one is cut instead, and the row stays in the canvas.
+/// In a window too narrow for the row, Cancel still shows whole.
+#[test]
+fn progress_pill_cancel_keeps_its_label_and_a_long_name_gives_way() {
+    let mut h = output_viewer_fixture();
+    h.app.render_workspace.view.draft.width = 512;
+    h.app.render_workspace.view.draft.height = 512;
+    h.app.render_workspace.view.name = "A".into();
+    ribbon::perform_job(&mut h.app, "render.start").unwrap();
+    let job = h.app.render_workspace.view.job.unwrap();
+    h.frames(3);
+    let whole = crate::scenario::rect_of("render:progress:cancel").unwrap().width();
+    let fraction = |h: &mut Harness| {
+        let status = h.app.session.execute("render.status", &json!({"job":job})).unwrap();
+        status["progress"]["done"].as_f64().unwrap() / status["progress"]["total"].as_f64().unwrap().max(1.0)
+    };
+    assert!(fraction(&mut h) < 0.1);
+    let long = "A very long shot name that will not fit beside the progress meter ".repeat(4);
+    let host = h.app.session.render_job_host().unwrap().clone();
+    for below in [true, false] {
+        if !below {
+            for _ in 0..100_000 {
+                if fraction(&mut h) >= 0.1 {
+                    break;
+                }
+                host.pump(64).unwrap();
+            }
+            let reached = fraction(&mut h);
+            assert!((0.1..1.0).contains(&reached), "{reached}");
+        }
+        for name in ["Bracket front view", long.as_str()] {
+            h.app.render_workspace.view.job_shot = Some(name.into());
+            h.frames(3);
+            let cancel = crate::scenario::rect_of("render:progress:cancel").unwrap();
+            let pill = crate::scenario::rect_of("render:progress-pill").unwrap();
+            let shown = crate::scenario::rect_of("render:progress:name").unwrap();
+            let case = format!("below 10 %: {below}, {} characters", name.len());
+            assert!((cancel.width() - whole).abs() < 0.5, "{case}: Cancel {} wide, whole {whole}", cancel.width());
+            assert!(pill.contains_rect(cancel), "{case}: {cancel:?} outside {pill:?}");
+            assert!(shown.right() < cancel.left(), "{case}");
+            let cut = crate::scenario::count_of("render:progress:name:cut");
+            assert_eq!(cut, Some(if name == long { 1.0 } else { 0.0 }), "{case}");
+            assert!(h.app.viewport.rect.unwrap().contains_rect(pill), "{case}: {pill:?}");
+        }
+    }
+    // A window too narrow for the whole row: the name is cut and Cancel still shows whole.
+    h.call("ui.resize", json!({"width": 480, "height": 600}));
+    h.frames(3);
+    let cancel = crate::scenario::rect_of("render:progress:cancel").unwrap();
+    assert!((cancel.width() - whole).abs() < 0.5, "narrow window: Cancel {} wide, whole {whole}", cancel.width());
+    assert_eq!(crate::scenario::count_of("render:progress:name:cut"), Some(1.0));
 }
 
 #[test]

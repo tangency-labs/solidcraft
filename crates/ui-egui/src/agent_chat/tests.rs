@@ -1386,6 +1386,77 @@ fn an_interrupted_turns_changes_undo_as_one_step() {
     assert!(Arc::ptr_eq(&app.session.doc, &before));
 }
 
+/// What the user changes by hand between two messages is told to the agent before the next one,
+/// with the parameters and features it touched (#10854): the agent built a hole on a parameter,
+/// the user changed it, and the agent picked the old rim. Its own changes, and a design it has not
+/// seen yet (a new chat), bring no note.
+#[test]
+fn a_change_by_hand_between_messages_is_told_to_the_agent() {
+    use solidcraft_engine::doc::Param;
+    let (mut app, script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    app.agent_chat.attach_selection = false;
+    let expr = |app: &SolveApp| app.session.doc.params.iter().find(|p| p.name == "w").map(|p| p.expr.clone()).unwrap();
+
+    send(&mut app, &ctx, "a box and a parameter w".into());
+    let replies = [
+        ask(&tx, "engine.execute", json!({"command": "parameters.add", "params": {"name": "w", "expression": "10", "unit": "mm"}})),
+        ask(&tx, "engine.execute", boxed(0.0)),
+    ];
+    frame(&mut app);
+    for r in replies {
+        assert_eq!(r.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    }
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    send(&mut app, &ctx, "thanks".into());
+    assert_eq!(script.calls().last().map(String::as_str), Some("prompt: thanks"), "the agent made those changes itself");
+    ended(&script, "");
+    poll(&mut app, &ctx);
+
+    let old = expr(&app);
+    app.run("parameters.change", json!({"name": "w", "expression": "25"})).unwrap();
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]})).unwrap();
+    let added = app.session.doc.features.last().map(|f| f.name.clone()).unwrap();
+    send(&mut app, &ctx, "chamfer it".into());
+    let sent = text_of(script.prompts().last().unwrap());
+    // The new box may bring parameters of its own after `w`.
+    let new = expr(&app);
+    assert!(sent.starts_with(&format!("[The user changed the design by hand since your last reply (parameters: w {old} -> {new}")), "{sent}");
+    assert!(sent.contains(&format!("; features: {added} (new)). Read it again before")), "{sent}");
+    assert!(sent.ends_with("chat.]\n\nchamfer it"), "{sent}");
+    assert!(
+        matches!(app.agent_chat.items.iter().rev().find(|i| matches!(i, Item::User { .. })), Some(Item::User { text, .. }) if text == "chamfer it")
+    );
+    script.report(Event::Text { thought: false, text: "done".into() });
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    send(&mut app, &ctx, "and again".into());
+    assert_eq!(script.calls().last().map(String::as_str), Some("prompt: and again"), "told once");
+    ended(&script, "");
+    poll(&mut app, &ctx);
+
+    // The note's other parts, and its bound on what it lists.
+    let seen = app.session.doc.as_ref().clone();
+    assert!(changed_note(&seen, &seen.clone()).is_none());
+    let mut rolled = seen.clone();
+    rolled.marker = Some(0);
+    let first = seen.features.first().map(|f| f.name.clone()).unwrap();
+    assert!(changed_note(&seen, &rolled).unwrap().contains(&format!("(the History marker is now before {first}, so it")));
+    let mut many = seen.clone();
+    let w = seen.params.iter().find(|p| p.name == "w").cloned().unwrap();
+    many.params.extend((0..20).map(|i| Param { name: format!("p{i}"), ..w.clone() }));
+    assert!(changed_note(&seen, &many).unwrap().contains(&format!(", p11 = {} (new) and 8 more)", w.expr)));
+
+    // A new chat starts a session that has seen nothing.
+    app.run("parameters.change", json!({"name": "w", "expression": "30"})).unwrap();
+    new_chat(&mut app);
+    app.agent_chat.state = Some(State::Ready);
+    send(&mut app, &ctx, "hello".into());
+    assert_eq!(script.calls().last().map(String::as_str), Some("prompt: hello"));
+}
+
 /// The same with a real agent process speaking ACP: `session/cancel` goes out, the agent answers
 /// the held prompt with the cancelled stop reason, and only then does the queued text go as a new
 /// `session/prompt`.
@@ -1543,7 +1614,7 @@ done
 }
 
 /// #9811: an agent that offers the standard `systemPrompt` field gets the note in it, on the first
-/// session and on the one New chat opens.
+/// session and on the one New chat opens, with the custom instructions set before it (#8220).
 #[cfg(unix)]
 #[test]
 fn an_acp_agent_offering_the_standard_field_gets_the_system_note_in_every_session() {
@@ -1576,6 +1647,7 @@ done
         }
     };
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
+    app.preferences.agent_instructions = "Print flat side down.".into();
     new_chat(&mut app);
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
     let sessions: Vec<Value> = std::fs::read_to_string(&log)
@@ -1585,11 +1657,86 @@ done
         .filter(|v| v["method"] == "session/new")
         .collect();
     assert_eq!(sessions.len(), 2);
-    for session in &sessions {
-        assert_eq!(session.pointer("/params/systemPrompt/content/0/text").and_then(Value::as_str), Some(acp::SYSTEM_NOTE));
+    let notes = [acp::SYSTEM_NOTE.to_string(), acp::system_note("Print flat side down.")];
+    for (session, note) in sessions.iter().zip(&notes) {
+        assert_eq!(session.pointer("/params/systemPrompt/content/0/text").and_then(Value::as_str), Some(note.as_str()));
     }
     disconnect(&mut app);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #8220: Preferences → AI shows the Custom instructions field; `ui.agent_chat` sets them (cut at
+/// the limit) and reports them; Connect sends them in the endpoint's system note, and an edit
+/// reaches the conversation New chat opens.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn custom_instructions_reach_the_system_note_of_each_new_session() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let log = seen.clone();
+    let http: backend::HttpFn = Arc::new(move |r: &backend::HttpRequest| {
+        if r.url.ends_with("/chat/completions") {
+            log.lock().unwrap().push(serde_json::from_slice(r.body.as_deref().unwrap_or(b"null")).unwrap());
+            return Ok((200, json!({"choices": [{"message": {"role": "assistant", "content": "ok"}}]}).to_string().into_bytes()));
+        }
+        Ok((200, b"{\"data\":[]}".to_vec()))
+    });
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.services.agent_http = Some(http);
+    crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_ASSISTANT);
+    h.frames(4);
+    assert!(crate::scenario::rect_of("prefs:agent_instructions").is_some(), "the field is on the AI page");
+    h.app.preferences.ai_features = true;
+    h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("prefs_agent_instructions")));
+    h.frames(2);
+    h.step(&json!({"text": "M3"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.preferences.agent_instructions, "M3", "typed text lands in the field");
+    assert!(h.app.prefs_window.filter.is_empty(), "Preferences search does not take the typing");
+    let long = "x".repeat(acp::INSTRUCTIONS_LIMIT + 5);
+    assert_eq!(
+        h.call("ui.agent_chat", json!({"instructions": long}))["result"]["instructions"].as_str().map(str::len),
+        Some(acp::INSTRUCTIONS_LIMIT)
+    );
+    assert!(!h.call("ui.agent_chat", json!({"instructions": 3}))["error"].is_null());
+    assert_eq!(h.call("ui.agent_chat", json!({"instructions": "Use M3 screws."}))["result"]["instructions"], "Use M3 screws.");
+
+    h.app.preferences.agents.push(agents::AgentConfig {
+        id: "api-1".into(),
+        kind: agents::Kind::Api,
+        base_url: "http://localhost:11434/v1".into(),
+        model: "m".into(),
+        ..Default::default()
+    });
+    h.app.agent_chat.agent_id = Some("api-1".into());
+    let ctx = crate::fonts::test_context();
+    let until = |app: &mut SolveApp, done: &dyn Fn(&SolveApp) -> bool| {
+        let t = std::time::Instant::now();
+        while !done(app) {
+            assert!(t.elapsed() < std::time::Duration::from_secs(20), "timed out");
+            poll(app, &ctx);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    };
+    let sent = |n: usize| {
+        let seen = seen.clone();
+        move |a: &SolveApp| a.agent_chat.state() == State::Ready && seen.lock().unwrap().len() == n
+    };
+    connect(&mut h.app, &ctx);
+    until(&mut h.app, &|a| a.agent_chat.state() == State::Ready);
+    send(&mut h.app, &ctx, "one".into());
+    until(&mut h.app, &sent(1));
+    // Editing the field leaves the running conversation's note alone.
+    h.app.preferences.agent_instructions = "Print flat side down.".into();
+    send(&mut h.app, &ctx, "two".into());
+    until(&mut h.app, &sent(2));
+    new_chat(&mut h.app);
+    until(&mut h.app, &|a| a.agent_chat.state() == State::Ready);
+    send(&mut h.app, &ctx, "three".into());
+    until(&mut h.app, &sent(3));
+    let notes: Vec<Value> = seen.lock().unwrap().iter().map(|body| body["messages"][0]["content"].clone()).collect();
+    assert_eq!(notes, [acp::system_note("Use M3 screws."), acp::system_note("Use M3 screws."), acp::system_note("Print flat side down.")]);
+    disconnect(&mut h.app);
 }
 
 fn models_reply(current: &str) -> Event {
@@ -2903,6 +3050,133 @@ fn narrow_chat() -> crate::scenario::Harness {
     h.app.agent_chat.open = true;
     h.app.agent_chat.detection = Some(Default::default());
     h
+}
+
+/// The rows `a_selection_held_at_the_edge_scrolls_and_keeps_its_start` draws that are in view:
+/// each row's number, where its text is, and the conversation's view.
+fn rows_in_view(h: &crate::scenario::Harness) -> Vec<(usize, egui::Rect, egui::Rect)> {
+    let mut rows = Vec::new();
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Text(text) = shape
+                && let Some(n) = text.galley.text().strip_prefix("Parts list row ").and_then(|n| n.parse::<usize>().ok())
+            {
+                let at = egui::Rect::from_min_size(text.pos, text.galley.size());
+                if clipped.clip_rect.intersects(at) {
+                    rows.push((n, at, clipped.clip_rect));
+                }
+            }
+        });
+    }
+    rows.sort_by_key(|r| r.0);
+    rows
+}
+
+/// #11527: a text selection held at the conversation's edge scrolls it, and keeps its start once
+/// that has scrolled out of view, so Copy takes the hidden rows too. Resting there with no button
+/// down, or after letting go, scrolls nothing.
+#[test]
+fn a_selection_held_at_the_edge_scrolls_and_keeps_its_start() {
+    let mut h = narrow_chat();
+    for n in 0..80 {
+        h.app.agent_chat.items.push(Item::Agent { thought: false, text: format!("Parts list row {n}") });
+    }
+    h.frames(4);
+    let rows = rows_in_view(&h);
+    let (&(top, _, view), &(last, last_at, _)) = (rows.first().expect("rows in view"), rows.last().expect("rows in view"));
+    assert_eq!(last, 79, "the conversation shows its end");
+    let edge = egui::pos2(last_at.left() + 10.0, view.top() + 4.0);
+    let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    h.frame_with(vec![egui::Event::PointerMoved(edge)]);
+    h.frames(20);
+    assert_eq!(rows_in_view(&h)[0].0, top, "no button down: the pointer at the edge scrolls nothing");
+
+    // Start the selection at the end of the last row and hold it at the top edge.
+    let start = last_at.right_center() - egui::vec2(1.0, 0.0);
+    h.frame_with(vec![egui::Event::PointerMoved(start), press(start, true)]);
+    h.frame_with(vec![egui::Event::PointerMoved(edge)]);
+    for _ in 0..600 {
+        if !rows_in_view(&h).iter().any(|r| r.0 == last) {
+            break;
+        }
+        h.frame();
+    }
+    let rows = rows_in_view(&h);
+    assert!(!rows.iter().any(|r| r.0 == last), "holding the selection at the top scrolls the last row out of view");
+    let reached = rows[0].0;
+    assert!(reached < top, "row {reached} is in view, it was {top}");
+    h.frame_with(vec![press(edge, false)]);
+    let after = rows_in_view(&h)[0].0;
+    h.frames(20);
+    assert_eq!(rows_in_view(&h)[0].0, after, "letting go stops the scrolling");
+    assert!(h.ctx.plugin::<egui::text_selection::LabelSelectionState>().lock().has_selection(), "the selection keeps its start out of view");
+
+    h.frame_with(vec![egui::Event::Copy]);
+    let copied = h
+        .output
+        .commands
+        .iter()
+        .find_map(|c| if let egui::OutputCommand::CopyText(text) = c { Some(text.clone()) } else { None })
+        .expect("Copy takes the selection");
+    // The selection's moving end is under the pointer, in the first row or two in view.
+    for n in [reached + 2, 78] {
+        assert!(copied.contains(&format!("Parts list row {n}\n")), "row {n} is copied whole: {copied:?}");
+    }
+    assert!(copied.trim_end().ends_with("Parts list row 79"), "the selection ends where it started, out of view: {copied:?}");
+}
+
+/// #11527: only a drag towards the edge scrolls. Holding a press on the line at the top edge, a
+/// double click there, or a drag from there into the conversation leaves it where it is.
+#[test]
+fn a_press_at_the_edge_without_a_drag_towards_it_scrolls_nothing() {
+    let mut h = narrow_chat();
+    // One paragraph taller than the conversation: every point in view is on its text.
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "Bill of materials ".repeat(400) });
+    h.frames(4);
+    // Where the answer's text starts, the conversation's view, and the first line wholly in view
+    // (egui itself scrolls a pressed line that is cut off at the edge into view).
+    let answer = |h: &crate::scenario::Harness| {
+        let mut found = None;
+        for clipped in &h.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                if let egui::Shape::Text(text) = shape
+                    && text.galley.text().starts_with("Bill of materials")
+                    && clipped.clip_rect.intersects(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                {
+                    let line = text.galley.rows.iter().map(|r| r.rect().translate(text.pos.to_vec2())).find(|r| r.top() >= clipped.clip_rect.top());
+                    found = Some((text.pos.y, clipped.clip_rect, line.expect("a line wholly in view")));
+                }
+            });
+        }
+        found.expect("the answer is in view")
+    };
+    let (rest, view, line) = answer(&h);
+    let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    let edge = egui::pos2(view.left() + 40.0, line.center().y);
+    assert!(edge.y < view.top() + 32.0, "the first line in view is by the edge");
+    h.frame_with(vec![egui::Event::PointerMoved(edge), press(edge, true)]);
+    h.frames(30);
+    assert_eq!(answer(&h).0, rest, "a press held at the edge scrolls nothing");
+    h.frame_with(vec![press(edge, false)]);
+    for _ in 0..2 {
+        h.frame_with(vec![press(edge, true)]);
+        h.frame_with(vec![press(edge, false)]);
+    }
+    h.frames(10);
+    assert_eq!(answer(&h).0, rest, "a double click at the edge scrolls nothing");
+    let inside = edge + egui::vec2(0.0, 20.0);
+    h.frame_with(vec![egui::Event::PointerMoved(edge), press(edge, true)]);
+    h.frame_with(vec![egui::Event::PointerMoved(inside)]);
+    h.frames(30);
+    assert_eq!(answer(&h).0, rest, "a drag from the edge into the conversation scrolls nothing");
+    h.frame_with(vec![press(inside, false)]);
+    // Towards the edge it does.
+    let middle = view.center();
+    h.frame_with(vec![egui::Event::PointerMoved(middle), press(middle, true)]);
+    h.frame_with(vec![egui::Event::PointerMoved(edge)]);
+    h.frames(30);
+    assert!(answer(&h).0 > rest, "a drag to the top edge scrolls the answer down");
+    h.frame_with(vec![press(edge, false)]);
 }
 
 /// #10172: before a connection, what the panel draws under the agent switcher (the Agent row
@@ -4413,6 +4687,21 @@ fn the_copy_message_button_copies_the_prompt_as_entered() {
     let at = crate::scenario::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
     click_at(&mut h, at, egui::PointerButton::Primary);
     assert_eq!(copied_text(&h).as_deref(), Some("make a plate\n\nwith two holes:\n- 6 mm\n- 8 mm"), "the whole prompt, paragraphs and list items");
+}
+
+/// A prompt at the top of a short conversation is as tall as its text and its Copy message
+/// button: the button sits at the bubble's foot and the reply follows straight after, instead of
+/// the bubble stretching over the empty view below it.
+#[test]
+fn a_prompt_at_the_top_of_the_conversation_is_as_tall_as_its_content() {
+    // Kept to the end: the published handles and rects are its last frame's.
+    let _h = chat_with_copiable_messages();
+    let button = crate::scenario::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
+    let prompt = crate::scenario::rect_of("agent_chat:msg:0").expect("the prompt's message area");
+    let reply = crate::scenario::rect_of("agent_chat:msg:1").expect("the reply's message area");
+    let row = crate::theme::Tokens::get().control_height;
+    assert!(prompt.bottom() - button.y < row, "the bubble ends {} below its button", prompt.bottom() - button.y);
+    assert!(reply.top() - button.y < 2.0 * row, "the reply starts {} below the prompt's button", reply.top() - button.y);
 }
 
 /// The visible button on a reply copies its original Markdown: heading, paragraphs, list and

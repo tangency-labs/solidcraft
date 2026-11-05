@@ -88,6 +88,8 @@ The [architecture page](docs/architecture.md) has the layer table. The short ver
 
 - `crates/geom`: vectors, planes, meshes, measures.
 - `crates/sketch`: our own constraint solver, plus profile finding.
+- `crates/dynamics`: multibody dynamics: rigid bodies, joint constraints, gravity and springs,
+  integrated in time (RFC #9719). It depends only on `geom`.
 - `crates/kernel`: the B-rep kernel boundary. It wraps [truck](https://github.com/ricosjp/truck),
   and it's the only crate allowed to touch truck. Fillets, chamfers, shell/offset, Delete Face,
   Split Face, STEP/IGES read and write, and face provenance are our own code here. Patched
@@ -471,6 +473,16 @@ the same area), first resolve the command registry and source conflicts, then ru
 `union` merge driver: it can silently retain stale or duplicate command rows.
 The generator tests cover stable ordering and additions that leave existing lines
 unchanged. The initial switch to sorted rows is a one-time larger diff.
+
+## Pictures in the user guide
+
+The user guide's screenshots and short clips (`docs/book/src/media/`) are captured from the real
+app by `examples/demo/doc_shots.py`, one function per figure. Each run starts a fresh app with its
+own settings, so your preferences never show. When a change makes a figure out of date, run
+`python3 examples/demo/doc_shots.py <page or shot>` (it needs Xvfb, ffmpeg, Pillow and a release
+build) and commit the new file. A new figure is a new function there, an ATTRIBUTION row in
+`attribution/pending/`, and a `<video>` (clips) or image link on the page. Keep a still under
+about 250 KB and a clip under about 1 MB.
 
 ## Licence
 

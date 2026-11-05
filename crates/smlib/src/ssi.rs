@@ -129,7 +129,7 @@ impl Spec {
 impl Surface {
     /// solidcore's surface, made the first time it is needed.
     fn core(&self) -> Result<&crate::core::split::Tool> {
-        self.core.get_or_init(|| crate::core::ssi::surface(&self.spec)).as_ref().map_err(Clone::clone)
+        self.core.get_or_init(|| crate::stop::unstoppable(|| crate::core::ssi::surface(&self.spec))).as_ref().map_err(Clone::clone)
     }
 
     pub(crate) fn spec(&self) -> &Spec {

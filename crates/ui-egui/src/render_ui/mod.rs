@@ -188,7 +188,11 @@ pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if crate::render_workspace::job_busy(app) {
         let pill = Container::navigation_card(ui.ctx(), egui::Id::new("sc_render_progress"), free.center_top(), egui::Align2::CENTER_TOP, |ui| {
-            crate::render_workspace::progress_pill(app, ui);
+            // Bound the row by the canvas, not by the card's size last frame: a longer status or
+            // name would otherwise squeeze Cancel or cut a name that has room (#11222).
+            let t = Tokens::get();
+            ui.set_max_width((free.width() - t.space_24).min(t.form_card_width * 2.0).max(0.0));
+            crate::render_workspace::progress_pill(app, ui, "render:progress");
         });
         crate::shell::register_panel(app, "render:progress-pill", Some(pill.response.rect), None);
         crate::scenario::publish_rect("render:progress-pill", pill.response.rect);

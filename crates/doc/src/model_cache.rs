@@ -760,7 +760,7 @@ impl Model {
             return Err(bad("saved model: features"));
         }
         let (vals, param_errors) = evaluation_values(doc);
-        let step_digests = StepDigests::of(doc, &StepDigests::default());
+        let import_digests = ImportDigests::of(doc, &ImportDigests::default());
         let marker = doc.marker.unwrap_or(usize::MAX);
         // As `evaluate` digests the context under the mode, so the next evaluation reuses these.
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation);
@@ -769,19 +769,39 @@ impl Model {
         let mut exact = true;
         let mut prev = 0;
         let mut results = Vec::with_capacity(features.len());
+        let mut construction = HashMap::new();
+        let mut prepared_states = std::collections::HashSet::new();
         for (i, (f, r)) in doc.features.iter().zip(features).enumerate() {
             let saved = unhex(r.get("fingerprint").unwrap_or(&Json::Null))?;
             // A fingerprint reads the state before its feature (where the bodies it takes lie).
             // After a state the file left out, the saved one is taken: `evaluate` works that state
             // out, checks the fingerprints after it, and evaluates again from one that differs.
-            prev = if exact { chain_fingerprint(doc, &vals, f, prev, i >= marker, &step_digests, Some(&before)) } else { saved };
+            prev = if exact { chain_fingerprint(doc, &vals, f, prev, i >= marker, &import_digests, Some(&before)) } else { saved };
             if r.get("id").and_then(Json::as_u64) != Some(f.id) || saved != prev {
                 return Err(bad("saved model: the document changed"));
             }
             let ms = r.get("ms").and_then(Json::as_f64).filter(|ms| ms.is_finite()).ok_or_else(|| bad("saved model: time"))?;
             // A file without room for every state keeps some features without one (#3220).
-            let state =
-                r.get("state").map(|s| states.get(index(Some(s), states.len())?).cloned().ok_or_else(|| bad("saved model: state"))).transpose()?;
+            let state = r.get("state").map(|s| index(Some(s), states.len())).transpose()?;
+            if let Some(at) = state
+                && prepared_states.insert(at)
+            {
+                let original = matches!(
+                    &f.kind,
+                    FeatureKind::Box { operation: Operation::NewBody, .. } | FeatureKind::Extrude { operation: Operation::NewBody, .. }
+                );
+                let current = states.get_mut(at).ok_or_else(|| bad("saved model: state"))?;
+                // Each state is prepared before its first shared clone. Record and NameCell
+                // identity prove this is still the original geometry and its exact names.
+                for body in &mut Arc::make_mut(current).bodies {
+                    let key = (std::ptr::from_ref(body.body.record()).addr(), body.names.id());
+                    if original && body.feature == f.id && before.body(&body.name).is_none() {
+                        construction.insert(key, f.id);
+                    }
+                    body.names.cached_construction = construction.get(&key).copied();
+                }
+            }
+            let state = state.map(|at| states.get(at).cloned().ok_or_else(|| bad("saved model: state"))).transpose()?;
             let result = FeatureResult {
                 id: f.id,
                 name: f.name.clone(),
@@ -806,7 +826,7 @@ impl Model {
             }
             results.push(result);
         }
-        let mut model = Model { results, param_errors, step_digests, context: ctx, frame_bodies, validation, ..Model::default() };
+        let mut model = Model { results, param_errors, import_digests, context: ctx, frame_bodies, validation, ..Model::default() };
         let unkept = model.results.iter().filter(|r| r.unkept).count();
         if unkept > 0 {
             // The features whose state the file did not keep, each evaluated again from the state
@@ -824,7 +844,7 @@ impl Model {
         let mut before = Arc::new(ModelState::default());
         if let Ok(mut cache) = model.cache.lock() {
             for (f, r) in doc.features.iter().zip(&model.results).filter(|(_, r)| !r.skipped && r.error.is_none()) {
-                let local = fingerprint(doc, 0, f, &vals, false, &model.step_digests) ^ placement_digest(doc, f, Some(&before));
+                let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests) ^ placement_digest(doc, f, Some(&before));
                 cache.put(
                     cache_key(f, r.fingerprint, local, ctx, &before),
                     CachedEval {

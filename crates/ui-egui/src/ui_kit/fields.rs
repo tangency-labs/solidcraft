@@ -140,6 +140,119 @@ fn step_count(text: &str, delta: i64, limits: &Count<'_>) -> Option<String> {
     candidates.into_iter().flatten().find(|c| (limits.eval)(c).is_some_and(|v| (v - target as f64).abs() < 1e-9))
 }
 
+/// A value a label drag can change: a number with an optional unit ("20 mm", "1,5 in", "45°").
+#[derive(Clone, Debug, PartialEq)]
+struct Literal {
+    number: f64,
+    /// The text after the number, as written (" mm").
+    unit: String,
+    comma: bool,
+}
+
+/// The largest value a label drag reads or writes.
+const LITERAL_CAP: f64 = 1e12;
+
+/// `text` as a [`Literal`], or None for anything else: a parameter, a formula, an empty field.
+/// Dragging never rewrites an expression, so a driving parameter stays driving.
+fn literal(text: &str) -> Option<Literal> {
+    let text = text.trim();
+    if !solidcraft_engine::doc::expr::is_literal(text) {
+        return None;
+    }
+    let sign = usize::from(text.starts_with(['-', '+']));
+    let end = text.char_indices().skip(sign).find(|(_, c)| !(c.is_ascii_digit() || *c == '.' || *c == ',')).map_or(text.len(), |(at, _)| at);
+    let (number, unit) = (text.get(..end)?, text.get(end..)?);
+    // An exponent ("1e3") or anything else that is not a unit is left alone.
+    solidcraft_engine::doc::expr::unit_info(unit)?;
+    let comma = number.contains(',');
+    let number: f64 = number.replace(',', ".").parse().ok().filter(|n: &f64| n.is_finite() && n.abs() < LITERAL_CAP)?;
+    Some(Literal { number, unit: unit.to_owned(), comma })
+}
+
+/// How much one point of drag changes a value of this size, before Shift or Ctrl: about a
+/// hundredth of it, as a power of ten, so 20 mm moves by 0.1 mm and 250 mm by 1 mm.
+fn scrub_step(number: f64) -> f64 {
+    let decade = number.abs().max(1.0).log10().floor().clamp(0.0, 8.0);
+    10f64.powf(decade - 2.0)
+}
+
+/// `anchor` moved by `points` of drag at `step` per point, on the step's grid. A value that
+/// starts at zero or above stays there: a drag never turns a size negative.
+fn scrubbed(anchor: f64, points: f32, step: f64) -> f64 {
+    let moved = ((anchor + f64::from(points) * step) / step).round() * step;
+    let moved = if anchor >= 0.0 { moved.max(0.0) } else { moved };
+    // Literal values are capped where `literal` reads them; a drag never leaves that range.
+    if moved.is_finite() && moved.abs() < LITERAL_CAP { moved } else { anchor }
+}
+
+/// The scrubbed text: as many decimals as the step needs, the unit and decimal mark as typed.
+fn scrub_text(number: f64, step: f64, literal: &Literal) -> String {
+    let decimals = (-step.log10()).ceil().clamp(0.0, 6.0) as usize;
+    let mut text = format!("{number:.decimals$}");
+    if text.starts_with('-') && text.trim_start_matches(['-', '0', '.']).is_empty() {
+        text.remove(0);
+    }
+    if literal.comma {
+        text = text.replace('.', ",");
+    }
+    text + &literal.unit
+}
+
+/// An ongoing label drag: the value and pointer x it is measured from, and the speed in use.
+#[derive(Clone)]
+struct Scrub {
+    anchor: f64,
+    origin: f32,
+    step: f64,
+}
+
+/// Dragging a row's label sideways changes the literal value in its field: Shift for a tenth of
+/// the speed, Ctrl (Cmd on a Mac) for ten times. The text changes as if typed, so previews
+/// follow, and the dialog's OK still makes the one command (and the one undo step). A field
+/// holding an expression or a parameter is left alone. Returns whether the text changed.
+pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
+    let id = label.id.with("sc_scrub");
+    let Some(now) = literal(value).filter(|_| ui.is_enabled()) else {
+        ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
+        return false;
+    };
+    if label.hovered() || label.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    }
+    if !label.dragged() {
+        ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
+        return false;
+    }
+    let factor = ui.input(|i| {
+        if i.modifiers.shift {
+            0.1
+        } else if i.modifiers.command {
+            10.0
+        } else {
+            1.0
+        }
+    });
+    // Measured from where the pointer is, not summed per frame, so no frame's jump is lost or doubled.
+    let (Some(x), Some(pressed)) = ui.input(|i| (i.pointer.latest_pos().map(|p| p.x), i.pointer.press_origin().map(|p| p.x))) else {
+        return false;
+    };
+    let base = ui.ctx().data(|data| data.get_temp::<Scrub>(id));
+    // A new drag starts from where it was pressed; a changed modifier starts over from here.
+    let state = match base {
+        Some(state) if (state.step - scrub_step(state.anchor) * factor).abs() <= state.step * 1e-9 => state,
+        Some(_) => Scrub { anchor: now.number, origin: x, step: scrub_step(now.number) * factor },
+        None => Scrub { anchor: now.number, origin: pressed, step: scrub_step(now.number) * factor },
+    };
+    let points = x - state.origin;
+    let text = scrub_text(scrubbed(state.anchor, if points.is_finite() { points } else { 0.0 }, state.step), state.step, &now);
+    ui.ctx().data_mut(|data| data.insert_temp(id, state));
+    if text == *value {
+        return false;
+    }
+    *value = text;
+    true
+}
+
 /// Names, thread designations and plain numeric counts do not accept expression completion.
 /// Plain text editor without expression completion; returns (Enter, changed). Tokens: `same as field`.
 pub(crate) fn text_field(ui: &mut Ui, value: &mut String, hint: &str) -> (bool, bool) {
@@ -1259,7 +1372,7 @@ impl Default for Slider {
 
 /// The only slider element, including stepped preferences and editor-free timeline controls.
 /// Native input, keyboard routing, enabled state and accessibility; one token-painted track/thumb.
-/// Tokens: control_height, space_24/8/4/2, dialog_body/rule, control_fill, form_primary.
+/// Tokens: control_height, space_24/8/4/2, dialog_rule, control_fill, form_primary.
 pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::RangeInclusive<T>, options: Slider) -> Response {
     if crate::prefs_search::suppress_chrome(ui) {
         return crate::prefs_search::hidden_response(ui);
@@ -1284,7 +1397,8 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
             t.space_4
         };
         ui.spacing_mut().slider_width = dimension(ui.available_width() - reserved);
-        let mut widget = egui::Slider::new(value, range).show_value(options.show_value).handle_shape(egui::style::HandleShape::Circle);
+        let mut widget =
+            egui::Slider::new(value, range).show_value(options.show_value).handle_shape(egui::style::HandleShape::Circle).trailing_fill(false);
         if options.off_endpoint {
             // Blur's step is an editing affordance, not a persisted/API quantisation rule.
             widget = widget.clamping(egui::SliderClamping::Edits);
@@ -1298,20 +1412,59 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
         if options.integer {
             widget = widget.integer();
         }
+        let layer = ui.layer_id();
+        let paint_start = ui.ctx().graphics(|graphics| graphics.get(layer).map_or(egui::layers::ShapeIdx(0), |list| list.next_idx()));
         let response = ui.add(widget);
+        let slider = egui::Rect::from_min_size(response.rect.min, vec2(ui.spacing().slider_width, response.rect.height()));
+        // egui 0.36.2 paints the rail, then the circular handle, then the value editor.
+        // Suppress only a positively identified pair added by this widget. A backing
+        // rectangle would flatten translucent/blurred parents. Unexpected painting
+        // (including an invisible or clipped widget) keeps the native shapes intact.
+        ui.ctx().graphics_mut(|graphics| {
+            let Some(list) = graphics.get_mut(layer) else { return };
+            let paint_end = list.next_idx();
+            if paint_end.0.saturating_sub(paint_start.0) < 2 {
+                return;
+            }
+            let handle_idx = egui::layers::ShapeIdx(paint_start.0 + 1);
+            let rail_height = ui.spacing().slider_rail_height.max(0.0);
+            let native_radius = slider.height() / 2.5;
+            let native_range = slider.x_range().shrink(native_radius);
+            let mut rail_matches = false;
+            let mut handle_matches = false;
+            // Indexed reads via mutate_shape are bounded and allocate nothing; do not
+            // scan the layer's earlier parent/sibling paints looking for a match.
+            list.mutate_shape(paint_start, |entry| {
+                if let egui::Shape::Rect(rail) = &entry.shape {
+                    let expected = egui::Rect::from_center_size(slider.center(), vec2(slider.width(), rail_height));
+                    rail_matches = entry.clip_rect == ui.clip_rect()
+                        && (rail.rect.min - expected.min).length_sq() < 0.0001
+                        && (rail.rect.max - expected.max).length_sq() < 0.0001
+                        && rail.stroke == egui::Stroke::NONE;
+                }
+            });
+            list.mutate_shape(handle_idx, |entry| {
+                if let egui::Shape::Circle(handle) = &entry.shape {
+                    handle_matches = entry.clip_rect == ui.clip_rect()
+                        && (handle.center.y - slider.center().y).abs() < 0.01
+                        // egui's handle range reverses when the control is narrower
+                        // than its diameter; either endpoint still belongs to it.
+                        && handle.center.x >= native_range.min.min(native_range.max) - 0.01
+                        && handle.center.x <= native_range.min.max(native_range.max) + 0.01
+                        && (handle.radius - native_radius).abs() < 0.01;
+                }
+            });
+            if rail_matches && handle_matches {
+                list.mutate_shape(paint_start, |entry| entry.shape = egui::Shape::Noop);
+                list.mutate_shape(handle_idx, |entry| entry.shape = egui::Shape::Noop);
+            }
+        });
         if ui.ctx().memory(|memory| memory.focused()).is_some_and(|id| {
             ui.ctx().read_response(id).is_some_and(|focused| response.rect.contains(focused.rect.center()))
                 || egui::TextEdit::load_state(ui.ctx(), id).is_some()
         }) {
             crate::prefs_search::note_key_sink(ui.ctx());
         }
-        let slider = egui::Rect::from_min_size(response.rect.min, vec2(ui.spacing().slider_width, response.rect.height()));
-        let mut background = ui.painter().clone();
-        background.set_opacity(if ui.is_visible() { 1.0 } else { 0.0 });
-        // At the top of the range egui's own handle reaches `slider.right()` exactly, and a fill
-        // that stops there leaves its last column showing beside the editor (#5708). The gap
-        // before the editor is `item_spacing.x`, so a pixel past the edge covers nothing else.
-        background.rect_filled(slider.with_max_x(slider.right() + 1.0), 0.0, t.dialog_body);
         // Match egui's native input range (handle_radius = thickness / 2.5), so the
         // painted thumb stays under the pointer even at the two ends of the range.
         let input_radius = ui.text_style_height(&egui::TextStyle::Body).max(ui.spacing().interact_size.y) / 2.5;

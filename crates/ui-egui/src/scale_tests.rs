@@ -277,6 +277,7 @@ pub(crate) fn view_frame(
         pv_key: 0,
         pv_slot: none(),
         pv_hide: false,
+        preview_bounds: None,
         view_proj: proj.vp.to_f32(),
         back: proj.cam.back().to_f32(),
         size_px: [size as f32; 2],
