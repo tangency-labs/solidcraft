@@ -803,6 +803,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | docs/screenshots/box-insert-designer.gif | Shawn Marx | original recording made with BoxInsertDesigner's own Motion export (its three.js viewer) of its example game `examples/ccg-example` (https://github.com/ShawnMarx/BoxInsertDesigner): a card game box insert whose trays were built by SolidCraft through `solidcraft-cli`; the published card, board and box art in it is pixelated beyond recognition, and no logos or game names are shown (2.5× playback, 800 px wide) | MIT OR Apache-2.0 |
 | docs/screenshots/box-insert-designer.mp4 | Shawn Marx | original recording made with BoxInsertDesigner's own Motion export (its three.js viewer) of its example game `examples/ccg-example` (https://github.com/ShawnMarx/BoxInsertDesigner): a card game box insert whose trays were built by SolidCraft through `solidcraft-cli`; the published card, board and box art in it is pixelated beyond recognition, and no logos or game names are shown (1280×720) | MIT OR Apache-2.0 |
 | assets/locales/pending/agent-http-consent.json | SolidCraft contributors | Original endpoint-specific HTTP consent messages and translations | MIT OR Apache-2.0 |
+| assets/locales/pending/ground-shadow-placement.json | SolidCraft contributors | Original ground-shadow placement preference messages and translations | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 

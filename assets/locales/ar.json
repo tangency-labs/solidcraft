@@ -2425,6 +2425,8 @@
   "prefs.graphics_page.surfaces_edges": "الأسطح والحواف",
   "prefs.graphics_page.view_bar": "أيضًا في شريط العرض",
   "prefs.graphics_presets_note": "الإعدادات المسبقة تضبط الخيارات أدناه معًا.",
+  "prefs.ground_shadow_follows_model": "ظل الأرض يتبع النموذج",
+  "prefs.ground_shadow_follows_model_help": "ضع الظل أسفل أدنى جسم مرئي. عند التعطيل، يبقى ظل النماذج المرفوعة على مستوى الأرض عند نقطة الأصل.",
   "prefs.hide_constraint_glyphs_zoomed_out": "إخفاء رموز القيود عند التصغير",
   "prefs.hide_constraint_glyphs_zoomed_out_note": "تختفي رموز القيود من العرض عندما يُصغَّر الرسم بقدر يجعلها تزحمه. معطّل: تبقى بحجم ثابت على الشاشة عند أي مستوى تكبير.",
   "prefs.history": "السجل",

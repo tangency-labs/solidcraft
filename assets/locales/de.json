@@ -2398,6 +2398,8 @@
   "prefs.graphics_page.surfaces_edges": "Flächen und Kanten",
   "prefs.graphics_page.view_bar": "Auch in der Ansichtsleiste",
   "prefs.graphics_presets_note": "Mit den Profilen werden die unten aufgeführten Optionen gemeinsam eingestellt.",
+  "prefs.ground_shadow_follows_model": "Bodenschatten folgt dem Modell",
+  "prefs.ground_shadow_follows_model_help": "Den Schatten unter dem niedrigsten sichtbaren Körper platzieren. Wenn deaktiviert, bleibt der Schatten angehobener Modelle auf der Bodenebene durch den Ursprung.",
   "prefs.hide_constraint_glyphs_zoomed_out": "Bindungssymbole bei starkem Herauszoomen ausblenden",
   "prefs.hide_constraint_glyphs_zoomed_out_note": "Bindungssymbole verschwinden, wenn die Skizze so weit herausgezoomt ist, dass sie sie überladen würden. Aus: sie behalten bei jedem Zoom eine feste Bildschirmgröße.",
   "prefs.history": "Verlauf",

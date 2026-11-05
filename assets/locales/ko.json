@@ -1797,6 +1797,8 @@
   "prefs.graphics_page.surfaces_edges": "곡면과 모서리",
   "prefs.graphics_page.view_bar": "뷰 표시줄에서도 사용",
   "prefs.graphics_presets_note": "프리셋은 아래의 선택 항목을 한 번에 설정합니다.",
+  "prefs.ground_shadow_follows_model": "지면 그림자가 모델을 따라 이동",
+  "prefs.ground_shadow_follows_model_help": "표시된 바디의 가장 낮은 지점 아래에 그림자를 배치합니다. 끄면 위로 이동한 모델의 그림자가 원점을 지나는 지면에 유지됩니다.",
   "prefs.hide_constraint_glyphs_zoomed_out": "축소 시 구속 조건 기호 숨기기",
   "prefs.hide_constraint_glyphs_zoomed_out_note": "스케치를 충분히 축소하면 구속 조건 기호가 가려지지 않도록 숨깁니다. 끄기: 확대/축소와 관계없이 고정된 화면 크기를 유지합니다.",
   "prefs.history": "이력",

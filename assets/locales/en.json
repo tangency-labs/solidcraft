@@ -2425,6 +2425,8 @@
   "prefs.graphics_page.surfaces_edges": "Surfaces and edges",
   "prefs.graphics_page.view_bar": "Also in the view bar",
   "prefs.graphics_presets_note": "Presets set the choices below together.",
+  "prefs.ground_shadow_follows_model": "Ground shadow follows the model",
+  "prefs.ground_shadow_follows_model_help": "Place the shadow below the lowest visible body. When off, raised models keep their shadow on the origin ground plane.",
   "prefs.hide_constraint_glyphs_zoomed_out": "Hide constraint glyphs when zoomed out",
   "prefs.hide_constraint_glyphs_zoomed_out_note": "Constraint glyphs leave the view when the sketch is zoomed out far enough that they would clutter it. Off: they stay at a fixed screen size at every zoom.",
   "prefs.history": "History",

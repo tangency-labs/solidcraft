@@ -2425,6 +2425,8 @@
   "prefs.graphics_page.surfaces_edges": "Bề mặt và cạnh",
   "prefs.graphics_page.view_bar": "Cũng có trên thanh khung nhìn",
   "prefs.graphics_presets_note": "Các cấu hình định sẵn sẽ thiết lập đồng thời các tùy chọn bên dưới.",
+  "prefs.ground_shadow_follows_model": "Bóng trên mặt đất di chuyển theo mô hình",
+  "prefs.ground_shadow_follows_model_help": "Đặt bóng bên dưới khối hiển thị thấp nhất. Khi tắt, bóng của mô hình được nâng lên vẫn nằm trên mặt phẳng đất đi qua gốc tọa độ.",
   "prefs.hide_constraint_glyphs_zoomed_out": "Ẩn biểu tượng ràng buộc khi thu nhỏ",
   "prefs.hide_constraint_glyphs_zoomed_out_note": "Biểu tượng ràng buộc biến mất khi bản phác được thu nhỏ đủ xa để không làm rối khung nhìn. Tắt: chúng giữ kích thước màn hình cố định ở mọi mức thu phóng.",
   "prefs.history": "Lịch sử",
