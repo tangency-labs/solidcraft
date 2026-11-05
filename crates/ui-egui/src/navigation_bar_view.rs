@@ -249,7 +249,7 @@ fn activate(app: &mut SolveApp, slot: &Slot) {
         _ => {
             if let Some(command) = slot.command {
                 let params = match slot.kind {
-                    Kind::Tool => json!({"tool": if selected(app, slot.id) { "none" } else { slot.id }}),
+                    Kind::Tool if command == "view.tool" => json!({"tool": if selected(app, slot.id) { "none" } else { slot.id }}),
                     _ if slot.id == "ambient_occlusion" => json!({"enabled": !app.preferences.ambient_occlusion}),
                     _ => json!({}),
                 };
@@ -260,16 +260,18 @@ fn activate(app: &mut SolveApp, slot: &Slot) {
 }
 
 fn tooltip(app: &SolveApp, response: egui::Response, slot: &Slot, hidden: Option<&str>, along: Rect, edge: Edge) -> egui::Response {
+    let key = slot.command.and_then(|id| crate::keymap::display_for(app, id));
     let label = if let Some(hidden) = hidden {
         app.tr(hidden).to_owned()
     } else if slot.id == "visual_style" {
         crate::i18n::format("navbar.value_tip", &[("name", app.tr(slot.label)), ("value", current_style(app))])
     } else if slot.id == "projection" && projection_locked(app) {
         app.tr("nav.perspective.sketch").to_owned()
+    } else if slot.id == "zoom" && key.is_some() {
+        app.tr("navbar.zoom_hold_tip").to_owned()
     } else {
         app.tr(slot.label).to_owned()
     };
-    let key = slot.command.and_then(|id| crate::keymap::display_for(app, id));
     ui_kit::navigation_tooltip(&response, along, edge, &label, key.as_deref());
     response
 }

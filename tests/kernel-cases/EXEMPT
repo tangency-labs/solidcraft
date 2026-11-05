@@ -355,6 +355,7 @@ view.spin                         the view: camera, layout, display
 view.status_details               the view: camera, layout, display
 view.status_items                 the view: camera, layout, display
 view.tool                         the view: camera, layout, display
+view.tool.zoom                    the view: camera, layout, display
 view.top                          the view: camera, layout, display
 view.visual_style                 the view: camera, layout, display
 

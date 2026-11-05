@@ -1305,6 +1305,14 @@ impl SolveApp {
                         _ => None,
                     };
                 }
+                "view.tool.zoom" => {
+                    let active = self.viewport.nav == Some(viewport::NavMode::Zoom);
+                    if v.get("on").and_then(Value::as_bool).unwrap_or(!active) {
+                        self.viewport.nav = Some(viewport::NavMode::Zoom);
+                    } else if active {
+                        self.viewport.nav = None;
+                    }
+                }
                 "view.spin" => {
                     self.cancel_view_animation();
                     self.viewport.spin = v.get("on").and_then(Value::as_bool).unwrap_or(!self.viewport.spin);
@@ -1782,6 +1790,7 @@ impl SolveApp {
             id,
             "view.fit"
                 | "view.home"
+                | "view.tool.zoom"
                 | "view.spin"
                 | "view.grid"
                 | "view.ground_shadow"
