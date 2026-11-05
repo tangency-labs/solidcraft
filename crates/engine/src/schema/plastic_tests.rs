@@ -93,7 +93,7 @@ fn the_contracts_refuse_what_the_handlers_ignore() {
 
 /// #12313: the schemas take what the handlers read: a rule's name as text, its values as
 /// numbers or expressions, `active` and `delete` as true or false; bodies as a name or a list of
-/// names, and the rule as text or `null`.
+/// one or more names (not `null`), and the rule as text or `null`.
 #[test]
 fn the_schemas_take_what_the_handlers_read() {
     let manage = input_schema_for::<ManageRulesParams>();
@@ -119,6 +119,8 @@ fn the_schemas_take_what_the_handlers_read() {
         (json!({"bodies": ["Body1"], "rule": null}), true),
         (json!({}), false),
         (json!({"bodies": [5]}), false),
+        (json!({"bodies": null}), false),
+        (json!({"bodies": []}), false),
         (json!({"bodies": ["Body1"], "rule": 5}), false),
     ] {
         assert_eq!(conforms(assign, assign, &p), takes, "{p}");
