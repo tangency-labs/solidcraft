@@ -861,6 +861,12 @@ fn save_for_sharing(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`path` must be a .zip file"));
     }
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
+    // A copy never replaces the open design's own file (named directly or through a link).
+    if let Some(open) = s.path.as_deref()
+        && (open == path || matches!((std::fs::canonicalize(open), std::fs::canonicalize(path)), (Ok(a), Ok(b)) if a == b))
+    {
+        return Err(bad(cmd, "`path` is the open design's own file; share to a different .zip"));
+    }
     let bytes = match str_(p, "source").filter(|x| !x.trim().is_empty()) {
         Some(source) => {
             let bytes =
@@ -872,9 +878,18 @@ fn save_for_sharing(s: &mut Session, p: &Value) -> Result<Value> {
             if container { bytes } else { solidcraft_io::write_design_container_with_compression(&doc, solidcraft_io::DesignCompression::Compact)? }
         }
         // Without the evaluated model: the zip is smaller, and the design rebuilds the same.
-        None => s.design_container(solidcraft_io::DesignCompression::Compact, false, false)?,
+        // Links to component files are rebased to the folder the zip is saved in.
+        None => {
+            // Like Save: a move not captured yet isn't in the document, so the copy would disagree with the view.
+            if s.moved_uncaptured() {
+                return Err(EngineError::Other(format!(
+                    "{path}: a component is moved and not captured yet; component.capture_position keeps the move and component.revert_position puts it back, then share"
+                )));
+            }
+            s.design_container_at(Some(path), solidcraft_io::DesignCompression::Compact, false, false)?
+        }
     };
-    solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len()}))
 }
 
@@ -972,7 +987,7 @@ fn export_to(
         // file the design's properties where the format has a place for them.
         solidcraft_io::export_with_parts(&s.doc.painted(&*s.world_state()?), bodies, parts, format, &name, &s.doc.metadata, quality)?
     };
-    solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")}))
 }
 
@@ -2301,6 +2316,15 @@ mod tests {
         std::fs::write(dir.join("notes.txt"), "not a design").unwrap();
         assert!(s.execute("file.save_for_sharing", &json!({"path":wrapped, "source":dir.join("notes.txt")})).is_err());
         assert!(s.execute("file.save_for_sharing", &json!({"path":dir.join("bracket.solidcraft")})).is_err());
+        // The open design's own file is never the copy, and a move not captured yet is refused.
+        let own = dir.join("own.zip");
+        s.execute("file.save_as", &json!({"path":own})).unwrap();
+        let before = std::fs::read(&own).unwrap();
+        assert!(s.execute("file.save_for_sharing", &json!({"path":own})).is_err());
+        assert_eq!(std::fs::read(&own).unwrap(), before);
+        s.pending_moves.insert(1, solidcraft_doc::IDENTITY);
+        assert!(s.execute("file.save_for_sharing", &json!({"path":dir.join("moved.zip")})).is_err());
+        assert!(!dir.join("moved.zip").exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 
