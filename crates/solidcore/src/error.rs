@@ -801,6 +801,9 @@ pub enum ErrorKind {
     OffsetLoopsCross = 202,
     /// An offset would move a vertex to or past the other end of its edge.
     OffsetEdgeVanishes = 203,
+    /// An offset face's offset collapses onto a line or point: the distance is a radius
+    /// of curvature of the face on that side (a round inset by its radius).
+    OffsetCollapses = 204,
 }
 
 impl ErrorKind {
@@ -849,6 +852,7 @@ impl ErrorKind {
             Self::OffsetWallsTouch => "offset_walls_touch",
             Self::OffsetLoopsCross => "offset_loops_cross",
             Self::OffsetEdgeVanishes => "offset_edge_vanishes",
+            Self::OffsetCollapses => "offset_collapses",
         }
     }
 

@@ -8,6 +8,7 @@
 //! | Rust                                   | Status difftest compares                  |
 //! |----------------------------------------|-------------------------------------------|
 //! | [`OffsetFailure::Folds`]               | `SM_ERR` (WR-718, solidcore-native)       |
+//! | [`OffsetFailure::Collapses`]           | `SM_ERR` (#2350, solidcore-native)        |
 //! | [`OffsetFailure::WallsTouch`]          | `SM_ERR_OFFSET_WALLS_TOUCH` (fork a759622) |
 //! | [`OffsetFailure::LoopsCross`]          | `SM_ERR_BAD_INTERSECTIONS` (WR-345)       |
 //! | [`OffsetFailure::EdgeVanishes`]        | `SM_ERR_OFFSET_EDGE_VANISHES` (fork 34318f4) |
@@ -35,6 +36,19 @@ pub enum OffsetFailure {
         distance: f64,
         /// The largest wall that works.
         largest: f64,
+    },
+    /// The offset of `face` by `distance` collapses onto a line or point: the face has a
+    /// radius of curvature `radius` on the displaced side that the distance reaches, within
+    /// the B-rep's tolerance (a round inset by its radius). The offset is no surface there,
+    /// and the faces beside it would have to meet across it, which the offset does not
+    /// build (#2350).
+    Collapses {
+        /// The face whose offset collapses.
+        face: FaceId,
+        /// The offset distance asked for (signed, as the operation takes it).
+        distance: f64,
+        /// The radius of curvature the face attains on the displaced side.
+        radius: f64,
     },
     /// Loops of the offset of `face` touch without crossing, so the offset walls they
     /// come from meet there (opt-in `fixes.offset_walls_touch_refused`).
@@ -123,7 +137,7 @@ impl OffsetFailure {
     #[must_use]
     pub fn entity(&self) -> Option<EntityRef> {
         match *self {
-            Self::Folds { face, .. } => Some(EntityRef::Face(face)),
+            Self::Folds { face, .. } | Self::Collapses { face, .. } => Some(EntityRef::Face(face)),
             Self::WallsTouch { face, .. } | Self::LoopsCross { face, .. } => {
                 face.map(EntityRef::Face)
             }
@@ -137,7 +151,7 @@ impl OffsetFailure {
     /// The status the C++ reports for the refusal (difftest's comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Folds { .. } => SM_ERR,
+            Self::Folds { .. } | Self::Collapses { .. } => SM_ERR,
             Self::WallsTouch { .. } => SM_ERR_OFFSET_WALLS_TOUCH,
             Self::LoopsCross { .. } => SM_ERR_BAD_INTERSECTIONS,
             Self::EdgeVanishes { .. } => SM_ERR_OFFSET_EDGE_VANISHES,
@@ -152,6 +166,7 @@ impl OffsetFailure {
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::Folds { .. } => ErrorKind::OffsetFolds,
+            Self::Collapses { .. } => ErrorKind::OffsetCollapses,
             Self::WallsTouch { .. } => ErrorKind::OffsetWallsTouch,
             Self::LoopsCross { .. } => ErrorKind::OffsetLoopsCross,
             Self::EdgeVanishes { .. } => ErrorKind::OffsetEdgeVanishes,
@@ -212,6 +227,18 @@ impl core::fmt::Display for OffsetFailure {
                 "the offset of face {} by {distance} folds: the wall is thicker than a \
                  radius of curvature of the face on that side (the largest wall that works \
                  is {largest})",
+                face.index()
+            ),
+            Self::Collapses {
+                face,
+                distance,
+                radius,
+            } => write!(
+                f,
+                "the offset of face {} by {distance} collapses: the face has a radius of \
+                 curvature {radius} on that side, which the offset reaches (a round offset by \
+                 its radius is a line, not a face; the faces beside it would have to meet \
+                 across it, which the offset does not build)",
                 face.index()
             ),
             Self::WallsTouch { face, contact } => {

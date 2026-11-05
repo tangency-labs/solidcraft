@@ -70,7 +70,7 @@ why = "the exact surface extension replaces the fitted one (geometry; plan/findi
 [[mismatch]]
 unit = "offset.offset_executive_p2"
 case = "defeature_extrusion_face0_inset2_extended"
-why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+why = "the round of radius 2 (face 5) offset by 2 collapses onto a line: refused (OffsetFailure::Collapses, #2350; owner ruling), where the C++ builds a body that is not sound (edge tolerances 16.06 and 6.77 on a B-rep of 1e-4); tests/offset_shell_extrusion_extend.rs"
 
 [[mismatch]]
 unit = "offset.offset_executive_p2"
@@ -251,3 +251,8 @@ why = "the offset's extended surfaces reach as far as the offsets meet, not five
 unit = "offset.offset_executive_p2"
 case = "pe_Fillet_cyl_on_box_w_fillet2_f1_d0_out_ext"
 why = "the offset's extended surfaces reach as far as the offsets meet, not five offsets (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "round_merge_deleted_surface_user_ShellBrep_983_face0_inset"
+why = "a face offset by 1 collapses (a round of radius 1 inset by 1): refused at that face (OffsetFailure::Collapses, status SM_ERR, #2350). Before, the C++ and the port failed with SM_ERR too, later (no body either way); only the executive's partial offset differs: 11 faces built before the refusal, 16 before the C++ failure"

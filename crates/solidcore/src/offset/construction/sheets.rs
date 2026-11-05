@@ -1051,6 +1051,55 @@ pub fn certify_regular(
     })
 }
 
+/// What [`proved_singular`] found: a point of the region where the offset is no regular
+/// surface.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Singular {
+    /// The radius of curvature on the displaced side there, a radius the surface attains.
+    pub radius: f64,
+    /// Whether the offset collapses there (the radius is the distance, within the
+    /// resolution) rather than folds (the distance is the larger by more).
+    pub collapses: bool,
+}
+
+/// A proof that the offset of `s` by `d` (along its NURB normal) over the parameter box
+/// `uv_box` is no regular surface, or `None` where none was found. Where the surface attains
+/// a radius of curvature `r` on the displaced side, the offset's radius there is `r - |d|`:
+/// at most `resolution` (the smallest length the model tells apart), the offset collapses
+/// there onto a line or point (a round inset by its radius); below `-resolution`, it folds
+/// over itself. The radius is the least found by sampling each patch on a 9 x 9 grid and a
+/// pattern search about the least sample, at a point of the surface (one where the normal
+/// vanishes is passed over), so it is attained; its rounding, a few ulps of `r`, is far
+/// below any resolution. Unlike [`certify_regular`], it refuses nothing it has not seen.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a distance or resolution that is not finite or a
+/// negative resolution; those of the Bezier decomposition.
+pub fn proved_singular(
+    s: &Nurb,
+    d: f64,
+    uv_box: Option<[f64; 4]>,
+    resolution: f64,
+) -> Result<Option<Singular>> {
+    if !d.is_finite() || !resolution.is_finite() || resolution < 0.0 {
+        return Err(invalid("a distance or resolution that is not finite"));
+    }
+    let region = patches_in(s, uv_box)?;
+    if region.is_empty() || !positive(d.abs()) {
+        return Ok(None);
+    }
+    let radius = least_radius(&region, d.signum(), f64::INFINITY)?;
+    let reach = d.abs();
+    if radius - reach > resolution {
+        return Ok(None);
+    }
+    Ok(Some(Singular {
+        radius,
+        collapses: radius - reach >= -resolution,
+    }))
+}
+
 /// The principal curvatures (signed along the NURB normal) of a patch at `(s, t)`.
 fn principal_curvatures(patch: &Patch, s: f64, t: f64) -> Option<(f64, f64)> {
     let p = eval3(&patch.p, s, t);
@@ -1097,8 +1146,9 @@ fn principal_curvatures(patch: &Patch, s: f64, t: f64) -> Option<(f64, f64)> {
 }
 
 /// The radius `1 / k` of the largest curvature `k` on the side `side` (the sign of the
-/// distance) of the patch at `(s, t)`; infinite where it bends away.
-fn wall_at(patch: &Patch, side: f64, s: f64, t: f64) -> f64 {
+/// distance) of the patch at `(s, t)`; infinite where it bends away, `degenerate` where
+/// the normal vanishes.
+fn wall_or(patch: &Patch, side: f64, s: f64, t: f64, degenerate: f64) -> f64 {
     match principal_curvatures(patch, s, t) {
         Some((k1, k2)) => {
             let k = (k1 * side).max(k2 * side);
@@ -1108,19 +1158,25 @@ fn wall_at(patch: &Patch, side: f64, s: f64, t: f64) -> f64 {
                 f64::INFINITY
             }
         }
-        None => 0.0,
+        None => degenerate,
     }
 }
 
 /// The smallest radius of curvature on the side `side` over `region`: a 9 x 9 sample
 /// grid per patch, then a pattern search about the smallest sample.
 fn largest_wall(region: &[Patch], side: f64) -> Result<f64> {
+    least_radius(region, side, 0.0)
+}
+
+/// [`largest_wall`] with `degenerate` taken where a sample's normal vanishes: the radius at
+/// the sample it ends on, so a radius the surface attains (at least the true least).
+fn least_radius(region: &[Patch], side: f64, degenerate: f64) -> Result<f64> {
     let mut best = (f64::INFINITY, 0usize, 0.5, 0.5);
     for (i, patch) in region.iter().enumerate() {
         for a in 0..=8 {
             for c in 0..=8 {
                 let (s, t) = (f64::from(a) / 8.0, f64::from(c) / 8.0);
-                let r = wall_at(patch, side, s, t);
+                let r = wall_or(patch, side, s, t, degenerate);
                 if r < best.0 {
                     best = (r, i, s, t);
                 }
@@ -1134,7 +1190,7 @@ fn largest_wall(region: &[Patch], side: f64) -> Result<f64> {
         let mut moved = false;
         for (ds, dt) in [(step, 0.0), (-step, 0.0), (0.0, step), (0.0, -step)] {
             let (s2, t2) = ((s + ds).clamp(0.0, 1.0), (t + dt).clamp(0.0, 1.0));
-            let r2 = wall_at(patch, side, s2, t2);
+            let r2 = wall_or(patch, side, s2, t2, degenerate);
             if r2 < r {
                 (r, s, t, moved) = (r2, s2, t2, true);
             }
@@ -1464,5 +1520,38 @@ mod tests {
             panic!("an inset past the radius folds");
         };
         assert!((largest - 10.0).abs() < 1e-9, "{largest}");
+    }
+
+    /// A cylinder of radius 10 offset towards its axis: by 10 the offset collapses onto
+    /// the axis (refused, the radius named), short of 10 by more than the resolution it
+    /// does not, past 10 by more it folds; offset away from the axis, never. A distance
+    /// that is not finite is refused as input.
+    #[test]
+    fn a_round_offset_by_its_radius_is_proved_to_collapse() {
+        let s = quarter_cylinder();
+        let res = 1e-6;
+        let at = proved_singular(&s, -10.0, None, res).unwrap().unwrap();
+        assert!(at.collapses, "{at:?}");
+        assert!((at.radius - 10.0).abs() < 1e-12, "{at:?}");
+        // within the resolution either side of the radius: still a collapse
+        for d in [-10.0 + 0.5e-6, -10.0 - 0.5e-6] {
+            assert!(
+                proved_singular(&s, d, None, res)
+                    .unwrap()
+                    .unwrap()
+                    .collapses
+            );
+        }
+        assert_eq!(proved_singular(&s, -9.99, None, res).unwrap(), None);
+        let folds = proved_singular(&s, -10.5, None, res).unwrap().unwrap();
+        assert!(
+            !folds.collapses && (folds.radius - 10.0).abs() < 1e-12,
+            "{folds:?}"
+        );
+        for d in [10.0, 25.0, 0.0] {
+            assert_eq!(proved_singular(&s, d, None, res).unwrap(), None, "{d}");
+        }
+        assert!(proved_singular(&s, f64::NAN, None, res).is_err());
+        assert!(proved_singular(&s, -10.0, None, -1.0).is_err());
     }
 }

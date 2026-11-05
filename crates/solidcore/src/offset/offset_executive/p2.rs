@@ -236,6 +236,46 @@ fn make_shell_edges_exact(
     make_edges_on_analytics_exact(kernel, shell, &mut stores)
 }
 
+/// Not upstream (#2350): refuses the offset surface `offset` of `face` with
+/// [`OffsetFailure::Collapses`] where it is proved to collapse
+/// ([`crate::offset::construction::sheets::proved_singular`] over the face's parameter box,
+/// at the original B-rep's tolerance): the distance reaches a radius of curvature of the face
+/// (a round offset by its radius), so the offset is a line there, neither a face nor inside
+/// out, and building on lifts the faces beside it across it and grows their tolerances into
+/// an unsound body. An offset that folds (the distance passes the radius) is not refused
+/// here: its face comes out inside out, and the executive takes it away as upstream does
+/// (the lamina edge test). A base that is no NURB has nothing to prove.
+fn refuse_singular_offset(
+    kernel: &Kernel,
+    original: &Brep,
+    face: FaceId,
+    offset: &crate::surface::offset_surface::OffsetSurface,
+    operation: &'static str,
+) -> Result<()> {
+    use crate::offset::construction::sheets::proved_singular;
+    let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, offset.base_surface())? else {
+        return Ok(());
+    };
+    let Some(base) = nurb.gw_nurb() else {
+        return Ok(());
+    };
+    let domain = crate::topology::face::p2::uv_domain(original, face)?;
+    let uv_box = [domain.min.x, domain.max.x, domain.min.y, domain.max.y];
+    let distance = offset.offset_distance();
+    match proved_singular(base, distance, Some(uv_box), original.tolerance())? {
+        Some(singular) if singular.collapses => Err(Failure::new(
+            operation,
+            OffsetFailure::Collapses {
+                face,
+                distance,
+                radius: singular.radius,
+            },
+        )
+        .into_error()),
+        _ => Ok(()),
+    }
+}
+
 /// Opt-in (WR-718, #2350 S1): refuses the offset of `face` (whose implicit offset
 /// surface is `offset`) when it folds on the face's parameter box
 /// ([`crate::offset::construction::sheets::certify_regular`]), naming the largest wall
@@ -1386,6 +1426,15 @@ impl OffsetExecutive {
             // creator object decides upstream (virtual call), not `m_eOffsetOperation`.
             super::face::build_local(original, &self.local_faces, &self.local_surfaces, faceuse)?
         };
+        // Not upstream (#2350): a face whose offset provably collapses (a round offset by
+        // its radius) is refused, never built into an unsound body
+        if self.local_faces.is_empty() && self.operation() != OffsetOperation::LocalOperation {
+            if let Some(crate::surface::surface::SurfaceKind::OffsetSurface(offset)) =
+                surface.as_ref().map(crate::surface::surface::Surface::kind)
+            {
+                refuse_singular_offset(kernel, original, id, offset, operation)?;
+            }
+        }
         // Not upstream (WR-718, #2350 S1), opt-in `Kernel::fixes.shell_one_construction`:
         // a face whose offset folds is refused, naming the largest wall that works
         if kernel.fixes.shell_one_construction
