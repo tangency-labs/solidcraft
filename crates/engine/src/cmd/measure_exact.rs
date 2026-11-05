@@ -200,15 +200,16 @@ pub(crate) fn patch_perimeter(mesh: &Mesh, patch: &[usize], flat: bool, edge_len
 fn outer_loop_length(mesh: &Mesh, edges: &[usize], lengths: &[f64]) -> Option<f64> {
     let polylines: Vec<&Vec<Vec3>> = edges.iter().map(|&edge| mesh.edges.get(edge)).collect::<Option<_>>()?;
     let mut loop_of: Vec<usize> = (0..edges.len()).collect();
-    // Two edges in one loop share an end. The ends are sorted along X and each one meets only
-    // its close neighbours, so a face with many edges stays cheap.
-    let tol = mesh.bounds().diagonal().max(1.0) * 1e-6;
+    // Two edges in one loop share an end: the tessellator ends every edge on its B-rep vertices'
+    // own points, so a shared vertex is the same point to the last bit. A tolerance would join a
+    // hole to the outer loop where the two pass closer than it. The ends are sorted along X and
+    // each one meets only the ends with its X, so a face with many edges stays cheap.
     let mut ends: Vec<(Vec3, usize)> =
         polylines.iter().enumerate().flat_map(|(i, p)| [p.first(), p.last()].into_iter().flatten().map(move |end| (*end, i))).collect();
     ends.sort_by(|a, b| a.0.x.total_cmp(&b.0.x));
     for (i, (end, edge)) in ends.iter().enumerate() {
-        for (other, other_edge) in ends.iter().skip(i + 1).take_while(|(other, _)| other.x - end.x <= tol) {
-            if end.dist(*other) <= tol {
+        for (other, other_edge) in ends.iter().skip(i + 1).take_while(|(other, _)| other.x == end.x) {
+            if *end == *other {
                 let (a, b) = (loop_root(&loop_of, *edge), loop_root(&loop_of, *other_edge));
                 if let Some(slot) = loop_of.get_mut(a) {
                     *slot = b;
