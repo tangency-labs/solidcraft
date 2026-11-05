@@ -106,6 +106,9 @@ fn valid_name(name: &str) -> bool {
 }
 
 impl Preset {
+    /// The shape of a saved preset: a valid name, bounded texts, and a value for every field
+    /// the style, extent and tap type use (a clearance preset names a size and fit the table
+    /// has, and a thread never).
     fn validate(&self) -> Result<(), &'static str> {
         if !valid_name(&self.name) {
             return Err("hole_presets.invalid_name");
@@ -164,6 +167,9 @@ impl Preset {
         Ok(())
     }
 
+    /// The open Hole dialog as a preset: lengths made portable across designs (a bare number
+    /// takes this design's unit), the thread or clearance options as the command takes them,
+    /// and no geometry references.
     fn capture(d: &Dialog, name: &str, doc: &Document) -> Result<Self, &'static str> {
         let Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } = &d.kind else {
             return Err("hole_presets.invalid_parameters");
@@ -275,6 +281,9 @@ impl Preset {
         normalized(self) == normalized(other)
     }
 
+    /// Whether the values a preset would run with evaluate in `doc`: only the fields its
+    /// style, extent and tap type use, so an unfinished edit in a hidden field (the Simple
+    /// diameter behind a clearance or tapped hole) does not block saving.
     fn validate_active(&self, doc: &Document) -> Result<(), &'static str> {
         let length = |text: &str| doc.eval(text, expr::Kind::Length).is_ok_and(|v| v.is_finite() && v > 0.0);
         let angle = |text: &str| doc.eval(text, expr::Kind::Angle).is_ok_and(|v| v.is_finite() && v > 0.0 && v < std::f64::consts::PI);
@@ -284,7 +293,8 @@ impl Preset {
             Style::Simple | Style::Drilled => true,
         };
         if !style_valid
-            || (!self.tapped && !length(&self.diameter))
+            || (!self.tapped && self.clearance.is_none() && !length(&self.diameter))
+            || self.clearance.as_ref().and_then(|c| c.diameter.as_deref()).is_some_and(|text| !length(text))
             || (self.extent == Extent::Distance && !length(&self.depth))
             || (self.extent != Extent::All && (self.angled_bottom || self.style == Style::Drilled) && !angle(&self.tip_angle))
             || (self.tapped && solidcraft_engine::doc::parse_tapped_thread(&self.thread).is_none())
@@ -300,6 +310,9 @@ impl Preset {
         Ok(())
     }
 
+    /// Fills the open Hole dialog from the preset: every size, the style, extent, tap type and
+    /// thread or clearance options; the dialog's picks stay. A preset with options this build
+    /// does not know is refused rather than recalled in part.
     fn recall(&self, d: &mut Dialog) -> Result<(), &'static str> {
         self.validate()?;
         if !self.thread_options.unknown.is_empty() {
@@ -656,6 +669,19 @@ mod tests {
             assert!(opts.clearance && !opts.tapped);
             assert_eq!((opts.clearance_size.as_str(), opts.clearance_fit, opts.clearance_diameter.as_deref()), (size, fit, typed));
         }
+        // What a clearance preset runs with is its size, fit and override, not the Simple
+        // diameter hidden behind it: an unfinished edit there does not block saving, while an
+        // override that is no length does.
+        let mut dialog = Dialog::for_command(&harness.app, "solid.hole").unwrap();
+        let Kind::Hole { diameter, opts, .. } = &mut dialog.kind else { panic!("expected Hole") };
+        *diameter = "4.".into();
+        opts.clearance = true;
+        let hidden = Preset::capture(&dialog, "Hidden", &doc).unwrap();
+        assert_eq!(hidden.validate_active(&doc), Ok(()), "the hidden diameter is not checked");
+        let Kind::Hole { opts, .. } = &mut dialog.kind else { panic!("expected Hole") };
+        opts.clearance_diameter = Some("0 mm".into());
+        let zero = Preset::capture(&dialog, "Zero", &doc).unwrap();
+        assert_eq!(zero.validate_active(&doc), Err("hole_presets.invalid_parameters"), "a zero override is refused");
         let mut older =
             serde_json::to_value(Preset::capture(&Dialog::for_command(&harness.app, "solid.hole").unwrap(), "Plain", &doc).unwrap()).unwrap();
         assert!(older.get("clearance").is_none(), "a simple hole saves no clearance: {older}");
