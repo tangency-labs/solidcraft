@@ -1,0 +1,32 @@
+{
+  "en": {
+    "document.newer_file": "Saved by a newer SolidCraft (format {format}, this version reads up to {reads}). If something's missing, update.",
+    "document.newer_file_change": "Saved by a newer SolidCraft (format {format} with `{change}`, which this version doesn't know). If something's missing, update.",
+    "document.newer_file_not_read": "Not read: {what}. Saving keeps it."
+  },
+  "ar": {
+    "document.newer_file": "تم الحفظ بإصدار أحدث من SolidCraft (التنسيق {format}، وهذا الإصدار يقرأ حتى {reads}). إذا كان هناك شيء مفقود، فحدّث البرنامج.",
+    "document.newer_file_change": "تم الحفظ بإصدار أحدث من SolidCraft (التنسيق {format} مع `{change}`، وهو ما لا يعرفه هذا الإصدار). إذا كان هناك شيء مفقود، فحدّث البرنامج.",
+    "document.newer_file_not_read": "لم تتم قراءة: {what}. الحفظ يحتفظ به."
+  },
+  "he": {
+    "document.newer_file": "נשמר בגרסה חדשה יותר של SolidCraft (פורמט {format}, גרסה זו קוראת עד {reads}). אם משהו חסר, יש לעדכן.",
+    "document.newer_file_change": "נשמר בגרסה חדשה יותר של SolidCraft (פורמט {format} עם `{change}`, שגרסה זו אינה מכירה). אם משהו חסר, יש לעדכן.",
+    "document.newer_file_not_read": "לא נקרא: {what}. השמירה משאירה אותו בקובץ."
+  },
+  "ja": {
+    "document.newer_file": "新しいバージョンの SolidCraft で保存されています(形式 {format}、このバージョンは {reads} まで読み取れます)。足りないものがあれば更新してください。",
+    "document.newer_file_change": "新しいバージョンの SolidCraft で保存されています(形式 {format}、このバージョンが認識しない `{change}` を含みます)。足りないものがあれば更新してください。",
+    "document.newer_file_not_read": "読み取れませんでした: {what}。保存しても失われません。"
+  },
+  "vi": {
+    "document.newer_file": "Được lưu bằng phiên bản SolidCraft mới hơn (định dạng {format}, phiên bản này đọc được đến {reads}). Nếu thiếu gì, hãy cập nhật.",
+    "document.newer_file_change": "Được lưu bằng phiên bản SolidCraft mới hơn (định dạng {format} với `{change}`, phiên bản này không biết). Nếu thiếu gì, hãy cập nhật.",
+    "document.newer_file_not_read": "Không đọc được: {what}. Khi lưu, nội dung này vẫn được giữ lại."
+  },
+  "zh": {
+    "document.newer_file": "由较新版本的 SolidCraft 保存(格式 {format},此版本最高可读取 {reads})。如有缺失,请更新。",
+    "document.newer_file_change": "由较新版本的 SolidCraft 保存(格式 {format},包含此版本未知的 `{change}`)。如有缺失,请更新。",
+    "document.newer_file_not_read": "未读取:{what}。保存时会保留它。"
+  }
+}

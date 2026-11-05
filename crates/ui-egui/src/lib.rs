@@ -2222,6 +2222,12 @@ impl SolveApp {
             self.edit_sketch(id);
             return;
         }
+        // Nothing here knows what it holds: it says so, and waits for the build that does.
+        if let FeatureKind::NewerFileFeature { raw } = &f.kind {
+            let why = raw.why();
+            self.set_status(why, true);
+            return;
+        }
         let Some(idx) = self.session.doc.feature_index(id) else { return };
         let marker = self.finish_sketch_for_edit();
         self.tool = None;
@@ -2526,6 +2532,23 @@ impl SolveApp {
         self.status_undo = false;
     }
 
+    /// Tell the user when the open design came from a newer SolidCraft: the notice on the status
+    /// line, and what this version couldn't read in the messages.
+    pub(crate) fn say_newer_file(&mut self) {
+        let Some(file) = self.session.doc.newer_file.clone() else { return };
+        for what in &file.not_understood {
+            let text = i18n::format("document.newer_file_not_read", &[("what", what)]);
+            self.messages.push(&text, false, now_ms());
+        }
+        let text = if file.format <= file.reads_up_to && !file.unknown_changes.is_empty() {
+            let change = file.unknown_changes.first().map_or("", String::as_str);
+            i18n::format("document.newer_file_change", &[("format", &file.format.to_string()), ("change", change)])
+        } else {
+            i18n::format("document.newer_file", &[("format", &file.format.to_string()), ("reads", &file.reads_up_to.to_string())])
+        };
+        self.set_status(text, false);
+    }
+
     pub fn open_path(&mut self, path: &str) {
         match documents::reuse_path(self, path) {
             Ok(true) => return,
@@ -2543,6 +2566,7 @@ impl SolveApp {
             self.cam.set_view(StandardView::Iso);
             self.fit_view();
             stand_up::offer(self, path, &[], Some(&r));
+            self.say_newer_file();
         }
     }
 

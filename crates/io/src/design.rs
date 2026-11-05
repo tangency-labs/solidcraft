@@ -355,10 +355,16 @@ fn write_container(
         let render = replace(doc.render.as_ref(), changes).map_err(invalid)?;
         replacements.insert("render".into(), render);
     }
-    let metadata = replace(doc, replacements).map_err(invalid)?;
+    let mut metadata = replace(doc, replacements).map_err(invalid)?;
+    solidcraft_doc::newer_file::restore(doc, &mut metadata);
     let metadata = serde_json::to_vec(&metadata).map_err(invalid)?;
     writer.part("document.json", &metadata, true)?;
-    writer.part("container.json", &serde_json::to_vec(&json!({"format": VERSION})).map_err(invalid)?, false)?;
+    // What a newer build's file holds beside the design goes back as it came.
+    let container = doc.newer_file.as_ref().and_then(|file| file.container.clone()).unwrap_or_else(|| json!({"format": VERSION}));
+    writer.part("container.json", &serde_json::to_vec(&container).map_err(invalid)?, false)?;
+    for (name, bytes) in doc.newer_file.iter().flat_map(|file| &file.parts) {
+        writer.part(name, bytes, true)?;
+    }
     // The model cache is optional: one that does not fit the container keeps fewer states, or is
     // left out, never a failed save.
     let cache = geometry.and_then(|g| native_cache::encode_model(g, &metadata, writer.space(2, budget)).ok());
@@ -827,20 +833,122 @@ fn is_container_source(source: &mut FileSource) -> Result<bool> {
     Ok(is_design_container(&prefix))
 }
 
+/// A newer build's container: a feature, picture or point cloud whose payload doesn't read here
+/// is kept as the file has it, and so is every part this build has no use for.
+fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container: Value, reader: &mut PackageReader<R>) -> Result<()> {
+    let file = Arc::make_mut(doc.newer_file.as_mut().ok_or_else(|| invalid("not a newer design"))?);
+    for (index, feature) in doc.features.iter_mut().enumerate() {
+        let Some(value) = metadata.get("features").and_then(|v| v.get(index)) else { continue };
+        let readable = match &mut feature.kind {
+            FeatureKind::Import { .. } => reader.blob(value, "step_blob", "step").map(|_| ()),
+            FeatureKind::MeshImport { meshes, .. } => {
+                let mut check = meshes.clone();
+                check.iter_mut().enumerate().try_for_each(|(i, mesh)| {
+                    let value = value.get("meshes").and_then(|v| v.get(i)).ok_or_else(|| invalid("missing mesh metadata"))?;
+                    decode_mesh(reader.blob(value, "mesh_blob", "mesh")?, mesh)
+                })
+            }
+            _ => Ok(()),
+        };
+        if let Err(why) = readable {
+            file.not_understood.push(format!("feature `{}` ({why})", feature.name));
+            feature.kind = FeatureKind::NewerFileFeature { raw: solidcraft_doc::newer_file::RawFeature(Box::new(value.clone())) };
+        }
+    }
+    let canvases_read = doc.canvases.iter().enumerate().all(|(i, canvas)| {
+        canvas.data.is_empty()
+            && matches!(canvas.format.as_str(), "png" | "jpeg")
+            && metadata.get("canvases").and_then(|v| v.get(i)).is_some_and(|v| reader.blob(v, "image_blob", &canvas.format).is_ok())
+    });
+    if !canvases_read {
+        doc.canvases.clear();
+        file.keep_section("canvases", metadata.get("canvases").cloned().unwrap_or_default(), Some(json!([])), "pictures this version can't read");
+    }
+    let clouds_read = doc.point_clouds.iter().enumerate().all(|(i, cloud)| {
+        let mut check = cloud.clone();
+        metadata.get("point_clouds").and_then(|v| v.get(i)).is_some_and(|v| match reader.blob(v, "points_blob", "points") {
+            Ok(bytes) => decode_cloud(bytes, &mut check).is_ok(),
+            Err(_) => false,
+        })
+    });
+    if !clouds_read {
+        doc.point_clouds.clear();
+        file.keep_section("point_clouds", metadata.get("point_clouds").cloned().unwrap_or_default(), None, "point clouds this version can't read");
+    }
+    // The container's own note, when it says something this build doesn't know.
+    if !is_known_container(&container) {
+        file.container = Some(container);
+    }
+    // A blob a typed record uses comes back from that record; others only for what is kept.
+    let names: Vec<String> = reader.zip.file_names().filter_map(|name| name.ok().map(|name| name.into_owned())).collect();
+    for name in names {
+        let ours = matches!(name.as_str(), "document.json" | "container.json") || name.starts_with("cache/");
+        let unused_blob = name.starts_with("blobs/") && !file.mentions(&name) && !foreign_mentions(&doc.features, &name);
+        if !ours && !unused_blob {
+            file.parts.push((name.clone(), reader.limited_part(&name, part_limit(&name))?.into()));
+        }
+    }
+    // Looking counts against what a design may expand to only once: the reads below are the real ones.
+    reader.hydrated = 0;
+    Ok(())
+}
+
+/// A `container.json` that says only a format this build writes or wrote.
+fn is_known_container(container: &Value) -> bool {
+    *container == json!({"format": VERSION})
+        || *container == json!({"format": LEGACY_VERSION})
+        || container.get("content").is_some_and(|c| c == "drawing")
+}
+
+/// A container format of ours, this build's or a later one's: `solidcraft-container/N`.
+pub(crate) fn is_container_version(format: &str) -> bool {
+    format == LEGACY_VERSION || format.strip_prefix("solidcraft-container/").is_some_and(|n| n.parse::<u32>().is_ok())
+}
+
+/// Whether a feature this build couldn't read refers to this blob.
+fn foreign_mentions(features: &[solidcraft_doc::Feature], name: &str) -> bool {
+    fn names(value: &Value, name: &str) -> bool {
+        match value {
+            Value::String(s) => s == name,
+            Value::Array(a) => a.iter().any(|x| names(x, name)),
+            Value::Object(o) => o.values().any(|x| names(x, name)),
+            _ => false,
+        }
+    }
+    features.iter().any(|f| matches!(&f.kind, FeatureKind::NewerFileFeature { raw } if names(&raw.0, name)))
+}
+
 fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Document> {
     if drawing::container_kind(reader)? == FileKind::Drawing {
         return Err(IoError::Invalid("this file is a SolidCraft drawing, not a design: open it as a drawing".into()));
     }
     let bytes = reader.document(max_design())?;
-    check_hdr_manifest(&bytes)?;
-    check_texture_manifest(&bytes)?;
     let mut metadata: Value = serde_json::from_slice(&bytes).map_err(invalid)?;
+    // A newer build's file opens whatever it holds: what doesn't read here is kept (`newer_file`).
+    let container: Value = serde_json::from_slice(&reader.limited_part("container.json", 4096)?).map_err(invalid)?;
+    let newer_container = !is_known_container(&container);
+    let newer = newer_container || std::str::from_utf8(&bytes).is_ok_and(solidcraft_doc::format::says_newer);
     // HDR's typed JSON representation is deliberately strict: no empty placeholders or
-    // container-only blob fields may reach the document deserializer.
-    let hydrated_hdr = hydrate_hdr_resources(&mut metadata, reader)?;
-    let hydrated_textures = hydrate_texture_resources(&mut metadata, reader)?;
+    // container-only blob fields may reach the document deserializer. A newer build's section that
+    // doesn't pass stays as it is, which the document reader then leaves out.
+    let hydrated = if newer {
+        let mut copy = metadata.clone();
+        let done = check_hdr_manifest(&bytes).and_then(|()| check_texture_manifest(&bytes)).and_then(|()| {
+            let hdr = hydrate_hdr_resources(&mut copy, reader)?;
+            Ok(hydrate_texture_resources(&mut copy, reader)? || hdr)
+        });
+        if done.is_ok() {
+            metadata = copy;
+        }
+        done.unwrap_or(false)
+    } else {
+        check_hdr_manifest(&bytes)?;
+        check_texture_manifest(&bytes)?;
+        let hdr = hydrate_hdr_resources(&mut metadata, reader)?;
+        hydrate_texture_resources(&mut metadata, reader)? || hdr
+    };
     let hydrated_text;
-    let text = if hydrated_hdr || hydrated_textures {
+    let text = if hydrated {
         hydrated_text = serde_json::to_string(&metadata).map_err(invalid)?;
         &hydrated_text
     } else {
@@ -849,6 +957,16 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     // Migrations and all document validation run on the small parametric metadata.
     // Binary arrays have their own equivalent numeric/index validation below.
     let mut doc = Document::from_json(text)?;
+    if newer_container && doc.newer_file.is_none() {
+        let current = solidcraft_doc::format::FORMAT;
+        let says = container.get("format").and_then(Value::as_str).unwrap_or("a later container").to_string();
+        let mut file = solidcraft_doc::newer_file::NewerFile::default();
+        (file.format, file.reads_up_to, file.unknown_changes) = (current, current, vec![says]);
+        doc.newer_file = Some(Arc::new(file));
+    }
+    if doc.newer_file.is_some() {
+        hydrate_newer(&mut doc, &metadata, container, reader)?;
+    }
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let value = metadata.get("features").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing feature metadata"))?;
         match &mut feature.kind {
@@ -1816,6 +1934,60 @@ mod tests {
         doc
     }
 
+    /// A newer build's container: its feature this build can't read, that feature's blob, a part
+    /// this build has never heard of and a payload in a newer encoding all open and save back.
+    #[test]
+    fn a_newer_builds_container_opens_and_saving_keeps_all_it_holds() {
+        let doc = document();
+        let mut entries = parts(&write_design_container(&doc).unwrap());
+        let mut metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
+        let newer = solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1);
+        metadata["format"] = json!(newer);
+        let payload = b"a future payload".to_vec();
+        let blob = format!("blobs/{}.lattice", digest(&payload));
+        let future = json!({"id": 9000, "name": "Lattice1", "type": "gyroid_lattice", "lattice_blob": blob});
+        metadata["features"].as_array_mut().unwrap().push(future.clone());
+        metadata["future_section"] = json!({"keep": true});
+        entries.insert("document.json".into(), serde_json::to_vec(&metadata).unwrap());
+        entries.insert(blob.clone(), payload.clone());
+        entries.insert("future/notes.bin".into(), b"more".to_vec());
+        // This blob nothing names any more: it doesn't stay around.
+        entries.insert(format!("blobs/{}.lattice", digest(b"orphan")), b"orphan".to_vec());
+
+        let opened = crate::read_design(&package(&entries)).unwrap();
+        assert_eq!(opened.features.len(), doc.features.len() + 1);
+        assert!(opened.newer_file.as_ref().unwrap().not_understood.iter().any(|what| what.contains("Lattice1")));
+        assert_eq!(opened.features[0], doc.features[0]);
+
+        let resaved = parts(&write_design_container(&opened).unwrap());
+        let again: Value = serde_json::from_slice(&resaved["document.json"]).unwrap();
+        assert_eq!(again["format"], json!(newer));
+        assert_eq!(again["features"].as_array().unwrap().last().unwrap(), &future);
+        assert_eq!(again["future_section"], json!({"keep": true}));
+        assert_eq!(resaved[&blob], payload);
+        assert_eq!(resaved["future/notes.bin"], b"more");
+        assert!(!resaved.contains_key(&format!("blobs/{}.lattice", digest(b"orphan"))));
+        // And again: nothing is lost on the way round, the design's own blobs included.
+        let twice = crate::read_design(&write_design_container(&opened).unwrap()).unwrap();
+        assert_eq!(twice, opened);
+
+        // A payload in an encoding this build doesn't have costs its feature, not the design.
+        let mut entries = entries.clone();
+        let mesh = metadata["features"].as_array().unwrap().iter().flat_map(|f| f["meshes"].as_array().into_iter().flatten()).next().unwrap();
+        let mesh_blob = mesh["mesh_blob"].as_str().unwrap().to_string();
+        let mut encoded = entries[&mesh_blob].clone();
+        encoded[0] ^= 0xff;
+        let renamed = format!("blobs/{}.mesh", digest(&encoded));
+        entries.remove(&mesh_blob);
+        entries.insert(renamed.clone(), encoded.clone());
+        let text = String::from_utf8(entries["document.json"].clone()).unwrap().replace(&mesh_blob, &renamed);
+        entries.insert("document.json".into(), text.into_bytes());
+        let opened = crate::read_design(&package(&entries)).unwrap();
+        let said = &opened.newer_file.as_ref().unwrap().not_understood;
+        assert!(said.iter().any(|what| what.contains("unsupported mesh blob version")), "{said:?}");
+        assert_eq!(parts(&write_design_container(&opened).unwrap())[&renamed], encoded);
+    }
+
     fn parts(bytes: &[u8]) -> BTreeMap<String, Vec<u8>> {
         let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
         (0..zip.len())
@@ -2013,7 +2185,13 @@ mod tests {
         entries.insert("../escape".into(), vec![]);
         assert!(crate::read_design(&package(&entries)).is_err());
         entries.remove("../escape");
-        entries.insert("container.json".into(), br#"{"format":"solidcraft-container/999"}"#.to_vec());
+        // A later container still holds a design: it opens, says so, and saving keeps its note.
+        entries.insert("container.json".into(), br#"{"format":"solidcraft-container/999","more":1}"#.to_vec());
+        let later = crate::read_design(&package(&entries)).unwrap();
+        assert!(later.newer_file.as_ref().unwrap().notice().contains("solidcraft-container/999"));
+        let resaved = parts(&write_design_container(&later).unwrap());
+        assert_eq!(resaved["container.json"], entries["container.json"]);
+        entries.insert("container.json".into(), br#"{"format":"another-tool/1"}"#.to_vec());
         assert!(crate::read_design(&package(&entries)).unwrap_err().to_string().contains("unsupported container version"));
         for length in (0..bytes.len()).step_by(17) {
             assert!(crate::read_design(&bytes[..length]).is_err());
