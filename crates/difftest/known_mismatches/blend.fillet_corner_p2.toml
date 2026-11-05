@@ -17,11 +17,6 @@ why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--ble
 
 [[mismatch]]
 unit = "blend.fillet_corner_p2"
-case = "corner_adjust_concave_face_05"
-why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
-
-[[mismatch]]
-unit = "blend.fillet_corner_p2"
 case = "corner_adjust_concave_face_46"
 why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
 

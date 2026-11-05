@@ -432,7 +432,13 @@ impl FilletCorner {
             .surface
             .as_ref()
             .ok_or_else(|| null_deref("side face without surface"))?;
-        let new_surface = side_surface
+        // Not upstream (which extends, then copies as an analytic surface when it can): the
+        // side surface is taken as what it is first (a planar net as its plane), and that is
+        // extended. The same surface, a plane widened as a plane by any distance, where the
+        // continuation of its degree-1 net is measured only so far beside the net (a model at
+        // 1e5 whose rails meet the side edge 3e4 apart asks 3e5 of a net that gives 2e5).
+        let new_analytic_surface = side_surface
+            .copy_and_add_analytics(k)?
             .extended_sides(
                 k,
                 &crate::surface::side::BoxSide::ALL,
@@ -440,9 +446,6 @@ impl FilletCorner {
                 10.0 * gap_dist,
             )?
             .surface;
-
-        // Copy pNewSurface, when possible as an analytic surface.
-        let new_analytic_surface = new_surface.copy_and_add_analytics(k)?;
         Self::add_extended_original_surface_with_map(
             extended_surfaces,
             side_face_id,
