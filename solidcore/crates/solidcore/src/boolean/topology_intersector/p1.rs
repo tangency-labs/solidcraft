@@ -2045,7 +2045,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 .get(jj)
             {
                 k.check_cancelled("boolean::topology_intersector::p1::imprint_intersections")?;
-                let (result, edited) = mgr.imprint_edge_definition_reporting_edits(k, brep, ed);
+                let (result, edited) =
+                    mgr.imprint_classified_edge_definition_reporting_edits(k, brep, ed);
                 if record(result, ret)? {
                     jj += 1;
                 } else {

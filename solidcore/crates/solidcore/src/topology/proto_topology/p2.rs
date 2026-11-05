@@ -29,6 +29,9 @@
 //! | [`ProtoBrep::brep_make_edge_in_face`], [`make_edge_in_face_in_context`] | `SmBrep::MakeEdgeInFace` of `SmEdgeDefinition::Imprint` on `GetWhichBrep(i)` |
 //!
 //! Deviations:
+//! - **Classified seams (#2538).** The Boolean constructs a face-side intersection
+//!   edge from its classified seam edge before imprinting, keeping paired vertices
+//!   on that geometry instead of retaining an independent SSI approximation.
 //! - **B-rep access.** The topology objects are the caller's handles `O`, as in
 //!   [`p1`](super::p1). The stored members of edges, faces and vertices these functions
 //!   read or write, the two connectivity walks of `UpdateFaces`, and the allocation of
@@ -119,6 +122,7 @@
 //!   edge, which upstream dereferences, is [`SolidError::InvalidInput`].
 //! - **Recursion.** None.
 
+use crate::boolean::topology_intersector::p1::IntersectorBrep;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
@@ -128,7 +132,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
-use crate::geom::tol::{xsect_tol3d, ScaledZero};
+use crate::geom::tol::{xsect_tol3d, xsect_tol_3d_from_zones, ScaledZero};
 use crate::intersect::curve_class::p6::MergeContext;
 use crate::intersect::curve_class::{CurveClassification, CurveInterval};
 use crate::intersect::point_class::{
@@ -137,6 +141,7 @@ use crate::intersect::point_class::{
 };
 use crate::kernel::Kernel;
 use crate::math::{max2, max3, max4, min2, Point2, Point3, Vec3, EFF_ZERO};
+use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::face::p2::proto_vertex_containment_radius;
@@ -909,6 +914,201 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let mut edited = false;
         let result = self.imprint_edge_definition_inner(k, brep, ed, &mut edited);
         (result, edited)
+    }
+
+    /// Imprint using the classified seam as the construction geometry, retaining
+    /// vertex edit notifications through the Boolean's owning adapter.
+    pub(crate) fn imprint_classified_edge_definition_reporting_edits(
+        &mut self,
+        k: &Kernel,
+        brep: &mut impl IntersectorBrep<O>,
+        ed: EdgeDefId,
+    ) -> (Result<()>, bool) {
+        let mut seam_edited = false;
+        if let Err(e) = self.construct_on_classified_seam(k, brep, ed, &mut seam_edited) {
+            return (Err(e), seam_edited);
+        }
+        let (result, edited) = self.imprint_edge_definition_reporting_edits(k, brep, ed);
+        (result, seam_edited || edited)
+    }
+
+    /// An edge classified onto an existing seam has that seam's geometry, rather
+    /// than an independently approximated SSI curve and averaged endpoint positions.
+    /// Construct the definition from the classified edge before `MakeEdgeInFace`;
+    /// keep the SSI parameter interval and rebuild UV curves for the new geometry.
+    fn construct_on_classified_seam(
+        &mut self,
+        k: &Kernel,
+        brep: &mut impl IntersectorBrep<O>,
+        ed: EdgeDefId,
+        edited: &mut bool,
+    ) -> Result<()> {
+        let d = self
+            .edge_def(ed)
+            .ok_or(dangling("edge definition is deleted"))?
+            .clone();
+        let edge = match (d.src_topo_type(1), d.src_topo_type(2)) {
+            (PointClassType::Edge, PointClassType::Face) => d.src_topo(1),
+            (PointClassType::Face, PointClassType::Edge) => d.src_topo(2),
+            _ => return Ok(()),
+        }
+        .ok_or(dangling("classified edge is missing"))?;
+        if !Self::edge_is_surface_seam(k, brep, edge)? {
+            return Ok(());
+        }
+        let edge_curve = brep
+            .edge_curve(edge)
+            .flatten()
+            .ok_or(dangling("edge has no curve"))?;
+        let source = brep
+            .curve(edge_curve)
+            .ok_or(dangling("edge curve is missing"))?;
+        let source_interval = brep
+            .edge_interval(edge)
+            .ok_or(dangling("edge interval is missing"))?;
+        let tolerance = xsect_tol_3d_from_zones(
+            k,
+            brep.topology_tolerance(edge)
+                .ok_or(dangling("edge tolerance is missing"))?,
+            d.tolerance(k),
+        );
+        let classified = brep
+            .curve(
+                d.xsect_curve_3d()
+                    .ok_or(dangling("intersection curve is missing"))?,
+            )
+            .ok_or(dangling("intersection curve is missing"))?;
+        let start = self
+            .edge_def_start_proto_vertex(ed)?
+            .ok_or(dangling("start proto vertex is missing"))?;
+        let end = self
+            .edge_def_end_proto_vertex(ed)?
+            .ok_or(dangling("end proto vertex is missing"))?;
+        let mut ends = Vec::new();
+        for (pv, at_start, parameter) in [
+            (start, true, d.xsect_interval().min()),
+            (end, false, d.xsect_interval().max()),
+        ] {
+            let v1 = self.proto_vertex_final_vertex(k, brep, pv, 1, ed, at_start)?;
+            let v2 = self.proto_vertex_final_vertex(k, brep, pv, 2, ed, at_start)?;
+            let (Some(v1), Some(v2)) = (v1, v2) else {
+                return Ok(());
+            };
+            let proto = self
+                .proto_vertex(pv)
+                .ok_or(dangling("proto vertex is deleted"))?;
+            if !proto.vertex_definitions().iter().all(|&vd| {
+                self.vertex_def(vd)
+                    .is_some_and(|v| v.final_vertex(1) == Some(v1) && v.final_vertex(2) == Some(v2))
+            }) {
+                return Ok(());
+            }
+            let point = classified.evaluate_point(k, parameter)?;
+            let drop = source.drop_point(
+                k,
+                &source_interval,
+                point,
+                None,
+                tolerance,
+                None,
+                SolverOperation::Minimize,
+            )?;
+            if !drop.success || drop.distance > tolerance {
+                return Ok(());
+            }
+            ends.push((
+                pv,
+                source.evaluate_point(k, drop.parameter)?,
+                [v1, v2],
+                drop.parameter,
+            ));
+        }
+        let [first, last] = ends.as_slice() else {
+            return Err(dangling("seam endpoints are missing"));
+        };
+        let mut interval = Extent1d::from_min_max(first.3.min(last.3), first.3.max(last.3));
+        let mut curve = source.copy(k)?;
+        curve.trim(k, &mut interval, TrimMode::default())?;
+        if first.3 > last.3 {
+            curve.reverse_parameterization(k, &interval)?;
+        }
+        curve.edit_parameterization(k, &d.xsect_interval())?;
+        let curve = brep
+            .insert_curve(curve)
+            .ok_or(dangling("curve store is full"))?;
+        *edited = true;
+        for (pv, point, vertices, _) in ends {
+            for v in vertices {
+                brep.set_vertex_point(k, v, point)?;
+            }
+            let definitions = self
+                .proto_vertex(pv)
+                .ok_or(dangling("proto vertex is deleted"))?
+                .vertex_definitions()
+                .to_vec();
+            self.proto_vertex_mut(pv)
+                .ok_or(dangling("proto vertex is deleted"))?
+                .set_position(point);
+            for vd in definitions {
+                self.vertex_def_mut(vd)
+                    .ok_or(dangling("vertex definition is deleted"))?
+                    .set_position(point);
+            }
+        }
+        let d = self
+            .edge_def_mut(ed)
+            .ok_or(dangling("edge definition is deleted"))?;
+        d.set_xsect_curve_3d(Some(curve));
+        d.set_xsect_curve_uv(1, None);
+        d.set_xsect_curve_uv(2, None);
+        Ok(())
+    }
+
+    /// Recognize the classified edge's existing seam from its UV trim enclosure.
+    fn edge_is_surface_seam(k: &Kernel, brep: &impl IntersectorBrep<O>, edge: O) -> Result<bool> {
+        let Some((b, EntityRef::Edge(edge))) = brep.topology_entity(edge) else {
+            return Ok(false);
+        };
+        for &eu in &b.edge(edge)?.edgeuses {
+            let Some(f) = crate::topology::edgeuse::p1::face(b, eu)? else {
+                continue;
+            };
+            let face = b.face(f)?;
+            let (Some(surface), Some(uv)) =
+                (face.surface.as_ref(), b.edgeuse(eu)?.uv_trim_curve.as_ref())
+            else {
+                continue;
+            };
+            let bounds = uv
+                .calculate_bounding_box(
+                    k,
+                    &uv.natural_interval(),
+                    BoundingBoxRequest {
+                        normal: true,
+                        pseudo: false,
+                        polar: false,
+                    },
+                    true,
+                )?
+                .normal;
+            let Some(bounds) = bounds else {
+                continue;
+            };
+            let mut on_seam = true;
+            for p in [
+                bounds.min(),
+                (bounds.min() + bounds.max()) * 0.5,
+                bounds.max(),
+            ] {
+                on_seam &= surface
+                    .is_on_seam(k, Point2::new(p.x, p.y), Some(face.tolerance))?
+                    .on_seam;
+            }
+            if on_seam {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Not upstream (WR-619, opt-in `fixes.imprint_skips_collapsed_definition`): when the
