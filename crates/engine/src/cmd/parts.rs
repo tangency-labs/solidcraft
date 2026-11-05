@@ -1282,6 +1282,48 @@ mod tests {
         assert_eq!((s.doc.components.len(), s.doc.occurrences.len()), (comps, occs));
     }
 
+    /// #12191: a hole picked at both ends (a blind hole's rim and its floor edge, a through
+    /// hole's top and bottom rims) gets one fastener, head at the open end, not a second one
+    /// turned over.
+    #[test]
+    fn a_hole_picked_at_both_ends_gets_one_fastener_at_its_open_end() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Block"}));
+        let blind = [(8.0, 8.0), (32.0, 8.0), (32.0, 22.0)];
+        for (x, y) in blind {
+            run(&mut s, "solid.hole", json!({"position": [x, y, 20], "diameter": 3.4, "depth": 10}));
+        }
+        let through = (8.0, 22.0);
+        run(&mut s, "solid.hole", json!({"position": [through.0, through.1, 20], "diameter": 3.4}));
+        // The first blind hole is picked at its floor edge first, then at its rim; the second at
+        // its rim, then its floor; the third at its rim only; the through hole at both rims.
+        let rim = |(x, y): (f64, f64), z: f64| json!([x + 1.7, y, z]);
+        let at = vec![
+            rim(blind[0], 10.0),
+            rim(blind[0], 20.0),
+            rim(blind[1], 20.0),
+            rim(blind[1], 10.0),
+            rim(blind[2], 20.0),
+            rim(through, 20.0),
+            rim(through, 0.0),
+        ];
+        let r = run(&mut s, "parts.fastener", json!({"family": "socket_head_cap_screw", "size": "M3", "length": 8, "at": at}));
+        let comp = r["component"].as_u64().unwrap_or(0);
+        assert_eq!(r["occurrences"].as_array().map(Vec::len), Some(4), "one screw per hole: {r}");
+        let st = s.world_state().unwrap();
+        let mut seated: Vec<(f64, f64)> = Vec::new();
+        for b in st.bodies.iter().filter(|b| s.doc.model_body_component(b) == comp) {
+            let (lo, hi) = (b.mesh().bounds().min, b.mesh().bounds().max);
+            // Head on the top face (3 mm tall), shank 8 mm down the hole.
+            assert!((hi.z - 23.0).abs() < 1e-6 && (lo.z - 12.0).abs() < 1e-6, "{lo:?} {hi:?}");
+            seated.push(((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0));
+        }
+        assert_eq!(seated.len(), 4, "{seated:?}");
+        for (x, y) in blind.into_iter().chain([through]) {
+            assert!(seated.iter().any(|c| (c.0 - x).abs() < 1e-6 && (c.1 - y).abs() < 1e-6), "no screw at ({x}, {y}): {seated:?}");
+        }
+    }
+
     #[test]
     fn every_sketch_of_a_standard_part_is_fully_defined() {
         for (family, size, resized) in [
