@@ -88,6 +88,7 @@ pub mod render_ui;
 pub mod section;
 pub mod sheet;
 pub mod sketch;
+pub mod sketch_clipboard;
 pub mod sketch_constraints;
 pub mod sketch_create;
 pub mod sketch_ends;
