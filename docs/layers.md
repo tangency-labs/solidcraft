@@ -7,9 +7,9 @@ layer that needs another layer's job calls that layer; it never carries its own 
 
 ## 1. The layers
 
-![The layers and the dependencies allowed between them](layers/layers.svg)
+![One operation through the layers: a fillet asked for in SolidCraft](layers/layers.svg)
 
-*Look at the kernel: no arrow leaves it. An app never points at it either: it reaches geometry through ops, and draws through tess.*
+*Follow the steps: the app only turns the user's input into a command (1) and draws the mesh (7). Ops runs the recipe; the kernel does every computation, or refuses with the size that fits; the result comes back as a record.*
 
 
 | Layer | Crate | Its job | Examples | Never in it |
