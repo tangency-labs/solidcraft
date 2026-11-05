@@ -1877,7 +1877,7 @@ pub(crate) mod tests {
                 body = solidcraft_kernel::boolean(&body, &hole, solidcraft_kernel::BoolOp::Cut).unwrap().unwrap();
             }
         }
-        let m = body.tessellate(body.size() * 1e-5).unwrap();
+        let m = body.mesh(&solidcraft_kernel::MeshTolerance::chord(body.size() * 1e-5)).unwrap();
         assert_welds_as_all_pairs(&m.positions, &m.triangles, (body.size() * 1e-6).max(1e-7));
     }
 
