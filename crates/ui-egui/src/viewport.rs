@@ -4815,10 +4815,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         || app.viewport.spin
         || app.cam_anim.is_some();
     let joint_handle_pointer = hover.is_some_and(|p| inside && crate::joint_handles::owns_pointer(app, &proj, p));
-    // Nor while a component's triad drags it as a layer: the pointer holds the triad, and picking
-    // the dragged bodies would move their meshes at every step. A part dragged along its joint
-    // owns the pointer too: nothing under it lights up (#5137).
-    let dragging_layer = layered && manipulator_dragging;
+    // Nor while a component's triad drags it as a layer, unless the preference asks for the
+    // highlight (`drag_layer::holds_pointer`). A part dragged along its joint owns the pointer
+    // too: nothing under it lights up (#5137).
+    let dragging_layer = drag_layer::holds_pointer(app, layered, manipulator_dragging);
     let hits = hover
         .filter(|_| {
             inside && app.viewport.boxsel.is_none() && !crate::joint_drag::active(app) && !joint_handle_pointer && !navigating && !dragging_layer

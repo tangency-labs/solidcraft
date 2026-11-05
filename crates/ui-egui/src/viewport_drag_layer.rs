@@ -62,6 +62,14 @@ pub(super) fn follow(app: &mut SolveApp) -> bool {
     app.viewport.drag.is_some()
 }
 
+/// Whether the pointer picks nothing this frame: the triad drags a component drawn as a layer
+/// (`layered`) and "Highlight what is under the pointer while dragging a component" is off.
+/// Picking the dragged bodies would mesh them where they stand at every step, and a highlight
+/// has the Browser look up its row again.
+pub(super) fn holds_pointer(app: &SolveApp, layered: bool, manipulator_dragging: bool) -> bool {
+    layered && manipulator_dragging && !app.preferences.move_drag_highlights
+}
+
 fn transform(delta: &Mat) -> [[f32; 4]; 4] {
     std::array::from_fn(|c| std::array::from_fn(|r| delta[c][r] as f32))
 }
@@ -328,9 +336,35 @@ mod tests {
         assert!(lit.selected_blocks.is_empty() && lit.selected_planned.is_empty() && lit.selected_instanced.is_empty());
         let tris = lit.merged().tris;
         assert!(!tris.is_empty(), "the dragged body lights its own triangles");
-        let xs: Vec<f32> =
-            tris.chunks_exact(crate::gpu::TRI_SIZE).filter_map(|v| v.get(..4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))).collect();
+        let xs: Vec<f32> = tris
+            .as_chunks::<{ crate::gpu::TRI_SIZE }>()
+            .0
+            .iter()
+            .filter_map(|v| v.get(..4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])))
+            .collect();
         assert!(xs.iter().all(|x| *x > 23.9), "lit where the drag put it: {xs:?}");
+    }
+
+    /// While the triad drags a component drawn as a layer, the pointer picks nothing; "Highlight
+    /// what is under the pointer while dragging a component" picks and highlights as before
+    /// (#7273). A pointer that isn't dragging the triad picks either way.
+    #[test]
+    fn a_layer_drag_picks_under_the_pointer_only_with_its_preference() {
+        let (s, dragged) = two_parts();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        with_gpu(&mut app);
+        let _ = super::super::build_scene(&app);
+        whole_scene_built(&mut app);
+        let base = app.session.doc.occurrences.iter().find(|o| o.id == dragged).map(|o| o.transform).unwrap();
+        app.run("occurrence.move", json!({"occurrence": dragged, "base_transform": base, "translate": [4, 0, 0], "capture": false})).unwrap();
+        let layered = follow(&mut app);
+        assert!(layered, "the drag is drawn as a layer");
+        assert!(!app.preferences.move_drag_highlights, "off by default");
+        assert!(holds_pointer(&app, layered, true), "the triad's drag picks nothing");
+        assert!(!holds_pointer(&app, layered, false), "a pointer that isn't dragging the triad picks");
+        crate::prefs::set(&mut app, &json!({"move_drag_highlights": true})).unwrap();
+        assert!(app.preferences.move_drag_highlights, "the control channel sets it");
+        assert!(!holds_pointer(&app, layered, true), "with the preference the drag picks under the pointer");
     }
 
     /// Isocurve Analysis draws its curves where the bodies are, so a drag with them shown

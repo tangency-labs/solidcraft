@@ -1,0 +1,42 @@
+{
+  "en": {
+    "prefs.move_drag_highlights": "Highlight what is under the pointer while dragging a component",
+    "prefs.move_drag_highlights_tip": "Off: nothing under the pointer is highlighted while Move drags a component, which keeps large assemblies smooth."
+  },
+  "ar": {
+    "prefs.move_drag_highlights": "تمييز ما تحت المؤشر أثناء سحب مكوّن",
+    "prefs.move_drag_highlights_tip": "عند الإيقاف: لا يُميَّز أي شيء تحت المؤشر أثناء سحب مكوّن بأداة النقل، فتبقى التجميعات الكبيرة سلسة."
+  },
+  "de": {
+    "prefs.move_drag_highlights": "Beim Ziehen einer Komponente hervorheben, was unter dem Zeiger liegt",
+    "prefs.move_drag_highlights_tip": "Aus: Während Verschieben eine Komponente zieht, wird nichts unter dem Zeiger hervorgehoben; so bleiben große Baugruppen flüssig."
+  },
+  "es": {
+    "prefs.move_drag_highlights": "Resaltar lo que hay bajo el puntero al arrastrar un componente",
+    "prefs.move_drag_highlights_tip": "Desactivado: mientras Mover arrastra un componente no se resalta nada bajo el puntero, y los ensamblajes grandes se mueven con fluidez."
+  },
+  "fr": {
+    "prefs.move_drag_highlights": "Mettre en évidence ce qui est sous le pointeur pendant le glissement d’un composant",
+    "prefs.move_drag_highlights_tip": "Désactivé : pendant que Déplacer fait glisser un composant, rien n’est mis en évidence sous le pointeur, ce qui garde les grands assemblages fluides."
+  },
+  "he": {
+    "prefs.move_drag_highlights": "הדגשת מה שמתחת לסמן בזמן גרירת רכיב",
+    "prefs.move_drag_highlights_tip": "כבוי: בזמן שהזזה גוררת רכיב, דבר אינו מודגש מתחת לסמן, וכך מכלולים גדולים נשארים חלקים."
+  },
+  "ja": {
+    "prefs.move_drag_highlights": "コンポーネントのドラッグ中にポインターの下をハイライト",
+    "prefs.move_drag_highlights_tip": "オフ: 移動でコンポーネントをドラッグしている間はポインターの下をハイライトしないため、大きなアセンブリでも滑らかに動きます。"
+  },
+  "ko": {
+    "prefs.move_drag_highlights": "구성 요소를 끄는 동안 포인터 아래 항목 강조 표시",
+    "prefs.move_drag_highlights_tip": "끄면 이동으로 구성 요소를 끄는 동안 포인터 아래 항목을 강조 표시하지 않아 큰 어셈블리도 부드럽게 움직입니다."
+  },
+  "vi": {
+    "prefs.move_drag_highlights": "Tô sáng thứ nằm dưới con trỏ khi kéo một thành phần",
+    "prefs.move_drag_highlights_tip": "Tắt: khi Di chuyển kéo một thành phần, không có gì dưới con trỏ được tô sáng, nhờ đó các cụm lắp ráp lớn vẫn mượt."
+  },
+  "zh": {
+    "prefs.move_drag_highlights": "拖动组件时高亮指针下的对象",
+    "prefs.move_drag_highlights_tip": "关闭：使用移动拖动组件时，不高亮指针下的对象，大型装配体也能保持流畅。"
+  }
+}
