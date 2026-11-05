@@ -252,6 +252,9 @@ pub fn continuation_at(
 /// no more than the blend's tangency angle there ([`edge::blend_edgeuse`]'s) is left to the
 /// blend, as is an edge without a blend edge use.
 ///
+/// Its queries build the UV trim curves `e`'s edge uses lack and refit the edge's tolerance
+/// to them, so a caller that must leave a body as it is passes a copy (the session does).
+///
 /// # Errors
 /// [`SolidError::InvalidInput`] for a radius not finite and positive, or an edge use without
 /// a radial partner; those of [`edge::blend_edgeuse`] and the binormal evaluations.

@@ -282,6 +282,62 @@ fn a_round_within_the_tolerance_of_its_edge_is_refused() {
     assert_eq!(b.face_list().len(), faces + 1);
 }
 
+/// Per edge of `b`: its tolerance and which of its edge uses have a UV trim curve.
+fn trims_and_tolerances(b: &Brep) -> Vec<(f64, Vec<bool>)> {
+    let edges = solidcore::topology::brep::p1::edges(b, None).unwrap();
+    edges
+        .iter()
+        .map(|&e| {
+            let r = b.edge(e).unwrap();
+            let trims = r
+                .edgeuses
+                .iter()
+                .map(|&eu| b.edgeuse(eu).unwrap().uv_trim_curve.is_some())
+                .collect();
+            (r.tolerance, trims)
+        })
+        .collect()
+}
+
+/// The too-small check is a query: a round it refuses leaves the body as it was. Its
+/// evaluations build the UV trim curves an edge use lacks and refit the edge's tolerance;
+/// on the plate, ten of its 46 edge uses without one got one from the check alone, which
+/// on the caller's body moved every later result (#2718's sweep: edge tolerances of 1.03e-5
+/// where upstream keeps 1e-5).
+#[test]
+fn a_round_refused_as_too_small_leaves_the_body_as_it_was() {
+    let mut k = kernel(|_| {});
+    let mut b = plate(&mut k);
+    let edges = solidcore::topology::brep::p1::edges(&b, None).unwrap();
+    let mut refused = 0;
+    for &e in &edges {
+        let before = trims_and_tolerances(&b);
+        // the session's preparation: the API's own floor (8 tolerances) is above the
+        // smallest radius of a right-angle edge (tolerance / (sec(pi/4) - 1))
+        let circular = [FilletSurfaceGeneratorType::Circular];
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        let err = s
+            .prepare_per_edge_constant_radius(&mut k, &[e], &[1e-6], &circular, 1, 1.0)
+            .unwrap_err();
+        drop(s);
+        if matches!(
+            err,
+            SolidError::BlendRefused {
+                refusal: BlendRefusal::RoundTooSmall { .. },
+                ..
+            }
+        ) {
+            refused += 1;
+            assert_eq!(
+                before,
+                trims_and_tolerances(&b),
+                "edge {e:?}: the refused round changed the body"
+            );
+        }
+    }
+    assert!(refused >= 10, "{refused} refused");
+}
+
 #[test]
 fn a_setback_asked_that_does_not_fit_or_stops_short_is_refused() {
     let at = [[30.0, 40.0, 20.0], [60.0, 20.0, 20.0], [60.0, 40.0, 10.0]];

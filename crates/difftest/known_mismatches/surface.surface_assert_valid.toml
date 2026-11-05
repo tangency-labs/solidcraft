@@ -29,3 +29,15 @@ unit = "surface.surface_assert_valid"
 case = "ovf0276"
 cpp_defect = "WR-737"
 why = "WR-737 (addendum 2026-11-04, five sweep cases): the C++ emits SmBSplineSurface test #5 on a collapsed row whose steps are one ulp of the coordinates, inside the rounding bound; solidcore emits the case's other reports and not that one"
+
+[[mismatch]]
+unit = "surface.surface_assert_valid"
+case = "gen0812"
+cpp_defect = "WR-737"
+why = "WR-737 (addendum 2026-11-05, gen0812 and gen1016): the C++ emits SmBSplineSurface test #5 on a collapsed pole row whose steps are one ulp of the coordinates, inside the rounding bound; solidcore emits no report"
+
+[[mismatch]]
+unit = "surface.surface_assert_valid"
+case = "gen1016"
+cpp_defect = "WR-737"
+why = "WR-737 (addendum 2026-11-05, gen0812 and gen1016): the C++ emits SmBSplineSurface test #5 on a collapsed pole row whose steps are one ulp of the coordinates, inside the rounding bound; solidcore emits no report"

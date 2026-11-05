@@ -71,6 +71,12 @@ impl FilletSession<'_> {
     /// ([`round_too_small`]), refused as [`BlendRefusal::RoundTooSmall`] with status `SM_ERR`
     /// before the edges are prepared. Edges without a blend edge use are left to the
     /// preparation.
+    ///
+    /// The check reads a copy of the target, made once for the call: its queries build the
+    /// UV trim curves an edge use lacks and refit the edge's tolerance to them
+    /// (`GetBlendEdgeuse`, `EvaluateBinormal`), and on the target that would change the body
+    /// before upstream's preparation reads it, a refused round included (an all-edges round
+    /// of `Fillet/cyl_on_box_w_fillet.smb` left edges at 1.03e-5 where they stay at 1e-5).
     pub(super) fn refuse_rounds_too_small(
         &mut self,
         k: &Kernel,
@@ -78,6 +84,7 @@ impl FilletSession<'_> {
         radii: &[f64],
         sections: &[FilletSurfaceGeneratorType],
     ) -> Result<()> {
+        let mut scratch: Option<crate::topology::Brep> = None;
         for (i, &e) in edges.iter().enumerate() {
             let radius = radii.get(i).or_else(|| radii.first()).copied();
             let section = sections.get(i).or_else(|| sections.first()).copied();
@@ -89,7 +96,8 @@ impl FilletSession<'_> {
             {
                 continue;
             }
-            if let Some(refusal) = round_too_small(k, self.objects.target, e, radius)? {
+            let copy = scratch.get_or_insert_with(|| self.objects.target.clone());
+            if let Some(refusal) = round_too_small(k, copy, e, radius)? {
                 return Err(refusal.error(OP, SM_ERR));
             }
         }

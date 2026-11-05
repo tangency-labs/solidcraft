@@ -780,3 +780,9 @@ why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--ble
 unit = "blend.fillet_executive_p3"
 case = "preview0058"
 why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.preview[6]: cpp=1.5002e4 rust=1.5012e4)"
+
+# solidcore refuses a round too small to change the part (#2718; plan/findings/blend.fillet_executive_p3--2718-moved-four-cases-too-small-refusal-and-check-writing-to-the-body-2026-11-05.md)
+[[mismatch]]
+unit = "blend.fillet_executive_p3"
+case = "preview-radius-tiny"
+why = "solidcore refuses the 1e-12 round as RoundTooSmall naming 2.414e-5 (status 1001, plan/findings/blend.fillet_executive_p3--2718-moved-four-cases-too-small-refusal-and-check-writing-to-the-body-2026-11-05.md); C++ previews it (values.preview.len: cpp=111 rust=5)"
