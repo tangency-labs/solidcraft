@@ -170,12 +170,8 @@ fn parameter_table(params: &str) -> String {
     }
     let mut md = String::from("| Parameter | Type | Required | Description |\n| --- | --- | --- | --- |\n");
     for row in rows {
-        let cells = [
-            table_cell(&row.name),
-            table_cell(&row.kind),
-            if row.required { "Yes".to_string() } else { "No".to_string() },
-            table_cell(&row.description),
-        ];
+        let cells =
+            [table_cell(&row.name), table_cell(&row.kind), if row.required { "Yes".to_string() } else { "No".to_string() }, prose(&row.description)];
         md.push('|');
         for cell in cells {
             // An empty cell keeps the column, with a single space between the bars.
