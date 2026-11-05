@@ -166,6 +166,23 @@ pub trait BackingTooltipExt: Sized {
     fn backing_show_tooltip_text(&self, text: impl Into<WidgetText>);
 }
 
+/// What egui's `on_hover_text` does besides showing the tip: a widget that has an accessibility
+/// node gets the tip as its description, and as its name when it has none (a label is named by
+/// its text, a widget with a `labelled_by` relation by that). Mirrors egui's private
+/// `Response::describe_for_accessibility`, so a converted caller reads the same to a screen reader.
+fn describe_for_accessibility(response: &egui::Response, text: &str) {
+    if response.ctx.has_accesskit_node(response.id) {
+        response.ctx.accesskit_node_builder(response.id, |node| {
+            if node.description().is_none() {
+                node.set_description(text);
+            }
+            if node.role() != egui::accesskit::Role::Label && node.labelled_by().is_empty() && node.label().is_none_or(str::is_empty) {
+                node.set_label(text);
+            }
+        });
+    }
+}
+
 fn show_backing_tooltip(parent: Id, tip: egui::Tooltip<'_>, body: impl FnOnce(&mut egui::Ui)) {
     let slot = tip
         .popup
@@ -194,6 +211,8 @@ impl BackingTooltipExt for egui::Response {
         self
     }
     fn backing_on_hover_text(self, text: impl Into<WidgetText>) -> Self {
+        let text = text.into();
+        describe_for_accessibility(&self, text.text());
         self.backing_on_hover_ui(|ui| {
             ui.set_max_width(ui.spacing().tooltip_width);
             ui.label(text);
@@ -206,6 +225,8 @@ impl BackingTooltipExt for egui::Response {
         })
     }
     fn backing_on_hover_text_at_pointer(self, text: impl Into<WidgetText>) -> Self {
+        let text = text.into();
+        describe_for_accessibility(&self, text.text());
         self.backing_on_hover_ui_at_pointer(|ui| {
             ui.set_max_width(ui.spacing().tooltip_width);
             ui.label(text);
@@ -1088,3 +1109,7 @@ impl Container {
         self.surface == Surface::InputShield || !crate::issue_report::cad_input_blocked()
     }
 }
+
+#[cfg(test)]
+#[path = "container_tests.rs"]
+mod tests;
