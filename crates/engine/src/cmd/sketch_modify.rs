@@ -233,9 +233,12 @@ fn pin(sk: &mut Sketch, p: usize, cutter: usize) -> Result<()> {
 
 /// Split curve `ci` at interior parameters `ts` (sorted). Returns the pieces in parameter
 /// order (the first keeps the original index) and the new points.
-fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64]) -> Result<(Vec<usize>, Vec<usize>)> {
-    let sh = sk.shape(ci).ok_or_else(|| bad("split", "curve"))?;
-    let kind = sk.curves.get(ci).map(|c| c.kind.clone()).ok_or_else(|| bad("split", "curve"))?;
+///
+/// `cmd` is the command the caller used (`sketch.trim`, `sketch.trim.path`, `sketch.break`):
+/// a refusal names the command the caller can write, never an internal step.
+fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64], cmd: &str) -> Result<(Vec<usize>, Vec<usize>)> {
+    let sh = sk.shape(ci).ok_or_else(|| bad(cmd, "curve"))?;
+    let kind = sk.curves.get(ci).map(|c| c.kind.clone()).ok_or_else(|| bad(cmd, "curve"))?;
     let construction = sk.curves.get(ci).is_some_and(|c| c.construction);
     let mut pts = Vec::new();
     for t in ts {
@@ -273,7 +276,7 @@ fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64]) -> Result<(Vec<usize>, Vec<u
         }
         CurveKind::Circle { c, .. } => {
             if pts.len() < 2 {
-                return Err(bad("split", "a circle needs two points to split at"));
+                return Err(bad(cmd, "a circle needs two points to split at"));
             }
             let mut chain = pts.clone();
             if let Some(f) = pts.first() {
@@ -287,7 +290,7 @@ fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64]) -> Result<(Vec<usize>, Vec<u
                 push(sk, CurveKind::Arc { c, a: w[0], b: w[1] }, "a")?;
             }
         }
-        _ => return Err(bad("split", "not supported yet for ellipses, splines and conics")),
+        _ => return Err(bad(cmd, "not supported yet for ellipses, splines and conics")),
     }
     Ok((pieces, pts))
 }
@@ -668,7 +671,7 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
     release_extent(sk, ci);
     let tangencies = endpoint_tangencies(sk, ci);
     let ts: Vec<f64> = cuts.iter().map(|c| c.0).collect();
-    let (pieces, pts) = split_at(sk, ci, &ts)?;
+    let (pieces, pts) = split_at(sk, ci, &ts, cmd)?;
     // The piece containing tq.
     let k = if full {
         let (a, b) = (ts[0], ts[1]);
@@ -938,7 +941,7 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         // Its length (and its midpoint, an equal length) measured the whole curve: left on the
         // first piece, it would stretch that piece back to the old size and skew the sketch.
         release_extent(sk, ci);
-        let (pieces, pts) = split_at(sk, ci, &ts)?;
+        let (pieces, pts) = split_at(sk, ci, &ts, cmd)?;
         for (pi, c) in pts.iter().zip(&cutters) {
             if let Some(c) = c {
                 pin(sk, *pi, *c)?;
