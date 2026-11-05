@@ -50,6 +50,8 @@ pub enum NavMode {
 
 #[derive(Default)]
 pub struct ViewportState {
+    /// Touchscreen gesture ownership and contacts for the shared camera handler.
+    pub(crate) touch: crate::navigation::TouchNavigation,
     /// The faces the modelling kernel refuses that the window points at (a failed operation's
     /// message, a "needs repair" row under the pointer): ringed in the error colour. What this
     /// frame asks for ([`crate::refused_part::ring`]) is drawn from the next one on, so the ring
@@ -156,8 +158,6 @@ pub struct ViewportState {
     /// The preset's navigation for the left-button drag under way (Alias: Shift+Alt), taken
     /// when the button went down, so the drag neither selects nor moves sketch geometry.
     pub primary_nav: Option<NavMode>,
-    /// Touchscreen gesture ownership and contacts for the shared camera handler.
-    pub(crate) touch: crate::navigation::TouchNavigation,
     /// Button-free gesture and its last owned pointer position, kept through pauses.
     pub(crate) modifier_nav: Option<(NavMode, Pos2)>,
     /// What a click would pick now (after the active command's filter).
