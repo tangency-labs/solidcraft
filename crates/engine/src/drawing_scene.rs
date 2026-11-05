@@ -21,6 +21,9 @@
 //! session's view state, beside the drawing: never saved, never an undo step, and dropped when its
 //! drawing closes.
 //!
+//! [`hit`] says which of a scene's objects is under a point of the sheet, the one rule for picking
+//! there: the sheet page's hover and `drawing.scene.hit`.
+//!
 //! [`SheetLayout::paper`]: solidcraft_geom::drawing_sheet::SheetLayout::paper
 //! [`groups`]: crate::drawing_pictures::groups
 //! [`TitleBlockLayout::paper`]: solidcraft_geom::title_block::TitleBlockLayout::paper
@@ -153,6 +156,43 @@ pub struct SheetView {
     pub dimensions: Vec<DimensionState>,
     /// The dimensions out of date whose views aren't: [`step`] reads them once the views are done.
     pub stale_dimensions: Vec<u64>,
+}
+
+/// What is under a point of a sheet ([`hit`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Hit {
+    pub object: u64,
+    pub kind: ObjectKind,
+    /// The point is within the band of the box's edge: where a view is grabbed rather than clicked
+    /// through.
+    pub on_edge: bool,
+}
+
+/// The object of `objects`, in paint order, under `point_mm` on paper: of those whose box holds the
+/// point within `band_mm`, the smallest, then the topmost. A view's box is its boundary, so one that
+/// can't be drawn is still there; a dimension's is round its lines. The sheet's border is never hit.
+/// A point or a band that isn't a finite number, or a band below 0, hits nothing. One pass over the
+/// objects, cheap enough for every hover.
+pub fn hit(objects: &[SheetObject], point_mm: Vec2, band_mm: f64) -> Option<Hit> {
+    if !point_mm.is_finite() || !band_mm.is_finite() || band_mm < 0.0 {
+        return None;
+    }
+    let mut found: Option<(f64, Hit)> = None;
+    for object in objects.iter().filter(|o| o.kind != ObjectKind::DrawingBorder) {
+        let b = object.boundary_mm.unwrap_or(object.bounds_mm);
+        if !b.inflated(band_mm).contains(point_mm) {
+            continue;
+        }
+        let size = b.size();
+        let area = size.x * size.y;
+        // `<=`: of two the same size, the one painted later is on top.
+        if found.as_ref().is_none_or(|(smallest, _)| area <= *smallest) {
+            let to_edge = [point_mm.x - b.min.x, b.max.x - point_mm.x, point_mm.y - b.min.y, b.max.y - point_mm.y];
+            let on_edge = to_edge.iter().any(|gap| gap.abs() <= band_mm);
+            found = Some((area, Hit { object: object.object, kind: object.kind, on_edge }));
+        }
+    }
+    found.map(|(_, hit)| hit)
 }
 
 /// The id of the sheet `named` names in `drawing` (its id or its one name), refused as `cmd`: the

@@ -99,6 +99,7 @@ drawing.revision.tag.add          a drawing: its tests in crates/engine/src/cmd/
 drawing.revision.tag.delete       a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.revision.tag.edit         a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.scene                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.scene.hit                 a drawing: its tests in crates/engine/src/drawing_scene_tests.rs
 drawing.set                       a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.sheet.add                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.sheet.delete              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
