@@ -1131,6 +1131,7 @@ impl Dialog {
                 Dialog::new(kind, inputs)
             }
         };
+        recall(app, &mut d);
         // Patterns of features picked in the timeline: the objects are features.
         if is_pattern(&d.kind)
             && s.selection.iter().any(|x| matches!(x, Sel::Feature { .. }))
@@ -4129,6 +4130,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         d.repeat_after_apply = false;
         let _ = app.session.execute("select.clear", &json!({}));
     }
+    if applied && d.editing.is_none() {
+        remember(app, &d);
+    }
     // Cancel while computing: the result goes (its worker runs on to its end).
     if cancel && !applied {
         app.applying = None;
@@ -4165,6 +4169,198 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // The shortcut that asked for this sketch starts its tool in it.
     if let Some(id) = then_start {
         app.start(id);
+    }
+}
+
+/// The values retained after a command succeeds; selection-dependent values are refreshed.
+#[derive(Clone, Debug)]
+pub(crate) struct RememberedCommand {
+    kind: Kind,
+    extra: serde_json::Map<String, Value>,
+}
+
+/// Whether two dialog kinds are the same command (a chamfer is not a fillet).
+fn same_command(a: &Kind, b: &Kind) -> bool {
+    let Some(command) = dense::command(a) else { return false };
+    dense::command(b) == Some(command)
+}
+
+/// Dialog values that are safe to reuse; picks and document-specific editors are excluded.
+fn rememberable(kind: &Kind) -> bool {
+    matches!(
+        kind,
+        Kind::Mirror
+            | Kind::Extrude { .. }
+            | Kind::Revolve { .. }
+            | Kind::Fillet { .. }
+            | Kind::PatternRect { .. }
+            | Kind::PatternCirc { .. }
+            | Kind::Loft { .. }
+            | Kind::Sweep { .. }
+            | Kind::MeshConvert { .. }
+            | Kind::Construct { .. }
+            | Kind::PathPlane { .. }
+            | Kind::Rib { .. }
+            | Kind::Thread { .. }
+            | Kind::BoundaryFill { .. }
+            | Kind::Align { .. }
+            | Kind::PathPattern { .. }
+            | Kind::Section { .. }
+            | Kind::Move { .. }
+            | Kind::Hole { .. }
+            | Kind::Primitive { .. }
+            | Kind::Combine { .. }
+            | Kind::Shell { .. }
+            | Kind::Draft { .. }
+            | Kind::OffsetPlane { .. }
+            | Kind::AnglePlane { .. }
+            | Kind::Scale { .. }
+            | Kind::OffsetFaces { .. }
+            | Kind::Stock { .. }
+            | Kind::Pipe { .. }
+            | Kind::Emboss { .. }
+            | Kind::ViewDxf { .. }
+            | Kind::SketchModify(_)
+            | Kind::Sheet(
+                crate::dialogs_sheet::Sm::Perforate { .. }
+                    | crate::dialogs_sheet::Sm::Hem { .. }
+                    | crate::dialogs_sheet::Sm::Fold { .. }
+                    | crate::dialogs_sheet::Sm::Path { .. }
+                    | crate::dialogs_sheet::Sm::Flange { .. }
+                    | crate::dialogs_sheet::Sm::Unfold { .. },
+            )
+            | Kind::Surface(_)
+            | Kind::Plastic(
+                crate::dialogs_plastic::Pl::Boss { .. }
+                    | crate::dialogs_plastic::Pl::Lip { .. }
+                    | crate::dialogs_plastic::Pl::Rest { .. }
+                    | crate::dialogs_plastic::Pl::SnapFit { .. },
+            )
+            | Kind::Frame(_)
+    )
+}
+
+fn remembered_extra_keys(kind: &Kind) -> &'static [&'static str] {
+    match dense::command(kind) {
+        Some("solid.extrude") => &["convention"],
+        Some("solid.revolve") => &["angle2", "direction"],
+        Some("solid.shell") => &["direction", "tangent_chain"],
+        Some("solid.fillet") => &["type", "fit", "corner", "radius2", "mid", "radii", "swap_ends", "smooth"],
+        Some("solid.mirror") => &["combine"],
+        Some("solid.pattern.rectangular") => &["alignment", "reversed", "alignment2", "reversed2"],
+        Some("solid.pattern.circular") => &["alignment", "reversed"],
+        Some("solid.hole") => &["all_points", "flip"],
+        Some("solid.align") => &["from_snap", "to_snap"],
+        Some("solid.boundary_fill") => &["remove_tools"],
+        Some("solid.thread") => &["modeled"],
+        Some("solid.move") => &["copy"],
+        Some("solid.coil") => &["section", "section_position", "start_angle", "clockwise"],
+        _ => &[],
+    }
+}
+
+/// Keep the options and values of an applied dialog for the next one of the same command.
+fn remember(app: &mut SolveApp, dialog: &Dialog) {
+    if !app.preferences.remember_dialog_values {
+        return;
+    }
+    let kind = &dialog.kind;
+    if !rememberable(kind) {
+        return;
+    }
+    let Some(command) = dense::command(kind) else { return };
+    let extra =
+        remembered_extra_keys(kind).iter().filter_map(|key| dialog.extra.get(*key).map(|value| ((*key).to_string(), value.clone()))).collect();
+    app.remembered_commands.retain(|remembered| dense::command(&remembered.kind) != Some(command));
+    app.remembered_commands.push(RememberedCommand { kind: kind.clone(), extra });
+}
+
+/// A new dialog starts from what the last one of its command applied. Picks and context-dependent
+/// values come from the newly constructed dialog instead.
+fn recall(app: &SolveApp, dialog: &mut Dialog) {
+    if !app.preferences.remember_dialog_values {
+        return;
+    }
+    let Some(last) = app.remembered_commands.iter().find(|entry| same_command(&entry.kind, &dialog.kind)) else { return };
+    let mut next = last.kind.clone();
+    match (&mut next, &dialog.kind) {
+        (Kind::Extrude { smart, to_offset, .. }, Kind::Extrude { smart: fresh, to_offset: fresh_offset, .. }) => {
+            *smart = fresh.clone();
+            *to_offset = fresh_offset.clone();
+        }
+        (Kind::Revolve { axis, .. }, Kind::Revolve { axis: fresh, .. }) => *axis = fresh.clone(),
+        (Kind::PathPlane { sketch, .. }, Kind::PathPlane { sketch: fresh, .. }) => *sketch = *fresh,
+        (Kind::Thread { designation, suggested, of, .. }, Kind::Thread { suggested: fresh_suggested, of: fresh_of, .. }) => {
+            // A remembered auto-suggestion belonged to the old face: the new face gets its own.
+            // An authored designation stays.
+            if suggested.as_deref() == Some(designation.as_str()) {
+                *designation = fresh_suggested.clone().unwrap_or_default();
+            }
+            *suggested = fresh_suggested.clone();
+            *of = fresh_of.clone();
+        }
+        (Kind::BoundaryFill { cells, of, .. }, Kind::BoundaryFill { cells: fresh_cells, of: fresh_of, .. }) => {
+            *cells = fresh_cells.clone();
+            *of = fresh_of.clone();
+        }
+        (Kind::Hole { opts, .. }, Kind::Hole { opts: fresh, .. }) => opts.refs = fresh.refs.clone(),
+        (Kind::Primitive { at, .. }, Kind::Primitive { at: fresh, .. }) => *at = *fresh,
+        (Kind::Sweep { opts, .. }, Kind::Sweep { opts: fresh, .. }) => opts.direction = fresh.direction,
+        (
+            Kind::Surface(crate::dialogs_surface::Surf::Revolve { axis, .. }),
+            Kind::Surface(crate::dialogs_surface::Surf::Revolve { axis: fresh, .. }),
+        ) => *axis = fresh.clone(),
+        (Kind::Surface(crate::dialogs_surface::Surf::Sweep(opts)), Kind::Surface(crate::dialogs_surface::Surf::Sweep(fresh))) => {
+            opts.direction = fresh.direction;
+        }
+        (
+            Kind::Surface(crate::dialogs_surface::Surf::Trim { direction, .. }),
+            Kind::Surface(crate::dialogs_surface::Surf::Trim { direction: fresh, .. }),
+        ) => *direction = *fresh,
+        (Kind::Sheet(crate::dialogs_sheet::Sm::Flange { own, .. }), Kind::Sheet(crate::dialogs_sheet::Sm::Flange { own: fresh, .. })) => {
+            *own = fresh.clone();
+        }
+        (Kind::Plastic(crate::dialogs_plastic::Pl::SnapFit { hook, .. }), Kind::Plastic(crate::dialogs_plastic::Pl::SnapFit { hook: fresh, .. })) => {
+            *hook = *fresh;
+        }
+        (Kind::Frame(previous), Kind::Frame(fresh)) => previous.whole = fresh.whole,
+        _ => {}
+    }
+    let fresh_mode = mode_inputs_key(&dialog.kind);
+    dialog.kind = next;
+    // The remembered mode needs its own inputs (Rotate an Axis, Multiple Hole its points);
+    // the fresh selection of the first input stays.
+    if mode_inputs_key(&dialog.kind) != fresh_mode {
+        let rebuilt = match &dialog.kind {
+            Kind::Move { mode, .. } => Some(crate::dialogs_move::inputs(*mode)),
+            Kind::Hole { opts, .. } if opts.multiple => Some(vec![SelInput::new("Points", selection::POINTS, true)]),
+            Kind::Hole { .. } => Some(single_hole_inputs()),
+            _ => None,
+        };
+        if let Some(mut inputs) = rebuilt {
+            let keep = matches!(dialog.kind, Kind::Move { .. });
+            if keep && let (Some(fresh), Some(first)) = (dialog.inputs.first(), inputs.first_mut()) {
+                first.items = fresh.items.clone();
+            }
+            dialog.inputs = inputs;
+            dialog.active = 0;
+        }
+    }
+    for key in remembered_extra_keys(&dialog.kind) {
+        if let Some(value) = last.extra.get(*key) {
+            dialog.extra.insert((*key).to_string(), value.clone());
+        } else {
+            dialog.extra.remove(*key);
+        }
+    }
+}
+
+/// Which mode-dependent input set a dialog shows (`None` for dialogs whose inputs don't change).
+fn mode_inputs_key(kind: &Kind) -> Option<usize> {
+    match kind {
+        Kind::Move { mode, .. } => Some(*mode),
+        Kind::Hole { opts, .. } => Some(usize::from(opts.multiple)),
+        _ => None,
     }
 }
 

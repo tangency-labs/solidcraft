@@ -1025,6 +1025,9 @@ macro_rules! preference_settings {
     (@control $app:ident, $ui:ident, $field:ident, check_id($label:literal)) => {
         ui_kit::checkbox($ui, $app.tr($label), &mut $app.preferences.$field)
     };
+    (@control $app:ident, $ui:ident, $field:ident, check_id_help($label:literal, $help:literal)) => {
+        ui_kit::checkbox($ui, $app.tr($label), &mut $app.preferences.$field).on_hover_text($app.tr($help))
+    };
     (@control $app:ident, $ui:ident, $field:ident, number($label:literal, $range:expr)) => {
         ui_kit::row($ui, $app.tr($label), |ui| {
             ui_kit::number_field(ui, &mut $app.preferences.$field, $range, 1.0, "")
@@ -1445,6 +1448,8 @@ preference_settings! {
     /// Feature windows choose Join, New Body or Cut from what their material touches (`op_auto`,
     /// #6901). Off: they keep the operation they open with (Extrude its own Join or Cut), as before.
     auto_operation: bool = true, PAGE_TOOLS => check_id("prefs.auto_operation");
+    /// Reuse a command's safe values and options after it succeeds, until the app closes. Off by default: each dialog opens with its usual defaults.
+    remember_dialog_values: bool = false, PAGE_TOOLS => check_id_help("prefs.remember_dialog_values", "prefs.remember_dialog_values.help");
     /// Placing a Single hole snaps to the middle of the face and the centres of its round edges
     /// (`hole_place`). Off by default: a hole goes where it is clicked.
     hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");
@@ -4369,6 +4374,7 @@ mod tests {
             restored.load_prefs(&app.prefs());
             assert_eq!(restored.preferences.trackpad_zoom_modifier, value);
         }
+
         for invalid in [json!("super"), json!(""), json!(42), json!(null)] {
             assert!(set(&mut app, &json!({"trackpad_zoom_modifier": invalid})).is_err());
             assert_eq!(app.preferences.trackpad_zoom_modifier, TrackpadZoomModifier::Off);
@@ -4379,6 +4385,21 @@ mod tests {
         app.preferences.trackpad_zoom_modifier = TrackpadZoomModifier::Cmd;
         reset_preferences(&mut app.preferences, PAGE_NAVIGATION);
         assert_eq!(app.preferences.trackpad_zoom_modifier, TrackpadZoomModifier::Off);
+    }
+
+    #[test]
+    fn command_dialog_value_memory_defaults_off_persists_and_resets() {
+        assert!(!Prefs::default().remember_dialog_values);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert!(!app.preferences.remember_dialog_values);
+        app.preferences.remember_dialog_values = true;
+        assert_eq!(serde_json::to_value(&app.preferences).unwrap()["remember_dialog_values"], true);
+
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(restored.preferences.remember_dialog_values);
+        reset_preferences(&mut app.preferences, PAGE_TOOLS);
+        assert!(!app.preferences.remember_dialog_values);
     }
 
     #[test]

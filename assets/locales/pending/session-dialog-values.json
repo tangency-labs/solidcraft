@@ -1,0 +1,42 @@
+{
+  "ar": {
+    "prefs.command_dialog_values": "مربعات حوار الأوامر",
+    "prefs.remember_dialog_values": "تذكّر قيم مربعات حوار الأوامر",
+    "prefs.remember_dialog_values.help": "معطّل افتراضيًا. عند تفعيله، بعد نجاح الأمر، يُعاد استخدام قيمه وخياراته الآمنة في المرة التالية التي تفتح فيها الأمر نفسه، حتى إغلاق SolidCraft."
+  },
+  "de": {
+    "prefs.command_dialog_values": "Befehlsdialoge",
+    "prefs.remember_dialog_values": "Befehlsdialogwerte merken",
+    "prefs.remember_dialog_values.help": "Standardmäßig aus. Wenn aktiviert, werden nach erfolgreicher Ausführung eines Befehls seine sicheren Werte und Optionen beim nächsten Öffnen desselben Befehls wiederverwendet, bis SolidCraft geschlossen wird."
+  },
+  "en": {
+    "prefs.command_dialog_values": "Command dialogs",
+    "prefs.remember_dialog_values": "Remember command dialog values",
+    "prefs.remember_dialog_values.help": "Off by default. When on, after a command succeeds, its safe values and options are reused the next time you open the same command, until SolidCraft closes."
+  },
+  "he": {
+    "prefs.command_dialog_values": "תיבות דו-שיח של פקודות",
+    "prefs.remember_dialog_values": "זכור ערכים בתיבות דו-שיח של פקודות",
+    "prefs.remember_dialog_values.help": "כבוי כברירת מחדל. כשהוא פועל, לאחר הצלחת פקודה, הערכים והאפשרויות הבטוחים שלה ישמשו שוב בפעם הבאה שתפתח את אותה פקודה, עד לסגירת SolidCraft."
+  },
+  "ja": {
+    "prefs.command_dialog_values": "コマンドダイアログ",
+    "prefs.remember_dialog_values": "コマンドダイアログの値を記憶",
+    "prefs.remember_dialog_values.help": "既定ではオフです。オンにすると、コマンドが成功した後、SolidCraft を閉じるまで、同じコマンドを次に開いたときに安全な値とオプションを再利用します。"
+  },
+  "ko": {
+    "prefs.command_dialog_values": "명령 대화 상자",
+    "prefs.remember_dialog_values": "명령 대화 상자 값 기억",
+    "prefs.remember_dialog_values.help": "기본값은 꺼짐입니다. 켜면 명령이 성공한 후 SolidCraft를 닫을 때까지 같은 명령을 다음에 열 때 안전한 값과 옵션을 다시 사용합니다."
+  },
+  "vi": {
+    "prefs.command_dialog_values": "Hộp thoại lệnh",
+    "prefs.remember_dialog_values": "Ghi nhớ giá trị hộp thoại lệnh",
+    "prefs.remember_dialog_values.help": "Tắt theo mặc định. Khi bật, sau khi lệnh thành công, các giá trị và tùy chọn an toàn của lệnh sẽ được dùng lại vào lần tiếp theo bạn mở cùng lệnh đó, cho đến khi SolidCraft đóng."
+  },
+  "zh": {
+    "prefs.command_dialog_values": "命令对话框",
+    "prefs.remember_dialog_values": "记住命令对话框的值",
+    "prefs.remember_dialog_values.help": "默认关闭。开启后，命令成功执行后，在关闭 SolidCraft 前，下次打开同一命令时会重用其安全的值和选项。"
+  }
+}
