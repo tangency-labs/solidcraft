@@ -438,7 +438,15 @@ fn measure(result: &[Slot]) -> Result<Measured, String> {
     };
     let mut volume = Some(0.0);
     for s in result {
-        let c = s.body.counts().map_err(|e| format!("counts: {e}"))?;
+        // Counted as the record writes the body, the rig's convention (`outcome.raw_counts`): a
+        // line where the body touches itself is one edge in the kernel's list and one per pair
+        // of faces in the record.
+        let (record, _) = s.body.to_record().map_err(|e| format!("record: {e}"))?;
+        let c = [
+            record.faces.len(),
+            record.edges.len(),
+            record.vertices.len(),
+        ];
         for (a, b) in m.counts.iter_mut().zip(c) {
             *a += b;
         }
@@ -722,6 +730,19 @@ fn a_terminal_refusal_cannot_hide_later_invalid_markers() {
             matches!(run_case(Path::new("unused.json"), &e), Err(Stop::Fail(why)) if why.contains("continued"))
         );
     }
+}
+
+/// The final bodies are counted as their records write them, the convention of the rig's
+/// `raw_counts` (#2817). Here the hole is tangent to the front face, so the body touches itself
+/// along a line: the kernel keeps that line as one edge with four uses, the record writes it once
+/// per pair of faces (its Touching rule), 21 edges where the kernel's list has 20.
+#[test]
+fn a_body_touching_itself_along_a_line_is_counted_as_its_record() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let entry = corpus().join("ladder/02-booleans/018-hole-tangent-to-side-face.json");
+    let e: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+    assert_eq!(e["outcome"]["raw_counts"]["edges"], 21);
+    run_case(&entry, &e).unwrap();
 }
 
 fn check_discarded_edit(record: Record, op: &str, params: &Value, made: &Value, retained: Value) {
