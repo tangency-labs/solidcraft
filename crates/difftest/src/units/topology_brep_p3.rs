@@ -2147,6 +2147,183 @@ mod tests {
         assert!(run_cpp(&case(0.5)).is_ok());
     }
 
+    /// The `nurbs_off_*` cases the exact surface extension moves (land-me/split-ext;
+    /// plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md), measured
+    /// independently of the C++. `TurnToNURBS` approximates each offset face surface (cubic,
+    /// chord length, ten B-rep tolerances) and extends it, G1, by 2% of its box diagonal past
+    /// each side; the C++ fitted that extension to an estimated parameter reach, so only the
+    /// converted surfaces' natural domains move (every other compared value, the curves,
+    /// types and counts, agrees). For every converted face this rebuilds the approximation
+    /// with the kernel's own call and checks the face's surface: over the approximation's box
+    /// it is the approximation (within 1e-12 of its size); past each side it extends, the
+    /// iso curve through the side's middle (of the box as extended so far, in `BoxSide::ALL`'s
+    /// order) runs on for the asked distance, measured as a dense polyline's length
+    /// (Richardson-extrapolated from 2^15 and 2^16 chords, not the kernel's enclosure); and the
+    /// iso curve crosses the side tangent continuously. Writes one line per face to
+    /// `$SC_TURN_NURBS_PROBE` when set.
+    #[test]
+    fn turned_offsets_are_the_approximation_and_reach_the_extension() {
+        use solidcore::geom::vector2d::Point2;
+        use solidcore::nurbs::b_spline_surface_n_lib::p1::OffsetParamType;
+        use solidcore::surface::surface::SurfaceKind;
+        use std::fmt::Write as _;
+        // the offset base's B-spline form, as `TurnToNURBS` reads it
+        fn nurb_of(k: &Kernel, s: &SmSurface) -> Option<BSplineSurface> {
+            Some(match s.kind_with_nurb(k).ok()? {
+                SurfaceKind::BSpline(x) => x.clone(),
+                SurfaceKind::Plane(x) => x.base_with_nurb().ok()?.into_owned(),
+                SurfaceKind::SurfOfExtrusion(x) => x.base().clone(),
+                SurfaceKind::SurfOfRevolution(x) => x.base().clone(),
+                SurfaceKind::Cone(x) => x.rev().base().clone(),
+                SurfaceKind::Sphere(x) => x.base().base().clone(),
+                SurfaceKind::Torus(x) => x.base().base().clone(),
+                _ => return None,
+            })
+        }
+        let context = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 0,
+        };
+        let mut report = String::new();
+        let (mut sides_measured, mut failures) = (0, 0);
+        for case in &Runner.cases(&context).unwrap() {
+            if !case.name.starts_with("nurbs_off_") {
+                continue;
+            }
+            let i: Inputs = case.parse().unwrap();
+            let OpIn::TurnNurbsOffset { offset } = i.op else {
+                continue;
+            };
+            let mut k = Kernel::default();
+            let Ok(Ok((mut b, c))) = own_brep(&mut k, &i) else {
+                continue;
+            };
+            let Some((_, args)) = op_args(&i.op, &c).unwrap() else {
+                continue;
+            };
+            // the offsets the op replaces, on a second build of the same input
+            let faces: Vec<FaceId> = must(bp1::faces(&b, None)).ok().unwrap();
+            let Ok(Ok((mut wrapped, _))) = own_brep(&mut k, &i) else {
+                continue;
+            };
+            wrap_in_offsets(&k, &mut wrapped, &faces, offset)
+                .ok()
+                .unwrap();
+            let offsets: Vec<_> = faces
+                .iter()
+                .map(|&f| wrapped.face(f).ok().and_then(|x| x.surface.clone()))
+                .collect();
+            let tol = b.tolerance() * 10.0;
+            assert!(
+                run_rust_op(&mut k, &mut b, None, &i.op, &args).is_ok(),
+                "{}",
+                case.name
+            );
+            for (&f, off) in faces.iter().zip(&offsets) {
+                let Some(SurfaceKind::OffsetSurface(off)) = off.as_ref().map(SmSurface::kind)
+                else {
+                    continue;
+                };
+                let Some(base) = nurb_of(&k, off.base_surface()) else {
+                    continue;
+                };
+                let Ok(approx) = base.approximate_offset_surface(
+                    off.offset_distance(),
+                    tol,
+                    OffsetParamType::ChordLength,
+                ) else {
+                    continue; // the face keeps its surface
+                };
+                let approx = SmSurface::from(approx);
+                let ext = b.face(f).unwrap().surface.clone().unwrap();
+                let bx = approx.natural_uv_domain_with_nurb(&k).unwrap();
+                let e = ext.natural_uv_domain_with_nurb(&k).unwrap();
+                let mut size = approx
+                    .calculate_bounding_box(&k, &bx, [true, false, false], true)
+                    .map_or(0.0, |x| x.normal_box.map_or(0.0, |n| n.size().length()));
+                if !(size > 0.0 && size < 1.0e15) {
+                    size = 1.0;
+                }
+                let asked = 0.02 * size;
+                let at = |s: &SmSurface, u: f64, v: f64| {
+                    s.evaluate_point(&k, Point2::new(u, v)).unwrap()
+                };
+                let lerp = |a: f64, c: f64, t: f64| (1.0 - t) * a + t * c;
+                // over the approximation's box: the approximation
+                let mut on_box = 0.0_f64;
+                for p in 0..=16 {
+                    for q in 0..=16 {
+                        let u = lerp(bx.min().x, bx.max().x, f64::from(p) / 16.0);
+                        let v = lerp(bx.min().y, bx.max().y, f64::from(q) / 16.0);
+                        on_box = on_box.max(at(&approx, u, v).distance(at(&ext, u, v)) / size);
+                    }
+                }
+                let mut line = format!(
+                    "{}\tface {}\tasked={asked:.9e}\ton_box={on_box:.1e}",
+                    case.name,
+                    f.index()
+                );
+                failures += usize::from(on_box > 1e-12);
+                // the sides in BoxSide::ALL's order: (along u, side, far end, the middle of
+                // the other direction in the box as extended so far)
+                let mid_v = 0.5 * (bx.min().y + bx.max().y);
+                let mid_u = 0.5 * (e.min().x + e.max().x);
+                let sides = [
+                    ("umin", true, bx.min().x, e.min().x, mid_v),
+                    ("umax", true, bx.max().x, e.max().x, mid_v),
+                    ("vmin", false, bx.min().y, e.min().y, mid_u),
+                    ("vmax", false, bx.max().y, e.max().y, mid_u),
+                ];
+                for (name, along_u, edge, far, across) in sides {
+                    #[allow(clippy::float_cmp)]
+                    if edge == far {
+                        let _ = write!(line, "\t{name}=kept");
+                        continue; // closed or collapsed: left as it is on both sides
+                    }
+                    let point = |w: f64| {
+                        if along_u {
+                            at(&ext, w, across)
+                        } else {
+                            at(&ext, across, w)
+                        }
+                    };
+                    let polyline = |n: u32| {
+                        let mut length = 0.0;
+                        let mut last = point(edge);
+                        for j in 1..=n {
+                            let next = point(lerp(edge, far, f64::from(j) / f64::from(n)));
+                            length += last.distance(next);
+                            last = next;
+                        }
+                        length
+                    };
+                    let (l1, l2) = (polyline(1 << 15), polyline(1 << 16));
+                    let reach = l2 + (l2 - l1) / 3.0;
+                    let reach_err = (reach - asked).abs() / asked;
+                    // the iso curve's one-sided directions at the side
+                    let h = 1e-7 * (far - edge).abs();
+                    let dir = if far > edge { 1.0 } else { -1.0 };
+                    let (p0, pin, pout) =
+                        (point(edge), point(edge - dir * h), point(edge + dir * h));
+                    let (a, o) = (p0 - pin, pout - p0);
+                    let kink = a.cross(o).length() / (a.length() * o.length());
+                    sides_measured += 1;
+                    failures += usize::from(reach_err > 1e-7 || kink > 1e-5);
+                    let _ = write!(
+                        line,
+                        "\t{name}: far={far:.9} reach_rel_err={reach_err:.1e} kink={kink:.1e}"
+                    );
+                }
+                let _ = writeln!(report, "{line}");
+            }
+        }
+        if let Ok(path) = std::env::var("SC_TURN_NURBS_PROBE") {
+            std::fs::write(path, &report).unwrap();
+        }
+        assert!(sides_measured > 0);
+        assert_eq!(failures, 0, "{report}");
+    }
+
     /// Nightly fuzz case `topology.brep_p3/fuzz00282` (`nurbs_off_box_with_large_fillet_-0.05`
     /// with `/offset = 1e+300`): the FFI refuses the C++ side (HANG-16) and the Rust side
     /// must be refused the same way instead of running the operation (it took 25 s).
