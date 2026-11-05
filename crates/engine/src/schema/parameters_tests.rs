@@ -52,8 +52,9 @@ fn strict_keeps_todays_errors() {
     ]);
 }
 
-/// The schemas take what the handlers read: `expression` or `value` as a number or text (or
-/// `null`, read as left out), and a non-blank name.
+/// The schemas take what the handlers read: `expression` or `value` as a number or text (`null`
+/// is read as left out, so it doesn't count), a non-blank name, and exactly one of `before` and
+/// `after` as text.
 #[test]
 fn the_schemas_take_what_the_handlers_read() {
     let add = input_schema_for::<ParamAddParams>();
@@ -62,17 +63,48 @@ fn the_schemas_take_what_the_handlers_read() {
         (json!({"name": "W", "expression": "10 mm"}), true),
         (json!({"name": "W", "expression": 10, "unit": "mm", "comment": "Wall", "favorite": true}), true),
         (json!({"name": "W", "value": 10}), true),
+        (json!({"name": "W", "expression": null, "value": 3}), true),
+        (json!({"name": "W", "expression": null}), false),
         (json!({"name": "W", "expression": true}), false),
         (json!({"name": "", "expression": 10}), false),
     ] {
         assert_eq!(conforms(add, add, &p), takes, "{p}");
     }
-    // `conforms` doesn't read the `anyOf` of `required` lists, so it's pinned here.
-    assert_eq!(add["anyOf"], json!([{"required": ["expression"]}, {"required": ["value"]}]), "{add}");
+    assert_eq!(
+        add["anyOf"],
+        json!([
+            {"required": ["expression"], "properties": {"expression": {"type": ["number", "string"]}}},
+            {"required": ["value"], "properties": {"value": {"type": ["number", "string"]}}}
+        ]),
+        "{add}"
+    );
     let comment = input_schema_for::<ParamCommentParams>();
     let comment = comment.as_value();
     assert!(!conforms(comment, comment, &json!({"name": "W"})), "{comment}");
     assert!(!conforms(comment, comment, &json!({"name": "W", "comment": null})), "{comment}");
+    // `conforms` doesn't read `oneOf`, so `parameters.move`'s is pinned, and counted here.
+    let moved = input_schema_for::<ParamMoveParams>();
+    let moved = moved.as_value();
+    assert_eq!(
+        moved["oneOf"],
+        json!([
+            {"required": ["before"], "properties": {"before": {"type": "string"}}},
+            {"required": ["after"], "properties": {"after": {"type": "string"}}}
+        ]),
+        "{moved}"
+    );
+    let one_of = |p: &Value| moved["oneOf"].as_array().into_iter().flatten().filter(|b| conforms(moved, b, p)).count() == 1;
+    for (p, takes) in [
+        (json!({"name": "W", "before": "A"}), true),
+        (json!({"name": "W", "after": "A"}), true),
+        (json!({"name": "W", "before": null, "after": "B"}), true),
+        (json!({"name": "W"}), false),
+        (json!({"name": "W", "before": null}), false),
+        (json!({"name": "W", "before": "A", "after": "B"}), false),
+        (json!({"name": "W", "before": 5}), false),
+    ] {
+        assert_eq!(conforms(moved, moved, &p) && one_of(&p), takes, "{p}");
+    }
 }
 
 /// #11941: adding a number and a text parameter, then commenting, favouriting, moving,

@@ -69,9 +69,17 @@ fn expression_schema(_: &mut schemars::SchemaGenerator) -> Schema {
     })
 }
 
-/// `parameters.add` needs `expression`, or `value` in its place.
+/// `parameters.add` needs `expression`, or `value` in its place, as a number or text. Given
+/// isn't enough: `expr_arg` reads a `null` one as left out, so each alternative also needs its
+/// key's type.
 fn expression_or_value(schema: &mut Schema) {
-    schema.insert("anyOf".into(), serde_json::json!([{"required": ["expression"]}, {"required": ["value"]}]));
+    schema.insert(
+        "anyOf".into(),
+        serde_json::json!([
+            {"required": ["expression"], "properties": {"expression": {"type": ["number", "string"]}}},
+            {"required": ["value"], "properties": {"value": {"type": ["number", "string"]}}}
+        ]),
+    );
 }
 
 /// Rename a parameter, a user parameter or a feature's named input. The expressions, feature
@@ -158,7 +166,7 @@ pub struct ParamFavoriteParams {
 /// Move a user parameter just before or after another, in the order the user parameters are
 /// listed. Give exactly one of `before` and `after`. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[schemars(deny_unknown_fields, transform = before_or_after)]
 pub struct ParamMoveParams {
     /// The user parameter, by name.
     #[serde(deserialize_with = "param_name")]
@@ -180,6 +188,19 @@ fn neighbour<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error
         Value::String(name) => Ok(Some(name)),
         _ => Err(D::Error::custom(whole("give one of `before` or `after`: another user parameter"))),
     }
+}
+
+/// `parameters.move` needs exactly one of `before` and `after` as text. Each alternative needs
+/// its key to be text, so a `null` one, which the handler reads as left out, matches neither:
+/// `oneOf` then counts the keys as the handler does, and both or neither is refused.
+fn before_or_after(schema: &mut Schema) {
+    schema.insert(
+        "oneOf".into(),
+        serde_json::json!([
+            {"required": ["before"], "properties": {"before": {"type": "string"}}},
+            {"required": ["after"], "properties": {"after": {"type": "string"}}}
+        ]),
+    );
 }
 
 /// What `parameters.add` returns: the new parameter.
