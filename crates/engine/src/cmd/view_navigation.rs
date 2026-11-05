@@ -673,7 +673,7 @@ mod tests {
             assert!(s.execute("view.ribbon_tabs_only", &params).is_err(), "{params}");
         }
         assert_eq!(s.doc.to_json(), before);
-        assert!(s.undo.is_empty());
+        assert!(s.history.is_empty());
     }
 
     #[test]

@@ -1748,7 +1748,7 @@ mod studio_browser_tests {
         assert_eq!(request["provenance"]["source"], "Original synthetic fixture");
         let before = h.app.session.doc.to_json();
         let physical = (h.app.session.doc.features.clone(), h.app.session.doc.materials.clone());
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let pending = prepared_image_import(&mut h, view);
         std::fs::remove_file(h.dir.join("original-wood.png")).unwrap();
         h.app.render_workspace.view.library.imported.pending = Some(pending);
@@ -1756,7 +1756,7 @@ mod studio_browser_tests {
         assert!(h.app.render_workspace.view.library.imported.pending.is_none());
         assert_eq!(h.app.session.doc.render.texture_resources.len(), 1);
         assert_eq!(h.app.session.doc.render.setups["Imported wood"].surfaces.len(), 1);
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         assert_eq!((h.app.session.doc.features.clone(), h.app.session.doc.materials.clone()), physical);
         assert!(!h.app.session.doc.to_json().contains("original-wood.png"));
         assert_eq!(h.app.render_workspace.view.draft.surfaces.len(), 1);

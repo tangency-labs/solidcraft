@@ -800,7 +800,7 @@ mod tests {
         assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Cube, "Cancel keeps the cube");
         assert!(h.app.view_gizmo.shape.is_none() && h.app.preferences.navigator_home, "Cancel keeps Home on");
 
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         open(&mut h);
         fill(&mut h);
         h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
@@ -810,7 +810,7 @@ mod tests {
         assert_eq!(h.app.view_gizmo.shape.as_ref().map(|s| s.name.as_str()), Some(body.as_str()));
         assert!(!h.app.preferences.navigator_home && h.app.preferences.navigator_arrows);
         assert_eq!(h.app.preferences.navigator_texture, NavigatorTexture::Modeled);
-        assert_eq!(h.app.session.undo.len(), undo, "the navigator is never part of the design");
+        assert_eq!(h.app.session.history.len(), undo, "the navigator is never part of the design");
 
         // Opened again, the panel starts from the navigator as it is.
         open(&mut h);

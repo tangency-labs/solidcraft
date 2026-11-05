@@ -213,7 +213,7 @@ fn draft_value() -> String {
 fn a_new_dimension_in_the_window_steps_previews_and_applies_once() {
     let mut h = windowed([20., 0.]);
     let original = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"start":"sketch.dimension"})).unwrap();
     h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
     assert_eq!(crate::dim_view::live(), None, "no value follows the pointer before the text is placed");
@@ -237,7 +237,7 @@ fn a_new_dimension_in_the_window_steps_previews_and_applies_once() {
     assert!((dimension.kind.value().unwrap() - 23.).abs() < 1e-6, "the sketch previews the stepped value");
     assert!(crate::scenario::count_of("dimwin:preview_curves").unwrap_or(0.0) > 0.0, "what the value moves is drawn");
     assert_eq!(h.app.session.doc.to_json(), original, "nothing reaches the design before OK");
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")), "the arrows leave the keyboard with the field");
     // The wheel over the field steps it instead of zooming the view.
     let cam = h.app.cam;
@@ -252,7 +252,7 @@ fn a_new_dimension_in_the_window_steps_previews_and_applies_once() {
     h.step(&json!({"click":{"handle":"dimwin:ok"}})).unwrap();
     h.frames(2);
     assert!(!crate::dim_view::editing(), "{}", h.call("ui.inspect", json!({})));
-    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    assert_eq!(h.app.session.history.len(), undo + 1, "one undo step");
     let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let dimension = sk.constraints.iter().find(|c| c.param.is_some()).expect("the dimension was added");
@@ -267,14 +267,14 @@ fn a_new_dimension_in_the_window_steps_previews_and_applies_once() {
 fn the_window_cross_and_escape_drop_only_this_dimension() {
     let mut h = windowed([20., 0.]);
     let original = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     place(&mut h, &[[10., 0.]], [10., 6.]);
     h.step(&json!({"click":{"handle":"dimwin:up"}})).unwrap();
     h.step(&json!({"click":{"handle":"dimwin:cancel"}})).unwrap();
     h.frames(2);
     assert!(!crate::dim_view::editing());
     assert_eq!(h.app.session.doc.to_json(), original);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     assert_eq!(h.app.tool.as_ref().map(|t| (t.cmd, t.picks.len())), Some(("sketch.dimension", 0)));
     place(&mut h, &[[10., 0.]], [10., 6.]);
     h.step(&json!({"key":"Escape"})).unwrap();
@@ -297,7 +297,7 @@ fn double_clicking_a_dimension_opens_the_window_with_a_live_preview() {
     h.app.run("sketch.dimension", json!({"entities":["l1"],"value":20,"text_at":[10,8]})).unwrap();
     h.settle();
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.frames(40);
     h.step(&json!({"click":{"dimension":"d1"},"double":true})).unwrap();
     h.frames(3);
@@ -322,7 +322,7 @@ fn double_clicking_a_dimension_opens_the_window_with_a_live_preview() {
     h.frames(2);
     assert!(!crate::dim_view::editing());
     assert!((h.app.session.doc.eval("d1", solidcraft_engine::doc::expr::Kind::Length).unwrap() - 27.).abs() < 1e-6);
-    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    assert_eq!(h.app.session.history.len(), undo + 1, "one undo step");
     crate::dim_view::cancel();
 }
 

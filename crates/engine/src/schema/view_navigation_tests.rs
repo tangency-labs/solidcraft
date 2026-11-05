@@ -280,7 +280,7 @@ fn navigator_checks_and_echoes_its_settings_and_refuses_a_missing_body() {
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
     let body = s.world_state().unwrap().bodies[0].name.clone();
-    let before = (s.revision, s.doc.to_json(), s.undo.len());
+    let before = (s.revision, s.doc.to_json(), s.history.len());
     for (params, echo) in [
         (json!({}), json!({})),
         (Value::Null, json!({})),
@@ -294,7 +294,7 @@ fn navigator_checks_and_echoes_its_settings_and_refuses_a_missing_body() {
         assert_eq!(reply, echo, "{params}");
         assert!(conforms(root, root, &reply), "{reply} does not match {root}");
     }
-    assert_eq!((s.revision, s.doc.to_json(), s.undo.len()), before, "the navigator is never part of the design");
+    assert_eq!((s.revision, s.doc.to_json(), s.history.len()), before, "the navigator is never part of the design");
     for bad in
         [json!({"style": "sphere"}), json!({"body": "No such body"}), json!({"body": 3}), json!({"texture": "glossy"}), json!({"arrows": "yes"})]
     {

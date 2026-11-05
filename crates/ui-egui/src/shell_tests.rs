@@ -818,7 +818,7 @@ fn a_host_keeps_the_design_and_gives_it_back_with_its_timeline() {
     assert_eq!(timeline(&h), before);
     assert_eq!((h.app.session.doc.name.as_str(), h.app.session.is_dirty(), h.app.docs.count()), ("Bracket", false, docs));
     assert_ne!(h.app.session.document_id, id, "another design, as one opened is");
-    assert!(h.app.session.undo.is_empty(), "the undo history is the opened design's own");
+    assert!(h.app.session.history.is_empty(), "the undo history is the opened design's own");
     assert!(h.app.dialog.is_none() && h.app.tool.is_none());
     h.settle();
     for bad in [json!({}), json!({"text": "{"}), json!({"text": "not a design"})] {

@@ -1638,7 +1638,7 @@ mod tests {
         let model = single.session.model.state();
         let camera = single.cam;
         let meshes: Vec<_> = model.bodies.iter().map(|body| body.cached_mesh()).collect();
-        let invariant = (single.session.document_id.clone(), single.session.revision, single.session.undo.len(), single.session.is_dirty());
+        let invariant = (single.session.document_id.clone(), single.session.revision, single.session.history.len(), single.session.is_dirty());
         for step in panel_steps() {
             assert_eq!(panel_control(&mut single, "engine.execute", step)["ok"], true);
         }
@@ -1650,7 +1650,7 @@ mod tests {
         assert_eq!(panel_control(&mut single, "engine.execute", json!({"command":"layout.get"}))["result"]["state"]["revision"], live.revision);
         assert!(crate::agent_cursor::picks(&single, "panel.open", &panel_steps()[0]["params"]).is_empty());
         assert_eq!(single.cam, camera);
-        assert_eq!((single.session.document_id.clone(), single.session.revision, single.session.undo.len(), single.session.is_dirty()), invariant);
+        assert_eq!((single.session.document_id.clone(), single.session.revision, single.session.history.len(), single.session.is_dirty()), invariant);
         assert!(std::sync::Arc::ptr_eq(&doc, &single.session.doc));
         assert!(std::sync::Arc::ptr_eq(&model, &single.session.model.state()));
         for (old, new) in meshes.iter().zip(single.session.model.state().bodies.iter().map(|body| body.cached_mesh())) {
@@ -2311,7 +2311,7 @@ mod tests {
             ]}),
         );
         assert!(v["result"].get("failed").is_none(), "{v}");
-        assert!(h.app.session.undo.len() > 2, "past the first-body fit");
+        assert!(h.app.session.history.len() > 2, "past the first-body fit");
         // Straight to `execute`, with no frame: drawing places the world too.
         let r = super::execute(&mut h.app, "solid.sphere", json!({"radius": 3, "center": [80, 0, 0], "operation": "new"}));
         assert!(r.is_ok(), "{r:?}");

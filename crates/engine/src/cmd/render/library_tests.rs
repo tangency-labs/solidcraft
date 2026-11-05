@@ -65,10 +65,10 @@ fn imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resour
     input["maps"]["roughness_linear"] = input["maps"]["base_color_srgb"].clone();
     let before = s.doc.to_json();
     let physical = (s.doc.materials.clone(), s.doc.features.clone());
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let result = s.execute("render.surface.import", &input).unwrap();
     assert_eq!(result["self_contained"], true);
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     assert_eq!((s.doc.materials.clone(), s.doc.features.clone()), physical);
     assert_eq!(s.doc.render.texture_resources.len(), 1);
     let digest = HdrId::of(&bytes);
@@ -120,7 +120,7 @@ fn imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resour
 fn imported_surface_refusals_are_atomic_and_validate_identity_before_source_access() {
     let (mut s, path, _, input) = custom_surface_fixture();
     let before = s.doc.to_json();
-    let history = (s.revision, s.undo.len());
+    let history = (s.revision, s.history.len());
     for patch in [
         json!({"body_name":"Wrong", "maps":{"base_color_srgb":{"path":"missing-file.png"}}}),
         json!({"normal_strength":2.0}),
@@ -136,7 +136,7 @@ fn imported_surface_refusals_are_atomic_and_validate_identity_before_source_acce
         }
         assert!(s.execute("render.surface.import", &request).is_err(), "{request}");
         assert_eq!(s.doc.to_json(), before);
-        assert_eq!((s.revision, s.undo.len()), history);
+        assert_eq!((s.revision, s.history.len()), history);
     }
     let mut request = input.clone();
     request["maps"]["normal_opengl"] = json!({"path":"missing-later-map.png"});
@@ -155,10 +155,10 @@ fn cpu_surface_import_and_method_switch_reject_unsupported_encoding_without_losi
     input["maps"]["base_color_srgb"]["expected_sha256"] = json!(HdrId::of(&jpeg));
     input["set"]["job"]["method"] = json!("cpu_raytrace");
     let before = s.doc.to_json();
-    let history = (s.revision, s.undo.len());
+    let history = (s.revision, s.history.len());
     assert!(s.execute("render.surface.import", &input).unwrap_err().to_string().contains("noninterlaced 8-bit PNG"));
     assert_eq!(s.doc.to_json(), before);
-    assert_eq!((s.revision, s.undo.len()), history);
+    assert_eq!((s.revision, s.history.len()), history);
     input["set"]["job"]["method"] = json!("gpu_path");
     s.execute("render.surface.import", &input).unwrap();
     let saved = s.doc.to_json();
@@ -279,7 +279,7 @@ fn wood_grain_rotation_preserves_non_square_repeats_in_each_plane() {
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length":100,"width":100,"height":20,"body_name":"Board"})).unwrap();
     let before = s.doc.to_json();
-    let history = (s.undo.len(), s.redo.len());
+    let history = (s.history.len(), s.history.redo_steps().len());
     for (plane, expected_u, expected_v) in
         [("xy", [0.0, 60.0, 0.0], [-120.0, 0.0, 0.0]), ("yz", [0.0, 0.0, 60.0], [0.0, -120.0, 0.0]), ("zx", [60.0, 0.0, 0.0], [0.0, 0.0, -120.0])]
     {
@@ -314,7 +314,7 @@ fn wood_grain_rotation_preserves_non_square_repeats_in_each_plane() {
         );
     }
     assert_eq!(s.doc.to_json(), before);
-    assert_eq!((s.undo.len(), s.redo.len()), history);
+    assert_eq!((s.history.len(), s.history.redo_steps().len()), history);
 }
 
 #[cfg(feature = "bundled-render-library")]

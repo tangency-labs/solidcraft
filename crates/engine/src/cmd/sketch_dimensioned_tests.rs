@@ -156,9 +156,9 @@ fn slots_and_polygon_keep_permanent_typed_dimensions() {
     // A polygon drawn by a side takes that side's length in place of its radius (#11271), and
     // every side follows it.
     let mut s = session();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let out = draw(&mut s, "sketch.polygon.edge", json!({"p0":[0,0],"p1":[10,0],"sides":5,"connect":false}), json!({"length":"12 mm"}));
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     let length = out["dimensions"]["length"]["param"].as_str().unwrap();
     let result = run(&mut s, "parameters.change", json!({"name":length,"expression":20}));
     assert_eq!(result["errors"], json!([]));

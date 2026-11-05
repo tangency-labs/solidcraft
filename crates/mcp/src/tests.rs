@@ -28,7 +28,7 @@ fn headless_panel_single_batch_and_script_keep_one_backend_and_never_change_the_
     let mut script = panel_headless();
     let doc = one.session.doc.clone();
     let model = one.session.model.state();
-    let before = (one.session.document_id.clone(), one.session.revision, one.session.undo.len(), one.session.is_dirty(), one.session.camera);
+    let before = (one.session.document_id.clone(), one.session.revision, one.session.history.len(), one.session.is_dirty(), one.session.camera);
     for step in panel_mcp_steps() {
         one.call("engine.execute", step).unwrap();
     }
@@ -38,7 +38,10 @@ fn headless_panel_single_batch_and_script_keep_one_backend_and_never_change_the_
     assert_eq!(batch.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"], state["state"]["layout"]);
     assert_eq!(script.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"], state["state"]["layout"]);
     assert_eq!(state["state"]["capabilities"]["native_windows"], false);
-    assert_eq!((one.session.document_id.clone(), one.session.revision, one.session.undo.len(), one.session.is_dirty(), one.session.camera), before);
+    assert_eq!(
+        (one.session.document_id.clone(), one.session.revision, one.session.history.len(), one.session.is_dirty(), one.session.camera),
+        before
+    );
     assert!(std::sync::Arc::ptr_eq(&doc, &one.session.doc));
     assert!(std::sync::Arc::ptr_eq(&model, &one.session.model.state()));
     one.call("engine.script", json!({"commands":[{"command":"layout.save","params":{"name":"MCP saved"}},{"command":"layout.reset"}]})).unwrap();
@@ -241,7 +244,7 @@ fn atomic_tool_layout_batches_never_emulate_an_unavailable_backend_with_document
         let catalogue = backend.headless.panels.as_ref().unwrap().catalogue.state().clone();
         let document = backend.headless.session.doc.clone();
         let model = backend.headless.session.model.state();
-        let session = (backend.headless.session.revision, backend.headless.session.undo.len(), backend.headless.session.is_dirty());
+        let session = (backend.headless.session.revision, backend.headless.session.history.len(), backend.headless.session.is_dirty());
         let (tool, body) = fallback_tool_reply(&mut backend, json!({"commands":steps}));
         assert_eq!(tool["isError"], true);
         assert_eq!(tool["structuredContent"]["panel_error"]["rule"], "capability");
@@ -253,7 +256,7 @@ fn atomic_tool_layout_batches_never_emulate_an_unavailable_backend_with_document
         assert_eq!(backend.headless.panels.as_ref().unwrap().catalogue.state(), &catalogue);
         assert!(std::sync::Arc::ptr_eq(&document, &backend.headless.session.doc));
         assert!(std::sync::Arc::ptr_eq(&model, &backend.headless.session.model.state()));
-        assert_eq!((backend.headless.session.revision, backend.headless.session.undo.len(), backend.headless.session.is_dirty()), session);
+        assert_eq!((backend.headless.session.revision, backend.headless.session.history.len(), backend.headless.session.is_dirty()), session);
     }
 }
 

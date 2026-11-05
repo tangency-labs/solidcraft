@@ -42,9 +42,9 @@ fn check_captured_profile_transfer(revolve: bool) {
     };
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[40,0,0],"axis":[1,0,0],"angle":"45 deg","capture":false}));
     assert_pose(&s);
-    let undo = s.undo.len();
+    let undo = s.history.len();
     run(&mut s, "component.capture_position", json!({}));
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     assert!(s.pending_moves.is_empty());
     assert_pose(&s);
     let mut reopened = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Session::default() };

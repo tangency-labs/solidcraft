@@ -119,7 +119,7 @@ fn perforated_sheet_properties_include_holes_and_their_off_centre_volume_moment(
     let (volume, area, center) = perforated_panel_expected();
     let density = s.doc.density("Panel");
     let doc = s.doc.clone();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for command in ["component.properties", "inspect.measure"] {
         let result = run(&mut s, command, json!({}));
         close(&result["total"]["volume_mm3"], volume);
@@ -139,7 +139,7 @@ fn perforated_sheet_properties_include_holes_and_their_off_centre_volume_moment(
     let picked = run(&mut s, "inspect.measure", json!({"items": [{"type": "body", "name": "Panel"}]}));
     close(&picked["items"][0]["volume_mm3"], volume);
     assert!(std::sync::Arc::ptr_eq(&s.doc, &doc));
-    assert_eq!(s.undo.len(), undo, "measuring must not add an undo step");
+    assert_eq!(s.history.len(), undo, "measuring must not add an undo step");
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn perforated_sheet_instances_keep_physical_properties_in_nested_world_placement
     let second = [40.0 + center[0], center[1], center[2]];
     let doc = s.doc.clone();
     let moves = s.pending_moves.clone();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for (parent_occurrence, expected) in [(&parent["occurrence"], first), (&copy["occurrence"], second)] {
         let properties =
             run(&mut s, "occurrence.properties", json!({"occurrence": child["occurrence"], "path": [parent_occurrence, child["occurrence"]]}));
@@ -190,7 +190,7 @@ fn perforated_sheet_instances_keep_physical_properties_in_nested_world_placement
     assert_eq!(measured["bodies"].as_array().unwrap().iter().filter(|b| b["sheet_metal"] == true).count(), 2);
     assert!(std::sync::Arc::ptr_eq(&s.doc, &doc));
     assert_eq!(s.pending_moves, moves);
-    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.history.len(), undo);
 }
 
 #[test]

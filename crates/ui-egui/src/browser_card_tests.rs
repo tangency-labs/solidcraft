@@ -1010,7 +1010,7 @@ fn eye_drag_after_an_undo_under_the_press_keeps_its_steps() {
     three_bodies(&mut h);
     h.app.run("browser.visibility", json!({"items":["One"],"visible":false})).unwrap();
     let session = &h.app.session;
-    h.app.tree.eye_press = Some((session.doc.clone(), session.history.mark(), without_origin(session.visibility.clone())));
+    h.app.tree.eye_press = Some((session.uid, session.doc.clone(), session.history.mark(), without_origin(session.visibility.clone())));
     h.app.run("edit.undo", json!({})).unwrap();
     for name in ["Two", "Three"] {
         h.app.run("browser.visibility", json!({"items":[name],"visible":false})).unwrap();
@@ -1198,10 +1198,10 @@ fn history_bodies_and_origin_work_with_browser_hidden() {
     h.step(&json!({"click":[body.x, body.y]})).unwrap();
     assert_eq!(h.app.session.selection, [Sel::Body { name: "One".into() }]);
     let eye = semantic_control(ContentOwner::HISTORY, "eye:One");
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"click":[eye.x, eye.y]})).unwrap();
     assert!(body_hidden(&h, "One"));
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     let plane = semantic_at(ContentOwner::HISTORY, "XY");
     h.step(&json!({"move":[plane.x, plane.y]})).unwrap();
     assert_eq!(h.app.viewport.hover_plane.as_deref(), Some("XY"));
@@ -1244,9 +1244,9 @@ fn semantic_owner_submission_order_preserves_hover_selection_picks_and_single_vi
             semantic_click(&mut h, &owners, body, ctrl);
             assert_eq!(h.app.session.selection, [Sel::Body { name: "One".into() }], "Ctrl must toggle exactly once");
             let eye = semantic_control(owner, "eye:Two");
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             semantic_click(&mut h, &owners, eye, egui::Modifiers::NONE);
-            assert_eq!(h.app.session.undo.len(), undo + 1, "visibility command runs once");
+            assert_eq!(h.app.session.history.len(), undo + 1, "visibility command runs once");
             assert!(body_hidden(&h, "Two"));
             h.app.run("select.clear", json!({})).unwrap();
             h.app.start("solid.combine");
@@ -1412,7 +1412,7 @@ fn eye_capture_disappearance_finishes_one_undo_group_and_does_not_transfer_to_an
             semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
         }
         let first = semantic_control(owner, "eye:One");
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(first)], egui::Modifiers::NONE);
         semantic_frame(
             &mut h,
@@ -1431,7 +1431,7 @@ fn eye_capture_disappearance_finishes_one_undo_group_and_does_not_transfer_to_an
         semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
         assert!(h.ctx.data(|data| data.get_temp::<bool>(crate::ui_kit::eye_drag_id())).is_none());
         assert!(h.app.tree.eye_press.is_none());
-        assert_eq!(h.app.session.undo.len(), undo + 1, "disappearance closes the existing drag group");
+        assert_eq!(h.app.session.history.len(), undo + 1, "disappearance closes the existing drag group");
         semantic_frame(&mut h, &[other], vec![egui::Event::PointerMoved(other_eye)], egui::Modifiers::NONE);
         assert!(!body_hidden(&h, "Three"), "the vanished owner's eye target cannot transfer to another presentation");
         semantic_frame(
@@ -1479,7 +1479,7 @@ fn semantic_drop_runs_once_in_either_owner_submission_order() {
             }
             let from = semantic_at(owner, "One");
             let to = semantic_at(owner, "Destination (0)");
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(from)], egui::Modifiers::NONE);
             semantic_frame(
                 &mut h,
@@ -1497,7 +1497,7 @@ fn semantic_drop_runs_once_in_either_owner_submission_order() {
                 egui::Modifiers::NONE,
             );
             assert!(h.app.session.doc.browser_group(group).unwrap().has_item("One"));
-            assert_eq!(h.app.session.undo.len(), undo + 1, "{owners:?}, {owner:?}: exactly one drop command");
+            assert_eq!(h.app.session.history.len(), undo + 1, "{owners:?}, {owner:?}: exactly one drop command");
             h.app.run("edit.undo", json!({})).unwrap();
             assert!(!h.app.session.doc.browser_group(group).unwrap().has_item("One"));
         }
@@ -1559,13 +1559,13 @@ fn semantic_row_commands_are_consumed_once_across_layout_repeats() {
         semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
     }
     let at = semantic_control(ContentOwner::HISTORY, "eye:One");
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(at)], egui::Modifiers::NONE);
     semantic_frame(&mut h, &owners, vec![semantic_button(at, egui::PointerButton::Primary, true, egui::Modifiers::NONE)], egui::Modifiers::NONE);
     h.ctx.data_mut(|data| data.insert_temp(egui::Id::new("semantic-test-discard"), true));
     semantic_frame(&mut h, &owners, vec![semantic_button(at, egui::PointerButton::Primary, false, egui::Modifiers::NONE)], egui::Modifiers::NONE);
     assert!(body_hidden(&h, "One"), "a repeated layout cannot toggle the eye back on");
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
 }
 
 #[test]
@@ -1646,7 +1646,7 @@ fn matching_semantic_tab(h: &mut Harness) -> (usize, String, usize) {
     assert_ne!(h.app.session.uid, original_session);
     let tab = h.app.docs.active;
     let document = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     crate::documents::switch(&mut h.app, original);
     (tab, document, undo)
 }
@@ -1692,7 +1692,7 @@ fn switching_documents_cancels_body_payloads_before_matching_incoming_groups_can
             );
             assert_ne!(h.app.session.uid, outgoing);
             assert_eq!(h.app.session.doc.to_json(), document);
-            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(h.app.session.history.len(), undo);
             assert!(!egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
             assert!(h.ctx.dragged_id().is_none());
             // Even a delayed payload reintroduced after cancellation must fail provenance
@@ -1711,7 +1711,7 @@ fn switching_documents_cancels_body_payloads_before_matching_incoming_groups_can
                 egui::Modifiers::NONE,
             );
             assert_eq!(h.app.session.doc.to_json(), document);
-            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(h.app.session.history.len(), undo);
         }
     }
 }
@@ -1742,7 +1742,7 @@ fn switching_documents_cancels_occurrence_payloads_with_matching_component_and_p
             after_begin.then_some(tab),
         );
         assert_eq!(h.app.session.doc.to_json(), document);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         assert!(!egui::DragAndDrop::has_payload_of_type::<OccurrenceDrag>(&h.ctx));
         assert!(h.ctx.dragged_id().is_none());
     }
@@ -1776,7 +1776,7 @@ fn switching_documents_clears_combined_history_drag_even_when_feature_ids_match(
             after_begin.then_some(tab),
         );
         assert_eq!(h.app.session.doc.to_json(), document);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         assert!(h.app.tree.content.owner(ContentOwner::BROWSER).unwrap().feature_drags.is_empty());
         assert!(h.ctx.dragged_id().is_none());
     }
@@ -1801,7 +1801,7 @@ fn document_switch_drops_shift_anchors_without_changing_the_incoming_document_or
         semantic_click(&mut h, &owners, at, egui::Modifiers { shift: true, ..Default::default() });
         assert_eq!(h.app.session.selection, [Sel::Body { name: "Two".into() }], "A's One anchor cannot extend B's selection");
         assert_eq!(h.app.session.doc.to_json(), document);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
     }
 }
 
@@ -1815,7 +1815,7 @@ fn switching_documents_finishes_eye_undo_group_in_the_outgoing_session_only() {
     for _ in 0..3 {
         semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
     }
-    let undo_a = h.app.session.undo.len();
+    let undo_a = h.app.session.history.len();
     let one = semantic_control(ContentOwner::BROWSER, "eye:One");
     let two = semantic_control(ContentOwner::BROWSER, "eye:Two");
     semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(one)], egui::Modifiers::NONE);
@@ -1829,10 +1829,10 @@ fn switching_documents_finishes_eye_undo_group_in_the_outgoing_session_only() {
     semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(three)], egui::Modifiers::NONE);
     semantic_frame(&mut h, &owners, vec![semantic_button(three, egui::PointerButton::Primary, false, egui::Modifiers::NONE)], egui::Modifiers::NONE);
     assert_eq!(h.app.session.doc.to_json(), document);
-    assert_eq!(h.app.session.undo.len(), undo_b);
+    assert_eq!(h.app.session.history.len(), undo_b);
     assert!(!body_hidden(&h, "One") && !body_hidden(&h, "Two") && !body_hidden(&h, "Three"));
     crate::documents::switch(&mut h.app, original);
-    assert_eq!(h.app.session.undo.len(), undo_a + 1, "only the outgoing session receives the merged drag undo group");
+    assert_eq!(h.app.session.history.len(), undo_a + 1, "only the outgoing session receives the merged drag undo group");
     h.app.run("edit.undo", json!({})).unwrap();
     assert!(!body_hidden(&h, "One") && !body_hidden(&h, "Two"));
 }
@@ -1874,7 +1874,7 @@ fn hidden_body_or_group_drag_source_cannot_drop_through_a_surviving_history_targ
             let from = semantic_at(ContentOwner::BROWSER, if group_source { "Source (1)" } else { "One" });
             let to = semantic_at(ContentOwner::HISTORY, "Destination (0)");
             let document = h.app.session.doc.to_json();
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             semantic_drag_start(&mut h, &owners, from);
             assert!(egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
             let presented = if keep_source { &owners[..] } else { &[ContentOwner::HISTORY][..] };
@@ -1886,13 +1886,13 @@ fn hidden_body_or_group_drag_source_cannot_drop_through_a_surviving_history_targ
             );
             if keep_source {
                 assert_ne!(h.app.session.doc.to_json(), document, "cross-owner drops remain valid while both owners are presented");
-                assert_eq!(h.app.session.undo.len(), undo + 1);
+                assert_eq!(h.app.session.history.len(), undo + 1);
                 if !group_source {
                     assert!(h.app.session.doc.browser_group(destination).unwrap().has_item("One"));
                 }
             } else {
                 assert_eq!(h.app.session.doc.to_json(), document);
-                assert_eq!(h.app.session.undo.len(), undo);
+                assert_eq!(h.app.session.history.len(), undo);
             }
             assert!(!egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
             assert!(h.ctx.dragged_id().is_none());
@@ -1920,7 +1920,7 @@ fn hidden_occurrence_source_cannot_reparent_or_reorder_through_a_surviving_adapt
                 to.y -= crate::ui_kit::TREE_ROW_HEIGHT * 0.4;
             }
             let document = h.app.session.doc.to_json();
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             semantic_drag_start(&mut h, &owners, from);
             assert!(egui::DragAndDrop::has_payload_of_type::<OccurrenceDrag>(&h.ctx));
             let presented = if keep_source { &owners[..] } else { std::slice::from_ref(&adapter) };
@@ -1932,10 +1932,10 @@ fn hidden_occurrence_source_cannot_reparent_or_reorder_through_a_surviving_adapt
             );
             if keep_source {
                 assert_ne!(h.app.session.doc.to_json(), document);
-                assert_eq!(h.app.session.undo.len(), undo + 1);
+                assert_eq!(h.app.session.history.len(), undo + 1);
             } else {
                 assert_eq!(h.app.session.doc.to_json(), document);
-                assert_eq!(h.app.session.undo.len(), undo);
+                assert_eq!(h.app.session.history.len(), undo);
             }
             assert!(!egui::DragAndDrop::has_payload_of_type::<OccurrenceDrag>(&h.ctx));
             assert!(h.ctx.dragged_id().is_none());
@@ -1965,7 +1965,7 @@ fn session_switch_after_target_rows_render_discards_their_already_queued_drop() 
         Some(tab),
     );
     assert_eq!(h.app.session.doc.to_json(), document);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     assert!(semantic_content::output(ContentOwner::BROWSER).rows.is_empty());
     assert!(semantic_content::output(ContentOwner::HISTORY).rows.is_empty());
 }
@@ -1977,7 +1977,7 @@ fn semantic_entrypoints_reject_replaced_sessions_even_without_a_documents_hook()
     h.app.run("browser.group", json!({"component":0,"folder":"bodies","name":"Destination"})).unwrap();
     let incoming = solidcraft_engine::Session::new((*h.app.session.doc).clone());
     let document = incoming.doc.to_json();
-    let undo = incoming.undo.len();
+    let undo = incoming.history.len();
     let owners = [ContentOwner::BROWSER];
     for _ in 0..3 {
         semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
@@ -1995,7 +1995,7 @@ fn semantic_entrypoints_reject_replaced_sessions_even_without_a_documents_hook()
         egui::Modifiers::NONE,
     );
     assert_eq!(h.app.session.doc.to_json(), document);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     assert!(h.app.tree.content.owner(ContentOwner::BROWSER).unwrap().anchor.is_none());
     assert!(!egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
     assert!(h.ctx.dragged_id().is_none());

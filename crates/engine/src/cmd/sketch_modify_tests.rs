@@ -386,14 +386,14 @@ fn trim_keeps_endpoint_tangency_on_its_arc_piece() {
                     run(&mut s, "sketch.constraint.fix", json!({"entities": ["l2", "l3"]}));
                     assert_eq!(run(&mut s, "sketch.solve", json!({}))["dof"], 1);
                     let before = sketch(&s);
-                    let undo = s.undo.len();
+                    let undo = s.history.len();
                     let result = if path {
                         run(&mut s, "sketch.trim.path", json!({"points": [[0,45],[0,55]]}))
                     } else {
                         run(&mut s, "sketch.trim", json!({"curve": "a1", "at": [0,50]}))
                     };
                     assert_eq!(result["sketch"]["dof"], 1, "path={path}, separate={separate}, at_start={at_start}, reverse={reverse}: {result}");
-                    assert_eq!(s.undo.len(), undo + 1);
+                    assert_eq!(s.history.len(), undo + 1);
                     let after = sketch(&s);
                     let ci = after.curve_index(if at_start { "a1" } else { "a3" }).unwrap();
                     let li = after.curve_index("l1").unwrap();

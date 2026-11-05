@@ -9889,7 +9889,7 @@ mod tests {
         assert!(!restored.preferences.ground_shadow_follows_model, "Graphics defaults can be saved");
         assert_eq!(h.app.cam, camera);
         assert_eq!(h.app.session.doc.to_json(), design);
-        assert!(h.app.session.undo.is_empty());
+        assert!(h.app.session.history.is_empty());
     }
 
     #[test]
@@ -10724,7 +10724,7 @@ mod graphics_preset_tests {
             assert!(h.app.preferences.dark_parts_shading && h.app.preferences.frame_rate_details);
             assert_eq!(h.app.cam, camera);
             assert_eq!(h.app.session.doc.to_json(), design);
-            assert!(h.app.session.undo.is_empty());
+            assert!(h.app.session.history.is_empty());
         }
     }
 

@@ -779,7 +779,7 @@ mod tests {
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "config.configure", json!({"features":["TestSketch"]}));
         let before = s.doc.clone();
-        let undo_len = s.undo.len();
+        let undo_len = s.history.len();
         for value in [json!("banana"), json!(""), json!(2), json!(-1)] {
             for params in [
                 json!({"name":"Bad", "values":{"suppress:TestSketch":value}}),
@@ -789,7 +789,7 @@ mod tests {
                 let error = s.execute("config.row", &params).expect_err("invalid suppression must be rejected when saving a row");
                 assert!(error.to_string().contains("suppression must be true or false"), "{params}: {error}");
                 assert_eq!(s.doc, before, "{params}");
-                assert_eq!(s.undo.len(), undo_len, "{params}");
+                assert_eq!(s.history.len(), undo_len, "{params}");
             }
         }
     }
@@ -803,12 +803,12 @@ mod tests {
         // A row saved by an older reader may already contain invalid suppression text.
         s.doc_mut().configs.rows[0].cells[0] = "banana".into();
         let before = s.doc.clone();
-        let undo_len = s.undo.len();
+        let undo_len = s.history.len();
         for params in [json!({"name":"Copy", "from":"Default"}), json!({"name":"Default", "rename":"Renamed"})] {
             let error = s.execute("config.row", &params).expect_err("inherited invalid suppression must also be checked");
             assert!(error.to_string().contains("suppression must be true or false"), "{params}: {error}");
             assert_eq!(s.doc, before, "{params}");
-            assert_eq!(s.undo.len(), undo_len, "{params}");
+            assert_eq!(s.history.len(), undo_len, "{params}");
         }
         run(&mut s, "config.row", json!({"name":"Default", "values":{"TestSketch":false}}));
         assert_eq!(s.doc.configs.rows[0].cells[0], "false");

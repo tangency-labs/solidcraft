@@ -5483,7 +5483,7 @@ mod dropdown_toggle_tests {
             assert_eq!(rect_of("toolbar").unwrap().height(), whole.height(), "{layout}");
             assert!(h.app.run("view.ribbon_tabs_only", json!({"on": true})).is_ok());
             assert!(h.app.preferences.ribbon_tabs_only, "{layout}: `on` sets it");
-            assert!(h.app.session.undo.is_empty(), "{layout}: a window setting, not a design change");
+            assert!(h.app.session.history.is_empty(), "{layout}: a window setting, not a design change");
         }
     }
 

@@ -612,7 +612,8 @@ pub(crate) fn eye_drag_frame(app: &mut SolveApp, ctx: &egui::Context) {
     crate::semantic_content::ensure_session(app, ctx);
     let (pressed, down) = ctx.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_down()));
     if pressed && app.tree.eye_press.is_none() {
-        app.tree.eye_press = Some((app.session.uid, app.session.doc.clone(), app.session.history.mark(), without_origin(app.session.visibility.clone())));
+        app.tree.eye_press =
+            Some((app.session.uid, app.session.doc.clone(), app.session.history.mark(), without_origin(app.session.visibility.clone())));
     }
     if down {
         return;

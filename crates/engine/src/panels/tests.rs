@@ -480,7 +480,7 @@ fn layout_work_never_touches_document_dirty_revision_undo_geometry_or_tessellati
     let model_state = session.model.state();
     let meshes: Vec<_> = model_state.bodies.iter().map(|b| b.cached_mesh()).collect();
     let revision = session.revision;
-    let undo = session.undo.len();
+    let undo = session.history.len();
     let recomputed = session.model.recomputed;
     let mut service = fixture_service(false).unwrap();
     open(&mut service, "one", "first");
@@ -490,7 +490,7 @@ fn layout_work_never_touches_document_dirty_revision_undo_geometry_or_tessellati
     }
     assert!(!session.is_dirty());
     assert_eq!(session.revision, revision);
-    assert_eq!(session.undo.len(), undo);
+    assert_eq!(session.history.len(), undo);
     assert_eq!(session.model.recomputed, recomputed);
     assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
     assert!(std::sync::Arc::ptr_eq(&model_state, &session.model.state()));
@@ -1263,7 +1263,7 @@ fn session_only_panel_commands_report_capability_without_touching_document_or_mo
     let model = session.model.state();
     let revision = session.revision;
     let dirty = session.is_dirty();
-    let undo = session.undo.len();
+    let undo = session.history.len();
     let evaluations = session.evaluations;
     for level in crate::schema::ParamCheck::ALL {
         session.param_check = level;
@@ -1276,7 +1276,7 @@ fn session_only_panel_commands_report_capability_without_touching_document_or_mo
     assert!(std::sync::Arc::ptr_eq(&doc, &session.doc));
     assert!(std::sync::Arc::ptr_eq(&model, &session.model.state()));
     assert_eq!(session.revision, revision);
-    assert_eq!(session.undo.len(), undo);
+    assert_eq!(session.history.len(), undo);
     assert_eq!(session.is_dirty(), dirty);
     assert_eq!(session.evaluations, evaluations);
 }

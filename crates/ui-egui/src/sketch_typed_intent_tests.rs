@@ -207,9 +207,9 @@ fn edge_polygon_takes_a_typed_side_length_and_side_count() {
     type_value(&mut h, "12");
     h.step(&json!({"key":"Tab"})).unwrap();
     type_value(&mut h, "5");
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     enter(&mut h);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert!(constraints(&h).iter().any(|c| matches!(c, ConstraintKind::Length { value, .. } if (*value - 12.0).abs() < 1e-7)));
     // The design's own state: this sketch is in no component, so it matches the world view.
     let state = h.app.session.model.state();

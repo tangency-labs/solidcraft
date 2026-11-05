@@ -914,7 +914,7 @@ pub(crate) fn hostile_values() -> Vec<Value> {
 /// A copy of `s` as it stands: its design and model (sharing their bodies, as undo does), its
 /// undo and redo, its open sketch and the design it was entered from, and its log.
 fn copy_with_history(s: &Session) -> Session {
-    Session { undo: s.undo.clone(), redo: s.redo.clone(), sketch_entry: s.sketch_entry.clone(), log: s.log.clone(), ..s.scratch() }
+    Session { history: s.history.clone(), sketch_entry: s.sketch_entry.clone(), log: s.log.clone(), ..s.scratch() }
 }
 
 /// The hostile-parameter test's copy starts where a session built afresh stands: cancelling its
@@ -5348,7 +5348,7 @@ fn a_command_check_refuses_a_command_and_leaves_the_design() {
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
     s.set_command_check(Some(refusing("solid.box")));
     let doc = s.doc.clone();
-    let (undo, revision) = (s.undo.len(), s.revision);
+    let (undo, revision) = (s.history.len(), s.revision);
     let r = s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]}));
     match r {
         Err(EngineError::Refused { cmd, reason }) => {
@@ -5358,7 +5358,7 @@ fn a_command_check_refuses_a_command_and_leaves_the_design() {
         other => panic!("expected a refusal, got {other:?}"),
     }
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc), "the design is unchanged");
-    assert_eq!((s.undo.len(), s.revision), (undo, revision));
+    assert_eq!((s.history.len(), s.revision), (undo, revision));
     // Other commands still run, and the check stays with the session across new designs,
     // scripts and previews.
     run(&mut s, "file.new", json!({"name": "Next"}));
