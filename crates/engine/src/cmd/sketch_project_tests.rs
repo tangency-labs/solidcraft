@@ -1655,25 +1655,26 @@ fn a_ray_through_a_hole_opening_projects_its_rim() {
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
     run(&mut s, "solid.hole", json!({"position": [20, 15, 20], "diameter": 10, "depth": 20}));
     let st = s.model.state();
-    let down = solidcraft_geom::Vec3::new(0.0, 0.0, -1.0);
-    let rim = solidcraft_doc::project::hole_rim_along_ray(&st, solidcraft_geom::Vec3::new(20.0, 15.0, 80.0), down, |_| true)
+    let down = solidcore_record::Vec3::new(0.0, 0.0, -1.0);
+    let rim = solidcraft_doc::project::hole_rim_along_ray(&st, solidcore_record::Vec3::new(20.0, 15.0, 80.0), down, |_| true)
         .expect("the ray through the opening names the rim");
-    assert_eq!(rim.edges.len(), 2, "{rim:?}");
-    assert!(rim.at.dist(solidcraft_geom::Vec3::new(20.0, 15.0, 20.0)) < 1e-4, "{rim:?}");
-    let angled = solidcraft_geom::Vec3::new(0.0, 45.0, -30.0);
-    let from_side = solidcraft_doc::project::hole_rim_along_ray(&st, solidcraft_geom::Vec3::new(20.0, -30.0, 50.0), angled, |_| true);
-    assert!(from_side.as_ref().is_some_and(|r| r.edges.len() == 2), "{from_side:?}");
-    assert!(solidcraft_doc::project::hole_rim_along_ray(&st, solidcraft_geom::Vec3::new(5.0, 5.0, 80.0), down, |_| true).is_none());
+    // SMLib holds a full round rim as one edge; a kernel that splits it holds two halves.
+    assert!(matches!(rim.edges.len(), 1 | 2), "{rim:?}");
+    assert!(rim.at.dist(solidcore_record::Vec3::new(20.0, 15.0, 20.0)) < 1e-4, "{rim:?}");
+    let angled = solidcore_record::Vec3::new(0.0, 45.0, -30.0);
+    let from_side = solidcraft_doc::project::hole_rim_along_ray(&st, solidcore_record::Vec3::new(20.0, -30.0, 50.0), angled, |_| true);
+    assert!(from_side.as_ref().is_some_and(|r| matches!(r.edges.len(), 1 | 2)), "{from_side:?}");
+    assert!(solidcraft_doc::project::hole_rim_along_ray(&st, solidcore_record::Vec3::new(5.0, 5.0, 80.0), down, |_| true).is_none());
     assert!(
         solidcraft_doc::project::hole_rim_along_ray(
             &st,
-            solidcraft_geom::Vec3::new(20.0, 15.0, 80.0),
-            solidcraft_geom::Vec3::new(0.0, 0.0, 1.0),
+            solidcore_record::Vec3::new(20.0, 15.0, 80.0),
+            solidcore_record::Vec3::new(0.0, 0.0, 1.0),
             |_| true
         )
         .is_none()
     );
-    assert!(solidcraft_doc::project::hole_rim_along_ray(&st, solidcraft_geom::Vec3::new(20.0, 15.0, 80.0), down, |_| false).is_none());
+    assert!(solidcraft_doc::project::hole_rim_along_ray(&st, solidcore_record::Vec3::new(20.0, 15.0, 80.0), down, |_| false).is_none());
     run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 30}));
     let refs: Vec<Value> = rim.edges.iter().map(|p| json!({"edge": [p.x, p.y, p.z], "body": rim.body})).collect();
     let projected = run(&mut s, "sketch.project", json!({"refs": refs}));
@@ -1691,8 +1692,9 @@ fn a_ray_through_a_hole_opening_projects_its_rim() {
     let msg = err.to_string();
     assert!(msg.contains("the face no longer exists"), "{msg}");
     assert!(!msg.contains("no sketch is being edited"), "{msg}");
-    let rim = solidcraft_doc::project::hole_rim_along_ray(&st, solidcraft_geom::Vec3::new(50.0, 50.0, 40.0), down, |_| true).expect("large opening");
-    assert_eq!(rim.edges.len(), 2, "{rim:?}");
+    let rim = solidcraft_doc::project::hole_rim_along_ray(&st, solidcore_record::Vec3::new(50.0, 50.0, 40.0), down, |_| true).expect("large opening");
+    // SMLib holds a full round rim as one edge; a kernel that splits it holds two halves.
+    assert!(matches!(rim.edges.len(), 1 | 2), "{rim:?}");
     let refs: Vec<Value> = rim.edges.iter().map(|p| json!({"edge": [p.x, p.y, p.z], "body": rim.body})).collect();
     run(&mut wide, "sketch.project", json!({"refs": refs}));
     assert_rim(&mut wide, 40.0, [50.0, 50.0]);
