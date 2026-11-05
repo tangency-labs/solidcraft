@@ -726,6 +726,160 @@ fn feature_signed_distance_range(pf: &solidcraft_doc::Feature, state: &solidcraf
     if min_d <= max_d { Some((min_d, max_d)) } else { None }
 }
 
+/// User-defined sketch, construction plane, and body names extracted from Fusion 360 `.f3d` binary stream.
+#[derive(Debug, Default, Clone)]
+pub struct F3dUserNames {
+    pub sketches: HashMap<u32, String>,
+    pub workplanes: HashMap<u32, String>,
+    pub body_names: Vec<String>,
+}
+
+/// Parse user-assigned presentation names from `FusionAssetName[Active]/Design1/BulkStream.dat` in `.f3d`.
+pub fn parse_f3d_user_names(bytes: &[u8]) -> F3dUserNames {
+    let mut names = F3dUserNames::default();
+
+    let arena = cadmpeg_core::decode::DecodeArena::new();
+    let policy = cadmpeg_core::decode::DecodePolicy::default();
+    let Ok((ctx, root)) = cadmpeg_core::decode::DecodeContext::from_root_bytes(bytes, &arena, &policy) else {
+        return names;
+    };
+    let Ok(archive) = cadmpeg_container::ArchiveSnapshot::new(&ctx, root) else {
+        return names;
+    };
+    let stream_name = archive.entries().iter().find(|e| e.name.ends_with("Design1/BulkStream.dat")).map(|e| e.name.as_str());
+    let Some(sname) = stream_name else {
+        return names;
+    };
+    let Ok(stream_view) = archive.open(&ctx, sname) else {
+        return names;
+    };
+    let data = stream_view.window();
+
+    // 1. Sketches: [ord: u32] [00 00 01 0b 00 00 00 00 00 00 00 00 00] [len: u32] [utf-16le string]
+    let sk_marker: [u8; 13] = [0x00, 0x00, 0x01, 0x0b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+    let mut pos = 0;
+    while pos + sk_marker.len() + 4 <= data.len() {
+        if let Some(found) = data[pos..].windows(sk_marker.len()).position(|w| w == sk_marker) {
+            let m_pos = pos + found;
+            if m_pos >= 4 && m_pos + sk_marker.len() + 4 <= data.len() {
+                let ord = u32::from_le_bytes([data[m_pos - 4], data[m_pos - 3], data[m_pos - 2], data[m_pos - 1]]);
+                let len_pos = m_pos + sk_marker.len();
+                let char_len = u32::from_le_bytes([data[len_pos], data[len_pos + 1], data[len_pos + 2], data[len_pos + 3]]) as usize;
+                let str_start = len_pos + 4;
+                let byte_len = char_len.saturating_mul(2);
+                if char_len > 0 && char_len < 100 && str_start + byte_len <= data.len() {
+                    let u16_slice: Vec<u16> =
+                        data[str_start..str_start + byte_len].as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
+                    if let Ok(s) = String::from_utf16(&u16_slice)
+                        && ord > 0
+                        && s.chars().all(|c| c.is_ascii_graphic() || c == ' ')
+                    {
+                        names.sketches.entry(ord).or_insert(s);
+                    }
+                }
+            }
+            pos = m_pos + sk_marker.len();
+        } else {
+            break;
+        }
+    }
+
+    // 2. WorkPlanes: [ord: u32] [00 00 00 00 00 01] [id: 4 bytes] [00 00 00 00 00 00 00 01] [len: u32] [utf-16le string]
+    let wp_m1: [u8; 6] = [0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+    let wp_m2: [u8; 8] = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+    pos = 0;
+    while pos + wp_m1.len() <= data.len() {
+        if let Some(found) = data[pos..].windows(wp_m1.len()).position(|w| w == wp_m1) {
+            let m1_pos = pos + found;
+            if m1_pos >= 4 {
+                let ord = u32::from_le_bytes([data[m1_pos - 4], data[m1_pos - 3], data[m1_pos - 2], data[m1_pos - 1]]);
+                let m2_pos = m1_pos + wp_m1.len() + 4;
+                if m2_pos + wp_m2.len() + 4 <= data.len() && data[m2_pos..m2_pos + wp_m2.len()] == wp_m2 {
+                    let len_pos = m2_pos + wp_m2.len();
+                    let char_len = u32::from_le_bytes([data[len_pos], data[len_pos + 1], data[len_pos + 2], data[len_pos + 3]]) as usize;
+                    let str_start = len_pos + 4;
+                    let byte_len = char_len.saturating_mul(2);
+                    if char_len > 0 && char_len < 100 && str_start + byte_len <= data.len() {
+                        let u16_slice: Vec<u16> =
+                            data[str_start..str_start + byte_len].as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
+                        if let Ok(s) = String::from_utf16(&u16_slice)
+                            && ord > 0
+                            && s.chars().all(|c| c.is_ascii_graphic() || c == ' ')
+                        {
+                            names.workplanes.entry(ord).or_insert(s);
+                        }
+                    }
+                }
+            }
+            pos = m1_pos + wp_m1.len();
+        } else {
+            break;
+        }
+    }
+
+    // 3. Bodies: [01 06 00 00 00 00 00 00 00 00 00 00 01] [key: u32] [00 00 00 00 00 00] [len: u32] [utf-16le string]
+    let body_marker: [u8; 13] = [0x01, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+    pos = 0;
+    while pos + body_marker.len() <= data.len() {
+        if let Some(found) = data[pos..].windows(body_marker.len()).position(|w| w == body_marker) {
+            let m_pos = pos + found;
+            let after = m_pos + body_marker.len();
+            if after + 4 + 6 + 4 <= data.len() && data[after + 4..after + 10] == [0x00, 0x00, 0x00, 0x00, 0x00, 0x00] {
+                let len_pos = after + 10;
+                let char_len = u32::from_le_bytes([data[len_pos], data[len_pos + 1], data[len_pos + 2], data[len_pos + 3]]) as usize;
+                let str_start = len_pos + 4;
+                let byte_len = char_len.saturating_mul(2);
+                if char_len > 0 && char_len < 100 && str_start + byte_len <= data.len() {
+                    let u16_slice: Vec<u16> =
+                        data[str_start..str_start + byte_len].as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
+                    if let Ok(s) = String::from_utf16(&u16_slice)
+                        && s.chars().all(|c| c.is_ascii_graphic() || c == ' ')
+                        && !names.body_names.contains(&s)
+                    {
+                        names.body_names.push(s);
+                    }
+                }
+            }
+            pos = m_pos + body_marker.len();
+        } else {
+            break;
+        }
+    }
+
+    names
+}
+
+/// Resolve feature name for `.f3d` files, replacing synthetic names with user-defined names
+/// or standard Fusion 360 naming conventions (e.g. without extra spaces).
+pub fn resolve_f3d_feature_name(fname: &str, f3d_names: &F3dUserNames) -> String {
+    let clean = fname.strip_prefix("0_").unwrap_or(fname);
+    if let Some(rest) = clean.strip_prefix("Sketch ")
+        && let Ok(num) = rest.parse::<u32>()
+    {
+        if let Some(user_name) = f3d_names.sketches.get(&num) {
+            return user_name.clone();
+        }
+        return format!("Sketch{num}");
+    }
+    if let Some(rest) = clean.strip_prefix("WorkPlane ")
+        && let Ok(num) = rest.parse::<u32>()
+    {
+        if let Some(user_name) = f3d_names.workplanes.get(&num) {
+            return user_name.clone();
+        }
+        return format!("WorkPlane{num}");
+    }
+    // Standard feature: "Extrude 1" -> "Extrude1", "Fillet 1" -> "Fillet1", etc.
+    if let Some(pos) = clean.rfind(' ') {
+        let (prefix, suffix) = clean.split_at(pos);
+        let digits = &suffix[1..];
+        if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) && !prefix.contains(' ') {
+            return format!("{prefix}{digits}");
+        }
+    }
+    clean.to_string()
+}
+
 /// Convert native CAD bytes to a SolidCraft document with timeline features and evaluated model.
 /// Returns `None` if the file does not have native sketches or features.
 pub fn native_cad_to_document_with_model(bytes: &[u8], file: &str) -> Result<Option<(Document, solidcraft_doc::Model)>, String> {
@@ -785,6 +939,7 @@ pub fn native_cad_to_document_with_model_validating(
     doc.params.sort_by_key(|p| p.model);
 
     let is_f3d = format == "f3d" || file.ends_with(".f3d");
+    let f3d_names = if is_f3d { parse_f3d_user_names(bytes) } else { F3dUserNames::default() };
     let clean_f64 = |x: f64| -> f64 { if x.abs() < 1.0e-12 { 0.0 } else { x } };
     let rot = |v: Vec3| -> Vec3 {
         let r = if is_f3d { Vec3::new(v.x, -v.z, v.y) } else { v };
@@ -1267,6 +1422,48 @@ pub fn native_cad_to_document_with_model_validating(
     let mut timeline_features: Vec<_> = ir.model.features.iter().collect();
     timeline_features.sort_by_key(|f| f.ordinal);
 
+    if is_f3d && !f3d_names.body_names.is_empty() {
+        let mut assigned_slots: HashMap<String, String> = entity_body_names.clone();
+        for f in &timeline_features {
+            let op_def = match f.evaluation.definition() {
+                FeatureDefinition::Operation(op) => op,
+                FeatureDefinition::PostProcess { operation, .. } => operation,
+            };
+            if let FeatureOperation::SplitBody { .. } = op_def {
+                let affected = parse_body_slot_list(&f.source_properties, "affected_bodies");
+                let target_slot = affected.iter().find(|k| assigned_slots.contains_key(*k));
+                let target_name = target_slot.and_then(|k| assigned_slots.get(k).cloned());
+                for k in &affected {
+                    if !assigned_slots.contains_key(k) {
+                        let candidate = f3d_names
+                            .body_names
+                            .iter()
+                            .find(|b| {
+                                target_name.as_ref().is_some_and(|tn| b.starts_with(tn) && *b != tn) && !assigned_slots.values().any(|v| v == *b)
+                            })
+                            .or_else(|| {
+                                f3d_names
+                                    .body_names
+                                    .iter()
+                                    .find(|b| target_name.as_ref().is_none_or(|tn| *b != tn) && !assigned_slots.values().any(|v| v == *b))
+                            })
+                            .or_else(|| f3d_names.body_names.iter().find(|b| target_name.as_ref().is_none_or(|tn| *b != tn)))
+                            .cloned();
+                        if let Some(cand) = candidate {
+                            assigned_slots.insert(k.clone(), cand.clone());
+                            entity_body_names.insert(k.clone(), cand);
+                        }
+                    }
+                }
+            } else {
+                let deleted = parse_body_slot_list(&f.source_properties, "deleted_bodies");
+                for dk in &deleted {
+                    assigned_slots.remove(dk);
+                }
+            }
+        }
+    }
+
     // Propagate presentation body names across historical body slot re-indexing when an old slot is replaced by a new slot
     for f in timeline_features.iter().rev() {
         let affected = parse_body_slot_list(&f.source_properties, "affected_bodies");
@@ -1311,7 +1508,14 @@ pub fn native_cad_to_document_with_model_validating(
             }
         }
         let deleted_keys = parse_body_slot_list(&f.source_properties, "deleted_bodies");
-        let fname = f.name.as_deref().unwrap_or("Feature");
+        let raw_fname = f.name.as_deref().unwrap_or("Feature");
+        let resolved_name_holder;
+        let fname: &str = if is_f3d {
+            resolved_name_holder = resolve_f3d_feature_name(raw_fname, &f3d_names);
+            &resolved_name_holder
+        } else {
+            raw_fname
+        };
         let centers_for_f = parse_body_centers(&f.source_properties, rot);
         if !deleted_keys.is_empty()
             && !matches!(
@@ -1337,8 +1541,10 @@ pub fn native_cad_to_document_with_model_validating(
                 }
             }
             if !remove_names.is_empty() {
+                let remove_fname =
+                    if is_f3d && !remove_names.is_empty() { format!("RemoveBody-{}", remove_names[0].0) } else { "Remove 1".to_string() };
                 let kind = FeatureKind::Remove { bodies: remove_names };
-                if doc.add_feature(kind, Some("Remove 1")).is_ok() {
+                if doc.add_feature(kind, Some(&remove_fname)).is_ok() {
                     model.evaluate(&doc);
                     for dk in &deleted_keys {
                         if let Some(bname) = entity_to_body.get(dk)
@@ -1360,7 +1566,9 @@ pub fn native_cad_to_document_with_model_validating(
             if let Some(id) = sk_id_opt
                 && let Some(prep) = prepared_sketches.remove(id)
             {
-                let display_name = if !prep.name.is_empty() && !prep.name.starts_with("0_") {
+                let display_name = if is_f3d {
+                    fname
+                } else if !prep.name.is_empty() && !prep.name.starts_with("0_") {
                     prep.name.as_str()
                 } else if !fname.is_empty() && fname != "Feature" && !fname.starts_with("0_") {
                     fname
@@ -1825,8 +2033,9 @@ pub fn native_cad_to_document_with_model_validating(
                 }
             }
             if !remove_names.is_empty() {
+                let remove_fname = if is_f3d && !remove_names.is_empty() { format!("RemoveBody-{}", remove_names[0].0) } else { fname.to_string() };
                 let kind = FeatureKind::Remove { bodies: remove_names };
-                if doc.add_feature(kind, Some(fname)).is_ok() {
+                if doc.add_feature(kind, Some(&remove_fname)).is_ok() {
                     model.evaluate(&doc);
                     for k in removed_keys {
                         entity_to_body.remove(&k);
@@ -1859,8 +2068,9 @@ pub fn native_cad_to_document_with_model_validating(
                 }
             }
             if !remove_names.is_empty() {
+                let remove_fname = if is_f3d && !remove_names.is_empty() { format!("RemoveBody-{}", remove_names[0].0) } else { fname.to_string() };
                 let kind = FeatureKind::Remove { bodies: remove_names };
-                if doc.add_feature(kind, Some(fname)).is_ok() {
+                if doc.add_feature(kind, Some(&remove_fname)).is_ok() {
                     model.evaluate(&doc);
                     for k in &keys {
                         if let Some(bname) = entity_to_body.get(k)
@@ -3148,7 +3358,13 @@ pub fn native_cad_to_document_with_model_validating(
     // Append any prepared sketches that were not referenced by a timeline sketch feature
     let mut extra_sketches_added = false;
     for (_id, prep) in prepared_sketches {
-        let display_name = if !prep.name.is_empty() && !prep.name.starts_with("0_") { prep.name } else { "Sketch".to_string() };
+        let display_name = if is_f3d {
+            resolve_f3d_feature_name(&prep.name, &f3d_names)
+        } else if !prep.name.is_empty() && !prep.name.starts_with("0_") {
+            prep.name
+        } else {
+            "Sketch".to_string()
+        };
         if doc.add_feature(FeatureKind::Sketch { plane: prep.plane_ref, sketch: prep.sketch }, Some(&display_name)).is_ok() {
             extra_sketches_added = true;
         }
@@ -3204,6 +3420,20 @@ mod tests {
 
     #[test]
     #[cfg(feature = "f3d")]
+    fn test_parse_f3d_user_names() {
+        let path = "/archive/Projects/Fusion360/1 Wire LED Controller Rev 1.0/1WireRGBWController.f3d";
+        let bytes = std::fs::read(path).or_else(|_| std::fs::read("tests/fixtures/1wire/1WireRGBWController.f3d")).unwrap();
+        let names = parse_f3d_user_names(&bytes);
+        println!("SKETCHES: {:?}", names.sketches);
+        println!("WORKPLANES: {:?}", names.workplanes);
+        println!("BODIES: {:?}", names.body_names);
+        assert!(!names.sketches.is_empty(), "Must extract user sketches");
+        assert!(!names.workplanes.is_empty(), "Must extract user workplanes");
+        assert!(!names.body_names.is_empty(), "Must extract user bodies");
+    }
+
+    #[test]
+    #[cfg(feature = "f3d")]
     fn test_1wire_timeline_step_conformance() {
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let root = manifest_dir.join("../../tests/fixtures/1wire");
@@ -3256,6 +3486,20 @@ mod tests {
         // Verify final model bodies
         let final_bodies = &model.state().bodies;
         assert_eq!(final_bodies.len(), 2, "Final model must have 2 bodies (Bottom and Top)");
+        let body_names: Vec<&str> = final_bodies.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(body_names, ["Bottom", "Top"], "Final model bodies must be named Bottom and Top");
+
+        // Verify user-defined sketch, construction plane, and removal feature names
+        let feat_names: Vec<&str> = doc.features.iter().map(|f| f.name.as_str()).collect();
+        assert!(feat_names.contains(&"Base"), "Timeline must contain sketch Base");
+        assert!(feat_names.contains(&"DJ Jack"), "Timeline must contain sketch DJ Jack");
+        assert!(feat_names.contains(&"InnerLip"), "Timeline must contain sketch InnerLip");
+        assert!(feat_names.contains(&"ClipesLeft"), "Timeline must contain sketch ClipesLeft");
+        assert!(feat_names.contains(&"LegClampProfile"), "Timeline must contain sketch LegClampProfile");
+        assert!(feat_names.contains(&"Body Split"), "Timeline must contain plane Body Split");
+        assert!(feat_names.contains(&"LeftRightMirror"), "Timeline must contain plane LeftRightMirror");
+        assert!(feat_names.contains(&"RemoveBody-Top (1)"), "Timeline must contain RemoveBody-Top (1)");
+
         let total_faces: usize = final_bodies.iter().map(|b| b.body.face_count()).sum();
         assert!(total_faces >= 270, "Final model face count: {}", total_faces);
     }
