@@ -390,6 +390,45 @@ mod tests {
     use super::*;
     use crate::primitive::api_primitives::{create_box, create_sphere};
     use crate::query::api_queries::face_bounding_box;
+    use crate::query::exact::{distance2, le, Exact, Samples};
+
+    /// When `lower` equals the computed length, or is adjacent to its inflated value,
+    /// `gap + lower >= |z-a|` exactly, including positive gaps lost by cancellation.
+    #[test]
+    fn the_gap_covers_the_exact_step_at_float_neighbours() {
+        for (a, z) in Samples::steps() {
+            let step = (z - a).length();
+            let inflated = step * (1.0 + gamma(4));
+            // Both sides of the critical product, plus the equal-length case and
+            // the clamp-to-zero case: four lower bounds for each of 4096 steps.
+            for lower in [step, inflated.next_down(), inflated, inflated.next_up()] {
+                let gap = gap_of(step, lower);
+                assert!(gap >= 0.0);
+                le(
+                    &distance2(a, z),
+                    &Exact::of(gap).add(&Exact::of(lower)).square(),
+                );
+            }
+        }
+    }
+
+    /// After the length product has rounded, the final charge must cover the exact
+    /// subtraction `inflated - lower`; non-nearby operands exercise inexact subtraction.
+    #[test]
+    fn the_final_gap_subtraction_is_rounded_up_exactly() {
+        let mut rng = Samples::new();
+        // 4096 independent mantissas; 1/8 keeps subtraction away from Sterbenz's
+        // exact-subtraction interval, unlike the near-equal lower bounds above.
+        for _ in 0..4096 {
+            let step = rng.mantissa();
+            let lower = rng.mantissa() * 0.125;
+            let inflated = step * (1.0 + gamma(4));
+            le(
+                &Exact::of(inflated).sub(&Exact::of(lower)),
+                &Exact::of(gap_of(step, lower)),
+            );
+        }
+    }
 
     /// The 20 mm block's top face (`z = 20`).
     fn top(k: &Kernel, b: &Brep) -> FaceId {

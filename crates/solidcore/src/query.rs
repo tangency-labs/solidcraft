@@ -8,6 +8,8 @@ pub mod api_queries;
 pub mod brep;
 pub mod distance_bound;
 pub mod edge;
+#[cfg(test)]
+pub(crate) mod exact;
 pub mod face;
 mod face_surface;
 pub mod r#loop;
