@@ -367,7 +367,7 @@ fn a_pick_field_clicked_into_waits_for_its_pick_and_says_what_it_takes() {
 /// nothing leaves the field waiting and the note shown. A new note scrolls into view once.
 #[test]
 fn a_pick_fields_note_goes_with_a_value_field_or_a_marquee_that_takes_something() {
-    let note_shown = egui::Id::new("sc_dialog_pick_refused_shown");
+    let note_shown = egui::Id::unique("sc_dialog_pick_refused_shown");
     let mut h = plate();
     h.step(&json!({"start": "solid.cylinder"})).unwrap();
     h.frames(2);

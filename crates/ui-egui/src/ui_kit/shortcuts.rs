@@ -54,7 +54,7 @@ pub(crate) fn shortcut_binding(ui: &mut Ui, chord: &str, editable: bool) -> Resp
     }
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
-            if editable { egui::WidgetType::Button } else { egui::WidgetType::Label },
+            if editable { egui::Role::Button } else { egui::Role::Label },
             ui.is_enabled(),
             if chord.is_empty() { crate::i18n::tr("prefs.shortcuts_not_assigned") } else { chord },
         )

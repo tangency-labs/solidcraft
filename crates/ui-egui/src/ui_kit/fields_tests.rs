@@ -21,7 +21,7 @@ fn combo_backing_zero_preserves_stock_shapes_and_semantics() {
                 let combo = egui::ComboBox::from_id_salt("stock combo").selected_text("One");
                 let mut body = |ui: &mut Ui| {
                     let response = ui.button("Two");
-                    semantics = format!("{:?}", (ui.id(), ui.max_rect(), ui.clip_rect(), response.id, response.rect));
+                    semantics = format!("{:?}", (ui.scope_id(), ui.max_rect(), ui.clip_rect(), response.id, response.rect));
                 };
                 let response = if stock { combo.show_ui(ui, &mut body) } else { container::show_combo(ui, widget, combo, &mut body) };
                 id = response.response.id;
@@ -214,7 +214,7 @@ fn search_picker_filters_focuses_picks_and_takes_custom_values() {
     // Opening focuses the box: what is typed filters over labels, tips and values.
     open();
     assert!(is_open());
-    assert!(ctx.memory(|m| m.has_focus(egui::Id::new("search_picker_test").with("search"))), "the box has the focus");
+    assert!(ctx.memory(|m| m.has_focus(egui::Id::unique("search_picker_test").with("search"))), "the box has the focus");
     for row in ["a/one", "b/two", "b/three"] {
         assert!(scenario::handle_at(&format!("test:model:{row}")).is_some(), "{row}");
     }
@@ -572,7 +572,7 @@ fn dropdown_popups_own_escape_and_return_focus_without_canceling_the_window() {
             let mut draw = |ui: &mut Ui| {
                 let ctx = ui.ctx().clone();
                 action.set(
-                    Window::new(egui::Id::new(("dropdown_escape", kind)), "settings", "Preferences")
+                    Window::new(egui::Id::unique(("dropdown_escape", kind)), "settings", "Preferences")
                         .cards(1.0)
                         .fields()
                         .actions("OK", "Cancel", None)
@@ -946,7 +946,7 @@ fn navigation_dropdown_popups_own_escape_and_return_focus_without_canceling_the_
             let mut draw = |ui: &mut Ui| {
                 let ctx = ui.ctx().clone();
                 action.set(
-                    Window::new(egui::Id::new(("dropdown_escape", kind)), "settings", "Preferences")
+                    Window::new(egui::Id::unique(("dropdown_escape", kind)), "settings", "Preferences")
                         .cards(1.0)
                         .fields()
                         .actions("OK", "Cancel", None)

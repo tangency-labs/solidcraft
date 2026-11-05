@@ -125,7 +125,9 @@ impl CommandSearch {
             crate::scenario::publish_target("ribbon:search", r);
             crate::scenario::publish_target("shortcut:search", r);
             crate::scenario::publish_target("palette:search", r);
-            return ui.interact(r, egui::Id::new("sc_sbox_compact"), Sense::click()).backing_on_hover_text(crate::i18n::tr_label("Search commands"));
+            return ui
+                .interact(r, egui::Id::unique("sc_sbox_compact"), Sense::click())
+                .backing_on_hover_text(crate::i18n::tr_label("Search commands"));
         }
         icons::paint_icon(
             ui.painter(),

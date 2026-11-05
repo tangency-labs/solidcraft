@@ -115,6 +115,6 @@ pub(crate) fn checkbox_at(ui: &mut Ui, rect: Rect, label: &str, value: &mut bool
         response.mark_changed();
     }
     paint_box(ui, rect, &response, *value, false);
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *value, label));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), *value, label));
     response.backing_on_hover_text(label)
 }

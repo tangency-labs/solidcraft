@@ -1333,7 +1333,7 @@ fn page_list_sized<S>(
     ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
         ui.set_clip_rect(ui.clip_rect().intersect(nav));
         ui.spacing_mut().item_spacing.y = t.space_2;
-        let selection_id = ui.id().with("page_selection");
+        let selection_id = ui.scope_id().with("page_selection");
         let changed = ui.data_mut(|data| {
             let previous = data.get_temp::<usize>(selection_id);
             data.insert_temp(selection_id, *selected);

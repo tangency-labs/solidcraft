@@ -540,7 +540,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let search_shift = search.map_or(0.0, |s| s.width() + HEADER_SEARCH_GAP);
         if let Some(search) = search {
             // shortcut_box::show draws the one search editor wherever this rectangle is.
-            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_ribbon_search"), search));
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_ribbon_search"), search));
             crate::scenario::publish_target("titlebar:search", search);
         }
         // Assistant, Settings, Help and Report a bug form the right-hand cluster.
@@ -1608,7 +1608,7 @@ fn open_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, available: Rect, folded: R
     let ws = if floating { cards.workspace } else { Rect::from_min_size(r.left_top(), vec2(WORKSPACE_WIDTH, full - 1.0)) };
     let host = Container::for_layout(layout, Surface::Chrome);
     let mut tab_click = None;
-    host.area(egui::Id::new("sc_ribbon_open")).fixed_pos(r.min).show(ui.ctx(), |ui| {
+    host.area(egui::Id::unique("sc_ribbon_open")).fixed_pos(r.min).show(ui.ctx(), |ui| {
         ui.set_min_size(r.size());
         if !floating {
             let frame = host.frame(ui.ctx(), t.toolbar, crate::frame::Side::Left);
@@ -1617,7 +1617,7 @@ fn open_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, available: Rect, folded: R
         tab_click = ribbon_contents(app, ui, RibbonShape { floating, cards, r, ws, folded: false });
         if tab_click.is_some() {
             // The other tab's panels are drawn now; the old tab's open drop-down is gone with them.
-            ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sc_panel_open")));
+            ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
         }
         if floating {
             let frame = host.frame(ui.ctx(), t.toolbar, crate::frame::Side::Left);
@@ -1630,7 +1630,7 @@ fn open_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, available: Rect, folded: R
     let ctx = ui.ctx().clone();
     // A panel's drop-down, a menu or a dragged button keep the panels open while the pointer is
     // on them, away from the panels.
-    let busy = ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new("sc_panel_open")).is_some())
+    let busy = ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")).is_some())
         || app.viewport.context_menu.is_some()
         || egui::DragAndDrop::payload::<ToolbarDrag>(&ctx).is_some();
     let left = ctx.input(|i| i.pointer.latest_pos()).is_none_or(|p| !r.expand(t.space_4).contains(p));
@@ -2392,7 +2392,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             let ribbon = Rect::from_min_max(pos2(ribbon_left, r.top()), r.max);
             let pointer = ui.input(|i| i.pointer.hover_pos());
             let changed = ui.ctx().data_mut(|d| {
-                let key = egui::Id::new("sc_panel_open");
+                let key = egui::Id::unique("sc_panel_open");
                 let Some(open) = d.get_temp::<egui::Id>(key) else { return false };
                 let menu = open_panel_menu.filter(|(id, _)| *id == open).map(|(_, rect)| rect);
                 let stays_open =
@@ -2468,9 +2468,9 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32
         x += step;
         let info = c.info(&app.session);
         let enabled = shown && info.enabled;
-        let resp = ui.interact(br, ui.id().with(("quick_access", c.id)), Sense::click_and_drag());
+        let resp = ui.interact(br, ui.scope_id().with(("quick_access", c.id)), Sense::click_and_drag());
         let label = app.tr_label(info.label).to_string();
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, &label));
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, &label));
         crate::scenario::publish_target(&format!("appbar:quick:{}", c.id), br);
         if enabled && (resp.hovered() || resp.has_focus()) {
             ui.painter().rect_filled(br.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
@@ -2652,7 +2652,7 @@ fn reveal_tooltip(app: &SolveApp, ui: &egui::Ui, rect: Rect, command: &solidcraf
     let label = app.tr_label(info.label);
     let shortcut = crate::keymap::display_for(app, command.id).map(|k| format!("  ({k})")).unwrap_or_default();
     let help = crate::command_help::help(command.id);
-    if let Some(shown) = crate::ui_kit::Container::show_tooltip(egui::Id::new(("ribbon_reveal", command.id)), tip, |ui| {
+    if let Some(shown) = crate::ui_kit::Container::show_tooltip(egui::Id::unique(("ribbon_reveal", command.id)), tip, |ui| {
         ui.set_max_width(300.0);
         ui.label(egui::RichText::new(format!("{label}{shortcut}")).strong());
         if let Some(help) = help {
@@ -2778,10 +2778,10 @@ mod dropdown_tip_tests {
         let mut shown: Vec<(usize, Rect)> = Vec::new();
         crate::test_support::frame(ctx, raw, |ui| {
             let ctx = ui.ctx();
-            egui::Area::new(egui::Id::new("test_dropdown")).fixed_pos(menu.min).show(ctx, |ui| {
+            egui::Area::new(egui::Id::unique("test_dropdown")).fixed_pos(menu.min).show(ctx, |ui| {
                 for row in 0..2 {
                     let rect = Rect::from_min_size(menu.min + vec2(0.0, row as f32 * 32.0), vec2(menu.width(), 32.0));
-                    let resp = ui.interact(rect, egui::Id::new(("test_row", row)), Sense::hover());
+                    let resp = ui.interact(rect, egui::Id::unique(("test_row", row)), Sense::hover());
                     let tip = if row == 0 {
                         dropdown_tip(ui, menu, &resp, |ui| {
                             ui.label("first row");
@@ -5501,7 +5501,7 @@ mod dropdown_toggle_tests {
         h.frames(2);
         h.step(&json!({"click": {"handle": "panel:MODEL:MODIFY"}})).unwrap();
         h.frames(2);
-        let key = egui::Id::new("sc_panel_open");
+        let key = egui::Id::unique("sc_panel_open");
         assert!(h.app.ui.ribbon_open);
         assert!(h.ctx.data(|d| d.get_temp::<egui::Id>(key)).is_some(), "the panel menu is open");
         let other = rect_of("toolbar_tab:SURFACE").unwrap().center();

@@ -7173,13 +7173,12 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         && let Some((name, d, _, _)) = tips.get(i)
     {
         crate::scenario::publish_handle(&format!("axis_view_hover:{name}"), hover.unwrap_or(c));
-        ui.interact(Rect::from_center_size(hover.unwrap_or(c), vec2(2.0, 2.0)), ui.scope_id().with("axis_view_tip"), Sense::hover()).backing_on_hover_text(
-            format!(
+        ui.interact(Rect::from_center_size(hover.unwrap_or(c), vec2(2.0, 2.0)), ui.scope_id().with("axis_view_tip"), Sense::hover())
+            .backing_on_hover_text(format!(
                 "View from {}. Click again to reverse. Drag to orbit{}.",
                 name.to_uppercase(),
                 if app.preferences.free_orbit { "" } else { "; hold Shift to snap" }
-            ),
-        );
+            ));
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         if ui.input(|i| i.pointer.primary_clicked()) {
             let frame = app.cam.to_frame(*d);
@@ -11523,15 +11522,20 @@ mod tests {
         h.step(&json!({"start": "solid.extrude"})).unwrap();
         h.frames(6);
         let over =
-            |h: &crate::scenario::Harness| h.ctx.read_response(egui::Id::new("sc_canvas_value")).expect("Extrude's distance box").rect.center();
+            |h: &crate::scenario::Harness| h.ctx.read_response(egui::Id::unique("sc_canvas_value")).expect("Extrude's distance box").rect.center();
         let distance = |h: &crate::scenario::Harness| format!("{:?}", h.app.dialog.as_ref().map(|d| &d.kind));
         let typed = distance(&h);
         let at = over(&h);
         h.call("ui.move", json!({"x": at.x, "y": at.y}));
         h.frames(2);
         assert!(h.ctx.layer_id_at(at).is_some_and(crate::ui_kit::container::is_canvas), "the pointer is on the box");
-        let gesture =
-            |phase| egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(30.0, -20.0), modifiers: egui::Modifiers::NONE, phase };
+        let gesture = |phase| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(30.0, -20.0),
+            modifiers: egui::Modifiers::NONE,
+            phase,
+        };
         let before = h.app.cam;
         h.app.synthetic.push(gesture(egui::TouchPhase::Start));
         h.frame();
@@ -11575,7 +11579,7 @@ mod tests {
         h.step(&json!({"start": "solid.extrude"})).unwrap();
         h.frames(6);
         let over =
-            |h: &crate::scenario::Harness| h.ctx.read_response(egui::Id::new("sc_canvas_value")).expect("Extrude's distance box").rect.center();
+            |h: &crate::scenario::Harness| h.ctx.read_response(egui::Id::unique("sc_canvas_value")).expect("Extrude's distance box").rect.center();
         let typed = format!("{:?}", h.app.dialog.as_ref().map(|d| &d.kind));
         // The orbit is in progress and the box slides under the cursor: the pointer sits on the
         // box every frame, as it does when the spinning model carries the box to the pointer.
@@ -11583,8 +11587,13 @@ mod tests {
         h.call("ui.move", json!({"x": at.x, "y": at.y}));
         h.frames(2);
         assert!(h.ctx.layer_id_at(at).is_some_and(crate::ui_kit::container::is_canvas), "the pointer is on the box");
-        let orbit =
-            |phase| egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(24.0, -16.0), modifiers: egui::Modifiers::SHIFT, phase };
+        let orbit = |phase| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(24.0, -16.0),
+            modifiers: egui::Modifiers::SHIFT,
+            phase,
+        };
         h.app.synthetic.push(orbit(egui::TouchPhase::Start));
         h.frame();
         let mut last = h.app.cam;

@@ -442,12 +442,12 @@ fn spin_buttons(ui: &mut Ui, key: &str, height: f32) -> i32 {
     let (top, bottom) = rect.split_top_bottom_at_fraction(0.5);
     let mut steps = 0;
     for (direction, half, label, end) in [(1, top, "color.step_up", "up"), (-1, bottom, "color.step_down", "down")] {
-        let id = ui.id().with(("color_spin", key, end));
+        let id = ui.scope_id().with(("color_spin", key, end));
         // Sensing drags too keeps a long press down on the button: a press that senses clicks
         // only stops counting once it outlasts egui's longest click (0.8 s), and the repeat with
         // it, after 8 steps (#10201).
         let response = ui.interact(half, id, Sense::click_and_drag());
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), i18n::tr(label)));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), i18n::tr(label)));
         publish(&format!("color:spin:{key}:{end}"), &response);
         let held = response.is_pointer_button_down_on();
         if response.hovered() || held {
@@ -517,11 +517,11 @@ fn recent_row(ui: &mut Ui, width: f32) -> Option<[u8; 3]> {
                 ui.painter().rect_stroke(rect, t.control_radius, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
                 continue;
             };
-            let response = ui.interact(rect, ui.id().with(("color_recent", slot)), Sense::click());
+            let response = ui.interact(rect, ui.scope_id().with(("color_recent", slot)), Sense::click());
             let stroke = if response.hovered() { t.control_border_stroke(t.form_ink) } else { t.control_border_stroke(t.control_border) };
             ui.painter().rect(rect, t.control_radius, crate::theme::srgb([r, g, b].map(|c| f32::from(c) / 255.0)), stroke, egui::StrokeKind::Inside);
             let hex = format!("#{r:02x}{g:02x}{b:02x}");
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &hex));
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &hex));
             publish(&format!("color:recent:{slot}"), &response);
             let response = response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(&hex);
             if response.clicked() {

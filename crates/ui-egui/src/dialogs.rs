@@ -2080,7 +2080,7 @@ pub(crate) fn fillet_least_setback(ctx: &egui::Context, s: &Session, items: &[Se
     (&s.document_id, s.revision, radius.to_bits(), &bodies).hash(&mut key);
     corners.iter().for_each(|c| [c.x, c.y, c.z].map(f64::to_bits).hash(&mut key));
     let key = key.finish();
-    let id = egui::Id::new("fillet_least_setback");
+    let id = egui::Id::unique("fillet_least_setback");
     if let Some((k, least)) = ctx.data(|d| d.get_temp::<(u64, Option<f64>)>(id))
         && k == key
     {
@@ -3201,7 +3201,7 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
     }
     // A click the waiting pick field does not take: what that field is for, plainly (#10428).
     // Under the fold in a short window, a new note scrolls into view once, as a refusal does.
-    let note_shown_id = egui::Id::new("sc_dialog_pick_refused_shown");
+    let note_shown_id = egui::Id::unique("sc_dialog_pick_refused_shown");
     if let Some(id) = d.pick_refused.filter(|_| d.error.is_none() && app.preview.error.is_none()) {
         let note = crate::ui_kit::text(ui, crate::i18n::tr(id), crate::ui_kit::Text::Hint("pick_refused"));
         crate::scenario::publish_rect("dialog:pick_refused", note.rect);
@@ -3838,7 +3838,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     );
     let grow_key = egui::Id::unique(("sc_dialog_label_grow", raw_title));
     let label_grow = ctx.data(|data| data.get_temp::<f32>(grow_key)).unwrap_or(0.0).min((vp.width() - t.space_24 - card_width(&d)).max(0.0));
-    let panel = crate::ui_kit::Panel::unique(&heading, egui::Id::unique(("sc_dialog", title(&d.kind))), anchor, drag_bounds, side, frame)
+    let panel = crate::ui_kit::Panel::new(&heading, egui::Id::unique(("sc_dialog", title(&d.kind))), anchor, drag_bounds, side, frame)
         .actions(ok_label, close_label);
     let panel = if let Some(column) = column {
         panel.width(column.width()).joined(crate::ui_kit::DockEdges { left: true, top: true, ..Default::default() })

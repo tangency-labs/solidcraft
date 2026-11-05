@@ -112,7 +112,7 @@ fn styled_button(ui: &Ui, label: egui::WidgetText, tone: ButtonTone) -> egui::Bu
         // Native button padding already accounts for this state's border. Preserve its width
         // when changing the colour, or buttons outside a form grow and make toast actions wrap.
         let state = response.as_ref().map(Response::widget_state).unwrap_or_default();
-        appearance.stroke.width = ui.style().button_style(&Default::default(), state).frame.stroke.width;
+        appearance.stroke.width = ui.style().visuals.widgets.state(state).bg_stroke.width;
     }
     egui::Button::new(label.color(appearance.ink)).fill(appearance.fill).stroke(appearance.stroke)
 }

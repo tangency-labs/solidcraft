@@ -2238,7 +2238,7 @@ fn table_cells_keep_alignment_fixed_rows_editing_and_action_targets() {
                                     text(ui, name, Text::Cell);
                                 });
                                 row.cell(|ui| {
-                                    let response = cell_editor(ui, ui.id().with("expression"), value, "Expression", false);
+                                    let response = cell_editor(ui, ui.scope_id().with("expression"), value, "Expression", false);
                                     scenario::publish_handle(&format!("gallery:cell:{name}"), response.rect.center());
                                     scenario::publish_rect(&format!("gallery:cell:{name}"), response.rect);
                                 });

@@ -253,7 +253,7 @@ fn show_measuring(app: &mut SolveApp, ctx: &egui::Context) {
         Some((done, total)) => crate::i18n::format("ui.properties.measuring_bodies", &[("done", &done.to_string()), ("total", &total.to_string())]),
         None => app.tr("ui.properties.measuring").to_string(),
     };
-    let (closed, action) = ui_kit::Window::unique(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
         ui.horizontal(|ui| {
             ui.spinner();
             ui_kit::text(ui, &text, ui_kit::Text::Note("measuring"));

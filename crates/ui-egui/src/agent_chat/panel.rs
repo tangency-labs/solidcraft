@@ -146,8 +146,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let host = Container::new(ui.ctx(), Surface::Panel);
     let side = |salt: &'static str| host.edge(salt, if left { Edge::Left } else { Edge::Right });
     if app.preferences.agent_chat_minimized {
-        let r = host
-            .show_edge(ui, side("sc_agent_chat_strip")).exact_size(STRIP).resizable(false), host.edge_frame(t.panel), |ui| strip(app, ui));
+        let r = host.show_edge(ui, side("sc_agent_chat_strip").exact_size(STRIP).resizable(false), host.edge_frame(t.panel), |ui| strip(app, ui));
         app.agent_chat.drop_rect = Some(r.response.rect);
         show_drop_hint(app, &ctx);
         return;
@@ -1391,7 +1390,7 @@ fn config_select(app: &mut SolveApp, ui: &mut egui::Ui, option: &acp::ConfigOpti
         }
         response
     };
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, enabled, format!("{name}: {selected}")));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, enabled, format!("{name}: {selected}")));
     response.backing_on_hover_text(tip);
     match picked {
         Some(ui_kit::Picked::Listed(value)) => super::set_config_option(app, &option.id, &value),
@@ -1740,7 +1739,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 if copyable {
                     let drawn = egui::Rect::from_x_y_ranges(before.x_range(), before.min.y..=ui.cursor().min.y);
-                    let resp = ui.interact(drawn, Id::new(("agent_chat_msg", n)), Sense::hover());
+                    let resp = ui.interact(drawn, Id::unique(("agent_chat_msg", n)), Sense::hover());
                     copy_message_menu(ui, &resp, n, text);
                 }
             }
@@ -1753,7 +1752,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     if !text.is_empty() {
                         copy_message_button(ui, n, text);
                         let drawn = egui::Rect::from_x_y_ranges(before.x_range(), before.min.y..=ui.cursor().min.y);
-                        let resp = ui.interact(drawn, Id::new(("agent_chat_msg", n)), Sense::hover());
+                        let resp = ui.interact(drawn, Id::unique(("agent_chat_msg", n)), Sense::hover());
                         copy_message_menu(ui, &resp, n, text);
                     }
                 }
@@ -1923,7 +1922,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             match (&editing, edit_buf.as_mut()) {
                 (Some((i, _)), Some(buf)) if *i == n => {
-                    let te = ui_kit::message_field(ui, Id::new(("sc_agent_pending_input", n)), buf, "");
+                    let te = ui_kit::message_field(ui, Id::unique(("sc_agent_pending_input", n)), buf, "");
                     crate::scenario::publish_rect("agent_chat:pending_input", te.rect);
                     ui.horizontal(|ui| {
                         if ui_kit::button(ui, tr("ui.agent_chat_save"), ui_kit::Button::Normal).clicked() {

@@ -742,7 +742,7 @@ pub(crate) fn rename_popup(app: &mut SolveApp, ctx: &egui::Context) {
     crate::prefs_search::note_key_sink(ctx);
     let mut done = None;
     let popup = ui_kit::Container::new(ctx, ui_kit::Surface::Popup)
-        .area(egui::Id::new("sc_profile_rename"))
+        .area(egui::Id::unique("sc_profile_rename"))
         .fixed_pos(rename.at)
         .constrain(true)
         .order(egui::Order::Foreground)

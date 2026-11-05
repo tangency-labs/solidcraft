@@ -628,7 +628,7 @@ fn polygon_inputs_clear_each_other_and_the_preview() {
             let boxes: Vec<_> = (0..2usize)
                 .map(|i| {
                     h.ctx
-                        .memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", i))))
+                        .memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i))))
                         .unwrap_or_else(|| panic!("{command}, {view}, {corner:?}: input {i} missing"))
                 })
                 .collect();

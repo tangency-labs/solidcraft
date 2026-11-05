@@ -31,7 +31,7 @@ fn a_growing_form_widens_past_the_cap_and_publishes_the_card_extra() {
     let ctx = egui::Context::default();
     crate::fonts::setup_fonts(&ctx);
     let t = Tokens::get();
-    let key = egui::Id::new("grow-test");
+    let key = egui::Id::unique("grow-test");
     let long = "Anpassung an Leitkurve";
     let mut label = None;
     for _ in 0..3 {

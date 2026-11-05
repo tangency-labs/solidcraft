@@ -684,7 +684,7 @@ impl Painter {
         clear_color: [f32; 4],
         clipped_primitives: &[epaint::ClippedPrimitive],
         textures_delta: &mut epaint::textures::TexturesDelta,
-        capture_data: Vec<UserData>,
+        capture_data: Vec<egui::ScreenshotCallback>,
         window: &Arc<winit::window::Window>,
     ) -> f32 {
         profiling::function_scope!();

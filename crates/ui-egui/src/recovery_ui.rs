@@ -216,7 +216,7 @@ pub fn browser_copies_window(ctx: &egui::Context, language: &str, copies: &[Brow
         _ => crate::i18n::tr("recovery.restore_title").to_string(),
     };
     let mut act = None;
-    let _ = ui_kit::Window::new(egui::Id::new("sc_browser_keep_restore"), "restore", &title).required().show_body(ctx, |ui| {
+    let _ = ui_kit::Window::new(egui::Id::unique("sc_browser_keep_restore"), "restore", &title).required().show_body(ctx, |ui| {
         ui_kit::text(ui, crate::i18n::tr("recovery.restore_intro"), ui_kit::Text::Report("intro", false));
         for (index, c) in copies.iter().enumerate() {
             if copies.len() > 1 {

@@ -450,7 +450,7 @@ fn comb_options_card(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
     let mut options = comb_options();
     let (length_tip, teeth_tip) = (app.tr("ui.comb_length_tip").to_string(), app.tr("ui.comb_teeth_tip").to_string());
     let shown = crate::ui_kit::Container::new(ctx, crate::ui_kit::Surface::Canvas)
-        .area(egui::Id::new("sc_comb_options"))
+        .area(egui::Id::unique("sc_comb_options"))
         .fixed_pos(available.left_top() + egui::vec2(tk.space_16, tk.space_16))
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {

@@ -1167,7 +1167,7 @@ mod tests {
         h.app.home.open = false;
         h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
         h.frames(16);
-        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("issue_report_body")));
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("issue_report_body")));
         h.frames(1);
         h.frame_with(vec![egui::Event::Paste("故障".repeat(1500))]);
         h.frames(4);
@@ -1687,7 +1687,7 @@ mod tests {
             }
             h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
             h.frames(10);
-            let rect = |h: &crate::scenario::Harness| egui::containers::AreaState::load(&h.ctx, egui::Id::new("sc_issue_report")).unwrap().rect();
+            let rect = |h: &crate::scenario::Harness| egui::containers::AreaState::load(&h.ctx, egui::Id::unique("sc_issue_report")).unwrap().rect();
             let at = rect(&h);
             assert!((at.center().x - h.ctx.content_rect().center().x).abs() < 1.0, "sketch={sketch}: it opens at the top middle: {at:?}");
             // On the title, clear of the close button.

@@ -741,7 +741,7 @@ pub(crate) fn popup_list(
                         );
                         super::text::paint_text(ui, text_rect, option.text, mono.clone(), if picked { t.form_primary } else { option.color }, false);
                         ui.painter().text(inner.right_center(), egui::Align2::RIGHT_CENTER, kind, kind_font.clone(), t.form_dim);
-                        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), picked, option.text));
+                        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), picked, option.text));
                         // Tip the full name first: long identifiers still clip inside a capped popup.
                         let tip = if option.detail.is_empty() { option.text.to_owned() } else { format!("{}\n{}", option.text, option.detail) };
                         let response = response.backing_on_hover_text(tip);

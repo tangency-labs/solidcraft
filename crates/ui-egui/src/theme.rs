@@ -231,7 +231,7 @@ pub(crate) struct BlurIntent {
 }
 
 pub(crate) fn blur_intent(ctx: &egui::Context) -> BlurIntent {
-    ctx.data_mut(|data| data.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE)).blur)
+    ctx.data_mut(|data| data.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE)).blur)
 }
 
 /// Cache the authored theme and raw saved values before any effective-value normalization.

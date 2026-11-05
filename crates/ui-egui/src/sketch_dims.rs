@@ -206,7 +206,7 @@ fn construction_length(t: &Tool, b: &DimBox) -> bool {
 
 /// The id of the `i`th value box of the tool being drawn.
 pub(crate) fn box_id(i: usize) -> egui::Id {
-    egui::Id::new(("sc_dim", i))
+    egui::Id::unique(("sc_dim", i))
 }
 
 /// Where the preview and the value boxes put the tool's next point for the hover `p`: for a
@@ -728,8 +728,8 @@ pub(crate) const BOX: egui::Vec2 = egui::vec2(76.0, 24.0);
 /// sketch point, so the viewport asks before letting one take the click.
 pub(crate) fn over_tool_boxes(app: &SolveApp, ctx: &egui::Context, p: egui::Pos2) -> bool {
     let Some(t) = app.tool.as_ref() else { return false };
-    (0..t.dims.len()).any(|i| ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", i)))).is_some_and(|r| r.contains(p)))
-        || ctx.memory(|m| m.area_rect(egui::Id::new("sc_construction_switch"))).is_some_and(|r| r.contains(p))
+    (0..t.dims.len()).any(|i| ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).is_some_and(|r| r.contains(p)))
+        || ctx.memory(|m| m.area_rect(egui::Id::unique("sc_construction_switch"))).is_some_and(|r| r.contains(p))
 }
 
 /// Where a value box whose top left would be `pos` goes so it stays in the drawing area `view`:

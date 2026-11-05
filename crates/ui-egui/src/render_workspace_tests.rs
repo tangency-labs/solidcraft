@@ -7026,7 +7026,13 @@ fn render_results_compare_divider_drag_clamps_and_blocks_all_camera_input() {
     let end = egui::pos2(canvas.right() + 100.0, start.y);
     h.frame_with(vec![
         Event::PointerMoved(end),
-        Event::MouseWheel { unit: MouseWheelUnit::Point, delta: vec2(0.0, -300.0), modifiers: Modifiers::ALT, phase: egui::TouchPhase::Move },
+        Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: MouseWheelUnit::Point,
+            delta: vec2(0.0, -300.0),
+            modifiers: Modifiers::ALT,
+            phase: egui::TouchPhase::Move,
+        },
     ]);
     assert!(
         (h.app.render_workspace.view.compare.as_ref().unwrap().position - 0.95).abs() < 1e-6,

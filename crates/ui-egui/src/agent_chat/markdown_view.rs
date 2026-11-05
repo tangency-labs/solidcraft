@@ -67,7 +67,7 @@ fn host(url: &str) -> &str {
 pub(super) fn selectable(ui: &mut egui::Ui, label: egui::Label) -> egui::Response {
     use egui::text_selection::LabelSelectionState;
     let (pos, galley, response) = label.selectable(true).layout_in_ui(ui);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), galley.text()));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), galley.text()));
     // As `egui::Label` draws a label that is not a button.
     let colour = ui.visuals().text_color();
     if ui.is_rect_visible(response.rect) {

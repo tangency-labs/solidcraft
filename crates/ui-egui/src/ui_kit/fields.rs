@@ -454,7 +454,7 @@ pub(crate) fn search_picker(ui: &mut Ui, p: SearchPicker<'_>) -> egui::InnerResp
     {
         return egui::InnerResponse::new(None, crate::prefs_search::hidden_response(ui));
     }
-    let state = egui::Id::new(p.id);
+    let state = egui::Id::unique(p.id);
     let mut picked = None;
     let response = ui
         .add_enabled_ui(p.enabled, |ui| {
@@ -480,7 +480,7 @@ pub(crate) fn search_picker(ui: &mut Ui, p: SearchPicker<'_>) -> egui::InnerResp
             response
         })
         .inner;
-    publish(ui, &response, egui::WidgetType::ComboBox);
+    publish(ui, &response, egui::Role::ComboBox);
     scenario::publish_target(p.handles, response.rect);
     egui::InnerResponse::new(picked, response)
 }
@@ -804,7 +804,7 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
     }
     let mut response = ui.add_sized(vec2(width, row_height()), edit);
     if response.has_focus() {
-        ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("sc_focused_editor"), response.id));
+        ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("sc_focused_editor"), response.id));
     }
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     if response.has_focus() {
@@ -1264,7 +1264,7 @@ pub(crate) fn search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     crate::icons::paint_ink(ui.painter(), icon, "zoom", t.form_dim);
     super::layout::publish_geometry(ui, &response);
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), hint);
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), hint);
         info.current_text_value = Some(value.clone());
         info
     });

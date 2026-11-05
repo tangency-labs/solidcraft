@@ -2632,7 +2632,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         let Some(row) = seen.get(depth - 1).and_then(|s| s.anchor) else { break };
         // One area per flyout and contents: an egui area keeps its last size, so a flyout sharing
         // one with a shorter one would be squeezed into it and scroll.
-        let id = egui::Id::new(("sc_context_submenu", depth)).with(rows.iter().map(|i| (&i.id, &i.label)).collect::<Vec<_>>());
+        let id = egui::Id::unique(("sc_context_submenu", depth)).with(rows.iter().map(|i| (&i.id, &i.label)).collect::<Vec<_>>());
         let cursor = if depth == path.len() { app.menu.submenu_key } else { None };
         let sub = crate::ui_kit::Menu::submenu(ctx, id, row, list_height(rows), leftward, |ui| {
             egui::ScrollArea::vertical()

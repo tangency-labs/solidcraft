@@ -247,50 +247,18 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         crate::ui_kit::text(ui, app.tr("ui.3d_mouse_axes_reassigned"), crate::ui_kit::Text::Note("space_mouse_axes_reassigned"));
                     }
                     crate::ui_kit::row(ui, app.tr("ui.3d_mouse_dead_zone"), |ui| {
-                        dead_zone_slider(ui, &mut dead_zone).on_hover_text(app.tr("ui.3d_mouse_dead_zone_tip"));
+                        dead_zone_slider(ui, &mut dead_zone).backing_on_hover_text(app.tr("ui.3d_mouse_dead_zone_tip"));
                     });
-                } else {
-                    crate::ui_kit::progress(ui, "space_mouse_calibration", progress as f32);
-                    crate::ui_kit::text(ui, &counter, crate::ui_kit::Text::Note("space_mouse_counter"));
-                    // Each step shows the motion it asks for; once calibrated, the device's picture follows it.
-                    let step = match stage {
-                        Stage::Step(index) => solidcraft_space_mouse::STEPS.get(index).copied(),
-                        _ => None,
-                    };
-                    match (step, result) {
-                        (Some(step), _) => crate::space_mouse_model::demo(ui, step, kind),
-                        (_, Some(Ok(calibration))) => {
-                            let calibration = Calibration { dead_zone_share: dead_zone, ..calibration };
-                            crate::space_mouse_model::live(ui, &calibration, raw);
-                            dead_zone_pads(ui, &calibration, raw, true, &Default::default());
-                        }
-                        _ => crate::space_mouse_model::rest(ui, kind),
-                    }
-                }
-                // The device's six raw axes as they come, so the jitter at rest is there to see.
-                crate::ui_kit::text(ui, app.tr("ui.3d_mouse_reading"), crate::ui_kit::Text::Note("space_mouse_reading"));
-                reading_grid(ui, raw);
-                // A reassignment made in Preferences stays on top of whatever this records.
-                if app.preferences.space_mouse_axis_source != crate::space_mouse::SAME_AXES {
-                    crate::ui_kit::text(ui, app.tr("ui.3d_mouse_axes_reassigned"), crate::ui_kit::Text::Note("space_mouse_axes_reassigned"));
-                }
-                crate::ui_kit::row(ui, app.tr("ui.3d_mouse_dead_zone"), |ui| {
-                    dead_zone_slider(ui, &mut dead_zone).backing_on_hover_text(app.tr("ui.3d_mouse_dead_zone_tip"));
-                });
-            },
-            |ui| {
-                ui.horizontal(|ui| {
-                    back = ui
-                        .add_enabled_ui(stage != Stage::Choose, |ui| crate::ui_kit::button(ui, app.tr("ui.back"), crate::ui_kit::Button::Normal))
-                        .inner
-                        .clicked();
-                    skip = can_skip
-                        && crate::ui_kit::button(ui, app.tr("ui.3d_mouse_skip"), crate::ui_kit::Button::Normal)
-                            .backing_on_hover_text(app.tr("ui.3d_mouse_skip_tip"))
+                },
+                |ui| {
+                    ui.horizontal(|ui| {
+                        back = ui
+                            .add_enabled_ui(stage != Stage::Choose, |ui| crate::ui_kit::button(ui, app.tr("ui.back"), crate::ui_kit::Button::Normal))
+                            .inner
                             .clicked();
                         skip = can_skip
                             && crate::ui_kit::button(ui, app.tr("ui.3d_mouse_skip"), crate::ui_kit::Button::Normal)
-                                .on_hover_text(app.tr("ui.3d_mouse_skip_tip"))
+                                .backing_on_hover_text(app.tr("ui.3d_mouse_skip_tip"))
                                 .clicked();
                         over = matches!(result, Some(Err(_)))
                             && crate::ui_kit::button(ui, app.tr("ui.start_over"), crate::ui_kit::Button::Normal).clicked();

@@ -263,16 +263,17 @@ pub(crate) fn show_warning(app: &mut SolveApp, ctx: &egui::Context) {
         app.menu.joint_move_warning = None;
         return;
     }
-    let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::unique("sc_joint_move_blocked"), "status_warning", app.tr("joint_move.blocked_title"))
-        .tone(crate::ui_kit::Tone::Warning)
-        .actions(app.tr("ui.heading_ok"), "", None)
-        .show(ctx, true, |ui| {
-            if !blocked.part.is_empty() {
-                crate::ui_kit::text(ui, &blocked.part, crate::ui_kit::Text::Report("part", false));
-            }
-            crate::ui_kit::text(ui, &reason, crate::ui_kit::Text::Report("reason", false));
-            crate::ui_kit::text(ui, app.tr(hint), crate::ui_kit::Text::Hint("remedy"));
-        });
+    let (closed, action) =
+        crate::ui_kit::Confirm::new(egui::Id::unique("sc_joint_move_blocked"), "status_warning", app.tr("joint_move.blocked_title"))
+            .tone(crate::ui_kit::Tone::Warning)
+            .actions(app.tr("ui.heading_ok"), "", None)
+            .show(ctx, true, |ui| {
+                if !blocked.part.is_empty() {
+                    crate::ui_kit::text(ui, &blocked.part, crate::ui_kit::Text::Report("part", false));
+                }
+                crate::ui_kit::text(ui, &reason, crate::ui_kit::Text::Report("reason", false));
+                crate::ui_kit::text(ui, app.tr(hint), crate::ui_kit::Text::Hint("remedy"));
+            });
     app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
     if closed || action != crate::ui_kit::Action::None {
         app.menu.joint_move_warning = None;

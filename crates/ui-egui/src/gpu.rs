@@ -64,7 +64,7 @@ pub(crate) fn paint_background_picture(app: &mut crate::SolveApp, painter: &egui
         return;
     }
     let ctx = painter.ctx().clone();
-    let id = egui::Id::new("sc_background_picture");
+    let id = egui::Id::unique("sc_background_picture");
     let mut picture = ctx.data(|d| d.get_temp::<BackgroundPicture>(id)).filter(|p| p.path == *path).unwrap_or_else(|| {
         let picture = BackgroundPicture { path: path.clone(), decoded: Default::default(), texture: None };
         let (path, slot, repaint) = (path.clone(), picture.decoded.clone(), ctx.clone());
@@ -1250,7 +1250,7 @@ mod tests {
                     .is_some_and(|shape| matches!(shape, egui::Shape::Rect(_))),
                 "backing precedes native popup chrome"
             );
-            assert!(ctx.memory(|m| m.has_focus(egui::Id::new("blur_picker").with("search"))), "native search focus survives hover");
+            assert!(ctx.memory(|m| m.has_focus(egui::Id::unique("blur_picker").with("search"))), "native search focus survives hover");
         }
     }
 

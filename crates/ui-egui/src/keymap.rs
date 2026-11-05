@@ -565,7 +565,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     // A Preferences search lists the matching shortcuts too, and one recorded from there takes
     // the key like one on this page (#10043). Only a search field that has the keyboard keeps
     // its keys: going back to it to type stops the recording.
-    if ctx.memory(|m| m.has_focus(egui::Id::new("prefs_search"))) && app.keymap.capturing.is_some() {
+    if ctx.memory(|m| m.has_focus(egui::Id::unique("prefs_search"))) && app.keymap.capturing.is_some() {
         stop_capture(app);
     }
     // Keep a pending chord until it has settled and all keys are released. Modifier-only
@@ -631,7 +631,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         ui_kit::search_field(
                             ui,
-                            egui::Id::new("sc_keymap_filter"),
+                            egui::Id::unique("sc_keymap_filter"),
                             &mut app.keymap.filter,
                             crate::i18n::tr_label("Filter commands or keys"),
                         )
@@ -911,8 +911,8 @@ fn shortcut_row(
         let name =
             egui::Rect::from_min_size(rect.min + egui::vec2(0.0, t.space_4), egui::vec2(if beside { name_width } else { width }, label_height));
         ui.painter().galley(egui::pos2(name.left(), name.center().y - label_galley.size().y / 2.0), label_galley, t.form_ink);
-        let response = ui.interact(name, ui.id().with("command"), egui::Sense::hover()).backing_on_hover_text(command.id);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), format!("{label} ({})", command.id)));
+        let response = ui.interact(name, ui.scope_id().with("command"), egui::Sense::hover()).backing_on_hover_text(command.id);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), format!("{label} ({})", command.id)));
         let top = if beside { name.top() } else { name.bottom() + t.space_4 };
         let total = widths.iter().sum::<f32>() + widths.len().saturating_sub(1) as f32 * t.space_8;
         let left = if beside { rect.right() - actions_width - t.space_8 - total.min(controls_width) } else { rect.left() };
@@ -1099,7 +1099,7 @@ mod tests {
         assert!(!h.app.agent_chat.open, "extra modifiers do not match");
         h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
         assert!(h.app.agent_chat.open);
-        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("sc_agent_chat_input")));
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("sc_agent_chat_input")));
         h.frames(2);
         h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
         assert!(!h.app.agent_chat.open, "a chord can hide Assistant from its input field");

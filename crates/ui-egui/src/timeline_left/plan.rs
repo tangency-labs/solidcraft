@@ -106,7 +106,7 @@ pub(super) struct RowPlan {
 impl RowPlan {
     /// The plan for the design as it is, kept until it changes.
     pub(super) fn cached(app: &SolveApp, ui: &egui::Ui, under_feature: bool) -> Arc<Self> {
-        let id = egui::Id::new("sc_history_row_plan");
+        let id = egui::Id::unique("sc_history_row_plan");
         let key = PlanKey::of(app, under_feature);
         if let Some(plan) = ui.data(|data| data.get_temp::<Arc<Self>>(id)).filter(|plan| plan.key == key) {
             return plan;
@@ -376,7 +376,7 @@ impl RowPlan {
     /// closes.
     pub(super) fn order(&self, ui: &egui::Ui, folds: &Folds) -> Arc<Vec<TimelineItem>> {
         type Kept = (PlanKey, Folds, Arc<Vec<TimelineItem>>);
-        let id = egui::Id::new("sc_history_row_order");
+        let id = egui::Id::unique("sc_history_row_order");
         if let Some(kept) = ui.data(|data| data.get_temp::<Arc<Kept>>(id)).filter(|kept| kept.0 == self.key && kept.1 == *folds) {
             return kept.2.clone();
         }
@@ -447,6 +447,6 @@ impl RowPlan {
 
     /// The plan the History drew with last, from the egui context.
     pub(super) fn kept(ctx: &egui::Context) -> Option<Arc<Self>> {
-        ctx.data(|data| data.get_temp::<Arc<Self>>(egui::Id::new("sc_history_row_plan")))
+        ctx.data(|data| data.get_temp::<Arc<Self>>(egui::Id::unique("sc_history_row_plan")))
     }
 }

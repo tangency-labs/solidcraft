@@ -47,15 +47,15 @@ fn blur_host_fixture(host: BlurHost, mode: u8, position: egui::Pos2, transform: 
         .inner_margin(egui::Margin { left: 9, right: 13, top: 7, bottom: 11 })
         .outer_margin(egui::Margin { left: -2, right: 3, top: -1, bottom: 4 })
         .corner_radius(egui::CornerRadius { nw: 3, ne: 7, sw: 11, se: 15 });
-    let id = egui::Id::new("stock host fixture");
+    let id = egui::Id::unique("stock host fixture");
     let mut output = egui::FullOutput::default();
     let mut observation = String::new();
     for _ in 0..3 {
         output = crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
             ui.multiply_opacity(0.75);
             let mut body = |ui: &mut egui::Ui| {
-                let stack: Vec<_> = ui.stack().iter().map(|node| (node.id, node.kind(), *node.frame())).collect();
-                let semantic = format!("{:?}", (ui.id(), ui.max_rect(), ui.clip_rect(), ui.stack().bg_color(), stack));
+                let stack: Vec<_> = ui.stack().iter().map(|node| (node.scope_id, node.kind(), *node.frame())).collect();
+                let semantic = format!("{:?}", (ui.scope_id(), ui.max_rect(), ui.clip_rect(), ui.stack().bg_color(), stack));
                 ui.allocate_space(egui::vec2(83.0, 47.0));
                 let response = ui.button("Content stays above its frame");
                 // A child changing its content clip must not cut the host's padding/border.
@@ -143,7 +143,7 @@ fn blur_stock_window_open_flag_preserves_closed_close_and_reopen_behavior() {
         let ctx = crate::fonts::test_context();
         let container = Container::for_layout(crate::shell::LayoutMode::Floating, Surface::Feature);
         let frame = container.frame(&ctx, Tokens::get().dialog_body, crate::frame::Side::Left);
-        let id = egui::Id::new("open flag fixture");
+        let id = egui::Id::unique("open flag fixture");
         let mut recorded = Vec::new();
         for (index, mut keep) in [false, false, true, true, true, false, false, false, true, true, true].into_iter().enumerate() {
             let mut observation = String::new();
@@ -1657,6 +1657,7 @@ fn page_sidebar_footer_stays_visible_when_the_page_list_scrolls() {
         h.frame_with(vec![
             egui::Event::PointerMoved(egui::pos2(nav.center().x, nav.top() + 30.0)),
             egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
                 unit: egui::MouseWheelUnit::Point,
                 delta: egui::vec2(0.0, -1000.0),
                 modifiers: egui::Modifiers::NONE,

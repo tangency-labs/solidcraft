@@ -131,7 +131,7 @@ pub(crate) fn steps(ui: &mut egui::Ui, key: &str, labels: &[&str], current: usiz
             std::cmp::Ordering::Equal => "current",
             std::cmp::Ordering::Greater => "next",
         };
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), *label));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), *label));
         crate::scenario::publish_rect(&format!("dialog:step:{key}:{i}:{state}"), row);
         crate::scenario::publish_rect(&format!("dialog:step_mark:{key}:{i}"), slot);
     }

@@ -221,7 +221,7 @@ fn a_new_dimension_in_the_window_steps_previews_and_applies_once() {
     h.step(&json!({"click":{"world":[10,6,0]}})).unwrap();
     h.frames(3);
     assert!(crate::dim_view::editing(), "placing the text opens the window");
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")), "its field takes the keyboard");
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")), "its field takes the keyboard");
     let window = crate::scenario::rect_of("dimwin").expect("the window is shown");
     let drawable = h.app.viewport.layout.as_ref().unwrap().drawable;
     assert!(drawable.contains_rect(window), "the window {window:?} stays in the view {drawable:?}");
@@ -238,7 +238,7 @@ fn a_new_dimension_in_the_window_steps_previews_and_applies_once() {
     assert!(crate::scenario::count_of("dimwin:preview_curves").unwrap_or(0.0) > 0.0, "what the value moves is drawn");
     assert_eq!(h.app.session.doc.to_json(), original, "nothing reaches the design before OK");
     assert_eq!(h.app.session.undo.len(), undo);
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")), "the arrows leave the keyboard with the field");
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")), "the arrows leave the keyboard with the field");
     // The wheel over the field steps it instead of zooming the view.
     let cam = h.app.cam;
     let field = crate::scenario::rect_of("dimwin:value").unwrap();
@@ -1332,7 +1332,7 @@ fn type_first_keeps_the_place_first_flow() {
 /// Put the value field's caret at `at` with nothing selected, as the field itself does when it
 /// misses the keyboard for a frame (a WebView2 showed the caret before the value, #11204).
 fn caret_without_the_person(h: &Harness, at: usize) {
-    let id = egui::Id::new("sc_dim_edit");
+    let id = egui::Id::unique("sc_dim_edit");
     let mut state = egui::TextEdit::load_state(&h.ctx, id).unwrap_or_default();
     state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(at))));
     state.store(&h.ctx, id);
@@ -1352,7 +1352,7 @@ fn held_click(h: &mut Harness, at: [f64; 2], frames: usize) {
 
 /// The value field's caret and selection end (characters).
 fn caret(h: &Harness) -> Option<(usize, usize)> {
-    egui::TextEdit::load_state(&h.ctx, egui::Id::new("sc_dim_edit"))
+    egui::TextEdit::load_state(&h.ctx, egui::Id::unique("sc_dim_edit"))
         .and_then(|s| s.cursor.char_range())
         .map(|r| (r.primary.index.0, r.secondary.index.0))
 }
@@ -1373,7 +1373,7 @@ fn typed_digits_replace_the_proposed_value_whatever_moved_the_caret() {
         h.frames(12);
         caret_without_the_person(&h, 0);
         h.frames(2);
-        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")), "held {held}");
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")), "held {held}");
         keys(&mut h, "400");
         assert_eq!(crate::dim_view::draft_preview().map(|d| d.0).as_deref(), Some("400"), "held {held}");
         h.step(&json!({"key":"Enter"})).unwrap();

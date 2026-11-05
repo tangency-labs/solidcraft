@@ -1983,7 +1983,7 @@ mod tests {
                                 };
                                 let mut out = ctx.run_ui(raw, |ui| {
                                     let rect = ui.max_rect();
-                                    let resp = ui.interact(rect, ui.id().with("drag-zoom"), egui::Sense::click_and_drag());
+                                    let resp = ui.interact(rect, ui.scope_id().with("drag-zoom"), egui::Sense::click_and_drag());
                                     super::handle(&mut app, ui, rect, &resp, caps);
                                 });
                                 out.textures_delta.clear();

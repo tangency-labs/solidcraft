@@ -185,7 +185,7 @@ fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
             crate::icons::paint_ink(p, dot, "settings", dim(t.on_accent));
         }
     }
-    let kind = if tile { egui::WidgetType::Checkbox } else { egui::WidgetType::RadioButton };
+    let kind = if tile { egui::Role::CheckBox } else { egui::Role::RadioButton };
     response.widget_info(|| egui::WidgetInfo::selected(kind, enabled, card.selected, card.label));
     scenario::publish_target(&format!("prefs:card:{}", card.label), rect);
     let response = response.backing_on_hover_text(card.label);
@@ -372,7 +372,7 @@ pub(crate) fn preset_card(
         p.circle_filled(centre, t.space_8 + 1.0, dim(t.form_primary));
         tick(p, Rect::from_center_size(centre, vec2(t.space_12, t.space_12)), dim(t.on_accent));
     }
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, enabled, selected, name));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, enabled, selected, name));
     scenario::publish_target(&format!("prefs:preset:{name}"), rect);
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
@@ -387,7 +387,7 @@ pub(crate) fn help_icon(ui: &mut Ui, text: &str) -> Response {
     p.circle_stroke(rect.center(), size * 0.5 - 0.5, Stroke::new(1.0, ink));
     p.circle_filled(pos2(rect.center().x, rect.top() + size * 0.3), 0.9, ink);
     p.line_segment([pos2(rect.center().x, rect.top() + size * 0.46), pos2(rect.center().x, rect.bottom() - size * 0.24)], Stroke::new(1.2, ink));
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
     scenario::publish_target("prefs:help_icon", rect);
     response.backing_on_hover_text(text)
 }
@@ -460,7 +460,7 @@ fn carousel_arrow(ui: &mut Ui, size: egui::Vec2, direction: f32, enabled: bool, 
     if enabled && response.has_focus() {
         p.rect_stroke(rect.expand(t.space_2), f32::from(t.radius_lg) + t.space_2, Stroke::new(t.space_2, t.form_primary), StrokeKind::Outside);
     }
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
     scenario::publish_target(&format!("prefs:carousel:{label}"), rect);
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
@@ -534,7 +534,7 @@ pub(crate) fn settings_plugin_card(
         let icon = Rect::from_center_size(pos2(folder_rect.left() + t.space_8 + t.space_14 / 2.0, center_y), vec2(t.space_14, t.space_14));
         crate::icons::paint_ink(ui.painter(), icon, "folder", t.form_dim);
         ui.painter().galley(pos2(icon.right() + t.space_6, center_y - folder_galley.size().y / 2.0), folder_galley, t.form_dim);
-        folder.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), folder_label));
+        folder.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), folder_label));
         if folder.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
