@@ -4265,9 +4265,7 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
         };
         if let Some(mut inputs) = rebuilt {
             let keep = matches!(dialog.kind, Kind::Move { .. });
-            if keep
-                && let (Some(fresh), Some(first)) = (dialog.inputs.first(), inputs.first_mut())
-            {
+            if keep && let (Some(fresh), Some(first)) = (dialog.inputs.first(), inputs.first_mut()) {
                 first.items = fresh.items.clone();
             }
             dialog.inputs = inputs;
