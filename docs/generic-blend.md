@@ -324,8 +324,11 @@ ball's sphere. Setback: the rounds stop short and a 2n-sided hole is filled.*
   - uses no least squares and no averaging.
 
   The default setback is the larger of 1.5 r and the contact-line minimum plus 0.25 r. Where that
-  does not certify, the automatic setback grows to the smallest common scale that certifies (found by
-  bisection; certification is monotone in scale), up to 2×. A setback the user gives explicitly that
+  does not certify, the automatic setback grows to the smallest common scale that certifies, up to 2×.
+  That scale is found by bisecting in steps of a thousandth, within a fixed budget of attempts, and
+  the search assumes certification is monotone in scale (every scale above one that certifies
+  certifies too). That assumption is checked on a grid of cases, not proved; replacing the budgeted
+  search with a proved rule is open work. A setback the user gives explicitly that
   does not fit or does not certify is refused, naming the size that does. No uncertified fill is ever
   returned. At a convex edge meeting concave ones, any setback blend dips under the faces' planes
   regardless of representation [44]; there the spring curve between adjacent convex and concave
