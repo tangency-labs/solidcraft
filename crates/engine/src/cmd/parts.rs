@@ -10,31 +10,48 @@
 //! washer, the top of a set screw or pin); the shank runs down −z.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::{bad, num, str_, vec3};
+use crate::schema::parts::{InsertedPart, PartFamily, PartsInsertParams, PartsLibrary, PartsLibraryParams, PartsResizeParams, ResizedPart};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const LIBRARY_CONTRACT: TypedContract<PartsLibraryParams> = TypedContract::new();
+const INSERT_CONTRACT: TypedContract<PartsInsertParams> = TypedContract::new();
+const RESIZE_CONTRACT: TypedContract<PartsResizeParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("parts.library", "Standard Parts", library)
+    CommandSpec::new("parts.library", "Standard Parts", crate::checked!("parts.library", library))
         .icon("library")
         .noundo()
+        .contract(&LIBRARY_CONTRACT)
+        .output(output_schema_for::<PartsLibrary>)
         .params("family? → families (name, standard, system: metric|inch, sizes, lengths) and, with family, each size's dimensions (mm)"),
-    CommandSpec::new("parts.fastener", "Insert Fastener", insert_atomic)
+    CommandSpec::new("parts.fastener", "Insert Fastener", crate::checked!("parts.fastener", insert_atomic))
         .at("SOLID", "INSERT")
         .icon("fastener")
+        .contract(&INSERT_CONTRACT)
+        .output(output_schema_for::<InsertedPart>)
         .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction?, name?"),
-    CommandSpec::new("parts.insert", "Insert Part", insert_atomic).icon("fastener").params(
-        "family (socket_head_cap_screw | button_head_cap_screw | hex_bolt | hex_nut | washer | set_screw | dowel_pin | bearing | \
+    CommandSpec::new("parts.insert", "Insert Part", crate::checked!("parts.insert", insert_atomic))
+        .icon("fastener")
+        .contract(&INSERT_CONTRACT)
+        .output(output_schema_for::<InsertedPart>)
+        .params(
+            "family (socket_head_cap_screw | button_head_cap_screw | hex_bolt | hex_nut | washer | set_screw | dowel_pin | bearing | \
          hex_cap_screw_inch | hex_nut_inch | washer_sae | washer_uss); size (\"M6\", \"608\" for bearings, \"1/2-13 UNC\" for inch screws and nuts, \
          \"1/2\" for inch washers); length? (mm, inch parts too; screws, bolts, set screws, pins; default a standard length near 2.5 d); \
          at?: [x,y,z] on a hole's rim or wall (the part seats on the hole's face with a rigid joint), or a list of them (one component, \
          placed and seated once per hole) | point?: [x,y,z] with direction?: [x,y,z] (no joint); name? → component, occurrence, joint?, \
          and with at: occurrences, joints (one per hole, in pick order)",
-    ),
-    CommandSpec::new("parts.resize", "Change Part Size", resize_atomic)
+        ),
+    CommandSpec::new("parts.resize", "Change Part Size", crate::checked!("parts.resize", resize_atomic))
         .icon("scale")
+        .contract(&RESIZE_CONTRACT)
+        .output(output_schema_for::<ResizedPart>)
         .params("component: id|name of an inserted part; size?; length? — rebuilds it (joints keep it seated)"),
 ];
 
@@ -571,7 +588,7 @@ fn build(s: &mut Session, sh: &Shape) -> Result<()> {
 }
 
 fn library(_s: &mut Session, p: &Value) -> Result<Value> {
-    let fam = |id: &str| -> Value {
+    let fam = |id: &str| -> PartFamily {
         let mut sizes: Vec<Value> = match id {
             "socket_head_cap_screw" => SHCS.iter().map(|r| json!({"size": r.0, "d": metric(r.0).map(|m| m.0), "pitch": metric(r.0).map(|m| m.1), "head_diameter": r.1, "head_height": r.2, "socket": r.3, "socket_depth": r.4})).collect(),
             "button_head_cap_screw" => BHCS.iter().map(|r| json!({"size": r.0, "d": metric(r.0).map(|m| m.0), "pitch": metric(r.0).map(|m| m.1), "head_diameter": r.1, "head_height": r.2, "socket": r.3, "socket_depth": r.4})).collect(),
@@ -611,13 +628,22 @@ fn library(_s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         let system = if is_inch(id) { "inch" } else { "metric" };
-        json!({"family": id, "name": name, "standard": standard, "system": system, "sizes": sizes, "lengths": lengths})
+        PartFamily { family: id.into(), name: name.into(), standard: standard.into(), system: system.into(), sizes, lengths }
     };
     match str_(p, "family") {
-        Some(f) if FAMILIES.iter().any(|x| x.0 == f) => Ok(fam(f)),
+        Some(f) if FAMILIES.iter().any(|x| x.0 == f) => {
+            reply("parts.library", PartsLibrary { families: None, family: Some(fam(f)), param_warnings: Vec::new() })
+        }
         Some(f) => Err(bad("parts.library", format!("unknown part family `{f}`"))),
-        None => Ok(json!({"families": FAMILIES.iter().map(|f| fam(f.0)).collect::<Vec<_>>()})),
+        None => reply(
+            "parts.library",
+            PartsLibrary { families: Some(FAMILIES.iter().map(|f| fam(f.0)).collect()), family: None, param_warnings: Vec::new() },
+        ),
     }
+}
+
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn part_name(family: &str, size: &str, sh: &Shape) -> String {
@@ -746,14 +772,26 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     s.doc_mut().parts.insert(comp, solidcraft_doc::StandardPart { family: family.clone(), size: size.clone(), length: shape_len(&sh) });
     set_identity(s, comp, identity(&family, &size, &sh), None);
     run(s, "component.activate", json!({"component": active}))?;
-    let mut out = json!({"component": comp, "occurrence": occ, "name": name});
+    let mut out = InsertedPart {
+        component: comp,
+        occurrence: occ,
+        name: name.clone(),
+        joint: None,
+        occurrences: None,
+        joints: None,
+        param_warnings: Vec::new(),
+    };
     if !holes.is_empty() {
         // The first hole has the placement the component came with; each further hole places the
         // same part again. All are made before any is seated, while each is still at the part's
         // own origin, where the joint below takes the part's seating point to be.
-        let mut occurrences = vec![json!(occ)];
+        let mut occurrences = vec![occ];
         for _ in 1..holes.len() {
-            occurrences.push(run(s, "occurrence.copy", json!({"component": comp}))?["occurrence"].clone());
+            occurrences.push(
+                run(s, "occurrence.copy", json!({"component": comp}))?["occurrence"]
+                    .as_u64()
+                    .ok_or_else(|| bad(cmd, "the copy has no occurrence"))?,
+            );
         }
         let mut joints = Vec::new();
         for (i, ((a, h), o)) in holes.into_iter().zip(&occurrences).enumerate() {
@@ -765,11 +803,11 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
                 "joint.create",
                 json!({"type": "rigid", "a": {"occurrence": h, "circle": a}, "b": {"occurrence": o, "point": [0, 0, 0], "z": [0, 0, -1]}, "name": seat}),
             )?;
-            joints.push(j["joint"].clone());
+            joints.push(j["joint"].as_u64().ok_or_else(|| bad(cmd, "the joint has no id"))?);
         }
-        out["joint"] = joints.first().cloned().unwrap_or(Value::Null);
-        out["occurrences"] = Value::Array(occurrences);
-        out["joints"] = Value::Array(joints);
+        out.joint = joints.first().copied();
+        out.occurrences = Some(occurrences);
+        out.joints = Some(joints);
     } else if let Some(pt) = p.get("point").and_then(vec3) {
         // Placed at a point, its +z along `direction`.
         let dir = p.get("direction").and_then(vec3).and_then(|d| d.normalized()).unwrap_or(Vec3::Z);
@@ -781,11 +819,14 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
         );
         let mut m = m;
         m[3] = [pt.x, pt.y, pt.z, 1.0];
+        if !solidcraft_doc::is_placement(&m) {
+            return Err(bad(cmd, "`point` must be within 1e9 mm and `direction` finite"));
+        }
         if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ) {
             o.transform = m;
         }
     }
-    Ok(out)
+    reply(cmd, out)
 }
 
 /// The most holes one insert seats a part in.
@@ -811,7 +852,7 @@ fn hole_picks(p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
 /// point on the hole's axis level with it (the same for every pick on one rim).
 fn hole_wall(s: &Session, a: Vec3) -> Option<(Vec3, Vec3)> {
     // Picks are in world coordinates, including rims on already placed standard parts.
-    let st = s.world_state();
+    let st = s.world_state().ok()?;
     let dirs = [Vec3::Z * -1.0, Vec3::Z, Vec3::X, Vec3::X * -1.0, Vec3::Y, Vec3::Y * -1.0];
     for step in [0.2, 0.5, 1.0, 2.0] {
         for b in &st.bodies {
@@ -883,12 +924,13 @@ fn resize(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(e) = s.model.results.iter().find_map(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
-    Ok(json!({"component": comp, "name": name, "size": size, "length": shape_len(&sh)}))
+    reply(cmd, ResizedPart { component: comp, name, size, length: shape_len(&sh), param_warnings: Vec::new() })
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
+    use solidcraft_geom::prelude::*;
 
     use crate::Session;
 
@@ -899,8 +941,8 @@ mod tests {
         }
     }
 
-    fn bbox(s: &Session, prefix: &str) -> (solidcraft_geom::Vec3, solidcraft_geom::Vec3) {
-        let st = s.world_state();
+    fn bbox(s: &Session, prefix: &str) -> (solidcore_record::Vec3, solidcore_record::Vec3) {
+        let st = s.world_state().unwrap();
         let comp = s.doc.components.iter().find(|c| c.name.starts_with(prefix)).map(|c| c.id).unwrap_or(0);
         let b = st
             .bodies
@@ -1070,7 +1112,7 @@ mod tests {
         // The profile: full width at the rim and up the flank (0.15 k = 0.50 high), drawing in
         // over the crown (r = 4.62 halfway up the head), and a flat top of 0.7 s = 2.8, which
         // leaves a ring of material around the socket's corners at r = 2.31.
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let widest = |above: f64| {
             st.bodies.iter().flat_map(|b| b.mesh().positions.clone()).filter(|p| p.z > above).map(|p| p.x.hypot(p.y)).fold(0.0, f64::max)
         };
@@ -1165,8 +1207,8 @@ mod tests {
         assert_eq!(Some(joint.a.occurrence), washer["occurrence"].as_u64());
         // The seating face is X = 41.6: the 20 mm shank runs along -X and the 8 mm head along +X.
         let (lo, hi) = bbox(&s, "SHCS M8x20");
-        assert!(lo.dist(solidcraft_geom::Vec3::new(21.6, 43.5, 53.5)) < 1e-6, "{lo:?}");
-        assert!(hi.dist(solidcraft_geom::Vec3::new(49.6, 56.5, 66.5)) < 1e-6, "{hi:?}");
+        assert!(lo.dist(solidcore_record::Vec3::new(21.6, 43.5, 53.5)) < 1e-6, "{lo:?}");
+        assert!(hi.dist(solidcore_record::Vec3::new(49.6, 56.5, 66.5)) < 1e-6, "{hi:?}");
     }
 
     /// Several holes in one insert: one component placed and seated once per hole, in one undo
@@ -1200,7 +1242,7 @@ mod tests {
         assert_eq!(r["joint"], r["joints"][0]);
         // Each placement sits in its own hole: the head flush on the top face, the shank down
         // the hole's axis.
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let mut seated: Vec<(f64, f64)> = Vec::new();
         for b in st.bodies.iter().filter(|b| s.doc.model_body_component(b) == comp) {
             let (lo, hi) = (b.mesh().bounds().min, b.mesh().bounds().max);
@@ -1271,8 +1313,8 @@ mod tests {
                     assert!(s.model.state().threads.iter().any(|t| t.designation == "M8" && (t.pitch - 1.25).abs() < 1e-9), "{family} {units}");
                 }
                 if family == "dowel_pin" {
-                    assert!(b.0.dist(solidcraft_geom::Vec3::new(10., 46., 56.)) < 1e-6, "{b:?}");
-                    assert!(b.1.dist(solidcraft_geom::Vec3::new(40., 54., 64.)) < 1e-6, "{b:?}");
+                    assert!(b.0.dist(solidcore_record::Vec3::new(10., 46., 56.)) < 1e-6, "{b:?}");
+                    assert!(b.1.dist(solidcore_record::Vec3::new(40., 54., 64.)) < 1e-6, "{b:?}");
                 }
                 bounds.push(b);
             }

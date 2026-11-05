@@ -689,6 +689,7 @@ mod tests {
     use super::*;
     use crate::Services;
     use solidcraft_engine::Session;
+    use solidcraft_engine::geom::prelude::*;
     use solidcraft_engine::render::Camera;
 
     /// The camera math the page applies the motion with (`navigation::device`): `sketch` keeps

@@ -3,7 +3,8 @@
 //! the one piece under it.
 
 use serde_json::{Value, json};
-use solidcraft_engine::geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::Shape;
 
 use crate::scenario::Harness;
@@ -117,7 +118,7 @@ fn run(h: &mut Harness, id: &str, p: Value) -> Value {
 
 fn sketch(h: &Harness) -> solidcraft_engine::sketch::Sketch {
     let sid = h.app.session.active_sketch.expect("sketch mode");
-    h.app.session.world_state().sketch(sid).expect("the sketch").sketch.clone()
+    h.app.session.world_state().unwrap().sketch(sid).expect("the sketch").sketch.clone()
 }
 
 fn screen(h: &mut Harness, x: f64, y: f64) -> egui::Pos2 {
@@ -170,18 +171,18 @@ fn trimming_construction_source_and_offsets_by_click_or_drag_is_independent() {
         let before = h.app.session.doc.to_json();
         let undo = h.app.session.undo.len();
         if drag {
-            let a = screen(&mut h, 4.0, 5.0);
-            let b = screen(&mut h, 15.0, 5.0);
+            let a = screen(&mut h, 15.0, 5.0);
+            let b = screen(&mut h, -10.0, 5.0);
             let mut path = vec![a];
             path.extend(steps(a, b, 16));
-            let c = screen(&mut h, -10.0, 5.0);
+            let c = screen(&mut h, 15.0, 5.0);
             path.extend(steps(b, c, 16));
             path.extend(steps(c, b, 16));
             press_and_move(&mut h, &path);
             assert_eq!(h.app.session.doc.to_json(), before);
             release(&mut h, b);
         } else {
-            let points = [[10.0, 10.0], [10.0 - 2f64.sqrt(), 10.0 + 2f64.sqrt()], [10.0 + 2f64.sqrt(), 10.0 - 2f64.sqrt()]];
+            let points = [[10.0 + 2f64.sqrt(), 10.0 - 2f64.sqrt()], [10.0 - 2f64.sqrt(), 10.0 + 2f64.sqrt()], [10.0, 10.0]];
             for point in points {
                 h.step(&json!({"click":{"sketch":point}})).unwrap();
                 h.frames(2);

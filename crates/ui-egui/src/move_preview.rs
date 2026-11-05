@@ -3,11 +3,13 @@
 //! the move's transform. The preview from a scratch design evaluated the move and meshed the
 //! bodies again for every change, so while the triad was dragged the part trailed the arrow by
 //! one evaluation, longer for a larger part.
+use solidcraft_engine::geom::prelude::*;
 use std::sync::Arc;
 
 use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::{Document, Mat, apply_point, apply_vector, expr::Kind, rigid};
-use solidcraft_engine::geom::{Aabb3, Mesh, Vec3};
+use solidcraft_engine::geom::{Aabb3, Mesh};
 
 use crate::{
     SolveApp,
@@ -94,7 +96,7 @@ impl MovePreview {
         }
         if self.cached.as_ref().is_none_or(|c| c.revision != app.session.revision || !Arc::ptr_eq(&c.document, &app.session.doc) || c.names != names)
         {
-            let state = app.session.world_state();
+            let state = crate::open_meshing::session_world(&app.session);
             let meshes: Vec<Arc<Mesh>> = names.iter().map(|n| state.body(n).map(|b| b.mesh())).collect::<Option<_>>()?;
             if meshes.iter().map(|m| m.triangles.len()).sum::<usize>() > MAX_TRIANGLES {
                 return None;
@@ -196,7 +198,7 @@ mod tests {
         // The Move feature on the same body: the preview's extent is the moved body's.
         let mut s = app.session.scratch();
         s.execute("solid.move", &cmds[0].1).unwrap();
-        let moved = s.world_state().body("Plate").unwrap().mesh().bounds();
+        let moved = crate::open_meshing::session_world(&s).body("Plate").unwrap().mesh().bounds();
         assert!(near(built.bounds.min, moved.min) && near(built.bounds.max, moved.max), "{:?} vs {moved:?}", built.bounds);
         // A copy keeps the original shown.
         let copy = [("solid.move".to_string(), json!({"bodies": ["Plate"], "translate": [0, 0, 10], "copy": true}))];

@@ -43,7 +43,7 @@ fn render_workspace_shot_and_scene_widgets_fit_inspector_content_width() {
     setups::save(&mut h.app).unwrap();
     let name = h.app.render_workspace.view.name.clone();
     super::super::shot::choose_aspect(&mut h.app, &name, 0).unwrap();
-    h.app.cam.target = solidcraft_engine::geom::Vec3::new(-18.0, 125.5, -18.0);
+    h.app.cam.target = solidcore_record::Vec3::new(-18.0, 125.5, -18.0);
     let ctx = crate::fonts::test_context();
     let mut textures = std::collections::HashMap::new();
     for width in [350.0, 320.0] {
@@ -1838,7 +1838,8 @@ fn browser_shot_remove_keeps_confirmation_and_rejects_stale_actions() {
 #[test]
 fn appearance_inspector_targets_and_chain_follow_body_face_and_component() {
     use super::selection_appearance::{chains, inspected_look, targets};
-    use solidcraft_engine::{Sel, geom::Vec3};
+    use solidcore_record::Vec3;
+    use solidcraft_engine::Sel;
     let mut h = Harness::new();
     h.app.run("component.create", json!({"name":"Part"})).unwrap();
     h.app.run("solid.box", json!({"body_name":"Subject","length":20,"width":15,"height":10})).unwrap();
@@ -1977,7 +1978,8 @@ fn appearance_inspector_finish_presets_mixed_set_all_and_clear_use_existing_assi
 
 #[test]
 fn appearance_inspector_real_controls_switch_targets_inspect_chain_and_edit_finish() {
-    use solidcraft_engine::{Sel, geom::Vec3};
+    use solidcore_record::Vec3;
+    use solidcraft_engine::Sel;
     let mut h = fixture();
     h.app.run("appearance.assign", json!({"bodies":["Subject"],"appearance":"ABS - Red"})).unwrap();
     let face = h.app.run("model.faces", json!({"body":"Subject"})).unwrap()["faces"]
@@ -2303,7 +2305,8 @@ fn appearance_inspector_shared_picker_has_no_outer_hex_editor_and_keeps_mixed_va
 
 #[test]
 fn appearance_inspector_component_and_face_overrides_remove_to_material_from_real_controls() {
-    use solidcraft_engine::{Sel, geom::Vec3};
+    use solidcore_record::Vec3;
+    use solidcraft_engine::Sel;
     let mut h = Harness::new();
     h.call("ui.resize", json!({"width":1440,"height":1000}));
     h.app.run("component.create", json!({"name":"Part"})).unwrap();
@@ -2516,9 +2519,7 @@ fn appearance_editor_e2_sections_are_ordered_collapsed_and_expand_for_each_metho
         assert_eq!(h.app.session.doc.to_json(), before);
         assert!(h.app.render_workspace.view.materials.bindings.is_empty(), "opening never installs temporary bindings");
     }
-    for selection in
-        [Sel::Face { body: "Subject".into(), index: 0, point: solidcraft_engine::geom::Vec3::ZERO }, Sel::Body { name: "Subject".into() }]
-    {
+    for selection in [Sel::Face { body: "Subject".into(), index: 0, point: solidcore_record::Vec3::ZERO }, Sel::Body { name: "Subject".into() }] {
         h.app.session.selection = vec![selection];
         {
             let selection = super::super::object_selection(&h.app);

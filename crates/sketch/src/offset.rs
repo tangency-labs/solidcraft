@@ -1,7 +1,8 @@
 //! Associative offsets keep their output entity ids while their source curves move.
 use crate::{ConstraintKind, CurveKind, Shape, Sketch, SketchError, intersections};
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OffsetChain {
@@ -247,7 +248,7 @@ impl Sketch {
                         let (a, b) = (self.point(a).ok_or_else(bad)?, self.point(b).ok_or_else(bad)?);
                         let (a, b) = if *forward { (a, b) } else { (b, a) };
                         let n = (b - a).normalized().ok_or_else(bad)?.perp() * offset.distance;
-                        (Shape::Line { a: a + n, b: b + n }, a + n, b + n)
+                        (Shape::Line { a: a + n, b: b + n }, a + n, b + n, None)
                     }
                     CurveKind::Arc { c, a, b } => {
                         let (c, a, b) = (self.point(c).ok_or_else(bad)?, self.point(a).ok_or_else(bad)?, self.point(b).ok_or_else(bad)?);
@@ -258,7 +259,7 @@ impl Sketch {
                         let a = c + (a - c).normalized().ok_or_else(bad)? * r;
                         let b = c + (b - c).normalized().ok_or_else(bad)? * r;
                         let (a, b) = if *forward { (a, b) } else { (b, a) };
-                        (Shape::Round { c, r, start: 0.0, sweep: std::f64::consts::TAU }, a, b)
+                        (Shape::Round { c, r, start: 0.0, sweep: std::f64::consts::TAU }, a, b, Some(*forward))
                     }
                     CurveKind::Circle { c, r } => {
                         let c = self.point(c).ok_or_else(bad)?;
@@ -282,16 +283,32 @@ impl Sketch {
             if pieces.is_empty() {
                 continue;
             }
+            // Which way a piece runs at `p`: a line along itself, an arc anticlockwise round its
+            // centre when it follows its source forward.
+            let along = |piece: &(Shape, Vec2, Vec2, Option<bool>), p: Vec2| match (&piece.0, piece.3) {
+                (Shape::Line { a, b }, _) => *b - *a,
+                (Shape::Round { c, .. }, Some(true)) => (p - *c).perp(),
+                (Shape::Round { c, .. }, Some(false)) => (*c - p).perp(),
+                _ => Vec2::new(0.0, 0.0),
+            };
             let joint = |i: usize, j: usize| -> Result<Vec2, SketchError> {
                 let (x, y) = (pieces.get(i).ok_or_else(bad)?, pieces.get(j).ok_or_else(bad)?);
                 if x.2.dist(y.1) < 1e-6 {
                     return Ok(x.2);
                 }
                 let guess = (x.2 + y.1) * 0.5;
-                intersections(&x.0, &y.0)
-                    .into_iter()
-                    .min_by(|a, b| a.dist(guess).total_cmp(&b.dist(guess)))
-                    .ok_or_else(|| SketchError::Invalid("the offset curves no longer meet".into()))
+                let mut found = intersections(&x.0, &y.0);
+                found.sort_by(|a, b| a.dist(guess).total_cmp(&b.dist(guess)));
+                // Where the sources touch, as two tangent arcs do at a dog bone's notch (#10984),
+                // both crossings are as far from the corner and rounding chose one. The pieces
+                // overlap there: they meet where both are cut short, not where both run on and
+                // cross into a loop.
+                let cut_short = |p: Vec2| (p - x.2).dot(along(x, x.2)) < 0.0 && (p - y.1).dot(along(y, y.1)) > 0.0;
+                match found.as_slice() {
+                    [p, q, ..] if (q.dist(guess) - p.dist(guess)).abs() <= 1e-9 * (1.0 + p.dist(*q)) && !cut_short(*p) && cut_short(*q) => Ok(*q),
+                    [p, ..] => Ok(*p),
+                    [] => Err(SketchError::Invalid("the offset curves no longer meet".into())),
+                }
             };
             let n = pieces.len();
             let mut joints = vec![if offset.closed { joint(n - 1, 0)? } else { pieces.first().ok_or_else(bad)?.1 }];

@@ -29,7 +29,7 @@ fn pending_and_reverted_moves_replace_cached_transforms() {
     h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[20,0,0],"capture":false})).unwrap();
     let moved = super::model_placement(&mut h.app, &[occurrence]).unwrap();
     assert!(!Arc::ptr_eq(&first, &moved));
-    assert!((solidcraft_engine::doc::apply_point(&moved.world, solidcraft_engine::geom::Vec3::ZERO).x - 20.0).abs() < 1e-9);
+    assert!((solidcraft_engine::doc::apply_point(&moved.world, solidcore_record::Vec3::ZERO).x - 20.0).abs() < 1e-9);
     h.app.run("component.revert_position", json!({"occurrences":[occurrence]})).unwrap();
     let reverted = super::model_placement(&mut h.app, &[occurrence]).unwrap();
     assert!(!Arc::ptr_eq(&moved, &reverted));
@@ -95,16 +95,133 @@ fn a_face_picked_in_the_viewport_opens_the_browser_to_its_placements_body() {
     let (one, two) = (super::occurrence_key(&[occurrence]), super::occurrence_key(&[copy]));
     h.app.tree.collapsed.extend([one.clone(), two.clone(), format!("{two}/bodies")]);
     h.frames(2);
-    assert!(!h.app.tree.order.contains(&format!("b:{second}")), "the body's row is closed away");
-    let face = Sel::Face { body: second.clone(), index: 0, point: solidcraft_engine::geom::Vec3::new(55.0, 5.0, 10.0) };
+    assert!(
+        !h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{second}")),
+        "the body's row is closed away"
+    );
+    let face = Sel::Face { body: second.clone(), index: 0, point: solidcore_record::Vec3::new(55.0, 5.0, 10.0) };
     crate::viewport::select(&mut h.app, Some(face), false, false);
     assert_eq!(h.app.tree.reveal.as_deref(), Some(second.as_str()));
     h.frames(2);
     assert!(h.app.tree.reveal.is_none(), "revealed");
     assert!(!h.app.tree.collapsed.contains(&two) && !h.app.tree.collapsed.contains(&format!("{two}/bodies")));
     assert!(h.app.tree.collapsed.contains(&one), "the other placement stays as it was");
-    assert!(h.app.tree.order.contains(&format!("b:{second}")), "the row is drawn");
-    assert!(!h.app.tree.order.contains(&format!("b:{first}")), "the other placement's row stays closed away");
+    assert!(
+        h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{second}")),
+        "the row is drawn"
+    );
+    assert!(
+        !h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{first}")),
+        "the other placement's row stays closed away"
+    );
+}
+
+/// #8768: by default the Browser's folders start open, as before, and placements as "Components
+/// start open" says (#9274): with it on, a placement lists its body at once. Browser rows start
+/// closed (Preferences › Layout) closes the rows nobody opened, placements too whatever
+/// "Components start open" says, and turning it off again opens them.
+#[test]
+fn browser_rows_start_closed_closes_placements_even_with_components_start_open() {
+    let (mut h, _, occurrence) = fixture();
+    assert!(!h.app.preferences.browser_rows_start_closed, "off by default");
+    assert_eq!(h.call("ui.prefs", json!({"browser_components_open": true}))["ok"], true);
+    let body = super::model_placement(&mut h.app, &[occurrence]).unwrap().bodies[0].world.clone();
+    let row = format!("b:{body}");
+    h.app.ui.show_browser = true;
+    h.frames(2);
+    assert!(
+        h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&row),
+        "the placement starts open and lists its body"
+    );
+    assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": true}))["ok"], true);
+    h.frames(2);
+    assert!(
+        !h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&row),
+        "with the preference on, the placement starts closed"
+    );
+    assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": false}))["ok"], true);
+    h.frames(2);
+    assert!(h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&row), "off again, it is open again");
+}
+
+/// #8768: while the Browser's rows start closed (Preferences › Layout), a pick in the 3D view
+/// opens, closes and scrolls nothing, and neither the pick nor a body under the pointer has its
+/// placement looked up to mark the rows above it: on a large assembly that lookup names every
+/// placement again after each edit. With the preference off again, the rows above the hovered
+/// body are marked (#3009); a picked face marks its feature's row, not its body's (#9848).
+#[test]
+fn a_pick_in_the_viewport_leaves_the_browser_alone_while_its_rows_start_closed() {
+    let (mut h, _, occurrence) = fixture();
+    assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": true}))["ok"], true);
+    let copy = h.app.run("occurrence.copy", json!({"occurrence":occurrence,"translate":[50,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+    let second = super::model_placement(&mut h.app, &[copy]).unwrap().bodies[0].world.clone();
+    h.app.ui.show_browser = true;
+    // Both placements open by hand, their Bodies folders closed as they start.
+    h.app.tree.expanded.extend([super::occurrence_key(&[occurrence]), super::occurrence_key(&[copy])]);
+    h.frames(2);
+    let (collapsed, expanded, order) = (
+        h.app.tree.collapsed.clone(),
+        h.app.tree.expanded.clone(),
+        h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.clone(),
+    );
+    let point = solidcore_record::Vec3::new(55.0, 5.0, 10.0);
+    crate::viewport::select(&mut h.app, Some(Sel::Face { body: second.clone(), index: 0, point }), false, false);
+    assert!(h.app.tree.reveal.is_none(), "nothing to scroll to");
+    h.frames(3);
+    assert!(!h.app.session.selection.is_empty(), "the face is picked");
+    assert_eq!((&h.app.tree.collapsed, &h.app.tree.expanded), (&collapsed, &expanded), "every row stays open or closed as it was");
+    assert_eq!(h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order, order, "the same rows are drawn");
+    h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: second.clone(), index: 0, point });
+    let lit = super::Lit::of(&mut h.app);
+    assert!(lit.paths.is_empty(), "no row above the picked or hovered body is marked: {:?}", lit.paths);
+    assert!(!h.app.tree.model.as_ref().unwrap().body_paths_walked(), "the placements were not walked for the pick or the pointer");
+    assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": false}))["ok"], true);
+    // The call's frames took the hover from the pointer, which is elsewhere.
+    h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: second.clone(), index: 0, point });
+    let lit = super::Lit::of(&mut h.app);
+    assert_eq!(lit.paths, [vec![copy]], "the placement above the hovered body; the picked face marks its feature");
+}
+
+/// #8768: while the Browser's rows start closed, a new design's Bodies and Sketches folders list
+/// nothing until their arrow opens them, and Find in Browser opens the Bodies folder that holds
+/// the body it finds.
+#[test]
+fn with_rows_starting_closed_a_designs_folders_open_with_their_arrow_or_find_in_browser() {
+    let mut h = crate::scenario::Harness::new();
+    assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": true}))["ok"], true);
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Sketch1"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"})).unwrap();
+    h.app.ui.show_browser = true;
+    h.frames(2);
+    let drawn = |label: &str| super::drawn_rows().iter().any(|row| row.0 == label);
+    let body_row = "b:Block".to_string();
+    assert!(drawn("Bodies") && drawn("Sketches"), "the folders are listed");
+    assert!(!super::is_open(&h.app, "c0/bodies", false) && !super::is_open(&h.app, "c0/sketches", false));
+    assert!(
+        !h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&body_row),
+        "the body's row is closed away"
+    );
+    assert!(!drawn("Sketch1"), "so is the sketch's");
+    click(&mut h, "fold:Sketches");
+    h.frames(1);
+    assert!(drawn("Sketch1"), "the arrow opens the Sketches folder");
+    assert!(
+        !h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&body_row),
+        "the Bodies folder stays closed"
+    );
+
+    crate::context_menu::run_item(
+        &mut h.app,
+        &crate::context_menu::Item::action("ui.findBrowser", "", "").with(json!({"body":"Block"})),
+        egui::Pos2::ZERO,
+    );
+    h.frames(2);
+    assert!(super::is_open(&h.app, "c0/bodies", false), "Find in Browser opens the Bodies folder");
+    assert!(
+        h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&body_row) && h.app.tree.reveal.is_none(),
+        "and scrolls to the body's row"
+    );
 }
 
 /// Hovering a placement row lights its whole subtree: the subtree is walked once per model, not
@@ -207,9 +324,9 @@ fn render_browser_swatch_resolves_face_body_component_then_physical_material() {
     assert_eq!(swatch(&h).name, "ABS - Red");
     h.app.run("appearance.assign", json!({"bodies":["Body1"],"appearance":"ABS - Blue"})).unwrap();
     assert_eq!(swatch(&h).name, "ABS - Blue");
-    let point = solidcraft_engine::geom::Vec3::new(0.0, 5.0, 5.0);
+    let point = solidcore_record::Vec3::new(0.0, 5.0, 5.0);
     h.app.run("appearance.assign", json!({"body":"Body1","faces":[point],"appearance":"ABS - Red"})).unwrap();
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let body = state.body("Body1").unwrap();
     let face = solidcraft_engine::doc::appearance::face_index_at(body, point).unwrap();
     h.app.run("select.set", json!({"items":[Sel::Face{body:"Body1".into(),index:face,point}]})).unwrap();
@@ -499,4 +616,62 @@ fn a_design_saved_before_nested_groups_keeps_its_browser_order() {
         let rows = super::arrange(&h.app.session.doc, 0, "bodies", "c0", super::entries(&h.app, 0, "bodies"));
         assert_eq!(drawn(&rows), expected, "groups {groups:?}, saved order {saved:?}");
     }
+}
+
+/// #9274: placements start closed, so a large assembly opens as a short list. Opening one shows
+/// its own placements still closed, and closing and reopening it leaves them as they were.
+/// Expand All opens them, and the "Components start open" preference opens every one as before.
+#[test]
+fn placements_start_closed_and_the_preference_opens_them_as_before() {
+    fn drawn(h: &mut crate::scenario::Harness) -> Vec<(Vec<u64>, bool)> {
+        h.frames(2);
+        super::drawn_occurrences().into_iter().map(|(path, _, _, open)| (path, open)).collect()
+    }
+    let mut h = crate::scenario::Harness::new();
+    h.app.ui.show_browser = true;
+    let sub = h.app.run("component.create", json!({"name":"Sub"})).unwrap();
+    let outer = vec![sub["occurrence"].as_u64().unwrap()];
+    let leaf = h.app.run("component.create", json!({"name":"Leaf"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    let inner = vec![outer[0], leaf];
+    let fold = format!("fold:occurrence:{}", outer[0]);
+
+    assert_eq!(drawn(&mut h), [(outer.clone(), false)], "only the top placement is listed, closed");
+    click(&mut h, &fold);
+    assert_eq!(drawn(&mut h), [(outer.clone(), true), (inner.clone(), false)], "the placement inside stays closed");
+    click(&mut h, &fold);
+    assert_eq!(drawn(&mut h), [(outer.clone(), false)]);
+    click(&mut h, &fold);
+    assert_eq!(drawn(&mut h), [(outer.clone(), true), (inner.clone(), false)], "reopening shows it as it was");
+
+    h.app.run("browser.expand_all", json!({})).unwrap();
+    assert_eq!(drawn(&mut h), [(outer.clone(), true), (inner.clone(), true)], "Expand All opens every placement");
+    h.app.run("browser.collapse_all", json!({})).unwrap();
+    assert_eq!(drawn(&mut h), [(outer.clone(), false)], "Collapse All closes them again");
+
+    h.app.tree.collapsed.clear();
+    h.app.tree.expanded.clear();
+    h.call("ui.prefs", json!({"browser_components_open": true}));
+    assert!(h.app.preferences.browser_components_open);
+    assert_eq!(drawn(&mut h), [(outer.clone(), true), (inner, true)], "the preference opens every placement, as before #9274");
+    click(&mut h, &fold);
+    assert_eq!(drawn(&mut h), [(outer, false)], "and its arrow still closes one");
+}
+
+/// #9274: Find in Browser opens the placements, closed from the start, down to the body's row.
+#[test]
+fn find_in_browser_opens_placements_that_start_closed() {
+    let (mut h, _, occurrence) = fixture();
+    h.app.ui.show_browser = true;
+    let body = super::model_placement(&mut h.app, &[occurrence]).unwrap().bodies[0].world.clone();
+    h.frames(2);
+    assert!(!super::is_open(&h.app, &super::occurrence_key(&[occurrence]), true), "the placement starts closed");
+    super::reveal_body(&mut h.app, &body);
+    h.frames(3);
+    assert!(super::is_open(&h.app, &super::occurrence_key(&[occurrence]), true));
+    assert!(
+        h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{body}")),
+        "the body's row is drawn"
+    );
 }

@@ -89,6 +89,10 @@ pub fn visual_template(text: &str) -> Cow<'_, str> {
 }
 
 fn visual_line(line: &str, output: &mut String) {
+    // Empty paragraphs have no bidi levels. Their separators are kept by screen_order.
+    if line.is_empty() {
+        return;
+    }
     let info = unicode_bidi::ParagraphBidiInfo::new(line, None);
     let (levels, runs) = info.visual_runs(0..line.len());
     for run in runs {
@@ -169,6 +173,9 @@ mod tests {
     #[test]
     fn each_line_is_its_own_paragraph() {
         assert_eq!(visual("שלום עולם\nworld"), "עולם שלום\nworld");
+        assert_eq!(visual("\nשלום עולם\n\nworld\n"), "\nעולם שלום\n\nworld\n");
+        assert_eq!(visual_template("שלום\n\n{count}"), "שלום\n\n{count}");
+        assert_eq!(screen_order("\n\n"), "\n\n");
     }
 
     #[test]

@@ -4,6 +4,7 @@ use super::*;
 use crate::ui_kit::{Container, Surface};
 use crate::{scenario, theme::Tokens};
 use egui::{Ui, vec2};
+use solidcraft_engine::kernel::Continuity;
 
 struct Sample {
     value: String,
@@ -219,6 +220,14 @@ const ELEMENTS: &[Element] = &[
     element!("section_heading", |ui, _| {
         section_heading(ui, "Edit");
     }),
+    element!("checkbox_at", |ui, sample| {
+        let side = Tokens::get().space_16;
+        let (rect, _) = ui.allocate_exact_size(vec2(side, side), egui::Sense::hover());
+        checkbox_at(ui, rect, "Enabled", &mut sample.checked);
+    }),
+    element!("settings_plugin_card", |ui, sample| {
+        settings_plugin_card(ui, "sample", "Gear generator", "1.2.0", "Adds a parametric gear feature.", &mut sample.checked);
+    }),
     element!("text_button", |ui, _| {
         text_button(ui, "Reset", true);
     }),
@@ -233,10 +242,14 @@ const ELEMENTS: &[Element] = &[
         number_pair(ui, "Size", [&mut w, &mut h], 1..=16384, 1.0, "");
     }),
     element!("progress_action", |ui, _| {
-        progress_action(ui, "Rendering · 62%", 0.62, "Cancel");
+        progress_action(ui, "gallery:progress", "Rendering", "· 62%", 0.62, "Cancel");
     }),
     element!("settings_choice_row", |ui, _| {
-        settings_choice_row(ui, &SettingsChoice { key: "gallery:radio_row", title: "Preview", summary: "1280 × 720", detail: "Preview size" }, true);
+        settings_choice_row(
+            ui,
+            &SettingsChoice { icon: None, key: "gallery:radio_row", title: "Preview", summary: "1280 × 720", detail: "Preview size" },
+            true,
+        );
     }),
     element!("icon_label_action", |ui, _| {
         icon_label_action(ui, "Render Image", Some("play"), true, true);
@@ -472,6 +485,33 @@ const ELEMENTS: &[Element] = &[
             });
         });
     }),
+    element!("below_row_control", |ui, state| {
+        settings_form(ui, Tokens::get().form_label_width, |ui| {
+            row(ui, "Autosave every", |ui| {
+                field(ui, &mut state.value);
+            });
+            below_row_control(ui, "Autosave every", 260.0, |ui| settings_autosave_timeline(ui, 5.0));
+        });
+    }),
+    element!("named_control", "dialog:widget:Profile name", Some("dialog:Profile name"), |ui, state| {
+        named_control(ui, "Profile name", |ui| {
+            text_field(ui, &mut state.value, "Name this setup");
+        });
+    }),
+    element!("settings_row_card", |ui, _| {
+        let t = Tokens::get();
+        for selected in [true, false] {
+            settings_row_card(ui, selected, t.control_height + t.space_14, |ui| {
+                text(ui, "Default", if selected { Text::SelectedNameCell } else { Text::NameCell(false) });
+                if selected {
+                    settings_badge(ui, "Active", false);
+                } else {
+                    button(ui, "Apply", Button::Normal);
+                }
+            });
+            ui.add_space(t.space_8);
+        }
+    }),
     element!("settings_composition", |ui, _| {
         settings_heading(ui, "Interface", "Appearance and workspace");
         settings_section(ui, "gallery_settings", "Layout", |ui| {
@@ -480,27 +520,58 @@ const ELEMENTS: &[Element] = &[
                 |ui| {
                     text(ui, "Controls", Text::Inline);
                 },
-                |ui, ()| layout_preview(ui, LayoutPreview { compact: true, labels: false, history: 2, translucent: false }),
+                |ui, ()| layout_preview(ui, LayoutPreview { compact: true, labels: false, history: 2, translucent: false, dialog_left: true }),
             )
         });
+    }),
+    element!("settings_picture_choices", |ui, state| {
+        let choices = [
+            PictureChoice { key: "bottom", label: "Bottom", figure: super::preferences_figure_data::paint_history_bottom },
+            PictureChoice { key: "left", label: "Left", figure: super::preferences_figure_data::paint_history_left },
+        ];
+        if let Some(selected) = settings_picture_choices(ui, "gallery_history", "History", &choices, state.selected % choices.len(), true) {
+            state.selected = selected;
+        }
+        settings_picture_choices(ui, "gallery_history_disabled", "Disabled history", &choices, 0, false);
+    }),
+    element!("settings_picture_choices_sized", |ui, state| {
+        let choices = [
+            PictureChoice { key: "origin", label: "Origin", figure: super::preferences_figure_data::paint_orbit_origin },
+            PictureChoice { key: "centre", label: "View center", figure: super::preferences_figure_data::paint_orbit_centre },
+        ];
+        let t = Tokens::get();
+        if let Some(selected) = settings_picture_choices_sized(
+            ui,
+            "gallery_pivots",
+            "Orbit around",
+            &choices,
+            state.selected % choices.len(),
+            true,
+            PictureChoiceSize { width: t.space_24 * 8.0 + t.space_4, aspect: 184.0 / 99.5, caption: false },
+        ) {
+            state.selected = selected;
+        }
     }),
     element!("settings_permission_choices", |ui, state| {
         settings_choices(
             ui,
             &[
                 SettingsChoice {
+                    icon: None,
                     key: "gallery:ask",
                     title: "Ask first",
                     summary: "Confirm changes before they run.",
                     detail: "Full permission details",
                 },
                 SettingsChoice {
+                    icon: None,
                     key: "gallery:edits",
                     title: "Allow edits",
                     summary: "Ask before running other tools.",
                     detail: "Full permission details",
                 },
                 SettingsChoice {
+                    icon: Some("warning"),
                     key: "gallery:all",
                     title: "Allow all",
                     summary: "Run supported tools without asking.",
@@ -511,25 +582,34 @@ const ELEMENTS: &[Element] = &[
         );
         settings_pointer_preview(ui, true, "Normal", true);
     }),
-    element!("preference_theme_rail", |ui, _| {
-        theme_rail(
-            ui,
-            |ui| {
-                for label in ["Light", "Dark", "System"] {
-                    option_card(
-                        ui,
-                        label,
-                        Some("Built in"),
-                        label == "Light",
-                        true,
-                        PreferenceFigure::Theme { palette: Tokens::light().into(), system: label == "System" },
-                    );
-                }
-            },
-            |ui| {
+    element!("preference_theme_carousel", |ui, _| {
+        let light = ThemeSample::from_tokens(&Tokens::light());
+        let dark = ThemeSample::from_tokens(&Tokens::dark());
+        carousel(ui, "gallery_theme_carousel", 4, 88.0, 96.0, |ui, index| {
+            if index == 3 {
                 theme_import_tile(ui, "Import…", "theme file");
-            },
-        );
+            } else {
+                let label = ["Light", "Dark", "System"][index];
+                picture_card(
+                    ui,
+                    &Card {
+                        label,
+                        sub: Some(if index == 2 { "Follows the OS" } else { "Built in" }),
+                        selected: index == 0,
+                        enabled: true,
+                        options: None,
+                        check: false,
+                        aspect: 124.0 / 76.0,
+                        figure: &|p, rect| match index {
+                            0 => paint_theme_thumbnail(p, rect, &light),
+                            1 => paint_theme_thumbnail(p, rect, &dark),
+                            _ => paint_theme_system(p, rect, &light, &dark),
+                        },
+                    },
+                    88.0,
+                );
+            }
+        });
     }),
     element!("picture_card", |ui, _| {
         use super::preferences_figure_data as figures;
@@ -698,26 +778,56 @@ const ELEMENTS: &[Element] = &[
                 let width = 96.0;
                 let (rect, response) = ui.allocate_exact_size(vec2(width, width * size[1] / size[0]), egui::Sense::hover());
                 paint(ui.painter(), rect);
-                response.on_hover_text(*name);
+                response.backing_on_hover_text(*name);
             }
         });
     }),
     element!("preference_option_cards", |ui, _| {
         ui.horizontal_wrapped(|ui| {
-            for figure in [
-                PreferenceFigure::Theme { palette: Tokens::light().into(), system: true },
-                PreferenceFigure::Pivot(2),
-                PreferenceFigure::Quality(24),
-                PreferenceFigure::Antialiasing(8),
-                PreferenceFigure::ContactShading(true),
-                PreferenceFigure::UpAxis(true),
-            ] {
+            for figure in [PreferenceFigure::Pivot(2), PreferenceFigure::UpAxis(true)] {
                 option_card(ui, "Choice", Some("Example"), true, true, figure);
             }
+            let t = Tokens::get();
+            let width = t.space_24 * 5.0 + t.space_10;
+            for (label, figure) in [("Fine", paint_tess_fine as fn(&egui::Painter, egui::Rect)), ("8×", paint_aa_8x)] {
+                picture_card(
+                    ui,
+                    &Card { label, sub: None, selected: true, enabled: true, options: None, check: true, aspect: 120.0 / 64.0, figure: &figure },
+                    width,
+                );
+            }
+            toggle_tile(
+                ui,
+                &Card {
+                    label: "Ambient occlusion",
+                    sub: None,
+                    selected: true,
+                    enabled: true,
+                    options: None,
+                    check: false,
+                    aspect: 120.0 / 64.0,
+                    figure: &paint_ao_on,
+                },
+                width,
+            );
+        });
+    }),
+    element!("settings_font_row", |ui, sample| {
+        settings_page(ui, |ui| {
+            settings_font_row(ui, "Font", |ui, part| {
+                if part == 0 {
+                    named_control(ui, "Interface font", |ui| {
+                        dropdown(ui, "gallery_preferences_font", &mut sample.selected, &["IBM Plex Sans (built in)", "Custom font"]);
+                    });
+                } else {
+                    button(ui, "Choose font file…", Button::Normal);
+                    button(ui, "Reset", Button::Ghost);
+                }
+            });
+            font_specimen(ui, "The quick brown fox · 0123456789");
         });
     }),
     element!("preference_specimens", |ui, _| {
-        tab_accent_strip(ui);
         scale_specimen(ui, 1.1);
         status_palette_sample(ui, crate::theme::ColorVision::Deutan);
         colour_vision_sample(ui, &Tokens::get());
@@ -727,7 +837,7 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("assistant_entry", |ui, _| {
         let t = Tokens::get();
-        egui::Frame::NONE.fill(t.app_bar).show(ui, |ui| {
+        crate::ui_kit::Container::show_backing(ui, egui::Frame::NONE.fill(t.app_bar), |ui| {
             ui.horizontal(|ui| {
                 for state in [
                     AssistantEntryState::Quiet,
@@ -838,6 +948,12 @@ const ELEMENTS: &[Element] = &[
     element!("assistant_banner", |ui, _| {
         assistant_banner(ui, AssistantTone::Warning, |ui| {
             ui.label("Paused after the configured step limit.");
+        });
+    }),
+    element!("settings_tab_chip", |ui, _| {
+        ui.horizontal_wrapped(|ui| {
+            settings_tab_chip(ui, "MODEL", "Model", crate::workspace::tab_icon("MODEL"), true);
+            settings_tab_chip(ui, "SURFACE", "Surface", crate::workspace::tab_icon("SURFACE"), false);
         });
     }),
     element!("history_transport", |ui, _| {
@@ -1153,7 +1269,8 @@ const ELEMENTS: &[Element] = &[
         });
     }),
     element!("add_prompt", "dialog:table:add_prompt:add", Some("dialog:table:add_prompt:add"), |ui, _| {
-        table(ui, "add_prompt", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+        table_custom(ui, "add_prompt", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+            table.headers(ui, |_, _| false);
             table.add_prompt(ui, "Add configuration", "Add configuration");
         });
     }),
@@ -1195,12 +1312,13 @@ const ELEMENTS: &[Element] = &[
         text(ui, "Invalid expression", Text::Error("gallery"));
     }),
     element!("table_flex", |ui, s| {
-        table(
+        table_custom(
             ui,
             "flex",
             &[Column::new("Name", 1.0).flex(), Column::new("Expression", 1.5).flex(), Column::new("Actions", 0.0).icon_only()],
             "Empty",
             |ui, table| {
+                table.headers(ui, |_, _| false);
                 table.row(ui, "row", false, |row| {
                     row.cell(|ui| {
                         text(ui, "Width", Text::Cell);
@@ -1297,7 +1415,8 @@ const ELEMENTS: &[Element] = &[
         });
     }),
     element!("table", "dialog:table:gallery:row", None, |ui, s| {
-        table(ui, "gallery", &[Column::new("Name", 1.0), Column::new("Expression", 1.5)], "No rows", |ui, table| {
+        table_custom(ui, "gallery", &[Column::new("Name", 1.0), Column::new("Expression", 1.5)], "No rows", |ui, table| {
+            table.headers(ui, |_, _| false);
             table.row(ui, "row", true, |row| {
                 row.cell(|ui| {
                     text(ui, "Width", Text::Cell);
@@ -1517,6 +1636,35 @@ const ELEMENTS: &[Element] = &[
             hint_field(ui, &mut s.value, "Length");
         });
     }),
+    element!("checked_field", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        row(ui, "Gallery", |ui| {
+            checked_field(ui, &mut s.value, "Length", s.checked);
+        });
+    }),
+    element!("checked_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        checked_row(ui, "Gallery", &mut s.value, "Length", Some("Too small"));
+    }),
+    element!("warning_caption", "dialog:caption:Gallery", None, |ui, _| {
+        warning_caption(ui, "Gallery", "Too small");
+    }),
+    element!("text_field_tip", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        row(ui, "Gallery", |ui| {
+            text_field_tip(ui, &mut s.value, "Name", "What it is called");
+        });
+    }),
+    element!("continuity_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, _| {
+        let mut order = Continuity::G1;
+        continuity_row(ui, "Gallery", "gallery_continuity", &mut order, &[Continuity::G0, Continuity::G1, Continuity::G2]);
+    }),
+    element!("continuity_row_explained", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, _| {
+        let mut order = Continuity::G2;
+        let allowed = [Continuity::G1, Continuity::G2];
+        continuity_row_explained(ui, "Gallery", "gallery_continuity", &mut order, &allowed, &continuity_tip(&allowed));
+    }),
+    element!("continuity_tip", "dialog:row:Gallery", None, |ui, _| {
+        let tip = continuity_tip(&[Continuity::G0, Continuity::G1]);
+        row(ui, "Gallery", |ui| ui.label(tip));
+    }),
     element!("text_field", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         row(ui, "Gallery", |ui| {
             text_field(ui, &mut s.value, "Name");
@@ -1535,6 +1683,16 @@ const ELEMENTS: &[Element] = &[
     element!("dropdown", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         row(ui, "Gallery", |ui| {
             dropdown(ui, "gallery", &mut s.selected, &["One", "Two"]);
+        });
+    }),
+    element!("dropdown_icons", "dialog:row:Visual style", Some("dialog:Visual style"), |ui, s| {
+        row(ui, "Visual style", |ui| {
+            let options: Vec<_> = crate::navigation_bar::VISUAL_STYLES
+                .iter()
+                .enumerate()
+                .map(|(index, (_, label))| (*label, crate::navigation_bar::visual_style_icon(index as u8)))
+                .collect();
+            dropdown_icons(ui, "gallery_visual_style", &mut s.selected, &options);
         });
     }),
     element!("dropdown_previews", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
@@ -1586,6 +1744,13 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("checkbox_off", |ui, _| {
         checkbox(ui, "Option", &mut false);
+    }),
+    element!("checkbox_wrapped", |ui, s| {
+        ui.scope(|ui| {
+            ui.set_width(Tokens::get().space_24 * 8.0);
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+            checkbox(ui, "A long translated checkbox label stays readable on several lines", &mut s.checked);
+        });
     }),
     element!("checkbox_disabled_on", |ui, _| {
         ui.add_enabled_ui(false, |ui| checkbox(ui, "Option", &mut true));
@@ -1702,6 +1867,14 @@ const ELEMENTS: &[Element] = &[
         let (rect, _) = ui.allocate_exact_size(vec2(row_height(), row_height()), egui::Sense::hover());
         quiet_icon_button_at(ui, rect, "plus", "Add shortcut");
     }),
+    element!("shortcut_binding", |ui, _| {
+        ui.horizontal(|ui| {
+            shortcut_binding(ui, "Ctrl+Shift+PageDown", true);
+            shortcut_binding(ui, "Option+Enter", false);
+            shortcut_binding(ui, "Ctrl++", true);
+        });
+        shortcut_binding(ui, "", true);
+    }),
     element!("keyboard", |ui, _| {
         assert_eq!(keyboard(ui.ctx(), true), Action::None);
         ui.allocate_space(vec2(row_height(), row_height()));
@@ -1729,6 +1902,9 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("progress", "dialog:progress:gallery", None, |ui, _| {
         progress(ui, "gallery", 0.4);
+    }),
+    element!("steps", "dialog:step:gallery:0:done", None, |ui, _| {
+        steps(ui, "gallery", &["Read", "Mesh", "Show"], 1, Some("40%"));
     }),
     element!("hint", "dialog:hint:gallery", Some("dialog:hint:gallery"), |ui, _| {
         text(ui, "Pick a point", Text::Hint("gallery"));
@@ -1860,6 +2036,46 @@ fn every_element_has_geometry_and_stays_in_its_allocation_in_both_themes() {
                     }
                 }
             }
+        }
+    }
+    crate::theme::set_dark(previous);
+}
+
+#[test]
+fn visual_style_dropdown_specimen_selects_real_options_and_paints_their_icons() {
+    let previous = crate::theme::is_dark();
+    let element = ELEMENTS.iter().find(|element| element.name == "dropdown_icons").unwrap();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        let ctx = crate::fonts::test_context();
+        let sample = std::cell::RefCell::new(Sample { value: String::new(), second: String::new(), selected: 0, checked: false });
+        let mut draw = |ui: &mut Ui| {
+            (element.draw)(ui, &mut sample.borrow_mut());
+        };
+        for _ in 0..3 {
+            super::test_support::frame(&ctx, vec![], &mut draw);
+        }
+        for (index, (_, label)) in crate::navigation_bar::VISUAL_STYLES.into_iter().enumerate() {
+            let trigger = scenario::handle_at("dialog:Visual style").unwrap();
+            super::test_support::frame(&ctx, super::test_support::pointer(trigger, true), &mut draw);
+            super::test_support::frame(&ctx, super::test_support::pointer(trigger, false), &mut draw);
+            super::test_support::frame(&ctx, vec![], &mut draw);
+            for (option, (_, name)) in crate::navigation_bar::VISUAL_STYLES.into_iter().enumerate() {
+                let rect = scenario::rect_of(&format!("dialog:Visual style:{name}")).unwrap();
+                let icon = crate::navigation_bar::visual_style_icon(option as u8);
+                let painted = scenario::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
+                let owner = if option == sample.borrow().selected { scenario::rect_of("dialog:widget:Visual style").unwrap() } else { rect };
+                assert!(owner.contains_rect(painted), "{name}: its real icon is in its option or selected trigger");
+            }
+            let option = scenario::handle_at(&format!("dialog:Visual style:{label}")).unwrap();
+            super::test_support::frame(&ctx, super::test_support::pointer(option, true), &mut draw);
+            super::test_support::frame(&ctx, super::test_support::pointer(option, false), &mut draw);
+            super::test_support::frame(&ctx, vec![], &mut draw);
+            assert_eq!(sample.borrow().selected, index, "the specimen edits the real selection index");
+            let icon = crate::navigation_bar::visual_style_icon(index as u8);
+            let trigger = scenario::rect_of("dialog:widget:Visual style").unwrap();
+            assert!(trigger.contains_rect(scenario::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap()));
+            assert!(scenario::handle_at("dialog:Visual style:Wireframe").is_none(), "the native popup closes after selection");
         }
     }
     crate::theme::set_dark(previous);
@@ -2005,25 +2221,32 @@ fn table_cells_keep_alignment_fixed_rows_editing_and_action_targets() {
         let mut removed = false;
         let mut draw = |ui: &mut Ui| {
             scope(ui, |ui| {
-                table(ui, "cells", &[Column::new("Name", 1.0), Column::new("Expression", 1.5), Column::new("Actions", 0.7)], "Empty", |ui, table| {
-                    for (name, value) in [("Width", &mut first), ("Height", &mut second)] {
-                        table.row(ui, name, name == "Height", |row| {
-                            row.cell(|ui| {
-                                text(ui, name, Text::Cell);
+                table_custom(
+                    ui,
+                    "cells",
+                    &[Column::new("Name", 1.0), Column::new("Expression", 1.5), Column::new("Actions", 0.7)],
+                    "Empty",
+                    |ui, table| {
+                        table.headers(ui, |_, _| false);
+                        for (name, value) in [("Width", &mut first), ("Height", &mut second)] {
+                            table.row(ui, name, name == "Height", |row| {
+                                row.cell(|ui| {
+                                    text(ui, name, Text::Cell);
+                                });
+                                row.cell(|ui| {
+                                    let response = cell_editor(ui, ui.id().with("expression"), value, "Expression", false);
+                                    scenario::publish_handle(&format!("gallery:cell:{name}"), response.rect.center());
+                                    scenario::publish_rect(&format!("gallery:cell:{name}"), response.rect);
+                                });
+                                row.cell(|ui| {
+                                    if button(ui, "Delete", Button::Small).clicked() {
+                                        removed = true;
+                                    }
+                                });
                             });
-                            row.cell(|ui| {
-                                let response = cell_editor(ui, ui.id().with("expression"), value, "Expression", false);
-                                scenario::publish_handle(&format!("gallery:cell:{name}"), response.rect.center());
-                                scenario::publish_rect(&format!("gallery:cell:{name}"), response.rect);
-                            });
-                            row.cell(|ui| {
-                                if button(ui, "Delete", Button::Small).clicked() {
-                                    removed = true;
-                                }
-                            });
-                        });
-                    }
-                });
+                        }
+                    },
+                );
             });
         };
         for _ in 0..3 {
@@ -2144,7 +2367,7 @@ fn gallery_covers_every_inline_element() {
             {
                 let name = item.sig.ident.to_string();
                 // Inherited labels, state keys and size measurements do not render elements.
-                if !matches!(name.as_str(), "eye_drag_id" | "label" | "placement_field_content_size") {
+                if !matches!(name.as_str(), "eye_drag_id" | "icon_label_width" | "label" | "placement_field_content_size") {
                     assert!(names.contains(name.as_str()), "{file}: {name} needs a gallery entry");
                 }
             }
@@ -2176,7 +2399,8 @@ fn history_example(ui: &mut Ui, names: bool) {
     let width = crate::timeline_left::strip_width(&app);
     let rect = ui.allocate_space(vec2(width, 650.0)).1;
     ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink(5.0)), |ui| {
-        ui.painter().add(Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), Tokens::get().panel, crate::frame::Side::Left).paint(rect));
+        let frame = Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), Tokens::get().panel, crate::frame::Side::Left);
+        Container::paint_frame(ui.painter(), frame, rect);
         crate::timeline_left::left_timeline(&mut app, ui);
     });
 }
@@ -2837,7 +3061,7 @@ fn preset_card_help_icon_and_carousel_behave() {
         let help = help_icon(ui, "Help text");
         assert!(help.rect.width() > 8.0 && help.rect.width() < 20.0);
     });
-    // The next arrow moves the window by one and stays inert at the end.
+    // The next arrow moves the window by a page and stays inert at the end.
     let mut first = vec![];
     let mut at = None;
     for pass in 0..6 {

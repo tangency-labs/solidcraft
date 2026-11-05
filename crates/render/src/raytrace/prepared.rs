@@ -1,7 +1,8 @@
 //! Borrowed prepared-scene contract shared by bounded transport consumers.
 use super::{Bvh, Hit, MAX_DISTANCE_MM, Ray, Result, TraceError};
 use crate::{ProductScene, surface::OpaqueSurface};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 #[derive(Clone, Copy)]
 pub struct PreparedPrimitive {

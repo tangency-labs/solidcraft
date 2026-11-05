@@ -73,6 +73,7 @@ static HUNGARIAN: Catalog = Catalog::new("hu", "Magyar", include_str!(concat!(en
 static INDONESIAN: Catalog = Catalog::new("id", "Bahasa Indonesia", include_str!(concat!(env!("OUT_DIR"), "/locales/id.json")));
 static ITALIAN: Catalog = Catalog::new("it", "Italiano", include_str!(concat!(env!("OUT_DIR"), "/locales/it.json")));
 static JAPANESE: Catalog = Catalog::new("ja", "日本語", include_str!(concat!(env!("OUT_DIR"), "/locales/ja.json")));
+static GEORGIAN: Catalog = Catalog::new("ka", "ქართული", include_str!(concat!(env!("OUT_DIR"), "/locales/ka.json")));
 static KOREAN: Catalog = Catalog::new("ko", "한국어", include_str!(concat!(env!("OUT_DIR"), "/locales/ko.json")));
 static MALAY: Catalog = Catalog::new("ms", "Bahasa Melayu", include_str!(concat!(env!("OUT_DIR"), "/locales/ms.json")));
 static NORWEGIAN: Catalog = Catalog::new("nb", "Norsk bokmål", include_str!(concat!(env!("OUT_DIR"), "/locales/nb.json")));
@@ -109,6 +110,7 @@ pub const LOCALES: &[&Catalog] = &[
     &INDONESIAN,
     &ITALIAN,
     &JAPANESE,
+    &GEORGIAN,
     &KOREAN,
     &MALAY,
     &NORWEGIAN,
@@ -282,8 +284,12 @@ impl Locale {
     }
 
     /// Evaluation errors stay English for scripts; the empty Cut/Intersect hint that names
-    /// another component is translated where it is shown. Other text is returned unchanged.
+    /// another component, and a feature's request to reselect a reference it lost, are translated
+    /// where they are shown. Other text is returned unchanged.
     pub fn diagnostic(self, text: &str) -> String {
+        if let Some((feature, reference)) = solidcraft_engine::doc::reselect_parts(text) {
+            return self.format("diagnostic.reselect_reference", &[("feature", &self.given_name(feature)), ("reference", reference)]);
+        }
         const PREFIX: &str = "there is no body to cut or intersect in component '";
         if let Some((before, detail)) = text.split_once(PREFIX)
             && let Some((component, detail)) = detail.split_once("'; the tool may overlap '")
@@ -419,6 +425,41 @@ pub fn tr_name(text: &str) -> String {
 }
 pub fn tr_diagnostic(text: &str) -> String {
     CURRENT.with(|current| current.get().diagnostic(text))
+}
+
+/// The id of an offset curve an engine error names at the start, `` `{id}` ``.
+fn offset_error_id<'a>(text: &'a str, middle: &str, end: &str) -> Option<&'a str> {
+    let rest = text.strip_prefix('`')?;
+    let (id, rest) = rest.split_once('`')?;
+    (rest.contains(middle) && rest.ends_with(end)).then_some(id)
+}
+
+/// Translate known engine error messages using i18n keys.
+/// If the error message is not recognized, returns it unchanged.
+pub fn tr_engine_error(error: &str) -> String {
+    // `EngineError::BadParams` carries `invalid parameters for `<command>`: ` in front.
+    let text = error.strip_prefix("invalid parameters for `").and_then(|rest| rest.split_once("`: ")).map_or(error, |(_, text)| text);
+    if text == "nothing to break at there" {
+        return tr("sketch.error.nothing_to_break").to_string();
+    }
+    if let Some(id) = offset_error_id(
+        text,
+        " is an offset, and its ends follow its source curves: ",
+        " the source curves instead, or break the offset association first",
+    ) {
+        return format("sketch.error.offset_trim", &[("id", id)]);
+    }
+    if let Some(id) = offset_error_id(
+        text,
+        " is an offset, and its corners follow its source curves: ",
+        " the source corners before offsetting, or break the offset association first",
+    ) {
+        return format("sketch.error.offset_fillet_chamfer", &[("id", id)]);
+    }
+    if text == "a closed curve needs two crossings to trim" {
+        return tr("sketch.error.closed_curve_two_crossings").to_string();
+    }
+    error.to_string()
 }
 
 #[cfg(test)]
@@ -591,6 +632,18 @@ mod tests {
         }
         let plain = "there is no body to cut or intersect";
         assert_eq!(Locale::for_language("ja").diagnostic(plain), plain);
+    }
+
+    #[test]
+    fn reselect_reference_diagnostic_translates_with_the_feature_and_reference_as_given() {
+        let message = solidcraft_engine::doc::DocError::reselect("F4:side:c1#1|F4:top").in_feature("Fillet {2}").to_string();
+        assert_eq!(Locale::for_language("en").diagnostic(&message), message);
+        for language in ["ar", "de", "he", "ja", "ko", "zh"] {
+            let translated = Locale::for_language(language).diagnostic(&message);
+            assert_ne!(translated, message, "{language}");
+            // Right-to-left text comes back in display order, so only what it holds is checked.
+            assert!(translated.contains("Fillet {2}") && translated.contains("`F4:side:c1#1|F4:top`"), "{language}: {translated}");
+        }
     }
 
     /// English first, then by id, so adding a locale edits only its own line.
@@ -1401,6 +1454,7 @@ mod tests {
             ("bs", "Bosanski", "Postavke", "Ekstrudiraj", "Skica1", "Sačuvati promjene u My {design}?"),
             ("hr", "Hrvatski", "Postavke", "Ekstrudiraj", "Skica1", "Spremiti promjene u My {design}?"),
             ("sr", "Српски", "Подешавања", "Екструдирај", "Скица1", "Сачувати промене у My {design}?"),
+            ("ka", "ქართული", "პარამეტრები", "ამოწევა", "ესკიზი1", "შევინახოთ ცვლილებები My {design}-ში?"),
             ("hu", "Magyar", "Beállítások", "Kihúzás", "Vázlat1", "Menti a(z) My {design} módosításait?"),
             ("id", "Bahasa Indonesia", "Preferensi", "Ekstrusi", "Sketsa1", "Simpan perubahan ke My {design}?"),
             ("nl", "Nederlands", "Voorkeuren", "Extruderen", "Schets1", "Wijzigingen in My {design} opslaan?"),

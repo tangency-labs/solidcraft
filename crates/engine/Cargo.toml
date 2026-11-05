@@ -17,6 +17,10 @@ raytrace-cpu = ["solidcraft-render/raytrace-cpu"]
 # `src/schema/record.rs`), for checking a new contract against the whole test suite.
 param-audit = []
 solver-profiling = ["solidcraft-sketch/solver-profiling"]
+# Compile the profiler in (solidcraft-profile/enabled): every app turns it on by default, so any
+# build can be profiled; it records only once switched on (SOLIDCRAFT_PROFILE=1, the CLI's
+# --profile, the app's preference, diagnostics.profile).
+profile = ["solidcraft-profile/enabled"]
 
 [[example]]
 name = "sketch_analysis_bench"
@@ -31,12 +35,14 @@ name = "sketch_target_bench"
 required-features = ["solver-profiling"]
 
 [dependencies]
+solidcore-record = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-sketch = { workspace = true }
 solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }
 solidcraft-io = { workspace = true }
 solidcraft-render = { workspace = true }
+solidcraft-profile = { workspace = true }
 # reference pictures for inspect.compare_picture (PNG and JPEG decode, PNG encode)
 image = { workspace = true, features = ["jpeg"] }
 serde = { workspace = true }
@@ -49,6 +55,7 @@ log = { workspace = true }
 web-time = { workspace = true }
 
 [dev-dependencies]
+solidcraft-profile = { workspace = true, features = ["enabled"] }
 # Model-cache tests also run in a source tarball build (no git commit).
 solidcraft-io = { workspace = true, features = ["trust-unknown-source"] }
 # Normal CI exercises profiling assertions without enabling the production feature.

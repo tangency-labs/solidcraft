@@ -972,7 +972,11 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
             let a = one()?;
             unit_fn(a.v.abs(), a)
         }
-        "sign" => Value::num(one()?.v.signum()),
+        "sign" => {
+            let x = one()?.v;
+            // `f64::signum` gives 1 for +0 and -1 for -0; the sign of zero is 0.
+            Value::num(if x == 0.0 { 0.0 } else { x.signum() })
+        }
         "floor" | "ceil" | "round" | "trunc" => {
             let a = one()?;
             // Round in the value's own default unit (round(2.4 in) = 2 in for an inch parameter).
@@ -1427,6 +1431,16 @@ mod tests {
         ] {
             let err = ev(e, Kind::Unitless).map(|v| v.to_string()).unwrap_or_else(|e| e.to_string());
             assert!(err.contains(says), "{e}: {err}");
+        }
+    }
+
+    /// `sign(0)` is 0, not 1 (Rust's `signum` takes the sign bit, so it calls zero positive).
+    #[test]
+    fn sign_of_zero_is_zero() {
+        for (e, want) in
+            [("sign(0)", 0.0), ("sign(-0)", 0.0), ("sign(0 mm)", 0.0), ("sign(5)", 1.0), ("sign(-2 mm)", -1.0), ("sign(width - 40)", 0.0)]
+        {
+            assert_eq!(ev(e, Kind::Unitless).unwrap(), want, "{e}");
         }
     }
 

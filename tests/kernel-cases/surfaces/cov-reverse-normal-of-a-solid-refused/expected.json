@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "reverse normal on a solid: refused, its faces face out",
+ "source": "invariants",
+ "method": "a closed solid's orientation is fixed by its material; only a surface may be turned over",
+ "outcome": "refused",
+ "refusal": "a solid's faces face out"
+}

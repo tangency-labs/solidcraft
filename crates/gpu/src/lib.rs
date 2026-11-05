@@ -13,9 +13,9 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+use solidcore_record::Vec3;
 #[cfg(not(target_arch = "wasm32"))]
 use solidcraft_geom::Mesh;
-use solidcraft_geom::Vec3;
 use solidcraft_geom::tess::{EvalCurve, EvalSurface, TessPlan};
 use wgpu::util::DeviceExt;
 

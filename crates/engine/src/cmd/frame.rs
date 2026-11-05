@@ -3,13 +3,14 @@
 //! the built-in profiles, `frame.profile.properties` works out a profile's section, and
 //! `frame.profile.insert` draws one into a sketch.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
+use solidcore_record::{Loop2, Seg2, Vec2};
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::frame::{self, Anchor, MemberProfile, Profile, ProfileSpec};
 use solidcraft_doc::{FeatureKind, SketchId};
-use solidcraft_geom::{Loop2, Seg2, Vec2};
 use solidcraft_sketch::Sketch;
 
 use super::features::{add_feature, check_expr, sketch_id};

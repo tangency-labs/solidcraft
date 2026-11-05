@@ -1,5 +1,6 @@
 //! The left feature-history panel: named rows, folders, rollback and drag-and-drop.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Edge, Surface};
 use egui::{Rect, Sense, Stroke, pos2, vec2};
 use serde_json::json;
@@ -225,6 +226,7 @@ fn card_fill(app: &SolveApp, floating: bool) -> egui::Color32 {
 
 /// Full-height left card, or a card sharing the browser column below it.
 pub fn left_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
+    crate::browser::sync_reveals(app);
     let t = Tokens::get();
     let available = ui.available_rect_before_wrap();
     app.shell.history_dock_space = Some(available);
@@ -569,7 +571,7 @@ fn vertical_marker(app: &mut SolveApp, ui: &mut egui::Ui, drag: &mut Option<Drag
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
-    response.on_hover_text(crate::i18n::tr("ui.history_marker_tip"));
+    response.backing_on_hover_text(crate::i18n::tr("ui.history_marker_tip"));
     rect.center().y
 }
 
@@ -747,7 +749,7 @@ fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft
             ui.separator();
         }
         if crate::context_menu::button(ui, "Delete Selected Folders", "delete")
-            .on_hover_text(crate::i18n::tr("timeline.delete_folders_tip"))
+            .backing_on_hover_text(crate::i18n::tr("timeline.delete_folders_tip"))
             .clicked()
         {
             let ids = app.tree.picked_timeline_groups.clone();
@@ -765,14 +767,14 @@ fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft
             && joints.iter().all(|id| app.session.doc.assembly.joints.iter().any(|joint| joint.id == *id && joint.suppressed));
         let label = if all_suppressed { "Unsuppress Selected Folders" } else { "Suppress Selected Folders" };
         if crate::context_menu::button_enabled(ui, label, "suppress", has_contents)
-            .on_hover_text(crate::i18n::tr("timeline.suppress_folders_tip"))
+            .backing_on_hover_text(crate::i18n::tr("timeline.suppress_folders_tip"))
             .clicked()
         {
             let _ = app.run_heavy("timeline.suppress", json!({"groups": selected_groups, "suppressed": !all_suppressed}));
             ui.close();
         }
         if crate::context_menu::button(ui, "Delete Folders and Features…", "delete")
-            .on_hover_text(crate::i18n::tr("timeline.delete_folders_with_features_tip"))
+            .backing_on_hover_text(crate::i18n::tr("timeline.delete_folders_with_features_tip"))
             .clicked()
         {
             crate::timeline::delete_folders(app, selected_groups.clone(), contents);
@@ -1068,7 +1070,7 @@ fn timeline_group_name(
     if escape {
         // Dropping the shared state cancels the edit and leaves the old name intact.
     } else if commit {
-        crate::context_menu::commit_rename(app, &rename);
+        let _ = crate::context_menu::commit_rename(app, &rename);
     } else {
         app.menu.rename = Some(rename);
     }
@@ -1139,7 +1141,7 @@ fn vertical_group_row(
         crate::scenario::publish_handle(&format!("timeline-folder-status:{}:{}", status.icon(), group.name), mark.center());
     }
     let response = match tip {
-        Some(tip) => response.on_hover_text(tip),
+        Some(tip) => response.backing_on_hover_text(tip),
         None => response,
     };
     let renaming = timeline_group_name(app, ui, group, rect, offset, names, suppressed, &t);
@@ -1281,7 +1283,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
             })
             .collect(),
         results: crate::timeline::result_index(&app.session.model.results),
-        reveal: app.tree.timeline_reveal.take(),
+        reveal: app.tree.timeline_reveal,
         from_view,
         linked_hover: app.viewport.hover_feature.filter(|id| plan.referenced(*id)),
         drag: ui.data(|data| data.get_temp(drag_id)),
@@ -1479,8 +1481,8 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
         None => {
             crate::scenario::publish_rect(&format!("history:feature:{name}"), rect);
             crate::scenario::publish_handle(&format!("timeline:{name}"), rect.center());
-            if rows.reveal == Some(id) {
-                ui.scroll_to_rect(rect, Some(egui::Align::Center));
+            if rows.reveal == Some(id) && crate::semantic_content::scroll_acknowledged(ui, rect) {
+                app.tree.timeline_reveal = None;
             }
         }
     }
@@ -1574,7 +1576,8 @@ fn feature_row_body(
         .and_then(|at| app.session.model.results.get(*at).filter(|result| result.id == id).or_else(|| app.session.model.result(id)));
     let elapsed = result.map(|r| r.ms);
     let error = result.and_then(|result| result.error.clone());
-    let warning = result.and_then(|result| result.warning.clone());
+    let warning = result.and_then(crate::timeline::warning_text);
+    let status = (error.is_some() || warning.is_some()).then(|| crate::timeline::feature_status_text(name, ty, result));
     let rolled = match row_kind {
         RowKind::Reference { parent } => parent >= marker,
         RowKind::Own | RowKind::Nested => index >= marker,
@@ -1618,7 +1621,7 @@ fn feature_row_body(
     let listed_under = plan.host(id).and_then(|host| table.name(host));
     let mut tooltip = egui::Tooltip::for_enabled(&response);
     tooltip.popup = tooltip.popup.align(egui::RectAlign::RIGHT_START);
-    tooltip.show(|ui| {
+    crate::ui_kit::Container::show_tooltip(response.id, tooltip, |ui| {
         let summary = app
             .session
             .doc
@@ -1628,8 +1631,8 @@ fn feature_row_body(
             .unwrap_or_else(|| elapsed.map_or_else(String::new, |ms| format!("{ms:.1} ms")));
         let kind = crate::i18n::tr_label(ty.strip_suffix("Feature").unwrap_or(ty));
         let mut tip = format!("{name} · {kind} · {summary}");
-        if error.is_some() || warning.is_some() {
-            tip.push_str(&format!("\n{}", crate::timeline::status_text(name, ty, error.as_deref(), warning.as_deref())));
+        if let Some(status) = &status {
+            tip.push_str(&format!("\n{status}"));
         }
         // Greyed out says only "not shown": say why (#8100).
         if rolled {

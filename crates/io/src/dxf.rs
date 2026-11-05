@@ -5,9 +5,10 @@
 //! arcs and points (free-form curves as polylines); the flat pattern's drawing, with ELLIPSE and SPLINE, is
 //! [`crate::write_dxf_drawing`].
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
-use solidcraft_geom::{MAX_BEZIER_DEGREE, Vec2};
+use solidcore_record::{MAX_BEZIER_DEGREE, Vec2};
 
 use crate::sketch2d::{Geom2, MAX_DRAWING_BYTES, MAX_ENTITIES, bulge_arc};
 use crate::{IoError, Result};

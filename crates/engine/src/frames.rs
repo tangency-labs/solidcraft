@@ -10,8 +10,9 @@
 //! without moved components).
 
 use serde_json::{Map, Value};
+use solidcore_record::Vec3;
 use solidcraft_doc::{Mat, apply_point, apply_vector, is_identity, map_point_expr, map_vector_expr, mat_inverse};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -61,7 +62,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.hole" => &[("position", Pick), ("direction", Dir), ("body", Body)],
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
         "solid.offset_face" | "solid.shell" => &[("faces", Picks), ("body", Body)],
-        "solid.thread" => &[("face", Pick)],
+        "solid.thread" => &[("face", Pick), ("from", Pick), ("up_to", Plane)],
         "solid.emboss" => &[("face", Make)],
         "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
         "solid.press_pull" => &[("face", Pick), ("edges", Picks)],
@@ -149,13 +150,12 @@ fn pt(p: Vec3) -> Value {
 /// The frame of the body a world point lies on (the nearest), or of the named body, with the
 /// bodies whose faces meet there: the first is the body under the point, and more than one
 /// means the pick is ambiguous.
-fn frame_at(s: &Session, f: &Frames, p: Vec3, body: Option<&str>) -> Option<(Mat, Vec<String>)> {
+fn frame_at(s: &Session, world: &solidcraft_doc::ModelState, f: &Frames, p: Vec3, body: Option<&str>) -> Option<(Mat, Vec<String>)> {
     if let Some(b) = body
         && let Some((_, own, m)) = f.bodies(s).iter().find(|(w, _, _)| w == b)
     {
         return Some((*m, vec![own.clone()]));
     }
-    let world = s.world_state();
     let mut best: Option<(f64, Mat, Vec<String>)> = None;
     for wb in &world.bodies {
         let Some((_, own, m)) = f.bodies(s).iter().find(|(w, _, _)| *w == wb.name) else { continue };
@@ -201,7 +201,10 @@ fn tri_dist(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
 }
 
 struct Mapper<'a> {
+    /// The session the body frames are read from (only when a pick needs them).
     s: &'a Session,
+    /// The placed model the picks are on.
+    world: &'a solidcraft_doc::ModelState,
     f: Frames,
     /// The frame of the command's first pick (its directions turn with it).
     first: Option<Mat>,
@@ -213,7 +216,7 @@ struct Mapper<'a> {
 impl Mapper<'_> {
     fn pick(&mut self, v: &Value, body: Option<&str>) -> Option<Value> {
         let p = vec3(v)?;
-        let under = if self.here { None } else { frame_at(self.s, &self.f, p, body) };
+        let under = if self.here { None } else { frame_at(self.s, self.world, &self.f, p, body) };
         let m = if self.here { self.f.sketch } else { under.as_ref().map(|(m, _)| *m).unwrap_or(self.f.active) };
         self.first.get_or_insert(m);
         let out = self.local_point(&m, p);
@@ -288,7 +291,10 @@ impl Mapper<'_> {
                         m.insert(k.into(), y);
                     }
                 }
+                // A sketch's view of the model holds a further placement by the name the world
+                // gives it (`with_placed_copies`), so that name stays (#9957).
                 if let Some(bn) = &b
+                    && !self.here
                     && let Some(own) = self.own_name(bn)
                 {
                     m.insert("body".into(), Value::String(own));
@@ -300,6 +306,10 @@ impl Mapper<'_> {
     }
 
     fn plane(&mut self, v: &Value) -> Option<Value> {
+        // A point where a plane may be given (a thread's `up_to`): a pick.
+        if v.is_array() {
+            return self.pick(v, None);
+        }
         let o = v.as_object()?;
         let mut m = o.clone();
         if let Some(x) = o.get("face").and_then(|x| self.pick(x, None)) {
@@ -422,14 +432,26 @@ impl Drop for Nested {
     }
 }
 
-/// `params` with world picks mapped into component frames (`None`: nothing to change).
-pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
+/// `params` with world picks mapped into component frames (`None`: nothing to change). A model
+/// that cannot be placed is the error.
+pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<Value>> {
+    // A command with no world picks has nothing to map, and may not need the bodies placed.
+    let picks = !table(id).is_empty() || matches!(id, "library.apply" | "timeline.redefine" | "sketch.redefine");
+    // Edit Feature of a revolve restores its saved axis (and the origin's expressions) even
+    // where nothing is placed (`map_local`).
+    let revolve_edit =
+        id == "timeline.redefine" && matches!(params.get("command").and_then(Value::as_str), Some("solid.revolve" | "surface.revolve"));
+    if !picks || (!placed(s) && !revolve_edit) {
+        return Ok(None);
+    }
     // A move of bodies in differently turned frames keeps its world vectors: `solid.move` splits
     // it by frame and maps each part itself (`split_move`).
-    if id == "solid.move" && split_move(s, params).is_some() {
-        return None;
+    if id == "solid.move" && split_move(s, params)?.is_some() {
+        return Ok(None);
     }
-    map_params(s, id, params)
+    // Nothing placed: the model is its own world, and only the saved axis is restored.
+    let world = if placed(s) { s.world_state()? } else { s.model.state() };
+    Ok(map_local(s, &world, id, params))
 }
 
 /// A `solid.move` of bodies placed in different frames, as one move per frame (#9660). A Move
@@ -440,13 +462,14 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
 /// same place, as its pivot is a point). `None`: the bodies share one frame, or are moved as
 /// placements (`placements_moved`), or the move is not the outermost command (run by another,
 /// such as Edit Feature, its parameters are already in component frames). `to_local` leaves the
-/// parameters of a split move in the world, and `solid.move` asks for the parts.
-pub(crate) fn split_move(s: &Session, params: &Value) -> Option<Vec<Value>> {
+/// parameters of a split move in the world, and `solid.move` asks for the parts. A model that
+/// cannot be placed is the error.
+pub(crate) fn split_move(s: &Session, params: &Value) -> crate::Result<Option<Vec<Value>>> {
     let outermost_move = DEPTH.with(std::cell::Cell::get) == 1 && OUTER_MOVE.with(std::cell::Cell::get);
     if !outermost_move || !placed(s) || placements_moved(s, params).is_some() {
-        return None;
+        return Ok(None);
     }
-    let names = params.get("bodies")?.as_array()?;
+    let Some(names) = params.get("bodies").and_then(Value::as_array) else { return Ok(None) };
     let turns = params.get("axis").is_some() || params.get("angle").is_some();
     let alike = |a: &Mat, b: &Mat| {
         let columns = if turns { 4 } else { 3 };
@@ -456,16 +479,17 @@ pub(crate) fn split_move(s: &Session, params: &Value) -> Option<Vec<Value>> {
     let mut groups: Vec<(Mat, Vec<Value>)> = Vec::new();
     for name in names {
         // An unknown body is the command's to refuse.
-        let b = name.as_str()?;
-        let m = frames.iter().find(|(world, own, _)| world == b || own == b).map(|(.., m)| *m)?;
+        let Some(b) = name.as_str() else { return Ok(None) };
+        let Some(m) = frames.iter().find(|(world, own, _)| world == b || own == b).map(|(.., m)| *m) else { return Ok(None) };
         match groups.iter_mut().find(|(g, _)| alike(g, &m)) {
             Some((_, bodies)) => bodies.push(name.clone()),
             None => groups.push((m, vec![name.clone()])),
         }
     }
     if groups.len() < 2 {
-        return None;
+        return Ok(None);
     }
+    let world = s.world_state()?;
     let given = params.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty());
     let moves = groups
         .into_iter()
@@ -477,19 +501,19 @@ pub(crate) fn split_move(s: &Session, params: &Value) -> Option<Vec<Value>> {
             if let Some(name) = given.filter(|_| k > 0) {
                 p["name"] = Value::String(format!("{name} ({})", k + 1));
             }
-            map_params(s, "solid.move", &p).unwrap_or(p)
+            map_local(s, &world, "solid.move", &p).unwrap_or(p)
         })
         .collect();
-    Some(moves)
+    Ok(Some(moves))
 }
 
-/// [`to_local`] for one command.
-fn map_params(s: &Session, id: &str, params: &Value) -> Option<Value> {
+/// [`to_local`] on the placed model `world`.
+fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: &Value) -> Option<Value> {
     if id == "library.apply" {
         // Library targets are the same world selections as appearance.assign,
         // nested one level down. Convert at the outer boundary exactly once;
         // run_nested subsequently receives the component-local picks and names.
-        let targets = map_params(s, "appearance.assign", params.get("targets")?)?;
+        let targets = map_local(s, world, "appearance.assign", params.get("targets")?)?;
         let mut out = params.clone();
         out["targets"] = targets;
         return Some(out);
@@ -511,16 +535,41 @@ fn map_params(s: &Session, id: &str, params: &Value) -> Option<Value> {
         if let solidcraft_doc::FeatureKind::Emboss { face: Some(face), .. } = &feature.kind {
             context.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
         }
-        let mut inner = map_params(&context, cmd, params.get("params")?)?;
+        // Nothing to map (a surface revolve has no picks; a design with no placed component needs
+        // none): an untouched explicit axis is still restored below.
+        let mapped = if placed(s) { map_local(&context, world, cmd, params.get("params")?) } else { None };
+        let mut inner = match mapped {
+            Some(inner) => inner,
+            None if matches!(cmd, "solid.revolve" | "surface.revolve") => params.get("params")?.clone(),
+            None => return None,
+        };
         // An untouched explicit axis is displayed in world coordinates by Edit
         // Feature. Keep its exact saved values instead of an affine round trip.
-        if cmd == "solid.revolve"
-            && let solidcraft_doc::FeatureKind::Revolve { axis: solidcraft_doc::AxisRef::Line { origin, dir }, .. } = &feature.kind
+        if let (
+            "solid.revolve" | "surface.revolve",
+            solidcraft_doc::FeatureKind::Revolve { axis: solidcraft_doc::AxisRef::Line { origin, dir }, .. }
+            | solidcraft_doc::FeatureKind::SurfaceRevolve { axis: solidcraft_doc::AxisRef::Line { origin, dir }, .. },
+        ) = (cmd, &feature.kind)
+            && let Ok(at) = s.doc.eval_point(origin)
         {
             let frame = context.active_component_frame();
-            let displayed = serde_json::json!({"origin":pt(apply_point(&frame,origin.0)),"dir":pt(apply_vector(&frame,dir.0))});
-            if params.get("params").and_then(|p| p.get("axis")) == Some(&displayed) {
-                inner["axis"] = serde_json::json!({"origin":pt(origin.0),"dir":pt(dir.0)});
+            // Each half is kept when the dialog gives back what it showed (to float dust), so
+            // editing only the direction leaves the origin's expressions alone.
+            let given = params.get("params").and_then(|p| p.get("axis"));
+            let shown = |key: &str, shown: Vec3| {
+                let given = given.and_then(|a| a.get(key)).and_then(Value::as_array)?;
+                let [x, y, z] = given.as_slice() else { return None };
+                let near = |g: &Value, w: f64| g.as_f64().is_some_and(|g| (g - w).abs() <= 1e-9 * (1.0 + w.abs()));
+                (near(x, shown.x) && near(y, shown.y) && near(z, shown.z)).then_some(())
+            };
+            if let Some(axis) = inner.get_mut("axis").and_then(Value::as_object_mut) {
+                if shown("origin", apply_point(&frame, at)).is_some() {
+                    // The origin as saved: its expressions stay expressions.
+                    axis.insert("origin".into(), placement_point(origin));
+                }
+                if shown("dir", apply_vector(&frame, dir.0)).is_some() {
+                    axis.insert("dir".into(), pt(dir.0));
+                }
             }
         }
         let points = match (&feature.kind, cmd) {
@@ -570,7 +619,7 @@ fn map_params(s: &Session, id: &str, params: &Value) -> Option<Value> {
         return Some(out);
     }
     let keys = table(id);
-    if keys.is_empty() || !placed(s) {
+    if keys.is_empty() {
         return None;
     }
     let obj = params.as_object()?;
@@ -595,7 +644,7 @@ fn map_params(s: &Session, id: &str, params: &Value) -> Option<Value> {
         obj.insert("origin".into(), serde_json::json!([0.0, 0.0, 0.0]));
     }
     let obj = &obj;
-    let mut m = Mapper { s, f: command_frames, first, changed: false, here: false };
+    let mut m = Mapper { s, world, f: command_frames, first, changed: false, here: false };
     let body = obj.get("body").or_else(|| obj.get("face_body")).and_then(Value::as_str).map(str::to_string);
     let mut out: Map<String, Value> = obj.clone();
     // Picks first: their frame turns the directions.
@@ -661,16 +710,19 @@ fn map_params(s: &Session, id: &str, params: &Value) -> Option<Value> {
     m.changed.then_some(Value::Object(out))
 }
 
+/// A placement point as saved: a plain number stays a number, an expression is its text.
+fn placement_point(p: &solidcraft_doc::PointExpr) -> Value {
+    Value::Array(
+        p.iter()
+            .map(|e| e.as_str().trim().parse::<f64>().ok().filter(|x| x.is_finite()).map_or_else(|| Value::from(e.as_str()), Value::from))
+            .collect(),
+    )
+}
+
 /// A primitive's saved placement inputs, in its component's frame, for redefining it with `cmd`.
 fn primitive_placement(kind: &solidcraft_doc::FeatureKind, cmd: &str) -> Vec<(&'static str, Value)> {
     use solidcraft_doc::FeatureKind as Feature;
-    let point = |p: &solidcraft_doc::PointExpr| {
-        Value::Array(
-            p.iter()
-                .map(|e| e.as_str().trim().parse::<f64>().ok().filter(|x| x.is_finite()).map_or_else(|| Value::from(e.as_str()), Value::from))
-                .collect(),
-        )
-    };
+    let point = placement_point;
     match (kind, cmd) {
         (Feature::Box { corner, .. }, "solid.box") => vec![("corner", point(corner))],
         (Feature::Sphere { center, .. }, "solid.sphere") | (Feature::Torus { center, .. }, "solid.torus") => vec![("center", point(center))],

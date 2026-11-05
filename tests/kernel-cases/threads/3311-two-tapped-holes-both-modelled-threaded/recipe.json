@@ -1,0 +1,64 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 40,
+    "width": 20,
+    "height": 9,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     10,
+     10,
+     9
+    ],
+    "thread": "M5"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     30,
+     10,
+     9
+    ],
+    "thread": "M5"
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     12.1,
+     10,
+     4.5
+    ],
+    "designation": "M5",
+    "modeled": true
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     32.1,
+     10,
+     4.5
+    ],
+    "designation": "M5",
+    "modeled": true
+   }
+  }
+ ]
+}

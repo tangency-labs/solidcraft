@@ -3,11 +3,14 @@
 //! Runs the same [`solidcraft_ui_egui::SolveApp`] as the desktop app through eframe's web runner
 //! (wgpu: WebGPU where available, WebGL2 otherwise). Build with `trunk build --release` from this
 //! directory (output in `dist/web`). URL flags: `?webgl` forces WebGL2 (remembered until
-//! `?webgpu`), `?sample` opens the sample part.
+//! `?webgpu`), `?sample` opens the sample part, `?embed=editor` runs it as an editing embed in a
+//! host page (no application bar or start page; nothing kept in the browser; #8517).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 #[cfg(target_arch = "wasm32")]
 mod api;
+#[cfg(any(target_arch = "wasm32", test))]
+mod channel;
 #[cfg(any(target_arch = "wasm32", test))]
 mod disk;
 #[cfg(target_arch = "wasm32")]
@@ -16,6 +19,8 @@ mod easyprint;
 mod files;
 #[cfg(target_arch = "wasm32")]
 mod install;
+#[cfg(any(target_arch = "wasm32", test))]
+mod keep;
 #[cfg(target_arch = "wasm32")]
 mod linked;
 #[cfg(any(target_arch = "wasm32", test))]
@@ -40,6 +45,8 @@ fn query_flag(query: &str, name: &str) -> bool {
 struct Launch {
     open: Option<String>,
     embed: bool,
+    /// `?embed=editor` (#8517): an editing embed in a host page that keeps the files itself.
+    editor: bool,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -50,16 +57,19 @@ impl Launch {
         for (key, value) in url::form_urlencoded::parse(query.trim_start_matches('?').as_bytes()) {
             match key.as_ref() {
                 "open" if launch.open.is_none() => launch.open = Some(value.into_owned()),
+                "embed" if value == "editor" => launch.editor = true,
                 "embed" => embed = true,
                 _ => {}
             }
         }
-        launch.embed = embed && launch.open.is_some();
+        launch.embed = embed && launch.open.is_some() && !launch.editor;
         launch
     }
 
+    /// The browser's own storage (designs, autosave, recovery, preferences) is used: not when
+    /// embedded, where the host keeps what is kept.
     fn persists(&self) -> bool {
-        !self.embed
+        !self.embed && !self.editor
     }
 
     fn full_app_url(&self, mut url: url::Url) -> String {
@@ -152,8 +162,15 @@ impl PrefsWriter {
 /// tab of the page when one tab writes). Other keys, and settings taken away (clearing the site's
 /// data), leave this tab's settings as they are.
 #[cfg(any(target_arch = "wasm32", test))]
-fn settings_written(key: Option<&str>, value: Option<String>) -> Option<String> {
-    value.filter(|_| key == Some(solidcraft_ui_egui::prefs::STORAGE_KEY))
+fn settings_written(own_key: &str, key: Option<&str>, value: Option<String>) -> Option<String> {
+    // Tabs of another channel write to the same storage, under their own key.
+    value.filter(|_| key == Some(own_key))
+}
+
+/// The settings key of `channel` (see [`channel`]).
+#[cfg(target_arch = "wasm32")]
+fn prefs_key() -> String {
+    channel::key(solidcraft_ui_egui::prefs::STORAGE_KEY)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -162,12 +179,14 @@ mod web {
 
     use solidcraft_engine::Session;
     use solidcraft_engine::io::vfs;
+    use solidcraft_ui_egui::ui_kit::BackingTooltipExt as _;
     use solidcraft_ui_egui::{Services, SolveApp, ui_kit};
     use wasm_bindgen::JsCast as _;
 
     use crate::api::Api;
     use crate::disk::{self, SaveTarget};
     use crate::files::{self, Files, Intent};
+    use crate::keep;
     use crate::space_mouse::SpaceMouse;
 
     const CANVAS_ID: &str = "solidcraft_canvas";
@@ -227,7 +246,9 @@ mod web {
     }
 
     /// The browser's "leave site? changes you made may not be saved" prompt while a design has
-    /// unsaved changes (the page can't show its own dialog when it is being closed).
+    /// unsaved changes (the page can't show its own dialog when it is being closed). With "keep
+    /// unsaved work in this browser" on and "still ask" off, there is nothing to ask once every
+    /// unsaved design's copy is current (`keep::asks_before_unload`, #10220).
     fn ask_before_unload(window: &web_sys::Window) {
         let on_unload = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::BeforeUnloadEvent)>::new(|e: web_sys::BeforeUnloadEvent| {
             if UNSAVED.with(std::cell::Cell::get) {
@@ -238,6 +259,50 @@ mod web {
         let _ = window.add_event_listener_with_callback("beforeunload", on_unload.as_ref().unchecked_ref());
         // The listener lives as long as the page.
         on_unload.forget();
+    }
+
+    /// With "keep unsaved work in this browser" on, the page brings every unsaved design's copy up
+    /// to date when it is hidden or goes (`pagehide`, `visibilitychange`): the browser may not
+    /// wait for that write, so the copies are written shortly after each change as well
+    /// (`Shell::keep_tick`, #10220).
+    fn keep_when_hidden(window: &web_sys::Window, runner: &eframe::WebRunner) {
+        let keep_now = {
+            let runner = runner.clone();
+            move || {
+                if let Some(mut shell) = runner.app_mut::<Shell>() {
+                    shell.keep_tick(None, true);
+                }
+            }
+        };
+        let on_hide = {
+            let keep_now = keep_now.clone();
+            wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| keep_now())
+        };
+        let on_visibility = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| {
+            let hidden = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| js_sys::Reflect::get(&d, &"visibilityState".into()).ok())
+                .and_then(|v| v.as_string())
+                .is_some_and(|v| v == "hidden");
+            if hidden {
+                keep_now();
+            }
+        });
+        let _ = window.add_event_listener_with_callback("pagehide", on_hide.as_ref().unchecked_ref());
+        if let Some(document) = window.document() {
+            let _ = document.add_event_listener_with_callback("visibilitychange", on_visibility.as_ref().unchecked_ref());
+        }
+        // The listeners live as long as the page.
+        on_hide.forget();
+        on_visibility.forget();
+    }
+
+    /// One open design followed for its kept copy: its revision, when that last changed, and since
+    /// when its copy has lacked a change (`None`: current, or being written).
+    struct Track {
+        revision: u64,
+        last_change: f64,
+        first_unwritten: Option<f64>,
     }
 
     /// eframe cancels the browser's action for every Tab it gets, so the browser couldn't switch
@@ -262,7 +327,7 @@ mod web {
     fn hear_settings_from_other_tabs(window: &web_sys::Window, ctx: &egui::Context, inbox: PrefsInbox) {
         let ctx = ctx.clone();
         let on_storage = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::StorageEvent)>::new(move |e: web_sys::StorageEvent| {
-            if let Some(prefs) = crate::settings_written(e.key().as_deref(), e.new_value()) {
+            if let Some(prefs) = crate::settings_written(&crate::prefs_key(), e.key().as_deref(), e.new_value()) {
                 inbox.set(Some(prefs));
                 ctx.request_repaint();
             }
@@ -312,6 +377,10 @@ mod web {
         /// The settings this tab wrote or loaded last, and those another tab wrote since (#8644).
         prefs_writer: crate::PrefsWriter,
         other_tab_prefs: PrefsInbox,
+        /// The open designs followed for their kept copy, by `Session::uid` (#10220).
+        keep_track: std::collections::HashMap<u64, Track>,
+        /// Every unsaved design's kept copy is current (and the preference is on).
+        all_kept: bool,
     }
 
     impl Shell {
@@ -334,8 +403,7 @@ mod web {
             }
             let prefs = self.persisted_prefs();
             let Some(prefs) = self.prefs_writer.take(prefs) else { return };
-            let stored =
-                web_sys::window().and_then(|w| w.local_storage().ok().flatten()).map(|s| s.set_item(solidcraft_ui_egui::prefs::STORAGE_KEY, &prefs));
+            let stored = web_sys::window().and_then(|w| w.local_storage().ok().flatten()).map(|s| s.set_item(&crate::prefs_key(), &prefs));
             if !matches!(stored, Some(Ok(()))) {
                 log::warn!("settings: the browser's storage did not take them; they are saved again later");
                 self.prefs_writer = crate::PrefsWriter::default();
@@ -427,8 +495,14 @@ mod web {
                 self.sync_recents();
             }
             let now = ctx.input(|i| i.time);
+            // With "keep unsaved work in this browser" on, each design's own copy takes over from
+            // the single autosave (#10220).
+            if self.app.preferences.keep_unsaved_in_browser && self.autosaved.is_some() {
+                files::autosave(&self.files, None);
+                self.autosaved = None;
+            }
             // Unsaved work is kept (at most every AUTOSAVE_S); saved work needs no autosave.
-            if self.files.ready.get() && self.files.recovery.borrow().is_none() {
+            if self.files.ready.get() && self.files.recovery.borrow().is_none() && !self.app.preferences.keep_unsaved_in_browser {
                 let s = &self.app.session;
                 let changed = s.is_dirty() && self.autosaved != Some(s.revision);
                 let wait = AUTOSAVE_S - (now - self.autosaved_at);
@@ -446,6 +520,175 @@ mod web {
             }
             if !self.files.ready.get() || !self.files.incoming.borrow().is_empty() {
                 ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            }
+            self.all_kept = self.keep_tick(Some(ctx), false);
+        }
+
+        /// Keep each open design's unsaved changes in the browser, when the preference asks for
+        /// it: a design's copy is written once it has been still a moment (`keep::due`), or at
+        /// once with `now` (the page is being hidden); a copy whose design is saved or closed, or
+        /// with the preference off, goes. Answers whether every unsaved design's copy is current.
+        fn keep_tick(&mut self, ctx: Option<&egui::Context>, now: bool) -> bool {
+            if !self.launch.persists() || !self.files.ready.get() {
+                return false;
+            }
+            let Shell { app, files, keep_track, .. } = self;
+            let on = app.preferences.keep_unsaved_in_browser;
+            let time = js_sys::Date::now();
+            let page = files.keep_page.borrow().clone();
+            let mut wanted = std::collections::HashSet::new();
+            let mut all_kept = true;
+            let mut wake: Option<f64> = None;
+            let mut error = None;
+            let mut soon = |ms: f64| wake = Some(wake.map_or(ms, |w: f64| w.min(ms)));
+            if on {
+                for s in solidcraft_ui_egui::documents::open_sessions(app).into_iter().filter(|s| s.is_dirty()) {
+                    let id = keep::entry_id(&page, s.uid);
+                    wanted.insert(s.uid);
+                    let t = keep_track.entry(s.uid).or_insert(Track { revision: s.revision, last_change: time, first_unwritten: None });
+                    if t.revision != s.revision {
+                        t.revision = s.revision;
+                        t.last_change = time;
+                    }
+                    if files.kept.borrow().get(&id).copied().flatten() == Some(s.revision) {
+                        t.first_unwritten = None;
+                        continue;
+                    }
+                    all_kept = false;
+                    if files.keeping.borrow().contains(&id) {
+                        soon(100.0);
+                        continue;
+                    }
+                    let first = *t.first_unwritten.get_or_insert(time);
+                    let failed = files.kept_failed.borrow().get(&id).copied();
+                    if !keep::may_write(time, failed) {
+                        // The last write failed: try again after a while.
+                        soon(keep::RETRY_MS);
+                        continue;
+                    }
+                    if now || keep::due(time, first, t.last_change) {
+                        match solidcraft_engine::io::write_design_container(&s.design()) {
+                            Ok(bytes) => {
+                                let entry = keep::Entry { id, name: s.doc.name.clone(), path: s.path.clone(), changed_at: t.last_change };
+                                files::write_kept(files, &entry, bytes, s.revision);
+                                t.first_unwritten = None;
+                            }
+                            Err(e) => {
+                                files.kept_failed.borrow_mut().insert(id, time);
+                                error = Some(format!("keeping unsaved work in this browser: {e}"));
+                            }
+                        }
+                        soon(100.0);
+                    } else {
+                        soon((keep::QUIET_MS - (time - t.last_change)).min(keep::MAX_WAIT_MS - (time - first)).max(16.0));
+                    }
+                }
+            }
+            // This page's copies no design needs any more: saved, closed, or the preference off.
+            let stale: Vec<String> = files
+                .kept
+                .borrow()
+                .keys()
+                .filter(|id| keep::page_of(id) == Some(page.as_str()))
+                .filter(|id| !wanted.iter().any(|uid| keep::entry_id(&page, *uid) == **id))
+                .cloned()
+                .collect();
+            for id in stale {
+                files::remove_kept(files, &id);
+                soon(100.0);
+            }
+            keep_track.retain(|uid, _| wanted.contains(uid));
+            if let Some(e) = error {
+                app.set_status(e, true);
+            }
+            if let (Some(ctx), Some(ms)) = (ctx, wake) {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(ms / 1000.0));
+            }
+            on && all_kept
+        }
+
+        /// Offer the copies an earlier visit kept (#10220): "Restore unsaved design: <name>,
+        /// changed <time>?", one window for all of them, each with Restore, Open saved version
+        /// (when it has a file) and Discard.
+        fn keep_prompt(&mut self, ctx: &egui::Context) {
+            let offered = self.files.keep_offered.borrow().clone();
+            if offered.is_empty() || !self.files.ready.get() {
+                return;
+            }
+            let now = (js_sys::Date::now() / 1000.0) as u64;
+            let rows: Vec<_> = offered
+                .iter()
+                .map(|e| solidcraft_ui_egui::recovery_ui::BrowserCopy {
+                    name: &e.name,
+                    when: solidcraft_ui_egui::recovery_ui::ago_between(now, (e.changed_at / 1000.0) as u64),
+                    open_saved: keep::answers(e, self.saved_exists(e)).contains(&keep::Answer::OpenSaved),
+                })
+                .collect();
+            let act = solidcraft_ui_egui::recovery_ui::browser_copies_window(ctx, &self.app.preferences.language, &rows);
+            let Some((index, answer)) = act else { return };
+            let Some(entry) = offered.get(index) else { return };
+            let answer = match answer {
+                solidcraft_ui_egui::recovery_ui::CopyAnswer::Restore => keep::Answer::Restore,
+                solidcraft_ui_egui::recovery_ui::CopyAnswer::OpenSaved => keep::Answer::OpenSaved,
+                solidcraft_ui_egui::recovery_ui::CopyAnswer::Discard => keep::Answer::Discard,
+            };
+            self.keep_answer(entry, answer);
+        }
+
+        /// Whether a kept copy's design file can still be opened: in the browser's storage, or a
+        /// file on the computer this browser remembers.
+        fn saved_exists(&self, e: &keep::Entry) -> bool {
+            e.path.as_deref().is_some_and(|p| vfs::exists(p) || disk::parse(p).is_some_and(|(id, _)| self.files.disk_known.borrow().contains(id)))
+        }
+
+        /// Act on an answer in the "Restore unsaved design?" window (`keep::plan`).
+        fn keep_answer(&mut self, entry: &keep::Entry, answer: keep::Answer) {
+            let Some(plan) = keep::plan(answer, entry, self.saved_exists(entry)) else { return };
+            if plan.open_copy {
+                let copy = match files::prepare_kept(&entry.id, entry.path.as_deref()) {
+                    Ok(copy) => copy,
+                    Err(error) => {
+                        self.app.set_status(error, true);
+                        return;
+                    }
+                };
+                self.app.open_path(&copy);
+                if self.app.session.path.as_deref() != Some(copy.as_str()) {
+                    // Not opened (the status says why): it stays offered.
+                    return;
+                }
+                // It is its own design again (saving goes to its file), with its changes unsaved.
+                self.app.session.path = entry.path.clone();
+                self.app.session.doc_mut().name = entry.name.clone();
+                self.app.session.mark_unsaved();
+                self.app.home.open = false;
+            }
+            if let Some(path) = &plan.open_saved {
+                if vfs::exists(path) {
+                    self.app.open_path(path);
+                    if !keep::is_open(self.app.session.path.as_deref(), path) {
+                        // Not opened (the status says why): the copy stays offered.
+                        return;
+                    }
+                } else {
+                    // A file on the computer: the browser asks for access again, in this click.
+                    // The copy goes once the file has opened, not before: if access is refused,
+                    // the picker is dismissed or the file is gone, it stays offered.
+                    let (files, id) = (self.files.clone(), entry.id.clone());
+                    disk::restore(
+                        &self.files,
+                        path,
+                        Some(Box::new(move || {
+                            files.keep_offered.borrow_mut().retain(|e| e.id != id);
+                            files::remove_kept(&files, &id);
+                        })),
+                    );
+                    return;
+                }
+            }
+            if plan.drop_copy {
+                self.files.keep_offered.borrow_mut().retain(|e| e.id != entry.id);
+                files::remove_kept(&self.files, &entry.id);
             }
         }
 
@@ -492,7 +735,7 @@ mod web {
                             files::pick_from_disk(&self.files, Intent::Open);
                         }
                         if ui_kit::button(ui, "Insert from computer…", ui_kit::Button::Normal)
-                            .on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_drawings_hint"))
+                            .backing_on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_drawings_hint"))
                             .clicked()
                         {
                             files::pick_from_disk(&self.files, Intent::Insert);
@@ -546,7 +789,7 @@ mod web {
                                         let design = solidcraft_engine::io::is_design_path(&e.name);
                                         if !design
                                             && ui_kit::button(ui, "Insert", ui_kit::Button::Small)
-                                                .on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_stored_drawings_hint"))
+                                                .backing_on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_stored_drawings_hint"))
                                                 .clicked()
                                         {
                                             act = Some(("insert", e.name.clone()));
@@ -556,7 +799,7 @@ mod web {
                                             self.rename_focus = true;
                                         }
                                         if ui_kit::button(ui, "Save to computer…", ui_kit::Button::Small)
-                                            .on_hover_text("A copy in a file you choose; the stored design stays here")
+                                            .backing_on_hover_text("A copy in a file you choose; the stored design stays here")
                                             .clicked()
                                         {
                                             act = Some(("save_copy", e.name.clone()));
@@ -683,6 +926,13 @@ mod web {
             files::autosave(&self.files, None);
         }
 
+        /// Whether leaving the page asks through the browser's own box (`keep::asks_before_unload`).
+        fn asks_before_unload(&self) -> bool {
+            let any = solidcraft_ui_egui::documents::any_dirty(&self.app);
+            let prefs = &self.app.preferences;
+            keep::asks_before_unload(self.launch.persists(), prefs.keep_unsaved_in_browser, prefs.keep_unsaved_also_asks, any, self.all_kept)
+        }
+
         /// Whether the shell already has the on-demand face the live language needs.
         fn script_font_ready(&self) -> bool {
             match solidcraft_ui_egui::fonts::web_script_font_kind(solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language)) {
@@ -794,7 +1044,7 @@ mod web {
             self.api.poll();
             self.space_mouse.logic(&mut self.app, ctx);
             self.files_tick(ctx);
-            UNSAVED.with(|u| u.set(solidcraft_ui_egui::documents::any_dirty(&self.app)));
+            UNSAVED.with(|u| u.set(self.asks_before_unload()));
             DESIGN_SHOWN.with(|d| d.set(solidcraft_ui_egui::toolbar::design_shown(&self.app)));
         }
         fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
@@ -814,7 +1064,7 @@ mod web {
         }
         fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
             self.linked.tick(&mut self.app, ui.ctx());
-            UNSAVED.with(|u| u.set(self.launch.persists() && solidcraft_ui_egui::documents::any_dirty(&self.app)));
+            UNSAVED.with(|u| u.set(self.asks_before_unload()));
             if self.launch.embed {
                 ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Chrome).edge("embed_header", ui_kit::Edge::Top).show(ui, |ui| {
                     if ui_kit::button(ui, solidcraft_ui_egui::i18n::tr("web.open_full"), ui_kit::Button::Normal).clicked()
@@ -829,19 +1079,25 @@ mod web {
             if self.launch.persists() {
                 self.file_panel(&ctx);
                 self.recovery_prompt(&ctx);
+                self.keep_prompt(&ctx);
             }
             self.watch_text_for_font(&ctx);
             self.store_prefs(&ctx);
         }
+        #[cfg(target_arch = "wasm32")]
+        fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+            Some(&mut *self)
+        }
         fn persist_egui_memory(&self) -> bool {
-            self.launch.persists()
+            // eframe keeps this under one fixed key: only stable uses it, so a pre-release never rewrites it.
+            self.launch.persists() && crate::channel::current().is_empty()
         }
         fn save(&mut self, storage: &mut dyn eframe::Storage) {
             if !self.launch.persists() {
                 return;
             }
             let prefs = self.persisted_prefs();
-            storage.set_string(solidcraft_ui_egui::prefs::STORAGE_KEY, prefs);
+            storage.set_string(&crate::prefs_key(), prefs);
         }
     }
 
@@ -851,7 +1107,7 @@ mod web {
 
     /// Where `?webgl` is remembered. The installed app starts from its manifest's start URL, which
     /// has no query, so the choice has to outlive the page it was made on.
-    const WEBGL_KEY: &str = "solidcraft.webgl";
+    const WEBGL_KEY: &str = "solidcraft.webgl"; // stored under crate::channel::key
 
     /// Render with WebGL2: asked for now (`?webgl`, remembered) or before (until `?webgpu`).
     fn webgl() -> bool {
@@ -859,17 +1115,17 @@ mod web {
         let q = query();
         if crate::query_flag(&q, "webgl") {
             if let Some(s) = &storage {
-                let _ = s.set_item(WEBGL_KEY, "1");
+                let _ = s.set_item(&crate::channel::key(WEBGL_KEY), "1");
             }
             return true;
         }
         if crate::query_flag(&q, "webgpu") {
             if let Some(s) = &storage {
-                let _ = s.remove_item(WEBGL_KEY);
+                let _ = s.remove_item(&crate::channel::key(WEBGL_KEY));
             }
             return false;
         }
-        storage.and_then(|s| s.get_item(WEBGL_KEY).ok().flatten()).is_some()
+        storage.and_then(|s| s.get_item(&crate::channel::key(WEBGL_KEY)).ok().flatten()).is_some()
     }
 
     /// Fetch font bytes asynchronously through the browser.
@@ -906,7 +1162,8 @@ mod web {
             {
                 create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
             }
-            let result = eframe::WebRunner::new()
+            let runner = eframe::WebRunner::new();
+            let result = runner
                 .start(
                     canvas,
                     options,
@@ -918,7 +1175,7 @@ mod web {
                         }
                         let (panel, opener, saver, shown) = (files.clone(), files.clone(), files.clone(), files.clone());
                         let (restorable, restorer) = (files.clone(), files.clone());
-                        let services = if launch.embed { Services::default() } else { Services {
+                        let services = if !launch.persists() { Services::default() } else { Services {
                             // Open shows the browser's open dialog for a design where it has one
                             // (the file keeps its handle, so Save writes back to it), else the
                             // browser's files window. A command that reads another kind of file
@@ -950,7 +1207,7 @@ mod web {
                             can_restore: Some(Box::new(move |path: &str| {
                                 disk::parse(path).is_some_and(|(id, _)| restorable.disk_known.borrow().contains(id))
                             })),
-                            restore_file: Some(Box::new(move |path: &str| disk::restore(&restorer, path))),
+                            restore_file: Some(Box::new(move |path: &str| disk::restore(&restorer, path, None))),
                             download_design: Some(Box::new(files::download)),
                             easyprint_upload: Some(std::sync::Arc::new(crate::easyprint::upload)),
                             browser_files: Some(Box::new(move || shown.panel.set(true))),
@@ -962,13 +1219,14 @@ mod web {
                         let (sender, receiver) = std::sync::mpsc::channel();
                         let mut app = SolveApp::new(Session::default(), services).with_control(receiver);
                         app.embedded = launch.embed;
+                        app.embed_editor = launch.editor;
                         // Listening before reading: settings another tab writes from now on are
                         // newer than those read here.
                         let other_tab_prefs = PrefsInbox::default();
                         if launch.persists() {
                             hear_settings_from_other_tabs(&window, &cc.egui_ctx, other_tab_prefs.clone());
                         }
-                        if launch.persists() && let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k))) {
+                        if launch.persists() && let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(&crate::channel::key(k)))) {
                             app.load_prefs(&p);
                         }
                         if let Some(rs) = &cc.wgpu_render_state {
@@ -1016,10 +1274,18 @@ mod web {
                             wheel_gestures: solidcraft_ui_egui::WebWheelGestures::default(),
                             prefs_writer: crate::PrefsWriter::default(),
                             other_tab_prefs,
+                            keep_track: Default::default(),
+                            all_kept: false,
                         }))
                     }),
                 )
                 .await;
+            if result.is_ok()
+                && crate::Launch::parse(&query()).persists()
+                && let Some(window) = web_sys::window()
+            {
+                keep_when_hidden(&window, &runner);
+            }
             if let Some(el) = document.get_element_by_id(LOADING_ID) {
                 match result {
                     Ok(()) => dismiss_loading(el),
@@ -1070,6 +1336,17 @@ mod tests {
         assert!(!reopened.embed);
         assert!(reopened.persists());
         assert!(full.fragment().is_none());
+    }
+
+    #[test]
+    fn embed_editor_needs_no_design_link_and_keeps_nothing_in_the_browser() {
+        let editor = Launch::parse("?embed=editor");
+        assert!(editor.editor && !editor.embed && !editor.persists());
+        let linked = Launch::parse("?embed=editor&open=https://example.org/a.sc");
+        assert!(linked.editor && !linked.embed, "an editing embed may open a linked design, still editable");
+        let viewer = Launch::parse("?embed=viewer&open=https://example.org/a.sc");
+        assert!(viewer.embed && !viewer.editor, "any other value is the viewer embed, as before");
+        assert!(!Launch::parse("?other=editor").editor);
     }
 
     #[test]
@@ -1171,9 +1448,10 @@ mod tests {
     #[test]
     fn only_settings_another_tab_wrote_are_loaded() {
         let key = solidcraft_ui_egui::prefs::STORAGE_KEY;
-        assert_eq!(settings_written(Some(key), Some("{}".into())).as_deref(), Some("{}"));
-        assert_eq!(settings_written(Some("solidcraft.webgl"), Some("1".into())), None);
-        assert_eq!(settings_written(Some(key), None), None, "removed settings leave this tab's");
-        assert_eq!(settings_written(None, None), None, "clearing all storage leaves this tab's settings");
+        assert_eq!(settings_written(key, Some(key), Some("{}".into())).as_deref(), Some("{}"));
+        assert_eq!(settings_written(key, Some("solidcraft.webgl"), Some("1".into())), None);
+        assert_eq!(settings_written(key, Some(key), None), None, "removed settings leave this tab's");
+        assert_eq!(settings_written(key, None, None), None, "clearing all storage leaves this tab's settings");
+        assert_eq!(settings_written(key, Some("rc:solidcraft.prefs"), Some("{}".into())), None, "another channel's settings are not loaded");
     }
 }

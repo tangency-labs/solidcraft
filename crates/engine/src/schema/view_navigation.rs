@@ -4,6 +4,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
 
+use super::types::{CameraParam, present};
+
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RenderDock {
@@ -69,6 +71,44 @@ fn enabled_flag<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error
 pub struct AngleReadoutResult {
     /// Whether the readout is shown now.
     pub enabled: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Turn the view to the command's standard orientation (front, back, left, right, top, bottom
+/// or isometric), as the view cube does, keeping the camera's target, distance, projection and
+/// up axis. Display only: the design isn't changed and nothing is added to undo.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct StandardViewParams {
+    /// The camera to turn. Default: the session's camera, or the home view when there is none.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "CameraParam")]
+    pub camera: Option<CameraParam>,
+}
+
+/// Look straight at the first selected planar face or plane, centred on the point it was picked
+/// at (a plane: its origin); asked again while already facing it, look from the other side.
+/// Keeps the camera's distance, projection and up axis. Needs a planar face or plane in the
+/// selection. Display only: the design isn't changed and nothing is added to undo.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct NormalToParams {
+    /// The camera to turn. Default: the session's camera, or the home view when there is none.
+    /// Its yaw and roll must also be within ±1e6 and its pitch within ±π/2.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "CameraParam")]
+    pub camera: Option<CameraParam>,
+}
+
+/// What the standard views and `view.normal_to` return: the camera after the turn, which the
+/// session keeps as its view.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CameraReply {
+    /// The camera now.
+    #[schemars(with = "CameraParam")]
+    pub camera: solidcraft_render::Camera,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -184,6 +224,58 @@ pub struct RenderFrame {
     #[serde(default, deserialize_with = "super::types::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub centre_mark: Option<bool>,
+}
+
+/// Set the view navigator at the view's corner: its type, and for the custom one the body it
+/// draws, its texture and the controls around it. The navigator is the app's, kept with the
+/// preferences and settings profiles, never in the design; without an app the call only checks
+/// its parameters. Never opens a dialog.
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NavigatorParams {
+    /// The navigator: signed axes, the cube, or a custom body (the cube until a body is
+    /// chosen). Default: unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<NavigatorStyle>,
+    /// A body of the open design for the custom navigator to draw; the app keeps a snapshot of
+    /// it, so it stays when the design closes. `null`: no body (the cube again). A body over
+    /// 10,000 triangles, or whose thinnest width is under a fifth of its widest, is refused.
+    /// Default: unchanged.
+    #[serde(default, deserialize_with = "nullable", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub body: Option<Option<String>>,
+    /// The custom navigator's colours: the cube's (`themed`) or the body's own appearance and
+    /// edge colour (`modeled`). Default: unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub texture: Option<NavigatorTexture>,
+    /// The cube's orbit and roll arrows around the custom navigator. Default: unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arrows: Option<bool>,
+    /// The cube's Home button beside the custom navigator. Default: unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home: Option<bool>,
+}
+
+/// A view navigator type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NavigatorStyle {
+    Axes,
+    Cube,
+    Custom,
+}
+
+/// How the custom view navigator colours its body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NavigatorTexture {
+    Themed,
+    Modeled,
+}
+
+/// A key that may be given as `null` (`Some(None)`), apart from absent (`None`).
+fn nullable<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(d).map(Some)
 }
 
 #[cfg(test)]

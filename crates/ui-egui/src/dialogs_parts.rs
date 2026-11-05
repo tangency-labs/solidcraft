@@ -306,7 +306,7 @@ fn dimension_label(key: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
 
     fn lib() -> Vec<Family> {
         families(&json!({"families": [

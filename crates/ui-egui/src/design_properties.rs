@@ -9,13 +9,14 @@
 //! about; both are `ui_kit::Window` cards. While the card is open, [`overlay`] marks the centre
 //! of mass in the view with the principal axes standing out of it.
 
+use solidcraft_engine::geom::prelude::*;
 use std::sync::Arc;
 
 use egui::{Align2, FontId, Stroke};
 use serde_json::{Map, Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::metadata::{DESCRIPTION, Owner, keys};
 use solidcraft_engine::doc::progress::Progress;
-use solidcraft_engine::geom::Vec3;
 
 use crate::SolveApp;
 use crate::ui_kit;
@@ -132,8 +133,20 @@ pub fn open_object(app: &mut SolveApp, command: &str, params: &Value, fallback: 
     // copy beside it, the card shows when done. Headless and in tests (no wait set), here.
     // The worker reports how many bodies it has measured, and stops when the card closes (#8706).
     let progress = Arc::new(Progress::default());
+    // Tests hold the reply until let go (`apply_gate`), so a window thread held up under load
+    // cannot find the measurement already in where the card should still be measuring.
+    #[cfg(test)]
+    let gate = app.apply_gate.clone();
+    let hold = move || {
+        #[cfg(test)]
+        if let Some(gate) = gate
+            && let Ok(gate) = gate.lock()
+        {
+            let _ = gate.recv();
+        }
+    };
     if let Some(wait) = app.apply_off_thread
-        && let Some(rx) = measure_beside(app.session.scratch(), command, params, progress.clone())
+        && let Some(rx) = measure_beside(app.session.scratch(), command, params, progress.clone(), hold)
     {
         match rx.recv_timeout(wait) {
             Ok(reply) => opened(app, reply, fallback),
@@ -189,13 +202,14 @@ fn opened(app: &mut SolveApp, reply: Result<Value, String>, fallback: String) {
 }
 
 /// Run `command` on `copy` on a worker, watched by `progress`; the reply comes on the returned
-/// channel.
+/// channel once `hold` returns (which only tests make wait).
 #[cfg(not(target_arch = "wasm32"))]
 fn measure_beside(
     mut copy: solidcraft_engine::Session,
     command: &str,
     params: &Value,
     progress: Arc<Progress>,
+    hold: impl FnOnce() + Send + 'static,
 ) -> Option<std::sync::mpsc::Receiver<Result<Value, String>>> {
     let (tx, rx) = std::sync::mpsc::channel();
     let (command, params) = (command.to_string(), params.clone());
@@ -203,6 +217,7 @@ fn measure_beside(
         .name("properties".into())
         .spawn(move || {
             let reply = solidcraft_engine::doc::progress::watch(progress, || copy.execute(&command, &params));
+            hold();
             let _ = tx.send(reply.map_err(|e| e.to_string()));
         })
         .ok()?;
@@ -216,6 +231,7 @@ fn measure_beside(
     _command: &str,
     _params: &Value,
     _progress: Arc<Progress>,
+    _hold: impl FnOnce() + Send + 'static,
 ) -> Option<std::sync::mpsc::Receiver<Result<Value, String>>> {
     None
 }
@@ -465,6 +481,7 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use solidcraft_engine::geom::prelude::*;
 
     use crate::scenario::Harness;
 
@@ -546,6 +563,7 @@ mod tests {
             assert_ne!(english.text(k.label), k.label, "`{}`'s label is in the English catalog", k.name);
         }
         let mut h = Harness::new();
+        h.app.preferences.language = "en".into();
         // A key a newer SolidCraft might read: kept as another tool's data, never labelled as one of ours.
         h.app.session.doc_mut().metadata.0.insert("future_key".into(), json!("kept"));
         h.step(&json!({"start": "document.metadata"})).unwrap();
@@ -565,7 +583,7 @@ mod tests {
     /// its centre of mass with three principal axes a third of the box's diagonal long.
     #[test]
     fn the_measure_panels_properties_button_opens_the_window_with_the_moment_of_inertia() {
-        use solidcraft_engine::geom::Vec3;
+        use solidcore_record::Vec3;
         let mut h = Harness::new();
         h.app.run("solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "Block"})).unwrap();
         h.step(&json!({"start": "component.properties"})).unwrap();
@@ -628,9 +646,14 @@ mod tests {
         h.app.run("solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "Block"})).unwrap();
         let here = h.app.session.execute("component.properties", &json!({})).unwrap();
         h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+        // The worker holds its reply until let go, so a window thread held up under load cannot
+        // find it already in.
+        let (finish, gate) = std::sync::mpsc::channel();
+        h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
         super::open_object(&mut h.app, "component.properties", &json!({}), String::new());
         assert!(h.app.menu.props.is_none(), "nothing is waited for on the window thread");
         let m = h.app.menu.props_measuring.take().expect("measuring beside the window");
+        finish.send(()).unwrap();
         assert_eq!(m.rx.recv().unwrap().unwrap(), here, "the copy measures what the design here does");
 
         let (tx, rx) = std::sync::mpsc::channel();
@@ -671,11 +694,15 @@ mod tests {
             h.app.run("occurrence.copy", json!({"component": block, "translate": [20 * i, 0, 0]})).unwrap();
         }
         h.app.apply_off_thread = Some(std::time::Duration::ZERO);
-        let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Component { id: 0 });
+        // Held until checked: under load the worker could otherwise finish before the menu returns.
+        let (finish, gate) = std::sync::mpsc::channel();
+        h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+        let items = crate::context_menu::entries(&h.app, &crate::context_menu::Target::Component { id: 0 });
         let item = items.iter().find(|i| i.label == "Properties").expect("Properties item");
         crate::context_menu::run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
         assert!(h.app.menu.props_measuring.is_some(), "the menu returns at once, the card measuring");
         assert!(h.app.menu.props.is_none());
+        finish.send(()).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
         while h.app.menu.props.is_none() {
             assert!(std::time::Instant::now() < deadline, "the measurements never came in");
@@ -705,7 +732,7 @@ mod tests {
     #[test]
     fn the_file_menu_browser_and_root_component_open_the_window() {
         let mut h = Harness::new();
-        let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Component { id: 0 });
+        let items = crate::context_menu::entries(&h.app, &crate::context_menu::Target::Component { id: 0 });
         let item = items.iter().find(|i| i.id == "ui.designProperties").expect("root component menu item");
         assert_eq!(item.label, "Design Properties");
         crate::context_menu::run_item(&mut h.app, item, egui::pos2(0.0, 0.0));

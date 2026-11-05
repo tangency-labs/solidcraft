@@ -7,10 +7,11 @@
 use crate::selection::SelectionExt as _;
 use crate::ui_kit::{choice_row, expr_row};
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::{Mat, apply_point, apply_vector, is_identity, mat_inverse, mat_mul, rigid};
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
@@ -260,9 +261,12 @@ fn sel_point(app: &SolveApp, d: &Dialog, s: Option<&Sel>) -> Option<Vec3> {
     let s = s?;
     match s {
         Sel::Edge { body, index, point } => {
+            // As every pick reads the placed model: one that cannot be placed has no bodies here.
             let st = match d.editing {
-                Some((id, _)) => std::sync::Arc::new(solidcraft_engine::doc::world_state(&app.session.doc, &app.session.model.state_before(id))),
-                None => app.session.world_state(),
+                Some((id, _)) => std::sync::Arc::new(
+                    solidcraft_engine::doc::world_state(&app.session.doc, &app.session.model.state_before(id)).unwrap_or_default(),
+                ),
+                None => crate::open_meshing::session_world(&app.session),
             };
             // The centre is found where the body was modelled; the picked point is where it stands.
             Some(crate::dialogs::edge_circle_in(&st, body, *index).map_or(*point, |(c, ..)| carried(d, on_moved(&bodies_of(app, d), s), c)))

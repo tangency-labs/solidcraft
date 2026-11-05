@@ -54,8 +54,10 @@ pub use threemf::{
 };
 pub use urdf::{UrdfOptions, UrdfPackage, urdf};
 
+use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Metadata, ModelState};
-use solidcraft_geom::{MassProperties, Mesh, Vec3};
+use solidcraft_geom::prelude::*;
+use solidcraft_geom::{MassProperties, Mesh};
 
 /// Design file extension: new designs, autosaves and recovery files are written as `.sc`.
 pub const DESIGN_EXT: &str = "sc";
@@ -234,6 +236,7 @@ pub fn step_import_feature(bytes: &[u8], file: &str) -> Result<StepFeature> {
 
 /// [`step_import_feature`], with the bodies named after `names`.
 pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> Result<StepFeature> {
+    let _span = solidcraft_profile::span("import", "step_import_feature_named");
     limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
     // STEP is 7-bit text with escapes; tolerate stray 8-bit bytes. IGES and the cadmpeg formats
     // are restated as STEP (the feature keeps that STEP text).
@@ -289,6 +292,7 @@ pub struct MeshFeature {
 /// feature. A glTF file's bodies are all built where they are (see [`read_gltf`] for its node
 /// tree), and it can't read buffers in other files.
 pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
+    let _span = solidcraft_profile::span("import", "mesh_import_feature");
     if is_gltf_path(file) {
         let mut no_files = |name: &str| Err(format!("`{name}` can't be read here"));
         let mut g = read_gltf(bytes, file, &mut no_files)?;
@@ -418,7 +422,7 @@ pub fn export_mesh(b: &solidcraft_kernel::Body) -> Result<Mesh> {
 
 /// [`export_mesh`] at `quality` (never finer than 1 µm).
 pub fn export_mesh_at(b: &solidcraft_kernel::Body, quality: MeshQuality) -> Result<Mesh> {
-    Ok(b.tessellate((b.size() * quality.share()).max(1e-3))?)
+    Ok(b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * quality.share()).max(1e-3)))?)
 }
 
 /// Distance within which an exported mesh's vertices are welded (STL, 3MF and OBJ alike).
@@ -731,6 +735,7 @@ pub fn export_with_quality(
     meta: &Metadata,
     quality: MeshQuality,
 ) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("io", "export_with_quality");
     export_with_parts(state, bodies, &[], format, name, meta, quality)
 }
 
@@ -826,6 +831,7 @@ fn mesh_object(b: &solidcraft_doc::ModelBody, tagged: bool, quality: MeshQuality
 /// part, built where the file placed it) is taken into its component's frame by that offset,
 /// as the world placement does, so the occurrences above it place it only once.
 pub fn step_assembly(doc: &Document, local: &ModelState, name: &str) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("io", "step_assembly");
     use solidcraft_kernel::{ExportBody, ExportProduct};
     let mut index: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
     index.insert(0, 0);
@@ -858,6 +864,7 @@ pub fn step_assembly(doc: &Document, local: &ModelState, name: &str) -> Result<V
 
 /// Read a design file's bytes.
 pub fn read_design(bytes: &[u8]) -> Result<Document> {
+    let _span = solidcraft_profile::span("io", "read_design");
     limits::check(limits::Kind::Design, bytes.len() as u64).map_err(|e| IoError::Invalid(format!("design {e}")))?;
     if is_design_container(bytes) {
         return design::read(bytes);
@@ -950,8 +957,8 @@ pub const MAX_STL_TRIANGLES: usize = 20_000_000;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore_record::Vec3;
     use solidcraft_doc::{FeatureKind, Model, Operation, point_expr};
-    use solidcraft_geom::Vec3;
 
     fn model() -> (Document, Model) {
         let mut doc = Document::new("t");
@@ -1047,8 +1054,12 @@ mod tests {
         assert!(o.contains("o Body1") && o.contains("\nf "));
     }
 
-    /// OBJ shares a face's vertices (a cube: 8 positions, 6 normals, not 36 of each) and keeps
-    /// the body name as written, spaces included.
+    /// OBJ shares the vertices faces meet at and keeps the body name as written, spaces included.
+    /// The 10 × 20 × 30 box meshes as the planner's grids, no side longer than a fifth of its
+    /// extent (the 37.4 mm diagonal): its edges in 2, 3 and 5 pieces, so its faces are grids of
+    /// 2 × 3, 2 × 5 and 3 × 5 cells, 2 · (6 + 10 + 15) · 2 = 124 triangles. Welded, their
+    /// corners are the 3 · 4 · 6 = 72 nodes of the box's lattice less the 1 · 2 · 4 inside it: 64
+    /// positions (unwelded, 372), and one normal per face.
     #[test]
     fn obj_export_is_welded_and_keeps_names() {
         let (_, m) = model();
@@ -1059,10 +1070,10 @@ mod tests {
         let o = String::from_utf8(export(&st, &[], Format::Obj, "t").unwrap()).unwrap();
         let count = |p: &str| o.lines().filter(|l| l.starts_with(p)).count();
         assert!(o.contains("\no Red Block\n"), "{o}");
-        assert_eq!((count("v "), count("vn "), count("f ")), (8, 6, 12), "{o}");
+        assert_eq!((count("v "), count("vn "), count("f ")), (64, 6, 124), "{o}");
         let ids: Vec<usize> =
             o.lines().filter(|l| l.starts_with("f ")).flat_map(|l| l.split([' ', '/']).skip(1)).filter_map(|x| x.parse().ok()).collect();
-        assert!(ids.iter().all(|i| (1..=8).contains(i) || (1..=6).contains(i)));
+        assert!(ids.iter().all(|i| (1..=64).contains(i)));
     }
 
     /// The OBJ export carries the colours of the bodies: the mesh file names the material
@@ -1284,6 +1295,9 @@ mod tests {
                 style: Default::default(),
                 fit: Default::default(),
                 corner: Default::default(),
+                setbacks: Vec::new(),
+                turn: Default::default(),
+                tangent_chain: true,
             },
             None,
         )
@@ -1404,6 +1418,9 @@ mod tests {
                 style: Default::default(),
                 fit: Default::default(),
                 corner: Default::default(),
+                setbacks: Vec::new(),
+                turn: Default::default(),
+                tangent_chain: true,
             },
             None,
         )

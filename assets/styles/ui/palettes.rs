@@ -75,6 +75,7 @@ impl Tokens {
             font_compass: 13.5,
             font_subtitle: 15.0,
             font_intro: 16.0,
+            font_page_heading: 20.0,
             font_article_heading: 17.0,
             font_title: 22.0,
             font_display: 26.0,
@@ -203,6 +204,11 @@ impl Tokens {
             dimension_driven: Color32::from_rgb(160, 90, 120),
             sketch_point_free: Color32::from_rgb(30, 90, 200),
             section_cap: Color32::from_rgb(214, 128, 72),
+            // A steel and a sage that tint a body about as strongly as the cap does and to within
+            // a few points of its lightness, so the cut stays calm, while staying apart from the
+            // cap, each other and the body in every colour vision mode (dark keeps them, as the
+            // cap).
+            section_hatch: [Color32::from_rgb(84, 138, 168), Color32::from_rgb(108, 180, 126)],
             dialog_bg: Color32::from_rgb(250, 251, 252),
             dialog_border: Color32::from_rgb(213, 219, 227),
             chip: Color32::from_rgb(38, 120, 218),
@@ -228,6 +234,8 @@ impl Tokens {
             selected_bg: Color32::from_rgb(232, 241, 250),
             figure_ground: Color32::from_rgb(247, 248, 250),
             figure_line: Color32::from_rgb(111, 124, 143),
+            figure_highlight: Color32::WHITE,
+            figure_shadow: Color32::BLACK,
             figure_face_top: Color32::from_rgb(255, 255, 255),
             figure_face_left: Color32::from_rgb(228, 233, 240),
             figure_face_right: Color32::from_rgb(201, 210, 222),
@@ -241,8 +249,9 @@ impl Tokens {
             figure_axis_z: Color32::from_rgb(47, 111, 208),
             figure_ok: Color32::from_rgb(47, 125, 91),
             figure_warn: Color32::from_rgb(201, 138, 0),
+            figure_conflict: Color32::from_rgb(184, 74, 0),
             pref_well: Color32::from_rgb(238, 241, 245),
-            pref_note: Color32::from_rgb(184, 74, 0),
+            pref_note: Color32::from_rgb(183, 74, 0),
             pref_note_fill: Color32::from_rgb(251, 235, 221),
             pref_on_accent: Color32::from_rgb(255, 255, 255),
             pref_ok: Color32::from_rgb(39, 107, 44),
@@ -263,6 +272,8 @@ impl Tokens {
             bend_up: Color32::from_rgb(30, 140, 50),
             bend_down: Color32::from_rgb(200, 90, 20),
             interference: Color32::from_rgb(235, 45, 40),
+            comb_envelope: Color32::from_rgb(130, 40, 175),
+            comb_teeth: Color32::from_rgb(215, 105, 0),
             continuity: [
                 Color32::from_rgb(0, 158, 115),
                 Color32::from_rgb(0, 114, 178),
@@ -380,6 +391,7 @@ impl Tokens {
         t.figure_axis_z = Color32::from_rgb(108, 168, 247);
         t.figure_ok = Color32::from_rgb(127, 209, 174);
         t.figure_warn = Color32::from_rgb(232, 194, 74);
+        t.figure_conflict = Color32::from_rgb(240, 162, 122);
         t.pref_well = Color32::from_rgb(47, 52, 62);
         t.pref_note = Color32::from_rgb(240, 162, 122);
         t.pref_note_fill = Color32::from_rgb(74, 51, 38);
@@ -429,6 +441,8 @@ impl Tokens {
         t.box_crossing = Color32::from_rgb(80, 200, 120);
         t.bend_up = Color32::from_rgb(110, 200, 120);
         t.bend_down = Color32::from_rgb(240, 150, 80);
+        t.comb_envelope = Color32::from_rgb(195, 130, 255);
+        t.comb_teeth = Color32::from_rgb(255, 160, 60);
         t.form_ink = t.text;
         t.form_dim = Color32::from_rgb(180, 187, 200);
         t.form_primary = t.accent;

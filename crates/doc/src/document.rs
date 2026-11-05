@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 use solidcraft_kernel::Continuity;
 use solidcraft_sketch::Sketch;
 
@@ -14,21 +15,6 @@ pub const MAX_PARAMS: usize = 10_000;
 /// Largest feature id a replayed feature may keep (`Document::insert_feature`): exact in JSON
 /// numbers, and far from overflowing the next id.
 pub const MAX_FEATURE_ID: u64 = 1 << 52;
-
-/// Screw direction independent of the cylinder's placement and the picked end.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, solidcraft_derive::Walk)]
-#[serde(rename_all = "lowercase")]
-pub enum ThreadHandedness {
-    #[default]
-    Right,
-    Left,
-}
-
-impl ThreadHandedness {
-    pub fn is_right(&self) -> bool {
-        *self == Self::Right
-    }
-}
 
 /// A named parameter. User parameters are created by the user; model parameters (`d1`, `d2`…)
 /// are created by dimensions and features.
@@ -207,6 +193,33 @@ impl Operation {
     }
 }
 
+/// What a join makes of pieces that share no face: they share no volume and no area, so nothing
+/// fuses them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Touching {
+    /// A piece that touches another only along an edge or at a point cannot be one solid with it
+    /// and becomes a body of its own; pieces that touch nothing stay one body of several pieces.
+    #[default]
+    Separate,
+    /// Every piece stays in one body, also those that touch along an edge or at a point.
+    OneBody,
+}
+
+impl Touching {
+    pub fn parse(s: &str) -> Option<Touching> {
+        Some(match s.to_ascii_lowercase().replace([' ', '-'], "_").as_str() {
+            "separate" => Touching::Separate,
+            "one_body" => Touching::OneBody,
+            _ => return None,
+        })
+    }
+
+    fn is_separate(&self) -> bool {
+        *self == Touching::Separate
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
@@ -312,6 +325,13 @@ pub struct Extent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(angle = "Taper angle")]
     pub taper: Option<Expr>,
+    /// How a taper closes the profile's sharp corners, when the user chose
+    /// ([`solidcraft_kernel::draft_corners`] says what each rule gives at each corner). Without
+    /// it each profile takes preserve curvature where the kernel can build it exactly and the
+    /// tangent rule where a curve that is neither a line nor an arc has a corner, and the
+    /// feature's warning says so.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corner: Option<solidcraft_kernel::DraftCorner>,
     /// To Object: end at the face (or vertex/point) at this point, instead of `distance`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to: Option<FacePick>,
@@ -323,6 +343,11 @@ pub struct Extent {
     /// `start_offset`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<FacePick>,
+    /// A Join To Object leaves the body it runs to as its own body, joining only its targets.
+    /// Designs saved before a Join also took that body (format 39 and older, #8151) open with
+    /// it set, so they keep the bodies they were built with.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub to_body_apart: bool,
 }
 
 /// Thin Extrude: a wall of constant thickness along sketch curves instead of the profiles.
@@ -427,8 +452,14 @@ pub enum AxisRef {
     SketchAxis { axis: String },
     /// World X / Y / Z axis through the origin.
     World { axis: String },
-    /// Any line in the sketch plane, in world coordinates.
-    Line { origin: Position, dir: Dir },
+    /// Any line in the sketch plane, in world coordinates. The origin's coordinates are length
+    /// expressions, so the axis follows parameter changes.
+    Line {
+        #[serde(with = "point_expr")]
+        #[walk(placement)]
+        origin: PointExpr,
+        dir: Dir,
+    },
     /// An edge or round face of the model (a straight or circular edge, a cylinder, cone or
     /// torus face), found again on each evaluation: [`crate::construct::model_axis`].
     Model { geo: GeoRef },
@@ -585,6 +616,51 @@ impl<'de> Deserialize<'de> for FlangeEdge {
     }
 }
 
+/// One side of an Align by frames (#6257): an origin and a z direction, found again from the
+/// geometry each time the design is evaluated, so the bodies follow it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AlignFrame {
+    /// A joint origin on the model (its component's coordinates): its origin and z.
+    Origin { origin: Box<crate::joints::JointOrigin> },
+    /// A sketch point; z along the sketch's normal.
+    SketchPoint { sketch: SketchId, point: String },
+    /// The centre of a sketch circle, arc or ellipse; z along the sketch's normal.
+    SketchCurve { sketch: SketchId, curve: String },
+}
+
+impl AlignFrame {
+    /// The frame's origin and unit z in the model state `st` (its component's coordinates).
+    pub fn resolve(&self, doc: &Document, st: &crate::ModelState) -> Result<(Vec3, Vec3)> {
+        let sketch = |id: &SketchId| st.sketch(id.0).ok_or_else(|| DocError::Unknown(format!("sketch {id}")));
+        let (o, z) = match self {
+            AlignFrame::Origin { origin } => {
+                let m = crate::joints::resolve_origin(doc, st, origin)?;
+                (Vec3::new(m[3][0], m[3][1], m[3][2]), Vec3::new(m[2][0], m[2][1], m[2][2]))
+            }
+            AlignFrame::SketchPoint { sketch: id, point } => {
+                let ss = sketch(id)?;
+                let q = ss.sketch.point_index(point).and_then(|i| ss.sketch.point(i));
+                (ss.plane.to_world(q.ok_or_else(|| DocError::Unknown(format!("sketch point `{point}`")))?), ss.plane.normal())
+            }
+            AlignFrame::SketchCurve { sketch: id, curve } => {
+                use solidcraft_sketch::CurveKind;
+                let ss = sketch(id)?;
+                let kind = ss.sketch.curve_index(curve).and_then(|i| ss.sketch.curves.get(i)).map(|c| &c.kind);
+                let centre = match kind.ok_or_else(|| DocError::Unknown(format!("sketch curve `{curve}`")))? {
+                    CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } | CurveKind::Ellipse { c, .. } => ss.sketch.point(*c),
+                    _ => return Err(DocError::Invalid(format!("sketch curve `{curve}` is not a circle, arc or ellipse"))),
+                };
+                (ss.plane.to_world(centre.ok_or_else(|| DocError::Invalid(format!("sketch curve `{curve}` has no centre")))?), ss.plane.normal())
+            }
+        };
+        match z.normalized() {
+            Some(z) if o.is_finite() => Ok((o, z)),
+            _ => Err(DocError::Invalid("the frame has no finite origin and direction".into())),
+        }
+    }
+}
+
 /// Feature definitions.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -660,6 +736,18 @@ pub enum FeatureKind {
         /// (default) or a G2 patch repeating each blend up to the second order.
         #[serde(default, skip_serializing_if = "FilletCorner::is_rolling")]
         corner: FilletCorner,
+        /// Corners set back: each corner's patch starts its distance along every edge there
+        /// from the vertex instead of where the rounds meet (a constant-radius fillet only).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        setbacks: Vec<CornerSetback>,
+        /// How two rounds turn where they meet at a sharp side edge: in a mitre (the default) or
+        /// swept round it (a constant-radius, exact, rolling-corner fillet without setbacks only).
+        #[serde(default, skip_serializing_if = "FilletTurn::is_mitre")]
+        turn: FilletTurn,
+        /// Round each picked edge's tangent chain with it (the default: edges continuing it
+        /// smoothly at its ends, as far as they go), or only the picked edges.
+        #[serde(default = "yes", skip_serializing_if = "is_yes")]
+        tangent_chain: bool,
     },
     Chamfer {
         edges: Vec<Position>,
@@ -678,6 +766,9 @@ pub enum FeatureKind {
         flip: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
+        /// Cut each picked edge's tangent chain with it (the default), or only the picked edges.
+        #[serde(default = "yes", skip_serializing_if = "is_yes")]
+        tangent_chain: bool,
     },
     Box {
         #[serde(with = "point_expr")]
@@ -814,9 +905,17 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Thread depth")]
         thread_depth: Option<Expr>,
-        /// Screw direction of the cosmetic thread; older holes are right-handed.
-        #[serde(default, skip_serializing_if = "ThreadHandedness::is_right")]
-        handedness: ThreadHandedness,
+        /// The tapped thread's hand: right (the default) or left; never both.
+        #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
+        hand: crate::thread_forms::ThreadHand,
+        /// The tapped thread cut into the wall (the groove between its teeth, as a modelled
+        /// `solid.thread` cuts it) instead of only listed.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        modeled: bool,
+        /// A modelled tapped thread's inner end, towards the bottom: it fades out over this
+        /// length (ISO 3508's runout); none: it stops square, or clear of a blind hole's bottom.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ease_out: Option<ThreadRunout>,
         /// To Object: drill down to the face (or point) here instead of `depth`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to: Option<FacePick>,
@@ -833,14 +932,47 @@ pub enum FeatureKind {
         face: FacePick,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         designation: Option<String>,
-        /// Thread length from the face's end nearest `face`; `None` = full length.
+        /// Thread length from the end it starts at; `None` = full length (or `up_to`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Length")]
         length: Option<Expr>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         modeled: bool,
-        #[serde(default, skip_serializing_if = "ThreadHandedness::is_right")]
-        handedness: ThreadHandedness,
+        /// A point near the end of the face the thread starts at; `None`: the face's only free
+        /// end (no material past it), or the end the pick at `face` lies near.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<Position>,
+        /// Where the thread runs up to from the end it starts at, instead of a length.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        up_to: Option<ThreadLimit>,
+        /// The thread's form; `designation`'s prefix names it when this is the default.
+        #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
+        form: crate::thread_forms::ThreadForm,
+        #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
+        hand: crate::thread_forms::ThreadHand,
+        /// Starts (1 to 8): the lead is starts × pitch (unless `designation` gives the lead).
+        #[serde(default = "crate::thread_forms::one_start", skip_serializing_if = "crate::thread_forms::is_one_start")]
+        starts: u32,
+        /// The runout at the thread's inner end, the one away from where it starts (a groove
+        /// that fades out); none: the groove stops square there.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ease_out: Option<ThreadRunout>,
+        /// The chamfered tip at the thread's free end (ISO 4753).
+        #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
+        tip: crate::thread_forms::ThreadTip,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Chamfer angle")]
+        chamfer_angle: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Chamfer depth")]
+        chamfer_depth: Option<Expr>,
+        /// Buttress forms: which way the steep flank of the screw's teeth faces.
+        #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
+        steep_flank: crate::thread_forms::SteepFlank,
+        /// Set on threads saved before holes were sized by their nominal diameter, whose size
+        /// was left to the tap drill: a 12 mm hole stays M14 there. New threads leave it off.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        old_auto_size: bool,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {
@@ -918,6 +1050,8 @@ pub enum FeatureKind {
     Split {
         body: BodyName,
         plane: PlaneRef,
+        // The tool face is picked (and named), so the split follows it (#11674).
+        #[walk(picks_faces)]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool: Option<FaceAt>,
         /// A straight line of this sketch as the tool (#1552): the plane through it along the
@@ -1099,6 +1233,19 @@ pub enum FeatureKind {
         /// offset in full.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         axes: Option<Vec<Dir>>,
+        /// A frame on the bodies (#6257), found again on every evaluation: its origin and z are
+        /// the `from` point and normal. Replaces `from`, `from_normal` and `from_plane`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from_frame: Option<AlignFrame>,
+        /// A frame the bodies move onto, found again on every evaluation, so they follow it when
+        /// it moves. Replaces `to`, `to_normal` and `to_plane`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to_frame: Option<AlignFrame>,
+        /// A turn about the target's direction (its frame's z, face normal or plane normal),
+        /// through where `from` lands, after the move.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Angle")]
+        angle: Option<Expr>,
     },
     /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
     /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).
@@ -1597,7 +1744,9 @@ pub enum FeatureKind {
     /// A strip of ruled surface `distance` wide hanging off the chain of `body`'s edges through
     /// `edges`, as a new surface body: along `mode` (`angle` from `direction`, or from the
     /// face's normal; along `direction`), from the face at `face` where it borders the chain;
-    /// `flip` puts it on the other side; sharp corners as `corners` says.
+    /// `flip` puts it on the other side; sharp corners as `corners` says. `far`: per chain edge,
+    /// the interior control points of a free strip's far curve (moved handles); `None` or
+    /// missing, the kernel's default curve.
     SurfaceRuled {
         body: BodyName,
         edges: Vec<Position>,
@@ -1616,6 +1765,8 @@ pub enum FeatureKind {
         corners: RuledCorners,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         face: Option<FacePick>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        far: Vec<Option<Vec<Position>>>,
     },
     /// A surface body's boundary edges through `edges` extended outward: by `distance`, or up
     /// to `up_to`; the surface continued (`mode` natural) or a run-off face along each edge
@@ -1791,6 +1942,26 @@ pub enum FeatureKind {
         file: String,
         meshes: Vec<MeshData>,
     },
+    /// Repair Part (#8371): faces SMLib refuses rebuilt on their own surfaces, free edges that
+    /// pair up within `gap` sewn, and, when `patch_holes`, the loops of free edges left patched
+    /// and sewn in (`kernel::repair`).
+    Repair {
+        body: BodyName,
+        #[walk(length = "Gap")]
+        gap: Expr,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        patch_holes: bool,
+    },
+}
+
+/// A fillet corner set back: the vertex at `vertex`, where every edge is rounded, has its corner
+/// patch start `distance` along each of its edges from the vertex, the rounds running whole up to
+/// their sections there. One distance for all of a corner's edges.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct CornerSetback {
+    pub vertex: Position,
+    #[walk(length = "Setback")]
+    pub distance: Expr,
 }
 
 /// What fills the corner where three blended edges meet.
@@ -1800,13 +1971,47 @@ pub enum FilletCorner {
     /// A piece of the rolling ball's sphere: tangent (G1) to each blend.
     #[default]
     Rolling,
-    /// A G2 patch repeating each blend's surface up to the second order (see `corner_g2`).
+    /// The corner set back (its distance from the fillet's `setbacks`, else 1.5 × the radius)
+    /// and filled with a patch meeting the rounds and the faces round it to the second order
+    /// (`solidcraft_kernel::fillet_g2_corners`).
     G2,
 }
 
 impl FilletCorner {
     pub fn is_rolling(&self) -> bool {
         matches!(self, FilletCorner::Rolling)
+    }
+}
+
+/// How two constant rounds of one radius turn round a sharp, straight, convex side edge square to
+/// both on a plane, such as the rounds along a boss's base at its upright edges.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilletTurn {
+    /// The rounds run on to where they cross and meet in a mitre.
+    #[default]
+    Mitre,
+    /// The rounds end at the side edge and the corner is their section revolved about it, a
+    /// torus tangent to both (`solidcraft_kernel::FilletTurn::Swept`).
+    Swept,
+}
+
+/// Why a swept turn is refused with a fillet's other options: the kernel sweeps the turn of two
+/// constant rounds of one radius, at its own corners only.
+pub const SWEPT_TAKES: &str = "a swept corner turns two constant rounds of one radius: `turn: swept` takes `type: constant`, \
+`corner: rolling`, no `setbacks` and `fit: exact` or `reduce`";
+
+impl FilletTurn {
+    pub fn is_mitre(&self) -> bool {
+        *self == FilletTurn::Mitre
+    }
+
+    /// The kernel's turn.
+    pub fn kernel(self) -> solidcraft_kernel::FilletTurn {
+        match self {
+            FilletTurn::Mitre => solidcraft_kernel::FilletTurn::Mitre,
+            FilletTurn::Swept => solidcraft_kernel::FilletTurn::Swept,
+        }
     }
 }
 
@@ -1827,6 +2032,29 @@ impl ExtendMode {
     pub fn is_natural(&self) -> bool {
         *self == ExtendMode::Natural
     }
+}
+
+/// Where a thread runs up to instead of a length.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+#[serde(rename_all = "snake_case")]
+pub enum ThreadLimit {
+    /// Where this point lies along the thread's axis (a point on a face, such as a shoulder).
+    Face(FacePick),
+    /// Where this plane crosses the thread's axis.
+    Plane(PlaneRef),
+}
+
+/// A thread's runout length at one end: a length, or ISO 3508's standard (2.5 P) or short
+/// (1.25 P) runout.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+#[serde(rename_all = "snake_case")]
+pub enum ThreadRunout {
+    Standard,
+    Short,
+    Length {
+        #[walk(length = "Runout")]
+        length: Expr,
+    },
 }
 
 /// What Extend extends up to instead of a distance.
@@ -2190,6 +2418,12 @@ pub enum HoleKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Tip angle")]
         tip_angle: Option<Expr>,
+        /// Printing aid: two bridge layers this thick below the counterbore's floor (a slot along
+        /// X, then a square), so a printer bridges the step instead of sagging into it. Absent:
+        /// a plain counterbore.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Bridge layer")]
+        bridge: Option<Expr>,
     },
     Countersink {
         #[walk(length = "Countersink diameter")]
@@ -2452,6 +2686,7 @@ impl FeatureKind {
             FeatureKind::Import { .. } => "BaseFeature",
             FeatureKind::MeshImport { .. } => "MeshFeature",
             FeatureKind::MeshConvert { .. } => "MeshConvertFeature",
+            FeatureKind::Repair { .. } => "RepairFeature",
         }
     }
 
@@ -2532,6 +2767,7 @@ impl FeatureKind {
             FeatureKind::Import { .. } => "import",
             FeatureKind::MeshConvert { .. } => "mesh_convert",
             FeatureKind::MeshImport { .. } => "mesh_import",
+            FeatureKind::Repair { .. } => "repair",
         }
     }
 
@@ -2612,6 +2848,7 @@ impl FeatureKind {
             "BaseFeature" => "import",
             "MeshFeature" => "mesh_import",
             "MeshConvertFeature" => "mesh_convert",
+            "RepairFeature" => "repair",
             _ => return None,
         })
     }
@@ -2696,6 +2933,7 @@ impl FeatureKind {
             FeatureKind::Import { .. } => "Import",
             FeatureKind::MeshImport { .. } => "Mesh",
             FeatureKind::MeshConvert { .. } => "ConvertMesh",
+            FeatureKind::Repair { .. } => "Repair",
         }
     }
 }
@@ -2754,6 +2992,11 @@ pub struct Feature {
     /// its faces are named after them and references follow them through Update Links (#3330).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub link_faces: Vec<Vec<String>>,
+    /// What a join of this feature makes of pieces that share no face: those that touch along an
+    /// edge or at a point become separate bodies and those that touch nothing stay one body (the
+    /// default), or every piece stays one body.
+    #[serde(default, skip_serializing_if = "Touching::is_separate")]
+    pub touching: Touching,
     #[serde(flatten)]
     pub kind: FeatureKind,
 }
@@ -3056,7 +3299,7 @@ impl Visibility {
 pub struct NamedView {
     #[serde(default)]
     pub name: String,
-    pub target: solidcraft_geom::Vec3,
+    pub target: solidcore_record::Vec3,
     pub yaw: f64,
     pub pitch: f64,
     pub distance: f64,
@@ -3813,6 +4056,7 @@ impl Document {
             kernel_piece_order: false,
             inserted: false,
             link_faces: Vec::new(),
+            touching: Touching::Separate,
             kind,
         };
         self.place_feature(f);

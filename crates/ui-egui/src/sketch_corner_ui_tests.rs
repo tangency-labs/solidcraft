@@ -173,15 +173,17 @@ fn clicked_extend_endpoint_reaches_exact_ellipse_and_preserves_support() {
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     h.app.run("sketch.ellipse", json!({"center":[20,0],"major":[30,0],"minor_radius":5})).unwrap();
     h.app.run("sketch.constraint.fix", json!({"entity":"e1"})).unwrap();
-    h.app.run("sketch.line", json!({"points":[[0,3],[5,3]],"connect":false,"infer":false})).unwrap();
+    // The ellipse's construction axes come first, so the line's id is read from the reply.
+    let line =
+        h.app.run("sketch.line", json!({"points":[[0,3],[5,3]],"connect":false,"infer":false})).unwrap()["curves"][0].as_str().unwrap().to_string();
     h.frames(2);
     h.step(&json!({"start":"sketch.extend"})).unwrap();
     h.step(&json!({"click":{"world":[5,3,0]}})).unwrap();
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
-    let end = ss.sketch.point(ss.sketch.resolve_point("l1.end").unwrap()).unwrap();
+    let end = ss.sketch.point(ss.sketch.resolve_point(&format!("{line}.end")).unwrap()).unwrap();
     assert!(end.dist(Vec2::new(12.0, 3.0)) < 1e-7, "clicked endpoint must extend: {end:?}, {:?}", h.app.status);
-    assert_eq!(ss.sketch.point(ss.sketch.resolve_point("l1.start").unwrap()), Some(Vec2::new(0.0, 3.0)));
+    assert_eq!(ss.sketch.point(ss.sketch.resolve_point(&format!("{line}.start")).unwrap()), Some(Vec2::new(0.0, 3.0)));
 }
 
 #[test]
@@ -224,7 +226,7 @@ fn shift_clicks_on_two_curves_extend_both_to_where_they_meet() {
     shift_click(&mut h, &json!({"sketch": [12, 3]}));
     assert_eq!(h.app.session.undo.len(), undo + 1, "the second runs the two-curve extend, in one step");
 
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     for end in ["l1.end", "l2.end"] {
         let p = ss.sketch.point(ss.sketch.resolve_point(end).unwrap()).unwrap();
@@ -290,18 +292,31 @@ fn retype(h: &mut crate::scenario::Harness, handle: &str, text: &str) {
     h.frames(2);
 }
 
-fn apply(h: &mut crate::scenario::Harness) {
-    // Lay the window out once before reading its OK handle. An error line that wraps onto a
-    // second row moves the button, and a click on the handle from the frame before then
-    // lands above it and commits nothing.
+/// Run frames until the preview of the typed size is in. It computes on its own thread, and
+/// its result (a failure shows its reason in the window, which moves the buttons) arrives on
+/// whichever frame the thread finishes. A test that reads the window or clicks a handle
+/// before then races that frame, and on a loaded machine loses.
+fn preview_in(h: &mut crate::scenario::Harness) {
+    let began = std::time::Instant::now();
+    while h.app.preview.busy && began.elapsed() < std::time::Duration::from_secs(60) {
+        h.frame();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
     h.frames(2);
-    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+}
+
+fn apply(h: &mut crate::scenario::Harness) {
+    // Preview refusals can reflow the window during hover. The widget path resolves the
+    // button again after hovering, so the click follows its current position.
+    h.frames(2);
+    preview_in(h);
+    h.step(&json!({"widget":"OK"})).unwrap();
     h.frames(2);
 }
 
 /// Is there a point of the active sketch at `at`?
 fn has_point(h: &crate::scenario::Harness, at: Vec2) -> bool {
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let Some(ss) = h.app.session.active_sketch.and_then(|sid| st.sketch(sid)) else { return false };
     ss.sketch.points.iter().any(|p| p.pos.dist(at) < 1e-6)
 }
@@ -340,7 +355,7 @@ fn corner_window_takes_the_corner_then_applies_the_typed_size() {
         apply(&mut h);
         assert!(h.app.dialog.is_none(), "{command}: {:?}", h.app.status);
         assert_eq!(h.app.session.undo.len(), before.1 + 1, "{command} must be one undo entry");
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let ss = st.sketch(sid).unwrap();
         assert_eq!(ss.sketch.point(0), Some(Vec2::ZERO));
         assert!(ss.sketch.points[0].fixed);
@@ -355,7 +370,7 @@ fn corner_window_takes_the_corner_then_applies_the_typed_size() {
         assert!((ss.profiles[0].area - expected).abs() < 1e-6, "{command}: {}", ss.profiles[0].area);
         drop(st);
         h.app.run("edit.undo", json!({})).unwrap();
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let ss = st.sketch(sid).unwrap();
         assert_eq!(ss.sketch.curves.len(), 4);
         assert!((ss.profiles[0].area - 600.0).abs() < 1e-6);
@@ -412,7 +427,7 @@ fn fillet_window_reads_design_units_and_preserves_explicit_units_and_parameters(
             apply(&mut h);
             assert!(h.app.dialog.is_none(), "{units}, {text}, lines {lines}: {:?}", h.app.status);
             let check = |session: &solidcraft_engine::Session, expected: f64| {
-                let state = session.world_state();
+                let state = session.world_state().unwrap();
                 let ss = state.sketch(1).unwrap();
                 let arc = ss
                     .sketch
@@ -463,7 +478,7 @@ fn typed_chamfer_angle_other_than_45_degrees_reaches_the_command() {
     assert!(has_point(&h, Vec2::new(30.0, 0.0)), "10 mm along the first line");
     assert!(has_point(&h, Vec2::new(40.0, second)), "{second} mm along the second line, not 10 mm");
     assert!(!has_point(&h, Vec2::new(40.0, 10.0)), "45 degrees must no longer be forced");
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert!((ss.profiles[0].area - (1200.0 - 0.5 * 10.0 * second)).abs() < 1e-6, "{}", ss.profiles[0].area);
 }
@@ -559,7 +574,7 @@ fn a_refused_size_gives_way_to_one_that_fits() {
     let shown = |h: &mut crate::scenario::Harness, size: &str| {
         set_size(&mut h.app, size);
         h.settle();
-        h.frames(2);
+        preview_in(h);
         h.app.dialog.as_ref().and_then(|d| d.error.clone()).or_else(|| h.app.preview.error.clone())
     };
     assert!(shown(&mut h, "4 m").is_some_and(|e| e.contains("too large")));
@@ -609,7 +624,7 @@ fn a_fillet_rounds_every_picked_corner_to_one_radius() {
     apply(&mut h);
     assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
     assert_eq!(h.app.session.undo.len(), undo + 1, "one radius, one undo entry");
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert_eq!(ss.sketch.curves.iter().filter(|c| matches!(c.kind, CurveKind::Arc { .. })).count(), 3);
     assert!((ss.profiles[0].area - (1200.0 - 3.0 * 25.0 * (1.0 - std::f64::consts::PI / 4.0))).abs() < 1e-6, "{}", ss.profiles[0].area);
@@ -640,7 +655,7 @@ fn fully_constrained_center_rectangle_corners_can_be_picked_and_filleted() {
     let info = h.app.run("sketch.inspect", json!({})).unwrap();
     assert_eq!(info["dof"], 0, "{info}");
     assert_eq!(info["status"], "solved", "{info}");
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert_eq!(ss.sketch.curves.iter().filter(|c| matches!(c.kind, CurveKind::Arc { .. })).count(), 4);
     assert!((ss.profiles[0].area - (1200.0 - 36.0 * (1.0 - std::f64::consts::PI / 4.0))).abs() < 1e-6);
@@ -665,7 +680,7 @@ fn ordinary_drawing_keeps_origin_snap_and_real_origin_corners_work() {
     set_size(&mut h.app, "5");
     apply(&mut h);
     assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert_eq!(ss.sketch.point(0), Some(Vec2::ZERO));
     assert!(ss.sketch.curves.iter().any(|c| matches!(c.kind, CurveKind::Arc { .. })));
@@ -738,7 +753,7 @@ fn fillet_chamfer_corner_preview_draws_curves() {
 
     // Verify the sketch itself hasn't been modified yet.
     let sid = h.app.session.active_sketch.unwrap();
-    let sk = h.app.session.world_state().sketch(sid).unwrap().sketch.clone();
+    let sk = h.app.session.world_state().unwrap().sketch(sid).unwrap().sketch.clone();
     assert_eq!(sk.curves.len(), 2, "fillet preview must not modify the sketch");
 
     // Now test chamfer too. Close the fillet dialog first.
@@ -752,7 +767,7 @@ fn fillet_chamfer_corner_preview_draws_curves() {
     // Show the chamfer line and both shortened sides too.
     h.step(&json!({"until":{"count":{"name":"sketch_preview_curves","value":3}}})).unwrap();
 
-    let sk = h.app.session.world_state().sketch(sid).unwrap().sketch.clone();
+    let sk = h.app.session.world_state().unwrap().sketch(sid).unwrap().sketch.clone();
     assert_eq!(sk.curves.len(), 2, "chamfer preview must not modify the sketch");
 }
 
@@ -779,6 +794,59 @@ fn trim_hover_shows_the_piece_a_click_takes_away() {
     h.step(&json!({"key":"Escape"})).unwrap();
     h.step(&json!({"move":{"world":[15,0,0]}})).unwrap();
     assert!(trim_hover_piece(&h.app, sid, &line).is_none(), "only Trim shows a piece");
+}
+
+/// Trim's hover keeps the cuts of the curve under the cursor while the sketch is unchanged and
+/// Extend's preview while the cursor stays nearer one end: the piece follows the cursor along the
+/// line, and a curve added in the way moves the piece's end and the extension's stop with it.
+#[test]
+fn trim_and_extend_hovers_follow_the_cursor_and_a_changed_sketch() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let line = h.app.run("sketch.line", json!({"points": [[0,0],[30,0]], "connect": false})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    h.app.run("sketch.line", json!({"points": [[10,-5],[10,5]], "connect": false})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[20,-5],[20,5]], "connect": false})).unwrap();
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    let ends = |p: &[Vec2]| {
+        let mut x = [p[0].x, p[p.len() - 1].x];
+        x.sort_by(f64::total_cmp);
+        x
+    };
+    let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6;
+    h.step(&json!({"start":"sketch.trim"})).unwrap();
+    for (at, want) in [(15.0, [10.0, 20.0]), (16.0, [10.0, 20.0]), (25.0, [20.0, 30.0]), (4.0, [0.0, 10.0])] {
+        h.step(&json!({"move":{"world":[at,0,0]}})).unwrap();
+        let piece = trim_hover_piece(&h.app, sid, &line).unwrap();
+        assert!(near(ends(&piece), want), "at {at}: {piece:?}");
+    }
+    h.app.run("sketch.line", json!({"points": [[24,-5],[24,5]], "connect": false})).unwrap();
+    h.settle();
+    h.step(&json!({"move":{"world":[27,0,0]}})).unwrap();
+    let piece = trim_hover_piece(&h.app, sid, &line).unwrap();
+    assert!(near(ends(&piece), [24.0, 30.0]), "the new line cuts: {piece:?}");
+    let at = h.app.tool.as_ref().and_then(|t| t.hover.as_ref()).map(|h| h.0).unwrap();
+    let fresh = solidcraft_engine::cmd::trim_piece(&h.app.session.world_state().unwrap().sketch(sid).unwrap().sketch, &line, at);
+    assert_eq!(Some(piece), fresh, "the kept cuts are those of the sketch as it is");
+    h.step(&json!({"key":"Escape"})).unwrap();
+
+    let short = h.app.run("sketch.line", json!({"points": [[0,20],[8,20]], "connect": false})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    h.app.run("sketch.line", json!({"points": [[18,15],[18,25]], "connect": false})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.extend"})).unwrap();
+    for at in [7.0, 6.0, 5.0] {
+        h.step(&json!({"move":{"world":[at,20,0]}})).unwrap();
+        let piece = extend_preview_piece(&h.app, sid, &short).unwrap();
+        assert!(near([piece[0].x, piece[1].x], [8.0, 18.0]), "at {at}: {piece:?}");
+    }
+    h.step(&json!({"move":{"world":[2,20,0]}})).unwrap();
+    let piece = extend_preview_piece(&h.app, sid, &short).unwrap();
+    assert!((piece[0].x).abs() < 1e-6 && piece[1].x < 0.0, "the other end grows: {piece:?}");
+    h.app.run("sketch.line", json!({"points": [[13,15],[13,25]], "connect": false})).unwrap();
+    h.settle();
+    h.step(&json!({"move":{"world":[7,20,0]}})).unwrap();
+    let piece = extend_preview_piece(&h.app, sid, &short).unwrap();
+    assert!(near([piece[0].x, piece[1].x], [8.0, 13.0]), "the new line stops it: {piece:?}");
 }
 
 /// #3141: the 2-tangent circle tool, clicked on two sides of a rectangle drawn away from the
@@ -969,9 +1037,9 @@ fn corner_candidates_agree_with_engine_spatial_curve_filter() {
     for cmd in ["sketch.fillet", "sketch.chamfer.equal_distance", "sketch.chamfer.two_distance", "sketch.chamfer.distance_angle"] {
         h.app.start(cmd);
         for id in [&line, &spline, &linked, &"side".to_owned()] {
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let sk = &state.sketch(sketch).unwrap().sketch;
-            let hit = Hit::SketchCurve { sketch, id: id.clone(), straight: true, point: solidcraft_engine::geom::Vec3::ZERO };
+            let hit = Hit::SketchCurve { sketch, id: id.clone(), straight: true, point: solidcore_record::Vec3::ZERO };
             let offered = candidate(h.app.dialog.as_ref().unwrap(), &h.app.session, &hit).is_some();
             assert_eq!(offered, !sk.is_spatial_corner_curve(id), "{cmd}: {id}");
             assert_eq!(offered, id == "side", "{cmd}: {id}");
@@ -1007,7 +1075,7 @@ fn line_arc_fillet_preview_and_apply_work_in_both_pick_orders() {
         apply(&mut h);
         assert!(h.app.dialog.is_none(), "reverse {reverse}: {:?}", h.app.status);
         assert_eq!(h.app.session.undo.len(), undo + 1);
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         assert!(ss.report.ok());
         assert_eq!(ss.sketch.curves.len(), 3);
@@ -1015,5 +1083,27 @@ fn line_arc_fillet_preview_and_apply_work_in_both_pick_orders() {
         assert!(ss.sketch.curves.iter().enumerate().any(|(i, _)| {
             ss.sketch.radius(i).is_some_and(|r| (r - 3.0).abs() < 1e-7) && ss.sketch.center(i).is_some_and(|c| c.dist(want) < 1e-6)
         }));
+    }
+}
+
+/// An ellipse's axis is never a side of a Fillet or Chamfer corner (the engine refuses it), so a
+/// line drawn from the major end is no corner the picker offers.
+#[test]
+fn an_ellipse_axis_end_is_no_corner_to_pick() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let e = h.app.run("sketch.ellipse", json!({"center":[0,0],"major":[20,0],"minor_radius":8})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    let major_end = {
+        let st = h.app.session.model.state();
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let CurveKind::Ellipse { m, .. } = sk.curves[sk.curve_index(&e).unwrap()].kind else { panic!("an ellipse") };
+        sk.points[m].id.clone()
+    };
+    h.app.run("sketch.line", json!({"points":[major_end, [40,10]],"connect":false,"infer":false})).unwrap();
+    let st = h.app.session.model.state();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let pi = sk.resolve_point(&major_end).unwrap();
+    for arcs_ok in [true, false] {
+        assert_eq!(crate::sketch_tools::corner_curves(sk, pi, arcs_ok), None, "the axis and the line are no corner (arcs_ok {arcs_ok})");
     }
 }

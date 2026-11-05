@@ -1,5 +1,6 @@
 //! Undo/redo, the timeline, deletion and selection.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
@@ -18,8 +19,20 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ASSISTANT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::AssistantResult>)
         .params("Show or hide Assistant in the app. Headless calls are refused without changing the design"),
-    CommandSpec::new("edit.undo", "Undo", undo).icon("undo").key("Ctrl+Z").noundo().doc_only(),
-    CommandSpec::new("edit.redo", "Redo", redo).icon("redo").key("Ctrl+Y").noundo().doc_only(),
+    CommandSpec::new("edit.undo", "Undo", crate::checked!("edit.undo", undo))
+        .icon("undo")
+        .key("Ctrl+Z")
+        .noundo()
+        .doc_only()
+        .contract(&UNDO_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::UndoResult>),
+    CommandSpec::new("edit.redo", "Redo", crate::checked!("edit.redo", redo))
+        .icon("redo")
+        .key("Ctrl+Y")
+        .noundo()
+        .doc_only()
+        .contract(&REDO_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::RedoResult>),
     CommandSpec::new("edit.repeat", "Repeat Last Command", crate::checked!("edit.repeat", repeat))
         .icon("redo")
         .key("Shift+R")
@@ -28,13 +41,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&REPEAT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::RepeatResult>)
         .params("Starts the last tool or dialog started in the app again, with its defaults (a toolbar click, not a replay of its values). Only the app has a tool to start: called here it is refused, and changes nothing"),
-    CommandSpec::new("edit.checkpoint", "Checkpoint", checkpoint).icon("checkpoint")
+    CommandSpec::new("edit.checkpoint", "Checkpoint", crate::checked!("edit.checkpoint", checkpoint)).icon("checkpoint")
         .noundo()
         .doc_only()
+        .contract(&CHECKPOINT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::CheckpointResult>)
         .params("→ {checkpoint: id}: remember the design, active sketch and undo history (restore with edit.restore_checkpoint; the last 16 are kept, the oldest dropped first)"),
-    CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", restore_checkpoint).icon("restore")
+    CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", crate::checked!("edit.restore_checkpoint", restore_checkpoint)).icon("restore")
         .noundo()
         .doc_only()
+        .contract(&RESTORE_CHECKPOINT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::CheckpointResult>)
         .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included. Restoring or forgetting uses it and every later checkpoint up: take a new one to go back again"),
     CommandSpec::new("timeline.compute_all", "Compute All", compute_all).at("SOLID", "MODIFY").icon("compute").noundo(),
     CommandSpec::new("timeline.play", "Play History", crate::checked!("timeline.play", play))
@@ -111,12 +128,22 @@ fn play(_s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(crate::schema::edit::TimelinePlayResult { action: request.action }).map_err(|e| EngineError::Other(e.to_string()))
 }
 
+const UNDO_CONTRACT: crate::schema::TypedContract<crate::schema::edit::UndoParams> = crate::schema::TypedContract::new();
+const REDO_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RedoParams> = crate::schema::TypedContract::new();
+const CHECKPOINT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::CheckpointParams> = crate::schema::TypedContract::new();
+const RESTORE_CHECKPOINT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RestoreCheckpointParams> = crate::schema::TypedContract::new();
+
+/// A reply built from its schema's type, so the two can't drift apart.
+fn reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(r).map_err(|e| bad(cmd, e.to_string()))
+}
+
 fn undo(s: &mut Session, _p: &Value) -> Result<Value> {
     let Some(prev) = s.undo.pop() else { return Err(EngineError::Other("nothing to undo".into())) };
     let now = go_to(s, prev);
     let label = now.label.clone();
     s.redo.push(now);
-    Ok(json!({"undone": label}))
+    reply("edit.undo", crate::schema::edit::UndoResult { undone: label, param_warnings: Vec::new() })
 }
 
 fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -124,7 +151,7 @@ fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
     let now = go_to(s, next);
     let label = now.label.clone();
     s.undo.push(now);
-    Ok(json!({"redone": label}))
+    reply("edit.redo", crate::schema::edit::RedoResult { redone: label, param_warnings: Vec::new() })
 }
 
 const ASSISTANT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::AssistantParams> = crate::schema::TypedContract::new();
@@ -172,22 +199,27 @@ fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
 }
 
 fn checkpoint(s: &mut Session, _p: &Value) -> Result<Value> {
-    Ok(json!({"checkpoint": s.checkpoint()}))
+    let checkpoint = s.checkpoint();
+    reply("edit.checkpoint", crate::schema::edit::CheckpointResult { checkpoint, restored: None, param_warnings: Vec::new() })
 }
 
 fn restore_checkpoint(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "edit.restore_checkpoint";
     let id = p.get("checkpoint").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`checkpoint` must be an id from edit.checkpoint"))?;
+    let done =
+        |restored: bool| reply(cmd, crate::schema::edit::CheckpointResult { checkpoint: id, restored: Some(restored), param_warnings: Vec::new() });
     if bool_(p, "forget") == Some(true) {
         s.drop_checkpoint(id);
-        return Ok(json!({"checkpoint": id, "restored": false}));
+        return done(false);
     }
     s.restore_checkpoint(id)?;
-    Ok(json!({"checkpoint": id, "restored": true}))
+    done(true)
 }
 
 fn compute_all(s: &mut Session, _p: &Value) -> Result<Value> {
+    let validation = s.validation();
     s.model = solidcraft_doc::Model::new();
+    s.set_validation(validation);
     s.refresh();
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
     Ok(json!({"features": s.model.results.len(), "errors": errors}))
@@ -1140,7 +1172,6 @@ fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
         "id": f.id, "name": f.name, "type": f.kind.kind_key(), "type_name": f.kind.type_name(), "suppressed": f.suppressed, "rolled_back": rolled_back,
         "definition": def, "omitted": omitted, "inputs": inputs,
         "error": r.and_then(|r| r.error.clone()), "warning": r.and_then(|r| r.warning.clone()),
-        "boolean_diagnostics": r.map(|r| &r.boolean_diagnostics),
     }))
 }
 
@@ -1157,7 +1188,10 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     resolve_feature_names(&mut v, &s.doc, cmd)?;
     let mut nf: Feature = serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("invalid feature: {e}")))?;
     nf.id = f.id;
-    if let (FeatureKind::Extrude { extent: old, .. }, FeatureKind::Extrude { extent: new, .. }) = (&f.kind, &mut nf.kind)
+    // A one-sided extrude made symmetric takes the convention a new one would: its old marker
+    // never read a symmetric distance.
+    if let (FeatureKind::Extrude { extent: old, .. }, FeatureKind::Extrude { extent: new, .. })
+    | (FeatureKind::SurfaceExtrude { extent: old, .. }, FeatureKind::SurfaceExtrude { extent: new, .. }) = (&f.kind, &mut nf.kind)
         && old.direction != solidcraft_doc::Direction::Symmetric
         && new.direction == solidcraft_doc::Direction::Symmetric
         && set.get("extent").and_then(|e| e.get("convention")).is_none()
@@ -1227,7 +1261,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // New face points: their faces' names now.
     if nf.kind.face_points() != f.kind.face_points() {
-        nf.face_names = solidcraft_doc::face_point_names(&s.doc, &s.model.state_before(id), &nf.kind, nf.component);
+        nf.face_names = solidcraft_doc::face_point_names(&s.doc, &s.model.state_before(id), &nf.kind, nf.component)?;
     }
     if let Some(slot) = s.doc_mut().feature_mut(id) {
         *slot = nf;
@@ -1243,7 +1277,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
 /// an existing index-and-point pair. Unlike Measure, selection keeps the exact face/edge index:
 /// it must not merge a cylinder's patches or a circular rim's arcs into a different item.
 fn selection_item(s: &Session, value: Value) -> Result<Sel> {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
 
     let kind = value.get("type").and_then(Value::as_str);
     if !matches!(kind, Some("face" | "edge")) || (value.get("index").is_some() && value.get("point").is_some()) {
@@ -1257,7 +1291,7 @@ fn selection_item(s: &Session, value: Value) -> Result<Sel> {
         point: Option<Vec3>,
     }
     let Pick { body, index, point } = serde_json::from_value(value).map_err(|e| bad("select.set", e.to_string()))?;
-    let state = s.world_state();
+    let state = s.world_state()?;
     let b = state.body(&body).ok_or_else(|| bad("select.set", format!("no body `{body}`")))?;
     let missing = || bad("select.set", format!("no {} of `{body}` at the given index or point", if face { "face" } else { "edge" }));
     let (index, point) = match (index, point) {
@@ -1314,7 +1348,7 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
             // nothing, or the next body to take that name (#9737).
             other => {
                 if let Some(name) = other.body_name()
-                    && s.world_state().body(name).is_none()
+                    && s.world_state()?.body(name).is_none()
                 {
                     return Err(bad("select.set", format!("no body `{name}`")));
                 }
@@ -1365,7 +1399,7 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         })
         .ok_or_else(|| bad("select.same_look", "select an object or face"))?;
-    let state = s.world_state();
+    let state = s.world_state()?;
     let body = state.body(name).ok_or_else(|| bad("select.same_look", "unknown object"))?;
     let face = request.face.or(match selected {
         Some(Sel::Face { body, index, .. }) if request.body.is_none() && body == name => Some(*index),
@@ -1703,7 +1737,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && matches!(cid, "solid.extrude" | "surface.extrude")
         && let Some(parameters) = params.as_object_mut()
     {
-        let convention = if cid == "surface.extrude" || extent.direction == solidcraft_doc::Direction::Symmetric {
+        let convention = if extent.direction == solidcraft_doc::Direction::Symmetric {
             extent.convention
         } else {
             solidcraft_doc::ExtrudeConvention::TotalDistance
@@ -1715,6 +1749,15 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("convention").or_insert_with(|| json!(convention));
+    }
+    // A thread saved before holes were sized by their nominal diameter keeps the size it had
+    // when it is edited without naming one.
+    if let FeatureKind::Thread { old_auto_size: true, .. } = &old.kind
+        && cid == "solid.thread"
+        && let Some(parameters) = params.as_object_mut()
+        && parameters.get("designation").is_none_or(|d| d.is_null() || d.as_str().is_some_and(|d| d.trim().is_empty()))
+    {
+        parameters.entry("old_auto_size").or_insert_with(|| json!(true));
     }
     // Members keep their names through an edit, unless it gives them another name.
     if let FeatureKind::FrameMember { names, body_name, .. } = &old.kind
@@ -1775,6 +1818,12 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         *sketch = Some(*before);
         *profiles = picked.clone();
+    }
+    // An old design's Join To Object keeps the body it runs to apart through an edit (#8151).
+    if let (FeatureKind::Extrude { extent: before, .. }, FeatureKind::Extrude { extent: after, .. }) = (&old.kind, &mut new.kind)
+        && after.to.is_some()
+    {
+        after.to_body_apart = before.to_body_apart;
     }
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.

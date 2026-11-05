@@ -42,7 +42,7 @@ fn component(app: &SolveApp, sel: &Sel) -> Option<u64> {
     match sel {
         Sel::Occurrence { path } => app.session.placed_document().path_placement(path).map(|(id, _)| id).filter(|id| *id != 0),
         Sel::Body { name } | Sel::Face { body: name, .. } | Sel::Edge { body: name, .. } => {
-            let state = app.session.world_state();
+            let state = crate::open_meshing::session_world(&app.session);
             state.body(name).map(|body| app.session.doc.model_body_component(body)).filter(|id| *id != 0)
         }
         _ => None,
@@ -253,9 +253,7 @@ fn drop_preview(app: &SolveApp, look: Value, hit: &Hit, sel: &Sel, mods: Modifie
     }
     let whole_component = mods.ctrl || mods.command || app.ui.pick_components;
     if whole_component && let Some(id) = component(app, sel) {
-        let bodies = app
-            .session
-            .world_state()
+        let bodies = crate::open_meshing::session_world(&app.session)
             .bodies
             .iter()
             .filter(|b| {
@@ -506,7 +504,7 @@ pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::R
     for x in [bounds.min.x, bounds.max.x] {
         for y in [bounds.min.y, bounds.max.y] {
             for z in [bounds.min.z, bounds.max.z] {
-                if let Some(p) = proj.to_screen(solidcraft_engine::geom::Vec3::new(x, y, z)).filter(|p| p.is_finite()) {
+                if let Some(p) = proj.to_screen(solidcore_record::Vec3::new(x, y, z)).filter(|p| p.is_finite()) {
                     screen.extend_with(p);
                 }
             }

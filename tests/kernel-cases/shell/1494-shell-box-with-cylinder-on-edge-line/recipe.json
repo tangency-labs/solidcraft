@@ -1,0 +1,43 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "height": 30.0,
+    "length": 47.5,
+    "width": 45.0
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "axis": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "base": [
+     47.5,
+     0.0,
+     10.0
+    ],
+    "height": 30.0,
+    "operation": "join",
+    "radius": 7.5
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      23.75,
+      22.5,
+      0.0
+     ]
+    ],
+    "thickness": 1.0
+   }
+  }
+ ]
+}

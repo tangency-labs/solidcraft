@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "a modelled metric buttress S20x4 thread (DIN 513, 3/30 deg) on a d20 shaft, six turns",
+ "source": "analytic",
+ "method": "groove volume per turn 2 pi int r w(r) dr over the material it cuts (Pappus on the axial section; a screw motion), w(r) = P - flat - depth (tan a + tan b); six whole turns between free ends, so V = stock - 6 x that. Tolerance 0.01%: SMLib's exact screw sweep. DIN 513-1: 3 deg load flank, 30 deg clearance flank, H1 = 0.75 P, flats (P - 0.75 P (tan3 + tan30))/2 = 0.26384 P, external minor d3 = d - 2 x 0.86777 P = 13.058 (IS 4696-3 table)",
+ "body_count": 1,
+ "volume_mm3": 5454.579522681,
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

@@ -11,15 +11,17 @@
 //! is all its preview builds: its boolean, which can take seconds (a text joined onto a part),
 //! runs once, on OK, and an error it finds shows then, the dialog staying open.
 
+use solidcraft_engine::geom::prelude::*;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::ModelState;
 use solidcraft_engine::doc::progress::Progress;
-use solidcraft_engine::geom::{Aabb3, Mesh, Ring, Vec3};
+use solidcraft_engine::geom::{Aabb3, Mesh, Ring};
 use solidcraft_engine::kernel::history::Change;
 
 use crate::SolveApp;
@@ -436,8 +438,10 @@ fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, V
     // Watched by `progress`, so a job left behind for other inputs skips its remaining features.
     let watched = progress.clone();
     let spawned = std::thread::Builder::new().name("preview".into()).spawn(move || {
-        let job = solidcraft_engine::doc::progress::watch(watched, || {
-            if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) }
+        let job = scratch.stop_token().within(|| {
+            solidcraft_engine::doc::progress::watch(watched, || {
+                if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) }
+            })
         });
         let _ = tx.send(job);
     });
@@ -571,7 +575,7 @@ pub(crate) fn extrusion_target_error(s: &Session, cmds: &[(String, Value)], befo
                     before.bodies.iter().any(|body| s.doc.model_body_component(body) == s.active_component)
                         || (matches!(op, "cut" | "intersect") && s.cut_takes_every_body(before))
                 },
-                |name| s.world_state().body(name).is_some(),
+                |name| crate::open_meshing::session_world(s).body(name).is_some(),
             );
         }
         if !found && matches!(op, "cut" | "intersect") {
@@ -750,7 +754,16 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         }
         let m = b.mesh();
         if c.cut_tint {
+            // A changed body's surface it keeps is not removed material: drawn as ghost there it
+            // lies on the new body's face, and where that face is curved and meshed anew (its
+            // boundary moved) the two triangulations cross by up to their chord error, far past the
+            // ghost's depth bias, so the ghost showed through the new face in slivers.
+            let kept = if gone { None } else { after.body(&b.name).and_then(|a| SurfaceIndex::new(&a.mesh())) };
             for t in &m.triangles {
+                let Some(corners) = m.tri(t) else { continue };
+                if kept.as_ref().is_some_and(|k| on_surface(k, corners)) {
+                    continue;
+                }
                 for k in t {
                     let i = *k as usize;
                     if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
@@ -763,39 +776,14 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             replaced.push(b.name.clone());
         }
     }
-    let sketches = after
-        .sketches
-        .iter()
-        .filter_map(|sketch| {
-            let old = before.sketch(sketch.feature);
-            let old_curves =
-                old.into_iter().flat_map(|s| s.sketch.curves.iter().map(|c| (c.id.as_str(), c))).collect::<std::collections::HashMap<_, _>>();
-            let old_points =
-                old.into_iter().flat_map(|s| s.sketch.points.iter().map(|p| (p.id.as_str(), p.pos))).collect::<std::collections::HashMap<_, _>>();
-            let indices = sketch
-                .sketch
-                .curves
-                .iter()
-                .enumerate()
-                .filter_map(|(index, curve)| {
-                    let unchanged = old_curves.get(curve.id.as_str()).is_some_and(|previous| {
-                        previous.kind == curve.kind
-                            && curve.kind.point_ids().iter().all(|i| old.and_then(|s| s.sketch.point(*i)) == sketch.sketch.point(*i))
-                    });
-                    if unchanged { None } else { Some(index) }
-                })
-                .collect::<Vec<_>>();
-            let points = sketch
-                .sketch
-                .points
-                .iter()
-                .enumerate()
-                .filter_map(|(i, p)| if old_points.get(p.id.as_str()) == Some(&p.pos) { None } else { Some(i) })
-                .collect::<Vec<_>>();
-            if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
-        })
-        .collect();
+    let sketches = after.sketches.iter().filter_map(|sketch| sketch_changes(before.sketch(sketch.feature), sketch)).collect();
     Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None }
+}
+
+/// Does the triangle lie on the surface `index` holds: its corners, the middles of its sides
+/// and its centroid all on it?
+fn on_surface(index: &SurfaceIndex, [a, b, c]: [Vec3; 3]) -> bool {
+    [a, b, c, (a + b) / 2.0, (b + c) / 2.0, (c + a) / 2.0, (a + b + c) / 3.0].into_iter().all(|p| index.contains(p))
 }
 
 /// Points of one face the vote in [`new_faces`] asks about: every centroid of a face with no
@@ -803,6 +791,37 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
 /// facets happen to fall, and a spread sample of a larger one. The lookups per face stay
 /// bounded, so a modeled thread's thousands of faces still cost little.
 const FACE_SAMPLES: usize = 24;
+
+/// What of `sketch` differs from `old`, the same sketch before a change: the curves whose shape
+/// or points moved and the points that moved (`None`: nothing did).
+pub(crate) fn sketch_changes(
+    old: Option<&solidcraft_engine::doc::SolvedSketch>,
+    sketch: &std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
+) -> Option<SketchPreview> {
+    let old_curves = old.into_iter().flat_map(|s| s.sketch.curves.iter().map(|c| (c.id.as_str(), c))).collect::<std::collections::HashMap<_, _>>();
+    let old_points =
+        old.into_iter().flat_map(|s| s.sketch.points.iter().map(|p| (p.id.as_str(), p.pos))).collect::<std::collections::HashMap<_, _>>();
+    let indices = sketch
+        .sketch
+        .curves
+        .iter()
+        .enumerate()
+        .filter_map(|(index, curve)| {
+            let unchanged = old_curves.get(curve.id.as_str()).is_some_and(|previous| {
+                previous.kind == curve.kind && curve.kind.point_ids().iter().all(|i| old.and_then(|s| s.sketch.point(*i)) == sketch.sketch.point(*i))
+            });
+            if unchanged { None } else { Some(index) }
+        })
+        .collect::<Vec<_>>();
+    let points = sketch
+        .sketch
+        .points
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| if old_points.get(p.id.as_str()) == Some(&p.pos) { None } else { Some(i) })
+        .collect::<Vec<_>>();
+    if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
+}
 
 /// Which of the `nf` faces of `m` are new surface, i.e. not on the old mesh? Each is decided by
 /// a vote of points on it (triangle centroids spread over the face). One pass over `m`'s
@@ -945,22 +964,30 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
     {
         return;
     }
-    let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);
     let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
-    let mut curves = 0;
-    for preview in &app.preview.sketches {
-        let sketch = &preview.sketch;
-        for index in &preview.curves {
-            crate::tools::paint_curve(&sketch.sketch, *index, &sketch.plane, painter, proj, stroke, &mut budget);
-            curves += 1;
-        }
-        for index in &preview.points {
-            if let Some(point) = sketch.sketch.point(*index).and_then(|p| proj.to_screen(sketch.plane.to_world(p))) {
-                painter.circle_filled(point, 3.0, stroke.color);
-            }
+    let curves: usize = app.preview.sketches.iter().map(|preview| paint_sketch(preview, painter, proj, &mut budget)).sum();
+    crate::scenario::publish_count("sketch_preview_curves", curves as f64);
+}
+
+/// Draw what a change moves in a sketch, its curves and points, in the preview colour; returns
+/// how many curves it drew.
+pub(crate) fn paint_sketch(
+    preview: &SketchPreview,
+    painter: &egui::Painter,
+    proj: &crate::viewport::Proj,
+    budget: &mut solidcraft_engine::render::SamplingBudget,
+) -> usize {
+    let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);
+    let sketch = &preview.sketch;
+    for index in &preview.curves {
+        crate::tools::paint_curve(&sketch.sketch, *index, &sketch.plane, painter, proj, stroke, budget);
+    }
+    for index in &preview.points {
+        if let Some(point) = sketch.sketch.point(*index).and_then(|p| proj.to_screen(sketch.plane.to_world(p))) {
+            painter.circle_filled(point, 3.0, stroke.color);
         }
     }
-    crate::scenario::publish_count("sketch_preview_curves", curves as f64);
+    preview.curves.len()
 }
 
 #[cfg(test)]
@@ -1235,6 +1262,21 @@ mod tests {
         }
     }
 
+    /// #7520: a Hole's preview leaves a hidden body out, drawn nor drilled, as OK does; before,
+    /// it replaced the hidden body with a drilled one while the dialog was open.
+    #[test]
+    fn a_hole_preview_leaves_hidden_bodies_out() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 40, "height": 5, "body_name": "Plate"})).unwrap();
+        s.execute("solid.box", &json!({"corner": [0, 0, 5], "length": 40, "width": 40, "height": 20, "operation": "new", "body_name": "Block"}))
+            .unwrap();
+        s.execute("browser.visibility", &json!({"items": ["Block"], "visible": false})).unwrap();
+        let cmd = ("solid.hole".to_string(), json!({"position": [20, 20, 0], "diameter": 5, "depth": 10}));
+        let built = compute(&s, &[cmd], colors()).unwrap();
+        assert!(built.error.is_none(), "{:?}", built.error);
+        assert_eq!(built.replaced, vec!["Plate".to_string()]);
+    }
+
     /// A plate in its own component, stood up by its placement (an imported part set upright)
     /// and edited with that component active: the extrusion's tool is drawn where the plate is
     /// shown, on its top face, not at right angles to it in the component's own frame.
@@ -1440,6 +1482,29 @@ mod tests {
         assert!(!b.scene.ghost.is_empty());
         assert_eq!(s.revision, rev);
         assert_eq!(s.undo.len(), undo);
+    }
+
+    /// A fillet running into a boss: the boss's cylinder face keeps its surface but is meshed
+    /// anew (the fillet's end moves its boundary), so the ghost leaves it out. Drawn as ghost it
+    /// crossed the new triangulation and showed through the face in slivers.
+    #[test]
+    fn a_fillet_preview_ghosts_only_the_removed_material() {
+        let s = session_of(&[
+            ("solid.box", json!({"length": 60, "width": 40, "height": 30, "center": [0, 0, 15]})),
+            ("solid.cylinder", json!({"radius": 12, "height": 50, "base": [10, -20, 0], "operation": "join"})),
+        ]);
+        let b = compute(&s, &[("solid.fillet".into(), json!({"edges": [[-16, -20, 30]], "radius": 4}))], colors()).unwrap();
+        assert_eq!(b.replaced, vec!["Body1".to_string()]);
+        // Ghost triangles on the boss's side, well away from the fillet.
+        let on_boss = b.scene.ghost.as_chunks::<28>().0.as_chunks::<3>().0.iter().filter(|t| {
+            t.iter().all(|v| {
+                let f = |k: usize| f32::from_le_bytes([v[4 * k], v[4 * k + 1], v[4 * k + 2], v[4 * k + 3]]) as f64;
+                let (x, y, z) = (f(0), f(1), f(2));
+                (((x - 10.0).powi(2) + (y + 20.0).powi(2)).sqrt() - 12.0).abs() < 1e-3 && z > 36.0
+            })
+        });
+        assert_eq!(on_boss.count(), 0, "the boss keeps its surface: no ghost on it");
+        assert!(!b.scene.ghost.is_empty(), "the edge the fillet removes is still shown as ghost");
     }
 
     /// Graphics' Tint new surface in a preview, off: the changed body is drawn as itself, and

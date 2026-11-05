@@ -5,10 +5,11 @@
 //! cloud's own `origin` (double precision), so a scan far from the design's origin keeps its
 //! detail.
 
+use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::canvas::{base64_decode, base64_encode};
 pub use crate::point_cloud_complex::{Column, Complex, Filter, Floats, Keep, MAX_COLUMNS, MAX_NAMES, Names};

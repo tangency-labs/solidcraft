@@ -1,0 +1,99 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 40,
+    "body_name": "Cyl"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 16,
+    "width": 22,
+    "height": 10,
+    "corner": [
+     -5,
+     -11,
+     15
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "face.delete",
+   "params": {
+    "body": "Cyl",
+    "faces": [
+     [
+      -5,
+      0,
+      20
+     ],
+     [
+      3,
+      0,
+      15
+     ],
+     [
+      3,
+      0,
+      25
+     ]
+    ],
+    "heal": false
+   }
+  },
+  {
+   "command": "surface.patch",
+   "params": {
+    "body": "Cyl",
+    "edges": [
+     [
+      8.660254037844387,
+      -5,
+      15
+     ],
+     [
+      0,
+      10,
+      15
+     ],
+     [
+      8.660254037844387,
+      -5,
+      25
+     ],
+     [
+      0,
+      10,
+      25
+     ],
+     [
+      -5,
+      -8.660254037844387,
+      20
+     ],
+     [
+      -5,
+      8.660254037844387,
+      20
+     ]
+    ],
+    "continuity": "g1",
+    "body_name": "Lid"
+   }
+  },
+  {
+   "command": "surface.stitch",
+   "params": {
+    "bodies": [
+     "Cyl",
+     "Lid"
+    ]
+   }
+  }
+ ]
+}
