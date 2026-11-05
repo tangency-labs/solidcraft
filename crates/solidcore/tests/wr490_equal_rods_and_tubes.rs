@@ -198,8 +198,13 @@ fn steel_026_tubes_join() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
-/// The seams at which the coped joint fails, flag off and on, on both engines.
-const COPED_FAILING: [f64; 2] = [35.0, 90.0];
+/// The seams at which the coped joint fails, flag off and on. Seam 35 failed too (a body
+/// of volume -4592.38, not a manifold solid, check `SmTrimmingTools` tests 3 and 4, as
+/// the pinned C++ gives) until WR-751 (#2621): with `MergeIntoObject` splitting each edge
+/// where it passes nearest its point (all sixteen splits nearer, by up to 3.5e-7) it is a
+/// manifold solid within 1.2e-8 of the closed form, its check `SmBrep` test 12 as at the
+/// other seams.
+const COPED_FAILING: [f64; 1] = [90.0];
 
 /// The coped joint at the other seams, flag off and on (check as in
 /// [`steel_026_tubes_join`]).
@@ -216,10 +221,10 @@ fn coped_tubes_join() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
-/// At seams 35 and 90 deg the last union of the coped joint gives a body of volume
-/// -4592.38 that is not a manifold solid (check: `SmTrimmingTools` tests 3 and 4 at 35,
-/// `SmBrep` tests 8 and 12 at 90), with the flag off and on, and the pinned C++ gives the
-/// same: not WR-490's defect. Fails when one of them comes out right.
+/// At seam 90 deg the last union of the coped joint gives a body of volume -4592.38 that
+/// is not a manifold solid (check: `SmTrimmingTools` tests 3 and 4, `AssertValid`
+/// skipped; before WR-751 `SmBrep` tests 8 and 12), with the flag off and on, and the
+/// pinned C++ gives the same: not WR-490's defect. Fails when it comes out right.
 #[test]
 fn coped_tubes_join_known_failing() {
     let mut passing = Vec::new();

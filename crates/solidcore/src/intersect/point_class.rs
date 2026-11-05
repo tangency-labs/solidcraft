@@ -69,6 +69,12 @@
 //! | `Drop` (implicit)                                 | `~SmSpaceBend`, `~SmSpaceUnbend`, `~SmLineSegClassification` |
 //!
 //! Deviations:
+//! - **Edge split point (WR-751, #2621).** `MergeIntoObject` (through
+//!   [`PointClassification::merge_into_brep`]) splits an edge where its curve passes
+//!   nearest the classified point, not at the classification's parameter, which upstream
+//!   assumes is the point's (`SmPointClass.cpp:951`); off a grazing intersection the two
+//!   differ by an edge's accuracy over the angle's sine, and the edge then ended that far
+//!   from its vertex (`split_parameter`).
 //! - **Mutable topology.** [`BrepMerge`] supplies an arena, resolved target,
 //!   handle mapping and notification environment for [`PointClassification::merge_into_brep`],
 //!   and [`CombineBrep`] the arena and notifications
@@ -1658,11 +1664,13 @@ impl<O: ClassObject> PointClassification<O> {
                 v
             }
             EntityRef::Edge(e) => {
+                // Not upstream (#2621, WR-751): where the edge passes the point
+                let t = split_parameter(k, b, e, self.t_param(), src_point)?;
                 let split = p9::make_vertex_split_edge_with_curve_identity(
                     k,
                     b,
                     e,
-                    self.t_param(),
+                    t,
                     env,
                     curve_identity,
                 )?;
@@ -1930,6 +1938,47 @@ pub fn object_zone_tol_3d<O: ClassObject>(
         // SmVolume and other objects: the "unsupported object" branch (it warns)
         ClassObjectKind::Volume | ClassObjectKind::Point | ClassObjectKind::Other => Ok(system),
     }
+}
+
+/// Not upstream (#2621, WR-751): where `MergeIntoObject` splits the edge `e` for the
+/// classified point `src_point`: the parameter where the edge's curve passes nearest the
+/// point, from the classification's own `t` (the parameter upstream splits at), when that
+/// is nearer than `t`'s point, inside the edge's interval and within the edge's tolerance
+/// of the point (the point is on the edge); else `t`. A point off the edge (an offset's
+/// vertex 6.3e-2 from the edge it was classified to, at the edge's end) keeps `t`: moved,
+/// the split left a sliver 1.2e-3 long in place of the end vertex.
+///
+/// Upstream assumes the point is the edge's at `t` (`dParam = GetTParam(); // note:
+/// sSrcPoint expected to = Edge->Evaluate(TParam)`, `SmPointClass.cpp:951`). It is not
+/// where several surfaces meet at a grazing angle: the point is the vertex definition's,
+/// the consensus of every intersection that met there, and `t` that of the one which
+/// classified it to this edge, which fixes it along the edge only to the edge's accuracy
+/// over the angle's sine. Split at `t`, the edge ends that far from its vertex once the
+/// vertex moves to the point (2.9e-5 in #2621, where a groove flank meets a fillet's top
+/// circle at 5 degrees, against the edge's 2.7e-6 from the point); split nearest the
+/// point, both pieces end within the edge's accuracy of it.
+fn split_parameter(k: &Kernel, b: &Brep, e: EdgeId, t: f64, src_point: Point3) -> Result<f64> {
+    let Some(curve) = edge::curve(b, e)? else {
+        return Ok(t);
+    };
+    let interval = edge::interval(b, e)?;
+    let at_t = curve.evaluate_point(k, t)?.distance(src_point);
+    let nearest = curve.drop_point(
+        k,
+        &interval,
+        src_point,
+        None,
+        0.0,
+        Some(t),
+        SolverOperation::Minimize,
+    )?;
+    // the point must lie on the edge (within its tolerance) for the edge to pass it
+    let on_edge = nearest.distance <= edge::tolerance(b, e)?;
+    Ok(if nearest.success && on_edge && nearest.distance < at_t {
+        nearest.parameter
+    } else {
+        t
+    })
 }
 
 /// The position, tolerance and exactness of a merged vertex.

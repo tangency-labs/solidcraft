@@ -181,15 +181,15 @@ fn is_sub_multiset(sub: &[String], all: &[String]) -> bool {
     })
 }
 
-/// The check labels of the five reports below, sorted: six `SmBrep` gaps (#0/#2), the
-/// circle's `SmEllipse` #1/#2, and one or two `SmFace` #36.
-fn report(gaps: bool, ellipse: bool, seams: usize) -> Vec<String> {
+/// The check labels of the five reports below, sorted: `gaps` pairs of `SmBrep` gaps
+/// (#0/#2), `ellipses` pairs of a circle piece's `SmEllipse` #1/#2, and one or two
+/// `SmFace` #36.
+fn report(gaps: usize, ellipses: usize, seams: usize) -> Vec<String> {
     let mut v = Vec::new();
-    if gaps {
-        v.extend(["SmBrep::Test #0"; 3].map(String::from));
-        v.extend(["SmBrep::Test #2"; 3].map(String::from));
+    for _ in 0..gaps {
+        v.extend(["SmBrep::Test #0", "SmBrep::Test #2"].map(String::from));
     }
-    if ellipse {
+    for _ in 0..ellipses {
         v.extend(["SmEllipse::Test #1", "SmEllipse::Test #2"].map(String::from));
     }
     v.extend(std::iter::repeat_n("SmFace::Test #36".to_string(), seams));
@@ -231,13 +231,19 @@ fn flag_row(gap: f64, all: bool, expected_off: &[String]) -> Vec<String> {
 /// [`wr575_every_fix_at_1e_6_adds_no_check_failure`].
 #[test]
 fn wr575_tube_ends_join_adds_no_check_failure_at_any_gap() {
-    // (gap, every fix on, the flag-off report)
+    // (gap, every fix on, the flag-off report). At 1e-5 the flag-off controls changed with
+    // WR-751 (#2621), `MergeIntoObject` splitting the two end circles where they pass
+    // nearest their points (3.1e-6 -> 2.3e-6 and 2.8e-6 -> 2.2e-6 off): one gap pair
+    // (7.77e-6 against 7.5e-6) goes, and each split now falls a few micrometres from the
+    // circle's half-turn knot, so both pieces' short end spans fail `SmEllipse` #1/#2
+    // (1.8e-6 and 1.2e-6; one piece, 1.5e-6, before): WR-575's defect, which its flag
+    // clears, as the flag-on rows show.
     let rows = [
-        (1e-5, false, report(true, true, 2)),
-        (1e-6, false, report(false, true, 1)),
-        (1e-7, false, report(false, false, 1)),
-        (1e-5, true, report(false, true, 2)),
-        (1e-7, true, report(false, false, 1)),
+        (1e-5, false, report(2, 2, 2)),
+        (1e-6, false, report(0, 1, 1)),
+        (1e-7, false, report(0, 0, 1)),
+        (1e-5, true, report(0, 2, 2)),
+        (1e-7, true, report(0, 0, 1)),
     ];
     let failures: Vec<String> = rows
         .iter()
@@ -253,6 +259,6 @@ fn wr575_tube_ends_join_adds_no_check_failure_at_any_gap() {
 /// `SmBSplineCurve` #15 (tangency-labs/solidcore#2427).
 #[test]
 fn wr575_every_fix_at_1e_6_adds_no_check_failure() {
-    let failures = flag_row(1e-6, true, &report(false, true, 1));
+    let failures = flag_row(1e-6, true, &report(0, 1, 1));
     assert!(failures.is_empty(), "{failures:#?}");
 }

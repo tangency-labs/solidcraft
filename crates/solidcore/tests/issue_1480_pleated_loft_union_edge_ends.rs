@@ -310,8 +310,13 @@ fn wr469_union_flag_alone_grows_eight_vertex_tolerances() {
             "{name} worst end gap {:e}",
             u.worst_end_gap
         );
+        // 44443.49369572108 until WR-751 (#2621): `MergeIntoObject` now splits the eight
+        // crossing ridges' edges where they pass nearest their points (2.2476e-6 ->
+        // 2.2417e-6 and 2.2381e-6 -> 2.2298e-6 off), not at the classifications'
+        // parameters, 1.8e-8 along; topology, worst end gap and check are unchanged and
+        // the volume moves 4.0e-9 relative.
         assert!(
-            close(u.volume, 44443.49369572108),
+            close(u.volume, 44443.49387571212),
             "{name} volume {:?}",
             u.volume
         );
