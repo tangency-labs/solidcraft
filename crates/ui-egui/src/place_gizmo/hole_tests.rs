@@ -95,7 +95,8 @@ fn where_two_markers_overlap_the_nearer_one_takes_the_press() {
     h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
     h.settle();
     h.step(&json!({"start": "solid.hole"})).unwrap();
-    for p in [Vec3::new(39.0, 10.0, 20.0), Vec3::new(42.0, 10.0, 20.0)] {
+    // The second 1 mm lower: level with the first, its click lands on the first hole's depth box.
+    for p in [Vec3::new(39.0, 10.0, 20.0), Vec3::new(42.0, 9.0, 20.0)] {
         let at = screen(&mut h, p);
         h.step(&json!({"click": at})).unwrap();
         h.frames(2);
@@ -107,7 +108,7 @@ fn where_two_markers_overlap_the_nearer_one_takes_the_press() {
     assert!(a.distance(b) * 2.0 / 3.0 < 18.0, "the press is inside both reaches: {a:?} {b:?}");
     // Pressed a third of the way from the first to the second (inside both reaches) and dragged
     // down: the first moves, the second stays.
-    let press = [f64::from(a.x + (b.x - a.x) / 3.0), f64::from(a.y)];
+    let press = [f64::from(a.x + (b.x - a.x) / 3.0), f64::from(a.y + (b.y - a.y) / 3.0)];
     h.step(&json!({"drag": [press, [press[0], press[1] + 30.0]], "steps": 12})).unwrap();
     h.settle();
     let p = places(&h);
