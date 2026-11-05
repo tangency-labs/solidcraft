@@ -199,6 +199,31 @@ fn strict_keeps_the_motion_studys_errors() {
     }
 }
 
+/// #12155: a key's points, in `motion.study`'s schema, take what the handler reads: a step that
+/// is a number (not text), and a value that is a number or an expression, each smaller than 1e9
+/// in size; elements after those two are ignored. Each case is checked against the contract's
+/// own key check too, so the schema and the handler can't drift apart.
+#[test]
+fn a_studys_points_schema_takes_what_the_handler_reads() {
+    let study = input_schema_for::<MotionStudyParams>();
+    let study = study.as_value();
+    for (point, takes) in [
+        (json!([0, 20]), true),
+        (json!([12.5, "10 mm"]), true),
+        (json!([0, 20, "ignored"]), true),
+        (json!(["0", 20]), false),
+        (json!([null, 20]), false),
+        (json!([2e9, 20]), false),
+        (json!([0, 2e9]), false),
+        (json!([0, true]), false),
+        (json!([0]), false),
+    ] {
+        let key = json!({"joint": "Hinge", "points": [point]});
+        assert_eq!(conforms(study, study, &json!({"keys": [key]})), takes, "schema: {point}");
+        assert_eq!(super::study_key_problem(&key).is_none(), takes, "key check: {point}");
+    }
+}
+
 /// #12155: making, changing, listing and deleting motion studies reply as the output schemas
 /// say, in Warn without warnings; a listed study's keys go back into `motion.study` unchanged.
 /// A misspelt key gets `param_warnings` in Warn, since the handlers ignore unknown keys, and

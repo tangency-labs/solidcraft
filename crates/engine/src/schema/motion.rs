@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::check::whole;
 
@@ -410,6 +410,8 @@ pub struct ContactCollision {
 /// The most keys a motion study takes, and the most points one key takes.
 const MAX_STUDY_KEYS: usize = 1000;
 const MAX_KEY_POINTS: usize = 10_000;
+/// A point's step, and a value given as a number, are read only while smaller than this in size.
+const MAX_POINT_MAGNITUDE: f64 = 1e9;
 
 /// Make a motion study, which drives joints along a timeline of steps: each key gives one value of
 /// one joint at some steps, linear in between and held before the first and after the last. With
@@ -497,12 +499,12 @@ fn study_key_problem(key: &Value) -> Option<String> {
         return Some("a key needs 1…10000 points".into());
     }
     for point in points {
-        let step = point.get(0).and_then(Value::as_f64).filter(|x| x.is_finite() && x.abs() < 1e9);
+        let step = point.get(0).and_then(Value::as_f64).filter(|x| x.is_finite() && x.abs() < MAX_POINT_MAGNITUDE);
         let Some(value) = point.get(1).filter(|_| step.is_some()) else {
             return Some("points are [step, value]".into());
         };
         let readable = match value {
-            Value::Number(n) => n.as_f64().is_some_and(|x| x.is_finite() && x.abs() < 1e9),
+            Value::Number(n) => n.as_f64().is_some_and(|x| x.is_finite() && x.abs() < MAX_POINT_MAGNITUDE),
             Value::String(_) => true,
             _ => false,
         };
@@ -528,7 +530,11 @@ fn study_keys<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<Value>>, D::
     Ok(Some(keys))
 }
 
+/// The schema of `motion.study`'s `keys`. A point's two elements are typed apart
+/// (`prefixItems`): the step must be a number, while the value may be a number or an
+/// expression. Elements after those two are ignored by the handler, so they are left free.
 fn study_keys_schema(_: &mut SchemaGenerator) -> Schema {
+    let number = json!({"type": "number", "exclusiveMinimum": -MAX_POINT_MAGNITUDE, "exclusiveMaximum": MAX_POINT_MAGNITUDE});
     json_schema!({
         "description": "The study's keys, replacing any it has (at most 1000). Each drives one value of one joint: `joint` by id or name, `index` the value (0 for a revolute's angle; default 0), and `points` as [step, value] pairs (1 to 10 000), a value being degrees for an angle and mm for a distance, or an expression.",
         "type": "array",
@@ -546,7 +552,10 @@ fn study_keys_schema(_: &mut SchemaGenerator) -> Schema {
                     "items": {
                         "type": "array",
                         "minItems": 2,
-                        "items": {"type": ["number", "string"]}
+                        "prefixItems": [
+                            number.clone(),
+                            {"anyOf": [number, {"type": "string"}]}
+                        ]
                     }
                 }
             }
