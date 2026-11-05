@@ -26,10 +26,26 @@ mod shots;
 mod staging;
 mod studio_presets;
 mod surface_bindings;
+mod surface_resources;
 mod textures;
 mod transmission;
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("render.surface.import", "Import Surface Maps", crate::checked!("render.surface.import", surface_resources::import))
+        .icon("appearance")
+        .contract(&surface_resources::IMPORT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::render_surface_resources::ImportResult>)
+        .params("name; set?: typed CPU raytrace or GPU path setup patch; body_index and body_name from render.scene; frame: world-mm origin/u/v physical repeat vectors; maps: explicit base_color_srgb/normal_opengl/roughness_linear/metallic_linear {path,expected_sha256?}; provenance:{author,source,license}; normal_strength?:1; flip_v?:false; replace?:false. Captures exact PNG/JPEG bytes and saves definition-local binding in one undo. CPU maps require noninterlaced 8-bit PNG. Saved designs reopen without the source files."),
+    CommandSpec::new("render.texture.list", "List Embedded Surface Images", crate::checked!("render.texture.list", surface_resources::list))
+        .icon("list").noundo().doc_only()
+        .contract(&surface_resources::LIST_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::render_surface_resources::ListResult>)
+        .params("No parameters. Lists bounded design-owned texture digests, byte counts, dimensions, declared provenance and referencing setups; never returns image bytes or source filesystem paths."),
+    CommandSpec::new("render.texture.remove", "Remove Embedded Surface Image", crate::checked!("render.texture.remove", surface_resources::remove))
+        .icon("delete").doc_only()
+        .contract(&surface_resources::REMOVE_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::render_surface_resources::RemoveResult>)
+        .params("sha256: exact embedded image digest. Refuses while any saved setup uses the image, listing its users. Removing an unused image is one undo step."),
     CommandSpec::new("render.environment.set", "Set Render Environment", crate::checked!("render.environment.set", environment::set)).icon("settings").doc_only()
         .contract(&environment::CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::render::EnvironmentResult>)
@@ -134,7 +150,7 @@ CommandSpec::new("render.library.appearance.apply", "Apply Library Opaque Appear
 CommandSpec::new("render.library.environment.apply", "Apply Built-in HDR Environment", library::apply_environment).icon("settings").doc_only()
     .params("id: HDR-*; name: saved setup; set?: typed CPU/GPU setup patch; rotation_rad?: authored rotation (native origin offset is explicit in the reply); intensity?:1; samples?:16 for CPU; replace_environment?:false. Hash-verifies and embeds original bytes, saves one atomic undo without external files or a render device. An HDR-owned sun cannot duplicate an analytic sun."),
 CommandSpec::new("render.library.surface.prepare", "Prepare Authored Surface Maps", library::prepare_surface).icon("appearance").noundo()
-    .params("id: SURF-*; body_index and body_name from render.scene; origin?:[0,0,0]; plane?:xy/yz/zx; scale?:1. Returns an explicit GPU planar map binding with source hashes, original millimetre scale, image-up normal orientation and absolute base-color semantics. No document change; height/displacement and true anisotropy are not included."),
+    .params("id: SURF-*; body_index and body_name from render.scene; origin?:[0,0,0]; plane?:xy/yz/zx; scale?:1; rotation_rad?:0 (positive around the plane normal). Returns an explicit GPU planar map binding with source hashes, original millimetre scale, image-up normal orientation and absolute base-color semantics. No document change; height/displacement and true anisotropy are not included."),
 CommandSpec::new("render.library.studio.prepare", "Prepare Authored Studio Lights", library::prepare_studio).icon("inspect").noundo().doc_only()
     .params("id: RIG-*; variant: complete for emitter-only rigs, emitters_only for rigs with passive cards; center_mm and subject_extent_mm required. Converts exact rectangular half-edges and solar direction/radius to GPU lighting. Blocked calibration and external-sun rigs refuse. Returns a geometry-clearance review requirement; does not create cards or modify the scene."),
 CommandSpec::new("render.library.studio.apply", "Apply Authored Studio Lights", library::apply_studio).icon("settings")

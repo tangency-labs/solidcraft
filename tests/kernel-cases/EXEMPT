@@ -205,6 +205,9 @@ render.stage.clear                rendering: images, cameras, stages
 render.stage.ground               rendering: images, cameras, stages
 render.start                      rendering: images, cameras, stages
 render.status                     rendering: images, cameras, stages
+render.surface.import             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
+render.texture.list               rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
+render.texture.remove             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 select.clear                      the selection
 select.filter                     the selection
 select.same_look                  the selection

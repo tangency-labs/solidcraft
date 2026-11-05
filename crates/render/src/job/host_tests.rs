@@ -820,3 +820,89 @@ fn registered_large_pool_is_explicit_finite_and_accounted() {
     drop(lease);
     assert_eq!(host.admitted_bytes(), 0);
 }
+
+#[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
+#[test]
+fn actual_cpu_texture_worker_releases_sources_after_completion_or_cancel_while_status_is_retained() {
+    use crate::job::textures::{PlanarFrame, RuntimeTextures, TextureBinding, TextureMap};
+    use image::ImageEncoder;
+    for cancelled in [false, true] {
+        // Real native admission and ImageTask, manually pumped to avoid timing races.
+        let host = ImageHost(Arc::new(Owner {
+            executor: None,
+            shared: CpuHost::shared(MEMORY_LIMIT),
+            kind: HostKind::NativeWorker,
+            running: Mutex::new(None),
+            _worker: None,
+        }));
+        let mut encoded = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut encoded).write_image(&[128, 64, 32, 255], 1, 1, image::ExtendedColorType::Rgba8).unwrap();
+        let resources = Arc::new(
+            RuntimeTextures::new(vec![TextureBinding {
+                body_index: 0,
+                body_name: "Portable wood".into(),
+                frame: PlanarFrame { origin: [0.; 3], u: [1., 0., 0.], v: [0., 1., 0.] },
+                normal_strength: 1.,
+                base_color: Some(TextureMap::new(encoded, crate::texture_input::MapRole::BaseColor).unwrap()),
+                normal: None,
+                roughness: None,
+                metallic: None,
+                base_color_mode: Default::default(),
+                flip_v: false,
+            }])
+            .unwrap(),
+        );
+        let weak = Arc::downgrade(&resources);
+        let mesh = Mesh {
+            positions: vec![solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X, solidcore_record::Vec3::Y],
+            triangles: vec![[0, 1, 2]],
+            ..Default::default()
+        };
+        let scene = ProductScene {
+            bounds: mesh.bounds(),
+            meshes: vec![crate::ProductMesh {
+                name: "Portable wood".into(),
+                mesh: Arc::new(mesh),
+                color: [255; 3],
+                opacity: 1.,
+                surface: None,
+                transmission: None,
+                faces: vec![],
+            }],
+        };
+        let input = ImageRequest {
+            integrator: Integrator::Raytrace,
+            raytrace: Some(Default::default()),
+            textures: Some(resources),
+            width: 2,
+            height: 2,
+            ..request()
+        };
+        let job = host.submit(id(1599, 1), 1, scene, input).unwrap();
+        let status = job.status().unwrap();
+        assert!(status.request.textures.is_none());
+        assert_eq!(status.textures.as_ref().unwrap().bodies, 1);
+        let work = host.0.shared.queue.lock().unwrap().pop_front().unwrap();
+        let mut running = Running::begin(work).unwrap();
+        assert!(weak.upgrade().is_some());
+        assert!(running.guarded_step(1));
+        if cancelled {
+            job.cancel().unwrap();
+        }
+        let mut finished = false;
+        for _ in 0..10_000 {
+            if !running.guarded_step(4) {
+                finished = true;
+                break;
+            }
+        }
+        assert!(finished);
+        drop(running);
+        assert!(weak.upgrade().is_none(), "terminal CPU status cannot retain encoded texture payloads");
+        assert_eq!(job.status().unwrap().progress.phase, if cancelled { Phase::Cancelled } else { Phase::Completed });
+        assert_eq!(job.frame().unwrap().is_some(), !cancelled);
+        drop(status);
+        drop(job);
+        assert_eq!(host.admitted_bytes(), 0);
+    }
+}

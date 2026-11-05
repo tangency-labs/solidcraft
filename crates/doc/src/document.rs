@@ -3910,6 +3910,7 @@ impl Document {
     /// Read a design file's JSON (any format this build knows; older ones are upgraded).
     pub fn from_json(s: &str) -> Result<Document> {
         crate::render_resources::check_json_budget(s)?;
+        crate::render_texture_resources::check_json_budget(s)?;
         let mut d = crate::format::read(s)?;
         if d.features.len() > MAX_FEATURES || d.params.len() > MAX_PARAMS {
             return Err(DocError::Invalid("document too large".into()));
