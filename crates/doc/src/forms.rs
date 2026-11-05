@@ -782,7 +782,7 @@ mod tests {
             let ordinary_before = cached.mesh_plan(&tolerance).unwrap();
             let ordinary_mesh_before = serde_json::to_value(cached.mesh(&tolerance).unwrap()).unwrap();
             let raw_guides = super::profile::quilt_guide_edges(&fit.patch, &edited, &Placement::default(), &logical_edges, &rim).unwrap();
-            let sampled = super::profile::quilt::display(&cached, &state.bodies[0].body, &logical_edges, &rim, &raw_guides, 0.01).unwrap();
+            let sampled = super::profile::quilt::display(&cached, &fit.open, &state.bodies[0].body, &logical_edges, &rim, &raw_guides, 0.01).unwrap();
             assert_eq!(
                 cached.mesh_plan(&tolerance).unwrap(),
                 ordinary_before,
@@ -939,7 +939,7 @@ mod tests {
                 let rim = super::profile::QuiltRim::new(&profile, &edited, &Placement::default(), &state.bodies[0].body, top).unwrap();
                 let edges = edited.edges().unwrap();
                 let original = super::profile::quilt_guide_edges(&fit.patch, &edited, &Placement::default(), &edges, &rim).unwrap();
-                let sampled = super::profile::quilt::display(&fit.patch, &state.bodies[0].body, &edges, &rim, &original, 0.01)
+                let sampled = super::profile::quilt::display(&fit.patch, &fit.open, &state.bodies[0].body, &edges, &rim, &original, 0.01)
                     .unwrap_or_else(|error| panic!("{segments:?} sculpt={sculpt} direct route: {error}"));
                 assert_eq!(sampled.guides.len(), edges.len());
                 let key = |point: Vec3| [point.x.to_bits(), point.y.to_bits(), point.z.to_bits()];
@@ -1040,7 +1040,7 @@ mod tests {
             let native = serde_json::to_value(fit.patch.record()).unwrap();
             let edges = cage.edges().unwrap();
             let original = super::profile::quilt_guide_edges(&fit.patch, &cage, &Placement::default(), &edges, &rim).unwrap();
-            let sampled = super::profile::quilt::display(&fit.patch, &source.body, &edges, &rim, &original, 0.01).unwrap();
+            let sampled = super::profile::quilt::display(&fit.patch, &fit.open, &source.body, &edges, &rim, &original, 0.01).unwrap();
             let (centre_id, incident_faces) = (0..fit.patch.record().vertices.len())
                 .map(|id| {
                     let faces: std::collections::BTreeSet<_> = fit
@@ -1342,6 +1342,178 @@ mod tests {
         // cannot be upgraded by nearest-position guesses.
         assert!(profile.recompute(&definition, &state).is_err());
         assert_eq!(definition, before);
+    }
+    #[test]
+    fn moved_circular_surface_quilt_retains_the_resized_source_rim_at_saved_tolerance() {
+        use solidcore_record::Vec3;
+        let mut doc = crate::Document::new("Moved circular Surface display");
+        let source = doc
+            .add_feature(
+                crate::FeatureKind::Cylinder {
+                    base: crate::point_expr(Vec3::ZERO),
+                    axis: Vec3::Z.into(),
+                    radius: "3".into(),
+                    height: "2".into(),
+                    operation: crate::Operation::NewBody,
+                    references: Vec::new(),
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(source).unwrap().body_names = vec!["Support".into()];
+        let mut model = crate::Model::new();
+        model.evaluate(&doc);
+        assert!(model.results.iter().all(|result| result.error.is_none()));
+        let state = model.state();
+        let body = &state.bodies[0].body;
+        let top = (0..body.face_count()).find(|&face| body.planar_face(face).is_some_and(|plane| plane.normal().z > 0.99)).unwrap();
+        let (profile, mut cage) = Profile::seed(&state.bodies[0], top, [3, 2], 0).unwrap();
+        cage.points[5] += Vec3::new(0.12, -0.08, 0.8);
+        cage.points[6] += Vec3::new(-0.09, 0.06, 0.35);
+        let mut definition = Definition {
+            imported: None,
+            pipe: None,
+            profile: Some(Box::new(profile)),
+            matching: None,
+            placement: Default::default(),
+            cage,
+            parameters: Parameters { kind: "face".into(), segments: [3, 2, 1], ..Default::default() },
+            hierarchy: None,
+            symmetry: None,
+        };
+        let crate::FeatureKind::Cylinder { radius, height, .. } = &mut doc.feature_mut(source).unwrap().kind else { panic!("cylinder") };
+        *radius = "4".into();
+        *height = "3".into();
+        model.evaluate(&doc);
+        assert!(model.results.iter().all(|result| result.error.is_none()));
+        let (profile, cage) = definition.profile.as_ref().unwrap().recompute(&definition, &model.state()).unwrap();
+        definition.profile = Some(Box::new(profile));
+        definition.cage = cage;
+        doc.add_feature(
+            crate::FeatureKind::Move {
+                bodies: vec!["Support".into()],
+                translate: ["7".into(), "-4".into(), "9".into()],
+                rotate_axis: Some(Vec3::X.into()),
+                angle: Some("90 deg".into()),
+                copy: false,
+            },
+            None,
+        )
+        .unwrap();
+        model.evaluate(&doc);
+        assert!(model.results.iter().all(|result| result.error.is_none()));
+        let state = model.state();
+        let (profile, cage) = definition.profile.as_ref().unwrap().recompute(&definition, &state).unwrap();
+        definition.profile = Some(Box::new(profile));
+        definition.cage = cage;
+        let before = serde_json::to_value(&definition).unwrap();
+        let profile = definition.profile.as_ref().unwrap();
+        let tolerance = 0.05;
+        let fit = profile.fit(&state, &definition.cage, &definition.placement, tolerance).unwrap();
+        assert!(fit.patch_roots.is_none() && fit.patch.face_count() > 1);
+        fit.open.history().unwrap().check(&fit.open, &[&state.bodies[0].body]).unwrap();
+        fit.patch.history().unwrap().check(&fit.patch, &[&fit.open]).unwrap();
+        let map = |patch_history: &crate::kernel::history::History| {
+            super::profile::quilt::rim_sources(&fit.patch, &fit.open, &state.bodies[0].body, patch_history, fit.open.history().unwrap())
+        };
+        let origins = map(fit.patch.history().unwrap()).unwrap();
+        let outer = fit.patch.record().edges.iter().position(|edge| edge.uses.len() == 1).unwrap();
+        let source_edge = &state.bodies[0].body.record().edges[origins[outer].unwrap()];
+        let patch_edge = &fit.patch.record().edges[outer];
+        assert_ne!(source_edge.parameters(), patch_edge.parameters(), "the fixture must exercise actual native coefficient roundoff");
+        let retained = super::profile::quilt::retained_parameters;
+        assert!(retained(source_edge, patch_edge));
+        let mut ambiguous = fit.patch.history().unwrap().clone();
+        let duplicate = ambiguous.edges[outer].origins[0].clone();
+        ambiguous.edges[outer].origins.push(duplicate);
+        assert!(map(&ambiguous).is_err(), "multiple origins cannot be disambiguated by curve nearness");
+        ambiguous.edges[outer].origins.clear();
+        assert!(map(&ambiguous).is_err(), "an unrecorded origin is not guessed from the same curve");
+        ambiguous.edges[outer].origins.push(crate::kernel::history::EdgeOrigin::Edge { operand: 1, edge: 0 });
+        assert!(map(&ambiguous).is_err(), "the known operation has exactly one operand");
+        let mut rewritten = patch_edge.clone();
+        let solidcore_record::brep::Curve::RationalSpline { knots, .. } = rewritten.nurbs.as_mut().unwrap() else { panic!("rational rim") };
+        for knot in knots {
+            *knot *= 2.0;
+        }
+        for parameter in &mut rewritten.interval {
+            *parameter *= 2.0;
+        }
+        let original_curve = solidcraft_geom::brep::eval::CurveEval::new(patch_edge.parameters()).unwrap();
+        let rewritten_curve = solidcraft_geom::brep::eval::CurveEval::new(rewritten.parameters()).unwrap();
+        for t in [0.17, 0.43, 0.81] {
+            let parameter = patch_edge.interval[0] * (1.0 - t) + patch_edge.interval[1] * t;
+            assert!(original_curve.point(parameter).unwrap().dist(rewritten_curve.point(2.0 * parameter).unwrap()) < 1e-12);
+        }
+        assert!(!retained(source_edge, &rewritten), "the identical physical rim with rewritten parameters requires an explicit map");
+        let mut changed = patch_edge.clone();
+        let solidcore_record::brep::Curve::RationalSpline { homogeneous, .. } = changed.nurbs.as_mut().unwrap() else { panic!("rational rim") };
+        homogeneous.reverse();
+        assert!(!retained(source_edge, &changed), "reversed intrinsic orientation is refused");
+        let mut changed = patch_edge.clone();
+        let solidcore_record::brep::Curve::RationalSpline { homogeneous, .. } = changed.nurbs.as_mut().unwrap() else { panic!("rational rim") };
+        homogeneous[3][2] += 1e-6;
+        assert!(!retained(source_edge, &changed), "a change far below fit tolerance is still not coefficient roundoff");
+        let mut changed = patch_edge.clone();
+        let solidcore_record::brep::Curve::RationalSpline { homogeneous, .. } = changed.nurbs.as_mut().unwrap() else { panic!("rational rim") };
+        homogeneous[3][2] = f64::NAN;
+        assert!(!retained(source_edge, &changed));
+        let mut changed = patch_edge.clone();
+        let solidcore_record::brep::Curve::RationalSpline { homogeneous, .. } = changed.nurbs.as_mut().unwrap() else { panic!("rational rim") };
+        homogeneous[3][3] = f64::from_bits(homogeneous[3][3].to_bits() + 1);
+        assert!(!retained(source_edge, &changed), "weights and rational basis remain exact");
+        changed = patch_edge.clone();
+        changed.interval[0] = source_edge.interval[0] - 1e-6;
+        assert!(!retained(source_edge, &changed), "a piece cannot escape its known source interval");
+        let (_, top) = profile.resolve(&state).unwrap();
+        let rim = super::profile::QuiltRim::new(profile, &definition.cage, &definition.placement, &state.bodies[0].body, top).unwrap();
+        let edges = definition.cage.edges().unwrap();
+        let guides = super::profile::quilt_guide_edges(&fit.patch, &definition.cage, &definition.placement, &edges, &rim).unwrap();
+        let native_before = serde_json::to_value((fit.patch.record(), fit.open.record(), state.bodies[0].body.record())).unwrap();
+        let cached = fit.patch.keeping_meshes();
+        let mesh_tolerance = crate::kernel::MeshTolerance::chord(tolerance);
+        let memo_before = serde_json::to_value(cached.mesh(&mesh_tolerance).unwrap()).unwrap();
+        let plan_before = cached.mesh_plan(&mesh_tolerance).unwrap();
+        let direct = super::profile::quilt::display(&cached, &fit.open, &state.bodies[0].body, &edges, &rim, &guides, tolerance);
+        assert!(direct.is_ok(), "the direct co-sampled path must retain a moved source rim: {:?}", direct.err());
+        assert!(map(&crate::kernel::history::History::default()).is_err(), "missing operation history is refused");
+        let (mesh, _) = profile.display(&state, &definition.cage, &definition.placement, tolerance).unwrap();
+        assert_eq!(edges.len(), 3 * 3 + 2 * 4, "the analytic 3x2 guide grid has seventeen edges");
+        assert_eq!(mesh.edges.len(), edges.len());
+        assert!(mesh.edges.iter().all(|curve| curve.len() >= 2));
+        assert!(!mesh.triangles.is_empty());
+        let key = |point: Vec3| [point.x.to_bits(), point.y.to_bits(), point.z.to_bits()];
+        let side = |a, b| {
+            let (a, b) = (key(a), key(b));
+            if a < b { [a, b] } else { [b, a] }
+        };
+        let sides: std::collections::BTreeSet<_> = mesh
+            .triangles
+            .iter()
+            .flat_map(|&[a, b, c]| {
+                let [a, b, c] = [a, b, c].map(|id| mesh.positions[id as usize]);
+                [side(a, b), side(b, c), side(c, a)]
+            })
+            .collect();
+        for pair in mesh.edges.iter().flat_map(|curve| curve.windows(2)) {
+            assert!(sides.contains(&side(pair[0], pair[1])), "every public guide chord must be a bit-identical skin triangle edge");
+        }
+        let ring = definition.cage.boundary_loops().unwrap().pop().unwrap();
+        let perimeter: std::collections::BTreeSet<_> =
+            ring.iter().zip(ring.iter().cycle().skip(1)).take(ring.len()).map(|(&a, &b)| [a.min(b), a.max(b)]).collect();
+        for (edge, curve) in edges.iter().zip(&mesh.edges).filter(|(edge, _)| perimeter.contains(*edge)) {
+            for point in curve {
+                assert!(((point.x - 7.0).hypot(point.z - 9.0) - 4.0).abs() < 1e-12 && (point.y + 7.0).abs() < 1e-12);
+            }
+            for t in rim.stations(*edge).unwrap() {
+                let fixed = rim.sample(*edge, t).unwrap().unwrap();
+                assert!(curve.iter().any(|point| point.dist(fixed) < 1e-12), "every original fixed rim station must remain in its guide");
+            }
+        }
+        assert_eq!(serde_json::to_value(&definition).unwrap(), before);
+        assert_eq!(serde_json::to_value((fit.patch.record(), fit.open.record(), state.bodies[0].body.record())).unwrap(), native_before);
+        assert_eq!(serde_json::to_value(cached.mesh(&mesh_tolerance).unwrap()).unwrap(), memo_before);
+        assert_eq!(cached.mesh_plan(&mesh_tolerance).unwrap(), plan_before);
     }
     #[test]
     fn surface_chart_uses_the_circular_trim_when_uv_bbox_corners_are_off_the_rim() {

@@ -523,6 +523,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     live_cad::restore_fixed_profile_handles(app);
     ui.painter().rect_filled(rect, 0.0, token.viewport_top);
+    crate::gpu::paint_background_picture(app, ui.painter(), rect);
     let hover_blocked = busy || tool_active || gizmo_hot || dragging_gizmo || app.forms_prototype.drag.is_some() || extrusion::active(app);
     app.forms_prototype.hover = input.hover.filter(|_| input.inside && !hover_blocked).and_then(|p| surface::nearest(app, &proj, p));
     render(app, ui, &proj);

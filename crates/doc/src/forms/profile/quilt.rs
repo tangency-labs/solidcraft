@@ -1,5 +1,6 @@
 //! Derived guide routing on the native quilt, preserving original rim provenance.
 use super::*;
+use kernel::history::{BodyHistory, EdgeOrigin, History};
 use solidcore_record::brep;
 use solidcraft_geom::{
     brep::{eval::CurveEval, pcurve},
@@ -12,6 +13,7 @@ fn unsupported(reason: &str) -> DocError {
 
 struct Atlas<'a> {
     patch: &'a kernel::Body,
+    source_edges: Vec<Option<usize>>,
     surfaces: Vec<kernel::FaceGeometry>,
     domains: Vec<uv::Domain>,
     starts: Vec<uv::Starts>,
@@ -26,13 +28,14 @@ struct Node {
 
 pub(in crate::forms) fn display(
     patch: &kernel::Body,
+    open: &kernel::Body,
     source: &kernel::Body,
     edges: &[[usize; 2]],
     rim: &QuiltRim,
     samples: &[Vec<Vec3>],
     tolerance: f64,
 ) -> Result<kernel::GuidedMesh> {
-    let (pieces, groups) = route(patch, source, edges, rim, samples)?;
+    let (pieces, groups) = route(patch, open, source, edges, rim, samples)?;
     let mut sampled = patch.mesh_with_guides(&kernel::MeshTolerance::chord(tolerance.min(0.05)), &pieces)?;
     let mut guides = Vec::with_capacity(groups.len());
     for group in groups {
@@ -57,6 +60,7 @@ pub(in crate::forms) fn display(
 
 fn route(
     patch: &kernel::Body,
+    open: &kernel::Body,
     source: &kernel::Body,
     edges: &[[usize; 2]],
     rim: &QuiltRim,
@@ -71,7 +75,10 @@ fn route(
         return Err(unsupported("requires bounded nonperiodic native charts"));
     }
     let starts = surfaces.iter().map(|_| uv::Starts::default()).collect();
-    let atlas = Atlas { patch, surfaces, domains, starts };
+    let patch_history = patch.history().ok_or_else(|| unsupported("missing patch rim history over the open source"))?;
+    let open_history = open.history().ok_or_else(|| unsupported("missing open rim history over the original source"))?;
+    let source_edges = rim_sources(patch, open, source, patch_history, open_history)?;
+    let atlas = Atlas { patch, source_edges, surfaces, domains, starts };
     let mut pieces = Vec::new();
     let mut groups = Vec::with_capacity(edges.len());
     let mut trace_budget = 4096usize;
@@ -106,6 +113,85 @@ fn route(
         groups.push(group);
     }
     Ok((pieces, groups))
+}
+
+/// Identity comes only from the two operations' checked edge origins. A native
+/// record round trip may round a homogeneous coefficient; it must still retain
+/// the source's own parameter basis and bounded interval through both steps.
+pub(in crate::forms) fn rim_sources(
+    patch: &kernel::Body,
+    open: &kernel::Body,
+    source: &kernel::Body,
+    patch_history: &History,
+    open_history: &History,
+) -> Result<Vec<Option<usize>>> {
+    patch_history.check(patch, &[open])?;
+    open_history.check(open, &[source])?;
+    let origin = |history: &History, id: usize| -> Result<usize> {
+        let entry = history.edges.get(id).ok_or_else(|| unsupported("missing native rim edge origin"))?;
+        let [EdgeOrigin::Edge { operand: 0, edge }] = entry.origins.as_slice() else {
+            return Err(unsupported("native rim requires one original operand edge"));
+        };
+        Ok(*edge)
+    };
+    patch
+        .record()
+        .edges
+        .iter()
+        .enumerate()
+        .map(|(id, edge)| {
+            if edge.uses.len() != 1 {
+                return Ok(None);
+            }
+            let open_id = origin(patch_history, id)?;
+            let source_id = origin(open_history, open_id)?;
+            let middle = open.record().edges.get(open_id).ok_or_else(|| unsupported("missing open rim edge"))?;
+            let original = source.record().edges.get(source_id).ok_or_else(|| unsupported("missing original rim edge"))?;
+            if !retained_parameters(original, middle) || !retained_parameters(middle, edge) {
+                return Err(unsupported("native rim history changed its original intrinsic parameterization"));
+            }
+            Ok(Some(source_id))
+        })
+        .collect()
+}
+
+/// This certifies a parameter correspondence AFTER history chose the edge; it
+/// never associates nearby curves. Identical positive weights and knots retain
+/// the same oriented rational basis. Only xyz coefficient roundoff from native
+/// homogeneous -> Euclidean -> homogeneous record conversion is accepted.
+/// A division and multiplication convert each coefficient; the fixed relative
+/// eight-epsilon bound covers small native record conversions, independently
+/// of fitting tolerance. It never chooses the edge's identity.
+pub(in crate::forms) fn retained_parameters(original: &brep::Edge, edge: &brep::Edge) -> bool {
+    if !original.interval.iter().chain(&edge.interval).all(|value| value.is_finite())
+        || original.interval[0] >= original.interval[1]
+        || edge.interval[0] >= edge.interval[1]
+        || edge.interval[0] < original.interval[0]
+        || edge.interval[1] > original.interval[1]
+    {
+        return false;
+    }
+    if original.parameters() == edge.parameters() {
+        return true;
+    }
+    let (brep::Curve::RationalSpline { knots: a_knots, homogeneous: a }, brep::Curve::RationalSpline { knots: b_knots, homogeneous: b }) =
+        (original.parameters(), edge.parameters())
+    else {
+        return false;
+    };
+    a_knots == b_knots
+        && a_knots.iter().all(|value| value.is_finite())
+        && a.len() >= 2
+        && a.len() == b.len()
+        && a.iter().zip(b).all(|(a, b)| {
+            a[3].is_finite()
+                && a[3] > 0.0
+                && a[3] == b[3]
+                && a[..3]
+                    .iter()
+                    .zip(&b[..3])
+                    .all(|(&a, &b)| a.is_finite() && b.is_finite() && (a - b).abs() <= 8.0 * f64::EPSILON * a.abs().max(b.abs()))
+        })
 }
 
 fn push(pieces: &mut Vec<kernel::DisplayGuide>, group: &mut Vec<usize>, face: usize, points: Vec<kernel::DisplayGuidePoint>) -> Result<()> {
@@ -274,7 +360,12 @@ impl Atlas<'_> {
         let original = source.record().edges.get(source_id).ok_or_else(|| unsupported("missing fixed control source curve"))?;
         let record = self.patch.record();
         let mut candidates = Vec::new();
-        for (id, edge) in record.edges.iter().enumerate().filter(|(_, edge)| edge.uses.len() == 1 && edge.parameters() == original.parameters()) {
+        for (id, edge) in record
+            .edges
+            .iter()
+            .enumerate()
+            .filter(|(id, edge)| edge.uses.len() == 1 && self.source_edges.get(*id).copied().flatten() == Some(source_id))
+        {
             if let Some(parameter) = rim_parameter(original, parameter, edge.interval) {
                 candidates.push((id, parameter));
             }
@@ -342,27 +433,18 @@ impl Atlas<'_> {
         let mut native = Vec::new();
         let mut stations: Vec<(f64, Option<(usize, f64)>)> = rim.stations(logical)?.into_iter().map(|t| (t, None)).collect();
         for (id, edge) in record.edges.iter().enumerate().filter(|(_, edge)| edge.uses.len() == 1) {
-            let candidates: Vec<_> = source
-                .record()
-                .edges
-                .iter()
-                .enumerate()
-                .filter(|(_, original)| {
-                    original.parameters() == edge.parameters() && edge.interval[0] >= original.interval[0] && edge.interval[1] <= original.interval[1]
-                })
-                .filter(|(id, _)| rim.support.original_coordinate(*id, edge.interval[0]).is_ok())
-                .collect();
-            let [(source_id, _)] = candidates.as_slice() else {
-                return Err(unsupported("outer quilt edge does not retain one original effective source curve"));
-            };
-            native.push((id, *source_id));
+            let source_id = self.source_edges.get(id).copied().flatten().ok_or_else(|| unsupported("missing outer edge's original source"))?;
+            rim.support
+                .original_coordinate(source_id, edge.interval[0])
+                .map_err(|_| unsupported("outer quilt edge does not belong to its original support rim"))?;
+            native.push((id, source_id));
             for &parameter in &edge.interval {
-                let coordinate = rim.support.original_coordinate(*source_id, parameter)?;
+                let coordinate = rim.support.original_coordinate(source_id, parameter)?;
                 let fraction = rim.support.fraction(&coordinate)?;
                 let distance = if span > 0.0 { (fraction - start).rem_euclid(1.0) } else { -(start - fraction).rem_euclid(1.0) };
                 let t = distance / span;
                 if t > 0.0 && t < 1.0 {
-                    stations.push((t, Some((*source_id, parameter))));
+                    stations.push((t, Some((source_id, parameter))));
                 }
             }
         }

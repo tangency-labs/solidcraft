@@ -123,7 +123,7 @@ impl Profile {
             let (source, face) = self.resolve(state)?;
             let rim = QuiltRim::new(self, cage, placement, &source.body, face)?;
             let original = quilt_guide_edges(&patch, cage, placement, &edges, &rim)?;
-            match quilt::display(&patch, &source.body, &edges, &rim, &original, tolerance) {
+            match quilt::display(&patch, &fit.open, &source.body, &edges, &rim, &original, tolerance) {
                 Ok(sampled) => {
                     mesh = sampled.mesh;
                     sampled.guides
