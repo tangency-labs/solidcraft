@@ -3179,7 +3179,7 @@
   "render.category_wood": "木材",
   "render.check_glass_cpu": "CPU 支持经验证的平面玻璃薄片和轴对齐盒体。一般闭合网格、嵌套和内部散射需要间接光照。仍不支持穿过闭合玻璃的透射阴影。",
   "render.check_glass_gpu": "GPU 支持经验证的互不相交玻璃介质，或明确启用的经验证嵌套。嵌套要求外层物体为凸体、内层物体严格包含于其中，且边界互不接触。",
-  "render.check_media_remaining": "仍不支持粗糙玻璃、密度网格、位移和光谱传输。",
+  "render.check_media_remaining": "密度网格、置换、完整光谱积分和偏振状态传播仍不受支持。",
   "render.check_media_scope": "启用内部散射需要闭合玻璃介质，并关闭直线阴影透射和降噪。GPU 还需要只使用一个菲涅耳分层。启用的外部大气不能与玻璃或表面降噪同时使用。",
   "render.check_opaque": "透明度：仅不透明表面；支持背景 Alpha。",
   "render.check_sorted_alpha": "透明度：排序 Alpha 近似。",

@@ -2939,7 +2939,7 @@
   "render.category_wood": "Holz",
   "render.check_glass_cpu": "Die CPU unterstützt geprüfte ebene Glasscheiben und achsenparallele Boxen. Allgemeine geschlossene Netze, Verschachtelung und innere Streuung erfordern indirekte Beleuchtung. Durch geschlossenes Glas übertragene Schatten bleiben nicht unterstützt.",
   "render.check_glass_gpu": "Die GPU unterstützt geprüfte getrennte Glasmedien oder ausdrücklich aktivierte geprüfte Verschachtelung. Dafür müssen die äußeren Körper konvex und die inneren streng enthalten sein; Grenzen dürfen sich nicht berühren.",
-  "render.check_media_remaining": "Raues Glas, Dichtegitter, Displacement und spektraler Lichttransport bleiben nicht verfügbar.",
+  "render.check_media_remaining": "Dichtegitter, Displacement, vollständige spektrale Integration und fortgeführte Polarisation bleiben nicht verfügbar.",
   "render.check_media_scope": "Aktive innere Streuung benötigt ein geschlossenes Glasmedium ohne gerade Schattenübertragung und ohne Rauschreduzierung. Die GPU benötigt außerdem eine Fresnel-Schicht. Aktive äußere Atmosphäre kann nicht mit Glas oder Oberflächen-Rauschreduzierung kombiniert werden.",
   "render.check_opaque": "Transparenz: nur undurchsichtige Oberflächen; Hintergrund-Alpha wird unterstützt.",
   "render.check_sorted_alpha": "Transparenz: Näherung mit sortiertem Alpha.",

@@ -1631,6 +1631,15 @@ impl ImageHost {
         self.validate_integrator(request.integrator)?;
         options.validate()?;
         if let Some(executor) = &self.0.executor {
+            let modeled = |t: Option<crate::transmission::Transmission>| t.is_some_and(|t| t.model().is_some());
+            if scene.meshes.iter().any(|b| modeled(b.transmission) || b.faces.iter().any(|f| modeled(f.transmission)))
+                && !executor.supports_glass_models()
+            {
+                return Err(JobError::new(ErrorCode::InvalidRequest, "registered executor does not implement the authored advanced Glass models"));
+            }
+            if options.caustics.is_some() && !executor.supports_caustics() {
+                return Err(JobError::new(ErrorCode::InvalidRequest, "registered executor does not implement delta-light caustic photons"));
+            }
             if request.raytrace.is_some() {
                 return Err(JobError::new(ErrorCode::InvalidRequest, "registered executors do not accept CPU raytrace options"));
             }
