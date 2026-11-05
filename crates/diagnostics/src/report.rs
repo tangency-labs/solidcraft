@@ -3,7 +3,7 @@
 use std::fmt::Write;
 use std::path::Path;
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::body::{Body, EdgeInfo, FaceInfo, Mesh};
 use crate::render::{Frame, View};
@@ -47,7 +47,11 @@ pub fn build(
             })
         })
         .collect();
-    let refused: Vec<Value> = mesh.refused.iter().map(|(f, why)| json!({"face": f, "reason": why})).collect();
+    let refused: Vec<Value> = mesh
+        .refused
+        .iter()
+        .map(|(f, why)| json!({"face": f, "reason": why}))
+        .collect();
     json!({
         "file": file.display().to_string(),
         "body_tolerance": body.brep.tolerance(),
@@ -72,7 +76,11 @@ pub fn summary(body: &Body, edges: &[EdgeInfo], mesh: &Mesh) -> String {
     let mut by_size: Vec<&EdgeInfo> = edges.iter().collect();
     by_size.sort_by(|a, b| b.tolerance.total_cmp(&a.tolerance));
     for e in by_size.iter().take(LARGEST) {
-        let _ = writeln!(s, "  edge {:>4}  tolerance {:.3e}  faces {:?}", e.index, e.tolerance, e.faces);
+        let _ = writeln!(
+            s,
+            "  edge {:>4}  tolerance {:.3e}  faces {:?}",
+            e.index, e.tolerance, e.faces
+        );
     }
     s
 }
@@ -83,7 +91,8 @@ fn face_centres(mesh: &Mesh, faces: &[FaceInfo]) -> Vec<Option<[f64; 3]>> {
     let slot = |f: usize| faces.iter().position(|x| x.index == f);
     let point = |i: u32| mesh.positions.get(i as usize).copied();
     for (t, &f) in mesh.triangles.iter().zip(&mesh.triangle_face) {
-        let (Some(k), Some(a), Some(b), Some(c)) = (slot(f), point(t[0]), point(t[1]), point(t[2])) else {
+        let (Some(k), Some(a), Some(b), Some(c)) = (slot(f), point(t[0]), point(t[1]), point(t[2]))
+        else {
             continue;
         };
         let area = triangle_area(a, b, c);
@@ -97,13 +106,19 @@ fn face_centres(mesh: &Mesh, faces: &[FaceInfo]) -> Vec<Option<[f64; 3]>> {
             *total += area;
         }
     }
-    sums.into_iter().map(|(s, a)| (a > 0.0).then(|| s.map(|v| v / a))).collect()
+    sums.into_iter()
+        .map(|(s, a)| (a > 0.0).then(|| s.map(|v| v / a)))
+        .collect()
 }
 
 fn triangle_area(a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> f64 {
     let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
     let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-    let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    let n = [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ];
     0.5 * (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt()
 }
 
@@ -112,7 +127,10 @@ fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
 }
 
 fn length(points: &[[f64; 3]]) -> f64 {
-    points.windows(2).filter_map(|w| Some(distance(*w.first()?, *w.get(1)?))).sum()
+    points
+        .windows(2)
+        .filter_map(|w| Some(distance(*w.first()?, *w.get(1)?)))
+        .sum()
 }
 
 /// The point halfway along the polyline.
@@ -123,7 +141,11 @@ fn halfway(points: &[[f64; 3]]) -> Option<[f64; 3]> {
         let d = distance(a, b);
         if d >= left && d > 0.0 {
             let t = left / d;
-            return Some([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]);
+            return Some([
+                a[0] + (b[0] - a[0]) * t,
+                a[1] + (b[1] - a[1]) * t,
+                a[2] + (b[2] - a[2]) * t,
+            ]);
         }
         left -= d;
     }

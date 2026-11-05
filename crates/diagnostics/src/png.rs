@@ -15,7 +15,11 @@ pub fn encode(width: usize, height: usize, rgb: &[u8]) -> Vec<u8> {
     header.extend_from_slice(&[8, 2, 0, 0, 0]);
     let mut out = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
     chunk(&mut out, *b"IHDR", &header);
-    chunk(&mut out, *b"IDAT", &miniz_oxide::deflate::compress_to_vec_zlib(&raw, 6));
+    chunk(
+        &mut out,
+        *b"IDAT",
+        &miniz_oxide::deflate::compress_to_vec_zlib(&raw, 6),
+    );
     chunk(&mut out, *b"IEND", &[]);
     out
 }
@@ -34,7 +38,11 @@ fn crc32<'a>(bytes: impl Iterator<Item = &'a u8>) -> u32 {
     for &b in bytes {
         crc ^= u32::from(b);
         for _ in 0..8 {
-            crc = if crc & 1 == 1 { (crc >> 1) ^ 0xedb8_8320 } else { crc >> 1 };
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xedb8_8320
+            } else {
+                crc >> 1
+            };
         }
     }
     !crc

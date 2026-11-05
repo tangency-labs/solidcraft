@@ -61,7 +61,11 @@ pub fn read(path: &Path, binary: bool, rebuild: bool) -> Result<Body, String> {
         records: &mut records,
         next_key: 1u64 << 50,
     };
-    let kind = if binary { FileType::Binary } else { FileType::Ascii };
+    let kind = if binary {
+        FileType::Binary
+    } else {
+        FileType::Ascii
+    };
     p7::read_from_file(&mut kernel, &mut brep, bytes, kind, rebuild, &mut env).map_err(fail)?;
     brep.use_arena_naming().map_err(fail)?;
     brep.refresh_cached_topology();
@@ -76,8 +80,15 @@ pub fn faces(body: &Body) -> Result<Vec<FaceInfo>, String> {
         .into_iter()
         .map(|f| {
             let face = b.face(f).map_err(|e| e.to_string())?;
-            let surface = face.surface.as_ref().map_or("none", |s| surface_name(s.kind()));
-            Ok(FaceInfo { index: f.index() as usize, surface, tolerance: face.tolerance })
+            let surface = face
+                .surface
+                .as_ref()
+                .map_or("none", |s| surface_name(s.kind()));
+            Ok(FaceInfo {
+                index: f.index() as usize,
+                surface,
+                tolerance: face.tolerance,
+            })
         })
         .collect()
 }
@@ -108,14 +119,27 @@ pub fn mesh(body: &mut Body, edges: &[EdgeInfo]) -> Result<Mesh, String> {
     let (record, order) = solidcore_convert::brep::to_record(&mut body.kernel, &mut body.brep)
         .map_err(|e| format!("converting to the record: {e}"))?;
     let tolerance = solidcore_tess::MeshTolerance::display_of(size);
-    let (plan, _) = solidcore_tess::plan(&record, &tolerance, size).map_err(|e| format!("meshing: {e}"))?;
+    let (plan, _) =
+        solidcore_tess::plan(&record, &tolerance, size).map_err(|e| format!("meshing: {e}"))?;
     let (mesh, refused) = plan.evaluate();
-    let kernel_face = |record_face: usize| order.faces.get(record_face).map_or(usize::MAX, |f| f.index() as usize);
+    let kernel_face = |record_face: usize| {
+        order
+            .faces
+            .get(record_face)
+            .map_or(usize::MAX, |f| f.index() as usize)
+    };
     Ok(Mesh {
         positions: mesh.positions.iter().map(|p| [p.x, p.y, p.z]).collect(),
         triangles: mesh.triangles,
-        triangle_face: mesh.tri_face.iter().map(|&f| kernel_face(f as usize)).collect(),
-        refused: refused.iter().map(|r| (kernel_face(r.face), r.reason.clone())).collect(),
+        triangle_face: mesh
+            .tri_face
+            .iter()
+            .map(|&f| kernel_face(f as usize))
+            .collect(),
+        refused: refused
+            .iter()
+            .map(|r| (kernel_face(r.face), r.reason.clone()))
+            .collect(),
         size,
     })
 }
@@ -129,8 +153,17 @@ fn diagonal(points: impl Iterator<Item = [f64; 3]>) -> f64 {
             *h = h.max(v);
         }
     }
-    let d = lo.iter().zip(&hi).map(|(l, h)| (h - l) * (h - l)).sum::<f64>().sqrt();
-    if d.is_finite() && d > 0.0 { d } else { 1.0 }
+    let d = lo
+        .iter()
+        .zip(&hi)
+        .map(|(l, h)| (h - l) * (h - l))
+        .sum::<f64>()
+        .sqrt();
+    if d.is_finite() && d > 0.0 {
+        d
+    } else {
+        1.0
+    }
 }
 
 /// The name of a surface's kind, as the report and the summary print it.

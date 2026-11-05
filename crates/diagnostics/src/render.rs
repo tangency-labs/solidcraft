@@ -52,7 +52,10 @@ impl Frame {
     /// The pixel of the picture a model point projects to.
     pub fn pixel(&self, p: [f64; 3]) -> [f64; 2] {
         let [x, y, _] = self.view.project(p);
-        [x * self.scale + self.offset[0], y * self.scale + self.offset[1]]
+        [
+            x * self.scale + self.offset[0],
+            y * self.scale + self.offset[1],
+        ]
     }
 }
 
@@ -67,10 +70,21 @@ const EDGE: [f64; 3] = [0.333, 0.333, 0.333];
 const LARGE_EDGE: [f64; 3] = [0.0, 0.0, 0.0];
 
 /// Draws the mesh and the edges in a `width` × `height` picture.
-pub fn draw(mesh: &Mesh, edges: &[EdgeInfo], view: View, style: &Style, width: usize, height: usize) -> (Picture, Frame) {
+pub fn draw(
+    mesh: &Mesh,
+    edges: &[EdgeInfo],
+    view: View,
+    style: &Style,
+    width: usize,
+    height: usize,
+) -> (Picture, Frame) {
     let frame = fit(mesh, edges, view, width, height);
     let mut c = Canvas::new(width * SS, height * SS);
-    let fine = Frame { scale: frame.scale * SS as f64, offset: frame.offset.map(|o| o * SS as f64), view };
+    let fine = Frame {
+        scale: frame.scale * SS as f64,
+        offset: frame.offset.map(|o| o * SS as f64),
+        view,
+    };
     let point = |i: u32| mesh.positions.get(i as usize).copied();
     let screen = |p: [f64; 3]| {
         let [x, y] = fine.pixel(p);
@@ -94,7 +108,11 @@ pub fn draw(mesh: &Mesh, edges: &[EdgeInfo], view: View, style: &Style, width: u
                 FACE
             };
             let colour = base.map(|v| v * shade(view, a, b, d));
-            let alpha = if see_through { Some(SEE_THROUGH_ALPHA) } else { None };
+            let alpha = if see_through {
+                Some(SEE_THROUGH_ALPHA)
+            } else {
+                None
+            };
             c.triangle([screen(a), screen(b), screen(d)], colour, alpha);
         }
     }
@@ -102,7 +120,10 @@ pub fn draw(mesh: &Mesh, edges: &[EdgeInfo], view: View, style: &Style, width: u
     // up to the mesh's chord tolerance behind them.
     let slack = mesh.size * 3e-3;
     for large in [false, true] {
-        for e in edges.iter().filter(|e| (e.tolerance > style.edges_above) == large) {
+        for e in edges
+            .iter()
+            .filter(|e| (e.tolerance > style.edges_above) == large)
+        {
             let pts: Vec<[f64; 3]> = e.points.iter().map(|&p| screen(p)).collect();
             if large {
                 c.polyline(&pts, 2.5 * SS as f64, LARGE_EDGE, None);
@@ -117,7 +138,10 @@ pub fn draw(mesh: &Mesh, edges: &[EdgeInfo], view: View, style: &Style, width: u
 /// The frame that fits the mesh and the edges in the picture with a 4% margin, centred.
 fn fit(mesh: &Mesh, edges: &[EdgeInfo], view: View, width: usize, height: usize) -> Frame {
     let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
-    let all = mesh.positions.iter().chain(edges.iter().flat_map(|e| e.points.iter()));
+    let all = mesh
+        .positions
+        .iter()
+        .chain(edges.iter().flat_map(|e| e.points.iter()));
     for &p in all {
         let [x, y, _] = view.project(p);
         lo = [lo[0].min(x), lo[1].min(y)];
@@ -132,8 +156,16 @@ fn fit(mesh: &Mesh, edges: &[EdgeInfo], view: View, width: usize, height: usize)
         (w - extent[0] * scale) / 2.0 - lo[0] * scale,
         (h - extent[1] * scale) / 2.0 - lo[1] * scale,
     ];
-    let offset = if offset.iter().all(|o| o.is_finite()) { offset } else { [0.0, 0.0] };
-    Frame { scale, offset, view }
+    let offset = if offset.iter().all(|o| o.is_finite()) {
+        offset
+    } else {
+        [0.0, 0.0]
+    };
+    Frame {
+        scale,
+        offset,
+        view,
+    }
 }
 
 /// Lambert shading of a triangle's plane, lit from over the viewer's left shoulder, both
@@ -142,7 +174,11 @@ fn shade(view: View, a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> f64 {
     let [a, b, c] = [a, b, c].map(|p| view.project(p));
     let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
     let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-    let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    let n = [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ];
     let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
     let light = [-0.40, -0.60, -0.70];
     let light_len = (0.40f64 * 0.40 + 0.60 * 0.60 + 0.70 * 0.70).sqrt();
@@ -164,7 +200,12 @@ struct Canvas {
 
 impl Canvas {
     fn new(width: usize, height: usize) -> Self {
-        Canvas { width, height, depth: vec![f64::INFINITY; width * height], rgb: vec![BACKGROUND; width * height] }
+        Canvas {
+            width,
+            height,
+            depth: vec![f64::INFINITY; width * height],
+            rgb: vec![BACKGROUND; width * height],
+        }
     }
 
     /// The pixel range `[lo, hi]` covers, clamped to the canvas.
@@ -181,8 +222,16 @@ impl Canvas {
         if area.abs() < 1e-12 || !area.is_finite() {
             return;
         }
-        let xs = Self::span(a[0].min(b[0]).min(c[0]), a[0].max(b[0]).max(c[0]), self.width);
-        let ys = Self::span(a[1].min(b[1]).min(c[1]), a[1].max(b[1]).max(c[1]), self.height);
+        let xs = Self::span(
+            a[0].min(b[0]).min(c[0]),
+            a[0].max(b[0]).max(c[0]),
+            self.width,
+        );
+        let ys = Self::span(
+            a[1].min(b[1]).min(c[1]),
+            a[1].max(b[1]).max(c[1]),
+            self.height,
+        );
         for y in ys {
             for x in xs.clone() {
                 let (px, py) = (x as f64 + 0.5, y as f64 + 0.5);
