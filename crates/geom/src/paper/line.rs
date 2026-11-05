@@ -5,8 +5,8 @@
 //!   0.35, 0.5, 0.7, 1, 1.4 and 2 mm. A line group is named by its wide line; its narrow line is two
 //!   steps down the series, half as wide (wide : narrow = 2 : 1).
 //! - A visible edge is a wide line; a hidden edge, a centre line and a thin line (dimension,
-//!   leader, hatching) are narrow. Their dashes come with the hidden lines that first draw them
-//!   (D2b).
+//!   leader, a reference part's edge, hatching) are narrow. A hidden line is dashed, 12 line widths
+//!   on and 3 off.
 
 /// A line group, named by its wide line's width.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -54,6 +54,18 @@ impl LineKind {
         match self {
             LineKind::Visible => wide,
             LineKind::Hidden | LineKind::Centre | LineKind::Thin => narrow,
+        }
+    }
+
+    /// Its dash and gap in `group`, for a hidden line: ISO 128-20's dashed line, 12 and 3 line widths.
+    /// The other kinds are solid until a writer draws them otherwise.
+    pub fn dashes_mm(self, group: LineGroup) -> Option<[f64; 2]> {
+        match self {
+            LineKind::Hidden => {
+                let d = self.width_mm(group);
+                Some([12.0 * d, 3.0 * d])
+            }
+            LineKind::Visible | LineKind::Centre | LineKind::Thin => None,
         }
     }
 }

@@ -7,6 +7,7 @@ use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
+use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::{NoPictures, ObjectKind};
 
 use super::*;
@@ -602,7 +603,7 @@ fn a_change_of_reference_parts_redraws_the_views() {
     assert_ne!(bytes(&before.scene), bytes(&after.scene));
     let thin = |scene: &Scene| {
         let items = scene.groups.iter().filter(|g| g.kind == ObjectKind::View).flat_map(|g| &g.items);
-        items.filter(|i| matches!(i, Item::Stroke { width_mm, .. } if *width_mm == crate::drawing_view::REFERENCE_MM)).count()
+        items.filter(|i| matches!(i, Item::Stroke { width_mm, .. } if *width_mm == LineKind::Thin.width_mm(LineGroup::DEFAULT))).count()
     };
     assert_eq!(thin(&before.scene), 0);
     assert!(thin(&after.scene) > 0);
@@ -663,7 +664,7 @@ fn a_saved_views_reference_shown_percent_grows_only_what_it_should() {
     let (mut s, sheet, [_, top]) = front_and_top_of(design);
     let strokes = |scene: &Scene, reference: bool| {
         let items = scene.groups.iter().filter(|g| g.kind == ObjectKind::View).flat_map(|g| &g.items);
-        let thin = |i: &&Item| matches!(i, Item::Stroke { width_mm, .. } if *width_mm == crate::drawing_view::REFERENCE_MM);
+        let thin = |i: &&Item| matches!(i, Item::Stroke { width_mm, .. } if *width_mm == LineKind::Thin.width_mm(LineGroup::DEFAULT));
         let mut drawn: Vec<String> = items.filter(|i| matches!(i, Item::Stroke { .. }) && thin(i) == reference).map(|i| format!("{i:?}")).collect();
         drawn.sort();
         drawn

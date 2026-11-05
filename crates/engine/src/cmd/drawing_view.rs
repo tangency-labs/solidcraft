@@ -189,7 +189,7 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let parts = crate::drawing_picture::view_parts(&set, styles);
     let scene = if request.scene {
-        let mut group = crate::drawing_view::paper_group(&drawn, 0);
+        let mut group = crate::drawing_view::paper_group(&drawn, 0, solidcraft_geom::paper::line::LineGroup::DEFAULT);
         group.items.splice(0..0, crate::drawing_picture::picture_items(0, &parts, boundary));
         let scene = solidcraft_geom::paper::Scene::new(paper, vec![group]);
         scene.validate().map_err(|e| bad(CMD, format!("{e}: raise chord_mm, or choose a smaller view")))?;

@@ -6,6 +6,7 @@ use solidcraft_doc::drawing::DEFAULT_DPI;
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_view::ProjectedSide;
 use solidcraft_geom::paper::NoPictures;
+use solidcraft_geom::paper::line::{LineGroup, LineKind};
 
 use super::*;
 use crate::drawing_scene::tests::two_cubes;
@@ -1562,8 +1563,8 @@ fn a_scene_draws_reference_parts_thin_under_the_model() {
     let (mut s, _) = plate_and_block(5.0);
     let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "scene": true, "reference_shown_percent": 100}));
     let widths: Vec<f64> = strokes(&v).iter().map(|(_, _, width)| *width).collect();
-    let thin = widths.iter().take_while(|w| **w == crate::drawing_view::REFERENCE_MM).count();
-    assert!(thin > 0 && widths[thin..].iter().all(|w| *w == crate::drawing_view::VISIBLE_MM), "{widths:?}");
+    let thin = widths.iter().take_while(|w| **w == LineKind::Thin.width_mm(LineGroup::DEFAULT)).count();
+    assert!(thin > 0 && widths[thin..].iter().all(|w| *w == LineKind::Visible.width_mm(LineGroup::DEFAULT)), "{widths:?}");
 }
 
 /// A scene's hidden reference lines are dashed as the model's are, by the reference parts' own
