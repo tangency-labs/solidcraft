@@ -1688,6 +1688,7 @@ fn feature_row_body(
             ui.close();
         }
         ui.separator();
+        crate::timeline::affected_bodies_menu(app, ui, id);
         clipboard_buttons(app, ui, id);
         message_button(app, ui, id);
         ui.separator();
