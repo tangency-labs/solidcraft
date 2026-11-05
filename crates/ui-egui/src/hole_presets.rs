@@ -64,6 +64,16 @@ fn named_runout(text: &str) -> bool {
     matches!(text, "standard" | "short")
 }
 
+/// A clearance hole for a bolt (the Clearance tap type): the size and fit the command takes,
+/// and the diameter only when it is not the table's for them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct Clearance {
+    size: String,
+    fit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    diameter: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct Preset {
     name: String,
@@ -82,6 +92,9 @@ struct Preset {
     thread: String,
     #[serde(default)]
     thread_options: ThreadOptions,
+    /// Older presets have none: a simple or tapped hole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    clearance: Option<Clearance>,
 }
 
 fn valid_text(text: &str, max: usize) -> bool {
@@ -102,7 +115,15 @@ impl Preset {
         if expressions.into_iter().any(|text| !valid_text(text, MAX_EXPRESSION)) {
             return Err("hole_presets.invalid_parameters");
         }
-        let mut required = if self.tapped { Vec::new() } else { vec![&self.diameter] };
+        let mut required = if self.tapped || self.clearance.is_some() { Vec::new() } else { vec![&self.diameter] };
+        if let Some(clearance) = &self.clearance
+            && (self.tapped
+                || !crate::dialogs_hole::CLEARANCE_FITS.iter().any(|f| f.1 == clearance.fit)
+                || solidcraft_engine::cmd::clearance_diameter(&clearance.size, &clearance.fit).is_none()
+                || clearance.diameter.as_ref().is_some_and(|text| text.trim().is_empty() || !valid_text(text, MAX_EXPRESSION)))
+        {
+            return Err("hole_presets.invalid_parameters");
+        }
         if self.extent == Extent::Distance {
             required.push(&self.depth);
         }
@@ -193,7 +214,7 @@ impl Preset {
             } else {
                 Extent::Distance
             },
-            diameter: portable_length(diameter, !opts.tapped)?,
+            diameter: portable_length(diameter, !opts.tapped && !opts.clearance)?,
             depth: portable_length(depth, !opts.all && !d.inputs.iter().any(|input| input.label == "To Object"))?,
             cb_diameter: portable_length(cb_diameter, *kind == 1)?,
             cb_depth: portable_length(cb_depth, *kind == 1)?,
@@ -219,6 +240,15 @@ impl Preset {
                 }
             } else {
                 ThreadOptions::default()
+            },
+            clearance: if opts.clearance {
+                Some(Clearance {
+                    size: opts.clearance_size.trim().into(),
+                    fit: crate::dialogs_hole::CLEARANCE_FITS.get(opts.clearance_fit).map_or("", |f| f.1).into(),
+                    diameter: opts.clearance_diameter.as_deref().filter(|d| !d.trim().is_empty()).map(|d| portable_length(d, true)).transpose()?,
+                })
+            } else {
+                None
             },
         };
         preset.validate()?;
@@ -296,6 +326,13 @@ impl Preset {
         opts.tapped = self.tapped;
         opts.thread.clone_from(&self.thread);
         opts.custom_thread = None;
+        opts.clearance = self.clearance.is_some();
+        if let Some(clearance) = &self.clearance {
+            opts.clearance_size.clone_from(&clearance.size);
+            opts.clearance_fit =
+                crate::dialogs_hole::CLEARANCE_FITS.iter().position(|f| f.1 == clearance.fit).unwrap_or(crate::dialogs_hole::NORMAL_FIT);
+            opts.clearance_diameter.clone_from(&clearance.diameter);
+        }
         opts.thread_full_depth = self.thread_options.full_length;
         opts.hand = if self.thread_options.handedness == "left" {
             solidcraft_engine::doc::thread_forms::ThreadHand::Left
@@ -590,6 +627,41 @@ mod tests {
         let Kind::Hole { opts, .. } = &dialog.kind else { panic!("expected Hole") };
         assert_eq!(*opts.refs, *references);
         assert_eq!(dialog.inputs, inputs);
+    }
+
+    /// A clearance preset keeps the bolt size, the fit and a diameter typed over the table's;
+    /// saved, read back and recalled, the dialog is a clearance hole again. An older preset
+    /// without the field is a simple hole, and a clearance preset with a size the table lacks
+    /// is refused.
+    #[test]
+    fn hole_presets_round_trip_a_clearance_hole() {
+        let harness = crate::scenario::Harness::new();
+        let doc = Document::default();
+        for (size, fit, typed) in [("M4", 1, None), ("M10", 0, Some("11 mm")), ("M1.6", 2, None)] {
+            let mut dialog = Dialog::for_command(&harness.app, "solid.hole").unwrap();
+            let Kind::Hole { opts, .. } = &mut dialog.kind else { panic!("expected Hole") };
+            opts.clearance = true;
+            opts.clearance_size = size.into();
+            opts.clearance_fit = fit;
+            opts.clearance_diameter = typed.map(str::to_string);
+            let preset = Preset::capture(&dialog, "Bolt", &doc).unwrap();
+            let saved = serde_json::to_value(&preset).unwrap();
+            assert_eq!(saved["clearance"]["size"], size, "{saved}");
+            assert_eq!(saved["clearance"]["fit"], crate::dialogs_hole::CLEARANCE_FITS[fit].1, "{saved}");
+            assert_eq!(saved["clearance"].get("diameter").and_then(serde_json::Value::as_str), typed, "{saved}");
+            let read: Preset = serde_json::from_value(saved).unwrap();
+            let mut fresh = Dialog::for_command(&harness.app, "solid.hole").unwrap();
+            read.recall(&mut fresh).unwrap();
+            let Kind::Hole { opts, .. } = &fresh.kind else { panic!("expected Hole") };
+            assert!(opts.clearance && !opts.tapped);
+            assert_eq!((opts.clearance_size.as_str(), opts.clearance_fit, opts.clearance_diameter.as_deref()), (size, fit, typed));
+        }
+        let mut older =
+            serde_json::to_value(Preset::capture(&Dialog::for_command(&harness.app, "solid.hole").unwrap(), "Plain", &doc).unwrap()).unwrap();
+        assert!(older.get("clearance").is_none(), "a simple hole saves no clearance: {older}");
+        older["clearance"] = serde_json::json!({"size": "M7", "fit": "normal"});
+        let bad: Preset = serde_json::from_value(older).unwrap();
+        assert_eq!(bad.recall(&mut Dialog::for_command(&harness.app, "solid.hole").unwrap()), Err("hole_presets.invalid_parameters"));
     }
 
     /// A tapped preset keeps the thread's form and options: an Rc and an NPT size, modelled,
