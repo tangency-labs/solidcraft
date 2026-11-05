@@ -729,3 +729,48 @@ fn transform_scales_about_a_picked_center() {
     assert!((lo.0 - 10.0).abs() < 1e-6 && (lo.1 - 10.0).abs() < 1e-6, "the picked corner stayed: {lo:?}");
     assert!((hi.0 - 70.0).abs() < 1e-6 && (hi.1 - 50.0).abs() < 1e-6, "twice the size away from it: {hi:?}");
 }
+
+/// An Intersect whose result the sketch hides (Projected Geometries off) said nothing, so it
+/// looked as if the pick had done nothing, and each try laid another point on the first. The
+/// status line now says what was added and why it is not shown, and the same curve again adds
+/// no second point.
+#[test]
+fn intersect_says_what_it_added_and_that_projected_geometries_hides_it() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"YZ","offset":20})).unwrap();
+    h.app.run("sketch.options", json!({"show_projected": false})).unwrap();
+    h.app.run("view.home", json!({})).unwrap();
+    h.settle();
+    let intersect = |h: &mut Harness, at: [f64; 3]| {
+        h.app.status = None;
+        h.app.start("sketch.intersect");
+        h.settle();
+        h.step(&json!({"click":{"world":at}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.settle();
+        let state = h.app.session.world_state().unwrap();
+        let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        (h.app.status.clone().map(|(text, _, error)| (text, error)), sk.links.len(), sk.points.len())
+    };
+    let (status, links, points) = intersect(&mut h, [10.0, 0.0, 0.0]);
+    assert_eq!(
+        status,
+        Some((
+            "Intersect added 1 point to the sketch. The result is hidden because Projected Geometries is off in the sketch palette.".into(),
+            false
+        ))
+    );
+    assert_eq!(links, 1);
+    // The same side again adds nothing.
+    let (status, again, more) = intersect(&mut h, [10.0, 0.0, 0.0]);
+    assert_eq!((again, more), (links, points), "{status:?}");
+    h.app.dialog = None;
+    // Shown, the status says only what was added.
+    h.app.run("sketch.options", json!({"show_projected": true})).unwrap();
+    let (status, links, _) = intersect(&mut h, [10.0, 30.0, 0.0]);
+    assert_eq!(status, Some(("Intersect added 1 point to the sketch.".into(), false)));
+    assert_eq!(links, 2);
+}

@@ -1123,6 +1123,30 @@ fn projecting_what_the_face_sketch_already_shows_adds_no_second_copy() {
     assert_eq!(shown(&mut s).0, border.0 + 1);
 }
 
+/// Intersecting what was intersected before laid another point on the first each time (one spot
+/// held 11 points): the same curve or edge again is refused, as Project refuses what the sketch
+/// already shows, and something new alongside it still goes in.
+#[test]
+fn intersecting_the_same_curve_or_edge_again_adds_no_second_point() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Post"}));
+    let rectangle = run(&mut s, "sketch.create", json!({"plane":"XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,-10],"p1":[40,-5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane":"YZ","offset":20}));
+    let points = |s: &mut Session| inspect(s)["points"].as_array().unwrap().len();
+    for refs in [json!([{"sketch":rectangle,"curve":"l1"}]), json!([{"edge":[20,0,20],"body":"Post"}])] {
+        run(&mut s, "sketch.intersect", json!({"refs": refs}));
+        let once = points(&mut s);
+        let e = s.execute("sketch.intersect", &json!({"refs": refs})).unwrap_err().to_string();
+        assert!(e.contains("already intersected into this sketch"), "{refs}: {e}");
+        assert_eq!(points(&mut s), once, "{refs}");
+    }
+    let r = run(&mut s, "sketch.intersect", json!({"refs":[{"sketch":rectangle,"curve":"l1"},{"edge":[20,30,20],"body":"Post"}]}));
+    assert_eq!(r["links"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!(r["already_projected"].as_array().unwrap().len(), 1, "{r}");
+}
+
 /// The curves sketch Intersect makes, on `plane`, of the first body `steps` build: each line's ends,
 /// each circle's centre and radius.
 fn intersect_curves(steps: &[(&str, Value)], plane: Value) -> std::result::Result<Vec<Value>, String> {
