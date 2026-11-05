@@ -3,7 +3,7 @@
 
 use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
-use solidcore_record::Vec2;
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
@@ -371,7 +371,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                         tool.cmd != "sketch.constraint.fix"
                             && (!matches!(h, Hit::Axis { .. } | Hit::Plane { .. }) || allows_datum_reference(tool.cmd))
                             && matches!(h, Hit::Edge { .. } | Hit::Vertex { .. } | Hit::Axis { .. } | Hit::Plane { .. })
-                            && usable_reference(app, h)
+                            && usable_reference(app, h, tool.cmd)
                     })
                     .find_map(|h| crate::sketch_tools::model_ref(app, h))
                     .map(|r| r.to_string())
@@ -443,7 +443,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                     hits.iter().find_map(|h| match h {
                         Hit::Edge { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), true, false)),
                         Hit::Vertex { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), false, false)),
-                        Hit::Axis { .. } | Hit::Plane { .. } if usable_reference(app, h) => {
+                        Hit::Axis { .. } | Hit::Plane { .. } if usable_reference(app, h, tool.cmd) => {
                             crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), false, false))
                         }
                         _ => None,
@@ -517,12 +517,30 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     }
 }
 
-/// Only planes orthogonal to the sketch plane can be picked as references (Creo-like).
-fn usable_reference(app: &SolveApp, hit: &Hit) -> bool {
-    let Hit::Plane { name, .. } = hit else { return true };
-    let state = crate::open_meshing::session_world(&app.session);
-    let Some(sketch) = app.session.active_sketch.and_then(|id| state.sketch(id)) else { return false };
-    crate::dialogs::plane_by_name(&app.session, name).is_some_and(|plane| plane.normal().dot(sketch.plane.normal()).abs() < 1e-6)
+/// Planes must cross the sketch at right angles. Constraints between curves need an axis
+/// that projects to a line in the sketch.
+fn usable_reference(app: &SolveApp, hit: &Hit, cmd: &str) -> bool {
+    let sketch_plane = || {
+        let id = app.session.active_sketch?;
+        crate::open_meshing::session_world(&app.session).sketch(id).map(|sketch| sketch.plane)
+    };
+    match hit {
+        Hit::Plane { name, .. } => sketch_plane()
+            .zip(crate::dialogs::plane_by_name(&app.session, name))
+            .is_some_and(|(sketch, plane)| plane.normal().dot(sketch.normal()).abs() < 1e-6),
+        Hit::Axis { name }
+            if matches!(
+                cmd,
+                "sketch.constraint.parallel" | "sketch.constraint.perpendicular" | "sketch.constraint.collinear" | "sketch.constraint.tangent"
+            ) =>
+        {
+            let dir = origin_axis_direction(name).or_else(|| {
+                solidcraft_engine::view::construction_axes(&app.session).into_iter().find_map(|(_, axis, _, dir)| (axis == *name).then_some(dir))
+            });
+            sketch_plane().zip(dir).is_some_and(|(plane, dir)| Vec2::new(dir.dot(plane.x), dir.dot(plane.y)).len() > 1e-9)
+        }
+        _ => true,
+    }
 }
 
 /// Datum axes and planes can only be picked for constraints that make geometric sense.
@@ -847,16 +865,19 @@ pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> O
         .collect()
 }
 
+fn origin_axis_direction(name: &str) -> Option<Vec3> {
+    match name {
+        "X" => Some(Vec3::X),
+        "Y" => Some(Vec3::Y),
+        "Z" => Some(Vec3::Z),
+        _ => None,
+    }
+}
+
 /// `x` or `y` when the origin axis `name` is the active sketch's own x or y axis: along it, and
 /// through the sketch's origin.
 pub(crate) fn sketch_axis_of(app: &SolveApp, name: &str) -> Option<&'static str> {
-    use solidcore_record::Vec3;
-    let dir = match name {
-        "X" => Vec3::X,
-        "Y" => Vec3::Y,
-        "Z" => Vec3::Z,
-        _ => return None,
-    };
+    let dir = origin_axis_direction(name)?;
     let st = crate::open_meshing::session_world(&app.session);
     let plane = st.sketch(app.session.active_sketch?)?.plane;
     let o = plane.origin;
@@ -872,9 +893,8 @@ pub(crate) fn sketch_axis_of(app: &SolveApp, name: &str) -> Option<&'static str>
     }
 }
 
-/// Symmetry's arguments from three picked sketch ids in any order (#1796): with two points and
-/// a line, the line; with three lines, the only construction line or centerline among them (the
-/// line drawn between the two it mirrors); otherwise the last pick, as before.
+/// Symmetry prefers a single datum reference, then a single line, then a single construction
+/// line or centerline. If none of these identifies the axis, it uses the last pick (#1796).
 fn symmetry_args(picks: &[Value], sketch: Option<&solidcraft_engine::sketch::Sketch>) -> Option<Value> {
     let curve = |v: &Value| match v.as_str() {
         Some(id) => sketch.and_then(|sk| sk.curve_index(id).and_then(|i| sk.curves.get(i))),
@@ -890,7 +910,7 @@ fn symmetry_args(picks: &[Value], sketch: Option<&solidcraft_engine::sketch::Ske
     if picks.len() != 3 {
         return None;
     }
-    let line = only(&is_line).or_else(|| only(&is_axis)).unwrap_or(2);
+    let line = only(&reference_line).or_else(|| only(&is_line)).or_else(|| only(&is_axis)).unwrap_or(2);
     let mut rest = (0..3).filter(|i| *i != line).filter_map(|i| picks.get(i));
     let (a, b, line) = (rest.next()?, rest.next()?, picks.get(line)?);
     (a != b).then(|| json!({"a": a, "b": b, "line": line}))

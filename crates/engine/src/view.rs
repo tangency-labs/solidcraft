@@ -678,15 +678,14 @@ impl<'a> SketchPointVisibility<'a> {
             let interior = curve.kind.point_ids().into_iter().filter(|i| ends.is_none_or(|(a, b)| *i != a && *i != b));
             hidden.extend(interior.filter_map(|i| sk.points.get(i).map(|p| p.id.as_str())));
         }
-        for curve in sk.curves.iter().filter(|c| c.infinite) {
-            let ends = curve.kind.ends();
-            for i in ends.into_iter().flat_map(|(a, b)| [a, b]) {
-                if sk.curves.iter().filter(|c| !c.infinite).all(|c| !c.kind.point_ids().contains(&i))
-                    && let Some(p) = sk.points.get(i)
-                {
-                    hidden.insert(p.id.as_str());
-                }
+        // Hide an infinite line's endpoints unless a finite curve also uses them.
+        let mut infinite_endpoints: std::collections::HashSet<_> =
+            sk.curves.iter().filter(|c| c.infinite).filter_map(|c| c.kind.ends()).flat_map(|(a, b)| [a, b]).collect();
+        if !infinite_endpoints.is_empty() {
+            for i in sk.curves.iter().filter(|c| !c.infinite).flat_map(|c| c.kind.point_ids()) {
+                infinite_endpoints.remove(&i);
             }
+            hidden.extend(infinite_endpoints.into_iter().filter_map(|i| sk.points.get(i).map(|p| p.id.as_str())));
         }
         Self { hidden }
     }

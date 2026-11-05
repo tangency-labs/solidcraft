@@ -44,6 +44,63 @@ fn equal_tool_refuses_to_pick_an_origin_plane_or_axis() {
 }
 
 #[test]
+fn line_constraints_skip_end_on_datum_axes() {
+    let mut h = Harness::new();
+    h.app.run("construct.axis.two_points", json!({"a":{"point":[-15,6,0]},"b":{"point":[-15,6,20]},"name":"End on"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.set_origin_shown(true);
+    h.call("ui.view", json!({"view":"iso"}));
+    h.app.cam.distance = 150.0;
+    h.settle();
+
+    for (name, at) in [("Z", [0, 0, 10]), ("End on", [-15, 6, 10])] {
+        h.step(&json!({"move":{"world":at}})).unwrap();
+        assert_eq!(h.call("ui.selection", json!({}))["result"]["hover"]["name"], name, "the axis is under the pointer");
+        for cmd in ["parallel", "perpendicular", "collinear", "tangent"] {
+            h.step(&json!({"start":format!("sketch.constraint.{cmd}")})).unwrap();
+            h.step(&json!({"click":{"world":at}})).unwrap();
+            assert!(h.app.tool.as_ref().unwrap().picks.is_empty(), "{cmd} needs a curve");
+        }
+        h.step(&json!({"start":"sketch.constraint.coincident"})).unwrap();
+        h.step(&json!({"click":{"world":at}})).unwrap();
+        let picks = &h.app.tool.as_ref().unwrap().picks;
+        assert_eq!(picks.len(), 1);
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&picks[0]).unwrap(), json!({"axis":name}));
+        h.step(&json!({"key":"Escape"})).unwrap();
+    }
+}
+
+#[test]
+fn symmetry_uses_the_datum_picked_before_two_construction_lines() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    for points in [[[-20, 15], [-10, 15]], [[10, 15], [20, 15]]] {
+        h.app.run("sketch.line", json!({"points":points,"construction":true,"infer":false,"connect":false})).unwrap();
+    }
+    h.app.set_origin_shown(true);
+    h.call("ui.view", json!({"view":"top"}));
+    h.app.cam.distance = 150.0;
+    h.settle();
+    h.step(&json!({"start":"sketch.constraint.symmetry"})).unwrap();
+    for at in [[0, 8, 0], [-14, 15, 0], [14, 15, 0]] {
+        h.step(&json!({"click":{"world":at}})).unwrap();
+    }
+    assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
+    let state = h.app.session.world_state().unwrap();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let axis = sk.link_curves(&sk.links[0].id)[0];
+    let symmetry: Vec<_> = sk
+        .constraints
+        .iter()
+        .filter_map(|c| match c.kind {
+            ConstraintKind::Symmetric { l, .. } => Some(l),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(symmetry, [axis, axis]);
+}
+
+#[test]
 fn clicked_point_constraint_preselection_applies_and_undoes_once() {
     // Pick the edge away from its selectable MID; the point/edge constraint is unchanged.
     for (command, picks) in [

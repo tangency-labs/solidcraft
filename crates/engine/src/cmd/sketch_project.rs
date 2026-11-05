@@ -500,7 +500,7 @@ fn project_ref(s: &mut Session, doc: &Document, id: u64, sk: &mut Sketch, v: &Va
     if let LinkSource::Plane { name } = &src {
         let placed = placed_candidate(s, doc);
         let st = s.model.state_before(id);
-        let st = state_for_sketch(s, &placed, id, &st)?;
+        let st = state_for_sketch(s, &placed, id, &st, &[])?;
         let plane = sketch_plane(&placed, id, &st)?;
         let reference = super::sketch::plane_ref(s, &json!({"plane": name}), cmd)?;
         let (vals, _) = placed.param_values();
