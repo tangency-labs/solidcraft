@@ -192,12 +192,16 @@ fn tilt_20_below_the_bound_builds() {
 /// rail ends on its side edge at the seam's vertex and is continued across it (63c7962).
 /// The +y End's rim edge stops at the seam's vertex short of the rail's end, which lies on
 /// the next rim edge; the End's edge on the rim joins the two (a circle's arcs: their
-/// B-splines). The fork: 10 faces, -33.432934277429 removed (here -33.432934278928), the
-/// rails' ends at (-4.176377478, +-4.664695271, 0.893582223).
+/// B-splines). The fork: 10 faces, -33.432934277429 removed, the rails' ends at
+/// (-4.176377478, +-4.664695271, 0.893582223). Pinned here at -33.432934235592: the side
+/// plane extended for the round is now an exactly widened plane (the fork's path handed the
+/// round the plane's fitted B-spline), and the faces, rails and rounds are exact. The move,
+/// 4.2e-8, is 1.1e-12 of the part's volume (38601): rounding at the part's scale, so the
+/// value is re-pinned with the same 5e-9.
 #[test]
 fn tilt_40_rail_continued_across_the_seam_vertex() {
     let (got, faces, points) = rounded_seam(40.0, 125.13, 1.5).unwrap();
-    assert!((got - -33.432_934_277_429).abs() <= 5e-9, "{got}");
+    assert!((got - -33.432_934_235_592).abs() <= 5e-9, "{got}");
     assert_eq!(faces, 10);
     for y in [-4.664_695_271, 4.664_695_271] {
         let want = Point3::new(-4.176_377_478, y, 0.893_582_223);
