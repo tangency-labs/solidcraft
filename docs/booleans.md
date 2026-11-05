@@ -43,8 +43,10 @@ piece's class is.
 
 The rule follows the contract of [definitions-and-certificates.md](definitions-and-certificates.md):
 a face's surface is its definition S, and its net B is only a certified approximation within ε. So:
-- **Classification reads S, never a mesh.** Every point a decision rests on is a root on the
-  surfaces themselves; a display mesh decides nothing ([layers.md](layers.md) §3).
+- **Classification reads S, never a mesh.** Surface hits and explicitly surface-solved points are
+  roots on the surfaces themselves. `classify_remaining` may use an evaluated operand-edge point
+  only as a ray origin; that origin is not itself a surface solve. A display mesh decides nothing
+  ([layers.md](layers.md) §3).
 - **A region is dropped or kept only by its class.** No piece is removed because it is small,
   because a sample missed it, or because a tolerance was widened.
 - **A case the code cannot decide is refused by name**, never guessed.
