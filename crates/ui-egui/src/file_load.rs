@@ -12,6 +12,7 @@
 //! linked design being read and its rebuild's progress.
 
 use crate::ui_kit::{Container, Surface};
+#[cfg(not(target_arch = "wasm32"))]
 use solidcraft_engine::geom::prelude::*;
 use std::collections::VecDeque;
 use std::sync::{
