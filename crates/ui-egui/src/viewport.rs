@@ -596,6 +596,8 @@ fn scene_key(app: &SolveApp) -> u64 {
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
     app.ui.visual_style.hash(&mut h);
     app.preferences.vertex_markers.hash(&mut h);
+    // The cached ground AO receiver and the ellipse share the selected ground plane.
+    app.preferences.ground_shadow_follows_model.hash(&mut h);
     solidcraft_engine::doc::display_quality::current().hash(&mut h);
     lod_generation(app).hash(&mut h);
     app.viewport.mesh_lods.generation().hash(&mut h);
@@ -1735,7 +1737,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     if app.ui.visual_style != 2 {
         let bounds = ground_bounds(app, &st);
         let radius = (bounds.diagonal() * 0.04).clamp(1e-4, 1e6) as f32;
-        sc.ground_ao = solidcraft_gpu::view::GroundAo::new(bounds, ground_height(bounds), app.cam.up, radius);
+        sc.ground_ao = solidcraft_gpu::view::GroundAo::new(bounds, ground_height(app, bounds), app.cam.up, radius);
     }
     // Section: the outline of each body where the plane cuts it, in the view's text colour (#4146).
     if let Some((o, n)) = section_plane(app) {
@@ -2073,9 +2075,12 @@ fn ground_bounds(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::Mod
     b
 }
 
-/// Both ground effects use the original ellipse's plane, independent of the origin grid.
-fn ground_height(bounds: solidcraft_engine::geom::Aabb3) -> f64 {
-    bounds.min.z - 1e-3 * (1.0 + bounds.diagonal())
+/// Both ground effects share the selected plane, independent of the origin grid.
+fn ground_height(app: &SolveApp, bounds: solidcraft_engine::geom::Aabb3) -> f64 {
+    // Raised bodies cast onto the origin. Keep the plane below lower bodies, and
+    // retain the former floating ground when requested.
+    let ground = if app.preferences.ground_shadow_follows_model { bounds.min.z } else { bounds.min.z.min(0.0) };
+    ground - 1e-3 * (1.0 + bounds.diagonal())
 }
 
 fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, b: solidcraft_engine::geom::Aabb3) {
@@ -2084,7 +2089,7 @@ fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, b: solidcraft_engine::geom::
     }
     let size = b.size();
     let c = b.center();
-    let z = ground_height(b);
+    let z = ground_height(app, b);
     let (rx, ry) = (size.x * 0.62 + size.z * 0.15, size.y * 0.62 + size.z * 0.15);
     if !(rx > 0.0 && ry > 0.0) {
         return;
@@ -7239,6 +7244,69 @@ pub fn look_at_selection(app: &mut SolveApp) {
 mod tests {
     use super::*;
     use crate::navigation::*;
+
+    #[test]
+    fn raised_bodies_cast_ground_shadows_at_the_origin() -> Result<(), Box<dyn std::error::Error>> {
+        use solidcraft_engine::render::UpAxis;
+        for (up, translate, coordinate) in [(UpAxis::Z, [0, 0, 13], 2), (UpAxis::Y, [0, 13, 0], 1)] {
+            let mut session = solidcraft_engine::Session::default();
+            session.execute("solid.box", &json!({"length": 12, "width": 12, "height": 30, "body_name": "Raised"}))?;
+            session.execute("solid.move", &json!({"bodies": ["Raised"], "translate": translate}))?;
+            let mut app = SolveApp::new(session, crate::Services::default());
+            app.cam.up = up;
+            let mut scene = GpuScene::default();
+            ground_shadow(&mut scene, &app, ground_bounds(&app, &app.session.world_state()?));
+            assert!(!scene.shadow.is_empty());
+            for vertex in scene.shadow.as_chunks::<{ crate::gpu::TRI_SIZE }>().0 {
+                let height = f32::from_le_bytes(vertex[coordinate * 4..coordinate * 4 + 4].try_into()?);
+                assert!((-0.1..=0.0).contains(&height), "{up:?}: shadow must stay just below the origin ground plane, got {height}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn ground_shadow_keeps_legacy_placement_and_stays_below_low_bodies() -> Result<(), Box<dyn std::error::Error>> {
+        use solidcraft_engine::render::UpAxis;
+        for (up, coordinate) in [(UpAxis::Z, 2), (UpAxis::Y, 1)] {
+            for (height, follows_model, expected) in [(13, true, 13.0), (-7, false, -7.0), (-7, true, -7.0), (0, false, 0.0)] {
+                let mut session = solidcraft_engine::Session::default();
+                session.execute("solid.box", &json!({"length": 12, "width": 12, "height": 30, "body_name": "Box"}))?;
+                let mut translate = [0; 3];
+                translate[coordinate] = height;
+                session.execute("solid.move", &json!({"bodies": ["Box"], "translate": translate}))?;
+                let mut app = SolveApp::new(session, crate::Services::default());
+                app.cam.up = up;
+                let state = app.session.world_state()?;
+                let proj = projection(&app, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)));
+                let model_key = scene_key(&app);
+                let view_key = sketch_scene_key(&app, &proj);
+                let before = shadow_geometry(&app, &state);
+                crate::prefs::set(&mut app, &json!({"ground_shadow_follows_model": true}))?;
+                assert_ne!(scene_key(&app), model_key, "the cached ground AO receiver is refreshed");
+                assert_ne!(sketch_scene_key(&app, &proj), view_key, "the visible shadow is refreshed");
+                let after = shadow_geometry(&app, &state);
+                assert!(!std::sync::Arc::ptr_eq(&before.bytes, &after.bytes), "changing placement rebuilds the shadow");
+                assert!(std::sync::Arc::ptr_eq(&after.bytes, &shadow_geometry(&app, &state).bytes), "unchanged placement stays cached");
+                crate::prefs::set(&mut app, &json!({"ground_shadow_follows_model": follows_model}))?;
+                let mut scene = GpuScene::default();
+                ground_shadow(&mut scene, &app, ground_bounds(&app, &app.session.world_state()?));
+                assert!(!scene.shadow.is_empty());
+                for vertex in scene.shadow.as_chunks::<{ crate::gpu::TRI_SIZE }>().0 {
+                    let actual = f32::from_le_bytes(vertex[coordinate * 4..coordinate * 4 + 4].try_into()?);
+                    assert!(
+                        (expected - 0.1..=expected).contains(&actual),
+                        "{up:?}, follows model {follows_model}: expected {expected}, got {actual}"
+                    );
+                }
+                app.session.visibility.hidden_bodies.push("Box".into());
+                let mut hidden = GpuScene::default();
+                ground_shadow(&mut hidden, &app, ground_bounds(&app, &app.session.world_state()?));
+                assert!(hidden.shadow.is_empty(), "hidden bodies cast no shadow");
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn ground_shadow_does_not_enter_see_through_geometry() -> Result<(), Box<dyn std::error::Error>> {
