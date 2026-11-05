@@ -569,7 +569,7 @@ mod tests {
             run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"visual_style": "visible"}}));
         }
         let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
-        let svg = run(&mut s, "drawing.export", json!({"sheet": sheet}))["text"].clone();
+        let svg = run(&mut s, "drawing.export", json!({"sheet": sheet}))["svg"].clone();
         assert!(svg.is_string(), "{svg}");
         let (doc, steps) = (s.doc.clone(), s.undo.len());
         let reply = run(&mut s, "select.set", json!({"items": [item(drawing, front), item(drawing, dimension), item(drawing, balloon)]}));
@@ -578,7 +578,7 @@ mod tests {
         run(&mut s, "select.set", json!({"items": [item(drawing, right)], "add": true}));
         assert_eq!(s.selection.len(), 4);
         assert!(std::sync::Arc::ptr_eq(&doc, &s.doc) && s.undo.len() == steps);
-        assert_eq!(run(&mut s, "drawing.export", json!({"sheet": sheet}))["text"], svg);
+        assert_eq!(run(&mut s, "drawing.export", json!({"sheet": sheet}))["svg"], svg);
         run(&mut s, "select.clear", json!({}));
         assert!(s.selection.is_empty());
     }
