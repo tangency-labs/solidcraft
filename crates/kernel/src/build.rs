@@ -991,7 +991,7 @@ pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
     loft_with_rails(sections, &[], RailFit::Scale)
 }
 
-/// [`loft`] following one or two guide rails (polylines from the first section to the last,
+/// [`loft`] following 1…16 guide rails (polylines from the first section to the last,
 /// through every section's curve; see [`crate::loft_rails`]), `fit` saying how they reshape the
 /// sections between. Without rails, the plain loft.
 pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {

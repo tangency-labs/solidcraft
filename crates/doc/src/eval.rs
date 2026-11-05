@@ -5762,8 +5762,8 @@ pub(crate) fn kernel_rail_fit(fit: crate::RailFit) -> kernel::RailFit {
 /// A sweep's or a loft's guide rails as polylines in the feature's frame, each a chain of its sketch's curves
 /// (planar or 3D) from the end nearest `start` (the start of the path, the loft's first section).
 pub(crate) fn rail_polylines(doc: &Document, st: &ModelState, rails: &[crate::SweepRail], consumer: u64, start: Vec3) -> Result<Vec<Vec<Vec3>>> {
-    if rails.len() > 2 {
-        return Err(DocError::Invalid("a sweep or a loft takes one or two guide rails".into()));
+    if rails.len() > kernel::MAX_LOFT_RAILS {
+        return Err(DocError::Invalid(format!("a loft takes 1…{} guide rails (a sweep one or two)", kernel::MAX_LOFT_RAILS)));
     }
     rails
         .iter()
