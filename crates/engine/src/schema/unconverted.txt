@@ -2,15 +2,6 @@
 # (coverage_tests.rs). This list only shrinks: when you give a command its contract and output
 # type, remove its line. Never add one: a new command comes with both schemas. Sorted, one id
 # per line.
-body.rename
-browser.collapse_all
-browser.expand_all
-browser.group
-browser.move
-browser.order
-browser.rename_group
-browser.ungroup
-browser.visibility
 canvas.calibrate
 canvas.decal
 canvas.delete

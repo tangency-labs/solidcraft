@@ -21,7 +21,7 @@ macro_rules! planned {
 }
 
 mod bom;
-mod browser;
+pub(crate) mod browser;
 pub(crate) mod clearance;
 mod clipboard;
 mod clipboard_foreign;
