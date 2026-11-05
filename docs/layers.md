@@ -7,6 +7,11 @@ layer that needs another layer's job calls that layer; it never carries its own 
 
 ## 1. The layers
 
+![The layers and the dependencies allowed between them](layers/layers.svg)
+
+*Look at the kernel: no arrow leaves it. An app never points at it either: it reaches geometry through ops, and draws through tess.*
+
+
 | Layer | Crate | Its job | Examples | Never in it |
 |---|---|---|---|---|
 | Kernel | `solidcore` | Every geometric computation: build, evaluate, measure, intersect, fit | **build:** skin, sweep, blend, fillet, offset, booleans, trim, sew, curves and surfaces from control points and knots; **evaluate:** points, derivatives, normals, curvature, frames, normal sections, projection; **measure:** distance, angle, area, volume, mass properties, continuity across an edge (gap, normal angle, curvature difference); **intersect:** curve/surface, surface/surface, ray/body; **fit:** knot insertion and removal, degree elevation, Greville, interpolation, approximation, constrained fits (an edge row matched to a target at G0/G1/G2); **check** | anything app-specific: defaults, command shapes, UI |
@@ -14,10 +19,7 @@ layer that needs another layer's job calls that layer; it never carries its own 
 | Convert | `solidcore-convert` | The one record ↔ kernel conversion, used by ops and tess | record `Surface`, `Curve`, `Curve2`, `Frame`, `Plane`, `Vec3` to the kernel's values and back, field by field | any maths |
 | Ops | `solidcore-ops` | The modelling API both apps call: every workflow operation as a sequence of kernel calls, converting through `solidcore-convert` | the align command (picks the edges and the order, calls the kernel's constrained fit); the edge-continuity check (picks sample parameters and tolerances, calls the kernel's continuity measure, compares and reports); CV-curve editing (defaults, calls the kernel's constructor); comb values (calls curvature and normal, scales for display); importing a file (parses into the record, then calls the kernel to build, sew and heal) | any geometric quantity computed itself (see below) |
 | Tess | `solidcore-tess` | Geometry made drawable | display meshes; isoparm and curve polylines | modelling or measurement decisions |
-| View | `tlabs-view` | Drawing on the GPU | shading, edges, lines; the camera's ray for a pick (the hit itself is the kernel's ray/body intersection, called through ops) | geometry maths on the model |
-| Kit | `tlabs-kit` | Interface components | ribbon, panels, history bar, preferences, menus | app state, geometry |
-| Link | `tlabs-link` | Talking between apps | publish, withdraw, revisions | app types |
-| Apps | the applications built on solidcore (SolidCraft and others) | State, and mapping input to commands | document, selection, command ids, settings, construction history and replay | any geometry computation |
+| Apps | the applications built on solidcore (SolidCraft and others) | State, and mapping input to commands | document, selection, command ids, settings, construction history and replay; their own interface and drawing crates, which are not solidcore's | any geometry computation |
 
 ### The line between kernel and ops
 
@@ -65,10 +67,7 @@ solidcore          -> (none of the others)
 solidcore-convert  -> solidcore, solidcore-record
 solidcore-ops      -> solidcore, solidcore-record, solidcore-convert
 solidcore-tess     -> solidcore, solidcore-record, solidcore-convert
-tlabs-view         -> solidcore-tess (the meshes and polylines it draws)
-tlabs-kit          -> (none)
-tlabs-link         -> (none of the geometry crates; it carries bytes and revisions)
-apps               -> solidcore-ops, solidcore-record, solidcore-tess, tlabs-*
+apps               -> solidcore-ops, solidcore-record, solidcore-tess
 ```
 
 - **Apps never depend on `solidcore` directly.** A modelling call goes through `solidcore-ops`. A number an app needs (a distance, an area, a nearest face) is an ops call.
