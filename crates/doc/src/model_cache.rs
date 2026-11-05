@@ -414,7 +414,7 @@ impl SavedModel {
                 name: text(s.get("name"))?,
                 plane: serde_json::from_value(parse(s.get("plane"))?).map_err(|_| bad("saved model: sketch"))?,
                 report: serde_json::from_value(parse(s.get("report"))?).map_err(|_| bad("saved model: sketch"))?,
-                profiles: find_profiles(&sketch),
+                profiles: find_drawn_profiles(&sketch),
                 ends: solidcraft_sketch::loose_ends(&sketch),
                 sketch,
             }));

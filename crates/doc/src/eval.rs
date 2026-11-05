@@ -16,7 +16,7 @@ use solidcore_record::{Plane, Region2, Vec2, Vec3};
 use solidcraft_geom::tess::TessPlan;
 use solidcraft_geom::{Mesh, UnitVec3, regions_apart};
 use solidcraft_kernel::{self as kernel, Body, BoolOp};
-use solidcraft_sketch::{CurveKind, Profile, SolveReport, find_profiles};
+use solidcraft_sketch::{CurveKind, Profile, SolveReport, find_drawn_profiles};
 
 use crate::expr::{self, Kind, Value};
 use crate::lineage::Traced;
@@ -1992,7 +1992,7 @@ impl Model {
             feature,
             name: last.name.clone(),
             plane: last.plane,
-            profiles: find_profiles(&sketch),
+            profiles: find_drawn_profiles(&sketch),
             ends: solidcraft_sketch::loose_ends(&sketch),
             sketch,
             report,
@@ -6083,15 +6083,28 @@ fn from_profile_on_closed_path(segs: Vec<solidcore_record::Seg2>, path: &Plane, 
 /// Where an extrude of distance `d` starts and ends along the sketch normal, before any start
 /// offset: one side, the other, both (symmetric), or a second distance on the other side.
 ///
-/// A second distance (`distance2`) goes the other way from the first side, wherever that went:
-/// against the normal for `direction: negative` (#2700), and back along it when a negative
-/// distance or a To Object below the sketch sends the first side down.
+/// A second distance (`distance2`) goes the other way from the first side: against the normal,
+/// or along it for `direction: negative` (#2700). Entered distances keep those sides whatever
+/// their signs; a To Object below the sketch or a Through All that reaches down sends the first
+/// side down and the second back along the normal.
 pub(crate) fn extent_sides(vals: &BTreeMap<String, Value>, extent: &crate::Extent, d: f64, direction: crate::Direction) -> Result<(f64, f64)> {
     Ok(match (&extent.distance2, direction) {
         (Some(d2), _) => {
-            let first = if direction == crate::Direction::Negative { -d } else { d };
+            let negative = direction == crate::Direction::Negative;
+            let first = if negative { -d } else { d };
             let d2 = val(vals, d2, Kind::Length)?;
-            (if first < 0.0 { d2 } else { -d2 }, first)
+            // An entered distance keeps its side whatever its sign: Direction fixes the sides,
+            // and a sign only turns its own side over. A reach computed from the model (To
+            // Object, Through All) has the sign of where the object is, so the other side
+            // follows it.
+            let second = if extent.to.is_some() || extent.through_all {
+                if first < 0.0 { d2 } else { -d2 }
+            } else if negative {
+                d2
+            } else {
+                -d2
+            };
+            (second, first)
         }
         (None, crate::Direction::Positive) => (0.0, d),
         (None, crate::Direction::Negative) => (-d, 0.0),

@@ -200,7 +200,10 @@ fn a_second_distance_goes_the_other_way_from_the_first_side() {
     for (settings, lo, hi) in [
         (json!({"direction":"positive","distance":"10 mm","distance2":"4 mm"}), -4.0, 10.0),
         (json!({"direction":"negative","distance":"10 mm","distance2":"4 mm"}), -10.0, 4.0),
-        (json!({"direction":"positive","distance":"-10 mm","distance2":"4 mm"}), -10.0, 4.0),
+        // A sign only turns its own side over: Distance 2 stays where Direction puts it, so a
+        // negative Distance 1 leaves the span between the two ends.
+        (json!({"direction":"positive","distance":"-10 mm","distance2":"4 mm"}), -10.0, -4.0),
+        (json!({"direction":"negative","distance":"-10 mm","distance2":"4 mm"}), 4.0, 10.0),
     ] {
         let s = fixture(settings.clone());
         check(&s, lo, hi);
