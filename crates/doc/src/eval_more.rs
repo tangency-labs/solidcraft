@@ -69,10 +69,11 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             // #10940: an emboss or deboss whose tool lies clear of the body (a sketch on the far
             // side of the material, a depth that stops short) used to report success and change
-            // nothing. Say so: the body is compared before and after, as the command's reply does.
+            // nothing. Say so: the body's shape is compared before and after (its colour, paint and face
+            // metadata may be rebuilt by a missed cut without the shape changing).
             let before: Vec<Body> = st.bodies.iter().map(|b| b.body.clone()).collect();
             apply_op(doc, st, f, tools, if *deboss { Operation::Cut } else { Operation::Join }, &crate::plain(targets))?;
-            let unchanged = st.bodies.len() == before.len() && st.bodies.iter().zip(&before).all(|(b, old)| old.same(&b.body));
+            let unchanged = st.bodies.len() == before.len() && st.bodies.iter().zip(&before).all(|(b, old)| old.same_shape(&b.body));
             if unchanged {
                 let what = if *deboss { "deboss" } else { "emboss" };
                 append_warning(
