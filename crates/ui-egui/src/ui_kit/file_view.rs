@@ -1,6 +1,10 @@
 //! File/start presentation; callers retain commands, caches and recovery ownership.
-use super::{metrics::dimension, text::paint_text};
+use super::{
+    metrics::dimension,
+    text::{paint_text, paint_text_aligned},
+};
 use crate::theme::Tokens;
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Align2, FontId, InnerResponse, Rect, Response, Sense, Stroke, TextureId, Ui, Vec2, pos2, vec2};
 
 pub(crate) struct RecoveryMessage<'a> {
@@ -34,10 +38,10 @@ pub(crate) struct FileView;
 
 impl FileView {
     pub(crate) fn page<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
-        super::Container::new(ui.ctx(), super::Surface::Viewport)
-            .central()
-            .frame(super::Container::new(ui.ctx(), super::Surface::Viewport).edge_frame(Tokens::get().file_background))
-            .show(ui, add)
+        let host = super::Container::new(ui.ctx(), super::Surface::Viewport);
+        let panel = host.central();
+        let frame = host.edge_frame(Tokens::get().file_background);
+        super::Container::show_central(ui, panel, frame, add)
     }
 
     pub(crate) fn content<R>(ui: &mut Ui, narrow: bool, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
@@ -99,14 +103,18 @@ impl FileView {
 
     pub(crate) fn recent_list<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
         let t = Tokens::get();
-        egui::Frame::NONE.fill(t.file_surface).stroke(t.tertiary_border(t.file_border)).corner_radius(t.radius_xl).show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            let key = ui.id().with("file_recent_index");
-            ui.ctx().data_mut(|data| data.insert_temp(key, 0_usize));
-            let result = add(ui);
-            ui.ctx().data_mut(|data| data.remove::<usize>(key));
-            result
-        })
+        crate::ui_kit::Container::show_backing(
+            ui,
+            egui::Frame::NONE.fill(t.file_surface).stroke(t.tertiary_border(t.file_border)).corner_radius(t.radius_xl),
+            |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let key = ui.scope_id().with("file_recent_index");
+                ui.ctx().data_mut(|data| data.insert_temp(key, 0_usize));
+                let result = add(ui);
+                ui.ctx().data_mut(|data| data.remove::<usize>(key));
+                result
+            },
+        )
     }
 
     pub(crate) fn title(ui: &mut Ui, title: &str) {
@@ -140,10 +148,14 @@ impl FileView {
 
     pub(crate) fn navigation<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
         let t = Tokens::get();
-        egui::Frame::NONE.fill(t.file_rail).inner_margin(egui::Margin::symmetric(t.space_10 as i8, t.space_14 as i8)).show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = t.space_2;
-            add(ui)
-        })
+        crate::ui_kit::Container::show_backing(
+            ui,
+            egui::Frame::NONE.fill(t.file_rail).inner_margin(egui::Margin::symmetric(t.space_10 as i8, t.space_14 as i8)),
+            |ui| {
+                ui.spacing_mut().item_spacing.y = t.space_2;
+                add(ui)
+            },
+        )
     }
 
     pub(crate) fn nav_row(ui: &mut Ui, id: &str, label: &str, shortcut: &str, selected: bool, enabled: bool) -> Response {
@@ -254,7 +266,7 @@ impl FileView {
         let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect));
         painter.galley(pos2(text_rect.left(), top), title.clone(), ink);
         painter.galley(pos2(text_rect.left(), top + title.size().y + t.space_2), caption, t.file_dim);
-        response.on_hover_text(format!("{label}\n{subtitle}"))
+        response.backing_on_hover_text(format!("{label}\n{subtitle}"))
     }
 
     pub(crate) fn recent_row(ui: &mut Ui, id: &str, row: RecentRow<'_>) -> Response {
@@ -264,7 +276,7 @@ impl FileView {
             ui.painter().rect_filled(rect, t.radius_lg, t.hover);
         }
         let list = ui.stack().iter().find_map(|node| {
-            let key = node.id.with("file_recent_index");
+            let key = node.unique_id.with("file_recent_index");
             ui.ctx().data(|data| data.get_temp::<usize>(key)).map(|index| (key, index))
         });
         if let Some((key, index)) = list {
@@ -301,7 +313,15 @@ impl FileView {
                 t.form_ink,
                 false,
             );
-            paint_text(ui, Rect::from_min_max(pos2(left, half), content.max), row.path, FontId::monospace(t.font_body), t.file_dim, false);
+            paint_text_aligned(
+                ui,
+                Rect::from_min_max(pos2(left, half), content.max),
+                row.path,
+                FontId::monospace(t.font_body),
+                t.file_dim,
+                false,
+                true,
+            );
         } else {
             let when_width = t.space_24 * 5.0;
             let workspace_width = t.form_label_width * 2.0;
@@ -318,13 +338,14 @@ impl FileView {
                 t.form_ink,
                 false,
             );
-            paint_text(
+            paint_text_aligned(
                 ui,
                 Rect::from_min_max(pos2(path_left, content.top()), pos2((when_left - t.space_14).max(path_left), content.bottom())),
                 row.path,
                 FontId::monospace(t.font_body),
                 t.file_dim,
                 false,
+                true,
             );
             paint_text(
                 ui,
@@ -344,7 +365,7 @@ impl FileView {
                 false,
             );
         }
-        response.on_hover_text(row.path)
+        response.backing_on_hover_text(row.path)
     }
 
     pub(crate) fn sample_grid(ui: &mut Ui, id: &str, samples: &[SampleCard<'_>]) -> Vec<Response> {
@@ -387,7 +408,7 @@ impl FileView {
 fn allocate(ui: &mut Ui, id: &str, width: f32, height: f32, label: &str) -> (Rect, Response) {
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(width).min(dimension(ui.available_width())), height), Sense::hover());
     let response = ui.interact(rect, ui.make_persistent_id(id), Sense::click());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     if response.clicked() {
         response.request_focus();
     }
@@ -437,12 +458,14 @@ fn recovery_panel(
     let t = Tokens::get();
     let fill = if banner { t.file_recovery } else { t.file_surface };
     let border = if banner { t.file_recovery_border } else { t.file_border };
-    egui::Frame::NONE
-        .fill(fill)
-        .stroke(if banner { Stroke::new(1.0, border) } else { t.tertiary_border(border) })
-        .corner_radius(t.radius_xl)
-        .inner_margin(egui::Margin::symmetric(t.space_16 as i8, t.space_12 as i8))
-        .show(ui, |ui| {
+    crate::ui_kit::Container::show_backing(
+        ui,
+        egui::Frame::NONE
+            .fill(fill)
+            .stroke(if banner { Stroke::new(1.0, border) } else { t.tertiary_border(border) })
+            .corner_radius(t.radius_xl)
+            .inner_margin(egui::Margin::symmetric(t.space_16 as i8, t.space_12 as i8)),
+        |ui| {
             let width = dimension(ui.available_width());
             let button_width = |text: &str| {
                 ui.painter().layout_no_wrap(text.to_owned(), crate::fonts::semibold(t.font_heading), t.form_ink).size().x + t.space_14 * 2.0
@@ -499,8 +522,9 @@ fn recovery_panel(
                 )
             });
             (a, b)
-        })
-        .inner
+        },
+    )
+    .inner
 }
 
 fn grid_geometry(available: f32, min_width: f32, count: usize) -> (usize, f32) {
@@ -544,5 +568,5 @@ fn sample_card_with_height(ui: &mut Ui, id: &str, width: f32, sample: &SampleCar
     let description_top = title_top + title.size().y + t.space_8;
     painter.galley(pos2(inner.left(), title_top), title, t.form_ink);
     painter.galley(pos2(inner.left(), description_top), description, t.file_dim);
-    response.on_hover_text(sample.description)
+    response.backing_on_hover_text(sample.description)
 }

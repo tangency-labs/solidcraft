@@ -4,25 +4,29 @@
 //! normal geometry.
 
 use serde_json::{Value, json};
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_doc::project::resolve;
 use solidcraft_doc::{Document, FeatureKind};
-use solidcraft_geom::{Plane, Vec2, Vec3};
-use solidcraft_sketch::{ConstraintKind, LinkKind, LinkSource, Sketch, nearest_crossing};
+use solidcraft_geom::prelude::*;
+use solidcraft_sketch::{ConstraintKind, LinkKind, LinkSource, Sketch};
 
+use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, str_, vec3};
 use crate::{EngineError, Result, Session};
 
 macro_rules! refs_doc {
     () => {
-        "refs: [{edge: [x,y,z], body?} | {face: [x,y,z], body?} (its edge loops) | {body: name} (silhouette) | {vertex: [x,y,z], body?} | {sketch, curve} | {sketch, point} | \"origin\" | {axis: X|Y|Z} | {plane: XY|XZ|YZ|name}]"
+        "refs: [{edge: [x,y,z], body?} | {face: [x,y,z], body?} (its edge loops) | {body: name} (silhouette) | {vertex: [x,y,z], body?} | {sketch, curve} | {sketch, point} | \"origin\" | {axis: X|Y|Z|name} | {plane: XY|XZ|YZ|name}]"
     };
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.project", "Project", project_cmd).at("SKETCH", "CREATE").icon("project").key("P").enabled(in_sketch).params(concat!(refs_doc!(), created_doc!())),
+    CommandSpec::new("sketch.project", "Project", project_cmd).at("SKETCH", "CREATE").icon("project").key("P").enabled(in_sketch).params(
+        concat!(refs_doc!(), "; projection_link?: bool (default true)", created_doc!()),
+    ),
     CommandSpec::new("sketch.intersect", "Intersect", intersect_cmd).at("SKETCH", "CREATE").icon("intersect").enabled(in_sketch).params(
-        concat!("refs: [{body}, {face: [x,y,z], body?}, {edge: [x,y,z], body?}, {sketch, curve}]: section curves (or points) with the sketch plane, linked", created_doc!()),
+        concat!("refs: [{body}, {face: [x,y,z], body?}, {edge: [x,y,z], body?}, {sketch, curve}]: section curves (or points) with the sketch plane; projection_link?: bool (default true)", created_doc!()),
     ),
     CommandSpec::new("sketch.include_3d", "Include 3D Geometry", include_cmd)
         .at("SKETCH", "CREATE")
@@ -38,7 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CREATE")
         .icon("intersection_curve")
         .enabled(in_sketch)
-        .params(concat!("a, b: {body} | {face: [x,y,z], body?}: where they meet, as linked 3D curves", created_doc!())),
+        .params(concat!("a, b: {body} | {face: [x,y,z], body?} | {sketch, curve} (a curve of another sketch, standing in for its extrusion along that sketch's normal): where they meet, as linked 3D curves", created_doc!())),
     CommandSpec::new("sketch.spun_profile", "Spun Profile", spun_profile)
         .at("SKETCH", "CREATE")
         .icon("spun")
@@ -107,7 +111,7 @@ fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
         return Ok(LinkSource::Body { body: b.to_string() });
     }
     if let Some(a) = str_(v, "axis") {
-        return Ok(LinkSource::Axis { name: a.to_ascii_uppercase() });
+        return axis_source(s, a, cmd);
     }
     if let Some(p) = str_(v, "plane") {
         return Ok(LinkSource::Plane { name: p.to_string() });
@@ -116,6 +120,17 @@ fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
         return Ok(LinkSource::Origin);
     }
     Err(bad(cmd, format!("cannot project {v}")))
+}
+
+/// An origin axis (`X`, `Y` or `Z`, in any case), or a construction axis by its name (#9324).
+fn axis_source(s: &Session, name: &str, cmd: &str) -> Result<LinkSource> {
+    if ["X", "Y", "Z"].iter().any(|axis| name.eq_ignore_ascii_case(axis)) {
+        return Ok(LinkSource::Axis { name: name.to_ascii_uppercase() });
+    }
+    match s.doc.find_feature(name) {
+        Some(f) if matches!(f.kind, FeatureKind::ConstructionAxis { .. }) => Ok(LinkSource::Axis { name: f.name.clone() }),
+        _ => Err(bad(cmd, format!("unknown axis `{name}`: X, Y, Z or the name of a construction axis"))),
+    }
 }
 
 /// The plane of a sketch feature, resolved against `st`: the model before the sketch as its
@@ -130,21 +145,84 @@ fn sketch_plane(doc: &Document, id: u64, st: &solidcraft_doc::ModelState) -> Res
 }
 
 /// The model before sketch `id` in the frame its links and its plane are resolved in: the
-/// attached face's frame for a sketch on a face, else its component's.
+/// attached face's frame for a sketch on a face, else its component's. The further placements
+/// `named` names (`Block (Part:2)`) are in it too, where they are (#9957).
 fn state_for_sketch<'a>(
     s: &Session,
     doc: &Document,
     id: u64,
     st: &'a solidcraft_doc::ModelState,
+    named: &[&str],
 ) -> std::result::Result<std::borrow::Cow<'a, solidcraft_doc::ModelState>, solidcraft_doc::DocError> {
     let comp = doc.feature(id).map(|f| f.component).unwrap_or(0);
     let attachment = doc.feature(id).and_then(|feature| match &feature.kind {
         solidcraft_doc::FeatureKind::Sketch { plane, .. } => super::sketch::face::anchor(plane),
         _ => None,
     });
-    match attachment {
-        Some(anchor) => solidcraft_doc::state_in_face_anchor_frame(doc, st, anchor, comp),
-        None => Ok(solidcraft_doc::state_in_frame_at(doc, st, comp, owner_frame(s, doc, comp))),
+    let (framed, frame) = match attachment {
+        Some(anchor) => (solidcraft_doc::state_in_face_anchor_frame(doc, st, anchor, comp)?, anchor.author_frame(doc, comp)?),
+        None => {
+            let frame = owner_frame(s, doc, comp);
+            (solidcraft_doc::state_in_frame_at(doc, st, comp, frame)?, frame)
+        }
+    };
+    Ok(solidcraft_doc::with_placed_copies(doc, st, framed, &frame, named))
+}
+
+/// The placed bodies of a design (`Document::body_frames_with_source`): world name, definition
+/// name, component, occurrence path and frame.
+pub(super) type PlacedBodies = Vec<(String, String, u64, Vec<u64>, solidcraft_doc::Mat)>;
+
+/// Sketch links keep a further placement's body by the name the world gives it (`Block (Part:2)`,
+/// #9957), which a rename of the body or of its component changes: each link naming one of
+/// `before` (the placed bodies before the rename) now names what that body is called in `doc`.
+/// `renamed` is the body renamed (old name, new name), if one was.
+pub(super) fn follow_placed_renames(doc: &mut Document, st: &solidcraft_doc::ModelState, before: &PlacedBodies, renamed: Option<(&str, &str)>) {
+    let renames: std::collections::HashMap<String, String> = {
+        let names = solidcraft_doc::WorldNames::new(doc, st);
+        before
+            .iter()
+            .filter(|(world, own, ..)| world != own)
+            .filter_map(|(world, own, component, path, _)| {
+                let source = match renamed {
+                    Some((old, new)) if own == old => new,
+                    _ => own.as_str(),
+                };
+                let now = names.name(source, *component, path);
+                (now != *world).then(|| (world.clone(), now))
+            })
+            .collect()
+    };
+    if renames.is_empty() {
+        return;
+    }
+    for f in &mut doc.features {
+        if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
+            for link in &mut sketch.links {
+                rename_link_body(&mut link.source, &renames);
+            }
+        }
+    }
+}
+
+fn rename_link_body(source: &mut LinkSource, renames: &std::collections::HashMap<String, String>) {
+    match source {
+        LinkSource::Edge { body, .. }
+        | LinkSource::Face { body, .. }
+        | LinkSource::Body { body }
+        | LinkSource::Vertex { body, .. }
+        | LinkSource::OnSurface { body, .. }
+        | LinkSource::Iso { body, .. }
+        | LinkSource::Spun { body, .. } => {
+            if let Some(new) = renames.get(body.as_str()) {
+                body.clone_from(new);
+            }
+        }
+        LinkSource::Intersection { a, b } => {
+            rename_link_body(a, renames);
+            rename_link_body(b, renames);
+        }
+        _ => {}
     }
 }
 
@@ -190,15 +268,22 @@ pub(super) fn refresh(s: &Session, doc: &Document, id: u64, sk: &mut Sketch) -> 
         solidcraft_doc::FeatureKind::Sketch { plane, .. } => super::sketch::face::anchor(plane),
         _ => None,
     });
-    let Ok(st) = state_for_sketch(s, &doc, id, &st) else {
+    let named: Vec<&str> = sk.links.iter().flat_map(|l| l.source.bodies()).collect();
+    let Ok(st) = state_for_sketch(s, &doc, id, &st, &named) else {
         return vec!["lost face attachment; reattach explicitly".into()];
     };
     let Ok(plane) = sketch_plane(&doc, id, &st) else { return Vec::new() };
-    let warnings = match attachment {
+    let refreshed = match attachment {
         Some(anchor) => solidcraft_doc::project::refresh_face_anchor_links(&doc, &vals, &st, &plane, sk, anchor),
         None => solidcraft_doc::project::refresh_links(&doc, &vals, &st, &plane, sk),
     };
-    if let Ok(stored) = doc.sketch(id)
+    // A link whose named face or edge is gone fails the sketch when it is evaluated; while it is
+    // edited, that is what the refresh says.
+    let warnings = match refreshed {
+        Ok(warnings) => warnings,
+        Err(e) => return vec![e.in_feature(&doc.feature(id).map(|f| f.name.clone()).unwrap_or_default()).to_string()],
+    };
+    if let Ok(stored) = sketch_store::read(&doc, id)
         && sk.positions_in(stored).is_some()
     {
         let mut solved = sk.clone();
@@ -230,6 +315,32 @@ pub(super) mod refresh_count {
     }
 }
 
+/// Resolve an origin axis as a mirror line: the axis's projection into the sketch plane, kept
+/// linked and fixed. An axis perpendicular to the plane has no line in it and is refused.
+pub(super) fn origin_axis_line(s: &Session, p: &Value, line: &Value, cmd: &str) -> Result<(LinkSource, Vec<solidcraft_sketch::LinkGeom>)> {
+    let id = sketch_store::target(s, p, cmd)?;
+    let doc = placed_candidate(s, &s.doc);
+    let st = s.model.state_before(id);
+    let st = state_for_sketch(s, &doc, id, &st, &[])?;
+    let plane = sketch_plane(&doc, id, &st)?;
+    let src = source(s, line, cmd)?;
+    let LinkSource::Axis { name } = &src else { return Err(bad(cmd, "the mirror line must be a straight sketch curve or an origin axis")) };
+    let dir = match name.as_str() {
+        "X" => Vec3::X,
+        "Y" => Vec3::Y,
+        "Z" => Vec3::Z,
+        _ => return Err(bad(cmd, "the origin axis must be X, Y or Z")),
+    };
+    // The resolve below projects the axis into the plane: its direction there is the plane's
+    // share of `dir`, and empty means a point, not a mirror line.
+    if Vec2::new(dir.dot(plane.x), dir.dot(plane.y)).len() <= 1e-9 {
+        return Err(bad(cmd, "the origin axis is perpendicular to the sketch plane, so it has no line in it"));
+    }
+    let (vals, _) = doc.param_values();
+    let r = resolve(&doc, &vals, &st, &plane, LinkKind::Project, &src)?;
+    Ok((r.source, r.geom))
+}
+
 /// Add a link for `src` to sketch `id` in `doc` (not stored in the session). Returns the link id.
 pub(super) fn add_link(s: &Session, doc: &Document, id: u64, sk: &mut Sketch, kind: LinkKind, src: LinkSource) -> Result<String> {
     add_link_unless_present(s, doc, id, sk, kind, src, false).map(|l| l.unwrap_or_default())
@@ -250,7 +361,7 @@ fn add_link_unless_present(
     let (vals, _) = doc.param_values();
     let st = s.model.state_before(id);
     // The model as the sketch's component sees it.
-    let st = state_for_sketch(s, &doc, id, &st)?;
+    let st = state_for_sketch(s, &doc, id, &st, &src.bodies())?;
     let plane = sketch_plane(&doc, id, &st)?;
     let r = resolve(&doc, &vals, &st, &plane, kind, &src)?;
     if skip_present && r.wires.is_empty() && sk.link_geometry_present(&r.geom) {
@@ -270,6 +381,9 @@ fn add_link_unless_present(
     // The link is the edge that was picked, not whichever is nearest the picked point later.
     let edge_name = solidcraft_doc::project::resolved_edge_name(&st, &r);
     let link = sk.add_link_with_wires(kind, r.source, &r.geom, &r.wires)?;
+    // The wires' exact curves, as a refresh of the link gives them (an included edge's record
+    // curve): a link made now is the one its sketch would resolve.
+    sk.set_link_wire_curves(&link, &r.exact)?;
     if let Some(l) = sk.links.iter_mut().find(|l| l.id == link) {
         l.face_name = name;
         l.edge_name = edge_name;
@@ -283,7 +397,7 @@ fn link_json(sk: &Sketch, link: &str) -> Value {
     json!({"link": link, "curves": curves, "points": points})
 }
 
-fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind) -> Result<Value> {
+fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_link: bool) -> Result<Value> {
     let refs: Vec<Value> = match p.get("refs").or_else(|| p.get("ref")) {
         Some(Value::Array(a)) => a.iter().take(1000).cloned().collect(),
         Some(v) => vec![v.clone()],
@@ -292,28 +406,35 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind) -> Result<Va
     if refs.is_empty() {
         return Err(bad(cmd, "`refs` is empty"));
     }
-    let id = s.active_sketch.ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+    let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
     let sources: Vec<LinkSource> = refs.iter().map(|v| source(s, v, cmd)).collect::<Result<_>>()?;
-    let mut doc = (*s.doc).clone();
-    let mut sk = doc.sketch(id)?.clone();
-    refresh(s, &doc, id, &mut sk);
-    let mut out = Vec::new();
-    // Projecting what the sketch already shows (the border of the face it is on, an edge
-    // projected before) would lay a second copy over the first: those references are skipped.
-    let mut present = Vec::new();
-    for src in sources {
-        let what = src.describe();
-        match add_link_unless_present(s, &doc, id, &mut sk, kind, src, kind == LinkKind::Project) {
-            Ok(Some(l)) => out.push(link_json(&sk, &l)),
-            Ok(None) => present.push(what),
-            Err(e) => return Err(bad(cmd, format!("{what}: {e}"))),
+    let (out, present) = sketch_store::update(s, id, |s, doc, sk| {
+        refresh(s, doc, id, sk);
+        let mut out = Vec::new();
+        // Projecting what the sketch already shows (the border of the face it is on, an edge
+        // projected before) would lay a second copy over the first: those references are skipped.
+        let mut present = Vec::new();
+        for src in sources {
+            let what = src.describe();
+            match add_link_unless_present(s, doc, id, sk, kind, src, kind == LinkKind::Project) {
+                Ok(Some(l)) => {
+                    let mut result = link_json(sk, &l);
+                    if !projection_link {
+                        result["link"] = Value::Null;
+                        sk.break_link(&l)?;
+                    }
+                    out.push(result);
+                }
+                Ok(None) => present.push(what),
+                Err(e) => return Err(bad(cmd, format!("{what}: {e}"))),
+            }
         }
-    }
-    if out.is_empty() {
-        return Err(bad(cmd, format!("already projected into this sketch: {}", present.join(", "))));
-    }
-    *doc.sketch_mut(id)? = sk;
-    *s.doc_mut() = doc;
+        // Nothing new: the sketch is kept as it was.
+        if out.is_empty() {
+            return Err(bad(cmd, format!("already projected into this sketch: {}", present.join(", "))));
+        }
+        Ok((out, present))
+    })?;
     let mut r = json!({"links": out});
     if !present.is_empty() {
         r["already_projected"] = json!(present);
@@ -322,15 +443,25 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind) -> Result<Va
 }
 
 fn project_cmd(s: &mut Session, p: &Value) -> Result<Value> {
-    run_links(s, p, "sketch.project", LinkKind::Project)
+    let projection_link = match p.get("projection_link") {
+        None => true,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(bad("sketch.project", "`projection_link` must be a boolean")),
+    };
+    run_links(s, p, "sketch.project", LinkKind::Project, projection_link)
 }
 
 fn intersect_cmd(s: &mut Session, p: &Value) -> Result<Value> {
-    run_links(s, p, "sketch.intersect", LinkKind::Intersect)
+    let projection_link = match p.get("projection_link") {
+        None => true,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(bad("sketch.intersect", "`projection_link` must be a boolean")),
+    };
+    run_links(s, p, "sketch.intersect", LinkKind::Intersect, projection_link)
 }
 
 fn include_cmd(s: &mut Session, p: &Value) -> Result<Value> {
-    run_links(s, p, "sketch.include_3d", LinkKind::Include)
+    run_links(s, p, "sketch.include_3d", LinkKind::Include, true)
 }
 
 /// A constraint's operands may be model geometry (#6348): an `{edge: [x,y,z], body?}` or
@@ -339,46 +470,90 @@ fn include_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 /// Any body's edges work, a mirrored or patterned copy's too; the link keeps the edge's
 /// persistent name, so the constraint follows the edge through rebuilds.
 pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&str]) -> Result<Value> {
-    let model = |v: &Value| v.get("edge").is_some() || v.get("vertex").is_some();
-    if !keys.iter().any(|k| p.get(*k).is_some_and(model)) {
+    if !keys.iter().any(|k| p.get(*k).is_some_and(model_ref)) {
         return Ok(p.clone());
     }
-    let id = super::sketch::target_sketch(s, p, cmd)?;
+    let id = sketch_store::target(s, p, cmd)?;
     let mut doc = (*s.doc).clone();
-    let mut sk = doc.sketch(id)?.clone();
+    let mut sk = sketch_store::read(&doc, id)?.clone();
     refresh(s, &doc, id, &mut sk);
     let mut out = p.clone();
     for key in keys {
-        let Some(v) = p.get(*key).filter(|v| model(v)) else { continue };
-        let src = source(s, v, cmd)?;
-        let what = src.describe();
-        let link = add_link(s, &doc, id, &mut sk, LinkKind::Project, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
-        // An edge stands for its curve (a point when it is seen end on), a vertex for its point.
-        let curve = if v.get("edge").is_some() { sk.link_curves(&link).first().and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone()) } else { None };
-        let entity = curve
-            .or_else(|| sk.link_points(&link).first().and_then(|q| sk.points.get(*q)).map(|q| q.id.clone()))
-            .ok_or_else(|| bad(cmd, format!("{what} projects to nothing on this sketch")))?;
-        out[*key] = json!(entity);
+        let Some(v) = p.get(*key).filter(|v| model_ref(v)) else { continue };
+        out[*key] = json!(project_ref(s, &doc, id, &mut sk, v, cmd)?);
     }
-    *doc.sketch_mut(id)? = sk;
+    sketch_store::write(&mut doc, id, sk)?;
     *s.doc_mut() = doc;
     Ok(out)
 }
 
+/// A model's reference among a command's operands (#6348): an `{edge: [x,y,z], body?}` or a
+/// `{vertex: [x,y,z], body?}`.
+fn model_ref(v: &Value) -> bool {
+    v.get("edge").is_some() || v.get("vertex").is_some()
+}
+
+/// Project one model reference into the sketch and report the entity it stands for: an edge's
+/// projected curve (a point when it is seen end on) or a vertex's projected point.
+fn project_ref(s: &mut Session, doc: &Document, id: u64, sk: &mut Sketch, v: &Value, cmd: &str) -> Result<String> {
+    let src = source(s, v, cmd)?;
+    let what = src.describe();
+    let link = add_link(s, doc, id, sk, LinkKind::Project, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
+    // An edge stands for its curve (a point when it is seen end on), a vertex for its point.
+    let curve = if v.get("edge").is_some() { sk.link_curves(&link).first().and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone()) } else { None };
+    curve
+        .or_else(|| sk.link_points(&link).first().and_then(|q| sk.points.get(*q)).map(|q| q.id.clone()))
+        .ok_or_else(|| bad(cmd, format!("{what} projects to nothing on this sketch")))
+}
+
+/// Most model references one call may project into a sketch: each one is a link and a resolve,
+/// so the count is capped before any of them is projected.
+const MAX_PROJECTED_ENTITIES: usize = 1_000;
+
+/// A dimension's entities may be model geometry (#7912): an `{edge: [x,y,z], body?}` or
+/// `{vertex: [x,y,z], body?}` among them is projected into the sketch first, as Project does,
+/// and stands for the projected curve (or point) in the entities returned.
+pub(super) fn project_entities(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
+    let Some(Value::Array(entities)) = p.get("entities") else { return Ok(p.clone()) };
+    // A long list is refused before anything is projected, so it costs nothing.
+    if entities.len() > MAX_PROJECTED_ENTITIES {
+        return Err(bad(cmd, format!("`entities` may list at most {MAX_PROJECTED_ENTITIES} entities")));
+    }
+    if !entities.iter().any(model_ref) {
+        return Ok(p.clone());
+    }
+    let id = sketch_store::target(s, p, cmd)?;
+    let mut doc = (*s.doc).clone();
+    let mut sk = sketch_store::read(&doc, id)?.clone();
+    refresh(s, &doc, id, &mut sk);
+    let mut out = entities.clone();
+    for entity in out.iter_mut().take(MAX_PROJECTED_ENTITIES) {
+        if !model_ref(entity) {
+            continue;
+        }
+        *entity = json!(project_ref(s, &doc, id, &mut sk, entity, cmd)?);
+    }
+    let mut params = p.clone();
+    if let Some(o) = params.as_object_mut() {
+        o.insert("entities".into(), Value::Array(out));
+    }
+    sketch_store::write(&mut doc, id, sk)?;
+    *s.doc_mut() = doc;
+    Ok(params)
+}
+
 /// Add one link from `src` to the active sketch and report it.
 fn one_link(s: &mut Session, cmd: &str, kind: LinkKind, src: LinkSource) -> Result<Value> {
-    let id = s.active_sketch.ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
-    let mut doc = (*s.doc).clone();
-    let mut sk = doc.sketch(id)?.clone();
-    refresh(s, &doc, id, &mut sk);
-    let what = src.describe();
-    let l = add_link(s, &doc, id, &mut sk, kind, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
-    let mut out = link_json(&sk, &l);
-    let wires: Vec<String> = sk.link_wires(&l).iter().filter_map(|w| sk.wires.get(*w).map(|w| w.id.clone())).collect();
-    out["wires"] = json!(wires);
-    *doc.sketch_mut(id)? = sk;
-    *s.doc_mut() = doc;
-    Ok(out)
+    let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+    sketch_store::update(s, id, |s, doc, sk| {
+        refresh(s, doc, id, sk);
+        let what = src.describe();
+        let l = add_link(s, doc, id, sk, kind, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
+        let mut out = link_json(sk, &l);
+        let wires: Vec<String> = sk.link_wires(&l).iter().filter_map(|w| sk.wires.get(*w).map(|w| w.id.clone())).collect();
+        out["wires"] = json!(wires);
+        Ok(out)
+    })
 }
 
 fn project_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
@@ -404,8 +579,8 @@ fn intersection_curve(s: &mut Session, p: &Value) -> Result<Value> {
     let side = |k: &str| -> Result<LinkSource> {
         let v = p.get(k).ok_or_else(|| bad(cmd, format!("missing `{k}`")))?;
         match source(s, v, cmd)? {
-            x @ (LinkSource::Body { .. } | LinkSource::Face { .. }) => Ok(x),
-            _ => Err(bad(cmd, format!("`{k}` must be a body or a face"))),
+            x @ (LinkSource::Body { .. } | LinkSource::Face { .. } | LinkSource::SketchCurve { .. }) => Ok(x),
+            _ => Err(bad(cmd, format!("`{k}` must be a body, a face or a curve of another sketch"))),
         }
     };
     let (a, b) = (side("a")?, side("b")?);
@@ -421,7 +596,7 @@ fn spun_profile(s: &mut Session, p: &Value) -> Result<Value> {
         "Y" => (Vec3::ZERO, Vec3::Y),
         "Z" => (Vec3::ZERO, Vec3::Z),
         _ => {
-            let id = s.active_sketch.ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+            let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
             let st = s.model.state();
             let ss = st.sketch(id).ok_or_else(|| EngineError::Other("the sketch is not evaluated".into()))?;
             let ci = ss.sketch.curve_index(axis).ok_or_else(|| bad(cmd, format!("unknown curve `{axis}`")))?;
@@ -454,48 +629,47 @@ fn fit_section(s: &mut Session, p: &Value) -> Result<Value> {
     if s.model.state().body(&body).is_none() {
         return Err(bad(cmd, format!("no body `{body}`")));
     }
-    let id = s.active_sketch.ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
-    let mut doc = (*s.doc).clone();
-    let mut sk = doc.sketch(id)?.clone();
-    let l = add_link(s, &doc, id, &mut sk, LinkKind::Intersect, LinkSource::Body { body }).map_err(|e| bad(cmd, e.to_string()))?;
-    let curves: Vec<String> = sk.link_curves(&l).iter().filter_map(|c| sk.curves.get(*c).map(|c| c.id.clone())).collect();
-    sk.break_link(&l)?;
-    *doc.sketch_mut(id)? = sk;
-    *s.doc_mut() = doc;
+    let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+    let curves = sketch_store::update(s, id, |s, doc, sk| {
+        let l = add_link(s, doc, id, sk, LinkKind::Intersect, LinkSource::Body { body }).map_err(|e| bad(cmd, e.to_string()))?;
+        let curves: Vec<String> = sk.link_curves(&l).iter().filter_map(|c| sk.curves.get(*c).map(|c| c.id.clone())).collect();
+        sk.break_link(&l)?;
+        Ok(curves)
+    })?;
     Ok(json!({"curves": curves}))
 }
 
 fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.break_link";
-    let id = s.active_sketch.ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
-    let mut doc = (*s.doc).clone();
-    let sk = doc.sketch_mut(id)?;
-    let mut links: Vec<String> = Vec::new();
-    if let Some(l) = str_(p, "link") {
-        if sk.link(l).is_none() {
-            return Err(bad(cmd, format!("no link `{l}`")));
+    let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+    let links = sketch_store::update(s, id, |_, _, sk| {
+        let mut links: Vec<String> = Vec::new();
+        if let Some(l) = str_(p, "link") {
+            if sk.link(l).is_none() {
+                return Err(bad(cmd, format!("no link `{l}`")));
+            }
+            links.push(l.to_string());
         }
-        links.push(l.to_string());
-    }
-    for e in crate::params::string_list(p, "entities") {
-        let l = sk
-            .curves
-            .iter()
-            .find(|c| c.id == e)
-            .and_then(|c| c.link.clone())
-            .or_else(|| sk.points.iter().find(|q| q.id == e).and_then(|q| q.link.clone()))
-            .ok_or_else(|| bad(cmd, format!("`{e}` is not linked geometry")))?;
-        if !links.contains(&l) {
-            links.push(l);
+        for e in crate::params::string_list(cmd, p, "entities")? {
+            let l = sk
+                .curves
+                .iter()
+                .find(|c| c.id == e)
+                .and_then(|c| c.link.clone())
+                .or_else(|| sk.points.iter().find(|q| q.id == e).and_then(|q| q.link.clone()))
+                .ok_or_else(|| bad(cmd, format!("`{e}` is not linked geometry")))?;
+            if !links.contains(&l) {
+                links.push(l);
+            }
         }
-    }
-    if links.is_empty() {
-        return Err(bad(cmd, "give `link` or `entities`"));
-    }
-    for l in &links {
-        sk.break_link(l)?;
-    }
-    *s.doc_mut() = doc;
+        if links.is_empty() {
+            return Err(bad(cmd, "give `link` or `entities`"));
+        }
+        for l in &links {
+            sk.break_link(l)?;
+        }
+        Ok(links)
+    })?;
     Ok(json!({"broken": links}))
 }
 
@@ -537,7 +711,7 @@ fn curve_intersection_arg(v: &Value, cmd: &str) -> Result<Option<(String, String
 /// two lines, circles or arcs (and `"vertex:x,y,z"` is the vertex form). Everything else is left
 /// as it is. The links are added to the active sketch in the session's document.
 pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
-    let Some(id) = s.active_sketch else { return Ok(p.clone()) };
+    let Some(id) = sketch_store::active(s) else { return Ok(p.clone()) };
     let mut out = p.clone();
     let mut doc: Option<(Document, Sketch)> = None;
     let fix = |v: &mut Value, s: &Session, doc: &mut Option<(Document, Sketch)>| -> Result<()> {
@@ -567,7 +741,7 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
         }
         if doc.is_none() {
             let d = (*s.doc).clone();
-            let mut sk = d.sketch(id)?.clone();
+            let mut sk = sketch_store::read(&d, id)?.clone();
             refresh(s, &d, id, &mut sk);
             *doc = Some((d, sk));
         }
@@ -588,9 +762,9 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
             if ci == cj {
                 return Err(bad(cmd, "`x:` needs two distinct curves"));
             }
-            let sha = sk.shape(ci).ok_or_else(|| bad(cmd, format!("`{a}` is not a line, circle or arc")))?;
-            let shb = sk.shape(cj).ok_or_else(|| bad(cmd, format!("`{b}` is not a line, circle or arc")))?;
-            let at = nearest_crossing(&sha, &shb, near).ok_or_else(|| bad(cmd, "those curves do not meet"))?;
+            sk.shape(ci).ok_or_else(|| bad(cmd, format!("`{a}` is not a line, circle or arc")))?;
+            sk.shape(cj).ok_or_else(|| bad(cmd, format!("`{b}` is not a line, circle or arc")))?;
+            let at = sk.nearest_crossing(ci, cj, near).ok_or_else(|| bad(cmd, "those curves do not meet"))?;
             let pi = sk.add_point(at, None)?;
             sk.add_constraint(ConstraintKind::PointOnCurve { p: pi, c: ci }, None)?;
             sk.add_constraint(ConstraintKind::PointOnCurve { p: pi, c: cj }, None)?;
@@ -609,7 +783,7 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
         } else if let Some(at) = edge {
             let l = add_link(s, d, id, sk, LinkKind::Project, LinkSource::Edge { body, at }).map_err(|e| bad(cmd, format!("edge: {e}")))?;
             let before = s.model.state_before(id);
-            let plane = sketch_plane(d, id, &*state_for_sketch(s, d, id, &before)?)?;
+            let plane = sketch_plane(d, id, &*state_for_sketch(s, d, id, &before, &[])?)?;
             let q = plane.to_local(at);
             let ci = sk.link_curves(&l).first().copied().ok_or_else(|| bad(cmd, "the edge projects to a point"))?;
             let pi = sk.add_point(q, None)?;
@@ -635,7 +809,7 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
         }
     }
     if let Some((mut d, sk)) = doc {
-        *d.sketch_mut(id)? = sk;
+        sketch_store::write(&mut d, id, sk)?;
         *s.doc_mut() = d;
     }
     Ok(out)
@@ -655,11 +829,11 @@ pub(super) fn project_internal_faces(s: &mut Session, id: u64, body: &str, indic
     let mut doc = (*s.doc).clone();
     let raw = s.model.state_before(id);
     let component = doc.feature(id).map(|feature| feature.component).unwrap_or(0);
-    let state = solidcraft_doc::state_in_frame_at(&doc, &raw, component, owner_frame(s, &doc, component));
+    let state = solidcraft_doc::state_in_frame_at(&doc, &raw, component, owner_frame(s, &doc, component))?;
     let plane = sketch_plane(&doc, id, &state)?;
     let names = state.body(body).map(solidcraft_doc::naming::face_names).unwrap_or_default();
 
-    let mut sk = doc.sketch(id)?.clone();
+    let mut sk = sketch_store::read(&doc, id)?.clone();
     let mut links = Vec::with_capacity(indices.len());
     for &index in indices {
         let resolved = solidcraft_doc::project::resolve_face_indices(&state, &plane, LinkKind::Project, body, &[index])?;
@@ -669,7 +843,7 @@ pub(super) fn project_internal_faces(s: &mut Session, id: u64, body: &str, indic
         }
         links.push(link);
     }
-    *doc.sketch_mut(id)? = sk;
+    sketch_store::write(&mut doc, id, sk)?;
     *s.doc_mut() = doc;
     Ok(links)
 }
@@ -692,13 +866,13 @@ pub(super) fn auto_project_face(s: &mut Session, id: u64, _at: Vec3) -> Result<O
     let state = solidcraft_doc::state_in_face_anchor_frame(&doc, &raw, &anchor, author)?;
     let plane = doc.resolve_face_anchor(&anchor, author, &raw)?;
     let resolved = solidcraft_doc::project::resolve_anchored_face(&doc, &state, &plane, LinkKind::Project, &anchor)?;
-    let mut sk = doc.sketch(id)?.clone();
+    let mut sk = sketch_store::read(&doc, id)?.clone();
     let link = sk.add_link_with_wires(LinkKind::Project, resolved.source, &resolved.geom, &resolved.wires)?;
     if let Some(link) = sk.links.iter_mut().find(|entry| entry.id == link) {
         link.face_name = Some(anchor.target.name.clone());
         link.auto_face = true;
     }
-    *doc.sketch_mut(id)? = sk;
+    sketch_store::write(&mut doc, id, sk)?;
     *s.doc_mut() = doc;
     Ok(Some(link))
 }

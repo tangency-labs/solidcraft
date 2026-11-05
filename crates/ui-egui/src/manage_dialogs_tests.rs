@@ -379,7 +379,7 @@ fn appearance_card_keeps_the_approved_width_with_no_preselection() {
     h.app.start("appearance.assign");
     h.frames(4);
     let header = scenario::rect_of("dialog:header").unwrap();
-    let card = h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dialog", "APPEARANCE")))).unwrap();
+    let card = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dialog", "APPEARANCE")))).unwrap();
     let t = Tokens::get();
     let approved = t.form_card_width + t.form_label_width + t.space_6;
     assert!((card.width() - approved).abs() <= t.space_2, "card {card:?}, header {header:?}");
@@ -388,6 +388,7 @@ fn appearance_card_keeps_the_approved_width_with_no_preselection() {
 #[test]
 fn parameter_inventory_remains_reachable_with_regular_draft_rows() {
     let mut h = fixture();
+    h.app.preferences.language = "en".into();
     h.app.start("parameters.change");
     h.frames(4);
     for label in ["Filter", "Import…", "Export CSV…", "Export JSON…", "User Parameters", "Model Parameters"] {
@@ -490,6 +491,82 @@ fn configuration_inventory_keeps_library_rules_preview_and_inline_row_lifecycle(
     h.step(&json!({"click":{"handle":"dialog:collapse"}})).unwrap();
     h.step(&json!({"click":{"handle":"dialog:button:Actions:Delete"}})).unwrap();
     assert_eq!(h.app.session.doc.configs.rows.len(), 1, "bin retains immediate deletion");
+}
+
+#[test]
+fn configuration_add_column_menu_filters_as_typed_and_resets_on_close() {
+    // A design has many parameters, features and bodies: the Add Column menu's filter narrows
+    // its list as the user types, Enter picks a lone match, and the next opening starts blank.
+    let mut h = fixture();
+    h.app.run("config.configure", json!({"params":["width"]})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"dialog:menu:Add Column"}})).unwrap();
+    h.frames(2);
+    assert!(scenario::handle_at("dialog:menu:Add Column:filter").is_some(), "the menu opens with a filter field");
+    h.step(&json!({"click":{"handle":"dialog:menu:Add Column:filter"}})).unwrap();
+    h.frames(2);
+    assert!(scenario::handle_at("dialog:menu:Add Column:filter").is_some(), "a click into the filter keeps the menu open");
+    let feature = h.app.session.doc.features[0].name.clone();
+    assert!(h.widget(&format!("Suppress {feature}")).is_some());
+    assert!(h.widget("Body1 (material)").is_some());
+    assert!(h.widget("Face Appearance").is_some());
+    h.step(&json!({"text":"mater"})).unwrap();
+    h.frames(2);
+    assert!(h.widget("Body1 (material)").is_some(), "the match stays");
+    assert!(h.widget(&format!("Suppress {feature}")).is_none(), "a feature does not match `mater`");
+    assert!(h.widget("Body1 (appearance)").is_none());
+    assert!(h.widget("Face Appearance").is_none(), "the submenu hides when it does not match");
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"zzz"})).unwrap();
+    h.frames(2);
+    assert!(h.widget("No matching columns").is_some());
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"face app"})).unwrap();
+    h.frames(2);
+    assert!(h.widget("Face Appearance").is_some(), "the submenu matches by its own label");
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"Suppress"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(3);
+    assert!(
+        h.app.session.doc.configs.columns.iter().any(|c| matches!(c, solidcraft_engine::doc::config::Column::Suppress(_))),
+        "Enter picks the one match"
+    );
+    assert!(h.app.dialog.is_some(), "Enter in the filter does not submit the card");
+    assert!(scenario::handle_at("dialog:menu:Add Column:filter").is_none(), "picking closes the menu");
+    h.step(&json!({"click":{"handle":"dialog:menu:Add Column"}})).unwrap();
+    h.frames(2);
+    assert!(h.widget("Body1 (material)").is_some(), "a reopened menu starts unfiltered");
+    assert!(h.widget(&format!("Suppress {feature}")).is_none(), "an added column leaves the menu");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.dialog.is_some(), "menu Escape leaves the card open");
+}
+
+#[test]
+fn a_rule_says_why_then_lists_only_the_tables_columns() {
+    // A rule drives or restricts a column of the table only, so Then leaves out a parameter or a
+    // feature without one, where When lists them all: a note says so and how to add one (#10532).
+    let parameters = "Only parameters with a column in the table are listed. Add one with Add Column (+) to use it here.";
+    let features = "Only features with a Suppress column in the table are listed. Add one with Add Column (+) to drive it here.";
+    let mut h = fixture();
+    h.app.run("parameters.add", json!({"name":"depth","expression":"5 mm"})).unwrap();
+    h.app.run("config.configure", json!({"params":["width"]})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"dialog:section:Add or edit rule"}})).unwrap();
+    h.frames(3);
+    assert!(h.widget(parameters).is_some(), "depth has no column, so Drive parameter says why it is not listed");
+    h.step(&json!({"click":{"handle":"dialog:Then"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Then:Drive suppression"}})).unwrap();
+    h.frames(3);
+    assert!(h.widget(features).is_some(), "no feature has a Suppress column, so the empty list says why");
+    assert!(h.widget(parameters).is_none(), "the parameter note belongs to the parameter effects");
+    for feature in h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>() {
+        h.app.run("config.column", json!({"feature": feature})).unwrap();
+    }
+    h.frames(3);
+    assert!(h.widget(features).is_none(), "with a column for every feature, all are listed and the note goes");
 }
 
 #[test]

@@ -1,7 +1,8 @@
 //! Associative offsets keep their output entity ids while their source curves move.
 use crate::{ConstraintKind, CurveKind, Shape, Sketch, SketchError, intersections};
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OffsetChain {
@@ -67,6 +68,13 @@ impl Sketch {
         output(&arc.id) && self.curves.iter().enumerate().any(|(k, other)| k != curve && other.kind.uses(centre) && !output(&other.id))
     }
 
+    /// A circle an offset made (#9264). The offset sets its radius from the source's after the
+    /// solve, so the solve holds that radius instead of counting it as a free unknown.
+    pub(crate) fn offset_circle_follows_source(&self, curve: usize) -> bool {
+        let Some(circle) = self.curves.get(curve) else { return false };
+        matches!(circle.kind, CurveKind::Circle { .. }) && self.offsets.iter().any(|o| o.owns_output(&circle.id))
+    }
+
     /// Endpoints of a normal-distance annotation, evaluated from its source curve.
     pub fn offset_dimension_points(&self, output: &str) -> Option<(Vec2, Vec2)> {
         let (source, forward, distance) = self
@@ -113,6 +121,80 @@ impl Sketch {
                 point.fixed = false;
             }
         }
+    }
+
+    /// Retry a failed solve whose source edit was blocked by attachments to an offset's old
+    /// fixed points. Seed the sources without those attachments, rebuild the offsets, then
+    /// solve every attachment with the sources held. Nothing is adopted unless the complete
+    /// sketch solves with its original constraints and orientation.
+    pub fn solve_after_offset_edit(
+        &mut self,
+        old: &crate::DrivingValues,
+        reference: Option<&[Vec2]>,
+        analysis: crate::Analysis,
+    ) -> Option<crate::SolveReport> {
+        let source =
+            |id: &str| self.offsets.iter().any(|o| o.sources.iter().any(|(s, _)| s == id)) || self.freeform_offsets.iter().any(|o| o.source == id);
+        let output = |id: &str| self.offsets.iter().any(|o| o.owns_output(id)) || self.freeform_offsets.iter().any(|o| o.output == id);
+        let source_points: std::collections::BTreeSet<usize> =
+            self.curves.iter().filter(|c| source(&c.id)).flat_map(|c| c.kind.point_ids()).collect();
+        let outputs: std::collections::BTreeSet<usize> = self.curves.iter().enumerate().filter(|(_, c)| output(&c.id)).map(|(i, _)| i).collect();
+        let output_points: std::collections::BTreeSet<usize> =
+            outputs.iter().filter_map(|i| self.curves.get(*i)).flat_map(|c| c.kind.point_ids()).filter(|p| !source_points.contains(p)).collect();
+        let mut candidate = self.clone();
+        candidate.constraints.retain(|c| {
+            !c.kind.indices().1.iter().any(|i| outputs.contains(i)) && !self.constraint_points(&c.kind).iter().any(|p| output_points.contains(p))
+        });
+        if candidate.constraints.len() == self.constraints.len() {
+            return None;
+        }
+        let before: Vec<Vec2> = reference.map_or_else(|| self.points.iter().map(|p| p.pos).collect(), <[Vec2]>::to_vec);
+        if !crate::solve_after_edit_with_analysis(&mut candidate, old, Some(&before), crate::Analysis::StatusOnly).keeps_orientation() {
+            return None;
+        }
+        candidate.constraints.clone_from(&self.constraints);
+        candidate.refresh_offsets().ok()?;
+        // Keep the freshly rebuilt offset exact while its attached geometry catches up.
+        // Refresh may retire output curves or refine a dependent spline: resolve holds again.
+        let hold = crate::Hold {
+            points: candidate.curves.iter().filter(|c| source(&c.id)).flat_map(|c| c.kind.point_ids()).collect(),
+            radii: candidate.curves.iter().enumerate().filter(|(_, c)| source(&c.id) || output(&c.id)).map(|(i, _)| i).collect(),
+        };
+        if !crate::solve_with(&mut candidate, &hold, Some(&before), crate::Analysis::StatusOnly, None).keeps_orientation() {
+            // A cap tangent to an arc can land on the other tangency branch after a large
+            // jump. Walk the held source and output points from their stored positions.
+            // Their own dimensions are restored after the walk, not imposed at each step.
+            let mut walking = candidate.clone();
+            walking.constraints.retain(|c| candidate.constraint_points(&c.kind).iter().any(|p| !hold.points.contains(p)));
+            for i in &hold.points {
+                if let Some(p) = walking.points.get_mut(*i) {
+                    p.fixed = true;
+                }
+            }
+            for i in &hold.radii {
+                if let Some(c) = walking.curves.get_mut(*i) {
+                    c.fixed = true;
+                }
+            }
+            let mut from = walking.clone();
+            for (p, pos) in from.points.iter_mut().zip(&before) {
+                p.pos = *pos;
+            }
+            crate::solve_after_link_move(&mut walking, &from, old, crate::Analysis::StatusOnly)?;
+            for (p, q) in candidate.points.iter_mut().zip(&walking.points) {
+                p.pos = q.pos;
+            }
+            for (c, d) in candidate.curves.iter_mut().zip(&walking.curves) {
+                c.kind.clone_from(&d.kind);
+            }
+        }
+        // Publish ordinary freedom/redundancy diagnostics, without the temporary holds.
+        let report = crate::solve_after_edit_with_analysis(&mut candidate, old, Some(&before), analysis);
+        if !report.keeps_orientation() {
+            return None;
+        }
+        *self = candidate;
+        Some(report)
     }
 
     pub fn refresh_offsets(&mut self) -> Result<(), SketchError> {
@@ -166,7 +248,7 @@ impl Sketch {
                         let (a, b) = (self.point(a).ok_or_else(bad)?, self.point(b).ok_or_else(bad)?);
                         let (a, b) = if *forward { (a, b) } else { (b, a) };
                         let n = (b - a).normalized().ok_or_else(bad)?.perp() * offset.distance;
-                        (Shape::Line { a: a + n, b: b + n }, a + n, b + n)
+                        (Shape::Line { a: a + n, b: b + n }, a + n, b + n, None)
                     }
                     CurveKind::Arc { c, a, b } => {
                         let (c, a, b) = (self.point(c).ok_or_else(bad)?, self.point(a).ok_or_else(bad)?, self.point(b).ok_or_else(bad)?);
@@ -177,7 +259,7 @@ impl Sketch {
                         let a = c + (a - c).normalized().ok_or_else(bad)? * r;
                         let b = c + (b - c).normalized().ok_or_else(bad)? * r;
                         let (a, b) = if *forward { (a, b) } else { (b, a) };
-                        (Shape::Round { c, r, start: 0.0, sweep: std::f64::consts::TAU }, a, b)
+                        (Shape::Round { c, r, start: 0.0, sweep: std::f64::consts::TAU }, a, b, Some(*forward))
                     }
                     CurveKind::Circle { c, r } => {
                         let c = self.point(c).ok_or_else(bad)?;
@@ -201,16 +283,32 @@ impl Sketch {
             if pieces.is_empty() {
                 continue;
             }
+            // Which way a piece runs at `p`: a line along itself, an arc anticlockwise round its
+            // centre when it follows its source forward.
+            let along = |piece: &(Shape, Vec2, Vec2, Option<bool>), p: Vec2| match (&piece.0, piece.3) {
+                (Shape::Line { a, b }, _) => *b - *a,
+                (Shape::Round { c, .. }, Some(true)) => (p - *c).perp(),
+                (Shape::Round { c, .. }, Some(false)) => (*c - p).perp(),
+                _ => Vec2::new(0.0, 0.0),
+            };
             let joint = |i: usize, j: usize| -> Result<Vec2, SketchError> {
                 let (x, y) = (pieces.get(i).ok_or_else(bad)?, pieces.get(j).ok_or_else(bad)?);
                 if x.2.dist(y.1) < 1e-6 {
                     return Ok(x.2);
                 }
                 let guess = (x.2 + y.1) * 0.5;
-                intersections(&x.0, &y.0)
-                    .into_iter()
-                    .min_by(|a, b| a.dist(guess).total_cmp(&b.dist(guess)))
-                    .ok_or_else(|| SketchError::Invalid("the offset curves no longer meet".into()))
+                let mut found = intersections(&x.0, &y.0);
+                found.sort_by(|a, b| a.dist(guess).total_cmp(&b.dist(guess)));
+                // Where the sources touch, as two tangent arcs do at a dog bone's notch (#10984),
+                // both crossings are as far from the corner and rounding chose one. The pieces
+                // overlap there: they meet where both are cut short, not where both run on and
+                // cross into a loop.
+                let cut_short = |p: Vec2| (p - x.2).dot(along(x, x.2)) < 0.0 && (p - y.1).dot(along(y, y.1)) > 0.0;
+                match found.as_slice() {
+                    [p, q, ..] if (q.dist(guess) - p.dist(guess)).abs() <= 1e-9 * (1.0 + p.dist(*q)) && !cut_short(*p) && cut_short(*q) => Ok(*q),
+                    [p, ..] => Ok(*p),
+                    [] => Err(SketchError::Invalid("the offset curves no longer meet".into())),
+                }
             };
             let n = pieces.len();
             let mut joints = vec![if offset.closed { joint(n - 1, 0)? } else { pieces.first().ok_or_else(bad)?.1 }];

@@ -24,6 +24,12 @@ fn square_on_a_block() -> Harness {
     h.app.finish_sketch();
     h.app.start("solid.extrude");
     h.frames(2);
+    // The window's own operation check would hand OK its Join already evaluated (#6901): these
+    // tests are about OK computing it.
+    if let Some(d) = h.app.dialog.as_mut() {
+        d.op_auto.manual = true;
+    }
+    h.app.op_check = Default::default();
     h
 }
 
@@ -95,6 +101,28 @@ fn cancel_while_computing_applies_nothing() {
     assert!(finish.send(prepared).is_err());
     h.frames(5);
     assert_eq!(h.app.session.doc.features.len(), features);
+}
+
+#[test]
+fn removing_the_edited_feature_discards_its_pending_result() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":"Block"})).unwrap();
+    h.call("ui.editFeature", json!({"feature":"Block"}));
+    h.frames(2);
+    let prepared = result(&h);
+    let finish = hold_result(&mut h, false);
+    let progress = h.app.applying.as_ref().unwrap().progress.clone();
+    h.app.run("edit.undo", json!({})).unwrap();
+    let document = h.app.session.doc.clone();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    h.frames(2);
+    assert!(h.app.dialog.is_none() && h.app.applying.is_none() && h.app.editing_state.is_none());
+    assert!(progress.is_cancelled());
+    assert!(finish.send(prepared).is_err(), "the removed editor cannot adopt a late result");
+    h.frames(2);
+    assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
 }
 
 #[test]
@@ -308,16 +336,52 @@ fn changed_first_cut_adopts_its_entire_suffix_without_window_evaluation() {
     assert!((redone - after_volume).abs() < 0.001);
 }
 
+/// An edit in a dialog without a live preview (Offset Plane) is computed off the window thread
+/// too: OK evaluates nothing here, the features after the plane included.
+#[test]
+fn an_edit_without_a_preview_adopts_its_suffix_without_window_evaluation() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":10,"name":"Shelf"})).unwrap();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.app.run("solid.box", json!({"corner":[5,5,20],"length":10,"width":10,"height":5,"operation":"join"})).unwrap();
+    let plane = h.app.session.doc.find_feature("Shelf").unwrap().id;
+    let undo = h.app.session.undo.len();
+    h.call("ui.editFeature", json!({"feature":plane}));
+    h.frames(2);
+    assert!(h.app.dialog.as_ref().is_some_and(|d| !d.previews()), "Offset Plane has no live preview");
+    if let Some(crate::dialogs::Kind::OffsetPlane { offset }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *offset = "15".into();
+    }
+    let window = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
+    solidcraft_engine::doc::progress::watch(window.clone(), || {
+        h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+        assert!(h.app.applying.is_some(), "computing beside the window");
+        until_applied(&mut h);
+    });
+    assert_eq!(window.features(), (0, 0), "nothing evaluated on the window thread");
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    assert_eq!(h.app.session.doc.marker, None);
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    let shelf = &h.app.session.doc.feature(plane).unwrap().kind;
+    assert!(
+        matches!(shelf, solidcraft_engine::doc::FeatureKind::ConstructionPlane { plane: solidcraft_engine::doc::PlaneRef::Offset { distance, .. } } if *distance == "15"),
+        "{shelf:?}"
+    );
+    h.step(&json!({"expect":{"bodies":1,"volume":24500}})).unwrap();
+}
+
 #[test]
 fn cancelling_an_edit_restores_pinned_geometry_without_evaluating_an_evicted_suffix() {
     let (mut h, target) = cut_chain();
     h.app.run("solid.box", json!({"corner":[100,0,0],"length":2,"width":2,"height":2})).unwrap();
     h.app.run("edit.undo", json!({})).unwrap();
-    let before = h.app.session.world_state();
+    let before = h.app.session.world_state().unwrap();
     let history = (h.app.session.undo.len(), h.app.session.redo.len());
     let visibility = h.app.session.visibility.clone();
     h.call("ui.editFeature", json!({"feature":target}));
-    crate::dialogs::sync_feature_edit_sketch(&mut h.app);
+    crate::dialogs::sync_feature_edit(&mut h.app);
     let sketch = h.app.session.feature_edit_sketch.expect("edited Extrude exposes its sketch");
     assert!(solidcraft_engine::view::sketch_shown(&h.app.session, sketch));
     let prepared = result(&h);
@@ -336,7 +400,7 @@ fn cancelling_an_edit_restores_pinned_geometry_without_evaluating_an_evicted_suf
     assert_eq!(h.app.session.visibility, visibility, "temporary sketch display does not change stored visibility");
     assert_eq!(h.app.session.doc.marker, None);
     assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
-    assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.world_state()));
+    assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.world_state().unwrap()));
     assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Axis { name: "X".into() }]);
 }
 
@@ -366,11 +430,55 @@ fn cancelling_a_stale_editor_preserves_the_newer_document() {
 }
 
 #[test]
+fn hiding_an_origin_plane_during_feature_edit_allows_ok_and_cancel() {
+    for apply in [false, true] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        for (command, params) in [
+            ("sketch.create", json!({"plane":"XY"})),
+            ("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[30,20]})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"distance":10,"operation":"new"})),
+        ] {
+            h.app.run(command, params).unwrap();
+        }
+        h.call("ui.editFeature", json!({"feature":"Extrude1"}));
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"dialog:Distance"}})).unwrap();
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.step(&json!({"text":"20 mm"})).unwrap();
+        h.step(&json!({"click":{"handle":"fold:Origin"}})).unwrap();
+        h.step(&json!({"click":{"handle":"eye:XY"}})).unwrap();
+        assert!(h.app.session.visibility.hidden_origin.iter().any(|name| name == "XY"));
+        if apply {
+            h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+            until_applied(&mut h);
+        } else {
+            h.step(&json!({"key":"Escape"})).unwrap();
+        }
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|dialog| dialog.error.as_ref()));
+        assert!(h.app.status.as_ref().is_none_or(|(_, _, error)| !error), "{:?}", h.app.status);
+        assert_eq!(h.app.session.doc.marker, None);
+        assert!(h.app.session.visibility.hidden_origin.iter().any(|name| name == "XY"));
+        h.step(&json!({"expect":{"bodies":1,"volume":if apply {12000} else {6000}}})).unwrap();
+        if apply {
+            h.app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(h.app.session.doc.marker, None);
+            assert!(h.app.session.visibility.hidden_origin.iter().any(|name| name == "XY"));
+        }
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.marker, None, "undoing the eye click keeps the complete timeline");
+        assert!(!h.app.session.visibility.hidden_origin.iter().any(|name| name == "XY"));
+        h.step(&json!({"expect":{"bodies":1,"volume":6000}})).unwrap();
+    }
+}
+
+#[test]
 fn a_worker_error_then_cancel_preserves_original_world_history_redo_and_selection() {
     let (mut h, target) = cut_chain();
     h.app.run("solid.box", json!({"corner":[100,0,0],"length":2,"width":2,"height":2})).unwrap();
     h.app.run("edit.undo", json!({})).unwrap();
-    let world = h.app.session.world_state();
+    let world = h.app.session.world_state().unwrap();
     let document = h.app.session.doc.clone();
     let history = (h.app.session.undo.len(), h.app.session.redo.len());
     h.app.session.selection = vec![solidcraft_engine::Sel::Feature { id: target }];
@@ -395,7 +503,7 @@ fn a_worker_error_then_cancel_preserves_original_world_history_redo_and_selectio
     });
     assert_eq!(window.features(), (0, 0));
     assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
-    assert!(std::sync::Arc::ptr_eq(&world, &h.app.session.world_state()));
+    assert!(std::sync::Arc::ptr_eq(&world, &h.app.session.world_state().unwrap()));
     assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
     assert_eq!(h.app.session.selection, selection);
 }

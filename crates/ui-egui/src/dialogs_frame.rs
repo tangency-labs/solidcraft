@@ -14,7 +14,7 @@ use crate::selection::{PROFILES, SKETCH_LINES, SelInput, SelectionExt as _};
 use crate::ui_kit::{choice_row, expr_row, hint_row, text_row};
 
 /// The anchors as `frame.member` names them, and their labels.
-const ANCHORS: [(&str, &str); 11] = [
+const ANCHORS: &[(&str, &str)] = &[
     ("origin", "Origin"),
     ("center", "Center"),
     ("centroid", "Centroid"),

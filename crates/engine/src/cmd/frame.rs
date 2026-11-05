@@ -3,13 +3,14 @@
 //! the built-in profiles, `frame.profile.properties` works out a profile's section, and
 //! `frame.profile.insert` draws one into a sketch.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
+use solidcore_record::{Loop2, Seg2, Vec2};
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::frame::{self, Anchor, MemberProfile, Profile, ProfileSpec};
 use solidcraft_doc::{FeatureKind, SketchId};
-use solidcraft_geom::{Loop2, Seg2, Vec2};
 use solidcraft_sketch::Sketch;
 
 use super::features::{add_feature, check_expr, sketch_id};
@@ -188,7 +189,7 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
     let lines = match p.get("lines") {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(a)) if !a.is_empty() && a.len() <= frame::MAX_MEMBERS && a.iter().all(Value::is_string) => {
-            let lines = string_list(p, "lines");
+            let lines = string_list(cmd, p, "lines")?;
             let mut seen = std::collections::HashSet::new();
             if let Some(twice) = lines.iter().find(|l| !seen.insert(l.as_str())) {
                 return Err(bad(cmd, format!("line `{twice}` is listed twice")));

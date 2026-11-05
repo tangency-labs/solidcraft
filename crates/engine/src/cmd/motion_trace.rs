@@ -1,14 +1,15 @@
 //! Associative trace definitions and dependency checks. Sampling uses the existing motion
 //! driver on a scratch session; only a changed generated wire is handed to the evaluator.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::joints::{self, JointOrigin, Snap};
 use solidcraft_doc::motion::{MotionTrace, TraceMotion};
 use solidcraft_doc::{IDENTITY, apply_point};
-use solidcraft_geom::Vec3;
 
 use crate::params::{bad, bool_};
 use crate::{Result, Session};
@@ -254,6 +255,7 @@ fn seeded(s: &Session, t: &MotionTrace) -> Session {
 pub(super) fn remember(s: &mut Session, t: &MotionTrace) {
     let key = inputs(s, t).map_err(|e| e.to_string());
     if let Ok(key) = &key
+        // design-only: a motion trace's wire is in one of the design's sketches.
         && let Some(points) = s.doc.sketch(t.sketch).ok().and_then(|sk| sk.wires.iter().find(|w| w.id == t.wire)).map(|w| w.fit.clone())
     {
         remember_points(s, t.sketch, key.clone(), points);
@@ -330,6 +332,7 @@ pub(crate) fn refresh(s: &mut Session) {
         let unchanged = s.motion_traces.entries.get(&t.sketch).is_some_and(|old| old.inputs == key);
         if unchanged
             && cached.as_ref().is_none_or(|points| {
+                // design-only: a motion trace's wire is in one of the design's sketches.
                 s.doc.sketch(t.sketch).ok().and_then(|sk| sk.wires.iter().find(|w| w.id == t.wire)).is_some_and(|w| same_points(&w.fit, points))
             })
         {
@@ -352,9 +355,11 @@ pub(crate) fn refresh(s: &mut Session) {
             remember_points(s, t.sketch, key.clone(), points.clone());
         }
         let error = match result {
+            // design-only: a motion trace's wire is in one of the design's sketches.
             Ok(points) => match s.doc.sketch(t.sketch).ok().and_then(|sk| sk.wires.iter().find(|w| w.id == t.wire)) {
                 Some(wire) if same_points(&wire.fit, &points) => None,
                 Some(_) => {
+                    // design-only: a motion trace's wire is in one of the design's sketches.
                     if let Ok(sk) = s.doc_mut().sketch_mut(t.sketch)
                         && let Some(wire) = sk.wires.iter_mut().find(|w| w.id == t.wire)
                     {

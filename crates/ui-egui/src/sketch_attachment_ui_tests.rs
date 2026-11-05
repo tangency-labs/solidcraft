@@ -1,6 +1,7 @@
 use crate::scenario::Harness;
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{FaceAttachmentStatus, FeatureKind, PlaneRef};
+use solidcraft_engine::geom::prelude::*;
 
 fn picked_sketch() -> (Harness, u64) {
     let mut h = Harness::new();
@@ -59,8 +60,8 @@ fn lost_attachment_ghost_rebind_preview_cancel_apply_and_undo_preserve_sketch() 
     h.app.run("solid.extrude", json!({"sketch":sketch,"distance":2,"operation":"new_body","body_name":"Boss"})).unwrap();
     h.app.run("timeline.suppress", json!({"feature":"Original","suppressed":true})).unwrap();
     assert!(h.app.session.model.result(sketch).unwrap().error.is_some());
-    assert!(h.app.session.world_state().body("Boss").is_none(), "lost attachment cannot produce a Boss on ControlBox");
-    assert!(h.app.session.world_state().sketch(sketch).is_none(), "saved repair guides are not solved sketch geometry");
+    assert!(h.app.session.world_state().unwrap().body("Boss").is_none(), "lost attachment cannot produce a Boss on ControlBox");
+    assert!(h.app.session.world_state().unwrap().sketch(sketch).is_none(), "saved repair guides are not solved sketch geometry");
     let raw = raw_sketch(&h, sketch);
     let before = h.app.session.doc.to_json();
     h.app.edit_sketch(sketch);
@@ -111,7 +112,7 @@ fn lost_attachment_ghost_rebind_preview_cancel_apply_and_undo_preserve_sketch() 
     assert_eq!(raw_sketch(&h, sketch), raw, "curves, dimensions and expressions remain exact");
     assert_eq!(h.app.session.undo.len(), undo + 1);
     assert!(h.app.session.model.result(sketch).unwrap().error.is_none());
-    let boss = h.app.session.world_state().body("Boss").unwrap().mesh().bounds();
+    let boss = h.app.session.world_state().unwrap().body("Boss").unwrap().mesh().bounds();
     assert!((boss.min.z - 30.0).abs() < 1e-7 && (boss.max.z - 32.0).abs() < 1e-7);
     let repaired = h.app.session.doc.to_json();
     let path = h.dir.join("rebound-face.solidcraft");
@@ -229,6 +230,7 @@ fn actual_nested_second_placement_face_pick_keeps_target_and_author_paths() {
     assert_eq!(h.app.session.active_component, child_component);
     assert_eq!(h.app.session.active_occurrence_path.as_ref(), Some(&path));
     h.app.finish_sketch();
+    assert_eq!((h.app.session.active_component, h.app.session.active_occurrence_path.as_ref()), (0, None), "the design is active again (#8127)");
     assert_eq!(h.app.session.doc.feature(sketch).unwrap().kind, kind);
     let file = h.dir.join("nested-face.solidcraft");
     h.app.run("file.save", json!({"path":file})).unwrap();
@@ -248,9 +250,9 @@ fn actual_nested_second_placement_face_pick_keeps_target_and_author_paths() {
 
 #[test]
 fn nested_anchor_saved_fixed_conversion_preserves_rotated_second_author_plane() {
+    use solidcore_record::Plane;
+    use solidcore_record::Vec3;
     use solidcraft_engine::doc::{EmbossFace, apply_point, apply_vector};
-    use solidcraft_engine::geom::Plane;
-    use solidcraft_engine::geom::Vec3;
     let mut h = Harness::new();
     h.app.session.auto_project = false;
     let created = h.app.run("component.create", json!({"name":"Author"})).unwrap();
@@ -262,7 +264,7 @@ fn nested_anchor_saved_fixed_conversion_preserves_rotated_second_author_plane() 
     h.app.run("component.activate", json!({"component":component,"path":[second],"occurrence":second})).unwrap();
     let doc = h.app.session.placed_document();
     let body_name = doc.body_frames_with_source(&h.app.session.model.state()).into_iter().find(|(_, _, _, path, _)| path == &[second]).unwrap().0;
-    let world = h.app.session.world_state();
+    let world = h.app.session.world_state().unwrap();
     let face = world
         .body(&body_name)
         .unwrap()
@@ -419,4 +421,36 @@ fn redefine_panel_names_the_plane_a_sketch_is_on() {
     let offset = PlaneRef::Offset { base: xy.clone(), distance: "12 mm".into() };
     assert_eq!(plane_description(&h.app.session.doc, &offset), "The XY plane, offset by 12 mm");
     assert_eq!(plane_description(&h.app.session.doc, &PlaneRef::Flipped { base: xy, about_y: false }), "The XY plane, from its other side");
+}
+
+/// Preferences › Sketch › "Sketching on a part's face makes that part active" (#10215): a face of
+/// a part's body picked for Create Sketch while the design is active puts the sketch in the part,
+/// which stays active; off, the sketch belongs to the design.
+#[test]
+fn face_pick_makes_its_part_active_only_with_the_preference() {
+    for on in [true, false] {
+        let mut h = Harness::new();
+        h.app.set_origin_shown(false);
+        h.app.session.auto_project = false;
+        h.app.preferences.sketch_face_activates_part = on;
+        let part = h.app.run("component.create", json!({"name":"Part"})).unwrap();
+        let (component, occurrence) = (part["component"].as_u64().unwrap(), part["occurrence"].as_u64().unwrap());
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"PartBox"})).unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.call("ui.view", json!({"view":"fit"}));
+        h.settle();
+        h.step(&json!({"start":"sketch.create"})).unwrap();
+        h.step(&json!({"click":{"world":[3,4,10]}})).unwrap();
+        let sketch = h.app.session.active_sketch.expect("the picked face takes a sketch");
+        let owner = h.app.session.doc.feature(sketch).unwrap().component;
+        if on {
+            assert_eq!(owner, component);
+            assert_eq!((h.app.session.active_component, h.app.session.active_occurrence_path.clone()), (component, Some(vec![occurrence])));
+        } else {
+            assert_eq!((owner, h.app.session.active_component), (0, 0));
+        }
+        h.app.finish_sketch();
+        assert_eq!(h.app.session.active_component, if on { component } else { 0 }, "the part stays active as after Activate");
+    }
 }

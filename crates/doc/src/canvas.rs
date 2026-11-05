@@ -2,7 +2,8 @@
 //! The image bytes travel inside the design file (base64), so it reopens without the original.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::PlaneRef;
 
@@ -15,8 +16,10 @@ pub struct Canvas {
     pub name: String,
     /// `png` or `jpeg`.
     pub format: String,
-    /// The image file, base64.
-    pub data: String,
+    /// The image file, base64. Shared rather than owned: every edit clones the document (the undo
+    /// history keeps the old one), and an image of up to 16 MiB copied into each of the 200 undo
+    /// states would hold gigabytes. Serialized as the same JSON string as before.
+    pub data: std::sync::Arc<str>,
     /// Pixel size of the image.
     pub pixels: [u32; 2],
     pub plane: PlaneRef,

@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::expr::{self, Expr, Kind, ParamDef, Value};
+use crate::sheet::rule_references;
 use crate::walk::Walk;
 use crate::{DocError, Document, FeatureKind, MAX_PARAMS, Result};
 
@@ -90,7 +91,11 @@ pub struct ParamRow {
     pub name: String,
     pub expression: String,
     pub unit: String,
+    /// Always millimetres for a length, degrees for an angle, whatever the parameter's own
+    /// unit — the same meaning `value` has in every reply (#10747).
     pub value: Option<f64>,
+    /// The value in the parameter's own `unit`, as the Parameters window shows it.
+    pub display_value: Option<f64>,
     pub error: Option<String>,
     pub comment: String,
     /// "user", "sketch" (a dimension) or "feature".
@@ -225,6 +230,12 @@ impl Document {
     /// A typed length that is a bare number means the design's units: it gets that unit written
     /// in (feature inputs are stored in mm otherwise). Anything else is returned unchanged.
     pub fn with_design_unit(&self, e: &str, kind: Kind) -> String {
+        // A definition's value reads as the value would (#4071): `w = 2` is `w = 2 in`.
+        if let Some((name, rhs)) = expr::definition(e)
+            && expr::is_bare_number(rhs)
+        {
+            return format!("{name} = {}", self.with_design_unit(rhs, kind));
+        }
         let u = self.units.trim();
         let bare = expr::is_bare_number(e);
         if kind == Kind::Length && bare && !u.is_empty() && u != "mm" && expr::unit_info(u).is_some_and(|(k, _)| k == Kind::Length) {
@@ -262,7 +273,7 @@ impl Document {
             .filter(|(_, _, k)| *k == Kind::Length)
             .map(|(_, e, _)| {
                 let d = if expr::is_literal(&e) { expr::Defaults::default() } else { expr::Defaults { len: scale, ..expr::Defaults::default() } };
-                expr::eval_with(&e, &look).and_then(|v| v.to_kind_in(Kind::Length, d)).ok()
+                expr::eval_with_defaults(&e, &look, d).and_then(|v| v.to_kind_in(Kind::Length, d)).ok()
             })
             .collect()
     }
@@ -361,14 +372,20 @@ impl Document {
             }
         }
         let used_by = |n: &str| -> Vec<String> { users.get(n).cloned().unwrap_or_default() };
-        let value = |n: &str, k: Kind| vals.get(n).and_then(|v| v.to_kind(k).ok()).map(|x| if k == Kind::Angle { x.to_degrees() } else { x });
+        let value = |n: &str, k: Kind| {
+            vals.get(n).and_then(|v| v.to_kind(k).ok()).map(|x| if k == Kind::Angle { x.to_degrees() } else { x }).map(expr::round_reported)
+        };
+        // `value` is mm / degrees in every row (#10747); the parameter's own unit goes to
+        // `display_value`. Both carry the number a person would read, not the float noise.
+        let unified = |n: &str| vals.get(n).map(|v| expr::round_reported(expr::reported_value(*v)));
         let mut rows = Vec::new();
         for p in &self.params {
             rows.push(ParamRow {
                 name: p.name.clone(),
                 expression: p.expr.clone(),
                 unit: p.unit.clone(),
-                value: self.param_display_value(&vals, &p.name),
+                value: unified(&p.name),
+                display_value: self.param_display_value(&vals, &p.name).map(expr::round_reported),
                 error: errs.get(&p.name).cloned(),
                 comment: p.comment.clone(),
                 source: if p.model { "sketch" } else { "user" },
@@ -390,6 +407,8 @@ impl Document {
                     expression: e,
                     unit: unit_of(k).into(),
                     value: value(name, k),
+                    // A feature input's own unit is mm / deg, so its display value is its value.
+                    display_value: value(name, k),
                     error: errs.get(name).cloned(),
                     comment: self.param_comments.get(name).cloned().unwrap_or_default(),
                     source: "feature",
@@ -409,6 +428,7 @@ impl Document {
                 expression: p.text.clone(),
                 unit: crate::text_params::TEXT_UNIT.into(),
                 value: None,
+                display_value: None,
                 error: None,
                 comment: p.comment.clone(),
                 source: "user",
@@ -454,9 +474,10 @@ impl Document {
         Ok(())
     }
 
-    /// User parameters as CSV (`name,unit,expression,value,comment`).
+    /// User parameters as CSV (`name,unit,expression,value,comment`). The `value` column is the
+    /// number in the `unit` column, rounded for reading (#10747); import reads `expression`.
     pub fn params_csv(&self) -> String {
-        let q = |s: &str| if s.contains([',', '"', '\n']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s.to_string() };
+        let q = |s: &str| if s.contains([',', '"', '\r', '\n']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s.to_string() };
         let mut out = String::from("name,unit,expression,value,comment,favorite\n");
         for r in self.param_rows().into_iter().filter(|r| r.source == "user") {
             out += &format!(
@@ -464,7 +485,7 @@ impl Document {
                 q(&r.name),
                 q(&r.unit),
                 q(&r.expression),
-                r.value.map(|v| format!("{v}")).unwrap_or_default(),
+                r.display_value.or(r.value).map(|v| format!("{v}")).unwrap_or_default(),
                 q(&r.comment),
                 r.favorite
             );
@@ -491,23 +512,25 @@ impl Document {
                 })
                 .collect::<Result<_>>()?
         } else {
-            let mut lines = text.lines();
-            let header: Vec<String> = parse_csv_line(lines.next().unwrap_or_default()).into_iter().map(|h| h.trim().to_ascii_lowercase()).collect();
-            let col = |n: &str| header.iter().position(|h| h == n);
+            let mut records = split_csv(text.strip_prefix('\u{feff}').unwrap_or(text), '\n');
+            let header = csv_fields(records.next().unwrap_or_default())?;
+            let col = |n: &str| header.iter().position(|h| h.trim().eq_ignore_ascii_case(n));
             let (Some(ni), Some(ei)) = (col("name"), col("expression").or(col("value"))) else {
                 return Err(DocError::Invalid("the CSV needs `name` and `expression` columns".into()));
             };
             let (ui, ci) = (col("unit"), col("comment"));
-            lines
-                .filter(|l| !l.trim().is_empty())
-                .map(|l| {
-                    let c = parse_csv_line(l);
+            records
+                .filter(|record| !record.trim().is_empty())
+                .take(MAX_PARAMS + 1)
+                .map(|record| {
+                    let c = csv_fields(record)?;
                     let get = |i: Option<usize>| i.and_then(|i| c.get(i)).map(|s| s.trim().to_string());
-                    (get(Some(ni)).unwrap_or_default(), get(Some(ei)).unwrap_or_default(), get(ui), get(ci))
+                    let comment = ci.and_then(|i| c.get(i)).cloned();
+                    Ok((get(Some(ni)).unwrap_or_default(), get(Some(ei)).unwrap_or_default(), get(ui), comment))
                 })
-                .collect()
+                .collect::<Result<_>>()?
         };
-        if rows.len() > 10_000 {
+        if rows.len() > MAX_PARAMS {
             return Err(DocError::Invalid("too many parameters".into()));
         }
         // Each row is checked and applied as `change_param` would, but the parameters are
@@ -579,7 +602,7 @@ impl Document {
                 }
                 let unit = match unit {
                     Some(u) => u.trim().to_string(),
-                    None => Self::infer_unit_in(vals, expr_s),
+                    None => Self::infer_unit_in(vals, expr_s, &self.units),
                 };
                 self.params.push(crate::Param {
                     name: name.into(),
@@ -690,18 +713,19 @@ impl Document {
     }
 
     /// The unit for a new parameter with this expression: that of its value; a bare number is
-    /// a length (mm).
+    /// a length in the design's units, as a typed length reads it (#8865).
     pub(crate) fn infer_unit(&self, e: &str) -> String {
-        Self::infer_unit_in(&self.param_values().0, e)
+        Self::infer_unit_in(&self.param_values().0, e, &self.units)
     }
 
-    /// [`Document::infer_unit`] against parameter values already worked out.
-    fn infer_unit_in(vals: &BTreeMap<String, Value>, e: &str) -> String {
+    /// [`Document::infer_unit`] against parameter values already worked out, a length taking
+    /// `units` (the design's, or `mm` where a bare number reads as millimetres).
+    pub(crate) fn infer_unit_in(vals: &BTreeMap<String, Value>, e: &str, units: &str) -> String {
         let v = expr::eval_with(e, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))));
         match v.ok().and_then(|v| v.kind()) {
             Some(Kind::Unitless) if !expr::references(e).is_empty() => String::new(),
             Some(Kind::Angle) => "deg".into(),
-            _ => "mm".into(),
+            _ => expr::length_unit_or_mm(units).to_string(),
         }
     }
 
@@ -774,13 +798,14 @@ impl Document {
             }
         }
         let uses = |e: &str| expr::references(e).iter().any(|r| r == name);
+        let rule_uses = |field: &str, e: &str| rule_references(field, e).iter().any(|r| r == name);
         for r in &self.sheet.rules {
-            for (field, _, _) in r.fields().into_iter().filter(|(_, e, _)| uses(e)) {
+            for (field, _, _) in r.fields().into_iter().filter(|(f, e, _)| rule_uses(f, e)) {
                 out.push(ParamUser::Rule { kind: "sheet metal".into(), name: r.name.clone(), field: field.into() });
             }
         }
         for r in &self.plastic.rules {
-            for (field, _, _) in r.fields().into_iter().filter(|(_, e, _)| uses(e)) {
+            for (field, _, _) in r.fields().into_iter().filter(|(f, e, _)| rule_uses(f, e)) {
                 out.push(ParamUser::Rule { kind: "plastic".into(), name: r.name.clone(), field: field.into() });
             }
         }
@@ -831,6 +856,21 @@ impl Document {
         }
         if self.name_taken(new) {
             return Err(DocError::Invalid(format!("there is already a parameter `{new}`")));
+        }
+        // Outside a rule's own thickness, `Thickness` is the rule's thickness (#9623): renaming to
+        // it would turn those references into the rule's thickness and change their values.
+        if new == "Thickness" {
+            let uses_old = |field: &str, e: &str| field != "thickness" && expr::references(e).iter().any(|r| r == old);
+            let sheet = self.sheet.rules.iter().flat_map(|r| r.fields().into_iter().map(move |(f, e, _)| ("sheet metal", &r.name, f, e)));
+            let plastic = self.plastic.rules.iter().flat_map(|r| r.fields().into_iter().map(move |(f, e, _)| ("plastic", &r.name, f, e)));
+            let list: Vec<String> =
+                sheet.chain(plastic).filter(|(_, _, f, e)| uses_old(f, e)).map(|(kind, name, f, _)| format!("{kind} rule {name} ({f})")).collect();
+            if !list.is_empty() {
+                return Err(DocError::Invalid(format!(
+                    "`{old}` can't be renamed to `Thickness`: {} would read the rule's thickness instead",
+                    list.join(", ")
+                )));
+            }
         }
         let mut n = 0;
         let text = self.text_param(old).is_some();
@@ -890,6 +930,18 @@ impl Document {
                         n += 1;
                     }
                 }
+                // An equation curve's variable hides a parameter of its name: such a parameter is
+                // not what its formulas refer to.
+                for (variable, e) in sketch.equation_exprs_mut() {
+                    if variable == old {
+                        continue;
+                    }
+                    let r = expr::rename_reference(e, old, new);
+                    if r != *e {
+                        *e = r;
+                        n += 1;
+                    }
+                }
                 for e in sketch.text_word_exprs_mut() {
                     let r = crate::text_params::rename_reference(e, old, new);
                     if r != *e {
@@ -929,7 +981,8 @@ impl Document {
         }
         // Sheet metal and plastic rules and canvas planes hold expressions too (#4420).
         let rules = self.sheet.rules.iter_mut().flat_map(|r| r.fields_mut()).chain(self.plastic.rules.iter_mut().flat_map(|r| r.fields_mut()));
-        for (_, e) in rules {
+        // `Thickness` outside a rule's own thickness is the rule's, not the parameter (#9623).
+        for (_, e) in rules.filter(|(field, _)| old != "Thickness" || *field == "thickness") {
             let r = expr::rename_reference(e, old, new);
             if r != *e {
                 *e = r;
@@ -990,10 +1043,10 @@ impl Document {
             }
             // Sheet metal and plastic features rebuild when their rules' parameters change (#4420).
             if f.kind.is_sheet() {
-                names.extend(self.sheet.rules.iter().flat_map(|r| r.fields()).flat_map(|(_, e, _)| expr::references(e)));
+                names.extend(self.sheet.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)));
             }
             if f.kind.is_plastic() {
-                names.extend(self.plastic.rules.iter().flat_map(|r| r.fields()).flat_map(|(_, e, _)| expr::references(e)));
+                names.extend(self.plastic.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)));
             }
             out.extend(names.into_iter().map(|n| (format!("Feature:{}", f.name), n)));
         }
@@ -1017,9 +1070,9 @@ impl Document {
         }
         // A rule that uses it changes every sheet metal (or plastic) feature: the evaluation
         // hashes the rules into their fingerprint.
-        let uses = |e: &String| expr::references(e).iter().any(|r| affected.contains(r));
-        let sheet = self.sheet.rules.iter().any(|r| r.fields().iter().any(|(_, e, _)| uses(e)));
-        let plastic = self.plastic.rules.iter().any(|r| r.fields().iter().any(|(_, e, _)| uses(e)));
+        let uses = |field: &str, e: &str| rule_references(field, e).iter().any(|r| affected.contains(r));
+        let sheet = self.sheet.rules.iter().any(|r| r.fields().iter().any(|(f, e, _)| uses(f, e)));
+        let plastic = self.plastic.rules.iter().any(|r| r.fields().iter().any(|(f, e, _)| uses(f, e)));
         let mut out = Vec::new();
         for f in &self.features {
             let mut hit = f.param_names.iter().any(|n| affected.contains(n));
@@ -1050,25 +1103,32 @@ impl Document {
     }
 }
 
-/// One CSV line with quoted fields.
-fn parse_csv_line(l: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
+/// Split records or fields only outside quotes. A doubled quote toggles twice
+/// before the next separator, leaving it inside the same field.
+fn split_csv(text: &str, separator: char) -> impl Iterator<Item = &str> {
     let mut quoted = false;
-    let mut chars = l.chars().peekable();
-    while let Some(c) = chars.next() {
-        match (c, quoted) {
-            ('"', true) if chars.peek() == Some(&'"') => {
-                cur.push('"');
-                chars.next();
-            }
-            ('"', _) => quoted = !quoted,
-            (',', false) => out.push(std::mem::take(&mut cur)),
-            (c, _) => cur.push(c),
+    text.split(move |c| {
+        if c == '"' {
+            quoted = !quoted;
         }
-    }
-    out.push(cur);
-    out
+        c == separator && !quoted
+    })
+}
+
+fn csv_fields(record: &str) -> Result<Vec<String>> {
+    split_csv(record, ',')
+        .map(|raw| {
+            let field = raw.trim();
+            if !field.contains('"') {
+                return Ok(field.to_string());
+            }
+            let inner = field.strip_prefix('"').and_then(|s| s.strip_suffix('"'));
+            match inner {
+                Some(s) if s.split("\"\"").all(|part| !part.contains('"')) => Ok(s.replace("\"\"", "\"")),
+                _ => Err(DocError::Invalid("invalid quoting in parameter CSV".into())),
+            }
+        })
+        .collect()
 }
 
 /// Parameters whose definitions depend on each other in a loop.
@@ -1129,6 +1189,19 @@ mod design_length_tests {
         assert_eq!(written("parsec", 5.0), w("mm", "5 mm"));
         assert_eq!(written("deg", 5.0), w("mm", "5 mm"));
         assert_eq!(written("", 5.0), w("mm", "5 mm"));
+    }
+
+    /// A bare number typed as a formula (`=5`) means the design's units like `5` does.
+    #[test]
+    fn a_formula_that_is_a_bare_number_gets_the_design_unit() {
+        let mut doc = Document::new("Units");
+        doc.units = "in".into();
+        let length = crate::expr::Kind::Length;
+        assert_eq!(doc.with_design_unit("5", length), "5 in");
+        assert_eq!(doc.with_design_unit("=5", length), "=5 in");
+        assert_eq!(doc.with_design_unit("=5 mm", length), "=5 mm");
+        let inches = doc.eval(&doc.with_design_unit("=5", length), length).unwrap();
+        assert!((inches - 127.0).abs() < 1e-9, "{inches}");
     }
 
     #[test]

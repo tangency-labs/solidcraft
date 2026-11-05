@@ -167,7 +167,7 @@ impl Document {
             return Err(DocError::Invalid("the plastic thickness must be positive".into()));
         }
         let with_t = |e: &str, k: Kind| -> Result<f64> {
-            let f = |n: &str| if n == "Thickness" && !vals.contains_key("Thickness") { Ok(Value::length(t)) } else { look(n) };
+            let f = |n: &str| if n == "Thickness" { Ok(Value::length(t)) } else { look(n) };
             let v = expr::eval_with(e, &f)?.to_kind(k)?;
             if !v.is_finite() || v < 0.0 {
                 return Err(DocError::Invalid(format!("plastic rule `{}`: `{e}` must not be negative", r.name)));

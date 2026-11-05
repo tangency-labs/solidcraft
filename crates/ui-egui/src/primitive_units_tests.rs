@@ -1,7 +1,8 @@
 //! #630: the Box, Cylinder, Sphere, Torus and Coil dialogs show the unit of their sizes, as the
 //! other dialogs do ("10 mm"), in the design's units. OK makes what the bare numbers made before,
 //! and a bare number typed into a field still means the design's units. #5638: the Box dialog
-//! places the box by its corner or centre and the Cylinder dialog by its base, typed or picked.
+//! places the box by its corner or centre, the Cylinder and Cone dialogs by their base and the
+//! Sphere and Torus dialogs by their centre, typed or picked.
 
 use serde_json::{Value, json};
 use solidcraft_engine::Session;
@@ -37,20 +38,23 @@ fn fields(h: &Harness) -> Vec<(&'static str, String)> {
     }
 }
 
-/// Every field shows its text in its row, as a person sees it.
+/// Every field shows its text in its row, as a person sees it, under a label in words
+/// ("Section size"), not the command's parameter name.
 fn assert_shown(h: &Harness, fields: &[(&str, String)]) {
-    for (label, text) in fields {
+    for (key, text) in fields {
+        let label = crate::i18n::tr(crate::dialogs::primitive_label(key));
+        assert!(label.starts_with(char::is_uppercase) && !label.contains('_'), "the {key} row is labelled {label:?}");
         let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
         assert!(
-            nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(*label) && n.value() == Some(text)),
+            nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label) && n.value() == Some(text)),
             "the {label} editor shows {text:?}"
         );
     }
 }
 
 /// Replace a field's text by typing, as a person does.
-fn type_into(h: &mut Harness, label: &str, text: &str) {
-    h.step(&json!({"click": {"handle": format!("dialog:{label}")}})).unwrap();
+fn type_into(h: &mut Harness, key: &str, text: &str) {
+    h.step(&json!({"click": {"handle": format!("dialog:{}", crate::dialogs::primitive_label(key))}})).unwrap();
     h.step(&json!({"key": "A", "cmd": true})).unwrap();
     h.step(&json!({"text": text})).unwrap();
 }
@@ -282,7 +286,7 @@ fn operation_length_defaults_follow_every_design_unit() {
         ("solid.fillet", &["2", "2"]),
         ("solid.chamfer", &["1", "1"]),
         ("solid.shell", &["2"]),
-        ("solid.hole", &["5", "10", "9", "3", "10"]),
+        ("solid.hole", &["5", "10", "9", "3", "10", ""]),
         ("solid.rib", &["2", ""]),
         ("solid.web", &["2", ""]),
         ("solid.emboss", &["1"]),
@@ -423,6 +427,7 @@ fn cone_dialog_makes_a_cone_and_edits_it_into_a_frustum() {
     h.frames(3);
     let shown = fields(&h);
     assert_eq!(shown, vec![("radius", "(20 mm) / 2".to_string()), ("top_radius", "(0 mm) / 2".to_string()), ("height", "20 mm".to_string())]);
+    assert_shown(&h, &shown);
     type_into(&mut h, "top_radius", "4");
     h.frames(2);
     ok(&mut h);
@@ -577,9 +582,12 @@ fn the_cylinder_dialog_takes_its_base_point() {
 
 #[test]
 fn a_point_picked_in_the_box_dialog_becomes_its_corner_or_centre() {
+    use solidcore_record::Vec3;
     use solidcraft_engine::Sel;
-    use solidcraft_engine::geom::Vec3;
     let mut h = design("mm");
+    // The box made here overlaps Base, which the window would join or cut (#6901): this test is
+    // about where it goes, so the window keeps its New Body.
+    h.app.preferences.auto_operation = false;
     h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Base"})).unwrap();
     h.frames(2);
     // A face picked before the command: the box stands on it, as before (no typed placement).
@@ -610,4 +618,204 @@ fn a_point_picked_in_the_box_dialog_becomes_its_corner_or_centre() {
     ok(&mut h);
     let made = bounds(&mut h.app.session);
     assert_near(made[1].0, [-10.0, -10.0, -10.0]);
+}
+
+#[test]
+fn a_point_picked_in_the_box_dialog_reads_in_the_design_unit() {
+    use solidcore_record::Vec3;
+    use solidcraft_engine::Sel;
+    let mut h = design("in");
+    h.app.preferences.auto_operation = false;
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Base"})).unwrap();
+    h.frames(2);
+    h.app.start("solid.box");
+    h.frames(3);
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, Sel::Face { body: "Base".into(), index: 0, point: Vec3::new(25.4, 38.1, 12.7) });
+    h.app.dialog = Some(d);
+    h.frames(2);
+    // 38.1 / 25.4 is 1.5000000000000002 in floating point: the field reads 1.5 in.
+    assert_shown(&h, &[("X", "1 in".into()), ("Y", "1.5 in".into()), ("Z", "0.5 in".into())]);
+    assert_eq!(sent(&h)["corner"], json!(["1 in", "1.5 in", "0.5 in"]));
+    ok(&mut h);
+    assert_near(bounds(&mut h.app.session)[1].0, [25.4, 38.1, 12.7]);
+    // The Sphere and Torus centre take the point the same way.
+    for cmd in ["solid.sphere", "solid.torus"] {
+        h.app.start(cmd);
+        h.frames(3);
+        let mut d = h.app.dialog.take().unwrap();
+        d.pick(&h.app.session, Sel::Vertex { body: "Base".into(), point: Vec3::new(25.4, 38.1, 12.7) });
+        h.app.dialog = Some(d);
+        h.frames(2);
+        assert_shown(&h, &[("X", "1 in".into()), ("Y", "1.5 in".into()), ("Z", "0.5 in".into())]);
+        assert_eq!(sent(&h)["center"], json!(["1 in", "1.5 in", "0.5 in"]), "{cmd}");
+        h.app.dialog = None;
+    }
+    // In a metre design the text keeps the micrometre: a point that is not round in mm lands
+    // where it was picked, not rounded to a millionth of a metre (a millimetre).
+    let mut h = design("m");
+    h.app.preferences.auto_operation = false;
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Base"})).unwrap();
+    h.frames(2);
+    h.app.start("solid.box");
+    h.frames(3);
+    let at = [12.345678, -23.456789, 5.000123];
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, Sel::Face { body: "Base".into(), index: 0, point: Vec3::new(at[0], at[1], at[2]) });
+    h.app.dialog = Some(d);
+    h.frames(2);
+    assert_eq!(sent(&h)["corner"], json!(["0.012345678 m", "-0.023456789 m", "0.005000123 m"]));
+    ok(&mut h);
+    assert_near(bounds(&mut h.app.session)[1].0, at);
+}
+
+#[test]
+fn the_sphere_torus_and_cone_dialogs_take_their_placement() {
+    let mut h = design("mm");
+    // The sphere by its centre: left alone at the origin, as before.
+    h.app.start("solid.sphere");
+    h.frames(3);
+    assert!(sent(&h).get("center").is_none(), "left alone, at the origin as before");
+    type_into(&mut h, "X", "30");
+    type_into(&mut h, "Z", "-4");
+    h.frames(2);
+    assert_eq!(sent(&h)["center"], json!(["30", "0 mm", "-4"]));
+    ok(&mut h);
+    // The torus by its centre.
+    h.app.start("solid.torus");
+    h.frames(3);
+    type_into(&mut h, "Y", "60");
+    h.frames(2);
+    assert_eq!(sent(&h)["center"], json!(["0 mm", "60", "0 mm"]));
+    ok(&mut h);
+    // The cone by the centre of its base.
+    h.app.start("solid.cone");
+    h.frames(3);
+    assert!(sent(&h).get("base").is_none(), "left alone, at the origin as before");
+    type_into(&mut h, "X", "-50");
+    h.frames(2);
+    assert_eq!(sent(&h)["base"], json!(["-50", "0 mm", "0 mm"]));
+    ok(&mut h);
+    let made = bounds(&mut h.app.session);
+    // The round faces are measured on their facets: within a hundredth of a millimetre.
+    assert_within(made[0].0, [20.0, -10.0, -14.0], 1e-2);
+    assert_within(made[0].1, [40.0, 10.0, 6.0], 1e-2);
+    assert_within(made[1].0, [-25.0, 35.0, -5.0], 1e-2);
+    assert_within(made[1].1, [25.0, 85.0, 5.0], 1e-2);
+    assert_within(made[2].0, [-60.0, -10.0, 0.0], 1e-2);
+    assert_within(made[2].1, [-40.0, 10.0, 20.0], 1e-2);
+}
+
+#[test]
+fn editing_a_sphere_torus_or_cone_shows_its_placement_and_keeps_it() {
+    use solidcraft_engine::doc::FeatureKind;
+    let mut h = design("mm");
+    h.app.run("parameters.add", json!({"name": "off", "expression": "15 mm"})).unwrap();
+    h.app.run("solid.sphere", json!({"radius": 4, "center": ["-off", 0, 5], "operation": "new"})).unwrap();
+    h.app.run("solid.torus", json!({"major": 10, "minor": 2, "center": [60, 60, 0], "operation": "new"})).unwrap();
+    h.app.run("solid.cone", json!({"radius": 5, "height": 10, "base": [0, "off", 0], "operation": "new"})).unwrap();
+    h.frames(2);
+    let ids: Vec<u64> = h.app.session.doc.features.iter().map(|f| f.id).collect();
+    let stored = |h: &Harness, id: u64| match h.app.session.doc.feature(id).map(|f| &f.kind) {
+        Some(FeatureKind::Sphere { center, .. } | FeatureKind::Torus { center, .. }) => center.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        Some(FeatureKind::Cone { base, .. }) => base.iter().map(ToString::to_string).collect(),
+        other => panic!("not a sphere, torus or cone: {other:?}"),
+    };
+    let (sphere_id, torus_id, cone_id) = (ids[0], ids[1], ids[2]);
+    // The sphere's centre, an expression, shown and kept.
+    let centre = stored(&h, sphere_id);
+    h.app.edit_feature(sphere_id);
+    h.frames(3);
+    assert_shown(&h, &[("X", "-off".into()), ("Y", "0".into()), ("Z", "5".into())]);
+    ok(&mut h);
+    assert_eq!(stored(&h, sphere_id), centre, "OK without a change keeps the centre");
+    // A changed coordinate moves it.
+    h.app.edit_feature(sphere_id);
+    h.frames(3);
+    type_into(&mut h, "Z", "8");
+    h.frames(2);
+    ok(&mut h);
+    assert_eq!(stored(&h, sphere_id), ["-off", "0", "8"]);
+    assert_within(bounds(&mut h.app.session)[0].0, [-19.0, -4.0, 4.0], 1e-2);
+    // The torus's centre and the cone's base.
+    for (id, shown) in [(torus_id, ["60", "60", "0"]), (cone_id, ["0", "off", "0"])] {
+        let before = stored(&h, id);
+        h.app.edit_feature(id);
+        h.frames(3);
+        assert_shown(&h, &[("X", shown[0].into()), ("Y", shown[1].into()), ("Z", shown[2].into())]);
+        ok(&mut h);
+        assert_eq!(stored(&h, id), before);
+    }
+}
+
+#[test]
+fn a_point_picked_in_the_sphere_or_torus_dialog_becomes_its_centre() {
+    use solidcore_record::Vec3;
+    use solidcraft_engine::Sel;
+    let mut h = design("mm");
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Base"})).unwrap();
+    h.frames(2);
+    for cmd in ["solid.sphere", "solid.torus"] {
+        h.app.start(cmd);
+        h.frames(3);
+        let mut d = h.app.dialog.take().unwrap();
+        let hit = crate::viewport::Hit::Vertex { body: "Base".into(), point: Vec3::ZERO };
+        assert!(d.active_input().is_some_and(|i| i.accepts(&hit, None, |_, _| true).is_some()), "the {cmd} dialog takes a vertex");
+        d.pick(&h.app.session, Sel::Vertex { body: "Base".into(), point: Vec3::new(40.0, 30.0, 20.0) });
+        h.app.dialog = Some(d);
+        h.frames(2);
+        assert_shown(&h, &[("X", "40 mm".into()), ("Y", "30 mm".into()), ("Z", "20 mm".into())]);
+        assert_eq!(sent(&h)["center"], json!(["40 mm", "30 mm", "20 mm"]), "{cmd}");
+        h.app.dialog = None;
+    }
+}
+
+#[test]
+fn a_sketch_point_places_the_box_sphere_and_torus() {
+    // #9403: a point of a sketch, clicked in the window or selected before it opens, is where the
+    // primitive goes, where the sketch puts it in the world (here 20 mm up, on an offset plane).
+    use solidcraft_engine::Sel;
+    let mut h = design("mm");
+    h.app.run("sketch.create", json!({"plane": "XY", "offset": 20, "name": "Marks"})).unwrap();
+    h.app.run("sketch.point", json!({"point": [12, 7], "id": "m"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.frames(3);
+    for (cmd, key) in [("solid.sphere", "center"), ("solid.torus", "center"), ("solid.box", "corner")] {
+        h.app.start(cmd);
+        h.frames(3);
+        h.step(&json!({"click": {"world": [12, 7, 20]}})).unwrap();
+        h.frames(2);
+        assert_shown(&h, &[("X", "12 mm".into()), ("Y", "7 mm".into()), ("Z", "20 mm".into())]);
+        assert_eq!(sent(&h)[key], json!(["12 mm", "7 mm", "20 mm"]), "{cmd}");
+        let d = h.app.dialog.as_ref().unwrap();
+        let chip = crate::dialogs::selection_label(&h.app.session, crate::prefs::OriginPlaneNames::Xyz, d, &d.inputs[0], &d.inputs[0].items[0]);
+        // Numbered as Select Other numbers it: the sketch's origin is point 1.
+        assert_eq!(chip, "Point 2 · Marks", "the chip names the point and its sketch");
+        h.app.dialog = None;
+    }
+    let sketch = h.app.session.doc.features.iter().find(|f| f.name == "Marks").map(|f| f.id).unwrap();
+    h.app.session.selection = vec![Sel::ExternalSketchPoint { sketch, id: "m".into() }];
+    h.app.start("solid.sphere");
+    h.frames(3);
+    assert_eq!(sent(&h)["center"], json!([12.0, 7.0, 20.0]));
+    ok(&mut h);
+    let made = bounds(&mut h.app.session);
+    assert_within(made[0].0, [2.0, -3.0, 10.0], 0.05);
+    assert_within(made[0].1, [22.0, 17.0, 30.0], 0.05);
+}
+
+#[test]
+fn a_point_selected_in_the_open_sketch_still_places_the_sphere_when_the_sketch_ends() {
+    // Starting the sphere finishes the sketch; the point picked in it is then the finished
+    // sketch's, and still where the sphere goes.
+    use solidcraft_engine::Sel;
+    let mut h = design("mm");
+    h.app.run("sketch.create", json!({"plane": "XY", "offset": 20, "name": "Marks"})).unwrap();
+    h.app.run("sketch.point", json!({"point": [12, 7], "id": "m"})).unwrap();
+    assert!(h.app.session.active_sketch.is_some());
+    h.app.session.selection = vec![Sel::SketchPoint { id: "m".into() }];
+    h.app.start("solid.sphere");
+    h.frames(3);
+    assert!(h.app.session.active_sketch.is_none(), "the sphere ends the sketch");
+    assert_eq!(sent(&h)["center"], json!([12.0, 7.0, 20.0]));
 }

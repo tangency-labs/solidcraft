@@ -2,10 +2,11 @@
 //! distances with the closest and farthest listed too, diameters and radii, slot sizes. Every
 //! expected value is worked out by hand from the part's dimensions.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{PI, TAU};
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::Session;
 
@@ -159,6 +160,8 @@ fn two_holes_measure_centre_to_centre_with_min_and_max() {
     // One rim: Ø, R and circumference first-class.
     let r = measure(&mut s, vec![ea]);
     assert!(close(&r["diameter"], 6.0, 1e-9) && close(&r["radius"], 3.0, 1e-9) && close(&r["circumference"], TAU * 3.0, 1e-9), "{r}");
+    // Its length is its circumference, not the length of the polyline drawn for it (#9086).
+    assert!(close(&r["items"][0]["length_mm"], TAU * 3.0, 1e-9), "{r}");
     assert_eq!(r["items"][0]["round"], "circle", "{r}");
 }
 
@@ -259,9 +262,11 @@ fn sketch_circle_arc_and_slot() {
         run(&mut s, "sketch.arc.center_point", json!({"center": [30, 0], "start": [34, 0], "sweep": 90}))["curves"][0].as_str().unwrap().to_string();
     let r = measure(&mut s, vec![json!({"type": "sketch_curve", "id": c})]);
     assert!(close(&r["diameter"], 10.0, 1e-9) && close(&r["radius"], 5.0, 1e-9) && close(&r["circumference"], 10.0 * PI, 1e-9), "{r}");
+    assert!(close(&r["items"][0]["length_mm"], 10.0 * PI, 1e-9), "{r}");
     let r = measure(&mut s, vec![json!({"type": "sketch_curve", "id": a})]);
     assert!(close(&r["radius"], 4.0, 1e-9) && close(&r["diameter"], 8.0, 1e-9), "{r}");
     assert!(close(&r["angle_deg"], 90.0, 1e-9) && close(&r["arc_length"], 2.0 * PI, 1e-9), "{r}");
+    assert!(close(&r["items"][0]["length_mm"], 2.0 * PI, 1e-9), "{r}");
     assert_eq!(r["items"][0]["round"], "arc");
     // Circle to arc: centre to centre.
     let r = measure(&mut s, vec![json!({"type": "sketch_curve", "id": c}), json!({"type": "sketch_curve", "id": a})]);
@@ -315,7 +320,63 @@ fn a_fillet_edge_is_an_arc() {
     let r = measure(&mut s, vec![e]);
     assert!(close(&r["radius"], 5.0, 1e-9) && close(&r["diameter"], 10.0, 1e-9), "{r}");
     assert!(close(&r["angle_deg"], 90.0, 1e-6) && close(&r["arc_length"], 2.5 * PI, 1e-6), "{r}");
+    assert!(close(&r["items"][0]["length_mm"], 2.5 * PI, 1e-6), "{r}");
     assert!(close(&r["center"][0], 35.0, 1e-9) && close(&r["center"][1], 25.0, 1e-9), "{r}");
+}
+
+/// A cylinder's top circle is as long as its circumference, in the same reply: the length
+/// comes from the exact circle, not from the polyline drawn for it, which runs inside it
+/// (#9086, the report's own cylinder).
+#[test]
+fn a_cylinders_top_circle_is_as_long_as_its_circumference() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "base": [40, 10, 0], "operation": "new"}));
+    let e = edge(&s, |p| (p.z - 20.0).abs() < 1e-9 && ((p - Vec3::new(40.0, 10.0, 20.0)).len() - 5.0).abs() < 1e-6);
+    let r = measure(&mut s, vec![e]);
+    assert!(close(&r["circumference"], TAU * 5.0, 1e-9), "{r}");
+    assert!(close(&r["items"][0]["length_mm"], TAU * 5.0, 1e-9), "{r}");
+}
+
+/// The first face whose analytic surface satisfies `want`, as a pick.
+fn face_of(s: &Session, want: impl Fn(solidcraft_kernel::FaceSurface) -> bool) -> Value {
+    let st = s.model.state();
+    let b = st.bodies.first().unwrap();
+    let m = b.mesh();
+    let n = m.tri_face.iter().map(|f| *f as usize + 1).max().unwrap();
+    let f = (0..n).find(|&f| solidcraft_kernel::face_surface(&b.body, f).is_some_and(&want)).expect("face");
+    let p = m.triangles.iter().zip(&m.tri_face).find(|(_, tf)| **tf as usize == f).and_then(|(t, _)| m.tri(t)).unwrap()[0];
+    json!({"type": "face", "body": b.name, "index": f, "point": p})
+}
+
+/// A fillet round the foot of a boss is a toroidal face: it measures its radius (the fillet's)
+/// next to its area, and says it is a torus with its ring radius too.
+#[test]
+fn a_fillet_round_a_boss_reports_its_radius() {
+    use solidcraft_kernel::FaceSurface;
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10}));
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 12, "base": [20, 20, 10], "operation": "join"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[25, 20, 10]], "radius": 3}));
+    let fillet = face_of(&s, |f| matches!(f, FaceSurface::Torus { minor, .. } if (minor - 3.0).abs() < 1e-6));
+    let r = measure(&mut s, vec![fillet]);
+    assert!(close(&r["radius"], 3.0, 1e-6) && close(&r["diameter"], 6.0, 1e-6), "{r}");
+    assert_eq!(r["items"][0]["surface"], "torus", "{r}");
+    // The ring through the middle of the rolling ball: the boss's radius plus the fillet's.
+    assert!(close(&r["items"][0]["major_radius"], 8.0, 1e-6), "{r}");
+    // The area is still there.
+    assert!(r["items"][0]["area_mm2"].as_f64().is_some_and(|a| a > 1.0), "{r}");
+}
+
+/// A ball's face reports its radius.
+#[test]
+fn a_sphere_face_reports_its_radius() {
+    use solidcraft_kernel::FaceSurface;
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"radius": 7, "center": [0, 0, 0]}));
+    let ball = face_of(&s, |f| matches!(f, FaceSurface::Sphere { .. }));
+    let r = measure(&mut s, vec![ball]);
+    assert!(close(&r["radius"], 7.0, 1e-6) && close(&r["diameter"], 14.0, 1e-6), "{r}");
+    assert_eq!(r["items"][0]["surface"], "sphere", "{r}");
 }
 
 /// A plate with holes through STEP: the holes come back as cylinders, and measure the same.
@@ -456,6 +517,7 @@ fn open_surface_measurements_have_no_volume_properties() {
     assert_eq!(props["total"]["open_bodies_skipped"], 1);
     assert!(props["bodies"][0]["mass_g"].is_null());
     assert!(props["total"]["center_of_mass"].is_null());
+    assert!(s.execute("inspect.center_of_mass", &json!({"bodies": ["OpenTube"]})).is_err(), "an open surface has no centre of mass");
 }
 
 #[test]
@@ -484,6 +546,43 @@ fn volume_totals_skip_open_surfaces_and_keep_closed_box_properties() {
     for key in ["volume_mm3", "mass_g", "center_of_mass"] {
         assert_eq!(props_before["total"][key], props_after["total"][key]);
     }
+    let com = run(&mut s, "inspect.center_of_mass", json!({}));
+    assert_eq!(com["skipped"].as_array().map(Vec::len), Some(1), "{com}");
+    assert_eq!(com["bodies"].as_array().map(Vec::len), Some(1), "{com}");
+    assert!(close(&com["volume"], 6000.0, 1e-9), "{com}");
+    for (axis, expected) in [5.0, 10.0, 15.0].into_iter().enumerate() {
+        assert!(close(&com["center"][axis], expected, 1e-9), "{com}");
+    }
+}
+
+/// #6173: Center of Mass reports the volume and centre Measure does. It measured the display
+/// mesh, whose flat facets cut curved faces short: a sphere of radius 10 came out 0.13 % small.
+#[test]
+fn center_of_mass_reports_the_same_volume_and_centre_as_measure() {
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"radius": 10, "center": [0, 0, 0], "body_name": "Ball"}));
+    run(&mut s, "solid.cylinder", json!({"base": [50, 0, 0], "radius": 10, "height": 20, "body_name": "Cup"}));
+    run(&mut s, "solid.shell", json!({"faces": [[50, 0, 20]], "thickness": 2}));
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    let com = run(&mut s, "inspect.center_of_mass", json!({}));
+    let entry = |list: &Value, key: &str, name: &str| -> Value {
+        list.as_array().and_then(|l| l.iter().find(|b| b[key] == name)).cloned().unwrap_or_else(|| panic!("{name} in {list}"))
+    };
+    for name in ["Ball", "Cup"] {
+        let (m, c) = (entry(&measured["bodies"], "name", name), entry(&com["bodies"], "body", name));
+        assert!(close(&c["volume"], m["volume_mm3"].as_f64().unwrap(), 1e-9), "{name}: {c} vs {m}");
+        for axis in 0..3 {
+            assert!(close(&c["center"][axis], m["center_of_mass"][axis].as_f64().unwrap(), 1e-9), "{name}: {c} vs {m}");
+        }
+    }
+    assert!(close(&com["volume"], measured["total"]["volume_mm3"].as_f64().unwrap(), 1e-6), "{com} vs {measured}");
+    assert_eq!(com["skipped"].as_array().map(Vec::len), Some(0), "{com}");
+    // Worked out by hand: the sphere is 4/3 pi r^3, the cup a cylinder less its 8 x 18 bore.
+    let ball = 4.0 / 3.0 * PI * 1000.0;
+    let cup = PI * (100.0 * 20.0 - 64.0 * 18.0);
+    let (b, c) = (entry(&com["bodies"], "body", "Ball"), entry(&com["bodies"], "body", "Cup"));
+    assert!(close(&b["volume"], ball, ball * 2e-4), "{b}: want {ball}");
+    assert!(close(&c["volume"], cup, cup * 2e-4), "{c}: want {cup}");
 }
 
 /// An ASCII STL of the tetrahedron (0,0,0), (10,0,0), (0,10,0), (0,0,10), outward facing; `open`

@@ -1,0 +1,143 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 0,
+    "name": "Block"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     100.0,
+     100.0
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Block",
+    "distance": 30,
+    "body_name": "Frame"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 30,
+    "name": "Recess"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     6.0,
+     6.0
+    ],
+    "p1": [
+     94.0,
+     94.0
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Recess",
+    "distance": -12,
+    "operation": "cut",
+    "targets": [
+     "Frame"
+    ]
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 0,
+    "name": "Ring"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     2.5,
+     2.5
+    ],
+    "p1": [
+     97.5,
+     97.5
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     16.0,
+     16.0
+    ],
+    "p1": [
+     84.0,
+     84.0
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Ring",
+    "distance": 17.5,
+    "operation": "cut",
+    "targets": [
+     "Frame"
+    ],
+    "profiles": [
+     {
+      "point": [
+       9.25,
+       50.0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      97.5,
+      10.416666666666666,
+      5.833333333333333
+     ]
+    ],
+    "thickness": 0.5
+   }
+  }
+ ]
+}

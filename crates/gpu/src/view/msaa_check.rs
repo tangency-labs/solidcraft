@@ -95,7 +95,9 @@ impl Renderer {
         }
         let slot = |scene| Arc::new(Mutex::new(scene));
         let frame = Frame {
+            product_lights: None,
             product: false,
+            upload_error: None,
             key: 1,
             slot: slot(Some(model)),
             sketch_key: 2,
@@ -105,21 +107,26 @@ impl Renderer {
             pv_key: 4,
             pv_slot: slot(None),
             pv_hide: false,
+            preview_bounds: None,
             view_proj: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.5, 1.0]],
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
             clip: [0.0; 4],
             cap: [0.0; 4],
             images: Vec::new(),
+            clouds: Vec::new(),
             analysis: [0.0; 8],
             analysis_colors: [0.0; 36],
             access: None,
             outline: false,
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,
+            ao_samples: crate::view::AO_SAMPLES,
+            sky: [0.0; 4],
             ssaa: 1.0,
             hover_tint: [0.0; 3],
             selection_tint: [0.0; 3],
+            hatch: Default::default(),
         };
         let size = wgpu::Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 };
         let color = device.create_texture(&wgpu::TextureDescriptor {

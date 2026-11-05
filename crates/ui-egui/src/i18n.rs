@@ -57,19 +57,24 @@ impl Catalog {
 
 static ENGLISH: Catalog = Catalog::new("en", "English", include_str!(concat!(env!("OUT_DIR"), "/locales/en.json")));
 static ARABIC: Catalog = Catalog::new("ar", "العربية", include_str!(concat!(env!("OUT_DIR"), "/locales/ar.json")));
+static BOSNIAN: Catalog = Catalog::new("bs", "Bosanski", include_str!(concat!(env!("OUT_DIR"), "/locales/bs.json")));
+static CATALAN: Catalog = Catalog::new("ca", "Català", include_str!(concat!(env!("OUT_DIR"), "/locales/ca.json")));
 static CZECH: Catalog = Catalog::new("cs", "Čeština", include_str!(concat!(env!("OUT_DIR"), "/locales/cs.json")));
 static DANISH: Catalog = Catalog::new("da", "Dansk", include_str!(concat!(env!("OUT_DIR"), "/locales/da.json")));
 static GERMAN: Catalog = Catalog::new("de", "Deutsch", include_str!(concat!(env!("OUT_DIR"), "/locales/de.json")));
 /// English in UK spelling: only the messages whose spelling differs; the rest are English's.
 static ENGLISH_UK: Catalog = Catalog::new("en-GB", "English (UK)", include_str!(concat!(env!("OUT_DIR"), "/locales/en-GB.json")));
 static SPANISH: Catalog = Catalog::new("es", "Español (España)", include_str!(concat!(env!("OUT_DIR"), "/locales/es.json")));
+static FINNISH: Catalog = Catalog::new("fi", "Suomi", include_str!(concat!(env!("OUT_DIR"), "/locales/fi.json")));
 static FRENCH: Catalog = Catalog::new("fr", "Français", include_str!(concat!(env!("OUT_DIR"), "/locales/fr.json")));
 static GALICIAN: Catalog = Catalog::new("gl", "Galego", include_str!(concat!(env!("OUT_DIR"), "/locales/gl.json")));
 static HEBREW: Catalog = Catalog::new("he", "עברית", include_str!(concat!(env!("OUT_DIR"), "/locales/he.json")));
+static CROATIAN: Catalog = Catalog::new("hr", "Hrvatski", include_str!(concat!(env!("OUT_DIR"), "/locales/hr.json")));
 static HUNGARIAN: Catalog = Catalog::new("hu", "Magyar", include_str!(concat!(env!("OUT_DIR"), "/locales/hu.json")));
 static INDONESIAN: Catalog = Catalog::new("id", "Bahasa Indonesia", include_str!(concat!(env!("OUT_DIR"), "/locales/id.json")));
 static ITALIAN: Catalog = Catalog::new("it", "Italiano", include_str!(concat!(env!("OUT_DIR"), "/locales/it.json")));
 static JAPANESE: Catalog = Catalog::new("ja", "日本語", include_str!(concat!(env!("OUT_DIR"), "/locales/ja.json")));
+static GEORGIAN: Catalog = Catalog::new("ka", "ქართული", include_str!(concat!(env!("OUT_DIR"), "/locales/ka.json")));
 static KOREAN: Catalog = Catalog::new("ko", "한국어", include_str!(concat!(env!("OUT_DIR"), "/locales/ko.json")));
 static MALAY: Catalog = Catalog::new("ms", "Bahasa Melayu", include_str!(concat!(env!("OUT_DIR"), "/locales/ms.json")));
 static NORWEGIAN: Catalog = Catalog::new("nb", "Norsk bokmål", include_str!(concat!(env!("OUT_DIR"), "/locales/nb.json")));
@@ -78,6 +83,7 @@ static POLISH: Catalog = Catalog::new("pl", "Polski", include_str!(concat!(env!(
 static PORTUGUESE_BR: Catalog = Catalog::new("pt-BR", "Português (Brasil)", include_str!(concat!(env!("OUT_DIR"), "/locales/pt-BR.json")));
 static ROMANIAN: Catalog = Catalog::new("ro", "Română", include_str!(concat!(env!("OUT_DIR"), "/locales/ro.json")));
 static RUSSIAN: Catalog = Catalog::new("ru", "Русский", include_str!(concat!(env!("OUT_DIR"), "/locales/ru.json")));
+static SERBIAN: Catalog = Catalog::new("sr", "Српски", include_str!(concat!(env!("OUT_DIR"), "/locales/sr.json")));
 static SWEDISH: Catalog = Catalog::new("sv", "Svenska", include_str!(concat!(env!("OUT_DIR"), "/locales/sv.json")));
 static TURKISH: Catalog = Catalog::new("tr", "Türkçe", include_str!(concat!(env!("OUT_DIR"), "/locales/tr.json")));
 static UKRAINIAN: Catalog = Catalog::new("uk", "Українська", include_str!(concat!(env!("OUT_DIR"), "/locales/uk.json")));
@@ -90,18 +96,23 @@ static CHINESE_TRADITIONAL: Catalog = Catalog::new("zh-TW", "繁體中文", incl
 pub const LOCALES: &[&Catalog] = &[
     &ENGLISH,
     &ARABIC,
+    &BOSNIAN,
+    &CATALAN,
     &CZECH,
     &DANISH,
     &GERMAN,
     &ENGLISH_UK,
     &SPANISH,
+    &FINNISH,
     &FRENCH,
     &GALICIAN,
     &HEBREW,
+    &CROATIAN,
     &HUNGARIAN,
     &INDONESIAN,
     &ITALIAN,
     &JAPANESE,
+    &GEORGIAN,
     &KOREAN,
     &MALAY,
     &NORWEGIAN,
@@ -110,6 +121,7 @@ pub const LOCALES: &[&Catalog] = &[
     &PORTUGUESE_BR,
     &ROMANIAN,
     &RUSSIAN,
+    &SERBIAN,
     &SWEDISH,
     &TURKISH,
     &UKRAINIAN,
@@ -122,12 +134,82 @@ pub fn is_supported(id: &str) -> bool {
     LOCALES.iter().any(|catalog| catalog.id == id)
 }
 
+/// The `language` preference value that follows the system (#10138). Not a catalog id: it
+/// resolves through [`system_language`] wherever a catalog is needed.
+pub const SYSTEM: &str = "system";
+
+/// Match the system's preferred locale tags against the catalogs: the exact tag first
+/// (`zh-TW`, `pt-BR`, `en-GB`), then the tag's base language (`zh-CN` → `zh`, `de-AT` → `de`),
+/// then English. A Chinese tag goes by its script or region instead ([`chinese_catalog`]).
+/// Tags come in the system's order of preference; the first one that matches wins.
+pub fn match_system_tags(tags: &[String]) -> &'static str {
+    for tag in tags {
+        let tag = tag.replace('_', "-");
+        if let Some(catalog) = chinese_catalog(&tag) {
+            return catalog;
+        }
+        if let Some(catalog) = LOCALES.iter().find(|catalog| catalog.id.eq_ignore_ascii_case(&tag)) {
+            return catalog.id;
+        }
+        let base = tag.split('-').next().unwrap_or(&tag);
+        if let Some(catalog) = LOCALES.iter().find(|catalog| catalog.id.eq_ignore_ascii_case(base)) {
+            return catalog.id;
+        }
+    }
+    ENGLISH.id
+}
+
+/// The catalog for a Chinese tag (#10306): by its script when it has one (`Hant` → `zh-TW`,
+/// `Hans` → `zh`), else by its region (`TW`, `HK` and `MO` use Traditional characters, so
+/// `zh-TW`; any other region, or none, `zh`). macOS lists its languages with a script
+/// (`zh-Hant-TW`), which no catalog matches exactly, and the base `zh` is Simplified.
+fn chinese_catalog(tag: &str) -> Option<&'static str> {
+    let mut parts = tag.split('-');
+    if !parts.next().is_some_and(|base| base.eq_ignore_ascii_case("zh")) {
+        return None;
+    }
+    let rest: Vec<&str> = parts.collect();
+    let traditional = match rest.iter().find(|part| part.len() == 4) {
+        Some(script) => script.eq_ignore_ascii_case("Hant"),
+        None => rest.iter().any(|part| ["TW", "HK", "MO"].iter().any(|region| part.eq_ignore_ascii_case(region))),
+    };
+    let id = if traditional { "zh-TW" } else { "zh" };
+    LOCALES.iter().find(|catalog| catalog.id == id).map(|catalog| catalog.id)
+}
+
+/// The catalog id the system asks for, read once per process: the OS locale on desktop
+/// (Windows, macOS, Linux/BSD) and `navigator.languages` in the browser.
+pub fn system_language() -> &'static str {
+    SYSTEM_LANGUAGE.get_or_init(|| {
+        // Tests read the same words on every PC, whatever its language.
+        if cfg!(test) { ENGLISH.id } else { match_system_tags(&sys_locale::get_locales().collect::<Vec<_>>()) }
+    })
+}
+
+static SYSTEM_LANGUAGE: OnceLock<&'static str> = OnceLock::new();
+
+/// `cfg!(test)` for the tests outside this crate, which link it without that: they all start from
+/// the test harness, which calls this first.
+pub(crate) fn pin_system_language() {
+    let _ = SYSTEM_LANGUAGE.set(ENGLISH.id);
+}
+
+/// The catalog id a `language` preference resolves to: the saved choice, or the system's for
+/// [`SYSTEM`]. For callers that need the id as text (font fallbacks), not a [`Locale`].
+pub fn effective_language(preference: &str) -> &'static str {
+    Locale::for_language(preference).0.id
+}
+
 /// Immutable locale reference. Catalogs parse once; lookups are logarithmic.
 #[derive(Clone, Copy)]
 pub struct Locale(&'static Catalog);
 
 impl Locale {
     pub fn for_language(id: &str) -> Self {
+        if id == SYSTEM {
+            let system = system_language();
+            return Self(LOCALES.iter().copied().find(|catalog| catalog.id == system).unwrap_or(&ENGLISH));
+        }
         Self(LOCALES.iter().copied().find(|catalog| catalog.id == id).unwrap_or(&ENGLISH))
     }
 
@@ -196,14 +278,20 @@ impl Locale {
     }
 
     /// A name someone gave (a body, sketch, component, …): shown as typed, even when it matches
-    /// a UI label ("Fillet", "Boss"); only the default names are translated.
+    /// a UI label ("Fillet", "Boss"); only the default names are translated. A right-to-left name
+    /// is given in display order like a catalog message (see [`crate::bidi`]), so a multi-word
+    /// Hebrew or Arabic name reads from the right like the interface's own labels (#10471).
     pub fn given_name(self, text: &str) -> String {
-        self.default_name(text).unwrap_or_else(|| text.to_string())
+        self.default_name(text).unwrap_or_else(|| crate::bidi::visual(text).into_owned())
     }
 
     /// Evaluation errors stay English for scripts; the empty Cut/Intersect hint that names
-    /// another component is translated where it is shown. Other text is returned unchanged.
+    /// another component, and a feature's request to reselect a reference it lost, are translated
+    /// where they are shown. Other text is returned unchanged.
     pub fn diagnostic(self, text: &str) -> String {
+        if let Some((feature, reference)) = solidcraft_engine::doc::reselect_parts(text) {
+            return self.format("diagnostic.reselect_reference", &[("feature", &self.given_name(feature)), ("reference", reference)]);
+        }
         const PREFIX: &str = "there is no body to cut or intersect in component '";
         if let Some((before, detail)) = text.split_once(PREFIX)
             && let Some((component, detail)) = detail.split_once("'; the tool may overlap '")
@@ -269,6 +357,26 @@ thread_local! {
     // Helpers without an app reference share a render scope. Nested renders restore
     // their caller's locale; no owned language strings or persistent global setting.
     static CURRENT: Cell<Locale> = const { Cell::new(Locale(&ENGLISH)) };
+    /// Theme-authored language maps are already resolved and are not catalog source labels.
+    static RESOLVED_LABELS: Cell<bool> = const { Cell::new(false) };
+}
+
+#[must_use]
+pub(crate) struct ResolvedLabels {
+    previous: bool,
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+/// Shared controls can render supplied translations verbatim while retaining catalog messages.
+pub(crate) fn resolved_labels() -> ResolvedLabels {
+    let previous = RESOLVED_LABELS.with(|labels| labels.replace(true));
+    ResolvedLabels { previous, _thread: std::marker::PhantomData }
+}
+
+impl Drop for ResolvedLabels {
+    fn drop(&mut self) {
+        RESOLVED_LABELS.with(|labels| labels.set(self.previous));
+    }
 }
 
 #[must_use]
@@ -298,7 +406,7 @@ pub fn tr(id: &str) -> &str {
     CURRENT.with(|current| current.get().text(id))
 }
 pub fn tr_label(label: &str) -> &str {
-    CURRENT.with(|current| current.get().label(label))
+    if RESOLVED_LABELS.with(Cell::get) { label } else { CURRENT.with(|current| current.get().label(label)) }
 }
 
 /// Every English catalog entry `(id, text)`, for Preferences search to match a translation
@@ -321,8 +429,123 @@ pub fn tr_diagnostic(text: &str) -> String {
     CURRENT.with(|current| current.get().diagnostic(text))
 }
 
+/// The id of an offset curve an engine error names at the start, `` `{id}` ``.
+fn offset_error_id<'a>(text: &'a str, middle: &str, end: &str) -> Option<&'a str> {
+    let rest = text.strip_prefix('`')?;
+    let (id, rest) = rest.split_once('`')?;
+    (rest.contains(middle) && rest.ends_with(end)).then_some(id)
+}
+
+/// Translate known engine error messages using i18n keys.
+/// If the error message is not recognized, returns it unchanged.
+pub fn tr_engine_error(error: &str) -> String {
+    // `EngineError::BadParams` carries `invalid parameters for `<command>`: ` in front.
+    let text = error.strip_prefix("invalid parameters for `").and_then(|rest| rest.split_once("`: ")).map_or(error, |(_, text)| text);
+    if text == "nothing to break at there" {
+        return tr("sketch.error.nothing_to_break").to_string();
+    }
+    if let Some(id) = offset_error_id(
+        text,
+        " is an offset, and its ends follow its source curves: ",
+        " the source curves instead, or break the offset association first",
+    ) {
+        return format("sketch.error.offset_trim", &[("id", id)]);
+    }
+    if let Some(id) = offset_error_id(
+        text,
+        " is an offset, and its corners follow its source curves: ",
+        " the source corners before offsetting, or break the offset association first",
+    ) {
+        return format("sketch.error.offset_fillet_chamfer", &[("id", id)]);
+    }
+    if text == "a closed curve needs two crossings to trim" {
+        return tr("sketch.error.closed_curve_two_crossings").to_string();
+    }
+    error.to_string()
+}
+
 #[cfg(test)]
 mod tests {
+    /// The system's locale tags pick a catalog: exact tag, then base language, then English (#10138).
+    #[test]
+    fn system_tags_match_the_catalog_exact_then_base_then_english() {
+        let tags = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(super::match_system_tags(&tags(&["zh-TW"])), "zh-TW", "exact tag");
+        assert_eq!(super::match_system_tags(&tags(&["pt-BR"])), "pt-BR");
+        assert_eq!(super::match_system_tags(&tags(&["en-GB"])), "en-GB");
+        assert_eq!(super::match_system_tags(&tags(&["zh-CN"])), "zh", "base language of zh-CN");
+        assert_eq!(super::match_system_tags(&tags(&["de-AT"])), "de");
+        assert_eq!(super::match_system_tags(&tags(&["zh_CN"])), "zh", "underscores normalize");
+        assert_eq!(super::match_system_tags(&tags(&["FR"])), "fr", "case-insensitive");
+        assert_eq!(super::match_system_tags(&tags(&["nl"])), "nl", "bare base tag");
+        assert_eq!(super::match_system_tags(&tags(&["pt-PT"])), "en", "pt has no catalog: English");
+        assert_eq!(super::match_system_tags(&tags(&["xx-YY"])), "en", "unknown: English");
+        assert_eq!(super::match_system_tags(&tags(&[])), "en", "nothing: English");
+        assert_eq!(super::match_system_tags(&tags(&["xx-YY", "de-DE"])), "de", "the first tag that matches wins");
+        // #10306: a Chinese tag goes by its script, else by its region.
+        for (tag, want) in [
+            ("zh-Hant-TW", "zh-TW"),
+            ("zh-Hant-HK", "zh-TW"),
+            ("zh-Hant", "zh-TW"),
+            ("zh_Hant_MO", "zh-TW"),
+            ("ZH-HANT-tw", "zh-TW"),
+            ("zh-Hant-CN", "zh-TW"),
+            ("zh-HK", "zh-TW"),
+            ("zh-MO", "zh-TW"),
+            ("zh-Hans-CN", "zh"),
+            ("zh-Hans", "zh"),
+            ("zh-Hans-TW", "zh"),
+            ("zh-SG", "zh"),
+            ("zh", "zh"),
+        ] {
+            assert_eq!(super::match_system_tags(&tags(&[tag])), want, "{tag}");
+        }
+        // Other languages keep the exact tag, then the base language.
+        assert_eq!(super::match_system_tags(&tags(&["sr-Latn-RS"])), "sr");
+        assert_eq!(super::match_system_tags(&tags(&["zhx-TW", "de"])), "de", "only zh itself is Chinese");
+    }
+
+    /// Tests name English words, so the PC's own language never reaches them (#10297).
+    #[test]
+    fn tests_take_english_as_the_system_language() {
+        assert_eq!(super::system_language(), "en");
+    }
+
+    /// A saved language is never overridden: only `system` resolves through the OS (#10138).
+    #[test]
+    fn a_saved_language_choice_is_never_overridden() {
+        assert_eq!(super::Locale::for_language("de").name(), "Deutsch");
+        assert_eq!(super::Locale::for_language("zh-TW").name(), "繁體中文");
+        assert_eq!(super::effective_language("de"), "de");
+        assert_eq!(super::effective_language("ja"), "ja");
+        // A first start has no saved language: the default follows the system.
+        assert_eq!(crate::prefs::Prefs::default().language, super::SYSTEM);
+        // A saved choice in the settings file wins over the default.
+        let saved: crate::prefs::Prefs = serde_json::from_str(r#"{"language":"ja"}"#).unwrap();
+        assert_eq!(saved.language, "ja");
+        // `system` is a preference value, not a catalog: it never enters the language list.
+        assert!(!super::is_supported(super::SYSTEM));
+        assert!(super::is_supported(super::effective_language(super::SYSTEM)), "system resolves to a catalog");
+    }
+
+    #[test]
+    fn theme_options_resolved_labels_are_verbatim_and_restore_catalog_adapters() {
+        let _language = super::scope("de");
+        assert_eq!(super::tr_label("Profile"), "Profil");
+        {
+            let _labels = super::resolved_labels();
+            assert_eq!(super::tr_label("Profile"), "Profile");
+            assert_eq!(super::tr_label("ui.cancel"), "ui.cancel");
+            assert_ne!(super::tr("ui.cancel"), "ui.cancel", "stable catalog messages remain translated");
+            {
+                let _nested = super::resolved_labels();
+                assert_eq!(super::tr_label("Profile"), "Profile");
+            }
+            assert_eq!(super::tr_label("Profile"), "Profile");
+        }
+        assert_eq!(super::tr_label("Profile"), "Profil");
+    }
+
     use super::*;
 
     /// Strings a pull request adds under `assets/locales/pending/` work before they are folded
@@ -338,6 +561,31 @@ mod tests {
                     // pending files hold it in reading order, as the catalogs do (#7527).
                     assert_eq!(Locale::for_language(&locale).text(&id), crate::bidi::visual_template(&text), "{locale}: {id}");
                 }
+            }
+        }
+    }
+
+    /// A name someone gave is shown in display order, like a catalog message: a multi-word
+    /// Hebrew name must read from the right, not with its words backwards (#10471).
+    #[test]
+    fn given_names_are_shown_in_display_order() {
+        let _language = scope("he");
+        assert_eq!(tr_name("לוח עליון קטן"), "קטן עליון לוח");
+        assert_eq!(tr_name("לוח"), "לוח", "one word is shown as it is");
+        assert_eq!(tr_name("Top plate"), "Top plate", "Latin is shown as it is");
+        assert_eq!(tr_name("Body2"), tr("browser.body_name").replace("{number}", "2"), "default names stay translated");
+        let _arabic = scope("ar");
+        assert_eq!(tr_name("لوحة علوية صغيرة"), "صغيرة علوية لوحة");
+    }
+
+    #[test]
+    fn construction_operation_names_exist_in_every_supported_catalog() {
+        let family = crate::sketch_families::family("sketch.construction_line").unwrap();
+        for catalog in LOCALES {
+            assert!(catalog.messages().get("ui.construction.ribbon_label").is_some_and(|v| !v.trim().is_empty()), "{}: ribbon label", catalog.id);
+            for id in family.commands {
+                let key = format!("cmd.{id}");
+                assert!(catalog.messages().get(&key).is_some_and(|v| !v.trim().is_empty()), "{}: {key}", catalog.id);
             }
         }
     }
@@ -386,6 +634,18 @@ mod tests {
         }
         let plain = "there is no body to cut or intersect";
         assert_eq!(Locale::for_language("ja").diagnostic(plain), plain);
+    }
+
+    #[test]
+    fn reselect_reference_diagnostic_translates_with_the_feature_and_reference_as_given() {
+        let message = solidcraft_engine::doc::DocError::reselect("F4:side:c1#1|F4:top").in_feature("Fillet {2}").to_string();
+        assert_eq!(Locale::for_language("en").diagnostic(&message), message);
+        for language in ["ar", "de", "he", "ja", "ko", "zh"] {
+            let translated = Locale::for_language(language).diagnostic(&message);
+            assert_ne!(translated, message, "{language}");
+            // Right-to-left text comes back in display order, so only what it holds is checked.
+            assert!(translated.contains("Fillet {2}") && translated.contains("`F4:side:c1#1|F4:top`"), "{language}: {translated}");
+        }
     }
 
     /// English first, then by id, so adding a locale edits only its own line.
@@ -683,7 +943,6 @@ mod tests {
                 "BATCH",
                 "Shots",
                 "Shots Strip",
-                "Strip",
                 "Pick",
                 "Component",
                 "The live preview shows direct light only and no shadows.",
@@ -695,7 +954,35 @@ mod tests {
             // rather than requiring its spelling to differ from English.
             assert!(locale.0.messages().contains_key("toolbar.render_studio"));
             assert_eq!(locale.label("STUDIO"), locale.text("toolbar.render_studio"));
-            for id in ["render.pick_label", "render.pick_body", "render.pick_face", "render.pick_component", "render.pick_help"] {
+            let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
+            for id in english.keys().filter(|id| id.starts_with("render.inspector_")) {
+                assert!(locale.0.messages().contains_key(id), "{language}: {id}");
+            }
+            for id in [
+                "render.pick_label",
+                "render.pick_body",
+                "render.pick_face",
+                "render.pick_component",
+                "render.pick_help",
+                "render.tree_browser",
+                "render.tree_search",
+                "render.tree_more",
+                "render.shots_save",
+                "render.shots_name_help",
+                "render.shots_no_result",
+                "render.shots_result",
+                "render.studios_environments",
+                "render.frame_presets",
+                "render.size_presets",
+                "render.frame_presets_pending",
+                "render.size_presets_pending",
+                "render.search_appearances",
+                "render.library_applicable",
+                "render.library_other",
+                "render.library_apply_hint",
+                "render.studio_tiles_require_gpu",
+                "render.environment_tiles_require_raytrace",
+            ] {
                 assert_ne!(locale.text(id), Locale::for_language("en").text(id), "{language}: {id}");
             }
             let session = solidcraft_engine::Session::default();
@@ -707,13 +994,73 @@ mod tests {
         }
     }
 
+    #[test]
+    fn output_viewer_labels_exist_in_all_required_catalogs() {
+        for language in ["en", "de", "ja", "ko", "zh"] {
+            let locale = Locale::for_language(language);
+            for key in [
+                "cmd.render_output_size",
+                "cmd.render_result_view",
+                "cmd.render_result_close",
+                "cmd.render_result_copy",
+                "cmd.render_lights_add",
+                "render.output_destination",
+                "render.output_destination_help",
+                "render.output_backend_ready",
+                "render.output_dimensions",
+                "render.output_effects",
+                "render.output_advanced",
+                "render.output_copy",
+                "render.output_fit",
+                "render.output_export",
+                "render.output_view_image",
+                "render.effects_gpu_only",
+                "render.output_image",
+                "render.output_check_summary",
+                "render.output_presets_help",
+                "render.size_preview",
+                "render.size_full_hd",
+                "render.size_4k",
+                "render.size_square",
+                "render.size_custom",
+                "render.output_format",
+                "render.output_exr_unavailable",
+                "render.output_largest",
+                "render.output_quality",
+                "render.output_quality_waiting",
+                "render.quality_draft",
+                "render.quality_balanced",
+                "render.quality_high",
+                "render.quality_custom",
+                "render.output_check",
+                "render.output_check_help",
+                "render.output_ready",
+                "render.output_size_ok",
+                "render.check_transmission",
+                "render.check_opaque",
+                "render.check_sorted_alpha",
+                "render.state_model",
+                "render.state_in_progress",
+                "render.state_completed",
+                "render.result_actual",
+                "render.radial_assign",
+                "render.radial_save",
+                "render.radial_fit",
+                "render.radial_compare",
+                "render.wait_add_light",
+            ] {
+                assert!(locale.0.messages().contains_key(key), "{language}: {key}");
+            }
+        }
+    }
+
     /// The mouse mapping picker shows its preset's help through `tr_label`, which the guard above
     /// can't see: the text sits in a struct field, not in a call. Each one must be the English text
     /// of its preset's catalog message, or it stays English in every locale.
     #[test]
     fn navigation_preset_help_reaches_the_catalog() {
         let english = Locale::for_language("en");
-        for preset in &crate::prefs::NAV_PRESETS {
+        for preset in crate::prefs::NAV_PRESETS {
             let id = format!("nav.{}.help", preset.id);
             assert_eq!(english.text(&id), preset.help, "{id}");
         }
@@ -1050,6 +1397,18 @@ mod tests {
     }
 
     #[test]
+    fn finnish_catalog_is_registered_and_translates_keys() {
+        let fi = Locale::for_language("fi");
+        assert_eq!(fi.name(), "Suomi");
+        assert!(is_supported("fi"));
+        assert_eq!(fi.text("ui.preferences"), "Asetukset");
+        assert_eq!(fi.format("document.save_changes", &[("name", "My {design}")]), "Tallennetaanko muutokset tiedostoon My {design}?");
+        assert_eq!(fi.format("dialog.selected_count", &[("count", "2")]), "↖ 2 valittu");
+        assert_eq!(fi.label("Fillet"), "Pyöristys");
+        assert_eq!(fi.label("NonExistentKey"), "NonExistentKey");
+    }
+
+    #[test]
     fn ukrainian_catalog_translates_keys_labels_and_browser_patterns() {
         let uk = Locale::for_language("uk");
         assert_eq!(uk.name(), "Українська");
@@ -1094,6 +1453,10 @@ mod tests {
     #[test]
     fn new_languages_translate_keys_labels_and_default_names() {
         for (id, name, preferences, extrude, sketch1, save) in [
+            ("bs", "Bosanski", "Postavke", "Ekstrudiraj", "Skica1", "Sačuvati promjene u My {design}?"),
+            ("hr", "Hrvatski", "Postavke", "Ekstrudiraj", "Skica1", "Spremiti promjene u My {design}?"),
+            ("sr", "Српски", "Подешавања", "Екструдирај", "Скица1", "Сачувати промене у My {design}?"),
+            ("ka", "ქართული", "პარამეტრები", "ამოწევა", "ესკიზი1", "შევინახოთ ცვლილებები My {design}-ში?"),
             ("hu", "Magyar", "Beállítások", "Kihúzás", "Vázlat1", "Menti a(z) My {design} módosításait?"),
             ("id", "Bahasa Indonesia", "Preferensi", "Ekstrusi", "Sketsa1", "Simpan perubahan ke My {design}?"),
             ("nl", "Nederlands", "Voorkeuren", "Extruderen", "Schets1", "Wijzigingen in My {design} opslaan?"),
@@ -1166,6 +1529,7 @@ mod tests {
     const KIT_CALLS: &[KitCall] = &[
         // layout.rs: `sized_row` draws `tr_label(text)`, and every row builder reaches it.
         KitCall { name: "row", args: &[1], id: false, trim: &[1] },
+        KitCall { name: "status_line", args: &[1], id: false, trim: &[] },
         KitCall { name: "expr_row", args: &[1], id: false, trim: &[1] },
         KitCall { name: "hint_row", args: &[1], id: false, trim: &[1] },
         KitCall { name: "text_row", args: &[1], id: false, trim: &[1] },
@@ -1178,6 +1542,7 @@ mod tests {
         KitCall { name: "cell_editor", args: &[3], id: false, trim: &[] },
         KitCall { name: "bounded_cell_editor", args: &[3], id: false, trim: &[] },
         KitCall { name: "search_field", args: &[3], id: false, trim: &[] },
+        KitCall { name: "menu_filter", args: &[3], id: false, trim: &[] },
         KitCall { name: "placement_field", args: &[3], id: false, trim: &[] },
         KitCall { name: "library_cell", args: &[3], id: false, trim: &[] },
         // actions.rs
@@ -1850,8 +2215,8 @@ mod tests {
 
     /// The names the hand-written kit probes import, exactly as a UI file would.
     const KIT_IMPORTS: &str = concat!(
-        "use crate::ui_kit::{row, expr_row, hint_row, text_row, choice_row, section, section_count, ",
-        "multiline_text_field, dropdown, cell_editor, bounded_cell_editor, search_field, placement_field, ",
+        "use crate::ui_kit::{row, status_line, expr_row, hint_row, text_row, choice_row, section, section_count, ",
+        "multiline_text_field, dropdown, cell_editor, bounded_cell_editor, search_field, menu_filter, placement_field, ",
         "library_cell, icon_button_at, icon_button_colored, footer, button, primary_button, ",
         "wide_primary_button, action_menu, compact_button, icon_label_button, command_menu_button, ",
         "checkbox_grid, options, checkbox_row, toggle_icon, removable_header, bin_button, ",
@@ -1874,6 +2239,7 @@ mod tests {
     fn every_kit_call_is_read_at_its_real_signature() {
         let cases: &[(&str, &[&str])] = &[
             ("row(ui, \"row\", |ui| {})", &["row"]),
+            ("status_line(ui, \"status_line\", StatusTone::Dim)", &["status_line"]),
             ("expr_row(ui, \"expr_row\", value)", &["expr_row"]),
             ("hint_row(ui, \"hint_row\", value, hint)", &["hint_row"]),
             ("text_row(ui, \"text_row\", value, hint)", &["text_row"]),
@@ -1888,6 +2254,7 @@ mod tests {
             ("cell_editor(ui, id, value, \"cell_editor\", invalid)", &["cell_editor"]),
             ("bounded_cell_editor(ui, id, value, \"bounded_cell_editor\", invalid, limit)", &["bounded_cell_editor"]),
             ("search_field(ui, id, value, \"search_field\")", &["search_field"]),
+            ("menu_filter(ui, id, value, \"menu_filter\")", &["menu_filter"]),
             ("placement_field(ui, id, value, \"placement_field\")", &["placement_field"]),
             ("library_cell(ui, id, value, \"library_cell\", |ui| {})", &["library_cell"]),
             ("icon_button_at(ui, rect, icon, \"icon_button_at\")", &["icon_button_at"]),

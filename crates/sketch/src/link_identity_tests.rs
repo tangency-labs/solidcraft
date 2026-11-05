@@ -360,3 +360,101 @@ fn edge_on_face_lays_out_as_one_silhouette_line_and_stays_current() {
     assert_eq!(sk.link_curves(&link).len(), 4);
     assert!(!sk.link(&link).unwrap().lost);
 }
+
+/// A conic that comes with a link (projected geometry) takes the curve prefix `n` like a drawn
+/// one, not the constraints' `k` (#6173).
+#[test]
+fn linked_conic_curves_take_the_n_prefix_not_the_constraints_k() {
+    let mut sk = Sketch::new();
+    let geom = vec![
+        LinkGeom::Line(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)),
+        LinkGeom::Conic { a: Vec2::new(10.0, 0.0), apex: Vec2::new(15.0, 4.0), b: Vec2::new(20.0, 0.0), rho: 0.5 },
+    ];
+    let link = sk.add_link(LinkKind::Project, LinkSource::Origin, &geom).unwrap();
+    let ids: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    assert_eq!(ids, vec!["l1".to_string(), "n1".to_string()], "linked curve ids");
+}
+
+/// A face seen edge-on was saved as two lines on the same two points, one each way, and is one
+/// line now. Re-resolving it must not give the first line a new id: an offset names it as its
+/// source, and lost it ("an offset source vanished or changed shape").
+#[test]
+fn edge_on_face_saved_as_a_line_pair_keeps_the_line_an_offset_follows() {
+    let (a, b) = (Vec2::new(5.0, 5.0), Vec2::new(15.0, 5.0));
+    let mut sk = Sketch::new();
+    // `add_link` makes one line of a reversed pair, so lay the pair out the way a saved file has it.
+    let link = "j1".to_string();
+    let (pa, pb) = (sk.add_point(a, None).unwrap(), sk.add_point(b, None).unwrap());
+    for (from, to, id) in [(pa, pb, "l1"), (pb, pa, "l2")] {
+        let c = sk.add_line_pts(from, to, Some(id)).unwrap();
+        sk.curves[c].link = Some(link.clone());
+    }
+    for point in [pa, pb] {
+        sk.points[point].link = Some(link.clone());
+    }
+    sk.links.push(Link {
+        id: link.clone(),
+        kind: LinkKind::Project,
+        source: face(),
+        face_name: None,
+        edge_name: None,
+        auto_face: false,
+        lost: false,
+    });
+    let ids: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    assert_eq!(ids.len(), 2, "the saved link holds the pair");
+    let (p, q) = (sk.add_point(Vec2::new(5.0, 3.0), None).unwrap(), sk.add_point(Vec2::new(15.0, 3.0), None).unwrap());
+    let out = sk.add_line_pts(p, q, None).unwrap();
+    let out_id = sk.curves[out].id.clone();
+    sk.offsets.push(crate::offset::OffsetChain {
+        sources: vec![(ids[0].clone(), true)],
+        outputs: vec![out_id],
+        distance: -2.0,
+        closed: false,
+        topology: None,
+    });
+    sk.refresh_offsets().unwrap();
+
+    sk.update_link(&link, &[LinkGeom::Line(a, Vec2::new(17.0, 5.0))]).unwrap();
+
+    let kept: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    assert_eq!(kept, vec![ids[0].clone()], "the first line keeps its id");
+    sk.refresh_offsets().unwrap();
+    let end = sk.points[sk.link_points(&link)[1]].pos;
+    assert_eq!(end, Vec2::new(17.0, 5.0), "the line moved to the new geometry");
+}
+
+/// #5388: a circle the user drew on a projected hole's centre survives when the face changes
+/// shape and its projection is rebuilt (a second hole added to the face).
+#[test]
+fn rebuilt_face_keeps_a_users_circle_on_its_projected_centre() {
+    let mut sk = Sketch::new();
+    let hole = |c: Vec2| LinkGeom::Circle(c, 2.1);
+    let face_with = |holes: &[Vec2]| square(15.0).into_iter().chain(holes.iter().map(|c| hole(*c))).collect::<Vec<_>>();
+    let link = sk.add_link(LinkKind::Project, face(), &face_with(&[Vec2::ZERO])).unwrap();
+    // The projected hole's centre point.
+    let centre = sk
+        .link_curves(&link)
+        .into_iter()
+        .find_map(|i| match sk.curves[i].kind {
+            CurveKind::Circle { c, .. } => Some(c),
+            _ => None,
+        })
+        .unwrap();
+    let mine = sk.add_curve(CurveKind::Circle { c: centre, r: 5.25 }, Some("c_mine")).unwrap();
+    assert!(sk.curves[mine].link.is_none());
+    // The face gains two more holes: the projection's shape changes, so it is rebuilt.
+    assert!(sk.update_link(&link, &face_with(&[Vec2::ZERO, Vec2::new(-10.0, 0.0), Vec2::new(10.0, 0.0)])).unwrap());
+    let kept = sk.curves.iter().find(|c| c.id == "c_mine").expect("the user's circle survives the rebuild");
+    assert!(kept.link.is_none());
+    match kept.kind {
+        CurveKind::Circle { c, r } => {
+            assert_eq!(r, 5.25);
+            let p = &sk.points[c];
+            assert!(p.link.is_none(), "it sits on a point of its own, not a projected one");
+            assert!(p.pos.len() < 1e-9, "still at the hole's centre: {:?}", p.pos);
+        }
+        ref k => panic!("not a circle: {k:?}"),
+    }
+    assert_eq!(sk.link_curves(&link).len(), 4 + 3, "the projection is the new outline and holes");
+}

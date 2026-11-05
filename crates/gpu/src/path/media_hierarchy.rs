@@ -2,7 +2,8 @@
 //! only a candidate; parent convexity and child vertices are checked against
 //! every outward parent half-space. Intersections and touching boundaries refuse.
 use super::scene::{Triangle, reserved};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 use solidcraft_render::job::{CancelToken, ErrorCode, JobError, Result};
 use std::ops::Range;
 

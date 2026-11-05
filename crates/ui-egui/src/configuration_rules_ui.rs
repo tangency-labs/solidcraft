@@ -1,6 +1,7 @@
 //! Structured configuration rule editing and non-mutating row preview.
 use crate::SolveApp;
 use crate::ui_kit;
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::Ui;
 use serde_json::{Value, json};
 use solidcraft_engine::doc::config::{Column, ConfigRule, RuleCondition, RuleEffect, RuleOperator};
@@ -18,6 +19,10 @@ pub struct Editor {
     pub(super) drafts: std::collections::BTreeMap<(String, String), String>,
     /// The configuration table at a design revision: the command's answer and its shown cells.
     pub(super) table: Option<std::sync::Arc<(u64, Value, super::Table)>>,
+    /// The Add Column menu's filter text, and whether the menu was open last frame (the filter
+    /// takes focus when the menu opens and is cleared when it closes).
+    pub(super) column_filter: String,
+    pub(super) column_menu_open: bool,
 }
 impl Default for Editor {
     fn default() -> Self {
@@ -39,6 +44,8 @@ impl Default for Editor {
             focus_new_row: false,
             drafts: Default::default(),
             table: None,
+            column_filter: String::new(),
+            column_menu_open: false,
         }
     }
 }
@@ -80,6 +87,10 @@ pub(super) fn show(ui: &mut Ui, app: &mut SolveApp, error: &mut Option<String>, 
     let features: Vec<(u64, String)> = app.session.doc.features.iter().map(|f| (f.id, f.name.clone())).collect();
     let suppression_features: Vec<(u64, String)> =
         features.iter().filter(|(id, _)| app.session.doc.configs.columns.contains(&Column::Suppress(*id))).cloned().collect();
+    // A rule's target must be a column of the table (the engine refuses any other), so the Then
+    // lists leave out what has none; a note then says so, where When lists everything (#10532).
+    let unlisted_features = suppression_features.len() < features.len();
+    let unlisted_parameters = all_parameters.iter().any(|p| !parameters.contains(p));
     ui_kit::divider(ui, "configuration_rules");
     ui_kit::text(ui, crate::i18n::tr_label("Configuration rules"), ui_kit::Text::Heading("rules_heading"));
     ui_kit::text(
@@ -106,13 +117,13 @@ pub(super) fn show(ui: &mut Ui, app: &mut SolveApp, error: &mut Option<String>, 
                 if ui_kit::button(ui, crate::i18n::tr_label("Edit"), ui_kit::Button::Normal).clicked() {
                     editor.rule = rule.clone();
                 }
-                let up = ui_kit::button(ui, "↑", ui_kit::Button::Enabled(index > 0)).on_hover_text(crate::i18n::tr_label("Move earlier"));
+                let up = ui_kit::button(ui, "↑", ui_kit::Button::Enabled(index > 0)).backing_on_hover_text(crate::i18n::tr_label("Move earlier"));
                 crate::scenario::publish_handle(&format!("config:rule:{}:up", rule.id), up.rect.center());
                 if up.clicked() {
                     *error = app.run("config.rule", json!({"id":rule.id,"index":index-1})).err();
                 }
                 if ui_kit::button(ui, "↓", ui_kit::Button::Enabled(index + 1 < rules.len()))
-                    .on_hover_text(crate::i18n::tr_label("Move later"))
+                    .backing_on_hover_text(crate::i18n::tr_label("Move later"))
                     .clicked()
                 {
                     *error = app.run("config.rule", json!({"id":rule.id,"index":index+1})).err();
@@ -173,17 +184,20 @@ pub(super) fn show(ui: &mut Ui, app: &mut SolveApp, error: &mut Option<String>, 
             RuleEffect::DriveParameter { parameter, expression: value } => {
                 ui.vertical(|ui| {
                     choose(ui, "effect_parameter", parameter, &parameters);
+                    columns_note(ui, unlisted_parameters, "config.rule_parameter_columns");
                     expression(ui, "Value", value);
                 });
             }
             RuleEffect::DriveSuppression { feature, value } => {
                 ui.vertical(|ui| {
                     feature_choice(ui, "effect_feature", feature, &suppression_features);
+                    columns_note(ui, unlisted_features, "config.rule_suppression_columns");
                     ui_kit::checkbox(ui, crate::i18n::tr_label("Suppressed"), value);
                 });
             }
             RuleEffect::ParameterRange { parameter, minimum, maximum } => {
                 choose(ui, "range_parameter", parameter, &parameters);
+                columns_note(ui, unlisted_parameters, "config.rule_parameter_columns");
                 ui.vertical(|ui| {
                     expression(ui, "Minimum", minimum);
                 });
@@ -193,6 +207,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut SolveApp, error: &mut Option<String>, 
             }
             RuleEffect::AllowParameterValues { parameter, expressions } => {
                 choose(ui, "allowed_parameter", parameter, &parameters);
+                columns_note(ui, unlisted_parameters, "config.rule_parameter_columns");
                 let mut text = expressions.join("; ");
                 if ui_kit::row(ui, "Allowed expressions, separated by semicolons", |ui| ui_kit::text_field(ui, &mut text, "").1) {
                     *expressions = text.split(';').map(|s| s.trim().to_string()).collect();
@@ -306,6 +321,13 @@ pub(super) fn show(ui: &mut Ui, app: &mut SolveApp, error: &mut Option<String>, 
             });
         }
     });
+}
+/// Under a Then list that leaves some out (`unlisted`): only the table's columns are listed, and
+/// how to add one.
+fn columns_note(ui: &mut Ui, unlisted: bool, message: &'static str) {
+    if unlisted {
+        ui_kit::text(ui, crate::i18n::tr(message), ui_kit::Text::Note(message));
+    }
 }
 fn report(ui: &mut Ui, text: impl AsRef<str>) {
     ui_kit::text(ui, crate::i18n::tr_label(text.as_ref()), ui_kit::Text::Report("rule_report", false));

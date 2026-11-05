@@ -1,0 +1,17 @@
+{
+ "sources": [],
+ "what": "two 10 x 10 sheets sharing the edge x = 10, stitched: one surface body of two faces",
+ "source": "analytic",
+ "method": "area 200; the shared edge used by both faces, the outline's 6 edges free; B goes into A",
+ "valid": false,
+ "body_count": 1,
+ "faces": [
+  1,
+  2
+ ],
+ "boundary_edges": 6,
+ "area_mm2": 200.0,
+ "surface_types": [
+  "plane"
+ ]
+}

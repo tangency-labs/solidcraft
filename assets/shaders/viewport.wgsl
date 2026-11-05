@@ -10,7 +10,7 @@ struct U {
     acc_u: vec4<f32>,  // accessibility map axes (xyz, offset)
     acc_v: vec4<f32>,
     eye: vec4<f32>,    // eye position, w = 1 for perspective (0: orthographic, looking along -back)
-    ao: vec4<f32>,     // radius in world units (zero: disabled)
+    ao: vec4<f32>,     // x: radius in world units (zero: disabled), y: samples per pixel
     // analysis colours (`theme::AnalysisColors`): draft positive, between, negative; reachable,
     // blocked; curvature flat, middle, tight
     ana_c: array<vec4<f32>, 8>,
@@ -18,6 +18,11 @@ struct U {
     depth: vec4<f32>,  // x = 1: reversed depth (1 near, 0 far); y, z: the faces' push (`FACE_BIAS`)
     tint: vec4<f32>,   // xyz added to a whole hovered body's colour before lighting
     sel: vec4<f32>,    // xyz a whole selected body's colour before lighting
+    // the section hatch colours by part (`solidcraft_render::hatch`), the first the cap's own
+    hatch: array<vec4<f32>, 3>,
+    product_lights_meta: vec4<f32>, // explicit preview flag and bounded count
+    product_lights: array<vec4<f32>,84>, // position/kind, radiance, axis/cone, attenuation
+    sky: vec4<f32>,    // xyz = world up; w = 1: shade in linear light with a sky fill (#7974)
 };
 
 fn reversed() -> bool {
@@ -32,19 +37,29 @@ fn near_z(c: vec4<f32>) -> f32 {
 
 @group(1) @binding(2) var acc_t: texture_2d<f32>;
 @group(2) @binding(0) var ao_depth: texture_2d<u32>;
+@group(2) @binding(1) var ao_map: texture_2d<f32>;
 
 fn clipped(p: vec3<f32>) -> bool {
     return length(u.clip.xyz) > 0.5 && dot(u.clip.xyz, p) > u.clip.w;
 }
 @group(0) @binding(0) var<uniform> u: U;
-// The scene's colours, 2048 entries to a row: an R32Uint texture rather than a storage buffer,
-// so the viewport draws on WebGL2 (which has no storage buffers) as well.
+// The scene's colours, 2048 entries to a row: an Rg32Uint texture rather than a storage buffer,
+// so the viewport draws on WebGL2 (which has no storage buffers) as well. Each entry is the
+// colour's bytes, then 1 + the section hatch of the body it colours (0: the cap's own).
 @group(0) @binding(1) var pal: texture_2d<u32>;
 
-/// The colour at palette entry `i`, as byte/255 (the old Unorm8x4 conversion, bit for bit).
-fn palette(i: u32) -> vec4<f32> {
-    let v = textureLoad(pal, vec2<i32>(i32(i & 2047u), i32(i >> 11u)), 0).x;
+fn palette_entry(i: u32) -> vec2<u32> {
+    return textureLoad(pal, vec2<i32>(i32(i & 2047u), i32(i >> 11u)), 0).xy;
+}
+
+/// A palette entry's colour bytes as byte/255 (the old Unorm8x4 conversion, bit for bit).
+fn unpack_color(v: u32) -> vec4<f32> {
     return vec4<f32>(f32(v & 255u), f32((v >> 8u) & 255u), f32((v >> 16u) & 255u), f32((v >> 24u) & 255u)) / 255.0;
+}
+
+/// The colour at palette entry `i`.
+fn palette(i: u32) -> vec4<f32> {
+    return unpack_color(palette_entry(i).x);
 }
 
 fn to_linear(c: vec3<f32>) -> vec3<f32> {
@@ -59,10 +74,12 @@ fn out_color(c: vec4<f32>) -> vec4<f32> {
 }
 
 struct TOut {
-    @builtin(position) pos: vec4<f32>,
+    @invariant @builtin(position) pos: vec4<f32>,
     @location(0) n: vec3<f32>,
     @location(1) c: vec4<f32>,
     @location(2) wp: vec3<f32>,
+    // 1 + the section hatch of the body (0: the cap's own), from the palette.
+    @location(3) @interpolate(flat) h: u32,
 };
 
 @vertex
@@ -70,7 +87,9 @@ fn vs_tri(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: 
     var o: TOut;
     o.pos = u.vp * vec4<f32>(p, 1.0);
     o.n = n;
-    o.c = palette(c);
+    let e = palette_entry(c);
+    o.c = unpack_color(e.x);
+    o.h = e.y;
     o.wp = p;
     return o;
 }
@@ -92,7 +111,9 @@ fn vs_tri_inst(
     var o: TOut;
     o.pos = u.vp * vec4<f32>(wp, 1.0);
     o.n = vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n));
-    o.c = palette(c);
+    let e = palette_entry(c);
+    o.c = unpack_color(e.x);
+    o.h = e.y;
     o.wp = wp;
     return o;
 }
@@ -104,9 +125,10 @@ fn vs_tri_inst(
 /// stores every vertex's outputs: more of them cost more than the triangles' shared vertices
 /// save).
 struct FOut {
-    @builtin(position) pos: vec4<f32>,
+    @invariant @builtin(position) pos: vec4<f32>,
     @location(0) rp: vec3<f32>,
     @location(1) c: vec4<f32>,
+    @location(2) @interpolate(flat) h: u32,
 };
 
 @vertex
@@ -122,7 +144,9 @@ fn vs_tri_inst_flat(
     var o: FOut;
     o.pos = u.vp * vec4<f32>(wp, 1.0);
     o.rp = wp - u.eye.xyz;
-    o.c = palette(c);
+    let e = palette_entry(c);
+    o.c = unpack_color(e.x);
+    o.h = e.y;
     return o;
 }
 
@@ -138,6 +162,7 @@ fn flat_fragment(i: FOut, front: bool) -> TOut {
     o.pos = i.pos;
     o.n = n;
     o.c = i.c;
+    o.h = i.h;
     o.wp = i.rp + u.eye.xyz;
     return o;
 }
@@ -206,10 +231,46 @@ fn fs_ao_depth_flat(i: FOut, @builtin(front_facing) front: bool) -> AoDepth {
     return opaque_depth(t, front);
 }
 
+@fragment
+fn fs_ao_term_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let t = flat_fragment(i, front);
+    return ao_term(t, front);
+}
+
 /// Opaque model surfaces: cut by the section plane/// Opaque model surfaces: cut by the section plane, the inside shows as a flat cap colour.
 @fragment
 fn fs_solid(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     let c = solid(i, front);
+    return c;
+}
+
+/// A section's crossing count (`Cut::count` in `view.rs`): nothing but the cut itself, so the
+/// stencil counts only the faces behind the section plane. The colour is not written.
+@fragment
+fn fs_clip(i: TOut) -> @location(0) vec4<f32> {
+    if (clipped(i.wp)) { discard; }
+    return vec4<f32>(0.0);
+}
+
+@fragment
+fn fs_clip_flat(i: FOut) -> @location(0) vec4<f32> {
+    if (clipped(i.rp + u.eye.xyz)) { discard; }
+    return vec4<f32>(0.0);
+}
+
+/// Faces where the section plane is outside every closed body (`Cut::rest`): a back face seen
+/// there is the inside of an open body (a surface body, a solid with faces left out), lit as it
+/// is without a section rather than hatched, since there is no cut face to show.
+@fragment
+fn fs_solid_open(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let c = solid(i, true);
+    return c;
+}
+
+@fragment
+fn fs_solid_open_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let t = flat_fragment(i, front);
+    let c = solid(t, true);
     return c;
 }
 
@@ -218,8 +279,8 @@ struct CutOut {
     @builtin(frag_depth) depth: f32,
 };
 
-/// The section cap (the inside seen through the cut, drawn on the far walls' back faces where
-/// they are the visible surface) again, at the depth of the section plane rather than of the
+/// The section cap (where the section plane lies inside a body, drawn on the far walls' back
+/// faces) again, at the depth of the section plane rather than of the
 /// far wall, so the cut face hides what lies inside the body instead of showing it like a
 /// pane of glass.
 @fragment
@@ -264,11 +325,19 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
     if (clipped(i.wp)) { discard; }
     if (!front && length(u.clip.xyz) > 0.5) {
         // The cut face in its body's colour ("from component" colouring), tinted toward the
-        // cap colour so it reads as a cut, hatched at 45 degrees on screen; with the hatch off
+        // cap colour so it reads as a cut, hatched at 45 degrees on screen; by part, toward the
+        // body's own hatch colour and at its angle (45 or 135 degrees). With the hatch off
         // (`u.cap.a` 0), plain in the body's own colour.
         if (u.cap.a < 0.5) { return out_color(vec4<f32>(i.c.rgb, 1.0)); }
-        let base = mix(i.c.rgb, u.cap.rgb, 0.35);
-        let h = fract((i.pos.x + i.pos.y) / 9.0);
+        var tint = u.cap.rgb;
+        var turn = 1.0;
+        if (i.h > 0u) {
+            let k = i.h - 1u;
+            tint = u.hatch[min(k >> 1u, 2u)].rgb;
+            turn = select(1.0, -1.0, (k & 1u) == 1u);
+        }
+        let base = mix(i.c.rgb, tint, 0.35);
+        let h = fract((i.pos.x + turn * i.pos.y) / 9.0);
         return out_color(vec4<f32>(select(base, base * 0.6, h < 0.22), 1.0));
     }
     if (u.ana.x > 0.5 && length(i.n) > 0.5) {
@@ -297,6 +366,13 @@ fn fs_ao_depth(i: TOut, @builtin(front_facing) front: bool) -> AoDepth {
     return opaque_depth(i, front);
 }
 
+// The virtual ground preserves the viewport background; only contact occlusion is blended.
+@fragment
+fn fs_ground_ao(i: TOut) -> @location(0) vec4<f32> {
+    if (clipped(i.wp)) { discard; }
+    return vec4<f32>(0.0, 0.0, 0.0, 1.0 - occlusion(i));
+}
+
 /// The AO prepass's depth of an opaque surface's fragment.
 fn opaque_depth(i: TOut, front: bool) -> AoDepth {
     if (clipped(i.wp) || length(i.n) < 0.5) { discard; }
@@ -305,11 +381,89 @@ fn opaque_depth(i: TOut, front: bool) -> AoDepth {
     return AoDepth(depth, bitcast<u32>(depth));
 }
 
+/// The term for an opaque surface's fragment, on the prepass's depth. A section's cut face has none.
+fn ao_term(i: TOut, front: bool) -> vec4<f32> {
+    if (clipped(i.wp) || length(i.n) < 0.5) { discard; }
+    if (!front && length(u.clip.xyz) > 0.5) { return vec4<f32>(1.0); }
+    return vec4<f32>(occlusion_term(i));
+}
+
+@fragment
+fn fs_ao_term(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    return ao_term(i, front);
+}
+
+@vertex
+fn vs_ao_blur(@builtin(vertex_index) v: u32) -> @builtin(position) vec4<f32> {
+    let p = vec2<f32>(f32((v << 1u) & 2u), f32(v & 2u));
+    return vec4<f32>(p * 2.0 - 1.0, 0.0, 1.0);
+}
+
+/// The depth map at `p`, reading 0 near and 1 far whichever way the buffer runs.
+fn map_depth(p: vec2<i32>) -> f32 {
+    let at = clamp(p, vec2<i32>(0), vec2<i32>(textureDimensions(ao_depth)) - vec2<i32>(1));
+    let d = bitcast<f32>(textureLoad(ao_depth, at, 0).x);
+    return select(d, 1.0 - d, reversed());
+}
+
+/// The raw term (`ao_map` in this pass) averaged over a 4 x 4 window, which holds every turn of
+/// [`ao_turn`]'s pattern once. A neighbour counts when it lies on this pixel's plane, the slope
+/// taken from the nearer side across each axis, so no surface's shade crosses an edge.
+@fragment
+fn fs_ao_blur(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let c = vec2<i32>(pos.xy);
+    let d = map_depth(c);
+    if (d >= 1.0) { return vec4<f32>(1.0); }
+    let left = d - map_depth(c + vec2<i32>(-1, 0));
+    let right = map_depth(c + vec2<i32>(1, 0)) - d;
+    let above = d - map_depth(c + vec2<i32>(0, -1));
+    let below = map_depth(c + vec2<i32>(0, 1)) - d;
+    let dx = select(right, left, abs(left) < abs(right));
+    let dy = select(below, above, abs(above) < abs(below));
+    let tolerance = 1.5 * (abs(dx) + abs(dy)) + 1e-6;
+    let last = vec2<i32>(textureDimensions(ao_map)) - vec2<i32>(1);
+    var sum = 0.0;
+    var weight = 0.0;
+    for (var y = -2; y < 2; y = y + 1) {
+        for (var x = -2; x < 2; x = x + 1) {
+            let p = c + vec2<i32>(x, y);
+            let s = map_depth(p);
+            if (s < 1.0 && abs(s - (d + dx * f32(x) + dy * f32(y))) <= tolerance) {
+                sum = sum + textureLoad(ao_map, clamp(p, vec2<i32>(0), last), 0).x;
+                weight = weight + 1.0;
+            }
+        }
+    }
+    return vec4<f32>(sum / max(weight, 1.0));
+}
+
+/// A pixel's turn of the sample pattern: every 4 x 4 window holds each of 16 turns once.
+fn ao_turn(pos: vec2<f32>) -> f32 {
+    let x = u32(pos.x) & 3u;
+    let y = u32(pos.y) & 3u;
+    // WGSL won't mix shifts and `|` without parentheses; naga takes it, browsers refuse it (#11080).
+    let v = (((x ^ y) & 1u) << 3u) | ((y & 1u) << 2u) | (((x ^ y) >> 1u) << 1u) | (y >> 1u);
+    return (f32(v) + 0.5) / 16.0;
+}
+
+/// The lit pass's occlusion: the blurred term where this point falls in the map, whatever the
+/// window's viewport offset and supersampling.
+fn occlusion(i: TOut) -> f32 {
+    let size = vec2<i32>(textureDimensions(ao_map));
+    // The maps are 1 × 1 stand-ins until a frame draws into them (the product preview draws no
+    // prepass, and AO off releases them): they tell nothing, so leave the surface unoccluded.
+    if (u.ao.x <= 0.0 || length(i.n) < 0.5 || size.x < 2 || size.y < 2) { return 1.0; }
+    let q = u.vp * vec4<f32>(i.wp, 1.0);
+    if (q.w <= 0.0) { return 1.0; }
+    let uv = vec2<f32>(q.x / q.w * 0.5 + 0.5, 0.5 - q.y / q.w * 0.5);
+    return textureLoad(ao_map, clamp(vec2<i32>(uv * vec2<f32>(size)), vec2<i32>(0), size - vec2<i32>(1)), 0).x;
+}
+
 // Cosine-weighted hemisphere samples, the pattern turned by a different angle at each pixel.
 // Projecting the sample and a point one radius toward the eye supplies a depth range in both
 // orthographic and perspective views; distant foreground geometry cannot cast a dark halo onto
 // a background surface.
-fn occlusion(i: TOut) -> f32 {
+fn occlusion_term(i: TOut) -> f32 {
     let radius = u.ao.x;
     if (radius <= 0.0 || length(i.n) < 0.5) { return 1.0; }
     var n = normalize(i.n);
@@ -323,19 +477,21 @@ fn occlusion(i: TOut) -> f32 {
     if (size.x < 2 || size.y < 2) { return 1.0; }
     // The same offsets at every pixel made each sample darken its own shifted copy of a nearby
     // part's outline: faint ghosts of the part where the radius is large on screen (#4167),
-    // stepped bands along contacts where it is small (#3407). Turned by interleaved gradient
-    // noise (Jimenez 2014), neighbouring pixels sample different points and the copies break up
-    // into an even grain.
-    let turn = fract(52.9829189 * fract(dot(i.pos.xy, vec2<f32>(0.06711056, 0.00583715))));
+    // stepped bands along contacts where it is small (#3407). Turned, neighbouring pixels sample
+    // different points, the copies break up into grain, and the blur takes the grain out (#9327).
+    let turn = ao_turn(i.pos.xy);
     let t = tangent * cos(turn * 6.28318531) + bitangent * sin(turn * 6.28318531);
     let b = cross(n, t);
     // One comparison for both depth directions: depths read as 0 near / 1 far (mirrored when
     // the buffer runs reversed). The map is cleared to its far plane either way, so a texel
     // with nothing in it reads as 1 and the `d < 1.0` test below skips it.
     let flip = reversed();
+    // Fewer samples while the view moves (#7165), spread over the same hemisphere. 32 is the
+    // still picture's count, `AO_SAMPLES` in view.rs.
+    let count = u32(clamp(u.ao.y, 1.0, 32.0));
     var blocked = 0.0;
-    for (var j = 0u; j < 32u; j = j + 1u) {
-        let f = (f32(j) + 0.5) / 32.0;
+    for (var j = 0u; j < count; j = j + 1u) {
+        let f = (f32(j) + 0.5) / f32(count);
         let angle = f32(j) * 2.39996323;
         let direction = t * (cos(angle) * sqrt(f)) + b * (sin(angle) * sqrt(f)) + n * sqrt(1.0 - f);
         let reach = radius * (0.2 + 0.8 * fract(f32(j) * 0.61803399 + 0.5));
@@ -356,7 +512,7 @@ fn occlusion(i: TOut) -> f32 {
             blocked = blocked + smoothstep(0.005, 0.15, delta) * (1.0 - smoothstep(0.5, 1.0, delta));
         }
     }
-    return 1.0 - 0.85 * blocked / 32.0;
+    return 1.0 - 0.85 * blocked / f32(count);
 }
 
 /// How fast the normal turns across the pixel (per mm).
@@ -380,8 +536,13 @@ fn analysis(i: TOut, k: f32) -> vec4<f32> {
         let r = reflect(-v, n);
         var side = cross(v, vec3<f32>(0.0, 0.0, 1.0));
         if (length(side) < 1e-3) { side = vec3<f32>(1.0, 0.0, 0.0); }
-        let s = sin(dot(r, normalize(side)) * u.ana.y * 3.14159265);
-        let c = select(0.08, 0.95, s > 0.0);
+        let x = dot(r, normalize(side));
+        let s = sin(x * u.ana.y * 3.14159265);
+        // A face whose normal lies in the upright plane through the view (every horizontal
+        // face) reflects straight ahead: its sideways part is zero, on the edge between a black
+        // and a white stripe, and rounding picked one or the other from frame to frame while
+        // the view turned (#2153). Straight ahead is white.
+        let c = select(0.08, 0.95, s > 0.0 || abs(x) < 1e-4);
         return out_color(vec4<f32>(vec3<f32>(c), 1.0));
     }
     if (u.ana.x > 4.5) {
@@ -468,8 +629,63 @@ fn shade(i: TOut) -> vec4<f32> {
     return lit(i, 1.0);
 }
 
+fn product_light_unit(v: vec3<f32>) -> vec3<f32> {
+    let scale=max(max(abs(v.x),abs(v.y)),abs(v.z));
+    if scale == 0.0 { return vec3<f32>(0.0,0.0,1.0); }
+    return normalize(v/scale);
+}
+
+// Direction and incident radiance for an unshadowed analytic preview sample.
+fn product_light_sample(k: u32, p: vec3<f32>) -> mat2x3<f32> {
+    let source=u.product_lights[k*4u];
+    let colour=u.product_lights[k*4u+1u];
+    let axis=u.product_lights[k*4u+2u];
+    let falloff=u.product_lights[k*4u+3u];
+    var direction=product_light_unit(source.xyz);
+    var weight=1.0;
+    if source.w > 0.5 {
+        let delta=source.xyz-p;
+        let distance=max(length(delta),falloff.y);
+        direction=product_light_unit(delta);
+        weight=falloff.x/max(distance*distance,0.000001);
+        if source.w == 2.0 {
+            let cosine=dot(product_light_unit(axis.xyz),-direction);
+            var cone=select(0.0,1.0,cosine>=colour.w);
+            if axis.w-colour.w>0.000001 {cone=smoothstep(colour.w,axis.w,cosine);}
+            weight *= cone;
+        }
+        if source.w == 3.0 {weight *= max(dot(product_light_unit(axis.xyz),-direction),0.0);}
+    }
+    return mat2x3<f32>(direction,colour.xyz*weight);
+}
+
 fn lit(i: TOut, visibility: f32) -> vec4<f32> {
     return lit_color(i, visibility, i.c);
+}
+
+/// sRGB to linear light, exact (the straight segment too, which `to_linear` leaves out).
+fn srgb_decode(c: vec3<f32>) -> vec3<f32> {
+    return select(c / 12.92, pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4)), c > vec3<f32>(0.04045));
+}
+
+fn srgb_encode(c: vec3<f32>) -> vec3<f32> {
+    let l = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+    return select(l * 12.92, 1.055 * pow(l, vec3<f32>(1.0 / 2.4)) - vec3<f32>(0.055), l > vec3<f32>(0.0031308));
+}
+
+/// The studio light summed in linear light, encoded once (#7974): the key and the eye fill as in
+/// [`lit_color`], over a sky fill that grows as the face turns up, and the 4% every dielectric
+/// reflects of that sky (a little more toward grazing), so a near-black face keeps a gradient. The sky
+/// and the fill are what ambient occlusion (`visibility`) takes away. sRGB out.
+fn sky_lit(base: vec3<f32>, n: vec3<f32>, diff: f32, fill: f32, visibility: f32) -> vec3<f32> {
+    let up = dot(n, normalize(u.sky.xyz)) * 0.5 + 0.5;
+    let sky = mix(0.18, 0.42, up);
+    // Schlick's rise toward grazing, tempered so mid-tones only gain a soft rim.
+    let fresnel = 0.04 + 0.2 * pow(1.0 - fill, 5.0);
+    let albedo = srgb_decode(base);
+    // Scaled so light and mid-grey faces land near where the sRGB shading puts them.
+    let light = albedo * (0.41 * diff + (0.66 * sky + 0.2 * fill) * visibility) + vec3<f32>(fresnel * sky * visibility);
+    return srgb_encode(light);
 }
 
 /// [`lit`] in a colour of its own: a whole highlighted body is lit in its colour lifted by the
@@ -482,11 +698,25 @@ fn lit_color(i: TOut, visibility: f32, base: vec4<f32>) -> vec4<f32> {
     let v = normalize(u.back.xyz);
     var n = normalize(i.n);
     if (dot(n, v) < 0.0) { n = -n; }
+    if u.product_lights_meta.x>0.0 {
+        var radiance=vec3<f32>(0.0);
+        for (var k=0u;k<min(u32(u.product_lights_meta.y),21u);k+=1u) {
+            if u.product_lights[k*4u].w == 4.0 {radiance+=to_linear(base.rgb)*u.product_lights[k*4u+1u].xyz/3.141592653589793;continue;}
+            let sample=product_light_sample(k,i.wp);
+            radiance+=to_linear(base.rgb)*sample[1]*(max(dot(n,sample[0]),0.0)/3.141592653589793);
+        }
+        let mapped=radiance/(vec3<f32>(1.0)+radiance);
+        let encoded=select(mapped*12.92,1.055*pow(mapped,vec3<f32>(1.0/2.4))-vec3<f32>(0.055),mapped>vec3<f32>(0.0031308));
+        return out_color(vec4<f32>(encoded,base.a));
+    }
     let key = normalize(v * 0.8 + vec3<f32>(-0.3, 0.2, 0.6));
     let diff = max(dot(n, key), 0.0);
     let fill = max(dot(n, v), 0.0);
     let h = normalize(key + v);
     let spec = pow(max(dot(n, h), 0.0), 40.0) * 0.25;
+    if u.sky.w > 0.5 {
+        return out_color(vec4<f32>(min(sky_lit(base.rgb, n, diff, fill, visibility) + vec3<f32>(spec), vec3<f32>(1.0)), base.a));
+    }
     let k = 0.42 + 0.38 * diff + 0.25 * fill - (0.42 + 0.25 * fill) * (1.0 - visibility);
     return out_color(vec4<f32>(min(base.rgb * k + vec3<f32>(spec), vec3<f32>(1.0)), base.a));
 }
@@ -579,7 +809,9 @@ fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(
     let sb = cb.xy / max(cb.w, 1e-6) * half;
     var dir = sb - sa;
     let len = length(dir);
-    if (len < 1e-6) { dir = vec2<f32>(1.0, 0.0); } else { dir = dir / len; }
+    // Intel OpenGL can miscompile vector/scalar division here (#8053). Scalar
+    // quotients keep the same direction and the fallback for a point.
+    if (len < 1e-6) { dir = vec2<f32>(1.0, 0.0); } else { dir = vec2<f32>(dir.x / len, dir.y / len); }
     let nrm = vec2<f32>(-dir.y, dir.x);
     // Two triangles: corners (t, side).
     var ts = array<f32, 6>(0.0, 1.0, 1.0, 0.0, 1.0, 0.0);
@@ -649,4 +881,241 @@ fn fs_img(i: IOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_line_all(i: LOut) -> @location(0) vec4<f32> {
     return out_color(i.c);
+}
+
+// Point clouds and their cells (`view/clouds.rs`): dots, segments as beads (or lines when they
+// have no size) and triangles, from one record per element. The cloud's style colours them by
+// their own colour, a ramp or a palette, and shows only those whose filtered values lie in its
+// ranges or sets; values vary across an element, so a range cuts it where its value crosses an end.
+
+struct Cloud {
+    style: vec4<f32>,               // x: colour (0 own, 1 ramp, 2 palette), y: dot size (px), z, w: ramp range
+    filters: array<vec4<f32>, 4>,   // x: kind (0 off, 1 range y…z, 2 whole values y + i for the bits i of w)
+};
+@group(1) @binding(3) var<uniform> cloud: Cloud;
+
+struct CIn {
+    @location(0) a: vec3<f32>,
+    @location(1) b: vec3<f32>,
+    @location(2) c: vec3<f32>,
+    @location(8) before: vec3<f32>,
+    @location(9) after: vec3<f32>,
+    @location(3) v: vec3<f32>,
+    @location(4) f0: vec3<f32>,
+    @location(5) f1: vec3<f32>,
+    @location(10) f2: vec3<f32>,
+    @location(11) f3: vec3<f32>,
+    @location(6) size: vec2<f32>,
+    @location(7) rgb: vec4<f32>,
+};
+
+struct COut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) wp: vec3<f32>,
+    @location(1) n: vec3<f32>,     // zero: not lit
+    @location(2) v: f32,
+    @location(3) f: vec4<f32>,
+    @location(4) rgb: vec3<f32>,
+    @location(5) at: vec2<f32>,    // a dot's place on its disc
+    @location(6) @interpolate(flat) has: u32,
+};
+
+fn cloud_out(i: CIn, w: vec3<f32>, wp: vec3<f32>, pos: vec4<f32>, n: vec3<f32>) -> COut {
+    var o: COut;
+    o.pos = pos;
+    o.wp = wp;
+    o.n = n;
+    o.v = dot(w, i.v);
+    o.f = vec4<f32>(dot(w, i.f0), dot(w, i.f1), dot(w, i.f2), dot(w, i.f3));
+    o.rgb = i.rgb.rgb;
+    o.at = vec2<f32>(0.0);
+    o.has = u32(round(i.rgb.a * 255.0));
+    return o;
+}
+
+fn behind(c: vec4<f32>) -> bool {
+    return near_z(c) < 0.0;
+}
+
+@vertex
+fn vs_cloud_dot(@builtin(vertex_index) vi: u32, i: CIn) -> COut {
+    var xs = array<f32, 6>(-1.0, 1.0, 1.0, -1.0, 1.0, -1.0);
+    var ys = array<f32, 6>(-1.0, -1.0, 1.0, -1.0, 1.0, 1.0);
+    let at = vec2<f32>(xs[vi], ys[vi]);
+    let size = max(cloud.style.y, 1.0);
+    let centre = u.vp * vec4<f32>(i.a, 1.0);
+    var pos = vec4<f32>(centre.xy + at * size / u.screen.xy * centre.w, centre.z, centre.w);
+    if (behind(centre)) { pos = vec4<f32>(0.0, 0.0, 0.0, -1.0); }
+    var o = cloud_out(i, vec3<f32>(1.0, 0.0, 0.0), i.a, pos, vec3<f32>(0.0));
+    // Dots under two pixels are squares: a disc that small loses its centre pixel.
+    o.at = at * select(1.0, 0.0, size < 2.0);
+    return o;
+}
+
+/// The least half-width of a segment on screen, in pixels.
+const MIN_HALF_PX: f32 = 0.75;
+
+/// The frame of a bead along `d`: along it, across it level, and up, its height axis.
+fn bead_frame(d: vec3<f32>) -> mat3x3<f32> {
+    var t = vec3<f32>(1.0, 0.0, 0.0);
+    if (length(d) > 1e-9) { t = d / length(d); }
+    var side = cross(vec3<f32>(0.0, 0.0, 1.0), t);
+    if (length(side) < 1e-6) { side = vec3<f32>(1.0, 0.0, 0.0); }
+    side = normalize(side);
+    return mat3x3<f32>(t, side, cross(t, side));
+}
+
+/// Corner `j` (0…9) of a bead's cross-section, a stadium: its place across and up, and its
+/// normal. Corners 0…4 go up the right half-disc, 5…9 down the left one, so 4–5 is the flat top
+/// and 9–0 the flat bottom.
+fn stadium(j: u32, size: vec2<f32>) -> vec4<f32> {
+    let k = j % 10u;
+    let right = k < 5u;
+    let a = -1.5707963 + 0.7853982 * f32(k % 5u) + select(3.1415927, 0.0, right);
+    let r = 0.5 * size.y;
+    let flat_half = 0.5 * max(size.x - size.y, 0.0);
+    return vec4<f32>(select(-flat_half, flat_half, right) + r * cos(a), r * sin(a), cos(a), sin(a));
+}
+
+/// Whether filter `f` keeps the value `v`.
+fn cloud_keeps(f: vec4<f32>, v: f32) -> bool {
+    if (f.x < 0.5) { return true; }
+    if (f.x < 1.5) { return v >= f.y && v <= f.z; }
+    let k = i32(round(v)) - i32(round(f.y));
+    return k >= 0 && k < 32 && ((bitcast<u32>(f.w) >> u32(k)) & 1u) != 0u;
+}
+
+/// Whether filter `f` leaves out a whole element with values `v` at its corners: all on one
+/// side of a range, or one value at every corner, not kept. A set of values with corners that
+/// differ may keep part of the element: its fragments decide.
+fn cloud_drops(f: vec4<f32>, v: vec3<f32>) -> bool {
+    if (f.x > 1.5) { return all(v == vec3<f32>(v.x)) && !cloud_keeps(f, v.x); }
+    return f.x > 0.5 && (all(v < vec3<f32>(f.y)) || all(v > vec3<f32>(f.z)));
+}
+
+/// Whether a filter leaves out the whole element.
+fn filtered_out(i: CIn) -> bool {
+    let has = u32(round(i.rgb.a * 255.0));
+    let values = array<vec3<f32>, 4>(i.f0, i.f1, i.f2, i.f3);
+    for (var k = 0u; k < 4u; k++) {
+        if (((has >> k) & 1u) != 0u && cloud_drops(cloud.filters[k], values[k])) { return true; }
+    }
+    return false;
+}
+
+/// The part in front of the near plane of the segment between clip-space `a` and `b`, as
+/// fractions of it from `a`; empty (first above second) when all of it is behind. Clip-space
+/// coordinates are affine along a line, so the crossing is exact.
+fn in_front(a: vec4<f32>, b: vec4<f32>) -> vec2<f32> {
+    let za = near_z(a);
+    let zb = near_z(b);
+    if (za < 0.0 && zb < 0.0) { return vec2<f32>(1.0, 0.0); }
+    let t = za / (za - zb);
+    return vec2<f32>(select(0.0, t, za < 0.0), select(1.0, t, zb < 0.0));
+}
+
+@vertex
+fn vs_cloud_segment(@builtin(vertex_index) vi: u32, i: CIn) -> COut {
+    // Corner `vi % 10` of the cross-section at the start (`vi < 10`) or the end; the index
+    // buffer joins them into the bead's sides.
+    let pa = u.vp * vec4<f32>(i.a, 1.0);
+    let pb = u.vp * vec4<f32>(i.b, 1.0);
+    let part = in_front(pa, pb);
+    if (filtered_out(i) || part.x > part.y) {
+        return cloud_out(i, vec3<f32>(1.0, 0.0, 0.0), i.a, vec4<f32>(0.0, 0.0, 0.0, -1.0), vec3<f32>(0.0));
+    }
+    // Where the near plane cuts it, the bead ends there, square; its numbers are exact at `e`.
+    let at_end = vi >= 10u;
+    let e = select(part.x, part.y, at_end);
+    let cut = e != select(0.0, 1.0, at_end);
+    let f = bead_frame(i.b - i.a);
+    let c = stadium(vi % 10u, i.size);
+    let axis = mix(i.a, i.b, e);
+    // Where it meets the next or the previous bead, the cross-section lies in the plane halfway
+    // between their directions, stretched across to keep its width: both beads end on the same
+    // section. A turn sharper than 120° ends square instead.
+    let other = select(i.a - i.before, i.after - i.b, at_end);
+    var across_dir = f[1];
+    var stretch = 1.0;
+    if (!cut && length(other) > 1e-9) {
+        let g = bead_frame(other);
+        let mid = f[1] + g[1];
+        if (length(mid) > 1e-6 && dot(normalize(mid), f[1]) > 0.5) {
+            across_dir = normalize(mid);
+            stretch = 1.0 / dot(across_dir, f[1]);
+        }
+    }
+    let wp = axis + across_dir * (c.x * stretch) + f[2] * c.y;
+    let ca = u.vp * vec4<f32>(axis, 1.0);
+    let cw = u.vp * vec4<f32>(wp, 1.0);
+    let half = u.screen.xy * 0.5;
+    var pos = cw;
+    // At least a pixel and a half across: a bead seen from afar, or a line without size. A corner
+    // behind the eye has no place on the screen and needs no widening: the rasteriser clips it.
+    if (cw.w > 0.0) {
+        let c0 = mix(pa, pb, part.x);
+        let c1 = mix(pa, pb, part.y);
+        let along = (c1.xy / c1.w - c0.xy / c0.w) * half;
+        var across = vec2<f32>(-along.y, along.x);
+        if (length(across) < 1e-6) { across = vec2<f32>(1.0, 0.0); }
+        across = normalize(across);
+        var px = (cw.xy / cw.w - ca.xy / ca.w) * half;
+        if (length(px) < MIN_HALF_PX * abs(c.z)) {
+            px = across * c.z * MIN_HALF_PX;
+            pos = vec4<f32>((ca.xy / ca.w + px / half) * cw.w, cw.z, cw.w);
+        }
+    }
+    let n = select(f[1] * c.z + f[2] * c.w, vec3<f32>(0.0), i.size.y <= 0.0);
+    return cloud_out(i, vec3<f32>(1.0 - e, e, 0.0), wp, pos, n);
+}
+
+@vertex
+fn vs_cloud_triangle(@builtin(vertex_index) vi: u32, i: CIn) -> COut {
+    // Not `w[vi] = 1.0`: the Windows D3D12 shader compiler cannot write through a dynamic vector index.
+    let w = vec3<f32>(f32(vi == 0u), f32(vi == 1u), f32(vi == 2u));
+    let wp = i.a * w.x + i.b * w.y + i.c * w.z;
+    var n = cross(i.b - i.a, i.c - i.a);
+    if (length(n) > 0.0) { n = normalize(n); }
+    // The true clip-space corner, even behind the eye: the rasteriser clips a triangle exactly.
+    return cloud_out(i, w, wp, u.vp * vec4<f32>(wp, 1.0), n);
+}
+
+fn cloud_ramp(t: f32) -> vec3<f32> {
+    var stops = array<vec3<f32>, 5>(
+        vec3<f32>(40.0, 70.0, 200.0), vec3<f32>(30.0, 170.0, 230.0), vec3<f32>(60.0, 200.0, 90.0),
+        vec3<f32>(240.0, 220.0, 60.0), vec3<f32>(230.0, 70.0, 50.0));
+    let k = clamp(t, 0.0, 1.0) * 4.0;
+    let j = min(u32(k), 3u);
+    return mix(stops[j], stops[j + 1u], k - f32(j)) / 255.0;
+}
+
+fn cloud_palette(v: f32) -> vec3<f32> {
+    var colours = array<vec3<f32>, 10>(
+        vec3<f32>(240.0, 140.0, 40.0), vec3<f32>(245.0, 205.0, 65.0), vec3<f32>(230.0, 65.0, 65.0),
+        vec3<f32>(165.0, 75.0, 190.0), vec3<f32>(65.0, 190.0, 115.0), vec3<f32>(75.0, 150.0, 220.0),
+        vec3<f32>(240.0, 120.0, 180.0), vec3<f32>(140.0, 105.0, 75.0), vec3<f32>(120.0, 215.0, 215.0),
+        vec3<f32>(190.0, 190.0, 80.0));
+    if (v < -0.5) { return vec3<f32>(150.0, 160.0, 176.0) / 255.0; }
+    return colours[u32(round(v)) % 10u] / 255.0;
+}
+
+
+@fragment
+fn fs_cloud(o: COut) -> @location(0) vec4<f32> {
+    var out = clipped(o.wp) || dot(o.at, o.at) > 1.0;
+    for (var k = 0u; k < 4u; k++) {
+        out = out || (((o.has >> k) & 1u) != 0u && !cloud_keeps(cloud.filters[k], o.f[k]));
+    }
+    if (out) { discard; }
+    var c = o.rgb;
+    let mode = cloud.style.x;
+    if ((o.has & 16u) != 0u && mode > 1.5) {
+        c = cloud_palette(o.v);
+    } else if ((o.has & 16u) != 0u && mode > 0.5) {
+        c = cloud_ramp((o.v - cloud.style.z) / max(cloud.style.w - cloud.style.z, 1e-12));
+    }
+    if (length(o.n) > 0.5) {
+        c = c * (0.45 + 0.55 * abs(dot(normalize(o.n), normalize(u.back.xyz))));
+    }
+    return out_color(vec4<f32>(c, 1.0));
 }

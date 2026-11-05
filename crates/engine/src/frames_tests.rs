@@ -2,7 +2,8 @@
 //! world land in the component's own frame (user bug #4).
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -18,7 +19,7 @@ fn near(a: Vec3, b: Vec3) -> bool {
 }
 
 fn world_bbox(s: &Session, body: &str) -> (Vec3, Vec3) {
-    let w = s.world_state();
+    let w = s.world_state().unwrap();
     let b = w.body(body).unwrap_or_else(|| panic!("no body {body}")).mesh().bounds();
     (b.min, b.max)
 }
@@ -72,9 +73,13 @@ fn sketches_and_planes_move_with_the_component() {
 fn world_picks_map_into_the_component() {
     let mut s = moved_part();
     let v0 = volume(&mut s);
+    assert!((v0 - 6000.0).abs() < 1e-6, "{v0}"); // 30 x 20 x 10
     // The edge along X at the top front: world (65, 0, 10).
     run(&mut s, "solid.fillet", json!({"edges": [[65, 0, 10]], "radius": 2}));
-    assert!(volume(&mut s) < v0 - 1.0, "the fillet cut material");
+    let filleted = volume(&mut s);
+    // A round of radius 2 along the 30 mm edge removes r²(1 − π/4) of section along its length.
+    let round = 4.0 * (1.0 - std::f64::consts::PI / 4.0) * 30.0;
+    assert!((v0 - filleted - round).abs() < 4e-7 * v0, "the fillet cut {} against {round}", v0 - filleted);
     // The modified face has no certified lineage; explicitly freeze its picked plane.
     // Its world pick still maps into the moved component exactly once.
     run(&mut s, "sketch.create", json!({"plane": {"face": [70, 10, 10],"fixed":true}, "name": "Pad"}));
@@ -88,7 +93,10 @@ fn world_picks_map_into_the_component() {
     assert!(near(pad, Vec3::new(70.0, 10.0, 10.0)), "{pad:?}");
     let v1 = volume(&mut s);
     let h = run(&mut s, "solid.hole", json!({"position": [60, 10, 10], "diameter": 4, "depth": 5}));
-    assert!(volume(&mut s) < v1 - 1.0, "the hole cut material: {h}");
+    // A simple (flat-bottomed) hole: a cylinder of radius 2, 5 deep, clear of the round at y < 2.
+    let bore = std::f64::consts::PI * 4.0 * 5.0;
+    let v2 = volume(&mut s);
+    assert!((v1 - v2 - bore).abs() < 4e-7 * v1, "the hole cut {} against {bore}: {h}", v1 - v2);
     // A box made at world (100, 0, 0) in the active (moved) component shows there.
     run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0], "operation": "new"}));
     let last = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
@@ -108,7 +116,11 @@ fn picks_on_an_instance_map_through_its_placement() {
     // An edge of the second instance only (world y = 40).
     run(&mut s, "solid.fillet", json!({"edges": [[5, 40, 10]], "radius": 2}));
     let v1 = volume(&mut s);
-    assert!(v1 < v0 - 1.0, "{v0} {v1}");
+    // Two 10 mm cubes; the round of radius 2 along one 10 mm edge of the component removes
+    // r²(1 − π/4)·10 from every instance, the picked one and the other.
+    assert!((v0 - 2000.0).abs() < 1e-6, "{v0}");
+    let round = 4.0 * (1.0 - std::f64::consts::PI / 4.0) * 10.0;
+    assert!((v0 - v1 - 2.0 * round).abs() < 4e-7 * v0, "{v0} {v1}");
 }
 
 /// (c) Moving a body into a moved component keeps it where it is in the world.
@@ -217,6 +229,111 @@ fn block_in_component() -> Session {
     s
 }
 
+#[test]
+fn move_expression_distances_follow_world_axes_in_a_turned_component() {
+    for translate in [json!([0, -4, 0]), json!(["0 mm", "-4 mm", "0 mm"]), json!([0, "-4", 0])] {
+        let mut s = block_in_component();
+        run(&mut s, "occurrence.move", json!({"occurrence": "C:1", "axis": [1, 0, 0], "angle": "90 deg", "translate": [50, 10, 20]}));
+        let before = world_bbox(&s, "Body1");
+        run(&mut s, "solid.move", json!({"bodies": ["Body1"], "translate": translate}));
+        let after = world_bbox(&s, "Body1");
+        let shift = Vec3::new(0.0, -4.0, 0.0);
+        assert!(near(after.0, before.0 + shift) && near(after.1, before.1 + shift), "{translate}: {before:?} -> {after:?}");
+        assert!((volume(&mut s) - 24_000.0).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn move_expression_distances_keep_parameters_through_rebuild_and_reopen() {
+    for copy in [false, true] {
+        let mut s = block_in_component();
+        run(&mut s, "parameters.add", json!({"name": "travel", "expression": "4 mm"}));
+        // An oblique turn mixes all three coordinates; the placement's translation must
+        // never contribute to the displacement vector.
+        run(&mut s, "occurrence.move", json!({"occurrence": "C:1", "axis": [1, 2, 3], "angle": "37 deg", "translate": [50, 10, 20]}));
+        run(&mut s, "component.activate", json!({"component": "C"}));
+        let before = world_bbox(&s, "Body1");
+        run(&mut s, "solid.move", json!({"bodies": ["Body1"], "translate": [2, "-travel", "1 cm"], "copy": copy}));
+        let moved = s.model.state().bodies.last().unwrap().name.clone();
+        let assert_shift = |s: &Session, travel: f64| {
+            let after = world_bbox(s, &moved);
+            let shift = Vec3::new(2.0, -travel, 10.0);
+            assert!(near(after.0, before.0 + shift) && near(after.1, before.1 + shift), "copy={copy}, travel={travel}: {before:?} -> {after:?}");
+            if copy {
+                let original = world_bbox(s, "Body1");
+                assert!(near(original.0, before.0) && near(original.1, before.1));
+            }
+        };
+        assert_shift(&s, 4.0);
+        run(&mut s, "parameters.change", json!({"name": "travel", "expression": "8 mm"}));
+        assert_shift(&s, 8.0);
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert_shift(&reopened, 8.0);
+        run(&mut reopened, "parameters.change", json!({"name": "travel", "expression": "12 mm"}));
+        assert_shift(&reopened, 12.0);
+        assert!((volume(&mut reopened) - if copy { 48_000.0 } else { 24_000.0 }).abs() < 1e-6);
+    }
+}
+
+/// One `solid.move` of bodies placed in differently turned frames (a block in the root and a
+/// screw inserted lying down) moves and turns each of them in the world, whichever is listed
+/// first (#9660).
+#[test]
+fn one_move_of_bodies_in_differently_turned_frames_moves_each_in_the_world() {
+    let corners = |(lo, hi): (Vec3, Vec3)| {
+        let mut out = Vec::new();
+        for x in [lo.x, hi.x] {
+            for y in [lo.y, hi.y] {
+                for z in [lo.z, hi.z] {
+                    out.push(Vec3::new(x, y, z));
+                }
+            }
+        }
+        out
+    };
+    let bounds = |points: Vec<Vec3>| {
+        let mut lo = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        let mut hi = Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for p in points {
+            lo = Vec3::new(lo.x.min(p.x), lo.y.min(p.y), lo.z.min(p.z));
+            hi = Vec3::new(hi.x.max(p.x), hi.y.max(p.y), hi.z.max(p.z));
+        }
+        (lo, hi)
+    };
+    let close = |a: (Vec3, Vec3), b: (Vec3, Vec3)| a.0.dist(b.0) < 1e-4 && a.1.dist(b.1) < 1e-4;
+    // The quarter turn is about the world z axis, which passes through the screw's own origin
+    // (where it was inserted): a Move feature turns about that origin.
+    let moves: [(Value, &dyn Fn(Vec3) -> Vec3); 3] = [
+        (json!({"translate": [0, 0, 3]}), &|p| p + Vec3::new(0.0, 0.0, 3.0)),
+        (json!({"translate": [0, "2 mm", 0]}), &|p| p + Vec3::new(0.0, 2.0, 0.0)),
+        (json!({"axis": [0, 0, 1], "angle": "90 deg"}), &|p| Vec3::new(-p.y, p.x, p.z)),
+    ];
+    for direction in [[1, 0, 0], [0, 0, -1], [0, 1, 0]] {
+        for order in [["Block", "Body1"], ["Body1", "Block"]] {
+            for (params, expected) in &moves {
+                let mut s = Session::default();
+                run(&mut s, "solid.box", json!({"length": 30, "width": 30, "height": 10, "center": [0, 0, 5], "body_name": "Block"}));
+                let screw = json!({"family": "socket_head_cap_screw", "size": "M3", "length": 12, "point": [0, 0, 10], "direction": direction, "name": "screw"});
+                run(&mut s, "parts.insert", screw);
+                let before: Vec<_> = order.iter().map(|b| world_bbox(&s, b)).collect();
+                let mut p = params.clone();
+                p["bodies"] = json!(order);
+                run(&mut s, "solid.move", p.clone());
+                for (body, was) in order.iter().zip(&before) {
+                    let want = bounds(corners(*was).into_iter().map(expected).collect());
+                    let got = world_bbox(&s, body);
+                    assert!(close(got, want), "{body} after {p} (screw along {direction:?}): {got:?}, want {want:?}");
+                }
+                // One step: a single undo puts both back.
+                run(&mut s, "edit.undo", json!({}));
+                for (body, was) in order.iter().zip(&before) {
+                    assert!(close(world_bbox(&s, body), *was), "{body} after undoing {p}");
+                }
+            }
+        }
+    }
+}
+
 /// Edit Feature passes a primitive's placement through as saved, so changing the radius of
 /// Leaf B's rod in the Hinge Assembly leaves the leaf where it was (#2926).
 #[test]
@@ -239,6 +356,48 @@ fn editing_a_primitive_in_a_turned_component_keeps_its_placement() {
     assert!(((lo + hi) * 0.5).dist((rod_lo + rod_hi) * 0.5) < 1e-3, "the rod moved: {lo:?} {hi:?}");
     let (size, before) = (hi - lo, rod_hi - rod_lo);
     assert!((size.x - before.x).abs() < 1e-6 && (size.y - 12.0).abs() < 0.05 && (size.z - 12.0).abs() < 0.05, "{size:?}");
+}
+
+/// Edit Feature shows an explicit revolve axis with its origin evaluated; sending that back
+/// untouched keeps the saved expressions, for a solid and a surface revolve alike.
+#[test]
+fn an_untouched_revolve_axis_keeps_its_origin_expressions_through_redefine() {
+    for (command, name) in [("solid.revolve", "Turn"), ("surface.revolve", "Shell")] {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+        run(&mut s, "sketch.create", json!({"name": "Profile", "plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let axis = json!({"origin": ["W / 2", 0, 0], "dir": [0, 1, 0]});
+        let mut made = json!({"sketch": "Profile", "axis": axis, "angle": "90 deg", "name": name});
+        if command == "solid.revolve" {
+            made["operation"] = json!("new");
+        }
+        run(&mut s, command, made);
+        // The origin's coordinates as text (a saved 0 may read back as 0 or 0.0).
+        let saved = |s: &mut Session| -> Vec<String> {
+            let axis = run(s, "timeline.inspect", json!({"feature": name}))["definition"]["axis"].clone();
+            axis["origin"].as_array().unwrap().iter().map(|c| c.as_f64().map_or_else(|| c.as_str().unwrap().to_string(), |x| x.to_string())).collect()
+        };
+        let original = saved(&mut s);
+        assert_eq!(original, ["W / 2", "0", "0"]);
+        // What the dialog sends back untouched: the origin as numbers.
+        let mut params = json!({"sketch": "Profile", "axis": {"origin": [20.0, 0.0, 0.0], "dir": [0.0, 1.0, 0.0]}, "angle": "45 deg"});
+        if command == "solid.revolve" {
+            params["operation"] = json!("new");
+        }
+        run(&mut s, "timeline.redefine", json!({"feature": name, "command": command, "params": params}));
+        assert_eq!(saved(&mut s), original, "{command}");
+        // Only the direction changed: the origin keeps its expressions.
+        let mut turned = params.clone();
+        turned["axis"]["dir"] = json!([0.0, -1.0, 0.0]);
+        run(&mut s, "timeline.redefine", json!({"feature": name, "command": command, "params": turned}));
+        assert_eq!(saved(&mut s), original, "{command}");
+        // A changed origin is taken as given.
+        params["axis"]["origin"] = json!([21.0, 0.0, 0.0]);
+        run(&mut s, "timeline.redefine", json!({"feature": name, "command": command, "params": params}));
+        assert_eq!(saved(&mut s), ["21", "0", "0"], "{command}");
+    }
 }
 
 /// A new placement given to `timeline.redefine` is still a world point.
@@ -369,4 +528,30 @@ fn an_explicit_sketch_plane_is_read_in_the_frame_asked_for() {
         let e = s.execute("sketch.create", &p).expect_err("refused").to_string();
         assert!(e.contains(why), "{p}: {e}");
     }
+}
+
+/// #3383: a root body joined into a body of a component turned a quarter turn about X stays where
+/// it is in the world: the join overlaps the plate by 10 x 5 x 5 and is one solid. When the
+/// component moves on, the join follows where both bodies are placed.
+#[test]
+fn a_combine_tool_stays_where_it_is_placed() {
+    let mut s = Session::default();
+    // The design's first part is grounded when it is made (#2804); this one is moved.
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-20, -20, 0], "body_name": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [1, 0, 0], "angle": "90 deg"}));
+    run(&mut s, "component.capture_position", json!({}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-5, -5, -25], "operation": "new", "body_name": "Boss"}));
+    run(&mut s, "solid.combine", json!({"target": "Plate", "tools": ["Boss"]}));
+    let lumps = |s: &Session| s.model.state().body("Plate").map(|b| b.body.lumps().unwrap().len());
+    assert_eq!(lumps(&s), Some(1), "the boss overlaps the plate where it is shown");
+    assert!((volume(&mut s) - 16750.0).abs() < 1e-6, "{}", volume(&mut s));
+    let (lo, hi) = world_bbox(&s, "Plate");
+    assert!(near(lo, Vec3::new(-20.0, -10.0, -25.0)) && near(hi, Vec3::new(20.0, 5.0, 20.0)), "{lo:?} {hi:?}");
+    // Raised 10 mm, the plate (z -10..30) clears the boss (z -25..-15).
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 0, 10]}));
+    run(&mut s, "component.capture_position", json!({}));
+    assert_eq!(lumps(&s), Some(2), "the boss stays where it is in the world");
+    assert!((volume(&mut s) - 17000.0).abs() < 1e-6, "{}", volume(&mut s));
 }

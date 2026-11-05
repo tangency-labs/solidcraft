@@ -9,10 +9,11 @@
 //! camera takes (`navigation::device_camera`), so calibration, reassigned axes, invert, speed and
 //! the zoom direction all show. Pan and zoom are held so the boat never leaves its box.
 
+use solidcraft_engine::geom::prelude::*;
 use std::sync::OnceLock;
 
 use egui::{Pos2, Rect, pos2};
-use solidcraft_engine::geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_engine::render::Camera;
 
 use crate::space_mouse::DeviceMotion;
@@ -109,17 +110,8 @@ impl Boat {
 
 /// `motion` for `seconds` on the boat's camera in a box `aspect` wide for its height of `height`
 /// points, with pan and zoom held so a sphere of `radius` stays inside it.
-pub(crate) fn step(
-    cam: &mut Camera,
-    motion: crate::space_mouse::Motion,
-    seconds: f64,
-    height: f64,
-    radius: f64,
-    aspect: f64,
-    reverse_zoom: bool,
-    free_orbit: bool,
-) {
-    crate::navigation::device_camera(cam, motion, seconds, height, true, reverse_zoom, free_orbit);
+pub(crate) fn step(cam: &mut Camera, motion: crate::space_mouse::Motion, seconds: f64, height: f64, radius: f64, aspect: f64, free_orbit: bool) {
+    crate::navigation::device_camera(cam, motion, seconds, height, true, free_orbit, None, None);
     cam.fov = FOV;
     // Zoom within limits: the nearest still shows the whole boat in the shorter side of the box.
     let shorter = aspect.min(1.0);
@@ -171,14 +163,7 @@ pub(crate) fn project(model: &Model, cam: &Camera, rect: Rect) -> Frame {
 }
 
 /// Draws the boat in a box of `size` and moves it by this frame's motion. `boat` is the page's state.
-pub(crate) fn show(
-    ui: &mut egui::Ui,
-    boat: &mut Option<Boat>,
-    motion: Option<DeviceMotion>,
-    reverse_zoom: bool,
-    free_orbit: bool,
-    size: egui::Vec2,
-) -> Option<Rect> {
+pub(crate) fn show(ui: &mut egui::Ui, boat: &mut Option<Boat>, motion: Option<DeviceMotion>, free_orbit: bool, size: egui::Vec2) -> Option<Rect> {
     let model = model()?;
     let t = Tokens::get();
     let now = ui.input(|i| i.time);
@@ -188,7 +173,7 @@ pub(crate) fn show(
     state.seen = now;
     if let Some(motion) = motion {
         let aspect = f64::from(rect.width()) / f64::from(rect.height().max(1.0));
-        step(&mut state.cam, motion.motion, motion.seconds, f64::from(rect.height()), model.radius, aspect, reverse_zoom, free_orbit);
+        step(&mut state.cam, motion.motion, motion.seconds, f64::from(rect.height()), model.radius, aspect, free_orbit);
     }
     let painter = ui.painter_at(rect);
     painter.rect(rect, t.radius_sm, t.dialog_body, egui::Stroke::new(1.0, t.dialog_rule), egui::StrokeKind::Inside);

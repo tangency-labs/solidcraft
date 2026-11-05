@@ -6,19 +6,24 @@
 //! component shows where it goes, and with Animate the joint plays its motion.
 
 use crate::fonts::RichTextExt as _;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{choice_row, expr_row, text_row};
 use egui::{Color32, Pos2, RichText, Stroke, vec2};
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::doc::joints::JointKind;
-use solidcraft_engine::geom::{Aabb3, Mesh, Vec3};
+use solidcraft_engine::doc::joints::{JointKind, JointOrigin, Snap};
+use solidcraft_engine::geom::prelude::*;
+use solidcraft_engine::geom::{Aabb3, Mesh};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, combo, field, form_row};
 use crate::preview::{Built, Colors};
-use crate::selection::{BODIES, EDGES, FACES, SelInput, SelectionExt as _, VERTICES, items as sel_items, point_value as pt, polyline_mid};
+use crate::selection::{
+    BODIES, EDGES, FACES, ORIGIN, POINTS, SelInput, SelectionExt as _, VERTICES, items as sel_items, point_value as pt, polyline_mid,
+};
 use crate::theme::Tokens;
 
 use crate::viewport::Proj;
@@ -59,10 +64,21 @@ const TYPE_LABELS: [&str; 13] = [
     "Point on line",
     "Line on plane",
 ];
-/// What a joint origin input accepts (snaps on faces, edges and vertices).
-pub const SNAPS: u16 = FACES | EDGES | VERTICES;
+/// A joint type's label, as the Type box lists it ("Pin-slot", "Point on plane").
+pub(crate) fn kind_label(kind: JointKind) -> &'static str {
+    TYPES.iter().position(|t| JointKind::parse(t) == Some(kind)).and_then(|i| TYPE_LABELS.get(i)).copied().unwrap_or("")
+}
+
+/// A joint as the joint lists name it: its name, and its type in the user's language.
+pub(crate) fn joint_choice(name: &str, kind: JointKind) -> String {
+    format!("{name} ({})", crate::i18n::tr_label(kind_label(kind)))
+}
+
+/// What a joint origin input accepts: snaps on faces, edges and vertices, the world origin, and
+/// a sketch point (so a joint can be placed on the design origin or a hole centre, like Fusion's).
+pub const SNAPS: u16 = FACES | EDGES | VERTICES | ORIGIN | POINTS;
 /// Commands whose effect is where occurrences sit (previewed on the placed model).
-const MOVES: [&str; 12] = [
+const MOVES: &[&str] = &[
     "joint.create",
     "joint.as_built",
     "joint.drive",
@@ -73,12 +89,14 @@ const MOVES: [&str; 12] = [
     "joint.rack_pinion",
     "joint.screw",
     "joint.cam",
+    "occurrence.align",
     "parts.insert",
     "parts.fastener",
 ];
 
 #[derive(Clone, Debug)]
 pub enum Asm {
+    FromBodies,
     NewComponent {
         name: String,
         activate: bool,
@@ -111,13 +129,51 @@ pub enum Asm {
         of: Vec<Sel>,
         /// Pairs closer than this (mm, as typed) are listed too.
         clearance: String,
+        /// Compute's check under way (its reply lands here).
+        check: Option<Check>,
     },
     /// Motion Trace: a picked point's path, previewed; OK keeps it as a 3D sketch spline.
     Trace(Box<TraceForm>),
 }
 
+/// Interference's check off the window thread: where it leaves its reply (the check's and the
+/// shared volumes' meshes), the design and the picks it checked, and when it started.
+#[derive(Clone, Debug)]
+pub struct Check {
+    reply: std::sync::Arc<std::sync::Mutex<Option<(Value, Vec<Mesh>)>>>,
+    design: std::sync::Weak<solidcraft_engine::doc::Document>,
+    of: Vec<Sel>,
+    started: f64,
+}
+
 /// The snap under the cursor, remembered for the selection it was found for.
 pub type Hover = Option<(Sel, Option<SnapPt>)>;
+
+/// A search off the window thread: where it leaves its reply, and what it searched.
+#[derive(Clone, Debug)]
+pub struct Search {
+    reply: std::sync::Arc<std::sync::Mutex<Option<Result<Value, String>>>>,
+    searched: Searched,
+}
+
+/// The design and the joint (the commands OK would run for it) a search was for.
+#[derive(Clone, Debug)]
+pub struct Searched {
+    design: std::sync::Weak<solidcraft_engine::doc::Document>,
+    joint: Vec<(String, Value)>,
+}
+
+impl Searched {
+    fn now(app: &SolveApp, f: &JointForm, inputs: &[SelInput]) -> Result<Searched, String> {
+        Ok(Searched { design: std::sync::Arc::downgrade(&app.session.doc), joint: edit_commands(app, f, inputs)? })
+    }
+
+    /// Whether the design and the dialog's joint are still the ones searched.
+    fn current(&self, app: &SolveApp, f: &JointForm, inputs: &[SelInput]) -> bool {
+        self.design.upgrade().is_some_and(|d| std::sync::Arc::ptr_eq(&d, &app.session.doc))
+            && edit_commands(app, f, inputs).is_ok_and(|now| now == self.joint)
+    }
+}
 
 /// The Joint and As-built Joint dialogs.
 #[derive(Clone, Debug)]
@@ -126,12 +182,28 @@ pub struct JointForm {
     /// Editing this joint (its origins stay; type, alignment and limits change).
     pub editing: Option<u64>,
     pub kind: usize,
+    /// Edit Joint: the sides as the dialog opened on them. A side still that pick is not sent,
+    /// so it keeps its origin exactly.
+    pub sides: [Option<Sel>; 2],
     /// Flip B relative to the mate (faces apart instead of together).
     pub flip: bool,
     pub angle: String,
+    /// Edit Joint: the angle as the dialog opened on it. Sent only when changed, so a side moved
+    /// without it turns B as joint.create would.
+    pub angle_shown: String,
     pub offset: [String; 3],
     /// Per joint value: limited, minimum, maximum.
     pub limits: Vec<(bool, String, String)>,
+    /// Find Limits: the search under way (`joint.find_limits`'s reply lands here).
+    pub search: Option<Search>,
+    /// What Find Limits found for each value (a line under its rows).
+    pub found: Vec<String>,
+    /// What the last search said about them all: parts already in each other, or why it failed.
+    pub found_note: Option<String>,
+    /// The design and the joint (as the dialog had it) the found limits are for.
+    pub searched: Option<Searched>,
+    /// Edit Joint Limits: open the Limits section when the dialog first draws.
+    pub show_limits: bool,
     pub animate: bool,
     /// Animation phase, 0…1.
     pub phase: f64,
@@ -144,10 +216,17 @@ impl JointForm {
             as_built,
             editing: None,
             kind: 0,
+            sides: [None, None],
             flip: false,
             angle: "0 deg".into(),
+            angle_shown: "0 deg".into(),
             offset: std::array::from_fn(|_| crate::length_input::default(doc, "0")),
             limits: Vec::new(),
+            search: None,
+            found: Vec::new(),
+            found_note: None,
+            searched: None,
+            show_limits: false,
             animate: false,
             phase: 0.0,
             hover: None,
@@ -177,6 +256,7 @@ impl JointForm {
 impl Asm {
     pub fn title(&self) -> &'static str {
         match self {
+            Asm::FromBodies => "cmd.component_from_bodies",
             Asm::NewComponent { .. } => "NEW COMPONENT",
             Asm::Joint(j) if j.editing.is_some() => "EDIT JOINT",
             Asm::Joint(j) if j.as_built => "AS-BUILT JOINT",
@@ -205,11 +285,9 @@ impl Asm {
 pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let s = &app.session;
     let (asm, inputs) = match id {
+        "component.from_bodies" => (Asm::FromBodies, vec![SelInput::new("Bodies", BODIES, true)]),
         "component.create" => (Asm::NewComponent { name: String::new(), activate: true }, vec![SelInput::new("Bodies (optional)", BODIES, true)]),
-        "joint.create" => (
-            Asm::Joint(Box::new(JointForm::new(false, &app.session.doc))),
-            vec![SelInput::new("Component 1", SNAPS, false), SelInput::new("Component 2", SNAPS, false)],
-        ),
+        "joint.create" => (Asm::Joint(Box::new(JointForm::new(false, &app.session.doc))), side_inputs()),
         "joint.as_built" => (
             Asm::Joint(Box::new(JointForm::new(true, &app.session.doc))),
             vec![SelInput::new("Components", BODIES, true), SelInput::new("Position", SNAPS, false)],
@@ -228,7 +306,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "joint.gear" | "joint.rack_pinion" | "joint.screw" => crate::dialogs_coupling::start(app, id)?,
         "joint.cam" => crate::dialogs_coupling::cam::start(app),
         "inspect.interference" => (
-            Asm::Interference { result: None, overlaps: Vec::new(), of: Vec::new(), clearance: "0".into() },
+            Asm::Interference { result: None, overlaps: Vec::new(), of: Vec::new(), clearance: "0".into(), check: None },
             vec![SelInput::new("Bodies (all if none)", BODIES, true)],
         ),
         _ => return None,
@@ -310,16 +388,132 @@ pub(crate) fn num(v: f64, unit: &str) -> String {
     format!("{} {unit}", crate::dialogs_coupling::trim(v))
 }
 
-/// The Edit Joint dialog for a joint (by id).
+/// The two side inputs of the Joint dialog (Joint and Edit Joint): the picks of each origin.
+fn side_inputs() -> Vec<SelInput> {
+    vec![SelInput::new("Component 1", SNAPS, false), SelInput::new("Component 2", SNAPS, false)]
+}
+
+/// The pick a joint side shows in the side inputs: the face or edge of its own occurrence that
+/// the side's snap names (the piece nearest its pick, when the name has several), else the face
+/// or edge nearest the pick. A point or frame side names no face, so it shows its component.
+fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
+    let s = &app.session;
+    let (pick, face, edge) = match &o.snap {
+        Snap::FaceCenter { pick, face, .. } | Snap::CircleCenter { pick, face, .. } => (*pick, face.as_deref(), None),
+        Snap::Edge { pick, edge, .. } => (*pick, None, edge.as_deref()),
+        Snap::Point { .. } | Snap::Frame { .. } => {
+            let path = if o.occurrence == 0 {
+                Vec::new()
+            } else {
+                let occurrence = s.doc.occurrences.iter().find(|p| p.id == o.occurrence)?;
+                let mut path = s.doc.first_path(occurrence.parent);
+                path.push(occurrence.id);
+                s.doc.path_placement(&path)?;
+                path
+            };
+            return Some(Sel::Occurrence { path });
+        }
+    };
+    // The pick is in the component's coordinates; the placed bodies are in the world.
+    let at =
+        if o.occurrence == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, o.occurrence) };
+    let p = solidcraft_engine::doc::apply_point(&at, pick);
+    let st = crate::open_meshing::session_world(s);
+    let own: Vec<&solidcraft_engine::doc::ModelBody> = st.bodies.iter().filter(|b| occurrence_of_body(s, &b.name) == Some(o.occurrence)).collect();
+    let named = match (face, edge) {
+        (Some(name), _) => own.iter().filter_map(|b| named_face(b, name, p)).min_by(|a, b| a.0.total_cmp(&b.0)),
+        (None, Some(name)) => own.iter().filter_map(|b| named_edge(b, name, p)).min_by(|a, b| a.0.total_cmp(&b.0)),
+        (None, None) => None,
+    };
+    named.map(|(_, sel)| sel).or_else(|| nearest_pick(&own, p, matches!(o.snap, Snap::Edge { .. })))
+}
+
+/// The distance from `p` to the face `f` of `m`, measured to its triangles.
+fn face_dist(m: &Mesh, f: usize, p: Vec3) -> Option<f64> {
+    m.triangles
+        .iter()
+        .zip(&m.tri_face)
+        .filter(|(_, tf)| **tf as usize == f)
+        .filter_map(|(t, _)| m.tri(t))
+        .map(|[a, c, e]| crate::preview::point_triangle_dist(p, a, c, e))
+        .reduce(f64::min)
+}
+
+/// The distance from `p` to the mesh edge `i` of `m`.
+fn edge_dist(m: &Mesh, i: usize, p: Vec3) -> Option<f64> {
+    m.edges.get(i)?.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).reduce(f64::min)
+}
+
+/// The face of `b` the name `name` names, the piece nearest `p` when it has several.
+fn named_face(b: &solidcraft_engine::doc::ModelBody, name: &str, p: Vec3) -> Option<(f64, Sel)> {
+    let m = b.mesh();
+    let names = solidcraft_engine::doc::naming::face_names(b);
+    names
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.as_str() == name)
+        .filter_map(|(f, _)| face_dist(&m, f, p).map(|d| (d, Sel::Face { body: b.name.clone(), index: f, point: p })))
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+}
+
+/// The edge of `b` the name `name` names (a split edge: the piece nearest `p`).
+fn named_edge(b: &solidcraft_engine::doc::ModelBody, name: &str, p: Vec3) -> Option<(f64, Sel)> {
+    let m = b.mesh();
+    let names = solidcraft_engine::doc::naming::edge_names(b);
+    let index = match names.iter().position(|n| n == name) {
+        Some(i) => i,
+        None => {
+            let at = solidcraft_engine::doc::naming::find_edge(b, name, p).ok()?;
+            (0..m.edges.len())
+                .min_by(|x, y| edge_dist(&m, *x, at).unwrap_or(f64::INFINITY).total_cmp(&edge_dist(&m, *y, at).unwrap_or(f64::INFINITY)))?
+        }
+    };
+    let d = edge_dist(&m, index, p)?;
+    Some((d, Sel::Edge { body: b.name.clone(), index, point: p }))
+}
+
+/// The face (or edge) of the bodies `own` nearest `p`.
+fn nearest_pick(own: &[&solidcraft_engine::doc::ModelBody], p: Vec3, edges: bool) -> Option<Sel> {
+    let mut best: Option<(f64, Sel)> = None;
+    for b in own {
+        let m = b.mesh();
+        if edges {
+            for i in 0..m.edges.len() {
+                let Some(d) = edge_dist(&m, i, p) else { continue };
+                if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+                    best = Some((d, Sel::Edge { body: b.name.clone(), index: i, point: p }));
+                }
+            }
+        } else {
+            for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+                let Some([a, c, e]) = m.tri(t) else { continue };
+                let d = crate::preview::point_triangle_dist(p, a, c, e);
+                if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+                    best = Some((d, Sel::Face { body: b.name.clone(), index: *f as usize, point: p }));
+                }
+            }
+        }
+    }
+    best.map(|(_, sel)| sel)
+}
+
+/// The Edit Joint dialog for a joint (by id). Its two sides show as the Joint dialog's do, each
+/// pre-filled with the pick it sits on.
 pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let j = app.session.doc.assembly.joints.iter().find(|j| j.id == id)?;
     let mut f = JointForm::new(false, &app.session.doc);
     f.editing = Some(id);
+    f.sides = [side_pick(app, &j.a), side_pick(app, &j.b)];
+    let mut inputs = side_inputs();
+    for (input, pick) in inputs.iter_mut().zip(&f.sides) {
+        input.items = pick.iter().cloned().collect();
+    }
     f.kind = TYPES.iter().position(|t| JointKind::parse(t) == Some(j.kind)).unwrap_or(0);
     f.flip = j.flip;
     // An offset or angle typed as an expression shows (and is sent back) as that expression, so
     // the joint keeps following its parameters.
     f.angle = j.exprs.angle.clone().unwrap_or_else(|| num(j.angle.to_degrees(), "deg"));
+    f.angle_shown = f.angle.clone();
     f.offset[2] = j.exprs.offset.clone().unwrap_or_else(|| crate::length_input::model(&app.session.doc, j.offset));
     f.fit_limits(&app.session.doc);
     for (i, l) in f.limits.iter_mut().enumerate() {
@@ -328,10 +522,18 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
             *l = (true, fmt(*lo), fmt(*hi));
         }
     }
-    Some(Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f))), vec![]))
+    Some(Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f))), inputs))
 }
 
-/// The Drive Joints dialog on a joint (by id).
+/// Edit Joint with its Limits section open (the browser's Edit Joint Limits).
+pub fn edit_joint_limits(app: &SolveApp, id: u64) -> Option<Dialog> {
+    let mut d = edit_joint(app, id)?;
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.show_limits = true;
+    }
+    Some(d)
+}
+
 /// Edit Joint with its motion playing (the browser's Animate Joint).
 pub fn animate_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let mut d = edit_joint(app, id)?;
@@ -358,7 +560,7 @@ pub fn find_joint(app: &mut SolveApp, id: u64) {
 /// are placed; occurrence 0 is the root, holding the bodies outside every occurrence.
 pub fn occurrence_bounds(s: &Session, occs: &[u64]) -> Aabb3 {
     let model = s.model.state();
-    let world = s.world_state();
+    let world = crate::open_meshing::session_world(s);
     let mut bb = Aabb3::default();
     for (name, _, path, _) in s.doc.body_frames(&model) {
         let on = occs.iter().any(|o| if *o == 0 { path.is_empty() } else { path.contains(o) });
@@ -369,6 +571,7 @@ pub fn occurrence_bounds(s: &Session, occs: &[u64]) -> Aabb3 {
     bb
 }
 
+/// The Drive Joints dialog on a joint (by id).
 pub fn drive_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let joint = app.session.doc.assembly.joints.iter().position(|j| j.id == id)?;
     Some(Dialog::new(Kind::Assembly(Asm::Drive { joint, values: current_values(&app.session, joint), focus: true }), vec![]))
@@ -396,7 +599,7 @@ pub struct SnapPt {
 /// The occurrence placing a world body (0: the root design), the instance its name says.
 pub(crate) fn occurrence_of_body(s: &Session, body: &str) -> Option<u64> {
     // The world name tells the instance: a further occurrence of a component is not its first.
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     let b = st.body(body)?;
     if s.doc.model_body_component(b) == 0 {
         return Some(0);
@@ -455,20 +658,20 @@ fn face_normal_near(m: &Mesh, f: u32, p: Vec3) -> Option<Vec3> {
 
 /// The snap a picked item stands for (world coordinates, as the viewport shows them).
 pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     let (body, mut snap) = match sel {
         Sel::Face { body, index, point } => {
             let b = st.body(body)?;
             let tol = (b.body.size() * 2e-3).max(1e-3);
             let f = b.body.faces(tol).ok()?.into_iter().find(|f| f.index == *index)?;
             match f.plane_normal {
-                Some(n) => (body, SnapPt { at: f.centroid, z: n, kind: SnapKind::FaceCenter, param: json!({"face": pt(*point)}) }),
+                Some(n) => (body.as_str(), SnapPt { at: f.centroid, z: n, kind: SnapKind::FaceCenter, param: json!({"face": pt(*point)}) }),
                 None => {
                     let c = solidcraft_engine::kernel::cylinder_face_at(&b.body, *point)?;
                     let sv = (*point - c.axis_point).dot(c.axis);
                     let (at, dir) = if (sv - c.start).abs() <= (c.end - sv).abs() { (c.start, -1.0) } else { (c.end, 1.0) };
                     (
-                        body,
+                        body.as_str(),
                         SnapPt {
                             at: c.axis_point + c.axis * at,
                             z: c.axis * dir,
@@ -491,7 +694,7 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
                     let z = if out.dot(n) < 0.0 { -n } else { n };
                     // Its round end, kept by name so it follows the hole or boss as the part
                     // changes (a point where it has none).
-                    (body, SnapPt { at: c, z, kind: SnapKind::CircleCenter, param: json!({"circle": pt(c), "z": pt(z)}) })
+                    (body.as_str(), SnapPt { at: c, z, kind: SnapKind::CircleCenter, param: json!({"circle": pt(c), "z": pt(z)}) })
                 }
                 None => {
                     let mid = polyline_mid(e);
@@ -499,7 +702,7 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
                         .or_else(|| m.edge_faces.get(*index).and_then(|fs| fs.first()).and_then(|f| face_normal_near(&m, *f, mid)))
                         .unwrap_or(Vec3::Z);
                     // Its middle, kept by the edge's name.
-                    (body, SnapPt { at: mid, z, kind: SnapKind::EdgeMid, param: json!({"edge": pt(mid), "z": pt(z)}) })
+                    (body.as_str(), SnapPt { at: mid, z, kind: SnapKind::EdgeMid, param: json!({"edge": pt(mid), "z": pt(z)}) })
                 }
             }
         }
@@ -508,7 +711,23 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
             // as a point's is.
             let z = occurrence_of_body(s, body)
                 .map_or(Vec3::Z, |o| solidcraft_engine::doc::apply_vector(&solidcraft_engine::doc::joints::occurrence_world(&s.doc, o), Vec3::Z));
-            (body, SnapPt { at: *point, z: Vec3::Z, kind: SnapKind::Vertex, param: json!({"edge": pt(*point), "corner": pt(*point), "z": pt(z)}) })
+            (
+                body.as_str(),
+                SnapPt { at: *point, z: Vec3::Z, kind: SnapKind::Vertex, param: json!({"edge": pt(*point), "corner": pt(*point), "z": pt(z)}) },
+            )
+        }
+        Sel::SketchPoint { id } => {
+            // A sketch point's world position, its plane's normal as the joint's z, kept by its
+            // sketch and id so it follows the sketch as the part changes. No body names it, so the
+            // engine finds the occurrence from the world point (its own body).
+            let (sketch, point) = match id.split_once(':') {
+                Some((sketch, point)) => (sketch.parse().ok()?, point),
+                None => (s.active_sketch?, id.as_str()),
+            };
+            let ss = st.sketch(sketch)?;
+            let at = ss.plane.to_world(ss.sketch.point(ss.sketch.resolve_point(point)?)?);
+            let z = ss.plane.normal();
+            ("", SnapPt { at, z, kind: SnapKind::Vertex, param: json!({"point": pt(at), "z": pt(z)}) })
         }
         _ => return None,
     };
@@ -537,6 +756,16 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
     let mut enter = false;
     let problem = joint_problem(app, k, inputs);
     match k {
+        Asm::FromBodies => {
+            ui.add(egui::Label::new(app.tr("ui.components_from_bodies_hint")).wrap());
+            if crate::ui_kit::button(ui, app.tr("ui.select_all"), crate::ui_kit::Button::Normal).clicked()
+                && let Some(input) = inputs.first_mut()
+            {
+                // Transfers take definition names, rather than the names of repeated placements.
+                input.items = app.session.model.state().bodies.iter().map(|body| Sel::Body { name: body.name.clone() }).collect();
+                *active = 0;
+            }
+        }
         Asm::NewComponent { name, activate } => {
             enter |= text_row(ui, "Name", name, crate::i18n::tr_label("Component1")).0;
             crate::ui_kit::options(ui, "component_options", &mut [("Activate", activate)]);
@@ -549,10 +778,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             // Picks that make no joint say why, under them, and offer the way out (#1239).
             if let Some((why, bodies)) = problem {
                 ui.vertical(|ui| {
-                    ui.add(egui::Label::new(RichText::new(why).color(t.warning)).wrap());
+                    crate::ui_kit::status_line(ui, &why, crate::ui_kit::StatusTone::Warning);
                     if !bodies.is_empty()
                         && crate::ui_kit::button(ui, crate::i18n::tr("cmd.component_from_bodies"), crate::ui_kit::Button::Normal)
-                            .on_hover_text(crate::i18n::tr("joint.from_bodies_hint"))
+                            .backing_on_hover_text(crate::i18n::tr("joint.from_bodies_hint"))
                             .clicked()
                     {
                         // A refusal shows on the status line; the picks stay either way.
@@ -563,7 +792,13 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             form_row(ui, "Motion", |ui| {
                 ui.label("");
             });
+            let was = f.kind;
             choice_row(ui, "Type", "jt_type", &mut f.kind, &TYPE_LABELS);
+            if f.kind != was {
+                // What Find Limits found was for the other type's values.
+                (f.search, f.found_note, f.searched) = (None, None, None);
+                f.found.clear();
+            }
             f.fit_limits(&app.session.doc);
             if !f.as_built {
                 enter |= expr_row(ui, "Angle", &mut f.angle);
@@ -580,13 +815,20 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             let kind = f.joint_kind();
             if kind != JointKind::Rigid {
                 form_row(ui, "Animate", |ui| {
-                    let label = if f.animate { "■ Stop" } else { "▶ Play" };
-                    if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal).on_hover_text("Play the joint's motion in the view").clicked()
+                    let label = crate::i18n::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
+                    if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
+                        .backing_on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"))
+                        .clicked()
                     {
                         f.animate = !f.animate;
                     }
                 });
+                if std::mem::take(&mut f.show_limits) {
+                    let id = ui.make_persistent_id("joint_limits");
+                    ui.ctx().data_mut(|d| d.insert_persisted(id, true));
+                }
                 crate::ui_kit::section(ui, "joint_limits", "Limits", false, |ui| {
+                    let found = f.found.clone();
                     for (i, (on, lo, hi)) in f.limits.iter_mut().enumerate() {
                         let name = kind.dofs().get(i).copied().unwrap_or("value");
                         form_row(ui, &format!("{} limits", capital(name)), |ui| {
@@ -596,6 +838,16 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                             enter |= expr_row(ui, "  Minimum", lo);
                             enter |= expr_row(ui, "  Maximum", hi);
                         }
+                        if let Some(note) = found.get(i).filter(|n| !n.is_empty()) {
+                            ui.vertical(|ui| {
+                                for line in note.lines() {
+                                    ui.add(egui::Label::new(RichText::new(line).size(t.font_small).color(t.text_dim)).wrap());
+                                }
+                            });
+                        }
+                    }
+                    if let Some(id) = f.editing {
+                        find_limits_row(app, ui, f, id, inputs);
                     }
                 });
             } else {
@@ -622,7 +874,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 let mut edit = false;
                 ui.vertical(|ui| {
                     let why = crate::i18n::format("drive.rigid", &[("joint", name.as_str())]);
-                    ui.add(egui::Label::new(RichText::new(why).color(t.warning)).wrap());
+                    crate::ui_kit::status_line(ui, &why, crate::ui_kit::StatusTone::Warning);
                     let r = crate::ui_kit::button(ui, crate::i18n::tr_label("Edit Joint"), crate::ui_kit::Button::Normal);
                     crate::scenario::publish_handle("drive:edit_joint", r.rect.center());
                     edit = r.clicked();
@@ -640,8 +892,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 }
                 return false;
             }
-            let labels: Vec<String> =
-                list.iter().filter_map(|i| s.doc.assembly.joints.get(*i)).map(|j| format!("{} ({:?})", j.name, j.kind)).collect();
+            let labels: Vec<String> = list.iter().filter_map(|i| s.doc.assembly.joints.get(*i)).map(|j| joint_choice(&j.name, j.kind)).collect();
             let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
             // On a rigid joint the box shows none of the joints that move until one is chosen.
             let mut pos = list.iter().position(|i| i == joint).unwrap_or(list.len());
@@ -660,7 +911,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 form_row(ui, &capital(name), |ui| {
                     if i == 0 {
                         // Typing replaces the value at once, as in the other dialogs' value boxes.
-                        let id = egui::Id::new("sc_drive_value");
+                        let id = egui::Id::unique("sc_drive_value");
                         let r = crate::ui_kit::cell_editor(ui, id, v, "", false);
                         crate::params_dialog::complete(ui, &r, v);
                         if std::mem::take(focus) {
@@ -731,9 +982,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             let s = &app.session;
             let joints = &s.doc.assembly.joints;
             if joints.len() < 2 {
-                form_row(ui, "", |ui| {
-                    ui.label(RichText::new(crate::i18n::tr_label("needs two joints")).color(t.text_dim));
-                });
+                crate::ui_kit::status_line(ui, "needs two joints", crate::ui_kit::StatusTone::Dim);
                 return false;
             }
             let labels: Vec<&str> = joints.iter().map(|j| j.name.as_str()).collect();
@@ -755,10 +1004,45 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
         }
         Asm::Coupling(f) => enter |= crate::dialogs_coupling::rows(app, ui, f, inputs),
         Asm::Cam(f) => enter |= crate::dialogs_coupling::cam::rows(app, ui, f, inputs),
-        Asm::Interference { result, overlaps, of, clearance } => {
+        Asm::Interference { result, overlaps, of, clearance, check } => {
             let picked: Vec<Sel> = inputs.first().map(|i| i.items.clone()).unwrap_or_default();
+            if let Some(c) = check.take() {
+                match c.reply.lock().map(|mut r| r.take()).map_err(|_| ()) {
+                    Ok(None) => {
+                        *check = Some(c);
+                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+                    }
+                    // Done: shown unless the design changed meanwhile (a script, the control
+                    // channel, undo). A poisoned lock (its thread panicked) leaves nothing.
+                    Ok(Some((r, o))) => {
+                        if c.design.upgrade().is_some_and(|d| std::sync::Arc::ptr_eq(&d, &app.session.doc)) {
+                            (*result, *overlaps, *of) = (Some(r), o, c.of);
+                        }
+                        ui.ctx().request_repaint();
+                    }
+                    Err(()) => {}
+                }
+            }
             enter |= expr_row(ui, "Clearance", clearance);
+            // While it checks: the seconds so far, and Cancel where Compute was.
+            if let Some(started) = check.as_ref().map(|c| c.started) {
+                let t = Tokens::get();
+                form_row(ui, "", |ui| {
+                    ui.horizontal(|ui| {
+                        let seconds = ((crate::now_ms() - started) / 1000.0).floor().max(0.0);
+                        ui.add(egui::Spinner::new().size(t.font_small));
+                        ui.label(RichText::new(crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))])).color(t.text_dim));
+                    });
+                });
+            }
             form_row(ui, "", |ui| {
+                if check.is_some() {
+                    if crate::ui_kit::button(ui, crate::i18n::tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
+                        // Its thread finishes the check; the reply is left unread.
+                        *check = None;
+                    }
+                    return;
+                }
                 let stale = result.is_some() && *of != picked;
                 if crate::ui_kit::button(
                     ui,
@@ -767,13 +1051,14 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 )
                 .clicked()
                 {
-                    let (r, o) = interference(app, &picked, clearance);
-                    *result = Some(r);
-                    *overlaps = o;
-                    *of = picked;
+                    (*result, *overlaps) = (None, Vec::new());
+                    *check = Some(interference(app, &picked, clearance));
+                    ui.ctx().request_repaint();
                 }
             });
-            if let Some(r) = result.as_ref() {
+            if check.is_none()
+                && let Some(r) = result.as_ref()
+            {
                 interference_rows(app, ui, r);
             }
         }
@@ -787,42 +1072,265 @@ fn capital(s: &str) -> String {
     c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
 }
 
-/// Run the check (overlaps, pairs closer than the clearance, each body's nearest neighbour) and
-/// find the overlapping volumes (world placement) to show in red.
-fn interference(app: &mut SolveApp, picked: &[Sel], clearance: &str) -> (Value, Vec<Mesh>) {
-    let names: Vec<String> = picked.body_names();
-    let (scale, _) = crate::prefs::unit_scale(&app.session.doc.units);
-    let clearance = match crate::prefs::parse_length_mm(clearance, scale) {
-        Some(v) if v >= 0.0 => v,
-        _ => return (json!({ "error": crate::i18n::tr("dialog.clearance_invalid") }), Vec::new()),
-    };
-    let mut p = json!({ "clearance": clearance, "nearest": 1 });
-    if !names.is_empty() {
-        p["bodies"] = json!(names);
-    }
-    let r = match app.run("inspect.clearance", p) {
-        Ok(v) => v,
-        Err(e) => return (json!({ "error": e }), Vec::new()),
-    };
-    let st = app.session.world_state();
-    let mut meshes = Vec::new();
-    for hit in r["overlaps"].as_array().into_iter().flatten() {
-        let (Some(a), Some(b)) = (hit["a"].as_str().and_then(|n| st.body(n)), hit["b"].as_str().and_then(|n| st.body(n))) else { continue };
-        if let Ok(Some(o)) = solidcraft_engine::kernel::boolean(&a.body, &b.body, solidcraft_engine::kernel::BoolOp::Intersect)
-            && let Ok(m) = o.tessellate((o.size() * 2e-3).max(1e-3))
-        {
-            meshes.push(m);
+/// The Limits section's Find Limits row: the button, or the search under way with Cancel; and
+/// what the last search said about all the values.
+fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id: u64, inputs: &[SelInput]) {
+    let t = Tokens::get();
+    if let Some(search) = &f.search {
+        // A poisoned lock: the search's thread panicked.
+        let reply = search.reply.lock().map(|mut r| r.take()).unwrap_or_else(|_| Some(Err(crate::i18n::tr("joint.find_limits_failed").to_string())));
+        match reply {
+            Some(reply) => {
+                // Found for a design changed since (by a script, the control channel, undo), or
+                // a joint the dialog has changed since (its sides, flip, angle or offset): dropped.
+                let searched = search.searched.clone();
+                f.search = None;
+                if searched.current(app, f, inputs) {
+                    f.searched = Some(searched);
+                    fill_limits(&app.session.doc, f, reply);
+                } else {
+                    f.found_note = Some(crate::i18n::tr("joint.find_limits_stale").to_string());
+                }
+                // The rows above were drawn before this: once more, with what was found.
+                ui.ctx().request_repaint();
+            }
+            None => ui.ctx().request_repaint_after(std::time::Duration::from_millis(100)),
         }
     }
-    (r, meshes)
+    // What it found stops applying once the joint or the design changes: its notes go, and the
+    // dialog says so (the values filled in stay, to keep or edit).
+    if f.search.is_none()
+        && let Some(searched) = &f.searched
+        && !searched.current(app, f, inputs)
+    {
+        f.searched = None;
+        f.found.clear();
+        f.found_note = Some(crate::i18n::tr("joint.find_limits_stale").to_string());
+    }
+    form_row(ui, "", |ui| {
+        if f.search.is_some() {
+            ui.horizontal(|ui| {
+                ui.add(egui::Spinner::new().size(t.font_small));
+                ui.label(RichText::new(crate::i18n::tr("joint.finding_limits")).color(t.text_dim));
+                if crate::ui_kit::button(ui, crate::i18n::tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
+                    // Its thread finishes within its work budget; the reply is left unread.
+                    f.search = None;
+                }
+            });
+        } else if crate::ui_kit::button(ui, crate::i18n::tr("joint.find_limits"), crate::ui_kit::Button::Normal)
+            .backing_on_hover_text(crate::i18n::tr("joint.find_limits_hint"))
+            .clicked()
+        {
+            find_limits(app, f, id, inputs);
+        }
+    });
+    if let Some(note) = &f.found_note {
+        ui.vertical(|ui| {
+            ui.add(egui::Label::new(RichText::new(note).color(t.warning)).wrap());
+        });
+    }
+}
+
+/// The commands OK would run for the joint as the dialog has it (its sides as picked in
+/// `inputs`), but its limits (what Find Limits fills in).
+fn edit_commands(app: &SolveApp, f: &JointForm, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
+    let edit = Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f.clone()))), inputs.to_vec());
+    Ok(crate::dialogs::apply_commands(app, &edit)?.into_iter().filter(|(id, _)| id != "joint.limits").collect())
+}
+
+/// Find Limits: on a copy of the design, the joint as the dialog has it now (its type and
+/// alignment, as OK would leave them), then `joint.find_limits` on it. Off the window thread
+/// when the app runs commands there, else at once.
+fn find_limits(app: &SolveApp, f: &mut JointForm, id: u64, inputs: &[SelInput]) {
+    (f.found_note, f.search, f.searched) = (None, None, None);
+    f.found.clear();
+    let searched = match Searched::now(app, f, inputs) {
+        Ok(s) => s,
+        Err(e) => {
+            f.found_note = Some(e);
+            return;
+        }
+    };
+    // A joint OK would refuse (an expression that doesn't read) says so at once, before any search.
+    let mut probe = app.session.scratch();
+    if let Some(e) = searched.joint.iter().find_map(|(id, p)| probe.execute(id, p).err()) {
+        f.found_note = Some(e.to_string());
+        return;
+    }
+    let mut commands = searched.joint.clone();
+    commands.push(("joint.find_limits".into(), json!({ "joint": id })));
+    // The search's reply, or the first command that failed.
+    fn reply<E: std::fmt::Display>(replies: Vec<Result<Value, E>>) -> Result<Value, String> {
+        let mut last = Err(String::new());
+        for r in replies {
+            last = Ok(r.map_err(|e| e.to_string())?);
+        }
+        last
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if app.apply_off_thread.is_some() {
+        let search = Search { reply: Default::default(), searched: searched.clone() };
+        let (ahead, out, list) = (app.session.ahead(), search.reply.clone(), commands.clone());
+        let spawned = std::thread::Builder::new().name("find limits".into()).spawn(move || {
+            let r = reply(ahead.replies(&list));
+            if let Ok(mut slot) = out.lock() {
+                *slot = Some(r);
+            }
+        });
+        if spawned.is_ok() {
+            f.search = Some(search);
+            return;
+        }
+    }
+    f.searched = Some(searched);
+    fill_limits(&app.session.doc, f, reply(app.session.ahead().replies(&commands)));
+}
+
+/// Fill the limits rows from `joint.find_limits`'s reply: each side found, rounded inward (a
+/// tenth of a degree, a hundredth of the design's length unit), and its row ticked once both
+/// are; a side with nothing to meet keeps what it had. A line under each row says what stopped
+/// each side.
+fn fill_limits(doc: &solidcraft_engine::doc::Document, f: &mut JointForm, reply: Result<Value, String>) {
+    let r = match reply {
+        Ok(r) => r,
+        Err(e) => {
+            (f.found_note, f.searched) = (Some(e), None);
+            return;
+        }
+    };
+    let kind = f.joint_kind();
+    let unit = crate::length_input::unit(doc).to_string();
+    let scale = solidcraft_engine::doc::expr::unit_info(&unit).map(|(_, scale)| scale).filter(|s| *s > 0.0).unwrap_or(1.0);
+    f.found = vec![String::new(); f.limits.len()];
+    for v in r["values"].as_array().into_iter().flatten() {
+        let Some(i) = v["index"].as_u64().and_then(|i| usize::try_from(i).ok()) else { continue };
+        let (Some(row), Some(note)) = (f.limits.get_mut(i), f.found.get_mut(i)) else { continue };
+        let angle = kind.is_angle(i);
+        // A side as the dialog shows it: rounded toward the joint's value, so it stays clear; as
+        // found where rounding would pass the joint's value (a stop nearer than the rounding).
+        let (min, max) = (v["min"].as_f64().filter(|x| x.is_finite()), v["max"].as_f64().filter(|x| x.is_finite()));
+        let now = v["value"].as_f64().filter(|x| x.is_finite());
+        let step = if angle { 0.1 } else { 0.01 * scale };
+        let lo = min.map(|x| Some((x / step - 1e-6).ceil() * step).filter(|r| now.is_none_or(|c| *r <= c)).unwrap_or(x));
+        let hi = max.map(|x| Some((x / step + 1e-6).floor() * step).filter(|r| now.is_none_or(|c| *r >= c)).unwrap_or(x));
+        let (lo, hi) = if lo.zip(hi).is_some_and(|(lo, hi)| lo > hi) { (min, max) } else { (lo, hi) };
+        let shown = |x: f64| {
+            if angle { (num(x, "deg"), format!("{}°", crate::dialogs_coupling::trim(x))) } else { (num(x / scale, &unit), num(x / scale, &unit)) }
+        };
+        let (min, max) = (lo.map(shown), hi.map(shown));
+        let mut lines = Vec::new();
+        for (label, found, by) in [("Minimum", &min, &v["min_by"]), ("Maximum", &max, &v["max_by"])] {
+            let which = crate::i18n::tr_label(label);
+            let value = found.as_ref().map(|(_, shown)| shown.as_str()).unwrap_or_default();
+            lines.push(match by.as_str() {
+                Some("loop") => crate::i18n::format("joint.limit_loop", &[("side", which), ("value", value)]),
+                Some("limit") => crate::i18n::format("joint.limit_limit", &[("side", which), ("value", value)]),
+                Some("turn") => crate::i18n::format("joint.limit_turn", &[("side", which), ("value", value)]),
+                Some(_) => {
+                    // Down to a tenth, so it never claims more than was searched.
+                    let range = (v["range"].as_f64().filter(|x| x.is_finite()).unwrap_or(0.0) / scale * 10.0).floor() / 10.0;
+                    crate::i18n::format("joint.limit_range", &[("side", which), ("range", &num(range, &unit))])
+                }
+                None => {
+                    let (a, b) = (by["a"].as_str().unwrap_or_default(), by["b"].as_str().unwrap_or_default());
+                    crate::i18n::format("joint.limit_contact", &[("side", which), ("value", value), ("a", a), ("b", b)])
+                }
+            });
+        }
+        *note = lines.join("\n");
+        // A side with nothing to meet has no limit to fill in: the row keeps what it had.
+        row.0 |= min.is_some() && max.is_some();
+        if let Some((lo, _)) = min {
+            row.1 = lo;
+        }
+        if let Some((hi, _)) = max {
+            row.2 = hi;
+        }
+    }
+    let overlapping: Vec<String> = r["overlapping_at_start"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|o| format!("{} / {}", o["a"].as_str().unwrap_or_default(), o["b"].as_str().unwrap_or_default()))
+        .collect();
+    if !overlapping.is_empty() {
+        f.found_note = Some(crate::i18n::format("joint.limits_overlapping", &[("pairs", &overlapping.join(", "))]));
+    }
+}
+
+/// Start Compute's check (overlaps, pairs closer than the clearance, each body's nearest
+/// neighbour) and find the overlapping volumes (world placement) to show in red. Off the window
+/// thread, on a kernel thread, when the app runs commands there: a slow pair froze the window
+/// until the app was closed (#11483). Else at once.
+fn interference(app: &SolveApp, picked: &[Sel], clearance: &str) -> Check {
+    let check =
+        Check { reply: Default::default(), design: std::sync::Arc::downgrade(&app.session.doc), of: picked.to_vec(), started: crate::now_ms() };
+    let names: Vec<String> = picked.body_names();
+    let (scale, _) = crate::prefs::unit_scale(&app.session.doc.units);
+    let reply = match crate::prefs::parse_length_mm(clearance, scale) {
+        Some(v) if v >= 0.0 => {
+            let mut p = json!({ "clearance": v, "nearest": 1 });
+            if !names.is_empty() {
+                p["bodies"] = json!(names);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            if app.apply_off_thread.is_some() {
+                let (ahead, world, out, params) =
+                    (app.session.ahead(), crate::open_meshing::session_world(&app.session), check.reply.clone(), p.clone());
+                let spawned = solidcraft_engine::kernel::kernel_thread("interference").spawn(move || {
+                    let r = check_now(ahead, &world, params);
+                    if let Ok(mut slot) = out.lock() {
+                        *slot = Some(r);
+                    }
+                });
+                if spawned.is_ok() {
+                    return check;
+                }
+            }
+            check_now(app.session.ahead(), &crate::open_meshing::session_world(&app.session), p)
+        }
+        _ => (json!({ "error": crate::i18n::tr("dialog.clearance_invalid") }), Vec::new()),
+    };
+    if let Ok(mut slot) = check.reply.lock() {
+        *slot = Some(reply);
+    }
+    check
+}
+
+/// `inspect.clearance` with `p` on a copy of the session, and the volume each pair it finds
+/// overlapping shares ([`overlap_meshes`]).
+fn check_now(ahead: solidcraft_engine::Ahead, world: &solidcraft_engine::doc::ModelState, p: Value) -> (Value, Vec<Mesh>) {
+    // One reply for the one command.
+    match ahead.replies(&[("inspect.clearance".to_string(), p)]).pop() {
+        Some(Ok(r)) => {
+            let meshes = overlap_meshes(world, &r);
+            (r, meshes)
+        }
+        Some(Err(e)) => (json!({ "error": e.to_string() }), Vec::new()),
+        None => (json!({}), Vec::new()),
+    }
+}
+
+/// The volume each pair in an `inspect.clearance` reply's `overlaps` shares, meshed in world
+/// placement. Each pair runs on a kernel worker with the kernel's stack, whatever thread asks
+/// (the window thread's is 1 MiB on Windows).
+fn overlap_meshes(st: &solidcraft_engine::doc::ModelState, r: &Value) -> Vec<Mesh> {
+    use solidcraft_engine::kernel;
+    let pairs: Vec<_> =
+        r["overlaps"].as_array().into_iter().flatten().filter_map(|hit| Some((st.body(hit["a"].as_str()?)?, st.body(hit["b"].as_str()?)?))).collect();
+    kernel::map_with_local_pools(&pairs, usize::MAX, |&(a, b)| {
+        let Some(o) = kernel::boolean(&a.body, &b.body, kernel::BoolOp::Intersect)? else { return Ok(None) };
+        o.mesh(&kernel::MeshTolerance::chord((o.size() * 2e-3).max(1e-3))).map(Some)
+    })
+    .into_iter()
+    .filter_map(|m| m.ok().flatten())
+    .collect()
 }
 
 fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     let t = Tokens::get();
     if let Some(e) = r.get("error").and_then(Value::as_str) {
-        form_row(ui, "", |ui| {
-            ui.label(RichText::new(e).color(t.error));
-        });
+        crate::ui_kit::status_line(ui, e, crate::ui_kit::StatusTone::Error);
         return;
     }
     let hits = r["overlaps"].as_array().cloned().unwrap_or_default();
@@ -833,9 +1341,7 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     let near = r["near"].as_array().cloned().unwrap_or_default();
     let pair = |h: &Value| format!("{} · {}", h["a"].as_str().unwrap_or(""), h["b"].as_str().unwrap_or(""));
     if hits.is_empty() && unchecked.is_empty() {
-        form_row(ui, "Result", |ui| {
-            ui.label(RichText::new(crate::i18n::tr_label("no interference")).color(t.text_dim));
-        });
+        crate::ui_kit::status_line(ui, "no interference", crate::ui_kit::StatusTone::Dim);
     }
     // Pairs closer than the clearance, nearest first.
     if !near.is_empty() {
@@ -878,7 +1384,7 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     for u in unchecked {
         form_row(ui, &format!("{} · {}", u["a"].as_str().unwrap_or(""), u["b"].as_str().unwrap_or("")), |ui| {
             ui.label(RichText::new(crate::i18n::tr("dialog.could_not_be_checked")).color(t.warning))
-                .on_hover_text(u["reason"].as_str().unwrap_or(""));
+                .backing_on_hover_text(u["reason"].as_str().unwrap_or(""));
         });
     }
 }
@@ -946,6 +1452,13 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
     };
     let cmd = |id: &str, p: Value| vec![(id.to_string(), p)];
     Ok(match k {
+        Asm::FromBodies => {
+            let bodies = sel_items(inputs, 0).body_names();
+            if bodies.is_empty() {
+                return Err(crate::i18n::tr("ui.components_from_bodies_required").into());
+            }
+            cmd("component.from_bodies", json!({ "bodies": bodies }))
+        }
         Asm::NewComponent { name, activate } => {
             let bodies: Vec<String> = sel_items(inputs, 0).body_names();
             if bodies.is_empty() {
@@ -964,7 +1477,20 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             let limits: Vec<Value> =
                 f.limits.iter().take(jk.dofs().len()).map(|(on, lo, hi)| if *on { json!([lo, hi]) } else { Value::Null }).collect();
             if let Some(id) = f.editing {
-                let mut out = cmd("joint.edit", json!({"joint": id, "type": kind, "flip": f.flip, "offset": f.offset[2], "angle": f.angle}));
+                let mut p = json!({"joint": id, "type": kind, "flip": f.flip, "offset": f.offset[2]});
+                // The angle only when the user changed it: a side moved without it turns B as joint.create would.
+                if f.angle != f.angle_shown {
+                    p["angle"] = json!(f.angle);
+                }
+                // A side picked again moves the joint's attachment there; one left as it was keeps its origin.
+                for (i, key) in ["a", "b"].into_iter().enumerate() {
+                    let picked = sel_items(inputs, i).first();
+                    if picked != f.sides[i].as_ref() {
+                        let what = if i == 0 { "component 1's joint origin" } else { "component 2's joint origin" };
+                        p[key] = snap(i, what)?.param;
+                    }
+                }
+                let mut out = cmd("joint.edit", p);
                 for (i, l) in limits.iter().enumerate() {
                     let p = match l.as_array() {
                         Some(a) => json!({"joint": id, "index": i, "min": a.first(), "max": a.get(1)}),
@@ -1277,12 +1803,31 @@ fn joint_menu(
     }
 }
 
+/// Membership is indexed once so a collapsed folder with hundreds of joints stays cheap.
+fn timeline_joint_items(app: &SolveApp, ids: Option<&[u64]>) -> Vec<(u64, String, JointKind, bool)> {
+    let members: std::collections::BTreeSet<u64> = match ids {
+        Some(ids) => ids.iter().copied().collect(),
+        None => app.session.doc.timeline_groups.iter().flat_map(|group| group.joints.iter().copied()).collect(),
+    };
+    app.session
+        .doc
+        .assembly
+        .joints
+        .iter()
+        .filter(|joint| members.contains(&joint.id) == ids.is_some())
+        .map(|joint| (joint.id, joint.name.clone(), joint.kind, joint.suppressed))
+        .collect()
+}
+
 /// Joints after the features in the timeline: double-click edits, the menu drives, suppresses
 /// or deletes. Returns the x after them.
-pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, mut x: f32, r: egui::Rect) -> f32 {
+pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, x: f32, r: egui::Rect) -> f32 {
+    timeline_joint_tiles(app, ui, p, x, r, None)
+}
+
+pub(crate) fn timeline_joint_tiles(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, mut x: f32, r: egui::Rect, ids: Option<&[u64]>) -> f32 {
     let t = Tokens::get();
-    let joints: Vec<(u64, String, JointKind, bool)> =
-        app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
+    let joints = timeline_joint_items(app, ids);
     if joints.is_empty() {
         return x;
     }
@@ -1292,7 +1837,7 @@ pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter,
     for (id, name, kind, suppressed) in joints {
         let br = egui::Rect::from_min_size(egui::pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
         crate::scenario::publish_handle(&format!("timeline-joint:{name}"), br.center());
-        let resp = ui.interact(br, ui.id().with(("joint", id)), egui::Sense::click());
+        let resp = ui.interact(br, ui.scope_id().with(("joint", id)), egui::Sense::click());
         let bg = if app.tree.picked_joints.contains(&id) {
             t.accent_soft
         } else if resp.hovered() {
@@ -1305,7 +1850,7 @@ pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter,
         if suppressed {
             p.line_segment([br.left_bottom() + vec2(4.0, -4.0), br.right_top() + vec2(-4.0, 4.0)], Stroke::new(1.5, t.text_dim));
         }
-        let resp = resp.on_hover_text(format!("{name}  ({kind:?} joint)\nDouble-click to edit · right-click for more"));
+        let resp = resp.backing_on_hover_text(format!("{name}  ({kind:?} joint)\nDouble-click to edit · right-click for more"));
         if resp.double_clicked() {
             open = edit_joint(app, id);
         } else if resp.clicked() {
@@ -1333,19 +1878,29 @@ pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter,
 
 /// Named joint rows for the vertical feature-history layout.
 pub fn timeline_joints_vertical(app: &mut SolveApp, ui: &mut egui::Ui) {
+    timeline_joint_rows(app, ui, None);
+}
+
+pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Option<&[u64]>) {
     let t = Tokens::get();
-    let joints: Vec<(u64, String, JointKind, bool)> =
-        app.session.doc.assembly.joints.iter().map(|joint| (joint.id, joint.name.clone(), joint.kind, joint.suppressed)).collect();
+    let joints = timeline_joint_items(app, ids);
     if joints.is_empty() {
         return;
     }
-    ui.add_space(4.0);
-    ui.label(egui::RichText::new("JOINTS").size(crate::theme::Tokens::get().font_micro).semibold().color(t.text_dim));
+    if ids.is_none() {
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("JOINTS").size(crate::theme::Tokens::get().font_micro).semibold().color(t.text_dim));
+    }
     let mut open = None;
     let mut run = None;
     for (id, name, kind, suppressed) in joints {
         let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), egui::Sense::click());
         crate::scenario::publish_handle(&format!("timeline-joint:{name}"), rect.center());
+        // Keep the scroll extent and row IDs, but only lay out icons, text and menus for
+        // joints in the clipped viewport (an imported assembly can have thousands).
+        if !ui.is_rect_visible(rect) {
+            continue;
+        }
         if app.tree.picked_joints.contains(&id) {
             ui.painter().rect_filled(rect, t.radius_sm.saturating_sub(1), t.accent_soft);
         } else if response.hovered() {
@@ -1363,7 +1918,7 @@ pub fn timeline_joints_vertical(app: &mut SolveApp, ui: &mut egui::Ui) {
             egui::FontId::proportional(crate::theme::Tokens::get().font_body),
             if suppressed { t.text_dim } else { t.text },
         );
-        let response = response.on_hover_text(format!("{name}  ({kind:?} joint)\nDouble-click to edit · right-click for more"));
+        let response = response.backing_on_hover_text(format!("{name}  ({kind:?} joint)\nDouble-click to edit · right-click for more"));
         if response.double_clicked() {
             open = edit_joint(app, id);
         } else if response.clicked() {
@@ -1401,17 +1956,18 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     // `eye:Joints`, `row:<name>`). The folder's eye is its own: hiding it hides every joint's
     // glyph without changing each joint's eye.
     let key = "c0/joints";
-    let open = is_open(app, key, true);
+    let start_open = crate::browser::rows_start_open(app);
+    let open = is_open(app, key, start_open);
     let folder_shown = !app.session.folder_hidden(key);
     let r = draw_row(
         ui,
-        ui.id().with(key),
+        ui.scope_id().with(key),
         &Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label: "Joints", dim: !folder_shown, ..Default::default() },
     );
     if r.eye {
         crate::browser::toggle_folder(app, key);
     } else if r.fold || r.clicked {
-        toggle(app, key, true);
+        toggle(app, key, start_open);
     }
     if !open {
         return;
@@ -1422,7 +1978,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         let selected = app.tree.picked_joints.contains(&id);
         let r = draw_row(
             ui,
-            ui.id().with(("joint", id)),
+            ui.scope_id().with(("joint", id)),
             &Row {
                 depth: depth + 1,
                 eye: Some(visible),
@@ -1435,7 +1991,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
             },
         );
         if let Some(resp) = &r.resp {
-            resp.clone().on_hover_text(format!("{kind:?} joint"));
+            resp.clone().backing_on_hover_text(format!("{kind:?} joint"));
         }
         if r.eye {
             let _ = app.run("browser.visibility", json!({ "joints": [id], "visible": !visible }));
@@ -1480,6 +2036,105 @@ pub fn pick_joint(app: &mut SolveApp, id: u64, add: bool) {
     }
 }
 
+/// A placement's Joints folder (#9130): the design's joints that attach this placement (it is
+/// one of the two they join), each beside the placement it joins this one to. The rows are the
+/// same joints as the root Joints folder's and act the same: a click picks the joint, a
+/// double-click edits it, the eye shows or hides its glyph and the menu is the joint's menu.
+/// The folder starts closed and has no eye of its own (the root folder's eye hides every joint
+/// glyph); it isn't drawn for a placement no joint attaches. `key` is the placement's row key.
+pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key: &str, depth: usize) {
+    use crate::browser::{Row, draw_row, is_open, toggle};
+    let joints = placement_joints(&app.session.doc, path);
+    if joints.is_empty() {
+        return;
+    }
+    let key = format!("{key}/joints");
+    let open = is_open(app, &key, false);
+    let r = draw_row(ui, ui.scope_id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label: "Joints", ..Default::default() });
+    if r.fold || r.clicked {
+        toggle(app, &key, false);
+    }
+    if !open {
+        return;
+    }
+    // Hiding the root folder hides every glyph: these rows fade with it, as its own rows do.
+    let folder_shown = !app.session.folder_hidden("c0/joints");
+    let mut dialog: Option<Dialog> = None;
+    for j in joints {
+        let id = j.id;
+        let visible = app.session.joint_visible(id);
+        let selected = app.tree.picked_joints.contains(&id);
+        let r = draw_row(
+            ui,
+            ui.scope_id().with((&key, "joint", id)),
+            &Row {
+                depth: depth + 1,
+                eye: Some(visible),
+                icon: "joint",
+                label: &j.name,
+                secondary: &j.other,
+                name: true,
+                selected,
+                dim: j.suppressed || !visible || !folder_shown,
+                ..Default::default()
+            },
+        );
+        if let Some(resp) = &r.resp {
+            resp.clone().backing_on_hover_text(format!("{:?} joint", j.kind));
+        }
+        if r.eye {
+            let _ = app.run("browser.visibility", json!({ "joints": [id], "visible": !visible }));
+        } else if r.clicked {
+            pick_joint(app, id, ui.input(|i| i.modifiers.command || i.modifiers.ctrl));
+        }
+        if r.double {
+            dialog = edit_joint(app, id);
+        }
+        if let Some(at) = r.secondary {
+            if !app.tree.picked_joints.contains(&id) {
+                pick_joint(app, id, false);
+            }
+            crate::context_menu::open_for(app, at, crate::context_menu::Target::Joint { id });
+        }
+    }
+    if let Some(d) = dialog {
+        app.tool = None;
+        app.dialog = Some(d);
+    }
+}
+
+/// A joint as a placement's Joints folder lists it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PlacementJoint {
+    pub id: u64,
+    pub name: String,
+    pub kind: JointKind,
+    pub suppressed: bool,
+    /// The name of the placement the joint joins this one to (empty when there is none).
+    pub other: String,
+}
+
+/// The joints that attach the placement at `path` (its last occurrence is one of the two a
+/// joint joins), in the design's joint order.
+pub(crate) fn placement_joints(doc: &solidcraft_engine::doc::Document, path: &[u64]) -> Vec<PlacementJoint> {
+    let Some(&occ) = path.last() else { return Vec::new() };
+    let name_of = |o: u64| doc.occurrences.iter().find(|x| x.id == o).map(|x| x.name.clone()).unwrap_or_default();
+    doc.assembly
+        .joints
+        .iter()
+        .filter_map(|j| {
+            let other = if j.a.occurrence == occ {
+                j.b.occurrence
+            } else if j.b.occurrence == occ {
+                j.a.occurrence
+            } else {
+                return None;
+            };
+            Some(PlacementJoint { id: j.id, name: j.name.clone(), kind: j.kind, suppressed: j.suppressed, other: name_of(other) })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 #[path = "dialogs_assembly_tests.rs"]
 mod tests;
@@ -1516,11 +2171,31 @@ pub fn origins_world(s: &Session) -> Vec<(String, solidcraft_engine::doc::Mat)> 
     v
 }
 
+/// Is a named joint origin's triad drawn: its occurrence shown (with its parents), and the
+/// Joints folder shown in the design and on that placement. Hidden hardware keeps no triad.
+pub fn origin_drawn(s: &Session, name: &str) -> bool {
+    let Some(o) = s.doc.assembly.origins.iter().find(|o| o.name == name) else { return false };
+    if s.folder_hidden("c0/joints") {
+        return false;
+    }
+    if o.origin.occurrence == 0 {
+        return true;
+    }
+    let Some(occ) = s.doc.occurrences.iter().find(|x| x.id == o.origin.occurrence) else { return false };
+    // The origin's own placement, not its component's first one (copies hide separately).
+    let mut path = s.doc.first_path(occ.parent);
+    path.push(occ.id);
+    s.occurrence_visible(&path) && !s.folder_hidden(&format!("{}/joints", Session::folder_scope(&path)))
+}
+
 /// Named joint origins in the viewport: a small triad where each sits.
 pub fn origins(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let t = Tokens::get();
     let len = app.cam.half_height() * 2.0 * 0.04;
-    for (_, m) in origins_world(&app.session) {
+    for (name, m) in origins_world(&app.session) {
+        if !origin_drawn(&app.session, &name) {
+            continue;
+        }
         let at = solidcraft_engine::doc::apply_point(&m, Vec3::ZERO);
         let Some(c) = proj.to_screen(at) else { continue };
         for (axis, col) in [(Vec3::X, t.axis_x), (Vec3::Y, t.axis_y), (Vec3::Z, t.axis_z)] {

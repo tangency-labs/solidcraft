@@ -35,6 +35,7 @@ fn request() -> ImageRequest {
     let mut camera = crate::Camera { distance: 50.0, ..Default::default() };
     camera.set_view(crate::StandardView::Top);
     ImageRequest {
+        studio_weights: None,
         environment: None,
         textures: None,
         integrator: job::Integrator::Raytrace,
@@ -67,7 +68,7 @@ fn real_cpu_png_conductor_matches_independent_environment_quadrature_once() {
     // Independent roughness-one white-conductor f*cos= z/(2*pi*(1+z)).
     // The fixed 8x8 solid-angle strata integrate 4 positive z rows, each 8 samples.
     let factor = [0.125, 0.375, 0.625, 0.875].into_iter().map(|z| z / (1.0 + z)).sum::<f64>() / 4.0;
-    let expected = [factor, factor * 0.5, factor * 0.25].map(|r| encode(r / (1.0 + r)));
+    let expected = [factor, factor * 0.5, factor * 0.25].map(|r| encode8(r / (1.0 + r)));
     assert_eq!(image.get_pixel(4, 4).0, [expected[0], expected[1], expected[2], 255]);
     assert_eq!(baseline.get_pixel(4, 4).0, [0, 0, 0, 255]);
     let empty = ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY };
@@ -118,7 +119,7 @@ fn progressive_hdr_expected(samples: u32, seed: u32) -> [u8; 4] {
     let mean = sum / f64::from(samples);
     // The original HDR is constant linear RGB (1, 0.5, 0.25). Average in
     // linear space over ALL attempts, then apply the display response once.
-    let rgb = [mean, mean * 0.5, mean * 0.25].map(|r| encode(r / (1.0 + r)));
+    let rgb = [mean, mean * 0.5, mean * 0.25].map(|r| encode8(r / (1.0 + r)));
     [rgb[0], rgb[1], rgb[2], 255]
 }
 

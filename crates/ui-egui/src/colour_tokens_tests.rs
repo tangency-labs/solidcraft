@@ -31,6 +31,8 @@ fn moved_colours_keep_the_values_they_were_drawn_with() {
         assert_eq!(t.logo, [Color32::from_rgb(96, 158, 236), Color32::from_rgb(58, 136, 238), Color32::from_rgb(55, 108, 197)]);
         assert_eq!(t.icons.marker_halo, Color32::from_black_alpha(150));
         assert_eq!(t.icons.agent, Color32::from_rgb(168, 85, 247));
+        assert_eq!(t.figure_white, Color32::WHITE);
+        assert_eq!(t.figure_black, Color32::BLACK);
     }
     let (l, d) = (Tokens::light(), Tokens::dark());
     assert_eq!((l.bend_up, l.bend_down), (Color32::from_rgb(30, 140, 50), Color32::from_rgb(200, 90, 20)));
@@ -69,7 +71,7 @@ fn stroke_colours(shapes: &[egui::epaint::ClippedShape]) -> std::collections::BT
 fn every_axis_is_drawn_in_one_set_of_colours() {
     use crate::theme::{ColorVision, set_dark, set_vision};
     use egui::{Pos2, Rect, vec2};
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let ctx = crate::fonts::test_context();
     let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
     let cam = solidcraft_engine::render::Camera::default();
@@ -84,7 +86,7 @@ fn every_axis_is_drawn_in_one_set_of_colours() {
 
         let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
             let painter = ui.painter().clone();
-            crate::gizmo::show(ui, &painter, &proj, egui::Id::new("one_set_gizmo"), &triad, 1.0);
+            crate::gizmo::show(ui, &painter, &proj, egui::Id::unique("one_set_gizmo"), &triad, 1.0);
         });
         out.textures_delta.clear();
         let mut gizmo = stroke_colours(&out.shapes);
@@ -141,12 +143,20 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 /// raise the file's count here and give the reason. Fewer is always fine. The icon sources may
 /// hold none at all.
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
+    ("gpu.rs", 1, "the white tint that shows the background picture as it is"),
     ("navigation.rs", 1, "the navigation cube's face shading, made from a token"),
     ("canvas.rs", 3, "white rings around manipulator handles"),
+    (
+        "body_gizmo.rs",
+        3,
+        "the custom view navigator's raster: the design's appearance and tokens, shaded, as pixels, drawn with the white image tint",
+    ),
     ("context_menu.rs", 1, "the radial menu's shadow"),
     ("dialogs_appearance.rs", 1, "a design appearance: the colour is the fact"),
     ("dialogs_save_mesh.rs", 1, "an installed slicer's own icon, drawn untinted"),
     ("dialogs_library.rs", 1, "a library appearance's swatch: the colour is the fact"),
+    ("render_ui/scene.rs", 2, "Browser appearance swatches: the colours are document data"),
+    ("render_workspace_library.rs", 1, "a catalog appearance preview: the colour is authored data"),
     ("render_workspace_materials.rs", 1, "an authored material swatch: the displayed colour is the material data"),
     ("dialogs_assembly.rs", 1, "the interference fill, shaded from its token"),
     ("dialogs_motion.rs", 1, "a white outline"),
@@ -274,9 +284,10 @@ fn every_engine_colour_tag_is_placed() {
         "AXIS_Y",
         "AXIS_Z",
     ];
-    // Bodies, edges, profiles, the grid and the background: the GPU viewport draws these from
-    // their own tokens; the engine's values are only the headless snapshot's.
-    const NEUTRAL: &[&str] = &["BODY", "BODY_SELECTED", "EDGE", "PROFILE", "GRID", "GRID_MAJOR", "BG_TOP", "BG_BOTTOM", "SECTION_CAP"];
+    // Bodies, edges, profiles, the grid, the background and Isocurve Analysis curves (the accent):
+    // the GPU viewport draws these from their own tokens; the engine's values are only the
+    // headless snapshot's.
+    const NEUTRAL: &[&str] = &["BODY", "BODY_SELECTED", "EDGE", "PROFILE", "GRID", "GRID_MAJOR", "BG_TOP", "BG_BOTTOM", "SECTION_CAP", "ISOCURVE"];
     let src = include_str!("../../engine/src/view.rs");
     let start = src.find("pub mod colors {").unwrap_or(0);
     let block = &src[start..];
@@ -286,4 +297,35 @@ fn every_engine_colour_tag_is_placed() {
     let mut placed: Vec<&str> = MAPPED.iter().chain(NEUTRAL).copied().collect();
     placed.sort_unstable();
     assert_eq!(names, placed, "an engine colour tag must be mapped to a token in `viewport::sketch_color` or listed as neutral");
+}
+
+/// Preferences › Interface › Logo: the logo in shades of the theme's accent (the accent itself in
+/// the middle, a lighter and a darker face), in a built-in theme and a theme file alike, and back
+/// to the theme's own logo colours.
+#[test]
+fn the_logo_can_take_the_themes_accent() {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            crate::theme::set_logo_accent(false);
+        }
+    }
+    let _reset = Reset;
+    let mut h = crate::scenario::Harness::new();
+    for theme in ["dark", "gruvbox-dark"] {
+        h.call("ui.prefs", serde_json::json!({"theme": theme, "logo_accent": false}));
+        h.frames(1);
+        let own = Tokens::get();
+        h.call("ui.prefs", serde_json::json!({"logo_accent": true}));
+        h.frames(1);
+        let t = Tokens::get();
+        let accent = t.accent.to_opaque();
+        assert_eq!(t.logo[1], accent, "{theme}");
+        let lum = |c: Color32| u32::from(c.r()) + u32::from(c.g()) + u32::from(c.b());
+        assert!(lum(t.logo[0]) > lum(accent) && lum(t.logo[2]) < lum(accent), "{theme}: {:?}", t.logo);
+        assert_eq!(Tokens { logo: own.logo, ..t }, own, "{theme}: only the logo changes");
+        h.call("ui.prefs", serde_json::json!({"logo_accent": false}));
+        h.frames(1);
+        assert_eq!(Tokens::get().logo, own.logo, "{theme}: the theme's own again");
+    }
 }

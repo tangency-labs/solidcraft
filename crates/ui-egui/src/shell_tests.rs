@@ -55,7 +55,7 @@ fn both_modes_keep_their_geometry_and_fit_clear_of_covered_rects() {
             assert!(!layout.drawable.intersect(covered).is_positive(), "{layout:?} {covered:?}");
         }
         let projection = crate::viewport::projection(&h.app, viewport);
-        for point in [solidcraft_engine::geom::Vec3::ZERO, solidcraft_engine::geom::Vec3::new(40.0, 30.0, 20.0)] {
+        for point in [solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(40.0, 30.0, 20.0)] {
             assert!(layout.drawable.contains(projection.to_screen(point).unwrap()));
         }
         h.app.start("solid.extrude");
@@ -108,7 +108,7 @@ fn floating_sketch_palette_and_compass_share_measured_clearance() {
             assert!(layout.viewport.expand(1.0).contains_rect(palette), "{palette:?} {layout:?}");
             assert!(palette.contains(crate::scenario::handle_at("sketch_palette:look_at").unwrap()));
             let proj = crate::viewport::projection(&h.app, layout.viewport);
-            for point in [solidcraft_engine::geom::Vec3::ZERO, solidcraft_engine::geom::Vec3::new(20.0, 0.0, 0.0)] {
+            for point in [solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(20.0, 0.0, 0.0)] {
                 assert!(layout.drawable.contains(proj.to_screen(point).unwrap()), "{layout:?}");
             }
             if width > 1000.0 {
@@ -515,13 +515,73 @@ fn tool_sheets_drag_over_browser_and_history_but_clear_protected_panels() {
             if target == browser.center() {
                 assert!(sheet.intersect(browser).is_positive(), "sheet can cover Browser");
                 let layer = h.ctx.layer_id_at(sheet.intersect(browser).center()).unwrap();
-                assert_eq!(layer.id, egui::Id::new(("sc_dialog", "CREATE SKETCH")), "sheet receives input above Browser");
+                assert_eq!(layer.id, egui::Id::unique(("sc_dialog", "CREATE SKETCH")), "sheet receives input above Browser");
             } else if target == history.center() {
                 assert!(sheet.intersect(history).is_positive(), "sheet can cover History");
             }
         }
         h.step(&json!({"widget":"Cancel"})).unwrap();
         assert!(h.app.dialog.is_none(), "dragged sheet remains interactive");
+    }
+}
+
+#[test]
+fn tool_sheets_stay_above_browser_and_history_after_panel_clicks() {
+    for dock in ["bottom", "left", "under_browser"] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1800,"height":1000}));
+        h.call("ui.set", json!({"layout":"floating"}));
+        h.app.run("view.history_layout", json!({"dock":dock})).unwrap();
+        h.app.start("solid.extrude");
+        h.settle();
+        for panel in [h.app.shell.browser.unwrap(), h.app.shell.history.unwrap()] {
+            let title = crate::scenario::handle_at("dialog:title").unwrap();
+            let target = panel.center();
+            h.call("ui.drag", json!({"x0":title.x,"y0":title.y,"x1":target.x,"y1":target.y,"steps":10}));
+            let sheet = h.app.viewport.dialog_rect.unwrap();
+            let overlap = sheet.intersect(panel);
+            assert!(overlap.is_positive(), "{dock}: the dialog overlaps the panel");
+            let exposed = panel.left_top() + egui::vec2(10.0, 10.0);
+            assert!(!sheet.contains(exposed), "the panel click is outside the dialog");
+            h.call("ui.click", json!({"x":exposed.x,"y":exposed.y}));
+            let layer = h.ctx.layer_id_at(overlap.center()).unwrap();
+            assert_eq!(layer.id, egui::Id::unique(("sc_dialog", "EXTRUDE")), "{dock}: clicking a panel must not cover the dialog");
+            let panel_layer = h.ctx.layer_id_at(exposed).unwrap();
+            h.call("ui.click", json!({"x":1700,"y":500}));
+            assert_eq!(h.ctx.layer_id_at(exposed), Some(panel_layer), "clicking the model view must not cover the panel");
+        }
+        h.step(&json!({"widget":"Cancel"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{dock}: the overlapping dialog remains clickable");
+    }
+}
+
+#[test]
+fn tool_sheet_dropdowns_and_preferences_still_open_above_the_sheet() {
+    for layout in ["floating", "compact"] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1400,"height":900}));
+        h.call("ui.set", json!({"layout":layout}));
+        h.app.start("solid.extrude");
+        h.settle();
+        let title = crate::scenario::handle_at("dialog:title").unwrap();
+        h.call("ui.drag", json!({"x0":title.x,"y0":title.y,"x1":700,"y1":350,"steps":10}));
+        h.step(&json!({"widget":"One Side"})).unwrap();
+        h.step(&json!({"widget":"Symmetric"})).unwrap();
+        assert!(matches!(h.app.dialog.as_ref().unwrap().kind, crate::dialogs::Kind::Extrude { direction: 2, .. }));
+        let sheet = h.app.viewport.dialog_rect.unwrap();
+        h.call("ui.prefs", json!({"open":"General"}));
+        let preferences = rect_of("dialog:window").unwrap();
+        let overlap = sheet.intersect(preferences);
+        assert!(overlap.is_positive(), "Preferences overlaps the feature dialog");
+        assert_eq!(h.ctx.layer_id_at(overlap.center()).unwrap().id, egui::Id::unique("sc_prefs"), "Preferences receives input above the sheet");
+        let cancel = rect_of("prefs:cancel").expect("Preferences Cancel");
+        assert_eq!(h.ctx.layer_id_at(cancel.center()).unwrap().id, egui::Id::unique("sc_prefs"), "Preferences owns its Cancel target");
+        h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
+        assert!(!h.app.prefs_window.open && h.app.dialog.is_some(), "Cancel closes Preferences, leaving the feature dialog open");
+        h.step(&json!({"widget":"Cancel"})).unwrap();
+        assert!(h.app.dialog.is_none());
     }
 }
 
@@ -534,7 +594,7 @@ fn compact_layout_is_saved_and_survives_cancel_apply_defaults_and_bad_input() {
     let design = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
     let camera = h.app.cam;
-    h.call("ui.prefs", json!({"open":"Interface"}));
+    h.call("ui.prefs", json!({"open":"Layout"}));
     crate::prefs::reveal_preference(&mut h, "dialog:Workspace:Compact");
     h.step(&json!({"click":{"handle":"dialog:Workspace:Compact"}})).unwrap();
     h.call("ui.prefs", json!({"button":"ok"}));
@@ -551,15 +611,15 @@ fn compact_layout_is_saved_and_survives_cancel_apply_defaults_and_bad_input() {
     restored.load_prefs(&h.app.prefs());
     assert_eq!(restored.ui.layout, LayoutMode::Docked);
     assert_eq!(restored.preferences.layout, LayoutMode::Docked);
-    h.call("ui.prefs", json!({"open":"Interface","layout":"floating"}));
+    h.call("ui.prefs", json!({"open":"Layout","layout":"floating"}));
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert_eq!(h.app.ui.layout, LayoutMode::Docked);
-    h.call("ui.prefs", json!({"open":"Interface","layout":"floating"}));
+    h.call("ui.prefs", json!({"open":"Layout","layout":"floating"}));
     h.call("ui.prefs", json!({"button":"apply"}));
     h.call("ui.prefs", json!({"layout":"compact"}));
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert_eq!(h.app.ui.layout, LayoutMode::Floating);
-    h.call("ui.prefs", json!({"open":"Interface","layout":"compact"}));
+    h.call("ui.prefs", json!({"open":"Layout","layout":"compact"}));
     h.call("ui.prefs", json!({"button":"defaults"}));
     assert_eq!(h.app.ui.layout, LayoutMode::Floating);
     assert_eq!(h.app.preferences.layout, LayoutMode::Floating);
@@ -681,11 +741,90 @@ fn embed_keeps_model_panels_without_application_chrome() {
     assert!(h.app.viewport.rect.is_some());
 }
 
+#[test]
+fn embed_editor_keeps_the_ribbon_and_leaves_files_to_the_host() {
+    let mut h = Harness::new();
+    h.settle();
+    assert!(rect_of("appbar:home").is_some(), "the full app has its application bar");
+    h.app.embed_editor = true;
+    h.app.home.show(h.app.session.revision);
+    h.settle();
+    assert!(!h.app.home.open, "the host shows the design, never the start page");
+    assert_eq!(h.app.ui.layout, LayoutMode::Docked);
+    assert!(rect_of("appbar:home").is_none() && rect_of("titlebar:report").is_none(), "no application bar");
+    assert!(rect_of("button:sketch.create").is_some() && rect_of("browser:card").is_some(), "the modelling surface stays");
+    // With no bar to hold it, command search stays in the ribbon whatever the host's header layout.
+    h.app.header = crate::toolbar::HeaderLayout::COMPACT;
+    h.settle();
+    assert!(rect_of("ribbon:search").is_some() && rect_of("titlebar:search").is_none());
+    h.step(&json!({"click":{"handle":"button:sketch.create"}})).unwrap();
+    assert!(h.app.dialog.is_some(), "and its commands work");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    // New, Open, Save, Close and Preferences belong to the host page.
+    let (docs, revision) = (h.app.docs.count(), h.app.session.revision);
+    for key in ["N", "O", "S", "W", "Comma"] {
+        h.step(&json!({"key":key,"cmd":true})).unwrap();
+    }
+    h.settle();
+    assert_eq!((h.app.docs.count(), h.app.session.revision), (docs, revision));
+    assert!(!h.app.file_picker_busy() && !h.app.prefs_window.open, "{}", h.call("ui.inspect", json!({})));
+    // Undo stays the design's own.
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.settle();
+    h.step(&json!({"key":"Z","cmd":true})).unwrap();
+    assert!(h.app.session.doc.features.is_empty(), "Ctrl+Z undoes in the embed too");
+}
+
 /// A design with a finished sketch nothing uses yet, so Extrude opens ready for OK.
 fn sketched(h: &mut Harness) {
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
+}
+
+#[test]
+fn a_host_keeps_the_design_and_gives_it_back_with_its_timeline() {
+    let mut h = Harness::new();
+    h.app.embed_editor = true;
+    sketched(&mut h);
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.settle();
+    let kept = h.call("document.export", json!({}));
+    assert_eq!(kept["ok"], true, "{kept}");
+    let kept = &kept["result"];
+    assert_eq!((kept["format"].as_str(), kept["dirty"].as_bool()), (Some("json"), Some(true)));
+    assert_eq!(kept["revision"], h.call("document.revision", json!({}))["result"]["revision"], "the revision that follows the design");
+    let text = kept["text"].as_str().unwrap().to_string();
+    let timeline = |h: &Harness| h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    let before = timeline(&h);
+    assert!(before.len() >= 2, "{before:?}");
+    // The host says it saved: the design is saved from there, until the next change.
+    let at = kept["revision"].as_u64().unwrap();
+    assert_eq!(h.call("document.saved", json!({"revision": at}))["result"]["dirty"], false);
+    assert!(!h.app.session.is_dirty());
+    assert_eq!(h.call("document.saved", json!({"revision": at + 7}))["ok"], false, "another revision is refused");
+    // Something else is drawn and left open; the kept design comes back in its place, saved,
+    // timeline and all, and what was going on in the other leaves with it.
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    assert_eq!(h.call("document.saved", json!({"revision": at}))["ok"], false, "the design changed since");
+    h.call("ui.start", json!({"command":"sketch.create"}));
+    h.settle();
+    assert!(h.app.dialog.is_some(), "{}", h.call("ui.inspect", json!({})));
+    let (docs, id) = (h.app.docs.count(), h.app.session.document_id.clone());
+    let back = h.call("document.import", json!({"text": text, "name": "Bracket"}));
+    assert_eq!(back["ok"], true, "{back}");
+    assert_eq!(back["result"]["errors"], 0);
+    assert_eq!(back["result"]["revision"], h.call("document.revision", json!({}))["result"]["revision"]);
+    assert_eq!(timeline(&h), before);
+    assert_eq!((h.app.session.doc.name.as_str(), h.app.session.is_dirty(), h.app.docs.count()), ("Bracket", false, docs));
+    assert_ne!(h.app.session.document_id, id, "another design, as one opened is");
+    assert!(h.app.session.undo.is_empty(), "the undo history is the opened design's own");
+    assert!(h.app.dialog.is_none() && h.app.tool.is_none());
+    h.settle();
+    for bad in [json!({}), json!({"text": "{"}), json!({"text": "not a design"})] {
+        assert_eq!(h.call("document.import", bad.clone())["ok"], false, "{bad}");
+        assert_eq!(timeline(&h), before, "a refused import leaves the design as it was");
+    }
 }
 
 /// Dialogs › In the left column (#6707): Extrude takes the place of the browser and the History
@@ -871,7 +1010,7 @@ fn the_view_corner_answers_a_dialog_in_the_left_column() {
     }
 }
 
-/// Dialogs is an Interface preference: set from the page or the control channel, saved,
+/// Dialogs is a Layout preference: set from the page or the control channel, saved,
 /// refused when unknown, and Cancel and Restore Defaults put it back. A dialog already open
 /// moves with it.
 #[test]
@@ -883,7 +1022,7 @@ fn dialog_place_is_saved_and_survives_cancel_defaults_and_bad_input() {
     h.settle();
     let right = h.app.viewport.dialog_rect.unwrap();
     assert_eq!(h.app.preferences.dialog_place, DialogPlace::Edge);
-    h.call("ui.prefs", json!({"open":"Interface"}));
+    h.call("ui.prefs", json!({"open":"Layout"}));
     crate::prefs::reveal_preference(&mut h, "dialog:Dialogs:In the left column");
     h.step(&json!({"click":{"handle":"dialog:Dialogs:In the left column"}})).unwrap();
     assert_eq!(h.app.preferences.dialog_place, DialogPlace::LeftColumn);
@@ -894,10 +1033,10 @@ fn dialog_place_is_saved_and_survives_cancel_defaults_and_bad_input() {
     let mut restored = crate::SolveApp::new(Default::default(), Default::default());
     restored.load_prefs(&h.app.prefs());
     assert_eq!(restored.preferences.dialog_place, DialogPlace::LeftColumn);
-    h.call("ui.prefs", json!({"open":"Interface","dialog_place":"edge"}));
+    h.call("ui.prefs", json!({"open":"Layout","dialog_place":"edge"}));
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert_eq!(h.app.preferences.dialog_place, DialogPlace::LeftColumn);
-    h.call("ui.prefs", json!({"open":"Interface"}));
+    h.call("ui.prefs", json!({"open":"Layout"}));
     h.call("ui.prefs", json!({"button":"defaults"}));
     assert_eq!(h.app.preferences.dialog_place, DialogPlace::Edge);
     h.call("ui.prefs", json!({"button":"ok"}));
@@ -906,4 +1045,285 @@ fn dialog_place_is_saved_and_survives_cancel_defaults_and_bad_input() {
     restored.load_prefs(r#"{"preferences":{"dialog_place":"top","default_units":"in"}}"#);
     assert_eq!(restored.preferences.dialog_place, DialogPlace::Edge);
     assert_eq!(restored.preferences.default_units, "in");
+}
+
+/// Every text the last frame painted.
+fn painted_texts(h: &Harness) -> Vec<String> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(t) => out.push(t.galley.text().to_string()),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    h.shapes.iter().for_each(|s| walk(&s.shape, &mut out));
+    out
+}
+
+#[test]
+fn status_bar_spans_the_window_below_history_in_both_layouts_and_is_covered() {
+    for mode in [LayoutMode::Docked, LayoutMode::Floating] {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1400,"height":900}));
+        h.call("ui.set", json!({"layout":mode}));
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+        h.settle();
+        assert!(rect_of("status:bar").is_none() && h.app.shell.status_bar.is_none(), "off by default");
+        let viewport_without = h.app.viewport.rect.unwrap();
+        let covered_without = covered_rects(&h.app);
+        h.call("ui.prefs", json!({"status_bar": true}));
+        h.settle();
+        let bar = rect_of("status:bar").unwrap();
+        assert_eq!(h.app.shell.status_bar, Some(bar));
+        assert_eq!((bar.left(), bar.right(), bar.bottom()), (0.0, 1400.0, 900.0), "{mode:?}: full width at the window's bottom: {bar:?}");
+        assert_eq!(bar.height(), crate::status_bar::HEIGHT);
+        let viewport = h.app.viewport.rect.unwrap();
+        assert!(viewport.bottom() <= bar.top() + 0.5, "{mode:?}: the view ends above the bar: {viewport:?} {bar:?}");
+        assert_eq!(viewport.bottom(), viewport_without.bottom() - bar.height(), "{mode:?}: the view gives up only the bar's height");
+        let history = h.app.shell.history.unwrap();
+        assert!(history.bottom() <= bar.top() + 0.5, "{mode:?}: History sits above the bar: {history:?} {bar:?}");
+        let rects = covered_rects(&h.app);
+        assert!(rects.contains(&bar), "{mode:?}: the bar is covered: {rects:?}");
+        assert_eq!(rects.len(), covered_without.len() + 1, "{mode:?}: {rects:?} {covered_without:?}");
+        assert!(covered(&h.app, bar.center()));
+        h.call("ui.prefs", json!({"status_bar": false}));
+        h.settle();
+        assert!(rect_of("status:bar").is_none() && h.app.shell.status_bar.is_none());
+        assert_eq!(h.app.viewport.rect.unwrap(), viewport_without);
+    }
+}
+
+#[test]
+fn viewport_sketch_status_distinguishes_empty_and_constrained_geometry() {
+    for mode in [LayoutMode::Docked, LayoutMode::Floating] {
+        let mut h = Harness::new();
+        h.call("ui.set", json!({"layout":mode}));
+        let corner = |h: &Harness| painted_texts(h).into_iter().filter(|t| t.starts_with("Sketch1 — ")).collect::<Vec<_>>();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        assert_eq!(corner(&h), ["Sketch1 — No geometry yet"], "{mode:?}: an empty sketch is not fully constrained");
+        assert!(h.widget("No geometry yet").is_some(), "the palette agrees with the viewport");
+
+        let rectangle = h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+        h.settle();
+        assert_eq!(corner(&h), ["Sketch1 — 2 degrees of freedom"], "the rectangle's width and height are free");
+        h.app.run("sketch.constraint.fix", json!({"entities":rectangle["curves"]})).unwrap();
+        h.settle();
+        assert_eq!(corner(&h), ["Sketch1 — fully constrained"], "drawn geometry can be fully constrained");
+
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
+        assert_eq!(corner(&h), ["Sketch1 — 2 degrees of freedom"]);
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
+        assert_eq!(corner(&h), ["Sketch1 — No geometry yet"], "undoing the geometry restores the empty status");
+    }
+}
+
+#[test]
+fn status_bar_names_what_is_edited_and_the_sketch_state_and_replaces_the_views_corner_text() {
+    use crate::status_bar::SketchState;
+    let mut h = Harness::new();
+    let corner = |h: &Harness| painted_texts(h).into_iter().filter(|t| t.starts_with("Sketch1 — ")).collect::<Vec<_>>();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.settle();
+    assert_eq!(corner(&h), ["Sketch1 — No geometry yet"], "without the bar the state stays in the view's corner");
+    h.call("ui.prefs", json!({"status_bar": true}));
+    h.settle();
+    let contents = crate::status_bar::contents(&h.app);
+    assert_eq!(contents.editing.as_deref(), Some("Editing Sketch1"));
+    assert_eq!(contents.sketch, Some(SketchState::Empty), "a blank sketch is not called fully constrained");
+    let rectangle = h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+    h.settle();
+    let contents = crate::status_bar::contents(&h.app);
+    let Some(SketchState::Under(dof)) = contents.sketch else { panic!("{contents:?}") };
+    assert!(dof > 0);
+    let texts = painted_texts(&h);
+    assert!(corner(&h).is_empty(), "with the bar on, the view's corner shows no state: {texts:?}");
+    assert!(texts.contains(&format!("Under constrained ({dof} degrees of freedom)")), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Editing Sketch1") && texts.iter().any(|t| t == "mm"), "{texts:?}");
+    assert!(crate::scenario::handle_at("status:editing").unwrap().x < crate::scenario::handle_at("status:sketch").unwrap().x);
+    assert!(crate::scenario::handle_at("status:sketch").unwrap().x < crate::scenario::handle_at("status:units").unwrap().x);
+    // Fully constrained: the rectangle fixed in place.
+    h.app.run("sketch.constraint.fix", json!({"entities": rectangle["curves"]})).unwrap();
+    h.settle();
+    assert_eq!(crate::status_bar::contents(&h.app).sketch, Some(SketchState::Full));
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"distance":10})).unwrap();
+    h.settle();
+    let idle = crate::status_bar::contents(&h.app);
+    assert_eq!((idle.editing, idle.sketch, idle.units.as_str()), (None, None, "mm"), "idle: only the units");
+    assert!(crate::scenario::handle_at("status:editing").is_none() && crate::scenario::handle_at("status:sketch").is_none());
+    // A feature's dialog, editing it.
+    let extrude = h.app.session.doc.features.iter().find(|f| f.name == "Extrude1").map(|f| f.id).unwrap();
+    h.app.edit_feature(extrude);
+    h.settle();
+    assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some()));
+    assert_eq!(crate::status_bar::contents(&h.app).editing.as_deref(), Some("Editing Extrude1"));
+    // In another language the text is translated, and so is a default feature name.
+    let _ja = crate::i18n::scope("ja");
+    assert_eq!(crate::status_bar::contents(&h.app).editing, Some(format!("編集中: {}", crate::i18n::tr_name("Extrude1"))));
+    assert_eq!(crate::i18n::tr_name("Sketch1"), "スケッチ1");
+}
+
+#[test]
+fn status_bar_units_open_the_units_menu_above_the_bar_and_change_units_in_one_undo_step() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1400,"height":900}));
+    h.call("ui.prefs", json!({"status_bar": true}));
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.settle();
+    let undo = h.app.session.undo.len();
+    let button = rect_of("status:units").unwrap();
+    assert!(rect_of("status:bar").unwrap().contains_rect(button));
+    h.step(&json!({"click":{"handle":"status:units"}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.menu.target, crate::context_menu::Target::Units);
+    let at = h.app.viewport.context_menu.unwrap();
+    assert_eq!(at, button.right_top());
+    let menu = crate::context_menu::describe(&h.app);
+    let labels: Vec<_> = menu["items"].as_array().unwrap().iter().map(|i| i["label"].as_str().unwrap().to_string()).collect();
+    assert_eq!(labels, crate::prefs::UNITS);
+    // The list opens above the bar, inside the window.
+    let list = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).unwrap();
+    assert!(list.bottom() <= button.top() + 0.5 && list.top() >= 0.0, "{list:?} {button:?}");
+    assert_eq!(h.app.session.undo.len(), undo, "opening the menu changes nothing");
+    h.call("ui.menuPick", json!({"item":"in"}));
+    h.settle();
+    assert_eq!(h.app.session.doc.units, "in");
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert!(h.app.viewport.context_menu.is_none());
+    assert_eq!(crate::status_bar::contents(&h.app).units, "in");
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.doc.units, "mm");
+    // A second click on the button closes the menu it opened.
+    h.step(&json!({"click":{"handle":"status:units"}})).unwrap();
+    h.settle();
+    assert!(h.app.viewport.context_menu.is_some());
+    h.step(&json!({"click":{"handle":"status:units"}})).unwrap();
+    h.settle();
+    assert!(h.app.viewport.context_menu.is_none());
+}
+
+#[test]
+fn status_bar_mouse_mapping_opens_the_mappings_and_picks_one_as_the_preferences_page_does() {
+    use crate::context_menu::Target;
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1400,"height":900}));
+    h.call("ui.prefs", json!({"status_bar": true}));
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.settle();
+    let doc = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    let button = rect_of("status:navigation").unwrap();
+    assert!(rect_of("status:bar").unwrap().contains_rect(button));
+    assert!(button.right() < rect_of("status:units").unwrap().left(), "the mapping sits left of the units");
+    assert_eq!(crate::status_bar::contents(&h.app).navigation, "Fusion");
+    assert!(painted_texts(&h).iter().any(|t| t == "Fusion"));
+    h.step(&json!({"click":{"handle":"status:navigation"}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.menu.target, Target::Navigation);
+    assert_eq!(h.app.viewport.context_menu, Some(button.right_top()));
+    let menu = crate::context_menu::items(&h.app, &Target::Navigation);
+    let labels: Vec<_> = menu.iter().map(|item| item.label.as_str()).collect();
+    assert_eq!(labels, crate::prefs::NAV_PRESETS.iter().map(|preset| preset.translated_label()).collect::<Vec<_>>());
+    assert_eq!(menu.iter().filter(|item| item.shortcut == "current").map(|item| item.label.as_str()).collect::<Vec<_>>(), ["Fusion"]);
+    let list = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).unwrap();
+    assert!(list.bottom() <= button.top() + 0.5 && list.top() >= 0.0, "{list:?} {button:?}");
+    // Each mapping, picked from the menu, sets what Preferences › Navigation sets for it.
+    for preset in crate::prefs::NAV_PRESETS {
+        let mut expected = h.app.preferences.clone();
+        crate::prefs::choose_nav_preset(&mut expected, preset);
+        if h.app.viewport.context_menu.is_none() {
+            h.step(&json!({"click":{"handle":"status:navigation"}})).unwrap();
+            h.settle();
+        }
+        h.call("ui.menuPick", json!({"item": preset.translated_label()}));
+        h.settle();
+        assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), serde_json::to_value(&expected).unwrap(), "{}", preset.id);
+        assert!(h.app.viewport.context_menu.is_none());
+        assert_eq!(crate::status_bar::contents(&h.app).navigation, preset.translated_label());
+    }
+    assert_eq!(h.app.session.doc.to_json(), doc, "a preference, not a design edit");
+    assert_eq!(h.app.session.undo.len(), undo);
+    // An unknown mapping changes nothing.
+    let before = serde_json::to_value(&h.app.preferences).unwrap();
+    let hostile = crate::context_menu::Item::action("ui.navPreset", "Nope", "").with(json!({"preset": "nope"}));
+    crate::context_menu::run_item(&mut h.app, &hostile, egui::pos2(0.0, 0.0));
+    assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), before);
+    // A second click on the button closes the menu it opened.
+    h.step(&json!({"click":{"handle":"status:navigation"}})).unwrap();
+    h.settle();
+    assert!(h.app.viewport.context_menu.is_some());
+    h.step(&json!({"click":{"handle":"status:navigation"}})).unwrap();
+    h.settle();
+    assert!(h.app.viewport.context_menu.is_none());
+}
+
+#[test]
+fn status_bar_stays_out_of_the_embed() {
+    let mut h = Harness::new();
+    h.app.embedded = true;
+    h.app.preferences.status_bar = true;
+    h.settle();
+    assert!(!crate::status_bar::shown(&h.app));
+    assert!(rect_of("status:bar").is_none() && h.app.shell.status_bar.is_none());
+}
+
+/// Content kept from an earlier frame that lies outside the viewport now (the window shrank, the
+/// scale grew) gave an inside-out content rect, min past max, and the Render workspace's frame
+/// overlay panicked clamping into it: `min > max, or either was NaN. min = 1004.0, max = 937.8125`.
+/// The viewport stands in for such content, and the space left beside cards never panics.
+#[test]
+fn content_outside_a_shrunk_viewport_gives_way_to_the_viewport() {
+    let mut h = Harness::new();
+    let viewport = Rect::from_min_max(pos2(0.0, 0.0), pos2(800.0, 600.0));
+    h.app.shell.content = Some(Rect::from_min_max(pos2(900.0, 650.0), pos2(1600.0, 1000.0)));
+    assert_eq!(content_rect(&h.app, viewport), viewport);
+    // A rect already turned inside out, with History and Browser cards at its edges.
+    let inside_out = Rect::from_min_max(pos2(500.0, 1004.0), pos2(300.0, 938.0));
+    h.app.shell.history = Some(Rect::from_min_max(pos2(0.0, 900.0), pos2(800.0, 1000.0)));
+    h.app.shell.browser = Some(Rect::from_min_max(pos2(0.0, 0.0), pos2(200.0, 800.0)));
+    for left in [false, true] {
+        h.app.preferences.timeline_left = left;
+        let free = workspace_content(&h.app, inside_out);
+        assert!(free.min.x.is_finite() && free.min.y.is_finite(), "{free:?}");
+    }
+}
+
+/// The interface scale raised after a click at the top of a narrow window (found by a UI fuzzer
+/// and shrunk to these three steps): the content kept from the frame before lay outside the new
+/// viewport, and the next frame's layout panicked clamping into it (`min = 264.0, max =
+/// 165.28125`).
+#[test]
+fn a_larger_interface_scale_in_a_narrow_window_keeps_drawing() {
+    let mut h = Harness::new();
+    for step in [
+        json!({"call": "ui.resize", "params": {"width": 330.5693343218654, "height": 1445.8773151935186}}),
+        json!({"click": [206.1875, 17.0]}),
+        json!({"call": "ui.prefs", "params": {"ui_scale": 2.0}}),
+    ] {
+        h.step(&step).unwrap();
+    }
+    h.frames(3);
+    assert!(h.app.viewport.rect.unwrap().is_positive());
+}
+
+#[test]
+fn docked_assistant_beside_an_inverted_view_area_does_not_panic() {
+    // A surface reconfigure can leave the view area inside out, its left past its right (#9492).
+    for side in ["right", "left"] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.set", json!({"layout":"floating"}));
+        h.call("ui.agent_chat", json!({"open":true,"side":side,"width":380,"picker":false}));
+        h.frames(5);
+        assert!(h.app.agent_chat.panel_rect.is_some(), "{side}: docked Assistant");
+        h.app.viewport.rect = Some(Rect::from_min_max(pos2(264.1875, 30.0), pos2(159.0, 20.0)));
+        let ctx = h.ctx.clone();
+        crate::viewport::refresh_layout(&mut h.app, &ctx);
+        assert!(h.app.viewport.layout.is_some(), "{side}: a layout for the next frame");
+    }
 }

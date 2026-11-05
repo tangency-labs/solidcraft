@@ -69,9 +69,21 @@ fn fs_pbr(i: PbrOut) -> @location(0) vec4<f32> {
     let v = pbr_unit(view);
     let lights = array<vec4<f32>, 3>(vec4<f32>(0.6, 0.0, 0.8, 3.0), vec4<f32>(-0.8, 0.0, 0.6, 1.0), vec4<f32>(0.0, -0.6, 0.8, 1.5));
     var radiance = vec3<f32>(0.0);
-    for (var k = 0u; k < 3u; k += 1u) {
+    for (var k = 0u; k < 3u && u.product_lights_meta.x == 0.0; k += 1u) {
         let light = lights[k];
         radiance += pbr_brdf(i.base, i.parameters, n, v, light.xyz) * (light.w * max(dot(n, light.xyz), 0.0));
+    }
+    for (var k = 0u; k < min(u32(u.product_lights_meta.y),21u) && u.product_lights_meta.x > 0.0; k += 1u) {
+        let source=u.product_lights[k*4u];
+        let colour=u.product_lights[k*4u+1u];
+        let axis=u.product_lights[k*4u+2u];
+        let falloff=u.product_lights[k*4u+3u];
+        if source.w == 4.0 {
+            radiance += i.base*colour.xyz*(1.0-i.parameters.x)/3.141592653589793;
+            continue;
+        }
+        let sample=product_light_sample(k,i.wp);
+        radiance += pbr_brdf(i.base,i.parameters,n,v,sample[0])*sample[1]*max(dot(n,sample[0]),0.0);
     }
     let mapped = radiance / (vec3<f32>(1.0) + radiance);
     if (u.back.w > 0.5) { return vec4<f32>(mapped, 1.0); }

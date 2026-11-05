@@ -1,6 +1,7 @@
 //! Product-image work and its device-independent, session-scoped protocol.
 //! Hosts own execution; documents and history never contain these values.
 
+use solidcraft_geom::prelude::*;
 use std::fmt;
 use std::sync::{
     Arc,
@@ -397,6 +398,22 @@ pub enum LightingPreset {
     Neutral,
     WarmCool,
     KeyRim,
+}
+
+impl LightingPreset {
+    /// Portable source values shared by CPU transport and light inspection.
+    pub fn directional_lights(self) -> Vec<DirectionalLightOptions> {
+        let light = |direction, color, intensity| DirectionalLightOptions { direction, color, intensity };
+        match self {
+            Self::Neutral => crate::studio::LIGHTS.into_iter().map(|(d, intensity)| light([d.x, d.y, d.z], [1.0; 3], intensity)).collect(),
+            Self::WarmCool => vec![
+                light([0.6, 0.0, 0.8], [1.0, 0.72, 0.48], 3.0),
+                light([-0.8, 0.0, 0.6], [0.45, 0.65, 1.0], 1.0),
+                light([0.0, -0.6, 0.8], [1.0; 3], 1.5),
+            ],
+            Self::KeyRim => vec![light([0.6, -0.4, 0.8], [1.0; 3], 3.0), light([-0.6, 0.4, 0.8], [0.6, 0.8, 1.0], 2.0)],
+        }
+    }
 }
 
 /// Full world-space side vectors; U cross V is the emitting side.
@@ -947,7 +964,7 @@ impl RaytraceOptions {
         }
         if let Some(lights) = &self.area_lights {
             for light in lights {
-                use solidcraft_geom::Vec3;
+                use solidcore_record::Vec3;
                 let vec = |v: [f64; 3]| Vec3::new(v[0], v[1], v[2]);
                 let c = vec(light.center_mm);
                 let u = vec(light.edge_u_mm);
@@ -1037,6 +1054,9 @@ impl RaytraceOptions {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImageRequest {
+    /// Transient visibility of the three implicit studio lights; never saved in a design.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub studio_weights: Option<[f64; 3]>,
     /// Captured GPU resources stay in admitted work, never in status or saved data.
     #[serde(skip)]
     pub environment: Option<Arc<crate::lighting::environment::EnvironmentSource>>,

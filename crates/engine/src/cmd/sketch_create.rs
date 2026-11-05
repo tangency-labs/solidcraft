@@ -2,7 +2,8 @@
 //! arc slots.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Shape, Sketch, TextAlign, TextExprs, TextStyle};
 
 /// The style parameters of `sketch.text` and `sketch.edit_text`.
@@ -13,9 +14,12 @@ macro_rules! text_style_doc {
 }
 
 use super::sketch::{add_c, circumcircle, edit, ids_of, mark_construction, req_parg, result, slot};
+use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list};
-use crate::{Result, Session};
+use crate::schema::sketch_create::{SplineRemovePointParams, SplineRemovePointResult, SplineReverseParams, SplineReverseResult};
+use crate::schema::{TypedContract, output_schema_for};
+use crate::{EngineError, Result, Session};
 
 #[cfg(test)]
 #[path = "sketch_text_move_tests.rs"]
@@ -25,6 +29,9 @@ mod text_move_tests;
 #[path = "sketch_text_expr_tests.rs"]
 mod text_expr_tests;
 
+const SPLINE_REVERSE_CONTRACT: TypedContract<SplineReverseParams> = TypedContract::new();
+const SPLINE_REMOVE_POINT_CONTRACT: TypedContract<SplineRemovePointParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.line.midpoint", "Midpoint Line", midpoint_line)
         .at("SKETCH", "CREATE")
@@ -32,7 +39,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .params(concat!("mid: [x,y], point ref or snap (\"mid:<line>\", \"on:<curve>:x,y\", model vertex/edge); end: [x,y]; construction?", created_doc!())),
     CommandSpec::new("sketch.arc.tangent", "Tangent Arc", arc_tangent).at("SKETCH", "CREATE").icon("arc_tangent").enabled(in_sketch).params(concat!(
-        "start: end point of a line or arc (\"l1.end\"), end: [x,y]; curve?: the curve to be tangent to (default: the one ending at start)",
+        "start: end point of a line or arc (\"l1.end\"), end: [x,y] or an existing point's id (\"l2.start\": the arc ends on that point); curve?: the curve to be tangent to (default: the one ending at start)",
         created_doc!()
     )),
     CommandSpec::new("sketch.circle.two_tangent", "2-Tangent Circle", circle_tan_tan)
@@ -61,7 +68,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .params(concat!("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise) or sweep: degrees (0 < sweep < 360), width; returns centre_arc", created_doc!())),
     CommandSpec::new("sketch.ellipse", "Ellipse", ellipse).at("SKETCH", "CREATE").icon("ellipse").enabled(in_sketch).params(concat!(
-        "center, major: end of the major axis [x,y], minor: a point the ellipse passes through on the minor side [x,y] | minor_radius",
+        "center, major: end of the major axis [x,y], minor: a point the ellipse passes through on the minor side [x,y] | minor_radius. Also adds its major and minor axes as construction lines through the centre (their ends: the major end and the point opposite it, and the two ends of the minor axis on the ellipse), held by midpoint, perpendicular and point-on-curve constraints, so a half-axis is the distance from the centre to an axis end and an axis line's length is a full axis; axes?: bool (default true; false: the ellipse alone, as the Ellipse tool draws it with Draw ellipses with their axes off)",
         created_doc!()
     )),
     CommandSpec::new("sketch.spline.fit_point", "Fit Point Spline", spline_fit)
@@ -83,6 +90,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("spline")
         .enabled(in_sketch)
         .params("curve: fit point spline id, at: [x,y]: a fit point is inserted where the curve passes nearest to it, between its neighbours (the curve still runs through it and all its old points; constraints on them stay); end?: start|end: `at` becomes the spline's new first or last point instead, and the curve runs on to it (refused when that end is joined to other geometry). Control point splines take no new points yet. Returns point: the new point's id"),
+    CommandSpec::new("sketch.spline.remove_point", "Remove Spline Point", crate::checked!("sketch.spline.remove_point", spline_remove_point))
+        .icon("spline")
+        .enabled(in_sketch)
+        .contract(&SPLINE_REMOVE_POINT_CONTRACT)
+        .output(output_schema_for::<SplineRemovePointResult>)
+        .params("curve: spline id, point: one of its points (a point id, or the curve's start or end such as s1.end): the spline runs through (or over) its other points only, and the point goes with the constraints on it unless another curve uses it. Fit point, control point and closed splines. Refused for a closed spline's closing point, for an end joined to other geometry or held by a constraint, when fewer than 2 points would be left (3 on a closed spline), and for a projected, offset or patterned spline. Returns curve, point: the point's id, deleted: whether the point went too"),
+    CommandSpec::new("sketch.spline.reverse", "Reverse Spline Direction", crate::checked!("sketch.spline.reverse", spline_reverse))
+        .icon("spline")
+        .enabled(in_sketch)
+        .contract(&SPLINE_REVERSE_CONTRACT)
+        .output(output_schema_for::<SplineReverseResult>)
+        .params("curve: spline id (fit point, control point or closed): its last point becomes its first and the curve runs the other way along the same path; its points and the constraints on them stay. Refused for a projected spline and for one an offset uses or makes. Returns curve"),
     CommandSpec::new("sketch.conic", "Conic Curve", conic)
         .at("SKETCH", "CREATE")
         .icon("conic")
@@ -105,7 +124,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .params("curves: [line ids], value?: bool (default toggles): infinite line type (#1359): construction geometry drawn across the whole view through the line's two points; off, a normal line"),
     CommandSpec::new("sketch.text", "Text", text).at("SKETCH", "CREATE").icon("sketch_text").enabled(in_sketch).params(concat!(
-        "text: string (\\n breaks lines), or text_expression: the words built from text parameters (parameters.add with unit text) and quoted texts joined by + (\"Label + '-L'\"): the text keeps it, its words follow the parameters (a parameter edit or a configuration row relabels it) and `exprs` returns it as `text`; at: baseline start [x,y], height?: capital height mm (default 5), angle?: deg; at's x and y, height and angle each take a number or an expression over the design's parameters as a string (\"plate_width / 2\", \"label_size\"): the text keeps the expression, follows the parameters, and returns it in `exprs`; an expression naming no parameter is the number it comes to, a bare number in one is in the design's units, \
+        "text: string (\\n breaks lines), or text_expression: the words built from text parameters (parameters.add with unit text), number parameters and quoted texts joined by + (\"Label + '-L'\", \"'W' + Width\"; a number parameter shows its value in the design's units, \"85 mm\", an angle in degrees, \"30°\"; number(Width) is the number alone and number(Width, 2) has 2 decimals): the text keeps it, its words follow the parameters (a parameter edit or a configuration row relabels it) and `exprs` returns it as `text`; at: baseline start [x,y], height?: capital height mm (default 5), angle?: deg; at's x and y, height and angle each take a number or an expression over the design's parameters as a string (\"plate_width / 2\", \"label_size\"): the text keeps the expression, follows the parameters, and returns it in `exprs`; an expression naming no parameter is the number it comes to, a bare number in one is in the design's units, \
          font?: an installed font's family or full name, or a .ttf/.otf file path (~ and %VAR% expand; default: the built-in Liberation Sans), ",
         text_style_doc!(),
         created_doc!()
@@ -211,7 +230,7 @@ fn text_source(doc: &solidcraft_doc::Document, p: &Value, cmd: &str, old: Option
             t.clone()
         }
         (None, Some(Value::String(e))) => {
-            let words = doc.eval_words(e.trim()).map_err(|error| bad(cmd, format!("`text_expression`: {error}")))?;
+            let words = doc.eval_words(e.trim(), &doc.param_values().0).map_err(|error| bad(cmd, format!("`text_expression`: {error}")))?;
             exprs.text = Some(e.trim().to_string());
             words
         }
@@ -276,20 +295,19 @@ fn text(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, AT_MUST));
     }
     let src = text_source(&s.doc, p, cmd, None)?;
-    let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
-    let mut doc = (*s.doc).clone();
-    let mut sk = doc.sketch(id)?.clone();
-    // A text needs nothing outside its sketch (a path is one of its curves).
-    let geom = sk.text_source_geometry(&src).map_err(|e| bad(cmd, e.to_string()))?;
-    if geom.is_empty() {
-        return Err(bad(cmd, "the text makes no outline"));
-    }
-    let guide = guide(&mut sk, &src);
+    let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
     let exprs = text_exprs_json(&src);
-    let l = sk.add_link(LinkKind::Text, src, &geom)?;
-    let curves = ids_of(&sk, &sk.link_curves(&l));
-    *doc.sketch_mut(id)? = sk;
-    *s.doc_mut() = doc;
+    let (l, curves, guide) = sketch_store::update(s, id, |_, _, sk| {
+        // A text needs nothing outside its sketch (a path is one of its curves).
+        let geom = sk.text_source_geometry(&src).map_err(|e| bad(cmd, e.to_string()))?;
+        if geom.is_empty() {
+            return Err(bad(cmd, "the text makes no outline"));
+        }
+        let guide = guide(sk, &src);
+        let l = sk.add_link(LinkKind::Text, src, &geom)?;
+        let curves = ids_of(sk, &sk.link_curves(&l));
+        Ok((l, curves, guide))
+    })?;
     let mut out = json!({"link": l, "curves": curves, "guide": guide});
     if let Some(exprs) = exprs {
         out["exprs"] = exprs;
@@ -364,23 +382,20 @@ const MAX_TEXT_EDITS: usize = 1000;
 
 fn edit_text(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.edit_text";
-    let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
-    let mut doc = (*s.doc).clone();
-    let mut sk = doc.sketch(id)?.clone();
-    // The numbers its expressions give now (a parameter may have changed since the sketch was
-    // last stored); one that cannot be evaluated is left as it was, to be replaced by this edit.
-    let _ = doc.apply_text_values(&doc.param_values().0, &mut sk);
-    let out = apply_text_edits(&mut sk, &doc, p)?;
-    *doc.sketch_mut(id)? = sk;
-    *s.doc_mut() = doc;
-    Ok(out)
+    let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
+    sketch_store::update(s, id, |_, doc, sk| {
+        // The numbers its expressions give now (a parameter may have changed since the sketch was
+        // last stored); one that cannot be evaluated is left as it was, to be replaced by this edit.
+        let _ = doc.apply_text_values(&doc.param_values().0, sk);
+        apply_text_edits(sk, doc, p)
+    })
 }
 
 /// One frame of an interactive resize or rotation: the sketch is solved and shown, the
 /// features after it keep their last result until `sketch.drag_end` evaluates the model.
 fn edit_text_live(s: &mut Session, p: &Value) -> Result<(Value, Option<crate::LiveEdit>)> {
     let cmd = "sketch.edit_text";
-    let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
+    let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
     let (out, report) = super::sketch::edit_solved(s, id, false, solidcraft_sketch::Analysis::Full, |sk, doc| {
         Ok((apply_text_edits(sk, doc, p)?, super::sketch::Left::Unsolved))
     })?;
@@ -444,14 +459,8 @@ fn end_of(sk: &Sketch, pi: usize) -> Option<(usize, Vec2)> {
 fn blend_order(p: &Value, cmd: &str) -> Result<usize> {
     match p.get("continuity") {
         None | Some(Value::Null) => Ok(1),
-        Some(Value::String(v)) => match v.trim().to_ascii_lowercase().as_str() {
-            "" | "g1" => Ok(1),
-            "g2" => Ok(2),
-            "g3" => Ok(3),
-            "g4" => Ok(4),
-            _ => Err(bad(cmd, "`continuity` must be g1, g2, g3 or g4")),
-        },
-        Some(_) => Err(bad(cmd, "`continuity` must be g1, g2, g3 or g4")),
+        Some(Value::String(v)) if v.trim().is_empty() => Ok(1),
+        given => Ok(crate::params::continuity(cmd, given, "`continuity`", solidcraft_kernel::Construction::BlendCurve)?.order()),
     }
 }
 
@@ -515,7 +524,7 @@ fn blend(s: &mut Session, p: &Value) -> Result<Value> {
         let (sp, cons) = if order <= 1 {
             let c1 = sk.add_point(qa + ta * (l / 3.0), None)?;
             let c2 = sk.add_point(qb + tb * (l / 3.0), None)?;
-            let sp = sk.add_curve(CurveKind::Spline { pts: vec![pa, c1, c2, pb], control: true, degree: 3, periodic: false }, None)?;
+            let sp = sk.add_curve(CurveKind::Spline { pts: vec![pa, c1, c2, pb], control: true, degree: 3, periodic: false, nurbs: None }, None)?;
             let cons = vec![add_c(sk, ConstraintKind::Tangent { a: ca, b: sp })?, add_c(sk, ConstraintKind::Tangent { a: cb, b: sp })?];
             (sp, cons)
         } else {
@@ -537,7 +546,7 @@ fn blend(s: &mut Session, p: &Value) -> Result<Value> {
                 });
             }
             let degree = u8::try_from(cps.len().saturating_sub(1)).map_err(|_| bad(cmd, "the blend curve needs too many control points"))?;
-            let sp = sk.add_curve(CurveKind::Spline { pts, control: true, degree, periodic: false }, None)?;
+            let sp = sk.add_curve(CurveKind::Spline { pts, control: true, degree, periodic: false, nurbs: None }, None)?;
             (sp, Vec::new())
         };
         solve_new_only(sk, first_new);
@@ -548,7 +557,7 @@ fn blend(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn centerline(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.centerline";
-    let ids = string_list(p, "curves");
+    let ids = string_list(cmd, p, "curves")?;
     if ids.is_empty() {
         return Err(bad(cmd, "`curves` must list lines"));
     }
@@ -573,7 +582,7 @@ fn centerline(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn infinite_line(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.infinite";
-    let ids = string_list(p, "curves");
+    let ids = string_list(cmd, p, "curves")?;
     if ids.is_empty() {
         return Err(bad(cmd, "`curves` must list lines"));
     }
@@ -617,12 +626,38 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
     if !(r > 1e-9 && r < 1e8) {
         return Err(bad(cmd, "the minor radius must be positive"));
     }
+    let axes = match p.get("axes") {
+        None | Some(Value::Null) => true,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(bad(cmd, "`axes` must be true or false")),
+    };
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let ci = sk.add_point(c, None)?;
         let mi = sk.add_point(m, None)?;
         let e = sk.add_curve(CurveKind::Ellipse { c: ci, m: mi, r }, None)?;
         mark_construction(sk, &[e], p);
-        Ok((ids_of(sk, &[e]), Vec::new()))
+        if !axes {
+            return Ok((ids_of(sk, &[e]), Vec::new()));
+        }
+        // Its major and minor axes, construction lines through the centre that bisects both:
+        // the major one ends at the major end, the minor one is perpendicular to it and ends
+        // on the ellipse. Six new coordinates, six equations: the ellipse keeps its 5 degrees
+        // of freedom, and each half-axis is a plain distance from the centre to an end.
+        let n = u.perp() * r;
+        let (m2, n1, n2) = (sk.add_point(c * 2.0 - m, None)?, sk.add_point(c + n, None)?, sk.add_point(c - n, None)?);
+        let (major, minor) = (sk.add_line_pts(m2, mi, None)?, sk.add_line_pts(n2, n1, None)?);
+        for l in [major, minor] {
+            if let Some(cu) = sk.curves.get_mut(l) {
+                cu.construction = true;
+            }
+        }
+        let cons = vec![
+            add_c(sk, ConstraintKind::Midpoint { p: ci, l: major })?,
+            add_c(sk, ConstraintKind::Midpoint { p: ci, l: minor })?,
+            add_c(sk, ConstraintKind::Perpendicular { a: minor, b: major })?,
+            add_c(sk, ConstraintKind::PointOnCurve { p: n1, c: e })?,
+        ];
+        Ok((ids_of(sk, &[e]), cons))
     })?;
     Ok(result(out, info))
 }
@@ -665,7 +700,7 @@ fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8) -> R
         {
             pts.push(*pts.first().ok_or_else(|| bad(cmd, "missing first point"))?);
         }
-        let c = sk.add_curve(CurveKind::Spline { pts, control, degree, periodic }, None)?;
+        let c = sk.add_curve(CurveKind::Spline { pts, control, degree, periodic, nurbs: None }, None)?;
         mark_construction(sk, &[c], p);
         Ok((ids_of(sk, &[c]), Vec::new()))
     })?;
@@ -702,6 +737,33 @@ fn spline_insert_point(s: &mut Session, p: &Value) -> Result<Value> {
         sk.points.get(new).map(|q| q.id.clone()).ok_or_else(|| bad(cmd, "the new point is missing"))
     })?;
     Ok(json!({"point": point, "curve": p.get("curve"), "sketch": info}))
+}
+
+/// One point taken out of a spline (#10783).
+fn spline_remove_point(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.remove_point";
+    let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?.to_string();
+    let point = str_(p, "point").ok_or_else(|| bad(cmd, "`point` must be one of the spline's points"))?.to_string();
+    let ((point, deleted), info) = edit(s, p, cmd, false, |sk, _| {
+        let c = sk.curve_index(&id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+        let at = sk.resolve_point(&point).ok_or_else(|| bad(cmd, format!("unknown sketch point `{point}`")))?;
+        let name = sk.points.get(at).map_or(point.clone(), |q| q.id.clone());
+        let deleted = sk.remove_spline_point(c, at).map_err(|e| bad(cmd, e.to_string()))?;
+        Ok((name, deleted))
+    })?;
+    let reply = SplineRemovePointResult { curve: id, point, deleted, sketch: info, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn spline_reverse(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.reverse";
+    let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?.to_string();
+    let ((), info) = edit(s, p, cmd, false, |sk, _| {
+        let c = sk.curve_index(&id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+        sk.reverse_spline(c).map_err(|e| bad(cmd, e.to_string()))
+    })?;
+    let reply = SplineReverseResult { curve: id, sketch: info, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn conic(s: &mut Session, p: &Value) -> Result<Value> {
@@ -754,7 +816,7 @@ fn midpoint_line(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Direction leaving curve `ci` at its end point `pi` (continuing the curve past that end).
-fn leaving_dir(sk: &Sketch, ci: usize, pi: usize) -> Option<Vec2> {
+pub(super) fn leaving_dir(sk: &Sketch, ci: usize, pi: usize) -> Option<Vec2> {
     match sk.curves.get(ci)?.kind {
         CurveKind::Line { a, b } => {
             let (pa, pb) = (sk.point(a)?, sk.point(b)?);
@@ -801,18 +863,82 @@ fn leaving_dir(sk: &Sketch, ci: usize, pi: usize) -> Option<Vec2> {
     }
 }
 
+/// The centre of the arc that leaves `start` in direction `dir` and ends at `end`, and whether it
+/// runs counter-clockwise. `None` straight ahead (or back), where no arc does.
+fn tangent_arc_centre(dir: Vec2, start: Vec2, end: Vec2) -> Option<(Vec2, bool)> {
+    let n = dir.perp();
+    let d = end - start;
+    let den = 2.0 * n.dot(d);
+    if den.abs() < 1e-9 * d.len().max(1e-9) || d.len() < 1e-9 {
+        return None;
+    }
+    Some((start + n * (d.len2() / den), den > 0.0))
+}
+
+/// The arc `sketch.arc.tangent` would draw from point `start` on `curve` to `end`, alone in a
+/// sketch of its own for a preview. `None` where the command would refuse.
+pub fn tangent_arc_preview(sk: &Sketch, curve: &str, start: &str, end: Vec2) -> Option<Sketch> {
+    let pi = sk.resolve_point(start)?;
+    let s0 = sk.point(pi)?;
+    let (center, ccw) = tangent_arc_centre(leaving_dir(sk, sk.curve_index(curve)?, pi)?, s0, end)?;
+    if !center.is_finite() {
+        return None;
+    }
+    let mut out = Sketch::new();
+    if ccw {
+        out.add_arc(center, s0, end, [None; 3], None).ok()?;
+    } else {
+        out.add_arc(center, end, s0, [None; 3], None).ok()?;
+        out.curves.first_mut()?.reversed = true;
+    }
+    Some(out)
+}
+
+/// The picked point, then any other point at the same place: a trimmed arc's end is its own
+/// point, lying on the end of the curve that trimmed it, which is the one a click picks (#1485).
+fn tangent_start_candidates(sk: &Sketch, picked: usize) -> Vec<usize> {
+    let at = sk.point(picked).unwrap_or_default();
+    let tol = 1e-6 * at.len().max(1.0);
+    std::iter::once(picked).chain((0..sk.points.len()).filter(|&q| q != picked && sk.point(q).is_some_and(|x| x.dist(at) <= tol))).collect()
+}
+
+/// The first drawn curve (and which of the candidate points) a tangent arc can leave from.
+fn tangent_start_curve(sk: &Sketch, candidates: &[usize]) -> Option<(usize, usize)> {
+    candidates
+        .iter()
+        .find_map(|&q| sk.curves.iter().enumerate().find(|(i, c)| !c.construction && leaving_dir(sk, *i, q).is_some()).map(|(i, _)| (i, q)))
+}
+
+/// Whether `sketch.arc.tangent` can start at sketch point `start` (an id such as `l1.end`): the
+/// end of a drawn line, arc or spline there. A tool asks before taking the click (#10653).
+pub fn tangent_arc_starts_at(sk: &Sketch, start: &str) -> bool {
+    sk.resolve_point(start).is_some_and(|picked| tangent_start_curve(sk, &tangent_start_candidates(sk, picked)).is_some())
+}
+
 fn arc_tangent(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.arc.tangent";
-    let end = req_vec2(cmd, p, "end")?;
+    // An id ends the arc on that point, so a chain can close; coordinates make a new point.
+    let end_ref = p.get("end").and_then(Value::as_str);
+    let at = if end_ref.is_some() { None } else { Some(req_vec2(cmd, p, "end")?) };
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
+        let (end, end_point) = match (end_ref, at) {
+            (Some(r), _) => {
+                let q = sk.resolve_point(r).ok_or_else(|| bad(cmd, format!("unknown sketch point `{r}`")))?;
+                (sk.point(q).ok_or_else(|| bad(cmd, format!("unknown sketch point `{r}`")))?, Some(q))
+            }
+            (None, Some(at)) => (at, None),
+            (None, None) => return Err(bad(cmd, "missing `end`")),
+        };
+        // A snapped place that is no point yet (`on:l3:…` on a line, `mid:l1` at its middle: a
+        // click between a line's ends) is no end to start from: said so, not as an unknown point
+        // (#10653). Point ids (`l1.end`, `p3`, `origin`) have no colon.
+        let not_an_end = || bad(cmd, "`start` must be the end point of a line or arc");
+        if str_(p, "start").is_some_and(|start| start.contains(':')) {
+            return Err(not_an_end());
+        }
         let st = req_parg(sk, doc, p, "start", cmd)?;
-        let picked = st.idx().ok_or_else(|| bad(cmd, "`start` must be the end point of a line or arc"))?;
-        // The picked point, then any other point at the same place: a trimmed arc's end is its own
-        // point, lying on the end of the curve that trimmed it, which is the one a click picks (#1485).
-        let at = st.pos();
-        let tol = 1e-6 * at.len().max(1.0);
-        let candidates: Vec<usize> =
-            std::iter::once(picked).chain((0..sk.points.len()).filter(|&q| q != picked && sk.point(q).is_some_and(|x| x.dist(at) <= tol))).collect();
+        let picked = st.idx().ok_or_else(not_an_end)?;
+        let candidates = tangent_start_candidates(sk, picked);
         let (ci, pi) = match str_(p, "curve") {
             Some(id) => {
                 let ci = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
@@ -823,24 +949,15 @@ fn arc_tangent(s: &mut Session, p: &Value) -> Result<Value> {
                     .ok_or_else(|| bad(cmd, "`start` is not an end of that curve"))?;
                 (ci, pi)
             }
-            None => candidates
-                .iter()
-                .find_map(|&q| sk.curves.iter().enumerate().find(|(i, c)| !c.construction && leaving_dir(sk, *i, q).is_some()).map(|(i, _)| (i, q)))
-                .ok_or_else(|| bad(cmd, "no line or arc ends at `start`"))?,
+            None => tangent_start_curve(sk, &candidates).ok_or_else(|| bad(cmd, "no line or arc ends at `start`"))?,
         };
         let t = leaving_dir(sk, ci, pi).ok_or_else(|| bad(cmd, "`start` is not an end of that curve"))?;
         let s0 = st.pos();
-        let n = t.perp();
-        let d = end - s0;
-        let den = 2.0 * n.dot(d);
-        if den.abs() < 1e-9 * d.len().max(1e-9) || d.len() < 1e-9 {
-            return Err(bad(cmd, "the end is straight ahead: draw a line instead"));
-        }
-        let center = s0 + n * (d.len2() / den);
-        let a = if den > 0.0 {
-            sk.add_arc(center, s0, end, [None, Some(pi), None], None)?
+        let (center, ccw) = tangent_arc_centre(t, s0, end).ok_or_else(|| bad(cmd, "the end is straight ahead: draw a line instead"))?;
+        let a = if ccw {
+            sk.add_arc(center, s0, end, [None, Some(pi), end_point], None)?
         } else {
-            let a = sk.add_arc(center, end, s0, [None, None, Some(pi)], None)?;
+            let a = sk.add_arc(center, end, s0, [None, end_point, Some(pi)], None)?;
             if let Some(c) = sk.curves.get_mut(a) {
                 c.reversed = true;
             }
@@ -893,7 +1010,7 @@ fn tangent_centre(sk: &Sketch, a: usize, b: usize, r: f64, near: Vec2) -> Option
 }
 
 fn tangent_curves(sk: &Sketch, p: &Value, cmd: &str, n: usize) -> Result<Vec<usize>> {
-    let ids = string_list(p, "curves");
+    let ids = string_list(cmd, p, "curves")?;
     if ids.len() != n {
         return Err(bad(cmd, format!("`curves` must list {n} curves")));
     }
@@ -941,6 +1058,8 @@ fn tangent_circle(s: &mut Session, p: &Value, cmd: &str, n: usize, radius: Optio
 fn circle_tan_tan(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.circle.two_tangent";
     let r = match (crate::params::expr(p, "radius"), num(p, "diameter")) {
+        // A bare number typed as text reads in the design's unit, as in `sketch.dimension`.
+        (Some(r), _) if p.get("radius").is_some_and(Value::is_string) => s.doc.with_design_unit(r.as_str(), solidcraft_doc::expr::Kind::Length),
         (Some(r), _) => r.into_string(),
         (None, Some(d)) => format!("{}", d / 2.0),
         _ => return Err(bad(cmd, "needs `radius` or `diameter`")),
@@ -990,11 +1109,12 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
             c.construction = true;
             centre_arc = Some(c.id.clone());
         }
+        // Each cap is tangent to both concentric sides, so its radius is half the gap between
+        // them: the two caps are equal without an Equal, which would only be redundant (#8355).
         let mut cons = Vec::new();
         for (a, b) in [(outer, cap_e), (inner, cap_e), (outer, cap_s), (inner, cap_s)] {
             cons.push(add_c(sk, ConstraintKind::Tangent { a, b })?);
         }
-        cons.push(add_c(sk, ConstraintKind::Equal { a: cap_s, b: cap_e })?);
         Ok((ids_of(sk, &[outer, cap_e, inner, cap_s]), cons))
     })?;
     let mut out = result(out, info);
@@ -1060,7 +1180,8 @@ pub(super) fn solve_new_only(sk: &mut Sketch, first_new: usize) {
 #[cfg(test)]
 mod blend_tests {
     use serde_json::{Value, json};
-    use solidcraft_geom::{Seg2, Vec2};
+    use solidcore_record::{Seg2, Vec2};
+    use solidcraft_geom::prelude::*;
     use solidcraft_sketch::CurveKind;
 
     use crate::Session;
@@ -1092,7 +1213,7 @@ mod blend_tests {
     }
 
     /// The derivatives 1…`order` of exact piece `seg` at its end (`at_end`), from the piece's own
-    /// geometry: what a blend must match, computed here independently of `Seg2::derivatives`.
+    /// geometry: what a blend must match, computed here independently of `Seg2Geom::derivatives`.
     fn piece_derivatives(seg: &Seg2, at_end: bool, order: usize) -> Vec<Vec2> {
         let t = if at_end { 1.0 } else { 0.0 };
         let p = seg.point_at(t);
@@ -1376,13 +1497,13 @@ mod blend_tests {
         let mut broken = solidcraft_sketch::Sketch::new();
         let p0 = broken.add_point(Vec2::new(1.0, 1.0), None).unwrap();
         let p1 = broken.add_point(Vec2::ZERO, None).unwrap();
-        let l = broken.add_curve(CurveKind::Spline { pts: vec![p1, p0], control: true, degree: 1, periodic: false }, None).unwrap();
+        let l = broken.add_curve(CurveKind::Spline { pts: vec![p1, p0], control: true, degree: 1, periodic: false, nurbs: None }, None).unwrap();
         broken.points[p0].pos = Vec2::new(f64::NAN, 4.0);
         assert!(super::joint_derivatives(&broken, l, p1, 2, true, "a", "sketch.blend_curve").is_err(), "non-finite geometry");
         let mut flat = solidcraft_sketch::Sketch::new();
         let q0 = flat.add_point(Vec2::new(3.0, 3.0), None).unwrap();
         let q1 = flat.add_point(Vec2::new(3.0, 3.0), None).unwrap();
-        let d = flat.add_curve(CurveKind::Spline { pts: vec![q0, q1], control: true, degree: 1, periodic: false }, None).unwrap();
+        let d = flat.add_curve(CurveKind::Spline { pts: vec![q0, q1], control: true, degree: 1, periodic: false, nurbs: None }, None).unwrap();
         let e = super::joint_derivatives(&flat, d, q0, 2, true, "a", "sketch.blend_curve").unwrap_err().to_string();
         assert!(e.contains("no tangent"), "{e}");
         assert!(solidcraft_geom::hermite_bezier(Vec2::ZERO, Vec2::X, &[Vec2::Y; 5], &[Vec2::Y; 5]).is_none(), "no order above g4");

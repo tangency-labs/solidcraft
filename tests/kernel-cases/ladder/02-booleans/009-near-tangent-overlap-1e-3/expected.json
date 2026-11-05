@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a cylinder r10 along X dipping 1e-3 mm into the top face, cut: a groove 1e-3 deep",
+ "source": "analytic",
+ "method": "circular segment of depth h=1e-3 in r=10: A = r^2 acos((r-h)/r) - (r-h) sqrt(2rh - h^2) = 1.886e-04 mm^2, times 60; the groove runs the whole length, so it splits the top face in two and adds one cylinder face: 6 - 1 + 2 + 1",
+ "body_count": 1,
+ "volume_mm3": 47999.988686461,
+ "faces": 8
+}

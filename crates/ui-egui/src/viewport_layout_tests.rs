@@ -40,6 +40,21 @@ fn layout(viewport: Rect, docks: &[Rect], scale: f32, style: crate::prefs::Navig
 }
 
 #[test]
+fn render_focus_compass_keeps_clear_of_an_exit_chip_on_either_side() {
+    let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 900.0));
+    let content = Rect::from_min_max(pos2(0.0, 104.0), viewport.max);
+    let navigation = crate::navigation_bar_view::measure(content, &Default::default(), crate::navigation::NavCaps::RENDER, |_| 0.0).rect;
+    for x in [8.0, 1250.0] {
+        let chip = Rect::from_min_size(pos2(x, content.top()), vec2(142.0, 40.0));
+        let layout = Layout::product(viewport, content, &[chip], 1.0, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, navigation);
+        assert!(layout.axis_view.is_positive() && layout.navigation.is_positive());
+        assert!(!layout.axis_view.intersect(chip).is_positive());
+        assert!(content.contains_rect(layout.axis_view));
+        assert!(content.contains_rect(layout.navigation));
+    }
+}
+
+#[test]
 fn thin_rotated_bounds_fit_using_the_original_full_projection() {
     for (width, height, scale) in [(1400.0, 900.0, 1.0), (700.0, 450.0, 2.0), (700.0, 360.0, 2.0), (900.0, 720.0, 1.0)] {
         let vp = Rect::from_min_max(pos2(250.0, crate::toolbar::APP_BAR_HEIGHT + crate::toolbar::RIBBON_HEIGHT), pos2(width, height - 30.0));
@@ -49,16 +64,17 @@ fn thin_rotated_bounds_fit_using_the_original_full_projection() {
         assert!(layout.axis_view.is_positive() && layout.navigation.is_positive(), "{layout:?}");
         assert!(!layout.drawable.intersect(dock).is_positive());
         assert!(!layout.axis_view.intersect(layout.navigation).is_positive());
-        for perspective in [false, true] {
+        // Parallel, the default angle, and the ends of the Field of view preference (#5364).
+        for fov in [0.0, 0.6, 15f64.to_radians(), 90f64.to_radians()] {
             for view in [StandardView::Top, StandardView::Iso, StandardView::Right] {
                 let mut cam = Camera::default();
                 cam.set_view(view);
                 let bounds = Aabb3 { min: Vec3::new(-30.0, -1.0, -2.0), max: Vec3::new(70.0, 2.0, 3.0) };
-                let fit = fit_bounds(cam, &bounds, &layout, perspective).unwrap();
+                let fit = fit_bounds(cam, &bounds, &layout, fov).unwrap();
                 assert_eq!((cam.yaw, cam.pitch, cam.up), (fit.yaw, fit.pitch, fit.up));
-                assert_eq!(fit_bounds(fit, &bounds, &layout, perspective).unwrap(), fit);
+                assert_eq!(fit_bounds(fit, &bounds, &layout, fov).unwrap(), fit);
                 let mut effective = fit;
-                effective.fov = if perspective { 0.6 } else { 0.0 };
+                effective.fov = fov;
                 let radius = (bounds.diagonal() * 0.5 + bounds.center().dist(fit.target)).max(effective.half_height() * 2.0).max(10.0);
                 for x in [bounds.min.x, bounds.max.x] {
                     for y in [bounds.min.y, bounds.max.y] {
@@ -133,9 +149,9 @@ fn measured_palette_fit_exposes_endpoints_and_layout_changes_preserve_manual_vie
 fn hostile_or_empty_fit_keeps_the_existing_camera_valid() {
     let cam = Camera::default();
     let measured = layout(Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0)), &[], 1.0, crate::prefs::NavigatorStyle::Axes, true);
-    assert!(fit_bounds(cam, &Aabb3::EMPTY, &measured, false).is_none());
+    assert!(fit_bounds(cam, &Aabb3::EMPTY, &measured, 0.0).is_none());
     let bad = Aabb3 { min: Vec3::new(f64::NAN, 0.0, 0.0), max: Vec3::new(1.0, 1.0, 1.0) };
-    assert!(fit_bounds(cam, &bad, &measured, true).is_none());
+    assert!(fit_bounds(cam, &bad, &measured, 0.6).is_none());
     let mut app = crate::SolveApp::new(Default::default(), Default::default());
     let tiny = layout(Rect::from_min_size(pos2(0.0, 0.0), vec2(5.0, 5.0)), &[], 1.0, crate::prefs::NavigatorStyle::Axes, true);
     app.viewport.layout = Some(tiny);
@@ -220,7 +236,8 @@ fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
                     continue;
                 }
                 assert!(!layout.navigation.intersect(outer).is_positive());
-                if style == crate::prefs::NavigatorStyle::Cube {
+                // Custom without a body draws the cube.
+                if style != crate::prefs::NavigatorStyle::Axes {
                     let front = crate::scenario::handle_at("navigation_cube:front").unwrap();
                     assert!(outer.contains(front));
                     let up = crate::scenario::handle_at("navigation_cube:control:up").unwrap();
@@ -538,4 +555,96 @@ fn escape_ends_navigation_before_sketch_tools_and_does_not_count_as_a_finish_pre
     assert_eq!(h.app.session.active_sketch, sketch);
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(h.app.session.active_sketch.is_none(), "two ordinary quick Escapes still finish the sketch");
+}
+
+/// Home and Fit put the model in the middle of the view. The floating controls take room out of
+/// it, so the model is drawn smaller and kept clear of them, but the room they leave over moves it
+/// towards the middle of the view rather than the middle of the gap between them; a panel moves
+/// the middle itself (#9195).
+#[test]
+fn a_fit_centres_the_model_in_the_view_and_is_moved_only_by_panels() {
+    let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(1600.0, 1000.0));
+    let bounds = Aabb3 { min: Vec3::new(-50.0, -50.0, -50.0), max: Vec3::new(50.0, 50.0, 50.0) };
+    let centre = bounds.center();
+    let on_screen = |cam: Camera, p: Vec3| {
+        let radius = (bounds.diagonal() * 0.5 + centre.dist(cam.target)).max(cam.half_height() * 2.0).max(10.0);
+        let (x, y, _) = cam.to_screen(p, f64::from(viewport.width()), f64::from(viewport.height()), radius).unwrap();
+        pos2(viewport.left() + x as f32, viewport.top() + y as f32)
+    };
+    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+        // The compass and the navigation bar, and nothing else.
+        let bare = layout(viewport, &[], 1.0, style, true);
+        let cam = fit_bounds(Camera::default(), &bounds, &bare, 0.0).expect("framed");
+        for x in [bounds.min.x, bounds.max.x] {
+            for y in [bounds.min.y, bounds.max.y] {
+                for z in [bounds.min.z, bounds.max.z] {
+                    let p = on_screen(cam, Vec3::new(x, y, z));
+                    assert!(bare.drawable.contains(p), "{style:?}: the model is clear of the controls: {p:?} {bare:?}");
+                }
+            }
+        }
+        let middle = bare.middle.center();
+        let gap = bare.drawable.center().distance(middle);
+        let off = on_screen(cam, centre).distance(middle);
+        assert!(off + 1.0 < gap, "{style:?}: nearer the middle of the view than the middle of the gap: {off} vs {gap}");
+        // A panel down the left takes that part of the view away, so the middle moves right: the
+        // camera's target moves the other way, against its right vector.
+        let panel = Rect::from_min_size(pos2(0.0, 0.0), vec2(320.0, 1000.0));
+        let docked = layout(viewport, &[panel], 1.0, style, true);
+        let moved = fit_bounds(Camera::default(), &bounds, &docked, 0.0).expect("framed");
+        let right = moved.basis().0;
+        assert!((moved.target - centre).dot(right) < -1.0, "{style:?}: a panel must move the model clear of it: {:?}", moved.target);
+        // It is drawn smaller with the controls shown than with the whole view to itself.
+        let empty = Layout::with_content(viewport, viewport, &[], 1.0, style, egui::Vec2::ZERO, Rect::NOTHING);
+        let roomy = fit_bounds(Camera::default(), &bounds, &empty, 0.0).expect("framed");
+        assert!(roomy.distance <= cam.distance + 1e-9, "{style:?}: controls must not make the model larger");
+    }
+}
+
+/// #9943: dragging the orbit gizmo toward the window edge must not stall once the cursor hits
+/// that edge: the drag warps the cursor back to the window centre and keeps orbiting while the
+/// button is held.
+#[test]
+fn gizmo_orbit_keeps_tracking_after_the_cursor_hits_the_window_edge() {
+    let mut h = Harness::new();
+    h.call("ui.view", json!({"view": "front"}));
+    h.settle();
+    let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
+    let c = outer.center();
+    let home = h.ctx.viewport_rect().center();
+    let edge = h.ctx.viewport_rect().max.x - 2.0;
+    assert!(c.x < edge - 20.0 && home.x < edge - 20.0, "the gizmo and the centre sit clear of the edge");
+    let press = |pressed: bool, at: egui::Pos2| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    h.app.synthetic.push(egui::Event::PointerMoved(c));
+    h.app.synthetic.push(press(true, c));
+    // Drag right until the cursor reaches the window's right edge.
+    for k in 1..=3 {
+        h.app.synthetic.push(egui::Event::PointerMoved(pos2((c.x + 40.0 * k as f32).min(edge), c.y)));
+    }
+    h.frames(8);
+    assert!(h.app.viewport.axis_drag.is_some(), "the drag is still held");
+    assert_eq!(h.app.viewport.axis_warp, Some(home), "the cursor was warped back to the window centre");
+    // The OS echoes the warp: the pointer reappears at the centre without moving the view.
+    let before = h.app.cam;
+    h.app.synthetic.push(egui::Event::PointerMoved(home));
+    h.frames(4);
+    assert_eq!(h.app.cam, before, "the warp echo must not jump the view");
+    assert!(h.app.viewport.axis_warp.is_none(), "the echo clears the pending warp");
+    // The user keeps dragging right from the centre: the orbit keeps tracking past the edge.
+    let yaw = h.app.cam.yaw;
+    for k in 1..=5 {
+        h.app.synthetic.push(egui::Event::PointerMoved(pos2(home.x + 30.0 * k as f32, home.y)));
+    }
+    h.frames(8);
+    assert!((h.app.cam.yaw - yaw - 150.0 * 0.008).abs() < 1e-3, "the orbit kept tracking past the edge: {:?}", h.app.cam);
+    // Releasing ends the drag cleanly.
+    h.app.synthetic.push(press(false, pos2(home.x + 150.0, home.y)));
+    h.frames(4);
+    assert!(h.app.viewport.axis_drag.is_none());
+    assert!(h.app.viewport.axis_warp.is_none());
 }

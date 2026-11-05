@@ -144,6 +144,7 @@ mod progressive_checkpoints {
 
 fn request() -> ImageRequest {
     ImageRequest {
+        studio_weights: None,
         integrator: Default::default(),
         raytrace: None,
         textures: None,
@@ -284,7 +285,7 @@ fn cancellation_while_encoding_cannot_publish_a_late_frame() {
 }
 
 #[test]
-fn malformed_preparation_fails_the_job_without_stopping_the_host() {
+fn malformed_geometry_is_rejected_without_stopping_the_host() {
     let host = CpuHost::cooperative();
     let scene = ProductScene {
         bounds: Aabb3::EMPTY,
@@ -298,13 +299,9 @@ fn malformed_preparation_fails_the_job_without_stopping_the_host() {
             faces: Vec::new(),
         }],
     };
-    let broken = host.submit(id(1, 1), 1, scene, request()).unwrap();
-    drain(&host);
-    let status = broken.status().unwrap();
-    assert_eq!(status.progress.phase, Phase::Failed);
-    assert_eq!(status.error.unwrap().code, ErrorCode::InvalidScene);
-    assert!(status.frame.is_none(), "a failed preparation path has no cached PNG identity");
-    assert!(broken.frame().unwrap().is_none());
+    let error = host.submit(id(1, 1), 1, scene, request()).err().unwrap();
+    assert_eq!(error.code, ErrorCode::InvalidScene);
+    assert_eq!(host.admitted_bytes(), 0);
     assert!(host.is_available());
     let healthy = host.submit(id(1, 2), 1, empty(), request()).unwrap();
     drain(&host);
@@ -351,6 +348,25 @@ fn native_job_finishes_without_any_poll_or_ui_pump() {
     assert_eq!(frame.info.png_bytes, frame.png().len() as u64);
     assert_eq!(frame.info.png_sha256, format!("{:x}", Sha256::digest(frame.png())));
     assert_eq!(status.frame.unwrap().png_sha256, frame.info.png_sha256);
+    let duration = job.completed_duration().unwrap().unwrap();
+    assert_eq!(job.completed_duration().unwrap(), Some(duration), "completed duration is independent of status polling");
+}
+
+#[test]
+fn completed_duration_is_captured_at_publication_and_never_for_cancelled_work() {
+    let host = CpuHost::cooperative();
+    let job = host.submit(id(1, 1), 12, empty(), request()).unwrap();
+    assert!(job.completed_duration().unwrap().is_none());
+    drain(&host);
+    let duration = job.completed_duration().unwrap().unwrap();
+    assert!(duration.as_secs_f64().is_finite());
+    job.status().unwrap();
+    host.pump(1).unwrap();
+    assert_eq!(job.completed_duration().unwrap(), Some(duration));
+    let cancelled = host.submit(id(1, 2), 12, empty(), request()).unwrap();
+    cancelled.cancel().unwrap();
+    drain(&host);
+    assert!(cancelled.completed_duration().unwrap().is_none());
 }
 
 /// Isolate the existing integrator-to-host completion boundary with a real PNG
@@ -537,6 +553,7 @@ impl ImageExecutor for DropProbe {
         Ok(Admission {
             triangles: 0,
             face_appearances: 0,
+            projected_pixel_tests: None,
             geometry_bytes: 0,
             pixel_scratch_bytes: self.estimated,
             preparation_bytes: 0,
@@ -779,6 +796,7 @@ fn registered_large_pool_is_explicit_finite_and_accounted() {
             Ok(Admission {
                 triangles: 0,
                 face_appearances: 0,
+                projected_pixel_tests: None,
                 geometry_bytes: 0,
                 pixel_scratch_bytes: 0,
                 preparation_bytes: 0,
@@ -801,4 +819,90 @@ fn registered_large_pool_is_explicit_finite_and_accounted() {
     assert!(host.0.shared.budget.reserve(600 * 1024 * 1024).is_err());
     drop(lease);
     assert_eq!(host.admitted_bytes(), 0);
+}
+
+#[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
+#[test]
+fn actual_cpu_texture_worker_releases_sources_after_completion_or_cancel_while_status_is_retained() {
+    use crate::job::textures::{PlanarFrame, RuntimeTextures, TextureBinding, TextureMap};
+    use image::ImageEncoder;
+    for cancelled in [false, true] {
+        // Real native admission and ImageTask, manually pumped to avoid timing races.
+        let host = ImageHost(Arc::new(Owner {
+            executor: None,
+            shared: CpuHost::shared(MEMORY_LIMIT),
+            kind: HostKind::NativeWorker,
+            running: Mutex::new(None),
+            _worker: None,
+        }));
+        let mut encoded = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut encoded).write_image(&[128, 64, 32, 255], 1, 1, image::ExtendedColorType::Rgba8).unwrap();
+        let resources = Arc::new(
+            RuntimeTextures::new(vec![TextureBinding {
+                body_index: 0,
+                body_name: "Portable wood".into(),
+                frame: PlanarFrame { origin: [0.; 3], u: [1., 0., 0.], v: [0., 1., 0.] },
+                normal_strength: 1.,
+                base_color: Some(TextureMap::new(encoded, crate::texture_input::MapRole::BaseColor).unwrap()),
+                normal: None,
+                roughness: None,
+                metallic: None,
+                base_color_mode: Default::default(),
+                flip_v: false,
+            }])
+            .unwrap(),
+        );
+        let weak = Arc::downgrade(&resources);
+        let mesh = Mesh {
+            positions: vec![solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X, solidcore_record::Vec3::Y],
+            triangles: vec![[0, 1, 2]],
+            ..Default::default()
+        };
+        let scene = ProductScene {
+            bounds: mesh.bounds(),
+            meshes: vec![crate::ProductMesh {
+                name: "Portable wood".into(),
+                mesh: Arc::new(mesh),
+                color: [255; 3],
+                opacity: 1.,
+                surface: None,
+                transmission: None,
+                faces: vec![],
+            }],
+        };
+        let input = ImageRequest {
+            integrator: Integrator::Raytrace,
+            raytrace: Some(Default::default()),
+            textures: Some(resources),
+            width: 2,
+            height: 2,
+            ..request()
+        };
+        let job = host.submit(id(1599, 1), 1, scene, input).unwrap();
+        let status = job.status().unwrap();
+        assert!(status.request.textures.is_none());
+        assert_eq!(status.textures.as_ref().unwrap().bodies, 1);
+        let work = host.0.shared.queue.lock().unwrap().pop_front().unwrap();
+        let mut running = Running::begin(work).unwrap();
+        assert!(weak.upgrade().is_some());
+        assert!(running.guarded_step(1));
+        if cancelled {
+            job.cancel().unwrap();
+        }
+        let mut finished = false;
+        for _ in 0..10_000 {
+            if !running.guarded_step(4) {
+                finished = true;
+                break;
+            }
+        }
+        assert!(finished);
+        drop(running);
+        assert!(weak.upgrade().is_none(), "terminal CPU status cannot retain encoded texture payloads");
+        assert_eq!(job.status().unwrap().progress.phase, if cancelled { Phase::Cancelled } else { Phase::Completed });
+        assert_eq!(job.frame().unwrap().is_some(), !cancelled);
+        drop(status);
+        drop(job);
+        assert_eq!(host.admitted_bytes(), 0);
+    }
 }

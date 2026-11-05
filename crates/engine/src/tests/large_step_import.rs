@@ -11,8 +11,8 @@ use crate::*;
 fn step_file(name: &str, count: usize) -> String {
     let bodies: Vec<_> = (0..count)
         .map(|i| {
-            let at = solidcraft_geom::Vec3::new((i % 32) as f64 * 12.0, (i / 32) as f64 * 12.0, 0.0);
-            solidcraft_kernel::box_solid(at, at + solidcraft_geom::Vec3::new(10.0, 10.0, 10.0)).unwrap()
+            let at = solidcore_record::Vec3::new((i % 32) as f64 * 12.0, (i / 32) as f64 * 12.0, 0.0);
+            solidcraft_kernel::box_solid(at, at + solidcore_record::Vec3::new(10.0, 10.0, 10.0)).unwrap()
         })
         .collect();
     let text = solidcraft_kernel::step_export(&bodies.iter().collect::<Vec<_>>(), name).unwrap();
@@ -111,4 +111,50 @@ fn a_cancelled_preview_import_leaves_no_failure_in_the_shared_cache() {
     let result = &s.model.results[import];
     assert!(result.error.is_none() && !result.skipped, "the design imports in full: {:?}", result.error);
     let _ = std::fs::remove_file(path);
+}
+
+/// The largest files read (#4086). Over the default limits a STEP file and a design file are
+/// refused before anything is read, saying how to raise the limit; with the limits raised (the
+/// preference, or `--max-file-size` for one run, which wins) the same reads go ahead.
+#[test]
+fn raised_file_limits_let_larger_step_and_design_files_be_read() {
+    use solidcraft_io::limits::{self, FileLimits, GB, Kind, MB};
+    /// Puts the defaults back however the test ends.
+    struct Defaults;
+    impl Drop for Defaults {
+        fn drop(&mut self) {
+            let _ = limits::set_override(None);
+            let _ = limits::set_preferred(FileLimits::DEFAULT);
+        }
+    }
+    let _defaults = Defaults;
+    let dir = std::env::temp_dir().join(format!("solidcraft-4086-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // Sparse files: nothing is written, and a refusal reads nothing either.
+    let sparse = |name: &str, len: u64| {
+        let path = dir.join(name);
+        std::fs::File::create(&path).unwrap().set_len(len).unwrap();
+        path.to_string_lossy().to_string()
+    };
+    let step = sparse("big.step", 512 * MB + 1);
+    let design = sparse("big.solidcraft", 256 * MB + 1);
+    let mut s = Session::default();
+    assert_eq!(limits::effective(), FileLimits::DEFAULT);
+    for path in [&step, &design] {
+        let error = s.execute("doc.open", &json!({"path": path})).unwrap_err().to_string();
+        assert!(error.contains("too large") && error.contains("Largest file to open") && error.contains("--max-file-size"), "{error}");
+    }
+    // The preference raises both limits; the design is now read (and refused only for not being one).
+    limits::set_preferred(FileLimits { step: GB, design: GB }).unwrap();
+    assert_eq!((limits::max_step_bytes(), limits::max_design_bytes()), (1 << 30, 1 << 30));
+    assert!(limits::check(Kind::Step, 512 * MB + 1).is_ok());
+    let error = s.execute("doc.open", &json!({"path": design})).unwrap_err().to_string();
+    assert!(!error.contains("too large"), "{error}");
+    // The flag overrides the preference for the run, and the ceiling holds for both.
+    limits::set_override(Some(2 * GB)).unwrap();
+    assert_eq!(limits::effective(), FileLimits { step: 2 * GB, design: 2 * GB });
+    assert!(limits::set_override(Some(16 * GB + 1)).is_err());
+    assert!(limits::set_preferred(FileLimits { step: 17 * GB, design: GB }).is_err());
+    assert_eq!(limits::preferred(), FileLimits { step: GB, design: GB }, "a refused value changes nothing");
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -22,19 +22,13 @@ pub struct SavedModel {
 
 /// Records refer to these at most.
 const MAX_ITEMS: usize = 1_000_000;
-/// Bodies, sketches and sheet bodies all the states hold together, at most (a state is a list of clones).
+/// Bodies, sketches, sheet bodies and sketch keys all the states hold together, at most (a state is
+/// a list of clones).
 const MAX_HELD: usize = 50_000_000;
-
-/// A feature's boolean retries as saved. The kernel leaves `rejected` out when it is empty, and
-/// the field has no default when read, so a saved model whose booleans retried was refused and
-/// the design evaluated on every open (#5286): an absent list is an empty one.
-fn saved_diagnostics(d: &Json) -> Result<kernel::BooleanDiagnostics> {
-    let mut d = d.clone();
-    if let Some(fields) = d.as_object_mut() {
-        fields.entry("rejected").or_insert_with(|| json!([]));
-    }
-    serde_json::from_value(d).map_err(|_| bad("saved model: diagnostics"))
-}
+/// Longest text a record holds (bytes). A feature's warning can quote every generated name of
+/// the edges it picked: 122,701 characters in one design, whose saved model was refused, so it
+/// evaluated again on every open (#8541).
+const MAX_TEXT: usize = 1 << 24;
 
 fn hex(v: u64) -> String {
     format!("{v:016x}")
@@ -44,13 +38,17 @@ fn unhex(v: &Json) -> Result<u64> {
     v.as_str().and_then(|s| u64::from_str_radix(s, 16).ok()).ok_or_else(|| bad("saved model: key"))
 }
 
+/// A sketch-key set's list `key` (`set` or `drop`).
+fn keys_list<'a>(set: &'a Json, key: &str) -> Result<&'a Vec<Json>> {
+    set.get(key).and_then(Json::as_array).filter(|l| l.len() <= MAX_ITEMS).ok_or_else(|| bad("saved model: sketch keys"))
+}
+
 fn bad(what: &str) -> DocError {
     DocError::Invalid(what.into())
 }
 
-/// A design whose stored face or edge names were saved before format 14 (marked
-/// [`crate::naming::LEGACY_MARK`]) finds them through names worked out from geometry on demand,
-/// which a saved model does not keep.
+/// A design holding a face or edge name saved before format 14 (marked
+/// [`crate::naming::LEGACY_MARK`]): it saves without a model.
 fn has_legacy_names(doc: &Document) -> bool {
     let mark = format!("\"{}", crate::naming::LEGACY_MARK);
     doc.features.iter().any(|f| match &f.kind {
@@ -124,25 +122,54 @@ struct Writer {
     sheet_index: HashMap<String, usize>,
     states: Vec<Json>,
     state_index: HashMap<usize, usize>,
+    /// Each kernel body's place in `bodies`, by its record.
+    body_index: HashMap<usize, usize>,
+    /// The rounds that made bodies (`Body::rounds`): the body, the body they were made on (both
+    /// places in `bodies`), and the edges they rounded there with their radii.
+    rounds: Vec<Json>,
+    /// The states' sketch keys, each distinct map once, written as the changes from the set
+    /// written before it: every state used to repeat the whole map (one entry per solved sketch),
+    /// 85 % of a 5,484-feature design's records, which then did not fit the cache's manifest.
+    sketch_key_sets: Vec<Json>,
+    sketch_key_index: HashMap<BTreeMap<u64, u64>, usize>,
+    last_sketch_keys: Option<(BTreeMap<u64, u64>, usize)>,
 }
 
 impl Writer {
+    /// The place of `keys` among the sketch-key sets, written the first time a state holds them
+    /// (as the changes from the set written last: a later state mostly adds a sketch or two).
+    fn sketch_key_set(&mut self, keys: &BTreeMap<u64, u64>) -> usize {
+        if let Some(i) = self.sketch_key_index.get(keys) {
+            return *i;
+        }
+        let record = match &self.last_sketch_keys {
+            Some((base, at)) => {
+                let set: Vec<Json> = keys.iter().filter(|(f, k)| base.get(f) != Some(k)).map(|(f, k)| json!([f, hex(*k)])).collect();
+                let drop: Vec<u64> = base.keys().filter(|f| !keys.contains_key(f)).copied().collect();
+                json!({"base": at, "set": set, "drop": drop})
+            }
+            None => json!({"set": keys.iter().map(|(f, k)| json!([f, hex(*k)])).collect::<Vec<_>>(), "drop": []}),
+        };
+        self.sketch_key_sets.push(record);
+        let i = self.sketch_key_sets.len() - 1;
+        self.sketch_key_index.insert(keys.clone(), i);
+        self.last_sketch_keys = Some((keys.clone(), i));
+        i
+    }
+
     fn names(&mut self, b: &ModelBody) -> usize {
         let id = b.names.id();
         if let Some(i) = self.names_index.get(&id) {
             return *i;
         }
         let names = crate::naming::names(b);
-        let info: Vec<Json> = names.info.iter().map(|i| json!([i.aliases, i.bounds, i.verified])).collect();
+        let info: Vec<Json> = names.info.iter().map(|i| json!([i.aliases, i.bounds, i.verified, i.synonyms])).collect();
         self.names.push(json!({"faces": *names.faces, "info": info}));
         self.names_index.insert(id, self.names.len() - 1);
         self.names.len() - 1
     }
 
     fn model_body(&mut self, b: &ModelBody) -> Option<usize> {
-        if b.body.is_mesh() {
-            return None;
-        }
         let key = BodyKey::of(b);
         if let Some(i) = self.model_body_index.get(&key) {
             return Some(*i);
@@ -167,11 +194,39 @@ impl Writer {
             let faces: Vec<Json> = look.faces.iter().map(|(name, (color, opacity))| json!([name, color, opacity])).collect();
             r["imported"] = json!({"color": look.color, "opacity": look.opacity, "faces": faces});
         }
-        r["body"] = json!(self.bodies.len());
-        self.bodies.push(b.body.clone());
+        r["body"] = json!(self.body(&b.body));
         self.model_bodies.push(r);
         self.model_body_index.insert(key, self.model_bodies.len() - 1);
         Some(self.model_bodies.len() - 1)
+    }
+
+    /// The place of a model body's kernel body: its own (a placed copy shares its record with
+    /// the part's other copies, but not its display), with the bodies the rounds that made it
+    /// were made on, each written once though no state holds it: a later round at a corner where
+    /// they meet blends them again, in a model opened from the file as in one evaluated anew.
+    fn body(&mut self, body: &Body) -> usize {
+        let key = |b: &Body| std::ptr::from_ref(b.record()).addr();
+        self.bodies.push(body.clone());
+        let first = self.bodies.len() - 1;
+        self.body_index.entry(key(body)).or_insert(first);
+        let (mut at, mut of) = (body.clone(), first);
+        // Down the rounds, until a body made on one already written.
+        while let Some((before, edges)) = at.rounds().map(|(b, e)| (b.clone(), e.to_vec())) {
+            let (i, new) = match self.body_index.get(&key(&before)) {
+                Some(i) => (*i, false),
+                None => {
+                    self.bodies.push(before.clone());
+                    self.body_index.insert(key(&before), self.bodies.len() - 1);
+                    (self.bodies.len() - 1, true)
+                }
+            };
+            self.rounds.push(json!({"body": of, "before": i, "edges": edges}));
+            if !new {
+                break;
+            }
+            (at, of) = (before, i);
+        }
+        first
     }
 
     fn sketch(&mut self, s: &Arc<SolvedSketch>) -> Option<usize> {
@@ -189,11 +244,15 @@ impl Writer {
     }
 
     fn sheet(&mut self, sheet: &crate::sheet::SheetBody) -> Option<usize> {
-        let record = serde_json::to_value(sheet).ok()?;
-        let key = record.to_string();
+        // Keyed by the sheet written as text, straight from the sheet: every state asks for each
+        // of its sheets, and building the record (a JSON tree) each time only to find it written
+        // already took most of a sheet-metal design's save (906 states, 300 sheets: 0.8 s). Two
+        // sheets are the same text exactly when they are the same record.
+        let key = serde_json::to_string(sheet).ok()?;
         if let Some(i) = self.sheet_index.get(&key) {
             return Some(*i);
         }
+        let record = serde_json::to_value(sheet).ok()?;
         self.sheets.push(record);
         self.sheet_index.insert(key, self.sheets.len() - 1);
         Some(self.sheets.len() - 1)
@@ -212,7 +271,7 @@ impl Writer {
             "reserved_body_names": st.reserved_body_names.iter().collect::<Vec<_>>(),
             "sheets": sheets, "construct": serde_json::to_value(&st.construct).ok()?,
             "threads": serde_json::to_value(&st.threads).ok()?,
-            "sketch_keys": st.sketch_keys.iter().map(|(f, k)| json!([f, hex(*k)])).collect::<Vec<_>>(),
+            "sketch_key_set": self.sketch_key_set(&st.sketch_keys),
             "blend_edges": serde_json::to_value(&st.blend_edges).ok()?, "fitted": serde_json::to_value(&st.fitted).ok()?,
             "tapered": serde_json::to_value(&st.tapered).ok()?,
         });
@@ -224,7 +283,7 @@ impl Writer {
 
 impl Model {
     /// The model as a design file keeps it: `None` unless it is `doc`'s evaluation without an
-    /// error, holds no mesh bodies, and `doc` keeps no names saved before format 14. Works out
+    /// error and `doc` keeps no names saved before format 14. Works out
     /// the face names not asked for yet (a saved model keeps them as worked out).
     pub fn saved(&self, doc: &Document) -> Option<SavedModel> {
         if self.results.is_empty() || self.results.iter().any(|r| r.error.is_some()) || !self.is_current(doc) || has_legacy_names(doc) {
@@ -239,14 +298,15 @@ impl Model {
                 if let Some(w) = &r.warning {
                     f["warning"] = json!(w);
                 }
-                if r.boolean_diagnostics != kernel::BooleanDiagnostics::default() {
-                    f["diagnostics"] = serde_json::to_value(&r.boolean_diagnostics).map_err(|e| kernel::KernelError::Invalid(e.to_string()))?;
+                if let Some(report) = &r.import_report {
+                    f["import_report"] = serde_json::to_value(report.as_ref()).map_err(|e| kernel::KernelError::Invalid(e.to_string()))?;
                 }
                 features.push(f);
             }
+            // The check mode the results were evaluated under: they are another mode's results.
             let records = json!({
                 "features": features, "states": w.states, "model_bodies": w.model_bodies, "names": w.names, "sketches": w.sketches,
-                "sheets": w.sheets,
+                "sheets": w.sheets, "validation": self.validation().id(), "rounds": w.rounds, "sketch_key_sets": w.sketch_key_sets,
             });
             Ok(SavedModel { records, bodies: w.bodies })
         })
@@ -257,23 +317,24 @@ impl Model {
 impl SavedModel {
     /// The states the records hold, every record checked.
     fn states(&self) -> Result<Vec<Arc<ModelState>>> {
-        let (records, bodies) = (&self.records, &self.bodies);
+        let bodies = &self.bodies_with_rounds()?;
+        let records = &self.records;
         let list = |key: &str| records.get(key).and_then(Json::as_array).filter(|l| l.len() <= MAX_ITEMS).ok_or_else(|| bad("saved model: list"));
         let index = |v: Option<&Json>, len: usize| {
             v.and_then(Json::as_u64).and_then(|i| usize::try_from(i).ok()).filter(|i| *i < len).ok_or_else(|| bad("saved model: index"))
         };
         let text =
-            |v: Option<&Json>| v.and_then(Json::as_str).filter(|s| s.len() <= 1 << 16).map(str::to_owned).ok_or_else(|| bad("saved model: text"));
+            |v: Option<&Json>| v.and_then(Json::as_str).filter(|s| s.len() <= MAX_TEXT).map(str::to_owned).ok_or_else(|| bad("saved model: text"));
         let parse = |v: Option<&Json>| v.cloned().ok_or_else(|| bad("saved model: missing"));
         let mut names = Vec::new();
         for n in list("names")? {
             let faces: Vec<String> = serde_json::from_value(parse(n.get("faces"))?).map_err(|_| bad("saved model: names"))?;
-            let info: Vec<(Vec<String>, std::collections::BTreeSet<String>, bool)> =
+            let info: Vec<(Vec<String>, std::collections::BTreeSet<String>, bool, Vec<String>)> =
                 serde_json::from_value(parse(n.get("info"))?).map_err(|_| bad("saved model: names"))?;
             if info.len() != faces.len() {
                 return Err(bad("saved model: names"));
             }
-            let info = info.into_iter().map(|(aliases, bounds, verified)| FaceInfo { aliases, bounds, verified }).collect();
+            let info = info.into_iter().map(|(aliases, bounds, verified, synonyms)| FaceInfo { aliases, synonyms, bounds, verified }).collect();
             names.push(Arc::new(Names { faces: Arc::new(faces), info }));
         }
         let mut sketches = Vec::new();
@@ -327,9 +388,49 @@ impl SavedModel {
         for s in list("sheets")? {
             sheets.push(serde_json::from_value::<crate::sheet::SheetBody>(s.clone()).map_err(|_| bad("saved model: sheet"))?);
         }
-        let mut states = Vec::new();
+        // The sketch-key sets, each the changes from an earlier one (`base`): a short record can
+        // stand for a large set, so what they hold counts towards MAX_HELD as they are built.
+        let mut key_sets: Vec<BTreeMap<u64, u64>> = Vec::new();
         let mut held = 0usize;
-        for s in list("states")? {
+        for k in list("sketch_key_sets")? {
+            // A set is the changes from one before it.
+            let base = match k.get("base") {
+                Some(b) => Some(key_sets.get(index(Some(b), key_sets.len())?).ok_or_else(|| bad("saved model: sketch keys"))?),
+                None => None,
+            };
+            let (drop, set) = (keys_list(k, "drop")?, keys_list(k, "set")?);
+            // Counted before the base is copied: at most what the set can hold.
+            held = held.saturating_add(base.map_or(0, BTreeMap::len)).saturating_add(set.len());
+            if held > MAX_HELD {
+                return Err(bad("saved model: sketch keys"));
+            }
+            let mut keys = base.cloned().unwrap_or_default();
+            for f in drop {
+                keys.remove(&f.as_u64().ok_or_else(|| bad("saved model: sketch keys"))?);
+            }
+            for e in set {
+                keys.insert(e.get(0).and_then(Json::as_u64).ok_or_else(|| bad("saved model: sketch keys"))?, unhex(e.get(1).unwrap_or(&Json::Null))?);
+            }
+            key_sets.push(keys);
+        }
+        let records = list("states")?;
+        // What every state holds, counted from its runs and its sketch-key set before any is
+        // built (a hostile file cannot make the states clone more than MAX_HELD items).
+        for s in records {
+            for key in ["bodies", "sketches"] {
+                for run in s.get(key).and_then(Json::as_array).ok_or_else(|| bad("saved model: state"))? {
+                    held = held.saturating_add(run.get(1).and_then(Json::as_u64).and_then(|n| usize::try_from(n).ok()).unwrap_or(usize::MAX));
+                }
+            }
+            held = held.saturating_add(s.get("sheets").and_then(Json::as_array).map_or(0, Vec::len));
+            held = held.saturating_add(key_sets.get(index(s.get("sketch_key_set"), key_sets.len())?).map_or(0, BTreeMap::len));
+            if held > MAX_HELD {
+                return Err(bad("saved model: states"));
+            }
+        }
+        // Each state is independent of the others once the records they share are read: built
+        // on threads (a 5,484-feature design spent 3.5 s building them one after another).
+        let built = kernel::map_on_threads(records, 16, |s: &Json| -> Result<ModelState> {
             // Runs of consecutive indices, each within the list it indexes.
             let ids = |key: &str, len: usize| -> Result<Vec<usize>> {
                 let mut out = Vec::new();
@@ -345,12 +446,8 @@ impl SavedModel {
             };
             let field = |key: &str| parse(s.get(key));
             let invalid = |_| bad("saved model: state");
-            let mut sketch_keys = BTreeMap::new();
-            for k in s.get("sketch_keys").and_then(Json::as_array).ok_or_else(|| bad("saved model: state"))? {
-                sketch_keys
-                    .insert(k.get(0).and_then(Json::as_u64).ok_or_else(|| bad("saved model: state"))?, unhex(k.get(1).unwrap_or(&Json::Null))?);
-            }
-            let st = ModelState {
+            let sketch_keys = key_sets.get(index(s.get("sketch_key_set"), key_sets.len())?).cloned().ok_or_else(|| bad("saved model: state"))?;
+            Ok(ModelState {
                 frame_bodies: Default::default(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
                 sketches: ids("sketches", sketches.len())?.into_iter().filter_map(|i| sketches.get(i).cloned()).collect(),
@@ -373,14 +470,65 @@ impl SavedModel {
                 blend_edges: serde_json::from_value(field("blend_edges")?).map_err(invalid)?,
                 fitted: serde_json::from_value(field("fitted")?).map_err(invalid)?,
                 tapered: serde_json::from_value(field("tapered")?).map_err(invalid)?,
-            };
-            held = held.saturating_add(st.bodies.len()).saturating_add(st.sketches.len()).saturating_add(st.sheets.len());
-            if held > MAX_HELD {
-                return Err(bad("saved model: states"));
-            }
-            states.push(Arc::new(st));
-        }
+                // A join's notice is for the evaluation that made it, not kept with the cache.
+                kept_separate: BTreeMap::new(),
+                // Not kept either: a saved model's states carry no lineage, so the check of a
+                // legacy split's picks (`lineage::legacy_picks_digest`) finds no pieces in them
+                // and takes them as the design's evaluation they were saved as.
+                legacy_picks: BTreeMap::new(),
+            })
+        });
+        let states = built.into_iter().map(|r| r.unwrap_or_else(|| Err(bad("saved model: state"))).map(Arc::new)).collect::<Result<Vec<_>>>()?;
         Ok(states)
+    }
+
+    /// The kernel bodies with the rounds that made them ([`kernel::Body::rounds`]) as the records
+    /// list them, each body's before it is taken as another's body before its rounds.
+    fn bodies_with_rounds(&self) -> Result<Vec<Body>> {
+        let refused = || bad("saved model: rounds");
+        let list = self.records.get("rounds").and_then(Json::as_array).filter(|l| l.len() <= self.bodies.len()).ok_or_else(refused)?;
+        let place = |v: Option<&Json>| v.and_then(Json::as_u64).and_then(|i| usize::try_from(i).ok()).filter(|i| *i < self.bodies.len());
+        // Per body, the body its rounds were made on and their edges.
+        let mut made: Vec<Option<(usize, Vec<(usize, f64)>)>> = vec![None; self.bodies.len()];
+        for r in list {
+            let (body, before) = (place(r.get("body")).ok_or_else(refused)?, place(r.get("before")).ok_or_else(refused)?);
+            let edges: Vec<(usize, f64)> = serde_json::from_value(r.get("edges").cloned().ok_or_else(refused)?).map_err(|_| refused())?;
+            match made.get_mut(body) {
+                Some(slot @ None) => *slot = Some((before, edges)),
+                _ => return Err(refused()),
+            }
+        }
+        // Each body after the one its rounds were made on, down each chain once (a cycle is refused).
+        let mut bodies = self.bodies.clone();
+        let (mut done, mut on_chain) = (vec![false; bodies.len()], vec![false; bodies.len()]);
+        for start in 0..bodies.len() {
+            let mut chain = Vec::new();
+            let mut at = start;
+            while let Some(seen @ false) = done.get_mut(at) {
+                *seen = true;
+                chain.push(at);
+                if let Some(on) = on_chain.get_mut(at) {
+                    *on = true;
+                }
+                match made.get(at).and_then(Option::as_ref) {
+                    Some((before, _)) => at = *before,
+                    None => break,
+                }
+                if on_chain.get(at).copied().unwrap_or(false) {
+                    return Err(refused());
+                }
+            }
+            for &k in chain.iter().rev() {
+                if let Some(on) = on_chain.get_mut(k) {
+                    *on = false;
+                }
+                let Some(Some((before, edges))) = made.get(k) else { continue };
+                let before = bodies.get(*before).cloned().ok_or_else(refused)?;
+                let body = bodies.get(k).cloned().ok_or_else(refused)?;
+                *bodies.get_mut(k).ok_or_else(refused)? = body.with_rounds_of(&before, edges.clone())?;
+            }
+        }
+        Ok(bodies)
     }
 
     /// The model's final state (what a picture of it shows), without checking that it is a
@@ -428,6 +576,20 @@ impl SavedModel {
         let state_sketches = states.iter().map(|s| held(s, "sketches", sketches.len())).collect::<Option<Vec<_>>>()?;
         let body_of = model_bodies.iter().map(|r| at(r.get("body"), self.bodies.len())).collect::<Option<Vec<_>>>()?;
         let names_of = model_bodies.iter().map(|r| at(r.get("names"), names.len())).collect::<Option<Vec<_>>>()?;
+        // The body each body's rounds were made on: kept with it, though no kept state holds it.
+        let rounds = list("rounds")?;
+        let mut before_of = HashMap::new();
+        for r in rounds {
+            before_of.insert(at(r.get("body"), self.bodies.len())?, at(r.get("before"), self.bodies.len())?);
+        }
+        // A kernel body and the bodies down its rounds (a cycle, refused on reading, ends it).
+        let with_before = |k: usize| -> Vec<usize> {
+            let mut out = vec![k];
+            while let Some(b) = out.last().and_then(|k| before_of.get(k)).filter(|b| !out.contains(b)) {
+                out.push(*b);
+            }
+            out
+        };
         // What each record takes in the file.
         let bytes = |list: &[Json]| list.iter().map(|r| serde_json::to_vec(r).map_or(usize::MAX, |b| b.len().saturating_add(1))).collect::<Vec<_>>();
         let (state_bytes, body_bytes) = (bytes(states.as_slice()), bytes(model_bodies.as_slice()));
@@ -453,7 +615,8 @@ impl SavedModel {
         let mut stored = std::collections::HashSet::new();
         // The sheet bodies, each written once and named by place in the states: all kept.
         let sheets = list("sheets").cloned().unwrap_or_default();
-        let mut used = bytes(sheets.as_slice()).iter().fold(0usize, |t, b| t.saturating_add(*b));
+        let key_sets = list("sketch_key_sets").cloned().unwrap_or_default();
+        let mut used = bytes(sheets.as_slice()).iter().chain(bytes(key_sets.as_slice()).iter()).fold(0usize, |t, b| t.saturating_add(*b));
         for s in std::iter::once(last).chain(order) {
             let (mut adds, mut new_names, mut new_sketches) = (HashMap::new(), std::collections::HashSet::new(), std::collections::HashSet::new());
             let mut records = *state_bytes.get(s)?;
@@ -464,9 +627,11 @@ impl SavedModel {
                     if names_used.get(n) == Some(&false) && new_names.insert(n) {
                         records = records.saturating_add(*name_bytes.get(n)?);
                     }
-                    for &(piece, bytes) in pieces.get(*body_of.get(m)?)? {
-                        if !stored.contains(&piece) {
-                            adds.insert(piece, bytes);
+                    for k in with_before(*body_of.get(m)?) {
+                        for &(piece, bytes) in pieces.get(k)? {
+                            if !stored.contains(&piece) {
+                                adds.insert(piece, bytes);
+                            }
                         }
                     }
                 }
@@ -496,7 +661,9 @@ impl SavedModel {
         // What the states kept refer to, numbered again in the order it had.
         let mut kernel_used = vec![false; self.bodies.len()];
         for m in (0..model_bodies.len()).filter(|m| kept_bodies.get(*m) == Some(&true)) {
-            *kernel_used.get_mut(*body_of.get(m)?)? = true;
+            for k in with_before(*body_of.get(m)?) {
+                *kernel_used.get_mut(k)? = true;
+            }
         }
         let renumber = |used: &[bool]| -> Vec<Option<usize>> {
             let mut next = 0;
@@ -543,10 +710,25 @@ impl SavedModel {
             };
             out_features.push(f);
         }
-        let records = json!({
+        let mut out_rounds = Vec::new();
+        for r in rounds {
+            let Some(body) = new(&new_kernel, at(r.get("body"), self.bodies.len())?) else { continue };
+            let before = new(&new_kernel, at(r.get("before"), self.bodies.len())?)?;
+            let mut r = r.clone();
+            let o = r.as_object_mut()?;
+            o.insert("body".into(), json!(body));
+            o.insert("before".into(), json!(before));
+            out_rounds.push(r);
+        }
+        let mut records = json!({
             "features": out_features, "states": out_states, "model_bodies": out_bodies, "names": kept_of(names.as_slice(), &names_used),
-            "sketches": kept_of(sketches.as_slice(), &sketches_used), "sheets": sheets,
+            "sketches": kept_of(sketches.as_slice(), &sketches_used), "sheets": sheets, "rounds": out_rounds, "sketch_key_sets": key_sets,
         });
+        // The check mode the results were evaluated under, as the model records it (a model
+        // that records none stays without one: adopting it is refused either way).
+        if let (Some(validation), Some(out)) = (self.records.get("validation"), records.as_object_mut()) {
+            out.insert("validation".into(), validation.clone());
+        }
         let kept: Vec<usize> = (0..self.bodies.len()).filter(|i| kernel_used.get(*i) == Some(&true)).collect();
         let bodies = kept.iter().filter_map(|i| self.bodies.get(*i).cloned()).collect();
         Some((SavedModel { records, bodies }, kept, used))
@@ -556,8 +738,9 @@ impl SavedModel {
 impl Model {
     /// The model a design file kept for `doc` ([`Model::saved`]), taken as `doc`'s evaluation:
     /// every feature's result as saved, nothing evaluated but the features whose state the file
-    /// did not keep ([`SavedModel::thinned`]). Refused (an error) unless every feature's
-    /// fingerprint is the one `doc` gives it now, and every record is well formed.
+    /// did not keep ([`SavedModel::thinned`]), under the check mode it was evaluated in
+    /// ([`Model::validation`]). Refused (an error) unless every feature's fingerprint is the one
+    /// `doc` gives it now, and every record is well formed.
     pub fn adopt(doc: &Document, saved: &SavedModel) -> Result<Model> {
         let mut states = saved.states()?;
         let frame_bodies = Arc::new(std::sync::Mutex::new(FrameBodies::default()));
@@ -569,42 +752,67 @@ impl Model {
             v.and_then(Json::as_u64).and_then(|i| usize::try_from(i).ok()).filter(|i| *i < len).ok_or_else(|| bad("saved model: index"))
         };
         let text =
-            |v: Option<&Json>| v.and_then(Json::as_str).filter(|s| s.len() <= 1 << 16).map(str::to_owned).ok_or_else(|| bad("saved model: text"));
+            |v: Option<&Json>| v.and_then(Json::as_str).filter(|s| s.len() <= MAX_TEXT).map(str::to_owned).ok_or_else(|| bad("saved model: text"));
         let features = records.get("features").and_then(Json::as_array).ok_or_else(|| bad("saved model: features"))?;
+        let validation =
+            records.get("validation").and_then(Json::as_str).and_then(kernel::Validation::parse).ok_or_else(|| bad("saved model: validation"))?;
         if features.len() != doc.features.len() {
             return Err(bad("saved model: features"));
         }
         let (vals, param_errors) = evaluation_values(doc);
-        let step_digests = StepDigests::of(doc, &StepDigests::default());
+        let import_digests = ImportDigests::of(doc, &ImportDigests::default());
         let marker = doc.marker.unwrap_or(usize::MAX);
-        let ctx = context_digest(doc, &vals);
+        // As `evaluate` digests the context under the mode, so the next evaluation reuses these.
+        let ctx = context_digest(doc, &vals) ^ validation_digest(validation);
         let mut before = Arc::new(ModelState::default());
         // Whether `before` is the state before the feature: one the file left out only stands in.
         let mut exact = true;
         let mut prev = 0;
         let mut results = Vec::with_capacity(features.len());
+        let mut construction = HashMap::new();
+        let mut prepared_states = std::collections::HashSet::new();
         for (i, (f, r)) in doc.features.iter().zip(features).enumerate() {
             let saved = unhex(r.get("fingerprint").unwrap_or(&Json::Null))?;
             // A fingerprint reads the state before its feature (where the bodies it takes lie).
             // After a state the file left out, the saved one is taken: `evaluate` works that state
             // out, checks the fingerprints after it, and evaluates again from one that differs.
-            prev = if exact { chain_fingerprint(doc, &vals, f, prev, i >= marker, &step_digests, Some(&before)) } else { saved };
+            prev = if exact { chain_fingerprint(doc, &vals, f, prev, i >= marker, &import_digests, Some(&before)) } else { saved };
             if r.get("id").and_then(Json::as_u64) != Some(f.id) || saved != prev {
                 return Err(bad("saved model: the document changed"));
             }
             let ms = r.get("ms").and_then(Json::as_f64).filter(|ms| ms.is_finite()).ok_or_else(|| bad("saved model: time"))?;
             // A file without room for every state keeps some features without one (#3220).
-            let state =
-                r.get("state").map(|s| states.get(index(Some(s), states.len())?).cloned().ok_or_else(|| bad("saved model: state"))).transpose()?;
+            let state = r.get("state").map(|s| index(Some(s), states.len())).transpose()?;
+            if let Some(at) = state
+                && prepared_states.insert(at)
+            {
+                let original = matches!(
+                    &f.kind,
+                    FeatureKind::Box { operation: Operation::NewBody, .. } | FeatureKind::Extrude { operation: Operation::NewBody, .. }
+                );
+                let current = states.get_mut(at).ok_or_else(|| bad("saved model: state"))?;
+                // Each state is prepared before its first shared clone. Record and NameCell
+                // identity prove this is still the original geometry and its exact names.
+                for body in &mut Arc::make_mut(current).bodies {
+                    let key = (std::ptr::from_ref(body.body.record()).addr(), body.names.id());
+                    if original && body.feature == f.id && before.body(&body.name).is_none() {
+                        construction.insert(key, f.id);
+                    }
+                    body.names.cached_construction = construction.get(&key).copied();
+                }
+            }
+            let state = state.map(|at| states.get(at).cloned().ok_or_else(|| bad("saved model: state"))).transpose()?;
             let result = FeatureResult {
                 id: f.id,
                 name: f.name.clone(),
                 error: None,
+                internal: false,
                 warning: r.get("warning").map(|w| text(Some(w))).transpose()?,
-                boolean_diagnostics: match r.get("diagnostics") {
-                    Some(d) => saved_diagnostics(d)?,
-                    None => Default::default(),
-                },
+                import_report: r
+                    .get("import_report")
+                    .map(|v| serde_json::from_value::<kernel::ImportReport>(v.clone()).map(Arc::new).map_err(|_| bad("saved model: import report")))
+                    .transpose()?,
+                repair: None,
                 ms,
                 skipped: r.get("skipped").and_then(Json::as_bool).ok_or_else(|| bad("saved model: skipped"))?,
                 stale: false,
@@ -618,7 +826,7 @@ impl Model {
             }
             results.push(result);
         }
-        let mut model = Model { results, param_errors, step_digests, context: ctx, frame_bodies, ..Model::default() };
+        let mut model = Model { results, param_errors, import_digests, context: ctx, frame_bodies, validation, ..Model::default() };
         let unkept = model.results.iter().filter(|r| r.unkept).count();
         if unkept > 0 {
             // The features whose state the file did not keep, each evaluated again from the state
@@ -636,13 +844,14 @@ impl Model {
         let mut before = Arc::new(ModelState::default());
         if let Ok(mut cache) = model.cache.lock() {
             for (f, r) in doc.features.iter().zip(&model.results).filter(|(_, r)| !r.skipped && r.error.is_none()) {
-                let local = fingerprint(doc, 0, f, &vals, false, &model.step_digests) ^ placement_digest(doc, f, Some(&before));
+                let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests) ^ placement_digest(doc, f, Some(&before));
                 cache.put(
                     cache_key(f, r.fingerprint, local, ctx, &before),
                     CachedEval {
                         error: None,
                         warning: r.warning.clone(),
-                        boolean_diagnostics: r.boolean_diagnostics.clone(),
+                        import_report: r.import_report.clone(),
+                        repair: r.repair.clone(),
                         ms: r.ms,
                         bytes: r.state.retained_bytes(),
                         state: r.state.clone(),

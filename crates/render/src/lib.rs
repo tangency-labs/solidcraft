@@ -12,6 +12,7 @@ pub mod clear_coat;
 mod curve_display;
 pub mod film;
 mod gif;
+pub mod hatch;
 pub mod job;
 pub mod lighting;
 pub mod mapping;
@@ -36,9 +37,9 @@ pub use backend::{
     RenderMode, RenderOperation, RenderPolicy, RenderProfile, RenderRequest, ResolveError, ResolvedRequest, ScratchLayout, builtin_backend,
     resolve_request,
 };
-pub use camera::{Camera, CameraAnim, Mat4, Quat, StandardView, UpAxis, ease_in_out};
+pub use camera::{Camera, CameraAnim, Mat4, Quat, StandardView, UpAxis, ViewAngles, ease_in_out};
 pub use curve_display::{PixelCurveView, SampledPath, SamplingBudget, SamplingQuality, sample_segment, sample_segment_unclipped};
 pub use gif::gif;
 pub use product::{FaceAppearance, ProductMesh, ProductScene};
 pub use raster::{Canvas, render, render_png, render_transparent};
-pub use scene::{MIN_ALPHA, Rgb, SECTION_CAP, SEE_THROUGH, Scene, SceneLine, SceneMesh, png};
+pub use scene::{MIN_ALPHA, Rgb, SECTION_CAP, SECTION_HATCH, SEE_THROUGH, Scene, SceneLine, SceneMesh, png};

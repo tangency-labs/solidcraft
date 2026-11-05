@@ -76,7 +76,7 @@ impl Kind {
 }
 
 /// The wire protocol of an endpoint the user added.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Protocol {
     /// `{base}/chat/completions`, as Ollama, LM Studio, OpenAI and their kin speak.
     #[default]
@@ -110,9 +110,14 @@ pub struct AgentConfig {
     pub ollama: bool,
     /// API: a key is stored for it in the system keychain.
     pub key: bool,
+    /// OpenAI-compatible API: explicit consent to send the key over HTTP to this endpoint.
+    pub allow_insecure_http: bool,
     /// API: how long one model request may take, in seconds (clamped to
     /// [`MIN_REQUEST_TIMEOUT_S`]..=[`MAX_REQUEST_TIMEOUT_S`] where it is used).
     pub request_timeout_s: u64,
+    /// API: the reasoning effort to send as `reasoning_effort`; empty sends nothing and the
+    /// provider's own default applies (trimmed and length-capped by [`reasoning_effort`]).
+    pub reasoning_effort: String,
 }
 
 impl Default for AgentConfig {
@@ -126,7 +131,9 @@ impl Default for AgentConfig {
             model: String::new(),
             ollama: false,
             key: false,
+            allow_insecure_http: false,
             request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
+            reasoning_effort: String::new(),
         }
     }
 }
@@ -148,6 +155,15 @@ pub fn request_timeout_s(secs: f64) -> u64 {
     secs.round().clamp(MIN_REQUEST_TIMEOUT_S as f64, MAX_REQUEST_TIMEOUT_S as f64) as u64
 }
 
+/// The longest reasoning effort an endpoint can be given (no provider names one near this).
+pub const MAX_REASONING_EFFORT_LEN: usize = 64;
+
+/// A reasoning effort as stored: trimmed, and capped so a hand-edited preferences file or the
+/// control channel cannot carry an absurd value into every request. Empty means "send nothing".
+pub fn reasoning_effort(raw: &str) -> String {
+    raw.trim().chars().take(MAX_REASONING_EFFORT_LEN).collect()
+}
+
 /// An agent as the picker and the switcher show it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
@@ -165,8 +181,15 @@ pub struct Entry {
     pub base_url: String,
     pub model: String,
     pub key: bool,
+    pub allow_insecure_http: bool,
     /// API: seconds one model request may take (in range).
     pub request_timeout_s: u64,
+    /// API: the reasoning effort to send, empty for none (trimmed, in length).
+    pub reasoning_effort: String,
+    /// Found installed, but its program didn't start when asked its version: why (#9034).
+    pub problem: Option<String>,
+    /// Found installed: the command that installs it again.
+    pub install: &'static str,
 }
 
 impl Entry {
@@ -182,18 +205,33 @@ impl Entry {
             base_url: c.base_url.clone(),
             model: c.model.clone(),
             key: c.key,
+            allow_insecure_http: c.kind == Kind::Api && c.allow_insecure_http,
             request_timeout_s: c.request_timeout_s.clamp(MIN_REQUEST_TIMEOUT_S, MAX_REQUEST_TIMEOUT_S),
+            reasoning_effort: reasoning_effort(&c.reasoning_effort),
+            problem: None,
+            install: "",
         }
     }
-    /// A short line under the name: the version, the model, or the command.
+    /// A short line under the name: the version, the model, the command, or why it can't start.
     pub fn detail(&self) -> String {
         match self.kind {
             Kind::Api | Kind::Anthropic => format!("{} · {}", self.model, self.base_url),
-            Kind::Acp => match &self.version {
-                Some(v) => v.clone(),
-                None => super::panel::short_command(&self.argv.join(" ")),
+            Kind::Acp => match (&self.problem, &self.version) {
+                (Some(p), _) => crate::i18n::format("ui.agent_chat_cannot_start", &[("error", p)]),
+                (None, Some(v)) => v.clone(),
+                (None, None) => super::panel::short_command(&self.argv.join(" ")),
             },
         }
+    }
+    /// What to tell someone starting an agent that was found but didn't start (#9034): the reason,
+    /// and how to install it again. `None` when nothing was seen wrong.
+    pub fn problem_hint(&self) -> Option<String> {
+        let problem = self.problem.as_deref()?;
+        let program = self.argv.first().map(String::as_str).unwrap_or_default();
+        Some(crate::i18n::format(
+            "ui.agent_chat_reinstall",
+            &[("agent", &self.name), ("program", program), ("error", problem), ("install", self.install)],
+        ))
     }
 }
 
@@ -213,7 +251,11 @@ pub fn entries(app: &crate::SolveApp) -> Vec<Entry> {
             base_url: String::new(),
             model: String::new(),
             key: false,
+            allow_insecure_http: false,
             request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
+            reasoning_effort: String::new(),
+            problem: f.problem.clone(),
+            install: f.install,
         }));
     }
     out.extend(app.preferences.agents.iter().map(Entry::from_config));
@@ -267,13 +309,24 @@ pub struct ApiPreset {
 pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "Ollama", base_url: "http://localhost:11434/v1" },
     ApiPreset { name: "LM Studio", base_url: "http://localhost:1234/v1" },
+    ApiPreset { name: "OpenClaw", base_url: "http://localhost:18789/v1" },
     ApiPreset { name: "OpenAI", base_url: "https://api.openai.com/v1" },
+    ApiPreset { name: "Mistral AI", base_url: "https://api.mistral.ai/v1" },
     ApiPreset { name: "Mammouth AI", base_url: "https://api.mammouth.ai/v1" },
+    ApiPreset { name: "OpenCode Go", base_url: "https://opencode.ai/zen/go/v1" },
+    ApiPreset { name: "DeepSeek", base_url: "https://api.deepseek.com" },
+    ApiPreset { name: "Qwen", base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" },
+    ApiPreset { name: "Cheaper Inference", base_url: "https://api.cheaperinference.com/v1" },
+    ApiPreset { name: "OpenRouter", base_url: "https://openrouter.ai/api/v1" },
 ];
 
 /// Anthropic-compatible endpoints people use. The base URL is the one their documentation calls
 /// `ANTHROPIC_BASE_URL`: the `/v1` is added where needed.
-pub const ANTHROPIC_PRESETS: &[ApiPreset] = &[ApiPreset { name: "Anthropic", base_url: "https://api.anthropic.com/v1" }];
+pub const ANTHROPIC_PRESETS: &[ApiPreset] = &[
+    ApiPreset { name: "Anthropic", base_url: "https://api.anthropic.com/v1" },
+    ApiPreset { name: "DeepSeek", base_url: "https://api.deepseek.com/anthropic" },
+    ApiPreset { name: "Qwen", base_url: "https://dashscope-intl.aliyuncs.com/apps/anthropic" },
+];
 
 /// The presets offered for an endpoint protocol.
 pub fn presets(protocol: Protocol) -> &'static [ApiPreset] {
@@ -290,14 +343,37 @@ pub fn key_safe_for(url: &str) -> bool {
         return true;
     }
     let Some(rest) = u.strip_prefix("http://") else { return false };
-    let host = rest.split(['/', '?']).next().unwrap_or("");
-    let host = host.rsplit_once('@').map_or(host, |(_, h)| h);
-    let name = if host.starts_with('[') {
-        host.split(']').next().map(|h| format!("{h}]")).unwrap_or_default()
-    } else {
-        host.split(':').next().unwrap_or("").to_string()
+    // The host part ends where the HTTP client ends it, at the first `/`, `?` or `#`.
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    local_authority(authority)
+}
+
+/// `authority` is exactly this computer's name with at most a port. No user name goes before it
+/// and no stray character after it, as URL parsers don't all read those the same way.
+fn local_authority(authority: &str) -> bool {
+    let (host, port) = match authority.strip_prefix('[') {
+        Some(inner) => {
+            let Some((ip, after)) = inner.split_once(']') else { return false };
+            if ip != "::1" {
+                return false;
+            }
+            ("[::1]", after)
+        }
+        None => {
+            let end = authority.find(':').unwrap_or(authority.len());
+            authority.split_at(end)
+        }
     };
-    matches!(name.as_str(), "localhost" | "127.0.0.1" | "[::1]")
+    let port_ok = match port.strip_prefix(':') {
+        Some(digits) => digits.bytes().all(|b| b.is_ascii_digit()) && digits.parse::<u16>().is_ok(),
+        None => port.is_empty(),
+    };
+    port_ok && matches!(host, "localhost" | "127.0.0.1" | "[::1]")
+}
+
+/// The default key policy, with explicit consent for this endpoint's plain HTTP connection.
+pub fn key_allowed_for(url: &str, allow_insecure_http: bool) -> bool {
+    key_safe_for(url) || (allow_insecure_http && url.trim().to_ascii_lowercase().starts_with("http://"))
 }
 
 /// A base URL the API backend accepts: `http(s)://host…`, without a trailing slash.
@@ -318,6 +394,7 @@ mod tests {
     fn keys_go_only_over_https_or_to_this_computer() {
         assert!(key_safe_for("https://api.openai.com/v1"));
         assert!(key_safe_for("https://api.mammouth.ai/v1"));
+        assert!(key_safe_for("https://api.cheaperinference.com/v1"));
         assert!(key_safe_for("http://localhost:11434/v1"));
         assert!(key_safe_for("http://127.0.0.1:1234/v1"));
         assert!(key_safe_for("http://[::1]:8080/v1"));
@@ -325,6 +402,73 @@ mod tests {
         assert!(!key_safe_for("http://localhost.evil.example/v1"));
         assert!(!key_safe_for("http://user@evil.example/v1"));
         assert!(!key_safe_for("ftp://x"));
+    }
+
+    /// Plain HTTP only reaches this computer: the check reads the host where the HTTP client does,
+    /// and takes nothing around the name that URL parsers could read differently.
+    #[test]
+    fn a_key_over_http_needs_a_url_that_can_only_mean_this_computer() {
+        for url in [
+            "http://localhost",
+            "HTTP://LOCALHOST:11434/v1",
+            " http://localhost:11434/v1/ ",
+            "http://127.0.0.1:1234/v1?x=1",
+            "http://[::1]/v1",
+            "http://[::1]:8080/v1",
+            "http://localhost:65535/@models",
+        ] {
+            assert!(key_safe_for(url), "{url}");
+        }
+        for url in [
+            "http://evil.example#@localhost/v1",
+            "http://evil.example?@localhost/v1",
+            "http://evil.example/@localhost/v1",
+            "http://evil.example\\@localhost/v1",
+            "http://localhost\\@evil.example/v1",
+            "http://localhost\\.evil.example/v1",
+            "http://localhost@evil.example/v1",
+            "http://localhost:1234@evil.example/v1",
+            "http://user@localhost/v1",
+            "http://user:secret@localhost:1234/v1",
+            "http://[::1]@evil.example/v1",
+            "http://[::1].evil.example/v1",
+            "http://[::1]evil.example/v1",
+            "http://[::2]/v1",
+            "http://[::1/v1",
+            "http://127.0.0.1.evil.example/v1",
+            "http://localhost.evil.example:1234/v1",
+            "http://localhost:80.evil.example/v1",
+            "http://localhost:abc/v1",
+            "http://localhost:/v1",
+            "http://localhost:65536/v1",
+            "http://local\thost.evil.example/v1",
+            "http://localhost evil.example/v1",
+            "http://localhost%2eevil.example/v1",
+            "http://",
+            "http:///localhost/v1",
+            "http:/localhost/v1",
+            "//localhost/v1",
+            "localhost:1234/v1",
+        ] {
+            assert!(!key_safe_for(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn http_key_consent_defaults_off_and_only_relaxes_http_for_that_entry() {
+        let old: AgentConfig = serde_json::from_value(serde_json::json!({
+            "id":"private", "kind":"api", "base_url":"http://192.168.1.100:8000/v1", "key":true
+        }))
+        .unwrap();
+        assert!(!old.allow_insecure_http);
+        assert!(!key_allowed_for(&old.base_url, Entry::from_config(&old).allow_insecure_http));
+        let opted_in = AgentConfig { allow_insecure_http: true, ..old.clone() };
+        let loaded: AgentConfig = serde_json::from_str(&serde_json::to_string(&opted_in).unwrap()).unwrap();
+        assert!(key_allowed_for(&loaded.base_url, Entry::from_config(&loaded).allow_insecure_http));
+        assert!(!key_allowed_for(&old.base_url, Entry::from_config(&old).allow_insecure_http));
+        assert!(!key_allowed_for("ftp://192.168.1.100", true));
+        let anthropic = AgentConfig { kind: Kind::Anthropic, ..opted_in };
+        assert!(!key_allowed_for(&anthropic.base_url, Entry::from_config(&anthropic).allow_insecure_http));
     }
 
     #[test]
@@ -360,7 +504,27 @@ mod tests {
         assert_eq!(Kind::Anthropic.id(), "anthropic");
         assert!(presets(Protocol::OpenAi).iter().all(|p| !p.name.is_empty() && p.base_url.starts_with("http")));
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Mammouth AI" && key_safe_for(p.base_url)));
+        assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Mistral AI" && p.base_url == "https://api.mistral.ai/v1"));
+        assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Cheaper Inference" && key_safe_for(p.base_url)));
         assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.anthropic.com/v1"));
+        for name in ["DeepSeek", "Qwen"] {
+            assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == name), "OpenAI-compatible preset for {name}");
+            assert!(presets(Protocol::Anthropic).iter().any(|p| p.name == name), "Anthropic-compatible preset for {name}");
+        }
+        assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.deepseek.com/anthropic"));
+        assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://dashscope-intl.aliyuncs.com/apps/anthropic"));
+    }
+
+    /// The first preset is the one an Add dialog opens with, and the one taken for Ollama.
+    #[test]
+    fn ollama_stays_the_first_preset_and_every_preset_can_take_a_key() {
+        assert_eq!(OPENAI_PRESETS.first().map(|p| p.name), Some("Ollama"));
+        assert_eq!(OPENAI_PRESETS.last().map(|p| p.name), Some("OpenRouter"));
+        assert!(OPENAI_PRESETS.iter().any(|p| p.name == "OpenClaw"));
+        for preset in OPENAI_PRESETS.iter().chain(ANTHROPIC_PRESETS) {
+            assert_eq!(normalize_url(preset.base_url).as_deref(), Ok(preset.base_url), "{}", preset.name);
+            assert!(key_safe_for(preset.base_url), "{}", preset.name);
+        }
     }
 
     #[test]
@@ -380,5 +544,24 @@ mod tests {
         let saved = AgentConfig { id: "api-3".into(), kind: Kind::Api, request_timeout_s: 1200, ..Default::default() };
         let back: AgentConfig = serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
         assert_eq!(back, saved);
+    }
+
+    #[test]
+    fn reasoning_effort_defaults_to_empty_and_is_trimmed_and_capped() {
+        assert!(AgentConfig::default().reasoning_effort.is_empty());
+        // An older preferences file has no effort: empty, so nothing is sent.
+        let old: AgentConfig = serde_json::from_str(r#"{"id":"api-1","kind":"api","base_url":"http://localhost:11434/v1","model":"m"}"#).unwrap();
+        assert!(old.reasoning_effort.is_empty());
+        assert_eq!(reasoning_effort("  high "), "high");
+        assert!(reasoning_effort("   ").is_empty());
+        let long = reasoning_effort(&"x".repeat(500));
+        assert_eq!(long.chars().count(), MAX_REASONING_EFFORT_LEN);
+        let saved = AgentConfig { id: "api-2".into(), kind: Kind::Api, reasoning_effort: "max".into(), ..Default::default() };
+        let back: AgentConfig = serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
+        assert_eq!(back, saved);
+        // The entry carries it trimmed; a hand-edited over-long one is capped where used.
+        assert_eq!(Entry::from_config(&saved).reasoning_effort, "max");
+        let wild: AgentConfig = serde_json::from_str(&format!(r#"{{"id":"api-3","kind":"api","reasoning_effort":"{}"}}"#, "y".repeat(500))).unwrap();
+        assert_eq!(Entry::from_config(&wild).reasoning_effort.chars().count(), MAX_REASONING_EFFORT_LEN);
     }
 }

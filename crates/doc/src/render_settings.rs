@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_render::{BackendId, Camera, RenderFormat, RenderLimits, RenderMode, UpAxis};
 
 pub use crate::render_job::{CpuJob, GpuJob, RenderJob, SkyEnvironment};
@@ -37,6 +37,12 @@ pub struct RenderSetup {
     pub optics: crate::render_optics::OpticalBindings,
     #[serde(skip_serializing_if = "solidcraft_render::stage::Stage::is_empty")]
     pub stage: solidcraft_render::stage::Stage,
+}
+
+/// The CPU request a size check belongs to, so a refusal can name the profile that admits it.
+#[derive(Clone, Copy)]
+struct CpuSize {
+    progressive: Option<solidcraft_render::job::CpuProgressiveOptions>,
 }
 
 // Reuse Camera's representation and defaults, but reject misspelled saved fields. A remote
@@ -80,27 +86,29 @@ impl Default for RenderSetup {
 
 impl RenderSetup {
     pub fn validate(&self) -> Result<()> {
-        let limits = match &self.job {
-            Some(RenderJob::CpuRaytrace { options }) => options.budget.image_limits(options.progressive.is_some()),
-            Some(RenderJob::GpuPath { .. }) => solidcraft_render::job::GPU_PATH_LIMITS,
-            _ => RenderLimits::default(),
+        let (limits, cpu) = match &self.job {
+            Some(RenderJob::CpuRaytrace { options }) => {
+                (options.budget.image_limits(options.progressive.is_some()), Some(CpuSize { progressive: options.progressive }))
+            }
+            Some(RenderJob::GpuPath { .. }) => (solidcraft_render::job::GPU_PATH_LIMITS, None),
+            _ => (RenderLimits::default(), None),
         };
-        self.validate_with_limits(limits)
+        self.validate_with_limits(limits, cpu)
     }
 
     /// Runtime CPU lowering has already moved typed options out of this setup.
     /// Saving still uses validate(), so a legacy setup cannot smuggle a large profile.
     pub fn validate_for_cpu(&self, budget: solidcraft_render::job::CpuBudget) -> Result<()> {
         budget.validate_image(self.width, self.height, None).map_err(|e| DocError::Invalid(e.to_string()))?;
-        self.validate_with_limits(budget.image_limits(false))
+        self.validate_with_limits(budget.image_limits(false), Some(CpuSize { progressive: None }))
     }
 
     /// Typed GPU options have already been lowered; retain their dimension envelope.
     pub fn validate_for_gpu(&self) -> Result<()> {
-        self.validate_with_limits(solidcraft_render::job::GPU_PATH_LIMITS)
+        self.validate_with_limits(solidcraft_render::job::GPU_PATH_LIMITS, None)
     }
 
-    fn validate_with_limits(&self, limits: RenderLimits) -> Result<()> {
+    fn validate_with_limits(&self, limits: RenderLimits, cpu: Option<CpuSize>) -> Result<()> {
         self.surfaces.validate()?;
         self.optics.validate()?;
         if !self.optics.is_empty() && !matches!(self.job, Some(RenderJob::GpuPath { .. })) {
@@ -113,8 +121,10 @@ impl RenderSetup {
         if !self.stage.is_empty() && matches!(self.job, Some(RenderJob::Raster { .. })) {
             return Err(DocError::Invalid("passive stage geometry requires raytracing; raster cannot silently discard it".into()));
         }
-        if !self.surfaces.is_empty() && !matches!(self.job, Some(RenderJob::GpuPath { .. })) {
-            return Err(DocError::Invalid("saved surfaces require an explicit GPU job; unsupported methods cannot discard bindings".into()));
+        if !self.surfaces.is_empty() && !matches!(self.job, Some(RenderJob::CpuRaytrace { .. } | RenderJob::GpuPath { .. })) {
+            return Err(DocError::Invalid(
+                "saved surfaces require an explicit CPU raytrace or GPU path job; unsupported methods cannot discard bindings".into(),
+            ));
         }
         let (width, height) = (u64::from(self.width), u64::from(self.height));
         if width == 0 || height == 0 {
@@ -123,9 +133,14 @@ impl RenderSetup {
         if let Some((w, h)) = limits.fit(width, height, None)
             && (w, h) != (width, height)
         {
+            // A CPU refusal names the profile that can render the size (#8941). It is never
+            // selected for the person: resolution and profile change only when they choose.
+            let advice = cpu.map_or_else(String::new, |cpu| {
+                format!("; {}", solidcraft_render::job::CpuBudget::size_advice(self.width, self.height, cpu.progressive))
+            });
             return Err(DocError::Invalid(format!(
                 "render output {width} × {height} exceeds the image limits ({} pixels per side, {} pixels in all); \
-                 the largest image at this aspect is {w} × {h}",
+                 the largest image at this aspect is {w} × {h}{advice}",
                 limits.max_dimension, limits.max_pixels
             )));
         }
@@ -172,6 +187,8 @@ pub struct RenderSettings {
     pub setups: BTreeMap<String, RenderSetup>,
     #[serde(skip_serializing_if = "crate::render_resources::HdrResources::is_empty")]
     pub resources: crate::render_resources::HdrResources,
+    #[serde(skip_serializing_if = "crate::render_texture_resources::TextureResources::is_empty")]
+    pub texture_resources: crate::render_texture_resources::TextureResources,
 }
 
 #[derive(Default, Deserialize)]
@@ -179,12 +196,13 @@ pub struct RenderSettings {
 struct UncheckedSettings {
     setups: BTreeMap<String, RenderSetup>,
     resources: crate::render_resources::HdrResources,
+    texture_resources: crate::render_texture_resources::TextureResources,
 }
 
 impl TryFrom<UncheckedSettings> for RenderSettings {
     type Error = DocError;
     fn try_from(value: UncheckedSettings) -> Result<Self> {
-        let settings = Self { setups: value.setups, resources: value.resources };
+        let settings = Self { setups: value.setups, resources: value.resources, texture_resources: value.texture_resources };
         settings.validate()?;
         Ok(settings)
     }
@@ -192,7 +210,7 @@ impl TryFrom<UncheckedSettings> for RenderSettings {
 
 impl RenderSettings {
     pub fn is_empty(&self) -> bool {
-        self.setups.is_empty() && self.resources.is_empty()
+        self.setups.is_empty() && self.resources.is_empty() && self.texture_resources.is_empty()
     }
 
     pub fn validate_name(name: &str) -> Result<()> {
@@ -215,6 +233,17 @@ impl RenderSettings {
     }
 
     pub fn validate_resources(&self, setup: &RenderSetup) -> Result<()> {
+        for surface in setup.surfaces.iter() {
+            if let crate::render_surface::SurfaceSource::Embedded(source) = &surface.source {
+                for (role, id) in source.role_resources() {
+                    let resource = self.texture_resources.required(&id)?;
+                    resource.validate_role(role)?;
+                    if matches!(setup.job, Some(RenderJob::CpuRaytrace { .. })) {
+                        resource.validate_cpu_encoding()?;
+                    }
+                }
+            }
+        }
         match &setup.job {
             Some(RenderJob::CpuRaytrace { options }) => {
                 if let Some(hdr) = options.hdr {
@@ -538,7 +567,56 @@ mod tests {
         let setup = RenderSetup { width: 7680, height: 4320, ..Default::default() };
         let message = setup.validate().unwrap_err().to_string();
         assert!(message.contains("the largest image at this aspect is 27"), "{message}");
+        assert!(!message.contains("CPU resource profile"), "a raster refusal names no CPU profile: {message}");
         assert!(RenderSetup { width: 2048, height: 2048, ..Default::default() }.validate().is_ok());
+    }
+
+    /// #8941: 4K UHD under the default Compact profile names Studio, the profile that renders it;
+    /// a 16K-wide image under Studio names Workstation; past Workstation no profile is named.
+    /// The saved profile is never changed by the check, and GPU path tracing keeps its own limits.
+    #[test]
+    fn a_cpu_size_refusal_names_the_profile_that_can_render_it() {
+        use solidcraft_render::job::CpuBudget;
+        let cpu = |budget, width, height| RenderSetup {
+            width,
+            height,
+            job: Some(RenderJob::CpuRaytrace { options: CpuJob { budget, ..Default::default() } }),
+            ..Default::default()
+        };
+        let compact = cpu(CpuBudget::Compact, 3840, 2160);
+        let message = compact.validate().unwrap_err().to_string();
+        assert!(message.contains("3840 × 2160 exceeds the image limits (4096 pixels per side, 4194304 pixels in all)"), "{message}");
+        assert!(message.contains("the largest image at this aspect is 2730 × 1536"), "{message}");
+        assert!(message.contains("choose the Studio CPU resource profile, or a smaller size"), "{message}");
+        assert!(matches!(&compact.job, Some(RenderJob::CpuRaytrace { options }) if options.budget == CpuBudget::Compact));
+        let message = compact.validate_for_cpu(CpuBudget::Compact).unwrap_err().to_string();
+        assert!(message.contains("choose the Studio CPU resource profile"), "{message}");
+
+        cpu(CpuBudget::Studio, 3840, 2160).validate().unwrap();
+        RenderSetup { width: 3840, height: 2160, ..Default::default() }.validate_for_cpu(CpuBudget::Studio).unwrap();
+
+        let message = cpu(CpuBudget::Studio, 15360, 4320).validate().unwrap_err().to_string();
+        assert!(message.contains("choose the Workstation CPU resource profile"), "{message}");
+        cpu(CpuBudget::Workstation, 15360, 4320).validate().unwrap();
+
+        let message = cpu(CpuBudget::Workstation, 16384, 16384).validate().unwrap_err().to_string();
+        assert!(message.contains("no CPU resource profile accepts this size; choose a smaller size"), "{message}");
+        for profile in ["Compact", "Studio", "Workstation"] {
+            assert!(!message.contains(&format!("the {profile} CPU")), "{message}");
+        }
+
+        // GPU path tracing: 4K renders, an over-limit size names no CPU profile.
+        let gpu = |width, height| RenderSetup {
+            width,
+            height,
+            job: Some(RenderJob::GpuPath { transparent_background: false, options: Default::default() }),
+            ..Default::default()
+        };
+        gpu(3840, 2160).validate().unwrap();
+        gpu(3840, 2160).validate_for_gpu().unwrap();
+        let message = gpu(8193, 8193).validate().unwrap_err().to_string();
+        assert!(message.contains("(8192 pixels per side, 16777216 pixels in all)"), "{message}");
+        assert!(!message.contains("CPU resource profile"), "{message}");
     }
 
     #[test]

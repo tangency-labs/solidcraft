@@ -152,6 +152,39 @@ fn measured_bar_honours_size_position_and_ignores_unknown_slots() {
 }
 
 #[test]
+fn a_bar_on_the_top_edge_sits_under_the_top_and_keeps_the_corner_controls_below_it() {
+    use crate::ui_kit::NAV_BOTTOM;
+    // Older settings have no edge and keep the bar at the bottom; a bad value recovers the same way.
+    let old: NavigationBar = serde_json::from_value(json!({"position": "right"})).unwrap();
+    assert_eq!(old.edge, Edge::Bottom);
+    let bad: NavigationBar = serde_json::from_value(json!({"edge": "sideways"})).unwrap();
+    assert_eq!(bad.edge, Edge::Bottom);
+    assert!(validate(&json!({"edge": "sideways"})).is_err());
+    assert!(validate(&json!({"edge": "top"})).is_ok());
+    let canvas = Rect::from_min_size(pos2(20.0, 30.0), vec2(900.0, 600.0));
+    for position in [Position::Centre, Position::Left, Position::Right] {
+        for edge in [Edge::Bottom, Edge::Top] {
+            let prefs: NavigationBar = serde_json::from_value(json!({"position": position, "edge": edge})).unwrap();
+            assert_eq!(serde_json::to_value(&prefs).unwrap()["edge"], if edge == Edge::Top { "top" } else { "bottom" });
+            let bar = measure(canvas, &prefs, NavCaps::MODEL, |_| 50.0);
+            match edge {
+                Edge::Bottom => assert_eq!(bar.rect.bottom(), canvas.bottom() - NAV_BOTTOM),
+                Edge::Top => assert_eq!(bar.rect.top(), canvas.top() + NAV_BOTTOM),
+            }
+            for corner in [egui::Vec2::ZERO, vec2(120.0, 32.0)] {
+                let layout =
+                    crate::viewport_layout::Layout::with_content(canvas, canvas, &[], 1.0, crate::prefs::NavigatorStyle::Cube, corner, bar.rect);
+                // The axis view keeps its full size: on top, it moves down past the bar instead.
+                assert_eq!(layout.axis_view.width(), crate::viewport::axis_view_size(crate::prefs::NavigatorStyle::Cube));
+                assert!(!layout.axis_view.intersect(bar.rect).is_positive(), "{position:?} {edge:?}");
+                assert!(!layout.confirm.intersect(bar.rect).is_positive(), "{position:?} {edge:?}");
+                assert!(!layout.confirm.intersect(layout.axis_view).is_positive(), "{position:?} {edge:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn navigation_slot_visuals_never_use_focus_as_a_fill() {
     use crate::ui_kit::{NavigationFill, navigation_visual};
     for kind in [Kind::Action, Kind::Tool, Kind::Toggle, Kind::Menu] {
@@ -438,7 +471,7 @@ fn navigation_context_menus_customise_hide_reset_and_remove() {
         match action {
             "customise" => {
                 assert!(h.app.prefs_window.open);
-                assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_INTERFACE);
+                assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_LAYOUT);
                 assert!(crate::scenario::rect_of("prefs:navbar:preview").is_some());
             }
             "hide" => assert!(!h.app.ui.show_navigation_bar),
@@ -461,7 +494,7 @@ fn navigation_board_metrics_and_state_colors_are_shared_in_both_themes() {
     }
     assert_eq!((NAV_BORDER, NAV_PADDING, NAV_GAP, NAV_BOTTOM, NAV_EDGE), (1.0, 3.0, 2.0, 7.0, 12.0));
     assert_eq!((NAV_SEPARATOR, NAV_SEPARATOR_HEIGHT, NAV_MENU_LEFT, NAV_MENU_RIGHT, NAV_MENU_GAP, NAV_CHEVRON), (9.0, 18.0, 7.0, 6.0, 5.0, 12.0));
-    assert_eq!((NAV_STAGE_HEIGHT, NAV_STAGE_INSET, NAV_TILE_HEIGHT, NAV_TILE_ADD), (58.0, 12.0, 32.0, 22.0));
+    assert_eq!((NAV_STAGE_HEIGHT, NAV_STAGE_INSET, NAV_TILE_HEIGHT, NAV_TILE_ADD), (96.0, 12.0, 32.0, 22.0));
     assert_eq!(
         (NAV_MARKER_HEIGHT, NAV_GHOST_OPACITY, NAV_TILE_DRAG_OPACITY, NAV_IDLE_OPACITY, NAV_FADE_SECONDS, NAV_TOOLTIP_DELAY),
         (24.0, 0.7, 0.55, 0.45, 0.12, 0.8)
@@ -513,6 +546,34 @@ fn navigation_board_popup_width_includes_its_border_and_padding() {
     }
 }
 
+/// A label longer than its menu row (the Display menu's "Perspective while orbiting, ortho on
+/// faces", #8700) is cut with an ellipsis before the row's check, not drawn past the menu's edge;
+/// a short one is drawn whole.
+#[test]
+fn a_long_menu_row_label_ends_in_an_ellipsis_inside_its_row() {
+    use crate::ui_kit::*;
+    let ctx = crate::fonts::test_context();
+    for (label, selected, cut) in [
+        ("Perspective while orbiting, ortho on faces", false, true),
+        ("Perspective while orbiting, ortho on faces", true, true),
+        ("Show tool at cursor", true, false),
+    ] {
+        let mut row = Rect::NOTHING;
+        let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            navigation_menu(ui, NAV_POPUP_WIDTH, |ui| {
+                let mut item = NavigationMenuRow::new("row", label, "select");
+                item.selected = selected;
+                row = item.show(ui).rect;
+            });
+        });
+        let text = crate::test_support::text_shapes(&output).find(|t| t.galley.text() == label).unwrap_or_else(|| panic!("{label} is drawn"));
+        assert_eq!(text.galley.elided, cut, "{label}");
+        let end = row.right() - NAV_MENU_INSET - if selected { crate::theme::Tokens::get().space_14 } else { 0.0 };
+        let drawn = text.pos.x + text.galley.size().x;
+        assert!(drawn <= end, "{label}: ends at {drawn}, past {end}");
+    }
+}
+
 #[test]
 fn navigation_board_position_aliases_migrate_and_editor_alignment_follows_position() {
     use crate::navigation_bar_view::editor_layout;
@@ -528,7 +589,9 @@ fn navigation_board_position_aliases_migrate_and_editor_alignment_follows_positi
             let bar = NavigationBar { size, ..bar.clone() };
             let preview = editor_layout(stage, &bar, |_| 0.0);
             let live = measure(stage, &bar, NavCaps::MODEL, |_| 0.0);
-            assert_eq!(preview.rect.center().y, stage.center().y);
+            assert_eq!(preview.rect.bottom(), stage.bottom() - NAV_BORDER - NAV_STAGE_INSET);
+            let top = editor_layout(stage, &NavigationBar { edge: crate::navigation_bar::Edge::Top, ..bar.clone() }, |_| 0.0);
+            assert_eq!(top.rect.top(), stage.top() + NAV_BORDER + NAV_STAGE_INSET);
             assert_eq!(preview.rect.height(), NavigationMetrics::for_size(size).height());
             match position {
                 Position::Centre => assert_eq!(preview.rect.center().x, stage.center().x),

@@ -1,6 +1,6 @@
 //! Native progressive product rendering. Software BVH traversal needs no ray-query
 //! features. Small measured quanta adapt to the device, then check cancellation.
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 #[cfg(test)]
 use solidcraft_render::job::ToneMap;
 use solidcraft_render::{
@@ -28,21 +28,33 @@ mod scene;
 #[cfg(test)]
 mod tests;
 mod textures;
-const SHADER: &str = concat!(
-    include_str!("path.wgsl"),
-    "\n",
-    include_str!("shadows.wgsl"),
-    "\n",
-    include_str!("textures.wgsl"),
-    "
-",
-    include_str!("volume.wgsl"),
-    "
-",
-    include_str!("aging.wgsl")
-);
+// Disjoint glass admits at most one active medium. Fixed local array sizes let
+// native compilers discard the unused fifteen entries without changing nested
+// transport's sixteen-medium limit. Both programs share every shader operation.
+macro_rules! path_shader {
+    ($capacity:literal) => {
+        concat!(
+            "const MEDIUM_CAPACITY: u32 = ",
+            $capacity,
+            "u;\n",
+            include_str!("path.wgsl"),
+            "\n",
+            include_str!("shadows.wgsl"),
+            "\n",
+            include_str!("textures.wgsl"),
+            "\n",
+            include_str!("volume.wgsl"),
+            "\n",
+            include_str!("aging.wgsl")
+        )
+    };
+}
+const SHADER: &str = path_shader!(16);
+const SINGLE_MEDIUM_SHADER: &str = path_shader!(1);
 const MAX_TRIANGLES: u64 = MAX_GPU_PATH_TRIANGLES;
-const PARAMETER_BYTES: usize = 1168;
+const PATH_WORKGROUP_SIZE: u32 = 32;
+const SCENE_PIPELINE_CACHE_SLOTS: usize = 5;
+const PARAMETER_BYTES: usize = 1184;
 // Eight u32 words: count low, pixel, bounce, sample, code, count high, first-writer flag, spare.
 const FAILURE_BYTES: u64 = 32;
 // A path that cannot classify its glass medium ends there. Isolated paths at the
@@ -92,24 +104,24 @@ pub fn host() -> Result<ImageHost> {
 /// Open an independent job device on the viewport's selected adapter. In particular,
 /// software fallback and safe mode must not rediscover a failing hardware driver.
 /// An explicit incompatible SOLIDCRAFT_GPU policy leaves this executor unavailable.
-/// The path tracer runs on Vulkan only. On Windows it must keep the viewport's backend:
-/// opening Vulkan drivers that startup avoided can crash inside native driver code.
-/// Elsewhere a viewport on another backend is reopened on the same GPU through Vulkan.
-/// Without a usable Vulkan adapter the executor is unavailable; CPU image methods remain usable.
+/// The path tracer runs on Vulkan, or Metal on macOS. On Windows it must keep the viewport's
+/// backend: opening Vulkan drivers that startup avoided can crash inside native driver code.
+/// Elsewhere a viewport on another backend is reopened on the same GPU through one of them.
+/// Without a usable adapter the executor is unavailable; CPU image methods remain usable.
 pub fn host_on_adapter(adapter: &wgpu::Adapter) -> Result<ImageHost> {
     let policy = crate::select::Policy::from_env().map_err(gpu)?;
     let info = adapter.get_info();
-    if !viewport_path_backends(info.backend, cfg!(target_os = "windows")).contains(wgpu::Backends::VULKAN) {
+    if !viewport_path_backends(info.backend, cfg!(target_os = "windows")).intersects(crate::select::path_backends()) {
         return Err(gpu(format!("{VULKAN_ONLY}; the viewport uses {:?}", info.backend)));
     }
     if !policy.admits(crate::select::tier_of(info.device_type)) {
         return Err(gpu(format!("viewport adapter does not satisfy SOLIDCRAFT_GPU={}", policy.name())));
     }
-    if info.backend != wgpu::Backend::Vulkan {
-        let (vulkan, _) = crate::select::pick_vulkan(policy, |i| i.vendor == info.vendor && i.device == info.device)
+    if !matches!(info.backend, wgpu::Backend::Vulkan | wgpu::Backend::Metal) {
+        let (picked, _) = crate::select::pick_path(policy, |i| i.vendor == info.vendor && i.device == info.device)
             .ok_or_else(|| gpu(format!("{VULKAN_ONLY}; the viewport uses {:?}", info.backend)))?;
-        let (device, queue) = open_device(&vulkan)?;
-        log::info!("gpu-path viewport GPU: {} through Vulkan", info.name);
+        let (device, queue) = open_device(&picked)?;
+        log::info!("gpu-path viewport GPU: {} through Vulkan or Metal", info.name);
         return ImageHost::with_executor(Arc::new(Executor::new(device, queue)?));
     }
     let (device, queue) = open_device(adapter)?;
@@ -118,11 +130,11 @@ pub fn host_on_adapter(adapter: &wgpu::Adapter) -> Result<ImageHost> {
 }
 
 // D3D12 shader compilation is avoided; the user can select a CPU image method instead.
-const VULKAN_ONLY: &str = "the GPU path tracer requires a Vulkan driver; select a CPU image method when Vulkan is unavailable";
+const VULKAN_ONLY: &str = "the GPU path tracer requires a Vulkan driver (Metal on macOS); select a CPU image method when none is available";
 
 /// Backends a viewport's path device may open, before any driver is loaded.
 fn viewport_path_backends(backend: wgpu::Backend, windows: bool) -> wgpu::Backends {
-    if windows { wgpu::Backends::from(backend) } else { wgpu::Backends::VULKAN }
+    if windows { wgpu::Backends::from(backend) } else { crate::select::path_backends() }
 }
 
 // Path resources need six storage buffers (geometry, BVH, accumulation, HDRI,
@@ -155,8 +167,8 @@ fn open_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue)> {
 }
 fn open_headless() -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
     let policy = crate::select::Policy::from_env().map_err(gpu)?;
-    let (adapter, _) = crate::select::pick_vulkan(policy, |_| true)
-        .ok_or_else(|| gpu(format!("{VULKAN_ONLY}; no Vulkan adapter satisfies SOLIDCRAFT_GPU={}", policy.name())))?;
+    let (adapter, _) = crate::select::pick_path(policy, |_| true)
+        .ok_or_else(|| gpu(format!("{VULKAN_ONLY}; no Vulkan or Metal adapter satisfies SOLIDCRAFT_GPU={}", policy.name())))?;
     let (device, queue) = open_device(&adapter)?;
     Ok((adapter, device, queue))
 }
@@ -166,6 +178,9 @@ struct Context {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
+    // Plain opaque and non-nested glass are ready before the host is published.
+    // The four map/nested variants are prepared lazily in the remaining slots.
+    scene_pipelines: [std::sync::OnceLock<wgpu::ComputePipeline>; SCENE_PIPELINE_CACHE_SLOTS],
     // Built and warmed by the first denoised job, then shared by later ones.
     denoise: std::sync::OnceLock<denoise::Pipelines>,
     layout: wgpu::BindGroupLayout,
@@ -183,6 +198,47 @@ impl Context {
     }
     fn wait(&self, submission: wgpu::SubmissionIndex, timeout: Duration) -> Result<()> {
         wait_device(&self.device, &self.healthy, submission, timeout)
+    }
+    fn prepared_scene_pipeline(&self, opaque: bool, maps: bool, nested: bool) -> Result<&wgpu::ComputePipeline> {
+        let Some(index) = scene_pipeline_variant(opaque, maps, nested) else { return Ok(&self.pipeline) };
+        self.scene_pipelines.get(index).and_then(std::sync::OnceLock::get).ok_or_else(|| gpu("captured scene has no prepared pipeline"))
+    }
+    fn prepare_scene_pipeline(&self, opaque: bool, maps: bool, nested: bool) -> Result<&wgpu::ComputePipeline> {
+        self.ensure_available()?;
+        let Some(index) = scene_pipeline_variant(opaque, maps, nested) else { return Ok(&self.pipeline) };
+        let slot = self.scene_pipelines.get(index).ok_or_else(|| gpu("scene pipeline variant exceeds its finite cache"))?;
+        if let Some(pipeline) = slot.get() {
+            return Ok(pipeline);
+        }
+        let _compiling = one_compile_at_a_time();
+        if let Some(pipeline) = slot.get() {
+            return Ok(pipeline);
+        }
+        let scopes = scopes(&self.device);
+        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("gpu-path captured scene"),
+            source: wgpu::ShaderSource::Wgsl(if opaque || nested { SHADER } else { SINGLE_MEDIUM_SHADER }.into()),
+        });
+        let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("gpu-path captured scene"),
+            bind_group_layouts: &[Some(&self.layout)],
+            immediate_size: 0,
+        });
+        let pipeline = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("gpu-path captured scene"),
+            layout: Some(&layout),
+            module: &shader,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &[("OPAQUE_SCENE", f64::from(u8::from(opaque))), ("HAS_TEXTURES", f64::from(u8::from(maps)))],
+                ..Default::default()
+            },
+            cache: None,
+        });
+        checked(scopes)?;
+        warm_up(&self.device, &self.queue, &pipeline, &placeholder_bind(&self.device, &self.layout, 7)?, &self.healthy)?;
+        let _ = slot.set(pipeline);
+        slot.get().ok_or_else(|| gpu("scene pipeline publication failed"))
     }
 }
 
@@ -217,6 +273,7 @@ impl Executor {
             lost.store(false, Ordering::Release);
             log::warn!("gpu-path device lost ({reason:?}); executor unavailable: {message}");
         });
+        let compiling = one_compile_at_a_time();
         let scopes = scopes(&device);
         let shader =
             device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("gpu-path"), source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
@@ -247,13 +304,35 @@ impl Executor {
             layout: Some(&pipeline_layout),
             module: &shader,
             entry_point: Some("main"),
-            compilation_options: Default::default(),
+            compilation_options: wgpu::PipelineCompilationOptions { constants: &[("OPAQUE_SCENE", 1.0)], ..Default::default() },
             cache: None,
         });
         checked(scopes)?;
+        drop(compiling);
         warm_up(&device, &queue, &pipeline, &placeholder_bind(&device, &layout, 7)?, &healthy)?;
-        Ok(Self { context: Arc::new(Context { healthy, device, queue, pipeline, layout, denoise: std::sync::OnceLock::new() }) })
+        let context = Arc::new(Context {
+            healthy,
+            device,
+            queue,
+            pipeline,
+            layout,
+            denoise: std::sync::OnceLock::new(),
+            scene_pipelines: std::array::from_fn(|_| std::sync::OnceLock::new()),
+        });
+        // The original host prepared glass before advertising readiness. Keep the
+        // common no-map/non-nested program out of the first image job's work.
+        context.prepare_scene_pipeline(false, false, false)?;
+        Ok(Self { context })
     }
+}
+
+/// Native drivers compile the path pipeline for minutes and gigabytes on a cold shader cache.
+/// Executors opened side by side (parallel tests, each on its own device) compiled it together
+/// until memory ran out (#6706). One compile at a time per process: the first fills the driver's
+/// cache, and the waiting ones then get it from there.
+fn one_compile_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+    static COMPILE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    COMPILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 // Small zeroed bindings: binding 0 is a uniform whose zero work count makes every
@@ -314,11 +393,27 @@ fn descriptor() -> Result<ExecutorDescriptor> {
     })
 }
 
+fn scene_pipeline_variant(opaque: bool, maps: bool, nested: bool) -> Option<usize> {
+    if opaque { maps.then_some(0) } else { Some(1 + 2 * usize::from(maps) + usize::from(nested)) }
+}
+
+fn use_opaque_pipeline(scene: &ProductScene, options: JobOptions) -> bool {
+    !scene.has_transmission()
+        && !options.volume.is_some_and(|volume| volume.active())
+        && scene.meshes.iter().all(|body| body.opacity == 1.0 && body.faces.iter().all(|face| face.opacity == 1.0))
+}
+
 fn admission(scene: &ProductScene, request: &ImageRequest, options: JobOptions) -> Result<Admission> {
     if request.integrator != solidcraft_render::job::Integrator::Raster || request.raytrace.is_some() {
         return Err(JobError::new(ErrorCode::InvalidRequest, "GPU path rendering does not accept CPU raytrace options"));
     }
     options.validate()?;
+    if request.studio_weights.is_some_and(|weights| weights.iter().any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))) {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "invalid studio visibility weights"));
+    }
+    if request.studio_weights.is_some() && (options.lighting.is_some() || request.environment.is_some()) {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "studio weights require implicit studio lighting"));
+    }
     options.aging.validate_scene(scene)?;
     if options.finishing.photographic.active() && request.transparent_background {
         return Err(JobError::new(ErrorCode::InvalidRequest, "photographic effects require opaque output; choose it explicitly"));
@@ -469,10 +564,7 @@ impl ImageExecutor for Executor {
         let a = admission(scene, request, options)?;
         let limit = self.context.device.limits().max_storage_buffer_binding_size;
         let geometry_bytes = 16 + a.triangles.max(1) * 100 + scene.meshes.iter().map(|m| m.mesh.positions.len() as u64 * 32).sum::<u64>();
-        let texture_bytes = request
-            .textures
-            .as_ref()
-            .map_or(16, |t| t.summary().linear_pixel_bytes + 4 * (5 + scene.meshes.len() as u64 + t.bindings().len() as u64 * 24));
+        let texture_bytes = request.textures.as_ref().map_or(16, |t| textures::packed_bytes(t, scene.meshes.len()));
         let environment_bytes =
             request.environment.as_ref().map_or(48, |source| 16 + u64::from(source.info().width) * u64::from(source.info().height) * 32);
         let node_bytes = a.triangles.max(1) * 64;
@@ -525,6 +617,8 @@ struct Task {
     context: Arc<Context>,
     request: ImageRequest,
     options: JobOptions,
+    opaque_scene: bool,
+    has_textures: bool,
     cancel: CancelToken,
     uniform: wgpu::Buffer,
     accumulation: wgpu::Buffer,
@@ -554,6 +648,10 @@ struct Task {
 }
 impl Task {
     fn new(context: Arc<Context>, scene: ProductScene, mut request: ImageRequest, options: JobOptions, cancel: CancelToken) -> Result<Self> {
+        cancel.check()?;
+        let opaque_scene = use_opaque_pipeline(&scene, options);
+        let has_textures = request.textures.is_some();
+        context.prepare_scene_pipeline(opaque_scene, has_textures, options.nested_media)?;
         cancel.check()?;
         let start = Instant::now();
         let aging = options.aging.gpu_layers([request.camera.target.x, request.camera.target.y, request.camera.target.z])?;
@@ -638,6 +736,8 @@ impl Task {
         cancel.check()?;
         Ok(Self {
             dispatch_budget: Default::default(),
+            opaque_scene,
+            has_textures,
             context,
             request,
             options,
@@ -752,6 +852,10 @@ impl Task {
                 bytes.extend_from_slice(&value.to_le_bytes());
             }
         }
+        let weights = self.request.studio_weights.unwrap_or([1.0; 3]);
+        for value in [weights[0] as f32, weights[1] as f32, weights[2] as f32, 0.0] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
         bytes
     }
     fn normalization_samples(&self) -> u32 {
@@ -772,9 +876,10 @@ impl Task {
         let mut encoder = context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("path tile") });
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("path tile"), timestamp_writes: None });
-            pass.set_pipeline(&context.pipeline);
+            let pipeline = context.prepared_scene_pipeline(self.opaque_scene, self.has_textures, self.options.nested_media)?;
+            pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &self.bind, &[]);
-            pass.dispatch_workgroups(count.div_ceil(64), 1, 1);
+            pass.dispatch_workgroups(count.div_ceil(PATH_WORKGROUP_SIZE), 1, 1);
         }
         let submission = context.queue.submit([encoder.finish()]);
         checked(scopes)?;

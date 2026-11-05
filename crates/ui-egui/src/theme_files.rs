@@ -68,9 +68,9 @@ impl Base {
     }
 }
 
-/// A theme: its id (the `theme` preference's value), name, base, optional radii and colour overrides, each a
-/// `#rrggbb` / `#rrggbbaa` string or a list of them, keyed by [`keys`].
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+/// A theme: identity, base value tables and optional declarations selecting literal overlays.
+/// Colour overrides are `#rrggbb` / `#rrggbbaa` strings or lists, keyed by [`keys`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ThemeFile {
     pub id: String,
     pub name: String,
@@ -85,6 +85,173 @@ pub struct ThemeFile {
     /// SVG display roles and three-colour semantic ramps; omitted values keep compiled defaults.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub icon_palette: BTreeMap<String, Value>,
+    /// Optional surface overrides for known ribbon tabs. Accents retain their existing tokens.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tabs: BTreeMap<String, BTreeMap<String, Value>>,
+    /// Theme-owned declarations, in file order; standard ids are normalized on import.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<OptionDef>,
+    /// Conditional value tables, applied in file order with later entries winning by key.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overlays: Vec<Overlay>,
+    /// Levels newer than [`REQUIREMENTS_LEVEL`] disable options and overlays.
+    #[serde(default = "default_requirements_level", skip_serializing_if = "is_default_requirements_level")]
+    pub requires: u64,
+}
+
+/// Theme option/overlay format level understood by this app.
+pub const REQUIREMENTS_LEVEL: u64 = 2;
+pub const MAX_OPTIONS: usize = 16;
+pub const MAX_OVERLAYS: usize = 32;
+const STANDARD_OPTIONS: [&str; 4] = ["opacity", "blur", "tab_colours", "tab_fade_ms"];
+
+fn default_requirements_level() -> u64 {
+    1
+}
+
+fn is_default_requirements_level(level: &u64) -> bool {
+    *level == 1
+}
+
+impl Default for ThemeFile {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            base: Base::default(),
+            colors: BTreeMap::new(),
+            radii: BTreeMap::new(),
+            borders: BTreeMap::new(),
+            icon_palette: BTreeMap::new(),
+            tabs: BTreeMap::new(),
+            options: Vec::new(),
+            overlays: Vec::new(),
+            requires: default_requirements_level(),
+        }
+    }
+}
+
+/// Saved option values use the same JSON primitives as defaults and comparisons.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum OptionValue {
+    Bool(bool),
+    Choice(String),
+    Num(f32),
+}
+
+/// Localized text belongs to the theme, with English as the fallback.
+pub type OptionText = BTreeMap<String, String>;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChoiceValue {
+    pub id: String,
+    pub label: OptionText,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum OptionKind {
+    Bool {
+        default: bool,
+    },
+    Choice {
+        default: String,
+        values: Vec<ChoiceValue>,
+    },
+    Range {
+        default: f32,
+        min: f32,
+        max: f32,
+        step: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unit: Option<String>,
+    },
+}
+
+/// Explicit theme-local continuous effects; custom option ids and ordering remain authored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OptionEffect {
+    SurfaceBrightness,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OptionDef {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<OptionEffect>,
+    #[serde(flatten)]
+    pub kind: OptionKind,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub label: OptionText,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub help: OptionText,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub advanced: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Condition {
+    Eq {
+        opt: String,
+        eq: OptionValue,
+    },
+    Range {
+        opt: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gte: Option<f32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lte: Option<f32>,
+    },
+}
+
+impl Condition {
+    fn option(&self) -> &str {
+        match self {
+            Self::Eq { opt, .. } | Self::Range { opt, .. } => opt,
+        }
+    }
+}
+
+/// Overlay tables have exactly the same keys and bounds as the theme's base tables.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ThemeLayer {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub colors: BTreeMap<String, Value>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub radii: BTreeMap<String, u8>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub borders: BTreeMap<String, Value>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub icon_palette: BTreeMap<String, Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Overlay {
+    pub when: Condition,
+    #[serde(flatten)]
+    pub values: ThemeLayer,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OptionNoticeKind {
+    UnknownOption,
+    WrongType,
+    UnknownChoice,
+    NonFinite,
+    Clamped,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OptionNotice {
+    pub id: String,
+    pub kind: OptionNoticeKind,
 }
 
 /// Maximum imported radius, in logical UI points; widgets clamp to their own bounds.
@@ -104,6 +271,31 @@ fn radius_slot<'a>(t: &'a mut Tokens, key: &str) -> Option<&'a mut u8> {
 }
 
 impl ThemeFile {
+    /// Shared by import and preference restoration; invalid saved maps are dropped as a unit.
+    pub(crate) fn set_tabs(&mut self, source: &Value) -> Result<(), String> {
+        self.tabs = parse_tabs(source.get("tabs"))?;
+        Ok(())
+    }
+
+    /// A newer format level keeps the authored base tables but disables options and overlays.
+    /// Computed from `requires` so it also works after restoring saved preferences.
+    pub fn needs_newer(&self) -> bool {
+        self.requires > REQUIREMENTS_LEVEL
+    }
+
+    /// Read option tables from a stored or directly supplied theme with the import parser.
+    /// Base tables are deliberately left alone; only completely valid declarations replace these.
+    pub(crate) fn set_option_tables(&mut self, source: &Value) -> Result<(), String> {
+        let options = if self.needs_newer() { Vec::new() } else { parse_options(source.get("options"))? };
+        if self.requires < 2 && options.iter().any(|option| option.effect.is_some()) {
+            return Err("option effects require `requires` of at least 2".into());
+        }
+        let overlays = if self.needs_newer() { Vec::new() } else { parse_overlays(source.get("overlays"), &options)? };
+        self.options = options;
+        self.overlays = overlays;
+        Ok(())
+    }
+
     /// Validate direct control-channel preference updates as strictly as file imports.
     pub(crate) fn validate_radii(&self) -> Result<(), String> {
         for (key, value) in &self.radii {
@@ -285,11 +477,12 @@ macro_rules! theme_keys {
                 space_12: _, space_14: _, space_16: _, space_24: _, radius_sm: _, radius_md: _,
                 radius_lg: _, radius_xl: _, font_badge: _, font_micro: _, font_panel: _, font_small: _,
                 font_caption: _, font_body: _, font_label: _, font_button: _, font_heading: _, font_triad: _,
-                font_compass: _, font_subtitle: _, font_intro: _, font_article_heading: _, font_title: _, font_display: _,
+                font_compass: _, font_subtitle: _, font_intro: _, font_page_heading: _, font_article_heading: _, font_title: _, font_display: _,
                 control_height: _,  control_radius: _, form_label_width: _, form_gap_y: _, form_footer_height: _, form_header_height: _,
                 form_card_width: _, form_icon_size: _, form_close_size: _, form_inset: _, form_icon_inset: _, form_section_icon_size: _,
                 form_checkbox_height: _, form_button_height: _, sketch_palette_width: _, sketch_mode_size: _, sketch_mode_radius: _, sketch_mode_border: _,
                 sketch_palette_alpha: _, sketch_mode_tint: _, sketch_footer_icon_size: _, font_section_tracking: _,
+                figure_ground: _, figure_line: _, figure_highlight: _, figure_shadow: _, figure_face_top: _, figure_face_left: _, figure_face_right: _, figure_card: _, figure_white: _, figure_black: _, figure_accent: _, figure_reference: _, figure_axis_x: _, figure_axis_y: _, figure_axis_z: _, figure_ok: _, figure_warn: _, figure_conflict: _, pref_well: _, pref_note: _, pref_note_fill: _, pref_on_accent: _, pref_ok: _, pref_ok_fill: _, pref_disabled: _,
             } = t;
             let IconColors { $($ione: _,)* } = &t.icons;
         }
@@ -304,19 +497,19 @@ theme_keys! {
         app_bar, toolbar, panel, panel_header, border, text, text_dim, accent, accent_soft, sketch_accent, error, warning,
         icon, timeline, hover, sel_face, sel_edge, sel_edge_rim, hover_edge, hover_edge_halo, sel_profile,
         sel_profile_edge, hover_profile, hover_profile_edge, sel_vertex, origin_plane, origin_plane_edge, origin_plane_hover,
-        origin_point, axis_x, axis_y, axis_z, construction_plane, construction_geom, body, body_edge, manipulator,
+        origin_point, axis_x, axis_y, axis_z, construction_plane, construction_geom, body, body_edge, manipulator, joint_manipulator, joint_axis,
         preview_add, preview_new, preview_sketch, preview_cut, cube_face, cube_border, cube_text, cube_hover, viewport_top,
-        viewport_bottom, grid, grid_major, body_selected, sketch, sketch_fixed, sketch_halo, sketch_locked, dimension, dimension_driven,
+        viewport_bottom, grid, grid_major, body_selected, sketch, sketch_fixed, sketch_halo, sketch_locked, sketch_conflict, dimension, dimension_driven,
         sketch_point, sketch_point_free, dialog_bg, dialog_border, chip, section_cap,
         profile_fill, glyph_bg, glyph_edge, glyph_text, overlay, rubber_band, app_bar_text, app_bar_hover, timeline_item,
         timeline_item_error, timeline_marker, field, box_window, box_crossing, sketch_projected, sketch_lost,
-        sketch_construction, sketch_centerline, bend_up, bend_down, interference,
+        sketch_construction, sketch_centerline, bend_up, bend_down, interference, comb_envelope, comb_teeth,
         sketch_ink, sketch_soft, surface_fill, surface_ink, surface_soft, mesh_fill, mesh_ink, mesh_soft, form_fill, form_tab_ink, form_soft, sheet_fill, sheet_ink, sheet_soft, render_fill, render_ink, render_soft, tab_on_fill_dark,
         app_bar_separator, surface_accent, mesh_accent, form_accent, render_accent, on_accent, agent_ok, agent_busy, app_bar_hover_subtle,
         app_bar_hover_button, app_bar_hover_strong, app_bar_tab_active,
         form_ink, form_dim, form_primary, form_primary_fill, form_error, form_error_fill, form_success, form_success_fill, dialog_body, dialog_footer, dialog_rule, control_fill, control_border, dialog_label, selected_ink, selected_bg,
     ],
-    many: [continuity, logo],
+    many: [continuity, logo, section_hatch],
     icons: [highlight, agent, marker_halo],
 }
 
@@ -367,7 +560,8 @@ fn colors_for_key(key: &str, value: &Value, len: usize) -> Result<Vec<Color32>, 
 }
 
 /// A theme file's text, checked: the format tag, a name, a base and only known keys with valid
-/// colours and bounded radii. Nothing is taken from a file with any error; the message names every bad key.
+/// colours, bounded shapes, option definitions and overlay comparisons. Nothing is taken from a
+/// supported-level file with any error; messages name the offending key and overlay position.
 pub fn parse(text: &str) -> Result<ThemeFile, String> {
     if text.len() > MAX_BYTES {
         return Err(format!("a theme file is at most {} KiB", MAX_BYTES / 1024));
@@ -390,6 +584,61 @@ pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
         Some("light") => Base::Light,
         _ => return Err("`base` must be \"dark\" or \"light\"".into()),
     };
+    let requires = match v.get("requires") {
+        None => default_requirements_level(),
+        Some(value) => value.as_u64().ok_or("`requires` must be a nonnegative integer")?,
+    };
+    let layer = parse_layer(v)?;
+    let tabs = parse_tabs(v.get("tabs"))?;
+    let options = if requires > REQUIREMENTS_LEVEL { Vec::new() } else { parse_options(v.get("options"))? };
+    if requires < 2 && options.iter().any(|option| option.effect.is_some()) {
+        return Err("option effects require `requires` of at least 2".into());
+    }
+    let overlays = if requires > REQUIREMENTS_LEVEL { Vec::new() } else { parse_overlays(v.get("overlays"), &options)? };
+    Ok(ThemeFile {
+        id: slug(name),
+        name: name.to_string(),
+        base,
+        colors: layer.colors,
+        radii: layer.radii,
+        borders: layer.borders,
+        icon_palette: layer.icon_palette,
+        tabs,
+        options,
+        overlays,
+        requires,
+    })
+}
+
+/// Keep the accepted vocabulary at the same boundary as the existing accent mapping.
+fn parse_tabs(v: Option<&Value>) -> Result<BTreeMap<String, BTreeMap<String, Value>>, String> {
+    let Some(v) = v else { return Ok(BTreeMap::new()) };
+    let tabs = v.as_object().ok_or("`tabs` must be an object")?;
+    if tabs.len() > crate::theme::TAB_NAMES.len() {
+        return Err("`tabs` has too many entries".into());
+    }
+    let mut parsed = BTreeMap::new();
+    for (tab, surfaces) in tabs {
+        if !crate::theme::TAB_NAMES.contains(&tab.as_str()) {
+            return Err(format!("`tabs.{tab}` is not a ribbon tab"));
+        }
+        let surfaces = surfaces.as_object().ok_or_else(|| format!("`tabs.{tab}` must be an object"))?;
+        let mut values = BTreeMap::new();
+        for (key, value) in surfaces {
+            if !matches!(key.as_str(), "panel" | "viewport_top" | "viewport_bottom") {
+                return Err(format!("`tabs.{tab}.{key}` is not a tab surface"));
+            }
+            if value.as_str().and_then(parse_color).is_none() {
+                return Err(format!("`tabs.{tab}.{key}` must be #rrggbb or #rrggbbaa"));
+            }
+            values.insert(key.clone(), value.clone());
+        }
+        parsed.insert(tab.clone(), values);
+    }
+    Ok(parsed)
+}
+
+fn parse_layer(v: &Value) -> Result<ThemeLayer, String> {
     let mut src = match v.get("colors") {
         None => serde_json::Map::new(),
         Some(Value::Object(o)) => o.clone(),
@@ -453,7 +702,244 @@ pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
         Some(_) => return Err("`icon_palette` must be an object of SVG roles and ramps".into()),
     };
     parse_icon_palette(&icon_palette)?;
-    Ok(ThemeFile { id: slug(name), name: name.to_string(), base, colors: src.into_iter().collect(), radii, borders, icon_palette })
+    Ok(ThemeLayer { colors: src.into_iter().collect(), radii, borders, icon_palette })
+}
+
+fn valid_option_id(id: &str) -> bool {
+    (1..=32).contains(&id.len())
+        && id.bytes().next().is_some_and(|b| b.is_ascii_lowercase())
+        && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+fn option_number(v: &Value, key: &str) -> Result<f32, String> {
+    v.get(key)
+        .and_then(Value::as_f64)
+        .map(|n| n as f32)
+        .filter(|n| n.is_finite())
+        .ok_or_else(|| format!("`{key}` must be a finite number representable as f32"))
+}
+
+fn option_text(v: Option<&Value>, key: &str, max: usize) -> Result<OptionText, String> {
+    let Some(v) = v else { return Ok(BTreeMap::new()) };
+    let obj = v.as_object().ok_or_else(|| format!("`{key}` must be a map of language codes to strings"))?;
+    if obj.len() > 64 {
+        return Err(format!("`{key}` has more than 64 languages"));
+    }
+    obj.iter()
+        .map(|(language, value)| {
+            if language.is_empty() || language.len() > 32 || !language.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+                return Err(format!("`{key}` has an invalid language code"));
+            }
+            let text = value
+                .as_str()
+                .filter(|s| s.chars().count() <= max)
+                .ok_or_else(|| format!("`{key}.{language}` must be a string of at most {max} characters"))?;
+            Ok((language.clone(), text.into()))
+        })
+        .collect()
+}
+
+fn parse_option(v: &Value) -> Result<OptionDef, String> {
+    let id = v.get("id").and_then(Value::as_str).filter(|id| valid_option_id(id)).ok_or("`id` must match [a-z][a-z0-9_]{0,31}")?;
+    let kind = v.get("type").and_then(Value::as_str).ok_or("`type` must be bool, choice or range")?;
+    let reserved = STANDARD_OPTIONS.contains(&id);
+    let effect = match v.get("effect") {
+        None => None,
+        Some(Value::String(effect)) if effect == "surface_brightness" && !reserved => Some(OptionEffect::SurfaceBrightness),
+        Some(_) => return Err("`effect` must be surface_brightness on a custom range option".into()),
+    };
+    let kind = if id == "tab_colours" || (!reserved && kind == "bool") {
+        if kind != "bool" {
+            return Err(format!("`{id}.type` must be bool"));
+        }
+        OptionKind::Bool { default: v.get("default").and_then(Value::as_bool).ok_or("`default` must be bool")? }
+    } else if reserved || kind == "range" {
+        if kind != "range" {
+            return Err(format!("`{id}.type` must be range"));
+        }
+        let (floor, ceiling, standard_unit) = match id {
+            "opacity" => (40.0, 100.0, Some("%")),
+            "blur" => (0.0, 60.0, Some("px")),
+            "tab_fade_ms" => (0.0, 600.0, Some("ms")),
+            _ => (0.0, 0.0, None),
+        };
+        let min = if reserved && v.get("min").is_none() { floor } else { option_number(v, "min")? };
+        let max = if reserved && v.get("max").is_none() { ceiling } else { option_number(v, "max")? };
+        if min > max {
+            return Err("`min` must not exceed `max`".into());
+        }
+        if reserved && (min < floor || max > ceiling) {
+            return Err(format!("`min` / `max` for {id} must stay inside {floor} to {ceiling}"));
+        }
+        let step = if id == "tab_fade_ms" {
+            20.0
+        } else if reserved {
+            1.0
+        } else {
+            option_number(v, "step")?
+        };
+        if step <= 0.0 {
+            return Err("`step` must be greater than zero".into());
+        }
+        let default = if id == "opacity" && v.get("default").is_none() { 100.0 } else { option_number(v, "default")? };
+        let default = if reserved {
+            default.clamp(min, max)
+        } else {
+            if default < min || default > max {
+                return Err("`default` must be inside `min` / `max`".into());
+            }
+            default
+        };
+        let unit = if reserved {
+            standard_unit.map(str::to_string)
+        } else {
+            v.get("unit")
+                .map(|v| v.as_str().filter(|s| s.chars().count() <= 4).map(str::to_string).ok_or("`unit` must be a string of at most 4 characters"))
+                .transpose()?
+        };
+        OptionKind::Range { default, min, max, step, unit }
+    } else if kind == "choice" {
+        let values = v.get("values").and_then(Value::as_array).filter(|v| (2..=12).contains(&v.len())).ok_or("`values` must have 2 to 12 choices")?;
+        let mut ids = std::collections::BTreeSet::new();
+        let mut choices = Vec::new();
+        for value in values {
+            let id = value.get("id").and_then(Value::as_str).filter(|id| valid_option_id(id)).ok_or("`values.id` must match [a-z][a-z0-9_]{0,31}")?;
+            if !ids.insert(id) {
+                return Err(format!("`values.id` duplicates {id}"));
+            }
+            let label = option_text(Some(value.get("label").ok_or("`values.label` is required")?), "values.label", 40)?;
+            choices.push(ChoiceValue { id: id.into(), label });
+        }
+        let default = v.get("default").and_then(Value::as_str).filter(|id| ids.contains(id)).ok_or("`default` must name an id in `values`")?;
+        OptionKind::Choice { default: default.into(), values: choices }
+    } else {
+        return Err("`type` must be bool, choice or range".into());
+    };
+    // Standard definitions are app-owned: even malformed presentation fields are ignored.
+    if effect.is_some()
+        && !matches!(&kind, OptionKind::Range { default, min, max, step, unit }
+        if *default == 100.0 && *min >= 60.0 && *max <= 120.0 && *min <= 100.0 && *max >= 100.0 && *step == 1.0 && unit.as_deref() == Some("%"))
+    {
+        return Err("surface_brightness requires a percent range inside 60 to 120, default 100 and step 1".into());
+    }
+    if reserved {
+        return Ok(OptionDef {
+            id: id.into(),
+            effect,
+            kind,
+            label: BTreeMap::new(),
+            help: BTreeMap::new(),
+            parent: (id == "tab_fade_ms").then(|| "tab_colours".into()),
+            advanced: false,
+            section: None,
+        });
+    }
+    let parent = v
+        .get("parent")
+        .map(|v| v.as_str().filter(|id| valid_option_id(id)).map(str::to_string).ok_or("`parent` must be an option id"))
+        .transpose()?;
+    let advanced = v.get("advanced").map(|v| v.as_bool().ok_or("`advanced` must be bool")).transpose()?.unwrap_or(false);
+    let section = v
+        .get("section")
+        .map(|v| v.as_str().filter(|s| s.chars().count() <= 24).map(str::to_string).ok_or("`section` must be a string of at most 24 characters"))
+        .transpose()?;
+    Ok(OptionDef {
+        id: id.into(),
+        effect,
+        kind,
+        label: option_text(v.get("label"), "label", 40)?,
+        help: option_text(v.get("help"), "help", 160)?,
+        parent,
+        advanced,
+        section,
+    })
+}
+
+fn parse_options(v: Option<&Value>) -> Result<Vec<OptionDef>, String> {
+    let Some(v) = v else { return Ok(Vec::new()) };
+    let values = v.as_array().filter(|v| v.len() <= MAX_OPTIONS).ok_or("`options` must be an array of at most 16 entries")?;
+    let mut options = Vec::new();
+    let mut ids = std::collections::BTreeSet::new();
+    for (position, value) in values.iter().enumerate() {
+        let option = parse_option(value).map_err(|e| format!("`options[{}]`: {e}", position + 1))?;
+        if !ids.insert(option.id.clone()) {
+            return Err(format!("`options.id` duplicates {}", option.id));
+        }
+        if option.effect.is_some() && options.iter().any(|previous: &OptionDef| previous.effect == option.effect) {
+            return Err("`options.effect` may declare surface_brightness only once".into());
+        }
+        options.push(option);
+    }
+    let mut parents = std::collections::BTreeSet::new();
+    for option in &options {
+        if let Some(parent) = &option.parent {
+            if !options.iter().any(|o| &o.id == parent && matches!(o.kind, OptionKind::Bool { .. })) {
+                return Err(format!("`options.{}.parent` must name a bool option", option.id));
+            }
+            if !parents.insert(parent) {
+                return Err(format!("`options.parent` {parent} has more than one child"));
+            }
+            let mut ancestor = Some(parent.as_str());
+            for _ in 0..=MAX_OPTIONS {
+                let Some(id) = ancestor else { break };
+                if id == option.id {
+                    return Err(format!("`options.{}.parent` forms a cycle", option.id));
+                }
+                ancestor = options.iter().find(|o| o.id == id).and_then(|o| o.parent.as_deref());
+            }
+        }
+    }
+    Ok(options)
+}
+
+fn parse_condition(v: &Value, options: &[OptionDef]) -> Result<Condition, String> {
+    let obj = v.as_object().ok_or("`when` must be an object")?;
+    let opt = v.get("opt").and_then(Value::as_str).ok_or("`when.opt` must be an option id")?;
+    let option = options.iter().find(|o| o.id == opt).ok_or_else(|| format!("`when.opt` names unknown option {opt}"))?;
+    if let Some(eq) = v.get("eq") {
+        if obj.len() != 2 {
+            return Err("`when.eq` cannot be combined with other comparisons".into());
+        }
+        let eq = match &option.kind {
+            OptionKind::Bool { .. } => OptionValue::Bool(eq.as_bool().ok_or("`when.eq` must be bool")?),
+            OptionKind::Choice { values, .. } => OptionValue::Choice(
+                eq.as_str().filter(|id| values.iter().any(|v| v.id == *id)).ok_or("`when.eq` must name a choice in `values`")?.into(),
+            ),
+            OptionKind::Range { .. } => OptionValue::Num(option_number(v, "eq").map_err(|e| format!("`when`: {e}"))?),
+        };
+        return Ok(Condition::Eq { opt: opt.into(), eq });
+    }
+    if !matches!(option.kind, OptionKind::Range { .. }) {
+        return Err("`when.gte` / `when.lte` require a range option".into());
+    }
+    if obj.keys().any(|k| !matches!(k.as_str(), "opt" | "gte" | "lte")) {
+        return Err("`when` has an unknown comparison".into());
+    }
+    let bound = |key| v.get(key).map(|_| option_number(v, key).map_err(|e| format!("`when`: {e}"))).transpose();
+    let (gte, lte) = (bound("gte")?, bound("lte")?);
+    if gte.is_none() && lte.is_none() {
+        return Err("`when` needs eq, gte or lte".into());
+    }
+    if matches!((gte, lte), (Some(a), Some(b)) if a > b) {
+        return Err("`when.gte` must not exceed `when.lte`".into());
+    }
+    Ok(Condition::Range { opt: opt.into(), gte, lte })
+}
+
+fn parse_overlays(v: Option<&Value>, options: &[OptionDef]) -> Result<Vec<Overlay>, String> {
+    let Some(v) = v else { return Ok(Vec::new()) };
+    let values = v.as_array().filter(|v| v.len() <= MAX_OVERLAYS).ok_or("`overlays` must be an array of at most 32 entries")?;
+    values
+        .iter()
+        .enumerate()
+        .map(|(position, value)| {
+            let parse = || {
+                let when = parse_condition(value.get("when").ok_or("`when` is required")?, options)?;
+                Ok(Overlay { when, values: parse_layer(value)? })
+            };
+            parse().map_err(|e: String| format!("`overlays[{}]`: {e}", position + 1))
+        })
+        .collect()
 }
 
 /// An id from a name: lower-case letters, digits and dashes.
@@ -470,9 +956,190 @@ fn slug(name: &str) -> String {
     if s.is_empty() { "theme".into() } else { s }
 }
 
-/// The theme's tokens: its base with its colours and radii on top. A colour the saved preferences hold
-/// that this version can't read (a hand edit) is skipped, never an error.
+/// Definitions from hand-edited preferences get the same bounds and reserved-id normalization
+/// as imports. An invalid definition list cannot drive an overlay.
+fn usable_options(theme: &ThemeFile) -> Vec<OptionDef> {
+    if theme.needs_newer() || theme.options.len() > MAX_OPTIONS {
+        return Vec::new();
+    }
+    let options = serde_json::to_value(&theme.options).ok().and_then(|v| parse_options(Some(&v)).ok()).unwrap_or_default();
+    if theme.requires < 2 && options.iter().any(|option| option.effect.is_some()) { Vec::new() } else { options }
+}
+
+impl OptionDef {
+    pub fn default_value(&self) -> OptionValue {
+        match &self.kind {
+            OptionKind::Bool { default } => OptionValue::Bool(*default),
+            OptionKind::Choice { default, .. } => OptionValue::Choice(default.clone()),
+            OptionKind::Range { default, .. } => OptionValue::Num(*default),
+        }
+    }
+}
+
+/// Values for every declared option. Missing values use defaults without a notice; invalid saved
+/// values use defaults and report why. Unknown ids are omitted (there is no definition/default).
+/// Range values are clamped, without rounding to `step`. Inactive children retain their values.
+pub fn effective_values(theme: &ThemeFile, saved: &BTreeMap<String, OptionValue>) -> (BTreeMap<String, OptionValue>, Vec<OptionNotice>) {
+    let options = usable_options(theme);
+    let mut values: BTreeMap<_, _> = options.iter().map(|o| (o.id.clone(), o.default_value())).collect();
+    let mut notices = Vec::new();
+    for (id, saved) in saved {
+        let Some(option) = options.iter().find(|o| &o.id == id) else {
+            notices.push(OptionNotice { id: id.clone(), kind: OptionNoticeKind::UnknownOption });
+            continue;
+        };
+        let mut notice = None;
+        let value = match (&option.kind, saved) {
+            (OptionKind::Bool { .. }, OptionValue::Bool(_)) => saved.clone(),
+            (OptionKind::Choice { values, .. }, OptionValue::Choice(id)) if values.iter().any(|v| &v.id == id) => saved.clone(),
+            (OptionKind::Choice { .. }, OptionValue::Choice(_)) => {
+                notice = Some(OptionNoticeKind::UnknownChoice);
+                option.default_value()
+            }
+            (OptionKind::Range { min, max, .. }, OptionValue::Num(n)) if n.is_finite() => {
+                let clamped = n.clamp(*min, *max);
+                if clamped != *n {
+                    notice = Some(OptionNoticeKind::Clamped);
+                }
+                OptionValue::Num(clamped)
+            }
+            (OptionKind::Range { .. }, OptionValue::Num(_)) => {
+                notice = Some(OptionNoticeKind::NonFinite);
+                option.default_value()
+            }
+            _ => {
+                notice = Some(OptionNoticeKind::WrongType);
+                option.default_value()
+            }
+        };
+        values.insert(id.clone(), value);
+        if let Some(kind) = notice {
+            notices.push(OptionNotice { id: id.clone(), kind });
+        }
+    }
+    (values, notices)
+}
+
+/// Standard options in the app's fixed order, each followed by its declared child, then custom
+/// options in file order. Each definition appears once. No undeclared standard option is added.
+pub fn ordered_options(theme: &ThemeFile) -> Vec<&OptionDef> {
+    if theme.needs_newer() {
+        return Vec::new();
+    }
+    let options = theme.options.get(..theme.options.len().min(MAX_OPTIONS)).unwrap_or_default();
+    let mut ordered: Vec<&OptionDef> = Vec::new();
+    for id in ["opacity", "blur", "tab_colours"] {
+        let mut next = options.iter().find(|o| o.id == id);
+        for _ in 0..MAX_OPTIONS {
+            let Some(option) = next else { break };
+            if ordered.iter().any(|o| o.id == option.id) {
+                break;
+            }
+            ordered.push(option);
+            next = options.iter().find(|o| o.parent.as_deref() == Some(option.id.as_str()));
+        }
+    }
+    for option in options {
+        if !ordered.iter().any(|o| o.id == option.id) {
+            ordered.push(option);
+        }
+    }
+    ordered
+}
+
+fn option_active(id: &str, options: &[OptionDef], values: &BTreeMap<String, OptionValue>) -> bool {
+    let mut current = id;
+    for _ in 0..=MAX_OPTIONS {
+        let Some(option) = options.iter().find(|o| o.id == current) else { return false };
+        let Some(parent) = option.parent.as_deref() else { return true };
+        if values.get(parent) != Some(&OptionValue::Bool(true)) {
+            return false;
+        }
+        current = parent;
+    }
+    false
+}
+
+fn condition_matches(condition: &Condition, values: &BTreeMap<String, OptionValue>) -> bool {
+    match condition {
+        Condition::Eq { opt, eq } => values.get(opt) == Some(eq),
+        Condition::Range { opt, gte, lte } => matches!(values.get(opt), Some(OptionValue::Num(n))
+            if n.is_finite() && gte.is_none_or(|a| *n >= a) && lte.is_none_or(|b| *n <= b)),
+    }
+}
+
+/// Resolve at declared defaults. Files without options retain the original palette exactly.
 pub fn resolve(theme: &ThemeFile) -> Tokens {
+    resolve_with(theme, &BTreeMap::new())
+}
+
+/// Resolve base tables, then matching overlays in file order. Later tables replace earlier
+/// entries by key. Saved values are normalized here too, so callers cannot bypass finite checks.
+pub fn resolve_with(theme: &ThemeFile, saved: &BTreeMap<String, OptionValue>) -> Tokens {
+    resolve_for_tab(theme, saved, None)
+}
+
+/// Resolve a tab and its base/overlays in one pass. Providers run last so opacity also protects
+/// tab-authored panels. Restored/direct Rust values are revalidated before they affect tokens.
+pub(crate) fn resolve_for_tab(theme: &ThemeFile, saved: &BTreeMap<String, OptionValue>, tab: Option<&str>) -> Tokens {
+    if theme.needs_newer() || (theme.options.is_empty() && theme.overlays.is_empty()) || theme.overlays.len() > MAX_OVERLAYS {
+        return resolve_base(theme);
+    }
+    let options = usable_options(theme);
+    let overlays = serde_json::to_value(&theme.overlays).ok().and_then(|v| parse_overlays(Some(&v), &options).ok()).unwrap_or_default();
+    let (values, _) = effective_values(theme, saved);
+    let mut merged = theme.clone();
+    for overlay in overlays {
+        if !option_active(overlay.when.option(), &options, &values) || !condition_matches(&overlay.when, &values) {
+            continue;
+        }
+        // Legacy axis lists are local to a layer: an overlay's triad must override axes in
+        // the base, while explicit axis keys in that same overlay still win over its triad.
+        for key in LEGACY_AXES {
+            if let Some(Value::Array(colors)) = overlay.values.colors.get(key) {
+                for (axis, color) in ["axis_x", "axis_y", "axis_z"].into_iter().zip(colors) {
+                    merged.colors.insert(axis.into(), color.clone());
+                }
+            }
+        }
+        merged.colors.extend(overlay.values.colors);
+        merged.radii.extend(overlay.values.radii);
+        merged.borders.extend(overlay.values.borders);
+        merged.icon_palette.extend(overlay.values.icon_palette);
+    }
+    let mut tokens = resolve_base(&merged);
+    let mut tab_panel = false;
+    if crate::theme_options::tab_settings(theme, &values).0
+        && let Some(tab) = tab
+        && let Ok(tabs) = serde_json::to_value(&theme.tabs).map_err(|e| e.to_string()).and_then(|v| parse_tabs(Some(&v)))
+        && let Some(surfaces) = tabs.get(tab)
+    {
+        for (key, value) in surfaces {
+            if let Some(slot) = slot(&mut tokens, key)
+                && let Ok(colors) = colors_for_key(key, value, 1)
+            {
+                slot.copy_from_slice(&colors);
+            }
+        }
+        tab_panel = surfaces.contains_key("panel");
+    }
+    for option in &options {
+        if option.effect == Some(OptionEffect::SurfaceBrightness)
+            && option_active(&option.id, &options, &values)
+            && let Some(OptionValue::Num(percent)) = values.get(&option.id)
+        {
+            tokens.apply_surface_brightness(*percent);
+        }
+    }
+    crate::theme_options::apply(theme, &values, &mut tokens);
+    if tab_panel {
+        tokens.protect_tab_panel();
+    }
+    tokens
+}
+
+/// A colour the saved preferences hold that this version cannot read is skipped safely.
+fn resolve_base(theme: &ThemeFile) -> Tokens {
     let mut t = if theme.base.is_dark() { Tokens::dark() } else { Tokens::light() };
     for k in LEGACY_AXES {
         if let Some(Ok(c)) = theme.colors.get(k).map(|v| colors_of(v, 3))
@@ -501,6 +1168,11 @@ pub fn resolve(theme: &ThemeFile) -> Tokens {
     // Malformed hand-edited saved settings cannot introduce non-finite drawing geometry.
     t.borders = parse_borders(&theme.borders).unwrap_or_default();
     t.icon_palette = parse_icon_palette(&theme.icon_palette).unwrap_or_default();
+    // Conflicting sketch geometry is drawn in the theme's own error colour unless it sets one of
+    // its own (#7244).
+    if !theme.colors.contains_key("sketch_conflict") {
+        t.sketch_conflict = t.error;
+    }
     // A file that sets no colours is its base palette, exactly.
     if !theme.colors.is_empty() {
         file_view_from_theme(&mut t, theme.base.is_dark(), |k| theme.colors.contains_key(k));
@@ -614,36 +1286,38 @@ pub fn export(name: &str, base: Base, t: &Tokens) -> Value {
     json!({"format": FORMAT, "name": name, "base": base, "colors": colors, "radii": radii, "borders": borders, "icon_palette": icon_palette})
 }
 
-/// The theme files that come with SolidCraft (original files; Gruvbox, Tokyo Night, Solarized, Nord, Nosferatu and Catppuccin map open-source palettes, MIT; Okibi and Akari map the Okibi design system; Clay and Clay Dark are original warm paper and charcoal palettes; CGA keeps to the 16 colours of the IBM Color Graphics Adapter; 1-bit and 1-bit Dark are original black-and-white palettes).
-const BUILTIN: [(&str, &str); 27] = [
-    ("gruvbox-dark", include_str!("../../../assets/styles/ui/themes/gruvbox-dark.json")),
-    ("gruvbox-dark-hard", include_str!("../../../assets/styles/ui/themes/gruvbox-dark-hard.json")),
-    ("gruvbox-dark-soft", include_str!("../../../assets/styles/ui/themes/gruvbox-dark-soft.json")),
-    ("gruvbox-light", include_str!("../../../assets/styles/ui/themes/gruvbox-light.json")),
-    ("gruvbox-light-hard", include_str!("../../../assets/styles/ui/themes/gruvbox-light-hard.json")),
-    ("gruvbox-light-soft", include_str!("../../../assets/styles/ui/themes/gruvbox-light-soft.json")),
-    ("solidcraft-95", include_str!("../../../assets/styles/ui/themes/solidcraft-95.json")),
-    ("1-bit", include_str!("../../../assets/styles/ui/themes/1-bit.json")),
-    ("1-bit-dark", include_str!("../../../assets/styles/ui/themes/1-bit-dark.json")),
-    ("platinum-9", include_str!("../../../assets/styles/ui/themes/platinum-9.json")),
-    ("cupertino", include_str!("../../../assets/styles/ui/themes/cupertino.json")),
-    ("green-phosphor", include_str!("../../../assets/styles/ui/themes/green-phosphor.json")),
-    ("amber-phosphor", include_str!("../../../assets/styles/ui/themes/amber-phosphor.json")),
-    ("blueprint", include_str!("../../../assets/styles/ui/themes/blueprint.json")),
-    ("one-dark", include_str!("../../../assets/styles/ui/themes/one-dark.json")),
-    ("tokyo-night", include_str!("../../../assets/styles/ui/themes/tokyo-night.json")),
-    ("solarized-light", include_str!("../../../assets/styles/ui/themes/solarized-light.json")),
-    ("nord", include_str!("../../../assets/styles/ui/themes/nord.json")),
-    ("high-contrast", include_str!("../../../assets/styles/ui/themes/high-contrast.json")),
-    ("graphite", include_str!("../../../assets/styles/ui/themes/graphite.json")),
-    ("nosferatu", include_str!("../../../assets/styles/ui/themes/nosferatu.json")),
-    ("catppuccin-mocha", include_str!("../../../assets/styles/ui/themes/catppuccin-mocha.json")),
-    ("okibi", include_str!("../../../assets/styles/ui/themes/okibi.json")),
-    ("akari", include_str!("../../../assets/styles/ui/themes/akari.json")),
-    ("clay", include_str!("../../../assets/styles/ui/themes/clay.json")),
-    ("clay-dark", include_str!("../../../assets/styles/ui/themes/clay-dark.json")),
-    ("cga", include_str!("../../../assets/styles/ui/themes/cga.json")),
-];
+/// Export a theme definition, preserving its options and overlays rather than flattening them
+/// to the current tokens. The existing [`export`] remains a complete token snapshot.
+pub fn export_file(theme: &ThemeFile) -> Value {
+    let mut value = json!({"format": FORMAT, "name": theme.name, "base": theme.base, "colors": theme.colors});
+    if let Some(obj) = value.as_object_mut() {
+        if !theme.radii.is_empty() {
+            obj.insert("radii".into(), json!(theme.radii));
+        }
+        if !theme.borders.is_empty() {
+            obj.insert("borders".into(), json!(theme.borders));
+        }
+        if !theme.icon_palette.is_empty() {
+            obj.insert("icon_palette".into(), json!(theme.icon_palette));
+        }
+        if !theme.tabs.is_empty() {
+            obj.insert("tabs".into(), json!(theme.tabs));
+        }
+        if !theme.options.is_empty() {
+            obj.insert("options".into(), json!(theme.options));
+        }
+        if !theme.overlays.is_empty() {
+            obj.insert("overlays".into(), json!(theme.overlays));
+        }
+        if !is_default_requirements_level(&theme.requires) {
+            obj.insert("requires".into(), json!(theme.requires));
+        }
+    }
+    value
+}
+
+// Theme sources are collected at build time; picker order is validated below.
+include!(concat!(env!("OUT_DIR"), "/builtin_themes.rs"));
 
 /// The two-colour built-in themes (1-bit and 1-bit Dark): pure black and white, so a few looks
 /// other themes tell apart by colour are told apart by text or shape instead.
@@ -652,21 +1326,51 @@ pub(crate) fn is_two_colour(id: &str) -> bool {
     matches!(id, "1-bit" | "1-bit-dark")
 }
 
-/// The built-in themes, read once (one that fails to read is left out; a test reads them all).
+#[cfg(test)]
+pub(crate) fn tab_fixture(base: &str) -> ThemeFile {
+    let catalog: Value = serde_json::from_str(include_str!("../tests/fixtures/theme-tabs.json")).unwrap();
+    from_value(&catalog[base]).unwrap()
+}
+
+/// The built-in themes, validated and ordered once; a test checks every shipped file.
 pub fn builtin() -> &'static [ThemeFile] {
     static THEMES: OnceLock<Vec<ThemeFile>> = OnceLock::new();
-    THEMES.get_or_init(|| {
-        BUILTIN
-            .iter()
-            .filter_map(|(id, text)| match parse(text) {
-                Ok(t) => Some(ThemeFile { id: (*id).to_string(), ..t }),
-                Err(e) => {
-                    log::error!("built-in theme {id}: {e}");
-                    None
-                }
-            })
-            .collect()
+    THEMES.get_or_init(|| match read_builtin(BUILTIN) {
+        Ok(themes) => themes,
+        Err(e) => {
+            log::error!("built-in themes: {e}");
+            Vec::new()
+        }
     })
+}
+
+fn read_builtin(sources: &[(&str, &str)]) -> Result<Vec<ThemeFile>, String> {
+    let mut orders = std::collections::BTreeSet::new();
+    let mut ids = std::collections::BTreeSet::new();
+    let mut themes = Vec::new();
+    for &(id, text) in sources {
+        if !ids.insert(id) || id.is_empty() {
+            return Err(format!("empty or duplicate theme id: {id}"));
+        }
+        if text.len() > MAX_BYTES {
+            return Err(format!("theme {id} exceeds the file size limit"));
+        }
+        let value: Value = serde_json::from_str(text).map_err(|e| format!("theme {id}: {e}"))?;
+        let order = value.get("order").and_then(Value::as_u64).ok_or_else(|| format!("theme {id}: order must be a nonnegative integer"))?;
+        if !orders.insert(order) {
+            return Err(format!("theme {id}: duplicate order {order}"));
+        }
+        if value.get("provenance").and_then(Value::as_str).is_none_or(|s| s.trim().is_empty()) {
+            return Err(format!("theme {id}: missing provenance"));
+        }
+        let theme = from_value(&value).map_err(|e| format!("theme {id}: {e}"))?;
+        themes.push((order, ThemeFile { id: id.into(), ..theme }));
+    }
+    if themes.is_empty() {
+        return Err("no built-in themes".into());
+    }
+    themes.sort_by_key(|(order, _)| *order);
+    Ok(themes.into_iter().map(|(_, theme)| theme).collect())
 }
 
 /// The theme a `theme` preference names: built in, or imported. `None` for dark, light, system
@@ -675,11 +1379,24 @@ pub fn find<'a>(id: &str, custom: &'a [ThemeFile]) -> Option<&'a ThemeFile> {
     builtin().iter().find(|t| t.id == id).or_else(|| custom.iter().find(|t| t.id == id))
 }
 
+/// Retired built-in cards now select a contrast value on their light/dark family.
+/// Keep these ids reserved so importing a theme cannot take a saved built-in identity.
+pub(crate) const GRUVBOX_ALIASES: [(&str, &str, &str); 4] = [
+    ("gruvbox-dark-hard", "gruvbox-dark", "hard"),
+    ("gruvbox-dark-soft", "gruvbox-dark", "soft"),
+    ("gruvbox-light-hard", "gruvbox-light", "hard"),
+    ("gruvbox-light-soft", "gruvbox-light", "soft"),
+];
+
+pub(crate) fn legacy_gruvbox(id: &str) -> Option<(&'static str, &'static str)> {
+    GRUVBOX_ALIASES.iter().find(|(old, _, _)| *old == id).map(|(_, family, contrast)| (*family, *contrast))
+}
+
 /// Add an imported theme to `custom`, replacing one with the same id (importing a file again
 /// updates it). Its id never takes a built-in one's or the modes' (dark, light, system).
 /// Returns the id it is kept under.
 pub fn add(custom: &mut Vec<ThemeFile>, mut theme: ThemeFile) -> Result<String, String> {
-    if ["dark", "light", "system"].contains(&theme.id.as_str()) || builtin().iter().any(|t| t.id == theme.id) {
+    if ["dark", "light", "system"].contains(&theme.id.as_str()) || builtin().iter().any(|t| t.id == theme.id) || legacy_gruvbox(&theme.id).is_some() {
         theme.id = format!("custom-{}", theme.id);
     }
     let id = theme.id.clone();
@@ -823,6 +1540,580 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tabs_import_is_strict_and_roundtrips_authored_surfaces() {
+        for base in ["dark", "light"] {
+            let file = tab_fixture(base);
+            assert_eq!(from_value(&export_file(&file)).unwrap(), file);
+            let mut source = export_file(&file);
+            source["tabs"] = json!(crate::theme::TAB_NAMES.iter().map(|tab| (*tab, json!({"panel":"#18202aff"}))).collect::<BTreeMap<_, _>>());
+            assert_eq!(from_value(&source).unwrap().tabs.len(), crate::theme::TAB_NAMES.len());
+            for (tabs, offending) in [
+                (json!(null), "tabs"),
+                (json!([]), "tabs"),
+                (json!({"sketch":{}}), "sketch"),
+                (json!({"MISSING":{}}), "MISSING"),
+                (json!({"SKETCH":null}), "SKETCH"),
+                (json!({"SKETCH":{"panel":"#bad"}}), "panel"),
+                (json!({"SKETCH":{"panel":["#ffffff"]}}), "panel"),
+                (json!({"SKETCH":{"panel":12}}), "panel"),
+            ] {
+                source["tabs"] = tabs;
+                assert!(from_value(&source).unwrap_err().contains(offending));
+            }
+            // Refuse every known non-surface token, not only status colours.
+            for key in keys().into_iter().filter(|key| !matches!(*key, "panel" | "viewport_top" | "viewport_bottom")) {
+                source["tabs"] = json!({"SKETCH":{key:"#ffffff"}});
+                assert!(from_value(&source).unwrap_err().contains(key), "{key}");
+            }
+            source["tabs"] = json!({"SKETCH":{"viewport_top":"#12345678"}});
+            let file = from_value(&source).unwrap();
+            assert_eq!(export_file(&file)["tabs"], source["tabs"]);
+        }
+    }
+
+    #[test]
+    fn tabs_resolve_only_surfaces_and_off_is_exactly_base() {
+        for base in ["dark", "light"] {
+            let file = tab_fixture(base);
+            let defaults = BTreeMap::new();
+            let base = resolve_with(&file, &defaults);
+            for tab in crate::theme::TAB_NAMES {
+                let mut want = base;
+                if let Some(surfaces) = file.tabs.get(*tab) {
+                    for (key, value) in surfaces {
+                        slot(&mut want, key).unwrap().copy_from_slice(&colors_of(value, 1).unwrap());
+                    }
+                }
+                let effective = resolve_for_tab(&file, &defaults, Some(tab));
+                assert_eq!(effective, want, "{tab}");
+                assert_eq!(crate::theme::TabAccent::for_tab(&effective, tab), crate::theme::TabAccent::for_tab(&base, tab));
+                let off = BTreeMap::from([("tab_colours".into(), OptionValue::Bool(false))]);
+                assert_eq!(resolve_for_tab(&file, &off, Some(tab)), resolve_with(&file, &off));
+            }
+            let mut damaged = file.clone();
+            damaged.tabs.get_mut("SKETCH").unwrap().insert("error".into(), json!("#ffffff"));
+            assert_eq!(resolve_for_tab(&damaged, &defaults, Some("SKETCH")), base);
+            let mut absent = file.clone();
+            absent.tabs.clear();
+            assert_eq!(resolve_for_tab(&absent, &defaults, Some("SKETCH")), base);
+            assert_eq!(export_file(&file)["options"][1]["default"], 240.0);
+        }
+        for file in builtin() {
+            let off = BTreeMap::from([("tab_colours".into(), OptionValue::Bool(false))]);
+            let mut without_tabs = file.clone();
+            without_tabs.tabs.clear();
+            for tab in crate::theme::TAB_NAMES {
+                assert_eq!(resolve_for_tab(file, &off, Some(tab)), resolve_with(file, &off), "{} {tab}: tabs off", file.id);
+                assert_eq!(resolve_for_tab(&without_tabs, &BTreeMap::new(), Some(tab)), resolve(file), "{} {tab}: no tables", file.id);
+                assert_eq!(
+                    resolve_for_tab(file, &BTreeMap::new(), Some(tab)),
+                    resolve_for_tab(&without_tabs, &BTreeMap::new(), Some(tab)),
+                    "{} {tab}: authored defaults leave tab surfaces off",
+                    file.id
+                );
+            }
+        }
+    }
+
+    fn option_theme(options: Value, overlays: Value) -> Value {
+        json!({"format":FORMAT,"name":"Options","base":"dark","options":options,"overlays":overlays})
+    }
+
+    fn sample_options() -> Value {
+        json!([
+            {"id":"enabled","type":"bool","default":true,"label":{"en":"Enable","da":"Aktivér"},"help":{"en":"Theme-owned help"}},
+            {"id":"style","type":"choice","default":"warm","parent":"enabled","advanced":true,"section":"Appearance",
+                "values":[{"id":"warm","label":{"en":"Warm"}},{"id":"cool","label":{"en":"Cool"}}]},
+            {"id":"amount","type":"range","default":5,"min":0,"max":10,"step":0.5,"unit":"pt"}
+        ])
+    }
+
+    #[test]
+    fn option_definitions_reject_bad_keys_and_hostile_numbers() {
+        let mut cases = vec![
+            (json!([{"id":"Bad","type":"bool","default":true}]), "id"),
+            (json!([{"id":"a","type":"script","default":true}]), "type"),
+            (json!([{"id":"a","type":"bool","default":1}]), "default"),
+            (json!([{"id":"a","type":"bool","default":true},{"id":"a","type":"bool","default":false}]), "id"),
+            (json!([{"id":"opacity","type":"bool","default":true}]), "type"),
+            (json!([{"id":"tab_colours","type":"range","default":1}]), "type"),
+            (json!([{"id":"a","type":"choice","default":"missing","values":[{"id":"x","label":{}},{"id":"y","label":{}}]}]), "default"),
+            (json!([{"id":"a","type":"choice","default":"x","values":[{"id":"x","label":{}},{"id":"x","label":{}}]}]), "values.id"),
+            (json!([{"id":"a","type":"choice","default":"x","values":[{"id":"x","label":{}}]}]), "values"),
+            (json!([{"id":"a","type":"range","default":1,"min":2,"max":1,"step":1}]), "min"),
+            (json!([{"id":"a","type":"range","default":3,"min":0,"max":2,"step":1}]), "default"),
+            (json!([{"id":"a","type":"range","default":1,"min":0,"max":2,"step":0}]), "step"),
+            (json!([{"id":"a","type":"range","default":1,"min":0,"max":2,"step":-1}]), "step"),
+            (json!([{"id":"a","type":"range","default":1,"min":0,"max":2,"step":1,"unit":"points"}]), "unit"),
+            (json!([{"id":"a","type":"bool","default":true,"label":{"en":"x".repeat(41)}}]), "label"),
+            (json!([{"id":"a","type":"bool","default":true,"help":{"en":"x".repeat(161)}}]), "help"),
+            (json!([{"id":"a","type":"bool","default":true,"section":"x".repeat(25)}]), "section"),
+            (json!([{"id":"a".repeat(33),"type":"bool","default":true}]), "id"),
+            (json!([{"id":"a","type":"bool","default":true,"parent":"missing"}]), "parent"),
+            (json!([{"id":"a","type":"bool","default":true,"advanced":"yes"}]), "advanced"),
+            (json!([{"id":"opacity","type":"range","default":80,"min":39}]), "min"),
+            (json!([{"id":"blur","type":"range","default":10,"max":61}]), "max"),
+        ];
+        let mut too_many = Vec::new();
+        for i in 0..17 {
+            too_many.push(json!({"id":format!("o{i}"),"type":"bool","default":true}));
+        }
+        cases.push((json!(too_many), "options"));
+        let mut too_many_choices = sample_options();
+        too_many_choices[1]["values"] = json!((0..13).map(|i| json!({"id":format!("v{i}"),"label":{}})).collect::<Vec<_>>());
+        cases.push((too_many_choices, "values"));
+        for key in ["min", "max", "step", "default"] {
+            // JSON cannot encode NaN/infinity; null, strings and finite f64 values overflowing
+            // f32 must still name the precise field. Actual non-finite Rust values are below.
+            for value in [Value::Null, json!("NaN"), json!("Infinity"), json!(1e100), json!(-1e100)] {
+                let mut options = sample_options();
+                options[2][key] = value;
+                cases.push((options, key));
+            }
+        }
+        for (options, key) in cases {
+            let error = from_value(&option_theme(options, json!([]))).unwrap_err();
+            assert!(error.contains(key), "expected {key}: {error}");
+        }
+        for number in ["NaN", "Infinity", "-Infinity", "1e400"] {
+            let text = format!(
+                r#"{{"format":"{FORMAT}","name":"Bad","base":"dark","options":[{{"id":"x","type":"range","min":0,"max":10,"step":1,"default":{number}}}]}}"#
+            );
+            assert!(parse(&text).is_err(), "{number} is not a JSON finite number");
+        }
+    }
+
+    #[test]
+    fn option_parents_must_be_unique_bool_parents_without_cycles() {
+        let mut options = sample_options();
+        options[1]["parent"] = json!("amount");
+        assert!(from_value(&option_theme(options, json!([]))).unwrap_err().contains("parent"));
+        let mut options = sample_options();
+        options[2]["parent"] = json!("enabled");
+        assert!(from_value(&option_theme(options, json!([]))).unwrap_err().contains("parent"));
+        for options in [
+            json!([{"id":"a","type":"bool","default":true,"parent":"a"}]),
+            json!([{"id":"a","type":"bool","default":true,"parent":"b"},{"id":"b","type":"bool","default":true,"parent":"a"}]),
+            json!([{"id":"tab_fade_ms","type":"range","default":100}]),
+        ] {
+            assert!(from_value(&option_theme(options, json!([]))).unwrap_err().contains("parent"));
+        }
+    }
+
+    #[test]
+    fn option_and_overlay_limits_accept_their_boundaries_and_count_unicode_characters() {
+        let mut options = sample_options().as_array().unwrap().clone();
+        options[0]["label"] = json!({"en":"é".repeat(40)});
+        options[0]["help"] = json!({"en":"é".repeat(160)});
+        options[0]["section"] = json!("é".repeat(24));
+        options[1]["values"] = json!((0..12).map(|i| json!({"id":format!("v{i}"),"label":{"en":"é".repeat(40)}})).collect::<Vec<_>>());
+        options[1]["default"] = json!("v11");
+        options[2]["unit"] = json!("é".repeat(4));
+        for i in options.len()..MAX_OPTIONS {
+            options.push(json!({"id":format!("o{i}"),"type":"bool","default":false}));
+        }
+        let overlays = (0..MAX_OVERLAYS).map(|i| json!({"when":{"opt":"enabled","eq":true},"radii":{"radius_sm":i}})).collect::<Vec<_>>();
+        let theme = from_value(&option_theme(json!(options), json!(overlays))).unwrap();
+        assert_eq!((theme.options.len(), theme.overlays.len()), (MAX_OPTIONS, MAX_OVERLAYS));
+        assert_eq!(resolve(&theme).radius_sm, 31);
+        assert_eq!(from_value(&export_file(&theme)).unwrap(), theme);
+    }
+
+    #[test]
+    fn reserved_options_are_app_owned_and_ordered_with_their_children() {
+        let file = from_value(&option_theme(
+            json!([
+                {"id":"custom_first","type":"bool","default":false},
+                {"id":"tab_fade_ms","type":"range","default":9999,"min":100,"max":500,"unit":"bad","parent":"wrong","step":null},
+                {"id":"tab_colours","type":"bool","default":true,"advanced":"ignored","label":null},
+                {"id":"blur","type":"range","default":-5,"help":false,"section":42},
+                {"id":"custom_child","type":"choice","default":"a","parent":"tab_fade_ms",
+                    "values":[{"id":"a","label":{}},{"id":"b","label":{}}]},
+                {"id":"opacity","type":"range","default":200,"min":60,"max":90,"step":0,"unit":false}
+            ]),
+            json!([]),
+        ))
+        .unwrap_err();
+        assert!(file.contains("parent"), "a reserved range cannot be a bool parent");
+        let file = from_value(&option_theme(
+            json!([
+                {"id":"custom_first","type":"bool","default":false},
+                {"id":"tab_fade_ms","type":"range","default":9999,"min":100,"max":500,"unit":"bad","parent":"wrong","step":null},
+                {"id":"tab_colours","type":"bool","default":true,"advanced":"ignored","label":null},
+                {"id":"blur","type":"range","default":-5,"help":false,"section":42},
+                {"id":"custom_child","type":"bool","default":true,"parent":"custom_first"},
+                {"id":"opacity","type":"range","default":200,"min":60,"max":90,"step":0,"unit":false}
+            ]),
+            json!([]),
+        ))
+        .unwrap();
+        let (values, notices) = effective_values(&file, &BTreeMap::new());
+        assert!(notices.is_empty());
+        assert_eq!(values["opacity"], OptionValue::Num(90.0));
+        assert_eq!(values["blur"], OptionValue::Num(0.0));
+        assert_eq!(values["tab_fade_ms"], OptionValue::Num(500.0));
+        let fade = file.options.iter().find(|o| o.id == "tab_fade_ms").unwrap();
+        assert_eq!(fade.parent.as_deref(), Some("tab_colours"));
+        assert!(matches!(&fade.kind, OptionKind::Range { min:100.0, max:500.0, step:20.0, unit:Some(unit), .. } if unit == "ms"));
+        assert!(
+            file.options
+                .iter()
+                .filter(|o| STANDARD_OPTIONS.contains(&o.id.as_str()))
+                .all(|o| o.label.is_empty() && o.help.is_empty() && !o.advanced && o.section.is_none())
+        );
+        assert_eq!(
+            ordered_options(&file).iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+            ["opacity", "blur", "tab_colours", "tab_fade_ms", "custom_first", "custom_child"]
+        );
+        let child = from_value(&option_theme(
+            json!([
+                {"id":"child","type":"bool","default":false,"parent":"tab_colours"},
+                {"id":"other","type":"bool","default":false},
+                {"id":"tab_colours","type":"bool","default":true}
+            ]),
+            json!([]),
+        ))
+        .unwrap();
+        assert_eq!(ordered_options(&child).iter().map(|o| o.id.as_str()).collect::<Vec<_>>(), ["tab_colours", "child", "other"]);
+    }
+
+    #[test]
+    fn effective_option_values_fall_back_clamp_and_report_each_saved_problem() {
+        let theme = from_value(&option_theme(sample_options(), json!([]))).unwrap();
+        let defaults = effective_values(&theme, &BTreeMap::new());
+        assert!(defaults.1.is_empty());
+        for (saved, expected, kind) in [
+            (OptionValue::Choice("typo".into()), OptionValue::Choice("warm".into()), OptionNoticeKind::UnknownChoice),
+            (OptionValue::Bool(false), OptionValue::Choice("warm".into()), OptionNoticeKind::WrongType),
+        ] {
+            let (values, notices) = effective_values(&theme, &BTreeMap::from([("style".into(), saved)]));
+            assert_eq!(values["style"], expected);
+            assert_eq!(notices, [OptionNotice { id: "style".into(), kind }]);
+        }
+        for (n, expected, kind) in [
+            (-1.0, 0.0, OptionNoticeKind::Clamped),
+            (20.0, 10.0, OptionNoticeKind::Clamped),
+            (f32::NAN, 5.0, OptionNoticeKind::NonFinite),
+            (f32::INFINITY, 5.0, OptionNoticeKind::NonFinite),
+            (f32::NEG_INFINITY, 5.0, OptionNoticeKind::NonFinite),
+        ] {
+            let (values, notices) = effective_values(&theme, &BTreeMap::from([("amount".into(), OptionValue::Num(n))]));
+            assert_eq!(values["amount"], OptionValue::Num(expected));
+            assert_eq!(notices, [OptionNotice { id: "amount".into(), kind }]);
+        }
+        let (values, notices) = effective_values(
+            &theme,
+            &BTreeMap::from([
+                ("enabled".into(), OptionValue::Choice("bad".into())),
+                ("style".into(), OptionValue::Choice("bad".into())),
+                ("amount".into(), OptionValue::Num(99.0)),
+                ("removed".into(), OptionValue::Bool(true)),
+            ]),
+        );
+        assert_eq!(notices.len(), 4);
+        assert!(!values.contains_key("removed"));
+        assert_eq!(values["enabled"], OptionValue::Bool(true));
+        let saved = BTreeMap::from([
+            ("enabled".into(), OptionValue::Bool(false)),
+            ("style".into(), OptionValue::Choice("cool".into())),
+            ("amount".into(), OptionValue::Num(4.25)),
+        ]);
+        assert_eq!(effective_values(&theme, &saved), (saved, Vec::new()), "step is a UI increment, not quantization");
+    }
+
+    #[test]
+    fn overlays_reject_unknown_options_types_comparisons_and_invalid_tables() {
+        let mut cases = vec![
+            (json!({"opt":"missing","eq":true}), json!({}), "opt"),
+            (json!({"opt":"enabled","eq":1}), json!({}), "eq"),
+            (json!({"opt":"style","eq":"missing"}), json!({}), "eq"),
+            (json!({"opt":"amount","eq":false}), json!({}), "eq"),
+            (json!({"opt":"enabled","gte":0}), json!({}), "gte"),
+            (json!({"opt":"style","lte":10}), json!({}), "lte"),
+            (json!({"opt":"amount","gte":9,"lte":2}), json!({}), "gte"),
+            (json!({"opt":"amount"}), json!({}), "when"),
+            (json!({"opt":"amount","eq":2,"gte":0}), json!({}), "eq"),
+            (json!({"opt":"amount","gt":2}), json!({}), "when"),
+            (json!({"opt":"enabled","eq":true}), json!({"colors":{"panle":"#000000"}}), "panle"),
+            (json!({"opt":"enabled","eq":true}), json!({"radii":{"radius_sm":33}}), "radii.radius_sm"),
+            (json!({"opt":"enabled","eq":true}), json!({"borders":{"primary":{"width":5,"color":"#ffffff"}}}), "borders.primary.width"),
+            (json!({"opt":"enabled","eq":true}), json!({"icon_palette":{"ink":"#ffffff80"}}), "icon_palette.ink"),
+        ];
+        for key in ["eq", "gte", "lte"] {
+            cases.push((json!({"opt":"amount",key:1e100}), json!({}), key));
+        }
+        for (when, mut overlay, key) in cases {
+            overlay["when"] = when;
+            let error = from_value(&option_theme(
+                sample_options(),
+                json!([
+                    {"when":{"opt":"enabled","eq":false}}, overlay
+                ]),
+            ))
+            .unwrap_err();
+            assert!(error.contains("overlays[2]") && error.contains(key), "{key}: {error}");
+        }
+        let overlays = vec![json!({"when":{"opt":"enabled","eq":true}}); 33];
+        assert!(from_value(&option_theme(sample_options(), json!(overlays))).unwrap_err().contains("overlays"));
+    }
+
+    #[test]
+    fn matching_overlays_apply_in_file_order_and_preserve_other_table_entries() {
+        let mut source = option_theme(
+            sample_options(),
+            json!([
+                {"when":{"opt":"enabled","eq":true},"colors":{"panel":"#123456","axis_x":"#111111"},"radii":{"radius_sm":1},
+                    "borders":{"primary":{"width":2,"color":"#abcdef"}},"icon_palette":{"ink":"#112233"}},
+                {"when":{"opt":"amount","gte":5,"lte":5},"colors":{"panel":"#abcdef","triad":["#222222","#333333","#444444"]},
+                    "radii":{"radius_md":2},"icon_palette":{"line":"#445566"}},
+                {"when":{"opt":"amount","eq":6},"colors":{"panel":"#000000"}},
+                {"when":{"opt":"style","eq":"cool"},"colors":{"panel":"#ffffff"}}
+            ]),
+        );
+        source["colors"] = json!({"text":"#fedcba","axis_x":"#000000"});
+        source["radii"] = json!({"radius_lg":3});
+        source["borders"] = json!({"control":{"width":1,"color":"#123456"}});
+        source["icon_palette"] = json!({"solid":["#ffffff","#777777","#000000"]});
+        let theme = from_value(&source).unwrap();
+        let resolved = resolve(&theme);
+        assert_eq!(resolved.panel, parse_color("#abcdef").unwrap());
+        assert_eq!(resolved.text, parse_color("#fedcba").unwrap());
+        assert_eq!(resolved.axes(), [parse_color("#222222").unwrap(), parse_color("#333333").unwrap(), parse_color("#444444").unwrap()]);
+        assert_eq!((resolved.radius_sm, resolved.radius_md, resolved.radius_lg), (1, 2, 3));
+        assert_eq!(resolved.borders.primary.unwrap().width, 2.0);
+        assert_eq!(resolved.borders.control.unwrap().width, 1.0);
+        let palette = export_icon_palette(resolved.icon_palette);
+        assert_eq!(palette["ink"], json!("#112233"));
+        assert_eq!(palette["line"], json!("#445566"));
+        assert_eq!(palette["solid"], source["icon_palette"]["solid"]);
+        assert_eq!(resolve_with(&theme, &BTreeMap::from([("amount".into(), OptionValue::Num(6.0))])).panel, Color32::BLACK);
+        let no_matches = BTreeMap::from([("enabled".into(), OptionValue::Bool(false)), ("amount".into(), OptionValue::Num(1.0))]);
+        assert_eq!(resolve_with(&theme, &no_matches), resolve_base(&theme));
+        assert_eq!(resolve_with(&theme, &effective_values(&theme, &BTreeMap::new()).0), resolved);
+    }
+
+    #[test]
+    fn inactive_children_never_match_overlays_and_values_resume_when_parent_is_on() {
+        let theme = from_value(&option_theme(
+            sample_options(),
+            json!([
+                {"when":{"opt":"style","eq":"cool"},"colors":{"panel":"#123456"}}
+            ]),
+        ))
+        .unwrap();
+        let mut saved = BTreeMap::from([("enabled".into(), OptionValue::Bool(false)), ("style".into(), OptionValue::Choice("cool".into()))]);
+        let effective = effective_values(&theme, &saved).0;
+        assert_eq!(effective["style"], OptionValue::Choice("cool".into()));
+        assert_eq!(resolve_with(&theme, &effective), resolve_base(&theme));
+        saved.insert("enabled".into(), OptionValue::Bool(true));
+        assert_eq!(resolve_with(&theme, &saved).panel, parse_color("#123456").unwrap());
+    }
+
+    #[test]
+    fn options_and_overlays_roundtrip_without_changing_old_export_shape() {
+        let theme = from_value(&option_theme(
+            sample_options(),
+            json!([
+                {"when":{"opt":"amount","gte":4},"colors":{"panel":"#123456"}},
+                {"when":{"opt":"style","eq":"warm"},"radii":{"radius_sm":0}}
+            ]),
+        ))
+        .unwrap();
+        let exported = export_file(&theme);
+        assert_eq!(from_value(&exported).unwrap(), theme);
+        assert_eq!(parse(&exported.to_string()).unwrap(), theme);
+        assert_eq!(serde_json::from_value::<ThemeFile>(serde_json::to_value(&theme).unwrap()).unwrap(), theme);
+        let old = from_value(&json!({"format":FORMAT,"name":"Old","base":"light"})).unwrap();
+        assert_eq!(from_value(&export_file(&old)).unwrap(), old);
+        for value in [export_file(&old), serde_json::to_value(&old).unwrap(), export("Snapshot", theme.base, &resolve(&theme))] {
+            for key in ["options", "overlays", "requires"] {
+                assert!(value.get(key).is_none(), "{key}: {value}");
+            }
+        }
+        let snapshot = export("Snapshot", theme.base, &resolve(&theme));
+        assert_eq!(
+            snapshot.as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>(),
+            ["base", "borders", "colors", "format", "icon_palette", "name", "radii"]
+        );
+        assert_eq!(resolve(&from_value(&snapshot).unwrap()), resolve(&theme));
+    }
+
+    #[test]
+    fn newer_requirements_keep_base_tables_without_reading_future_option_syntax() {
+        let source = json!({"format":FORMAT,"name":"Future","base":"light","requires":REQUIREMENTS_LEVEL + 1,"colors":{"panel":"#123456"},
+            "radii":{"radius_sm":0},"options":{"future":"syntax"},"overlays":false});
+        let theme = from_value(&source).unwrap();
+        assert!(theme.needs_newer());
+        assert!(theme.options.is_empty() && theme.overlays.is_empty() && ordered_options(&theme).is_empty());
+        assert_eq!(resolve(&theme).panel, parse_color("#123456").unwrap());
+        assert_eq!(resolve(&theme).radius_sm, 0);
+        assert_eq!(from_value(&export_file(&theme)).unwrap(), theme);
+        let restored: ThemeFile = serde_json::from_value(serde_json::to_value(&theme).unwrap()).unwrap();
+        assert!(restored.needs_newer());
+        assert_eq!(resolve(&restored), resolve_base(&theme));
+        for invalid in [json!(-1), json!(1.5), json!("2"), Value::Null] {
+            let mut source = source.clone();
+            source["requires"] = invalid;
+            assert!(from_value(&source).unwrap_err().contains("requires"));
+        }
+    }
+
+    #[test]
+    fn theme_options_opacity_only_changes_floating_fill_roles_and_full_is_exact() {
+        for base in ["light", "dark"] {
+            let mut source = json!({"format":FORMAT,"name":"Opacity","base":base,"options":[{"id":"opacity","type":"range"}]});
+            let file = from_value(&source).unwrap();
+            let original = resolve_base(&file);
+            assert_eq!(resolve(&file), original, "omitted default is 100");
+            assert_eq!(resolve_with(&file, &BTreeMap::from([("opacity".into(), OptionValue::Num(100.0))])), original);
+            let faded = resolve_with(&file, &BTreeMap::from([("opacity".into(), OptionValue::Num(60.0))]));
+            let mut only_fills = original;
+            only_fills.panel = faded.panel;
+            only_fills.panel_header = faded.panel_header;
+            only_fills.toolbar = faded.toolbar;
+            only_fills.timeline = faded.timeline;
+            only_fills.dialog_bg = faded.dialog_bg;
+            only_fills.dialog_body = faded.dialog_body;
+            only_fills.dialog_footer = faded.dialog_footer;
+            only_fills.overlay = faded.overlay;
+            only_fills.nav_tip = faded.nav_tip;
+            assert_eq!(faded, only_fills, "every other token (including text/icons/borders) stays exact");
+            assert!(faded.panel.a() < original.panel.a(), "the effect must actually change a panel");
+            source["options"] = json!([]);
+            let without = from_value(&source).unwrap();
+            assert_eq!(resolve_with(&without, &BTreeMap::from([("opacity".into(), OptionValue::Num(40.0))])), resolve_base(&without));
+        }
+    }
+
+    #[test]
+    fn theme_options_opacity_contrast_protects_text_at_40_over_viewport_extremes() {
+        use crate::theme::{composite, contrast_ratio};
+        for base in ["light", "dark"] {
+            let file = from_value(&json!({"format":FORMAT,"name":"Contrast","base":base,
+                "options":[{"id":"opacity","type":"range","default":40}]}))
+            .unwrap();
+            let full = resolve_base(&file);
+            let faded = resolve(&file);
+            for (role, fill) in [
+                ("panel", faded.panel),
+                ("panel_header", faded.panel_header),
+                ("toolbar", faded.toolbar),
+                ("timeline", faded.timeline),
+                ("dialog_bg", faded.dialog_bg),
+                ("dialog_body", faded.dialog_body),
+                ("dialog_footer", faded.dialog_footer),
+                ("overlay", faded.overlay),
+            ] {
+                for background in [Color32::BLACK, Color32::WHITE, full.viewport_top, full.viewport_bottom] {
+                    let ground = composite(fill, background);
+                    for ink in [faded.text, faded.form_ink, faded.dialog_label] {
+                        assert!(contrast_ratio(composite(ink, ground), ground) >= 4.5, "{base} {role} {ink:?} on {background:?}: {fill:?}");
+                    }
+                }
+            }
+            for background in [Color32::BLACK, Color32::WHITE] {
+                let ground = composite(faded.nav_tip, background);
+                assert!(contrast_ratio(composite(faded.nav_tip_ink, ground), ground) >= 4.5);
+            }
+            assert!(faded.panel.a() > (f32::from(full.panel.a()) * 0.4).round() as u8, "raise the floor when requested alpha is unreadable");
+            assert!(faded.panel.a() < 255, "do not make all options effectively opaque");
+            assert_eq!(resolve_with(&file, &BTreeMap::from([("opacity".into(), OptionValue::Num(-10.0))])), faded, "theme API still clamps");
+            assert_eq!(
+                resolve_with(&file, &BTreeMap::from([("opacity".into(), OptionValue::Num(f32::NAN))])),
+                faded,
+                "non-finite values use defaults"
+            );
+        }
+    }
+
+    #[test]
+    fn theme_options_opacity_is_applied_after_overlays_and_uses_the_theme_default() {
+        let file = from_value(&json!({"format":FORMAT,"name":"Overlay opacity","base":"dark",
+            "options":[{"id":"opacity","type":"range","default":60},{"id":"warm","type":"bool","default":true}],
+            "overlays":[{"when":{"opt":"warm","eq":true},"colors":{"panel":"#111111"}}]}))
+        .unwrap();
+        let faded = resolve(&file);
+        let full = resolve_with(&file, &BTreeMap::from([("opacity".into(), OptionValue::Num(100.0))]));
+        assert_eq!(full.panel, Color32::from_rgb(17, 17, 17));
+        assert!(faded.panel.a() < full.panel.a());
+        assert_eq!(faded.text, full.text);
+        // Premultiplied Color32 storage can quantize unmultiplied channels by one byte.
+        assert!(faded.panel.to_srgba_unmultiplied()[..3].iter().all(|c| c.abs_diff(17) <= 1));
+    }
+
+    #[test]
+    fn original_shipped_themes_keep_the_original_resolver_output_and_serialization() {
+        assert_eq!(builtin().len(), BUILTIN.len());
+        for id in ORIGINAL_BUILTIN_IDS {
+            let theme = find(id, &[]).unwrap();
+            assert!(theme.tabs.is_empty(), "{}", theme.id);
+            let gruvbox = matches!(theme.id.as_str(), "gruvbox-dark" | "gruvbox-light");
+            assert!(!theme.needs_newer());
+            assert_eq!(!theme.options.is_empty(), gruvbox);
+            assert_eq!(!theme.overlays.is_empty(), gruvbox);
+            assert_eq!(resolve(theme), resolve_base(theme), "{}", theme.id);
+            assert_eq!(resolve_with(theme, &BTreeMap::from([("opacity".into(), OptionValue::Num(40.0))])), resolve_base(theme), "{}", theme.id);
+            let stored = serde_json::to_value(theme).unwrap();
+            assert!(stored.get("requires").is_none(), "{}", theme.id);
+            for key in ["options", "overlays"] {
+                assert_eq!(stored.get(key).is_some(), gruvbox, "{}: {key}", theme.id);
+            }
+        }
+    }
+
+    #[test]
+    fn shipped_theme_defaults_and_definition_roundtrips_preserve_all_tables() {
+        assert_eq!(builtin().len(), BUILTIN.len());
+        for theme in builtin() {
+            assert!(!theme.needs_newer(), "{}", theme.id);
+            let (defaults, notices) = effective_values(theme, &BTreeMap::new());
+            assert!(notices.is_empty(), "{}", theme.id);
+            assert_eq!(defaults.len(), theme.options.len(), "{}: every declaration is valid", theme.id);
+            assert_eq!(resolve_with(theme, &defaults), resolve(theme), "{}", theme.id);
+            let stored = serde_json::to_value(theme).unwrap();
+            assert_eq!(stored.get("requires").is_none(), theme.requires == 1, "{}", theme.id);
+            for (key, present) in [("options", !theme.options.is_empty()), ("overlays", !theme.overlays.is_empty()), ("tabs", !theme.tabs.is_empty())]
+            {
+                assert_eq!(stored.get(key).is_some(), present, "{}: {key}", theme.id);
+            }
+            let restored: ThemeFile = serde_json::from_value(stored).unwrap();
+            assert_eq!(&restored, theme, "{}", theme.id);
+            let exported = export_file(theme);
+            let mut imported = parse(&exported.to_string()).unwrap();
+            // Built-in identity is assigned by the source filename, not by the exported name.
+            imported.id.clone_from(&theme.id);
+            assert_eq!(&imported, theme, "{}", theme.id);
+            assert_eq!(resolve(&imported), resolve(theme), "{}", theme.id);
+        }
+    }
+
+    #[test]
+    fn malformed_saved_definitions_and_comparisons_resolve_without_panics() {
+        let mut theme = from_value(&option_theme(
+            sample_options(),
+            json!([
+                {"when":{"opt":"amount","gte":0},"colors":{"panel":"#ffffff"}}
+            ]),
+        ))
+        .unwrap();
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let original = theme.clone();
+            theme.options[2].kind = OptionKind::Range { default: invalid, min: 0.0, max: 10.0, step: 1.0, unit: None };
+            assert_eq!(resolve(&theme), resolve_base(&theme));
+            theme = original.clone();
+            theme.options[2].kind = OptionKind::Range { default: 5.0, min: invalid, max: 10.0, step: 1.0, unit: None };
+            assert_eq!(resolve(&theme), resolve_base(&theme));
+            theme = original.clone();
+            theme.overlays[0].when = Condition::Range { opt: "amount".into(), gte: Some(invalid), lte: None };
+            assert_eq!(resolve(&theme), resolve_base(&theme));
+            theme = original;
+        }
+        theme.requires = REQUIREMENTS_LEVEL + 1;
+        assert_eq!(resolve(&theme), resolve_base(&theme));
+        assert!(effective_values(&theme, &BTreeMap::new()).0.is_empty());
+    }
+
+    #[test]
     fn navigation_board_colours_are_themeable_and_roundtrip_on_both_bases() {
         for (base, tokens, colours) in [
             ("light", Tokens::light(), ["#e9edf2", "#dce2ea", "#8895a7", "#eef1f5", "#1b2430", "#ffffff", "#ffffff"]),
@@ -901,7 +2192,7 @@ mod tests {
         assert_eq!(resolve(&file).borders, crate::theme::Borders::LEGACY);
         assert!(parse_borders(&BTreeMap::from([("primary".into(), json!({"width":null,"color":"#ffffff"}))])).is_err());
         assert_eq!(resolve(find("blueprint", &[]).unwrap()).borders.primary.unwrap().color, Color32::WHITE);
-        for id in ["gruvbox-dark", "gruvbox-light", "gruvbox-dark-soft", "gruvbox-light-soft"] {
+        for id in ["gruvbox-dark", "gruvbox-light"] {
             assert_eq!(resolve(find(id, &[]).unwrap()).borders, crate::theme::Borders::LEGACY);
         }
     }
@@ -965,17 +2256,22 @@ mod tests {
         use crate::theme::{TabAccent, contrast_ratio};
         assert_eq!(builtin().len(), BUILTIN.len(), "all shipped themes must be valid");
         for file in builtin() {
-            let t = resolve(file);
-            assert!(t.icon_palette.is_some(), "{} has no icon palette", file.id);
-            // A two-colour theme (1-bit, 1-bit Dark) can't give each workspace its own fill; it
-            // still has to keep every tab readable, below.
-            let two_colour = is_two_colour(&file.id);
-            let mut fills = std::collections::HashSet::new();
-            for tab in ["MODEL", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER", "SKETCH"] {
-                let accent = TabAccent::for_tab(&t, tab);
-                assert!(fills.insert(accent.color) || two_colour, "{} repeats {tab}", file.id);
-                assert!(contrast_ratio(accent.ink, accent.soft) >= 4.5, "{} {tab} soft text", file.id);
-                assert!(contrast_ratio(accent.on_fill(&t), accent.color) >= 4.5, "{} {tab} pill text", file.id);
+            let gruvbox = matches!(file.id.as_str(), "gruvbox-dark" | "gruvbox-light");
+            let contrasts: &[&str] = if gruvbox { &["soft", "standard", "hard"] } else { &["standard"] };
+            for contrast in contrasts {
+                let options = if gruvbox { BTreeMap::from([("contrast".into(), OptionValue::Choice((*contrast).into()))]) } else { BTreeMap::new() };
+                let t = resolve_with(file, &options);
+                assert!(t.icon_palette.is_some(), "{} {contrast} has no icon palette", file.id);
+                // A two-colour theme (1-bit, 1-bit Dark) can't give each workspace its own fill; it
+                // still has to keep every tab readable, below.
+                let two_colour = is_two_colour(&file.id);
+                let mut fills = std::collections::HashSet::new();
+                for tab in ["MODEL", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER", "SKETCH"] {
+                    let accent = TabAccent::for_tab(&t, tab);
+                    assert!(fills.insert(accent.color) || two_colour, "{} {contrast} repeats {tab}", file.id);
+                    assert!(contrast_ratio(accent.ink, accent.soft) >= 4.5, "{} {contrast} {tab} soft text", file.id);
+                    assert!(contrast_ratio(accent.on_fill(&t), accent.color) >= 4.5, "{} {contrast} {tab} pill text", file.id);
+                }
             }
         }
     }
@@ -1061,6 +2357,505 @@ mod tests {
     }
 
     #[test]
+    fn gruvbox_contrast_choices_keep_six_appearances() {
+        let families: Vec<_> = builtin().iter().filter(|f| f.id.starts_with("gruvbox-")).map(|f| f.id.as_str()).collect();
+        assert_eq!(families, ["gruvbox-dark", "gruvbox-light"]);
+        for (id, panels, tops, bottoms, inks) in [
+            (
+                "gruvbox-dark",
+                ["#32302f", "#282828", "#1d2021"],
+                ["#373432", "#32302f", "#2c2c2c"],
+                ["#373432", "#32302f", "#2c2c2c"],
+                ["#1d2021", "#1d2021", "#141617"],
+            ),
+            ("gruvbox-light", ["#f2e5bc", "#fbf1c7", "#f9f5d7"], ["#f6edd0", "#fcf5d8", "#fbf8e3"], ["#ebdbb2"; 3], ["#3c3836"; 3]),
+        ] {
+            let file = find(id, &[]).unwrap();
+            assert_eq!(file.options.len(), 1);
+            let option = &file.options[0];
+            assert_eq!(option.id, "contrast");
+            let OptionKind::Choice { default, values } = &option.kind else { panic!("contrast must be a choice") };
+            assert_eq!(default, "standard");
+            assert_eq!(values.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(), ["soft", "standard", "hard"]);
+            for (index, contrast) in ["soft", "standard", "hard"].into_iter().enumerate() {
+                let options = BTreeMap::from([("contrast".into(), OptionValue::Choice(contrast.into()))]);
+                let tokens = resolve_with(file, &options);
+                assert_eq!(tokens.panel, parse_color(panels[index]).unwrap(), "{id}: {contrast}");
+                assert_eq!(tokens.viewport_top, parse_color(tops[index]).unwrap(), "{id}: {contrast}");
+                assert_eq!(tokens.viewport_bottom, parse_color(bottoms[index]).unwrap(), "{id}: {contrast}");
+                assert_eq!(export_icon_palette(tokens.icon_palette)["ink"], inks[index], "{id}: {contrast}");
+                assert_eq!(tokens.borders, crate::theme::Borders::LEGACY);
+                assert_eq!(resolve_with(&from_value(&export_file(file)).unwrap(), &options), tokens);
+            }
+            assert_eq!(resolve(file), resolve_base(file), "the Standard default keeps the old family palette");
+        }
+    }
+
+    #[test]
+    fn gruvbox_retired_ids_stay_reserved_for_imported_names() {
+        let mut custom = Vec::new();
+        for (old, _, _) in GRUVBOX_ALIASES {
+            let file = from_value(&json!({"format":FORMAT,"name":old,"base":"dark"})).unwrap();
+            assert_eq!(add(&mut custom, file).unwrap(), format!("custom-{old}"));
+            assert!(find(old, &custom).is_none(), "retired ids are not duplicate theme cards");
+        }
+    }
+
+    #[test]
+    fn onyx_defaults_offer_broad_subtle_blur_and_independent_material_choices() {
+        let file = find("onyx", &[]).unwrap();
+        assert_eq!(file.base, Base::Dark);
+        assert!(!file.needs_newer());
+        assert_eq!(file.options.len(), 8, "seven controls plus the Fade child");
+        assert_eq!(builtin().last().map(|theme| theme.id.as_str()), Some("onyx"), "existing picker order is retained");
+        let (values, notices) = effective_values(file, &BTreeMap::new());
+        assert!(notices.is_empty());
+        assert_eq!(values["opacity"], OptionValue::Num(80.0));
+        assert_eq!(values["blur"], OptionValue::Num(60.0));
+        assert_eq!(values["tab_colours"], OptionValue::Bool(false));
+        assert_eq!(values["tab_fade_ms"], OptionValue::Num(240.0));
+        assert_eq!(values["contrast"], OptionValue::Choice("soft".into()));
+        assert_eq!(values["brightness"], OptionValue::Num(100.0));
+        assert!(file.options.iter().all(|option| option.id != "edge_finish"));
+        assert_eq!(export_file(file)["requires"], 2);
+        assert_eq!(values["accent"], OptionValue::Choice("slate".into()));
+        assert_eq!(values["foreground_colours"], OptionValue::Choice("vibrant".into()));
+        assert_eq!(
+            ordered_options(file).iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+            ["opacity", "blur", "tab_colours", "tab_fade_ms", "accent", "contrast", "brightness", "foreground_colours"]
+        );
+        let opacity = file.options.iter().find(|o| o.id == "opacity").unwrap();
+        let OptionKind::Range { min, max, .. } = &opacity.kind else { panic!("opacity must be a range") };
+        assert_eq!((*min, *max), (60.0, 100.0));
+        let faded = resolve(file);
+        let full = resolve_with(file, &BTreeMap::from([("opacity".into(), OptionValue::Num(100.0))]));
+        assert!(faded.panel.a() < full.panel.a(), "the default exposes a little of the scene");
+        assert_eq!((faded.toolbar, faded.timeline), (faded.panel, faded.panel), "workspace surfaces share the same material");
+        assert_eq!(full.panel.a(), 255);
+        assert_eq!(faded.text, full.text);
+        assert!(faded.borders.primary_inset.is_some());
+        assert!(faded.borders.bevel.is_none());
+        assert_eq!(faded.radius_md, 6);
+        assert_eq!(faded.viewport_top, resolve_base(file).viewport_top, "tab colours start off");
+        for def in file.options.iter().filter(|def| !crate::theme_options::standard(&def.id)) {
+            for language in ["en", "de", "ja", "ko", "zh"] {
+                assert!(def.label.contains_key(language) && def.help.contains_key(language));
+                if let OptionKind::Choice { values, .. } = &def.kind {
+                    assert!(values.iter().all(|value| value.label.contains_key(language)));
+                }
+            }
+        }
+        let roundtrip = from_value(&export_file(file)).unwrap();
+        assert_eq!(roundtrip.options, file.options);
+        assert_eq!(roundtrip.overlays, file.overlays);
+        assert_eq!(roundtrip.tabs, file.tabs);
+        assert_eq!(resolve(&roundtrip), faded);
+    }
+
+    #[test]
+    fn onyx_options_compose_and_keep_small_text_readable() {
+        use crate::theme::{TabAccent, composite, contrast_ratio};
+        let file = find("onyx", &[]).unwrap();
+        let ordinary = resolve(file);
+        for contrast in ["soft", "defined"] {
+            for accent in ["slate", "silver", "sage"] {
+                for opacity in [60.0, 80.0, 100.0] {
+                    for tabs in [false, true] {
+                        let values = BTreeMap::from([
+                            ("contrast".into(), OptionValue::Choice(contrast.into())),
+                            ("accent".into(), OptionValue::Choice(accent.into())),
+                            ("opacity".into(), OptionValue::Num(opacity)),
+                            ("tab_colours".into(), OptionValue::Bool(tabs)),
+                        ]);
+                        let base = resolve_with(file, &values);
+                        assert_eq!((base.toolbar, base.timeline), (base.panel, base.panel));
+                        let expected = match accent {
+                            "silver" => "#b7bdc2",
+                            "sage" => "#aabcae",
+                            _ => "#9eafbd",
+                        };
+                        assert_eq!(base.accent, parse_color(expected).unwrap());
+                        assert!(base.borders.primary_inset.is_some());
+                        assert!(base.borders.bevel.is_none());
+                        assert_eq!(base.error, ordinary.error, "accent and contrast must not recolour status");
+                        assert_eq!(base.warning, ordinary.warning);
+                        assert_eq!(base.agent_busy, ordinary.agent_busy);
+                        assert_eq!(base.agent_ok, ordinary.agent_ok);
+                        assert_eq!((base.axis_x, base.axis_y, base.axis_z), (ordinary.axis_x, ordinary.axis_y, ordinary.axis_z));
+                        assert_eq!(
+                            export_icon_palette(base.icon_palette)["solid"][2],
+                            "#4da7ff",
+                            "foreground glyphs retain the default Vibrant palette"
+                        );
+                        if contrast == "defined" {
+                            assert_ne!(base.field, ordinary.field, "defined contrast separates recessed fields");
+                        }
+                        for tab in ["MODEL", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER", "SKETCH"] {
+                            let tokens = resolve_for_tab(file, &values, Some(tab));
+                            assert_eq!(tokens.accent, base.accent, "tab surfaces must not replace the selected accent");
+                            assert_eq!(tokens.borders, base.borders);
+                            assert_eq!(tokens.icon_palette, base.icon_palette);
+                            if tabs {
+                                assert_ne!(tokens.viewport_top, base.viewport_top, "{tab} has a quiet authored tint");
+                            } else {
+                                assert_eq!(tokens, base);
+                            }
+                            let workspace = TabAccent::for_tab(&tokens, tab);
+                            assert!(contrast_ratio(workspace.ink, workspace.soft) >= 4.5);
+                            assert!(contrast_ratio(workspace.on_fill(&tokens), workspace.color) >= 4.5);
+                            for fill in [
+                                tokens.panel,
+                                tokens.panel_header,
+                                tokens.toolbar,
+                                tokens.timeline,
+                                tokens.dialog_bg,
+                                tokens.dialog_body,
+                                tokens.dialog_footer,
+                                tokens.overlay,
+                            ] {
+                                for background in [Color32::BLACK, Color32::WHITE, tokens.viewport_top, tokens.viewport_bottom] {
+                                    let ground = composite(fill, background);
+                                    for ink in [tokens.text, tokens.text_dim, tokens.form_ink, tokens.form_dim, tokens.dialog_label] {
+                                        assert!(
+                                            contrast_ratio(composite(ink, ground), ground) >= 4.5,
+                                            "{contrast}/{accent}/{opacity}/{tabs}/{tab}: {ink:?} on {fill:?} over {background:?}"
+                                        );
+                                    }
+                                }
+                            }
+                            assert!(contrast_ratio(tokens.text_dim, tokens.field) >= 4.5);
+                            assert!(contrast_ratio(tokens.text, tokens.control_fill) >= 4.5);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn surface_brightness_is_explicit_continuous_and_precedes_opacity_protection() {
+        use crate::theme::{composite, contrast_ratio};
+        let file = find("onyx", &[]).unwrap();
+        let source = export_file(file);
+        let index = file.options.iter().position(|option| option.id == "brightness").unwrap();
+        for (key, value) in [
+            ("effect", json!("unknown")),
+            ("effect", json!(true)),
+            ("type", json!("bool")),
+            ("min", json!(59)),
+            ("max", json!(121)),
+            ("default", json!(90)),
+            ("step", json!(2)),
+            ("unit", json!("px")),
+        ] {
+            let mut invalid = source.clone();
+            invalid["options"][index][key] = value;
+            assert!(from_value(&invalid).is_err(), "invalid brightness {key}");
+        }
+        let mut legacy = source.clone();
+        legacy["requires"] = json!(1);
+        assert!(from_value(&legacy).unwrap_err().contains("requires"));
+        assert_eq!(export_file(&from_value(&source).unwrap()), source);
+        let mut plain = file.clone();
+        plain.options.iter_mut().for_each(|option| option.effect = None);
+        assert_eq!(resolve(file), resolve(&plain), "100% preserves the exact authored palette");
+        let values = |brightness, opacity| {
+            BTreeMap::from([
+                ("brightness".into(), OptionValue::Num(brightness)),
+                ("opacity".into(), OptionValue::Num(opacity)),
+                ("tab_colours".into(), OptionValue::Bool(true)),
+            ])
+        };
+        let dark = resolve_for_tab(file, &values(60.0, 100.0), Some("SHEET METAL"));
+        let middle = resolve_for_tab(file, &values(100.0, 100.0), Some("SHEET METAL"));
+        let bright = resolve_for_tab(file, &values(120.0, 100.0), Some("SHEET METAL"));
+        assert!(dark.viewport_top.r() < middle.viewport_top.r() && middle.viewport_top.r() < bright.viewport_top.r());
+        assert!(dark.panel.r() < middle.panel.r() && middle.panel.r() < bright.panel.r());
+        assert_eq!((dark.panel.a(), bright.panel.a()), (middle.panel.a(), middle.panel.a()));
+        assert_eq!((dark.text, dark.axis_x, dark.selected_bg), (bright.text, bright.axis_x, bright.selected_bg));
+        for brightness in [60.0, 120.0] {
+            let translucent = resolve_for_tab(file, &values(brightness, 60.0), Some("SHEET METAL"));
+            for background in [Color32::BLACK, Color32::WHITE] {
+                assert!(contrast_ratio(translucent.text, composite(translucent.panel, background)) >= 4.5);
+            }
+        }
+    }
+
+    fn brightness_fixture() -> Value {
+        json!({"format":FORMAT,"name":"Brightness","base":"dark","requires":2,
+            "colors":{"panel":"#505050","viewport_top":"#646464","axis_x":"#12345678"},
+            "options":[{"id":"exposure","type":"range","effect":"surface_brightness",
+                "default":100,"min":60,"max":120,"step":1,"unit":"%"}]})
+    }
+
+    #[test]
+    fn surface_brightness_validation_matches_import_and_preference_updates() {
+        let source = brightness_fixture();
+        let theme = from_value(&source).unwrap();
+        assert_eq!(theme.options[0].effect, Some(OptionEffect::SurfaceBrightness));
+        assert_eq!(export_file(&theme)["requires"], 2);
+        assert_eq!(serde_json::to_value(&theme).unwrap()["requires"], 2);
+        assert_eq!(parse(&export_file(&theme).to_string()).unwrap(), theme);
+        assert_eq!(serde_json::from_value::<ThemeFile>(serde_json::to_value(&theme).unwrap()).unwrap(), theme);
+        for (min, max) in [(60, 120), (60, 100), (100, 120), (80, 110)] {
+            let mut valid = source.clone();
+            valid["options"][0]["min"] = json!(min);
+            valid["options"][0]["max"] = json!(max);
+            let imported = from_value(&valid).unwrap();
+            let mut restored = theme.clone();
+            restored.set_option_tables(&valid).unwrap();
+            assert_eq!(restored, imported);
+        }
+        let mut cases = Vec::new();
+        for (key, value) in [
+            ("effect", json!(null)),
+            ("effect", json!("unknown")),
+            ("effect", json!({"surface_brightness":true})),
+            ("effect", json!(["surface_brightness"])),
+            ("effect", json!(true)),
+            ("min", json!(59)),
+            ("min", json!(101)),
+            ("max", json!(121)),
+            ("max", json!(99)),
+            ("default", json!(90)),
+            ("step", json!(0)),
+            ("step", json!(2)),
+            ("unit", json!("px")),
+        ] {
+            let mut invalid = source.clone();
+            invalid["options"][0][key] = value;
+            cases.push(invalid);
+        }
+        for option in [
+            json!({"id":"exposure","type":"bool","default":true,"effect":"surface_brightness"}),
+            json!({"id":"exposure","type":"choice","default":"a","values":[{"id":"a","label":{}},{"id":"b","label":{}}],
+                "effect":"surface_brightness"}),
+        ] {
+            let mut invalid = source.clone();
+            invalid["options"][0] = option;
+            cases.push(invalid);
+        }
+        for key in ["default", "min", "max", "step"] {
+            for value in [Value::Null, json!("NaN"), json!("Infinity"), json!(1e100), json!(-1e100)] {
+                let mut invalid = source.clone();
+                invalid["options"][0][key] = value;
+                cases.push(invalid);
+            }
+        }
+        for id in STANDARD_OPTIONS {
+            let mut invalid = source.clone();
+            invalid["options"][0]["id"] = json!(id);
+            cases.push(invalid);
+        }
+        let mut duplicate = source.clone();
+        let mut second = duplicate["options"][0].clone();
+        second["id"] = json!("another_exposure");
+        duplicate["options"].as_array_mut().unwrap().push(second);
+        cases.push(duplicate);
+        for level in [None, Some(0), Some(1)] {
+            let mut invalid = source.clone();
+            invalid.as_object_mut().unwrap().remove("requires");
+            if let Some(level) = level {
+                invalid["requires"] = json!(level);
+            }
+            assert!(from_value(&invalid).unwrap_err().contains("requires"));
+            let mut legacy = ThemeFile { requires: level.unwrap_or(1), ..theme.clone() };
+            let before = legacy.clone();
+            assert!(legacy.set_option_tables(&invalid).unwrap_err().contains("requires"));
+            assert_eq!(legacy, before, "invalid updates are atomic");
+            assert_eq!(resolve(&legacy), resolve_base(&legacy), "restored legacy tables cannot enable effects");
+        }
+        for invalid in cases {
+            assert!(parse(&invalid.to_string()).is_err(), "{invalid}");
+            let mut restored = theme.clone();
+            assert!(restored.set_option_tables(&invalid).is_err(), "{invalid}");
+            assert_eq!(restored, theme, "invalid updates are atomic");
+        }
+        for number in ["NaN", "Infinity", "-Infinity", "1e400"] {
+            let invalid = source.to_string().replace("\"default\":100", &format!("\"default\":{number}"));
+            assert!(parse(&invalid).is_err(), "{number}");
+        }
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            for field in ["default", "min", "max", "step"] {
+                let mut damaged = theme.clone();
+                let OptionKind::Range { default, min, max, step, .. } = &mut damaged.options[0].kind else { panic!("range fixture") };
+                match field {
+                    "default" => *default = invalid,
+                    "min" => *min = invalid,
+                    "max" => *max = invalid,
+                    _ => *step = invalid,
+                }
+                assert_eq!(resolve(&damaged), resolve_base(&damaged), "non-finite {field} disables restored effects");
+            }
+        }
+    }
+
+    #[test]
+    fn surface_brightness_saved_values_are_bounded_continuous_explicit_and_parent_gated() {
+        let source = brightness_fixture();
+        let theme = from_value(&source).unwrap();
+        let saved = |value| BTreeMap::from([("exposure".into(), value)]);
+        for (input, expected) in [(-100.0, 60.0), (59.0, 60.0), (121.0, 120.0), (f32::MAX, 120.0)] {
+            let values = saved(OptionValue::Num(input));
+            let (effective, notices) = effective_values(&theme, &values);
+            assert_eq!(effective["exposure"], OptionValue::Num(expected));
+            assert_eq!(notices, [OptionNotice { id: "exposure".into(), kind: OptionNoticeKind::Clamped }]);
+            assert_eq!(resolve_with(&theme, &values), resolve_with(&theme, &saved(OptionValue::Num(expected))));
+        }
+        for (input, kind) in [
+            (OptionValue::Num(f32::NAN), OptionNoticeKind::NonFinite),
+            (OptionValue::Num(f32::INFINITY), OptionNoticeKind::NonFinite),
+            (OptionValue::Num(f32::NEG_INFINITY), OptionNoticeKind::NonFinite),
+            (OptionValue::Bool(true), OptionNoticeKind::WrongType),
+            (OptionValue::Choice("100".into()), OptionNoticeKind::WrongType),
+        ] {
+            let values = saved(input);
+            let (effective, notices) = effective_values(&theme, &values);
+            assert_eq!(effective["exposure"], OptionValue::Num(100.0));
+            assert_eq!(notices, [OptionNotice { id: "exposure".into(), kind }]);
+            assert_eq!(resolve_with(&theme, &values), resolve(&theme));
+        }
+        for (percent, channel) in [(60.0, 60), (60.5, 61), (100.0, 100), (120.0, 120)] {
+            let values = saved(OptionValue::Num(percent));
+            assert!(effective_values(&theme, &values).1.is_empty());
+            assert_eq!(resolve_with(&theme, &values).viewport_top, Color32::from_gray(channel));
+        }
+        let mut implicit = source.clone();
+        implicit["options"][0].as_object_mut().unwrap().remove("effect");
+        implicit["options"][0]["id"] = json!("brightness");
+        let implicit = from_value(&implicit).unwrap();
+        assert_eq!(resolve_with(&implicit, &BTreeMap::from([("brightness".into(), OptionValue::Num(60.0))])), resolve_base(&implicit));
+        let mut gated = source;
+        gated["options"][0]["parent"] = json!("enabled");
+        gated["options"].as_array_mut().unwrap().push(json!({"id":"enabled","type":"bool","default":false}));
+        let gated = from_value(&gated).unwrap();
+        let mut values = saved(OptionValue::Num(60.0));
+        assert_eq!(effective_values(&gated, &values).0["exposure"], OptionValue::Num(60.0));
+        assert_eq!(resolve_with(&gated, &values), resolve_base(&gated));
+        values.insert("enabled".into(), OptionValue::Bool(true));
+        assert_eq!(resolve_with(&gated, &values).viewport_top, Color32::from_gray(60));
+    }
+
+    #[test]
+    fn surface_brightness_preserves_alpha_and_semantics_and_scales_authored_layers() {
+        let mut source = brightness_fixture();
+        source["colors"]["grid"] = json!("#64646480");
+        source["colors"]["border"] = json!("#64646480");
+        source["borders"] = json!({"primary":{"width":1,"color":"#64646480"}});
+        let theme = from_value(&source).unwrap();
+        let original = resolve(&theme);
+        for percent in [60.0, 120.0] {
+            let mut before = original;
+            let mut after = resolve_with(&theme, &BTreeMap::from([("exposure".into(), OptionValue::Num(percent))]));
+            assert_ne!(after.grid, before.grid);
+            assert_ne!(after.border, before.border);
+            assert_ne!(after.borders.primary, before.borders.primary);
+            assert_eq!(after.borders.primary.unwrap().color.a(), before.borders.primary.unwrap().color.a());
+            assert_eq!(after.borders.primary.unwrap().width, before.borders.primary.unwrap().width);
+            assert_eq!(after.icon_palette, before.icon_palette);
+            for key in keys() {
+                let alphas = |colors: &[Color32]| colors.iter().map(|color| color.a()).collect::<Vec<_>>();
+                assert_eq!(alphas(slot(&mut after, key).unwrap()), alphas(slot(&mut before, key).unwrap()), "{percent} {key}: alpha");
+            }
+            for key in [
+                "text",
+                "text_dim",
+                "form_ink",
+                "form_dim",
+                "dialog_label",
+                "accent",
+                "selected_bg",
+                "selected_ink",
+                "hover",
+                "error",
+                "warning",
+                "agent_busy",
+                "agent_ok",
+                "axis_x",
+                "axis_y",
+                "axis_z",
+                "sketch",
+                "sketch_fixed",
+                "sketch_conflict",
+            ] {
+                assert_eq!(slot(&mut after, key), slot(&mut before, key), "{percent} {key}: semantic colour");
+            }
+        }
+        source["overlays"] = json!([{"when":{"opt":"exposure","gte":60},"colors":{"panel":"#323232","viewport_top":"#969696"}}]);
+        source["tabs"] = json!({"SKETCH":{"panel":"#3c3c3c","viewport_top":"#c8c8c8"}});
+        source["options"]
+            .as_array_mut()
+            .unwrap()
+            .extend([json!({"id":"tab_colours","type":"bool","default":true}), json!({"id":"opacity","type":"range","default":60})]);
+        let theme = from_value(&source).unwrap();
+        for (percent, overlay_channel, tab_channel) in [(60.0, 90, 120), (120.0, 180, 240)] {
+            let values = BTreeMap::from([("exposure".into(), OptionValue::Num(percent))]);
+            let overlay = resolve_with(&theme, &values);
+            let tab = resolve_for_tab(&theme, &values, Some("SKETCH"));
+            assert_eq!(overlay.viewport_top, Color32::from_gray(overlay_channel));
+            assert_eq!(tab.viewport_top, Color32::from_gray(tab_channel));
+            assert_eq!(tab.axis_x, original.axis_x);
+            for tokens in [overlay, tab] {
+                for background in [Color32::BLACK, Color32::WHITE] {
+                    let ground = crate::theme::composite(tokens.panel, background);
+                    assert!(crate::theme::contrast_ratio(crate::theme::composite(tokens.text, ground), ground) >= 4.5);
+                }
+            }
+        }
+    }
+
+    const ORIGINAL_BUILTIN_IDS: &[&str] = &[
+        "gruvbox-dark",
+        "gruvbox-light",
+        "solidcraft-95",
+        "1-bit",
+        "1-bit-dark",
+        "platinum-9",
+        "cupertino",
+        "green-phosphor",
+        "amber-phosphor",
+        "blueprint",
+        "one-dark",
+        "tokyo-night",
+        "solarized-light",
+        "nord",
+        "high-contrast",
+        "graphite",
+        "nosferatu",
+        "catppuccin-mocha",
+        "okibi",
+        "akari",
+        "clay",
+        "clay-dark",
+        "cga",
+    ];
+
+    #[test]
+    fn builtin_order_preserves_the_existing_picker_sequence() {
+        let themes = read_builtin(BUILTIN).unwrap();
+        let retained: Vec<_> = themes.iter().map(|t| t.id.as_str()).filter(|id| ORIGINAL_BUILTIN_IDS.contains(id)).collect();
+        assert_eq!(retained, ORIGINAL_BUILTIN_IDS);
+        assert!(BUILTIN.windows(2).all(|pair| pair[0].0 < pair[1].0), "source entries are sorted by id");
+    }
+
+    #[test]
+    fn builtin_metadata_rejects_missing_invalid_and_duplicate_order() {
+        let text =
+            |order: Value| json!({"format": FORMAT, "name": "Synthetic", "base": "dark", "provenance": "Original", "order": order}).to_string();
+        let good = text(json!(10));
+        assert!(read_builtin(&[("a", &good)]).is_ok());
+        let earlier = text(json!(5));
+        let ordered = read_builtin(&[("a", &good), ("b", &earlier)]).unwrap();
+        assert_eq!(ordered.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["b", "a"]);
+        assert!(read_builtin(&[("a", &good), ("a", &earlier)]).is_err());
+        assert!(read_builtin(&[("a", &good), ("b", &good)]).is_err());
+        for order in [Value::Null, json!(-1), json!(1.5), json!("10")] {
+            assert!(read_builtin(&[("a", &text(order))]).is_err());
+        }
+        assert!(read_builtin(&[]).is_err());
+    }
+
+    #[test]
     fn built_in_themes_read_and_differ_from_their_base() {
         assert_eq!(builtin().len(), BUILTIN.len(), "every built-in theme file reads");
         for t in builtin() {
@@ -1101,17 +2896,24 @@ mod tests {
         assert_eq!((theme.name.as_str(), theme.colors.len()), ("CGA", keys().len()), "CGA sets every colour");
     }
 
-    /// #4868: a theme that sets none of the File view's colours (all the built-in ones) gets them
+    /// #4868: a theme that sets none of the File view's colours gets them
     /// from its own palette, readable: the rail and primary action from its accent, the page from
     /// its panel, not Dark's or Light's blue and grey. One it does set stays as set.
     #[test]
     fn the_file_view_follows_a_theme_that_does_not_set_its_colours() {
         for theme in builtin() {
             let t = resolve(theme);
+            // File colours derive from the authored material before floating-surface opacity.
+            let mut opaque = theme.clone();
+            opaque.options.retain(|option| option.id != "opacity");
+            let material = resolve(&opaque);
             if !theme.colors.contains_key("file_rail") {
-                assert_eq!((t.file_background, t.file_primary), (t.panel, t.accent_soft), "{}", theme.id);
+                assert_eq!((t.file_background, t.file_primary), (material.panel, material.accent_soft), "{}", theme.id);
                 let base = if theme.base.is_dark() { Tokens::dark() } else { Tokens::light() };
                 assert!(t.accent == base.accent || t.file_rail != base.file_rail, "{}: the rail is the base's", theme.id);
+            }
+            if !theme.colors.contains_key("file_surface") {
+                assert_eq!(t.file_surface, material.dialog_bg, "{}", theme.id);
             }
             // 4.5:1, or the best any of the theme's own inks reaches on that fill when that is less
             // (Solarized Light's text on its soft accent is 4.29:1): a derived colour can't do
@@ -1159,6 +2961,27 @@ mod tests {
         assert_eq!(p.panel, Color32::from_rgb(0x10, 0x20, 0x30));
         assert_eq!(p.axis_z, Color32::from_rgba_unmultiplied(0, 0, 255, 0x80));
         assert_eq!(p.text, Tokens::light().text);
+    }
+
+    /// Conflicting sketch geometry (#7244) is the error red by default, follows a theme's own
+    /// `error` when the theme leaves `sketch_conflict` out, and takes the theme's own key when set.
+    #[test]
+    fn sketch_conflict_defaults_to_the_error_colour_and_a_theme_can_set_its_own() {
+        for t in [Tokens::light(), Tokens::dark()] {
+            assert_eq!(t.sketch_conflict, t.error);
+        }
+        let file = |colors: &str| {
+            resolve(&parse(&format!(r#"{{"format":"solidcraft-theme/1","name":"Conflict","base":"light","colors":{{{colors}}}}}"#)).unwrap())
+        };
+        let (red, green) = (Color32::from_rgb(0xcc, 0x24, 0x1d), Color32::from_rgb(0x12, 0xab, 0x34));
+        assert_eq!(file(r##""error":"#cc241d""##).sketch_conflict, red, "the theme's error colour");
+        assert_eq!(file(r##""error":"#cc241d","sketch_conflict":"#12ab34""##).sketch_conflict, green, "the theme's own key wins");
+        assert_eq!(file(r##""panel":"#102030""##).sketch_conflict, Tokens::light().error);
+        for theme in builtin() {
+            let t = resolve(theme);
+            assert_eq!(t.sketch_conflict, t.error, "{}: conflicts in the theme's error colour", theme.id);
+        }
+        assert!(keys().contains(&"sketch_conflict"), "exported and imported by name");
     }
 
     /// A theme file written before the axes were one set (#976) still reads: its view triad and
@@ -1326,9 +3149,11 @@ mod tests {
         }
         let defaults = radius_values(Tokens::dark());
         assert_eq!(defaults, radius_values(Tokens::light()));
-        for suffix in ["", "-hard", "-soft"] {
-            assert_eq!(values(&format!("gruvbox-dark{suffix}")), defaults);
-            assert_eq!(values(&format!("gruvbox-light{suffix}")), defaults);
+        for id in ["gruvbox-dark", "gruvbox-light"] {
+            for contrast in ["soft", "standard", "hard"] {
+                let options = BTreeMap::from([("contrast".into(), OptionValue::Choice(contrast.into()))]);
+                assert_eq!(radius_values(resolve_with(find(id, &[]).unwrap(), &options)), defaults);
+            }
         }
         for file in builtin().iter().filter(|file| file.radii.is_empty()) {
             assert_eq!(radius_values(resolve(file)), defaults, "{}", file.id);

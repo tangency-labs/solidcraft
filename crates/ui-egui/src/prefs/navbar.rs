@@ -1,7 +1,8 @@
 //! Navigation bar editor. The shared viewport painter owns the preview's appearance.
 use crate::navigation::NavCaps;
-use crate::navigation_bar::{self, Idle, Kind, Labels, MenuDisplay, NavigationBar, Position, Size, SlotOptions};
+use crate::navigation_bar::{self, Edge, Idle, Kind, Labels, MenuDisplay, NavigationBar, Position, Size, SlotOptions};
 use crate::navigation_bar_view;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, scenario, theme::Tokens, ui_kit};
 use egui::{Rect, Sense, vec2};
 use serde_json::json;
@@ -23,18 +24,6 @@ struct Source {
 type Drag = ui_kit::ReorderPayload<Source>;
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
-    // The bar editor is drawn by hand, not through the kit rows the search hides, so while a
-    // search runs it stays out unless the section's own title or a setting's label matches.
-    if crate::prefs_search::querying(ui) {
-        let labels: Vec<String> = ["title", "preview_as", "position", "size", "buttons", "idle", "show", "reset_default"]
-            .iter()
-            .map(|key| app.tr(&format!("navbar.custom.{key}")).to_owned())
-            .collect();
-        let texts: Vec<&str> = labels.iter().map(String::as_str).collect();
-        if !crate::prefs_search::texts_hit(ui, &texts) {
-            return;
-        }
-    }
     let scroll = app.prefs_window.navbar_scroll;
     let mut state = std::mem::take(&mut app.prefs_window.navbar);
     if state.slots != app.preferences.navigation_bar.slots {
@@ -47,24 +36,49 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         ui_kit::settings_section(ui, "navigation_bar", crate::i18n::tr("navbar.custom.title"), |ui| {
             let width = ui.available_width();
-            ui_kit::text(ui, app.tr("navbar.custom.intro"), ui_kit::Text::Hint("navbar_intro"));
-            segments(ui, "preview_as", &mut usize::from(state.render), &["navbar.custom.design", "navbar.custom.render"], |i| state.render = i == 1);
-            preview(app, ui, &mut state, width);
-            let card = ui_kit::settings_card(ui, |ui| inspector(app, ui, &mut state));
-            scenario::publish_rect("prefs:navbar:inspector", card.response.rect);
-            available(app, ui, &mut state);
+            let t = Tokens::get();
+            let header = ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = t.space_16;
+                let label_width = ui_kit::ContentWidth::label(ui, app.tr("navbar.custom.preview_as")).max(t.form_label_width);
+                let tabs_width = [app.tr("navbar.custom.design"), app.tr("navbar.custom.render")]
+                    .iter()
+                    .map(|label| ui_kit::ContentWidth::name(ui, label) + t.space_16)
+                    .sum::<f32>();
+                let preview_width = (label_width + t.space_14 + tabs_width + t.space_16 + t.space_6).min(width);
+                ui.allocate_ui_with_layout(vec2(preview_width, t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+                    ui_kit::settings_form(ui, label_width, |ui| {
+                        segments(ui, "preview_as", &mut usize::from(state.render), &["navbar.custom.design", "navbar.custom.render"], |i| {
+                            state.render = i == 1
+                        });
+                    });
+                });
+                let actions_minimum = ui_kit::ContentWidth::label(ui, app.tr("navbar.custom.show"))
+                    + t.space_14
+                    + t.space_6
+                    + t.space_8
+                    + ui_kit::ContentWidth::button(ui, app.tr("navbar.custom.reset_default"));
+                let actions_width = (width - preview_width - t.space_16).max(actions_minimum).min(width);
+                ui.allocate_ui_with_layout(vec2(actions_width, t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+                    header_actions(app, ui, &mut state);
+                });
+            });
+            scenario::publish_rect("prefs:navbar:header", header.response.rect);
+            if !crate::prefs_search::suppress_chrome(ui) {
+                preview(app, ui, &mut state, width);
+                if state.selected.is_some() {
+                    let card = ui_kit::settings_card(ui, |ui| inspector(app, ui, &mut state));
+                    scenario::publish_rect("prefs:navbar:inspector", card.response.rect);
+                }
+                available(app, ui, &mut state);
+            }
             ui_kit::divider(ui, "navbar_appearance");
             appearance(app, ui);
-            ui_kit::settings_inline_note(
-                ui,
-                &crate::i18n::format("navbar.custom.count", &[("count", &app.preferences.navigation_bar.slots.len().to_string())]),
-            );
+
             if let Some(message) =
                 state.notice.or_else(|| (app.preferences.navigation_bar.slots.len() >= navigation_bar::MAX_SLOTS).then_some("navbar.custom.full"))
             {
                 ui.label(egui::RichText::new(app.tr(message)).color(Tokens::get().warning));
             }
-            footer(app, ui, &mut state);
         });
         if let Some(rect) = scenario::rect_of(&format!("dialog:section:{}", app.tr("navbar.custom.title"))) {
             scenario::publish_rect("prefs:section:navigation_bar", rect);
@@ -78,28 +92,55 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.prefs_window.navbar = state;
 }
 
-fn segments(ui: &mut egui::Ui, key: &str, selected: &mut usize, options: &[&str], mut change: impl FnMut(usize)) {
+fn segments(ui: &mut egui::Ui, key: &str, selected: &mut usize, options: &[&str], change: impl FnMut(usize)) {
     let label_key = format!("navbar.custom.{key}");
     let label = crate::i18n::tr(&label_key);
-    let labels: Vec<_> = options.iter().map(|key| crate::i18n::tr(key)).collect();
-    ui_kit::row(ui, label, |ui| {
-        if ui_kit::segmented(ui, selected, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() }) {
-            change(*selected);
-        }
-        if let Some(rect) = scenario::rect_of(&format!("dialog:segments:{label}")) {
-            scenario::publish_target(&format!("prefs:navbar:{key}"), rect);
-        } else if let Some(rect) = scenario::rect_of(&format!("dialog:widget:{label}")) {
-            scenario::publish_target(&format!("prefs:navbar:{key}"), rect);
-        }
-        for (index, option) in labels.iter().enumerate() {
-            if let Some(rect) = scenario::rect_of(&format!("dialog:{label}:{option}")) {
-                scenario::publish_target(&format!("prefs:navbar:{key}:{index}"), rect);
-            }
-        }
-    });
+    ui_kit::row(ui, label, |ui| segment_control(ui, key, selected, options, change));
 }
 
-fn footer(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
+fn segment_control(ui: &mut egui::Ui, key: &str, selected: &mut usize, options: &[&str], mut change: impl FnMut(usize)) {
+    ui.spacing_mut().item_spacing.x = Tokens::get().space_6;
+    let label_key = format!("navbar.custom.{key}");
+    let label = crate::i18n::tr(&label_key);
+    let labels: Vec<_> = options
+        .iter()
+        .map(|key| {
+            crate::i18n::tr(match *key {
+                "navbar.custom.always" => "prefs.layout_page.always",
+                "navbar.custom.hide_idle" => "prefs.layout_page.hover",
+                "navbar.custom.labels" => "prefs.layout_page.icons_labels",
+                _ => key,
+            })
+        })
+        .collect();
+    if ui_kit::segmented(ui, selected, &labels, ui_kit::Segments { intrinsic: matches!(key, "preview_as" | "shows"), ..Default::default() }) {
+        change(*selected);
+    }
+    if key == "preview_as" {
+        ui_kit::help_icon(ui, crate::i18n::tr("navbar.custom.intro"));
+    }
+    if let Some(rect) = scenario::rect_of(&format!("dialog:segments:{label}")) {
+        scenario::publish_target(&format!("prefs:navbar:{key}"), rect);
+    } else if let Some(rect) = scenario::rect_of(&format!("dialog:widget:{label}")) {
+        scenario::publish_target(&format!("prefs:navbar:{key}"), rect);
+    }
+    for (index, option) in labels.iter().enumerate() {
+        if let Some(rect) = scenario::rect_of(&format!("dialog:{label}:{option}")) {
+            scenario::publish_target(&format!("prefs:navbar:{key}:{index}"), rect);
+            if let Some(legacy) = options.get(index) {
+                scenario::publish_target(&format!("dialog:{label}:{}", crate::i18n::tr(legacy)), rect);
+            }
+        }
+    }
+}
+
+fn option(ui: &mut egui::Ui, key: &str, selected: &mut usize, options: &[&str], change: impl FnMut(usize)) {
+    let label_key = format!("navbar.custom.{key}");
+    let label = crate::i18n::tr(&label_key);
+    ui_kit::settings_compound_field(ui, label, label, |ui| segment_control(ui, key, selected, options, change));
+}
+
+fn header_actions(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
     let t = Tokens::get();
     let label = app.tr("navbar.custom.reset_default");
     let width = ui_kit::ContentWidth::button(ui, label).max(t.control_height);
@@ -107,14 +148,22 @@ fn footer(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
     let reset = Rect::from_min_max(egui::pos2((rect.right() - width).max(rect.left()), rect.top()), rect.max);
     let check = Rect::from_min_max(rect.min, egui::pos2((reset.left() - t.space_8).max(rect.left()), rect.bottom()));
     ui.scope_builder(egui::UiBuilder::new().max_rect(check).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-        let mut visible = app.ui.show_navigation_bar;
-        let response = ui_kit::checkbox(ui, app.tr("navbar.custom.show"), &mut visible);
-        scenario::publish_target("prefs:navbar:show", response.rect);
-        if response.changed() {
-            let _ = app.run("view.navigation_bar", json!({"visible":visible}));
-        }
+        ui_kit::settings_form(ui, 0.0, |ui| {
+            ui_kit::row(ui, "", |ui| {
+                let mut visible = app.ui.show_navigation_bar;
+                let response = ui_kit::checkbox(ui, app.tr("navbar.custom.show"), &mut visible);
+                scenario::publish_target("prefs:navbar:show", response.rect);
+                if response.changed() {
+                    let _ = app.run("view.navigation_bar", json!({"visible":visible}));
+                }
+            })
+        });
     });
-    let response = ui_kit::button_at(ui, "navbar_reset", reset, label, ui_kit::Button::Normal);
+    let response = ui
+        .scope_builder(egui::UiBuilder::new().max_rect(reset), |ui| {
+            ui_kit::settings_form(ui, 0.0, |ui| ui_kit::row(ui, label, |ui| ui_kit::button(ui, label, ui_kit::Button::Normal)))
+        })
+        .inner;
     scenario::publish_target("prefs:navbar:reset", response.rect);
     scenario::publish_rect("prefs:navbar:status", rect);
     if response.clicked() {
@@ -166,15 +215,42 @@ fn preview(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, width: f32)
             });
         }
     }
+    slot_count(app, ui, stage, bar.rect);
     let target = if egui::DragAndDrop::payload::<Drag>(ui.ctx()).is_some_and(|payload| payload.id.index.is_some()) {
         bar.rect.intersect(stage)
     } else {
         stage
     };
-    drop_on_preview(app, ui, state, target.intersect(ui.clip_rect()), &cells);
+    drop_on_preview(app, ui, state, target.intersect(ui.clip_rect()), &cells, bar.rect.center().y);
 }
 
-fn drop_on_preview(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, target: Rect, cells: &[(usize, Rect)]) {
+/// The slot count sits in the stage on the side of the bar facing the middle of the view, aligned with the bar.
+fn slot_count(app: &SolveApp, ui: &mut egui::Ui, stage: Rect, bar: Rect) {
+    let t = Tokens::get();
+    let view = Tokens::view();
+    let text = crate::i18n::format(
+        "prefs.layout_page.slot_count",
+        &[("count", &app.preferences.navigation_bar.slots.len().to_string()), ("max", &navigation_bar::MAX_SLOTS.to_string())],
+    );
+    let galley = ui.painter().layout_no_wrap(text.clone(), egui::FontId::proportional(t.font_body), view.text_dim);
+    let size = galley.size();
+    let x = match app.preferences.navigation_bar.position {
+        Position::Left => stage.left() + ui_kit::NAV_BORDER + ui_kit::NAV_STAGE_INSET + ui_kit::NAV_PADDING,
+        Position::Centre => stage.center().x - size.x / 2.0,
+        Position::Right => stage.right() - ui_kit::NAV_BORDER - ui_kit::NAV_STAGE_INSET - ui_kit::NAV_PADDING - size.x,
+    };
+    let y = match app.preferences.navigation_bar.edge {
+        Edge::Top => bar.bottom() + t.space_8,
+        Edge::Bottom => bar.top() - t.space_8 - size.y,
+    };
+    let rect = Rect::from_min_size(egui::pos2(x, y), size);
+    ui.painter().with_clip_rect(stage).galley(rect.min, galley, view.text_dim);
+    let response = ui.interact(rect, ui.scope_id().with("navbar_slot_count"), Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text.as_str()));
+    scenario::publish_rect("prefs:navbar:count", rect);
+}
+
+fn drop_on_preview(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, target: Rect, cells: &[(usize, Rect)], marker_y: f32) {
     let Some(payload) = egui::DragAndDrop::payload::<Drag>(ui.ctx()) else { return };
     let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) else { return };
     let over = target.contains(pointer) && ui.rect_contains_pointer(target);
@@ -189,8 +265,8 @@ fn drop_on_preview(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, tar
         let marker = ui_kit::insertion_marker_with_ink(
             ui.painter(),
             x,
-            target.center().y - ui_kit::NAV_MARKER_HEIGHT / 2.0,
-            target.center().y + ui_kit::NAV_MARKER_HEIGHT / 2.0,
+            marker_y - ui_kit::NAV_MARKER_HEIGHT / 2.0,
+            marker_y + ui_kit::NAV_MARKER_HEIGHT / 2.0,
             Tokens::get().form_primary,
         );
         scenario::publish_target("prefs:navbar:marker", marker);
@@ -239,11 +315,9 @@ fn inspector(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
         .selected
         .and_then(|index| app.preferences.navigation_bar.slots.get(index).and_then(|id| navigation_bar::find(id)).map(|slot| (index, slot)))
     else {
-        ui_kit::text(ui, app.tr("navbar.custom.select"), ui_kit::Text::Hint("navbar_select"));
         return;
     };
     inspector_header(app, ui, state, index, slot);
-    ui_kit::text(ui, app.tr(slot.description), ui_kit::Text::Hint("navbar_description"));
     if slot.id == "visual_style" {
         let mut selected = usize::from(app.preferences.navigation_bar.menu_display(slot.id) == MenuDisplay::IconOnly);
         segments(ui, "shows", &mut selected, &["navbar.custom.icon_value", "navbar.custom.icon_only"], |index| {
@@ -290,6 +364,7 @@ fn inspector_header(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, in
         }
         ui_kit::text(ui, app.tr(slot.label), ui_kit::Text::NameCell(true));
     });
+    ui.interact(name, ui.make_persistent_id("slot_help"), Sense::hover()).backing_on_hover_text(app.tr(slot.description));
     scenario::publish_rect("prefs:navbar:inspector:name", name);
     scenario::publish_rect("prefs:navbar:inspector:header", bounds);
     let mut actions_ui = ui.new_child(egui::UiBuilder::new().id_salt("slot_actions").max_rect(bounds));
@@ -317,8 +392,8 @@ fn inspector_header(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, in
                 .inner
             })
             .inner
-            .on_hover_text(label);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled && ui.is_enabled(), label));
+            .backing_on_hover_text(label);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled && ui.is_enabled(), label));
         scenario::publish_target(&format!("prefs:navbar:{key}"), response.rect);
         if response.clicked() {
             edit(app, state, index, key);
@@ -330,15 +405,44 @@ fn available(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = Tokens::get().space_6;
         let caption = crate::i18n::format("navbar.custom.available", &[("available", app.tr("ui.workspace_available"))]);
-        ui_kit::text(ui, &caption, ui_kit::Text::Hint("navbar_available"));
+        ui.horizontal(|ui| {
+            ui_kit::settings_inline_note(ui, app.tr("ui.workspace_available"));
+            ui_kit::help_icon(ui, &caption);
+            // Separators are not buttons: their source sits apart, at the end of the heading.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if let Some(slot) = navigation_bar::find("separator") {
+                    let hint = app.tr("navbar.custom.separator_hint");
+                    let dragging =
+                        egui::DragAndDrop::payload::<Drag>(ui.ctx()).is_some_and(|payload| payload.from_menu && payload.id.slot == slot.id);
+                    let (tile, add) = ui_kit::navigation_separator_source(ui, slot.id, app.tr(slot.label), dragging);
+                    let tile = tile.backing_on_hover_text(hint);
+                    scenario::publish_target(&format!("prefs:navbar:tile:{}", slot.id), tile.rect);
+                    scenario::publish_target(&format!("prefs:navbar:add:{}", slot.id), add.rect);
+                    if tile.drag_started() {
+                        tile.dnd_set_drag_payload(Drag {
+                            id: Source { slot: slot.id.to_owned(), index: None, slots: app.preferences.navigation_bar.slots.clone() },
+                            from_menu: true,
+                        });
+                    }
+                    if add.clicked() {
+                        let index = app.preferences.navigation_bar.slots.len();
+                        state.notice = app.preferences.navigation_bar.insert(index, slot.id).err();
+                        if state.notice.is_none() {
+                            state.selected = Some(index);
+                        }
+                    }
+                }
+            });
+        });
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(Tokens::get().space_8, Tokens::get().space_8);
             for slot in navigation_bar::CATALOGUE {
-                if slot.kind != Kind::Separator && app.preferences.navigation_bar.slots.iter().any(|id| id == slot.id) {
+                if slot.kind == Kind::Separator || app.preferences.navigation_bar.slots.iter().any(|id| id == slot.id) {
                     continue;
                 }
                 let dragging = egui::DragAndDrop::payload::<Drag>(ui.ctx()).is_some_and(|payload| payload.from_menu && payload.id.slot == slot.id);
                 let (tile, add) = ui_kit::navigation_tile(ui, slot.id, app.tr(slot.label), slot.current_icon(app.ui.visual_style), dragging);
+                let tile = tile.backing_on_hover_text(&caption);
                 scenario::publish_target(&format!("prefs:navbar:tile:{}", slot.id), tile.rect);
                 scenario::publish_target(&format!("prefs:navbar:add:{}", slot.id), add.rect);
                 if tile.drag_started() {
@@ -359,48 +463,102 @@ fn available(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
     });
 }
 
+fn option_grid(bar: &mut NavigationBar, ui: &mut egui::Ui, first: usize) {
+    let t = Tokens::get();
+    let columns = if ui.available_width() >= t.space_24 * 24.0 {
+        3
+    } else if ui.available_width() >= t.space_24 * 16.0 {
+        2
+    } else {
+        1
+    };
+    let width = (ui.available_width() - t.space_16 * (columns - 1) as f32) / columns as f32;
+    for row in (first..4).step_by(columns) {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = t.space_16;
+            for index in row..(row + columns).min(4) {
+                ui.allocate_ui_with_layout(vec2(width.max(0.0), t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| match index {
+                    0 => anchor_option(bar, ui),
+                    1 => {
+                        option(ui, "size", &mut usize::from(bar.size == Size::Regular), &["navbar.custom.compact", "navbar.custom.regular"], |i| {
+                            bar.size = if i == 1 { Size::Regular } else { Size::Compact }
+                        });
+                    }
+                    2 => {
+                        option(
+                            ui,
+                            "buttons",
+                            &mut usize::from(bar.labels == Labels::Labels),
+                            &["navbar.custom.icons", "navbar.custom.labels"],
+                            |i| bar.labels = if i == 1 { Labels::Labels } else { Labels::Icons },
+                        );
+                    }
+                    3 => {
+                        option(
+                            ui,
+                            "idle",
+                            &mut match bar.idle {
+                                Idle::Always => 0,
+                                Idle::Fade => 1,
+                                Idle::Hide => 2,
+                            },
+                            &["navbar.custom.always", "navbar.custom.fade", "navbar.custom.hide_idle"],
+                            |i| {
+                                bar.idle = match i {
+                                    0 => Idle::Always,
+                                    2 => Idle::Hide,
+                                    _ => Idle::Fade,
+                                }
+                            },
+                        );
+                    }
+                    _ => {}
+                });
+            }
+        });
+    }
+}
+
+fn anchor_option(bar: &mut NavigationBar, ui: &mut egui::Ui) {
+    let selected = usize::from(bar.edge == Edge::Bottom) * 3
+        + match bar.position {
+            Position::Left => 0,
+            Position::Centre => 1,
+            Position::Right => 2,
+        };
+    let names = [
+        "navbar.custom.anchor.top_left",
+        "navbar.custom.anchor.top_centre",
+        "navbar.custom.anchor.top_right",
+        "navbar.custom.anchor.bottom_left",
+        "navbar.custom.anchor.bottom_centre",
+        "navbar.custom.anchor.bottom_right",
+    ]
+    .map(crate::i18n::tr);
+    if let Some(index) = ui_kit::settings_anchor_field(ui, crate::i18n::tr("navbar.custom.position"), selected, &names) {
+        bar.edge = if index >= 3 { Edge::Bottom } else { Edge::Top };
+        bar.position = match index % 3 {
+            0 => Position::Left,
+            2 => Position::Right,
+            _ => Position::Centre,
+        };
+    }
+}
+
 fn appearance(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
     let bar = &mut app.preferences.navigation_bar;
-    ui_kit::settings_form(ui, Tokens::get().form_label_width, |ui| {
-        segments(
-            ui,
-            "position",
-            &mut match bar.position {
-                Position::Left => 0,
-                Position::Centre => 1,
-                Position::Right => 2,
-            },
-            &["navbar.custom.position_left", "navbar.custom.position_centre", "navbar.custom.position_right"],
-            |i| {
-                bar.position = match i {
-                    0 => Position::Left,
-                    2 => Position::Right,
-                    _ => Position::Centre,
-                }
-            },
-        );
-        segments(ui, "size", &mut usize::from(bar.size == Size::Regular), &["navbar.custom.compact", "navbar.custom.regular"], |i| {
-            bar.size = if i == 1 { Size::Regular } else { Size::Compact }
+    let anchor_size = ui_kit::navigation_anchor_size();
+    // The anchor picker is tall: beside the others when there is room, else the first of them.
+    if ui.available_width() >= t.space_24 * 22.0 {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = t.space_16;
+            ui.allocate_ui_with_layout(vec2(anchor_size.x, anchor_size.y + t.space_24), egui::Layout::top_down(egui::Align::Min), |ui| {
+                anchor_option(bar, ui)
+            });
+            ui.vertical(|ui| option_grid(bar, ui, 1));
         });
-        segments(ui, "buttons", &mut usize::from(bar.labels == Labels::Labels), &["navbar.custom.icons", "navbar.custom.labels"], |i| {
-            bar.labels = if i == 1 { Labels::Labels } else { Labels::Icons }
-        });
-        segments(
-            ui,
-            "idle",
-            &mut match bar.idle {
-                Idle::Always => 0,
-                Idle::Fade => 1,
-                Idle::Hide => 2,
-            },
-            &["navbar.custom.always", "navbar.custom.fade", "navbar.custom.hide_idle"],
-            |i| {
-                bar.idle = match i {
-                    0 => Idle::Always,
-                    2 => Idle::Hide,
-                    _ => Idle::Fade,
-                }
-            },
-        );
-    });
+    } else {
+        option_grid(bar, ui, 0);
+    }
 }

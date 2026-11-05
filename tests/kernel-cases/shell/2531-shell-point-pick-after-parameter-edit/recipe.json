@@ -1,0 +1,123 @@
+{
+ "commands": [
+  {
+   "command": "parameters.add",
+   "params": {
+    "name": "L",
+    "expression": "100 mm",
+    "unit": "mm"
+   }
+  },
+  {
+   "command": "parameters.add",
+   "params": {
+    "name": "Y0",
+    "expression": "5 mm",
+    "unit": "mm"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "S"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     5
+    ],
+    "p1": [
+     100,
+     25
+    ]
+   }
+  },
+  {
+   "command": "sketch.constraint.horizontal_vertical",
+   "params": {
+    "points": [
+     "origin",
+     "l1.start"
+    ],
+    "mode": "vertical"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "origin",
+     "l1.start"
+    ],
+    "type": "vertical",
+    "value": "Y0"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l1"
+    ],
+    "type": "length",
+    "value": "L"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l4"
+    ],
+    "type": "length",
+    "value": "20 mm"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "S",
+    "distance": "20 mm",
+    "operation": "new",
+    "body_name": "Bar"
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      100,
+      15,
+      10
+     ]
+    ],
+    "thickness": "2 mm",
+    "direction": "inside",
+    "body": "Bar"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "L",
+    "expression": "150 mm"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "Y0",
+    "expression": "15 mm"
+   }
+  }
+ ]
+}

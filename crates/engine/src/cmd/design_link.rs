@@ -68,7 +68,7 @@ pub(super) fn resolve(design: Option<&str>, link: &str) -> PathBuf {
 
 /// The links of `doc` stored for a design saved at `to` instead of at `from`.
 pub(super) fn rebased(doc: &Document, from: Option<&str>, to: &str) -> std::collections::BTreeMap<u64, DesignLink> {
-    doc.links.iter().map(|(c, l)| (*c, DesignLink { path: stored(Some(to), &resolve(from, &l.path)), feature: l.feature })).collect()
+    doc.links.iter().map(|(c, l)| (*c, DesignLink { path: stored(Some(to), &resolve(from, &l.path)), ..l.clone() })).collect()
 }
 
 #[cfg(test)]
@@ -90,7 +90,7 @@ mod tests {
         let unsaved = stored(None, &part);
         assert!(Path::new(&unsaved).is_absolute(), "{unsaved}");
         let mut doc = Document::default();
-        doc.links.insert(7, DesignLink { path: unsaved, feature: 3 });
+        doc.links.insert(7, DesignLink { path: unsaved, feature: 3, ..Default::default() });
         let moved = rebased(&doc, None, &design);
         assert_eq!(moved.get(&7).map(|l| l.path.as_str()), Some("../parts/plate.solidcraft"));
         let beside = root.join("parts").join("asm.solidcraft").to_string_lossy().into_owned();

@@ -157,7 +157,7 @@ pub fn router_skills(text: &str) -> BTreeSet<String> {
 
 /// The `name` and `description` of a `---` front matter block.
 pub fn front_matter(text: &str) -> Option<(String, String)> {
-    let rest = text.strip_prefix("---\n")?;
+    let rest = text.strip_prefix("---\n").or_else(|| text.strip_prefix("---\r\n"))?;
     let block = rest.split("\n---").next()?;
     let get =
         |key: &str| block.lines().find_map(|l| l.strip_prefix(key).and_then(|v| v.strip_prefix(':'))).map(|v| v.trim().trim_matches('"').to_owned());
@@ -405,6 +405,10 @@ mod tests {
             ]
         );
         assert_eq!(front_matter("no front matter"), None);
+        assert_eq!(
+            front_matter("---\r\nname: solidcraft-a\r\ndescription: Windows checkout\r\n---\r\n"),
+            Some(("solidcraft-a".into(), "Windows checkout".into()))
+        );
     }
 
     #[test]

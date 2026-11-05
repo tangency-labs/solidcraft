@@ -1,4 +1,6 @@
 {
+  "order": 250,
+  "provenance": "Original mapping of the IBM Color Graphics Adapter palette",
   "base": "dark",
   "colors": {
     "accent": "#55ffff",
@@ -27,6 +29,8 @@
     "chip": "#aa00aa",
     "construction_geom": "#aaaaaa",
     "construction_plane": "#ffff5522",
+    "comb_envelope": "#ff55ff",
+    "comb_teeth": "#55ffff",
     "continuity": [
       "#55ff55",
       "#5555ff",
@@ -45,8 +49,8 @@
     "dialog_footer": "#000000",
     "dialog_label": "#55ffff",
     "dialog_rule": "#00aaaa",
-    "dimension": "#ffffff",
-    "dimension_driven": "#aaaaaa",
+    "dimension": "#ffff55",
+    "dimension_driven": "#aa5500",
     "error": "#ff5555",
     "field": "#000000",
     "file_background": "#000000",
@@ -91,6 +95,8 @@
     "icons.highlight": "#ffffff",
     "icons.marker_halo": "#000000cc",
     "interference": "#ff5555",
+    "joint_axis": "#aaaaaa",
+    "joint_manipulator": "#ffff55",
     "logo": [
       "#ffffff",
       "#55ffff",
@@ -128,6 +134,10 @@
     "render_soft": "#000000",
     "rubber_band": "#55ffff",
     "section_cap": "#ffff55",
+    "section_hatch": [
+      "#555555",
+      "#aaaaaa"
+    ],
     "sel_edge": "#ffff55",
     "sel_edge_rim": "#000000",
     "sel_face": "#ffff55",
@@ -142,6 +152,7 @@
     "sketch": "#55ffff",
     "sketch_accent": "#ff55ff",
     "sketch_centerline": "#ffff55",
+    "sketch_conflict": "#ff5555",
     "sketch_construction": "#aaaaaa",
     "sketch_fixed": "#ffffff",
     "sketch_halo": "#000000",

@@ -4,6 +4,7 @@
 //! where it touches) or a flat face. Picking the profile on a part chooses the joint that part
 //! turns on. Play turns the cam a full turn so the follower shows its motion before OK.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::RichText;
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
@@ -46,7 +47,7 @@ pub struct CamForm {
 
 /// Joints of a kind: (id, label).
 fn joints_of(s: &Session, kinds: &[JointKind]) -> Vec<(u64, String)> {
-    s.doc.assembly.joints.iter().filter(|j| kinds.contains(&j.kind)).map(|j| (j.id, format!("{} ({:?})", j.name, j.kind))).collect()
+    s.doc.assembly.joints.iter().filter(|j| kinds.contains(&j.kind)).map(|j| (j.id, crate::dialogs_assembly::joint_choice(&j.name, j.kind))).collect()
 }
 
 pub fn start(app: &SolveApp) -> (Asm, Vec<SelInput>) {
@@ -94,9 +95,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut CamForm, inputs: &[Se
     let s = &app.session;
     let (cams, followers) = (joints_of(s, &[JointKind::Revolute]), joints_of(s, &[JointKind::Slider, JointKind::Revolute]));
     if cams.is_empty() || followers.len() < 2 && followers.iter().all(|j| cams.iter().any(|c| c.0 == j.0)) {
-        form_row(ui, "", |ui| {
-            ui.label(RichText::new(crate::i18n::tr_label("needs a joint that turns and one that slides or swings")).color(t.text_dim));
-        });
+        crate::ui_kit::status_line(ui, "needs a joint that turns and one that slides or swings", crate::ui_kit::StatusTone::Dim);
         return false;
     }
     // A profile picked on a part chooses the joint that part turns on, once.
@@ -133,9 +132,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut CamForm, inputs: &[Se
     }
     crate::ui_kit::options(ui, "cam_options", &mut [("Other side", &mut f.flip)]);
     form_row(ui, "Animate", |ui| {
-        let label = if f.animate { "■ Stop" } else { "▶ Play" };
+        let label = crate::i18n::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
         let r = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
-            .on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"));
+            .backing_on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"));
         crate::scenario::publish_handle("dialog:Animate", r.rect.center());
         if r.clicked() {
             f.animate = !f.animate;

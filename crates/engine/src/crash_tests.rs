@@ -50,6 +50,15 @@ fn child() {
         }
         std::process::abort();
     }
+    // Up and running, then a second window's surface (the agent chat on its own), then dying.
+    if mode == "late_surface" {
+        startup_step("window surface");
+        startup_step("surface configure");
+        phase(RUNNING);
+        startup_step("window surface");
+        startup_step("surface configure");
+        std::process::abort();
+    }
     set_environment("Renderer: test");
     let mut s = Session { crash_journal: true, ..Default::default() };
     s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
@@ -121,6 +130,29 @@ fn child() {
             assert_eq!(read_live_journal(state).base, json!({"file":path}));
             println!("PREPARED_JOURNAL_OK");
         }
+        // Live sketch drag frames store the edited design without copying it again: each
+        // frame is journaled, and the next frame does not take the design for an outside edit.
+        "sketch_drag" => {
+            s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+            s.execute("sketch.rectangle.two_point", &json!({"p0": [5, 5], "p1": [25, 20]})).unwrap();
+            for k in 1..=3 {
+                let (from, to) = ([6.0 - k as f64, 5.0], [5.0 - k as f64, 5.0]);
+                s.execute("sketch.drag", &json!({"entity": "l1.start", "from": from, "to": to, "live": true})).unwrap();
+            }
+            s.execute("sketch.drag_end", &json!({})).unwrap();
+            let journal = read_live_journal(STATE.get().unwrap());
+            assert_eq!(journal.base, json!("new"), "the drag frames continue the replay");
+            // The drag's end only evaluates the model: it changes nothing a replay needs.
+            let ids: Vec<&str> = journal.replay.iter().filter_map(|c| c["command"].as_str()).collect();
+            assert_eq!(ids, ["solid.box", "sketch.create", "sketch.rectangle.two_point", "sketch.drag", "sketch.drag", "sketch.drag"]);
+            let mut replay = Session::default();
+            for command in &journal.replay {
+                replay.execute(command["command"].as_str().unwrap(), &command["params"]).unwrap();
+            }
+            let id = s.active_sketch.unwrap();
+            assert_eq!(replay.doc.sketch(id).ok(), s.doc.sketch(id).ok(), "the replay drags the sketch to the same place");
+            println!("SKETCH_DRAG_JOURNAL_OK");
+        }
         "render" => {
             s.execute("render.settings.set", &json!({"name":"Studio","set":{"exposure_ev":2}})).unwrap();
             s.execute("render.settings.get", &json!({"name":"Studio"})).unwrap();
@@ -136,8 +168,10 @@ fn child() {
             }
             assert_eq!(s.doc.features.len(), 1, "the design is unchanged");
         }
+        // A panic inside a solidcore call: caught there, an internal error of the command.
         "kernel" => {
-            assert!(s.execute("diagnostics.crash_test", &json!({"mode": "kernel"})).is_err());
+            let r = s.execute("diagnostics.crash_test", &json!({"mode": "kernel"}));
+            assert!(matches!(&r, Err(crate::EngineError::Internal(id, _)) if id == "diagnostics.crash_test"), "{r:?}");
         }
         // `thread_dies`: the panic ends the app, as one on the window's thread does.
         "thread" | "thread_dies" => {
@@ -200,6 +234,14 @@ fn a_read_only_command_keeps_the_replay_after_body_names_are_pinned() {
     let directory = fresh_dir("read-only");
     let (output, ok) = run_child(&directory, "read_only");
     assert!(ok && output.contains("READ_ONLY_JOURNAL_OK"), "{output}");
+    let _ = fs::remove_dir_all(directory);
+}
+
+#[test]
+fn live_sketch_drag_frames_keep_the_replay() {
+    let directory = fresh_dir("sketch-drag");
+    let (output, ok) = run_child(&directory, "sketch_drag");
+    assert!(ok && output.contains("SKETCH_DRAG_JOURNAL_OK"), "{output}");
     let _ = fs::remove_dir_all(directory);
 }
 
@@ -444,6 +486,21 @@ fn a_crash_signal_is_reported_with_its_thread_and_its_walk_up_the_stack() {
 }
 
 #[test]
+fn a_window_surface_after_startup_is_not_a_startup_crash() {
+    let d = fresh_dir("late_surface");
+    let (_, ok) = run_child(&d, "late_surface");
+    assert!(!ok, "the child aborted");
+    let (_, ok) = run_child(&d, "none");
+    assert!(ok);
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "unclean_exit");
+    assert!(!s.message.contains("during startup"), "{}", s.message);
+    assert!(s.message.contains("between commands"), "{}", s.message);
+    assert!(v.get("startup_phase").is_none(), "{v}");
+    let _ = fs::remove_dir_all(&d);
+}
+
+#[test]
 fn startup_steps_survive_a_rebase_and_running_ends_startup() {
     let d = fresh_dir("rebase");
     fs::create_dir_all(d.join("sessions")).unwrap();
@@ -578,6 +635,22 @@ fn signatures_ignore_numbers_but_not_places() {
     assert_eq!(signature("a.rs:1", "face 12 of 40"), signature("a.rs:1", "face 7 of 3"));
     assert_ne!(signature("a.rs:1", "face 12"), signature("a.rs:2", "face 12"));
     assert_ne!(signature("a.rs:1", "edge"), signature("a.rs:1", "face"));
+}
+
+/// A graphics device reset met first by a queue write panics inside wgpu-core (#10240, #6528):
+/// that is the device loss, which the app restarts after, not a crash to report. The same words
+/// from anywhere else, and wgpu's other panics, still are.
+#[test]
+fn a_lost_graphics_device_met_inside_wgpu_is_not_a_crash() {
+    let lost = "called `Result::unwrap()` on an `Err` value: Lost";
+    let windows = r"C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-core-30.0.1\src\device\queue.rs:503";
+    let linux = "/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wgpu-core-30.0.1/src/device/queue.rs:503";
+    assert!(graphics_device_lost(lost, windows));
+    assert!(graphics_device_lost(lost, linux));
+    assert!(!graphics_device_lost(lost, "crates/gpu/src/view.rs:3189"), "not inside wgpu");
+    assert!(!graphics_device_lost("called `Result::unwrap()` on an `Err` value: OutOfMemory", linux));
+    assert!(!graphics_device_lost("Error in Queue::submit: Validation Error", linux));
+    assert!(!graphics_device_lost(lost, "/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wgpu-30.0.1/src/api/queue.rs:1"));
 }
 
 #[test]

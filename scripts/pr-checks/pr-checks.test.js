@@ -136,6 +136,18 @@ test('syncDefaultLabel adds and removes', async () => {
   assert.deepEqual(f.calls, [['remove', 'changes-default']]);
 });
 
+test('syncDefaultLabel notes a read-only token instead of failing', async () => {
+  const yes = 'Changes a default: yes — a, old behaviour kept behind preference p';
+  const f = fakes(mk(1, 'a', yes));
+  const notes = [];
+  f.core.notice = (m) => notes.push(m);
+  f.github.rest.issues.addLabels = async () => { throw Object.assign(new Error('Resource not accessible by integration'), { status: 403 }); };
+  await pc.syncDefaultLabel(f);
+  assert.equal(notes.length, 1);
+  f.github.rest.issues.addLabels = async () => { throw Object.assign(new Error('server error'), { status: 500 }); };
+  await assert.rejects(pc.syncDefaultLabel(f));
+});
+
 test('checkDefaults only enforces from 2026-10-25', async () => {
   const files = [{ filename: 'crates/a.rs' }];
   const old = mk(20, 'alice', 'Fixes #5', { created_at: '2026-10-24T23:59:59Z' });
@@ -145,4 +157,40 @@ test('checkDefaults only enforces from 2026-10-25', async () => {
   f = fakes({ ...old, created_at: '2026-10-25T00:00:00Z' }, { files });
   await pc.checkDefaults(f);
   assert.equal(f.failures.length, 1);
+});
+
+test('hasPicture needs one a reader can see in the description', () => {
+  assert.equal(pc.hasPicture('![tray](https://example.com/a.gif)'), true);
+  assert.equal(pc.hasPicture('<img width="960" alt="x" src="https://github.com/user-attachments/assets/abc" />'), true);
+  assert.equal(pc.hasPicture('<video src="https://example.com/a.mp4"></video>'), true);
+  assert.equal(pc.hasPicture('https://github.com/user-attachments/assets/abc'), true);
+  assert.equal(pc.hasPicture(''), false);
+  assert.equal(pc.hasPicture(null), false);
+  assert.equal(pc.hasPicture('The GIF is the change.'), false);
+  assert.equal(pc.hasPicture('See docs/screenshots/box.gif'), false);
+  assert.equal(pc.hasPicture('<!-- ![old](https://example.com/a.gif) -->'), false);
+  assert.equal(pc.hasPicture('```\n![x](https://example.com/a.gif)\n```'), false);
+  assert.equal(pc.hasPicture('`![x](https://example.com/a.gif)`'), false);
+});
+
+test('needsPicture covers the showcase and its media only', () => {
+  assert.equal(pc.needsPicture(['docs/showcase.md']), true);
+  assert.equal(pc.needsPicture(['crates/a.rs', 'docs/screenshots/a.gif']), true);
+  assert.equal(pc.needsPicture(['docs/mcp.md', 'crates/a.rs']), false);
+});
+
+test('checkPicture fails a showcase PR with no picture, from 2026-11-02 on', async () => {
+  const files = [{ filename: 'docs/showcase.md' }];
+  const pr = mk(30, 'alice', 'The GIF is the change.', { created_at: '2026-11-02T00:00:00Z' });
+  let f = fakes(pr, { files });
+  assert.deepEqual(await pc.checkPicture(f), { shown: false });
+  assert.equal(f.failures.length, 1);
+  f = fakes({ ...pr, body: '![it](https://example.com/a.gif)' }, { files });
+  assert.deepEqual(await pc.checkPicture(f), { shown: true });
+  assert.equal(f.failures.length, 0);
+  f = fakes({ ...pr, created_at: '2026-11-01T23:59:59Z' }, { files });
+  assert.deepEqual(await pc.checkPicture(f), { skipped: 'opened before enforcement' });
+  f = fakes(pr, { files: [{ filename: 'crates/a.rs' }] });
+  assert.deepEqual(await pc.checkPicture(f), { skipped: 'nothing to show' });
+  assert.equal(f.failures.length, 0);
 });

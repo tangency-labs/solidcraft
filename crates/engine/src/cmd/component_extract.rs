@@ -10,14 +10,15 @@
 //! as it did before. Anything that crosses the component's boundary (a feature outside that uses
 //! its sketches, bodies moved in or out, a joint to one of its subcomponents) is refused.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::{DesignLink, Document, FeatureKind, ModelBody, ModelState};
-use solidcraft_geom::Vec3;
 
-use super::{absolute, component_key, resolve, session_bodies, stored};
+use super::{absolute, component_key, file_sha256, inherit_properties, resolve, session_bodies, stored};
 use crate::params::{bad, str_};
 use crate::{EngineError, Result, Session};
 
@@ -131,10 +132,10 @@ fn keep_component_looks(doc: &mut Document, owners: &BTreeMap<String, u64>, comp
 /// What the bodies `new` call the face or edge that `old` calls `name`, found where it is.
 fn renamed(old: &ModelState, new: &[&ModelBody], name: &str, near: Vec3) -> Option<String> {
     use solidcraft_doc::{appearance::face_index_at, naming};
-    if let Some((p, _)) = naming::point_on_face(old, name, near) {
+    if let Some(p) = naming::point_on_face(old, name, near) {
         return new.iter().find_map(|b| face_index_at(b, p).and_then(|i| naming::face_names(b).get(i).cloned()));
     }
-    let p = old.bodies.iter().find_map(|b| naming::find_edge(b, name, near).ok())?.0;
+    let p = old.bodies.iter().find_map(|b| naming::find_edge(b, name, near).ok())?;
     new.iter().find(|b| face_index_at(b, p).is_some()).and_then(|b| naming::edge_names_at(b, &[p]).pop())
 }
 
@@ -228,7 +229,7 @@ fn scope(s: &Session, comp: u64, cmd: &str) -> Result<Scope> {
     if source.marker.is_some_and(|m| m < source.features.len()) {
         return Err(bad(cmd, "move the timeline marker to the end first"));
     }
-    if !s.pending_moves.is_empty() {
+    if !s.uncaptured_moves().is_empty() {
         return Err(bad(cmd, "capture or revert the moved components first"));
     }
     let subtree: BTreeSet<u64> = source.components.iter().filter(|c| source.component_within(c.id, comp)).map(|c| c.id).collect();
@@ -357,8 +358,6 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
     for g in &mut part.timeline_groups {
         g.features.retain(|f| sc.inside.contains(f));
     }
-    let parents: BTreeSet<u64> = part.timeline_groups.iter().filter_map(|g| g.parent).collect();
-    part.timeline_groups.retain(|g| !g.features.is_empty() || parents.contains(&g.id));
     part.named_views.clear();
     part.configs = Default::default();
     part.assembly = Default::default();
@@ -371,12 +370,19 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
     scope.assembly.origins.retain(|o| mapped(&o.origin.occurrence));
     scope.assembly.contact_sets.retain(|c| c.occurrences.iter().all(mapped));
     scope.assembly.exploded.retain(|v| v.moves.iter().all(|(o, _)| mapped(o)));
-    let mut notices = super::super::component_clone_assembly::clone_assembly(&mut part, &scope, &sc.occurrences, &features, &body_map)?;
+    let (mut notices, joints) =
+        super::super::component_clone_assembly::clone_assembly_with_joint_ids(&mut part, &scope, &sc.occurrences, &features, &body_map)?;
+    // Extracted joints receive new ids. References to joints outside the extracted part go away.
+    for group in &mut part.timeline_groups {
+        group.joints = group.joints.iter().filter_map(|id| joints.get(id).copied()).collect();
+    }
+    let parents: BTreeSet<u64> = part.timeline_groups.iter().filter_map(|g| g.parent).collect();
+    part.timeline_groups.retain(|g| !g.features.is_empty() || !g.joints.is_empty() || parents.contains(&g.id));
     prune_params(&mut part);
     if !source.configs.is_empty() {
         notices.push(format!("the configurations stay in this design; {stem} has none"));
     }
-    let part = Session::new(part);
+    let part = Session::opened_validating(part, None, s.validation());
     let failing: Vec<String> = part.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| format!("{} ({e})", r.name))).take(5).collect();
     if !failing.is_empty() {
         return Err(bad(cmd, format!("{name} does not build on its own: {}", failing.join("; "))));
@@ -453,14 +459,14 @@ struct Before {
 }
 
 impl Before {
-    fn take(s: &Session) -> Before {
+    fn take(s: &Session) -> Result<Before> {
         let sol = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
-        Before {
-            world: s.world_state(),
+        Ok(Before {
+            world: s.world_state()?,
             placements: s.doc.occurrences.iter().map(|o| (o.id, o.transform)).collect(),
             errors: s.model.results.iter().map(|r| (r.id, r.error.is_some())).collect(),
             joint_errors: sol.errors.iter().chain(&sol.conflicts).map(|(_, n, _)| n.clone()).collect(),
-        }
+        })
     }
 
     /// Refuse a swap that made a feature fail or changed a body; warn about joints it broke and
@@ -482,7 +488,7 @@ impl Before {
                 o.transform = *t;
             }
         }
-        let world = if moved.is_empty() { s.world_state() } else { std::sync::Arc::new(solidcraft_doc::world_state(&placed, &s.model.state())) };
+        let world = if moved.is_empty() { s.world_state()? } else { std::sync::Arc::new(solidcraft_doc::world_state(&placed, &s.model.state())?) };
         let (was, now): (Vec<&ModelBody>, Vec<&ModelBody>) = (self.world.bodies.iter().collect(), world.bodies.iter().collect());
         if let Some(what) = unmatched(&was, &now)? {
             return Err(bad(cmd, format!("{what} would look different without the history of {name}")));
@@ -529,7 +535,7 @@ fn copies_of(s: &Session, linked: u64) -> Result<Vec<u64>> {
         }
         let Ok(sc) = scope(s, c.id, CMD) else { continue };
         let Ok((part, _)) = part_design(s, &sc, &c.name, CMD) else { continue };
-        let world = part.world_state();
+        let world = part.world_state()?;
         let built: Vec<&ModelBody> = world.bodies.iter().collect();
         if same_solids(&reference, &built)? {
             out.push(c.id);
@@ -566,15 +572,15 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
 
     // This design: the component's history becomes an Import feature of the new design's bodies
     let shown = file.display().to_string();
-    let (_, sf, faces, _) = session_bodies(&part, &shown)?;
+    let (_, sf, faces, _, properties) = session_bodies(&part, &shown)?;
     // The link has a body per piece: a body in pieces keeps its name on the first
     let mut solids: Vec<String> = Vec::new();
-    for b in part.world_state().bodies.iter().filter(|b| !b.body.is_mesh()) {
+    for b in part.world_state()?.bodies.iter().filter(|b| !b.body.is_mesh()) {
         let pieces = b.body.lumps()?.len().max(1);
         solids.extend((1..=pieces).map(|n| if n == 1 { b.name.clone() } else { format!("{} ({n})", b.name) }));
     }
     let state = s.model.state();
-    let before = Before::take(s);
+    let before = Before::take(s)?;
     let last = s.doc.features.iter().rposition(|f| sc.inside.contains(&f.id)).unwrap_or(s.doc.features.len());
     let at = s.doc.features.iter().take(last).filter(|f| !sc.inside.contains(&f.id)).count();
     clear_history(s, &sc);
@@ -592,18 +598,26 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
         f.link_faces = faces;
     }
     let path = stored(s.path.as_deref(), &file);
-    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: id });
+    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: id, ..Default::default() });
     s.refresh();
     rename_joint_faces(s, &state, id, &sc.own);
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
+    inherit_properties(s, comp, &properties)?;
+    s.refresh();
     let mut warnings = sf.warnings;
     warnings.extend(before.check(s, CMD, &sc.name)?);
     let copies = copies_of(s, comp)?;
 
     part.path = s.path.clone();
     part.execute("file.save", &json!({"path": shown}))?;
+    // The link keeps what the new file holds, as Insert Design's does (#9739).
+    if let Some(read) = file_sha256(&file, s.path.as_deref())
+        && let Some(link) = s.doc_mut().links.get_mut(&comp)
+    {
+        link.file_sha256 = Some(read);
+    }
     Ok(json!({"component": comp, "feature": id, "path": path, "file": shown, "bodies": sc.bodies, "notices": notices, "warnings": warnings,
         "copies": named(s, &copies)}))
 }
@@ -661,12 +675,12 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
         let (part, _) = part_design(s, &sc, &sc.name, cmd)?;
         let state = s.model.state();
         let reference: Vec<&ModelBody> = state.bodies.iter().filter(|b| b.feature == link.feature).collect();
-        let world = part.world_state();
+        let world = part.world_state()?;
         let built: Vec<&ModelBody> = world.bodies.iter().collect();
         if !same_solids(&reference, &built)? {
             return Err(bad(cmd, format!("{} is not the same as {lname}", sc.name)));
         }
-        let before = Before::take(s);
+        let before = Before::take(s)?;
         clear_history(s, &sc);
         let d = s.doc_mut();
         // Named as the linked component's next placements, as add_occurrence names them
@@ -719,6 +733,7 @@ mod tests {
 
     fn volumes(s: &Session) -> BTreeMap<String, i64> {
         s.world_state()
+            .unwrap()
             .bodies
             .iter()
             .map(|b| (b.name.clone(), (solidcraft_kernel::measure(&b.body).unwrap().volume * 1000.0).round() as i64))
@@ -727,6 +742,7 @@ mod tests {
 
     fn centroids(s: &Session) -> BTreeMap<String, [i64; 3]> {
         s.world_state()
+            .unwrap()
             .bodies
             .iter()
             .map(|b| {
@@ -741,6 +757,7 @@ mod tests {
     fn shapes(s: &Session) -> Vec<[i64; 4]> {
         let mut out: Vec<[i64; 4]> = s
             .world_state()
+            .unwrap()
             .bodies
             .iter()
             .map(|b| {
@@ -783,6 +800,7 @@ mod tests {
     fn extract_moves_the_history_to_its_own_design_and_links_it() {
         let dir = folder("basic");
         let (mut s, plate, other) = assembly();
+        run(&mut s, "timeline.group", json!({"name":"Internal joints", "joints":["PinHold"]}));
         run(&mut s, "file.save", json!({"path": dir.join("asm.solidcraft")}));
         let (vol, cen) = (volumes(&s), centroids(&s));
         let other_features: Vec<u64> = s.doc.features.iter().filter(|f| f.component == other).map(|f| f.id).collect();
@@ -813,6 +831,7 @@ mod tests {
         assert_eq!(part.doc.components.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Pin"]);
         assert_eq!(part.doc.occurrences.len(), 1);
         assert_eq!(part.doc.assembly.joints.iter().map(|j| j.name.as_str()).collect::<Vec<_>>(), ["PinHold"]);
+        assert_eq!(part.doc.timeline_groups[0].joints, [part.doc.assembly.joints[0].id], "joint folders follow the extracted ids");
         assert!(part.doc.param("plate_h").is_some() && part.doc.param("unused").is_none());
         assert!(part.model.results.iter().all(|r| r.error.is_none()));
         let part_vol = volumes(&part);
@@ -885,12 +904,12 @@ mod tests {
         let plate_occ = s.doc.occurrence_of(plate).map(|o| o.id).unwrap();
         let other_occ = s.doc.occurrence_of(other).map(|o| o.id).unwrap();
         let top = {
-            let w = s.world_state();
+            let w = s.world_state().unwrap();
             let m = solidcraft_kernel::measure(&w.body("PlateBody").unwrap().body).unwrap();
             [(m.bbox.min.x + m.bbox.max.x) / 2.0, (m.bbox.min.y + m.bbox.max.y) / 2.0, m.bbox.max.z]
         };
         let bottom = {
-            let w = s.world_state();
+            let w = s.world_state().unwrap();
             let m = solidcraft_kernel::measure(&w.body("OtherBody").unwrap().body).unwrap();
             [(m.bbox.min.x + m.bbox.max.x) / 2.0, (m.bbox.min.y + m.bbox.max.y) / 2.0, m.bbox.min.z]
         };

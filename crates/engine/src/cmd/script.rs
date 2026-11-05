@@ -21,7 +21,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("timeline.export_script", "Export Command Script", export_script).icon("export").noundo().doc_only().params(
         "path?: write the script to this file → script: {commands: [...]} that rebuilds the design (solidcraft-cli eval/run), \
-         steps, omitted: what the script leaves out (appearances, folders, views, configurations); components and assemblies \
+         steps, omitted: what the script leaves out (appearances, folders, views, configurations, print-face assignments); components and assemblies \
          are not supported yet",
     ),
 ];
@@ -36,6 +36,19 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         .and_then(Value::as_object)
         .ok_or_else(|| bad(cmd, "`feature` must be a feature object, as a design file or timeline.inspect has it"))?;
     let mut raw = raw.clone();
+    if let Some(Value::Object(def)) = raw.remove("definition") {
+        for (k, v) in def {
+            raw.entry(k).or_insert(v);
+        }
+    }
+    for meta in ["omitted", "inputs", "error", "warning", "boolean_diagnostics", "rolled_back", "type_name"] {
+        raw.remove(meta);
+    }
+    if let Some(kind_str) = raw.get("type").and_then(Value::as_str)
+        && let Some(canonical) = FeatureKind::type_name_to_kind_key(kind_str)
+    {
+        raw.insert("type".into(), json!(canonical));
+    }
     resolve_legacy_names(&mut raw, &s.doc);
     let feature = recorded_feature(cmd, &raw)?;
     let params = step_params(cmd, p.get("params"))?;
@@ -197,6 +210,8 @@ pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> 
         (doc.appearances.is_empty(), "appearances (colours of bodies and faces)"),
         (doc.configs.is_empty(), "configurations"),
         (doc.canvases.is_empty(), "canvases (reference images)"),
+        (doc.point_clouds.is_empty(), "point clouds"),
+        (doc.print_faces.is_empty(), "print-face assignments (body.print_face)"),
         (doc.named_views.is_empty(), "named views"),
         (doc.browser_groups.is_empty() && doc.browser_order.is_empty(), "Browser folders and order"),
         (doc.timeline_groups.is_empty(), "timeline folders"),

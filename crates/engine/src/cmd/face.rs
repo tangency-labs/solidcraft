@@ -3,8 +3,10 @@
 //! edges become lines, circular edges circles or arcs, anything else a chain of lines.
 
 use serde_json::{Value, json};
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::{EmbossFace, apply_point, mat_inverse, mat_mul};
-use solidcraft_geom::{Mesh, Vec2, Vec3};
+use solidcraft_geom::Mesh;
+use solidcraft_geom::prelude::*;
 
 use crate::params::{bad, vec3};
 use crate::{Result, Session};
@@ -109,7 +111,7 @@ fn inside_hull(sorted: &[(f64, f64)], q: (f64, f64)) -> bool {
 /// The outward normal of the planar face at the world point `p`: on the model as the view
 /// places it (moved components where they are shown).
 pub(super) fn face_normal_world(s: &Session, p: Vec3) -> Option<Vec3> {
-    let (m, f, d, _) = face_at_state(&s.world_state(), p, None).ok().flatten()?;
+    let (m, f, d, _) = face_at_state(&*s.world_state().ok()?, p, None).ok().flatten()?;
     let tol = (m.bounds().diagonal() * 1e-3).max(1e-3);
     if d > tol * 10.0 {
         return None;
@@ -149,7 +151,7 @@ pub(super) fn face_ref(s: &Session, v: &Value, body: Option<&str>, cmd: &str) ->
     match face_ref_form(v).map_err(|why| bad(cmd, why))? {
         FaceRefForm::Point(p) => Ok(p),
         FaceRefForm::Name(name) => {
-            let st = if crate::frames::mapped() { s.model.state() } else { s.world_state() };
+            let st = if crate::frames::mapped() { s.model.state() } else { s.world_state()? };
             solidcraft_doc::naming::named_face_point(&st, body, name).map_err(|why| bad(cmd, why))
         }
     }
@@ -181,9 +183,24 @@ type FacePick = (std::sync::Arc<Mesh>, u32, f64, String);
 
 /// The face under a point of `only` (any body when `None`). Where faces of several bodies are
 /// equally near (bodies touching flush), the pick is ambiguous: `Err` names those bodies.
+/// A pick of the running command was resolved against the placed model, so the body under it
+/// wins: a body that only shares its place in the model is not in the way (#419). A named
+/// body still wins over that.
 fn face_at_in(s: &Session, p: Vec3, only: Option<&str>) -> std::result::Result<Option<FacePick>, Vec<String>> {
     let st = s.model.state();
-    face_at_state(&st, p, only)
+    match (crate::frames::picked(p), only) {
+        (Some(names), None) if names.len() > 1 => Err(model_names(&st, &names)),
+        (Some(names), None) => {
+            let under = names.first().and_then(|n| st.bodies.iter().find(|b| b.definition_name() == n.as_str()).map(|b| b.name.clone()));
+            face_at_state(&st, p, under.as_deref())
+        }
+        (_, only) => face_at_state(&st, p, only),
+    }
+}
+
+/// The names the model gives the bodies a pick met.
+fn model_names(st: &solidcraft_doc::ModelState, names: &[String]) -> Vec<String> {
+    names.iter().map(|n| st.bodies.iter().find(|b| b.definition_name() == n.as_str()).map(|b| b.name.clone()).unwrap_or_else(|| n.clone())).collect()
 }
 
 pub(super) fn face_at_state(st: &solidcraft_doc::ModelState, p: Vec3, only: Option<&str>) -> std::result::Result<Option<FacePick>, Vec<String>> {
@@ -239,7 +256,7 @@ pub(super) fn sketch_of_faces(s: &mut Session, points: &[Vec3], cmd: &str, face_
     }
     let state = s.model.state();
     let mut picked = Vec::new();
-    let mut common: Option<(String, solidcraft_geom::Plane)> = None;
+    let mut common: Option<(String, solidcore_record::Plane)> = None;
     for &point in points {
         if !point.is_finite() {
             return Err(bad(cmd, "faces must be finite points"));

@@ -11,10 +11,39 @@ const HALF: f64 = 40.0;
 // The remaining regions belong to the face, including the middle of each edge.
 const INSET: f64 = 0.68;
 
+fn camera(app: &SolveApp) -> Camera {
+    let mut cam = app.cam;
+    if !crate::render_workspace::active(app) {
+        cam.fov = app.view_fov();
+    }
+    cam
+}
+
+fn inverse_focal_length(cam: &Camera) -> f64 {
+    // The field of view spans the whole navigator, including the margin around its cube.
+    let half_height = f64::from(DESIGN_SIZE) / (2.0 * HALF);
+    if cam.fov.is_finite() { (cam.fov.clamp(0.0, std::f64::consts::FRAC_PI_2) * 0.5).tan() / half_height } else { 0.0 }
+}
+
 fn project(cam: &Camera, v: Vec3, scale: f64) -> egui::Vec2 {
-    let (r, u, _) = cam.basis();
+    let (r, u, b) = cam.basis();
     let v = cam.from_frame(v);
-    vec2((v.dot(r) * scale) as f32, -(v.dot(u) * scale) as f32)
+    // A unit cube has its own camera, independent of model size and zoom. Place its eye
+    // one unit beyond the focal distance: the front face keeps its size beside the arrows.
+    // At the maximum 90-degree field of view the eye is still outside the cube's sphere,
+    // so every vertex stays in front of it. Zero fov gives the original parallel projection.
+    let denominator = 1.0 + inverse_focal_length(cam) * (1.0 - v.dot(b));
+    vec2((v.dot(r) * scale / denominator) as f32, -(v.dot(u) * scale / denominator) as f32)
+}
+
+/// Local projected axes at a label's centre; a direction alone has no perspective position.
+fn project_direction(cam: &Camera, at: Vec3, direction: Vec3) -> egui::Vec2 {
+    let (r, u, b) = cam.basis();
+    let inverse_focal = inverse_focal_length(cam);
+    let direction = cam.from_frame(direction);
+    let denominator = 1.0 + inverse_focal * (1.0 - cam.from_frame(at).dot(b));
+    let parallel = vec2(direction.dot(r) as f32, -direction.dot(u) as f32);
+    (parallel + project(cam, at, 1.0) * (inverse_focal * direction.dot(b)) as f32) / denominator as f32
 }
 
 fn direction_label(d: Vec3) -> String {
@@ -38,16 +67,21 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
         return Vec::new();
     }
     let mut out = Vec::new();
+    let inverse_focal = inverse_focal_length(cam);
+    let inverse_eye_distance = inverse_focal / (1.0 + inverse_focal);
     let mut add = |d: Vec3, normal: Vec3, mut vertices: Vec<Vec3>, axes: Option<(Vec3, Vec3)>| {
         let depth = cam.from_frame(normal).dot(cam.back());
-        if depth <= 1e-5 {
+        // All face planes are one unit from the origin. In perspective a face must look
+        // toward the finite eye, not merely toward the parallel view direction.
+        if depth <= inverse_eye_distance + 1e-5 {
             return;
         }
         let centre = vertices.iter().copied().fold(Vec3::ZERO, |sum, p| sum + p) / vertices.len() as f64;
-        let at = c + project(cam, centre, half);
+        let projected_centre = project(cam, centre, half);
+        let at = c + projected_centre;
         vertices.sort_by(|a, b| {
-            let a = project(cam, *a - centre, half);
-            let b = project(cam, *b - centre, half);
+            let a = project(cam, *a, half) - projected_centre;
+            let b = project(cam, *b, half) - projected_centre;
             a.y.atan2(a.x).total_cmp(&b.y.atan2(b.x))
         });
         let vertices = Ring::new(vertices);
@@ -62,7 +96,7 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
             outer_edges,
             centre: at,
             label: direction_label(d),
-            text_axes: axes.map(|(r, u)| (project(cam, r, 1.0), -project(cam, u, 1.0))),
+            text_axes: axes.map(|(r, u)| (project_direction(cam, centre, r), -project_direction(cam, centre, u))),
             depth,
         });
     };
@@ -115,29 +149,70 @@ fn hit(faces: &[Facet], p: Pos2) -> Option<usize> {
     faces.iter().enumerate().rev().find(|(_, f)| contains(&f.points, p)).map(|(i, _)| i)
 }
 
-pub(super) fn drag_origin(cam: &Camera, centre: Pos2, pointer: Pos2, scale: f32) -> bool {
-    hit(&facets(cam, centre, HALF * f64::from(scale)), pointer).is_some()
+pub(super) fn drag_origin(app: &SolveApp, centre: Pos2, pointer: Pos2, scale: f32) -> bool {
+    hit(&facets(&camera(app), centre, HALF * f64::from(scale)), pointer).is_some()
 }
 
-fn navigate(app: &mut SolveApp, action: Option<&str>, dir: Option<Vec3>) {
-    let mut params = json!({"camera":app.cam});
+pub(super) fn navigate(app: &mut SolveApp, action: Option<&str>, dir: Option<Vec3>) {
+    // Same as arrow-key steps (#8912): turn from where a glide in flight is going, so rapid
+    // clicks add full turns instead of restarting from a mid-animation camera.
+    let from = app.cam_anim.map_or(app.cam, |a| a.to);
+    let mut params = json!({"camera": from});
     if let Some(action) = action {
         params["action"] = json!(action);
     }
     if let Some(d) = dir {
         params["direction"] = json!([d.x, d.y, d.z]);
     }
+    // Preferences › Navigation: a view chosen on the cube also frames the whole model (#10091).
+    if app.preferences.navigator_fit {
+        params["fit"] = json!(true);
+    }
     let _ = app.run("view.navigate", params);
 }
 
 fn control(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect, action: &str, tooltip: &str) -> bool {
     crate::scenario::publish_handle(&format!("navigation_cube:control:{action}"), bounds.center());
-    let response = ui.interact(bounds, ui.id().with(("navigation_cube", action)), Sense::click()).on_hover_text(tooltip);
+    let response = ui.interact(bounds, ui.scope_id().with(("navigation_cube", action)), Sense::click()).backing_on_hover_text(tooltip);
     let hover = response.hovered();
     if response.clicked() {
         navigate(app, Some(action), None);
     }
+    // The control takes the right-click from the viewport under it: open the gizmo's menu.
+    if response.secondary_clicked()
+        && app.dialog.is_none()
+        && let Some(at) = response.interact_pointer_pos()
+    {
+        crate::context_menu::open_for(app, at, crate::context_menu::Target::ViewGizmo);
+    }
     hover
+}
+
+/// Preferences › Navigation: "Invert the view cube rotation arrows" (#10254). With it on, an
+/// arrow orbits the camera the way the arrow points (camera-centric, as in Fusion and Inventor)
+/// instead of rotating the cube toward the side the arrow sits on, so left and right, and up and
+/// down, trade places. The tooltip names the action actually performed. The curved roll arrows
+/// are not inverted: they name the rotation they perform, not a direction.
+fn inverted_arrow(action: &str) -> Option<&'static str> {
+    match action {
+        "left" => Some("right"),
+        "right" => Some("left"),
+        "up" => Some("down"),
+        "down" => Some("up"),
+        _ => None,
+    }
+}
+
+/// Preferences › Navigation: "Invert the curved roll arrows" (#10483). With it on, the two
+/// curved arrows at the cube's corner roll the view the other way within the screen plane: the
+/// clockwise arrow rolls counterclockwise and the counterclockwise arrow rolls clockwise. The
+/// arrow keeps its curl; the tooltip names the roll actually performed.
+fn inverted_roll(action: &str) -> Option<&'static str> {
+    match action {
+        "clockwise" => Some("counterclockwise"),
+        "counterclockwise" => Some("clockwise"),
+        _ => None,
+    }
 }
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
@@ -154,7 +229,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let active = orbiting || ui.rect_contains_pointer(outer);
     let t = Tokens::get().navigation_cube(active);
     crate::scenario::publish_count("navigation_cube:active", f64::from(u8::from(active)));
-    let faces = facets(&app.cam, c, HALF * f64::from(scale));
+    let faces = facets(&camera(app), c, HALF * f64::from(scale));
     let hover = ui.input(|i| i.pointer.hover_pos()).filter(|p| ui.is_enabled() && ui.rect_contains_pointer(rect) && !crate::shell::covered(app, *p));
     let hovered = if orbiting { None } else { hover.and_then(|p| hit(&faces, p)) };
     let painter = ui.painter_at(outer);
@@ -184,41 +259,19 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     crate::scenario::publish_count("axis_view_highlights", f64::from(u8::from(hovered.is_some())));
     if let Some(face) = hovered.and_then(|i| faces.get(i)) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        ui.interact(Rect::from_center_size(hover.unwrap_or(face.centre), vec2(2.0, 2.0)), ui.id().with("navigation_cube_tip"), Sense::hover())
-            .on_hover_text(format!("{} view. Drag to orbit{}.", face.label, if app.preferences.free_orbit { "" } else { "; hold Shift to snap" }));
+        ui.interact(Rect::from_center_size(hover.unwrap_or(face.centre), vec2(2.0, 2.0)), ui.scope_id().with("navigation_cube_tip"), Sense::hover())
+            .backing_on_hover_text(format!(
+                "{} view. Drag to orbit{}.",
+                face.label,
+                if app.preferences.free_orbit { "" } else { "; hold Shift to snap" }
+            ));
         if ui.input(|i| i.pointer.primary_clicked()) {
             navigate(app, None, Some(face.direction));
         }
     }
     let square_on = faces.iter().filter(|f| f.text_axes.is_some()).count() == 1;
-    let (distance, button_size) = if square_on { (54.0, 20.0) } else { (74.0, 16.0) };
-    for (action, offset, direction, tooltip) in [
-        ("left", vec2(-distance, 0.0), vec2(1.0, 0.0), "Orbit left 90°"),
-        ("right", vec2(distance, 0.0), vec2(-1.0, 0.0), "Orbit right 90°"),
-        ("up", vec2(0.0, -distance), vec2(0.0, 1.0), "Orbit up 90°"),
-        ("down", vec2(0.0, distance), vec2(0.0, -1.0), "Orbit down 90°"),
-    ] {
-        let at = c + offset * scale;
-        let hovered = control(app, ui, Rect::from_center_size(at, vec2(button_size, button_size) * scale), action, tooltip);
-        if active {
-            arrow(&painter, at, direction * scale, hovered, t);
-        }
-    }
-    for (action, offset, size, clockwise, tooltip) in [
-        ("counterclockwise", vec2(42.0, -72.0), vec2(40.0, 20.0), false, "Rotate view counterclockwise 90°"),
-        ("clockwise", vec2(72.0, -42.0), vec2(20.0, 40.0), true, "Rotate view clockwise 90°"),
-    ] {
-        let hovered = control(app, ui, Rect::from_center_size(c + offset * scale, size * scale), action, tooltip);
-        if active {
-            curved_arrow(&painter, c + vec2(42.0, -42.0) * scale, clockwise, hovered, t, scale);
-        }
-    }
-    let home = Rect::from_center_size(c + vec2(-65.0, -65.0) * scale, vec2(26.0, 26.0) * scale);
-    crate::scenario::publish_target("axis_view:home", home);
-    let home_hover = control(app, ui, home, "home", "Home: isometric view and fit model");
-    if active {
-        icons::paint_icon(&painter, home.shrink(4.0 * scale), "home", f32::from((if home_hover { t.accent } else { t.cube_face }).a()) / 255.0);
-    }
+    arrows(app, ui, &painter, c, scale, active, square_on, t);
+    home(app, ui, &painter, c, scale, active, t);
     let fit = Rect::from_center_size(c + vec2(67.0, 67.0) * scale, vec2(22.0, 22.0) * scale);
     let fit_hover = control(app, ui, fit, "fit", "Fit model in view");
     if active {
@@ -234,6 +287,60 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     }
 }
 
+/// The Home button at the top left of a gizmo centred at `c`, painted while it is `active`.
+pub(super) fn home(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, c: Pos2, scale: f32, active: bool, t: Tokens) {
+    let home = Rect::from_center_size(c + vec2(-65.0, -65.0) * scale, vec2(26.0, 26.0) * scale);
+    crate::scenario::publish_target("axis_view:home", home);
+    let home_hover = control(app, ui, home, "home", "Home: isometric view and fit model");
+    if active {
+        icons::paint_icon(painter, home.shrink(4.0 * scale), "home", f32::from((if home_hover { t.accent } else { t.cube_face }).a()) / 255.0);
+    }
+}
+
+/// The four orbit arrows and the two roll arrows around a gizmo centred at `c`: nearer and larger
+/// while a cube face is square on, painted while the gizmo is `active`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn arrows(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, c: Pos2, scale: f32, active: bool, square_on: bool, t: Tokens) {
+    let (distance, button_size) = if square_on { (54.0, 20.0) } else { (74.0, 16.0) };
+    for (action, offset, direction, tooltip) in [
+        ("left", vec2(-distance, 0.0), vec2(1.0, 0.0), "Orbit left 90°"),
+        ("right", vec2(distance, 0.0), vec2(-1.0, 0.0), "Orbit right 90°"),
+        ("up", vec2(0.0, -distance), vec2(0.0, 1.0), "Orbit up 90°"),
+        ("down", vec2(0.0, distance), vec2(0.0, -1.0), "Orbit down 90°"),
+    ] {
+        let (action, tooltip) = match app.preferences.invert_navigator_arrows.then(|| inverted_arrow(action)).flatten() {
+            Some(swapped) => (
+                swapped,
+                match swapped {
+                    "right" => "Orbit right 90°",
+                    "left" => "Orbit left 90°",
+                    "down" => "Orbit down 90°",
+                    _ => "Orbit up 90°",
+                },
+            ),
+            None => (action, tooltip),
+        };
+        let at = c + offset * scale;
+        let hovered = control(app, ui, Rect::from_center_size(at, vec2(button_size, button_size) * scale), action, tooltip);
+        if active {
+            arrow(painter, at, direction * scale, hovered, t);
+        }
+    }
+    for (action, offset, size, clockwise, tooltip) in [
+        ("counterclockwise", vec2(42.0, -72.0), vec2(40.0, 20.0), false, "Rotate view counterclockwise 90°"),
+        ("clockwise", vec2(72.0, -42.0), vec2(20.0, 40.0), true, "Rotate view clockwise 90°"),
+    ] {
+        let (action, tooltip) = match app.preferences.invert_curved_roll_arrows.then(|| inverted_roll(action)).flatten() {
+            Some(swapped) => (swapped, if swapped == "clockwise" { "Rotate view clockwise 90°" } else { "Rotate view counterclockwise 90°" }),
+            None => (action, tooltip),
+        };
+        let hovered = control(app, ui, Rect::from_center_size(c + offset * scale, size * scale), action, tooltip);
+        if active {
+            curved_arrow(painter, c + vec2(42.0, -42.0) * scale, clockwise, hovered, t, scale);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,6 +353,64 @@ mod tests {
         // These tests inspect shapes without uploading textures to a renderer.
         output.textures_delta.clear();
         output
+    }
+
+    #[test]
+    fn cube_projection_foreshortens_depth_only_in_perspective() {
+        for up in [UpAxis::Z, UpAxis::Y] {
+            let mut cam = Camera { up, ..Default::default() };
+            cam.set_view(StandardView::Front);
+            let near = Vec3::new(0.5, -1.0, 0.0);
+            let far = Vec3::new(0.5, 1.0, 0.0);
+            assert_eq!(project(&cam, near, HALF), project(&cam, far, HALF));
+            for fov in [0.2618, 0.6, std::f64::consts::FRAC_PI_2] {
+                cam.fov = fov;
+                let front = project(&cam, near, HALF);
+                let back = project(&cam, far, HALF);
+                assert!(back.x < front.x, "perspective must make the far edge smaller: {up:?}, {fov}");
+                assert!((front.x - HALF as f32 * 0.5).abs() < 1e-4, "the front face must retain its size beside the orbit arrows");
+                let focal_distance = f64::from(DESIGN_SIZE) / (2.0 * HALF * (fov * 0.5).tan());
+                let ratio = focal_distance / (focal_distance + 2.0);
+                assert!((f64::from(back.x / front.x) - ratio).abs() < 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn perspective_toggle_changes_the_cube_and_its_faces_still_navigate() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube", "look_at_anim":false}));
+        h.call("ui.view", json!({"view":"iso"}));
+        let orthographic = crate::scenario::handle_at("navigation_cube:front").unwrap();
+        h.call("ui.set", json!({"perspective":true}));
+        let fov = camera(&h.app).fov;
+        assert!(fov > 0.0);
+        let p = crate::scenario::handle_at("navigation_cube:front").unwrap();
+        assert_ne!(p, orthographic, "the drawn cube must follow the viewport's projection selection");
+        h.call("ui.click", json!({"x":p.x,"y":p.y}));
+        assert_eq!(h.app.cam.aligned_standard_view(1e-5), Some(StandardView::Front));
+        assert_eq!(camera(&h.app).fov, fov);
+        h.call("ui.set", json!({"autoOrthoFaces":true}));
+        assert_eq!(camera(&h.app).fov, 0.0, "automatic orthographic axis views also apply to the cube");
+        h.call("ui.view", json!({"view":"iso"}));
+        assert_eq!(camera(&h.app).fov, fov);
+    }
+
+    #[test]
+    fn perspective_cube_culls_sides_facing_away_and_ignores_model_framing() {
+        let cam = Camera { yaw: -0.1, pitch: 0.1, fov: 0.6, ..Default::default() };
+        let faces = facets(&cam, Pos2::ZERO, HALF);
+        assert_eq!(faces.len(), 9, "only the front face is visible from this finite eye");
+        assert!(faces.iter().all(|face| face.direction.y == -1.0));
+        let points = |cam: &Camera| facets(cam, Pos2::ZERO, HALF).into_iter().flat_map(|face| face.points).collect::<Vec<_>>();
+        let expected = points(&cam);
+        for distance in [1e-3, 100.0, 1e12] {
+            assert_eq!(points(&Camera { distance, target: Vec3::new(123.0, -456.0, 789.0), ..cam }), expected);
+        }
+        let parallel = Camera { fov: 0.0, ..cam };
+        for fov in [f64::NAN, f64::INFINITY, -1.0] {
+            assert_eq!(points(&Camera { fov, ..cam }), points(&parallel));
+        }
     }
 
     #[test]
@@ -413,12 +578,16 @@ mod tests {
                 cam.set_view(view);
                 for roll in [0.0, 0.7, std::f64::consts::FRAC_PI_2] {
                     cam.roll = roll;
-                    let faces = facets(&cam, Pos2::ZERO, HALF);
-                    assert!(!faces.is_empty());
-                    for (i, face) in faces.iter().enumerate() {
-                        assert_eq!(hit(&faces, face.centre), Some(i), "{up:?} {view:?} {roll} {}", face.label);
+                    for fov in [0.0, 0.2618, 0.6, std::f64::consts::FRAC_PI_2] {
+                        cam.fov = fov;
+                        let faces = facets(&cam, Pos2::ZERO, HALF);
+                        assert!(!faces.is_empty());
+                        for (i, face) in faces.iter().enumerate() {
+                            assert_eq!(hit(&faces, face.centre), Some(i), "{up:?} {view:?} {roll} {fov} {}", face.label);
+                            assert!(face.points.iter().all(|p| p.is_finite() && p.to_vec2().length() <= (HALF * 3.0_f64.sqrt()) as f32 + 1e-4));
+                        }
+                        assert!(hit(&faces, pos2(80.0, 80.0)).is_none());
                     }
-                    assert!(hit(&faces, pos2(80.0, 80.0)).is_none());
                 }
             }
         }
@@ -509,6 +678,141 @@ mod tests {
         assert_eq!(h.app.cam.distance, cam.distance);
     }
 
+    /// #10091: with Preferences › Navigation "Fit the model after a navigator view change" on, a
+    /// cube face, corner or arrow frames the whole model from the new direction, as Home does;
+    /// off (the default) the view turns in place, keeping its target and zoom.
+    #[test]
+    fn cube_views_frame_the_model_when_the_navigation_preference_asks() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube", "look_at_anim":false}));
+        assert!(!h.app.preferences.navigator_fit, "off by default");
+        h.app.run("solid.box", json!({"corner":[100,0,0],"length":20,"width":20,"height":20})).unwrap();
+        h.settle();
+        let undo = h.app.session.undo.len();
+        let away = |h: &mut crate::scenario::Harness| {
+            h.call("ui.view", json!({"view":"iso"}));
+            h.app.cam.pan(600.0, 400.0, 500.0);
+            h.app.cam.distance *= 4.0;
+            h.frames(2);
+            h.app.cam
+        };
+        let from = away(&mut h);
+        let p = crate::scenario::handle_at("navigation_cube:front").unwrap();
+        h.call("ui.click", json!({"x":p.x,"y":p.y}));
+        h.frames(2);
+        assert!(h.app.cam.back().dist(-Vec3::Y) < 1e-6);
+        assert_eq!(h.app.cam.target, from.target, "off: the target stays");
+        assert_eq!(h.app.cam.distance, from.distance, "off: the zoom stays");
+        h.call("ui.prefs", json!({"navigator_fit":true}));
+        for handle in ["navigation_cube:front", "navigation_cube:top_front_right", "navigation_cube:control:right"] {
+            let from = away(&mut h);
+            let p = crate::scenario::handle_at(handle).unwrap();
+            h.call("ui.click", json!({"x":p.x,"y":p.y}));
+            h.frames(2);
+            if handle == "navigation_cube:front" {
+                assert!(h.app.cam.back().dist(-Vec3::Y) < 1e-6);
+            }
+            assert!(h.app.cam.target.dist(Vec3::new(110.0, 10.0, 10.0)) < 1e-6, "{handle}: looks at the middle of the model, {:?}", h.app.cam.target);
+            assert!(h.app.cam.distance < from.distance / 2.0, "{handle}: {} vs {}", h.app.cam.distance, from.distance);
+        }
+        // Home, then a face, a corner or an arrow: the zoom and the centre stay; only the
+        // direction changes.
+        let click = |h: &mut crate::scenario::Harness, handle: &str| {
+            let p = crate::scenario::handle_at(handle).unwrap_or_else(|| panic!("{handle} is not on the cube"));
+            h.call("ui.click", json!({"x":p.x,"y":p.y}));
+            h.frames(2);
+        };
+        click(&mut h, "navigation_cube:control:home");
+        let home = h.app.cam;
+        for handle in ["navigation_cube:front", "navigation_cube:top", "navigation_cube:top_front_right", "navigation_cube:control:right"] {
+            click(&mut h, "navigation_cube:control:home");
+            click(&mut h, handle);
+            assert!((h.app.cam.distance - home.distance).abs() < 1e-6, "{handle}: {} vs Home's {}", h.app.cam.distance, home.distance);
+            assert!(h.app.cam.target.dist(home.target) < 1e-6, "{handle}: {:?} vs Home's {:?}", h.app.cam.target, home.target);
+        }
+        assert_eq!(h.app.session.undo.len(), undo, "a view change edits nothing");
+    }
+
+    /// #10254: with Preferences › Navigation "Invert the view cube rotation arrows" on, the
+    /// arrow on the left orbits the camera the way it points (right), and the other arrows swap
+    /// the same way; the curved roll arrows keep their action.
+    #[test]
+    fn inverted_arrows_orbit_the_way_they_point() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube", "look_at_anim":false}));
+        assert!(!h.app.preferences.invert_navigator_arrows, "off by default");
+        let turn = |h: &mut crate::scenario::Harness, action: &str| -> Camera {
+            h.call("ui.view", json!({"view":"front"}));
+            h.frames(2);
+            serde_json::from_value(h.app.session.execute("view.navigate", &json!({"camera": h.app.cam, "action": action})).unwrap()["camera"].clone())
+                .unwrap()
+        };
+        let click = |h: &mut crate::scenario::Harness, handle: &str| {
+            h.call("ui.view", json!({"view":"front"}));
+            h.frames(2);
+            let p = crate::scenario::handle_at(&format!("navigation_cube:control:{handle}")).unwrap();
+            h.call("ui.click", json!({"x":p.x,"y":p.y}));
+            h.frames(2);
+            h.app.cam
+        };
+        let on_the_left = |handle: &str| {
+            let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
+            crate::scenario::handle_at(&format!("navigation_cube:control:{handle}")).unwrap().x < outer.center().x
+        };
+        // Off (the default): the arrow on the left runs the "left" orbit, as before.
+        assert!(on_the_left("left"), "off: the left action sits on the cube's left side");
+        assert_eq!(click(&mut h, "left"), turn(&mut h, "left"));
+        assert_eq!(click(&mut h, "up"), turn(&mut h, "up"));
+        h.call("ui.prefs", json!({"invert_navigator_arrows":true}));
+        h.frames(2);
+        // On: the arrow on the left now runs the "right" orbit, and the sides trade places.
+        assert!(on_the_left("right"), "on: the arrow on the left runs the right orbit");
+        assert_eq!(click(&mut h, "right"), turn(&mut h, "right"));
+        assert_eq!(click(&mut h, "left"), turn(&mut h, "left"));
+        assert_eq!(click(&mut h, "down"), turn(&mut h, "down"));
+        // The curved roll arrows are not inverted.
+        h.call("ui.view", json!({"view":"front"}));
+        h.frames(2);
+        let camera = h.app.cam;
+        let p = crate::scenario::handle_at("navigation_cube:control:clockwise").unwrap();
+        h.call("ui.click", json!({"x":p.x,"y":p.y}));
+        assert!((h.app.cam.roll - camera.roll - std::f64::consts::FRAC_PI_2).abs() < 1e-6, "clockwise still rolls clockwise");
+    }
+
+    /// #10483: with Preferences › Navigation "Invert the curved roll arrows" on, the two curved
+    /// arrows trade rolls: the clockwise arrow rolls counterclockwise, and the counterclockwise
+    /// arrow rolls clockwise.
+    #[test]
+    fn inverted_curved_arrows_roll_the_other_way() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube", "look_at_anim":false}));
+        assert!(!h.app.preferences.invert_curved_roll_arrows, "off by default");
+        let roll_at = |h: &mut crate::scenario::Harness, p: egui::Pos2| -> f64 {
+            h.call("ui.view", json!({"view":"front"}));
+            h.frames(2);
+            let camera = h.app.cam;
+            h.call("ui.click", json!({"x":p.x,"y":p.y}));
+            h.frames(2);
+            h.app.cam.roll - camera.roll
+        };
+        let quarter = std::f64::consts::FRAC_PI_2;
+        let turn = std::f64::consts::TAU;
+        // The engine keeps roll in [0, τ), so compare quarter-turns modulo a full turn.
+        let is_a_quarter_turn = |delta: f64, way: f64| (delta - way).rem_euclid(turn) < 1e-6 || (way - delta).rem_euclid(turn) < 1e-6;
+        let top = crate::scenario::handle_at("navigation_cube:control:counterclockwise").unwrap();
+        let right = crate::scenario::handle_at("navigation_cube:control:clockwise").unwrap();
+        // Off (the default): each arrow rolls the view the way it curls.
+        assert!(is_a_quarter_turn(roll_at(&mut h, right), quarter), "off: the clockwise arrow rolls clockwise");
+        assert!(is_a_quarter_turn(roll_at(&mut h, top), -quarter), "off: the counterclockwise arrow rolls counterclockwise");
+        h.call("ui.prefs", json!({"invert_curved_roll_arrows":true}));
+        h.frames(2);
+        // On: the same two arrows trade rolls.
+        assert!(is_a_quarter_turn(roll_at(&mut h, right), -quarter), "on: the clockwise arrow rolls counterclockwise");
+        assert!(is_a_quarter_turn(roll_at(&mut h, top), quarter), "on: the counterclockwise arrow rolls clockwise");
+        // The handles name the roll actually performed, and trade places with it.
+        assert_eq!(crate::scenario::handle_at("navigation_cube:control:clockwise").unwrap(), top);
+    }
+
     #[test]
     fn cube_navigation_eases_through_intermediate_views_and_can_be_interrupted() {
         let mut h = crate::scenario::Harness::new();
@@ -534,11 +838,39 @@ mod tests {
             }
             h.app.cam = anim.sample(anim.start + anim.duration / 2.0).0;
             let intermediate = h.app.cam;
+            let first_to = anim.to;
             navigate(&mut h.app, Some("left"), None);
-            assert_eq!(h.app.cam_anim.unwrap().from, intermediate, "another click starts where the camera is");
-            h.app.cam = anim.to;
+            let next = h.app.cam_anim.expect("retargeted glide");
+            assert_eq!(next.from, intermediate, "the glide continues from the camera as it is");
+            assert_ne!(next.to.basis(), first_to.basis(), "the destination is a further turn from the in-flight target");
+            h.app.cam = next.to;
             h.app.cancel_view_animation();
         }
+    }
+
+    /// #8912: two quick Right clicks retarget from the first glide's destination, not from mid-flight.
+    #[test]
+    fn rapid_cube_turns_compose_from_the_in_flight_target() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube"}));
+        assert!(h.app.preferences.look_at_anim);
+        navigate(&mut h.app, Some("right"), None);
+        let first = h.app.cam_anim.expect("first turn");
+        let first_to = first.to;
+        let mid = first.sample(first.start + first.duration / 2.0).0;
+        h.app.cam = mid;
+        navigate(&mut h.app, Some("right"), None);
+        let second = h.app.cam_anim.expect("retargeted turn");
+        let composed: Camera = serde_json::from_value(
+            h.app.session.execute("view.navigate", &json!({"camera": first_to, "action": "right"})).unwrap()["camera"].clone(),
+        )
+        .unwrap();
+        let from_mid: Camera =
+            serde_json::from_value(h.app.session.execute("view.navigate", &json!({"camera": mid, "action": "right"})).unwrap()["camera"].clone())
+                .unwrap();
+        assert!(second.to.back().dist(composed.back()) < 1e-6, "second click turns from the in-flight target");
+        assert!(second.to.back().dist(from_mid.back()) > 1e-3, "not from the mid-glide camera");
+        assert!(second.from.back().dist(mid.back()) < 1e-6, "ease still starts where the camera is");
     }
 
     /// A view-cube click glides, but a mouse orbit started at once cancels the glide: the camera

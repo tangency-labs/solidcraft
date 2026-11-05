@@ -1,4 +1,5 @@
 //! Read-only report and library containers, sharing the form's typography and actions.
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{scenario, theme::Tokens};
 use egui::{Ui, vec2};
 
@@ -30,16 +31,24 @@ pub(crate) fn report_divider(ui: &mut Ui, key: &str) {
 
 /// List border around a caller-owned virtualised viewport. Tokens: dialog_rule, control_radius, space_10.
 pub(crate) fn list_frame<R>(ui: &mut Ui, key: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    list_frame_filled(ui, key, egui::Color32::TRANSPARENT, 0.0, add)
+}
+
+pub(super) fn list_frame_filled<R>(ui: &mut Ui, key: &str, fill: egui::Color32, vertical: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
     let t = Tokens::get();
-    let response = egui::Frame::NONE
-        .stroke(t.container_border(t.dialog_rule))
-        .corner_radius(t.control_radius)
-        .inner_margin(egui::Margin::symmetric(t.space_10 as i8, 0))
-        .show(ui, |ui| {
+    let response = crate::ui_kit::Container::show_backing(
+        ui,
+        egui::Frame::NONE
+            .fill(fill)
+            .stroke(t.container_border(t.dialog_rule))
+            .corner_radius(t.control_radius)
+            .inner_margin(egui::Margin::symmetric(t.space_10 as i8, vertical as i8)),
+        |ui| {
             // Frame already subtracts its border and padding from the content width.
             ui.set_min_width(ui.available_width().max(0.0));
             add(ui)
-        });
+        },
+    );
     scenario::publish_rect(&format!("dialog:list:{key}"), response.response.rect);
     response.inner
 }
@@ -58,8 +67,8 @@ pub(crate) fn path_chip(ui: &mut Ui, path: &str, add: impl FnOnce(&mut Ui)) {
             let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(0.0), t.control_height), egui::Sense::hover());
             ui.painter().rect(rect, t.control_radius, t.dialog_footer, t.tertiary_border(t.dialog_rule), egui::StrokeKind::Inside);
             super::text::paint_text(ui, rect.shrink2(vec2(t.space_8, 0.0)), path, egui::FontId::monospace(t.font_small), t.form_dim, false);
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), path));
-            response.on_hover_text(path);
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), path));
+            response.backing_on_hover_text(path);
             let key = format!("dialog:cell:{path}");
             scenario::publish_handle(&key, rect.center());
             scenario::publish_rect(&key, rect);
@@ -78,7 +87,7 @@ pub(crate) fn empty_box(ui: &mut Ui, key: &str, message: &str) {
     }
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(0.0), t.control_height * 3.0), egui::Sense::hover());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), message));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), message));
     let mut points = super::preferences::rounded_perimeter(rect.shrink(0.5), f32::from(t.radius_lg));
     if let Some(first) = points.first().copied() {
         points.push(first);
@@ -126,8 +135,8 @@ pub(crate) fn report_header(ui: &mut Ui, kind: &str, count: u64, time: &str, ali
                 t.form_dim,
                 false,
             );
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), alias));
-            response.on_hover_text(alias);
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), alias));
+            response.backing_on_hover_text(alias);
             let key = format!("dialog:cell:{alias}");
             scenario::publish_rect(&key, rect);
             scenario::publish_handle(&key, rect.center());

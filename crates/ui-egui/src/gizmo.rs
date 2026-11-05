@@ -4,10 +4,12 @@
 //! round steps at the current zoom, angles to 5°; hold Alt or Ctrl for a free drag), so the caller
 //! adds it to the values it had when the drag started.
 
+use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 
 use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, vec2};
-use solidcraft_engine::geom::{Ring, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::Ring;
 
 use crate::theme::Tokens;
 use crate::viewport::{Proj, projected_polygon};
@@ -348,6 +350,23 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
             s
         }
     };
+    let done = r.drag_stopped() || !r.dragged() && !started;
+    // The frame's events can hold the release and further movement — the hand keeps moving as
+    // the button goes up, or input queued during a busy frame — and `p` is already past the
+    // release then. The release event itself carries where the button was let go (#8265): take
+    // the final change from there, so the drag ends where the button was released, not where
+    // the mouse has since got to.
+    let p = if done {
+        ui.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::PointerButton { pos, pressed: false, .. } => Some(*pos),
+                _ => None,
+            })
+        })
+        .unwrap_or(p)
+    } else {
+        p
+    };
     let change = match st.handle {
         Handle::Axis(i) => {
             let v = along(proj, p, st.center, DIRS[i]).map(|v| v - st.t0).unwrap_or(0.0);
@@ -374,7 +393,6 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
             Change::Translate(Vec3::new(snap(d.x, step, free), snap(d.y, step, free), snap(d.z, step, free)))
         }
     };
-    let done = r.drag_stopped() || !r.dragged() && !started;
     if done {
         ui.data_mut(|d| d.remove::<State>(id));
     } else {
