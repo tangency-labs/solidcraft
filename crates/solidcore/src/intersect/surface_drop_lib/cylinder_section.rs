@@ -43,7 +43,7 @@
 //! Deviations: not a port. The result is used only where it checks out: the curve is a
 //! B-spline kind with its NURB (B-spline, line, ellipse or circle, parabola, hyperbola)
 //! over the interval; it does not cross the cylinder's seam or leave the domain; it is
-//! not an iso-parameter line (`DropIsoCurve` already gives those exactly); every
+//! of positive degree and not an iso-parameter line (`DropIsoCurve` already gives those exactly); every
 //! piece's denominator has positive Bezier weights (a piece is halved up to
 //! [`MAX_HALVINGS`] times to get there) and the weights fit NLib's range; and the UV
 //! curve lifted onto the surface is within [`ON_SURFACE_REL`] (relative to the model's
@@ -660,6 +660,10 @@ struct UvData {
 /// curve is an iso-parameter line or the weights do not fit NLib's range.
 fn join(pieces: &[Piece], uv_domain: &Extent2d, uv_tol: f64) -> Option<UvData> {
     let degree = pieces.first()?.ctrl.len().checked_sub(1)?;
+    // Constant pieces have no endpoint stride and are outside the non-iso construction.
+    if degree == 0 {
+        return None;
+    }
     let mut data = UvData {
         knots: vec![pieces.first()?.t[0]],
         multiplicities: vec![degree + 1],
@@ -967,5 +971,49 @@ mod tests {
         let spans = |c: &BSplineCurve| c.knots(None).unwrap().0.len() - 1;
         // the three knots and three joint crossings, against the knots alone
         assert_eq!((spans(&uv), spans(&near)), (7, 4), "{:?}", uv.knots(None));
+    }
+
+    /// A constant curve inside one circle segment, away from seams and segment joints.
+    fn degree_zero_curve() -> Curve {
+        let n = NurbCurve::new(vec![CPoint::new(12.8, 9.6, 10.0, 1.0)], 0, vec![0.0, 1.0]).unwrap();
+        Curve::from(BSplineCurve::from_nurb(n, 3, false))
+    }
+
+    #[test]
+    fn degree_zero_exact_uv_pieces_are_ineligible() {
+        let k = Kernel::default();
+        let (s, domain) = cylinder(&k);
+        let curve = degree_zero_curve();
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        assert!(exact_uv_curve(&k, &s, &domain, &curve, &interval)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn degree_zero_public_drop_keeps_the_normal_refusal() {
+        use crate::geom::solution_array::{ObjectKind, SolutionObject};
+        #[derive(Clone, Copy, PartialEq)]
+        struct Obj;
+        impl SolutionObject for Obj {
+            fn kind(&self) -> ObjectKind {
+                ObjectKind::Curve
+            }
+        }
+        for enabled in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.cylinder_plane_section_trims_exact = enabled;
+            let (s, domain) = cylinder(&k);
+            let curve = degree_zero_curve();
+            let interval = Extent1d::from_min_max(0.0, 1.0);
+            let out = s.drop_curve_base::<Obj>(&k, &domain, &curve, &interval, 1e-6, false, None);
+            assert_eq!(
+                out.as_ref()
+                    .err()
+                    .and_then(crate::error::SolidError::sm_status),
+                Some(crate::error::SM_ERR_NULL_POINTER),
+                "exact UV enabled: {enabled}"
+            );
+        }
     }
 }
