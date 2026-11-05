@@ -2928,7 +2928,9 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                     // The reference is a centerline, else the linked line (an origin axis) in
                     // either pick order, so the free line is the one kept parallel to it.
                     let linked = |c: usize| sk.curves.get(c).is_some_and(|c| c.link.is_some());
-                    let a_ref = sk.curves.get(a).is_some_and(|c| c.centerline) || (linked(a) && !linked(b));
+                    // A centerline comes first, then a linked line, whichever was picked first.
+                    let centerline = |c: usize| sk.curves.get(c).is_some_and(|c| c.centerline);
+                    let a_ref = centerline(a) || (!centerline(b) && linked(a) && !linked(b));
                     let (a, b, b0) = if a_ref { (a, b, b0) } else { (b, a, a0) };
                     let (bq, _) = line_ends(sk, b);
                     let (a0, a1) = line_pts(sk, a).unwrap_or_default();
@@ -3081,7 +3083,7 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
         // whole line keeps that distance, unless something already sets its direction.
         if let Some((l, r)) = keep_parallel {
             let directed = sk.constraints.iter().any(|c| match c.kind {
-                ConstraintKind::Horizontal { l: x } | ConstraintKind::Vertical { l: x } => x == l,
+                ConstraintKind::Horizontal { l: x } | ConstraintKind::Vertical { l: x } | ConstraintKind::LineAngle { l: x, .. } => x == l,
                 ConstraintKind::Parallel { a, b }
                 | ConstraintKind::Collinear { a, b }
                 | ConstraintKind::Perpendicular { a, b }

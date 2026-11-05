@@ -232,6 +232,26 @@ fn dimension_measures_a_line_to_an_origin_axis() {
     }
 }
 
+/// A lowercase axis reference is projected as an uppercase one is.
+#[test]
+fn a_lowercase_axis_reference_is_projected() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l", {"axis": "x"}], "value": "12"}));
+    assert!((pt(&sketch(&s), "l.start").y.abs() - 12.0).abs() < 1e-7, "12 from X");
+}
+
+/// A line whose angle is already set keeps it: no Parallel is added to the axis.
+#[test]
+fn a_line_with_an_angle_gets_no_parallel_to_the_axis() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l"], "type": "angle", "value": "0 deg"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l", {"axis": "X"}], "value": "12"}));
+    let sk = sketch(&s);
+    assert!(!sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_sketch::ConstraintKind::Parallel { .. })), "{:?}", sk.constraints);
+}
+
 #[test]
 fn the_axis_survives_save_and_load() {
     let mut s = on(json!("YZ"));

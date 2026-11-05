@@ -848,8 +848,17 @@ fn symmetry_args(picks: &[Value], sketch: Option<&solidcraft_engine::sketch::Ske
 fn axis_pick(app: &SolveApp, tool: &Tool, name: &str) -> Option<String> {
     match tool.cmd {
         "sketch.constraint.symmetry" if tool.picks.len() == 2 => sketch_axis_of(app, name).map(str::to_string),
+        // The sketch's own `x` / `y`, unless a curve or point of the sketch is called that; then
+        // the axis reference, which can't be mistaken for it.
         "sketch.constraint.coincident" => {
-            sketch_axis_of(app, name).map(str::to_string).or_else(|| matches!(name, "X" | "Y" | "Z").then(|| json!({"axis": name}).to_string()))
+            let own = sketch_axis_of(app, name).filter(|id| {
+                let st = app.session.world_state();
+                !app.session
+                    .active_sketch
+                    .and_then(|s| st.sketch(s))
+                    .is_some_and(|ss| ss.sketch.curve_index(id).is_some() || ss.sketch.point_index(id).is_some())
+            });
+            own.map(str::to_string).or_else(|| matches!(name, "X" | "Y" | "Z").then(|| json!({"axis": name}).to_string()))
         }
         _ => None,
     }

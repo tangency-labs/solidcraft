@@ -413,7 +413,10 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
 /// A model's reference among a command's operands (#6348): an `{edge: [x,y,z], body?}` or a
 /// `{vertex: [x,y,z], body?}`, or an origin axis `{axis: X|Y|Z}`.
 fn model_ref(v: &Value) -> bool {
-    v.get("edge").is_some() || v.get("vertex").is_some() || v.get("axis").and_then(Value::as_str).is_some_and(|a| matches!(a, "X" | "Y" | "Z"))
+    // Either case, as `source` takes it.
+    v.get("edge").is_some()
+        || v.get("vertex").is_some()
+        || v.get("axis").and_then(Value::as_str).is_some_and(|a| matches!(a, "X" | "Y" | "Z" | "x" | "y" | "z"))
 }
 
 /// Project one model reference into the sketch and report the entity it stands for: an edge's
