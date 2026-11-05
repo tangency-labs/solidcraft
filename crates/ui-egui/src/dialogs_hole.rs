@@ -40,9 +40,65 @@ impl Dim {
     }
 }
 
+/// The clearance fits, as the Hole dialog lists them: (label id, the command's `fit`).
+pub(crate) const CLEARANCE_FITS: [(&str, &str); 3] = [("ui.fit_close", "close"), ("ui.fit_normal", "normal"), ("ui.fit_loose", "loose")];
+/// The normal fit's index in [`CLEARANCE_FITS`], the default.
+pub(crate) const NORMAL_FIT: usize = 1;
+
+/// ISO 273's diameter for the clearance options' bolt size and fit; none for a size outside
+/// the table.
+pub(crate) fn clearance_table_diameter(opts: &HoleOpts) -> Option<f64> {
+    let (_, fit) = CLEARANCE_FITS.get(opts.clearance_fit)?;
+    solidcraft_engine::cmd::clearance_diameter(&opts.clearance_size, fit)
+}
+
+/// The Clearance tap type's rows: the bolt size, the fit, and the hole's diameter, the table's
+/// as an editable default (as the tap drill is for a tapped hole). A new size or fit goes back
+/// to its own diameter. Returns whether Enter was accepted in the diameter field.
+pub(crate) fn clearance_rows(ui: &mut egui::Ui, opts: &mut HoleOpts) -> bool {
+    let sizes = solidcraft_engine::cmd::clearance_sizes();
+    let labels: Vec<&str> = sizes.iter().map(String::as_str).collect();
+    let before = (opts.clearance_size.clone(), opts.clearance_fit);
+    crate::dialogs::form_row(ui, "Size", |ui| {
+        let mut selected = sizes.iter().position(|s| s.eq_ignore_ascii_case(opts.clearance_size.trim())).unwrap_or(0);
+        crate::dialogs::combo(ui, "hole_clearance_size", &labels, &mut selected);
+        if let Some(size) = sizes.get(selected) {
+            opts.clearance_size.clone_from(size);
+        }
+    });
+    crate::dialogs::form_row(ui, "ui.clearance_fit", |ui| {
+        let fits: Vec<&str> = CLEARANCE_FITS.iter().map(|f| f.0).collect();
+        let mut selected = opts.clearance_fit.min(CLEARANCE_FITS.len() - 1);
+        crate::dialogs::combo(ui, "hole_clearance_fit", &fits, &mut selected);
+        opts.clearance_fit = selected;
+    });
+    if (opts.clearance_size.clone(), opts.clearance_fit) != before {
+        opts.clearance_diameter = None;
+    }
+    let mut enter = false;
+    crate::dialogs::form_row(ui, "ui.clearance_diameter", |ui| match clearance_table_diameter(opts) {
+        Some(d) => {
+            let default = format!("{d} mm");
+            let fit = CLEARANCE_FITS.get(opts.clearance_fit).map_or("", |f| crate::i18n::tr(f.0));
+            let mm = format!("{d}");
+            let tip = crate::i18n::format("hole.clearance_tip", &[("size", opts.clearance_size.as_str()), ("fit", fit), ("diameter", mm.as_str())]);
+            let mut text = opts.clearance_diameter.clone().unwrap_or_else(|| default.clone());
+            let (submitted, changed) = crate::ui_kit::text_field_tip(ui, &mut text, &default, &tip);
+            if changed {
+                opts.clearance_diameter = (text.trim() != default && !text.trim().is_empty()).then_some(text);
+            }
+            enter = submitted;
+        }
+        None => {
+            ui.label(crate::i18n::tr("thread.select_size"));
+        }
+    });
+    enter
+}
+
 /// The sizes a hole of type `kind` takes, top to bottom: a depth unless it goes through all or
-/// to an object, a diameter unless tapped, and a tip angle for an angled bottom
-/// independently of the entry recess.
+/// to an object, a diameter unless tapped or a clearance hole, and a tip angle for an angled
+/// bottom independently of the entry recess.
 pub(crate) fn dims(kind: usize, opts: &HoleOpts, to_object: bool) -> Vec<Dim> {
     let mut v = match kind {
         1 => vec![Dim::TopDiameter, Dim::CbDepth],
@@ -55,7 +111,7 @@ pub(crate) fn dims(kind: usize, opts: &HoleOpts, to_object: bool) -> Vec<Dim> {
     if opts.tapped && !opts.thread_full_depth {
         v.push(Dim::ThreadDepth);
     }
-    if !opts.tapped {
+    if !opts.tapped && !opts.clearance {
         v.push(Dim::Diameter);
     }
     if opts.angled && !opts.all {
@@ -67,7 +123,12 @@ pub(crate) fn dims(kind: usize, opts: &HoleOpts, to_object: bool) -> Vec<Dim> {
 /// Tapped bores use the engine's catalogued cut-tap drill, including Unified and parallel pipe sizes.
 /// A custom draft with an error must not illustrate its stale, last valid designation.
 fn bore_diameter(diameter: &str, opts: &HoleOpts, eval: &dyn Fn(&str, ValueKind) -> Option<f64>) -> Option<f64> {
-    if opts.tapped {
+    if opts.clearance {
+        match opts.clearance_diameter.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+            Some(d) => eval(d, ValueKind::Length).filter(|v| v.is_finite() && *v > 0.0),
+            None => clearance_table_diameter(opts),
+        }
+    } else if opts.tapped {
         if opts.custom_thread.as_ref().is_some_and(|draft| draft.error.is_some()) {
             return None;
         }
@@ -87,6 +148,8 @@ struct Section {
     to_object: bool,
     angled: bool,
     tapped: bool,
+    /// A clearance hole: the bolt's shank is drawn through it.
+    clearance: bool,
     /// A schematic fraction: known blind extents use the entered lengths. To Object and
     /// Through All have no typed drill length, so partial tapping is shown as a shorter span.
     thread_fraction: f32,
@@ -104,7 +167,8 @@ pub(crate) enum Choice {
     Extents(usize),
     /// Simple, Counterbore or Countersink, by index.
     Type(usize),
-    Tapped(bool),
+    /// Simple, Clearance or Tapped, by index.
+    Tap(usize),
     Angled(bool),
 }
 
@@ -120,7 +184,10 @@ pub(crate) fn preview(ui: &mut egui::Ui, form: &Kind, to_object: bool, choice: C
             to_object = e == 1;
         }
         Choice::Type(t) => *kind = t,
-        Choice::Tapped(on) => opts.tapped = on,
+        Choice::Tap(i) => {
+            opts.clearance = i == 1;
+            opts.tapped = i == 2;
+        }
         Choice::Angled(on) => opts.angled = on,
     }
     let Some(s) = section(&k, to_object, eval) else { return };
@@ -151,6 +218,7 @@ fn section(k: &Kind, to_object: bool, eval: &dyn Fn(&str, ValueKind) -> Option<f
         to_object,
         angled: opts.angled,
         tapped: opts.tapped,
+        clearance: opts.clearance,
         thread_fraction: if opts.thread_full_depth {
             1.0
         } else if !opts.all && !to_object {
@@ -349,6 +417,14 @@ fn paint(p: &egui::Painter, pic: Rect, s: &Section, slots: &[(Dim, Rect, bool)])
         p.line_segment([pos2(cx - r, thread_end), pos2(cx - bore_r, thread_end)], Stroke::new(1.0, t.form_ink));
         p.line_segment([pos2(cx + bore_r, thread_end), pos2(cx + r, thread_end)], Stroke::new(1.0, t.form_ink));
     }
+    // A clearance hole's bolt: its shank, dashed, down through the bore.
+    if s.clearance {
+        let r = bore_r * 0.78;
+        let end = if s.through { bottom + 1.0 } else { shoulder };
+        for x in [cx - r, cx + r] {
+            p.extend(Shape::dashed_line(&[pos2(x, top - 6.0), pos2(x, end)], Stroke::new(1.0, t.form_ink), 3.0, 2.0));
+        }
+    }
     // Outlines: the block's top and sides, the hole's walls and bottom.
     let edge = Stroke::new(1.4, t.form_ink);
     let wall = |sign: f32| -> Vec<Pos2> { half.iter().map(|(w, y)| pos2(cx + sign * w, *y)).collect() };
@@ -454,6 +530,7 @@ mod tests {
                         to_object: false,
                         angled: false,
                         tapped: true,
+                        clearance: false,
                         thread_fraction: fraction,
                         ratio: 0.5,
                         cs_half: std::f32::consts::FRAC_PI_4,
@@ -510,6 +587,27 @@ mod tests {
     }
 
     #[test]
+    fn clearance_section_uses_the_table_or_the_typed_diameter() {
+        let mut opts = HoleOpts { clearance: true, clearance_size: "M4".into(), ..HoleOpts::default() };
+        let stale_diameter = |_: &str, _: ValueKind| Some(9.0);
+        assert_eq!(bore_diameter("9 mm", &opts, &stale_diameter), Some(4.5), "M4 normal fit");
+        opts.clearance_fit = 0;
+        assert_eq!(bore_diameter("9 mm", &opts, &stale_diameter), Some(4.3), "M4 close fit");
+        opts.clearance_fit = 2;
+        assert_eq!(bore_diameter("9 mm", &opts, &stale_diameter), Some(4.8), "M4 loose fit");
+        opts.clearance_size = "M64".into();
+        assert_eq!(bore_diameter("9 mm", &opts, &stale_diameter), Some(74.0));
+        opts.clearance_size = "M7".into();
+        assert_eq!(bore_diameter("9 mm", &opts, &stale_diameter), None, "no M7 in ISO 273");
+        opts.clearance_size = "M4".into();
+        opts.clearance_diameter = Some("4.6 mm".into());
+        let typed = |e: &str, _: ValueKind| if e == "4.6 mm" { Some(4.6) } else { None };
+        assert_eq!(bore_diameter("9 mm", &opts, &typed), Some(4.6), "a typed diameter wins");
+        opts.clearance = false;
+        assert_eq!(bore_diameter("9 mm", &opts, &stale_diameter), Some(9.0));
+    }
+
+    #[test]
     fn partial_tapping_has_an_independent_dimension_for_every_extent() {
         for kind in 0..=2 {
             for through in [false, true] {
@@ -545,7 +643,7 @@ mod tests {
         for options in [
             vec![Choice::Extents(0), Choice::Extents(1), Choice::Extents(2)],
             vec![Choice::Type(0), Choice::Type(1), Choice::Type(2)],
-            vec![Choice::Tapped(false), Choice::Tapped(true)],
+            vec![Choice::Tap(0), Choice::Tap(1), Choice::Tap(2)],
             vec![Choice::Angled(false), Choice::Angled(true)],
         ] {
             let pictures: Vec<_> = options.iter().map(|c| drawn(*c)).collect();
@@ -606,6 +704,9 @@ mod tests {
         assert_eq!(dims(2, &opts(true, false), false), vec![TopDiameter, CsAngle, Diameter]);
         let tapped = HoleOpts { tapped: true, ..opts(false, true) };
         assert_eq!(dims(0, &tapped, false), vec![Depth, TipAngle], "tapped: the thread sets the diameter");
+        let clearance = HoleOpts { clearance: true, ..opts(false, true) };
+        assert_eq!(dims(0, &clearance, false), vec![Depth, TipAngle], "clearance: the bolt size sets the diameter");
+        assert_eq!(dims(1, &clearance, false), vec![TopDiameter, CbDepth, Depth, TipAngle]);
         assert_eq!(TopDiameter.label(1), "Counterbore Ø");
         assert_eq!(TopDiameter.label(2), "Countersink Ø");
     }
