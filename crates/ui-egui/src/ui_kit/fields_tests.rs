@@ -96,7 +96,7 @@ fn tab_visits_expression_fields_in_row_order() {
         let mut second = "20 mm".to_string();
         let second_id = std::cell::Cell::new(None);
         let mut draw = |ui: &mut Ui| {
-            crate::dialog_focus::scope(ui, egui::Id::new("expression_fields"), |ui| {
+            crate::dialog_focus::scope(ui, egui::Id::unique("expression_fields"), |ui| {
                 row(ui, "First value", |ui| {
                     field(ui, &mut first);
                 });

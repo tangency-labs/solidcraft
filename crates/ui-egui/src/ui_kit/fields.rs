@@ -1063,7 +1063,7 @@ pub(crate) fn compact_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, curren
 /// Reserve Enter for applying a feature form while its controls are being drawn.
 pub(crate) fn with_feature_form<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     let ctx = ui.ctx().clone();
-    let id = egui::Id::new("feature_form_enter_to_apply");
+    let id = egui::Id::unique("feature_form_enter_to_apply");
     let previous = ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
     ctx.data_mut(|d| d.insert_temp(id, true));
     let result = add(ui);
@@ -1072,7 +1072,7 @@ pub(crate) fn with_feature_form<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) 
 }
 
 pub(super) fn feature_form_active(ctx: &egui::Context) -> bool {
-    crate::dialog_focus::navigation_enabled(ctx) && ctx.data(|d| d.get_temp::<bool>(egui::Id::new("feature_form_enter_to_apply"))).unwrap_or(false)
+    crate::dialog_focus::navigation_enabled(ctx) && ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("feature_form_enter_to_apply"))).unwrap_or(false)
 }
 
 /// A closed value dropdown leaves Enter for OK; an open popup owns its own keys.

@@ -2606,8 +2606,8 @@ fn dialog_tab_window_wraps_in_both_directions_and_excludes_background_fields() {
     let mut disabled = "99 mm".to_string();
     let mut draw = |ui: &mut Ui| {
         crate::dialog_focus::prepare_active(ui.ctx());
-        cell_editor(ui, egui::Id::new("background_field"), &mut outside, "", false);
-        Window::new(egui::Id::new("focus_window"), "", "Test dialog").show(ui.ctx(), true, |ui| {
+        cell_editor(ui, egui::Id::unique("background_field"), &mut outside, "", false);
+        Window::new(egui::Id::unique("focus_window"), "", "Test dialog").show(ui.ctx(), true, |ui| {
             expr_row(ui, "First", &mut first);
             expr_row(ui, "Second", &mut second);
             ui.add_enabled_ui(false, |ui| {
@@ -2653,7 +2653,12 @@ fn dialog_tab_window_wraps_in_both_directions_and_excludes_background_fields() {
             }
         }
         assert!(visited.contains(&first_id), "the loop must return to the first field");
-        assert_eq!(visited.len(), 4, "only two fields and two footer actions belong in the loop; Close is pointer-only");
+        assert_eq!(
+            visited.len(),
+            4,
+            "only two fields and two footer actions belong in the loop; Close is pointer-only: {:?}",
+            visited.iter().map(|id| ctx.read_response(*id).map(|r| (r.id, r.rect))).collect::<Vec<_>>()
+        );
     }
 }
 
@@ -2670,7 +2675,7 @@ fn dialog_tab_dropdown_closes_and_leaves_in_both_directions() {
             let mut filter = String::new();
             let mut draw = |ui: &mut Ui| {
                 crate::dialog_focus::prepare_active(ui.ctx());
-                Window::new(egui::Id::new("popup_exit"), "", "Test").show(ui.ctx(), true, |ui| {
+                Window::new(egui::Id::unique("popup_exit"), "", "Test").show(ui.ctx(), true, |ui| {
                     expr_row(ui, "Before", &mut before);
                     row(ui, "Mode", |ui| {
                         owner.set(ui.make_persistent_id(egui::IdSalt::new("mode")));
@@ -2759,7 +2764,7 @@ fn dropdown_open_menu_starts_at_current_wraps_and_space_confirms() {
         let applied = std::cell::Cell::new(false);
         let mut draw = |ui: &mut Ui| {
             crate::dialog_focus::prepare_active(ui.ctx());
-            let (_, action) = Window::new(egui::Id::new("open_menu"), "", "Test").show(ui.ctx(), true, |ui| {
+            let (_, action) = Window::new(egui::Id::unique("open_menu"), "", "Test").show(ui.ctx(), true, |ui| {
                 row(ui, "Mode", |ui| {
                     owner.set(ui.make_persistent_id(egui::IdSalt::new("mode")));
                     let mut value = selected.get();
@@ -2822,7 +2827,7 @@ fn dialog_tab_dropdown_arrows_change_the_focused_choice() {
     let dropdown_id = std::cell::Cell::new(None);
     let mut draw = |ui: &mut Ui| {
         crate::dialog_focus::prepare_active(ui.ctx());
-        let (_, action) = Window::new(egui::Id::new("arrow_window"), "", "Test").show(ui.ctx(), true, |ui| {
+        let (_, action) = Window::new(egui::Id::unique("arrow_window"), "", "Test").show(ui.ctx(), true, |ui| {
             row(ui, "Mode", |ui| {
                 let mut value = selected.get();
                 dropdown_id.set(Some(dropdown(ui, "mode", &mut value, &["First", "Second", "Third"]).id));
@@ -2868,7 +2873,7 @@ fn dialog_tab_dropdown_and_actions_paint_a_focus_outline() {
     let ids = std::cell::Cell::new([egui::Id::NULL; 4]);
     let mut draw = |ui: &mut Ui| {
         scope(ui, |ui| {
-            crate::dialog_focus::scope(ui, egui::Id::new("outline"), |ui| {
+            crate::dialog_focus::scope(ui, egui::Id::unique("outline"), |ui| {
                 let mut selected = 0;
                 let choice = dropdown(ui, "mode", &mut selected, &["First", "Second"]);
                 let normal = button(ui, "Button", Button::Normal);
@@ -2902,7 +2907,7 @@ fn dialog_keyboard_closed_dropdown_enter_applies_and_space_opens_all_variants() 
         let mut filter = String::new();
         let mut draw = |ui: &mut Ui| {
             crate::dialog_focus::prepare_active(ui.ctx());
-            let (_, action) = Window::new(egui::Id::new("dropdown_enter"), "", "Test").show(ui.ctx(), true, |ui| {
+            let (_, action) = Window::new(egui::Id::unique("dropdown_enter"), "", "Test").show(ui.ctx(), true, |ui| {
                 super::super::fields::with_feature_form(ui, |ui| {
                     row(ui, "Mode", |ui| {
                         id.set(ui.make_persistent_id(egui::IdSalt::new("mode")));

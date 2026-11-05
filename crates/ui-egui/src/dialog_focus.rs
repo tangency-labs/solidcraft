@@ -2,11 +2,11 @@
 
 /// Per-frame policy: a folded feature has no form to traverse; other windows still do.
 pub(crate) fn configure(ctx: &egui::Context, enabled: bool, folded: Option<egui::Id>) {
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new("dialog_tab_policy"), (enabled, folded)));
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("dialog_tab_policy"), (enabled, folded)));
 }
 
 pub(crate) fn navigation_enabled(ctx: &egui::Context) -> bool {
-    ctx.data(|d| d.get_temp::<(bool, Option<egui::Id>)>(egui::Id::new("dialog_tab_policy"))).is_none_or(|(enabled, _)| enabled)
+    ctx.data(|d| d.get_temp::<(bool, Option<egui::Id>)>(egui::Id::unique("dialog_tab_policy"))).is_none_or(|(enabled, _)| enabled)
 }
 
 pub(crate) fn in_scope(ctx: &egui::Context) -> bool {
@@ -14,7 +14,7 @@ pub(crate) fn in_scope(ctx: &egui::Context) -> bool {
 }
 
 fn enabled(ctx: &egui::Context, id: egui::Id) -> bool {
-    ctx.data(|d| d.get_temp::<(bool, Option<egui::Id>)>(egui::Id::new("dialog_tab_policy")))
+    ctx.data(|d| d.get_temp::<(bool, Option<egui::Id>)>(egui::Id::unique("dialog_tab_policy")))
         .is_none_or(|(enabled, folded)| enabled && folded != Some(id))
 }
 
@@ -88,10 +88,10 @@ struct Traversal {
 }
 
 fn active_id() -> egui::Id {
-    egui::Id::new("dialog_tab_scope")
+    egui::Id::unique("dialog_tab_scope")
 }
 fn current_id() -> egui::Id {
-    egui::Id::new("dialog_tab_current")
+    egui::Id::unique("dialog_tab_current")
 }
 fn first(id: egui::Id) -> egui::Id {
     id.with("tab_first")
@@ -117,10 +117,10 @@ struct DropdownExit {
 }
 
 fn dropdown_id() -> egui::Id {
-    egui::Id::new("dialog_open_dropdown")
+    egui::Id::unique("dialog_open_dropdown")
 }
 fn dropdown_exit_id() -> egui::Id {
-    egui::Id::new("dialog_dropdown_exit")
+    egui::Id::unique("dialog_dropdown_exit")
 }
 
 /// Close a dropdown before its options can intercept the parent's ordinary Tab traversal.
@@ -323,5 +323,5 @@ pub(crate) fn popup<R>(ui: &mut egui::Ui, owner: egui::Id, close_behavior: egui:
         }
         result
     };
-    if parent.is_some() { scope(ui, ui.id().with("tab_popup"), draw) } else { draw(ui) }
+    if parent.is_some() { scope(ui, ui.scope_id().with("tab_popup"), draw) } else { draw(ui) }
 }

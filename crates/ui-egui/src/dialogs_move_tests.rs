@@ -779,7 +779,7 @@ fn dialog_tab_preference_restores_floating_move_axis_cycle() {
         h.step(&json!({"key":"Tab","shift":shift})).unwrap();
         h.frames(2);
         assert_eq!(h.app.dialog.as_mut().and_then(|d| d.primary()).map(|p| p.0), Some(expected));
-        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_canvas_value")));
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_canvas_value")));
     }
     h.app.preferences.dialog_tab_navigation = true;
     h.step(&json!({"key":"Tab"})).unwrap();

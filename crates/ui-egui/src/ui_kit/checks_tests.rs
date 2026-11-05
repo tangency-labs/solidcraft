@@ -484,7 +484,7 @@ fn checkbox_variants_use_space_to_toggle_and_enter_to_apply_the_dialog() {
             let target = std::cell::Cell::new(Rect::NOTHING);
             let mut draw = |ui: &mut Ui| {
                 crate::dialog_focus::prepare_active(ui.ctx());
-                let (_, action) = Window::new(egui::Id::new("checkbox_dialog"), "", "Test").show(ui.ctx(), true, |ui| {
+                let (_, action) = Window::new(egui::Id::unique("checkbox_dialog"), "", "Test").show(ui.ctx(), true, |ui| {
                     super::super::fields::with_feature_form(ui, |ui| {
                         let mut on = value.get();
                         match variant {

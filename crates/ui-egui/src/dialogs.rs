@@ -2742,7 +2742,7 @@ pub(crate) fn prepare_tab(app: &SolveApp, ctx: &egui::Context) {
     crate::dialog_focus::configure(
         ctx,
         app.preferences.dialog_tab_navigation,
-        app.dialog.as_ref().filter(|d| d.collapsed).map(|d| egui::Id::new(("sc_dialog", title(&d.kind)))),
+        app.dialog.as_ref().filter(|d| d.collapsed).map(|d| egui::Id::unique(("sc_dialog", title(&d.kind)))),
     );
     if app.issue_report.draft.is_some() || app.file_picker.is_some() || app.applying.is_some() || app.home.open {
         return;
@@ -4007,7 +4007,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
         };
-        let response = panel.show(ctx, Some(&mut keep), |ui| if enter_applies { crate::ui_kit::with_feature_form(ui, draw_dialog) } else { draw_dialog(ui) });
+        let response =
+            panel.show(ctx, Some(&mut keep), |ui| if enter_applies { crate::ui_kit::with_feature_form(ui, draw_dialog) } else { draw_dialog(ui) });
         app.viewport.dialog_rect = response.filter(|_| !host || painted).map(|r| r.response.rect);
         // OK and Cancel in the view's corner do what the dialog's own do (#6709).
         if app.issue_report.draft.is_none() {

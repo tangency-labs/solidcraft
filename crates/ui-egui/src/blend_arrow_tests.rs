@@ -141,7 +141,7 @@ fn dialog_tab_blends_from_floating_values_start_at_edges_and_wrap() {
             h.app.session.selection = vec![selected];
             h.app.start(command);
             h.frames(8);
-            let canvas = egui::Id::new("sc_canvas_value");
+            let canvas = egui::Id::unique("sc_canvas_value");
             assert_eq!(h.ctx.memory(|m| m.focused()), Some(canvas), "the blend starts in the floating value");
             h.step(&json!({"key":"Tab"})).unwrap();
             let response = h.ctx.read_response(h.ctx.memory(|m| m.focused()).unwrap()).unwrap();

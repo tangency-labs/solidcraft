@@ -397,7 +397,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         // Compatibility mode retains Tab/Shift+Tab cycling the floating Move axes (#4776).
         let cycle_axes = !app.preferences.dialog_tab_navigation;
         if cycle_axes {
-            let id = egui::Id::new("sc_canvas_value");
+            let id = egui::Id::unique("sc_canvas_value");
             let boxed = ui.ctx().memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
             let back = boxed && ui.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab));
             let tab = boxed && !back && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab));

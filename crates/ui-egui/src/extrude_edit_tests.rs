@@ -818,7 +818,7 @@ fn dialog_tab_extrude_enters_from_canvas_distance_and_never_leaves_the_dialog() 
     let mut h = make(json!({}));
     open(&mut h);
     h.step(&json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
-    let canvas = egui::Id::new("sc_canvas_value");
+    let canvas = egui::Id::unique("sc_canvas_value");
     assert!(h.ctx.read_response(canvas).is_some(), "the floating distance editor is drawn");
     h.ctx.memory_mut(|m| m.request_focus(canvas));
     h.frames(2);

@@ -420,7 +420,7 @@ fn segmented_space_and_arrows_choose_while_enter_applies_the_dialog() {
         let applied = std::cell::Cell::new(false);
         let mut draw = |ui: &mut Ui| {
             crate::dialog_focus::prepare_active(ui.ctx());
-            let (_, action) = Window::new(egui::Id::new("segment_dialog"), "", "Test").show(ui.ctx(), true, |ui| {
+            let (_, action) = Window::new(egui::Id::unique("segment_dialog"), "", "Test").show(ui.ctx(), true, |ui| {
                 super::super::fields::with_feature_form(ui, |ui| {
                     row(ui, "Continuity", |ui| {
                         target.set(ui.make_persistent_id((if icons { "icon_segment" } else { "segment" }, 1usize)));
