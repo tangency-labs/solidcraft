@@ -638,7 +638,7 @@ fn assert_live_line_inputs_are_clear(h: &Harness) {
     let plane = state.sketch(h.app.session.active_sketch.unwrap()).unwrap().plane;
     let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
     let segment = [proj.to_screen(plane.to_world(start)).unwrap(), proj.to_screen(plane.to_world(end)).unwrap()];
-    let boxes: Vec<_> = (0..2usize).map(|i| h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", i)))).unwrap()).collect();
+    let boxes: Vec<_> = (0..2usize).map(|i| h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).unwrap()).collect();
     assert!(!boxes[0].intersects(boxes[1]), "{}: inputs overlap: {boxes:?}", tool.cmd);
     for rect in boxes {
         assert!(!segment_intersects_input(segment, rect), "{}: {rect:?} covers {segment:?}", tool.cmd);
