@@ -38,6 +38,8 @@ pub(crate) fn coincident_operands(selection: &[Sel]) -> Option<serde_json::Value
     let operand = |s: &Sel| match s {
         Sel::SketchPoint { id } | Sel::SketchCurve { id, .. } => Some(serde_json::json!(id)),
         Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
+        // An origin axis, either operand: the command projects it into the sketch.
+        Sel::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => Some(serde_json::json!({"axis": name})),
         _ => None,
     };
     let (a, b) = (operand(a)?, operand(b)?);

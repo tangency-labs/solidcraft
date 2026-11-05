@@ -2925,14 +2925,17 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                 let (da, db) = (a1 - a0, b1 - b0);
                 if da.cross(db).abs() < 1e-9 * da.len() * db.len() && ty != "angle" {
                     // Parallel lines: distance between them (a diameter about a centerline).
-                    let (a, b, b0) = if sk.curves.get(a).is_some_and(|c| c.centerline) { (a, b, b0) } else { (b, a, a0) };
+                    // The reference is a centerline, else the linked line (an origin axis) in
+                    // either pick order, so the free line is the one kept parallel to it.
+                    let linked = |c: usize| sk.curves.get(c).is_some_and(|c| c.link.is_some());
+                    let a_ref = sk.curves.get(a).is_some_and(|c| c.centerline) || (linked(a) && !linked(b));
+                    let (a, b, b0) = if a_ref { (a, b, b0) } else { (b, a, a0) };
                     let (bq, _) = line_ends(sk, b);
                     let (a0, a1) = line_pts(sk, a).unwrap_or_default();
                     let d = (a1 - a0).normalized().map(|d| d.cross(b0 - a0).abs()).unwrap_or(0.0);
                     if diameter_about(sk, a, &ty) {
                         (ConstraintKind::LinearDiameter { p: bq, l: a, value: 2.0 * d }, 2.0 * d)
                     } else {
-                        let linked = |c: usize| sk.curves.get(c).is_some_and(|c| c.link.is_some());
                         if linked(a) && !linked(b) {
                             keep_parallel = Some((b, a));
                         }
@@ -3093,7 +3096,7 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
         Ok((pname, name, measured(is_angle, cur)))
     })?;
     // Report what the dimension measures once the sketch is solved, not the geometry before.
-    let current = solved_measure(s, p, cmd).unwrap_or(current);
+    let current = solved_measure(s, p, cmd, &new_id).unwrap_or(current);
     if driven {
         return Ok(json!({"param": Value::Null, "driven": true, "type": kind_name, "measured": current.0, "unit": current.1, "sketch": info}));
     }
@@ -3137,9 +3140,10 @@ fn measured(is_angle: bool, v: f64) -> (f64, &'static str) {
 }
 
 /// What the dimension just added (the sketch's last constraint) measures on the solved sketch.
-fn solved_measure(s: &Session, p: &Value, cmd: &str) -> Option<(f64, &'static str)> {
+/// The dimension is found by its id: a Parallel added after it is not it.
+fn solved_measure(s: &Session, p: &Value, cmd: &str, id: &str) -> Option<(f64, &'static str)> {
     let sk = sketch_store::read(&s.doc, sketch_store::target(s, p, cmd).ok()?).ok()?;
-    let k = &sk.constraints.last()?.kind;
+    let k = &sk.constraints.iter().find(|c| c.id == id)?.kind;
     Some(measured(k.is_angle(), solidcraft_sketch::measure_dimension(sk, k)?))
 }
 

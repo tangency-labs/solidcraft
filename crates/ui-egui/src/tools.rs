@@ -862,7 +862,9 @@ pub(crate) fn pick_axis_from_browser(app: &mut SolveApp, name: &str) -> bool {
     // A dimension measures the axis's projection against the other pick, as a click in the view does.
     if matches!(tool.kind, Kind::Dimension) && matches!(name, "X" | "Y" | "Z") && tool.picks.len() < 2 {
         let id = json!({"axis": name}).to_string();
-        if !tool.picks.contains(&id) {
+        // A value already typed into the open dimension is kept: the axis joins only before
+        // anything is typed, as a second pick in the view does.
+        if !tool.picks.contains(&id) && crate::dim_view::live() != Some(true) {
             tool.picks.push(id);
             if tool.picks.len() == 2 {
                 match crate::dim_view::begin_live(app, tool.picks.clone(), None) {

@@ -218,13 +218,18 @@ fn coincident_takes_an_origin_axis_reference() {
 /// line stays parallel to the axis.
 #[test]
 fn dimension_measures_a_line_to_an_origin_axis() {
-    let mut s = on(json!("XY"));
-    run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
-    run(&mut s, "sketch.dimension", json!({"entities": ["l", {"axis": "X"}], "value": "12"}));
-    let sk = sketch(&s);
-    assert!((pt(&sk, "l.start").y.abs() - 12.0).abs() < 1e-7, "12 from X");
-    assert!((pt(&sk, "l.end").y - pt(&sk, "l.start").y).abs() < 1e-7, "kept parallel to X, so all of it is 12 from X");
-    assert!((pt(&sk, "l.end").dist(pt(&sk, "l.start")) - 12.0).abs() > 1.0, "not the line's length");
+    // Either pick order: the axis is the reference and the line is kept parallel to it.
+    for entities in [json!(["l", {"axis": "X"}]), json!([{"axis": "X"}, "l"])] {
+        let mut s = on(json!("XY"));
+        run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
+        let out = run(&mut s, "sketch.dimension", json!({"entities": entities, "value": "12"}));
+        let sk = sketch(&s);
+        assert!((pt(&sk, "l.start").y.abs() - 12.0).abs() < 1e-7, "12 from X ({entities})");
+        assert!((pt(&sk, "l.end").y - pt(&sk, "l.start").y).abs() < 1e-7, "kept parallel to X, so all of it is 12 from X ({entities})");
+        assert!((pt(&sk, "l.end").dist(pt(&sk, "l.start")) - 12.0).abs() > 1.0, "not the line's length");
+        // What it measures once solved, not the 7 before (the Parallel after it is not it).
+        assert!((out["measured"].as_f64().unwrap_or(f64::NAN) - 12.0).abs() < 1e-6, "{out}");
+    }
 }
 
 #[test]

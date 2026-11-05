@@ -3088,6 +3088,23 @@ fn extrude_takes_every_profile_of_a_sketch_clicked_in_the_browser() {
     );
 }
 
+/// A selected sketch point and origin axis, either way round, go to Coincident from the toolbar:
+/// the point lands on the axis.
+#[test]
+fn coincident_takes_a_selected_point_and_origin_axis() {
+    for reverse in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.point", json!({"point": [10, 7], "id": "q"})).unwrap();
+        let (point, axis) = (Sel::SketchPoint { id: "q".into() }, Sel::Axis { name: "X".into() });
+        h.app.session.selection = if reverse { vec![axis, point] } else { vec![point, axis] };
+        h.app.start("sketch.constraint.coincident");
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let y = sk.point(sk.point_index("q").unwrap()).unwrap().y;
+        assert!(y.abs() < 1e-6, "reverse {reverse}: point at y {y} ({:?})", h.app.status);
+    }
+}
+
 /// #10311: a selected line midpoint and another line, either way round, go to Coincident from the
 /// toolbar and from the context menu: the line's middle lands on the other line.
 #[test]
