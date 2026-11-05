@@ -921,6 +921,71 @@ fn woken_points_of_a_hidden_sketch_sleep() {
     assert!(crate::snap_wake::shown(&h.app).is_empty(), "{:?}", h.app.viewport.woken);
 }
 
+/// An edit sleeps the woken points, even with nothing under the pointer: a point the design no
+/// longer offers is not shown or picked.
+#[test]
+fn an_edit_sleeps_the_woken_points() {
+    let mut h = holed_plate_picking_from();
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    assert!(!h.app.viewport.woken.points.is_empty(), "{:?}", h.app.viewport.woken);
+    h.app.run("solid.box", json!({"corner": [200, 200, 0], "length": 5, "width": 5, "height": 5})).unwrap();
+    // Nothing under the pointer now: the points woken before the edit sleep all the same.
+    h.app.viewport.hover = None;
+    crate::snap_wake::update(&mut h.app, &[]);
+    assert!(h.app.viewport.woken.points.is_empty(), "{:?}", h.app.viewport.woken);
+}
+
+/// A move dialog with a sketch line off the box: its middle is woken by hovering the line.
+fn box_and_sketch_line(point: Option<[f64; 2]>) -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "S"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[60, 0], [80, 0]], "ids": ["l"]})).unwrap();
+    if let Some(p) = point {
+        h.app.run("sketch.point", json!({"point": p, "id": "q"})).unwrap();
+    }
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.cam.distance = 200.0;
+    h.settle();
+    h
+}
+
+/// Move's points don't take a sketch point: one beside a line's woken middle no longer hides
+/// the middle, which a click there picks.
+#[test]
+fn a_point_the_input_doesnt_take_leaves_the_woken_middle() {
+    let mut h = box_and_sketch_line(Some([70.3, 0.0]));
+    h.app.start("solid.move");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.kind = kind(POINT_TO_POINT, &h.app.session.doc);
+    d.inputs = inputs(POINT_TO_POINT);
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.active = 1;
+    h.step(&json!({ "move": { "world": [65, 0, 0] } })).unwrap();
+    let middle = Vec3::new(70.0, 0.0, 0.0);
+    assert!(h.app.viewport.woken.points.iter().any(|p| p.at.dist(middle) < 1e-6), "{:?}", h.app.viewport.woken);
+    h.step(&json!({ "click": { "world": [70.2, 0, 0] } })).unwrap();
+    let from = &h.app.dialog.as_ref().unwrap().inputs[1].items;
+    assert!(matches!(from.as_slice(), [Sel::Vertex { point, .. }] if point.dist(middle) < 1e-6), "{from:?}");
+}
+
+/// Align takes sketch points: a sketch point on a line's woken middle stays the sketch point.
+#[test]
+fn a_sketch_point_on_a_woken_middle_stays_the_sketch_point() {
+    let mut h = box_and_sketch_line(Some([70.0, 0.0]));
+    h.app.start("solid.align");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+        d.active = 1;
+    }
+    h.step(&json!({ "move": { "world": [65, 0, 0] } })).unwrap();
+    assert!(h.app.viewport.woken.points.iter().any(|p| p.at.dist(Vec3::new(70.0, 0.0, 0.0)) < 1e-6), "{:?}", h.app.viewport.woken);
+    h.step(&json!({ "click": { "world": [70, 0, 0] } })).unwrap();
+    let from = &h.app.dialog.as_ref().unwrap().inputs[1].items;
+    assert!(matches!(from.as_slice(), [Sel::SketchPoint { .. }]), "{from:?}");
+}
+
 /// Snap points are on by default; with the preference off, hovering a rim wakes nothing and a
 /// click in the hole's middle picks nothing there, as before (#5912).
 #[test]
