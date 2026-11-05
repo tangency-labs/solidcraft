@@ -203,6 +203,7 @@ pub mod params_dialog;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
+mod plane_resize;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod prefs;
