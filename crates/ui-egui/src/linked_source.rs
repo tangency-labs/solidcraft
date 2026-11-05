@@ -814,14 +814,12 @@ mod tests {
         let linked = app.run("file.insert_step", json!({"path": source})).unwrap()["component"].as_u64().unwrap();
         for target in [Target::Component { id: linked }, Target::Occurrence { path: app.session.doc.first_path(linked) }] {
             let items = context_menu::items(&app, &target);
-            assert!(items.iter().any(|item| item.id == "component.update_links"));
-            assert!(items.iter().any(|item| item.id == "component.break_link"));
+            // Main's component menu no longer lists Update Links or Break Link; a STEP link still
+            // offers none of the linked-design actions.
             assert!(!items.iter().any(|item| matches!(item.id.as_str(), "ui.editInPlace" | "ui.openLinkedDesign" | "ui.relinkSource")));
         }
-        let update =
-            context_menu::items(&app, &Target::Component { id: linked }).into_iter().find(|item| item.id == "component.update_links").unwrap();
-        context_menu::run_item(&mut app, &update, egui::Pos2::ZERO);
-        assert!(app.file_load.busy(), "the Browser uses the same background update as the toolbar");
+        app.start("component.update_links");
+        assert!(app.file_load.busy(), "Update Links runs as a background update");
         settle(&mut app);
         shot(&mut app, "step-link-before");
         app.preferences.link_step_inserts = false;
