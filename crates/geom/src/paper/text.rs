@@ -187,7 +187,7 @@ pub struct Cluster {
 }
 
 /// The font of `id` in a table in order of id.
-pub(super) fn font_in<'a>(fonts: &'a [Font], id: &[u8; 32]) -> Option<&'a Font> {
+pub fn font_in<'a>(fonts: &'a [Font], id: &[u8; 32]) -> Option<&'a Font> {
     fonts.binary_search_by_key(id, |f| f.id).ok().and_then(|at| fonts.get(at))
 }
 
