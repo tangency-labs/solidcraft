@@ -6,12 +6,13 @@
 //!
 //! Upstream (default fixes) refuses the shell: the merge fails with `SM_ERR` (1001) in
 //! `make_faceuse` (pinned C++ agrees, `offset.offset_executive_p2` case
-//! `issue1818_square_to_circle_loft_api_shell_1_top`). With the flag alone the merge no
-//! longer intersects the side faces' mated offsets, gets through, and the difference
-//! returned `Ok` with ten faces, not a manifold solid, volume 0. The fork's commit
-//! (tangency-labs/smlib@85bbfaf, applied alone to the pinned C++) returns the same body;
-//! the fork's C API refuses it (`finish`, `SMLIB_ERR_NOT_SOLID`). The flag now refuses a
-//! shell of a solid that is no closed manifold solid (`SM_ERR`). The circle-to-circle loft
+//! `issue1818_square_to_circle_loft_api_shell_1_top`). With the flag alone, on the fitted
+//! side extensions, the difference returned ten faces, no manifold solid, volume 0 (the
+//! fork's C API refuses it, `SMLIB_ERR_NOT_SOLID`), and the flag refused it. On the exact
+//! side extensions (#2769) the offset of the loft is a closed solid and the flag's shell is
+//! a sound body: eleven faces, valid at every check level, a manifold solid facing out,
+//! its volume the loft's less the cavity's, measured independently ([`assert_sound`]).
+//! solidcore is the reference here, not the fork's refusal. The circle-to-circle loft
 //! (a cone frustum r 15) is the control: it shells to the closed form under the flag.
 
 #![allow(
@@ -24,19 +25,22 @@
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
 
-use offset_fixture::{planar_faces_at, volume, Notifications};
+use offset_fixture::{offset_full, planar_faces_at, volume, Notifications};
 use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::Ellipse;
 use solidcore::error::SM_ERR;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::UpstreamFixes;
+use solidcore::mass::integrator::properties::face_area;
 use solidcore::math::Vec3;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions, ShellOutcome};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::sweep::api_surfaces::create_skin_primitive;
+use solidcore::topology::brep::is_outward_solid;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::{Brep, Kernel};
 
 /// The issue's loft: a 40 x 40 square (or, for the control, a circle r 15) at z = 0 to a
@@ -153,43 +157,95 @@ fn default_fixes_refuse_the_square_to_circle_shell() {
     );
 }
 
-/// The flag alone: the difference's broken wall is refused, not returned.
+/// The shell of the square-to-circle loft is sound: eleven faces, no failure at any check
+/// level, a manifold solid facing out, and its volume consistent with the loft's and the
+/// cavity's, each measured on its own body.
+///
+/// **The volume.** The cavity is the loft offset 1 inward at its sides and bottom, open at
+/// z = 60. The loft's closed inward offset ([`offset_full`], its top at z = 59) is the
+/// cavity less the slab `59 <= z <= 60`, whose volume is the integral of the cavity's
+/// section area `A(z)` there. The sections narrow upward (the loft runs from a 40 x 40
+/// square to a circle r 15), so the slab lies between `A(60)` (the loft's top disk less the
+/// shell's top ring) and `A(59)` (the closed offset's top face): `V(loft) - V(shell) -
+/// V(offset)` must lie in `[A(60), A(59)]`, to the integrator's accuracy.
+fn assert_sound(k: &mut Kernel, mut wall: Brep, label: &str) {
+    wall.refresh_cached_topology();
+    for level in [CheckLevel::Level0, CheckLevel::Level1, CheckLevel::Level2] {
+        let c = check_brep(k, &mut wall, level).unwrap();
+        assert!(
+            c.is_valid() && c.failure_count() == 0,
+            "{label} {level:?}: {:?}",
+            c.lines()
+        );
+    }
+    assert!(is_outward_solid(k, &mut wall).unwrap(), "{label}");
+    assert_eq!(wall.face_list().len(), 11, "{label}");
+    let shell_volume = volume(k, &mut wall).unwrap();
+    let ring = planar_faces_at(k, &wall, 2, 60.0);
+    assert_eq!(ring.len(), 1, "{label}");
+    let ring = face_area(k, &mut wall, ring[0], 1e-10).unwrap();
+
+    let mut k2 = Kernel::default();
+    k2.fixes.clone_from(&mated());
+    let mut part = loft(&mut k2, true);
+    let loft_volume = volume(&k2, &mut part).unwrap();
+    let disk = planar_faces_at(&k2, &part, 2, 60.0);
+    let disk = face_area(&k2, &mut part, disk[0], 1e-10).unwrap();
+    let mut inner = offset_full(&mut k2, &mut part, -1.0).unwrap();
+    inner.refresh_cached_topology();
+    assert!(brep_is_manifold_solid(&inner).unwrap(), "{label}");
+    let inner_volume = volume(&k2, &mut inner).unwrap();
+    let top = planar_faces_at(&k2, &inner, 2, 59.0);
+    assert_eq!(top.len(), 1, "{label}");
+    let a59 = face_area(&k2, &mut inner, top[0], 1e-10).unwrap();
+    let a60 = disk - ring;
+
+    let slab = loft_volume - shell_volume - inner_volume;
+    // each volume to 1e-6 of itself (the integrator's accuracy)
+    let err = 1e-6 * (loft_volume + shell_volume + inner_volume);
+    assert!(
+        a60 - err <= slab && slab <= a59 + err && a60 < a59,
+        "{label}: slab {slab} not in [{a60}, {a59}] (shell {shell_volume})"
+    );
+}
+
+/// The flag alone: the shell is a sound body (it was the broken ten-face wall on the
+/// fitted extensions, refused).
 #[test]
-fn mated_offsets_alone_refuse_the_broken_wall() {
-    let (_, result) = shell(&mated(), true);
-    // The final-wall refusal must not return an input already consumed by the difference.
-    assert!(result.retained_input.is_none());
+fn mated_offsets_alone_shell_the_square_to_circle_loft() {
+    let (mut k, result) = shell(&mated(), true);
     assert!(result.input_ownership_transferred());
-    assert_sm_err(
-        result.result,
-        "offset::offset_executive::p2::shell_brep",
+    assert_sound(
+        &mut k,
+        result.result.unwrap(),
         "offset_extended_edges_mated",
     );
 }
 
-/// With WR-578's loop-gap closing too, the offset is refused before the difference.
+/// With WR-578's loop-gap closing too, the offset is still refused, now by WR-578's guard
+/// (an offset of a solid that is no closed solid) and no longer by the gap closing itself:
+/// at each top corner the side faces close their rim arcs' gaps to the lateral edge's
+/// vertex, while the open top's face closes the same corner by a chord between the two
+/// arcs' ends, so the closing edges are not shared. That inconsistency is the gap
+/// closing's own (an opt-in path); the flag alone builds the sound shell above.
 #[test]
-fn mated_offsets_with_loop_gaps_refuse_earlier() {
+fn mated_offsets_with_loop_gaps_still_refuse() {
     let mut fixes = mated();
     fixes.offset_closes_loop_gaps = true;
     let (_, result) = shell(&fixes, true);
     assert_sm_err(
         result.result,
-        "offset::offset_executive::step_gaps",
+        "offset::offset_executive::p2::shell_brep",
         "offset_extended_edges_mated + offset_closes_loop_gaps",
     );
 }
 
 /// SolidCraft's fixes (`issue_1476_swept_bar_shell.rs`, which include the flag and WR-454's
-/// `shell_empty_cavity_fails`, not WR-578's loop gaps) reached the same broken wall.
+/// `shell_empty_cavity_fails`, not WR-578's loop gaps): the same sound body.
 #[test]
-fn solidcraft_fixes_refuse_the_broken_wall() {
-    let (_, result) = shell(&solidcraft_fixes(), true);
-    assert_sm_err(
-        result.result,
-        "offset::offset_executive::p2::shell_brep",
-        "SolidCraft fixes",
-    );
+fn solidcraft_fixes_shell_the_square_to_circle_loft() {
+    let (mut k, result) = shell(&solidcraft_fixes(), true);
+    assert_sound(&mut k, result.result.unwrap(), "SolidCraft fixes");
 }
 
 /// The control: the circle-to-circle loft (a cone frustum, here a cylinder r 15) shells
