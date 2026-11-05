@@ -1132,6 +1132,7 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             distance2: None,
             start_offset: None,
             through_all: false,
+            second_follows_first: false,
             taper: None,
             corner: Default::default(),
             to: None,
