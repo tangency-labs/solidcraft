@@ -606,6 +606,117 @@ fn value_boxes_stay_in_view_and_off_the_cursor() {
     assert!(tiny.contains_rect(egui::Rect::from_min_size(in_view(egui::pos2(-200.0, -200.0), Some(tiny), Some(egui::pos2(40.0, 15.0))), BOX)));
 }
 
+// Independent slab clipping grades the rendered rectangles, not the placement algorithm.
+fn segment_intersects_input([a, b]: [egui::Pos2; 2], rect: egui::Rect) -> bool {
+    let mut interval = [0.0_f32, 1.0_f32];
+    for (start, end, low, high) in [(a.x, b.x, rect.min.x, rect.max.x), (a.y, b.y, rect.min.y, rect.max.y)] {
+        let delta = end - start;
+        if delta == 0.0 {
+            if start < low || start > high {
+                return false;
+            }
+        } else {
+            let p = (low - start) / delta;
+            let q = (high - start) / delta;
+            interval[0] = interval[0].max(p.min(q));
+            interval[1] = interval[1].min(p.max(q));
+            if interval[0] > interval[1] {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn assert_live_line_inputs_are_clear(h: &Harness) {
+    let tool = h.app.tool.as_ref().unwrap();
+    let point = tool.pts.last().unwrap().0;
+    let end = crate::sketch_dims::shown(&h.app, tool, tool.hover.as_ref().unwrap());
+    let start = if tool.cmd == "sketch.line.midpoint" { point * 2.0 - end } else { point };
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let plane = state.sketch(h.app.session.active_sketch.unwrap()).unwrap().plane;
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let segment = [proj.to_screen(plane.to_world(start)).unwrap(), proj.to_screen(plane.to_world(end)).unwrap()];
+    let boxes: Vec<_> = (0..2usize).map(|i| h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", i)))).unwrap()).collect();
+    assert!(!boxes[0].intersects(boxes[1]), "{}: inputs overlap: {boxes:?}", tool.cmd);
+    for rect in boxes {
+        assert!(!segment_intersects_input(segment, rect), "{}: {rect:?} covers {segment:?}", tool.cmd);
+        assert!(h.app.viewport.layout.as_ref().unwrap().drawable.contains_rect(rect), "{rect:?} outside drawing area");
+    }
+    assert_focus(h, 0);
+}
+
+#[test]
+fn line_inputs_clear_the_preview_in_all_directions() {
+    for command in ["sketch.line", "sketch.line.midpoint"] {
+        for view in ["top", "iso"] {
+            for [dx, dy] in [[2, 0], [0, 2], [2, 2], [-2, 2], [-2, 0], [0, -2], [-2, -2], [2, -2]] {
+                let mut h = Harness::new();
+                h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+                h.call("ui.view", json!({"view":view}));
+                h.step(&json!({"start":command})).unwrap();
+                h.step(&json!({"click":{"sketch":[10,10]}})).unwrap();
+                h.step(&json!({"move":{"sketch":[10 + dx,10 + dy]}})).unwrap();
+                h.frames(3);
+                assert_live_line_inputs_are_clear(&h);
+            }
+        }
+    }
+}
+
+#[test]
+fn line_inputs_at_drawing_area_edges_clear_the_preview() {
+    for command in ["sketch.line", "sketch.line.midpoint"] {
+        for corner in 0..4 {
+            let mut h = Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.call("ui.view", json!({"view":"top"}));
+            h.step(&json!({"start":command})).unwrap();
+            // Dismiss the startup hint so the bottom-right click reaches the canvas.
+            h.step(&json!({"click":{"handle":"toast:status:close"}})).unwrap();
+            h.frames(3);
+            assert!(h.app.status.is_none());
+            let view = h.app.viewport.layout.as_ref().unwrap().drawable.shrink(20.0);
+            let (start, offset) = match corner {
+                0 => (view.left_top(), egui::vec2(0.0, 14.0)),
+                1 => (view.right_top(), egui::vec2(-14.0, 0.0)),
+                2 => (view.left_bottom(), egui::vec2(14.0, -14.0)),
+                _ => (view.right_bottom(), egui::vec2(-14.0, -14.0)),
+            };
+            let end = start + offset;
+            h.step(&json!({"click":[start.x,start.y]})).unwrap();
+            assert!(!h.app.tool.as_ref().unwrap().pts.is_empty(), "{command}, corner {corner}: click at {start:?} must place the first point");
+            h.step(&json!({"move":[end.x,end.y]})).unwrap();
+            h.frames(3);
+            assert_live_line_inputs_are_clear(&h);
+        }
+    }
+}
+
+#[test]
+fn line_input_placement_measures_each_field_and_handles_tiny_views() {
+    let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+    let sizes = [egui::vec2(170.0, 24.0), egui::vec2(82.0, 30.0)];
+    for segment in [
+        [egui::pos2(400.0, 300.0), egui::pos2(400.0, 314.0)],
+        [egui::pos2(20.0, 20.0), egui::pos2(34.0, 34.0)],
+        [egui::pos2(780.0, 580.0), egui::pos2(766.0, 566.0)],
+        [egui::pos2(400.0, 300.0), egui::pos2(400.0, 300.0)],
+    ] {
+        let positions = super::line_input_positions(segment, &sizes, Some(view), 8.0);
+        let rects: Vec<_> = positions.iter().zip(sizes).map(|(p, size)| egui::Rect::from_min_size(*p, size)).collect();
+        assert!(!rects[0].intersects(rects[1]), "{rects:?}");
+        for rect in rects {
+            assert!(view.contains_rect(rect));
+            assert!(!segment_intersects_input(segment, rect), "{segment:?}: {rect:?}");
+        }
+    }
+    let tiny = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(3.0, 3.0));
+    let positions = super::line_input_positions([egui::pos2(1.0, 1.0); 2], &sizes, Some(tiny), 8.0);
+    assert_eq!(positions.len(), 2);
+    assert!(positions.iter().all(|p| p.is_finite()));
+}
+
 #[test]
 fn polygon_inputs_clear_each_other_and_the_preview() {
     for command in ["sketch.polygon.inscribed", "sketch.polygon.circumscribed"] {
