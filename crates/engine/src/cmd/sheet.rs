@@ -647,7 +647,7 @@ pub(crate) fn sheet_rule_name(v: &Value) -> std::result::Result<&str, &'static s
 /// A point on the largest flat face of `body`, in the frame [`super::face::face_ref`] gives a
 /// named face's point in: `sheet.convert`'s fixed face when none is given.
 fn largest_flat_face(s: &Session, body: &str) -> Option<Vec3> {
-    let st = if crate::frames::mapped() { s.model.state() } else { s.world_state() };
+    let st = if crate::frames::mapped() { s.model.state() } else { s.world_state().ok()? };
     let b = st.body(body)?;
     let faces = b.body.faces((b.body.size() * 2e-3).max(1e-3)).ok()?;
     let flat = faces.iter().filter(|f| f.plane_normal.is_some() && f.area.is_finite()).max_by(|x, y| x.area.total_cmp(&y.area))?;
