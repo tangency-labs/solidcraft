@@ -3661,6 +3661,33 @@ fn assistant_marks_follow_chat_login_turns_and_approvals() {
     assert_eq!(assistant_mark_for(State::Ready, "signed_in", true, 0, false, true), Stopped);
 }
 
+/// #12283: an agent started without SolidCraft's tools (no solidcraft-cli beside the app) can't
+/// reach the design. The panel's badge and the application bar's mark say so, not Ready; the
+/// badge's hover text says how to get the tools.
+#[test]
+fn an_agent_without_the_design_tools_is_not_shown_as_ready() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.app.agent_chat.set_state(State::Ready);
+    h.app.agent_chat.tools_available = Some(true);
+    h.frames(3);
+    assert_eq!(assistant_mark(&h.app), AssistantMark::Ready);
+    assert!(h.widget(tr("ui.agent_chat_state_ready")).is_some(), "with the tools, the badge says Ready");
+
+    h.app.agent_chat.tools_available = Some(false);
+    h.frames(3);
+    assert_eq!(assistant_mark(&h.app), AssistantMark::NoDesign);
+    assert!(h.widget(tr("ui.agent_chat_state_no_design")).is_some(), "the badge says the design can't be reached");
+    assert!(h.widget(tr("ui.agent_chat_state_ready")).is_none(), "and not Ready");
+    let tip = assistant_tip(&h.app, AssistantMark::NoDesign);
+    assert!(tip.contains(tr("ui.agent_chat_state_no_design")), "{tip}");
+    assert!(tr("ui.agent_chat_no_design_hint").contains("SOLIDCRAFT_CLI"));
+
+    // A turn in progress, or one waiting for approval, still shows what it is doing.
+    h.app.agent_chat.set_state(State::Busy);
+    assert_eq!(assistant_mark(&h.app), AssistantMark::Busy);
+}
+
 /// An app whose endpoint agents answer at once (offline), with `api-1` and `api-2` added.
 #[cfg(not(target_arch = "wasm32"))]
 fn app_with_endpoints() -> SolveApp {
