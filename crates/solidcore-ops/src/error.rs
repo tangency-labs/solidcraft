@@ -43,8 +43,8 @@ pub enum Error {
         /// The largest wall that works.
         largest: Option<f64>,
     },
-    /// The kernel cannot build this exactly yet (a variable radius whose law has a corner):
-    /// what it cannot.
+    /// The kernel cannot build this exactly yet (a variable radius that is zero inside its
+    /// edge): what it cannot.
     Unsupported(&'static str),
     /// A blend's edges meet at a vertex of a kind no blend corner handles yet.
     CornerUnsupported,

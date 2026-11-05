@@ -1469,15 +1469,14 @@ fn law_pinches(degree: usize, knots: &[f64], radii: &[f64]) -> bool {
 
 /// The edge of `body` at record index `edge` rounded with the radius law of `degree`, `knots`
 /// and control radii `radii` (a clamped B-spline from 0 to 1), running from the edge's end at
-/// its vertex of record index `start`. A solid gives a solid.
+/// its vertex of record index `start`. A solid gives a solid. A law with a corner gives the
+/// union of its balls, the round's faces split there (the kernel's law corners).
 ///
 /// # Errors
 /// [`Error::Argument`] for a law that is no clamped B-spline of degree 1 to 3 from 0 to 1 with
 /// 2 to [`MAX_LAW_RADII`] radii each in [0, [`MAX_SIZE`]], an index past its list, or a
 /// `start` that is not a vertex of the edge; [`Error::Unsupported`] for a law whose radius is
-/// zero inside the edge, or one with a corner (the kernel's
-/// [`FilletLaw::corner_parameters`]: the round's faces would be split there, which the kernel
-/// has not ported); [`Error::RoomRunsOut`] on a straight edge between planes for a law larger
+/// zero inside the edge; [`Error::RoomRunsOut`] on a straight edge between planes for a law larger
 /// than its band's room at a station (the kernel's `law_fits_band`); [`Error::NoRoom`] for a
 /// law whose balls fold over one another; the refusals of [`blend`]; those of [`finish`].
 pub fn fillet_variable(
@@ -1514,12 +1513,6 @@ pub fn fillet_variable(
                 return Ok(Err(room::refusal(b, e, reversed)))
             }
             Err(e) => return Err(e),
-        }
-        let interval = b.edge(e)?.interval;
-        if !law.corner_parameters(&interval, false)?.is_empty() {
-            return Ok(Err(Error::Unsupported(
-                "a variable radius whose law has a corner (the round's faces split there)",
-            )));
         }
         let expect = Expect::of(k, b)?;
         let (r0, r1) = (

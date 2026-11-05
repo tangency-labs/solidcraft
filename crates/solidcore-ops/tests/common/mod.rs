@@ -58,9 +58,13 @@ pub fn volume(b: &Body) -> f64 {
 }
 
 /// `b` as the kernel reads it back from its `.smb` bytes (the same entity order), with a
-/// kernel to query it.
+/// kernel to query it: every fix on, as [`all_fixes`] runs the session, so a round kept as
+/// its definition reads back.
 pub fn kernel_copy(b: &Body) -> (Kernel, Brep) {
-    let mut k = Kernel::default();
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
     let mut attributes = AttributeStore::default();
     let mut records = NotifyRecords::new();
     let mut env = TopologyEnv {

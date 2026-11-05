@@ -27,6 +27,9 @@
 //! edges, edge uses and faces under the session's kernel identities is rebound to the
 //! target's naming, as the piecewise merge does (owners are pointers upstream;
 //! tangency-labs/solidcore#423).
+//! `do_filleting` ends with the fork's `SplitFilletFacesAtRadiusCorners`, which the fork
+//! runs in `DoFillet` only, so a session driven step by step splits a round at its radius
+//! law's corners too.
 //! A failing `CreateFilletBrep` (or one that makes no faces) that noted no error notes
 //! `SM_FILERR_EDGE_PROBLEM` with what failed, and the caller's error info gets it (not
 //! upstream, #11360: upstream leaves code 0 and the default comment there).
@@ -527,23 +530,12 @@ impl FilletSession<'_> {
         let missing_corner_note = (k.fixes.fillet_vertex_error_diagnostics
             && self.executive.error.code == FilletErrorType::CornerUnsupported as i32)
             .then(|| self.executive.error.clone());
-        let result = self.do_filleting_unlogged(k, None);
+        let (result, split_and_logged) = self.filleting_split_and_logged(k, None);
         if result.is_err() {
             if let Some(note) = missing_corner_note {
                 self.executive.error = note;
             }
         }
-        // The fork's SplitFilletFacesAtRadiusCorners (6eecf04): a fillet surface turns where
-        // its radius has a corner; the face is split there into faces that are smooth, with
-        // an edge along the turn (and rebuilt where the law dips or peaks, 7babe17).
-        let split = if result.is_ok() {
-            self.split_fillet_faces_at_radius_corners(k)
-        } else {
-            Ok(())
-        };
-        // (not upstream, #2489) the blend face log is read after the split, whose faces
-        // replace the round's
-        let logged = self.take_blend_faces(k, result.is_ok() && split.is_ok());
         // Opt-in (`fixes.fillet_gn_section_generator`, WR-696): a refusal with a size that
         // builds carries it on the error, its status unchanged.
         if let Err(SolidError::Upstream {
@@ -563,8 +555,7 @@ impl FilletSession<'_> {
             }
         }
         result?;
-        split?;
-        logged?;
+        split_and_logged?;
         if !k.fixes.fillet_refuse_non_manifold_result {
             return Ok(());
         }
@@ -610,18 +601,45 @@ impl FilletSession<'_> {
     /// joined again afterwards where the blends left more than one at a split point,
     /// whether the blends built or not (`JoinBlendedVertexFans`); the filleting's own
     /// error comes first.
+    ///
+    /// A round whose radius law has a corner is split there (the fork's
+    /// `SplitFilletFacesAtRadiusCorners`, which its `DoFillet` runs), so a session filleted
+    /// step by step, its corners set between [`Self::create_corners`] and this, builds the
+    /// law's corners as [`Self::do_fillet`] does.
     pub fn do_filleting(
         &mut self,
         k: &mut Kernel,
         error_out: Option<&mut ErrorInfo<FilletObject>>,
     ) -> Result<()> {
-        let status = self.do_filleting_unlogged(k, error_out);
-        let logged = self.take_blend_faces(k, status.is_ok());
-        status.and(logged)
+        let (status, split_and_logged) = self.filleting_split_and_logged(k, error_out);
+        status.and(split_and_logged)
     }
 
-    /// [`Self::do_filleting`] without reading the blend face log, for
-    /// [`Self::do_fillet`], which reads it after the split at the radius law's corners.
+    /// The filleting's status, then the split at the radius law's corners and the blend
+    /// face log read after it: the filleting's own error is kept apart for
+    /// [`Self::do_fillet`].
+    fn filleting_split_and_logged(
+        &mut self,
+        k: &mut Kernel,
+        error_out: Option<&mut ErrorInfo<FilletObject>>,
+    ) -> (Result<()>, Result<()>) {
+        let status = self.do_filleting_unlogged(k, error_out);
+        // The fork's SplitFilletFacesAtRadiusCorners (6eecf04): a fillet surface turns where
+        // its radius has a corner; the face is split there into faces that are smooth, with
+        // an edge along the turn (and rebuilt where the law dips or peaks, 7babe17).
+        let split = if status.is_ok() {
+            self.split_fillet_faces_at_radius_corners(k)
+        } else {
+            Ok(())
+        };
+        // (not upstream, #2489) the blend face log is read after the split, whose faces
+        // replace the round's
+        let logged = self.take_blend_faces(k, status.is_ok() && split.is_ok());
+        (status, split.and(logged))
+    }
+
+    /// [`Self::do_filleting`]'s filleting, without the split at the radius law's corners
+    /// or reading the blend face log.
     fn do_filleting_unlogged(
         &mut self,
         k: &mut Kernel,

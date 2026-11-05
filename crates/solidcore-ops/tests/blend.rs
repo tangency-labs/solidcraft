@@ -184,19 +184,10 @@ fn a_variable_round_runs_from_its_start() {
     assert!(v < ABC - off(1.0) && v > ABC - off(2.0), "{v}");
     assert!(b.check(CheckLevel::All).unwrap().is_valid());
 
-    // a law with a corner, one zero inside, one that starts off the edge
+    // a law zero inside, one that starts off the edge
     let b = block();
     let e = top_front(&b);
     let start = vertex_at(&b, [0.0, 0.0, 10.0]);
-    let bent = fillet_variable(
-        &b,
-        e,
-        start,
-        1,
-        &[0.0, 0.0, 0.5, 1.0, 1.0],
-        &[1.0, 2.0, 1.0],
-    );
-    assert!(matches!(bent, Err(Error::Unsupported(_))), "{bent:?}");
     let pinched = fillet_variable(
         &b,
         e,
@@ -211,6 +202,93 @@ fn a_variable_round_runs_from_its_start() {
     assert_eq!(off_edge, Err(Error::Argument));
     // refused: the body as it came in
     assert!(rel(volume(&b), ABC) < 1e-12);
+}
+
+/// A law with a corner rounds its edge as the union of its balls (`docs/generic-blend.md` §3.2,
+/// "Corners in a radius law"): at a peak the two sides' rounds cross and end on their crossing,
+/// at a dip the corner ball's zone lies between them. Each removes its balls' union, integrated
+/// numerically (SolidCraft's `variable_radius_with_a_corner_through_a_middle_point` for the
+/// peak, the fork's capi cases for the others, as `wr685_law_corners` holds them), to that
+/// test's 1e-4 relative; each keeps the law's radius at its start and is one sound body.
+#[test]
+fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
+    // box size, the edge's middle, its start, the start's rail ends, knots, radii, removed, faces
+    type Case<'a> = (
+        [f64; 3],
+        [f64; 3],
+        [f64; 3],
+        [[f64; 3]; 2],
+        &'a [f64],
+        &'a [f64],
+        f64,
+        usize,
+    );
+    all_fixes();
+    let peak = [0.0, 0.0, 0.5, 1.0, 1.0];
+    let dip_then_peak = [0.0, 0.0, 0.25, 0.75, 1.0, 1.0];
+    let cases: [Case<'_>; 4] = [
+        // 2 -> 4 -> 2 on the 10 x 20 x 30 box's top edge x = 10, z = 30, from y = 0
+        (
+            [10.0, 20.0, 30.0],
+            [10.0, 10.0, 30.0],
+            [10.0, 0.0, 30.0],
+            [[8.0, 0.0, 30.0], [10.0, 0.0, 28.0]],
+            &peak,
+            &[2.0, 4.0, 2.0],
+            39.541034,
+            8,
+        ),
+        // 4 -> 2 -> 4 on the 20 cube's edge y = z = 20, from x = 0
+        (
+            [20.0; 3],
+            [10.0, 20.0, 20.0],
+            [0.0, 20.0, 20.0],
+            [[0.0, 16.0, 20.0], [0.0, 20.0, 16.0]],
+            &peak,
+            &[4.0, 2.0, 4.0],
+            39.542073,
+            9,
+        ),
+        // 4, 2, 4, 2 at 0, 0.25, 0.75, 1 on the same edge, from either end (mirror images)
+        (
+            [20.0; 3],
+            [10.0, 20.0, 20.0],
+            [0.0, 20.0, 20.0],
+            [[0.0, 16.0, 20.0], [0.0, 20.0, 16.0]],
+            &dip_then_peak,
+            &[4.0, 2.0, 4.0, 2.0],
+            38.818277,
+            10,
+        ),
+        (
+            [20.0; 3],
+            [10.0, 20.0, 20.0],
+            [20.0, 20.0, 20.0],
+            [[20.0, 16.0, 20.0], [20.0, 20.0, 16.0]],
+            &dip_then_peak,
+            &[4.0, 2.0, 4.0, 2.0],
+            38.818277,
+            10,
+        ),
+    ];
+    for (size, middle, from, rails, knots, radii, want, faces) in cases {
+        let b = make_box([0.0; 3], size).unwrap();
+        let e = edge_at(&b, middle);
+        let start = vertex_at(&b, from);
+        fillet_variable(&b, e, start, 1, knots, radii).unwrap();
+        let removed = size[0] * size[1] * size[2] - volume(&b);
+        eprintln!("{radii:?} from {from:?}: removed {removed}, want {want}");
+        assert!(
+            (removed - want).abs() <= 1e-4 * want,
+            "{radii:?} from {from:?}: removed {removed}, want {want}"
+        );
+        assert_eq!(b.counts().unwrap()[0], faces, "{radii:?} from {from:?}");
+        // the round's end at its start is a section of the law's first radius
+        for p in rails {
+            vertex_at(&b, p);
+        }
+        assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    }
 }
 
 #[test]
