@@ -37,8 +37,8 @@ fn extensions() {
     assert!(is_native_cad_path("Part.IPT") && is_native_cad_path("Assembly.IAM"));
 }
 
-// Original, in-memory neutral records: no Inventor application, third-party
-// corpus files, or Corliss records are used to generate these tests.
+// Original, in-memory neutral records: no Inventor application or third-party
+// corpus files are used to generate these tests.
 fn synthetic_inventor_history() -> cadmpeg_ir::CadIr {
     use serde_json::json;
     let mut ir = cadmpeg_ir::CadIr::empty();
@@ -129,6 +129,149 @@ fn inventor_neutral_symmetric_extent_is_total_distance() {
     assert!((imported_history_volume(&doc) - 1920.0).abs() < 1e-6, "8 mm total, not 8 mm on each side");
 }
 
+/// An angle parameter compares its decoded value in radians, as `eval` in the angle kind does:
+/// `ang = 90 deg` keeps its history instead of being refused.
+#[test]
+fn inventor_angle_parameters_compare_in_radians() {
+    use serde_json::json;
+    let mut ir = synthetic_inventor_history();
+    ir.model.parameters.push(
+        serde_json::from_value(json!({"id":"synthetic:test:parameter#ang",
+        "name":"ang", "expression":"90 deg", "value":{"kind":"angle","value":std::f64::consts::FRAC_PI_2}}))
+        .unwrap(),
+    );
+    let doc = crate::inventor::rebuild(&ir, "angle.ipt").unwrap();
+    assert!((doc.eval("ang", solidcraft_doc::expr::Kind::Angle).unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+}
+
+/// A hole loop of the sketch's profile table is a hole, not a second solid: a 20 × 12 plate with
+/// a radius-5 hole extruded 8 mm has the hole's area subtracted.
+#[test]
+fn inventor_hole_loops_extrude_as_holes() {
+    use serde_json::json;
+    let mut ir = synthetic_inventor_history();
+    let sketch = ir.model.sketches[0].id.as_str().to_string();
+    let hole = "synthetic:test:entity#hole";
+    ir.model.sketch_entities.push(
+        serde_json::from_value(json!({"id":hole,"sketch":sketch,
+            "geometry":{"kind":"circle","center":{"u":10,"v":6},"radius":5}}))
+        .unwrap(),
+    );
+    let outer: Vec<_> = (0..4).map(|i| json!({"entity":format!("synthetic:test:entity#line-{i}"),"reversed":false})).collect();
+    ir.model.sketches[0].profiles = serde_json::from_value(json!([outer, [json!({"entity":hole,"reversed":false})]])).unwrap();
+    let v = imported_history_volume(&crate::inventor::rebuild(&ir, "hole.ipt").unwrap());
+    // Circular mass properties are tessellated: 0.1% against the analytic value.
+    let expected = (240.0 - 25.0 * std::f64::consts::PI) * 8.0;
+    assert!((v - expected).abs() < expected * 1e-3, "{v} vs {expected}: the hole stayed solid");
+}
+
+/// The extrusion of `synthetic_inventor_history` with the given planar profile selection.
+fn synthetic_extrusion_with_profile(mut ir: cadmpeg_ir::CadIr, profile: serde_json::Value) -> cadmpeg_ir::CadIr {
+    ir.model.features[1].evaluation.set_definition({
+        let full = serde_json::json!({
+            "definition":"extrude",
+            "profile":profile,
+            "direction":{"kind":"profile_normal"}, "start":{"kind":"profile_plane"},
+            "extent":{"kind":"one_sided","side":{"termination":{"kind":"blind","length":8}}},
+            "op":"new_body", "solid":true
+        });
+        match serde_json::from_value(full.clone()) {
+            Ok(d) => d,
+            Err(e) => panic!("{e}: {full}"),
+        }
+    });
+    ir
+}
+
+/// The same hole selection recorded as a region (outer loop plus its holes): the hole is kept
+/// out of the solid, and a selection missing a hole or an outer loop is refused, not filled in.
+#[test]
+fn inventor_region_selection_keeps_holes_and_refuses_partial_ones() {
+    use serde_json::json;
+    let mut base = synthetic_inventor_history();
+    let sketch = base.model.sketches[0].id.as_str().to_string();
+    let hole = "synthetic:test:entity#hole";
+    base.model.sketch_entities.push(
+        serde_json::from_value(json!({"id":hole,"sketch":sketch,
+            "geometry":{"kind":"circle","center":{"u":10,"v":6},"radius":5}}))
+        .unwrap(),
+    );
+    let outer: Vec<_> = (0..4).map(|i| json!({"entity":format!("synthetic:test:entity#line-{i}"),"reversed":false})).collect();
+    base.model.sketches[0].profiles = serde_json::from_value(json!([outer, [json!({"entity":hole,"reversed":false})]])).unwrap();
+    // Outer loop plus its hole: one region with the hole kept out of the solid.
+    let ir = synthetic_extrusion_with_profile(
+        base.clone(),
+        json!({"kind":"sketch_regions","value":{"sketch":sketch,"regions":[{"region":"loops","outer":0,"holes":[1]}]}}),
+    );
+    let v = imported_history_volume(&crate::inventor::rebuild(&ir, "region.ipt").unwrap());
+    // Circular mass properties are tessellated: 0.1% against the analytic value.
+    let expected = (240.0 - 25.0 * std::f64::consts::PI) * 8.0;
+    assert!((v - expected).abs() < expected * 1e-3, "{v} vs {expected}: the hole stayed solid");
+    // The outer loop with none of its holes: a pick the sketch does not hold as a profile.
+    let ir = synthetic_extrusion_with_profile(
+        base.clone(),
+        json!({"kind":"sketch_regions","value":{"sketch":sketch,"regions":[{"region":"loops","outer":0}]}}),
+    );
+    assert!(crate::inventor::rebuild(&ir, "no-holes.ipt").unwrap_err().contains("holes"));
+    // The hole loop alone: it is a closed profile of its own, so it extrudes its disk.
+    let ir = synthetic_extrusion_with_profile(base.clone(), json!({"kind":"sketch_profiles","value":{"sketch":sketch,"profiles":[1]}}));
+    let v = imported_history_volume(&crate::inventor::rebuild(&ir, "hole-only.ipt").unwrap());
+    assert!((v - 200.0 * std::f64::consts::PI).abs() < 200.0 * std::f64::consts::PI * 1e-3, "{v}: the lone loop is its own profile");
+}
+
+/// A reversed extrusion with a 5 mm offset from the profile plane starts 5 mm along the travel
+/// direction, not 5 mm the other way: the solid spans -13 … -5, not -3 … 5.
+#[test]
+fn inventor_reversed_extrusion_with_offset_travels_with_its_direction() {
+    use serde_json::json;
+    let mut ir = synthetic_inventor_history();
+    ir.model.features[1].evaluation.set_definition(
+        serde_json::from_value(json!({
+            "definition":"extrude",
+            "profile":{"kind":"sketch","value":ir.model.sketches[0].id.as_str()},
+            "direction":{"kind":"reversed_profile_normal"},
+            "start":{"kind":"offset_profile_plane","offset":5},
+            "extent":{"kind":"one_sided","side":{"termination":{"kind":"blind","length":8}}},
+            "op":"new_body", "solid":true
+        }))
+        .unwrap(),
+    );
+    let doc = crate::inventor::rebuild(&ir, "reversed.ipt").unwrap();
+    let solidcraft_doc::FeatureKind::Extrude { extent, .. } = &doc.features[1].kind else { panic!("not an extrusion") };
+    assert!(matches!(extent.direction, solidcraft_doc::Direction::Negative));
+    assert_eq!(extent.start_offset.as_deref(), Some("-5"), "the offset flips with the direction");
+    let mut model = solidcraft_doc::Model::new();
+    model.evaluate(&doc);
+    let m = solidcraft_kernel::measure(&model.state().bodies[0].body).unwrap();
+    assert!((m.bbox.min.z - (-13.0)).abs() < 1e-6 && (m.bbox.max.z - (-5.0)).abs() < 1e-6, "{:?} {:?}", m.bbox.min, m.bbox.max);
+}
+
+/// A reference dimension (driving: false) measures without driving: it gets no stored
+/// expression, so changing the geometry cannot make its parameter and its value disagree.
+#[test]
+fn inventor_reference_dimensions_do_not_drive() {
+    use serde_json::json;
+    let mut ir = synthetic_inventor_history();
+    let sketch = ir.model.sketches[0].id.as_str().to_string();
+    ir.model.parameters.push(
+        serde_json::from_value(json!({"id":"synthetic:test:parameter#refd",
+        "name":"refd", "expression":"20", "value":{"kind":"length","value":20}}))
+        .unwrap(),
+    );
+    ir.model.sketch_constraints.push(
+        serde_json::from_value(json!({"id":"synthetic:test:constraint#ref",
+        "sketch":sketch,"active":true,"driving":false,
+        "definition":{"kind":"distance","entities":["synthetic:test:entity#line-0"],"parameter":"synthetic:test:parameter#refd"}}))
+        .unwrap(),
+    );
+    let doc = crate::inventor::rebuild(&ir, "reference.ipt").unwrap();
+    let solidcraft_doc::FeatureKind::Sketch { sketch, .. } = &doc.features[0].kind else { panic!("not a sketch") };
+    let c = sketch.constraints.iter().find(|c| matches!(c.kind, solidcraft_doc::sketch::ConstraintKind::Length { .. })).unwrap();
+    assert!(c.driven, "the reference dimension is driven");
+    assert!(c.param.is_none(), "a reference dimension keeps no driving expression: {:?}", c.param);
+    assert!(imported_history_volume(&doc) > 0.0);
+}
+
 #[test]
 fn inventor_parameters_preserve_units_and_dependency_expressions() {
     use serde_json::json;
@@ -211,7 +354,7 @@ fn inventor_radius_dimension_remains_bound_to_its_parameter() {
 }
 
 #[test]
-fn inventor_hostile_bytes_fail_cleanly_without_a_corliss_dependency() {
+fn inventor_hostile_bytes_fail_cleanly() {
     for data in [b"".as_slice(), b"not a compound file", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", &[0u8; 512]] {
         let outcome = std::panic::catch_unwind(|| crate::import_inventor(data, "hostile.ipt"));
         let error = outcome.expect("no escaping panic").expect_err("no invented history");
@@ -285,7 +428,7 @@ fn hostile_native_cad_never_panics() {
 }
 
 /// cadmpeg decodes under its tight `service` caps, with our STEP size limit on the input.
-/// cadmpeg 0.6.3 has no work-unit or collection-item budgets, and its service profile already
+/// cadmpeg has no work-unit or collection-item budgets, and its service profile already
 /// admits the 8 million entities a detailed part needed (#1783).
 #[test]
 fn decoding_is_capped() {

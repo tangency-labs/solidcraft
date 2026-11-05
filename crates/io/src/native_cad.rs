@@ -44,8 +44,8 @@ pub(crate) mod convert {
 
     /// Caps for hostile input: cadmpeg's tight `service` profile, with our STEP size limit on
     /// the input. The service profile already admits a detailed part's 8 million entities:
-    /// cadmpeg 0.6.3 dropped the collection-item budget that refused one at a million (#1783)
-    /// and the work-unit budget that went with it.
+    /// since cadmpeg 0.6.3 the collection-item budget that refused one at a million (#1783)
+    /// and the work-unit budget that went with it are gone.
     pub(crate) fn policy() -> DecodePolicy {
         DecodePolicy {
             mode: DecodeMode::Salvage,

@@ -1,8 +1,9 @@
 //! File formats. Designs use JSON or versioned containers (`.sc`; `.solidcraft` and `.solvecraft` still open); the authoritative
 //! document rebuilds on load and optional display caches remain provisional. Bodies export
 //! as STL (binary or ASCII), OBJ, STEP and 3MF, and assemblies as URDF ([`urdf()`]); STEP, IGES,
-//! FreeCAD and Rhino files import as a base feature (see [`step_import_feature`]), 3MF and
-//! STL files as mesh bodies (see [`mesh_import_feature`]), PLY and XYZ files as point clouds
+//! FreeCAD, Rhino and Inventor files import as a base feature (see [`step_import_feature`]);
+//! Inventor part files additionally try their editable history (see [`import_inventor`]), 3MF and
+//! STL files import as mesh bodies (see [`mesh_import_feature`]), PLY and XYZ files as point clouds
 //! (see [`read_point_cloud`]).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
@@ -48,7 +49,7 @@ pub use svg::{decode_svg, read_svg, svg_nothing_to_import};
 mod gltf_in;
 mod inventor;
 pub use gltf_in::{GltfImport, Loader, MAX_GLTF_BYTES, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
-pub use inventor::{import_inventor, is_inventor_path};
+pub use inventor::{import_inventor, is_inventor_part_path};
 mod obj;
 pub use obj::read_obj;
 pub use threemf::{

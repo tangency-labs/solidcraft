@@ -1,6 +1,6 @@
-//! Independent translation of cadmpeg's Apache-2.0 neutral Inventor design records.
-//! No Corliss code, bindings, or source fixtures are used. Unsupported or incomplete
-//! history is refused as a whole so the caller can offer the geometry import instead.
+//! Independent translation of cadmpeg's Apache-2.0 neutral Inventor part records.
+//! Unsupported or incomplete history is refused as a whole so the caller can offer the
+//! geometry import instead.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -17,8 +17,9 @@ use solidcraft_geom::{Plane, Vec2, Vec3};
 
 type ReadResult<T> = std::result::Result<T, String>;
 
-/// Inventor parts have editable-history support; assemblies use the geometry importer.
-pub fn is_inventor_path(path: &str) -> bool {
+/// Inventor part files (`.ipt`) have editable-history support; assemblies (`.iam`) use the
+/// geometry importer.
+pub fn is_inventor_part_path(path: &str) -> bool {
     std::path::Path::new(path).extension().and_then(|x| x.to_str()).is_some_and(|x| x.eq_ignore_ascii_case("ipt"))
 }
 
@@ -30,7 +31,7 @@ pub fn import_inventor(bytes: &[u8], file: &str) -> crate::Result<(Document, Vec
 }
 
 fn read(bytes: &[u8], file: &str) -> ReadResult<(Document, Vec<String>)> {
-    if !is_inventor_path(file) {
+    if !is_inventor_part_path(file) {
         return Err("editable history requires an Inventor .ipt part".into());
     }
     let (_, decoded) = crate::native_cad::convert::decode(file, "ipt", bytes, &["inventor"], DecodeDepth::Full)?;
@@ -86,12 +87,12 @@ pub(crate) fn rebuild(ir: &CadIr, file: &str) -> ReadResult<Document> {
                 let source = ir.model.sketches.iter().find(|s| &s.id == id).ok_or("sketch is missing")?;
                 let (plane, sketch, curves) = sketch_model(ir, source)?;
                 let index = doc
-                    .add_feature(FeatureKind::Sketch { plane: PlaneRef::Custom { plane }, sketch }, feature.name.as_deref())
+                    .add_feature(FeatureKind::Sketch { plane: PlaneRef::Custom { plane }, sketch: sketch.clone() }, feature.name.as_deref())
                     .map_err(|e| e.to_string())?;
                 let imported = doc.feature_mut(index).ok_or("created sketch is missing")?;
                 imported.component = component;
                 imported.suppressed = suppressed;
-                sketches.insert(id.as_str(), (index, plane, curves));
+                sketches.insert(id.as_str(), (index, plane, sketch, curves));
                 continue;
             }
             FeatureOperation::Extrude {
@@ -115,7 +116,7 @@ pub(crate) fn rebuild(ir: &CadIr, file: &str) -> ReadResult<Document> {
                     return Err("extrusion solid state or face-building options are unsupported or unresolved".into());
                 }
                 let (source, selected) = selected_profiles(ir, profile)?;
-                let (sketch_id, plane, curves) = sketches.get(source.id.as_str()).ok_or("extrusion uses a sketch later in the history")?;
+                let (sketch_id, plane, sketch, curves) = sketches.get(source.id.as_str()).ok_or("extrusion uses a sketch later in the history")?;
                 let mut loops = Vec::new();
                 for index in selected {
                     let chain = source.profiles.get(index).ok_or("profile index is out of range")?;
@@ -128,6 +129,14 @@ pub(crate) fn rebuild(ir: &CadIr, file: &str) -> ReadResult<Document> {
                     }
                     loops.push(names);
                 }
+                // A picked outer loop's holes come with it; a hole loop of its own would fill the
+                // hole in, so the pick is grouped against the sketch's own profiles.
+                let found = solidcraft_sketch::find_profiles_checked(sketch);
+                if found.incomplete {
+                    return Err("the sketch's profile search was cut short".into());
+                }
+                let sets: Vec<BTreeSet<String>> = loops.iter().map(|l| l.iter().cloned().collect()).collect();
+                let profiles = group_profile_selection(&found.profiles, &sets)?;
                 let operation = match op {
                     BooleanOp::NewBody => Operation::NewBody,
                     BooleanOp::Join if bodies <= 1 => Operation::Join,
@@ -140,7 +149,7 @@ pub(crate) fn rebuild(ir: &CadIr, file: &str) -> ReadResult<Document> {
                 }
                 FeatureKind::Extrude {
                     sketch: SketchId(*sketch_id),
-                    profiles: ProfileSel::Curves { loops },
+                    profiles,
                     extent: extrusion_extent(plane, direction, start, extent)?,
                     operation,
                     targets: Vec::new(),
@@ -180,9 +189,10 @@ fn parameters(ir: &CadIr, doc: &mut Document) -> ReadResult<()> {
         if p.owner.is_some() || !names.insert(p.name.as_str()) {
             return Err("scoped or duplicate parameter name".into());
         }
+        // The decoded value is canonical (mm / radians); `eval` in the parameter's kind agrees.
         let (unit, expected) = match &p.value {
             Some(ParameterValue::Length(v)) => ("mm", v.get()),
-            Some(ParameterValue::Angle(v)) => ("deg", v.get().to_degrees()),
+            Some(ParameterValue::Angle(v)) => ("deg", v.get()),
             Some(ParameterValue::Real(v)) => ("", v.get()),
             _ => return Err(format!("parameter {} has unsupported or unresolved units", p.name)),
         };
@@ -199,6 +209,7 @@ fn parameters(ir: &CadIr, doc: &mut Document) -> ReadResult<()> {
 fn selected_profiles<'a>(ir: &'a CadIr, profile: &ProfileRef) -> ReadResult<(&'a cadmpeg_ir::Sketch, Vec<usize>)> {
     let planar = profile.planar().ok_or("spatial sketch profiles are not supported")?;
     let (id, indices) = match planar {
+        // The whole sketch: every closed loop of its profile table.
         PlanarProfileRef::Sketch(id) => (id, None),
         PlanarProfileRef::SketchProfiles { sketch, profiles } => (sketch, Some(profiles.iter().map(|i| *i as usize).collect())),
         PlanarProfileRef::SketchRegions { sketch, regions } => {
@@ -223,7 +234,53 @@ fn selected_profiles<'a>(ir: &'a CadIr, profile: &ProfileRef) -> ReadResult<(&'a
     if unique.len() != selected.len() {
         return Err("profile repeats a loop".into());
     }
+    if selected.iter().any(|i| *i >= sketch.profiles.len()) {
+        return Err("profile index is out of range".into());
+    }
     Ok((sketch, selected))
+}
+
+/// The loop selection as SolidCraft profile picks: the outermost picked profiles, each carried
+/// with the sketch's holes in it. A picked loop that is a hole of another picked profile is
+/// absorbed (it is not a second solid); a picked loop that is not a closed profile of the sketch
+/// at all, or a picked outer whose profile holes were not all picked, is refused rather than
+/// imported wrong.
+fn group_profile_selection(found: &[solidcraft_sketch::Profile], selected: &[BTreeSet<String>]) -> ReadResult<ProfileSel> {
+    let profiles: Vec<(BTreeSet<String>, Vec<BTreeSet<String>>)> = found
+        .iter()
+        .map(|p| (p.outer_curves.iter().cloned().collect(), p.hole_curves.iter().map(|h| h.iter().cloned().collect()).collect()))
+        .collect();
+    let is_outer = |loop_set: &BTreeSet<String>| profiles.iter().any(|(outer, _)| outer == loop_set);
+    let is_hole_of = |loop_set: &BTreeSet<String>| profiles.iter().any(|(_, holes)| holes.iter().any(|h| h == loop_set));
+    // Absorbed when it is a hole of a profile whose own outer was picked too.
+    let absorbed = |loop_set: &BTreeSet<String>| {
+        profiles.iter().filter(|(_, holes)| holes.iter().any(|h| h == loop_set)).any(|(outer, _)| selected.iter().any(|s| s == outer))
+    };
+    let outers: Vec<&BTreeSet<String>> = selected.iter().filter(|l| is_outer(l) && !absorbed(l)).collect();
+    if outers.is_empty() {
+        return Err("the selected loops contain no outer loop".into());
+    }
+    for loop_set in selected {
+        if is_outer(loop_set) && !absorbed(loop_set) {
+            continue;
+        }
+        if is_hole_of(loop_set) && absorbed(loop_set) {
+            continue;
+        }
+        return Err("a selected loop is not a closed profile of the sketch or a hole in one".into());
+    }
+    // A picked outer carries the sketch's profile holes: refuse a pick that leaves some out, or
+    // the hole would silently fill in.
+    for loop_set in &outers {
+        let (_, holes) = profiles.iter().find(|(outer, _)| outer == *loop_set).ok_or("picked profile disappeared")?;
+        for hole in holes {
+            if !selected.iter().any(|s| s == hole) {
+                return Err("a selected outer loop's holes were not all selected".into());
+            }
+        }
+    }
+    let loops: Vec<Vec<String>> = outers.iter().map(|o| (*o).iter().cloned().collect()).collect();
+    Ok(ProfileSel::Curves { loops })
 }
 
 fn extrusion_extent(plane: &Plane, direction: &ExtrudeDirection, start: &ExtrudeStart, source: &ExtrudeExtent) -> ReadResult<Extent> {
@@ -263,7 +320,13 @@ fn extrusion_extent(plane: &Plane, direction: &ExtrudeDirection, start: &Extrude
     };
     let start_offset = match start {
         ExtrudeStart::ProfilePlane {} => None,
-        ExtrudeStart::OffsetProfilePlane { offset } => Some(Expr::from(offset.get().to_string())),
+        // The source measures the offset along the travel direction; SolidCraft's start offset
+        // runs along the sketch normal whatever the extrusion direction, so it flips when the
+        // direction reverses. A symmetric extent has no travel direction: it keeps the offset.
+        ExtrudeStart::OffsetProfilePlane { offset } => {
+            let factor = if symmetric { 1.0 } else { sign };
+            Some(Expr::from((factor * offset.get()).to_string()))
+        }
         _ => return Err("extrusion start is unresolved or unsupported".into()),
     };
     if distance <= 0.0 {
@@ -335,6 +398,8 @@ fn sketch_model(ir: &CadIr, source: &cadmpeg_ir::Sketch) -> ReadResult<(Plane, S
         if constraint.active.is_none() {
             return Err("sketch constraint activity is unresolved".into());
         }
+        // A reference dimension measures without driving: no stored expression for it.
+        let reference = constraint.driving == Some(false);
         let mut driving = None;
         let kind = match constraint.definition.kind() {
             Relation::Disabled {} => continue,
@@ -348,7 +413,7 @@ fn sketch_model(ir: &CadIr, source: &cadmpeg_ir::Sketch) -> ReadResult<(Plane, S
                 let Some(ParameterValue::Length(value)) = &p.value else {
                     return Err("dimension is not a length".into());
                 };
-                driving = Some(p.name.clone());
+                driving = (!reference).then(|| p.name.clone());
                 let c = curve(&targets, entity)?;
                 if matches!(constraint.definition.kind(), Relation::Radius { .. }) {
                     ConstraintKind::Radius { c, value: value.get() }
@@ -362,7 +427,7 @@ fn sketch_model(ir: &CadIr, source: &cadmpeg_ir::Sketch) -> ReadResult<(Plane, S
                 let Some(ParameterValue::Length(value)) = &p.value else {
                     return Err("dimension is not a length".into());
                 };
-                driving = Some(p.name.clone());
+                driving = (!reference).then(|| p.name.clone());
                 ConstraintKind::Length { l: curve(&targets, entity)?, value: value.get() }
             }
             Relation::CoincidentLoci { loci } => {
@@ -383,7 +448,7 @@ fn sketch_model(ir: &CadIr, source: &cadmpeg_ir::Sketch) -> ReadResult<(Plane, S
         }
         let id = sketch.add_constraint(kind, driving).map_err(|e| e.to_string())?;
         if let Some(imported) = sketch.constraints.iter_mut().find(|c| c.id == id) {
-            imported.driven = constraint.driving == Some(false);
+            imported.driven = reference;
         }
     }
     Ok((plane, sketch, curves))
