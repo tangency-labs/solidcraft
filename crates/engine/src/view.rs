@@ -411,15 +411,41 @@ pub fn grid_lines(half_height: f64, at: f64, reach: f64, cap: i64) -> Vec<GridLi
     merged.into_iter().map(|(line, own, shared)| if shared { line } else { GridLineAt { weight: own, ..line } }).filter(|l| l.weight > 0.0).collect()
 }
 
+/// The step of the grid's lines the viewport draws at this zoom (#9843).
+///
+/// Away from a cross-fade it is the step of the level the grid is drawn at. In a cross-fade that
+/// level is the one with the bigger weight, and its lines are drawn as long as it has lines of
+/// its own: the levels 2 and 5 do not nest, so each of them fades its own lines out over its
+/// half of the cross-fade, and at the middle of it only the lines the two share (every 10 mm)
+/// are drawn. The crossings the user can see are then those, and there is no crossing at 5 mm
+/// to snap to.
+fn grid_drawn_step(half_height: f64) -> f64 {
+    let (minor, _) = grid_step(half_height);
+    let Some(b) = grid_blend(half_height) else { return minor; };
+    let (own_lo, own_hi) = b.own();
+    // The level with the bigger weight is the one the grid is drawn at (`grid_step`).
+    let (level, own) = if b.s >= 0.5 { (b.hi, own_hi) } else { (b.lo, own_lo) };
+    if own > 0.0 { level } else { grid_shared_step(&b) }
+}
+
+/// The step of the lines two levels of a cross-fade share: the lines both of them draw.
+///
+/// The levels that nest (1 and 2, 5 and 10) share the lines of the coarser one. The levels that
+/// do not nest (2 and 5) share only the lines every 10 mm, which is the finer level's major
+/// step.
+fn grid_shared_step(b: &GridBlend) -> f64 {
+    if b.nested { b.hi } else { b.lo * 5.0 }
+}
+
 /// The grid a sketch's points snap to: the crossings of the lines the viewport draws, and the
 /// finer lattice between them.
 ///
-/// The grid's lines are `minor` apart, so its crossings are what the user can see and what a
-/// point lands on when it is near one (#7114). Between two crossings the finer lattice holds
-/// the point, so a value that is not on a crossing (an exact inch, say) can still be placed.
+/// The crossings are the lines the viewport draws, so their step is the step of the lines that
+/// are drawn ([`grid_drawn_step`]). The finer lattice is a tenth of the level the grid is drawn
+/// at, so a value that is not on a crossing (an exact inch, say) can still be placed.
 pub fn sketch_grid_step(half_height: f64) -> (f64, f64) {
     let (minor, _) = grid_step(half_height);
-    (minor, minor / 10.0)
+    (grid_drawn_step(half_height), minor / 10.0)
 }
 
 /// The crossing of the drawn grid's lines nearest `p`, when the pointer means that crossing:
