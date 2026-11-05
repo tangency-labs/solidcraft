@@ -425,3 +425,35 @@ fn the_record_comes_when_asked_numbered_as_the_body() {
     v["bodies"][0]["record"]["faces"].as_array_mut().unwrap().pop();
     assert!(from_json(&v.to_string()).is_err());
 }
+
+/// The one-call forms and the helpers give what the longer forms do.
+#[test]
+fn one_call_forms_and_helpers_match_the_long_forms() {
+    let bytes = bytes(&box_doc("20 mm"));
+    let options = Options::default().with_overrides([("L", "30 mm")]);
+    let long = open(&bytes).unwrap().snapshot(&options).unwrap();
+    assert_eq!(solidcraft_exchange::snapshot(&bytes, &options).unwrap(), long);
+    assert_eq!(solidcraft_exchange::parameters(&bytes).unwrap(), open(&bytes).unwrap().parameters());
+    assert_eq!(options, Options::default().with_override("L", "30 mm"));
+    assert_eq!(Options::default().with_override("L", String::from("30 mm")), options);
+
+    let b = &long.bodies[0];
+    let (triangles, tags) = b.tagged_triangles();
+    assert_eq!((triangles.len(), tags.len()), (b.triangle_count(), b.triangle_count()));
+    assert_eq!(long.triangle_count(), long.bodies.iter().map(|b| b.faces.iter().map(|f| f.triangles.len()).sum::<usize>()).sum::<usize>());
+    let mut k = 0;
+    for f in &b.faces {
+        for t in &f.triangles {
+            assert_eq!((triangles[k], tags[k]), (t.map(|v| v.0), f.index.0));
+            k += 1;
+        }
+    }
+    assert_eq!(Point([1000.0, -2.0, 0.5]).to_metres(), [1.0, -0.002, 0.0005]);
+    assert_eq!(Mm(250.0).to_metres(), 0.25);
+    for p in solidcraft_exchange::parameters(&bytes).unwrap() {
+        match &p.value {
+            solidcraft_exchange::ParameterValue::Quantity(q) => assert_eq!(p.quantity(), Some(*q)),
+            _ => assert_eq!(p.quantity(), None),
+        }
+    }
+}

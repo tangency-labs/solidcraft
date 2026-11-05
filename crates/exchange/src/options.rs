@@ -36,6 +36,12 @@ impl From<&str> for Override {
     }
 }
 
+impl From<String> for Override {
+    fn from(e: String) -> Self {
+        Override::Expression(e)
+    }
+}
+
 /// How closely the meshes follow curved faces: the largest distance between a triangle and its
 /// face (chord tolerance).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -79,6 +85,13 @@ impl Options {
     #[must_use]
     pub fn with_override(mut self, name: impl Into<ParameterName>, value: impl Into<Override>) -> Self {
         self.overrides.push((name.into(), value.into()));
+        self
+    }
+
+    /// [`Self::with_override`] for each (name, value).
+    #[must_use]
+    pub fn with_overrides<N: Into<ParameterName>, V: Into<Override>>(mut self, overrides: impl IntoIterator<Item = (N, V)>) -> Self {
+        self.overrides.extend(overrides.into_iter().map(|(n, v)| (n.into(), v.into())));
         self
     }
 

@@ -20,6 +20,18 @@ pub struct Parameter {
     pub comment: String,
 }
 
+impl Parameter {
+    /// The value when it is a length (mm), angle (radians) or number; `None` for a text or a
+    /// value that does not evaluate.
+    #[must_use]
+    pub fn quantity(&self) -> Option<Quantity> {
+        match self.value {
+            ParameterValue::Quantity(q) => Some(q),
+            _ => None,
+        }
+    }
+}
+
 /// A parameter's value.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

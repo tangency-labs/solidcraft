@@ -272,6 +272,27 @@ impl Body {
             .flat_map(move |f| f.triangles.iter().filter_map(move |t| Some((f, [self.position(t[0])?, self.position(t[1])?, self.position(t[2])?]))))
     }
 
+    /// The triangles as one list over [`Self::positions`], face after face, and beside it each
+    /// triangle's face index (a face-tagged mesh, as the tagged 3MF export writes).
+    #[must_use]
+    pub fn tagged_triangles(&self) -> (Vec<[u32; 3]>, Vec<u32>) {
+        let count = self.triangle_count();
+        let (mut triangles, mut tags) = (Vec::with_capacity(count), Vec::with_capacity(count));
+        for f in &self.faces {
+            for t in &f.triangles {
+                triangles.push(t.map(|v| v.0));
+                tags.push(f.index.0);
+            }
+        }
+        (triangles, tags)
+    }
+
+    /// How many triangles the body's faces hold.
+    #[must_use]
+    pub fn triangle_count(&self) -> usize {
+        self.faces.iter().map(|f| f.triangles.len()).sum()
+    }
+
     /// The edges that bound `face`.
     pub fn edges_of(&self, face: FaceIndex) -> impl Iterator<Item = &Edge> + '_ {
         self.edges.iter().filter(move |e| e.bounds.contains(face))

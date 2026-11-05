@@ -26,7 +26,15 @@ let options = Options::default()
     ]);
 let snap = design.snapshot(&options)?;
 let json = solidcraft_exchange::to_json(&snap)?;          // deterministic bytes
+
+// One snapshot, without keeping the design:
+let snap = solidcraft_exchange::snapshot(&bytes, &Options::default().with_overrides([("width", "3 cm")]))?;
+let params = solidcraft_exchange::parameters(&bytes)?;
 ```
+
+Keep the `Design` for several snapshots of one design (a sweep, a model redrawn as its
+parameters change): its evaluation is reused. The one-call `snapshot` and `parameters` open the
+design each time.
 
 `snapshot` applies the overrides (all or none), then the edits, to a copy of the design,
 evaluates it and leaves the design as it was. Snapshots of one `Design` share an evaluation, so
@@ -51,8 +59,11 @@ solidcraft-cli export-snapshot part.sc --out part.json --param width=30 --param 
 something there, every direction is a unit vector, coordinates are finite, NURBS patches are
 well formed, body names are unique. A `Snapshot` in hand can therefore be walked safely, by
 reference rather than by index: `body.triangles()` (each with its face and corner positions),
-`body.edges_of(face)`, `body.edges_at(corner)`, `edge.points(&body)`, `body.face_named(..)`.
-Lengths and angles add, scale and print with their unit (`Mm(3.0) * 2.0`, `"6 mm"`), and
+`body.edges_of(face)`, `body.edges_at(corner)`, `edge.points(&body)`, `body.face_named(..)`,
+`body.tagged_triangles()` (one triangle list over `positions` with each triangle's face index),
+`body.triangle_count()`, `snapshot.triangle_count()`, `parameter.quantity()`.
+Lengths and angles add, scale and print with their unit (`Mm(3.0) * 2.0`, `"6 mm"`; `to_metres()`
+on `Mm` and `Point` for tools that work in SI), and
 names key maps that look up by `&str`.
 
 ## Types

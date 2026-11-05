@@ -86,6 +86,19 @@ pub fn open(bytes: &[u8]) -> Result<Design> {
     Ok(Design { doc, model: Mutex::new(Model::new()) })
 }
 
+/// The snapshot of a design file's bytes taken with `options`: [`open`] then
+/// [`Design::snapshot`], for one snapshot. Several of one design (a sweep, a model redrawn as its
+/// parameters change) keep the [`Design`] instead: its later snapshots recompute only the
+/// features the changes reach.
+pub fn snapshot(bytes: &[u8], options: &Options) -> Result<Snapshot> {
+    open(bytes)?.snapshot(options)
+}
+
+/// The parameters of a design file's bytes: [`open`] then [`Design::parameters`].
+pub fn parameters(bytes: &[u8]) -> Result<Vec<Parameter>> {
+    Ok(open(bytes)?.parameters())
+}
+
 /// The snapshot as JSON: deterministic bytes (fixed field and element order, shortest
 /// round-trip numbers).
 pub fn to_json(snapshot: &Snapshot) -> Result<String> {

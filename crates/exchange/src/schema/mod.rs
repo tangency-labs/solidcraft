@@ -83,6 +83,12 @@ impl Snapshot {
         self.bodies.iter().find(|b| b.name == *name)
     }
 
+    /// How many triangles all the bodies hold.
+    #[must_use]
+    pub fn triangle_count(&self) -> usize {
+        self.bodies.iter().map(Body::triangle_count).sum()
+    }
+
     /// The feature with this id.
     pub fn feature(&self, id: FeatureId) -> Option<&Feature> {
         self.features.iter().find(|f| f.id == id)

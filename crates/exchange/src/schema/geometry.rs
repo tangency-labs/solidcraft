@@ -67,6 +67,14 @@ quantity_ops! {
     Radians: "rad";
 }
 
+impl Mm {
+    /// The length in metres.
+    #[must_use]
+    pub fn to_metres(self) -> f64 {
+        self.0 * 1e-3
+    }
+}
+
 impl Radians {
     #[must_use]
     pub fn from_degrees(deg: f64) -> Radians {
@@ -85,6 +93,12 @@ impl Radians {
 pub struct Point(pub [f64; 3]);
 
 impl Point {
+    /// The coordinates in metres.
+    #[must_use]
+    pub fn to_metres(self) -> [f64; 3] {
+        self.0.map(|c| c * 1e-3)
+    }
+
     /// The distance to another point.
     #[must_use]
     pub fn distance(self, o: Point) -> Mm {
