@@ -707,6 +707,15 @@ pub enum LineSourceResult {
     Silhouette { face: usize },
 }
 
+impl From<solidcraft_geom::hlr::Source> for LineSourceResult {
+    fn from(source: solidcraft_geom::hlr::Source) -> Self {
+        match source {
+            solidcraft_geom::hlr::Source::Edge { edge, tangent } => LineSourceResult::Edge { edge, tangent },
+            solidcraft_geom::hlr::Source::Silhouette { face } => LineSourceResult::Silhouette { face },
+        }
+    }
+}
+
 /// A run of a line at one visibility, on the sheet.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct PieceResult {

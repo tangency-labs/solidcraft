@@ -15,8 +15,8 @@ use solidcraft_doc::ids;
 use super::CommandSpec;
 use crate::drawing_scene::{CMD, DimensionState};
 use crate::schema::drawing_scene::{
-    DimensionStatusResult, DrawingStatusParams, DrawingStatusResult, HitResult, SheetHitParams, SheetHitResult, SheetPaperScene, SheetSceneDimension,
-    SheetSceneParams, SheetSceneResult, ViewStatusResult,
+    DimensionStatusResult, DrawingStatusParams, DrawingStatusResult, HitResult, LineHitResult, SheetHitParams, SheetHitResult, SheetLineParams,
+    SheetLineResult, SheetPaperScene, SheetSceneDimension, SheetSceneParams, SheetSceneResult, ViewStatusResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -24,6 +24,8 @@ use crate::{EngineError, Result, Session};
 const CONTRACT: TypedContract<SheetSceneParams> = TypedContract::new();
 const HIT: &str = "drawing.scene.hit";
 const HIT_CONTRACT: TypedContract<SheetHitParams> = TypedContract::new();
+const LINE: &str = "drawing.scene.line";
+const LINE_CONTRACT: TypedContract<SheetLineParams> = TypedContract::new();
 const STATUS: &str = "drawing.status";
 const STATUS_CONTRACT: TypedContract<DrawingStatusParams> = TypedContract::new();
 
@@ -43,6 +45,14 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(STATUS, "Drawing Status
     .contract(&HIT_CONTRACT)
     .output(output_schema_for::<SheetHitResult>)
     .params("sheet: id or name; point_mm: [x, y] on paper; band_mm?: how near a box's edge counts as on it (default 0) → {hit: {object, kind, on_edge} or null}: of the boxes round the objects drawing.scene lists (a view's is its boundary, so one that can't be drawn is there too) that hold the point within the band, the smallest, then the topmost, with its kind as that list gives it. The drawing border is never hit. Read-only; no model is evaluated."),
+    CommandSpec::new(LINE, "Line Under a Point", crate::checked!("drawing.scene.line", line))
+    .icon("inspect")
+    .in_drawing()
+    .noundo()
+    .doc_only()
+    .contract(&LINE_CONTRACT)
+    .output(output_schema_for::<SheetLineResult>)
+    .params("sheet: id or name; point_mm: [x, y] on paper; band_mm?: how far from a line the point may be (default 1) → {line: {view, occurrence, body, reference, source: {kind: edge, edge, tangent} or {kind: silhouette, face}, distance_mm} or null}: in the view drawing.scene.hit finds there (over the views alone), the nearest line within the band, of two as near the one drawn on top, named as drawing.view.snapshot names its lines. The sheet's views out of date are drawn first, as the page draws them; a view that can't be drawn has no lines. Read-only; no model is evaluated."),
     CommandSpec::new(CMD, "Draw Sheet", crate::checked!("drawing.scene", scene))
     .icon("export")
     .in_drawing()
@@ -85,6 +95,24 @@ fn hit(s: &mut Session, p: &Value) -> Result<Value> {
     let found = crate::drawing_scene::hit(&built.objects, request.point_mm.0, request.band_mm);
     let hit = found.map(|h| HitResult { object: ids::encode(h.object), kind: h.kind, on_edge: h.on_edge });
     serde_json::to_value(SheetHitResult { hit, param_warnings: Vec::new() }).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn line(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: SheetLineParams = crate::schema::read(LINE, p)?;
+    if !request.band_mm.is_finite() || request.band_mm < 0.0 {
+        return Err(crate::params::bad(LINE, "band_mm is a finite number, 0 or more"));
+    }
+    let sheet = crate::drawing_scene::sheet_id(s.drawing(LINE)?, &request.sheet, LINE)?;
+    let found = crate::drawing_scene::line_at(s, sheet, request.point_mm.0, request.band_mm)?;
+    let line = found.map(|l| LineHitResult {
+        view: ids::encode(l.view),
+        occurrence: l.body.path,
+        body: l.body.body,
+        reference: l.body.reference,
+        source: l.source.into(),
+        distance_mm: l.distance_mm,
+    });
+    serde_json::to_value(SheetLineResult { line, param_warnings: Vec::new() }).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// Each dimension of a scene in the words of a reply.

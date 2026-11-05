@@ -42,6 +42,7 @@ use solidcraft_doc::drawing_view::TangentEdges;
 use solidcraft_doc::{DocError, ModelState, ids};
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_view::ViewFrame;
+use solidcraft_geom::hlr::Source;
 use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_geom::paper::text::TextRun;
 use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, ObjectKind, Picture, Scene};
@@ -49,7 +50,7 @@ use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb2, ArcMap};
 
 use crate::drawing_picture::{picture_items, view_parts};
-use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, ShownSet, Stats, Styles, Unmeasured, paper_group};
+use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, Shown, ShownSet, Stats, Styles, Unmeasured, paper_lines};
 use crate::params::bad;
 use crate::{EngineError, Result, Session};
 
@@ -196,6 +197,59 @@ pub fn hit(objects: &[SheetObject], point_mm: Vec2, band_mm: f64) -> Option<Hit>
     found.map(|(_, hit)| hit)
 }
 
+/// The stroke of `items` nearest `point_mm`, within `band_mm`, and how far it is: of two as near, the
+/// one painted later. Only the pieces whose box reaches the point are measured; pictures, fills and
+/// text are passed over. A point that isn't a finite number is near nothing.
+pub fn nearest_stroke(items: &[Item], point_mm: Vec2, band_mm: f64) -> Option<(usize, f64)> {
+    let mut found: Option<(usize, f64)> = None;
+    for (at, item) in items.iter().enumerate() {
+        let Item::Stroke { path, .. } = item else { continue };
+        for seg in path.iter().filter(|seg| seg.bounds().inflated(band_mm).contains(point_mm)) {
+            let distance = seg.point_at(seg.closest_param(point_mm)).dist(point_mm);
+            if distance <= band_mm && found.is_none_or(|(_, nearest)| distance <= nearest) {
+                found = Some((at, distance));
+            }
+        }
+    }
+    found
+}
+
+/// A line of a view on a sheet ([`line_at`]): the body that drew it and what of the body.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LineHit {
+    pub view: u64,
+    pub body: Shown,
+    pub source: Source,
+    /// How far the point is from it, on paper.
+    pub distance_mm: f64,
+}
+
+/// The line under `point_mm` on sheet `sheet` of the drawing open, within `band_mm`: in the view
+/// [`hit`] there, the nearest of its strokes ([`nearest_stroke`]). The sheet's views out of date are
+/// drawn first, as the page draws them ([`step`]), so the line is one the page shows. A view that
+/// can't be drawn, or isn't in the scene, has no lines. No model is evaluated.
+pub fn line_at(s: &mut Session, sheet: u64, point_mm: Vec2, band_mm: f64) -> Result<Option<LineHit>> {
+    extract(s, sheet)?;
+    while step(s) {}
+    let answer = extract(s, sheet)?;
+    let views: Vec<SheetObject> = answer.objects.iter().filter(|o| o.kind == ObjectKind::View).copied().collect();
+    let Some(view) = hit(&views, point_mm, band_mm).map(|h| h.object) else { return Ok(None) };
+    if !answer.views.iter().any(|v| v.view == view && v.status == Status::Drawn) {
+        return Ok(None);
+    }
+    let d = s.drawing(CMD)?;
+    let centre = views_on(d, sheet)?.into_iter().find(|(id, ..)| *id == view).map(|(.., centre)| centre);
+    let drawn = s.drawing_scenes.views.get(&view).map(|e| &e.drawn);
+    let (Some(centre), Some(Drawn { group: Some(group), owners: Some(owners), .. })) = (centre, drawn) else { return Ok(None) };
+    // The group is centred on the view, as it was drawn.
+    let Some((at, distance_mm)) = nearest_stroke(&group.items, point_mm - centre, band_mm) else { return Ok(None) };
+    let Some((body, source)) = owners.items.get(at).copied().flatten().and_then(|(shown, source)| Some((owners.bodies.get(shown)?.clone(), source)))
+    else {
+        return Ok(None);
+    };
+    Ok(Some(LineHit { view, body, source, distance_mm }))
+}
+
 /// The id of the sheet `named` names in `drawing` (its id or its one name), refused as `cmd`: the
 /// sheet a command asks to draw.
 pub fn sheet_id(drawing: &Drawing, named: &str, cmd: &str) -> Result<u64> {
@@ -233,6 +287,16 @@ struct Drawn {
     boundary: Option<Aabb2>,
     /// The frame its lines were drawn through, for its dimensions.
     frame: Option<ViewFrame>,
+    /// What drew each item of `group`, for [`line_at`].
+    owners: Option<Arc<Owners>>,
+}
+
+/// What drew each item of a view's group: for a stroke, the body (its index among `bodies`) and what
+/// of it; nothing for a picture.
+#[derive(Debug)]
+struct Owners {
+    bodies: Vec<Shown>,
+    items: Vec<Option<(usize, Source)>>,
 }
 
 /// A dimension's lines for a sheet scene, centred on its view, and how it read.
@@ -258,7 +322,7 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     });
     let placing = measured.as_ref().map(|(_, extents, around)| (*extents, *around)).map_err(|why| *why);
     let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
-    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None };
+    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None };
     let styles = Styles::from(view);
     if let Some(why) = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value) {
         return none(Status::Failed(why.into()));
@@ -285,12 +349,17 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     });
     match lines {
         Ok((lines, rect)) => {
-            let mut group = paper_group(&lines, id, LineGroup::DEFAULT);
-            group.items.splice(0..0, picture_items(id, &view_parts(&set, styles), rect));
+            let (mut group, drew) = paper_lines(&lines, id, LineGroup::DEFAULT);
+            let pictures = picture_items(id, &view_parts(&set, styles), rect);
+            // The pictures go under the strokes, so the owners start with one empty entry for each.
+            let owner = |at: usize| lines.lines.get(at).map(|line| (line.shown, line.source));
+            let items = std::iter::repeat_n(None, pictures.len()).chain(drew.into_iter().map(owner)).collect();
+            group.items.splice(0..0, pictures);
             if group.records() > MAX_RECORDS {
                 return none(Status::Failed(format!("its lines are more than a paper scene's {MAX_RECORDS} records: choose a smaller scale")));
             }
-            Drawn { group: Some(group), status: Status::Drawn, stats: Some(lines.stats), boundary, frame: Some(frame) }
+            let owners = Some(Arc::new(Owners { bodies: set.into_owned().bodies, items }));
+            Drawn { group: Some(group), status: Status::Drawn, stats: Some(lines.stats), boundary, frame: Some(frame), owners }
         }
         Err(e) => none(Status::Failed(reason(e))),
     }
