@@ -86,8 +86,8 @@
   },
   {
     "case": "fillets/every-block-cylinder-tangent-concave-arc-r2-partial-chain",
-    "issue": "tangency-labs/solidcore#2851",
-    "reason": "solidcore builds the round where the recorded SMLib run refused (status 1001); the case still compares against that refusal instead of its analytic volume"
+    "issue": "tangency-labs/solidcore#2864",
+    "reason": "the picked edge ends at the cylinder's seam, and the round ends there with a step 54.9 degrees short of the half circle (19085.7707 against 19091.9620); it should run on into the same curve, or refuse"
   },
   {
     "case": "fillets/report-drafted-peg-front-and-concave-rounds-together-r2",
