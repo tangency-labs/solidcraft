@@ -781,3 +781,33 @@ fn an_opened_design_comes_up_at_the_home_view() {
     let _ = std::fs::remove_dir_all(&other);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A design a newer SolidCraft saved opens in the window: the status line says so without a
+/// dialog, Messages names what wasn't read, and editing that feature says why it can't be edited.
+#[test]
+fn a_newer_design_opens_with_a_notice_and_no_dialog() {
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    let dir = scratch("newer_design");
+    let mut design = Session::default();
+    design.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+    let mut file: serde_json::Value = serde_json::from_str(&design.doc.to_json()).unwrap();
+    let (reads, newer) = (solidcraft_engine::doc::format::FORMAT, solidcraft_engine::doc::format::FORMAT + 1);
+    file["format"] = json!(solidcraft_engine::doc::format::format_string(newer));
+    file["features"].as_array_mut().unwrap().push(json!({"id": 900, "name": "Lattice1", "type": "gyroid_lattice"}));
+    let path = dir.join("newer.json");
+    std::fs::write(&path, file.to_string()).unwrap();
+
+    app.open_path(&path.to_string_lossy());
+
+    let (text, _, error) = app.status.clone().unwrap();
+    assert_eq!(text, format!("Saved by a newer SolidCraft (format {newer}, this version reads up to {reads}). If something's missing, update."));
+    assert!(!error);
+    assert!(app.dialog.is_none());
+    assert!(app.messages.iter().any(|m| m.text.contains("Lattice1") && m.text.contains("Saving keeps it")));
+    assert_eq!(app.session.model.state().bodies.len(), 1);
+    app.edit_feature(900);
+    let (text, _, error) = app.status.clone().unwrap();
+    assert!(error && text.contains("gyroid_lattice"), "{text}");
+    assert!(app.dialog.is_none() && !app.ui.palette_open);
+    let _ = std::fs::remove_dir_all(&dir);
+}

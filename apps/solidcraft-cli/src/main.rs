@@ -318,6 +318,19 @@ fn load_checked(path: &str, check: solidcraft_engine::schema::ParamCheck) -> Res
 /// `load_checked`, the features computed under `validation` (`diagnostics.validation`), which
 /// the session keeps.
 fn load_with(path: &str, check: solidcraft_engine::schema::ParamCheck, validation: solidcraft_engine::kernel::Validation) -> Result<Session, String> {
+    let s = read_session(path, check, validation)?;
+    // A newer SolidCraft's file opens all the same; stderr says so, stdout stays the caller's.
+    for warning in s.doc.newer_file.iter().flat_map(|file| file.warnings()) {
+        eprintln!("{path}: warning: {warning}");
+    }
+    Ok(s)
+}
+
+fn read_session(
+    path: &str,
+    check: solidcraft_engine::schema::ParamCheck,
+    validation: solidcraft_engine::kernel::Validation,
+) -> Result<Session, String> {
     let mut s = Session::default();
     s.param_check = check;
     s.set_validation(validation);
@@ -484,8 +497,10 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     // A feature that fails leaves the bodies as they were before it (a parameter change can
     // break a feature without failing the command that made it): writing them would hand out
     // the wrong part with success, so fail the run unless asked to write it anyway.
+    // A feature only a newer SolidCraft can build isn't a broken design: saving the design keeps it
+    // and hands out no part. Exporting bodies without it would, so that still stops.
     if !args.iter().any(|a| a == "--allow-errors") {
-        timeline_ok(&s)?;
+        timeline_ok(&s, flags(args, "--out").is_empty())?;
     }
     for out in flags(args, "--out") {
         s.execute("file.export", &json!({"path": out})).map_err(|e| e.to_string())?;
@@ -561,8 +576,12 @@ fn known_args(cmd: &str, args: &[String], valued: &[&str], switches: &[&str], po
 }
 
 /// Every failing timeline feature, one per line, as an error; Ok when none fails.
-fn timeline_ok(s: &Session) -> Result<(), String> {
-    let failed: Vec<String> = s.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| format!("  {}: {e}", r.name))).collect();
+fn timeline_ok(s: &Session, skip_newer_features: bool) -> Result<(), String> {
+    let newer = |id: u64| {
+        skip_newer_features && s.doc.feature(id).is_some_and(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::NewerFileFeature { .. }))
+    };
+    let failed: Vec<String> =
+        s.model.results.iter().filter(|r| !newer(r.id)).filter_map(|r| r.error.as_ref().map(|e| format!("  {}: {e}", r.name))).collect();
     if failed.is_empty() {
         return Ok(());
     }
@@ -579,7 +598,7 @@ fn cmd_eval(args: &[String]) -> Result<(), String> {
     let mut s = open(flag(args, "--in"), positional(args), solidcraft_engine::schema::ParamCheck::Off)?;
     let m = s.execute("inspect.measure", &json!({})).map_err(|e| e.to_string())?;
     let d = s.execute("document.inspect", &json!({})).map_err(|e| e.to_string())?;
-    let out = json!({
+    let mut out = json!({
         "body_count": m["body_count"],
         "bodies": m["bodies"],
         "total": m["total"],
@@ -587,6 +606,10 @@ fn cmd_eval(args: &[String]) -> Result<(), String> {
         "params": d["params"],
         "sketches": d["sketches"],
     });
+    if let Some(file) = &s.doc.newer_file {
+        out["newer_file"] = file.report();
+        out["warnings"] = json!(file.warnings());
+    }
     print_json(&out, json_out)
 }
 

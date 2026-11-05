@@ -827,6 +827,19 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | docs/book/src/media/sketching/parts.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (default dark theme, software renderer, 1280x800) showing a fully constrained sketch, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
 | docs/book/src/media/sketching/offset.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) offsetting a sketch outline, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
 | docs/book/src/media/sketching/trim.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (default dark theme, software renderer) trimming a notch in a sketch, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| assets/locales/ca.json | carlymx | Catalan translation of the English catalog, contributed upstream | MIT OR Apache-2.0 |
+| assets/locales/pending/sketch-mirror-auto-line.json | SolidCraft contributors | Original Mirror preference label and translations | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-01-extrude5-edge-frame.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-04-preview-outer-l11.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-05-preview-inner-l8.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-06-result-outer-120.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-07-preview-360.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-08-cancelled.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-13-colliding-id.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-14-surface-l1.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/demo-15-surface-result.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| docs/screenshots/7452/revolve-selected-edge.mp4 | SamD98 | screen recording of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
+| assets/locales/bg.json | Yasen-55 | Original translation | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
@@ -896,11 +909,10 @@ copied into SolidCraft.
 
 | Directory | Source | Licence | Changes |
 |---|---|---|---|
-| vendor/accesskit_macos | accesskit_macos 0.26.3, https://github.com/AccessKit/accesskit (The AccessKit contributors) | MIT OR Apache-2.0 | the subclassing adapter and its tests from 0.27.2: dropping the adapter keeps AppKit's key-value observers (vendor/README.md) |
 
 ## Vendored renderer compatibility fix
 
-`vendor/egui-wgpu` is egui-wgpu 0.36.2 from https://github.com/emilk/egui
+`vendor/egui-wgpu` is egui-wgpu 0.37.0 from https://github.com/emilk/egui
 (MIT OR Apache-2.0; both original licence texts are included). Rust sources and
 its original `egui.wgsl` shader are retained; no images or other artwork are copied.
 SolidCraft's narrow patch selects a safe 1x MSAA path on the chosen OpenGL adapter

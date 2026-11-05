@@ -14,7 +14,7 @@ struct RecentColors {
 }
 
 fn recent_id() -> egui::Id {
-    egui::Id::new("color_recent_colors")
+    egui::Id::unique("color_recent_colors")
 }
 
 /// The recently picked colours, newest first.

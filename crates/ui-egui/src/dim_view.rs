@@ -307,8 +307,8 @@ pub fn pin(app: &SolveApp, at: Vec2) {
 }
 
 /// Move a draft's text to `at`. Where the text goes can change what the dimension measures
-/// (two points or a slanted line: inside the box they span the distance between them, above or
-/// below it the horizontal one, beside it the vertical one), so a value nothing was typed into yet
+/// (two points or a slanted line: across from them the distance between them, pulled past an
+/// end up or down the horizontal one, sideways the vertical one), so a value nothing was typed into yet
 /// becomes what the new dimension measures; carrying the old one over would preview, and on
 /// Enter apply, the aligned length as a horizontal or vertical span, moving the picked points.
 fn move_text(app: &SolveApp, e: &mut Edit, at: Vec2) {
@@ -1014,7 +1014,7 @@ fn is_plain_value(text: &str) -> bool {
 /// The cursor ends just after the name and the field keeps the keyboard.
 fn insert_reference(ctx: &egui::Context, edit: &mut Edit, name: &str) {
     edit.typed = true;
-    let id = egui::Id::new("sc_dim_edit");
+    let id = egui::Id::unique("sc_dim_edit");
     let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
     let len = edit.expr.chars().count();
     let (start, end) = if is_plain_value(&edit.expr) {
@@ -1120,7 +1120,7 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
         let (done, escaped) = window::show(app, ctx, &mut e, at);
         return settle(app, e, done, escaped);
     }
-    let id = egui::Id::new("sc_dim_edit");
+    let id = egui::Id::unique("sc_dim_edit");
     let mut done: Option<bool> = None;
     let mut escaped = false;
     // A type-first value sits beside its text, clear of the pointer and of the target a click
@@ -1129,74 +1129,78 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     let popup_width = drawable.map_or(220.0, |rect| (rect.width() - 8.0).clamp(24.0, 220.0));
     let anchor = edit_anchor(at, e.live.is_some(), drawable, popup_width);
     // Background: under Preferences and Report a bug (#9016), like canvas value boxes.
-    Container::new(ctx, Surface::Canvas).area(egui::Id::new("sc_dim_edit_area")).fixed_pos(anchor).order(egui::Order::Background).show(ctx, |ui| {
-        let frame = Container::popup_frame(ui.style()).fill(Tokens::get().dialog_body).inner_margin(Tokens::get().space_4);
-        Container::show_backing(ui, frame, |ui| {
-            crate::ui_kit::scope(ui, |ui| {
-                ui.set_max_width(popup_width);
-                crate::ui_kit::text(ui, &crate::i18n::format("dialog.dimension_name", &[("name", &e.param)]), crate::ui_kit::Text::Inline)
-                    .backing_on_hover_text(crate::i18n::tr("dialog.dimension_insert_hint"));
-                if !e.owned {
-                    // The whole value is selected before the field reads its state, every frame
-                    // until the person takes it over, so typing replaces it (#11204). Only on the
-                    // first frame was not enough: a frame without the keyboard collapses the
-                    // field's selection to its caret, and the first digit went in beside the value.
-                    let n = e.expr.chars().count();
-                    let mut s = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
-                    s.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
-                    e.selection = s.cursor.char_range();
-                    s.store(ui.ctx(), id);
-                    // A key this frame acts on the whole value (a digit replaces it, Home puts the
-                    // caret before it); from then on the caret is the person's.
-                    let focused = ui.memory(|m| m.has_focus(id));
-                    e.owned = focused && ui.input(|i| i.events.iter().any(|ev| matches!(ev, egui::Event::Key { pressed: true, .. })));
-                }
-                let r = crate::ui_kit::cell_editor(ui, id, &mut e.expr, "", false);
-                // A press into the field puts the caret where it landed; not the press that placed
-                // or pinned the value, which began before the box sat there.
-                let settled = e.shown == Some(anchor);
-                e.owned |= settled && r.hovered() && ui.input(|i| i.pointer.any_pressed());
-                crate::theme::TabAccent::number_focus(ui, &r);
-                if r.has_focus() {
-                    e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
-                }
-                let completed = crate::params_dialog::complete(ui, &r, &mut e.expr);
-                if completed {
-                    e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
-                }
-                if let Some(live) = e.live.as_mut() {
-                    live.typed |= r.changed() || completed;
-                }
-                e.owned |= r.changed() || completed;
-                e.typed |= r.changed() || completed;
-                // Solved now, so the next frame draws the sketch at the new value from its start.
-                if (r.changed() || completed)
-                    && let Some(draft) = e.draft.as_mut()
-                {
-                    let expr = e.expr.clone();
-                    reevaluate(app, draft, &expr);
-                }
-                if let Some(error) = e.draft.as_ref().and_then(|d| d.error.as_ref()) {
-                    crate::ui_kit::text(ui, error, crate::ui_kit::Text::Report("dimension_error", true));
-                }
-                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if r.lost_focus() && enter {
-                    done = Some(true);
-                } else if e.fresh > 0 {
-                    if !r.has_focus() {
-                        r.request_focus();
+    Container::new(ctx, Surface::Canvas).area(egui::Id::unique("sc_dim_edit_area")).fixed_pos(anchor).order(egui::Order::Background).show(
+        ctx,
+        |ui| {
+            let frame = Container::popup_frame(ui.style()).fill(Tokens::get().dialog_body).inner_margin(Tokens::get().space_4);
+            Container::show_backing(ui, frame, |ui| {
+                crate::ui_kit::scope(ui, |ui| {
+                    ui.set_max_width(popup_width);
+                    crate::ui_kit::text(ui, &crate::i18n::format("dialog.dimension_name", &[("name", &e.param)]), crate::ui_kit::Text::Inline)
+                        .backing_on_hover_text(crate::i18n::tr("dialog.dimension_insert_hint"));
+                    if !e.owned {
+                        // The whole value is selected before the field reads its state, every frame
+                        // until the person takes it over, so typing replaces it (#11204). Only on the
+                        // first frame was not enough: a frame without the keyboard collapses the
+                        // field's selection to its caret, and the first digit went in beside the value.
+                        let n = e.expr.chars().count();
+                        let mut s = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
+                        s.cursor
+                            .set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
+                        e.selection = s.cursor.char_range();
+                        s.store(ui.ctx(), id);
+                        // A key this frame acts on the whole value (a digit replaces it, Home puts the
+                        // caret before it); from then on the caret is the person's.
+                        let focused = ui.memory(|m| m.has_focus(id));
+                        e.owned = focused && ui.input(|i| i.events.iter().any(|ev| matches!(ev, egui::Event::Key { pressed: true, .. })));
                     }
-                } else if r.lost_focus() {
-                    done = Some(false);
-                }
-                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                    done = Some(false);
-                    // Esc cancels the whole dimension, picks included.
-                    escaped = true;
-                }
+                    let r = crate::ui_kit::cell_editor(ui, id, &mut e.expr, "", false);
+                    // A press into the field puts the caret where it landed; not the press that placed
+                    // or pinned the value, which began before the box sat there.
+                    let settled = e.shown == Some(anchor);
+                    e.owned |= settled && r.hovered() && ui.input(|i| i.pointer.any_pressed());
+                    crate::theme::TabAccent::number_focus(ui, &r);
+                    if r.has_focus() {
+                        e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
+                    }
+                    let completed = crate::params_dialog::complete(ui, &r, &mut e.expr);
+                    if completed {
+                        e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
+                    }
+                    if let Some(live) = e.live.as_mut() {
+                        live.typed |= r.changed() || completed;
+                    }
+                    e.owned |= r.changed() || completed;
+                    e.typed |= r.changed() || completed;
+                    // Solved now, so the next frame draws the sketch at the new value from its start.
+                    if (r.changed() || completed)
+                        && let Some(draft) = e.draft.as_mut()
+                    {
+                        let expr = e.expr.clone();
+                        reevaluate(app, draft, &expr);
+                    }
+                    if let Some(error) = e.draft.as_ref().and_then(|d| d.error.as_ref()) {
+                        crate::ui_kit::text(ui, error, crate::ui_kit::Text::Report("dimension_error", true));
+                    }
+                    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if r.lost_focus() && enter {
+                        done = Some(true);
+                    } else if e.fresh > 0 {
+                        if !r.has_focus() {
+                            r.request_focus();
+                        }
+                    } else if r.lost_focus() {
+                        done = Some(false);
+                    }
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        done = Some(false);
+                        // Esc cancels the whole dimension, picks included.
+                        escaped = true;
+                    }
+                });
             });
-        });
-    });
+        },
+    );
     e.shown = Some(anchor);
     settle(app, e, done, escaped);
 }
