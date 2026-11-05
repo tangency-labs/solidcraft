@@ -2856,7 +2856,8 @@ mod opt_point_expr {
 }
 
 impl FeatureKind {
-    /// A sheet metal feature (its result depends on the sheet metal rules).
+    /// A plastic part feature: a boss, lip, snap fit or rest (its result depends on the plastic
+    /// rules).
     pub fn is_plastic(&self) -> bool {
         matches!(self, FeatureKind::Boss { .. } | FeatureKind::Lip { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. })
     }
@@ -2867,6 +2868,7 @@ impl FeatureKind {
         matches!(self, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
     }
 
+    /// A sheet metal feature (its result depends on the sheet metal rules).
     pub fn is_sheet(&self) -> bool {
         matches!(
             self,
