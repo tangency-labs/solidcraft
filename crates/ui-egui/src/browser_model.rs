@@ -38,6 +38,9 @@ impl Model {
             if !matches!(feature.kind, FeatureKind::Sketch { .. }) {
                 features.entry(feature.component).or_default().push(i);
             }
+            if session.doc.marker.is_some_and(|marker| i >= marker) {
+                continue;
+            }
             let index = match feature.kind {
                 FeatureKind::Sketch { .. } => &mut sketches,
                 FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. } => &mut planes,
@@ -103,5 +106,11 @@ impl Model {
             self.body_paths = Some(paths);
         }
         self.body_paths.as_ref()?.get(body).cloned()
+    }
+
+    /// Whether [`Model::body_path`] has walked the placements for this model.
+    #[cfg(test)]
+    pub fn body_paths_walked(&self) -> bool {
+        self.body_paths.is_some()
     }
 }

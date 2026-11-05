@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::{FeatureKind, PlaneRef};
 
 use super::CommandSpec;
-use crate::params::{bad, name_or_id_list, vec3};
+use crate::params::{bad, name_or_id_values, vec3};
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -24,14 +24,11 @@ pub static COMMANDS: &[CommandSpec] = &[
 fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.copy";
     // The features are named or numbered, and both kinds can sit in one list.
-    let keys = name_or_id_list(cmd, p, "features")?;
+    let keys = name_or_id_values(cmd, p, "features")?;
     if keys.is_empty() || keys.len() > 1000 {
         return Err(bad(cmd, "`features` must list 1…1000 features"));
     }
-    let mut ids = Vec::new();
-    for k in &keys {
-        ids.push(s.doc.find_feature(k).map(|f| f.id).ok_or_else(|| bad(cmd, format!("no feature `{k}`")))?);
-    }
+    let ids = keys.iter().map(|key| super::edit::feature_id(s, Some(key), cmd)).collect::<Result<Vec<_>>>()?;
     // Keep timeline order so sketches come before the features that use them.
     let copied: Vec<solidcraft_doc::Feature> = s.doc.features.iter().filter(|f| ids.contains(&f.id)).cloned().collect();
     let names: Vec<String> = copied.iter().map(|f| f.name.clone()).collect();
@@ -44,7 +41,7 @@ fn copy(s: &mut Session, p: &Value) -> Result<Value> {
 pub(in crate::cmd) fn explicit_planes(p: &mut PlaneRef) {
     match p {
         PlaneRef::Origin { name } => {
-            if let Some(plane) = solidcraft_geom::Plane::named(name) {
+            if let Some(plane) = solidcore_record::Plane::named(name) {
                 *p = PlaneRef::Custom { plane };
             }
         }
@@ -153,6 +150,10 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
             if !internal {
                 notices.push(format!("pasted sketch retains external exact face attachment to {}", anchor.target.body));
             }
+            if internal {
+                let source = solidcraft_doc::mat_mul(&shift, frame_change.get(&anchor.component).unwrap_or(&solidcraft_doc::IDENTITY));
+                anchor.reframe_placement(&m, &source)?;
+            }
             anchor.remap_target(&sketches, &bodies)?;
             if internal {
                 anchor.component = comp;
@@ -242,6 +243,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
+    use solidcraft_geom::prelude::*;
 
     use crate::Session;
 
@@ -308,7 +310,7 @@ mod tests {
 
     #[test]
     fn foreign_sketch_paste_preserves_world_position_in_a_placed_component() {
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
 
         let mut source = dimensioned_sketch();
         let arc = [Vec3::new(1., 0., 0.), Vec3::new(0., 0., 1.), Vec3::new(-1., 0., 0.)];
@@ -328,15 +330,15 @@ mod tests {
             [0]["id"]
             .as_u64()
             .unwrap();
-        let original = source.world_state().sketch(1).unwrap().plane;
-        let pasted = target.world_state().sketch(id).unwrap().plane;
+        let original = source.world_state().unwrap().sketch(1).unwrap().plane;
+        let pasted = target.world_state().unwrap().sketch(id).unwrap().plane;
         assert!(pasted.origin.dist(original.origin) < 1e-6, "{original:?} vs {pasted:?}");
         assert!(pasted.x.dist(original.x) < 1e-6);
         assert!(pasted.y.dist(original.y) < 1e-6);
         assert!((sketch_area(&target, id) - 200.).abs() < 1e-6);
         assert_eq!(target.doc.feature(id).unwrap().component, component);
         for (original, pasted) in
-            source.world_state().sketch(1).unwrap().sketch.wires.iter().zip(&target.world_state().sketch(id).unwrap().sketch.wires)
+            source.world_state().unwrap().sketch(1).unwrap().sketch.wires.iter().zip(&target.world_state().unwrap().sketch(id).unwrap().sketch.wires)
         {
             for (a, b) in original.pts.iter().chain(&original.fit).zip(pasted.pts.iter().chain(&pasted.fit)) {
                 assert!(a.dist(*b) < 1e-6, "wire {:?}: {a:?} vs {b:?}", original.space);
@@ -355,8 +357,15 @@ mod tests {
             .unwrap();
         let frame = target.placed_document().path_transform(component, &[occurrence]).unwrap();
         let delta = solidcraft_doc::apply_vector(&frame, Vec3::new(2., 3., 4.));
-        for (original, pasted) in
-            source.world_state().sketch(1).unwrap().sketch.wires.iter().zip(&target.world_state().sketch(moved).unwrap().sketch.wires)
+        for (original, pasted) in source
+            .world_state()
+            .unwrap()
+            .sketch(1)
+            .unwrap()
+            .sketch
+            .wires
+            .iter()
+            .zip(&target.world_state().unwrap().sketch(moved).unwrap().sketch.wires)
         {
             for (a, b) in original.pts.iter().chain(&original.fit).zip(pasted.pts.iter().chain(&pasted.fit)) {
                 assert!((*a + delta).dist(*b) < 1e-6, "translated wire {:?}: {a:?} vs {b:?}", original.space);
@@ -480,7 +489,7 @@ mod tests {
         let r = run(&mut s, "timeline.paste", json!({"component": a, "component_path": [at]}));
         assert_eq!(r["errors"].as_array().map(Vec::len), Some(0), "{r}");
         assert_eq!(r["pasted"][0]["name"], "S (2)");
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let (original, copy) = (world.body("Block").unwrap().mesh().bounds(), world.body("Block (2)").unwrap().mesh().bounds());
         assert!(copy.min.dist(original.min) < 1e-6 && copy.max.dist(original.max) < 1e-6, "{original:?} vs {copy:?}");
         let state = s.model.state();
@@ -837,7 +846,7 @@ mod tests {
         let spring = r["pasted"][1]["name"].as_str().unwrap_or_default().to_string();
         let def = run(&mut s, "timeline.inspect", json!({"feature": spring}));
         assert_eq!(def["definition"]["targets"], json!(["Plate (2)"]), "{def}");
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let v = |name: &str| solidcraft_kernel::measure(&st.body(name).unwrap().body).unwrap().volume;
         // A spring on the wrong plate is hundreds of mm³ off. The two plates are measured apart
         // (one moved 50 mm), which the boolean and the measure each round in their own way:

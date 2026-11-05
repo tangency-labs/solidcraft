@@ -67,13 +67,22 @@ const AHEAD_AREAS: &[&str] = &[
 const NAMES_A_FILE: &[&str] = &["path", "paths", "file", "files", "dir", "folder", "url", "out"];
 
 /// Commands that change nothing in the design and write a file: they run on a copy.
-const ANSWERED_ON_A_COPY: &[&str] = &["file.export", "file.save_mesh"];
+const ANSWERED_ON_A_COPY: &[&str] =
+    &["file.export", "file.export_3mf", "file.export_obj", "file.export_step", "file.export_stl", "file.export_urdf", "file.save_mesh"];
 
 /// Commands that only read the design, which can take long on a large one (a measure of every
 /// body, an inspection that measures them, #4604; a clearance or interference check of every pair
 /// of bodies, minutes on an assembly of 150): they run on a copy too, whatever the preference,
 /// since an answer from the design as it was when asked has no order to keep.
-const READ_ON_A_COPY: &[&str] = &["inspect.measure", "document.inspect", "inspect.clearance", "inspect.interference"];
+const READ_ON_A_COPY: &[&str] = &[
+    "inspect.measure",
+    "document.inspect",
+    "inspect.clearance",
+    "inspect.interference",
+    // Physical properties of a component or placement: every body of every placement (#8706).
+    "component.properties",
+    "occurrence.properties",
+];
 
 /// Exports and readings computing at once; more run here.
 const MAX_ANSWERING: usize = 4;
@@ -123,7 +132,20 @@ fn reading(req: &ControlRequest) -> Option<(&'static str, Value)> {
 
 /// Requests that change the design: they wait while one computes.
 pub(crate) fn changes_the_design(method: &str) -> bool {
-    matches!(method, "engine.execute" | "command" | "engine.script" | "engine.batch")
+    matches!(method, "engine.execute" | "command" | "engine.script" | "engine.batch" | "document.import" | "document.saved")
+}
+
+/// Whether `doc` is the design `session` shows, as it is or edited since (an undo step away).
+fn shows_design(session: &solidcraft_engine::Session, doc: &Arc<solidcraft_engine::doc::Document>) -> bool {
+    Arc::ptr_eq(&session.doc, doc) || session.undo.iter().chain(&session.redo).any(|snap| Arc::ptr_eq(&snap.doc, doc))
+}
+
+/// The reply to a request whose design left the window while it computed.
+fn design_replaced(label: &str) -> Value {
+    json!({
+        "ok": false,
+        "error": format!("the design was replaced (another tab, or a file opened) while `{label}` computed; nothing was applied"),
+    })
 }
 
 /// What a request computes off the window thread.
@@ -413,9 +435,19 @@ impl SolveApp {
         if let Some(level) = level {
             copy.param_check = level;
         }
+        // The copy has no history and no file (#9624): an inspection reports the design's own.
+        let s = &self.session;
+        let own = (id == "document.inspect").then(|| (s.undo.len(), s.redo.len(), s.path.clone()));
         let rx = spawn(scope, move || {
             let mut reply = match copy.execute(id, &params) {
-                Ok(v) => json!({"ok": true, "result": v}),
+                Ok(mut v) => {
+                    if let (Some((undo, redo, path)), Some(o)) = (own, v.as_object_mut()) {
+                        o.insert("undo".into(), json!(undo));
+                        o.insert("redo".into(), json!(redo));
+                        o.insert("path".into(), json!(path));
+                    }
+                    json!({"ok": true, "result": v})
+                }
                 Err(e) => json!({"ok": false, "error": e.to_string()}),
             };
             if let Some(level) = level {
@@ -471,6 +503,16 @@ impl SolveApp {
             self.control_job = None;
             return;
         }
+        // The design it computes for has left the window (closed, another tab, a file opened):
+        // refused now, however long its computation has left, so the requests behind it, which
+        // are for the design shown, don't wait for it.
+        let left = matches!(&job.work, Work::Ahead { doc, .. } if !shows_design(&self.session, doc));
+        if left {
+            if let Some(job) = self.control_job.take() {
+                let _ = job.req.reply.send(design_replaced(&job.label));
+            }
+            return;
+        }
         if job.poll().is_none() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
             return;
@@ -484,13 +526,8 @@ impl SolveApp {
         let Work::Ahead { commands, doc, revision, tries, kept } = job.work else { return };
         let s = &self.session;
         let same = Arc::ptr_eq(&s.doc, &doc);
-        // The design it was computed for is still this one, edited since (an undo step away).
-        let edited = !same && s.undo.iter().chain(&s.redo).any(|snap| Arc::ptr_eq(&snap.doc, &doc));
-        if !same && !edited {
-            let _ = job.req.reply.send(json!({
-                "ok": false,
-                "error": format!("the design was replaced (another tab, or a file opened) while `{}` computed; nothing was applied", job.label),
-            }));
+        if !shows_design(s, &doc) {
+            let _ = job.req.reply.send(design_replaced(&job.label));
             return;
         }
         if (!same || s.revision != revision) && tries < MAX_TRIES {

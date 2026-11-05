@@ -35,7 +35,7 @@ impl Pipelines {
             layout: Some(&guide_layout),
             module: &guide_shader,
             entry_point: Some("denoise_guides"),
-            compilation_options: Default::default(),
+            compilation_options: wgpu::PipelineCompilationOptions { constants: &[("HAS_TEXTURES", 1.0)], ..Default::default() },
             cache: None,
         });
         let entries: Vec<_> = (0..4)

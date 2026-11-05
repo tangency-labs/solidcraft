@@ -12,5 +12,13 @@
   {"expect": {"glyphs": {"k1": 1, "k2": 1}}},
   {"call": "ui.prefs", "params": {"hide_constraint_glyphs_zoomed_out": true}},
   {"call": "ui.view", "params": {"view": "fit"}},
-  {"expect": {"glyphs": {"k1": 1, "k2": 1}}}
+  {"expect": {"glyphs": {"k1": 1, "k2": 1}}},
+  {"call": "engine.execute", "params": {"command": "sketch.line", "params": {"points": [[0, 0], [500, 0]]}}},
+  {"call": "engine.execute", "params": {"command": "sketch.constraint.horizontal_vertical", "params": {"line": "l2", "mode": "horizontal"}}},
+  {"call": "engine.execute", "params": {"command": "sketch.line", "params": {"points": [[500, 0], [500, 500]]}}},
+  {"call": "engine.execute", "params": {"command": "sketch.constraint.horizontal_vertical", "params": {"line": "l3", "mode": "vertical"}}},
+  {"call": "ui.view", "params": {"view": "fit"}},
+  {"expect": {"glyphs": {"k1": 1, "k2": 1, "k3": 1, "k4": 1}}},
+  {"call": "ui.camera", "params": {"distance": 20000}},
+  {"expect": {"glyphs": {"k1": 0, "k2": 0, "k3": 0, "k4": 0}}}
 ]

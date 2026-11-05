@@ -1,4 +1,5 @@
 use crate::*;
+use solidcore_record::{MAX_BEZIER_CTRL, Plane, Seg2, Vec2, Vec3};
 
 fn cube_mesh(s: f64) -> Mesh {
     let p = |x: f64, y: f64, z: f64| Vec3::new(x * s, y * s, z * s);
@@ -95,6 +96,44 @@ fn raycast_never_slips_between_triangles() {
             assert!(hit.is_some_and(|(t, _)| (t - 50.0).abs() < 1e-6), "{p:?} along {d:?}: {hit:?}");
         }
     }
+}
+
+/// A ray through an edge that two triangles share crosses exactly one of them: the same grid,
+/// crossed at every inner edge's midpoint (and the middle of each cell, on its diagonal), straight
+/// down and obliquely. The bracket example's hole centre fell on such an edge of the base's top
+/// and was counted once for two faces.
+#[test]
+fn ray_crossings_count_a_shared_edge_once() {
+    let n = 6;
+    let positions: Vec<Vec3> =
+        (0..=n).flat_map(|j| (0..=n).map(move |i| Vec3::new(f64::from(i) * 40.0 / 6.0 + 100.0, f64::from(j) * 5.0, 20.0))).collect();
+    let id = |i: u32, j: u32| j * (n + 1) + i;
+    let mut triangles = Vec::new();
+    for j in 0..n {
+        for i in 0..n {
+            triangles.push([id(i, j), id(i + 1, j), id(i + 1, j + 1)]);
+            triangles.push([id(i, j), id(i + 1, j + 1), id(i, j + 1)]);
+        }
+    }
+    let tri_face = vec![0; triangles.len()];
+    let m = Mesh { positions, triangles, tri_face, ..Default::default() };
+    let dirs = [Vec3::new(-0.57735, 0.57735, -0.57735), Vec3::new(0.3, -0.7, -0.648), Vec3::new(-0.123456789, -0.2, -1.0), Vec3::new(0.0, 0.0, -1.0)];
+    for d in dirs {
+        for j in 1..2 * n {
+            for i in 1..2 * n {
+                if i % 2 == 0 && j % 2 == 0 {
+                    continue;
+                }
+                let p = Vec3::new(f64::from(i) * 20.0 / 6.0 + 100.0, f64::from(j) * 2.5, 20.0);
+                assert_eq!(m.ray_crossings(p - d * 50.0, d), 1, "{p:?} along {d:?}");
+                assert_eq!(m.ray_crossings(p + d * 50.0, d), 0, "{p:?} along {d:?}, from beyond");
+            }
+        }
+    }
+    // A closed cube: a ray through its top's diagonal crosses the top and the bottom.
+    let cube = cube_mesh(2.0);
+    assert_eq!(cube.ray_crossings(Vec3::new(0.5, 0.5, 5.0), Vec3::new(0.0, 0.0, -1.0)), 2);
+    assert_eq!(cube.ray_crossings(Vec3::new(0.5, 0.5, 1.0), Vec3::new(0.0, 0.0, -1.0)), 1);
 }
 
 #[test]
@@ -296,7 +335,7 @@ fn surface_patches_cross_only_hidden_seams() {
 
 #[test]
 fn cubic_and_conic_segments_measure_exactly() {
-    use crate::{Loop2, Seg2, Vec2};
+    use solidcore_record::{Loop2, Seg2, Vec2};
     // An ellipse (a = 5, b = 3) as four quarter conics: area π a b.
     let w = std::f64::consts::FRAC_1_SQRT_2;
     let (a, b) = (5.0, 3.0);
@@ -351,7 +390,7 @@ fn cubic_and_conic_segments_measure_exactly() {
 
 #[test]
 fn split_at_and_closest_param() {
-    use crate::{Seg2, Vec2};
+    use solidcore_record::{Seg2, Vec2};
     let w = std::f64::consts::FRAC_1_SQRT_2;
     let quarter = Seg2::Conic { a: Vec2::new(10.0, 0.0), apex: Vec2::new(10.0, 10.0), b: Vec2::new(0.0, 10.0), w };
     for t in [0.2, 0.5, 0.8] {

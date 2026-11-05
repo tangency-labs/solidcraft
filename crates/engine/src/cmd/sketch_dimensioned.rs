@@ -11,8 +11,8 @@
 //! creator joins [`dimension_roles`] with its roles and entities, and `locate` gets a frame with a
 //! Z direction; the UI routes the 3D tools through `tools::draw`, which asks `dimension_roles`.
 use serde_json::{Map, Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::expr::{Kind, definition};
-use solidcraft_geom::Vec3;
 
 use crate::{
     Result, Session,
@@ -31,16 +31,20 @@ pub fn dimension_roles(creator: &str) -> Option<&'static [&'static str]> {
         // A circle is dimensioned by its diameter unless a radius is given.
         "sketch.circle.center" | "sketch.circle.two_point" | "sketch.circle.three_point" => &["diameter", "radius"],
         "sketch.arc.center_point" => &["radius", "sweep"],
+        "sketch.ellipse" => &["major_radius", "minor_radius"],
         "sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point" => &["length", "width"],
         "sketch.slot.arc_center" => &["radius", "sweep", "width"],
         "sketch.slot.arc_three_point" => &["width"],
-        "sketch.polygon.inscribed" | "sketch.polygon.circumscribed" | "sketch.polygon.edge" => &["radius"],
+        "sketch.polygon.inscribed" | "sketch.polygon.circumscribed" => &["radius"],
+        // A polygon drawn by a side can be sized by that side instead (#11271).
+        "sketch.polygon.edge" => &["radius", "length"],
         _ => return None,
     })
 }
 
-/// Roles that measure the same size two ways: a shape takes one of each pair.
-const ALTERNATIVES: &[[&str; 2]] = &[["radius", "diameter"]];
+/// Roles that measure the same size two ways: a shape takes one of each pair. Only the edge
+/// polygon has both a radius and a length.
+const ALTERNATIVES: &[[&str; 2]] = &[["radius", "diameter"], ["radius", "length"]];
 
 /// The roles to place: the given ones, then (`as_drawn`) each other role of `roles` that is not
 /// an alternative of one already placed. None stands for the size as drawn.
@@ -73,8 +77,8 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
     if dimensions.len() > roles.len() || dimensions.keys().any(|key| !roles.contains(&key.as_str())) {
         return Err(bad(cmd, "unsupported dimension role for this creator"));
     }
-    if dimensions.contains_key("radius") && dimensions.contains_key("diameter") {
-        return Err(bad(cmd, "choose radius or diameter, not both"));
+    if let Some([a, b]) = ALTERNATIVES.iter().find(|pair| pair.iter().all(|role| dimensions.contains_key(*role))) {
+        return Err(bad(cmd, format!("choose {a} or {b}, not both")));
     }
     let mut overall_length = None;
     let mut slot_width = None;
@@ -152,6 +156,9 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
             (c, "width" | "height") if c.starts_with("sketch.rectangle.") => (vec![curve(usize::from(role == "height"))?], "length"),
             (c, "radius" | "diameter") if c.starts_with("sketch.circle.") => (vec![curve(0)?], role),
             ("sketch.arc.center_point", "radius" | "sweep") => (vec![curve(0)?], role),
+            // `sketch.dimension` gives an ellipse its major radius as `major`, else its minor one.
+            ("sketch.ellipse", "major_radius") => (vec![curve(0)?], "major"),
+            ("sketch.ellipse", "minor_radius") => (vec![curve(0)?], "radius"),
             ("sketch.slot.center_to_center" | "sketch.slot.center_point", "length") => (vec![curve(0)?], "length"),
             ("sketch.slot.overall", "length") => (vec![curve(1)?, curve(3)?], "overall_length"),
             (c, "width") if c.starts_with("sketch.slot.") => (vec![curve(1)?], "diameter"),
@@ -159,6 +166,8 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
                 let centre = out.get("centre_arc").filter(|v| v.is_string()).cloned().ok_or_else(|| bad(cmd, "slot centre arc missing"))?;
                 (vec![centre], role)
             }
+            // The first side runs from `p0` to `p1`; the others are equal to it.
+            ("sketch.polygon.edge", "length") => (vec![curve(0)?], "length"),
             (c, "radius") if c.starts_with("sketch.polygon.") => {
                 let support =
                     out.get("support_circle").filter(|v| v.is_string()).cloned().ok_or_else(|| bad(cmd, "polygon support circle missing"))?;

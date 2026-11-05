@@ -55,5 +55,5 @@ ending in the same word (`file.open`: did you mean `doc.open`?).
    (English, every catalog in `COMPLETE` in `crates/ui-egui/src/i18n.rs`, which a test requires,
    and any other language you can write) and the id to `DOCUMENTED` in
    `crates/ui-egui/src/command_help.rs`. The test
-   `every_toolbar_command_has_help_or_is_on_the_backlog` fails for a ribbon command without help;
-   the older ones on its `BACKLOG` only shrink (#2758).
+   `every_toolbar_command_has_help` fails for a ribbon command without help
+   (#2758).

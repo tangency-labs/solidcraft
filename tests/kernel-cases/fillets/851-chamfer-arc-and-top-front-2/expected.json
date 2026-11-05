@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#851",
+  "tangency-labs/solidcraft#854"
+ ],
+ "what": "on #851's knife-edge part (tessellation/1263): the arc's top edge and the top front edge together chamfered 2",
+ "source": "analytic",
+ "method": "plate x 0..41.1667, y -21..0 and the corner x 41.1667..62.1667 less the cylinder r 21 about (62.1667, -21), 10 high (tessellation/1263): V0 = 10 (62.1667 x 21 - pi 21^2/4) = 9591.394099. The arc's chamfer: its section in (rho, z) about the wall's axis, the triangle (rho - 21) + (10 - z) <= 2, swept round it from the front face (through the axis, square to the arc) to the back face y = 0, which the arc runs into tangent at the tip: at radius rho the part spans the angle asin(21/rho), so it takes Int_21^23 rho asin(21/rho) (2 - (rho - 21)) drho = 58.061950 (Simpson; the same derivation as 851-chamfer-arc-top-edge-9-5 at distance 2). The top front edge (y = -21, z = 10, x 0..41.1667) chamfered 2 takes 2^2/2 x 41.1667 = 82.333333. The two chamfers meet at the corner (41.1667, -21, 10), where the top, the front face and the arc's wall are square to each other, so together they take the union of the two: their common part in the plate (u = z - 8 in 0..2, 0 <= y + 21 <= u, x <= 41.1667, rho <= 21 + u) is Int_0^2 Int_0^u (sqrt((21 + u)^2 - Y^2) - 21) dY du = 2.637139, and the front chamfer's sliver past x = 41.1667 lies inside the arc's chamfer already (there rho <= sqrt(21^2 + Y^2) <= 21 + u). V = 9591.394099 - 58.061950 - 82.333333 + 2.637139 = 9453.635955; one closed valid solid whose display mesh closes",
+ "body_count": 1,
+ "volume_mm3": 9453.6359553261,
+ "watertight": true
+}

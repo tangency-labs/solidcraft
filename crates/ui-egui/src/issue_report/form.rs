@@ -17,7 +17,13 @@ fn answer(ui: &mut Ui, label: &str, hint: &str, text: &mut String, id: &str, row
     ui_kit::text(ui, tr_label(hint), ui_kit::Text::Note(hint));
     let response = ui_kit::text_area(ui, tr_label(label), Id::new(id), text, rows, MAX_ANSWER);
     crate::scenario::publish_handle(id, response.rect.center());
-    super::truncate(text, MAX_ANSWER);
+    super::truncate_chars(text, MAX_ANSWER);
+    // What doesn't fit is not added: near the limit, say how much room is left (#7191).
+    let left = MAX_ANSWER.saturating_sub(text.chars().count());
+    if left < super::ANSWER_ROOM {
+        let key = if left == 1 { "ui.report_characters_left_one" } else { "ui.report_characters_left_other" };
+        ui_kit::text(ui, &crate::i18n::format(key, &[("count", &left.to_string())]), ui_kit::Text::Note(id));
+    }
     response
 }
 
@@ -120,7 +126,9 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     let close_label = if compact { "" } else { "Close draft" };
     let (closed, mut action) = ui_kit::Window::new(Id::new("sc_issue_report"), "bug_report", tr_label("Report a bug"))
         .cards(cards)
-        .anchor(egui::Align2::CENTER_TOP, vec2(0.0, t.space_16))
+        // Opens at the top middle, and its title band drags it off what the report is about
+        // (#9916).
+        .placed(egui::Align2::CENTER_TOP, egui::pos2(screen.center().x, screen.top() + t.space_16))
         .fields()
         .keep_open_on_escape()
         .actions(tr_label(open_label), tr_label(close_label), Some(tr_label("Copy report")))

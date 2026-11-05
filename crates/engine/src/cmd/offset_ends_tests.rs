@@ -2,6 +2,7 @@
 //! #2424: curves start at the ends of an associated offset spline, and follow them.
 use serde_json::{Value, json};
 use solidcraft_doc::Document;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
 use crate::Session;

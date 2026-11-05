@@ -1,31 +1,53 @@
 # A tour of the window
 
-![The SolidCraft window](../generated/sample-plate.png)
+![The SolidCraft window with the sample plate open, its parts numbered 1 to 8](../media/ui-tour/window.png)
+
+**1** Title bar · **2** Toolbar · **3** Browser · **4** Viewport · **5** Axis view ·
+**6** Navigation bar · **7** Timeline · **8** Command search
+
+To get around the view, drag with the right button to orbit, drag with the middle button to pan
+and turn the wheel to zoom at the pointer. The house above the axis view goes back to the Home
+view.
+
+<video src="../media/ui-tour/navigate.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Orbiting the sample plate with a right drag, panning with a middle drag, zooming with the wheel, then clicking Home"></video>
 
 - **Title bar.** On Windows and Linux the application bar is the window's title bar. On the left:
   the File menu (New, Open, Save, Save As, Export…), undo and redo, the Home tab (the start page)
   and one tab per open design (each with its own undo history, selection and camera; a dot marks
   unsaved changes). On the right: Report a bug, Help (?), Preferences (which hold the theme) and the
-  window's buttons.
+  window's buttons. On Linux, to have your desktop's own title bar and window buttons instead, set
+  `SOLIDCRAFT_TITLEBAR=system` or put `"titlebar": "system"` in `graphics.json` in the settings
+  folder (see [Troubleshooting](troubleshooting.md#reset-the-settings)) and restart; `app` (the
+  default) puts the application bar back.
 - **Toolbar.** The workspace switcher (DESIGN) sits on the left. The tabs (MODEL, SURFACE,
   ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW and SHEET METAL) hold sections of commands. SKETCH appears while
   editing a sketch; SHEET METAL is always there and is highlighted for the active sheet body. Both select automatically
   when entered, and the other tabs remain available. Click a
-  panel's name for all its commands. Drag a command from the dropdown onto a panel's label
+  panel's name for all its commands. With **Switch panel menus on hover** enabled in
+  **Preferences > Layout > Toolbar tabs**, click once to open a menu, then hover another
+  panel's name to switch. Move outside the ribbon and open menu to close it.
+  Drag a command from the dropdown onto a panel's label
   or empty space to append it; the insertion line shows its destination. Drop onto an existing
   button to insert before it. Buttons can also move between panels, and the layout is saved.
   Click the **+** after the tabs, right-click a tab or empty toolbar space, or use
-  **Preferences > Interface > Toolbar tabs** to hide or restore tabs. Every existing tab,
+  **Preferences > Layout > Toolbar tabs** to hide or restore tabs. Every existing tab,
   including Sheet Metal and Weldments, stays visible by default. Tabs you hide stay hidden in every
   design until you show them again. Hidden tabs keep
   their customised buttons, commands in search and shortcuts; with all tabs hidden, **+** remains.
 - **Browser** (left). The design as a tree: document settings and units, named views, the
   origin, bodies, sketches, construction planes, canvases, joints and components. The eye at the
   row's right end shows or hides an item (**Preferences › Interface › Eye next to the fold arrow**
-  puts it back beside the fold arrow), a component's radio button makes it the active component,
-  and right-clicking any row gives that item's menu. Right-click the design or a component and choose **Expand All** or
-  **Collapse All** to open or close every folder under that row (the design row stays visible
-  when the whole tree is collapsed). Rows drag into groups and other components. **Preferences ›
+  puts it back beside the fold arrow; press an eye and drag up or down over other eyes to show or hide them all at once, as one undo step), a component's radio button makes it the active component,
+  and right-clicking any row gives that item's menu. Right-click the design or a component and choose
+  **Organize → Expand All** or **Collapse All** to open or close every folder under that row (the design row stays visible
+  when the whole tree is collapsed). Components start closed, so a large assembly opens as a
+  short list; open one with its fold arrow, or use **Find in Browser** on a body to open the rows
+  down to it (**Preferences › Interface › Components start open** opens every component from the
+  start, as before). **Preferences › Layout › Browser rows start closed** (off by default) starts
+  folders closed too, and components whatever **Components start open** says: they open with
+  their arrow, **Expand All**, or **Find in Browser** on a body, face or edge in the view, which
+  opens just the rows down to that body, and a pick in the view leaves the Browser as it is. Rows
+  drag into groups and other components. **Preferences ›
   Interface › Bodies folders** sets when a component's bodies sit in a Bodies folder of their own:
   **Several bodies only** (the default) lists a component's body straight under it when it has
   only one and no groups, **Never** lists every component's bodies and groups straight under it
@@ -121,7 +143,8 @@
   wide as that column; the column comes back as it was when the dialog closes.
   Interface › **Dialog buttons** › **Top** puts OK, Cancel and Apply in
   the dialog's title row, right of the title, where they stay while sections open and close;
-  Cancel then also takes the place of the close button. Enter and Esc work as before.
+  Cancel then also takes the place of the close button. Enter and Esc work as before. The Sketch
+  panel's Finish Sketch, Look at and Slice move up under its title, above the options.
 - **Timeline** (bottom). Every feature in order. Double-click to edit, drag the marker to roll
   back, and drag features to reorder them. A sketch's icon, here and in the browser, takes the
   colour of its state: the sketch colour while it is under constrained, the fully constrained
@@ -184,11 +207,27 @@ compass. Tool sheets remain draggable: their four corners round away from the ri
 edge, and their two right corners square when docked there. Browser keeps only the height its contents need. Assistant remains on the
 outside edge, and History keeps its chosen bottom, left or shared Browser column.
 The choice is saved between launches. Switching preserves the current tool,
-camera, selection and design; Cancel and Restore Defaults work like other preferences.
+camera, selection and design; Cancel and Restore page defaults work like other preferences.
 
 General › **Show text under ribbon icons** is a separate, saved option for either
 layout. Turn it off for shorter icon-only command buttons; tooltips, section names
 and command menus remain available.
+
+**Quick-access bar.** Right-click any ribbon button, a row of a section's drop-down or a command
+search result and choose **Add to Quick Access**: the command's icon joins the application bar,
+after Save, Undo and Redo. A click starts the command as its ribbon button does; drag a button
+along the bar to reorder it; right-click it and choose **Remove from Quick Access** to take it off.
+The bar is empty, and so not shown, until a command is added, and holds up to 24 commands. Narrow
+windows hide it with Undo and Redo. It is saved with the toolbar's customisations, so it is
+exported with the keyboard shortcuts and carried by settings profiles.
+
+Layout › **Show only the ribbon's tabs** (off by default) folds the ribbon to its tab
+row, so the view gets the room its panels took. Click a tab to show its panels over the view; they
+close again when a command starts, when the pointer leaves them, when Escape is pressed or when the
+open tab is clicked again. The command **Ribbon Tabs Only** (VIEW tab, the toolbar's right-click
+menu and command search) switches the option, so it can be given a key in Keyboard Shortcuts:
+choose it again to keep the whole ribbon shown. Scripts run `view.ribbon_tabs_only` with
+`{"on": true}` or `{"on": false}`, or with no parameters to switch.
 
 Interface › Layout › **Show origin and bodies at the top** (off by default) puts the active
 component's Bodies folder and the Origin (planes, axes and point) at the top of the History when
@@ -291,6 +330,199 @@ Command icons use the shared SVG palette.
 
 Imported themes are kept with your preferences, so they work in the browser app too. Colour
 vision modes still apply on top of any theme.
+
+#### Theme-file options and overlays
+
+Theme authors can add `options` and `overlays` to `solidcraft-theme/1`. Offered options appear
+below the theme cards in Interface, with the theme's name. Switches, sliders, segmented choices
+and dropdowns apply immediately and are saved per theme, including a followed theme file.
+**Reset** appears when an offered value differs from its default and restores that theme's
+defaults through the same preference update path. Cancel retains its existing behaviour of
+restoring the Preferences window's opening snapshot. Themes with no offered options add no
+options block or badge. Existing theme files need no changes or appearance changes.
+
+Options flow left to right into two columns. A parent and its child occupy one cell; turning
+the parent off disables its child without forgetting the child's value. Choices with four or
+five values and long labels take a full row; choices with more than five values use a dropdown.
+The first ten non-advanced top-level entries appear before **More · N**; advanced entries and
+overflow always appear inside it. Section labels appear only above six top-level entries.
+Help is available on hover. A registered behaviour unavailable on the current device stays
+disabled in its place with a reason; unimplemented standard behaviours and their children
+are absent. Theme cards show an Options badge only when the theme offers controls.
+
+**Export…** preserves the authored definitions and overlays for a theme that declares them.
+Older themes still export a complete token snapshot. The resolver API clamps numeric values;
+invalid saved preference values instead fall back to the theme's defaults, retaining the raw
+saved values for compatibility.
+
+For example, add these two keys alongside a theme's `colors`:
+
+```json
+{
+  "options": [
+    {
+      "id": "warm_accent",
+      "type": "bool",
+      "default": true,
+      "label": {"en": "Warm accent"},
+      "help": {"en": "Use a warmer accent colour."}
+    },
+    {
+      "id": "rounding",
+      "type": "range",
+      "default": 4,
+      "min": 0,
+      "max": 12,
+      "step": 1,
+      "unit": "pt",
+      "parent": "warm_accent"
+    }
+  ],
+  "overlays": [
+    {
+      "when": {"opt": "warm_accent", "eq": true},
+      "colors": {"accent": "#cc7744"}
+    },
+    {
+      "when": {"opt": "rounding", "gte": 4, "lte": 12},
+      "radii": {"control_radius": 8}
+    }
+  ]
+}
+```
+
+A file can declare up to 16 options. Each `id` is unique and matches
+`[a-z][a-z0-9_]{0,31}`. Every option has a `type` and a `default` (opacity may omit its
+default to use 100):
+
+- `bool`: the default is `true` or `false`.
+- `choice`: `values` contains 2 to 12 entries, each with a unique `id` in the same syntax
+  and a localized `label` map, for example `{"id":"warm","label":{"en":"Warm"}}`.
+  The default names one of those ids.
+- `range`: finite numeric `min`, `max` and positive `step` are required, with `min` no larger
+  than `max` and the default inside those bounds. Optional `unit` has at most 4 characters.
+  Numbers must fit a finite 32-bit float. Saved values are clamped to the bounds; `step`
+  is an increment for future controls, not a rounding rule.
+
+Optional `label` and `help` maps use language codes as keys, with `en` as the fallback.
+Labels have at most 40 characters and help strings at most 160, per language. Each map
+supports up to 64 language codes, each at most 32 ASCII letters, digits, hyphens or underscores.
+These texts belong to the theme and need no application catalog entries. `advanced` is an
+optional boolean; `section` is an optional string of at most 24 characters. `parent` names
+a declared boolean option, with at most one child per parent and no cycles. While the
+parent is off, overlays referring to the child are inactive; the child's value is retained.
+
+Four ids are reserved for definitions owned by the app:
+
+| Id | Type | Bounds | Unit | Parent |
+|---|---|---|---|---|
+| `opacity` | range | 40–100 | `%` | — |
+| `blur` | range | 0–60 | `px` | — |
+| `tab_colours` | bool | — | — | — |
+| `tab_fade_ms` | range | 0–600 | `ms` | `tab_colours` |
+
+A theme declares these with their required type and a default; it may also narrow a range's
+`min` and `max`. The default is clamped to those bounds. Other fields are ignored, including
+presentation text, `step` (fixed at 20 for `tab_fade_ms`, 1 for other standard ranges), unit and parent. A wrong type or
+bounds outside the standard range are import errors. Declaring `tab_fade_ms` also requires
+declaring its boolean parent, `tab_colours`. Custom options cannot redefine reserved ids.
+`opacity`, `tab_colours` and `tab_fade_ms` have registered standard behaviours. `blur` remains
+absent from the list until its behaviour is registered.
+The resolver exposes declared standard options in the order `opacity`, `blur`, `tab_colours`,
+each immediately followed by its child, then custom options in declared order.
+
+Opacity scales only these floating surface fill tokens: `panel`, `panel_header`, `toolbar`,
+`timeline`, `dialog_bg`, `dialog_body`, `dialog_footer`, `overlay` and `nav_tip`. Scaling is applied after matching
+overlays. All other tokens, including text, icons, borders, controls, viewport and document
+colours, retain their resolved values. At 100%, with the implicit 100% default, or without
+offered opacity, every token is exactly the original resolved value. The supported range is
+40–100%; the theme may narrow it. To keep normal text at 4.5:1 against a panel over black and
+white viewport extremes, each fill's actual alpha rises as necessary. This also protects
+against background overrides and busy models. A theme whose authored foreground and opaque
+fill already fail contrast receives full alpha; opacity never rewrites the theme's text colours.
+
+Imported themes can also declare `tabs`, using exact ribbon registry names. Only `panel`,
+`viewport_top` and `viewport_bottom` are accepted; an unknown tab or any other token is an
+import error. Tabs without an entry keep the base surfaces. Existing tab accent fills, inks
+and tints keep their own tokens. For example, save this original theme as a JSON file and import it:
+
+```json
+{
+  "format": "solidcraft-theme/1",
+  "name": "Garden tabs",
+  "base": "dark",
+  "options": [
+    {"id": "tab_colours", "type": "bool", "default": true},
+    {"id": "tab_fade_ms", "type": "range", "default": 240}
+  ],
+  "tabs": {
+    "SKETCH": {"panel": "#123028", "viewport_top": "#103128", "viewport_bottom": "#204a3c"},
+    "RENDER": {"panel": "#302039", "viewport_top": "#30203d", "viewport_bottom": "#493252"}
+  }
+}
+```
+
+The [imported light/dark fixtures](../../../../crates/ui-egui/tests/fixtures/theme-tabs.json)
+also provide Model surfaces. No built-in theme declares tab surfaces. With `tab_colours`
+off or absent, every tab keeps the base palette. With it on, `tab_fade_ms` blends panel and
+viewport surfaces together in Oklab with an ease-out cubic curve; zero switches instantly.
+A tab change during a fade starts from the colours currently displayed. Opacity readability
+floors also apply to tab panels and interpolated alpha. A viewport set to the opposite light/dark
+palette keeps that palette; a flat background preference takes precedence over tab gradients. Definitions and authored defaults
+roundtrip through theme export; saved option values are excluded.
+
+Render's untouched, unsaved preview also uses these animated surfaces, including viewport
+palette and flat-colour preferences. Explicit scene backplates, transparency, environments,
+gradient backdrops and saved setups keep their existing background instead. Saved setups do
+not record whether their background was explicitly chosen, so even a setup saved only for its
+camera conservatively retains its scene backplate. With tab surfaces absent/off, Render keeps
+its original flat scene background. Theme surfaces never change rendered images or exports.
+
+Gruvbox has two cards, **Gruvbox Dark** and **Gruvbox Light**. Each offers a
+**Contrast** choice: **Soft**, **Standard** (the default), or **Hard**. These are the
+same six palettes as the former separate cards, including their icon colours.
+Saved selections and settings profiles using the former `-soft` and `-hard` ids
+select the corresponding family and contrast. Selecting a family again restores its
+last contrast; Reset returns it to Standard.
+
+**Onyx** is an original dark stone-grey theme with quiet surface layers, fine etched edges
+and a restrained blue-grey accent. Its defaults pair **80% Opacity** (adjustable from 60–100%) with a broad **60 px Blur**:
+Opacity sets how much of the scene shows through; Blur sets how widely its detail softens.
+Its custom controls are **Accent** (Slate blue, Silver or Sage), **Contrast** (Soft or Defined),
+**Brightness** (60–120%, default 100%), then **Foreground colours** (Vibrant or Muted),
+with optional **Tab colours** and a Fade control in the standard controls above.
+Edges always use the fine Etched finish. Brightness smoothly adjusts stone surfaces,
+viewport backgrounds and grid tones while preserving text and semantic foreground colours.
+Vibrant is the default, giving the axes, icons and modelling guides stronger colour.
+Muted preserves the original quiet palette. Accent independently controls selection and highlights; foreground modes
+keep the stone-grey backgrounds and red/green/blue axis meanings.
+Tab colours gently tint panels and the viewport while preserving the selected accent.
+Accent changes selection and control accents; Foreground colours sets semantic glyphs,
+workspace colours and status colours while retaining their meaning. As with other themes, the existing blur availability and readability limits apply.
+
+Up to 32 overlays apply in file order, after the base palette and the theme's own value tables.
+Later matching entries win by key. Every overlay has one `when`: `{"opt":"id","eq":value}`
+for an exact, correctly typed comparison, or `gte`, `lte`, or both for inclusive range bounds.
+A choice comparison must name a declared choice. Unknown option ids, mixed comparisons and
+malformed values are refused with the overlay's one-based position. An overlay may override
+`colors`, `radii`, `borders` and `icon_palette`; all their existing key and value checks apply.
+Overlays only select literal tables: there are no scripts, expressions or interpolation.
+
+The optional integer `requires` defaults to 1; this app supports levels through 2. A larger level
+loads the authored base value tables, disables options and overlays, and exposes a
+`needs_newer` flag through the theme API for future UI. The theme-definition API can export
+options and overlays intact; the existing token snapshot export keeps its previous shape.
+The value resolver reports notices for unknown saved ids, wrong types, unknown choices,
+non-finite numbers and clamped values. Invalid saved values for declared options fall back to defaults;
+unknown saved ids are omitted because they have no definition or default.
+
+A custom percent range may declare `"effect":"surface_brightness"` with `requires: 2`.
+Its bounds must stay within 60–120%, include 100%, and use default 100 and step 1.
+This continuously scales neutral surface, viewport, grid and border RGB after overlays
+and tab tables, before opacity readability protection. Alpha, text, semantic colours
+and selection colours stay authored. At 100% the transform is exactly unchanged.
+Only one such effect is allowed per theme; other effects and non-range bindings are rejected.
+The custom option keeps its authored label and order, after the standard controls.
 
 #### Follow a theme file
 

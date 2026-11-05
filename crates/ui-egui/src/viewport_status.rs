@@ -59,11 +59,11 @@ pub(crate) fn section_setting(app: &SolveApp, origin: [f64; 3], normal: [f64; 3]
     Some(text)
 }
 
-fn identity(effect: &Effect) -> String {
+pub(crate) fn identity(effect: &Effect) -> String {
     format!("{:?}:{}", effect.id, effect.command)
 }
 
-fn direction(value: [f64; 3]) -> String {
+pub(crate) fn direction(value: [f64; 3]) -> String {
     for (axis, vector) in [("X", [1.0, 0.0, 0.0]), ("Y", [0.0, 1.0, 0.0]), ("Z", [0.0, 0.0, 1.0])] {
         if value.iter().zip(vector).all(|(a, b)| (*a - b).abs() < 1e-8) {
             return axis.into();
@@ -95,8 +95,8 @@ pub(crate) fn presentation(app: &SolveApp, effect: &Effect) -> Option<StatusItem
         kind: StatusKind::Mode,
         name: crate::toolbar::persistent_button_name(app, command),
         setting,
-        has_key: effect.has_key,
-        editable: effect.id == StatusId::Section,
+        has_key: if app.preferences.viewport_status_details { effect.has_details() } else { effect.has_key },
+        editable: if app.preferences.viewport_status_details { effect.has_details() } else { effect.id == StatusId::Section },
     })
 }
 
@@ -115,9 +115,10 @@ pub(crate) fn escape(app: &mut SolveApp, repeat: bool) -> bool {
     if repeat {
         return app.viewport_status.open_key.is_some() || has_effect(app);
     }
-    if let Some(open) = app.viewport_status.open_key.take()
-        && app.session.status_items().iter().any(|effect| eligible(app).contains(&effect.id) && effect.has_key && identity(effect) == open)
+    if let Some(open) = app.viewport_status.open_key.clone()
+        && app.session.status_items().iter().any(|effect| presentation(app, effect).is_some_and(|item| item.has_key && item.id == open))
     {
+        app.viewport_status.close_details();
         return true;
     }
     if let Some(effect) = app.session.newest_status_item(&eligible(app)) {
@@ -129,10 +130,49 @@ pub(crate) fn escape(app: &mut SolveApp, repeat: bool) -> bool {
 
 /// Reconcile before shortcut routing so a vanished native popup cannot own Escape invisibly.
 pub(crate) fn reconcile(app: &mut SolveApp, ctx: &egui::Context) {
+    app.viewport_status.reconcile_session(ctx, app.session.uid);
+    // A visible native field must retain focus through a completed input frame before
+    // consuming the request; hidden Area measurement is not a focus acknowledgement.
+    if ui_kit::details_field_owns_focus(ctx) || ui_kit::details_control_owns_focus(ctx) {
+        app.viewport_status.focus_field = None;
+    }
+    if app.viewport_status.live_details != app.preferences.viewport_status_details && app.viewport_status.open_key.is_some() {
+        ui_kit::dismiss_details_popups(ctx);
+        if ui_kit::details_field_owns_focus(ctx) || ui_kit::details_control_owns_focus(ctx) {
+            ctx.memory_mut(|memory| {
+                if let Some(id) = memory.focused() {
+                    memory.surrender_focus(id);
+                }
+            });
+        }
+        app.viewport_status.open_key = None;
+        app.viewport_status.focus_field = None;
+    }
+    app.viewport_status.live_details = app.preferences.viewport_status_details;
     let items: Vec<_> = app.session.status_items().iter().filter_map(|effect| presentation(app, effect)).collect();
+    if app.viewport_status.open_key.as_ref().is_some_and(|open| !items.iter().any(|item| item.has_key && &item.id == open)) {
+        ui_kit::dismiss_details_popups(ctx);
+        if ui_kit::details_field_owns_focus(ctx) || ui_kit::details_control_owns_focus(ctx) {
+            ctx.memory_mut(|memory| {
+                if let Some(id) = memory.focused() {
+                    memory.surrender_focus(id);
+                }
+            });
+        }
+        app.viewport_status.open_key = None;
+        app.viewport_status.focus_field = None;
+    }
     let members =
         if app.preferences.viewport_status_summary && items.len() >= 3 { items.into_iter().map(|item| item.id).collect() } else { Vec::new() };
     app.viewport_status.reconcile_summary(ctx, members);
+    // The popup is a separate foreground host: the badge's Background layer cannot
+    // shield it. Tools deliberately remain eligible for their existing row actions.
+    let higher_owner = app.prefs_window.open
+        || app.dialog.is_some()
+        || app.keymap.open
+        || app.ui.palette_open
+        || ctx.memory(|memory| memory.top_modal_layer().is_some());
+    app.viewport_status.suspend_summary(ctx, higher_owner);
 }
 
 pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, viewport: egui::Rect) {
@@ -142,7 +182,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, viewport: egui::Rect
         return;
     }
     let effects = app.session.status_items();
-    if !app.preferences.viewport_analysis_status {
+    if !app.preferences.viewport_analysis_status && !app.preferences.viewport_section_status {
         app.viewport_status.open_key = None;
     }
     let items: Vec<_> = effects.iter().filter_map(|effect| presentation(app, effect)).collect();
@@ -164,10 +204,35 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, viewport: egui::Rect
     if !free.is_finite() || !free.is_positive() {
         return;
     }
-    let legend = crate::viewport::analysis_legend_data(app);
-    let key_contents = |ui: &mut egui::Ui, _: &str| {
-        if let Some((title, along, rows)) = &legend {
-            ui_kit::analysis_key(ui, title, along.as_deref(), rows);
+    let modern = app.preferences.viewport_status_details;
+    let descriptions: Vec<_> = effects
+        .iter()
+        .filter_map(|effect| {
+            presentation(app, effect).map(|item| {
+                let details =
+                    if modern { crate::viewport_details::description(app, effect) } else { crate::viewport_details::legacy_description(app) };
+                (item.id, details)
+            })
+        })
+        .collect();
+    if let Some(field) = app.viewport_status.focus_field.as_deref()
+        && !descriptions.iter().any(|(owner, details)| {
+            Some(owner.as_str()) == app.viewport_status.open_key.as_deref()
+                && details.settings.iter().any(|setting| setting.id == field && setting.enabled)
+        })
+    {
+        app.viewport_status.focus_field = None;
+    }
+    let focus = app.viewport_status.focus_field.clone();
+    let session_uid = app.session.uid;
+    let mut edits = Vec::new();
+    let key_contents = |ui: &mut egui::Ui, id: &str| {
+        if let Some((_, description)) = descriptions.iter().find(|(owner, _)| owner == id) {
+            ui.push_id(session_uid, |ui| {
+                edits.extend(
+                    ui_kit::details(ui, id, description, free.height() * 0.6, focus.as_deref()).into_iter().map(|event| (id.to_owned(), event)),
+                );
+            });
         }
     };
     let newest = app.session.newest_status_item(&eligible(app)).map(|effect| identity(&effect));
@@ -177,6 +242,9 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, viewport: egui::Rect
         ui_kit::viewport_status_row(ctx, free, &items, &mut app.viewport_status, key_contents)
     };
     dispatch(app, actions);
+    for (owner, event) in edits {
+        crate::viewport_details::dispatch(app, ctx, &owner, event);
+    }
 }
 
 /// Resolve requests against current represented effects, never a menu-open snapshot.
@@ -197,7 +265,12 @@ pub(crate) fn dispatch(app: &mut SolveApp, actions: Vec<StatusAction>) {
                 }
             }
             StatusAction::Edit(id) => {
-                if effects.iter().any(|effect| effect.id == StatusId::Section && identity(effect) == id) {
+                if app.preferences.viewport_status_details {
+                    if let Some(effect) = effects.iter().find(|effect| identity(effect) == id) {
+                        app.viewport_status.focus_field = Some(crate::viewport_details::primary(effect).into());
+                        app.viewport_status.open_key = Some(id);
+                    }
+                } else if effects.iter().any(|effect| effect.id == StatusId::Section && identity(effect) == id) {
                     crate::dialogs::edit_section(app);
                 }
             }

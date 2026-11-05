@@ -1,15 +1,20 @@
 //! Section Analysis: a view-only cut through the model by a plane (what is on the plane's
 //! positive side is hidden). It changes no geometry and is not an undo step.
 
-use serde_json::{Value, json};
-use solidcraft_geom::{Plane, Vec3};
+use serde_json::Value;
+use solidcore_record::{Plane, Vec3};
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, expr, vec3};
+use crate::schema::{TypedContract, output_schema_for, section as contract};
 use crate::{Result, Session};
+const SECTION: TypedContract<contract::SectionParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] =
-    &[CommandSpec::new("inspect.section", "Section Analysis", section).at("SOLID", "INSPECT").icon("section").noundo().params(
+    &[CommandSpec::new("inspect.section", "Section Analysis", crate::checked!("inspect.section", section))
+    .contract(&SECTION).output(output_schema_for::<contract::SectionResult>)
+    .at("SOLID", "INSPECT").icon("section").noundo().params(
         "plane: XY|XZ|YZ | construction plane name or id | {origin, normal}; offset?: expr along the plane's normal (XY: +Z, XZ: +Y, YZ: +X); \
          at?: expr, the cut's world coordinate on the named plane's axis (XY: Z, XZ: Y, YZ: X), instead of offset; \
          flip?: bool; hatch?: bool (hatch the cut faces, in each body's colour; default true); or clear: true. Returns the cut's origin and normal, and for a named plane its axis and at",
@@ -20,8 +25,8 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     if bool_(p, "clear").unwrap_or(false) {
         s.section = None;
         s.status_slot(crate::status_items::StatusId::Section, false);
-        s.revision += 1;
-        return Ok(json!({"section": null}));
+        s.refresh_display();
+        return serde_json::to_value(contract::SectionResult { section: None, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()));
     }
     // A named plane's world axis: which component of a point lies along its normal.
     let (origin, normal, axis) = match p.get("plane") {
@@ -78,13 +83,15 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     s.section_hatch = bool_(p, "hatch").unwrap_or(true);
     s.status_slot(crate::status_items::StatusId::Section, true);
     s.status_activated(crate::status_items::StatusId::Section);
-    s.revision += 1;
-    let mut section = json!({"origin": origin, "normal": normal, "hatch": s.section_hatch});
-    if let Some(i) = axis {
-        section["axis"] = json!(["X", "Y", "Z"].get(i).copied().unwrap_or("?"));
-        section["at"] = json!(axis_component(origin, i));
-    }
-    Ok(json!({"section": section}))
+    s.refresh_display();
+    let section = contract::Section {
+        origin: [origin.x, origin.y, origin.z],
+        normal: [normal.x, normal.y, normal.z],
+        hatch: s.section_hatch,
+        axis: axis.and_then(|i| ["X", "Y", "Z"].get(i).map(|v| (*v).to_owned())),
+        at: axis.map(|i| axis_component(origin, i)),
+    };
+    serde_json::to_value(contract::SectionResult { section: Some(section), param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn axis_component(v: Vec3, i: usize) -> f64 {

@@ -259,6 +259,7 @@ pub fn write_design_container_with_thumbnail(
     geometry: Option<&solidcraft_doc::SavedModel>,
     thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
     write_container(doc, compression, preview, geometry, thumbnail, max_design())
 }
 
@@ -333,13 +334,25 @@ fn write_container(
     if !clouds.is_empty() {
         replacements.insert("point_clouds".into(), Value::Array(clouds));
     }
-    if !doc.render.resources.is_empty() {
-        let mut resources = Map::new();
-        for (id, resource) in doc.render.resources.iter() {
-            let blob = writer.blob(resource.bytes(), "hdr", false)?;
-            resources.insert(id.to_string(), json!({"kind":"radiance_hdr","data":"","hdr_blob":blob}));
+    if !doc.render.resources.is_empty() || !doc.render.texture_resources.is_empty() {
+        let mut changes = Map::new();
+        if !doc.render.resources.is_empty() {
+            let mut resources = Map::new();
+            for (id, resource) in doc.render.resources.iter() {
+                let blob = writer.blob(resource.bytes(), "hdr", false)?;
+                resources.insert(id.to_string(), json!({"kind":"radiance_hdr","data":"","hdr_blob":blob}));
+            }
+            changes.insert("resources".into(), Value::Object(resources));
         }
-        let render = replace(doc.render.as_ref(), fields([("resources", Value::Object(resources))])).map_err(invalid)?;
+        if !doc.render.texture_resources.is_empty() {
+            let mut resources = Map::new();
+            for (id, resource) in doc.render.texture_resources.iter() {
+                let blob = writer.blob(resource.bytes(), "texture", false)?;
+                resources.insert(id.to_string(), json!({"kind":"opaque_texture","data":"","texture_blob":blob,"provenance":resource.provenance()}));
+            }
+            changes.insert("texture_resources".into(), Value::Object(resources));
+        }
+        let render = replace(doc.render.as_ref(), changes).map_err(invalid)?;
         replacements.insert("render".into(), render);
     }
     let metadata = replace(doc, replacements).map_err(invalid)?;
@@ -734,6 +747,12 @@ impl<R: Read + Seek> DesignContainerReader<R> {
     pub fn read_document(mut self) -> Result<Document> {
         read_document(&mut self.reader)
     }
+
+    /// [`Self::geometry`] when [`Self::read_document`] follows: it validates the document.
+    fn geometry_before_document(&mut self) -> Option<solidcraft_doc::SavedModel> {
+        let document = self.reader.document(16 << 20).ok()?;
+        native_cache::read_geometry_before_document(&mut self.reader, &document).ok()
+    }
 }
 
 pub(super) fn read(bytes: &[u8]) -> Result<Document> {
@@ -746,11 +765,12 @@ pub(super) fn read(bytes: &[u8]) -> Result<Document> {
 /// keeps one seekable file handle instead of buffering the complete archive. JSON continues
 /// through the normal migrations.
 pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
+    let _span = solidcraft_profile::span("io", "read_design_file");
     let mut source = open_regular_file(path)?;
     if is_container_source(&mut source)? {
         let mut reader = DesignContainerReader::new(source)?;
         // A design with its model opens without a picture first: the model is the session.
-        let model = reader.geometry();
+        let model = reader.geometry_before_document();
         if let Some(notify) = notify
             && model.is_none()
             && let Ok(preview) = read_preview(&mut reader.reader)
@@ -813,12 +833,14 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     }
     let bytes = reader.document(max_design())?;
     check_hdr_manifest(&bytes)?;
+    check_texture_manifest(&bytes)?;
     let mut metadata: Value = serde_json::from_slice(&bytes).map_err(invalid)?;
     // HDR's typed JSON representation is deliberately strict: no empty placeholders or
     // container-only blob fields may reach the document deserializer.
     let hydrated_hdr = hydrate_hdr_resources(&mut metadata, reader)?;
+    let hydrated_textures = hydrate_texture_resources(&mut metadata, reader)?;
     let hydrated_text;
-    let text = if hydrated_hdr {
+    let text = if hydrated_hdr || hydrated_textures {
         hydrated_text = serde_json::to_string(&metadata).map_err(invalid)?;
         &hydrated_text
     } else {
@@ -857,7 +879,7 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         if bytes.len() > solidcraft_doc::canvas::MAX_CANVAS_BYTES {
             return Err(invalid("canvas too large"));
         }
-        canvas.data = solidcraft_doc::canvas::base64_encode(bytes);
+        canvas.data = solidcraft_doc::canvas::base64_encode(bytes).into();
     }
     for (index, cloud) in doc.point_clouds.iter_mut().enumerate() {
         if !cloud.points.is_empty() || !cloud.colors.is_empty() {
@@ -984,10 +1006,139 @@ fn hydrate_hdr_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut Pack
     Ok(!resources.is_empty())
 }
 
+/// Texture manifests are checked before Value allocation, including duplicate keys,
+/// bounded provenance and strict empty-payload/blob markers.
+fn check_texture_manifest(bytes: &[u8]) -> Result<()> {
+    use serde::{
+        Deserialize,
+        de::{MapAccess, Visitor},
+    };
+    use solidcraft_doc::{
+        render_resources::HdrId,
+        render_texture_resources::{MAX_TEXTURE_RESOURCES, TextureProvenance},
+    };
+    #[derive(Default, Deserialize)]
+    struct Render {
+        #[serde(default, deserialize_with = "resources")]
+        texture_resources: (),
+    }
+    #[derive(Deserialize)]
+    struct Metadata {
+        #[serde(default)]
+        render: Render,
+    }
+    fn marker<'de, D: serde::Deserializer<'de>>(d: D, field: &'static str) -> std::result::Result<(), D::Error> {
+        let raw = <&serde_json::value::RawValue>::deserialize(d)?;
+        let maximum = match field {
+            "kind" => 14,
+            "data" => 0,
+            _ => 78,
+        };
+        if raw.get().len() > maximum * 6 + 2 {
+            return Err(serde::de::Error::custom("texture metadata marker exceeds its budget"));
+        }
+        let value: String = serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?;
+        let valid = match field {
+            "kind" => value == "opaque_texture",
+            "data" => value.is_empty(),
+            _ => value
+                .strip_prefix("blobs/")
+                .and_then(|v| v.strip_suffix(".texture"))
+                .is_some_and(|v| v.len() == 64 && v.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))),
+        };
+        if valid { Ok(()) } else { Err(serde::de::Error::custom("invalid texture metadata marker")) }
+    }
+    fn kind<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        marker(d, "kind")
+    }
+    fn data<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        marker(d, "data")
+    }
+    fn blob<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        marker(d, "blob")
+    }
+    fn provenance<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        let raw = <&serde_json::value::RawValue>::deserialize(d)?;
+        if raw.get().len() > 48 * 1024 {
+            return Err(serde::de::Error::custom("texture provenance exceeds its budget"));
+        }
+        let value: TextureProvenance = serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?;
+        value.validate().map_err(serde::de::Error::custom)
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Entry {
+        #[serde(deserialize_with = "kind")]
+        kind: (),
+        #[serde(deserialize_with = "data")]
+        data: (),
+        #[serde(deserialize_with = "blob")]
+        texture_blob: (),
+        #[serde(deserialize_with = "provenance")]
+        provenance: (),
+    }
+    fn resources<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        struct Resources;
+        impl<'de> Visitor<'de> for Resources {
+            type Value = ();
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("unique bounded texture blob references")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<(), A::Error> {
+                let mut keys = BTreeSet::new();
+                while let Some(id) = map.next_key::<HdrId>()? {
+                    if keys.len() >= MAX_TEXTURE_RESOURCES || !keys.insert(id) {
+                        return Err(serde::de::Error::custom("too many or duplicate embedded texture resources"));
+                    }
+                    let Entry { kind: (), data: (), texture_blob: (), provenance: () } = map.next_value()?;
+                }
+                Ok(())
+            }
+        }
+        d.deserialize_map(Resources)
+    }
+    let Metadata { render: Render { texture_resources: () } } = serde_json::from_slice(bytes).map_err(invalid)?;
+    Ok(())
+}
+fn hydrate_texture_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut PackageReader<R>) -> Result<bool> {
+    use solidcraft_doc::{
+        render_resources::{HdrId, encode_hdr_base64},
+        render_texture_resources::{MAX_TEXTURE_BYTES, MAX_TEXTURE_RESOURCE_BYTES, MAX_TEXTURE_RESOURCES},
+    };
+    let Some(resources) = metadata.get_mut("render").and_then(|render| render.get_mut("texture_resources")) else {
+        return Ok(false);
+    };
+    let resources = resources.as_object_mut().ok_or_else(|| invalid("texture resources must be an object"))?;
+    if resources.len() > MAX_TEXTURE_RESOURCES {
+        return Err(invalid("at most 32 embedded texture resources"));
+    }
+    let mut total = 0usize;
+    for (key, value) in resources.iter_mut() {
+        let id: HdrId = serde_json::from_value(Value::String(key.clone())).map_err(invalid)?;
+        if !value.as_object().is_some_and(|fields| fields.len() == 4)
+            || value.get("kind").and_then(Value::as_str) != Some("opaque_texture")
+            || value.get("data").and_then(Value::as_str) != Some("")
+        {
+            return Err(invalid("texture metadata requires opaque_texture, empty data, provenance and one blob"));
+        }
+        let remaining = MAX_TEXTURE_RESOURCE_BYTES.saturating_sub(total).min(MAX_TEXTURE_BYTES);
+        let bytes = reader.limited_blob(value, "texture_blob", "texture", remaining)?;
+        if HdrId::of(bytes) != id {
+            return Err(invalid("texture resource key does not match its blob hash"));
+        }
+        total = total.checked_add(bytes.len()).ok_or_else(|| invalid("texture resource size overflow"))?;
+        let encoded = encode_hdr_base64(bytes).map_err(invalid)?;
+        let fields = value.as_object_mut().ok_or_else(|| invalid("invalid texture metadata"))?;
+        fields.remove("texture_blob");
+        fields.insert("data".into(), Value::String(encoded));
+    }
+    Ok(!resources.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
 
     struct CountingReader {
         source: Cursor<Vec<u8>>,
@@ -1079,8 +1230,8 @@ mod tests {
         assert!(result.is_err_and(|e| e.to_string().contains("not a regular file")));
     }
 
-    /// A saved model of one state holding `bodies` (no document evaluated it: enough for the
-    /// container, which stores whatever model it is given).
+    /// A saved model of one state holding `bodies`, none made by rounds (no document evaluated
+    /// it: enough for the container, which stores whatever model it is given).
     fn saved_model(bodies: Vec<solidcraft_kernel::Body>) -> solidcraft_doc::SavedModel {
         let records: Vec<Value> = (0..bodies.len())
             .map(|i| json!({"name": format!("Body{i}"), "feature": 1, "component": 0, "key": "0000000000000001", "names": 0, "body": i}))
@@ -1092,14 +1243,15 @@ mod tests {
         solidcraft_doc::SavedModel {
             records: json!({
                 "features": [{"id": 1, "fingerprint": "0000000000000000", "ms": 0.0, "skipped": false, "state": 0}],
-                "states": [state], "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [], "sketch_key_sets": [{"set": [], "drop": []}],
+                "states": [state], "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [],
+                "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
             }),
             bodies,
         }
     }
 
     fn native_geometry() -> solidcraft_doc::SavedModel {
-        saved_model(vec![solidcraft_kernel::box_solid(solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::new(10., 20., 30.)).unwrap()])
+        saved_model(vec![solidcraft_kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(10., 20., 30.)).unwrap()])
     }
 
     #[test]
@@ -1164,7 +1316,7 @@ mod tests {
 
     #[test]
     fn model_cache_stores_repeated_parts_once_and_keeps_placed_copies() {
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         let part = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
         let share = solidcraft_kernel::DisplayShare::new(part.clone());
         let mut bodies = vec![part.clone(), part.clone()];
@@ -1190,12 +1342,31 @@ mod tests {
         }
     }
 
+    /// The model cache's manifest, written straight from the model's records (not copied into a
+    /// JSON tree first), is byte for byte what writing it as a tree wrote: the same keys in the
+    /// same (sorted) order, the same numbers.
+    #[test]
+    fn the_model_cache_manifest_is_what_a_json_tree_writes() {
+        use solidcore_record::Vec3;
+        let part = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+        let share = solidcraft_kernel::DisplayShare::new(part.clone());
+        let t = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [50.5, -0.25, 1e-7, 1.]];
+        let moved = solidcraft_kernel::transform(&part, Vec3::new(50.5, -0.25, 1e-7), Vec3::ZERO, Vec3::Z, 0.).unwrap();
+        let model = saved_model(vec![part.clone(), moved.with_display_share(&share, t)]);
+        let bytes = write_design_container_with_cache(&document(), DesignCompression::Fast, None, Some(&model)).unwrap();
+        let manifest = &parts(&bytes)["cache/model.json"];
+        let tree: Value = serde_json::from_slice(manifest).unwrap();
+        assert_eq!(serde_json::to_vec(&tree).unwrap(), *manifest);
+        assert_eq!(tree["model"], model.records);
+        assert_eq!(tree.as_object().unwrap().len(), 12, "{:?}", tree.as_object().unwrap().keys().collect::<Vec<_>>());
+    }
+
     /// #9170: a mesh body (an imported STL) is kept in the model cache with the rest of the
     /// model, as its own triangles, colour and paint. One mesh body left the whole cache out, so
     /// opening the design evaluated every feature again.
     #[test]
     fn model_cache_keeps_mesh_bodies_with_the_rest_of_the_model() {
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         let corners = [Vec3::ZERO, Vec3::new(10., 0., 0.), Vec3::new(0., 10., 0.), Vec3::new(0., 0., 10.)];
         let tetra = solidcraft_kernel::mesh_body(&corners, &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]])
             .unwrap()
@@ -1261,12 +1432,51 @@ mod tests {
         assert!(read_design_geometry(&bytes).is_some());
     }
 
+    /// Opening a design with its model validates its document once, where the document is read
+    /// (`read_document`); reading the model first validated it a second time, a whole parse and
+    /// validation of a large design. A broken document still fails the open, as it did.
+    #[test]
+    fn opening_with_a_model_cache_validates_the_document_once() {
+        let validated = || native_cache::VALIDATED.with(std::cell::Cell::get);
+        let doc = document();
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&native_geometry())).unwrap();
+        let before = validated();
+        let alone = DesignContainerReader::new(Cursor::new(&bytes)).unwrap().geometry().unwrap();
+        assert_eq!(validated(), before + 1, "the model alone checks its document");
+        let mut reader = DesignContainerReader::new(Cursor::new(&bytes)).unwrap();
+        let model = reader.geometry_before_document().unwrap();
+        assert_eq!(validated(), before + 1, "opening leaves it to read_document");
+        assert_eq!(reader.read_document().unwrap().to_json(), doc.to_json());
+        assert_eq!(model.records, alone.records);
+        assert_eq!(model.bodies.len(), alone.bodies.len());
+
+        // A broken document whose cache is signed for it: the open fails with read_document's
+        // error, as when the model was read with the document validated (and so missed).
+        let entries = parts(&bytes);
+        let mut manifest: Value = serde_json::from_slice(&entries["cache/model.json"]).unwrap();
+        let mut metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
+        metadata["features"] = json!(5);
+        let truncated = entries["document.json"][..entries["document.json"].len() / 2].to_vec();
+        for broken in [serde_json::to_vec(&metadata).unwrap(), truncated] {
+            let mut entries = entries.clone();
+            manifest["document"] = json!(digest(&broken));
+            entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
+            entries.insert("document.json".into(), broken);
+            let bytes = package(&entries);
+            assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().geometry().is_none());
+            let expected = read(&bytes).unwrap_err().to_string();
+            let mut reader = DesignContainerReader::new(Cursor::new(&bytes)).unwrap();
+            let _ = reader.geometry_before_document();
+            assert_eq!(reader.read_document().unwrap_err().to_string(), expected);
+        }
+    }
+
     /// A saved model of four features (5, 50, 20 and 1 ms) whose states each hold the eight
     /// bodies all of them share and eight of their own (a body each feature replaces). No
     /// document evaluated it.
     fn timeline_model() -> solidcraft_doc::SavedModel {
         let bodies: Vec<_> = (0..40)
-            .map(|i| solidcraft_kernel::box_solid(solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::new(10. + f64::from(i), 20., 30.)).unwrap())
+            .map(|i| solidcraft_kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(10. + f64::from(i), 20., 30.)).unwrap())
             .collect();
         let records: Vec<Value> = (0..40)
             .map(|i| json!({"name": format!("Body{i}"), "feature": 1 + i / 8, "component": 0, "key": "0000000000000001", "names": 0, "body": i}))
@@ -1287,7 +1497,10 @@ mod tests {
             .map(|(i, ms)| json!({"id": i + 1, "fingerprint": "0000000000000000", "ms": ms, "skipped": false, "state": i}))
             .collect();
         solidcraft_doc::SavedModel {
-            records: json!({"features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [], "sketch_key_sets": [{"set": [], "drop": []}]}),
+            records: json!({
+                "features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [],
+                "sheets": [], "validation": "each_feature", "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
+            }),
             bodies,
         }
     }
@@ -1313,6 +1526,7 @@ mod tests {
         let (states, kept, all, within) = thinned(40);
         assert_eq!((states, kept.len(), within), (vec![true; 4], 40, true));
         assert_eq!(all.records, model.records);
+        assert_eq!(thinned(16).2.records["validation"], "each_feature", "the check mode it was evaluated under");
         // The final state and the slowest other (50 ms): the shared bodies count once, else
         // these two states would need 32 bodies' room.
         for bodies in [24, 31] {
@@ -1403,7 +1617,7 @@ mod tests {
         let doc = document();
         let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&native_geometry())).unwrap();
         let original = parts(&bytes);
-        for key in ["format", "producer", "evaluation", "document", "payload"] {
+        for key in ["format", "producer", "evaluation", "kernel", "document", "payload"] {
             let mut entries = original.clone();
             let mut manifest: Value = serde_json::from_slice(&entries["cache/model.json"]).unwrap();
             manifest[key] = json!("unsupported-or-stale");
@@ -1475,6 +1689,17 @@ mod tests {
         let mut entries = original.clone();
         let mut manifest = written(&entries);
         manifest.as_object_mut().unwrap().remove("evaluation");
+        entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
+        assert!(read_design_geometry(&package(&entries)).is_none());
+        // The kernel that computed it is recorded, and a model the C++ kernel computed (an earlier
+        // build's) is evaluated again (a cache without one is a miss too).
+        assert_eq!(written(&original)["kernel"], json!(native_cache::KERNEL));
+        let bytes = with(&[("kernel", "smlib")]);
+        assert!(read_design_geometry(&bytes).is_none(), "the C++ kernel's cache");
+        assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
+        let mut entries = original.clone();
+        let mut manifest = written(&entries);
+        manifest.as_object_mut().unwrap().remove("kernel");
         entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
         assert!(read_design_geometry(&package(&entries)).is_none());
     }
@@ -1572,7 +1797,7 @@ mod tests {
             id,
             name: "Reference".into(),
             format: "png".into(),
-            data: solidcraft_doc::canvas::base64_encode(b"original image bytes"),
+            data: solidcraft_doc::canvas::base64_encode(b"original image bytes").into(),
             pixels: [1, 1],
             plane: solidcraft_doc::PlaneRef::Origin { name: "XY".into() },
             center: Vec2::new(0.0, 0.0),
@@ -1831,7 +2056,7 @@ mod tests {
     /// A valid STEP cube, padded with a comment to `length` bytes. `noisy` padding barely
     /// compresses; otherwise it is repetitive like the text of a real large export.
     fn padded_step(length: usize, noisy: bool) -> String {
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         let cube = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
         let step = solidcraft_kernel::step_export(&[&cube], "padded").unwrap();
         let (head, tail) = step.split_at(step.find("DATA;").unwrap() + 5);
@@ -2182,6 +2407,93 @@ mod tests {
     }
 
     #[test]
+    fn embedded_texture_container_keeps_exact_blobs_provenance_and_offline_bindings() {
+        use solidcraft_doc::{
+            render_settings::{GpuJob, RenderJob, RenderSetup},
+            render_surface::{EmbeddedSurfaceKind, EmbeddedSurfaceSource, RenderBodyTarget, SavedSurface, SurfaceSource},
+            render_texture_resources::{TextureProvenance, TextureResource},
+        };
+        let source = include_bytes!("../../../assets/render/starter/materials/exports/SURF-027/base_color.png").to_vec();
+        let resource = TextureResource::new(
+            source.clone(),
+            TextureProvenance {
+                author: "Original SolidCraft test".into(),
+                source: "original bundled diagnostic".into(),
+                license: "MIT OR Apache-2.0".into(),
+            },
+        )
+        .unwrap();
+        let id = resource.id();
+        let mut doc = document();
+        let render = Arc::make_mut(&mut doc.render);
+        render.texture_resources.insert(resource).unwrap();
+        let mut setup = RenderSetup {
+            job: Some(RenderJob::GpuPath { transparent_background: false, options: Box::new(GpuJob::default()) }),
+            ..Default::default()
+        };
+        setup
+            .surfaces
+            .set(
+                SavedSurface {
+                    target: RenderBodyTarget { definition: "Wood".into(), feature: 7, component: 0, occurrence_path: vec![] },
+                    source: SurfaceSource::Embedded(EmbeddedSurfaceSource {
+                        kind: EmbeddedSurfaceKind::Embedded,
+                        base_color: Some(id),
+                        normal_open_gl: None,
+                        roughness: Some(id),
+                        metallic: None,
+                        flip_v: true,
+                    }),
+                    local_frame: serde_json::from_value(serde_json::json!({"origin":[0.,0.,0.],"u":[240.,0.,0.],"v":[0.,480.,0.]})).unwrap(),
+                    normal_strength: 0.75,
+                },
+                false,
+            )
+            .unwrap();
+        render.setups.insert("Wood".into(), setup);
+        let bytes = write_design_container(&doc).unwrap();
+        assert_eq!(crate::read_design(&bytes).unwrap(), doc);
+        assert_eq!(crate::read_design(&crate::write_design(&doc)).unwrap(), doc);
+        let original = parts(&bytes);
+        let blob = format!("blobs/{id}.texture");
+        assert_eq!(original.keys().filter(|name| name.ends_with(".texture")).count(), 1);
+        assert_eq!(original[&blob], source);
+        let metadata: Value = serde_json::from_slice(&original["document.json"]).unwrap();
+        let entry = &metadata["render"]["texture_resources"][id.to_string()];
+        assert_eq!(entry["data"], "");
+        assert_eq!(entry["texture_blob"], blob);
+        assert_eq!(entry["provenance"]["author"], "Original SolidCraft test");
+        assert!(Document::from_json(&metadata.to_string()).is_err());
+        let mut missing = original.clone();
+        missing.remove(&blob);
+        assert!(crate::read_design(&package(&missing)).unwrap_err().to_string().contains("required part"));
+        let mut corrupt = original.clone();
+        corrupt.get_mut(&blob).unwrap()[0] ^= 1;
+        assert!(crate::read_design(&package(&corrupt)).unwrap_err().to_string().contains("hash mismatch"));
+        for (field, value) in
+            [("kind", json!("png")), ("data", json!("AAAA")), ("path", json!("wood.png")), ("texture_blob", json!(format!("blobs/{id}.hdr")))]
+        {
+            let mut entries = original.clone();
+            let mut changed = metadata.clone();
+            changed["render"]["texture_resources"][id.to_string()][field] = value;
+            entries.insert("document.json".into(), serde_json::to_vec(&changed).unwrap());
+            assert!(crate::read_design(&package(&entries)).is_err(), "{field}");
+        }
+        let duplicate = format!("{{\"render\":{{\"texture_resources\":{{\"{id}\":{entry},\"{id}\":{entry}}}}}}}");
+        assert!(check_texture_manifest(duplicate.as_bytes()).unwrap_err().to_string().contains("duplicate"));
+    }
+
+    #[test]
+    fn texture_manifest_refuses_escaped_inline_payload_before_value_materialization() {
+        let id = "0".repeat(64);
+        let escaped = "\\u0041".repeat(4096);
+        let wire = format!(
+            "{{\"render\":{{\"texture_resources\":{{\"{id}\":{{\"kind\":\"opaque_texture\",\"data\":\"{escaped}\",\"texture_blob\":\"blobs/{id}.texture\",\"provenance\":{{}}}}}}}}}}"
+        );
+        assert!(check_texture_manifest(wire.as_bytes()).unwrap_err().to_string().contains("marker exceeds its budget"));
+    }
+
+    #[test]
     fn embedded_hdr_container_refuses_oversized_part_before_reading_payload() {
         use solidcraft_doc::render_resources::{HdrId, MAX_HDR_BYTES};
         let source = vec![0u8; MAX_HDR_BYTES + 1];
@@ -2230,7 +2542,7 @@ mod tests {
     #[test]
     #[ignore = "manual IO performance measurement"]
     fn benchmark_step_storage() {
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         let bodies: Vec<_> = (0..512)
             .map(|i| {
                 let corner = Vec3::new((i % 32) as f64 * 12.0, (i / 32) as f64 * 12.0, 0.0);

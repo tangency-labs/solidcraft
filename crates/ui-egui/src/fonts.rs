@@ -387,7 +387,8 @@ impl CjkFontLoader {
         self.status
     }
 
-    /// Called every frame with the live language. `ready` is true when the shell already has the
+    /// Called every frame with the live language (a `system` preference resolves to its catalog
+    /// via [`crate::i18n::effective_language`]). `ready` is true when the shell already has the
     /// on-demand face that language needs. Returns true when a fetch should start now. After a
     /// failed load a CJK language falls back to English for this session; the saved preference is
     /// kept (see [`Self::persisted_language`]). Switching to another CJK language that still needs
@@ -400,7 +401,7 @@ impl CjkFontLoader {
                 self.status = CjkFontStatus::Unloaded;
             }
         }
-        if !needs_cjk_font(language) {
+        if !needs_cjk_font(crate::i18n::effective_language(language)) {
             return false;
         }
         if ready {
@@ -436,13 +437,14 @@ impl CjkFontLoader {
         self.status == CjkFontStatus::Unloaded
     }
 
-    /// Record the outcome of the fetch and install.
+    /// Record the outcome of the fetch and install. A `system` preference resolves to its
+    /// catalog first ([`Self::tick`]).
     pub fn finished(&mut self, installed: bool, language: &mut String) {
         if installed {
             self.status = CjkFontStatus::Installed;
         } else {
             self.status = CjkFontStatus::Failed;
-            if needs_cjk_font(language) {
+            if needs_cjk_font(crate::i18n::effective_language(language)) {
                 self.fall_back(language);
             }
         }
@@ -1241,8 +1243,10 @@ mod tests {
     }
 
     #[test]
-    fn default_ui_language_is_english() {
-        assert_eq!(crate::prefs::Prefs::default().language, "en");
+    fn default_ui_language_follows_the_system() {
+        // A first start follows the system (#10138); English, the fallback it lands on when
+        // nothing matches, needs no CJK face.
+        assert_eq!(crate::prefs::Prefs::default().language, crate::i18n::SYSTEM);
         assert!(!needs_cjk_font("en"));
     }
 

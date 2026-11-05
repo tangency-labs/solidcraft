@@ -146,6 +146,19 @@ pub const KNOWN: &[Known] = &[
         retired: false,
         reports_version: true,
     },
+    Known {
+        id: "vibe",
+        name: "Mistral Vibe",
+        programs: &["vibe-acp"],
+        args: &[],
+        install: "uv tool install mistral-vibe",
+        // Vibe may keep its sign-in in the OS keyring. Let it report whether it needs auth.
+        credentials: None,
+        config_dir_var: None,
+        key_vars: &["MISTRAL_API_KEY"],
+        retired: false,
+        reports_version: true,
+    },
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -187,6 +200,11 @@ pub struct Found {
     pub argv: Vec<String>,
     pub version: Option<String>,
     pub login: Login,
+    /// Why its program doesn't start (#9034): asked for `--version`, it failed without printing
+    /// one, as the `opencode.exe` of an npm install whose setup script didn't run does on Windows.
+    pub problem: Option<String>,
+    /// Its one-line install hint, to reinstall it with.
+    pub install: &'static str,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -270,7 +288,9 @@ pub fn runnable_sibling(program: &Path) -> Option<PathBuf> {
 
 /// Start probes and sessions with the same PATH used for discovery. Desktop launchers often
 /// omit Node's install folder even when we found an adapter with a `#!/usr/bin/env node` shebang.
-/// Only the child's environment changes; inherited absolute PATH entries keep precedence.
+/// Only the child's environment changes. An explicitly selected Node also takes precedence for
+/// its descendants; otherwise inherited absolute PATH entries keep precedence. No probes here:
+/// starting a session calls this on the UI thread.
 pub(super) fn command_for(program: &Path) -> Command {
     // Older saved Windows commands may name npm's bare Unix script rather than its .cmd shim.
     let shim = if cfg!(windows) { runnable_sibling(program) } else { None };
@@ -282,38 +302,141 @@ pub(super) fn command_for(program: &Path) -> Command {
     } else {
         Command::new(program)
     };
-    if let Ok(path) = std::env::join_paths(search_dirs()) {
+    let mut dirs = search_dirs();
+    if program.is_absolute()
+        && program.file_name().is_some_and(|n| n == "node" || n == "node.exe")
+        && let Some(parent) = program.parent()
+    {
+        dirs.retain(|d| d != parent);
+        dirs.insert(0, parent.to_path_buf());
+    }
+    if let Ok(path) = std::env::join_paths(dirs) {
         cmd.env("PATH", path);
     }
     cmd
 }
 
-/// `program --version`'s first line, or `None` after `limit` (the probe is then stopped).
-fn version(program: &Path, limit: Duration) -> Option<String> {
-    let mut cmd = command_for(program);
+/// What `program --version` showed.
+#[derive(Debug, Default, PartialEq)]
+struct Probe {
+    /// Its version number, from the first line it printed.
+    version: Option<String>,
+    /// Why it can't start: the system refused to start it, or it failed and printed nothing but
+    /// an error. A probe that runs out of time says nothing either way (a slow machine).
+    problem: Option<String>,
+    /// A failed JSON import-attributes parse on a Node version that cannot support it.
+    old_node: Option<String>,
+}
+
+/// How long an agent is given to answer `--version`.
+const PROBE_LIMIT: Duration = Duration::from_secs(3);
+
+/// The longest reason kept from a failed probe.
+const PROBLEM_CHARS: usize = 300;
+
+/// Ask `program --version`; it is stopped after `limit`.
+fn probe(program: &Path, limit: Duration) -> Probe {
+    probe_command(program, command_for(program), limit)
+}
+
+fn probe_command(program: &Path, mut cmd: Command, limit: Duration) -> Probe {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         // CREATE_NO_WINDOW: probing a console agent doesn't flash a terminal window.
         cmd.creation_flags(0x0800_0000);
     }
-    let mut child = cmd.arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let mut child = match cmd.arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+        Ok(child) => child,
+        // Windows: "not a valid Win32 application" (193), "not compatible with the version of
+        // Windows you're running" (216); elsewhere: not allowed to run it, an unknown format.
+        // Windows leaves the program's place in its message as `%1`.
+        Err(e) => return Probe { problem: Some(cut(&e.to_string().replace("%1", &program.display().to_string()))), ..Probe::default() },
+    };
     let start = Instant::now();
-    loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(status)) => break status,
             Ok(None) if start.elapsed() < limit => std::thread::sleep(Duration::from_millis(20)),
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return None;
+                return Probe::default();
             }
         }
+    };
+    let out = read_capped(child.stdout.take());
+    if let Some(line) = out.lines().map(str::trim).find(|l| !l.is_empty()) {
+        return Probe { version: Some(version_of(line)), ..Probe::default() };
     }
-    let mut out = String::new();
-    std::io::Read::read_to_string(&mut child.stdout.take()?, &mut out).ok()?;
-    let line = out.lines().map(str::trim).find(|l| !l.is_empty())?;
-    Some(version_of(line))
+    if status.success() {
+        return Probe::default();
+    }
+    // Through a `.cmd` shim, Windows' own refusal arrives on stderr with a failing exit code.
+    let err = read_capped(child.stderr.take());
+    let reason = err.lines().map(str::trim).find(|l| !l.is_empty()).map(str::to_string).unwrap_or_else(|| status.to_string());
+    let old_node = err
+        .contains("SyntaxError: Unexpected token 'with'")
+        .then(|| {
+            err.lines().find_map(|line| {
+                let version = line.trim().strip_prefix("Node.js ")?;
+                (node_import_attributes(version) == Some(false)).then(|| version.to_string())
+            })
+        })
+        .flatten();
+    Probe { version: None, problem: Some(cut(&reason)), old_node }
+}
+
+/// Node added import attributes in 18.20, 20.10 and 21.0. Reject unrecognised versions.
+fn node_import_attributes(version: &str) -> Option<bool> {
+    let mut parts = version.strip_prefix('v')?.split('.');
+    let major = parts.next()?.parse::<u64>().ok()?;
+    let minor = parts.next()?.parse::<u64>().ok()?;
+    let _patch = parts.next()?.parse::<u64>().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(major >= 21 || (major == 20 && minor >= 10) || (major == 18 && minor >= 20))
+}
+
+/// Only replace an unambiguous env-node shebang, never a shell shim or a pinned interpreter.
+fn uses_env_node(program: &Path) -> bool {
+    use std::io::Read;
+    let Ok(file) = std::fs::File::open(program) else { return false };
+    let mut header = String::new();
+    if file.take(256).read_to_string(&mut header).is_err() {
+        return false;
+    }
+    let words: Vec<_> = header.lines().next().unwrap_or_default().split_whitespace().collect();
+    matches!(words.as_slice(), ["#!/usr/bin/env" | "#!/bin/env", "node"] | ["#!/usr/bin/env" | "#!/bin/env", "-S", "node"])
+}
+
+/// These checks run only after the adapter fails on an old Node, on the discovery worker.
+/// All candidate probes share one time budget, so many installed versions cannot stall Refresh.
+fn compatible_node(dirs: &[PathBuf], limit: Duration) -> Option<PathBuf> {
+    let start = Instant::now();
+    for dir in dirs.iter().take(64) {
+        let Some(node) = find_in("node", std::slice::from_ref(dir)) else { continue };
+        let remaining = limit.checked_sub(start.elapsed()).filter(|d| !d.is_zero())?;
+        if probe(&node, remaining).version.as_deref().and_then(node_import_attributes) == Some(true) {
+            return Some(node);
+        }
+    }
+    None
+}
+
+/// What a finished probe wrote on a pipe, up to 64 KiB.
+fn read_capped(pipe: Option<impl std::io::Read>) -> String {
+    let mut bytes = Vec::new();
+    if let Some(p) = pipe {
+        let _ = std::io::Read::read_to_end(&mut p.take(64 * 1024), &mut bytes);
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// `text`, cut short.
+fn cut(text: &str) -> String {
+    text.chars().take(PROBLEM_CHARS).collect()
 }
 
 /// The version number in a `--version` line (`codex-cli 0.162.1`, `2.1.295 (Claude Code)`,
@@ -342,10 +465,10 @@ fn login_of(k: &Known, home: Option<&Path>) -> Login {
 
 /// Look for every known agent. Blocking (each probe has a time limit): run it off the UI thread.
 pub fn detect() -> Detection {
-    detect_in(&search_dirs(), home().as_deref())
+    detect_in(&search_dirs(), home().as_deref(), PROBE_LIMIT)
 }
 
-fn detect_in(dirs: &[PathBuf], home: Option<&Path>) -> Detection {
+fn detect_in(dirs: &[PathBuf], home: Option<&Path>, limit: Duration) -> Detection {
     let t0 = Instant::now();
     let mut d = Detection::default();
     for k in KNOWN {
@@ -358,8 +481,21 @@ fn detect_in(dirs: &[PathBuf], home: Option<&Path>) -> Detection {
         let login = login_of(k, home);
         let mut argv = vec![path.to_string_lossy().into_owned()];
         argv.extend(k.args.iter().map(|a| a.to_string()));
-        let version = if k.reports_version { version(&path, Duration::from_secs(3)) } else { None };
-        d.found.push(Found { id: k.id, name: k.name, version, argv, login });
+        let mut result = if k.reports_version { probe(&path, limit) } else { Probe::default() };
+        if let Some(version) = result.old_node.as_deref() {
+            result.problem = Some(crate::i18n::format("ui.agent_chat_node_too_old", &[("version", version)]));
+            if uses_env_node(&path)
+                && let Some(node) = compatible_node(dirs, limit)
+            {
+                let mut cmd = command_for(&node);
+                cmd.arg(&path);
+                result = probe_command(&node, cmd, limit);
+                // Keep this interpreter for the live session as well as the version check.
+                argv.insert(0, node.to_string_lossy().into_owned());
+            }
+        }
+        let Probe { version, problem, .. } = result;
+        d.found.push(Found { id: k.id, name: k.name, version, argv, login, problem, install: k.install });
     }
     d.took_ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX);
     d
@@ -419,6 +555,111 @@ pub(super) fn tools_capability(value: &serde_json::Value) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A desktop PATH can name an old Node before the runtime installed with an npm adapter.
+    /// Both the version probe and the live session must use the recovered interpreter.
+    #[test]
+    #[cfg(unix)]
+    fn a_node_adapter_recovers_from_an_incompatible_desktop_runtime() {
+        use super::super::process::{AgentProcess, FromAgent};
+        use std::os::unix::fs::PermissionsExt;
+
+        const CHILD: &str = "SOLIDCRAFT_NODE_COMPAT_TEST";
+        const BROKEN_NODE: &str = "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo v18.19.1; else echo \"SyntaxError: Unexpected token 'with'\" >&2; echo 'Node.js v18.19.1' >&2; exit 1; fi\n";
+        if let Some(root) = std::env::var_os(CHILD) {
+            let root = PathBuf::from(root);
+            let old = root.join("old");
+            let newer = root.join("modern/bin");
+            let dirs = [old.clone(), newer.clone()];
+            let find = || detect_in(&dirs, None, Duration::from_secs(20)).found.into_iter().find(|f| f.id == "claude").unwrap();
+            let inherited_path = std::env::var_os("PATH");
+            let found = find();
+            assert_eq!(found.version.as_deref(), Some("1.2.3"), "{found:?}");
+            assert_eq!(found.problem, None);
+            assert_eq!(found.argv.first(), Some(&newer.join("node").to_string_lossy().into_owned()));
+            assert_eq!(found.argv.get(1), Some(&old.join("claude-agent-acp").to_string_lossy().into_owned()));
+            assert_eq!(std::env::var_os("PATH"), inherited_path, "only the child's PATH may change");
+
+            let mut process = AgentProcess::spawn(&found.argv, &root, &[], || {}).unwrap();
+            let message = serde_json::json!({"id": 1, "method": "initialize"});
+            process.send(&message);
+            let reply = process.from_agent.recv_timeout(Duration::from_secs(20)).unwrap();
+            process.shutdown(true);
+            match reply {
+                FromAgent::Line(line) => assert_eq!(serde_json::from_str::<serde_json::Value>(&line).unwrap(), message),
+                FromAgent::Exited(tail) => panic!("the recovered adapter did not start: {tail:?}"),
+            }
+
+            // An older runtime that already runs the adapter is left alone.
+            std::fs::write(old.join("node"), "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo v18.19.1; else echo adapter 9.9.9; fi\n").unwrap();
+            let working = find();
+            assert_eq!(working.version.as_deref(), Some("9.9.9"));
+            assert_eq!(working.argv.first(), Some(&old.join("claude-agent-acp").to_string_lossy().into_owned()));
+
+            // Without a compatible runtime the reason must name Node and the remedy.
+            std::fs::write(old.join("node"), BROKEN_NODE).unwrap();
+            std::fs::remove_file(newer.join("node")).unwrap();
+            let unavailable = find();
+            assert_eq!(unavailable.version, None);
+            let reason = unavailable.problem.unwrap();
+            assert!(reason.contains("18.19.1") && reason.contains("20.10") && reason.contains("Refresh"), "{reason}");
+            return;
+        }
+
+        let root = std::env::temp_dir().join(format!("sc agent node compat-{}", std::process::id()));
+        let old = root.join("old");
+        let newer = root.join("modern/bin");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&newer).unwrap();
+        for (path, script) in [
+            (old.join("claude-agent-acp"), "#!/usr/bin/env node\n"),
+            (old.join("node"), BROKEN_NODE),
+            (
+                newer.join("node"),
+                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo v22.0.0; elif [ \"$2\" = \"--version\" ]; then echo adapter 1.2.3; elif [ \"$(node --version)\" = v22.0.0 ]; then /bin/cat; else exit 1; fi\n",
+            ),
+        ] {
+            std::fs::write(&path, script).unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "agent_chat::discover::tests::a_node_adapter_recovers_from_an_incompatible_desktop_runtime", "--nocapture"])
+            .env(CHILD, &root)
+            .env("PATH", std::env::join_paths([old, PathBuf::from("/usr/bin"), PathBuf::from("/bin")]).unwrap())
+            .env("NPM_CONFIG_PREFIX", root.join("modern"))
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(root);
+        assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    }
+
+    #[test]
+    fn node_import_attributes_require_a_supported_release() {
+        for version in ["v18.20.0", "v18.20.8", "v20.10.0", "v20.19.0", "v21.0.0", "v22.0.0"] {
+            assert_eq!(node_import_attributes(version), Some(true), "{version}");
+        }
+        for version in ["v16.20.2", "v18.19.1", "v19.9.0", "v20.9.0"] {
+            assert_eq!(node_import_attributes(version), Some(false), "{version}");
+        }
+        for version in ["", "node", "v20", "v20.10", "v22.0.0-rc.1", "v22.0.0.1", "v18446744073709551616.0.0"] {
+            assert_eq!(node_import_attributes(version), None, "{version}");
+        }
+    }
+
+    #[test]
+    fn node_recovery_does_not_rewrite_shell_shims_or_pinned_interpreters() {
+        let path = std::env::temp_dir().join(format!("sc-agent-shebang-{}", std::process::id()));
+        for header in ["#!/usr/bin/env node\n", "#!/bin/env node\r\n", "#!/usr/bin/env -S node\n"] {
+            std::fs::write(&path, header).unwrap();
+            assert!(uses_env_node(&path), "{header}");
+        }
+        for header in ["#!/bin/sh\n", "#!/opt/node/bin/node\n", "#!/usr/bin/env -S node --experimental-modules\n", "@echo off\r\n", "node\n"] {
+            std::fs::write(&path, header).unwrap();
+            assert!(!uses_env_node(&path), "{header}");
+        }
+        std::fs::remove_file(&path).unwrap();
+        assert!(!uses_env_node(&path));
+    }
 
     #[test]
     fn ollama_capabilities_distinguish_tools_chat_and_unknown() {
@@ -544,7 +785,7 @@ mod tests {
         };
         let ids = |d: &Detection| (d.found.iter().map(|f| f.id).collect::<Vec<_>>(), d.missing.iter().map(|m| m.id).collect::<Vec<_>>());
 
-        let none = detect_in(std::slice::from_ref(&root), None);
+        let none = detect_in(std::slice::from_ref(&root), None, PROBE_LIMIT);
         let (found, missing) = ids(&none);
         assert!(found.is_empty());
         assert!(missing.contains(&"antigravity") && !missing.contains(&"gemini"), "{missing:?}");
@@ -554,7 +795,7 @@ mod tests {
         run("gemini", "echo gemini 0.64.0");
         // A server that would take seconds to answer `--version`, which Antigravity is never asked.
         run("agy_acp_server.par", "sleep 30");
-        let both = detect_in(std::slice::from_ref(&root), None);
+        let both = detect_in(std::slice::from_ref(&root), None, PROBE_LIMIT);
         let (found, missing) = ids(&both);
         assert_eq!(found, ["antigravity", "gemini"]);
         assert!(!missing.contains(&"antigravity") && !missing.contains(&"gemini"), "{missing:?}");
@@ -571,6 +812,103 @@ mod tests {
             assert!(!k.programs.is_empty() && !k.install.is_empty(), "{}", k.id);
         }
         assert_eq!(KNOWN.first().map(|k| k.id), Some("claude"), "the Claude Code adapter is the default");
+    }
+
+    #[test]
+    fn vibe_is_offered_for_install_and_discovered_as_an_acp_executable() {
+        let root = std::env::temp_dir().join(format!("sc-agent-vibe-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let detect = || detect_in(std::slice::from_ref(&root), None, PROBE_LIMIT);
+        let uninstalled = detect();
+        let missing = uninstalled.missing.iter().find(|agent| agent.id == "vibe").unwrap();
+        assert_eq!(missing.install, "uv tool install mistral-vibe");
+
+        let program = if cfg!(windows) { root.join("vibe-acp.cmd") } else { root.join("vibe-acp") };
+        let script = if cfg!(windows) {
+            "@echo off\r\nif \"%1\"==\"--version\" echo vibe-acp 3.0.4\r\n"
+        } else {
+            "#!/bin/sh\n[ \"$1\" = --version ] && echo vibe-acp 3.0.4\n"
+        };
+        std::fs::write(&program, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let installed = detect();
+        let found = installed.found.iter().find(|agent| agent.id == "vibe").unwrap();
+        assert_eq!(found.argv, [program.to_string_lossy().into_owned()]);
+        assert_eq!(found.version.as_deref(), Some("3.0.4"));
+        assert_eq!(found.problem, None);
+        assert!(!installed.missing.iter().any(|agent| agent.id == "vibe"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// #9034: npm installed OpenCode without running its setup script, so the `opencode.exe` its
+    /// `.cmd` shim starts is one Windows refuses. It is still found (its shim is there), with
+    /// the system's reason and the command to install it again, while an agent that answers
+    /// `--version`, or ends without a word but successfully, has no problem.
+    #[test]
+    fn an_agent_that_does_not_start_is_found_with_the_reason() {
+        let root = std::env::temp_dir().join(format!("sc-agent-broken-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        #[cfg(windows)]
+        {
+            // npm's layout: the shim in the prefix, the program under node_modules.
+            let bin = root.join("node_modules").join("opencode-ai").join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            std::fs::write(bin.join("opencode.exe"), "not a program for this computer").unwrap();
+            std::fs::write(root.join("opencode.cmd"), "@ECHO off\r\n\"%~dp0\\node_modules\\opencode-ai\\bin\\opencode.exe\" %*\r\n").unwrap();
+            // Started directly, the system itself refuses it.
+            std::fs::write(root.join("copilot.exe"), "not a program either").unwrap();
+            std::fs::write(root.join("grok.cmd"), "@echo off\r\nexit /b 3\r\n").unwrap();
+            std::fs::write(root.join("qwen.cmd"), "@echo off\r\necho 0.1.2\r\n").unwrap();
+            std::fs::write(root.join("goose.cmd"), "@echo off\r\n").unwrap();
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let run = |name: &str, body: &str| {
+                let path = root.join(name);
+                std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            };
+            run("opencode", "echo 'cannot execute binary file: Exec format error' >&2; exit 126");
+            // Not allowed to run: the system refuses it.
+            std::fs::write(root.join("copilot"), "not a program").unwrap();
+            std::fs::set_permissions(root.join("copilot"), std::fs::Permissions::from_mode(0o644)).unwrap();
+            run("grok", "exit 3");
+            run("qwen", "echo 0.1.2");
+            run("goose", "true");
+        }
+        // A generous limit: on a loaded machine `cmd` alone can take longer than three seconds to
+        // start, and a probe that runs out of time reports nothing.
+        let d = detect_in(std::slice::from_ref(&root), None, Duration::from_secs(60));
+        let found = |id: &str| d.found.iter().find(|f| f.id == id).unwrap_or_else(|| panic!("{id} not found: {:?}", d.found));
+
+        let opencode = found("opencode");
+        assert_eq!(opencode.version, None);
+        assert!(opencode.problem.as_deref().is_some_and(|p| !p.trim().is_empty()), "{opencode:?}");
+        assert_eq!(opencode.install, "npm install -g opencode-ai");
+        assert_eq!(opencode.argv.get(1).map(String::as_str), Some("acp"), "still offered with its ACP arguments");
+        let copilot = found("copilot");
+        assert!(copilot.problem.as_deref().is_some_and(|p| !p.trim().is_empty()), "{copilot:?}");
+        #[cfg(windows)]
+        assert!(
+            copilot.problem.as_deref().is_some_and(|p| (p.contains("216") || p.contains("193")) && p.contains("copilot.exe") && !p.contains("%1")),
+            "the system's reason, naming the program: {copilot:?}"
+        );
+        // Silent but failing: the exit status is the reason.
+        let grok = found("grok");
+        assert!(grok.problem.as_deref().is_some_and(|p| p.contains('3')), "{grok:?}");
+
+        let qwen = found("qwen");
+        assert_eq!((qwen.version.as_deref(), qwen.problem.as_deref()), (Some("0.1.2"), None));
+        let goose = found("goose");
+        assert_eq!((goose.version.as_deref(), goose.problem.as_deref()), (None, None));
+        assert!(d.found.iter().all(|f| f.problem.as_ref().is_none_or(|p| p.chars().count() <= PROBLEM_CHARS)));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// A launcher can start SolidCraft with a PATH that lacks Node (#9297). On Windows, Node's
@@ -623,7 +961,7 @@ mod tests {
             let agent = find_in("solidcraft-test-agent", &search_dirs()).unwrap();
             // Generous limits: both answer at once, but a whole test run on a loaded machine
             // can keep `env`, the shell and the script from starting within 3 s.
-            assert_eq!(version(&agent, Duration::from_secs(20)).as_deref(), Some("1.2.3"));
+            assert_eq!(probe(&agent, Duration::from_secs(20)).version.as_deref(), Some("1.2.3"));
             let mut p = AgentProcess::spawn(&[agent.to_string_lossy().into_owned()], &root, &[], || {}).unwrap();
             let message = serde_json::json!({"id": 1, "method": "initialize"});
             p.send(&message);

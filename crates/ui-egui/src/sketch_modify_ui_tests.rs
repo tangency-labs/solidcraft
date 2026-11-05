@@ -10,6 +10,7 @@
 
 use serde_json::json;
 use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::dialogs::{Kind, apply_commands};
 use crate::scenario::Harness;
@@ -436,7 +437,7 @@ fn the_x_distance_gets_a_drag_arrow_along_the_sketch_x_axis() {
         d.inputs[0].items = picks;
     }
     let sid = h.app.session.active_sketch.unwrap();
-    let x = h.app.session.world_state().sketch(sid).unwrap().plane.x;
+    let x = h.app.session.world_state().unwrap().sketch(sid).unwrap().plane.x;
     let d = h.app.dialog.as_ref().unwrap();
     let (_, dir) = crate::canvas::anchor(&h.app, d).expect("a picked sketch curve anchors the manipulator");
     let dir = dir.expect("a sketch move's X Distance has a direction to drag along");
@@ -528,7 +529,7 @@ fn rectangular_sections_flip_and_center_independently_and_restore_even_counts_wh
     h.settle();
     assert!(h.app.dialog.is_none());
     let sid = h.app.session.active_sketch.unwrap();
-    let pattern = h.app.session.world_state().sketch(sid).unwrap().sketch.patterns[0].id.clone();
+    let pattern = h.app.session.world_state().unwrap().sketch(sid).unwrap().sketch.patterns[0].id.clone();
     assert!(crate::sketch_modify_ui::edit_pattern(&mut h.app, &pattern));
     assert!(matches!(
         h.app.dialog.as_ref().unwrap().kind,
@@ -662,11 +663,11 @@ fn the_spacing_gets_a_canvas_arrow_along_the_pattern_direction() {
     h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
     let d = h.app.dialog.clone().unwrap();
     let (_, dir) = crate::canvas::anchor(&h.app, &d).expect("an anchor on the picked curve");
-    assert_eq!(dir, Some(solidcraft_engine::geom::Vec3::X));
+    assert_eq!(dir, Some(solidcore_record::Vec3::X));
     h.app.dialog.as_mut().unwrap().inputs[1].items = vec![Sel::Axis { name: "Y".into() }];
     let d = h.app.dialog.clone().unwrap();
     let (_, dir) = crate::canvas::anchor(&h.app, &d).expect("an anchor on the picked curve");
-    assert_eq!(dir, Some(solidcraft_engine::geom::Vec3::Y));
+    assert_eq!(dir, Some(solidcore_record::Vec3::Y));
 }
 
 /// Dragging a spacing arrow past its start flips the direction, as typing a negative spacing does
@@ -828,7 +829,7 @@ fn circular_flip_and_center_buttons_apply_and_reopen_the_saved_placement() {
     h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
     let sid = h.app.session.active_sketch.unwrap();
     let id = {
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let pattern = &state.sketch(sid).unwrap().sketch.patterns[0];
         assert!(matches!(pattern.kind, SketchPatternKind::Circular { alignment: PatternAlignment::Center, reversed: true, .. }));
         pattern.id.clone()
@@ -896,7 +897,7 @@ fn circular_quantity_keeps_its_expression_when_reopened_and_follows_parameter_ch
     assert!(crate::sketch_modify_ui::edit_pattern(&mut h.app, out["pattern"].as_str().unwrap()));
     assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::SketchModify(Mod::PatternCirc { count, .. }) if count=="HoleAmount"));
     let sid = h.app.session.active_sketch.unwrap();
-    assert_eq!(h.app.session.world_state().sketch(sid).unwrap().sketch.curves.len(), 7);
+    assert_eq!(crate::open_meshing::session_world(&h.app.session).sketch(sid).unwrap().sketch.curves.len(), 7);
 }
 
 #[test]
@@ -942,4 +943,31 @@ fn mirror_origin_axis_picks_use_the_same_reference_as_symmetry() {
     let cmds = commands(&h.app, &Mod::Mirror, &inputs, &serde_json::Map::new()).unwrap();
     assert_eq!(cmds[0].1["line"], json!({"axis":"Y"}));
     h.app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
+}
+
+/// #8201: on a sketch whose plane does not hold the picked origin axis, Mirror sends the axis
+/// and the engine mirrors about its projection into the sketch plane.
+#[test]
+fn mirror_sends_an_origin_axis_outside_the_sketch_plane_for_its_projection() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":{"origin":[0,0,0],"x_dir":[0,1,-1],"y_dir":[-2,1,1]}})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[10,3],[15,8]],"ids":["source"]})).unwrap();
+    let mut inputs = mirror_inputs();
+    inputs[0].items = vec![Sel::SketchCurve { id: "source".into(), sketch: None }];
+    inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    let cmds = commands(&h.app, &Mod::Mirror, &inputs, &serde_json::Map::new()).unwrap();
+    assert_eq!(cmds[0].1, json!({"entities":["source"], "line":{"axis":"X"}}));
+    let out = h.app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
+    assert_eq!(out["curves"].as_array().map(Vec::len), Some(1));
+    let state = h.app.session.model.state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let copy = out["curves"][0].as_str().unwrap();
+    let start = sk.point(sk.resolve_point(&format!("{copy}.start")).unwrap()).unwrap();
+    let end = sk.point(sk.resolve_point(&format!("{copy}.end")).unwrap()).unwrap();
+    let (start, end) = ((start.x, start.y), (end.x, end.y));
+    let mirrored = |p: (f64, f64), x: f64, y: f64| (p.0 - x).abs() < 1e-6 && (p.1 - y).abs() < 1e-6;
+    assert!(
+        (mirrored(start, -10.0, 3.0) && mirrored(end, -15.0, 8.0)) || (mirrored(start, -15.0, 8.0) && mirrored(end, -10.0, 3.0)),
+        "{start:?} {end:?}"
+    );
 }

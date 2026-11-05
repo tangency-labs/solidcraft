@@ -222,7 +222,7 @@ pub fn act(app: &mut SolveApp, ctx: &egui::Context, offer: &Offer, action: Actio
             app.preferences.space_mouse_offered.insert(offer.device.clone());
             if action == Action::Calibrate {
                 // The calibration window lives with Preferences, at Navigation.
-                crate::prefs::open_at(app, crate::prefs::PAGE_NAVIGATION);
+                crate::prefs::open_at(app, crate::prefs::PAGE_MOUSE3D);
                 crate::space_mouse_calibration::start(app);
             }
         }
@@ -391,7 +391,7 @@ mod preferences_tests {
             h.app.space_mouse.device = Some("hid 046d:c62b".into());
             h.frames(3);
             if open_first {
-                crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_NAVIGATION);
+                crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
             }
             for _ in 0..frames_before {
                 h.frame();
@@ -879,7 +879,7 @@ mod preferences_tests {
             h.app.preferences.space_mouse_calibrations.insert("hid 046d:c62b".into(), calibration);
             h.app.space_mouse.device = Some("hid 046d:c62b".into());
             if prefs_open {
-                crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_NAVIGATION);
+                crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
             }
             run(&mut h, 2.0);
             assert_eq!(crate::space_mouse::calibration(&h.app), Some(calibration));
@@ -918,7 +918,7 @@ mod preferences_tests {
         let mut h = spacenavd_harness();
         run(&mut h, 2.0);
         assert!(card_up(&h));
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_NAVIGATION);
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
         run(&mut h, 3.0);
         assert!(!card_up(&h), "no card over Preferences");
         h.app.prefs_window.open = false;
