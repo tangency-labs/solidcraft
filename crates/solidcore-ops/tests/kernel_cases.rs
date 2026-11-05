@@ -53,7 +53,7 @@ use solidcore_ops::blend::{
     blend, chamfer_sides_ordered, edge_faces_along_ordered, Blend, ChamferSecond, Corners,
 };
 use solidcore_ops::boolean::{boolean, BooleanOp};
-use solidcore_ops::sweep::{extrude, revolve, Curve, DraftCorner};
+use solidcore_ops::sweep::{extrude, loft, revolve, Curve, DraftCorner};
 use solidcore_ops::{make_sphere, offset, session, Body, Order};
 use solidcore_record::brep::Brep as Record;
 
@@ -74,6 +74,7 @@ const PORTED: &[&str] = &[
     "boolean",
     "extrude",
     "revolve",
+    "loft",
     "blend_dropping",
     "chamfer_sides",
 ];
@@ -365,6 +366,21 @@ fn call_with_copy(
                 Ok(None) => Err("the boolean left nothing".to_owned()),
                 Err(e) => Err(e.to_string()),
             }
+        }
+        "loft" => {
+            let sections = p["sections"]
+                .as_array()
+                .ok_or_else(|| bad("sections"))?
+                .iter()
+                .map(profile)
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| bad("sections"))?;
+            let degree = p["degree"]
+                .as_u64()
+                .and_then(|d| u32::try_from(d).ok())
+                .ok_or_else(|| bad("degree"))?;
+            let cap = p["cap"].as_bool().ok_or_else(|| bad("cap"))?;
+            made(loft(&sections, degree, cap))
         }
         "extrude" => {
             let curves = profile(&p["profile"]).ok_or_else(|| bad("profile"))?;
@@ -1039,6 +1055,87 @@ fn a_copied_edit_preserves_the_supplied_face_pick_order() {
         .fold(f64::NEG_INFINITY, f64::max);
     assert!((max_z - 12.0).abs() <= 12.0 * 1e-9, "top is at {max_z}");
     assert!((body.volume(1e-9).unwrap() - 6000.0).abs() <= 6000.0 * 1e-9);
+}
+
+fn loft_step(name: &str) -> (PathBuf, Value, Value) {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let entry = corpus().join(format!("ladder/04-spline-profiles/{name}.json"));
+    let e: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+    let step = e["calls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["op"] == "loft")
+        .unwrap()
+        .clone();
+    (entry, e, step)
+}
+
+#[test]
+#[allow(clippy::disallowed_methods)] // Independent closed-form test oracle, not ops geometry.
+fn a_loft_replays_the_frustum_and_forwards_its_cap() {
+    let (entry, e, step) = loft_step("006-loft-circle-frustum");
+    let expected_volume = 7000.0 * std::f64::consts::PI;
+    let side_area = 30.0 * std::f64::consts::PI * 1000.0_f64.sqrt();
+    for cap in [true, false] {
+        let mut step = step.clone();
+        step["params"]["cap"] = serde_json::json!(cap);
+        let output = call(&step, &mut []).unwrap().unwrap();
+        let volume = output.body.volume(1e-9).unwrap();
+        if cap {
+            assert!((volume - expected_volume).abs() <= expected_volume * 1e-9);
+            assert_eq!(output.body.counts().unwrap()[0], 3);
+        } else {
+            assert_eq!(volume, 0.0);
+            assert_eq!(output.body.counts().unwrap()[0], 1);
+            let area = output.body.area(1e-9).unwrap();
+            assert!((area - side_area).abs() <= side_area * 1e-9);
+        }
+    }
+    run_case(&entry, &e).unwrap();
+}
+
+#[test]
+fn a_loft_forwards_degree_for_the_three_circle_waist() {
+    let (_, _, step) = loft_step("007-loft-three-circles");
+    for (degree, factor) in [(1, 28000.0 / 3.0), (2, 22400.0 / 3.0)] {
+        let mut step = step.clone();
+        step["params"]["degree"] = serde_json::json!(degree);
+        let output = call(&step, &mut []).unwrap().unwrap();
+        let volume = output.body.volume(1e-9).unwrap();
+        let expected = factor * std::f64::consts::PI;
+        assert!(
+            (volume - expected).abs() <= expected * 1e-9,
+            "degree {degree}: {volume}"
+        );
+    }
+}
+
+#[test]
+fn loft_parameters_are_required_and_refused_degrees_are_not_defaulted() {
+    let (_, _, step) = loft_step("006-loft-circle-frustum");
+    for parameter in ["sections", "degree", "cap"] {
+        let mut missing = step.clone();
+        missing["params"].as_object_mut().unwrap().remove(parameter);
+        assert!(
+            matches!(call(&missing, &mut []), Err(Stop::Fail(_))),
+            "{parameter}"
+        );
+    }
+    let mut invalid_section = step.clone();
+    invalid_section["params"]["sections"][1] = serde_json::json!([{"unknown_curve": {}}]);
+    assert!(matches!(
+        call(&invalid_section, &mut []),
+        Err(Stop::Fail(_))
+    ));
+    for degree in [0, 4] {
+        let mut refused = step.clone();
+        refused["params"]["degree"] = serde_json::json!(degree);
+        assert!(
+            matches!(call(&refused, &mut []), Ok(Err(_))),
+            "degree {degree}"
+        );
+    }
 }
 
 #[test]
