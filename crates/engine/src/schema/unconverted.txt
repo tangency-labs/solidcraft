@@ -11,11 +11,6 @@ browser.order
 browser.rename_group
 browser.ungroup
 browser.visibility
-canvas.calibrate
-canvas.decal
-canvas.delete
-canvas.edit
-canvas.insert
 component.activate
 component.break_link
 component.capture_position
