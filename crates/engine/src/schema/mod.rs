@@ -65,6 +65,8 @@ pub mod construct;
 pub mod diagnostics;
 pub mod drawing;
 pub mod drawing_balloon;
+pub mod drawing_centre_line;
+pub mod drawing_centre_mark;
 pub mod drawing_dimension;
 pub mod drawing_export;
 pub mod drawing_image;

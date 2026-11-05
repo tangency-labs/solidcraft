@@ -78,6 +78,8 @@ pub fn check(template: &Drawing) -> Result<()> {
         (!template.views.is_empty(), "views"),
         (!template.dimensions.is_empty(), "dimensions"),
         (!template.balloons.is_empty(), "balloons"),
+        (!template.centre_marks.is_empty(), "centre marks"),
+        (!template.centre_lines.is_empty(), "centre lines"),
         (template.revisions.ids().next().is_some(), "revision rows"),
         (template.sheets.iter().any(|sheet| sheet.documents.is_some()), "a sheet that documents a component"),
     ];
@@ -108,7 +110,7 @@ pub fn instantiate(template: &Drawing, name: &str, taken: &BTreeSet<u64>, id_sou
 }
 
 /// `drawing` as a template: its format, and nothing it draws or documents (its sources, views,
-/// dimensions, balloons, revision rows, and the component each sheet documents), nor its number,
+/// dimensions, balloons, centre marks and lines, revision rows, and the component each sheet documents), nor its number,
 /// which drawings made from it get their own of. Its other properties, its revision numbering and
 /// the text typed over its cells of plain text stay; text typed over a cell that shows a field
 /// (a parameter, a value or a reference) goes with the design that field reads.
@@ -118,6 +120,8 @@ pub fn from_drawing(drawing: &Drawing) -> Result<Drawing> {
     template.views.clear();
     template.dimensions.clear();
     template.balloons.clear();
+    template.centre_marks.clear();
+    template.centre_lines.clear();
     Arc::make_mut(&mut template.properties).remove(crate::metadata::PART_NUMBER);
     let mut revisions = RevisionRecord::default();
     (revisions.numbering, revisions.per_sheet) = (template.revisions.numbering, template.revisions.per_sheet);

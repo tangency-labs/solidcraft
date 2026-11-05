@@ -37,6 +37,8 @@ mod delete;
 pub(crate) mod diagnostics;
 mod drawing;
 mod drawing_balloon;
+mod drawing_centre_line;
+mod drawing_centre_mark;
 mod drawing_dimension;
 mod drawing_export;
 mod drawing_image;
@@ -424,6 +426,8 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(view_dxf::COMMANDS.iter());
     v.extend(drawing::COMMANDS.iter());
     v.extend(drawing_balloon::COMMANDS.iter());
+    v.extend(drawing_centre_line::COMMANDS.iter());
+    v.extend(drawing_centre_mark::COMMANDS.iter());
     v.extend(drawing_image::COMMANDS.iter());
     v.extend(drawing_note::COMMANDS.iter());
     v.extend(drawing_dimension::COMMANDS.iter());

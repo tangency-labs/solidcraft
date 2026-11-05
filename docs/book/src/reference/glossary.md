@@ -111,6 +111,32 @@ a tree.
   it (in French, *arborescence*), so that "browser" and "web browser" don't share a word. See
   *web browser*.
 
+### centre line
+
+A patterned line that shows a feature's centre or axis in a drawing view.
+
+The initial command joins two named model points and extends beyond each end by a distance in
+paper millimetres. This selection and extent interface is proposed in issue #9419.
+
+- **In SolidCraft:** `drawing.center_line.add`, `drawing.center_line.inspect`, and the drawing's
+  `centre_lines` records.
+- **Don't use:** construction line (for this drawing annotation).
+- **Elsewhere:** centerline, centreline.
+- **For translators:** not a sketch construction entity and not an axis in the model.
+
+### centre mark
+
+Two crossing patterned lines that show the centre of a circular feature in a drawing view.
+
+A manual mark follows a named model edge. Its extension beyond the circle is measured in paper
+millimetres, so changing the view scale does not change that extension.
+
+- **In SolidCraft:** `drawing.center_mark.add`, `drawing.center_mark.inspect`, and the drawing's
+  `centre_marks` records.
+- **Don't use:** crosshair (for this saved drawing annotation).
+- **Elsewhere:** center mark, centermark.
+- **For translators:** a mark printed on the drawing, not the mouse pointer.
+
 ### component
 
 A named container of bodies, sketches, construction geometry and other components that can be

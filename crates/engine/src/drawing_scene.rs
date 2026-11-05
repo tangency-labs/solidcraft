@@ -48,6 +48,9 @@ use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, ShownSet, S
 use crate::params::bad;
 use crate::{EngineError, Result, Session};
 
+#[path = "drawing_scene_marks.rs"]
+mod marks;
+
 /// The command the sheet scene answers for, in its errors.
 pub const CMD: &str = "drawing.scene";
 
@@ -177,6 +180,7 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let wanted = dimensions_on(drawing, on.iter().map(|(id, ..)| *id));
     let dimensions = draw_dimensions(s, drawing, &wanted, |view| frames.get(&view).copied());
     assembly.add_dimensions(dimensions.iter());
+    assembly.add_marks(marks::groups(s, drawing, &assembly.placed)?)?;
     let (scene, views, objects, dimensions) = assembly.finish()?;
     Ok(SheetScene { scene, views, objects, dimensions })
 }
@@ -346,6 +350,22 @@ impl Assembly {
             }
             self.dimensions.push(DimensionState { dimension: one.dimension, view: one.view, status: one.status.clone(), drawn, why });
         }
+    }
+
+    /// Centre annotations use the accepted view frames and the same record budget as dimensions.
+    fn add_marks(&mut self, groups: Vec<Group>) -> Result<()> {
+        for group in groups {
+            let bounds_mm = self.add(&group, Vec2::ZERO).map_err(|why| match why {
+                LeftOut::TooManyRecords => {
+                    bad(CMD, format!("centre annotation {} exceeds the sheet's {MAX_RECORDS} record budget", ids::encode(group.object)))
+                }
+                LeftOut::Invalid(why) => bad(CMD, format!("centre annotation {}: {why}", ids::encode(group.object))),
+            })?;
+            if !bounds_mm.is_empty() {
+                self.objects.push(SheetObject { object: group.object, kind: group.kind, bounds_mm, boundary_mm: None });
+            }
+        }
+        Ok(())
     }
 
     /// The scene with its title block on top, checked whole.
@@ -520,7 +540,8 @@ struct DimensionEntry {
 
 /// What a scene is assembled from: the sheet's record, the drawing's projection (its title block's
 /// symbol), the images on the sheet, each view on it with its entry's serial (0: not drawn yet)
-/// and its centre, and each dimension read so far with its entry's serial.
+/// and its centre, each dimension read so far with its entry's serial, and the saved centre
+/// annotations.
 #[derive(PartialEq)]
 struct Inputs {
     sheet: Sheet,
@@ -528,6 +549,8 @@ struct Inputs {
     images: Vec<Group>,
     views: Vec<(u64, u64, Vec2)>,
     dimensions: Vec<(u64, u64)>,
+    marks: Vec<Arc<solidcraft_doc::drawing::centre_mark::CentreMark>>,
+    lines: Vec<Arc<solidcraft_doc::drawing::centre_line::CentreLine>>,
 }
 
 /// The last answer of [`extract`], for the sheet, drawing, world state, units and serial it was for:
@@ -539,6 +562,7 @@ struct Assembled {
     units: String,
     serial: u64,
     inputs: Inputs,
+    reference_statuses: Vec<(u64, bool, Option<String>)>,
     answer: SheetView,
 }
 
@@ -551,11 +575,14 @@ impl Cache {
     /// What sheet `record` of `d`, holding the views `on` ([`views_on`]), is assembled from now.
     fn inputs(&self, d: &Drawing, record: &Sheet, on: &[(u64, ResolvedView, Vec2)]) -> Inputs {
         let serial = |id: &u64| self.views.get(id).map_or(0, |e| e.serial);
+        let ids: BTreeSet<_> = on.iter().map(|(id, _, _)| *id).collect();
+        let marks = d.centre_marks.iter().filter(|mark| ids.contains(&mark.view)).cloned().collect();
+        let lines = d.centre_lines.iter().filter(|line| ids.contains(&line.view)).cloned().collect();
         let images = crate::drawing_pictures::groups(d, record.id);
         let views = on.iter().map(|(id, _, centre)| (*id, serial(id), *centre)).collect();
         let read = dimensions_on(d, on.iter().map(|(id, ..)| *id));
         let dimensions = read.iter().filter_map(|record| self.dimensions.get(&record.id).map(|e| (record.id, e.serial))).collect();
-        Inputs { sheet: record.clone(), projection: d.projection, images, views, dimensions }
+        Inputs { sheet: record.clone(), projection: d.projection, images, views, dimensions, marks, lines }
     }
 
     /// The views of the last scene assembled, while it is still its sheet's scene: the sheet as `d`
@@ -623,42 +650,80 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     let d = s.drawing(CMD)?.clone();
     let state = s.world_state()?;
     let units = s.doc.drawing_units(&d).to_string();
-    let cache = &mut s.drawing_scenes;
-    if let Some(last) = &cache.last
+    let has_marks = !d.centre_marks.is_empty() || !d.centre_lines.is_empty();
+    let reference_statuses: Vec<_> =
+        if has_marks { s.model.results.iter().map(|r| (r.id, r.skipped, r.error.clone())).collect() } else { Vec::new() };
+    if let Some(last) = &s.drawing_scenes.last
         && last.sheet == sheet
-        && last.serial == cache.serial
+        && last.serial == s.drawing_scenes.serial
         && last.units == units
         && Arc::ptr_eq(&last.drawing, &d)
         && Arc::ptr_eq(&last.state, &state)
+        && last.reference_statuses == reference_statuses
     {
         return Ok(last.answer.clone());
     }
     let record = sheet_of(&d, sheet)?;
     let on = views_on(&d, sheet)?;
-    cache.drawing = Some(d.id);
-    cache.sheet = Some(sheet);
+    let cache = &s.drawing_scenes;
     let stale = on.iter().filter(|(id, view, _)| !cache.fresh(*id, &state, view)).map(|(id, ..)| *id).collect();
     let stale_dimensions = cache.stale_dimensions(&d, &on, &state, &units).iter().map(|record| record.id).collect();
     let inputs = cache.inputs(&d, record, &on);
-    let (scene, views, objects, dimensions, generation) = match cache.last.take() {
-        Some(last) if last.inputs == inputs => {
-            (last.answer.scene, last.answer.views, last.answer.objects, last.answer.dimensions, last.answer.generation)
-        }
-        _ => {
-            // Views and dimensions no longer in the drawing are forgotten: each holds a world state.
-            let kept: BTreeSet<u64> = d.views.iter().map(|v| v.id).collect();
-            cache.views.retain(|id, _| kept.contains(id));
-            cache.dimensions.retain(|id, _| d.dimension(*id).is_some());
-            let drawn = on.iter().filter_map(|(id, _, centre)| cache.views.get(id).map(|e| (*id, *centre, &e.drawn)));
-            let mut assembly = assemble(record, d.projection, &inputs.images, drawn)?;
-            assembly.add_dimensions(inputs.dimensions.iter().filter_map(|(id, _)| cache.dimensions.get(id).map(|e| &e.drawn)));
-            let (scene, views, objects, dimensions) = assembly.finish()?;
-            (Arc::new(scene), views, objects.into(), dimensions, GENERATION.fetch_add(1, Ordering::Relaxed).wrapping_add(1))
-        }
+    let reused = cache.last.as_ref().filter(|last| {
+        last.inputs == inputs
+            && last.reference_statuses == reference_statuses
+            && ((inputs.marks.is_empty() && inputs.lines.is_empty()) || Arc::ptr_eq(&last.state, &state))
+    });
+    let (scene, views, objects, dimensions, generation) = if let Some(last) = reused {
+        (last.answer.scene.clone(), last.answer.views.clone(), last.answer.objects.clone(), last.answer.dimensions.clone(), last.answer.generation)
+    } else {
+        let drawn = on.iter().filter_map(|(id, _, centre)| cache.views.get(id).map(|e| (*id, *centre, &e.drawn)));
+        let mut assembly = assemble(record, d.projection, &inputs.images, drawn)?;
+        let mark_groups = provider_marks(s, &d, sheet, &on, &state, &assembly.placed)?;
+        assembly.add_dimensions(inputs.dimensions.iter().filter_map(|(id, _)| cache.dimensions.get(id).map(|e| &e.drawn)));
+        assembly.add_marks(mark_groups)?;
+        let (scene, views, objects, dimensions) = assembly.finish()?;
+        (Arc::new(scene), views, objects.into(), dimensions, GENERATION.fetch_add(1, Ordering::Relaxed).wrapping_add(1))
     };
     let answer = SheetView { scene, generation, views, stale, objects, dimensions, stale_dimensions };
-    cache.last = Some(Assembled { sheet, drawing: d, state, units, serial: cache.serial, inputs, answer: answer.clone() });
+    let cache = &mut s.drawing_scenes;
+    cache.drawing = Some(d.id);
+    cache.sheet = Some(sheet);
+    // Deleted records no longer hold their old world states in the cache.
+    let kept: BTreeSet<u64> = d.views.iter().map(|v| v.id).collect();
+    cache.views.retain(|id, _| kept.contains(id));
+    cache.dimensions.retain(|id, _| d.dimension(*id).is_some());
+    cache.last = Some(Assembled { sheet, drawing: d, state, units, serial: cache.serial, inputs, reference_statuses, answer: answer.clone() });
     Ok(answer)
+}
+
+/// Fresh marks use exactly the accepted frame of their view. While its model or settings are
+/// stale, retain that view's last marks with its last lines; never overlay fresh geometry on them.
+fn provider_marks(
+    s: &Session,
+    d: &Drawing,
+    sheet: u64,
+    on: &[(u64, ResolvedView, Vec2)],
+    state: &Arc<ModelState>,
+    placed: &BTreeMap<u64, (ViewFrame, Vec2)>,
+) -> Result<Vec<Group>> {
+    let cache = &s.drawing_scenes;
+    let fresh: BTreeSet<_> = on.iter().filter(|(id, view, _)| cache.fresh(*id, state, view)).map(|(id, ..)| *id).collect();
+    let frames = placed.iter().filter(|(id, _)| fresh.contains(id)).map(|(id, frame)| (*id, *frame)).collect();
+    let mut groups = marks::groups(s, d, &frames)?;
+    if let Some(last) = cache.last.as_ref().filter(|last| last.sheet == sheet && last.drawing.id == d.id) {
+        let owner = |object| last.drawing.centre_mark(object).map(|m| m.view).or_else(|| last.drawing.centre_line(object).map(|l| l.view));
+        for group in &last.answer.scene.groups {
+            if !matches!(group.kind, ObjectKind::CentreMark | ObjectKind::CentreLine) || !d.has_object(group.object) {
+                continue;
+            }
+            let Some(view) = owner(group.object).filter(|view| !fresh.contains(view)) else { continue };
+            let (Some((_, centre)), Some(old)) = (placed.get(&view), last.inputs.views.iter().find(|(id, ..)| *id == view)) else { continue };
+            groups.push(moved(group, *centre - old.2));
+        }
+    }
+    groups.sort_by_key(|group| (matches!(group.kind, ObjectKind::CentreLine), group.object));
+    Ok(groups)
 }
 
 /// Draws the first view out of date on the sheet last extracted or, with none, reads the dimensions

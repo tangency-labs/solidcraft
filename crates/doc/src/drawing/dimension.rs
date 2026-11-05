@@ -945,7 +945,7 @@ impl<'a> Lookup<'a> {
     /// The pieces of a split edge on one circle are still that circle, as [`Lookup::line`] keeps a
     /// line: read from the longest, so its points lie on what is left of it. Pieces on several
     /// circles are listed, and none is chosen.
-    fn whole_arc(&mut self, edge: &ModelEdge, basis: &Plane) -> std::result::Result<(f64, [Vec3; 4], bool), Status> {
+    pub(super) fn whole_arc(&mut self, edge: &ModelEdge, basis: &Plane) -> std::result::Result<(f64, [Vec3; 4], bool), Status> {
         let found = self.edges(edge)?;
         if !found.whole && one_circle(&found.pieces).is_none() {
             return Err(Status::Ambiguous(edge_candidates(&edge.body, &found)));
