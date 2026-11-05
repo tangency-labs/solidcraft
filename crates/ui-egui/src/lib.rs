@@ -117,6 +117,7 @@ mod measurement_ui_tests;
 #[cfg(test)]
 mod menu_tests;
 pub(crate) mod mesh_lod;
+pub mod mesh_units;
 pub mod messages;
 pub(crate) mod motion;
 pub mod occurrence_drag;
@@ -168,6 +169,7 @@ mod expression_complete;
 mod extrude_auto_to_object_tests;
 #[cfg(test)]
 mod extrude_edit_tests;
+mod extrude_face_snap;
 mod extrude_preview;
 mod file_load;
 mod file_picker;
@@ -696,6 +698,8 @@ pub struct SolveApp {
     pub recovery_discard_all: bool,
     /// The selection's measurement in the view's corner (#7000).
     pub(crate) quick_measure: quick_measure::QuickMeasure,
+    /// An STL or OBJ file waiting for the unit its coordinates are in (`mesh_units`).
+    pub mesh_units: Option<mesh_units::Ask>,
     /// The bodies of a just-opened Y-up file, offered to be stood up (`stand_up`).
     pub stand_up: Option<Vec<String>>,
     /// The placement of the component that file came in as: the offer turns it.
@@ -910,6 +914,7 @@ impl SolveApp {
             reopen_guard_dir: None,
             recovery_discard_all: false,
             quick_measure: Default::default(),
+            mesh_units: None,
             stand_up: None,
             stand_up_occurrence: None,
             stand_up_reason: false,
@@ -1718,6 +1723,25 @@ impl SolveApp {
         }
         if id == "view.normal_to" {
             if self.run(id, json!({"camera": self.cam})).is_ok() {
+                if self.universal_panel_host_enabled()
+                    && let (Some(mut camera), Some(layout), Ok(usable)) =
+                        (self.session.camera, self.viewport.layout.as_ref(), shell::host_usable(self))
+                {
+                    // Match the established follow-view up-axis semantics before
+                    // calculating the exact full-domain projection offset.
+                    if !render_workspace::active(self) {
+                        camera.up = self.cam.up;
+                    }
+                    let bounds = viewport::selection_bounds(self);
+                    let centred = if render_workspace::active(self) {
+                        render_workspace::centre_host_product_camera(self, camera, bounds.as_ref(), layout, &usable)
+                    } else {
+                        viewport_layout::centre_host_camera(camera, bounds.as_ref(), layout, &usable, self.view_fov())
+                    };
+                    if let Some(centred) = centred {
+                        self.session.camera = Some(centred);
+                    }
+                }
                 self.follow_view_request(true);
                 self.home.open = false;
             }
@@ -1927,7 +1951,22 @@ impl SolveApp {
             linked_source::start_selected(self);
             return;
         }
-        if matches!(id, "file.insert_step" | "file.insert_mesh" | "pointcloud.insert") {
+        if id == "file.insert_mesh" {
+            // Insert Mesh is an explicit ask for a mesh: a PLY chosen here is read as one (its
+            // faces), after asking its unit, where any other way of inserting it is a point cloud.
+            // Like Insert SVG it asks the host for its own kind of file (on the web a file dialog,
+            // not the window that also opens and downloads designs), so the file comes straight
+            // back here and nothing has to remember which command asked.
+            self.pick_open_for(&["3mf", "stl", "obj", "ply", "glb", "gltf"], |app, path| {
+                if let Some(path) = path
+                    && !mesh_units::ask_ply_as_mesh(app, &path)
+                {
+                    app.insert_path_async(&path);
+                }
+            });
+            return;
+        }
+        if matches!(id, "file.insert_step" | "pointcloud.insert") {
             self.pick_open(|app, path| {
                 if let Some(path) = path {
                     app.insert_path_async(&path);
@@ -2550,6 +2589,11 @@ impl SolveApp {
     }
 
     pub fn open_path(&mut self, path: &str) {
+        self.open_path_with(path, &Default::default());
+    }
+
+    /// [`Self::open_path`] with the import options of the request (`units` of an STL or OBJ file).
+    pub fn open_path_with(&mut self, path: &str, options: &serde_json::Map<String, Value>) {
         match documents::reuse_path(self, path) {
             Ok(true) => return,
             Err(e) => {
@@ -2560,7 +2604,9 @@ impl SolveApp {
         }
         self.home.open = false;
         documents::prepare_open(self);
-        if let Ok(r) = self.run("doc.open", json!({ "path": path })) {
+        let mut params = options.clone();
+        params.insert("path".into(), json!(path));
+        if let Ok(r) = self.run("doc.open", Value::Object(params)) {
             // An opened design comes up at the home view, not at the angle the design before it
             // was left at: `prepare_open` keeps the camera when it reuses a blank design.
             self.cam.set_view(StandardView::Iso);
@@ -2591,9 +2637,23 @@ impl SolveApp {
 
     /// Insert CAD bodies, meshes or sketch drawing geometry into the current design.
     pub fn insert_path(&mut self, path: &str) {
-        let cmd = if solidcraft_engine::io::is_point_cloud_path(path) { "pointcloud.insert" } else { file_load::insert_command(path) };
+        self.insert_path_with(path, &Default::default(), false);
+    }
+
+    /// [`Self::insert_path`] with the import options of the request (`units` of an STL or OBJ file).
+    /// `mesh`: insert it as a mesh whatever its extension says (a PLY with faces).
+    pub fn insert_path_with(&mut self, path: &str, options: &serde_json::Map<String, Value>, mesh: bool) {
+        let cmd = if mesh {
+            "file.insert_mesh"
+        } else if solidcraft_engine::io::is_point_cloud_path(path) {
+            "pointcloud.insert"
+        } else {
+            file_load::insert_command(path)
+        };
         let before: Vec<String> = crate::open_meshing::session_world(&self.session).bodies.iter().map(|b| b.name.clone()).collect();
-        if let Ok(r) = self.run(cmd, json!({ "path": path })) {
+        let mut params = options.clone();
+        params.insert("path".into(), json!(path));
+        if let Ok(r) = self.run(cmd, Value::Object(params)) {
             self.fit_view();
             stand_up::offer(self, path, &before, Some(&r));
             if let Some(summary) = timeline::import_status(self, &r) {
@@ -2688,6 +2748,13 @@ impl SolveApp {
     /// rectangle to frame into is the one from before the Home screen or a dialog covered it.
     fn try_fitted_bounds(&self, cam: Camera, bounds: &solidcraft_engine::geom::Aabb3) -> Option<Camera> {
         let layout = self.viewport.layout.as_ref()?;
+        if self.universal_panel_frame().is_some() {
+            let usable = shell::host_usable(self).ok()?;
+            if render_workspace::active(self) {
+                return render_workspace::fit_host_product_bounds(self, cam, bounds, layout, &usable);
+            }
+            return viewport_layout::fit_host_bounds(cam, bounds, layout, &usable, self.view_fov(), f64::from(self.preferences.home_fit_size));
+        }
         if render_workspace::active(self) {
             return viewport_layout::fit_product_bounds(cam, bounds, &render_workspace::picture_layout(self, layout));
         }
@@ -2706,6 +2773,8 @@ impl SolveApp {
 
     /// [`Self::navigator_fitted`] for `bounds`, or `None` when the layout can't frame it yet.
     fn navigator_fitted_bounds(&self, mut cam: Camera, bounds: &solidcraft_engine::geom::Aabb3) -> Option<Camera> {
+        use solidcraft_engine::geom::Vec3Geom as _;
+
         if bounds.is_empty() || !bounds.min.is_finite() || !bounds.max.is_finite() {
             return None;
         }
@@ -2715,11 +2784,20 @@ impl SolveApp {
         // square, so the layout fit of that cube is the sphere's.
         let offset = solidcore_record::Vec3::new(radius, radius, radius);
         let sphere = solidcraft_engine::geom::Aabb3 { min: centre - offset, max: centre + offset };
-        let mut probe = Camera::default();
+        // Keep Classic's original probe; the opt-in host retains the authored lens and up axis.
+        let mut probe = if self.universal_panel_host_enabled() { cam } else { Camera::default() };
         probe.set_view(StandardView::Front);
         let framed = self.try_fitted_bounds(probe, &sphere)?;
         cam.target = centre;
         cam.distance = framed.distance;
+        if self.universal_panel_frame().is_some() {
+            // Carry the sphere's one screen centre into the requested basis too.
+            // Recentring its cube in each direction would choose different footprints.
+            let offset = framed.target - centre;
+            let (front_right, front_up, _) = framed.basis();
+            let (right, up, _) = cam.basis();
+            cam.target = centre + right * offset.dot(front_right) + up * offset.dot(front_up);
+        }
         cam.is_valid().then_some(cam)
     }
 
@@ -2959,7 +3037,7 @@ impl SolveApp {
         // Shortcuts run here, before `ui` installs the language scope: a tool started by its
         // key must build its translated hint in the user's language, not in English.
         let _language = crate::i18n::scope(&self.preferences.language);
-        panel_runtime::tick_app(self);
+        panel_runtime::tick_app(self, ctx);
         // Sleep/wake often skips frames without a device-lost signal; refresh egui GPU textures
         // when the frame clock jumps so the chrome is not stuck blank (#8749).
         let frame_time = ctx.input(|i| i.time);
@@ -3029,6 +3107,7 @@ impl SolveApp {
         self.issue_screenshots(ctx);
         if self.issue_report.draft.is_none() && self.file_picker.is_none() {
             // Completion owns its keys before either CAD shortcuts or text editors see them.
+            panel_runtime::reserve_host_input(self, ctx);
             if !keymap::capturing(self) {
                 expression_complete::begin_frame(ctx);
             }
@@ -3215,6 +3294,7 @@ impl SolveApp {
             agent_chat::settings::dialog(self, ui.ctx());
         }
         if self.home.open {
+            panel_runtime::hide_app_host(self);
             home::show(self, ui);
             if self.home.open {
                 // Agent detection runs in the background and is only received by `agent_chat::poll`
@@ -3227,127 +3307,145 @@ impl SolveApp {
             }
         }
         // The status bar first: it spans the window's width below History and the side panels.
-        status_bar::show(self, ui);
-        let floating = render_workspace::active(self) || ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Panel).floating();
-        timeline::follow_view_pick(self);
-        render_ui::focus_shortcut(self, ui);
-        let show_timeline = self.ui.show_timeline && !render_workspace::active(self) && !self.preferences.history_in_browser;
-        let left_timeline = show_timeline && self.preferences.timeline_left;
-        timeline_left::animate_folds(self, ui.ctx());
-        if !floating && !self.embedded {
-            toolbar::toolbar(self, ui);
-        }
-        theme::TabAccent::publish(self, ui.ctx());
-        browser::publish_row_prefs(self, ui.ctx());
-        if !floating {
-            agent_chat::show(self, ui);
-        }
-        if !floating && show_timeline && !left_timeline {
-            timeline::timeline(self, ui);
-        }
-        // Browser hugs its contents in either layout; it never becomes a full-height blank column.
-        if !self.ui.show_browser || render_ui::focused(self) {
-            self.shell.browser = None;
-            shell::register_panel(self, "render:browser", None, None);
-            shell::register_panel(self, "render:appearances", None, None);
-        }
-        if floating || left_timeline || !show_timeline {
-            self.shell.history = None;
-        }
-        // The model draws next: a dialog the toolbar closed last frame no longer shows its sketch.
-        dialogs::sync_feature_edit(self);
-        let full = ui.available_rect_before_wrap();
-        if floating {
-            let cards = toolbar::shell_cards(self, full);
-            self.shell.cards = vec![cards.workspace, cards.ribbon];
-            self.shell.history = if left_timeline {
-                let below_ribbon = egui::Rect::from_min_max(egui::pos2(full.left(), cards.bottom), full.max);
-                // A dialog in the left column holds the History's place.
-                (!dialog_column::holds(self)).then(|| timeline_left::floating_rect(self, below_ribbon))
-            } else {
-                show_timeline.then(|| timeline::floating_rect(full))
-            };
-            // Draw the scene first, then let the unchanged panel layouts cover it. The
-            // viewport keeps its full projection even underneath the browser and cards.
-            preview::update(self, ui.ctx());
-            // A camera drag that began on the model keeps capture across cards. New
-            // gestures over chrome are blocked, as are selection drags into the ribbon.
-            let continuing_navigation = ui.input(|i| {
-                (i.pointer.middle_down() || i.pointer.secondary_down())
-                    && i.pointer.press_origin().is_some_and(|p| full.contains(p) && !shell::covered(self, p))
-            });
-            // A captured comparison divider also keeps its primary drag across floating cards.
-            let continuing_comparison = render_workspace::comparison_drag_captured(self) && ui.input(|i| i.pointer.primary_down());
-            let blocked =
-                !continuing_navigation && !continuing_comparison && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| shell::covered(self, p));
-            let mut viewport_ui = ui.new_child(egui::UiBuilder::new().max_rect(full).id_salt("floating_viewport"));
-            if blocked {
-                // Disabled only to shield the scene from input under a card or menu; it must
-                // not fade, or the whole viewport dims whenever the pointer is over the shell.
-                viewport_ui.visuals_mut().disabled_alpha = 1.0;
-                viewport_ui.disable();
+        if self.universal_panel_host_enabled() {
+            self.universal_workspace_ui(ui);
+            // Browser-owned editors retain their independent legacy windows,
+            // drafts and capture questions while the Browser host is suppressed.
+            browser::editors(self, ui);
+        } else {
+            status_bar::show(self, ui);
+            let floating = render_workspace::active(self) || ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Panel).floating();
+            timeline::follow_view_pick(self);
+            render_ui::focus_shortcut(self, ui);
+            let show_timeline = self.ui.show_timeline && !render_workspace::active(self) && !self.preferences.history_in_browser;
+            let left_timeline = show_timeline && self.preferences.timeline_left;
+            timeline_left::animate_folds(self, ui.ctx());
+            if !floating && !self.embedded {
+                toolbar::toolbar(self, ui);
             }
-            self.show_workspace(&mut viewport_ui);
-            shell::paint_top_corners(ui.painter(), full, theme::Tokens::get().app_bar);
-            toolbar::toolbar(self, ui);
             theme::TabAccent::publish(self, ui.ctx());
-        }
-        if floating && show_timeline && !left_timeline {
-            timeline::timeline(self, ui);
-        }
-        dialog_column::layout(self, ui.available_rect_before_wrap());
-        if left_timeline {
-            timeline_left::left_panel(self, ui);
-        }
-        if render_workspace::active(self) {
-            render_ui::shots_strip(self, ui);
-            render_workspace::panel(self, ui);
-        }
-        if self.ui.show_browser && !render_ui::focused(self) {
-            browser::browser(self, ui);
-        }
-        // All shared semantic content has now submitted its output. Apply it before the
-        // viewport/dialog/menu consumers, regardless of which presentations were visible.
-        semantic_content::finalize(self, ui.ctx());
-        browser::editors(self, ui);
-        if floating {
-            agent_chat::show(self, ui);
-        }
-        Container::new(ui.ctx(), Surface::Viewport)
-            .central()
-            .frame(Container::new(ui.ctx(), Surface::Viewport).edge_frame(egui::Color32::TRANSPARENT))
-            .show(ui, |ui| {
-                let panel_content = ui.max_rect();
-                self.shell.content = Some(shell::workspace_content(self, panel_content));
-                if floating {
-                    self.shell.panels = [
-                        egui::Rect::from_min_max(egui::pos2(full.left(), panel_content.top()), egui::pos2(panel_content.left(), full.bottom())),
-                        egui::Rect::from_min_max(egui::pos2(panel_content.right(), panel_content.top()), full.max),
-                    ]
-                    .into_iter()
-                    .filter(|r| r.is_positive())
-                    .collect();
-                    viewport::refresh_layout(self, ui.ctx());
+            browser::publish_row_prefs(self, ui.ctx());
+            if !floating {
+                agent_chat::show(self, ui);
+            }
+            if !floating && show_timeline && !left_timeline {
+                timeline::timeline(self, ui);
+            }
+            // Browser hugs its contents in either layout; it never becomes a full-height blank column.
+            if !self.ui.show_browser || render_ui::focused(self) {
+                self.shell.browser = None;
+                shell::register_panel(self, "render:browser", None, None);
+                shell::register_panel(self, "render:appearances", None, None);
+            }
+            if floating || left_timeline || !show_timeline {
+                self.shell.history = None;
+            }
+            // The model draws next: a dialog the toolbar closed last frame no longer shows its sketch.
+            dialogs::sync_feature_edit(self);
+            let full = ui.available_rect_before_wrap();
+            if floating {
+                let cards = toolbar::shell_cards(self, full);
+                self.shell.cards = vec![cards.workspace, cards.ribbon];
+                self.shell.history = if left_timeline {
+                    let below_ribbon = egui::Rect::from_min_max(egui::pos2(full.left(), cards.bottom), full.max);
+                    // A dialog in the left column holds the History's place.
+                    (!dialog_column::holds(self)).then(|| timeline_left::floating_rect(self, below_ribbon))
                 } else {
-                    preview::update(self, ui.ctx());
-                    self.show_workspace(ui);
+                    show_timeline.then(|| timeline::floating_rect(full))
+                };
+                // Draw the scene first, then let the unchanged panel layouts cover it. The
+                // viewport keeps its full projection even underneath the browser and cards.
+                preview::update(self, ui.ctx());
+                // A camera drag that began on the model keeps capture across cards. New
+                // gestures over chrome are blocked, as are selection drags into the ribbon.
+                let continuing_navigation = ui.input(|i| {
+                    (i.pointer.middle_down() || i.pointer.secondary_down())
+                        && i.pointer.press_origin().is_some_and(|p| full.contains(p) && !shell::covered(self, p))
+                });
+                // A captured comparison divider also keeps its primary drag across floating cards.
+                let continuing_comparison = render_workspace::comparison_drag_captured(self) && ui.input(|i| i.pointer.primary_down());
+                let blocked =
+                    !continuing_navigation && !continuing_comparison && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| shell::covered(self, p));
+                let mut viewport_ui = ui.new_child(egui::UiBuilder::new().max_rect(full).id_salt("floating_viewport"));
+                if blocked {
+                    // Disabled only to shield the scene from input under a card or menu; it must
+                    // not fade, or the whole viewport dims whenever the pointer is over the shell.
+                    viewport_ui.visuals_mut().disabled_alpha = 1.0;
+                    viewport_ui.disable();
                 }
-            });
+                self.show_workspace(&mut viewport_ui);
+                shell::paint_top_corners(ui.painter(), full, theme::Tokens::get().app_bar);
+                toolbar::toolbar(self, ui);
+                theme::TabAccent::publish(self, ui.ctx());
+            }
+            if floating && show_timeline && !left_timeline {
+                timeline::timeline(self, ui);
+            }
+            dialog_column::layout(self, ui.available_rect_before_wrap());
+            if left_timeline {
+                timeline_left::left_panel(self, ui);
+            }
+            if render_workspace::active(self) {
+                render_ui::shots_strip(self, ui);
+                render_workspace::panel(self, ui);
+            }
+            if self.ui.show_browser && !render_ui::focused(self) {
+                browser::browser(self, ui);
+            }
+            // Apply shared Browser/History output before viewport and menu consumers.
+            semantic_content::finalize(self, ui.ctx());
+            browser::editors(self, ui);
+            if floating {
+                agent_chat::show(self, ui);
+            }
+            Container::new(ui.ctx(), Surface::Viewport)
+                .central()
+                .frame(Container::new(ui.ctx(), Surface::Viewport).edge_frame(egui::Color32::TRANSPARENT))
+                .show(ui, |ui| {
+                    let panel_content = ui.max_rect();
+                    self.shell.content = Some(shell::workspace_content(self, panel_content));
+                    if floating {
+                        self.shell.panels = [
+                            egui::Rect::from_min_max(egui::pos2(full.left(), panel_content.top()), egui::pos2(panel_content.left(), full.bottom())),
+                            egui::Rect::from_min_max(egui::pos2(panel_content.right(), panel_content.top()), full.max),
+                        ]
+                        .into_iter()
+                        .filter(|r| r.is_positive())
+                        .collect();
+                        viewport::refresh_layout(self, ui.ctx());
+                    } else {
+                        preview::update(self, ui.ctx());
+                        self.show_workspace(ui);
+                    }
+                });
+        }
         if render_workspace::active(self) {
             render_ui::overlays(self, ui);
+        }
+        // Measure current persistent sketch chrome before the host's early
+        // confirmation pair. Its answer still precedes this frame's dialog.
+        if self.universal_panel_host_enabled() {
+            sketch_palette::show(self, ui.ctx());
+            self.viewport.host_windows = ui_kit::Container::host_window_regions(ui.ctx());
+            viewport::refresh_layout(self, ui.ctx());
         }
         // Before the dialog: a click on the view's OK or Cancel is for this frame's dialog.
         view_confirm::show(self, ui.ctx());
         dialogs::show(self, ui.ctx());
         issue_report::CadInput::block(self, ui, report_input);
-        sketch_palette::show(self, ui.ctx());
-        self.resolve_fit(ui.ctx());
+        if !self.universal_panel_host_enabled() {
+            sketch_palette::show(self, ui.ctx());
+        }
+        if !self.universal_panel_host_enabled() {
+            self.resolve_fit(ui.ctx());
+        }
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
         sketch_report::show(self, ui.ctx());
         bom_panel::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
+        mesh_units::show(self, ui.ctx());
         stand_up::show(self, ui.ctx());
         prefs_notice::show(self, ui.ctx());
         context_menu::show(self, ui.ctx());
@@ -3359,6 +3457,20 @@ impl SolveApp {
         shortcut_box::show(self, ui.ctx());
         prefs::show(self, ui.ctx());
         toolbar_custom::window(self, ui.ctx());
+        // All persistent producers have now registered this pass's actual
+        // visible paint. Place independent controls and finish result navigation
+        // against those footprints; the render domain stays unchanged.
+        if self.universal_panel_host_enabled() {
+            self.viewport.host_windows = ui_kit::Container::host_window_regions(ui.ctx());
+            if let Some(rect) = self.viewport.rect.filter(|rect| rect.is_positive() && rect.is_finite()) {
+                let mut controls = ui.new_child(egui::UiBuilder::new().id_salt("universal_panel_controls").max_rect(rect));
+                controls.set_clip_rect(controls.clip_rect().intersect(rect));
+                render_workspace::host_result_overlays(self, &mut controls);
+                viewport::show_host_controls(self, &mut controls, rect);
+            }
+            self.resolve_fit(ui.ctx());
+        }
+        panel_runtime::finish_app_host(self, ui);
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
