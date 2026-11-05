@@ -24,20 +24,16 @@ with bugs: not everything that worked before works now, and users meet those fai
 The job now is to make what people actually build work again, correctly. It is not to polish code
 paths nobody reaches.
 
-**What matters now, in this order.** Take the highest item you can make progress on; finish what
-is open before starting anything new.
-1. **Main green.** Main's difftest sweep is red, and every pull request's difftest stays red until
-   it is green (#2790). Fixing or recording each red unit comes before any other work (#2794).
-2. **The layer split.** The exact extension (#2797, then the curve side #2738), and the
-   operations the kernel rig still reports unported (stitch, `union_all`, loft, `chamfer_sides`,
-   sweep: `cargo test -p solidcore-ops --test kernel_cases -- --ignored`).
-3. **The rig's real failures** (#2793): the knife-edge chamfers (#851; the owner's ruling is that
-   they build, as the chord between the ball's contact points), the edge counts at tangent holes,
-   the touching cylinders.
-4. **Blends:** the certificate's root cause (#2690) and the G2 setback corner (#2697).
-5. **The shell, offset and thicken rebuild** (#2350).
+**What to work on: what has been reported.** Take an open issue someone reported (a user, a
+maintainer, a failing rig case or sweep), in this order, and claim it before you start:
+1. **`urgent` issues.** Main's red difftest sweep comes first (#2794 lists each red unit and the
+   cases): every pull request's difftest stays red until main is green.
+2. **`help wanted` issues**, oldest first among equals.
+3. **The rig's failures and unported operations** with an issue: the case names its operation
+   and the result it expects (`cargo test -p solidcore-ops --test kernel_cases -- --ignored`).
 
-Issues and pull requests for these carry the `urgent` label. Those open for anyone to take also carry `help wanted`: start there.
+Work already taken is visible: an issue's assignee, its `in progress` label, or an open pull
+request that names it. Check all three, and build on the existing work rather than next to it.
 
 **What not to work on.**
 - **Defects you think you found** in code no user reaches: an overflow from an impossible input,
@@ -48,8 +44,8 @@ Issues and pull requests for these carry the `urgent` label. Those open for anyo
 - **Speed tricks.** A speed-up is taken only with its root cause, shown as a count (evaluations,
   subdivisions, enclosures), never a timing, on a case that is slow for users or for CI. Making a
   slow path a constant factor faster, or making a slow test cheaper, is not taken.
-- **Anything off the list** waits. A pull request names, in its first lines, the item above it
-  serves; one that serves none is reviewed after all the ones that do.
+- **Anything not reported** waits. A pull request names, in its first lines, the issue it fixes;
+  one that fixes no reported issue is reviewed after all the ones that do.
 
 ## 1. Hard rules
 
