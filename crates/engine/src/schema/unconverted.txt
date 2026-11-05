@@ -120,12 +120,9 @@ parameters.list
 parameters.move
 parameters.rename
 parameters.users
-plastic.assign_rule
 plastic.boss
 plastic.lip
-plastic.manage_rules
 plastic.rest
-plastic.rules
 plastic.snap_fit
 render.aging.describe
 render.backends

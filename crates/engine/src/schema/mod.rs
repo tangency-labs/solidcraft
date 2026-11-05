@@ -76,6 +76,7 @@ pub mod motion;
 pub mod panels;
 pub mod parameter_sweep;
 pub mod parts;
+pub mod plastic;
 pub mod print_face;
 pub mod render;
 pub mod render_library;
