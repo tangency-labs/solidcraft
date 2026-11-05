@@ -4309,6 +4309,7 @@ dependencies = [
 name = "solidcraft-io"
 version = "0.40.0-rc.2"
 dependencies = [
+ "cadmpeg-container",
  "cadmpeg-core",
  "cadmpeg-ir",
  "cadmpeg-registry",
