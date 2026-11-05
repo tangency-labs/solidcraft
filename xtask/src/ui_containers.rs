@@ -168,6 +168,7 @@ impl<'ast> Visit<'ast> for ContainerGuard {
         let attrs = match item {
             syn::Item::Mod(i) => &i.attrs,
             syn::Item::Fn(i) => &i.attrs,
+            syn::Item::Macro(i) => &i.attrs,
             _ => return visit::visit_item(self, item),
         };
         if !test_only(attrs) {
@@ -317,6 +318,7 @@ fn violations(source: &str) -> Result<Vec<String>, String> {
             let attrs = match item {
                 syn::Item::Mod(i) => &i.attrs,
                 syn::Item::Fn(i) => &i.attrs,
+                syn::Item::Macro(i) => &i.attrs,
                 _ => return visit::visit_item(self, item),
             };
             if !test_only(attrs) {
@@ -525,6 +527,7 @@ mod tests {
             let width = ui.spacing().tooltip_width;
         }
         #[cfg(test)] mod tests { fn fixture(response: egui::Response) { response.on_hover_text(tip); } }
+        #[cfg(test)] macro_rules! fixture_tip { ($r:expr) => { $r.on_hover_text(tip) }; }
     "#
             )
             .is_empty()
