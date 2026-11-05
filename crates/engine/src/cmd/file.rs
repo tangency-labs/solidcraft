@@ -696,6 +696,21 @@ impl Session {
         self.saved_visibility = done.saved_visibility.clone();
     }
 
+    /// The design's file was renamed (browser OPFS rename, or an equivalent host move): keep the
+    /// open session on the new path, and when the design name was borrowed from the file, follow
+    /// it so the tab title matches the file list (#11375). A name the user chose is kept, as on
+    /// Save As.
+    pub fn follow_file_rename(&mut self, old_path: &str, new_path: &str) {
+        if self.path.as_deref() != Some(old_path) || old_path == new_path {
+            return;
+        }
+        if let Some(stem) = saved_name(&self.doc.name, Some(old_path), new_path, self.user_named) {
+            let from = self.doc.name.clone();
+            rename_design(self, &from, &stem);
+        }
+        self.path = Some(new_path.to_string());
+    }
+
     /// Another program or computer wrote the design's file since it was opened or last saved:
     /// saving to it would replace that work (#5467). A file that is gone has not changed.
     pub fn disk_changed(&self) -> bool {
@@ -1199,6 +1214,34 @@ mod tests {
         let has = |cat: &str| rows.iter().any(|r| r["category"] == cat);
         assert!(has("import") && has("solidcore"), "{p}");
         assert!(p["by_category"].as_array().is_some_and(|c| !c.is_empty()) && p["wall_ms"].as_f64().is_some_and(|w| w > 0.0), "{p}");
+    }
+
+    /// Renaming the open design's file updates its path and, when the name came from the file,
+    /// the design name the tab shows (#11375).
+    #[test]
+    fn follow_file_rename_updates_path_and_borrowed_design_name() {
+        let mut s = Session::default();
+        s.doc_mut().name = "Plate".into();
+        s.path = Some("opfs://Plate.solidcraft".into());
+        s.user_named = false;
+        s.follow_file_rename("opfs://Plate.solidcraft", "opfs://Bracket.solidcraft");
+        assert_eq!(s.path.as_deref(), Some("opfs://Bracket.solidcraft"));
+        assert_eq!(s.doc.name, "Bracket");
+
+        let mut kept = Session::default();
+        kept.doc_mut().name = "My part".into();
+        kept.path = Some("opfs://Plate.solidcraft".into());
+        kept.user_named = true;
+        kept.follow_file_rename("opfs://Plate.solidcraft", "opfs://Bracket.solidcraft");
+        assert_eq!(kept.path.as_deref(), Some("opfs://Bracket.solidcraft"));
+        assert_eq!(kept.doc.name, "My part");
+
+        let mut other = Session::default();
+        other.doc_mut().name = "Other".into();
+        other.path = Some("opfs://Other.solidcraft".into());
+        other.follow_file_rename("opfs://Plate.solidcraft", "opfs://Bracket.solidcraft");
+        assert_eq!(other.path.as_deref(), Some("opfs://Other.solidcraft"));
+        assert_eq!(other.doc.name, "Other");
     }
 
     /// #8139: with `objects: "component"` a 3MF has one object for each placement of a component
