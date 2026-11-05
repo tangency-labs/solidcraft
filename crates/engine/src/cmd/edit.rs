@@ -1718,6 +1718,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "sheet.perforate"
                 | "sheet.fold"
                 | "sheet.path_flange"
+                | "sheet.jog"
                 | "sheet.unfold"
                 | "sheet.refold"
                 | "sheet.convert"

@@ -1245,6 +1245,28 @@ struct ReturnCorner {
     cb: Vec2,
 }
 
+/// Where a fold's line lies on its panel (see [`SheetBody::fold_frame`]).
+struct FoldFrame {
+    panel: Option<usize>,
+    pts: Ring<Vec2>,
+    outline: Loop2,
+    d: Vec2,
+    n: Vec2,
+    l: f64,
+    span: (f64, f64),
+}
+
+/// The angle and radius of a fold or jog bend are usable.
+fn check_bend(angle: f64, radius: f64) -> Result<()> {
+    if !(angle > 1e-6 && angle <= std::f64::consts::PI - 1e-6) {
+        return Err(DocError::Invalid("the fold angle must be between 0 and 180°".into()));
+    }
+    if !(radius >= 0.0) {
+        return Err(DocError::Invalid("the bend radius must not be negative".into()));
+    }
+    Ok(())
+}
+
 impl SheetBody {
     /// Whether the flat pattern still describes the body: refused, naming the feature, once a
     /// feature that is not sheet metal changed the body's material (see `altered_by`). The flat
@@ -4258,26 +4280,11 @@ impl SheetBody {
         }
     }
 
-    /// [`Self::add_fold`]; `other_side` moves the side the fixed point would keep.
-    #[allow(clippy::too_many_arguments)]
-    fn fold_side(
-        &mut self,
-        a: Vec3,
-        b: Vec3,
-        angle: f64,
-        radius: f64,
-        position: &str,
-        flip: bool,
-        fixed: Option<Vec3>,
-        warning: &mut Option<String>,
-        other_side: bool,
-    ) -> Result<usize> {
-        if !(angle > 1e-6 && angle <= std::f64::consts::PI - 1e-6) {
-            return Err(DocError::Invalid("the fold angle must be between 0 and 180°".into()));
-        }
-        if !(radius >= 0.0) {
-            return Err(DocError::Invalid("the bend radius must not be negative".into()));
-        }
+    /// The frame of a fold along the line `a`, `b` (world points): the panel it lies on, that
+    /// panel's outline, the line's direction `d`, the direction `n` toward the side that moves,
+    /// the line's position `l` along `n` and the line's extent along `d`. `other_side` moves the
+    /// side the fixed point would keep.
+    fn fold_frame(&self, a: Vec3, b: Vec3, fixed: Option<Vec3>, warning: &mut Option<String>, other_side: bool) -> Result<FoldFrame> {
         // The panel the line lies on: both ends on its top or bottom face, the middle inside it.
         let on_face = |q: Vec3| q.z.abs() < 1e-4 || (q.z - self.t).abs() < 1e-4;
         let mut found = None;
@@ -4334,24 +4341,127 @@ impl SheetBody {
             n = n * -1.0;
         }
         let l = a2.dot(n);
-        let probe = SheetFlange {
-            parent: panel,
-            p: a2,
-            d,
-            len: 1.0,
-            n,
-            angle,
-            radius,
-            leg: 0.0,
-            ext: (0.0, 0.0),
-            slope: (0.0, 0.0),
-            tear: (false, false),
-            shape: None,
-            exact: None,
-            zone_shape: None,
-            tag: String::new(),
+        let span = (a2.dot(d).min(b2.dot(d)), a2.dot(d).max(b2.dot(d)));
+        Ok(FoldFrame { panel, pts, outline, d, n, l, span })
+    }
+
+    /// Bend allowance of a bend of `angle` (radians, either sign) and inner `radius`.
+    fn bend_allowance(&self, angle: f64, radius: f64) -> f64 {
+        angle.abs() * (radius + self.k * self.t)
+    }
+
+    /// A jog across a flat panel: the sheet bends by `angle` along the line `a`, `b` (world
+    /// points), runs straight for a short wall, and bends back, so the far side ends up parallel
+    /// to the near one, `offset` away (`measure`: `outside` = outer face to outer face, `inside`
+    /// = inner face to inner face, `faces` = a face to the same face). `position` says where
+    /// the line sits in the whole jog: `start`, `middle` or `end` of the span (two bends and the
+    /// wall) measured from the line toward the side that moves. Both bends are cut from the
+    /// existing sheet like a fold, so the flat pattern keeps its size. Returns the flange of the
+    /// second bend. An error leaves the sheet as it was.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_jog(
+        &mut self,
+        a: Vec3,
+        b: Vec3,
+        offset: f64,
+        measure: &str,
+        angle: f64,
+        radius: f64,
+        position: &str,
+        flip: bool,
+        fixed: Option<Vec3>,
+        warning: &mut Option<String>,
+    ) -> Result<usize> {
+        let backup = self.clone();
+        let r = self.jog(a, b, offset, measure, angle, radius, position, flip, fixed, warning);
+        if r.is_err() {
+            *self = backup;
+        }
+        r
+    }
+
+    /// The smallest face-to-same-face shift (`H`) of a jog of `angle` and `radius`: the one
+    /// whose straight wall has no length.
+    fn jog_min_shift(&self, angle: f64, radius: f64) -> f64 {
+        (2.0 * radius + self.t) * (1.0 - angle.cos())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn jog(
+        &mut self,
+        a: Vec3,
+        b: Vec3,
+        offset: f64,
+        measure: &str,
+        angle: f64,
+        radius: f64,
+        position: &str,
+        flip: bool,
+        fixed: Option<Vec3>,
+        warning: &mut Option<String>,
+    ) -> Result<usize> {
+        check_bend(angle, radius)?;
+        if !offset.is_finite() || offset < 0.0 {
+            return Err(DocError::Invalid("the jog offset must be a number that is not negative".into()));
+        }
+        // From the offset as measured to the shift of a face to the same face.
+        let (shift_of, name): (f64, &str) = match measure {
+            "outside" => (-self.t, "outside to outside"),
+            "inside" => (self.t, "inside to inside"),
+            "faces" => (0.0, "face to the same face"),
+            o => return Err(DocError::Invalid(format!("unknown jog measure `{o}` (outside, inside or faces)"))),
         };
-        let ba = self.allowance(&probe);
+        let h = offset + shift_of;
+        let min_h = self.jog_min_shift(angle, radius);
+        let wall = (h - min_h) / angle.sin();
+        if !(wall > 1e-3) {
+            let min_offset = min_h - shift_of;
+            return Err(DocError::Invalid(format!(
+                "the offset is too small for two bends of radius {radius:.3} mm at {:.1}°: measured {name} it must be more than {min_offset:.3} mm (it is {offset:.3} mm)",
+                angle.to_degrees()
+            )));
+        }
+        let ba = self.bend_allowance(angle, radius);
+        let span = 2.0 * ba + wall;
+        let FoldFrame { panel, pts, outline, d, n, l, span: line } = self.fold_frame(a, b, fixed, warning, false)?;
+        let s0 = match position {
+            "start" => l,
+            "middle" | "center" | "centre" => l - span / 2.0,
+            "end" => l - span,
+            o => return Err(DocError::Invalid(format!("unknown jog position `{o}` (start, middle or end)"))),
+        };
+        let before = self.flanges.len();
+        let first = self.fold_at(panel, &pts, &outline, (d, n), s0, line, angle, radius, flip)?;
+        if self.flanges.len() != before + 1 {
+            return Err(DocError::Invalid("not supported yet: a jog whose first bend splits the sheet into separate tabs".into()));
+        }
+        // The second bend folds the panel the first made, straight on its own coordinates.
+        let wall_outline = self.flanges.get(first).map(|f| self.panel(f).outer).ok_or_else(|| DocError::Invalid("jog".into()))?;
+        let wall_panel = dedup(&wall_outline.ccw().polyline(1e-3));
+        let second = self.fold_at(Some(first), &wall_panel, &wall_outline, (d, n), s0 + ba + wall, line, angle, radius, !flip)?;
+        if self.flanges.len() != before + 2 {
+            return Err(DocError::Invalid("not supported yet: a jog whose second bend splits the sheet into separate tabs".into()));
+        }
+        Ok(second)
+    }
+
+    /// [`Self::add_fold`]; `other_side` moves the side the fixed point would keep.
+    #[allow(clippy::too_many_arguments)]
+    fn fold_side(
+        &mut self,
+        a: Vec3,
+        b: Vec3,
+        angle: f64,
+        radius: f64,
+        position: &str,
+        flip: bool,
+        fixed: Option<Vec3>,
+        warning: &mut Option<String>,
+        other_side: bool,
+    ) -> Result<usize> {
+        check_bend(angle, radius)?;
+        let FoldFrame { panel, pts, outline, d, n, l, span } = self.fold_frame(a, b, fixed, warning, other_side)?;
+        let ba = self.bend_allowance(angle, radius);
         let s0 = match position {
             "centerline" | "center" | "centre" => l - ba / 2.0,
             "start" => l,
@@ -4359,9 +4469,28 @@ impl SheetBody {
             "mould" | "mold" => l - (radius + self.t) * (angle / 2.0).tan(),
             o => return Err(DocError::Invalid(format!("unknown fold position `{o}` (centerline, start, end or mould)"))),
         };
-        let fixed_part = clip(&pts, n * s0, n * -1.0);
-        let moving = clip(&pts, n * (s0 + ba), n);
-        let strip = clip(&clip(&pts, n * s0, n), n * (s0 + ba), n * -1.0);
+        self.fold_at(panel, &pts, &outline, (d, n), s0, span, angle, radius, flip)
+    }
+
+    /// Fold panel `panel` (outline `pts`, as drawn `outline`) with the bend zone `s0..s0 + BA` along
+    /// `n` (the direction of the side that moves, `d` along the line, `span` the line's extent along `d`).
+    #[allow(clippy::too_many_arguments)]
+    fn fold_at(
+        &mut self,
+        panel: Option<usize>,
+        pts: &[Vec2],
+        outline: &Loop2,
+        (d, n): (Vec2, Vec2),
+        s0: f64,
+        span: (f64, f64),
+        angle: f64,
+        radius: f64,
+        flip: bool,
+    ) -> Result<usize> {
+        let ba = self.bend_allowance(angle, radius);
+        let fixed_part = clip(pts, n * s0, n * -1.0);
+        let moving = clip(pts, n * (s0 + ba), n);
+        let strip = clip(&clip(pts, n * s0, n), n * (s0 + ba), n * -1.0);
         if signed_area(&fixed_part).abs() < 1e-9 || signed_area(&moving).abs() < 1e-9 {
             return Err(DocError::Invalid("the fold line must cross the sheet with material on both sides of the bend".into()));
         }
@@ -4375,9 +4504,8 @@ impl SheetBody {
             _ => strip,
         };
         if strips.len() > 1 {
-            let span = (a2.dot(d).min(b2.dot(d)), a2.dot(d).max(b2.dot(d)));
             let angle = if flip { -angle } else { angle };
-            return self.fold_tabs(panel, &pts, (n, d), (s0, ba), span, (angle, radius), &strips);
+            return self.fold_tabs(panel, pts, (n, d), (s0, ba), span, (angle, radius), &strips);
         }
         // The bend zone is a rectangle across the panel, or straight edges of the sheet slant
         // across it, or curved ones do. Those ends fold to helices and curves, as torn ends and
@@ -4388,7 +4516,7 @@ impl SheetBody {
         let mut zone_shape = None;
         // An outline with curves is cut exactly, wherever the curves are, so they stay as drawn in
         // the flat pattern; a cut that doesn't come out whole falls back on the chords.
-        let cut = if outline.segs.iter().all(|e| matches!(e, Seg2::Line { .. })) { None } else { curved_fold(&outline, n, d, s0, ba) };
+        let cut = if outline.segs.iter().all(|e| matches!(e, Seg2::Line { .. })) { None } else { curved_fold(outline, n, d, s0, ba) };
         if ((u1 - u0) * ba - signed_area(&strip).abs()).abs() > 1e-6 * (u1 - u0).max(1.0) * ba.max(1.0) {
             if let Some(slanted) = slanted_zone(&strip, n, d, s0, ba) {
                 ends = slanted;
@@ -4396,7 +4524,7 @@ impl SheetBody {
                 // A corner of the outline inside the zone (e.g. a fold right at a tab's root): name
                 // it and how far the line has to move to clear it.
                 let corners: Vec<(Vec2, f64)> =
-                    outline_corners(&outline).into_iter().map(|q| (q, q.dot(n) - s0)).filter(|(_, s)| *s > 1e-6 && *s < ba - 1e-6).collect();
+                    outline_corners(outline).into_iter().map(|q| (q, q.dot(n) - s0)).filter(|(_, s)| *s > 1e-6 && *s < ba - 1e-6).collect();
                 if let Some(&(c, _)) = corners.first() {
                     let on = corners.iter().fold(0.0_f64, |m, (_, s)| m.max(*s));
                     let back = corners.iter().fold(0.0_f64, |m, (_, s)| m.max(ba - *s));
