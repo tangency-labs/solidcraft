@@ -57,6 +57,28 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
     let t = Tokens::get();
     let reserve = (t.control_height * 0.75).round();
     let (enter, _, response) = editor_reserving(ui, value, "", true, reserve);
+    // Focused wheel over the field steps the count, like the arrows (#5685).
+    let wheel_key = response.id.with("count_wheel");
+    if response.has_focus() && ui.rect_contains_pointer(response.rect) {
+        let tenths = crate::value_step::wheel_tenths(ui, wheel_key);
+        if tenths != 0 {
+            // Claim even at a limit so the surrounding dialog does not move.
+            crate::navigation::claim_wheel(ui.ctx());
+            let mut notches = tenths / 10;
+            while notches != 0 {
+                let delta = notches.signum();
+                match step_count(value, delta, limits) {
+                    Some(next) => {
+                        *value = next;
+                        notches -= delta;
+                    }
+                    None => break,
+                }
+            }
+        }
+    } else {
+        ui.data_mut(|d| d.remove::<f32>(wheel_key));
+    }
     let rect = response.rect;
     let column = egui::Rect::from_min_max(egui::pos2((rect.right() - reserve).max(rect.left()), rect.top()), rect.max);
     let painter = ui.painter_at(rect);
@@ -1503,6 +1525,37 @@ pub(crate) fn mixed_slider(ui: &mut Ui, value: &mut f64, range: std::ops::RangeI
     .inner
 }
 
+/// Wheel over a focused number field nudges it by `step` per notch and consumes the scroll so a
+/// surrounding dialog does not move (#5685). Requires the pointer over the field; hovered-only
+/// (unfocused) fields keep egui's own drag-scroll. Discrete wheel events, not smooth-scroll
+/// frames, so one notch is one step.
+fn scroll_nudge(ui: &Ui, response: &Response, value: &mut f64, step: f64, range: Option<std::ops::RangeInclusive<f64>>) -> bool {
+    if !ui.is_enabled() || !response.has_focus() || !step.is_finite() || step == 0.0 {
+        return false;
+    }
+    let wheel_key = response.id.with("scroll_nudge_wheel");
+    if !ui.rect_contains_pointer(response.rect) {
+        ui.data_mut(|d| d.remove::<f32>(wheel_key));
+        return false;
+    }
+    let tenths = crate::value_step::wheel_tenths(ui, wheel_key);
+    if tenths == 0 {
+        return false;
+    }
+    // Claim even when the value is already at a range limit.
+    crate::navigation::claim_wheel(ui.ctx());
+    let next = *value + step * (tenths as f64 / 10.0);
+    let next = match &range {
+        Some(r) => next.clamp(*r.start(), *r.end()),
+        None => next,
+    };
+    if !next.is_finite() || (next - *value).abs() <= f64::EPSILON {
+        return false;
+    }
+    *value = next;
+    true
+}
+
 /// Locale-aware bounded scalar field, used for dimensionless material properties.
 pub(crate) fn scalar_field(ui: &mut Ui, value: &mut f64, range: std::ops::RangeInclusive<f64>) -> Response {
     mixed_scalar_field(ui, value, range, None)
@@ -1518,7 +1571,7 @@ fn scalar_field_impl(ui: &mut Ui, value: &mut f64, range: std::ops::RangeInclusi
     ui.style_mut().drag_value_text_style = egui::TextStyle::Monospace;
     let before = *value;
     let parsed = std::cell::Cell::new(false);
-    let field = egui::DragValue::new(value).range(range).speed(0.01).custom_parser(|text| {
+    let field = egui::DragValue::new(value).range(range.clone()).speed(0.01).custom_parser(|text| {
         let value = crate::prefs::parse_number(text);
         parsed.set(value.is_some());
         value
@@ -1532,10 +1585,13 @@ fn scalar_field_impl(ui: &mut Ui, value: &mut f64, range: std::ops::RangeInclusi
         };
         ui.add(field)
     });
+    let nudged = scroll_nudge(ui, &response, value, 0.01, Some(range));
     // Entering the first target's existing number still sets every mixed target.
     // Merely focusing and leaving the translated placeholder is inert.
     if mixed.is_some() {
-        response.flags.set(egui::response::Flags::CHANGED, *value != before || parsed.get());
+        response.flags.set(egui::response::Flags::CHANGED, *value != before || parsed.get() || nudged);
+    } else if nudged {
+        response.mark_changed();
     }
     if !plain {
         Tokens::get().input_bevel(ui, &response);
@@ -1547,7 +1603,11 @@ fn scalar_field_impl(ui: &mut Ui, value: &mut f64, range: std::ops::RangeInclusi
 /// Length held in millimetres, dragged or typed in the design's units ("0.5 in", "2 cm + 3 mm" parse).
 /// Tokens: control_height, scope control/font tokens.
 pub(crate) fn length_field(ui: &mut Ui, value: &mut f64, units: &str, decimals: u8) -> Response {
-    let response = ui.add(length_drag(value, units, decimals));
+    let mut response = ui.add(length_drag(value, units, decimals));
+    let (scale, _) = crate::prefs::unit_scale(units);
+    if scroll_nudge(ui, &response, value, scale, None) {
+        response.mark_changed();
+    }
     Tokens::get().input_bevel(ui, &response);
     scenario::publish_target(&format!("dialog:length:{}", label(ui)), response.rect);
     response
@@ -1562,7 +1622,11 @@ pub(crate) fn bounded_length_field(
     range: std::ops::RangeInclusive<f64>,
     speed: f64,
 ) -> Response {
-    let response = ui.add(length_drag(value, units, decimals).range(range).speed(speed));
+    let mut response = ui.add(length_drag(value, units, decimals).range(range.clone()).speed(speed));
+    let (scale, _) = crate::prefs::unit_scale(units);
+    if scroll_nudge(ui, &response, value, scale, Some(range)) {
+        response.mark_changed();
+    }
     scenario::publish_target(&format!("dialog:length:{}", label(ui)), response.rect);
     response
 }
@@ -1578,10 +1642,14 @@ pub(crate) fn angle_field(ui: &mut Ui, value: &mut f64) -> Response {
     if let Some(last) = ui.data(|d| d.get_temp::<f64>(set)).filter(|last| (last - shown).abs() <= 1e-9 * last.abs().max(1.0)) {
         shown = last;
     }
-    let response = ui.add(egui::DragValue::new(&mut shown).speed(1.0).suffix(" deg").custom_parser(crate::prefs::parse_number));
-    if response.changed() {
+    let mut response = ui.add(egui::DragValue::new(&mut shown).speed(1.0).suffix(" deg").custom_parser(crate::prefs::parse_number));
+    let nudged = scroll_nudge(ui, &response, &mut shown, 1.0, None);
+    if response.changed() || nudged {
         *value = shown;
         ui.data_mut(|d| d.insert_temp(set, shown));
+        if nudged {
+            response.mark_changed();
+        }
     }
     Tokens::get().input_bevel(ui, &response);
     scenario::publish_target(&format!("dialog:angle:{}", label(ui)), response.rect);
@@ -1638,7 +1706,13 @@ pub(crate) fn number_field<T: egui::emath::Numeric>(
     speed: f64,
     suffix: &str,
 ) -> Response {
-    let response = ui.add(egui::DragValue::new(value).range(range).speed(speed).suffix(suffix).custom_parser(crate::prefs::parse_number));
+    let mut response = ui.add(egui::DragValue::new(value).range(range.clone()).speed(speed).suffix(suffix).custom_parser(crate::prefs::parse_number));
+    let step = if speed >= 1.0 { 1.0 } else { speed };
+    let mut as_f64 = value.to_f64();
+    if scroll_nudge(ui, &response, &mut as_f64, step, Some(range.start().to_f64()..=range.end().to_f64())) {
+        *value = T::from_f64(as_f64);
+        response.mark_changed();
+    }
     if response.has_focus() {
         crate::prefs_search::note_key_sink(ui.ctx());
     }
@@ -1705,7 +1779,11 @@ pub(crate) fn number_fields<T: egui::emath::Numeric>(
 /// Tokens: scope control/font tokens. Values are caller data.
 pub(crate) fn track_number(ui: &mut Ui, value: &mut f64, speed: f64, decimals: usize) -> Response {
     let now = *value;
-    let response = ui.add(egui::DragValue::new(value).speed(speed).fixed_decimals(decimals).custom_parser(move |s| relative_number(s, now)));
+    let mut response = ui.add(egui::DragValue::new(value).speed(speed).fixed_decimals(decimals).custom_parser(move |s| relative_number(s, now)));
+    let step = if speed >= 1.0 { 1.0 } else { speed };
+    if scroll_nudge(ui, &response, value, step, None) {
+        response.mark_changed();
+    }
     Tokens::get().input_bevel(ui, &response);
     super::layout::publish_geometry(ui, &response);
     response

@@ -744,6 +744,67 @@ fn placement_field_keeps_focus_for_owner_validation_on_enter() {
     assert!(value.contains('x'));
 }
 
+/// #5685: with a numeric field focused, the wheel nudges by one step and does not leave the
+/// scroll for a surrounding panel.
+#[test]
+fn a_focused_angle_field_nudges_by_one_degree_on_the_wheel() {
+    let ctx = crate::fonts::test_context();
+    let degrees = std::cell::RefCell::new(30.0_f64);
+    let mut draw = |ui: &mut Ui| {
+        row(ui, "Angle", |ui| {
+            angle_field(ui, &mut degrees.borrow_mut());
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let at = scenario::rect_of("dialog:angle:Angle").expect("the angle field").center();
+    frame(&ctx, pointer(at, true), &mut draw);
+    frame(&ctx, pointer(at, false), &mut draw);
+    frame(
+        &ctx,
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Line,
+                delta: egui::vec2(0.0, 1.0),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            },
+        ],
+        &mut draw,
+    );
+    assert!((*degrees.borrow() - 31.0).abs() < 1e-9, "wheel up adds one degree: {}", *degrees.borrow());
+    frame(
+        &ctx,
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Line,
+                delta: egui::vec2(0.0, -1.0),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            },
+        ],
+        &mut draw,
+    );
+    assert!((*degrees.borrow() - 30.0).abs() < 1e-9, "wheel down subtracts one degree: {}", *degrees.borrow());
+    // Pointer away from the focused field: the wheel must not nudge it.
+    let away = egui::pos2(at.x + 400.0, at.y + 400.0);
+    frame(
+        &ctx,
+        vec![
+            egui::Event::PointerMoved(away),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Line,
+                delta: egui::vec2(0.0, 1.0),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            },
+        ],
+        &mut draw,
+    );
+    assert!((*degrees.borrow() - 30.0).abs() < 1e-9, "wheel away from the field leaves the value: {}", *degrees.borrow());
+}
+
 /// #10582: an angle typed a key at a time keeps its decimal point when its owner keeps it in
 /// radians, as Edit Canvas does, and so gives back a hair off the value the field set.
 #[test]
