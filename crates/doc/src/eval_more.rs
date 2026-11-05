@@ -778,6 +778,7 @@ pub(super) fn sheet_eval(
                 };
             let n0 = sk.sheet.panels.len();
             let several = picks.len() > 1;
+            let mut made = Vec::with_capacity(picks.len());
             for (k, (edge, height, angle)) in picks.into_iter().enumerate() {
                 // Each edge's error names it, among several.
                 let joint = sk.add_flange_on(edge, height, angle, rr, position, from, *flip).map_err(|e| match e {
@@ -787,7 +788,9 @@ pub(super) fn sheet_eval(
                 if let Some((relief, size)) = own {
                     sk.corner_reliefs.push((joint, relief, size));
                 }
+                made.push(joint);
             }
+            sk.clear_of_neighbours(&made)?;
             tag_panels(&mut sk, n0, f.id);
             if let Some(slot) = st.surface_sheets.get_mut(i) {
                 *slot = sk;

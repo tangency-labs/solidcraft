@@ -429,7 +429,7 @@ fn exact_edge(b: &Body, shape: &Shape, e: usize, path: &[Vec2], tol: f64) -> Vec
 /// where it turns toward the material (the faces are its outside) and `r` outside them where it
 /// turns away (they are its inside). None where running along the edge leads no further from the
 /// plane.
-fn bend_cut(v: Vec3, d: Vec3, m: Vec3, normals: (Vec3, Vec3), toward: bool, r: f64, t: f64, gap: f64) -> Option<f64> {
+pub(crate) fn bend_cut(v: Vec3, d: Vec3, m: Vec3, normals: (Vec3, Vec3), toward: bool, r: f64, t: f64, gap: f64) -> Option<f64> {
     let away = d.dot(m);
     if away <= 1e-9 {
         return None;
@@ -1644,7 +1644,7 @@ pub fn convert_surfaces(
 /// their tangent lines on it cross, with the corner's relief (`chosen` for the two bend joints,
 /// else the rule's): a notch, a round or a square relief belonging to the corner, or a tear tight
 /// against the rip that parts their other panels. Where a rip cuts a panel the bend joins, its
-/// metal ends at the rip's plane. Elsewhere the rule's bend relief is cut in whichever panel runs
+/// metal ends at the rip's plane, kept off it as a mitre keeps its panels. Elsewhere the rule's bend relief is cut in whichever panel runs
 /// on past the end. A bend's edge is its anchors' first [`Bend::length`], so a sheet settled again
 /// ends its bends where it did; the corners are the sheet's again. Why any relief asked for was
 /// not cut comes back; `at` names a point in what is said.
@@ -1710,6 +1710,8 @@ pub(crate) fn settle(
             let (v, into) = if e == 0 { (b.ends[0], d) } else { (b.ends[1], -d) };
             // A rip that carries on along the bend's edge, tangent to it, runs alongside the bend
             // rather than across its end, and cuts nothing off it.
+            // A mitre keeps the bend's metal as far off its plane as the panels it parts (two
+            // returns mitred at a corner, their bends meeting there, stay its gap apart).
             let planes = rips.iter().filter_map(|(r, ends, planes, ways)| {
                 let end = ends.iter().position(|p| near(*p, v))?;
                 if ways.get(end).is_some_and(|w| w.dot(into).abs() > ALONGSIDE) {
@@ -1717,16 +1719,20 @@ pub(crate) fn settle(
                 }
                 let m = planes.get(end).copied().flatten()?;
                 let rip = sheet.joints.get(*r)?;
+                let gap = match &rip.kind {
+                    JointKind::Rip(Rip { lap: Lap::Miter { gap }, .. }) => *gap,
+                    _ => 0.0,
+                };
                 let mine = |p: usize| p == b.a.panel || p == b.b.panel;
                 if mine(rip.a.panel) {
-                    Some(m)
+                    Some((m, gap))
                 } else if mine(rip.b.panel) {
-                    Some(-m)
+                    Some((-m, gap))
                 } else {
                     None
                 }
             });
-            if let Some(s) = planes.filter_map(|m| bend_cut(v, into, m, b.normals, b.toward, b.radius, t, 0.0)).reduce(f64::max) {
+            if let Some(s) = planes.filter_map(|(m, gap)| bend_cut(v, into, m, b.normals, b.toward, b.radius, t, gap)).reduce(f64::max) {
                 let a = if e == 0 { s } else { b.len - s };
                 if let Some(slot) = ends.get_mut(i).and_then(|x| x.get_mut(e)) {
                     *slot = (a, a, Relief::Notch);

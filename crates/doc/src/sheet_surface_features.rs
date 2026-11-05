@@ -73,6 +73,152 @@ impl SurfaceSheet {
         Ok(best.map(|(_, e)| e))
     }
 
+    /// Keeps the flanges of the bends `made` (a feature's, its corners closed) clear of the panel
+    /// beside their own at each end no other flange closed: where a rip parts their panel from
+    /// another at that end, and the flange lies on that panel's side of its own. A wall leaning in
+    /// over the base leans in over a return on the wall beside it. The wall's own end keeps half
+    /// the gap off the mitre between the two, which leaves it |n_q − n_p|·gap/2 from the other's
+    /// face (n_p, n_q: the faces' normals toward the flange); the flange is cut back until it keeps
+    /// that much too. Its bend stops square, and its panel's side becomes one line in the flat
+    /// through what the panel's start and its far edge need, neither less than nothing; it is
+    /// never run on. A flange of an earlier feature is left as it is.
+    pub fn clear_of_neighbours(&mut self, made: &[usize]) -> Result<()> {
+        let t = self.sheet.thickness;
+        let dev = develop(&self.sheet, 0).map_err(|e| DocError::Invalid(e.to_string()))?;
+        let places = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places)?.places;
+        let place = |i: usize| places.get(i).copied().flatten();
+        let plane = |i: usize| matches!(self.sheet.panels.get(i).map(|x| &x.surface), Some(Surface::Plane));
+        let size = self.sheet.panels.iter().map(|x| x.region.outer.polyline(1e-3).bounds().size().len()).fold(1.0, f64::max);
+        let tol = size * 1e-7;
+        let mut cuts = Vec::new();
+        for &j in made {
+            let Some(Joint { a: on_p, b: on_f, kind: JointKind::Bend(nb) }) = self.sheet.joints.get(j).cloned() else { continue };
+            let (p, f) = (on_p.panel, on_f.panel);
+            let (Some(pp), Some(pf)) = (place(p), place(f)) else { continue };
+            if !(plane(p) && plane(f)) {
+                continue;
+            }
+            for end in [0.0, nb.length] {
+                let (vp, vf) = (on_p.origin + on_p.dir * end, on_f.origin + on_f.dir * end);
+                // Closed: a rip parts the flange from another there.
+                let ends_at = |side: &[Vec2], v: Vec2| side.len() > 1 && [side.first(), side.last()].into_iter().flatten().any(|e| e.dist(v) <= tol);
+                let closed = self.sheet.joints.iter().any(|x| match &x.kind {
+                    JointKind::Rip(r) => (x.a.panel == f && ends_at(&r.edges.0, vf)) || (x.b.panel == f && ends_at(&r.edges.1, vf)),
+                    _ => false,
+                });
+                if closed {
+                    continue;
+                }
+                // The panel beside, parted from the flange's own by a rip that passes the bend's
+                // end within its reach (its sharp may lie inside the edge it stands on).
+                let reach = (nb.radius + t) * (nb.angle / 2.0).tan() + t;
+                let passes = |side: &[Vec2]| side.windows(2).any(|w| dist_to_segment(vp, w[0], w[1]) <= reach);
+                let beside = self.sheet.joints.iter().find_map(|x| match &x.kind {
+                    JointKind::Rip(r) if x.a.panel == p && passes(&r.edges.0) => Some(x.b.panel),
+                    JointKind::Rip(r) if x.b.panel == p && passes(&r.edges.1) => Some(x.a.panel),
+                    _ => None,
+                });
+                let Some(q) = beside else { continue };
+                let Some(pq) = place(q) else { continue };
+                if q == f || !plane(q) {
+                    continue;
+                }
+                // Which side of a panel's material a point lies on: 1 past its face `t` in, -1
+                // before its surface, 0 within.
+                let side = |pl: &Rigid3, x: Vec3| {
+                    let z = (x - pl.shift).dot(pl.z);
+                    if z > t {
+                        1.0
+                    } else if z < 0.0 {
+                        -1.0
+                    } else {
+                        0.0
+                    }
+                };
+                let height = self.sheet.panels.get(f).map_or(0.0, |x| reach_from(&x.region, (on_f.origin, -on_f.dir.perp())));
+                let mid_f = pf.point((on_f.origin + on_f.dir * (nb.length / 2.0) - on_f.dir.perp() * (height / 2.0)).extend(0.0));
+                let q_box = self.sheet.panels.get(q).map(|x| x.region.outer.polyline(1e-3).bounds());
+                let Some(mid_q) = q_box.map(|b| pq.point(((b.min + b.max) * 0.5).extend(0.0))) else { continue };
+                // Only a flange on the other panel's side of its own runs into it.
+                let (sp, sq) = (
+                    side(&pp, mid_f),
+                    side(&pq, pp.point(on_p.origin.extend(0.0)).lerp(pp.point((on_p.origin + on_p.dir * nb.length).extend(0.0)), 0.5)),
+                );
+                if sp == 0.0 || sq == 0.0 || side(&pp, mid_q) != sp {
+                    continue;
+                }
+                let (n_p, n_q) = (pp.z * sp, pq.z * sq);
+                let face_q = pq.shift + if sq > 0.0 { pq.z * t } else { Vec3::ZERO };
+                let keep = (n_q - n_p).len() * self.reliefs.gap.max(0.0) / 2.0;
+                let clear = |x: Vec3| n_q.dot(x - face_q) - keep;
+                // The bend, cut back square along its edge from the corner.
+                let way = if end == 0.0 { on_p.dir } else { -on_p.dir };
+                let v = pp.point(vp.extend(0.0));
+                let d = pp.vector(way.extend(0.0));
+                let Some(u_bend) =
+                    crate::sheet_surface_convert::bend_cut(v, d, n_q, (-pp.z, -pf.z), nb.toward_material, nb.radius, t, 2.0 * -clear(v))
+                else {
+                    continue;
+                };
+                // The panel: how far back each of its faces is clear, at its start (the bend's
+                // tangent line) and at its far edge.
+                let (along, into) = (if end == 0.0 { on_f.dir } else { -on_f.dir }, -on_f.dir.perp());
+                let at = |u: f64, y: f64| {
+                    let x = vf + along * u + into * y;
+                    let (c0, c1) = (clear(pf.point(x.extend(0.0))), clear(pf.point(x.extend(t))));
+                    c0.min(c1)
+                };
+                let per_u = at(1.0, 0.0) - at(0.0, 0.0);
+                if !(per_u > 1e-9) {
+                    continue;
+                }
+                let start = nb.setback(t).min(height);
+                let need = |y: f64| (-at(0.0, y) / per_u).max(0.0);
+                let (u0, u1) = (need(start), need(height));
+                if !(u_bend > 1e-9 || u0 > 1e-9 || u1 > 1e-9) {
+                    continue;
+                }
+                // Panel and bend ending together stay one straight edge.
+                let u0 = if (u0 - u_bend).abs() < 1e-9 { u_bend } else { u0 };
+                let side = (u0 > 1e-9 || u1 > 1e-9).then(|| (vf + along * u0 + into * start, vf + along * u1 + into * height));
+                cuts.push((j, end, u_bend, side));
+            }
+        }
+        // The panels first, along their anchors as they are; then the bends.
+        for &(j, end, _, side) in &cuts {
+            let (Some((a, b)), Some(Joint { b: on_f, .. })) = (side, self.sheet.joints.get(j).cloned()) else { continue };
+            let Some(m) = (b - a).normalized() else { continue };
+            let Some(s) = cross_lines((on_f.origin, on_f.dir), (a, m)).map(|c| (c - on_f.origin).dot(on_f.dir)) else { continue };
+            let Some(region) = self.sheet.panels.get(on_f.panel).map(|x| x.region.clone()) else { continue };
+            let Some((region, _)) = to_line(&region, &on_f, -1.0, end, s, m)? else {
+                return err("a flange runs into the panel beside its own, and its side can't be cut back");
+            };
+            if let Some(x) = self.sheet.panels.get_mut(on_f.panel) {
+                x.region = region;
+            }
+        }
+        for &(j, end, u, _) in cuts.iter().rev() {
+            if let Some(Joint { a, b, kind: JointKind::Bend(bend) }) = self.sheet.joints.get_mut(j) {
+                if !(bend.length - u > 1e-6) {
+                    return err("a flange runs into the panel beside its own: keeping clear of it would cut its bend away");
+                }
+                let at = if end == 0.0 { u } else { bend.length - u };
+                to_corner(a, b, bend, at, end);
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether panels `i` and `k` meet at a rip (two walls mitred at a corner).
+    fn ripped(&self, i: usize, k: usize) -> bool {
+        i != k
+            && self
+                .sheet
+                .joints
+                .iter()
+                .any(|j| matches!(j.kind, JointKind::Rip(_)) && ((j.a.panel == i && j.b.panel == k) || (j.a.panel == k && j.b.panel == i)))
+    }
+
     /// Whether a joint runs along the edge `a`–`b` of panel `i` (its anchor line holds both ends).
     fn joined(&self, i: usize, a: Vec2, b: Vec2) -> bool {
         let on = |an: &Anchor| {
@@ -154,7 +300,9 @@ impl SurfaceSheet {
         let edge = self
             .free_edge_at(pick)?
             .ok_or_else(|| DocError::Invalid("pick a free edge of the sheet (one no bend, seam or cut runs along)".into()))?;
-        self.add_flange_on(edge, height, angle, radius, position, from, flip)
+        let joint = self.add_flange_on(edge, height, angle, radius, position, from, flip)?;
+        self.clear_of_neighbours(&[joint])?;
+        Ok(joint)
     }
 
     /// [`SurfaceSheet::add_flange`] on an edge already found.
@@ -223,9 +371,11 @@ impl SurfaceSheet {
     }
 
     /// Closes the corners the bend `j`, a flange's just added, makes with the other bends standing
-    /// on its panel. Two bends whose anchors cross near an end of each, at a corner the panel's
-    /// material fills, with their flanges rising to the same side, share that corner: their
-    /// flanges' surfaces meet along the line where their planes cross. Each bend's edge then runs
+    /// on its panel, or on a panel its panel meets at a rip (a return beside another, on two walls
+    /// mitred at a corner). Two bends whose anchors cross near an end of each, at a corner the
+    /// panel's material fills (on one panel; across a rip, where their lines meet in space), with
+    /// their flanges rising to the same side, share that corner: their flanges' surfaces meet along
+    /// the line where their planes cross. Each bend's edge then runs
     /// to the corner and each flange to that line (see `to_line`), and a rip parts the two flanges
     /// along it, as far as both reach. Whatever made the other bend (Convert, Thicken or another
     /// flange), its panel is met alike. A panel whose side at the corner is no straight edge from
@@ -244,35 +394,69 @@ impl SurfaceSheet {
                 continue;
             }
             // The other bend's anchor on the panel and on its flange, and the side of each its
-            // material lies on (1 on the left).
+            // material lies on (1 on the left). Across a rip, the bend that stands on the panel
+            // beside (its first anchor's).
             let (on_q, on_w, side_q) = if a.panel == p {
                 (a, b, 1.0)
             } else if b.panel == p {
                 (b, a, -1.0)
+            } else if self.ripped(p, a.panel) {
+                (a, b, 1.0)
             } else {
                 continue;
             };
+            let across = on_q.panel != p;
             let (w, f) = (on_w.panel, on_f.panel);
             if !matches!(self.sheet.panels.get(w).map(|x| &x.surface), Some(Surface::Plane)) {
                 continue;
             }
             let (Some(Some(pf)), Some(Some(pw))) = (places.get(f), places.get(w)) else { continue };
-            let Some(c) = cross_lines((on_p.origin, on_p.dir), (on_q.origin, on_q.dir)) else { continue };
-            let (s1, s2) = ((c - on_p.origin).dot(on_p.dir), (c - on_q.origin).dot(on_q.dir));
+            // The corner: where the anchors' lines cross on the panel, or across the rip where they
+            // meet in space, in each one's chart.
+            let (c1, c2) = if across {
+                let (Some(Some(pp)), Some(Some(pq))) = (places.get(p), places.get(on_q.panel)) else { continue };
+                let line = |place: &Rigid3, an: &Anchor| (place.point(an.origin.extend(0.0)), place.vector(an.dir.extend(0.0)));
+                let Some((m1, m2)) = nearest(line(pp, &on_p), line(pq, &on_q)) else { continue };
+                if m1.dist(m2) > t * 4.0 {
+                    continue;
+                }
+                let chart = |place: &Rigid3, m: Vec3| {
+                    let q = place.inverse().point(m);
+                    Vec2::new(q.x, q.y)
+                };
+                (chart(pp, m1), chart(pq, m2))
+            } else {
+                let Some(c) = cross_lines((on_p.origin, on_p.dir), (on_q.origin, on_q.dir)) else { continue };
+                (c, c)
+            };
+            let (s1, s2) = ((c1 - on_p.origin).dot(on_p.dir), (c2 - on_q.origin).dot(on_q.dir));
             let nearer = |s: f64, len: f64| if s < len / 2.0 { 0.0 } else { len };
             let (e1, e2) = (nearer(s1, nb.length), nearer(s2, ob.length));
             let reach = reach_of(&nb) + reach_of(&ob) + t;
             if (s1 - e1).abs() > reach || (s2 - e2).abs() > reach {
                 continue;
             }
-            // A corner the panel fills: each bend runs off into the panel's side of the other.
+            // A corner the panel fills: each bend runs off into the panel's side of the other. (Across
+            // a rip the walls' own corner holds them; the flanges' meeting line is checked below.)
             let (into1, into2) = (if e1 == 0.0 { on_p.dir } else { -on_p.dir }, if e2 == 0.0 { on_q.dir } else { -on_q.dir });
-            if !(into2.dot(on_p.dir.perp()) > 1e-9 && into1.dot(on_q.dir.perp() * side_q) > 1e-9) {
+            if !across && !(into2.dot(on_p.dir.perp()) > 1e-9 && into1.dot(on_q.dir.perp() * side_q) > 1e-9) {
                 continue;
             }
             // The line the two flanges' planes meet along, from the corner into the new flange's
-            // material (on the right of its anchor), and into the other's too.
-            let Some(line) = pf.z.cross(pw.z).normalized() else { continue };
+            // material (on the right of its anchor), and into the other's too. Flanges in one plane
+            // (returns on two walls) meet on the line halving the corner between their bends.
+            let line = match pf.z.cross(pw.z).normalized() {
+                Some(line) => line,
+                None if pf.z.dot(pw.z) > 0.0 && (pw.shift - pf.shift).dot(pf.z).abs() < t * 0.5 => {
+                    let away = |place: &Rigid3, an: &Anchor, end: f64| {
+                        let d = if end == 0.0 { an.dir } else { -an.dir };
+                        place.vector(d.extend(0.0))
+                    };
+                    let Some(half) = (away(pf, &on_f, e1) + away(pw, &on_w, e2)).normalized() else { continue };
+                    half
+                }
+                None => continue,
+            };
             let flat = |v: Vec3| Vec2::new(v.x, v.y);
             let in_f = |l: Vec3| flat(pf.inverse().vector(l));
             let line = if in_f(line).dot(-on_f.dir.perp()) < 0.0 { -line } else { line };
@@ -1038,6 +1222,19 @@ fn area(r: &[Region2]) -> f64 {
     r.iter().map(Region2::area).sum()
 }
 
+/// How far a point lies from the segment `a`–`b`.
+fn dist_to_segment(p: Vec2, a: Vec2, b: Vec2) -> f64 {
+    let d = b - a;
+    let len2 = d.dot(d);
+    let s = if len2 > 0.0 { ((p - a).dot(d) / len2).clamp(0.0, 1.0) } else { 0.0 };
+    p.dist(a + d * s)
+}
+
+/// How far a region reaches from the line through `o`, along its normal `n`.
+fn reach_from(region: &Region2, (o, n): (Vec2, Vec2)) -> f64 {
+    (&region.outer.polyline(1e-4)).into_iter().map(|p| (*p - o).dot(n)).fold(0.0, f64::max)
+}
+
 fn cross_lines((p, u): (Vec2, Vec2), (q, w): (Vec2, Vec2)) -> Option<Vec2> {
     let cross = u.cross(w);
     (cross.abs() > 1e-12).then(|| p + u * ((q - p).cross(w) / cross))
@@ -1053,6 +1250,20 @@ fn to_corner(a: &mut Anchor, b: &mut Anchor, bend: &mut Bend, at: f64, end: f64)
         bend.length = at;
     }
     bend.ends = ZoneEnds { near: (0.0, bend.length), far: (0.0, bend.length) };
+}
+
+/// The points where two lines in space, each a point and a direction, come nearest each other;
+/// none for parallel lines.
+fn nearest((o1, d1): (Vec3, Vec3), (o2, d2): (Vec3, Vec3)) -> Option<(Vec3, Vec3)> {
+    let (a, b, c) = (d1.dot(d1), d1.dot(d2), d2.dot(d2));
+    let w = o1 - o2;
+    let (d, e) = (d1.dot(w), d2.dot(w));
+    let den = a * c - b * b;
+    if !(den.abs() > 1e-12 * a * c) {
+        return None;
+    }
+    let (s, u) = ((b * e - c * d) / den, (a * e - b * d) / den);
+    Some((o1 + d1 * s, o2 + d2 * u))
 }
 
 /// A panel's region with its side at a corner moved onto the line where it meets another flange:
