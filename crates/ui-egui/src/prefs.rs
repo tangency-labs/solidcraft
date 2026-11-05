@@ -1525,6 +1525,10 @@ preference_settings! {
     /// How strongly a print face stands out in the viewport (#8429): the share of the section
     /// colour in its tint, 0 to 1; its outline follows. 0 draws no highlight.
     print_face_highlight: f32 = 0.2, PAGE_GENERAL, accept(0.0..=1.0);
+    /// Print faces show in the view at all times and are saved in the design, as before #11512.
+    /// Off (the default): they show only while the Send to Slicer window is open, a save leaves
+    /// them out, and a design that has them opens without them.
+    keep_print_faces: bool = false, PAGE_GENERAL;
     /// The line about sending again replacing the slicer's file has been shown.
     slicer_resend_hint_seen: bool = false;
     /// The user has agreed to Open with EasyPrint uploading a model to Printables' servers.
@@ -2264,6 +2268,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     apply_network(&app.preferences);
     // The features computed from now on are checked as the preference says.
     app.session.set_validation(app.preferences.validation);
+    crate::print_face_ui::sync(&mut app.session, &app.preferences);
     // The profiler records while the preference is on (switched when it changes; at start-up only
     // when on, so SOLIDCRAFT_PROFILE=1 is not undone by the default).
     let profile = app.preferences.profile_operations;
@@ -6430,6 +6435,7 @@ mod tests {
             ("Fold items", PAGE_GRAPHICS),
             ("Allow network locations in designs", PAGE_GENERAL),
             ("Print face highlight", PAGE_GENERAL),
+            ("Keep print faces", PAGE_GENERAL),
         ];
         let mut found = vec![Vec::new(); cases.len()];
         let mut h = crate::scenario::Harness::new();

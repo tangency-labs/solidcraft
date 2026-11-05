@@ -59,6 +59,11 @@ pub struct SaveMesh {
 }
 
 impl SaveMesh {
+    /// Send to Slicer (or Open with EasyPrint), not Save As Mesh.
+    pub(crate) fn sends(&self) -> bool {
+        self.open
+    }
+
     /// The chosen format, as `file.save_mesh` names it (`stl`, `3mf`, `3mf-tagged`).
     #[cfg(test)]
     pub(crate) fn format_name(&self) -> &'static str {

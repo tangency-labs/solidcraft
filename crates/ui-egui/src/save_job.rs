@@ -24,6 +24,8 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
         app.set_status(crate::i18n::format("ui.edit_in_place_save_waits", &[("name", &name)]), true);
         return false;
     }
+    // A save keeps print faces only when the user keeps them (#11512).
+    crate::print_face_ui::sync(&mut app.session, &app.preferences);
     #[cfg(not(target_arch = "wasm32"))]
     if app.saving.is_none() && app.file_picker.is_none() && !app.file_load.busy() {
         let mut copy = app.session.scratch();
