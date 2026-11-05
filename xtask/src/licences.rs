@@ -182,6 +182,9 @@ fn render(root: &Path, crates: &[Crate]) -> String {
          - IBMPlexSans-Variable.ttf (assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf)\n  \
            Copyright 2017 IBM Corp. with Reserved Font Name \"Plex\"\n  \
            Source: https://github.com/IBM/plex\n\n\
+         - IBMPlexSansKR-Regular.ttf (assets/fonts/ibm-plex-sans-kr/IBMPlexSansKR-Regular.ttf)\n  \
+           Copyright 2017 IBM Corp. with Reserved Font Name \"Plex\"\n  \
+           Source: https://github.com/IBM/plex (unmodified google/fonts face)\n\n\
          - IBMPlexMono-Regular.ttf (assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf)\n  \
            Copyright 2017 IBM Corp. with Reserved Font Name \"Plex\"\n  \
            Source: https://github.com/IBM/plex\n\n"

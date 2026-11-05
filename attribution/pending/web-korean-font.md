@@ -1,0 +1,2 @@
+| assets/fonts/ibm-plex-sans-kr/IBMPlexSansKR-Regular.ttf | IBM Corp. | Unmodified IBM Plex Sans KR Regular from google/fonts commit 29731dada3b0ad91a10336c8ef5f25dc690aecc4, ofl/ibmplexsanskr; https://github.com/IBM/plex; accompanying OFL.txt; on-demand Korean web interface fallback | SIL OFL 1.1 |
+| assets/fonts/ibm-plex-sans-kr/OFL.txt | IBM Corp. | Unmodified accompanying license from google/fonts commit 29731dada3b0ad91a10336c8ef5f25dc690aecc4, ofl/ibmplexsanskr/OFL.txt | SIL OFL 1.1 |

@@ -19,8 +19,12 @@ preference restores Plex. Monospace fields keep Plex Mono.
 Egui's symbol and emoji fallbacks remain available. Desktop also appends the
 available Japanese/Chinese, Hangul and Thai system fonts to every family, ordered
 for the selected language. The web app installs Plex at startup and adds its
-bundled Japanese font asynchronously when needed, preserving the interface faces
-and any font preference.
+bundled Japanese, Chinese and Korean fonts asynchronously when their interface
+language needs them, preserving the interface faces and any font preference.
+The Korean web face is unmodified IBM Plex Sans KR Regular (SIL OFL 1.1), with
+its license in `assets/fonts/ibm-plex-sans-kr/OFL.txt`. Each downloaded face stays
+available when the language changes. A failed download keeps the existing
+session-only English fallback and preserves the saved language choice.
 
 ## Type scale and metrics
 
