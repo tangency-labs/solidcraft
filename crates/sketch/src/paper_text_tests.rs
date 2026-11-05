@@ -953,3 +953,135 @@ fn fuzz_whatever_is_set_is_a_scene() {
         }
     }
 }
+
+#[test]
+fn source_flow_retains_logical_ranges_beside_unchanged_bidi_paint_records() {
+    let source = "M \u{05e9}\u{05c1}\u{05b8}\u{05dd} 27";
+    let style = TextStyle { italic: true, ..TextStyle::default() };
+    let produced = paper_text_with_flow(source, None, "he", AT, 5.0, std::f64::consts::FRAC_PI_2, &style).unwrap();
+    let original = paper_text(source, None, "he", AT, 5.0, std::f64::consts::FRAC_PI_2, &style).unwrap().unwrap();
+    assert_eq!(produced.runs(), original.0);
+    assert_eq!(produced.fonts(), original.1);
+    assert_eq!(produced.runs().iter().map(|run| run.text.as_str()).collect::<Vec<_>>(), ["M ", "27", "\u{05e9}\u{05c1}\u{05b8}\u{05dd} "]);
+    assert_eq!(produced.flow().text(), source);
+    assert_eq!(produced.flow().run_ranges(), [0..2, 11..13, 2..11]);
+    produced.flow().check_runs(produced.runs()).unwrap();
+    let (runs, fonts, flow) = produced.into_parts();
+    flow.check_runs(&runs).unwrap();
+    mixed((runs, fonts));
+}
+
+#[test]
+fn source_flow_retains_lf_empty_lines_and_all_empty_source_without_changing_the_old_api() {
+    let source = "\nAV\n\nQ\n";
+    let produced = paper_text_with_flow(source, None, "", AT, 5.0, 0.0, &TextStyle::default()).unwrap();
+    assert_eq!(produced.flow().text(), source);
+    assert_eq!(produced.flow().run_ranges(), [1..3, 5..6]);
+    produced.flow().check_runs(produced.runs()).unwrap();
+    assert_eq!(produced.runs(), paper_text(source, None, "", AT, 5.0, 0.0, &TextStyle::default()).unwrap().unwrap().0);
+    for source in ["", "\n", "\n\n"] {
+        let produced = paper_text_with_flow(source, None, "", AT, 5.0, 0.0, &TextStyle::default()).unwrap();
+        assert_eq!(produced.flow().text(), source);
+        assert!(produced.runs().is_empty() && produced.fonts().is_empty() && produced.flow().run_ranges().is_empty());
+        produced.flow().check_runs(produced.runs()).unwrap();
+        assert!(paper_text(source, None, "", AT, 5.0, 0.0, &TextStyle::default()).unwrap().is_none());
+    }
+}
+
+#[test]
+fn source_flow_keeps_actual_fallback_font_runs_and_source_ranges() {
+    let source = "A\u{30c6}B";
+    let dirs = repo_fonts();
+    let produced = paper_text_with_flow_in(&dirs, source, Some("IBM Plex Mono"), "ja", AT, 5.0, 0.0, &TextStyle::default()).unwrap();
+    let original = paper_text_in(&dirs, source, Some("IBM Plex Mono"), "ja", AT, 5.0, 0.0, &TextStyle::default()).unwrap().unwrap();
+    assert_eq!(produced.runs(), original.0);
+    assert_eq!(produced.fonts(), original.1);
+    assert_eq!(produced.flow().text(), source);
+    assert_eq!(produced.flow().run_ranges(), [0..1, 1..4, 4..5]);
+    produced.flow().check_runs(produced.runs()).unwrap();
+    assert_eq!(produced.fonts().len(), 2);
+}
+
+#[test]
+fn source_flow_refuses_changed_glyph_cluster_font_placement_text_or_run_order() {
+    let produced = paper_text_with_flow("AV", None, "", AT, 5.0, 0.0, &TextStyle::default()).unwrap();
+    for field in 0..15 {
+        let mut runs = produced.runs().to_vec();
+        let run = &mut runs[0];
+        match field {
+            0 => run.font[0] ^= 1,
+            1 => run.scale += 0.001,
+            2 => run.origin.x += 1.0,
+            3 => run.origin.y += 1.0,
+            4 => run.angle += 0.25,
+            5 => run.slant += 0.1,
+            6 => run.rtl = !run.rtl,
+            7 => run.text = "VA".into(),
+            8 => run.glyphs[0].id ^= 1,
+            9 => run.glyphs[0].x += 0.1,
+            10 => run.glyphs[0].rise += 0.1,
+            11 => run.glyphs[0].advance += 0.1,
+            12 => run.clusters[0].glyphs.end += 1,
+            13 => run.clusters[0].text.end += 1,
+            _ => run.clusters.reverse(),
+        }
+        let error = produced.flow().check_runs(&runs).unwrap_err().to_string();
+        assert!(error.contains("paper text source flow"), "{field}: {error}");
+    }
+    assert!(produced.flow().check_runs(std::iter::empty::<&TextRun>()).is_err());
+    assert!(produced.flow().check_runs(produced.runs().iter().chain(produced.runs())).is_err());
+    // Equal run strings do not make two different baseline records interchangeable.
+    let produced = paper_text_with_flow("AA\nAA", None, "", AT, 5.0, 0.0, &TextStyle::default()).unwrap();
+    let mut changed = produced.runs().to_vec();
+    changed.swap(0, 1);
+    assert!(produced.flow().check_runs(&changed).is_err());
+    produced.flow().check_runs(produced.runs()).unwrap();
+}
+
+#[test]
+fn source_flow_factory_refuses_non_utf8_overlapping_incomplete_or_mismatched_ranges() {
+    let (runs, _) = set("AA", &TextStyle::default());
+    for (text, ranges) in [
+        ("AA", vec![]),
+        ("AA", std::iter::once(0..0).collect()),
+        ("AA", std::iter::once(0..1).collect()),
+        ("AA", std::iter::once(0..3).collect()),
+        ("AAA", std::iter::once(0..2).collect()),
+        ("XAA", std::iter::once(1..3).collect()),
+        ("AA\nX", std::iter::once(0..2).collect()),
+    ] {
+        let error = super::PaperTextFlow::issue(text, &runs, ranges).unwrap_err().to_string();
+        assert!(error.contains("paper text source flow"), "{text:?}: {error}");
+    }
+    let repeated = [runs[0].clone(), runs[0].clone()];
+    assert!(super::PaperTextFlow::issue("AAAA", &repeated, vec![0..2, 1..3]).is_err());
+    let (runs, _) = set("\u{05d0}", &TextStyle::default());
+    assert!(super::PaperTextFlow::issue("\u{05d0}", &runs, std::iter::once(0..1).collect()).is_err());
+}
+
+#[test]
+fn source_flow_bounds_text_runs_and_cumulative_fingerprint_work() {
+    let plain = TextStyle::default();
+    let produced = paper_text_with_flow(&"A".repeat(MAX_TEXT_CHARS), None, "", AT, 5.0, 0.0, &plain).unwrap();
+    produced.flow().check_runs(produced.runs()).unwrap();
+    assert!(matches!(paper_text_with_flow(&"A".repeat(MAX_TEXT_CHARS + 1), None, "", AT, 5.0, 0.0, &plain), Err(SketchError::TooLarge)));
+    let (mut runs, _) = set("A", &plain);
+    let glyph = runs[0].glyphs[0];
+    runs[0].glyphs.resize(solidcraft_geom::paper::text::MAX_RUN_GLYPHS + 1, glyph);
+    assert!(super::PaperTextFlow::issue("A", &runs, std::iter::once(0..1).collect()).is_err());
+    runs[0].glyphs.pop();
+    let many = vec![runs[0].clone(); 26];
+    let ranges = (0..26).map(|i| i..i + 1).collect();
+    let error = super::PaperTextFlow::issue(&"A".repeat(26), &many, ranges).unwrap_err().to_string();
+    assert!(error.contains("aggregate source-flow records"), "{error}");
+}
+
+#[test]
+fn source_flow_nonblocking_builtin_path_matches_the_original_ready_producer() {
+    let plain = TextStyle::default();
+    let produced = paper_text_with_flow_now(&[], "AV", None, "", AT, 5.0, 0.0, &plain).unwrap();
+    let original = paper_text_now(&[], "AV", None, "", AT, 5.0, 0.0, &plain).unwrap().unwrap();
+    assert_eq!(produced.runs(), original.0);
+    assert_eq!(produced.fonts(), original.1);
+    produced.flow().check_runs(produced.runs()).unwrap();
+}
