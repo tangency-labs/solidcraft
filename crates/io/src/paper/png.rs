@@ -5,14 +5,18 @@
 //!   ([`paper::flatten`]) and tiny-skia is given lines only: its own flattening stops at 64 lines a
 //!   curve, more than a pixel off on a large arc at a high dpi.
 //! - **Paint** as the scene says: black or a coloured paper's ink, strokes with butt caps and miter joins (limit 4), fills
-//!   even-odd. Each line is stroked once, then filled band by band; a line under a pixel wide is
-//!   drawn as tiny-skia's hairline instead, its coverage scaled by its width, so it never vanishes.
+//!   even-odd, text as its glyphs' outlines (the scene's, as SVG draws them) filled nonzero. Each
+//!   line is stroked once, then filled band by band; a line under a pixel wide is drawn as
+//!   tiny-skia's hairline instead, its coverage scaled by its width, so it never vanishes.
 //! - **Dashes:** a dashed line is cut into its dashes along the flattened line (tiny-skia's
 //!   dashing, the pattern scaled to pixels), then stroked like any line; the dashes' points count
 //!   against [`MAX_POINTS`] too.
 //! - **Bands:** the sheet is drawn [`BAND_BYTES`] of pixels at a time, with a row above and below
 //!   that isn't written, and streamed into the file, so an A0 sheet at 1200 dpi (1.6 billion
-//!   pixels) needs no more memory than an A4 one, and the bytes are the same whatever the band.
+//!   pixels) needs no more memory than an A4 one, and no band leaves a seam: where a band cuts a
+//!   shape tiny-skia may cover an edge pixel one sixteenth differently (in black and white, put it
+//!   on the other side of the threshold), so the bytes can differ with the band's height, by that
+//!   at most, at a few edge pixels (text's outlines show it, #4890 B2b).
 //! - **Pixels** are the sheet's pixel grid ([`PixelGrid::sheet`]): anchored at its top-left corner
 //!   and rounded outward, so nothing is clipped (210 mm at 300 dpi is 2481 px) and a side over
 //!   [`MAX_SIDE_PX`] is refused.
@@ -46,7 +50,8 @@ pub const PICTURE_DPI: RangeInclusive<f64> = *DPI.start()..=MAX_PICTURE_DPI;
 /// The pixels drawn at a time, as RGBA bytes.
 const BAND_BYTES: usize = 16 << 20;
 /// Rows drawn above and below each band and not written: tiny-skia starts an edge a little
-/// differently where a clip cuts it, so no written row sits on a cut and bands change nothing.
+/// differently where a clip cuts it, so no written row sits on a cut (the edge below the cut can
+/// still cover a pixel one sixteenth differently: the module's notes).
 const MARGIN: u32 = 1;
 
 /// How a sheet PNG stores its pixels.
@@ -130,17 +135,12 @@ fn write(scene: &Prepared, options: PngOptions, pictures: &dyn Pictures, out: im
                 let thin = colour != PngColour::BlackWhite && width < 1.0;
                 shapes.extend(if thin { Some(Shape::Thin(line, stroke)) } else { line.stroke(&stroke, 1.0).map(Shape::Fill) });
             }
-            GridItem::Fill { loops } => {
-                let mut builder = PathBuilder::new();
-                for l in loops {
-                    sheet.trace(&mut builder, l)?;
-                }
-                shapes.extend(builder.finish().map(Shape::EvenOdd));
-            }
+            GridItem::Fill { loops } => shapes.extend(sheet.traced(loops)?.map(Shape::EvenOdd)),
+            // Glyphs' contours may overlap, so they fill nonzero, as SVG fills them.
+            GridItem::Text { loops, .. } => shapes.extend(sheet.traced(loops)?.map(Shape::Fill)),
             GridItem::Picture { picture, clip, visible } => {
                 shapes.extend(grid.window(*visible).map(|window| Shape::Picture(*picture, window, *clip)))
             }
-            GridItem::Text { .. } => return Err(IoError::Invalid("not supported yet: text in a sheet PNG (#4890 B2)".into())),
         }
     }
     let png_error = |e: png::EncodingError| IoError::Invalid(format!("the sheet PNG: {e}"));
@@ -377,7 +377,7 @@ fn solid([r, g, b]: [u8; 3]) -> Color {
 
 /// What a band draws for one item.
 enum Shape {
-    /// A stroke's outline, filled non-zero.
+    /// Filled non-zero: a stroke's outline, or a text run's glyphs.
     Fill(Path),
     /// A fill's loops, filled even-odd.
     EvenOdd(Path),
@@ -413,6 +413,15 @@ impl Sheet {
             return Err(IoError::Invalid(format!("the sheet needs over {MAX_POINTS} points at this resolution")));
         }
         Ok(())
+    }
+
+    /// `loops` in pixels as one path, or `None` when they draw nothing.
+    fn traced(&mut self, loops: &[GridPath]) -> Result<Option<Path>> {
+        let mut builder = PathBuilder::new();
+        for l in loops {
+            self.trace(&mut builder, l)?;
+        }
+        Ok(builder.finish())
     }
 
     /// `path` onto `builder` in pixels, closed when it is.
