@@ -1224,22 +1224,65 @@ fn open_corners(
 /// [`Error::Argument`] for an index past the edges or a direction that is not finite; the
 /// kernel's refusal of an edge not between two faces.
 pub fn edge_faces_along(body: &Body, edge: usize, dir: [f64; 3]) -> Result<[(usize, f64); 2]> {
+    edge_faces_along_impl(body, None, edge, dir)
+}
+
+/// [`edge_faces_along`] with the edge and returned faces indexed by `order`.
+///
+/// # Errors
+/// As [`edge_faces_along`] and [`Body::copy_with_order`].
+pub fn edge_faces_along_ordered(
+    body: &Body,
+    order: &crate::Order,
+    edge: usize,
+    dir: [f64; 3],
+) -> Result<[(usize, f64); 2]> {
+    edge_faces_along_impl(body, Some(order), edge, dir)
+}
+
+fn edge_faces_along_impl(
+    body: &Body,
+    order: Option<&crate::Order>,
+    edge: usize,
+    dir: [f64; 3],
+) -> Result<[(usize, f64); 2]> {
     if !dir.iter().all(|x| x.is_finite()) {
         return Err(Error::Argument);
     }
+    if let Some(order) = order {
+        let (copy, mapped) = body.copy_with_order(order)?;
+        return with_body("edge_faces_along", &copy, |k, b| {
+            faces_along_indices(k, b, Some(&mapped), edge, dir)
+        })?;
+    }
     measure_body("edge_faces_along", body, |k, b| {
-        let Some(&e) = b.edge_list().get(edge) else {
-            return Ok(Err(Error::Argument));
-        };
-        let faces = faces_along(k, b, e, Vec3::new(dir[0], dir[1], dir[2]))?;
-        // the copy keeps the order: a face's index in it is its index in the body
-        let index = |f: FaceId| b.face_list().iter().position(|&g| g == f);
-        let [(f0, l0), (f1, l1)] = faces;
-        Ok(match (index(f0), index(f1)) {
-            (Some(i0), Some(i1)) => Ok([(i0, l0), (i1, l1)]),
-            _ => Err(Error::Exception),
-        })
+        faces_along_indices(k, b, None, edge, dir)
     })?
+}
+
+fn faces_along_indices(
+    k: &mut Kernel,
+    b: &mut Brep,
+    order: Option<&crate::Order>,
+    edge: usize,
+    dir: [f64; 3],
+) -> solidcore::Result<Result<[(usize, f64); 2]>> {
+    let edges = order.map_or_else(|| b.edge_list(), |o| o.edges.as_slice());
+    let Some(&e) = edges.get(edge) else {
+        return Ok(Err(Error::Argument));
+    };
+    if !b.edge_list().contains(&e) {
+        return Ok(Err(Error::Argument));
+    }
+    let faces = faces_along(k, b, e, Vec3::new(dir[0], dir[1], dir[2]))?;
+    // The supplied order is mapped through the measurement copy.
+    let face_order = order.map_or_else(|| b.face_list(), |o| o.faces.as_slice());
+    let index = |f: FaceId| face_order.iter().position(|&g| g == f);
+    let [(f0, l0), (f1, l1)] = faces;
+    Ok(match (index(f0), index(f1)) {
+        (Some(i0), Some(i1)) => Ok([(i0, l0), (i1, l1)]),
+        _ => Err(Error::Exception),
+    })
 }
 
 /// The tangent chain of the edges of `body` at record indices `edges` (the kernel's
@@ -1295,6 +1338,32 @@ pub fn chamfer_sides(
     distance: f64,
     second: ChamferSecond,
 ) -> Result<()> {
+    chamfer_sides_impl(body, None, edges, along, distance, second)
+}
+
+/// [`chamfer_sides`] with edge and face indices taken through `order`.
+///
+/// # Errors
+/// As [`chamfer_sides`]; [`Error::Argument`] for an order naming a missing entity.
+pub fn chamfer_sides_ordered(
+    body: &Body,
+    order: &crate::Order,
+    edges: &[usize],
+    along: &[usize],
+    distance: f64,
+    second: ChamferSecond,
+) -> Result<()> {
+    chamfer_sides_impl(body, Some(order), edges, along, distance, second)
+}
+
+fn chamfer_sides_impl(
+    body: &Body,
+    order: Option<&crate::Order>,
+    edges: &[usize],
+    along: &[usize],
+    distance: f64,
+    second: ChamferSecond,
+) -> Result<()> {
     let second_ok = match second {
         ChamferSecond::Angle(a) => a.is_finite() && a > 0.0 && a < std::f64::consts::PI,
         ChamferSecond::Distance(d) => size_ok(d),
@@ -1307,15 +1376,20 @@ pub fn chamfer_sides(
         ChamferSecond::Angle(angle) => ChamferSize::DistanceAngle { distance, angle },
     };
     with_body("chamfer_sides", body, |k, b| {
-        let picked = match each_once(b.edge_list(), edges) {
+        let edge_order = order.map_or_else(|| b.edge_list(), |o| o.edges.as_slice());
+        let picked = match each_once(edge_order, edges) {
             Ok(p) => p,
             Err(e) => return Ok(Err(e)),
         };
+        if picked.iter().any(|e| !b.edge_list().contains(e)) {
+            return Ok(Err(Error::Argument));
+        }
+        let face_order = order.map_or_else(|| b.face_list(), |o| o.faces.as_slice());
         let mut faces = Vec::new();
         for &f in along {
-            match b.face_list().get(f) {
-                Some(&f) => faces.push(f),
-                None => return Ok(Err(Error::Argument)),
+            match face_order.get(f) {
+                Some(&f) if b.face_list().contains(&f) => faces.push(f),
+                _ => return Ok(Err(Error::Argument)),
             }
         }
         let expect = Expect::of(k, b)?;
