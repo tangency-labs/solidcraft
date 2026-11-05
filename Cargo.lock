@@ -4202,6 +4202,7 @@ dependencies = [
  "log",
  "naga",
  "pollster 0.4.0",
+ "rayon",
  "robust",
  "serde",
  "serde_json",

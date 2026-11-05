@@ -197,6 +197,7 @@ fn mixed_bitwise(line: &str) -> Option<String> {
     groups.iter().find_map(mixed)
 }
 
+/// Unwraps a `Result` in test code, panicking with its `Debug` representation on `Err`.
 fn ok<T, E: std::fmt::Debug>(r: std::result::Result<T, E>) -> T {
     match r {
         Ok(v) => v,
@@ -204,6 +205,7 @@ fn ok<T, E: std::fmt::Debug>(r: std::result::Result<T, E>) -> T {
     }
 }
 
+/// Builds a representative suite of B-rep test solids (booleans, torus, fillets, mirror transform).
 fn bodies() -> Vec<(&'static str, Body)> {
     let bx = ok(solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 4.0)));
     let pin = ok(solidcraft_kernel::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.0, 6.0));
@@ -222,6 +224,7 @@ fn bodies() -> Vec<(&'static str, Body)> {
     ]
 }
 
+/// Verifies that GPU tessellation evaluation matches the CPU reference evaluator across all test bodies.
 #[test]
 fn gpu_evaluation_matches_the_cpu() {
     let Some(gpu) = gpu() else { return };
@@ -332,6 +335,7 @@ fn a_scene_in_one_dispatch_matches_each_body_on_the_cpu() {
     }
 }
 
+/// Asserts that evaluating and preparing an empty or zero-vertex [`TessPlan`] succeeds without validation errors.
 fn check_empty_tessellation(gpu: &TessGpu, plan: &TessPlan) {
     let scope = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
     let evaluated = ok(gpu.evaluate(plan));
@@ -353,6 +357,7 @@ fn check_empty_tessellation(gpu: &TessGpu, plan: &TessPlan) {
     assert!(error.is_none(), "{error:?}");
 }
 
+/// Verifies that a [`TessPlan`] with a surface but zero vertices skips GPU compute dispatch cleanly.
 #[test]
 fn tessellation_without_vertices_does_not_dispatch() {
     let Some(gpu) = gpu() else { return };
@@ -364,6 +369,7 @@ fn tessellation_without_vertices_does_not_dispatch() {
     check_empty_tessellation(&gpu, &plan);
 }
 
+/// Verifies that an empty default [`TessPlan`] with zero surfaces and zero vertices skips GPU compute dispatch cleanly.
 #[test]
 fn tessellation_without_surfaces_does_not_dispatch() {
     let Some(gpu) = gpu() else { return };
@@ -423,4 +429,461 @@ fn bench_plate() {
         let g = if g.is_empty() { "-".to_string() } else { format!("{:.1} ms", median(g)) };
         println!("| {tol} | {:.1} ms | {:.1} ms | {:.1} ms | {g} | {nr} / {np} |", median(r), median(p), median(c));
     }
+}
+
+/// Verifies numerical parity of `f32` and `f64` bicubic Bézier tensor-product patch evaluation across CPU, Vulkan, CUDA PTX, and Ampere DMMA Tensor Cores.
+#[test]
+fn multi_backend_bicubic_patch_f32_and_f64_dmma_parity() {
+    use crate::cuda::{CudaBackend, PatchUvQueryF32};
+    use crate::dispatch::{
+        VulkanAccel, cpu_eval_bicubic_f32_rayon, cpu_eval_bicubic_f32_scalar, cpu_eval_bicubic_f64_rayon, cpu_eval_bicubic_f64_scalar,
+        synthetic_bicubic_patch_f32, synthetic_bicubic_patch_f64,
+    };
+
+    let patch_f32 = synthetic_bicubic_patch_f32();
+    let patch_f64 = synthetic_bicubic_patch_f64();
+
+    // Use 259 queries (non-multiple of 4 and 64) to exercise tail handling in DMMA and workgroups.
+    let n = 259usize;
+    let queries_f32: Vec<PatchUvQueryF32> = (0..n)
+        .map(|i| {
+            let t = (i as f32) / (n as f32);
+            PatchUvQueryF32 { u: (t * 0.89 + 0.05).fract(), v: (t * 2.71 + 0.07).fract(), patch_idx: 0, pad: 0 }
+        })
+        .collect();
+    let queries_f64: Vec<[f64; 4]> = queries_f32.iter().map(|q| [q.u as f64, q.v as f64, 0.0, 0.0]).collect();
+
+    let ref_f32 = cpu_eval_bicubic_f32_scalar(&patch_f32, &queries_f32);
+    let ray_f32 = cpu_eval_bicubic_f32_rayon(&patch_f32, &queries_f32);
+    assert_eq!(ref_f32, ray_f32);
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_out = vk.eval_bicubic_f32(&patch_f32, &queries_f32).expect("vk eval_bicubic_f32");
+        assert_eq!(vk_out.len(), ref_f32.len());
+        for (i, (a, b)) in ref_f32.iter().zip(&vk_out).enumerate() {
+            for c in 0..3 {
+                assert!((a.pos[c] - b.pos[c]).abs() < 1e-4, "vk pos mismatch at {i}[{c}]: {:?} vs {:?}", a.pos, b.pos);
+                assert!((a.norm[c] - b.norm[c]).abs() < 1e-4, "vk norm mismatch at {i}[{c}]: {:?} vs {:?}", a.norm, b.norm);
+            }
+        }
+    }
+
+    let ref_f64 = cpu_eval_bicubic_f64_scalar(&patch_f64, &queries_f64);
+    let ray_f64 = cpu_eval_bicubic_f64_rayon(&patch_f64, &queries_f64);
+    assert_eq!(ref_f64, ray_f64);
+
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_f32_gen = cuda.eval_bicubic_f32(&patch_f32, &queries_f32, false).expect("cuda generic f32");
+        for (i, (a, b)) in ref_f32.iter().zip(&cu_f32_gen).enumerate() {
+            for c in 0..3 {
+                assert!((a.pos[c] - b.pos[c]).abs() < 1e-4, "cuda sm70 f32 pos mismatch at {i}[{c}]");
+                assert!((a.norm[c] - b.norm[c]).abs() < 1e-4, "cuda sm70 f32 norm mismatch at {i}[{c}]");
+            }
+        }
+        if cuda.has_ampere_ptx() {
+            let cu_f32_amp = cuda.eval_bicubic_f32(&patch_f32, &queries_f32, true).expect("cuda sm86 cp.async f32");
+            for (i, (a, b)) in ref_f32.iter().zip(&cu_f32_amp).enumerate() {
+                for c in 0..3 {
+                    assert!((a.pos[c] - b.pos[c]).abs() < 1e-4, "cuda sm86 f32 pos mismatch at {i}[{c}]");
+                    assert!((a.norm[c] - b.norm[c]).abs() < 1e-4, "cuda sm86 f32 norm mismatch at {i}[{c}]");
+                }
+            }
+        }
+
+        let cu_f64_gen = cuda.eval_bicubic_f64(&patch_f64, &queries_f64, false).expect("cuda generic f64");
+        for (i, (a, b)) in ref_f64.iter().zip(&cu_f64_gen).enumerate() {
+            for c in 0..3 {
+                assert!((a.pos[c] - b.pos[c]).abs() < 1e-12, "cuda sm70 f64 pos mismatch at {i}[{c}]: {} vs {}", a.pos[c], b.pos[c]);
+                assert!((a.norm[c] - b.norm[c]).abs() < 1e-12, "cuda sm70 f64 norm mismatch at {i}[{c}]: {} vs {}", a.norm[c], b.norm[c]);
+            }
+        }
+
+        if cuda.has_fp64_tensor_core() {
+            let cu_f64_dmma = cuda.eval_bicubic_f64(&patch_f64, &queries_f64, true).expect("cuda sm86 DMMA tensor core f64");
+            for (i, (a, b)) in ref_f64.iter().zip(&cu_f64_dmma).enumerate() {
+                for c in 0..3 {
+                    assert!(
+                        (a.pos[c] - b.pos[c]).abs() < 1e-12,
+                        "Ampere DMMA f64 pos mismatch at query {i} comp {c}: cpu={} dmma={}",
+                        a.pos[c],
+                        b.pos[c]
+                    );
+                    assert!(
+                        (a.norm[c] - b.norm[c]).abs() < 1e-12,
+                        "Ampere DMMA f64 norm mismatch at query {i} comp {c}: cpu={} dmma={}",
+                        a.norm[c],
+                        b.norm[c]
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Verifies 3-ray watertight point-in-solid classification parity across CPU, Vulkan, CUDA PTX, and RT/BVH backends, including empty-BVH fallback.
+#[test]
+fn multi_backend_point_in_solid_and_rt_bvh_parity() {
+    use crate::cuda::CudaBackend;
+    use crate::dispatch::{
+        VulkanAccel, build_gpu_bvh_from_mesh, cpu_classify_points_rayon, cpu_classify_points_scalar, synthetic_closed_sphere_mesh,
+    };
+
+    let mesh = synthetic_closed_sphere_mesh(10.0, 10, 10);
+    let (tris, bvh) = build_gpu_bvh_from_mesh(&mesh);
+
+    let mut pts = Vec::new();
+    for ix in -6..=6 {
+        for iy in -6..=6 {
+            for iz in -4..=4 {
+                let p = [ix as f32 * 2.1 + 0.13, iy as f32 * 2.1 - 0.17, iz as f32 * 2.9 + 0.07, 0.0];
+                pts.push(p);
+            }
+        }
+    }
+
+    let ref_scalar = cpu_classify_points_scalar(&pts, &tris, &[]);
+    let ref_bvh = cpu_classify_points_scalar(&pts, &tris, &bvh);
+    let ref_rayon = cpu_classify_points_rayon(&pts, &tris, &bvh);
+    assert_eq!(ref_scalar, ref_bvh, "CPU brute-force vs CPU BVH point classification");
+    assert_eq!(ref_scalar, ref_rayon, "CPU scalar vs CPU rayon point classification");
+
+    // Verify agreement with SolidCraft's authoritative Mesh::contains
+    for (i, p) in pts.iter().enumerate() {
+        let v = Vec3::new(p[0] as f64, p[1] as f64, p[2] as f64);
+        assert_eq!(ref_scalar[i], mesh.contains(v), "mismatch with Mesh::contains at {i}: {v:?}");
+    }
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_tiled = vk.classify_points(&pts, &tris, &bvh, false).expect("vk classify tiled");
+        let vk_bvh = vk.classify_points(&pts, &tris, &bvh, true).expect("vk classify bvh");
+        assert_eq!(ref_scalar, vk_tiled, "Vulkan tiled classify_points parity");
+        assert_eq!(ref_scalar, vk_bvh, "Vulkan BVH classify_points parity");
+        // Empty-BVH with non-empty tris must return None on BVH path so callers fall back to brute-force
+        assert!(vk.classify_points(&pts, &tris, &[], true).is_none());
+        assert_eq!(vk.classify_points(&pts, &[], &[], true), Some(vec![false; pts.len()]));
+    }
+
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_gen = cuda.classify_points(&pts, &tris, false).expect("cuda sm70 classify_points");
+        assert_eq!(ref_scalar, cu_gen, "CUDA sm_70 classify_points parity");
+        if cuda.has_ampere_ptx() {
+            let cu_amp = cuda.classify_points(&pts, &tris, true).expect("cuda sm86 classify_points");
+            assert_eq!(ref_scalar, cu_amp, "CUDA sm_86 cp.async classify_points parity");
+        }
+        let cu_rt_bvh = cuda.classify_points_rt_bvh(&pts, &tris, &bvh).expect("cuda rt_bvh classify_points");
+        assert_eq!(ref_scalar, cu_rt_bvh, "CUDA RT/BVH classify_points parity");
+        // Empty-BVH with non-empty tris must return None so the dispatcher falls back
+        assert!(cuda.classify_points_rt_bvh(&pts, &tris, &[]).is_none());
+        assert_eq!(cuda.classify_points_rt_bvh(&pts, &[], &[]), Some(vec![false; pts.len()]));
+    }
+}
+
+/// Verifies BVH ray-mesh intersection parity across CPU, Vulkan, and CUDA RT/BVH backends against `Mesh::raycast`, including empty-BVH handling.
+#[test]
+fn multi_backend_raycast_bvh_parity() {
+    use crate::cuda::{CudaBackend, GpuRay};
+    use crate::dispatch::{VulkanAccel, build_gpu_bvh_from_mesh, cpu_raycast_bvh_rayon, cpu_raycast_bvh_scalar, synthetic_closed_sphere_mesh};
+
+    let mesh = synthetic_closed_sphere_mesh(8.0, 10, 10);
+    let (tris, bvh) = build_gpu_bvh_from_mesh(&mesh);
+
+    let mut rays = Vec::new();
+    for ix in -10..=10 {
+        for iy in -10..=10 {
+            let ox = ix as f32 * 1.15 + 0.03;
+            let oy = iy as f32 * 1.15 - 0.04;
+            rays.push(GpuRay { origin: [ox, oy, -20.0, 0.0], dir: [0.0, 0.0, 1.0, 0.0] });
+        }
+    }
+
+    let ref_hits = cpu_raycast_bvh_scalar(&rays, &tris, &bvh);
+    let ray_hits = cpu_raycast_bvh_rayon(&rays, &tris, &bvh);
+    assert_eq!(ref_hits, ray_hits);
+
+    // Check against Mesh::raycast
+    for (i, r) in rays.iter().enumerate() {
+        let orig = Vec3::new(r.origin[0] as f64, r.origin[1] as f64, r.origin[2] as f64);
+        let dir = Vec3::new(r.dir[0] as f64, r.dir[1] as f64, r.dir[2] as f64);
+        let mesh_hit = mesh.raycast(orig, dir);
+        let gpu_hit = ref_hits[i];
+        match mesh_hit {
+            Some((t_cpu, _)) => {
+                assert!(gpu_hit.tri_idx != u32::MAX, "ray {i} missed in GPU BVH but hit in Mesh::raycast at t={t_cpu}");
+                assert!((gpu_hit.t as f64 - t_cpu).abs() < 1e-4, "ray {i} t mismatch: {} vs {t_cpu}", gpu_hit.t);
+            }
+            None => {
+                assert_eq!(gpu_hit.tri_idx, u32::MAX, "ray {i} hit in GPU BVH but missed in Mesh::raycast");
+            }
+        }
+    }
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_hits = vk.raycast_bvh(&rays, &tris, &bvh).expect("vk raycast_bvh");
+        for (i, (a, b)) in ref_hits.iter().zip(&vk_hits).enumerate() {
+            assert_eq!(a.tri_idx, b.tri_idx, "Vulkan raycast tri_idx mismatch at {i}");
+            if a.tri_idx != u32::MAX {
+                assert!((a.t - b.t).abs() < 1e-4, "Vulkan raycast t mismatch at {i}");
+            }
+        }
+        assert!(vk.raycast_bvh(&rays, &tris, &[]).is_none());
+        let empty_hits = vk.raycast_bvh(&rays, &[], &[]).expect("vk raycast empty tris");
+        assert!(empty_hits.iter().all(|h| h.tri_idx == u32::MAX));
+    }
+
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_hits = cuda.raycast_rt_bvh(&rays, &tris, &bvh).expect("cuda raycast_rt_bvh");
+        for (i, (a, b)) in ref_hits.iter().zip(&cu_hits).enumerate() {
+            assert_eq!(a.tri_idx, b.tri_idx, "CUDA RT/BVH raycast tri_idx mismatch at {i}");
+            if a.tri_idx != u32::MAX {
+                assert!((a.t - b.t).abs() < 1e-4, "CUDA RT/BVH raycast t mismatch at {i}");
+            }
+        }
+        assert!(cuda.raycast_rt_bvh(&rays, &tris, &[]).is_none());
+        let empty_hits = cuda.raycast_rt_bvh(&rays, &[], &[]).expect("cuda raycast empty tris");
+        assert!(empty_hits.iter().all(|h| h.tri_idx == u32::MAX));
+    }
+}
+
+/// Verifies bipartite AABB overlap, self-overlap, Morton LBVH traversal, and surface-surface intersection (SSI) residual evaluation across CPU, Vulkan, and CUDA backends.
+#[test]
+fn multi_backend_collision_lbvh_morton_and_ssi_residuals_parity() {
+    use crate::collision::{build_simple_lbvh, cpu_bipartite_overlap, cpu_self_overlap, face_aabbs_from_plan, synthetic_aabb_grid};
+    use crate::cuda::CudaBackend;
+    use crate::dispatch::{VulkanAccel, cpu_bipartite_overlap_rayon};
+
+    let boxes_a = synthetic_aabb_grid(150, 2.0, 1.15);
+    let boxes_b = synthetic_aabb_grid(130, 2.0, 1.15);
+    let tol = 1e-4f32;
+
+    let cpu_res = cpu_bipartite_overlap(&boxes_a, &boxes_b, tol);
+    let ray_res = cpu_bipartite_overlap_rayon(&boxes_a, &boxes_b, tol);
+    assert!(!cpu_res.pairs.is_empty());
+    assert_eq!(cpu_res.pairs, ray_res.pairs);
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_res = vk.collision().bipartite_overlap(&boxes_a, &boxes_b, tol).expect("vk bipartite");
+        assert_eq!(cpu_res.pairs, vk_res.pairs, "Vulkan bipartite AABB overlap parity");
+
+        // Self-overlap parity
+        let cpu_self = cpu_self_overlap(&boxes_a, tol);
+        let vk_self = vk.collision().self_overlap(&boxes_a, tol).expect("vk self_overlap");
+        assert_eq!(cpu_self.pairs, vk_self.pairs, "Vulkan self_overlap parity");
+
+        // Morton code + LBVH traversal parity
+        let morton = vk.collision().compute_morton(&boxes_b).expect("vk morton");
+        let lbvh = build_simple_lbvh(&boxes_b, &morton);
+        let lbvh_res = vk.collision().lbvh_query(&boxes_a, &lbvh, tol).expect("vk lbvh_query");
+        assert_eq!(cpu_res.pairs, lbvh_res.pairs, "Vulkan LBVH traversal vs all-pairs parity");
+
+        // Real B-rep face AABBs & SSI surface residuals parity
+        let b1 = ok(solidcraft_kernel::cylinder(Vec3::ZERO, Vec3::Z, 4.0, 10.0));
+        let b2 = ok(solidcraft_kernel::cylinder(Vec3::new(2.0, -5.0, 5.0), Vec3::Y, 3.0, 10.0));
+        let p1 = ok(b1.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.05)));
+        let p2 = ok(b2.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.05)));
+        let fa = face_aabbs_from_plan(&p1);
+        let fb = face_aabbs_from_plan(&p2);
+        assert_eq!(cpu_bipartite_overlap(&fa, &fb, 1e-3).pairs, vk.collision().bipartite_overlap(&fa, &fb, 1e-3).expect("vk face aabbs").pairs);
+
+        if let (Some(sa), Some(sb)) = (p1.surfaces.first(), p2.surfaces.first()) {
+            let vk_seeds =
+                vk.collision().surface_residuals(sa, (0.0, 1.0), (0.0, 1.0), sb, (0.0, 1.0), (0.0, 1.0), 16, 1.5).expect("vk surface_residuals");
+            for s in &vk_seeds {
+                assert!(s.dist_sq <= 1.5 * 1.5 + 1e-4);
+            }
+        }
+    }
+
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_gen = cuda.bipartite_aabb_overlap(&boxes_a, &boxes_b, tol, false).expect("cuda sm70 bipartite");
+        assert_eq!(cpu_res.pairs, cu_gen.pairs, "CUDA sm_70 bipartite AABB parity");
+        if cuda.has_ampere_ptx() {
+            let cu_amp = cuda.bipartite_aabb_overlap(&boxes_a, &boxes_b, tol, true).expect("cuda sm86 bipartite");
+            assert_eq!(cpu_res.pairs, cu_amp.pairs, "CUDA sm_86 cp.async + redux.sync bipartite AABB parity");
+        }
+    }
+}
+
+/// Verifies batched point-to-mesh squared distance and divergence-theorem mass properties across CPU, Vulkan, and CUDA backends.
+#[test]
+fn multi_backend_point_mesh_distance_and_mass_properties_parity() {
+    use crate::cuda::CudaBackend;
+    use crate::dispatch::{
+        VulkanAccel, build_gpu_bvh_from_mesh, cpu_mass_properties_rayon, cpu_mass_properties_scalar, cpu_point_mesh_distance_rayon,
+        cpu_point_mesh_distance_scalar,
+    };
+
+    let bx_body = ok(solidcraft_kernel::box_solid(Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 5.0, 6.0)));
+    let bx_mesh = ok(bx_body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.05)));
+    let (tris, _) = build_gpu_bvh_from_mesh(&bx_mesh);
+
+    // 1. Point-to-Mesh Distance parity
+    let pts: Vec<[f32; 4]> = (0..195)
+        .map(|i| {
+            let f = i as f32 * 0.13;
+            [f - 5.0, (f * 1.7).sin() * 6.0, (f * 0.9).cos() * 8.0, 0.0]
+        })
+        .collect();
+    let ref_dist = cpu_point_mesh_distance_scalar(&pts, &tris);
+    let ray_dist = cpu_point_mesh_distance_rayon(&pts, &tris);
+    assert_eq!(ref_dist, ray_dist);
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_dist = vk.point_mesh_distance(&pts, &tris).expect("vk point_mesh_distance");
+        for (i, (a, b)) in ref_dist.iter().zip(&vk_dist).enumerate() {
+            assert!((a - b).abs() < 1e-3, "vk distance mismatch at {i}: {a} vs {b}");
+        }
+    }
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_gen = cuda.point_mesh_distance(&pts, &tris, false).expect("cuda sm70 dist");
+        for (i, (a, b)) in ref_dist.iter().zip(&cu_gen).enumerate() {
+            assert!((a - b).abs() < 1e-3, "cuda sm70 distance mismatch at {i}: {a} vs {b}");
+        }
+        if cuda.has_ampere_ptx() {
+            let cu_amp = cuda.point_mesh_distance(&pts, &tris, true).expect("cuda sm86 cp.async dist");
+            for (i, (a, b)) in ref_dist.iter().zip(&cu_amp).enumerate() {
+                assert!((a - b).abs() < 1e-3, "cuda sm86 distance mismatch at {i}: {a} vs {b}");
+            }
+        }
+    }
+
+    // 2. Mass Properties Integration parity against Mesh::measure()
+    let exact_measure = bx_mesh.measure();
+    let cpu_s = cpu_mass_properties_scalar(&tris);
+    let cpu_r = cpu_mass_properties_rayon(&tris);
+    assert!((cpu_s.volume - exact_measure.volume).abs() < 1e-4, "volume: {} vs {}", cpu_s.volume, exact_measure.volume);
+    assert!((cpu_s.area - exact_measure.area).abs() < 1e-4, "area: {} vs {}", cpu_s.area, exact_measure.area);
+    assert!(cpu_s.centroid.dist(exact_measure.centroid) < 1e-4);
+    assert!((cpu_r.volume - exact_measure.volume).abs() < 1e-4);
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_m = vk.mass_properties(&tris).expect("vk mass_properties");
+        assert!((vk_m.volume - exact_measure.volume).abs() < 1e-2);
+        assert!((vk_m.area - exact_measure.area).abs() < 1e-2);
+        assert!(vk_m.centroid.dist(exact_measure.centroid) < 1e-3);
+    }
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_gen = cuda.mass_properties(&tris, false).expect("cuda sm70 mass_properties");
+        assert!((cu_gen.volume - exact_measure.volume).abs() < 1e-4);
+        assert!((cu_gen.area - exact_measure.area).abs() < 1e-4);
+        assert!(cu_gen.centroid.dist(exact_measure.centroid) < 1e-4);
+        if cuda.has_ampere_ptx() {
+            let cu_amp = cuda.mass_properties(&tris, true).expect("cuda sm86 shfl.sync mass_properties");
+            assert!((cu_amp.volume - exact_measure.volume).abs() < 1e-4);
+            assert!((cu_amp.area - exact_measure.area).abs() < 1e-4);
+            assert!(cu_amp.centroid.dist(exact_measure.centroid) < 1e-4);
+        }
+    }
+}
+
+/// Verifies [`Dispatcher`] multi-sample rotated calibration, markdown reporting, and forced routing across all backend targets.
+#[test]
+fn dispatcher_auto_tuning_calibration_and_routing() {
+    use crate::cuda::{GpuRay, PatchUvQueryF32};
+    use crate::dispatch::{
+        BENCH_SIZES, BackendTarget, CALIBRATION_SAMPLES, Dispatcher, KernelOp, build_gpu_bvh_from_mesh, synthetic_bicubic_patch_f32,
+        synthetic_bicubic_patch_f64, synthetic_closed_sphere_mesh,
+    };
+
+    let disp = Dispatcher::global();
+    let report = disp.report();
+    assert_eq!(report.kernels.len(), KernelOp::ALL.len());
+    for k in &report.kernels {
+        assert_eq!(k.buckets.len(), BENCH_SIZES.len());
+        for b in &k.buckets {
+            assert_eq!(b.sample_orders.len(), CALIBRATION_SAMPLES);
+            assert_eq!(b.sample_timings_ns.len(), CALIBRATION_SAMPLES);
+            if b.sample_orders[0].len() > 1 {
+                assert_ne!(b.sample_orders[0], b.sample_orders[1], "backend execution order must rotate across calibration samples");
+            }
+        }
+    }
+
+    let md = report.to_markdown();
+    println!("\n{md}");
+    assert!(md.contains("SolidCraft Multi-Backend GPU & Auto-Tuning Dispatcher Report"));
+    assert!(md.contains("Bicubic Tensor Patch Eval (f64 DMMA)"));
+
+    // Verify forced routing across every backend target produces consistent results
+    let patch_f32 = synthetic_bicubic_patch_f32();
+    let patch_f64 = synthetic_bicubic_patch_f64();
+    let q_f32 = vec![PatchUvQueryF32 { u: 0.25, v: 0.75, patch_idx: 0, pad: 0 }; 32];
+    let q_f64 = vec![[0.25f64, 0.75, 0.0, 0.0]; 32];
+    let sphere = synthetic_closed_sphere_mesh(5.0, 6, 6);
+    let (tris, bvh) = build_gpu_bvh_from_mesh(&sphere);
+    let pts = vec![[0.5f32, 0.5, 0.5, 0.0], [10.0, 10.0, 10.0, 0.0]];
+    let rays = vec![GpuRay { origin: [0.0, 0.0, -10.0, 0.0], dir: [0.0, 0.0, 1.0, 0.0] }];
+
+    let (_, ref_f64) = disp.with_forced_backend(Some(BackendTarget::CpuScalar)).eval_bicubic_f64(&patch_f64, &q_f64);
+    let (_, ref_cls) = disp.with_forced_backend(Some(BackendTarget::CpuScalar)).classify_points(&pts, &tris, &bvh);
+
+    for target in [
+        BackendTarget::CpuScalar,
+        BackendTarget::CpuRayon,
+        BackendTarget::VulkanCompute,
+        BackendTarget::CudaGeneric,
+        BackendTarget::AmperePtx,
+        BackendTarget::AmpereTensorCore,
+        BackendTarget::RtCoreBvh,
+    ] {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, out_f32) = d.eval_bicubic_f32(&patch_f32, &q_f32);
+        assert_eq!(out_f32.len(), 32);
+        let (_, out_f64) = d.eval_bicubic_f64(&patch_f64, &q_f64);
+        assert!((out_f64[0].pos[0] - ref_f64[0].pos[0]).abs() < 1e-12);
+        let (_, out_cls) = d.classify_points(&pts, &tris, &bvh);
+        assert_eq!(out_cls, ref_cls);
+        let (_, out_cls_no_bvh) = d.classify_points(&pts, &tris, &[]);
+        assert_eq!(out_cls_no_bvh, ref_cls);
+        let (_, out_rc) = d.raycast_mesh(&rays, &tris, &bvh);
+        assert!(out_rc[0].tri_idx != u32::MAX);
+        let (_, out_rc_no_bvh) = d.raycast_mesh(&rays, &tris, &[]);
+        assert_eq!(out_rc_no_bvh[0].tri_idx, out_rc[0].tri_idx);
+        let (_, out_dist) = d.point_mesh_distance(&pts, &tris);
+        assert_eq!(out_dist.len(), 2);
+        let (_, out_mass) = d.mass_properties(&tris);
+        assert!(out_mass.volume > 100.0);
+    }
+}
+
+/// Extracts sorted `(key, value)` pairs from a `[section]` header in a TOML manifest.
+fn parse_toml_section_entries(toml_text: &str, section_header: &str) -> Vec<(String, String)> {
+    let mut in_section = false;
+    let mut entries = Vec::new();
+    for raw_line in toml_text.lines() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            in_section = line == section_header;
+            continue;
+        }
+        if in_section && let Some((k, v)) = line.split_once('=') {
+            entries.push((k.trim().to_string(), v.trim().to_string()));
+        }
+    }
+    entries.sort();
+    entries
+}
+
+/// Ensures `[lints.clippy]` and `[lints.rust]` in `crates/gpu/Cargo.toml` stay synchronized with `[workspace.lints.*]` in the root `Cargo.toml`.
+#[test]
+fn gpu_cargo_toml_lints_match_workspace() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let gpu_toml = ok(std::fs::read_to_string(manifest_dir.join("Cargo.toml")));
+    let root_toml = ok(std::fs::read_to_string(manifest_dir.join("../../Cargo.toml")));
+
+    let ws_clippy = parse_toml_section_entries(&root_toml, "[workspace.lints.clippy]");
+    let gpu_clippy = parse_toml_section_entries(&gpu_toml, "[lints.clippy]");
+    assert!(!ws_clippy.is_empty(), "root Cargo.toml must have [workspace.lints.clippy]");
+    assert_eq!(gpu_clippy, ws_clippy, "crates/gpu/Cargo.toml [lints.clippy] must stay in sync with root Cargo.toml [workspace.lints.clippy]");
+
+    let ws_rust = parse_toml_section_entries(&root_toml, "[workspace.lints.rust]");
+    let gpu_rust = parse_toml_section_entries(&gpu_toml, "[lints.rust]");
+    assert_eq!(ws_rust, vec![("unsafe_code".to_string(), "\"forbid\"".to_string())]);
+    assert_eq!(
+        gpu_rust,
+        vec![("unsafe_code".to_string(), "\"deny\"".to_string())],
+        "crates/gpu/Cargo.toml [lints.rust] must match [workspace.lints.rust] except for unsafe_code = \"deny\""
+    );
 }
