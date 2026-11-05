@@ -884,7 +884,7 @@ fn paste_new_into_selected_parent_keeps_child_face_attachment() {
         .faces(0.01)
         .unwrap()
         .into_iter()
-        .find(|face| body.body.face_plane(face.index).is_some_and(|plane| plane.normal().dot(solidcraft_engine::geom::Vec3::Z) > 0.999))
+        .find(|face| body.body.face_plane(face.index).is_some_and(|plane| plane.normal().dot(solidcore_record::Vec3::Z) > 0.999))
         .unwrap();
     app.run("sketch.create", json!({"plane":{"body":body_name,"face":face.centroid,"index":face.index,"path":source_path},"name":"Sketch2"}))
         .unwrap();
