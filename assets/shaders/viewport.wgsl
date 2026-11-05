@@ -986,9 +986,10 @@ fn cloud_keeps(f: vec4<f32>, v: f32) -> bool {
 }
 
 /// Whether filter `f` leaves out a whole element with values `v` at its corners: all on one
-/// side of a range, or a whole value (the same at every corner) not kept.
+/// side of a range, or one value at every corner, not kept. A set of values with corners that
+/// differ may keep part of the element: its fragments decide.
 fn cloud_drops(f: vec4<f32>, v: vec3<f32>) -> bool {
-    if (f.x > 1.5) { return !cloud_keeps(f, v.x); }
+    if (f.x > 1.5) { return all(v == vec3<f32>(v.x)) && !cloud_keeps(f, v.x); }
     return f.x > 0.5 && (all(v < vec3<f32>(f.y)) || all(v > vec3<f32>(f.z)));
 }
 

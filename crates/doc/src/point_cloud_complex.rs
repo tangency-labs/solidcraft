@@ -117,6 +117,47 @@ impl Complex {
     pub fn is_empty(&self) -> bool {
         self.segments.is_empty() && self.triangles.is_empty() && self.columns.is_empty() && self.names.is_empty()
     }
+    /// The subcomplex spanned by the points `kept` marks: those points, numbered in order, with
+    /// their numbers, and the segments and triangles all of whose corners are among them, with
+    /// theirs. Also how many segments and triangles it leaves out.
+    pub fn induced(&self, kept: &[bool]) -> (Complex, u64) {
+        let mut next = 0u32;
+        let renumbered: Vec<Option<u32>> = kept
+            .iter()
+            .map(|k| {
+                k.then(|| {
+                    next += 1;
+                    next - 1
+                })
+            })
+            .collect();
+        let restrict = |indices: &Indices, n: usize| {
+            let (mut ids, mut whole) = (Vec::new(), Vec::new());
+            for corners in indices.0.chunks_exact(n) {
+                let new: Option<Vec<u32>> = corners.iter().map(|i| renumbered.get(*i as usize).copied().flatten()).collect();
+                whole.push(new.is_some());
+                ids.extend(new.unwrap_or_default());
+            }
+            (Indices(ids.into()), whole)
+        };
+        let (segments, on_segments) = restrict(&self.segments, 2);
+        let (triangles, on_triangles) = restrict(&self.triangles, 3);
+        let left_out = on_segments.iter().chain(&on_triangles).filter(|whole| !**whole).count() as u64;
+        let columns = self
+            .columns
+            .iter()
+            .map(|c| {
+                let mask = match c.on {
+                    On::Point => kept,
+                    On::Segment => &on_segments,
+                    On::Triangle => &on_triangles,
+                };
+                let values: Vec<f32> = c.values.0.iter().zip(mask).filter(|(_, k)| **k).map(|(v, _)| *v).collect();
+                Column { values: Floats(values.into()), ..c.clone() }
+            })
+            .collect();
+        (Complex { segments, triangles, columns, names: self.names.clone() }, left_out)
+    }
     pub fn segment_count(&self) -> usize {
         self.segments.0.len() / 2
     }

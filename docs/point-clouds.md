@@ -47,7 +47,9 @@ card shows a legend, a swatch and a name per value; clicking a name shows or hid
 A cloud read from a PLY file with edges or faces draws them between its points: triangles
 filled, segments as lines or, when they have `width` and `height` properties, as beads of that
 stadium cross-section (a tube when the two are equal), meeting mitred where one runs into the
-next. Points no segment or triangle ends on stay dots, of the cloud's point size.
+next. Points no segment or triangle ends on stay dots, of the cloud's point size. A point that
+can't be read (not a finite number, or out of range) is left out with a warning, and so are the
+segments and triangles that end on it.
 
 A property on the points varies along the segments and across the triangles that meet there;
 one on the segments or triangles is constant on each. Colours follow the same rule, and a range

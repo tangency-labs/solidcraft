@@ -5305,6 +5305,48 @@ mod glass_tests {
         assert!(!has(&hidden, &|p| p[0] > 200 && p[1] < 90 && p[2] < 90), "hiding the cloud removes it");
     }
 
+    /// A set of values keeps the part of a bead where its rounded value is kept, as the range
+    /// tracks measure it, whichever end holds the kept value: the first end's value alone does
+    /// not decide for the whole bead.
+    #[test]
+    fn a_set_filter_keeps_the_part_of_a_bead_whose_ends_differ() {
+        let Some((_, device, queue)) = crate::open_headless().ok() else { return };
+        let depth = crate::depth_format(&device, true);
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
+        let mut renderer = Renderer::new(&device, target, None);
+        let mut draw = |version: u64, at_start: f32, at_end: f32, mask: u32| {
+            let mut frame = test_frame(GpuScene::default(), 1.0);
+            let ends = [[-3.0, -3.0, 0.0], [3.0, -3.0, 0.0], [3.0, -3.0, 0.0]];
+            let bead = Cell {
+                corners: ends,
+                neighbours: [ends[0], ends[1]],
+                filtered: [[at_start, at_end, at_end], [0.0; 3], [0.0; 3], [0.0; 3]],
+                size: [0.5, 0.5],
+                rgb: [0, 255, 0],
+                has: 1,
+                ..Default::default()
+            };
+            let mut segments = Vec::new();
+            cloud_cell(&mut segments, &bead);
+            let mut filters: [CloudFilter; 4] = Default::default();
+            filters[0] = CloudFilter::Values { offset: 0, mask };
+            let style = CloudStyle { mode: ColorMode::Own, range: [0.0, 1.0], filters, point_size: 1.0 };
+            let empty = Arc::new(Vec::new());
+            frame.clouds.push(GpuCloud { id: 1, version, dots: empty.clone(), segments: Arc::new(segments), triangles: empty, style });
+            let img = render_frame(&mut renderer, &device, &queue, &frame, true);
+            // The 64 by 64 picture, split down the middle.
+            let side =
+                |left: bool| img.as_chunks::<4>().0.iter().enumerate().any(|(i, p)| (i % 64 < 32) == left && p[1] > 60 && p[0] < 30 && p[2] < 30);
+            (side(true), side(false))
+        };
+        assert_eq!(draw(1, 0.0, 1.0, 0b10), (false, true), "1 is kept at the end only: the half towards the end");
+        assert_eq!(draw(2, 1.0, 0.0, 0b10), (true, false), "1 is kept at the start only: the half towards the start");
+        assert_eq!(draw(3, 0.0, 1.0, 0b11), (true, true), "both kept: the whole bead");
+        assert_eq!(draw(4, 0.0, 1.0, 0b100), (false, false), "neither kept: nothing");
+        assert_eq!(draw(5, 1.0, 1.0, 0b01), (false, false), "the same value at both ends, not kept: nothing");
+    }
+
     /// A floor and a bead on it, one end far off to the side behind the eye: each is cut exactly at
     /// the near plane. So what lies ahead shows where the perspective puts it, and nothing is
     /// drawn straight below the eye, where an end moved to a made-up place would pull a wedge.
