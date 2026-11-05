@@ -1028,7 +1028,7 @@ macro_rules! preference_settings {
         ui_kit::checkbox($ui, $app.tr($label), &mut $app.preferences.$field)
     };
     (@control $app:ident, $ui:ident, $field:ident, check_id_help($label:literal, $help:literal)) => {
-        ui_kit::checkbox($ui, $app.tr($label), &mut $app.preferences.$field).on_hover_text($app.tr($help))
+        ui_kit::checkbox($ui, $app.tr($label), &mut $app.preferences.$field).backing_on_hover_text($app.tr($help))
     };
     (@control $app:ident, $ui:ident, $field:ident, number($label:literal, $range:expr)) => {
         ui_kit::row($ui, $app.tr($label), |ui| {

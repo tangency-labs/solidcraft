@@ -530,11 +530,11 @@ fn dimension_values(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
                 ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
                     let p = &mut app.preferences;
                     ui_kit::bounded_length_field(ui, &mut p.dimension_step_mm, &units, decimals, DIMENSION_STEP_MM, 0.1)
-                        .on_hover_text(crate::i18n::tr("prefs.dimension_step_length"));
+                        .backing_on_hover_text(crate::i18n::tr("prefs.dimension_step_length"));
                 });
                 ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
                     ui_kit::number_field(ui, &mut app.preferences.dimension_step_deg, DIMENSION_STEP_DEG, 0.1, "°")
-                        .on_hover_text(crate::i18n::tr("prefs.dimension_step_angle"));
+                        .backing_on_hover_text(crate::i18n::tr("prefs.dimension_step_angle"));
                 });
             });
         });
