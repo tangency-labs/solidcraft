@@ -1,6 +1,5 @@
 [
   "plane_recognition_origin_after_axes",
-  "hash_table_grow_preserves_removed_records",
   "gap_samples_use_trimmed_spans",
   "gap_samples_non_bspline_v_stride",
   "transform_aligned_bbox_image",

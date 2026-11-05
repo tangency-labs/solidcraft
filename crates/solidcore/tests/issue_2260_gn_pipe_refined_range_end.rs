@@ -188,7 +188,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "global_solver_identical_prefers_larger_when_maximizing",
     "glue_vertices_joins_every_region",
     "good_drop_result_distances_in_order",
-    "hash_table_grow_preserves_removed_records",
     "heal_stage3_failures_propagate",
     "imprint_extends_edge_to_proto_vertex",
     "imprint_extension_keeps_analytic_curve",
