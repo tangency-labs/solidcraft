@@ -331,13 +331,8 @@ timeline.roll_to
 timeline.rollback
 timeline.suppress
 timeline.ungroup
-view.ambient_occlusion
 view.apply
 view.delete
-view.graphics_preset
-view.history_layout
-view.layout
 view.list
-view.navigate
 view.rename
 view.save

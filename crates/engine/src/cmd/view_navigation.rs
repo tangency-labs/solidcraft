@@ -6,8 +6,10 @@ use solidcraft_render::{Camera, StandardView};
 use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
 use crate::schema::view_navigation::{
-    CameraReply, NavigatorParams, NormalToParams, RenderBrowser, RenderFocus, RenderSelect, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams,
-    TabStep, TabStepParams,
+    AmbientOcclusionParams, AmbientOcclusionResult, CameraReply, GraphicsPreset, GraphicsPresetParams, GraphicsPresetResult, HistoryDock,
+    HistoryLayoutParams, HistoryLayoutResult, LayoutMode, LayoutParams, LayoutResult, NavigateParams, NavigateResult, NavigatorParams,
+    NormalToParams, PresetQuality, RenderBrowser, RenderFocus, RenderSelect, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams, TabStep,
+    TabStepParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
@@ -19,6 +21,11 @@ const TAB_STEP_CONTRACT: TypedContract<TabStepParams> = TypedContract::new();
 const STANDARD_VIEW_CONTRACT: TypedContract<StandardViewParams> = TypedContract::new();
 const NORMAL_TO_CONTRACT: TypedContract<NormalToParams> = TypedContract::new();
 const RIBBON_TABS_ONLY_CONTRACT: TypedContract<RibbonTabsOnlyParams> = TypedContract::new();
+const LAYOUT_CONTRACT: TypedContract<LayoutParams> = TypedContract::new();
+const HISTORY_LAYOUT_CONTRACT: TypedContract<HistoryLayoutParams> = TypedContract::new();
+const GRAPHICS_PRESET_CONTRACT: TypedContract<GraphicsPresetParams> = TypedContract::new();
+const AMBIENT_OCCLUSION_CONTRACT: TypedContract<AmbientOcclusionParams> = TypedContract::new();
+const NAVIGATE_CONTRACT: TypedContract<NavigateParams> = TypedContract::new();
 
 // Both existing request forms share the Browser command and its published schema.
 #[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -105,22 +112,24 @@ CommandSpec::new("view.render_dock", "Move Render Dock", crate::checked!("view.r
     .contract(&RENDER_DOCK_CONTRACT)
     .output(crate::schema::output_schema_for::<crate::schema::view_navigation::RenderDock>)
     .params("panel: inspector|browser; side: left|right → {panel, side}; Render dock UI preference; headless echo only, no document edits or undo"),
-CommandSpec::new("view.layout", "Workspace layout", layout)
-    .icon("settings").noundo().doc_only().params("mode: floating|compact → validated workspace layout; display only, never opens a dialog"),
-CommandSpec::new("view.history_layout", "History layout", history_layout)
-    .icon("settings").noundo().doc_only().params("width?: 1..1000000; dock?: bottom|left|under_browser|browser (browser: the history in the browser, no timeline); collapsed?: bool → validated layout request; display only, never opens a dialog"),
-CommandSpec::new("view.graphics_preset", "Graphics Preset", graphics_preset)
-    .icon("settings").noundo().doc_only().params("preset: performance|quality → preset, enabled, display_quality, supersampling, supersampling_adaptive; Quality: AO, Fine, adaptive 2x SSAA; Performance: no AO, Normal, no SSAA"),
-CommandSpec::new("view.ambient_occlusion", "Ambient Occlusion", ambient_occlusion)
-    .icon("settings").noundo().doc_only().params("enabled: bool → enabled; apply soft contact shading in the GPU viewport"),
+CommandSpec::new("view.layout", "Workspace layout", crate::checked!("view.layout", layout))
+    .icon("settings").noundo().doc_only().contract(&LAYOUT_CONTRACT).output(output_schema_for::<LayoutResult>).params("mode: floating|compact → validated workspace layout; display only, never opens a dialog"),
+CommandSpec::new("view.history_layout", "History layout", crate::checked!("view.history_layout", history_layout))
+    .icon("settings").noundo().doc_only().contract(&HISTORY_LAYOUT_CONTRACT).output(output_schema_for::<HistoryLayoutResult>).params("width?: 1..1000000; dock?: bottom|left|under_browser|browser (browser: the history in the browser, no timeline); collapsed?: bool → validated layout request; display only, never opens a dialog"),
+CommandSpec::new("view.graphics_preset", "Graphics Preset", crate::checked!("view.graphics_preset", graphics_preset))
+    .icon("settings").noundo().doc_only().contract(&GRAPHICS_PRESET_CONTRACT).output(output_schema_for::<GraphicsPresetResult>).params("preset: performance|quality → preset, enabled, display_quality, supersampling, supersampling_adaptive; Quality: AO, Fine, adaptive 2x SSAA; Performance: no AO, Normal, no SSAA"),
+CommandSpec::new("view.ambient_occlusion", "Ambient Occlusion", crate::checked!("view.ambient_occlusion", ambient_occlusion))
+    .icon("settings").noundo().doc_only().contract(&AMBIENT_OCCLUSION_CONTRACT).output(output_schema_for::<AmbientOcclusionResult>).params("enabled: bool → enabled; apply soft contact shading in the GPU viewport"),
 CommandSpec::new("view.perspective", "Perspective view", perspective)
     .icon("perspective").noundo().doc_only().params("enabled: bool → enabled; draw the view in perspective, or orthographic when false; a sketch being edited is always shown orthographic"),
 CommandSpec::new("view.angle_readout", "View Angles", crate::checked!("view.angle_readout", angle_readout))
     .icon("camera").noundo().doc_only().contract(&ANGLE_READOUT_CONTRACT).output(crate::schema::output_schema_for::<crate::schema::view_navigation::AngleReadoutResult>).params("enabled: bool → enabled; show the view's pitch, yaw and roll (degrees, as view.apply's camera in radians) and Ortho or Persp under the orientation gizmo; display only, never opens a dialog"),
-CommandSpec::new("view.navigate", "Navigate View", navigate)
+CommandSpec::new("view.navigate", "Navigate View", crate::checked!("view.navigate", navigate))
     .icon("orbit")
     .noundo()
     .doc_only()
+    .contract(&NAVIGATE_CONTRACT)
+    .output(output_schema_for::<NavigateResult>)
     .params("camera: Camera; direction?: [x,y,z] in the camera's up-axis frame; or action: left|right|up|down|clockwise|counterclockwise|home|fit, degrees?: 0..180 (how far left|right|up|down turn; default 90), fit?: bool (frame the whole model from the new direction as well, as home does; default false); or motion: pan|orbit|zoom, delta?: [dx,dy] (pixels, each ±10000), free_orbit?: bool (orbit through poles, default false), viewport?: [width,height] (1..1000000, required for pan or pivot), pivot?: [x,y,z], factor?: 0.05..20 (required for zoom), anchor?: [x,y,z] → camera, fit, continuous?"),
 CommandSpec::new("view.normal_to", "Normal to Selection", crate::checked!("view.normal_to", normal_to))
         .icon("camera")
@@ -448,31 +457,39 @@ fn layout(_s: &mut Session, p: &Value) -> Result<Value> {
         .and_then(Value::as_str)
         .filter(|mode| matches!(*mode, "floating" | "compact"))
         .ok_or_else(|| bad("view.layout", "mode must be floating or compact"))?;
-    Ok(json!({"mode": mode}))
+    let mode = if mode == "compact" { LayoutMode::Compact } else { LayoutMode::Floating };
+    typed_reply("view.layout", LayoutResult { mode, param_warnings: Vec::new() })
+}
+
+/// A command's typed reply as the JSON it sends.
+fn typed_reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn history_layout(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.history_layout";
-    let mut result = serde_json::Map::new();
+    let mut result = HistoryLayoutResult { width: None, dock: None, collapsed: None, param_warnings: Vec::new() };
     if let Some(value) = p.get("width") {
         let width = value
             .as_f64()
             .filter(|v| v.is_finite() && (1.0..=1_000_000.0).contains(v))
             .ok_or_else(|| bad(cmd, "width must be finite and within 1..1000000"))?;
-        result.insert("width".into(), json!(width));
+        result.width = Some(width);
     }
     if let Some(value) = p.get("dock") {
-        let dock = value
-            .as_str()
-            .filter(|v| matches!(*v, "bottom" | "left" | "under_browser" | "browser"))
-            .ok_or_else(|| bad(cmd, "dock must be bottom, left, under_browser or browser"))?;
-        result.insert("dock".into(), json!(dock));
+        let dock = match value.as_str() {
+            Some("bottom") => HistoryDock::Bottom,
+            Some("left") => HistoryDock::Left,
+            Some("under_browser") => HistoryDock::UnderBrowser,
+            Some("browser") => HistoryDock::Browser,
+            _ => return Err(bad(cmd, "dock must be bottom, left, under_browser or browser")),
+        };
+        result.dock = Some(dock);
     }
     if let Some(value) = p.get("collapsed") {
-        let collapsed = value.as_bool().ok_or_else(|| bad(cmd, "collapsed must be a boolean"))?;
-        result.insert("collapsed".into(), json!(collapsed));
+        result.collapsed = Some(value.as_bool().ok_or_else(|| bad(cmd, "collapsed must be a boolean"))?);
     }
-    Ok(Value::Object(result))
+    typed_reply(cmd, result)
 }
 
 fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -540,7 +557,7 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
             _ => return Err(bad(cmd, "unknown navigation action")),
         }
     }
-    Ok(json!({"camera": cam, "fit": fit}))
+    typed_reply(cmd, NavigateResult { camera: cam, fit, continuous: None, param_warnings: Vec::new() })
 }
 
 /// Direct manipulation is stateless, bounded and independent of document evaluation.
@@ -592,7 +609,7 @@ fn continuous(mut cam: Camera, p: &Value) -> Result<Value> {
     if !cam.is_valid() {
         return Err(bad(cmd, "motion produced an invalid camera"));
     }
-    Ok(json!({"camera":cam, "fit":false, "continuous":true}))
+    typed_reply(cmd, NavigateResult { camera: cam, fit: false, continuous: Some(true), param_warnings: Vec::new() })
 }
 
 /// At a halfway tie prefer the heading nearer the front plan view.
@@ -1029,7 +1046,7 @@ mod tests {
 
 fn ambient_occlusion(_s: &mut Session, p: &Value) -> Result<Value> {
     let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad("view.ambient_occlusion", "enabled must be a boolean"))?;
-    Ok(json!({"enabled": enabled}))
+    typed_reply("view.ambient_occlusion", AmbientOcclusionResult { enabled, param_warnings: Vec::new() })
 }
 
 fn perspective(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -1108,14 +1125,23 @@ mod ambient_occlusion_tests {
 
 /// One preset for contact shading, tessellation and supersampling. MSAA stays independent.
 fn graphics_preset(_s: &mut Session, p: &Value) -> Result<Value> {
-    let preset = p.get("preset").and_then(Value::as_str);
-    let enabled = match preset {
-        Some("quality") => true,
-        Some("performance") => false,
+    let preset = match p.get("preset").and_then(Value::as_str) {
+        Some("quality") => GraphicsPreset::Quality,
+        Some("performance") => GraphicsPreset::Performance,
         _ => return Err(bad("view.graphics_preset", "preset must be performance or quality")),
     };
-    Ok(json!({"preset": preset, "enabled": enabled, "display_quality": if enabled { "fine" } else { "normal" },
-        "supersampling": if enabled { 2.0 } else { 1.0 }, "supersampling_adaptive": true}))
+    let enabled = preset == GraphicsPreset::Quality;
+    typed_reply(
+        "view.graphics_preset",
+        GraphicsPresetResult {
+            preset,
+            enabled,
+            display_quality: if enabled { PresetQuality::Fine } else { PresetQuality::Normal },
+            supersampling: if enabled { 2.0 } else { 1.0 },
+            supersampling_adaptive: true,
+            param_warnings: Vec::new(),
+        },
+    )
 }
 
 #[cfg(test)]

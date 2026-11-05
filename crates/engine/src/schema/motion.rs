@@ -278,7 +278,7 @@ fn contact_set_schema(_: &mut SchemaGenerator) -> Schema {
 
 /// Adds `key` to the schema's `required` list: for a key the type has optional so that the
 /// handler, not the check, refuses it when it's left out.
-fn require(schema: &mut Schema, key: &str) {
+pub(super) fn require(schema: &mut Schema, key: &str) {
     match schema.get_mut("required") {
         Some(Value::Array(required)) => {
             if !required.iter().any(|k| k == key) {
