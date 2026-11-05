@@ -1,7 +1,7 @@
 {
   "format": "vectorcraft",
   "version": 4,
-  "generator": "VectorCraft 0.9.0",
+  "generator": "VectorCraft 0.10.0",
   "document": {
     "version": 1,
     "title": "layers",
@@ -131,7 +131,7 @@
                 ],
                 "runs": [
                   {
-                    "text": "One operation through the layers: a fillet asked for in SolidCraft",
+                    "text": "One operation through the layers",
                     "style": {
                       "font_family": "Helvetica",
                       "font_style": "Bold",
@@ -3226,66 +3226,6 @@
               }
             },
             {
-              "id": 44,
-              "kind": {
-                "type": "text",
-                "kind": {
-                  "kind": "point"
-                },
-                "xf": [
-                  1.0,
-                  0.0,
-                  0.0,
-                  1.0,
-                  248.0,
-                  405.5
-                ],
-                "runs": [
-                  {
-                    "text": "the body's record",
-                    "style": {
-                      "font_family": "Helvetica",
-                      "font_style": "Regular",
-                      "size": 12.0,
-                      "tracking": 0.0,
-                      "baseline_shift": 0.0,
-                      "h_scale": 100.0,
-                      "v_scale": 100.0,
-                      "rotation": 0.0,
-                      "fill": {
-                        "type": "solid",
-                        "color": {
-                          "model": "rgb",
-                          "r": 0.0,
-                          "g": 0.0,
-                          "b": 0.0
-                        }
-                      },
-                      "stroke": {
-                        "type": "none"
-                      },
-                      "stroke_width": 0.0,
-                      "underline": false,
-                      "strikethrough": false,
-                      "all_caps": false
-                    }
-                  }
-                ],
-                "para": {
-                  "justify": "Left",
-                  "justify_auto": true,
-                  "left_indent": 0.0,
-                  "right_indent": 0.0,
-                  "first_line_indent": 0.0,
-                  "space_before": 0.0,
-                  "space_after": 0.0,
-                  "hyphenate": false,
-                  "mojikumi": "lineEndHalf",
-                  "burasagari": "standard"
-                }
-              }
-            },
-            {
               "id": 45,
               "appearance": {
                 "items": [
@@ -3487,66 +3427,6 @@
                           "r": 1.0,
                           "g": 1.0,
                           "b": 1.0
-                        }
-                      },
-                      "stroke": {
-                        "type": "none"
-                      },
-                      "stroke_width": 0.0,
-                      "underline": false,
-                      "strikethrough": false,
-                      "all_caps": false
-                    }
-                  }
-                ],
-                "para": {
-                  "justify": "Left",
-                  "justify_auto": true,
-                  "left_indent": 0.0,
-                  "right_indent": 0.0,
-                  "first_line_indent": 0.0,
-                  "space_before": 0.0,
-                  "space_after": 0.0,
-                  "hyphenate": false,
-                  "mojikumi": "lineEndHalf",
-                  "burasagari": "standard"
-                }
-              }
-            },
-            {
-              "id": 48,
-              "kind": {
-                "type": "text",
-                "kind": {
-                  "kind": "point"
-                },
-                "xf": [
-                  1.0,
-                  0.0,
-                  0.0,
-                  1.0,
-                  248.0,
-                  555.5
-                ],
-                "runs": [
-                  {
-                    "text": "the kernel's B-rep",
-                    "style": {
-                      "font_family": "Helvetica",
-                      "font_style": "Regular",
-                      "size": 12.0,
-                      "tracking": 0.0,
-                      "baseline_shift": 0.0,
-                      "h_scale": 100.0,
-                      "v_scale": 100.0,
-                      "rotation": 0.0,
-                      "fill": {
-                        "type": "solid",
-                        "color": {
-                          "model": "rgb",
-                          "r": 0.0,
-                          "g": 0.0,
-                          "b": 0.0
                         }
                       },
                       "stroke": {
@@ -3842,66 +3722,6 @@
               }
             },
             {
-              "id": 52,
-              "kind": {
-                "type": "text",
-                "kind": {
-                  "kind": "point"
-                },
-                "xf": [
-                  1.0,
-                  0.0,
-                  0.0,
-                  1.0,
-                  578.0,
-                  564.5
-                ],
-                "runs": [
-                  {
-                    "text": "the new body, as a record",
-                    "style": {
-                      "font_family": "Helvetica",
-                      "font_style": "Regular",
-                      "size": 12.0,
-                      "tracking": 0.0,
-                      "baseline_shift": 0.0,
-                      "h_scale": 100.0,
-                      "v_scale": 100.0,
-                      "rotation": 0.0,
-                      "fill": {
-                        "type": "solid",
-                        "color": {
-                          "model": "rgb",
-                          "r": 0.0,
-                          "g": 0.0,
-                          "b": 0.0
-                        }
-                      },
-                      "stroke": {
-                        "type": "none"
-                      },
-                      "stroke_width": 0.0,
-                      "underline": false,
-                      "strikethrough": false,
-                      "all_caps": false
-                    }
-                  }
-                ],
-                "para": {
-                  "justify": "Left",
-                  "justify_auto": true,
-                  "left_indent": 0.0,
-                  "right_indent": 0.0,
-                  "first_line_indent": 0.0,
-                  "space_before": 0.0,
-                  "space_after": 0.0,
-                  "hyphenate": false,
-                  "mojikumi": "lineEndHalf",
-                  "burasagari": "standard"
-                }
-              }
-            },
-            {
               "id": 53,
               "appearance": {
                 "items": [
@@ -3991,66 +3811,6 @@
                       "closed": false
                     }
                   ]
-                }
-              }
-            },
-            {
-              "id": 54,
-              "kind": {
-                "type": "text",
-                "kind": {
-                  "kind": "point"
-                },
-                "xf": [
-                  1.0,
-                  0.0,
-                  0.0,
-                  1.0,
-                  602.0,
-                  392.0
-                ],
-                "runs": [
-                  {
-                    "text": "result to ops",
-                    "style": {
-                      "font_family": "Helvetica",
-                      "font_style": "Regular",
-                      "size": 12.0,
-                      "tracking": 0.0,
-                      "baseline_shift": 0.0,
-                      "h_scale": 100.0,
-                      "v_scale": 100.0,
-                      "rotation": 0.0,
-                      "fill": {
-                        "type": "solid",
-                        "color": {
-                          "model": "rgb",
-                          "r": 0.33333334,
-                          "g": 0.33333334,
-                          "b": 0.33333334
-                        }
-                      },
-                      "stroke": {
-                        "type": "none"
-                      },
-                      "stroke_width": 0.0,
-                      "underline": false,
-                      "strikethrough": false,
-                      "all_caps": false
-                    }
-                  }
-                ],
-                "para": {
-                  "justify": "Left",
-                  "justify_auto": true,
-                  "left_indent": 0.0,
-                  "right_indent": 0.0,
-                  "first_line_indent": 0.0,
-                  "space_before": 0.0,
-                  "space_after": 0.0,
-                  "hyphenate": false,
-                  "mojikumi": "lineEndHalf",
-                  "burasagari": "standard"
                 }
               }
             },
@@ -4544,66 +4304,6 @@
                           "r": 1.0,
                           "g": 1.0,
                           "b": 1.0
-                        }
-                      },
-                      "stroke": {
-                        "type": "none"
-                      },
-                      "stroke_width": 0.0,
-                      "underline": false,
-                      "strikethrough": false,
-                      "all_caps": false
-                    }
-                  }
-                ],
-                "para": {
-                  "justify": "Left",
-                  "justify_auto": true,
-                  "left_indent": 0.0,
-                  "right_indent": 0.0,
-                  "first_line_indent": 0.0,
-                  "space_before": 0.0,
-                  "space_after": 0.0,
-                  "hyphenate": false,
-                  "mojikumi": "lineEndHalf",
-                  "burasagari": "standard"
-                }
-              }
-            },
-            {
-              "id": 62,
-              "kind": {
-                "type": "text",
-                "kind": {
-                  "kind": "point"
-                },
-                "xf": [
-                  1.0,
-                  0.0,
-                  0.0,
-                  1.0,
-                  898.0,
-                  254.5
-                ],
-                "runs": [
-                  {
-                    "text": "the mesh",
-                    "style": {
-                      "font_family": "Helvetica",
-                      "font_style": "Regular",
-                      "size": 12.0,
-                      "tracking": 0.0,
-                      "baseline_shift": 0.0,
-                      "h_scale": 100.0,
-                      "v_scale": 100.0,
-                      "rotation": 0.0,
-                      "fill": {
-                        "type": "solid",
-                        "color": {
-                          "model": "rgb",
-                          "r": 0.0,
-                          "g": 0.0,
-                          "b": 0.0
                         }
                       },
                       "stroke": {
@@ -5637,7 +5337,16 @@
       "copyrightNotice": "",
       "copyrightUrl": "",
       "created": 1793887324,
-      "modified": 1793887672
+      "modified": 1793887835
+    },
+    "last_view": {
+      "name": "",
+      "center": {
+        "x": 560.0,
+        "y": 390.0
+      },
+      "zoom": 0.9064102564102564,
+      "rotation": 0.0
     }
   },
   "images": {}

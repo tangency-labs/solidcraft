@@ -7,7 +7,7 @@ layer that needs another layer's job calls that layer; it never carries its own 
 
 ## 1. The layers
 
-![One operation through the layers: a fillet asked for in SolidCraft](layers/layers.svg)
+![One operation through the layers](layers/layers.svg)
 
 *Above the dashed line is the app, below it is solidcore. The app crosses the line only through ops (the intent, and its result or refusal) and tess (a mesh request, and the mesh to draw). Inside solidcore, the kernel does every computation and the result comes back as a record.*
 
