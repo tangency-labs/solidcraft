@@ -4,7 +4,7 @@
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Brep, Curve};
 use solidcraft_geom::UnitVec3;
-use solidcraft_geom::brep::eval::CurveEval;
+use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::prelude::*;
 
 use crate::Body;
@@ -47,7 +47,82 @@ pub fn face_surface(b: &Body, face: usize) -> Option<FaceSurface> {
     if b.is_mesh() {
         return None;
     }
-    surface_of(b.record(), face)
+    surface_of(b.record(), face).or_else(|| torus_of_face(b, face))
+}
+
+/// What torus face `face` lies on, if its surface is a torus held as a spline (such as a
+/// constant-radius fillet).
+fn torus_of_face(b: &Body, face: usize) -> Option<FaceSurface> {
+    let rec = b.record();
+    let f = rec.faces.get(face)?;
+    match &f.surface {
+        solidcore_record::brep::Surface::RationalSpline { .. } | solidcore_record::brep::Surface::Spline { .. } => {}
+        _ => return None,
+    }
+    let eval = SurfaceEval::new(f.parameters()).ok()?;
+    let [ru, rv] = f.domain;
+    if !(ru[0].is_finite() && ru[1].is_finite() && rv[0].is_finite() && rv[1].is_finite()) {
+        return None;
+    }
+    let (u0, u1) = (ru[0], ru[1]);
+    let (v0, v1) = (rv[0], rv[1]);
+    if u0 >= u1 || v0 >= v1 {
+        return None;
+    }
+    let tol = (b.size() * 1e-6).max(1e-7) * 100.0;
+    find_torus(&eval, u0, u1, v0, v1, tol, false).or_else(|| find_torus(&eval, u0, u1, v0, v1, tol, true))
+}
+
+/// Test if iso-curves in one parameter at stations of the other are circles of equal radius whose
+/// centers lie on a circular axis of the torus.
+fn find_torus(eval: &SurfaceEval, u0: f64, u1: f64, v0: f64, v1: f64, tol: f64, swapped: bool) -> Option<FaceSurface> {
+    const N_STATIONS: usize = 5;
+    const N_ARC: usize = 16;
+    let (s0, s1, t0, t1) = if swapped { (v0, v1, u0, u1) } else { (u0, u1, v0, v1) };
+    let point_at = |s: f64, t: f64| -> Option<Vec3> {
+        let (u, v) = if swapped { (t, s) } else { (s, t) };
+        eval.derivs(u, v).map(|(p, _, _)| p)
+    };
+    let mut minor_circles = Vec::with_capacity(N_STATIONS);
+    for i in 0..N_STATIONS {
+        let s = s0 + (s1 - s0) * (i as f64) / ((N_STATIONS - 1) as f64);
+        let samples: Vec<Vec3> = (0..=N_ARC)
+            .map(|j| {
+                let t = t0 + (t1 - t0) * (j as f64) / (N_ARC as f64);
+                point_at(s, t)
+            })
+            .collect::<Option<_>>()?;
+        let c = circle_through(&samples, tol)?;
+        minor_circles.push(c);
+    }
+    let minor = minor_circles.first()?.radius;
+    if !minor_circles.iter().all(|c| (c.radius - minor).abs() <= tol) {
+        return None;
+    }
+    let centers: Vec<Vec3> = minor_circles.iter().map(|c| c.center).collect();
+    let major_circle = circle_through(&centers, tol)?;
+    let center = major_circle.center;
+    let axis = major_circle.axis;
+    let major = major_circle.radius;
+    if !(major.is_finite() && minor.is_finite() && major > 0.0 && minor > 0.0) {
+        return None;
+    }
+    for i in 0..=3 {
+        let s = s0 + (s1 - s0) * (i as f64) / 3.0;
+        for j in 0..=3 {
+            let t = t0 + (t1 - t0) * (j as f64) / 3.0;
+            let p = point_at(s, t)?;
+            let to_axis = p - center;
+            let h = to_axis.dot(axis);
+            let radial = to_axis - axis * h;
+            let d = radial.len();
+            let dist = ((d - major).powi(2) + h.powi(2)).sqrt();
+            if (dist - minor).abs() > tol * 5.0 {
+                return None;
+            }
+        }
+    }
+    Some(FaceSurface::Torus { center, axis, major, minor })
 }
 
 /// The analytic surface of face `face` of the record `b`, as the record holds it.
@@ -204,5 +279,22 @@ mod tests {
         let cone = FaceSurface::Cone { apex: Vec3::ZERO, axis: UnitVec3::Z, half_angle: std::f64::consts::FRAC_PI_4 };
         assert!(cone.nearest(Vec3::new(2.0, 0.0, 0.0)).is_some_and(|q| q.dist(Vec3::new(1.0, 0.0, 1.0)) < 1e-12));
         assert!(plane.nearest(Vec3::new(f64::NAN, 0.0, 0.0)).is_none());
+    }
+
+    /// #11876: A constant-radius fillet (held as a rational spline from SMLib) is recognized as a
+    /// torus by face_surface so Quick Measure and Measure report its radius and diameter.
+    #[test]
+    fn a_fillet_face_is_recognized_as_a_torus() {
+        let cyl = crate::cylinder(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0), 5.0, 10.0).unwrap();
+        let rounded = crate::fillet(&cyl, &[Vec3::new(5.0, 0.0, 10.0)], 2.0).unwrap();
+        let tori: Vec<_> = (0..rounded.face_count())
+            .filter_map(|i| match face_surface(&rounded, i) {
+                Some(FaceSurface::Torus { major, minor, .. }) => Some((major, minor)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tori.len(), 1, "found: {tori:?}");
+        assert!((tori[0].0 - 3.0).abs() < 1e-3, "major radius: {:?}", tori[0].0);
+        assert!((tori[0].1 - 2.0).abs() < 1e-3, "minor radius: {:?}", tori[0].1);
     }
 }
