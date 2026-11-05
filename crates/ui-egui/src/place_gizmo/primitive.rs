@@ -242,7 +242,7 @@ fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], _: usize) -> bool {
                 // Typed fields stand the box square to the world: on a curved face, the way out of
                 // it at the point; a tilted face or a curved one whose way out there is off the
                 // axes, which has no outline for it, does not take it.
-                let n = n.or_else(|| solidcraft_engine::doc::hole_direction_at(&crate::open_meshing::session_world(s), p).map(|d| -d));
+                let n = n.or_else(|| solidcraft_engine::doc::hole_direction_at(&crate::open_meshing::session_world(s), p, &[]).map(|d| -d));
                 if n.is_some_and(|n| !STANDS_ON.iter().any(|axis| square_to(n, *axis))) {
                     return false;
                 }
