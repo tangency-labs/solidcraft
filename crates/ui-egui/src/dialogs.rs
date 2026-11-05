@@ -2081,7 +2081,7 @@ pub(crate) fn fillet_least_setback(ctx: &egui::Context, s: &Session, items: &[Se
     (&s.document_id, s.revision, radius.to_bits(), &bodies).hash(&mut key);
     corners.iter().for_each(|c| [c.x, c.y, c.z].map(f64::to_bits).hash(&mut key));
     let key = key.finish();
-    let id = egui::Id::new("fillet_least_setback");
+    let id = egui::Id::unique("fillet_least_setback");
     if let Some((k, least)) = ctx.data(|d| d.get_temp::<(u64, Option<f64>)>(id))
         && k == key
     {
@@ -2539,7 +2539,7 @@ fn tr(text: &str) -> &str {
 }
 
 fn publish_check(ui: &egui::Ui, response: &egui::Response, selected: bool) {
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), selected, tr(crate::ui_kit::row_label(ui))));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), selected, tr(crate::ui_kit::row_label(ui))));
 }
 
 fn title(k: &Kind) -> &'static str {
@@ -3024,7 +3024,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 let chip = crate::ui_kit::selection_field(ui, prompt, crate::ui_kit::Selection { active, filled });
                 if matches!(d.kind, Kind::Shell { .. }) && i == 0 {
                     chip.widget_info(|| {
-                        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tr(inp.label));
+                        let mut info = egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tr(inp.label));
                         info.current_text_value = Some(prompt.to_string());
                         info
                     });
@@ -3196,13 +3196,13 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
     {
         d.refuse(app, error);
     }
-    let shown_id = egui::Id::new("sc_dialog_refusal_shown");
+    let shown_id = egui::Id::unique("sc_dialog_refusal_shown");
     if d.error.is_none() && app.preview.error.is_none() {
         ui.data_mut(|m| m.remove::<String>(shown_id));
     }
     // A click the waiting pick field does not take: what that field is for, plainly (#10428).
     // Under the fold in a short window, a new note scrolls into view once, as a refusal does.
-    let note_shown_id = egui::Id::new("sc_dialog_pick_refused_shown");
+    let note_shown_id = egui::Id::unique("sc_dialog_pick_refused_shown");
     if let Some(id) = d.pick_refused.filter(|_| d.error.is_none() && app.preview.error.is_none()) {
         let note = crate::ui_kit::text(ui, crate::i18n::tr(id), crate::ui_kit::Text::Hint("pick_refused"));
         crate::scenario::publish_rect("dialog:pick_refused", note.rect);
@@ -3837,9 +3837,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             | Kind::Sheet(crate::dialogs_sheet::Sm::Rules { .. })
             | Kind::Plastic(crate::dialogs_plastic::Pl::Rules { .. })
     );
-    let grow_key = egui::Id::new(("sc_dialog_label_grow", raw_title));
+    let grow_key = egui::Id::unique(("sc_dialog_label_grow", raw_title));
     let label_grow = ctx.data(|data| data.get_temp::<f32>(grow_key)).unwrap_or(0.0).min((vp.width() - t.space_24 - card_width(&d)).max(0.0));
-    let panel = crate::ui_kit::Panel::new(&heading, egui::Id::new(("sc_dialog", title(&d.kind))), anchor, drag_bounds, side, frame)
+    let panel = crate::ui_kit::Panel::new(&heading, egui::Id::unique(("sc_dialog", title(&d.kind))), anchor, drag_bounds, side, frame)
         .actions(ok_label, close_label);
     let panel = if let Some(column) = column {
         panel.width(column.width()).joined(crate::ui_kit::DockEdges { left: true, top: true, ..Default::default() })
@@ -3859,7 +3859,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
         let detail = with.join(" · ");
-        let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::new(("sc_dialog", title(&d.kind))), "delete", &heading)
+        let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::unique(("sc_dialog", title(&d.kind))), "delete", &heading)
             .tone(crate::ui_kit::Tone::Danger)
             .actions("Delete", "Cancel", None)
             .detail(&detail)
@@ -3997,7 +3997,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Keyboard: Enter applies (from a value field, or with nothing focused), Esc cancels.
     let (enter_free, esc) = ctx.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
     let nothing_focused = ctx.memory(|m| m.focused().is_none());
-    let canvas_enter = enter_free && ctx.memory(|m| m.had_focus_last_frame(egui::Id::new("sc_canvas_value")));
+    let canvas_enter = enter_free && ctx.memory(|m| m.had_focus_last_frame(egui::Id::unique("sc_canvas_value")));
     // Tables (configurations, a study's keys) take Enter for their cells.
     let enter_applies = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. })
         && !matches!(&d.kind, Kind::Motion(k) if k.wide())

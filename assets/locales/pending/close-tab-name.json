@@ -1,0 +1,13 @@
+{
+  "en": { "ui.close_tab": "Close tab" },
+  "ar": { "ui.close_tab": "إغلاق علامة التبويب" },
+  "de": { "ui.close_tab": "Tab schließen" },
+  "es": { "ui.close_tab": "Cerrar pestaña" },
+  "fr": { "ui.close_tab": "Fermer l’onglet" },
+  "he": { "ui.close_tab": "סגירת הלשונית" },
+  "ja": { "ui.close_tab": "タブを閉じる" },
+  "ko": { "ui.close_tab": "탭 닫기" },
+  "vi": { "ui.close_tab": "Đóng thẻ" },
+  "zh": { "ui.close_tab": "关闭标签页" },
+  "zh-TW": { "ui.close_tab": "關閉分頁" }
+}

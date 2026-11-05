@@ -64,7 +64,7 @@ pub(crate) fn paint_background_picture(app: &mut crate::SolveApp, painter: &egui
         return;
     }
     let ctx = painter.ctx().clone();
-    let id = egui::Id::new("sc_background_picture");
+    let id = egui::Id::unique("sc_background_picture");
     let mut picture = ctx.data(|d| d.get_temp::<BackgroundPicture>(id)).filter(|p| p.path == *path).unwrap_or_else(|| {
         let picture = BackgroundPicture { path: path.clone(), decoded: Default::default(), texture: None };
         let (path, slot, repaint) = (path.clone(), picture.decoded.clone(), ctx.clone());
@@ -829,7 +829,7 @@ mod tests {
                 time += 0.023;
                 let mut raw = egui::RawInput { time: Some(time), ..Default::default() };
                 raw.viewports.entry(egui::ViewportId::ROOT).or_default().occluded = Some(!visible);
-                let _ = ctx.run_ui(raw, |ui| {
+                ctx.run_ui(raw, |ui| {
                     ui.ctx().request_repaint(); // Deterministic harness only; product never does this for sampling.
                     let paint = rendered.then(|| crate::blur::PaintedFrame {
                         frame: ui.ctx().cumulative_frame_nr().saturating_sub(1),
@@ -838,7 +838,9 @@ mod tests {
                     });
                     session.sample(ui.ctx(), revision, radius, available, paint);
                     session.sample(ui.ctx(), revision, radius, available, paint); // egui re-pass duplicate
-                });
+                })
+                .textures_delta
+                .clear();
             };
         feed(&mut session, false, true, true, true, 1, 40.0);
         feed(&mut session, false, true, true, true, 1, 40.0);
@@ -1250,7 +1252,7 @@ mod tests {
                     .is_some_and(|shape| matches!(shape, egui::Shape::Rect(_))),
                 "backing precedes native popup chrome"
             );
-            assert!(ctx.memory(|m| m.has_focus(egui::Id::new("blur_picker").with("search"))), "native search focus survives hover");
+            assert!(ctx.memory(|m| m.has_focus(egui::Id::unique("blur_picker").with("search"))), "native search focus survives hover");
         }
     }
 

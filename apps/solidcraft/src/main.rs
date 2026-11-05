@@ -1792,7 +1792,7 @@ mod viewport_tests {
                 viewport.fullscreen = Some(fullscreen);
                 viewport.native_pixels_per_point = Some(retina);
                 super::fullscreen_content_insets(&mut raw, 32.0, zoom);
-                let _ = ctx.run_ui(raw, |ui| super::content_ui(app, ui));
+                ctx.run_ui(raw, |ui| super::content_ui(app, ui)).textures_delta.clear();
             };
             // Enter, leave, and enter again: no stale inset when returning to a normal window.
             for fullscreen in [false, true, false, true] {
