@@ -187,7 +187,7 @@ pub(crate) fn theme_segments(ui: &mut Ui, key: &str, options: &[ThemeSegment<'_>
         if response.has_focus() {
             ui.painter().rect_stroke(r.expand(t.space_2), rounding, Stroke::new(t.space_2, t.form_primary), StrokeKind::Outside);
         }
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), on, option.label));
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), on, option.label));
         crate::prefs_search::remember(ui, option.label, r);
         crate::prefs_search::follow(ui, option.label, r);
         let visible = r.intersect(ui.clip_rect());
@@ -269,7 +269,7 @@ pub(crate) fn theme_import_button(ui: &mut Ui, label: &str) -> Response {
     if response.has_focus() {
         ui.painter().rect_stroke(r.expand(t.space_2), t.radius_md, Stroke::new(t.space_2, t.form_primary), StrokeKind::Outside);
     }
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     crate::prefs_search::remember(ui, label, r);
     crate::prefs_search::follow(ui, label, r);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -307,7 +307,7 @@ pub(crate) fn theme_slot(ui: &mut Ui, slot: &ThemeSlot<'_>) -> Response {
     p.text(pos2(icon.right() + t.space_4, icon.center().y), Align2::LEFT_CENTER, slot.title, FontId::proportional(t.font_small), t.form_dim);
     p.text(pos2(x, r.bottom() - t.space_16 - t.space_4), Align2::LEFT_CENTER, slot.name, crate::fonts::semibold(t.font_label), t.form_ink);
     p.text(pos2(r.right() - t.space_10, r.center().y), Align2::RIGHT_CENTER, slot.hint, FontId::proportional(t.font_small), t.form_dim);
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), slot.aimed, slot.title));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), slot.aimed, slot.title));
     crate::prefs_search::remember(ui, slot.title, r);
     crate::prefs_search::follow(ui, slot.title, r);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -482,7 +482,7 @@ pub(crate) fn theme_browser(ui: &mut Ui, id: &str, count: usize, grid: bool, rev
                     item(&mut card_ui, index, card_width);
                 }
             });
-        offset = out.state.offset.x;
+        offset = out.state.clamped_offset().x;
         let r = out.inner_rect;
         let hovered = ui.rect_contains_pointer(r);
         let wheel = if hovered { crate::navigation::take_horizontal_wheel(ui, offset, max) } else { 0.0 };
@@ -531,7 +531,7 @@ pub(crate) fn theme_browser(ui: &mut Ui, id: &str, count: usize, grid: bool, rev
                 ui.painter().circle_stroke(centre, size / 2.0 + t.space_2, Stroke::new(t.space_2, t.form_primary));
             }
             let label = crate::i18n::tr(if left { "prefs.appearance.previous_themes" } else { "prefs.appearance.next_themes" });
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
             scenario::publish_target(if left { "prefs:theme_previous" } else { "prefs:theme_next" }, arrow);
             if response.clicked() {
                 // A screenful: the cards that fit in view, at least one (#11434).
@@ -540,7 +540,7 @@ pub(crate) fn theme_browser(ui: &mut Ui, id: &str, count: usize, grid: bool, rev
             }
             response.backing_on_hover_text(label).on_hover_cursor(egui::CursorIcon::PointingHand);
         }
-        if (offset - out.state.offset.x).abs() > 0.1 {
+        if (offset - out.state.clamped_offset().x).abs() > 0.1 {
             ui.ctx().request_repaint();
         }
         ui.data_mut(|d| d.insert_temp(key, offset));

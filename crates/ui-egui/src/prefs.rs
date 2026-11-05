@@ -4343,7 +4343,13 @@ mod tests {
             let at = crate::scenario::rect_of("prefs:theme_viewport").unwrap().center();
             h.frame_with(vec![
                 egui::Event::PointerMoved(at),
-                egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta, modifiers, phase: egui::TouchPhase::Move },
+                egui::Event::MouseWheel {
+                    source: egui::MouseWheelSource::Unknown,
+                    unit: egui::MouseWheelUnit::Point,
+                    delta,
+                    modifiers,
+                    phase: egui::TouchPhase::Move,
+                },
             ]);
             h.frames(60);
             let after = crate::scenario::rect_of("prefs:card:Light").unwrap();
