@@ -678,6 +678,31 @@ mod tests {
         assert!((i.at - Vec2::new(30.0, 0.0)).dot(i.at - prev).abs() < 1e-9);
     }
 
+    /// #12179: a line started on an arc (at its end point) or on a circle snaps along the
+    /// curve's tangent there, so it leaves the curve smoothly.
+    #[test]
+    fn a_line_started_on_an_arc_or_circle_snaps_along_its_tangent() {
+        let mut s = Sketch::new();
+        // A half circle over the X axis, centre (0, 0), radius 10, from (10, 0) to (-10, 0).
+        let _ = s.add_arc(Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::new(-10.0, 0.0), [None, None, None], Some("a1"));
+        let end = Vec2::new(10.0, 0.0);
+        // The tangent at (10, 0) is vertical: straight down from the arc's end.
+        let i = tangent(&s, end, Vec2::new(10.3, -20.0), 0.5).expect("tangent at the arc's end");
+        assert_eq!((i.kind.clone(), i.curve.as_str()), (Kind::Tangent, "a1"));
+        assert!(i.at.dist(Vec2::new(10.0, -20.0)) < 1e-9, "{:?}", i.at);
+        assert_eq!(i.guide.0, end);
+        // Off the tangent, or still at the start point, nothing.
+        assert!(tangent(&s, end, Vec2::new(14.0, -20.0), 0.5).is_none());
+        assert!(tangent(&s, end, Vec2::new(10.1, 0.1), 0.5).is_none());
+        // On a circle, anywhere on it: the tangent at (0, 10) is horizontal.
+        let mut c = Sketch::new();
+        let _ = c.add_circle(Vec2::ZERO, 10.0, None, Some("c1"));
+        let i = tangent(&c, Vec2::new(0.0, 10.0), Vec2::new(-15.0, 10.2), 0.5).expect("tangent on the circle");
+        assert!(i.at.dist(Vec2::new(-15.0, 10.0)) < 1e-9, "{:?}", i.at);
+        // A point on the arc's circle but off the arc itself takes nothing from it.
+        assert!(tangent(&s, Vec2::new(0.0, -10.0), Vec2::new(20.0, -10.2), 0.5).is_none());
+    }
+
     fn circle() -> Sketch {
         let mut s = Sketch::new();
         let _ = s.add_circle(Vec2::ZERO, 10.0, None, Some("c1"));
