@@ -1767,8 +1767,9 @@ fn a_rounded_bore_rim_is_lost_and_a_repair_reads_it_again() {
     assert_eq!(back["record"], first["record"], "the first record reads again");
 }
 
-/// Bore1 deleted with the drawing closed: its dimension is lost and never reads Bore2 by itself.
-/// Repaired to Bore2's rim on purpose, it reads Ø10 by the name Bore2's own dimension has, as one
+/// Bore1 deleted with the drawing closed: its dimension is lost and never reads Bore2 by itself. Its
+/// leads come only from the features that named its edge, so they are the plate's and Bore2's rim
+/// isn't among them. Repaired to Bore2's rim on purpose, it reads Ø10 by the name Bore2's own dimension has, as one
 /// undo step. Bore1's delete undone, the repaired dimension stays on Bore2; the repair undone, it
 /// reads Bore1 by its first record again.
 #[test]
@@ -1776,8 +1777,10 @@ fn a_deleted_bores_dimension_reads_bore2_only_when_repaired_to_it() {
     let (mut s, id, first, second) = workshop_plate_dimensions();
     let drawing = json!({"drawing": ids::encode(id)});
     closed_edit(&mut s, &drawing, "timeline.delete", json!({"feature": "Bore1"}));
-    lost_again(&mut s, &first, &first["record"]);
+    let lost = lost_again(&mut s, &first, &first["record"]);
     let rim = json!({"edge": {"body": "Plate", "index": workshop_plate_round_index(&s, "Plate", [60.0, 50.0, 20.0], 5.0)}});
+    let leads = lost["candidates"].as_array().cloned().unwrap_or_default();
+    assert!(!leads.is_empty() && !leads.contains(&rim), "leads come from the plate, never Bore2's rim: {leads:?}");
     let steps = s.undo.len();
     let repaired = run(&mut s, REPAIR, json!({"dimension": first["dimension"], "slot": "edge", "pick": rim}));
     reads(&repaired, 10.0, "Ø10.00");

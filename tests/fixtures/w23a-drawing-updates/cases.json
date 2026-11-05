@@ -720,7 +720,7 @@
         "drawing.dimension.repair onto that circle reads 10 as one drawing undo step, with the same id, view and text place, and only the edge's name changed",
         "the repair undone is lost with the same leads, redone reads 10, and reads 10 after save and reopen",
         "the round undone, the repaired dimension is lost and keeps its repair; redone it reads 10; repair and round undone, it reads 10 by its first record",
-        "Bore1 deleted: diam_bore1 is lost and never reads Bore2 by itself; repaired onto Bore2's rim it reads 10 by the name Bore2's own dimension has",
+        "Bore1 deleted: diam_bore1 is lost and never reads Bore2 by itself, and its leads are the plate's, never Bore2's rim; repaired onto Bore2's rim it reads 10 by the name Bore2's own dimension has",
         "Bore1's delete undone, the repair stays on Bore2; the repair undone, diam_bore1 reads Bore1 by its first record"
       ],
       "implemented_rust_tests": ["a_rounded_bore_rim_is_lost_and_a_repair_reads_it_again", "a_deleted_bores_dimension_reads_bore2_only_when_repaired_to_it"],
