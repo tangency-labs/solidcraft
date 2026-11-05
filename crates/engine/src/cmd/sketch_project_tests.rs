@@ -1678,7 +1678,7 @@ fn a_ray_through_a_hole_opening_projects_its_rim() {
     run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 30}));
     let refs: Vec<Value> = rim.edges.iter().map(|p| json!({"edge": [p.x, p.y, p.z], "body": rim.body})).collect();
     let projected = run(&mut s, "sketch.project", json!({"refs": refs}));
-    assert_eq!(projected["links"].as_array().map(|a| a.len()), Some(2), "{projected}");
+    assert_eq!(projected["links"].as_array().map(|a| a.len()), Some(rim.edges.len()), "{projected}");
     assert_rim(&mut s, 5.0, [20.0, 15.0]);
 
     // Diameter 80 in a 100 plate: the opening's centre is farther from every face than
