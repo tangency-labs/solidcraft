@@ -438,7 +438,30 @@ fn call_with_copy(
                 .ok_or_else(|| bad("sizes"))?;
             let mut s = copy_for_edit(&first()?)?;
             let (edges, _) = faces(&mut s, &p["edges"])?;
-            let r = blend(&s.body, kind, &edges, &sizes, &[], Corners::Filled).map(|_| ());
+            let one_size = sizes.len() == 1;
+            if !(one_size || sizes.len() == edges.len()) {
+                return Err(bad("sizes"));
+            }
+            // SolidCraft validates every supplied size before its picker retains the first
+            // point for each edge. A bad later size must not disappear with its duplicate.
+            if sizes.iter().any(|&size| {
+                !size.is_finite() || size <= 0.0 || size > solidcore_ops::blend::MAX_SIZE
+            }) {
+                return Ok(Err(solidcore_ops::Error::Argument.to_string()));
+            }
+            let mut unique = Vec::new();
+            let mut each = Vec::new();
+            for (i, edge) in edges.into_iter().enumerate() {
+                if !unique.contains(&edge) {
+                    unique.push(edge);
+                    each.push(
+                        *sizes
+                            .get(if one_size { 0 } else { i })
+                            .ok_or_else(|| bad("sizes"))?,
+                    );
+                }
+            }
+            let r = blend(&s.body, kind, &unique, &each, &[], Corners::Filled).map(|_| ());
             in_place(Slot { order: None, ..s }, r)
         }
         other => {
@@ -736,6 +759,59 @@ fn chamfer_dispatch_preserves_order_direction_sizes_and_operand() {
         let removed = 0.5 * (20.0 - x) * (20.0 - z) * 20.0;
         assert!((out.body.volume(1e-9).unwrap() - (8000.0 - removed)).abs() < 1e-6);
         assert!((body.volume(1e-9).unwrap() - 8000.0).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn repeated_blend_picks_keep_first_size_and_source() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let record = solidcore_ops::make_box([0.0; 3], [20.0; 3])
+        .unwrap()
+        .to_record()
+        .unwrap()
+        .0;
+    let edge = record
+        .edges
+        .iter()
+        .position(|e| {
+            e.vertices.iter().all(|&i| {
+                let p = record.vertices[i as usize].point;
+                p[0] == 20.0 && p[2] == 20.0
+            })
+        })
+        .unwrap();
+    for sizes in [serde_json::json!([2.0, 7.0]), serde_json::json!([2.0])] {
+        check_discarded_edit(
+            record.clone(),
+            "blend_dropping",
+            &serde_json::json!({
+                "kind": "chamfer", "edges": {"picked": [{"index": edge}, {"index": edge}]},
+                "sizes": sizes
+            }),
+            &serde_json::json!({"body_count": 1, "volume_mm3": 7960.0}),
+            serde_json::json!({"body_count": 1, "volume_mm3": 8000.0}),
+        );
+    }
+}
+
+#[test]
+fn repeated_blend_picks_do_not_hide_invalid_later_sizes() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let record = solidcore_ops::make_box([0.0; 3], [20.0; 3])
+        .unwrap()
+        .to_record()
+        .unwrap()
+        .0;
+    for sizes in [
+        serde_json::json!([2.0, -7.0]),
+        serde_json::json!([2.0, 1_000_001.0]),
+    ] {
+        let mut records = serde_json::Map::new();
+        records.insert("input".to_owned(), serde_json::to_value(&record).unwrap());
+        let e = serde_json::json!({"bodies": {"input": {"trusted": true}},
+            "calls": [{"op": "blend_dropping", "inputs": ["input"], "error": "invalid size",
+                "params": {"kind": "chamfer", "edges": {"picked": [{"index": 0}, {"index": 0}]}, "sizes": sizes}}]});
+        assert!(run_case_with_records(&e, || records).unwrap().is_none());
     }
 }
 
