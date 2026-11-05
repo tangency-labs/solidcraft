@@ -111,6 +111,22 @@ fn a_piece_with_many_faces_around_it_keeps_a_name_that_can_be_used() {
     assert_ne!(names.faces[0], names.faces[1], "the pieces are still told apart");
 }
 
+/// A name saved in the older form (`F5:blend:F2:+x|F2:+z`) names the same face as today's
+/// `F5:blend(F2:+x|F2:+z)`, so a stored name still finds the face, its piece and its stem.
+#[test]
+fn a_name_in_the_older_form_still_finds_the_face_it_names() {
+    let names = qualify(named(&["F5:blend(F2:+x|F2:+z)#[F6:-y]", "F2:+x", "F2:+z"]), &[]);
+    // The face is a piece of the blend face the stored name names.
+    assert_eq!(matches(&names, 0, "F5:blend:F2:+x|F2:+z"), Some(Match::Piece), "the older form names the same face");
+    assert_eq!(matches(&names, 0, "F5:blend(F2:+x|F2:+z)"), Some(Match::Piece), "the current form as well");
+    // Another face of the design is not that face.
+    assert_eq!(matches(&names, 1, "F5:blend:F2:+x|F2:+z"), None);
+    // The inner face of an older design is found as well.
+    let names = qualify(named(&["F3:inner(F2:top)#[F4:-y]", "F2:top"]), &[]);
+    assert_eq!(matches(&names, 0, "F3:inner:F2:top"), Some(Match::Piece), "the older form names the same face");
+    assert_eq!(matches(&names, 1, "F3:inner:F2:top"), None);
+}
+
 #[test]
 fn a_merged_face_takes_the_shared_stem_or_the_first_name_and_answers_to_the_others() {
     let m = merged(named(&["top#[a]", "top#[b]"])).unwrap();
