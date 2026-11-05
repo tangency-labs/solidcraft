@@ -503,6 +503,8 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             connecting_section(app, ui);
         });
         ui.add_enabled_ui(app.preferences.ai_features, |ui| pointer_section(app, ui));
+        // Agents through MCP don't use the chat, so this stays on with AI features off.
+        mcp_section(app, ui);
     });
 }
 
@@ -707,6 +709,22 @@ fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             },
             |ui, (visible, speed, follow)| ui_kit::settings_pointer_preview(ui, visible, crate::i18n::tr_label(&speed), follow),
         );
+    });
+}
+
+/// The AI page's section for agents outside the app, which reach it through the MCP server
+/// whether or not the chat is on: shown below the chat's settings, with the chat off too.
+fn mcp_section(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if cfg!(target_arch = "wasm32") {
+        return;
+    }
+    ui_kit::settings_section(ui, "mcp_agents", tr("ui.mcp_agents"), |ui| {
+        ui.horizontal(|ui| {
+            let response =
+                ui_kit::checkbox(ui, tr("ui.mcp_compact"), &mut app.preferences.mcp_compact).backing_on_hover_text(tr("ui.mcp_compact_note"));
+            crate::scenario::publish_handle("prefs:mcp_compact", response.rect.center());
+            ui_kit::help_icon(ui, tr("ui.mcp_compact_note"));
+        });
     });
 }
 
