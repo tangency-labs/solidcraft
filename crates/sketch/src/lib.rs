@@ -79,7 +79,7 @@ pub use paper_text::{
     paper_lines_in, paper_lines_now, paper_text, paper_text_in, paper_text_now, paper_text_with_flow, paper_text_with_flow_in,
     paper_text_with_flow_now,
 };
-pub use pattern::{PatternAlignment, PatternInstance, SketchPattern, SketchPatternKind};
+pub use pattern::{DEFAULT_PATTERN_COPIES, MAX_PATTERN_COPIES, PatternAlignment, PatternInstance, SketchPattern, SketchPatternKind};
 pub use periodic::periodic_beziers;
 pub use profiles::{
     CurvePick, ENDPOINT_JOIN_TOL, MAX_PROFILE_EDGES, Profile, ProfileSearch, distinct_curves, find_drawn_profiles, find_profiles,

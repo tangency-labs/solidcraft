@@ -2857,3 +2857,14 @@ fn mirror_axis_does_not_drift_when_dimensioning_mirrored_geometry() {
     assert!((before_axis.0 - after_axis.0).len() < 1e-6, "axis moved");
     assert!((before_axis.1 - after_axis.1).len() < 1e-6, "axis moved");
 }
+
+/// #7824: a circular Quantity is bounded by the fixed ceiling, not by the old 500 cap; the
+/// user's own limit is the engine's to apply.
+#[test]
+fn pattern_counts_are_bounded_by_the_ceiling_not_500() {
+    assert_eq!(SketchPattern::circular_quantity(600.0).ok(), Some(600));
+    assert_eq!(SketchPattern::circular_quantity(20_000.0).ok(), Some(20_000));
+    assert!(SketchPattern::circular_quantity(20_001.0).is_err());
+    assert!(SketchPattern::circular_quantity(f64::NAN).is_err());
+    assert!(SketchPattern::circular_quantity(1.0).is_err());
+}
