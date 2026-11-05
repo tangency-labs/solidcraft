@@ -1037,6 +1037,9 @@ impl SolveApp {
         {
             let adapter = rs.adapter.clone();
             let key = render_workspace::adapter_key(&adapter.get_info());
+            // Next to the graphics settings: a setup that stops the app is not run again by itself.
+            let marker = self.services.graphics_path.as_deref().map(|p| std::path::Path::new(p).with_file_name(render_workspace::SETUP_MARKER));
+            self.render_workspace.watch_setup(marker);
             self.render_workspace.defer_path_host(key, move || solidcraft_gpu::path::host_on_adapter(&adapter).map_err(|e| e.to_string()));
         }
         render_workspace::sync_backend(self);
@@ -1738,11 +1741,12 @@ impl SolveApp {
             return;
         }
         // A display choice opens its choices, as the navigation bar's menus do: run with no
-        // parameters it could only fail (#8868). The choices menu is not the command's ribbon
+        // parameters it could only fail (#8868); so does the selection filter's mode (#11505). The choices menu is not the command's ribbon
         // place, so the ribbon keeps its tab however the menu was opened (#10540).
         let choice = match id {
             "view.visual_style" => Some(context_menu::Target::VisualStyle),
             "view.tool" => Some(context_menu::Target::ViewTool),
+            "select.filter" => Some(context_menu::Target::SelectionFilter),
             _ => None,
         };
         if let Some(target) = choice {

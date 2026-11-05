@@ -8,6 +8,10 @@
 //! (a window listing every command of the tab with a check box) and Reset Toolbar; Reset Toolbar
 //! restores the tab. The buttons are kept with the preferences and exported or imported with the
 //! keyboard shortcuts; hidden tabs are kept in the `hidden_toolbar_tabs` preference.
+//!
+//! The quick-access bar (#10223) is kept here too: the commands a command's menu added to the
+//! application bar, after Save, Undo and Redo, in the order the user dragged them into. It is
+//! empty, and so not drawn, until a command is added.
 
 use std::collections::BTreeMap;
 
@@ -27,9 +31,14 @@ pub struct ToolbarCustom {
     pub panels: BTreeMap<String, Vec<String>>,
     /// `"<workspace>/<tab>"` → gallery commands moved to full-size buttons.
     pub gallery_buttons: BTreeMap<String, Vec<String>>,
+    /// The quick-access bar's commands, in order (#10223). Empty by default: no bar.
+    pub quick_access: Vec<String>,
     /// The Customize Toolbar window is open (not kept).
     pub customizing: bool,
 }
+
+/// Most commands the quick-access bar holds.
+pub const MAX_QUICK_ACCESS: usize = 24;
 
 impl ToolbarCustom {
     /// Whether a command still uses a compact gallery cell in this panel.
@@ -41,7 +50,7 @@ impl ToolbarCustom {
     }
 
     pub fn prefs(&self) -> Value {
-        json!({"version": 3, "panels": self.panels, "gallery_buttons": self.gallery_buttons})
+        json!({"version": 3, "panels": self.panels, "gallery_buttons": self.gallery_buttons, "quick_access": self.quick_access})
     }
     pub fn load(&mut self, v: &Value) {
         let version = v.get("version").and_then(Value::as_u64).unwrap_or(0);
@@ -72,6 +81,13 @@ impl ToolbarCustom {
                     .collect()
             })
             .unwrap_or_default();
+        // Saved ids are kept as they are, each once; one this version lacks is not drawn.
+        self.quick_access.clear();
+        for id in v.get("quick_access").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).take(100) {
+            if !id.is_empty() && id.len() <= 200 && !self.quick_access.iter().any(|q| q == id) && self.quick_access.len() < MAX_QUICK_ACCESS {
+                self.quick_access.push(id.to_string());
+            }
+        }
         if !current {
             self.migrate();
         }
@@ -307,6 +323,36 @@ pub fn toggle(app: &mut SolveApp, tab: &str, id: &str) {
     }
 }
 
+/// Add a command to the end of the quick-access bar (#10223); a command already there stays put.
+pub fn quick_add(app: &mut SolveApp, id: &str) -> Result<(), String> {
+    let spec = solidcraft_engine::find_command(id).ok_or_else(|| format!("no command `{id}`"))?;
+    let list = &mut app.toolbar_custom.quick_access;
+    if list.iter().any(|q| q == spec.id) {
+        return Ok(());
+    }
+    if list.len() >= MAX_QUICK_ACCESS {
+        return Err(crate::i18n::format("ui.quick_access_full", &[("count", &MAX_QUICK_ACCESS.to_string())]));
+    }
+    list.push(spec.id.to_string());
+    Ok(())
+}
+
+/// Take a command off the quick-access bar.
+pub fn quick_remove(app: &mut SolveApp, id: &str) {
+    app.toolbar_custom.quick_access.retain(|q| q != id);
+}
+
+/// Move a quick-access button before another one (`before`: None puts it at the end).
+pub fn quick_move(app: &mut SolveApp, id: &str, before: Option<&str>) {
+    let list = &mut app.toolbar_custom.quick_access;
+    if !list.iter().any(|q| q == id) || before == Some(id) {
+        return;
+    }
+    list.retain(|q| q != id);
+    let at = before.and_then(|b| list.iter().position(|q| q == b)).unwrap_or(list.len());
+    list.insert(at, id.to_string());
+}
+
 /// Reset Toolbar: a tab's panels back to their defaults.
 pub fn reset(app: &mut SolveApp, tab: &str) {
     let prefix = format!("{WORKSPACE}/{tab}/");
@@ -326,6 +372,12 @@ pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
         Item::action("ui.toolbarPin", "Pin to Toolbar", "plus").with(json!({ "command": id }))
     });
     v.push(Item::action("ui.shortcutPin", if fav { "Unpin from Shortcuts" } else { "Pin to Shortcuts" }, "star").with(json!({ "command": id })));
+    // The application bar's quick-access buttons (#10223).
+    v.push(if app.toolbar_custom.quick_access.iter().any(|q| q == id) {
+        Item::action("ui.quickAccessRemove", "Remove from Quick Access", "close").with(json!({ "command": id }))
+    } else {
+        Item::action("ui.quickAccessAdd", "Add to Quick Access", "plus").with(json!({ "command": id }))
+    });
     v.push(Item::sep());
     v.push(Item::action("ui.toolbarCustomize", "Customize Toolbar…", "settings"));
     v.push(Item::action("ui.toolbarReset", "Reset Toolbar", "restore").with(json!({ "tab": tab })));
@@ -371,6 +423,12 @@ pub fn run(app: &mut SolveApp, action: &str, p: &Value) {
         "ui.toolbarCustomize" => app.toolbar_custom.customizing = true,
         "ui.toolbarTab" => crate::workspace::set_tab_shown(app, &tab, p.get("shown").and_then(Value::as_bool).unwrap_or(true)),
         "ui.shortcutPin" => app.sbox.toggle_pin(id),
+        "ui.quickAccessAdd" => {
+            if let Err(e) = quick_add(app, id) {
+                app.set_status(e, true);
+            }
+        }
+        "ui.quickAccessRemove" => quick_remove(app, id),
         _ => {}
     }
 }

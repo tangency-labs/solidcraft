@@ -43,7 +43,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.revolve", "Revolve", revolve)
         .at("SOLID", "CREATE")
         .icon("revolve")
-        .params("axis: sketch line id | x | y (sketch axes) | X|Y|Z (world) | {type: world, axis: X|Y|Z} (as returned by timeline.inspect) | construction axis name (followed when edited) | {origin, dir} | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (Two Sides: the other side's angle); direction?: symmetric (angle split either side, independent of axis direction); convention?: sketch_normal|legacy_axis_start (default sketch_normal; legacy retains older angular starts); to?: [x,y,z] (To Object: turn until that face, vertex or point); sketch?, profiles? | face: [x,y,z] (a planar body face as the profile) and face_body?: name (whose face, where faces of several bodies meet), operation?, touching?, targets?, name?, body_name?"),
+        .params("axis: sketch line id | x | y (sketch axes) | X|Y|Z (world) | {type: world, axis: X|Y|Z} (as returned by timeline.inspect) | construction axis name (followed when edited) | {origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (Two Sides: the other side's angle); direction?: symmetric (angle split either side, independent of axis direction); convention?: sketch_normal|legacy_axis_start (default sketch_normal; legacy retains older angular starts); to?: [x,y,z] (To Object: turn until that face, vertex or point); sketch?, profiles? | face: [x,y,z] (a planar body face as the profile) and face_body?: name (whose face, where faces of several bodies meet), operation?, touching?, targets?, name?, body_name?"),
     CommandSpec::new("solid.sweep", "Sweep", sweep)
         .at("SOLID", "CREATE")
         .icon("sweep")
@@ -105,7 +105,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("hole")
         .key("H")
-        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body)"),
+        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body)"),
     CommandSpec::new("solid.pipe", "Pipe", crate::checked!("solid.pipe", pipe))
         .at("SOLID", "CREATE")
         .icon("pipe")
@@ -1335,7 +1335,8 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// A revolve axis of `sketch` from its parameter: a sketch line id, the sketch's x or y axis, a
 /// world axis (also as saved: {type: world, axis: X|Y|Z}), a construction axis by name
-/// (followed when it is edited), {origin, dir}, or an edge
+/// (followed when it is edited), {origin, dir} (each origin coordinate a number or an expression over
+/// the parameters, which the axis follows), or an edge
 /// or round face of the model ({edge|face: [x,y,z]}), which the revolve follows as the model
 /// changes. A line of the sketch wins over a construction axis of the same name.
 pub(super) fn axis_param(s: &Session, sketch: u64, p: &Value, cmd: &str) -> Result<AxisRef> {
@@ -1348,9 +1349,12 @@ pub(super) fn axis_param(s: &Session, sketch: u64, p: &Value, cmd: &str) -> Resu
                 str_(o, "axis").filter(|a| matches!(*a, "X" | "Y" | "Z")).ok_or_else(|| bad(cmd, "world axis requires `axis` to be X, Y or Z"))?;
             return Ok(AxisRef::World { axis: axis.into() });
         }
-        let origin = o.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
-        let dir = o.get("dir").and_then(vec3).ok_or_else(|| bad(cmd, "axis needs `dir`"))?;
-        return Ok(AxisRef::Line { origin: Position(origin), dir: Dir(dir) });
+        let origin = point_param(s, o, "origin", cmd)?.unwrap_or_else(|| solidcraft_doc::point_expr(Vec3::ZERO));
+        let dir = match o.get("dir") {
+            None => return Err(bad(cmd, "axis needs `dir`")),
+            Some(v) => vec3(v).ok_or_else(|| bad(cmd, "axis `dir` must be a direction [x, y, z] of numbers"))?,
+        };
+        return Ok(AxisRef::Line { origin, dir: Dir(dir) });
     }
     match str_(p, "axis") {
         Some(a @ ("X" | "Y" | "Z")) => Ok(AxisRef::World { axis: a.into() }),
@@ -2827,9 +2831,16 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             Some(d) => d.normalized().ok_or_else(|| bad(cmd, "`direction` must be non-zero"))?,
             None => {
                 // Into the face the position lies on: against the outward normal of the face
-                // nearest it (planar or curved), as it faces out of its own body.
+                // nearest it (planar or curved), as it faces out of its own body. A hole that
+                // names the bodies it drills goes by the face of one of them where one passes
+                // through the position, never that of a body touching it there (#12066).
+                let named = match string_list(cmd, p, "participants")? {
+                    v if v.is_empty() => string_list(cmd, p, "targets")?,
+                    v => v,
+                };
+                let scope: &[String] = if named.iter().any(|b| b == "*") { &[] } else { &named };
                 let st = s.model.state();
-                solidcraft_doc::hole_direction_at(&st, position).ok_or_else(|| bad(cmd, "no face at `position`; give `direction`"))?
+                solidcraft_doc::hole_direction_at(&st, position, scope).ok_or_else(|| bad(cmd, "no face at `position`; give `direction`"))?
             }
         },
     };

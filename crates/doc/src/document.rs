@@ -452,8 +452,14 @@ pub enum AxisRef {
     SketchAxis { axis: String },
     /// World X / Y / Z axis through the origin.
     World { axis: String },
-    /// Any line in the sketch plane, in world coordinates.
-    Line { origin: Position, dir: Dir },
+    /// Any line in the sketch plane, in world coordinates. The origin's coordinates are length
+    /// expressions, so the axis follows parameter changes.
+    Line {
+        #[serde(with = "point_expr")]
+        #[walk(placement)]
+        origin: PointExpr,
+        dir: Dir,
+    },
     /// An edge or round face of the model (a straight or circular edge, a cylinder, cone or
     /// torus face), found again on each evaluation: [`crate::construct::model_axis`].
     Model { geo: GeoRef },
@@ -1044,6 +1050,8 @@ pub enum FeatureKind {
     Split {
         body: BodyName,
         plane: PlaneRef,
+        // The tool face is picked (and named), so the split follows it (#11674).
+        #[walk(picks_faces)]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool: Option<FaceAt>,
         /// A straight line of this sketch as the tool (#1552): the plane through it along the

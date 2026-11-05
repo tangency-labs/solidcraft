@@ -3807,6 +3807,8 @@
   "sample.plate.name": "Placa de exemplo",
   "sample.vents.about": "Ranuras nun patrón rectangular: filas, columnas e paso son parámetros",
   "sample.vents.name": "Placa de ventilación",
+  "scale.per_axis": "Por eixo",
+  "scale.uniform": "Uniforme",
   "search.command_keys": "Intro executar     Maiús+Intro executar e manter aberto     Esc pechar",
   "search.commands": "Ordes",
   "search.design": "Neste deseño",

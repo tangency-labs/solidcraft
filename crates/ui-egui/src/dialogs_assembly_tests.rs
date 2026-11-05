@@ -60,7 +60,46 @@ fn joint_from_two_snaps() {
     assert_eq!(app.session.doc.assembly.joints.len(), 1);
 }
 
-/// A straight edge is the revolute axis, even when both adjacent faces are perpendicular to it.
+/// A joint origin can be the design origin or a sketch point, not just faces, edges and vertices
+/// (#10290). The origin snaps to the world origin with z up; a sketch point snaps to its world
+/// position with the sketch plane's normal as z, and both make a joint.
+#[test]
+fn joint_origin_can_be_the_origin_or_a_sketch_point() {
+    let mut app = two_boxes();
+    // A sketch point on B's top face, at world (35, 5, 10).
+    app.session.execute("component.activate", &json!({"component": "B"})).unwrap();
+    app.session
+        .execute("sketch.create", &json!({"plane": {"origin": [30.0, 0.0, 10.0], "x_dir": [1.0, 0.0, 0.0], "y_dir": [0.0, 1.0, 0.0]}, "name": "S"}))
+        .unwrap();
+    app.session.execute("sketch.point", &json!({"point": [5.0, 5.0], "id": "q"})).unwrap();
+    app.session.execute("sketch.finish", &json!({})).unwrap();
+    let sketch = app.session.doc.find_feature("S").unwrap().id;
+
+    // The two picks a joint origin input now accepts.
+    let origin = Sel::Vertex { body: String::new(), point: Vec3::ZERO };
+    let sketch_point = Sel::SketchPoint { id: format!("{sketch}:q") };
+    let so = |s: &Sel| snap_of(&app.session, s).expect("a snap for the pick");
+    let o = so(&origin);
+    let sp = so(&sketch_point);
+    assert!(o.at.dist(Vec3::ZERO) < 1e-6, "the world origin snaps to the origin: {o:?}");
+    assert!(o.z.dist(Vec3::Z) < 1e-9, "the origin's z is up: {o:?}");
+    assert!(sp.at.dist(Vec3::new(35.0, 5.0, 10.0)) < 1e-6, "the sketch point snaps to its world position: {sp:?}");
+    assert!(sp.z.dist(Vec3::Z) < 1e-9, "the sketch point's z is the plane normal: {sp:?}");
+
+    // And a joint can be made from them.
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, origin);
+    d.pick(&app.session, sketch_point);
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.kind = 1;
+        f.fit_limits(&app.session.doc);
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints.len(), 1, "a joint was made from the origin and the sketch point");
+}
 #[test]
 fn revolute_joint_uses_the_picked_straight_edges() {
     let mut app = two_boxes();

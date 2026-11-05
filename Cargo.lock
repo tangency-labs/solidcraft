@@ -4154,6 +4154,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-dynamics"
+version = "0.40.0-rc.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "solidcore-record",
+ "solidcraft-geom",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "solidcraft-engine"
 version = "0.40.0-rc.2"
 dependencies = [

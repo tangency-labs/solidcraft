@@ -1677,9 +1677,11 @@ impl PaletteGpu {
 }
 
 /// Planned bodies end a GPU chunk one time in this many (by their plan's address), and a chunk
-/// holds at most [`MAX_CHUNK_BODIES`]: a scene of a thousand bodies takes a few dozen dispatches
-/// once, and a changed body re-evaluates a few dozen bodies, not all of them.
-const CHUNK_SPLIT: u64 = 32;
+/// holds at most [`MAX_CHUNK_BODIES`]: a scene of a thousand bodies takes a few hundred
+/// dispatches once, and a changed body re-evaluates a few bodies, not all of them. (At 32, a
+/// refinement that finished while a 194-body assembly was orbited re-evaluated about 10 bodies
+/// for each one that changed, 12 ms a chunk.)
+const CHUNK_SPLIT: u64 = 4;
 const MAX_CHUNK_BODIES: usize = 128;
 
 /// A block's see-through triangles as the global glass stream took them ([`Batches::glass_from`]).
@@ -1744,6 +1746,10 @@ struct Batches {
     /// Evaluated chunks by their plans' addresses, holding the plans so the addresses stay
     /// theirs: a chunk whose plans are unchanged is not evaluated again when the scene is rebuilt.
     resident: std::collections::HashMap<Vec<usize>, (Vec<Arc<solidcraft_geom::tess::TessPlan>>, Arc<crate::GpuMesh>)>,
+    /// Each resident chunk's colour buffer by the same key, with what it was built from (the
+    /// chunk's mesh and its bodies' face colours): a scene rebuilt for a change that leaves the
+    /// colours alone keeps it, instead of filling a colour for every vertex of every chunk again.
+    chunk_colors: std::collections::HashMap<Vec<usize>, (u64, wgpu::Buffer)>,
 }
 
 impl Batches {
@@ -2008,6 +2014,7 @@ impl Batches {
         }
         let key = |c: &[&PlannedBody]| c.iter().map(|b| Arc::as_ptr(&b.plan) as usize).collect::<Vec<usize>>();
         self.resident.retain(|k, _| chunks.iter().any(|c| key(c) == *k));
+        self.chunk_colors.retain(|k, _| chunks.iter().any(|c| key(c) == *k));
         let mut out = Vec::with_capacity(chunks.len());
         for chunk in &chunks {
             let mesh = match self.resident.get(&key(chunk)) {
@@ -2029,6 +2036,19 @@ impl Batches {
                     }
                 }
             };
+            let looks = {
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                std::hash::Hash::hash(&(Arc::as_ptr(&mesh) as usize), &mut h);
+                for b in chunk {
+                    std::hash::Hash::hash(&b.face_colors, &mut h);
+                }
+                std::hash::Hasher::finish(&h)
+            };
+            if let Some((_, colors)) = self.chunk_colors.get(&key(chunk)).filter(|(l, _)| *l == looks) {
+                let (class, closed) = chunk.first().map_or((TriClass::Opaque, true), |b| (b.class, b.closed));
+                out.push(PlannedDraw { mesh, colors: colors.clone(), class, closed, plans: key(chunk) });
+                continue;
+            }
             let mut bytes = Vec::with_capacity(mesh.vertex_face.len() * 4);
             for (part, b) in mesh.parts.iter().zip(chunk) {
                 let last = b.face_colors.last().copied().unwrap_or(PaletteIndex(0));
@@ -2040,6 +2060,7 @@ impl Batches {
             self.uploads.planned += bytes.len() as u64;
             if let Some((colors, _)) = upload(device, "sc_planned_colors", &bytes, 4).and_then(|c| c.parts.into_iter().next()) {
                 let (class, closed) = chunk.first().map_or((TriClass::Opaque, true), |b| (b.class, b.closed));
+                self.chunk_colors.insert(key(chunk), (looks, colors.clone()));
                 out.push(PlannedDraw { mesh, colors, class, closed, plans: key(chunk) });
             }
         }

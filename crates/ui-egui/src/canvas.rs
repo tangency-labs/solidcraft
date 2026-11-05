@@ -98,7 +98,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         }
         // A hole on a curved face drills against the face's normal where it was picked.
         Kind::Hole { .. } if matches!(first, Sel::Face { .. }) => {
-            (at, normal.or_else(|| solidcraft_engine::doc::hole_direction_at(&st, at).map(|d| -d)))
+            (at, normal.or_else(|| solidcraft_engine::doc::hole_direction_at(&st, at, &[]).map(|d| -d)))
         }
         // Holes at sketch points go into the part the sketch touches (or away, flipped): the
         // arrow shows which way.
@@ -120,7 +120,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
             (at, normal.or(dir.map(|d| -d)))
         }
         // A curved face offsets along its outward normal where it was picked.
-        Kind::OffsetFaces { .. } => (at, normal.or_else(|| solidcraft_engine::doc::hole_direction_at(&st, at).map(|d| -d))),
+        Kind::OffsetFaces { .. } => (at, normal.or_else(|| solidcraft_engine::doc::hole_direction_at(&st, at, &[]).map(|d| -d))),
         Kind::Section { .. } | Kind::OffsetPlane { .. } => (at, normal),
         // Fillet radii and chamfer distances grow the way `blend_grow_dir` gives (into the body
         // on an outside edge, into the open corner on an inside one); shell thickness grows into

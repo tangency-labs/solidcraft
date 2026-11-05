@@ -251,13 +251,17 @@ fn a_construction_axis_projects_and_stays_linked() {
     let link = &state.sketch(sketch).unwrap().sketch.links[0];
     assert_eq!(link.source, solidcraft_sketch::LinkSource::Axis { name: "Hinge axis".into() });
     assert!(!link.lost, "renamed, the axis is still found");
-    // A design with the axis after the sketch opens with the link lost, saying why.
+    // Moved after the sketch, the axis can't be found from it: the link is lost, saying why, at
+    // once and when the design is opened again (#9544). Moved back, it is found again.
     run(&mut s, "timeline.reorder", json!({"feature": "Hinge axis", "position": 1}));
     let opened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-    assert!(opened.model.state().sketch(sketch).unwrap().sketch.links[0].lost);
-    let warnings = opened.model.result(sketch).and_then(|r| r.warning.clone()).unwrap_or_default();
-    assert!(warnings.contains("it must come earlier in the timeline"), "{warnings}");
+    for session in [&s, &opened] {
+        assert!(session.model.state().sketch(sketch).unwrap().sketch.links[0].lost);
+        let warnings = session.model.result(sketch).and_then(|r| r.warning.clone()).unwrap_or_default();
+        assert!(warnings.contains("it must come earlier in the timeline"), "{warnings}");
+    }
     run(&mut s, "timeline.reorder", json!({"feature": "Hinge axis", "position": 0}));
+    assert!(!s.model.state().sketch(sketch).unwrap().sketch.links[0].lost);
     // An axis that is no origin axis and no construction axis is refused, by its name.
     run(&mut s, "sketch.edit", json!({"sketch": sketch}));
     let error = s.execute("sketch.project", &json!({"refs": [{"axis": "Axis9"}]})).unwrap_err().to_string();
@@ -1395,6 +1399,47 @@ fn whole_body_intersect_of_a_filleted_plate_keeps_exact_lines_and_arcs() {
     assert!(arcs.iter().all(|r| (r - 2.).abs() < 5e-3), "{arcs:?}");
 }
 #[test]
+fn whole_body_intersect_keeps_a_small_round_between_short_walls() {
+    use solidcraft_sketch::CurveKind;
+    // A tapered groove on each side stops 2 mm short of the R2 corner rounds: walls of 2 mm, a
+    // round, walls of 2 mm, which a loose fit takes for one larger arc that misses the walls.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 150, "width": 55, "height": 150, "corner": [-75, 0, -75], "body_name": "Part"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[75, 27.5, 75], [-75, 27.5, 75], [75, 27.5, -75], [-75, 27.5, -75]], "radius": 2}));
+    for (plane, offset, direction, rect) in [
+        ("YZ", 75, "negative", [[7, -71], [48, 71]]),
+        ("YZ", -75, "positive", [[7, -71], [48, 71]]),
+        ("XY", 75, "negative", [[-71, 7], [71, 48]]),
+        ("XY", -75, "positive", [[-71, 7], [71, 48]]),
+    ] {
+        run(&mut s, "sketch.create", json!({"plane": plane, "offset": offset}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": rect[0], "p1": rect[1]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 6, "direction": direction, "taper": "-56.31 deg", "operation": "cut", "targets": ["Part"]}));
+    }
+    let sketch = run(&mut s, "sketch.create", json!({"plane": "XZ", "offset": 20, "project_edges": false}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.intersect", json!({"refs": [{"body": "Part"}]}));
+    let inspect = run(&mut s, "sketch.inspect", json!({}));
+    let state = s.model.state();
+    let sk = &state.sketch(sketch).unwrap().sketch;
+    let pos = |i: usize| sk.points[i].pos;
+    let arcs: Vec<f64> = sk
+        .curves
+        .iter()
+        .filter_map(|c| match c.kind {
+            CurveKind::Arc { c, a, .. } => Some(pos(c).dist(pos(a))),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(arcs.len(), 4, "{arcs:?}");
+    assert!(arcs.iter().all(|r| (r - 2.).abs() < 5e-3), "{arcs:?}");
+    // Square less the corners' (4 - pi) r^2 and four trapezoid grooves (142 + 124) / 2 * 6.
+    assert_eq!(inspect["profiles"].as_array().map(Vec::len), Some(1), "one closed outline");
+    let area = inspect["profiles"][0]["area_mm2"].as_f64().unwrap();
+    let expected = 150. * 150. - (4. - std::f64::consts::PI) * 4. - 4. * 798.;
+    assert!((area - expected).abs() < 0.5, "{area} vs {expected}");
+}
+#[test]
 fn a_rebuilt_projection_keeps_user_constraints_without_a_warning() {
     for dimensioned in [false, true] {
         let mut s = Session::default();
@@ -1532,4 +1577,57 @@ fn the_silhouette_of_conic_rounds_closes() {
     assert_eq!(profiles.len(), 1, "{}", si["profiles"]);
     let area = profiles[0]["area_mm2"].as_f64().unwrap();
     assert!((area - exact).abs() < exact * 2e-4, "area {area}, exact {exact}");
+}
+
+/// A second placement's body is projected where that placement puts it (#9957): a sketch sees
+/// "Block (Part:2)" as the browser shows it, not only the first placement's "Block", on a plane
+/// and on a face alike.
+#[test]
+fn a_second_placements_face_and_edge_project_where_it_is_placed() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":100,"width":40,"height":5,"body_name":"Plate"}));
+    let part = run(&mut s, "component.create", json!({"name":"Part"}));
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10,"body_name":"Block"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "occurrence.copy", json!({"component":part["component"],"translate":[50,0,5]}));
+    let mut sketches = Vec::new();
+    let picks = [
+        (json!({"plane":"XY","offset":15}), json!({"body":"Block (Part:2)","face":[60,10,15]})),
+        (json!({"plane":"XY","offset":15}), json!({"body":"Block (Part:2)","edge":[60,20,15]})),
+        (json!({"plane":{"face":[90,35,5]},"project_edges":false}), json!({"body":"Block (Part:2)","face":[60,10,15]})),
+    ];
+    for (plane, pick) in picks {
+        let id = run(&mut s, "sketch.create", plane)["sketch"].as_u64().unwrap();
+        let projected = run(&mut s, "sketch.project", json!({"refs":[pick]}));
+        assert_eq!(projected["links"].as_array().map(Vec::len), Some(1), "{projected}");
+        run(&mut s, "sketch.finish", json!({}));
+        sketches.push(id);
+    }
+    // Every projected point is on the copy (x 50..70, y from `y`), none on the original.
+    let check = |s: &Session, y: f64| {
+        let state = s.model.state();
+        for id in &sketches {
+            let ss = state.sketch(*id).unwrap();
+            let sk = &ss.sketch;
+            assert!(sk.links.iter().all(|l| !l.lost), "{:?}", sk.links);
+            let points: Vec<_> =
+                sk.links.iter().flat_map(|l| sk.link_points(&l.id)).filter_map(|p| sk.points.get(p)).map(|p| ss.plane.to_world(p.pos)).collect();
+            assert!(!points.is_empty());
+            assert!(points.iter().all(|p| p.x > 49.9 && p.x < 70.1 && p.y > y - 0.1 && p.y < y + 20.1), "sketch {id}, y {y}: {points:?}");
+        }
+    };
+    check(&s, 0.0);
+    // A design opened again, so rebuilt from its features, finds the copy as well.
+    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()), 0.0);
+    // Moving the copy moves what was projected from it.
+    let first = s.doc.occurrences[0].id;
+    let copy = s.doc.occurrences.iter().map(|o| o.id).find(|id| *id != first).unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence":copy,"translate":[0,15,0],"capture":true}));
+    check(&s, 15.0);
+    // Renaming the part or the body renames the copy ("Base (Housing:2)"): the links follow it.
+    run(&mut s, "component.rename", json!({"component":part["component"],"name":"Housing"}));
+    run(&mut s, "body.rename", json!({"body":"Block","name":"Base"}));
+    assert!(s.model.state().sketch(sketches[0]).unwrap().sketch.links.iter().all(|l| l.source.bodies() == ["Base (Housing:2)"]));
+    check(&s, 15.0);
+    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()), 15.0);
 }

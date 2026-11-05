@@ -3808,6 +3808,8 @@
   "sample.plate.name": "Exempelplatta",
   "sample.vents.about": "Spår i ett rektangulärt mönster: rader, kolumner och delning är parametrar",
   "sample.vents.name": "Ventilationsplatta",
+  "scale.per_axis": "Per axel",
+  "scale.uniform": "Likformig",
   "search.command_keys": "Enter kör     Shift+Enter kör och behåll öppen     Esc stäng",
   "search.commands": "Kommandon",
   "search.design": "I denna konstruktion",
