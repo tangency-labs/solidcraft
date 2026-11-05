@@ -4889,10 +4889,12 @@ fn link_status(app: &SolveApp, cmd: &str, reply: &Value) -> Option<String> {
     // A curve's ends and centre are points of its link too: a point counts on its own only when
     // no curve uses it (a projected vertex beside a projected edge).
     let lone = match sketch {
-        Some(sk) => points
-            .iter()
-            .filter(|id| sk.points.iter().position(|p| p.id == **id).is_some_and(|i| !sk.curves.iter().any(|c| c.kind.point_ids().contains(&i))))
-            .count(),
+        Some(sk) => {
+            // Once over the sketch, not once per point: a large outline returns many points.
+            let on_curves: std::collections::HashSet<usize> = sk.curves.iter().flat_map(|c| c.kind.point_ids()).collect();
+            let index: std::collections::HashMap<&str, usize> = sk.points.iter().enumerate().map(|(i, p)| (p.id.as_str(), i)).collect();
+            points.iter().filter(|id| index.get(**id).is_some_and(|i| !on_curves.contains(i))).count()
+        }
         None if curves.is_empty() => points.len(),
         None => 0,
     };
