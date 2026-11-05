@@ -3711,7 +3711,7 @@ fn move_points(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => 0.1,
         Some(_) => num(p, "tolerance").filter(|t| *t > 0.0).ok_or_else(|| bad(cmd, "`tolerance` must be a positive length (mm)"))?,
     };
-    let id = target_sketch(s, p, cmd)?;
+    let id = sketch_store::target(s, p, cmd)?;
     let state = s.model.result(id).map(|r| r.state.clone());
     let last = state.as_ref().and_then(|state| state.sketch(id));
     let (picked, rep) = edit_solved(s, id, false, Analysis::Freedom, |sk, _| {

@@ -2439,14 +2439,14 @@ fn move_points_moves_each_point_to_its_own_target() {
     assert_eq!(moved[1]["to"], json!([20.0, -5.0]));
     let sk = sketch(&s);
     let at = |id: &str| sk.point(sk.resolve_point(id).unwrap()).unwrap();
-    assert!(at("l1.end").dist(solidcraft_geom::Vec2::new(10.0, 5.0)) < 1e-9);
-    assert!(at("l2.end").dist(solidcraft_geom::Vec2::new(20.0, -5.0)) < 1e-9);
-    assert!(at("l3.end").dist(solidcraft_geom::Vec2::new(30.0, 0.0)) < 1e-9, "the other points stay");
+    assert!(at("l1.end").dist(solidcore_record::Vec2::new(10.0, 5.0)) < 1e-9);
+    assert!(at("l2.end").dist(solidcore_record::Vec2::new(20.0, -5.0)) < 1e-9);
+    assert!(at("l3.end").dist(solidcore_record::Vec2::new(30.0, 0.0)) < 1e-9, "the other points stay");
     // One undo step takes both back.
     let undo_after = run(&mut s, "document.inspect", json!({}))["undo"].as_u64().unwrap();
     assert_eq!(undo_after, undo_before.as_u64().unwrap() + 1);
     run(&mut s, "edit.undo", json!({}));
-    assert!(pt(&s, "l1.end").dist(solidcraft_geom::Vec2::new(10.0, 0.0)) < 1e-9);
+    assert!(pt(&s, "l1.end").dist(solidcore_record::Vec2::new(10.0, 0.0)) < 1e-9);
     // `near` that finds nothing, or a malformed move, is refused and moves nothing.
     for bad in [
         json!({"moves": [{"near": [100, 100], "to": [0, 0]}]}),
