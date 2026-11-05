@@ -4,7 +4,7 @@
 from #4962; coordinated with [#4892](https://github.com/tangency-labs/solidcraft/issues/4892)
 and [CamWight's invitation](https://github.com/tangency-labs/solidcraft/issues/4892#issuecomment-6471076927).
 
-These are four written end-to-end acceptance recipes in `cases.json`, plus **twelve runnable native Rust tests** in the existing `crates/engine/src/cmd/drawing_dimension_tests.rs` file. They are Engine-level subsets, **not** complete U2/UI tests or new W13/W14 production code. Source model oracles 84, 86 and 87 (with 85 as a width cross-check) remain the analytic reference.
+These are four written end-to-end acceptance recipes in `cases.json`, plus **fifteen runnable native Rust tests** in the existing `crates/engine/src/cmd/drawing_dimension_tests.rs` file. They are Engine-level subsets, **not** complete U2/UI tests or new W13/W14 production code. Source model oracles 84, 86 and 87 (with 85 as a width cross-check) remain the analytic reference.
 
 ## Executable engine tests and evidence
 
@@ -18,9 +18,11 @@ These are four written end-to-end acceptance recipes in `cases.json`, plus **twe
 - **R2 centres** (`early_native_extensions`): Bore1's centre to Bore2's, each centre named by its rim (#9249), reads 50 aligned, 40 across and 30 up the top view. A new Bore1 diameter moves none of them; Bore1 suppressed, all three read `suppressed`; deleted, all three are `lost` with their last values, which survive save and reopen.
 - **The sheet** (`early_native_extensions`): through `drawing.scene`, `drawing.status` and `drawing.export`, the top view sits at 1:2 round (150, 180), 50 x 40, with the width's, the length's and the centres' arrowheads 40, 50 and 25 mm apart. Bore1 at Ø12 redraws only the view and Bore1's dimension; Bore1 deleted leaves out its two dimensions, listed `lost`; each undo draws and exports the sheet as it was; the length at 120 widens the view to 60; a reopened design draws the same sheet. The sheet draws no text yet.
 - **Filleted corners** (`early_native_extensions`): fillets that take the plate's corners leave all five dimensions reading as before (R1 faces survive a fillet).
+- **Repair** (`early_native_extensions`, W23-2 on #12170): Bore1's rim rounded 1 makes its dimension `lost` with leads; repaired to the circle where the round meets the bore, it reads Ø10 again as one undo step, keeps its id, view and text place, and holds through undo, redo, save and reopen. Bore1 deleted, its dimension reads Bore2 only when repaired to Bore2's rim on purpose, and stays there when the delete is undone.
+- **Renaming the plate** (listed in `tests/KNOWN_FAILING_TESTS` until #5308): the plate renamed `Base` should keep its five dimensions. Today a reference names its body, so all five read `lost`.
 - **A new hole after an undo** (listed in `tests/KNOWN_FAILING_TESTS` until #5308): a dimension on an undone Bore3 must stay `lost` when Bore4 is made elsewhere. Today Bore4 takes Bore3's feature id and the dimension reads its Ø8 (gap 2 on #4892), so the test fails, and its line comes off when #5308 makes it pass.
 
-All twelve reuse CamWight's `examples/acceptance/drawing_m2.json` from #9821 (stacked on #9254), via `Session::run_script`. No duplicate model script or per-case Rust test file was added.
+All fifteen reuse CamWight's `examples/acceptance/drawing_m2.json` from #9821 (stacked on #9254), via `Session::run_script`. No duplicate model script or per-case Rust test file was added.
 
 **Verified native integration CI (2 Nov 2026):** [Test #56](https://github.com/Benny1496/solidcraft/actions/runs/41430987707) ran the clean integration commit `4b0f664f7e53462aedfbee93448f3410b64804b5` on official `drawings@d5fd14135f0e220b45171010722a0064683c63f1`: **28/28** dimension (including all five W23a E2E tests), **55/55** view, **4/4** view schema, **4/4** export and **2/2** doc-view tests passed. **93 distinct targeted native Rust tests, zero failed or ignored**, plus Rust formatting and static contract validation. This is not the full engine or rendered/UI test suite.
 

@@ -153,7 +153,7 @@ def main():
     tests = (ROOT / "crates/engine/src/cmd/drawing_dimension_tests.rs").read_text(encoding="utf-8")
     extensions = data["early_native_extensions"]
     require([e["id"] for e in extensions] == ["W23A-R1-WIDTH", "W23A-SUPPRESSED-BORE", "W23A-FIVE-DIMENSIONS", "W23A-R2-CENTRES",
-                                              "W23A-SHEET", "W23A-FILLETED-CORNERS"], "native extension identities changed")
+                                              "W23A-SHEET", "W23A-FILLETED-CORNERS", "W23A-REPAIR"], "native extension identities changed")
     for e in extensions:
         require(e["runtime_status"] == "NATIVE_ENGINE_TEST", e["id"] + " is an engine test, not a drawing or UI run")
         require(all(a["session"] == "design" for a in e["source_actions"]), e["id"] + ": model edits are design commands")
@@ -180,6 +180,13 @@ def main():
     five = [a["params"]["name"] for a in extensions[2]["source_actions"] if a["command"] == "parameters.change"]
     require(five == list(parameters), "every parameter of the plate is changed once")
     require(any("50" in c and "40" in c and "30" in c for c in extensions[3]["checks"]), "centre to centre: 50, 40 and 30")
+    # The repair: the user's own pick after a round and after a delete, never a move by itself.
+    repair = extensions[6]
+    require([a["command"] for a in repair["source_actions"]] == ["solid.fillet", "edit.undo", "edit.redo", "edit.undo", "timeline.delete", "edit.undo"],
+            "round Bore1's rim, undo and redo it, undo it, then delete Bore1 and undo")
+    require(repair["source_actions"][0]["params"]["edges"] == [[25, 20, 20]], "the round is on Bore1's rim")
+    require(any("drawing.dimension.repair" in c and "one drawing undo step" in c for c in repair["checks"]), "a repair is one undo step")
+    require(any("never reads Bore2 by itself" in c for c in repair["checks"]), "a lost dimension never moves to Bore2 by itself")
     print("STATIC CONTRACT PASS: four W23a recipes match source oracle metadata.")
     print("DRAWING E2E AND EARLY W19d/W20a DIMENSION INSPECTION: NOT RUN (static only).")
 

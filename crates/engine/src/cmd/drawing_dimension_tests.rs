@@ -1689,3 +1689,124 @@ fn a_new_hole_never_takes_the_dimension_of_an_undone_one() {
         reads(&run(&mut s, INSPECT, json!({"dimension": bore["dimension"]})), 10.0, "Ø10.00");
     }
 }
+
+/// The lost reference of `added`, read now: `lost` with Bore1's last Ø10, its record as `record`.
+fn lost_again(s: &mut Session, added: &Value, record: &Value) -> Value {
+    let read = run(s, INSPECT, json!({"dimension": added["dimension"]}));
+    reads_lost_bore(&read);
+    assert_eq!(&read["record"], record, "a lost dimension keeps its record: {read}");
+    read
+}
+
+/// The edge name in a radial dimension's record.
+fn rim_name(record: &Value) -> &Value {
+    &record["kind"]["radial"]["edge"]["name"]
+}
+
+/// Bore1's rim rounded 1 with the drawing closed (#4892 B5): its edge is gone, so Bore1's
+/// dimension is lost with its last Ø10 and some leads, and Bore2 still reads Ø10. Repaired to the
+/// circle where the round meets the bore, 1 below the top, it reads Ø10 again as one undo step, with
+/// its id, view and text place, and only the edge's name changed. Undone it's lost with the same
+/// leads, redone it reads; the same after save and reopen, where the file's copy also keeps the last
+/// value. With the round undone the repaired reference is lost and stays as it was put, and with the
+/// round redone it reads again. The repair undone and then the round,
+/// Bore1's dimension reads Ø10 by its first record.
+#[test]
+fn a_rounded_bore_rim_is_lost_and_a_repair_reads_it_again() {
+    let (mut s, id, first, second) = workshop_plate_dimensions();
+    let drawing = json!({"drawing": ids::encode(id)});
+    closed_edit(&mut s, &drawing, "solid.fillet", json!({"body": "Plate", "radius": 1, "edges": [[25, 20, 20]]}));
+    let lost = lost_again(&mut s, &first, &first["record"]);
+    reads(&run(&mut s, INSPECT, json!({"dimension": second["dimension"]})), 10.0, "Ø10.00");
+    let leads = lost["candidates"].as_array().cloned().unwrap_or_default();
+    let pick = json!({"edge": {"body": "Plate", "index": workshop_plate_round_index(&s, "Plate", [20.0, 20.0, 19.0], 5.0)}});
+    assert!(leads.contains(&pick), "the bore's circle 1 below the top is a lead: {leads:?}");
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let steps = s.undo.len();
+    let repaired = run(&mut s, REPAIR, json!({"dimension": first["dimension"], "slot": "edge", "pick": pick}));
+    reads(&repaired, 10.0, "Ø10.00");
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+    assert_eq!((&repaired["dimension"], &repaired["view"]), (&first["dimension"], &first["view"]));
+    assert_ne!(rim_name(&repaired["record"]), rim_name(&first["record"]), "{repaired}");
+    let mut renamed = first["record"].clone();
+    renamed["kind"]["radial"]["edge"]["name"] = rim_name(&repaired["record"]).clone();
+    assert_eq!(renamed, repaired["record"], "only the edge's name changed");
+    assert_eq!(repaired["record"]["text"], json!({"at": [12.0, 24.0]}));
+    let after = s.drawing("test").unwrap().to_json().unwrap();
+
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before, "the repair undone");
+    let again = lost_again(&mut s, &first, &first["record"]);
+    assert_eq!(again["candidates"], lost["candidates"], "the same leads");
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), after, "the repair redone");
+    reads(&run(&mut s, INSPECT, json!({"dimension": first["dimension"]})), 10.0, "Ø10.00");
+
+    let mut opened = reopened(&mut s, id, "w23-repair-rounded-rim.solidcraft");
+    let read = run(&mut opened, INSPECT, json!({"dimension": first["dimension"]}));
+    reads(&read, 10.0, "Ø10.00");
+    // The file's copy of a record also keeps its last good value.
+    let mut saved = read["record"].clone();
+    let last_good = saved.as_object_mut().and_then(|record| record.remove("last_good"));
+    assert_eq!(last_good, Some(json!(10.0)), "{read}");
+    assert_eq!(saved, repaired["record"], "the repair is saved");
+
+    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    let unrounded = run(&mut s, INSPECT, json!({"dimension": first["dimension"]}));
+    assert_eq!(unrounded["status"], "lost", "the repaired edge is the round's: {unrounded}");
+    assert_eq!(unrounded["record"], repaired["record"], "and the repair stays as it was put");
+    reads(&run(&mut s, INSPECT, json!({"dimension": second["dimension"]})), 10.0, "Ø10.00");
+    closed_edit(&mut s, &drawing, "edit.redo", json!({}));
+    reads(&run(&mut s, INSPECT, json!({"dimension": first["dimension"]})), 10.0, "Ø10.00");
+
+    run(&mut s, "edit.undo", json!({}));
+    lost_again(&mut s, &first, &first["record"]);
+    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    let back = run(&mut s, INSPECT, json!({"dimension": first["dimension"]}));
+    reads(&back, 10.0, "Ø10.00");
+    assert_eq!(back["record"], first["record"], "the first record reads again");
+}
+
+/// Bore1 deleted with the drawing closed: its dimension is lost and never reads Bore2 by itself.
+/// Repaired to Bore2's rim on purpose, it reads Ø10 by the name Bore2's own dimension has, as one
+/// undo step. Bore1's delete undone, the repaired dimension stays on Bore2; the repair undone, it
+/// reads Bore1 by its first record again.
+#[test]
+fn a_deleted_bores_dimension_reads_bore2_only_when_repaired_to_it() {
+    let (mut s, id, first, second) = workshop_plate_dimensions();
+    let drawing = json!({"drawing": ids::encode(id)});
+    closed_edit(&mut s, &drawing, "timeline.delete", json!({"feature": "Bore1"}));
+    lost_again(&mut s, &first, &first["record"]);
+    let rim = json!({"edge": {"body": "Plate", "index": workshop_plate_round_index(&s, "Plate", [60.0, 50.0, 20.0], 5.0)}});
+    let steps = s.undo.len();
+    let repaired = run(&mut s, REPAIR, json!({"dimension": first["dimension"], "slot": "edge", "pick": rim}));
+    reads(&repaired, 10.0, "Ø10.00");
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+    assert_eq!(rim_name(&repaired["record"]), rim_name(&second["record"]), "Bore2's rim, as Bore2's dimension names it: {repaired}");
+    assert_eq!((&repaired["dimension"], &repaired["record"]["text"]), (&first["dimension"], &json!({"at": [12.0, 24.0]})));
+    reads(&run(&mut s, INSPECT, json!({"dimension": second["dimension"]})), 10.0, "Ø10.00");
+
+    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    let kept = run(&mut s, INSPECT, json!({"dimension": first["dimension"]}));
+    reads(&kept, 10.0, "Ø10.00");
+    assert_eq!(kept["record"], repaired["record"], "a repair stays where it was put");
+    run(&mut s, "edit.undo", json!({}));
+    let back = run(&mut s, INSPECT, json!({"dimension": first["dimension"]}));
+    reads(&back, 10.0, "Ø10.00");
+    assert_eq!(back["record"], first["record"], "Bore1 by its first record again");
+}
+
+/// The plate renamed Base with the drawing closed keeps its five dimensions (gap 1 on #4892, #5308):
+/// each reads as before, and by the reference it was added with once the rename is undone. Today a
+/// reference names its body, so a rename loses all five.
+#[test]
+fn renaming_the_plate_keeps_its_five_dimensions() {
+    let (mut s, drawing, _, five) = plate_with_five();
+    closed_edit(&mut s, &drawing, "body.rename", json!({"body": "Plate", "name": "Base"}));
+    for (i, (added, value)) in five.iter().zip(PLATE).enumerate() {
+        let text = if i < 2 { format!("Ø{value:.2}") } else { format!("{value:.2}") };
+        reads(&run(&mut s, INSPECT, json!({"dimension": added["dimension"]})), value, &text);
+    }
+    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    read_as(&mut s, &five, PLATE);
+}
