@@ -1585,7 +1585,7 @@ fn palette_texture(device: &wgpu::Device, rows: u32) -> wgpu::Texture {
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rg32Uint,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     })
 }
@@ -1947,6 +1947,9 @@ impl Batches {
             self.blocks_culled_for = None;
             // Last: the palette texture is shared with the picture on screen, which a refused
             // upload above must leave as it was.
+            if UPLOAD_FAILURE.with(|f| f.borrow().is_some()) {
+                return;
+            }
             let mut written = 0;
             match self.palette.take() {
                 Some(mut p) => {
@@ -4633,7 +4636,35 @@ mod tests {
             key: 7,
             bytes: Arc::new(BlockBytes { vertices: Arc::new(vec![0; 3 * TRI_SIZE]), opaque: Arc::new(vec![0..1; runs]), ..BlockBytes::default() }),
         };
-        let scene = |block: &SceneBlock| GpuScene { blocks: vec![block.clone()], ..GpuScene::default() };
+        let scene = |block: &SceneBlock| GpuScene {
+            blocks: vec![block.clone()],
+            palette: Arc::new(Palette::with_stable(vec![if block.bytes.opaque.len() == 1024 { [9, 9, 9, 255] } else { [1, 2, 3, 255] }])),
+            ..GpuScene::default()
+        };
+        // The first texel of the palette texture, as the GPU holds it.
+        let first_texel = |batches: &Batches| -> [u8; 4] {
+            let texture = &batches.palette.as_ref().unwrap()._texture;
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("test palette read"),
+                size: u64::from(PALETTE_TEXEL),
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder = device.create_command_encoder(&Default::default());
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &buffer,
+                    layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: None, rows_per_image: None },
+                },
+                wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            );
+            queue.submit([encoder.finish()]);
+            buffer.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            let mapped = buffer.slice(..).get_mapped_range().unwrap();
+            [mapped[0], mapped[1], mapped[2], mapped[3]]
+        };
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let r = Renderer::new(&device, GpuTarget { format, depth: None, samples: 1, tess: false, oit: false }, None);
         let mut batches = Batches::default();
@@ -4648,6 +4679,7 @@ mod tests {
             assert!(batches.take(&device, &queue, &r.uniform, &r.uniform_bgl, 2, &slot, None, false).is_err());
             assert_eq!(batches.key, Some(1), "the previous picture stays");
             assert!(Arc::ptr_eq(&batches.blocks[&7].bytes, &previous.bytes));
+            assert_eq!(first_texel(&batches), [1, 2, 3, 255], "the refused scene's colours are not written over the picture's");
             let pending = slot.lock().unwrap();
             assert!(Arc::ptr_eq(&pending.as_ref().unwrap().blocks[0].bytes, &refused.bytes), "kept for a retry");
         }

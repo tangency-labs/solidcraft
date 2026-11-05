@@ -106,10 +106,10 @@ fn buffer_init(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu:
         return Err(GpuError::Render(error));
     }
     // The whole padded size: a mapped range must be a multiple of the alignment too.
-    let mut padded = contents.to_vec();
-    padded.resize(size as usize, 0);
+    // The mapped range starts zeroed, so only the contents are copied and the padding stays zero.
     match buffer.get_mapped_range_mut(..size) {
-        Ok(mut mapped) => mapped.copy_from_slice(&padded),
+        // `size` is `contents.len()` rounded up, so the head is always within the range.
+        Ok(mut mapped) => mapped.slice(..contents.len()).copy_from_slice(contents),
         Err(error) => return Err(GpuError::Render(error.to_string())),
     }
     buffer.unmap();
