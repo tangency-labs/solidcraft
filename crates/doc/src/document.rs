@@ -2766,6 +2766,7 @@ impl FeatureKind {
             FeatureKind::SheetHem { .. } => "sheet_hem",
             FeatureKind::SheetPerforate { .. } => "sheet_perforate",
             FeatureKind::SheetFold { .. } => "sheet_fold",
+            FeatureKind::SheetJog { .. } => "sheet_jog",
             FeatureKind::SheetPath { .. } => "sheet_path",
             FeatureKind::SheetUnfold { .. } => "sheet_unfold",
             FeatureKind::SheetConvert { .. } => "sheet_convert",
