@@ -3,6 +3,7 @@ use std::f64::consts::{FRAC_PI_2, TAU};
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 use solidcraft_geom::Aabb2;
+use solidcraft_geom::paper::text::{Cluster, Embed, Font, FontFlags, FontGlyph, FontMetrics, PlacedGlyph, TextRun};
 use solidcraft_geom::paper::{Dashes, Group, Item, NoPictures, ObjectKind, Scene};
 use solidcraft_geom::prelude::*;
 
@@ -270,11 +271,6 @@ fn what_cannot_be_drawn_is_refused() {
     );
     // An ellipse draws, as cubics (A3b).
     assert!(paper_png(&ellipse.prepare().unwrap(), PngOptions::default(), &NoPictures, Vec::new()).is_ok());
-    let style = solidcraft_sketch::TextStyle::default();
-    let (runs, fonts) = solidcraft_sketch::paper_text("A", None, "", p(2.0, 2.0), 3.5, 0.0, &style).unwrap().unwrap();
-    let text = Scene { fonts, ..scene(p(20.0, 10.0), runs.into_iter().map(Item::Text).collect()) };
-    let e = paper_png(&text.prepare().unwrap(), PngOptions::default(), &NoPictures, Vec::new()).unwrap_err();
-    assert!(e.to_string().contains("not supported yet: text in a sheet PNG"), "{e}");
     // 1,000 circles of 100 m at 2400 dpi, each about 19,000 points: over 2^24 in all. A small sheet,
     // so a cap that failed would cost seconds, not hours.
     let big = Loop2::circle(p(0.0, 0.0), 1e5);
@@ -538,4 +534,171 @@ fn a_line_in_a_gap_draws_nothing_and_too_many_dashes_are_refused() {
     assert!(refused.to_string().contains("too many dashes"), "{refused}");
     sheet.points = MAX_POINTS - 3;
     assert!(sheet.dash(&line(100.0), &pattern(&[1, 1], 0)).unwrap_err().to_string().contains("points"));
+}
+
+/// A 20 x 10 mm sheet of `runs` set in `fonts`; at 254 dpi a millimetre is 10 pixels.
+fn text_sheet(runs: Vec<TextRun>, fonts: Vec<Font>) -> Scene {
+    Scene { fonts, ..scene(p(20.0, 10.0), runs.into_iter().map(Item::Text).collect()) }
+}
+
+/// A font of one glyph, id 1, with `outline` in units of a thousandth of an em; its bytes are
+/// never read (the writers take the scene's outlines).
+fn made_up_font(outline: Vec<Loop2>) -> Font {
+    let metrics = FontMetrics {
+        ascent: 900,
+        descent: -200,
+        cap_height: 700,
+        bbox: [-500, -500, 1000, 900],
+        italic_angle: 0.0,
+        flags: FontFlags::default(),
+        stem_v: 80,
+    };
+    Font {
+        id: [1; 32],
+        bytes: std::sync::Arc::from(vec![1u8]),
+        face: 0,
+        postscript_name: "MadeUp".into(),
+        family: "Made Up".into(),
+        embed: Embed::Outlines,
+        num_glyphs: 2,
+        units_per_em: 1000,
+        metrics,
+        glyphs: [(1, FontGlyph { advance: 1000, outline })].into(),
+    }
+}
+
+/// A run of `count` of [`made_up_font`]'s glyph, all at `origin`, `scale` millimetres a unit.
+fn made_up_run(origin: Vec2, scale: f64, count: usize) -> TextRun {
+    TextRun {
+        font: [1; 32],
+        scale,
+        origin,
+        angle: 0.0,
+        slant: 0.0,
+        glyphs: vec![PlacedGlyph { id: 1, x: 0.0, rise: 0.0, advance: 0.0 }; count],
+        text: "A".into(),
+        clusters: vec![Cluster { glyphs: 0..count as u32, text: 0..1 }],
+        rtl: false,
+    }
+}
+
+/// A sheet's PNG file, drawn `band_bytes` at a time.
+fn drawn(scene: &Scene, options: PngOptions, band_bytes: usize) -> Vec<u8> {
+    let mut out = Vec::new();
+    write(&scene.prepare().unwrap(), options, &NoPictures, &mut out, band_bytes).unwrap();
+    out
+}
+
+/// A sheet's grey samples at 254 dpi, with the file's bytes.
+fn greys(scene: &Scene, band_bytes: usize) -> (Vec<u8>, Vec<u8>) {
+    let out = drawn(scene, AT_254, band_bytes);
+    let samples = read(&out).samples;
+    (out, samples)
+}
+
+/// One glyph made of two overlapping boxes turning the same way, 9 x 7 mm, set at (2, 1): where
+/// they overlap is inside both, so nonzero fills it, where even-odd would leave it white (#4890 B2b).
+#[test]
+fn a_glyph_is_filled_nonzero_where_the_scene_puts_it() {
+    let font = made_up_font(vec![rectangle(p(0.0, 0.0), p(600.0, 700.0)), rectangle(p(300.0, 0.0), p(900.0, 700.0))]);
+    let run = made_up_run(p(2.0, 1.0), 0.01, 1);
+    let (_, grey) = greys(&text_sheet(vec![run], vec![font]), BAND_BYTES);
+    // The glyph covers x 2 to 11 mm and y 1 to 8 mm: columns 20 to 110, rows 20 to 90 from the top.
+    let at = |x: usize, y: usize| grey[y * 200 + x];
+    for (x, y, value, what) in [
+        (35, 55, 0, "the first box alone"),
+        (65, 55, 0, "where the boxes overlap"),
+        (95, 55, 0, "the second box alone"),
+        (115, 55, 255, "right of the glyph"),
+        (65, 95, 255, "below the baseline"),
+        (65, 15, 255, "above the cap height"),
+    ] {
+        assert_eq!(at(x, y), value, "{what} at ({x}, {y})");
+    }
+}
+
+/// Real text in the drawing font, the marks a dimension uses and a line read right to left,
+/// darkens the sheet only within its glyphs' outlines and gives the same bytes every time (#4890
+/// B2b). Moved by a millimetre, its pixels leave those outlines. Drawn in bands, in every colour, it
+/// leaves no seam: where a band cuts a glyph, tiny-skia may cover an edge pixel one sixteenth
+/// differently (16 grey levels), and never more, nor more than a few pixels a sheet.
+#[test]
+fn real_text_lands_inside_its_outlines_whatever_the_band() {
+    let style = solidcraft_sketch::TextStyle::default();
+    for line in ["\u{d8}12 \u{b1}0.1 30\u{b0}", "\u{5e7}\u{5d5} 12"] {
+        // 2 mm high, so the line fits the 20 mm sheet and a run moved along it shows.
+        let (runs, fonts) = solidcraft_sketch::paper_text(line, None, "", p(2.0, 3.0), 2.0, 0.0, &style).unwrap().unwrap();
+        let font = |run: &TextRun| fonts.iter().find(|f| f.id == run.font).unwrap();
+        // The outlines' extent, each piece sampled 16 times along its length.
+        let points: Vec<Vec2> = runs
+            .iter()
+            .flat_map(|run| run.outlines(font(run)).collect::<Vec<_>>())
+            .flat_map(|l| l.segs)
+            .flat_map(|s| (0..=16).map(move |i| s.point_at(f64::from(i) / 16.0)))
+            .collect();
+        let bounds = points.iter().fold(Aabb2::EMPTY, |b, q| b.union(&Aabb2 { min: *q, max: *q }));
+        let sheet = text_sheet(runs.clone(), fonts.clone());
+        let (bytes, grey) = greys(&sheet, BAND_BYTES);
+        let mut exported = Vec::new();
+        paper_png(&sheet.prepare().unwrap(), AT_254, &NoPictures, &mut exported).unwrap();
+        assert_eq!(exported, bytes, "{line}: an export is drawn in the default band height");
+        for colour in [PngColour::Grey, PngColour::BlackWhite, PngColour::Rgb, PngColour::Transparent] {
+            let options = PngOptions { colour, ..AT_254 };
+            let whole = drawn(&sheet, options, BAND_BYTES);
+            assert_eq!(drawn(&sheet, options, BAND_BYTES), whole, "{line}: {colour:?} the same bytes again");
+            for rows in [1, 3, 7] {
+                let banded = drawn(&sheet, options, 200 * 4 * rows);
+                assert_eq!(drawn(&sheet, options, 200 * 4 * rows), banded, "{line}: {colour:?} the same bytes again in bands of {rows} rows");
+                // tiny-skia's edge clipping where a band cuts a path can move an edge pixel one AA step.
+                let off: Vec<u8> = read(&banded).samples.iter().zip(&read(&whole).samples).map(|(a, b)| a.abs_diff(*b)).filter(|d| *d > 0).collect();
+                // One step is 16 grey levels; in black and white such a pixel may cross the threshold.
+                let step = if colour == PngColour::BlackWhite { u8::MAX } else { 16 };
+                assert!(
+                    off.len() <= 32 && off.iter().all(|d| *d <= step),
+                    "{line}: {colour:?} in bands of {rows} rows: at most 32 samples, each one AA step, off the whole sheet: {off:?}"
+                );
+            }
+        }
+        let pixels = |grey: &[u8]| -> Vec<(usize, usize)> {
+            (0..100).flat_map(|y| (0..200).map(move |x| (x, y))).filter(|&(x, y)| grey[y * 200 + x] < 128).collect()
+        };
+        // A pixel's centre in sheet millimetres, inside the outlines' extent with a pixel's slack.
+        let inside = |&(x, y): &(usize, usize)| {
+            let (mx, my) = ((x as f64 + 0.5) / 10.0, 10.0 - (y as f64 + 0.5) / 10.0);
+            mx >= bounds.min.x - 0.1 && mx <= bounds.max.x + 0.1 && my >= bounds.min.y - 0.1 && my <= bounds.max.y + 0.1
+        };
+        let dark = pixels(&grey);
+        assert!(dark.len() > 50, "{line} draws {} dark pixels", dark.len());
+        assert!(dark.iter().all(inside), "{line}: a dark pixel off its outlines");
+        // The same text a millimetre to the right is no longer all where its outlines are.
+        let moved: Vec<TextRun> = runs.iter().map(|r| TextRun { origin: r.origin + p(1.0, 0.0), ..r.clone() }).collect();
+        let (_, shifted) = greys(&text_sheet(moved, fonts), BAND_BYTES);
+        assert!(!pixels(&shifted).iter().all(inside), "{line}: a moved run must leave its outlines");
+    }
+}
+
+/// Text's points count toward the cap like any line's, added up over the sheet: a run of 600
+/// glyphs, each a 100 m circle of four Béziers, is drawn at 2400 dpi, and two of them are refused,
+/// not drawn (#4890 B2b).
+#[test]
+fn text_counts_toward_the_point_cap() {
+    let k = 0.552_284_75 * 500.0;
+    let q = |a: Vec2, b: Vec2, c: Vec2, d: Vec2| Seg2::Cubic { p0: a, p1: b, p2: c, p3: d };
+    let (e, n, w, s) = (p(500.0, 0.0), p(0.0, 500.0), p(-500.0, 0.0), p(0.0, -500.0));
+    let circle = Loop2 {
+        segs: vec![
+            q(e, p(500.0, k), p(k, 500.0), n),
+            q(n, p(-k, 500.0), p(-500.0, k), w),
+            q(w, p(-500.0, -k), p(-k, -500.0), s),
+            q(s, p(k, -500.0), p(500.0, -k), e),
+        ],
+    };
+    let options = PngOptions { dpi: 2400.0, colour: PngColour::Grey };
+    let drawn = |runs: usize| {
+        let runs = (0..runs).map(|_| made_up_run(p(0.0, 0.0), 200.0, 600)).collect();
+        paper_png(&text_sheet(runs, vec![made_up_font(vec![circle.clone()])]).prepare().unwrap(), options, &NoPictures, Vec::new())
+    };
+    assert!(drawn(1).is_ok());
+    let e = drawn(2).unwrap_err();
+    assert!(e.to_string().contains("16777216 points"), "{e}");
 }
