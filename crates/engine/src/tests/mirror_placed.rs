@@ -400,3 +400,67 @@ fn an_insert_after_a_mirror_keeps_its_meshes_through_a_drag() {
     }
     assert_as_evaluated_afresh(&s);
 }
+
+/// The model of `s` against a fresh evaluation of its design: each body's name, volume, bounds
+/// and reference mesh. Not the shown meshes: a copy's display triangles can tie differently by
+/// the pose they were made at, with or without reuse (as in the drag test above).
+fn assert_model_as_evaluated_afresh(s: &Session) {
+    let mut fresh = solidcraft_doc::Model::new();
+    fresh.no_cache = true;
+    fresh.evaluate(&s.doc);
+    assert!(fresh.results.iter().all(|r| r.error.is_none()));
+    let (got, want) = (s.model.state(), fresh.state());
+    assert_eq!(got.bodies.len(), want.bodies.len());
+    for (a, b) in got.bodies.iter().zip(&want.bodies) {
+        assert_eq!(a.name, b.name);
+        let (va, vb) = (a.measure().unwrap().volume, b.measure().unwrap().volume);
+        assert!((va - vb).abs() < 1e-6, "{}: {va} != {vb}", a.name);
+        assert_eq!(a.mesh().triangles, b.mesh().triangles, "{}", a.name);
+        let (ma, mb) = (a.mesh().bounds(), b.mesh().bounds());
+        assert!(ma.min.dist(mb.min) < 1e-6 && ma.max.dist(mb.max) < 1e-6, "{}: {ma:?} != {mb:?}", a.name);
+    }
+}
+
+/// Driving a joint evaluates a mirror of the part it moves again, and the features after it
+/// only when they read its copy: a box, a sketch and its extrusion, and a cut into another
+/// body are kept (#12139).
+#[test]
+fn a_joint_drive_evaluates_only_what_reads_the_mirrored_copy() {
+    for dependent in [false, true] {
+        let mut s = Session::default();
+        moved_arm(&mut s);
+        run(
+            &mut s,
+            "joint.as_built",
+            json!({"type": "revolute", "name": "Pan", "a": 0, "b": "Arm", "at": {"occurrence": 0, "point": [0, 0, 0], "z": [0, 0, 1]}}),
+        );
+        let copy = created(&run(&mut s, "solid.mirror", json!({"bodies": ["ArmBody"], "plane": "YZ"})));
+        run(&mut s, "solid.box", json!({"corner": [0, -100, 0], "length": 10, "width": 10, "height": 10, "body_name": "Later"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-100, -100], "p1": [-90, -90]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 4, "operation": "new"}));
+        run(&mut s, "solid.box", json!({"corner": [2, -98, 5], "length": 2, "width": 2, "height": 10, "operation": "cut", "targets": ["Later"]}));
+        if dependent {
+            run(&mut s, "solid.move", json!({"bodies": [copy.clone()], "translate": [0, 0, 5]}));
+        }
+        for angle in [20, -35, 60] {
+            run(&mut s, "joint.drive", json!({"joint": "Pan", "value": angle, "quiet": true}));
+            let recomputed = s.model.last_recomputed + s.model.last_restored;
+            if dependent {
+                assert_eq!(recomputed, 2, "the mirror and the move of its copy at {angle}°");
+            } else {
+                assert_eq!(recomputed, 1, "only the mirror at {angle}°");
+            }
+            assert_box(world_box(&s, &copy), {
+                let (lo, hi) = mirrored_yz(&s, "ArmBody");
+                if dependent { (lo + Vec3::new(0., 0., 5.), hi + Vec3::new(0., 0., 5.)) } else { (lo, hi) }
+            });
+            assert_model_as_evaluated_afresh(&s);
+        }
+        for command in ["edit.undo", "edit.redo"] {
+            run(&mut s, command, json!({}));
+            assert_model_as_evaluated_afresh(&s);
+        }
+    }
+}
