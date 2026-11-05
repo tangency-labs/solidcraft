@@ -1,0 +1,10 @@
+{
+  "en": { "prefs.sketch_mirror_auto_line": "Use the preselected construction line for Mirror" },
+  "ar": { "prefs.sketch_mirror_auto_line": "استخدام الخط الإنشائي المحدد مسبقًا كمحور للانعكاس" },
+  "de": { "prefs.sketch_mirror_auto_line": "Vorausgewählte Konstruktionslinie zum Spiegeln verwenden" },
+  "he": { "prefs.sketch_mirror_auto_line": "שימוש בישר העזר שנבחר מראש כציר שיקוף" },
+  "ja": { "prefs.sketch_mirror_auto_line": "事前に選択した補助直線をミラー線に使用する" },
+  "ko": { "prefs.sketch_mirror_auto_line": "미리 선택한 보조 직선을 미러 선으로 사용" },
+  "vi": { "prefs.sketch_mirror_auto_line": "Dùng đường dựng hình đã chọn làm đường đối xứng" },
+  "zh": { "prefs.sketch_mirror_auto_line": "将预选的构造直线用作镜像线" }
+}
