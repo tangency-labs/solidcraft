@@ -1904,6 +1904,79 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
 
+    /// A design's saved model writes each tap marking once, and every state names the markings
+    /// it holds by place: every state listed the markings of all the features before it, so a
+    /// design of many marked cylinders grew with the square of its features (400 cylinders: 34 of
+    /// a 37 MB manifest), passed the cache's size limit and kept only some of its states. Opened
+    /// from the file, every state holds the markings it was evaluated with, to the bit.
+    #[test]
+    fn a_saved_model_writes_each_tap_marking_once() {
+        let design = |cylinders: usize| {
+            let mut s = Session::new(Document::new("Marked"));
+            let run = |s: &mut Session, id: &str, p: Value| s.execute(id, &p).unwrap();
+            for i in 0..cylinders {
+                let x = 10 * i;
+                run(&mut s, "solid.cylinder", json!({"radius":3,"height":6,"base":[x,0,0]}));
+                run(&mut s, "solid.thread", json!({"face":[x + 3,0,2],"designation":"M6","length":4}));
+            }
+            s
+        };
+        let size = |s: &Session| serde_json::to_vec(&saved_geometry(s, &s.doc).unwrap().records).unwrap().len();
+        let (few, s) = (design(4), design(12));
+        let markings = &s.model.state().threads;
+        assert_eq!(markings.len(), 12, "one marking per cylinder");
+        let per_cylinder = (size(&s) - size(&few)) / 8;
+        let all = serde_json::to_vec(markings).unwrap().len();
+        assert!(per_cylinder * 2 < all, "each later cylinder adds {per_cylinder} bytes, its markings are {all}");
+        let saved = saved_geometry(&s, &s.doc).unwrap();
+        let records = &saved.records;
+        let written = records["threads"].as_array().unwrap();
+        let texts: std::collections::HashSet<String> = written.iter().map(Value::to_string).collect();
+        assert_eq!((texts.len(), written.len()), (12, 12), "each marking once in the manifest");
+        for (r, feature) in s.model.results.iter().zip(records["features"].as_array().unwrap()) {
+            let state = &records["states"][feature["state"].as_u64().unwrap() as usize];
+            let named: Vec<Value> = state["threads"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|run| {
+                    let first = run[0].as_u64().unwrap() as usize;
+                    (first..first + run[1].as_u64().unwrap() as usize).map(|i| written[i].clone())
+                })
+                .collect();
+            assert_eq!(Value::Array(named), serde_json::to_value(&r.state.threads).unwrap(), "{}: its own markings", r.name);
+        }
+        // Opened from the file as saved: nothing evaluated, every state as evaluated.
+        let bytes = solidcraft_io::write_design_container_with_cache(&s.doc, solidcraft_io::DesignCompression::Fast, None, Some(&saved)).unwrap();
+        let kept = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&bytes)).unwrap().geometry().unwrap();
+        let reopened = Session::opened(solidcraft_io::read_design(&bytes).unwrap(), Some(&kept));
+        assert_eq!(reopened.model.last_recomputed, 0, "taken from the file, not evaluated");
+        assert_eq!(reopened.model.results.len(), s.model.results.len());
+        for (a, b) in reopened.model.results.iter().zip(&s.model.results) {
+            assert_eq!(a.ms, b.ms, "{}: taken from the file", b.name);
+            assert_eq!(serde_json::to_string(&a.state.threads).unwrap(), serde_json::to_string(&b.state.threads).unwrap(), "{}", b.name);
+            let names = |r: &solidcraft_doc::FeatureResult| r.state.bodies.iter().map(|b| (b.name.clone(), b.feature)).collect::<Vec<_>>();
+            assert_eq!(names(a), names(b), "{}", b.name);
+        }
+    }
+
+    /// A saved model whose states name one large tap marking over and over is refused: every
+    /// state holds its own copy of each marking it lists, so a marking counts by its text.
+    #[test]
+    fn a_saved_model_repeating_a_large_tap_marking_is_refused() {
+        let mut s = Session::new(Document::new("Marked"));
+        s.execute("solid.cylinder", &json!({"radius":3,"height":6,"base":[0,0,0]})).unwrap();
+        s.execute("solid.thread", &json!({"face":[3,0,2],"designation":"M6","length":4})).unwrap();
+        let saved = saved_geometry(&s, &s.doc).unwrap();
+        assert!(solidcraft_doc::Model::adopt(&s.doc, &saved).is_ok());
+        let mut hostile = solidcraft_doc::SavedModel { records: saved.records.clone(), bodies: saved.bodies.clone() };
+        hostile.records["threads"][0]["designation"] = json!("M".repeat(1 << 20));
+        let repeated: Vec<Value> = (0..4000).map(|_| json!([0, 1])).collect();
+        let last = hostile.records["states"].as_array().unwrap().len() - 1;
+        hostile.records["states"][last]["threads"] = Value::Array(repeated);
+        assert!(solidcraft_doc::Model::adopt(&s.doc, &hostile).is_err());
+    }
+
     #[test]
     #[ignore = "manual native cache save benchmark; generate issue303-step.json first"]
     fn benchmark_native_cache_save() {
