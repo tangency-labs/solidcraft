@@ -17,13 +17,15 @@ fn error(h: &mut Harness, id: &str, params: Value) -> String {
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 99, "page presentation must not alter profile membership");
+    assert_eq!(keys.len(), 102, "Appearance includes its two system-theme slots");
     for key in [
         "nav",
         "mouse_gestures",
         "radial_context_menu",
         "zoom_reverse",
         "theme",
+        "theme_day",
+        "theme_night",
         "ui_scale",
         "ui_font",
         "navigator_style",
@@ -795,6 +797,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "ribbon_menus_follow_hover",
         "ribbon_menus_skip_pinned",
         "ribbon_reveal",
+        "ribbon_tabs_only",
         "right_drag_orbits",
         "select_other_hidden",
         "selection_shift_add_only",
@@ -816,7 +819,9 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "status_bar",
         "suppress_sketch_snap",
         "theme",
+        "theme_day",
         "theme_follow",
+        "theme_night",
         "theme_options",
         "timeline_collapsed",
         "timeline_left",
@@ -843,7 +848,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 99);
+    assert_eq!(expected.len(), 102);
     assert_eq!(actual, expected);
 }
 
@@ -922,6 +927,24 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
         let out = run(&mut h, "settings.profile.apply", json!({"name":imported["name"]}));
         assert_eq!(out["skipped"], json!(["home_fit_size"]));
         assert_eq!(h.app.preferences.home_fit_size, 0.5, "an out-of-range profile value is refused");
+    }
+}
+
+#[test]
+fn theme_day_and_night_are_captured_restored_and_saved_in_appearance_profiles() {
+    let mut h = Harness::new();
+    h.call("ui.prefs", json!({"theme":"system", "theme_day":"akari", "theme_night":"onyx"}));
+    run(&mut h, "settings.profile.save", json!({"name":"System pair"}));
+    let saved = h.app.settings_profiles.list[0].clone();
+    assert_eq!(saved["preferences"]["theme_day"], "akari");
+    assert_eq!(saved["preferences"]["theme_night"], "onyx");
+    assert_eq!(sanitize(&saved).unwrap(), saved);
+    h.call("ui.prefs", json!({"theme_day":"light", "theme_night":"dark"}));
+    run(&mut h, "settings.profile.apply", json!({"name":"System pair"}));
+    assert_eq!((&h.app.preferences.theme_day[..], &h.app.preferences.theme_night[..]), ("akari", "onyx"));
+    for key in ["theme_day", "theme_night"] {
+        let pages: Vec<_> = crate::prefs::FIELD_PAGES.iter().filter(|(field, _)| *field == key).map(|(_, page)| *page).collect();
+        assert_eq!(pages, [Some(crate::prefs::PAGE_APPEARANCE)]);
     }
 }
 

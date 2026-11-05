@@ -254,6 +254,35 @@ impl ModelBody {
         self.mesh.clone()
     }
 
+    /// Identity of the display cells of the solid this body shows: its own, or for a rigidly
+    /// placed copy its definition's (shared by every placement of it).
+    fn solid_id(&self) -> usize {
+        self.mesh_placement.as_deref().map_or(Arc::as_ptr(&self.mesh) as usize, placed_mesh::PlacedMesh::definition_id)
+    }
+
+    /// How this body is drawn moved from `before`: [`crate::IDENTITY`] when it is `before` where
+    /// it stood (its meshes and plans the same), the rigid motion between them when it is the same
+    /// solid placed elsewhere (a dragged component's body: `before`'s meshes and plans drawn moved
+    /// show it; a definition shown where it is defined is its own placement), `None` when it is
+    /// another body or its geometry differs.
+    pub fn display_moved_from(&self, before: &ModelBody) -> Option<crate::Mat> {
+        if self.name != before.name || self.solid_id() != before.solid_id() {
+            return None;
+        }
+        let (now, was) = (self.mesh_placement.as_deref(), before.mesh_placement.as_deref());
+        if let (Some(now), Some(was)) = (now, was)
+            && now.tolerance.to_bits() != was.tolerance.to_bits()
+        {
+            return None;
+        }
+        let at = |p: Option<&placed_mesh::PlacedMesh>| p.map_or(crate::IDENTITY, |p| *p.transform());
+        let (now, was) = (at(now), at(was));
+        if now == was {
+            return Some(crate::IDENTITY);
+        }
+        Some(crate::mat_mul(&now, &crate::mat_inverse(&was)?))
+    }
+
     /// [`ModelBody::mesh`] as a shared mesh and the move that places it: for a rigid placement
     /// of a definition, the definition's own mesh (the same one for every placement of it) and
     /// the placement; for any other body its own mesh, unmoved. The mesh moved by the matrix is
@@ -784,7 +813,7 @@ impl ModelState {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             serde_json::to_string(&s.plane).unwrap_or_default().hash(&mut h);
             let mut sketch = s.sketch.clone();
-            quantize(&mut sketch);
+            fingerprint_sketch(&mut sketch);
             serde_json::to_string(&sketch).unwrap_or_default().hash(&mut h);
             s.report.ok().hash(&mut h);
             self.sketch_keys.insert(feature, h.finish());
@@ -1253,6 +1282,13 @@ fn quantize(sk: &mut solidcraft_sketch::Sketch) {
     }
 }
 
+/// The stored solve as a cache key: on the [`QUANTUM`] grid, without the editor state
+/// (see [`solidcraft_sketch::Sketch::clear_id_counters`]).
+fn fingerprint_sketch(sk: &mut solidcraft_sketch::Sketch) {
+    quantize(sk);
+    sk.clear_id_counters();
+}
+
 /// A feature as fingerprinted: its definition, a sketch's stored solve quantized, an imported
 /// file's text or mesh payload by its content digest.
 /// Hash [`feature_json`] of `f` into `h`. Every evaluation fingerprints every feature, and in a
@@ -1319,7 +1355,7 @@ fn feature_json(f: &Feature, steps: &ImportDigests) -> String {
     if let FeatureKind::Sketch { .. } = &f.kind {
         let mut g = f.clone();
         if let FeatureKind::Sketch { sketch, .. } = &mut g.kind {
-            quantize(sketch);
+            fingerprint_sketch(sketch);
         }
         return serde_json::to_string(&g).unwrap_or_default();
     }
@@ -1570,6 +1606,9 @@ fn cache_key(f: &Feature, chain_fp: u64, local: u64, ctx: u64, state: &ModelStat
 #[derive(Default)]
 struct PlacementReads {
     all: bool,
+    /// A body named that `st` lacks: a further placement's (`Block (Part:2)`), found through
+    /// its occurrence (#9957), or gone.
+    unlisted: bool,
     components: std::collections::BTreeSet<u64>,
     paths: Vec<Vec<u64>>,
     bodies: std::collections::BTreeSet<String>,
@@ -1608,14 +1647,17 @@ impl PlacementReads {
         }
     }
 
-    /// The component of body `name` in `st`; every component when the body is not there (a
-    /// projection then takes the body nearest its point, wherever that is).
+    /// The component of body `name` in `st`; every component and every placement when the body
+    /// is not there (a further placement's body, or the body nearest its point, wherever that is).
     fn body(&mut self, doc: &Document, st: Option<&ModelState>, name: &str) {
         match st.and_then(|st| st.body(name)) {
             Some(b) => {
                 self.components.insert(doc.model_body_component(b));
             }
-            None => self.all = true,
+            None => {
+                self.all = true;
+                self.unlisted = true;
+            }
         }
     }
 
@@ -1851,6 +1893,9 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         }
     }
     hash_placed_bodies(doc, st, &reads.bodies, &inverse, &mut h);
+    if reads.unlisted {
+        placements_hash(doc).hash(&mut h);
+    }
     // Legacy and component-wide reads still need the conservative offset dependency. Body
     // reads above already include just their own offsets, in the frame that evaluates them.
     if reads.all || !reads.components.is_empty() || !reads.paths.is_empty() {
@@ -6038,15 +6083,28 @@ fn from_profile_on_closed_path(segs: Vec<solidcore_record::Seg2>, path: &Plane, 
 /// Where an extrude of distance `d` starts and ends along the sketch normal, before any start
 /// offset: one side, the other, both (symmetric), or a second distance on the other side.
 ///
-/// A second distance (`distance2`) goes the other way from the first side, wherever that went:
-/// against the normal for `direction: negative` (#2700), and back along it when a negative
-/// distance or a To Object below the sketch sends the first side down.
+/// A second distance (`distance2`) goes the other way from the first side: against the normal,
+/// or along it for `direction: negative` (#2700). Entered distances keep those sides whatever
+/// their signs; a To Object below the sketch or a Through All that reaches down sends the first
+/// side down and the second back along the normal.
 pub(crate) fn extent_sides(vals: &BTreeMap<String, Value>, extent: &crate::Extent, d: f64, direction: crate::Direction) -> Result<(f64, f64)> {
     Ok(match (&extent.distance2, direction) {
         (Some(d2), _) => {
-            let first = if direction == crate::Direction::Negative { -d } else { d };
+            let negative = direction == crate::Direction::Negative;
+            let first = if negative { -d } else { d };
             let d2 = val(vals, d2, Kind::Length)?;
-            (if first < 0.0 { d2 } else { -d2 }, first)
+            // An entered distance keeps its side whatever its sign: Direction fixes the sides,
+            // and a sign only turns its own side over. A reach computed from the model (To
+            // Object, Through All) has the sign of where the object is, so the other side
+            // follows it.
+            let second = if extent.second_follows_first || extent.to.is_some() || extent.through_all {
+                if first < 0.0 { d2 } else { -d2 }
+            } else if negative {
+                d2
+            } else {
+                -d2
+            };
+            (second, first)
         }
         (None, crate::Direction::Positive) => (0.0, d),
         (None, crate::Direction::Negative) => (-d, 0.0),
@@ -6726,6 +6784,24 @@ fn replay(
             }
             continue;
         }
+        // A moved copy is copied again as a body: each instance is the copy the Move made,
+        // placed by the pattern (#5931).
+        if let FeatureKind::Move { copy: true, .. } = &src.kind {
+            let made: Vec<ModelBody> = st.bodies.iter().filter(|b| b.feature == src.id).cloned().collect();
+            if made.is_empty() {
+                return Err(DocError::Invalid(format!("{} made no copy to repeat", src.name)));
+            }
+            let mut output = 0;
+            for (k, m) in mats.iter().enumerate() {
+                for mb in &made {
+                    let moved = moved_copy(mb, kernel::transform_matrix(&mb.body, *m)?, first + k + 1);
+                    let name = copy_body_name(st, f, output, &mb.name);
+                    st.bodies.push(ModelBody::traced_new(name, moved, f.id));
+                    output += 1;
+                }
+            }
+            continue;
+        }
         let (op, targets) = feature_op(src);
         // A primitive's or a hole's targets are its participants (#1108): the copies change
         // those bodies only, like the feature itself (#2755).
@@ -7194,6 +7270,7 @@ fn eval_feature(
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
     match &f.kind {
+        FeatureKind::NewerFileFeature { raw } => Err(DocError::Invalid(raw.why())),
         FeatureKind::BodyTransfer { bodies, from, to, transform } => {
             crate::body_transfer::evaluate(doc, st, &crate::plain(bodies), *from, *to, *transform)
         }
@@ -7232,7 +7309,7 @@ fn eval_feature(
         | FeatureKind::Rib { .. }
         | FeatureKind::ReplaceFace { .. }
         | FeatureKind::Align { .. }
-        | FeatureKind::Remove { .. } => more::eval(doc, vals, f, st),
+        | FeatureKind::Remove { .. } => more::eval(doc, vals, f, st, warning),
         FeatureKind::Sketch { plane, sketch } => {
             let anchor = crate::face_anchor::plane_face_anchor(plane);
             let fst = match anchor {
@@ -7242,6 +7319,14 @@ fn eval_feature(
                 // assembly again is what made each sketch edit as slow as the design is big.
                 None if !plane_reads_geometry(plane) && sketch.links.is_empty() => std::borrow::Cow::Borrowed(st),
                 None => state_in_frame(doc, st, f.component)?,
+            };
+            // A further placement a link reads is placed in its frame too (#9957).
+            let named: Vec<&str> = sketch.links.iter().flat_map(|l| l.source.bodies()).collect();
+            let fst = match anchor.map(|anchor| anchor.author_frame(doc, f.component)) {
+                _ if named.is_empty() => fst,
+                Some(Ok(frame)) => with_placed_copies(doc, st, fst, &frame, &named),
+                Some(Err(_)) => fst,
+                None => with_placed_copies(doc, st, fst, &doc.component_transform(f.component), &named),
             };
             let (plane, face_warning) = match (anchor, plane) {
                 (Some(_), plane) => doc.resolve_attached_plane_noted(vals, plane, f.component, st, &fst)?,
@@ -8480,6 +8565,51 @@ pub fn state_in_frame_at<'a>(doc: &Document, st: &'a ModelState, comp: u64, fram
     Ok(Cow::Owned(out))
 }
 
+/// `framed` (the model `st` in the frame that `frame` places in the world) with the further
+/// placements `names` names (`Block (Part:2)`), where they are in the world. A component's model
+/// holds its first placement only, so a sketch projecting a copy's face found no body of that
+/// name and took the first placement's (#9957). Only the named ones are placed: placing every
+/// body of an assembly for each sketch made sketch edits as slow as the design is big.
+pub fn with_placed_copies<'a>(
+    doc: &Document,
+    st: &ModelState,
+    framed: std::borrow::Cow<'a, ModelState>,
+    frame: &Mat,
+    names: &[&str],
+) -> std::borrow::Cow<'a, ModelState> {
+    let missing: Vec<&str> = names.iter().copied().filter(|n| !n.is_empty() && framed.body(n).is_none()).collect();
+    if missing.is_empty() || doc.occurrences.is_empty() {
+        return framed;
+    }
+    let Some(inv) = crate::mat_inverse(frame) else { return framed };
+    let mut by_component: std::collections::HashMap<u64, Vec<&ModelBody>> = std::collections::HashMap::new();
+    for (b, owner) in st.bodies.iter().zip(doc.model_body_components(st)) {
+        by_component.entry(owner).or_default().push(b);
+    }
+    let world = crate::WorldNames::new(doc, st);
+    let mut placed: Vec<ModelBody> = Vec::new();
+    for (comp, path, m) in doc.placements() {
+        for b in by_component.get(&comp).into_iter().flatten() {
+            let name = world.name(&b.name, comp, &path);
+            if !missing.contains(&name.as_str()) || placed.iter().any(|p| p.name == name) {
+                continue;
+            }
+            let bm = doc.model_body_offset(b).map(|o| crate::mat_mul(&m, o)).unwrap_or(m);
+            if let Ok(mut copy) = st.body_in_frame(b, &crate::mat_mul(&inv, &bm)) {
+                copy.name = name;
+                copy.source_name = Some(b.definition_name().to_string());
+                placed.push(copy);
+            }
+        }
+    }
+    if placed.is_empty() {
+        return framed;
+    }
+    let mut out = framed.into_owned();
+    out.bodies.extend(placed);
+    std::borrow::Cow::Owned(out)
+}
+
 /// The model placed in the world: each component's bodies, sketches, threads and construction
 /// geometry through every occurrence of it (bodies of the first placement keep their names;
 /// further instances get the occurrence path in brackets). Without components this is the model
@@ -8906,6 +9036,49 @@ mod world_placement_cache_tests {
         let again = world_state(&doc, &state).unwrap();
         assert!(Arc::ptr_eq(&original_mesh, &again.body("Block").unwrap().mesh()));
         assert!(Arc::ptr_eq(&names, &crate::naming::face_names(again.body(&second_name).unwrap())));
+    }
+
+    /// A dragged component's bodies are drawn from the meshes and plans made where the drag found
+    /// them, moved: each is the same solid moved rigidly, the others stand where they were, and a
+    /// body whose geometry changed is no such move.
+    #[test]
+    fn a_moved_placement_is_drawn_moved_from_where_it_stood() {
+        // A placement moved, and the part moved off where it is defined.
+        for from_definition in [false, true] {
+            let mut doc = Document::new("placements");
+            let component = doc.add_component(Some("Part"), 0).unwrap();
+            doc.body_components.insert("Block".into(), component);
+            let start = if from_definition { crate::IDENTITY } else { crate::rigid(Vec3::new(10., 20., 0.), Vec3::ZERO, Vec3::Z, 0.4) };
+            let second = doc.add_occurrence(component, 0, start).unwrap();
+            let mut state = ModelState::default();
+            state.bodies.push(ModelBody::new("Block".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(2., 3., 4.)).unwrap(), 1));
+            let before = world_state(&doc, &state).unwrap();
+            let delta = crate::rigid(Vec3::new(4., -7., 1.5), Vec3::new(1., 1., 0.), Vec3::new(0., 1., 1.), 0.6);
+            let moved = doc.occurrences.iter_mut().find(|o| o.id == second).unwrap();
+            moved.transform = crate::mat_mul(&delta, &moved.transform);
+            let after = world_state(&doc, &state).unwrap();
+            assert_eq!(after.bodies.len(), 2);
+            let mut moves = 0;
+            for now in &after.bodies {
+                let was = before.body(&now.name).unwrap();
+                let d = now.display_moved_from(was).unwrap();
+                if d == crate::IDENTITY {
+                    assert!(Arc::ptr_eq(&now.mesh(), &was.mesh()), "{}: unchanged, the same mesh", now.name);
+                    continue;
+                }
+                moves += 1;
+                assert!(d.iter().flatten().zip(delta.iter().flatten()).all(|(a, b)| (a - b).abs() < 1e-9), "{}: {d:?}", now.name);
+                // `was`'s mesh drawn moved is `now`'s.
+                for (p, q) in was.mesh().positions.iter().zip(&now.mesh().positions) {
+                    assert!(crate::apply_point(&d, *p).dist(*q) < 1e-9);
+                }
+            }
+            assert_eq!(moves, 1, "from its definition: {from_definition}");
+            // Another body, or other geometry: no move draws it.
+            assert!(after.bodies[0].display_moved_from(&before.bodies[1]).is_none());
+            let other = ModelBody::new(before.bodies[0].name.clone(), kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap(), 1);
+            assert!(other.display_moved_from(&before.bodies[0]).is_none());
+        }
     }
 }
 

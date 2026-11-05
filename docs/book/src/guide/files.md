@@ -1,5 +1,13 @@
 # Import and export
 
+Everything here starts from the **File** menu at the top left.
+
+![The File menu, numbered 1 to 5](../media/files/menu.png)
+
+**1** Open a design (or a STEP, IGES or mesh file as a new one) · **2** Insert a file into the open
+design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSON ·
+**5** Design properties
+
 | Format | Read | Write |
 |---|---|---|
 | `.sc` (versioned container or JSON design; `.solidcraft` files from earlier releases still open) | yes | yes |
@@ -22,7 +30,7 @@ Every imported file (STEP, IGES, 3MF, STL, OBJ or glTF) comes in as a new compon
 file, so its bodies never mix with yours. A STEP assembly keeps its structure: its parts and
 sub-assemblies become nested components, and a part used several times is one component with an
 occurrence for each place. The imported assembly is rigid: moving its component moves everything,
-and its parts don't move on their own. Right-click the component and choose **Unlock Contents** to
+and its parts don't move on their own. Right-click the component and choose **Placement → Unlock Contents** to
 joint the parts one by one. Undo removes a whole import in one step.
 
 A glTF file (`.glb`, or `.gltf` with the `.bin` files it names in the same folder) comes in the
@@ -129,7 +137,7 @@ opened through a symbolic link (a synced folder linked into a project) is saved 
 link points to, so the link stays. Unsaved changes in every open tab are autosaved to separate
 entries in a recovery folder, and the next launch offers to recover each design. Saving or
 closing one tab removes only its recovery entry. Older design files are upgraded on open, and files
-from a newer version are refused with a message.
+from a newer version open with a warning.
 
 **Save** writes a container by default; files named `.json` keep JSON on subsequent saves.
 **Save As** offers a container or plain JSON on
@@ -159,9 +167,12 @@ The default `cache: false` omits the portable thumbnail too.
 The repository's `docs/design-container.md` describes limits and encoding details.
 
 Designs are saved in the newest format this version of SolidCraft knows (`"format": "solidcraft/N"`
-in the file). It opens designs of every older format and upgrades them as they open; a design
-from a newer version asks you to update instead of being guessed at. Development (nightly) builds
-save a format number no release reads yet.
+in the file). It opens designs of every older format and upgrades them as they open. A design
+from a newer version opens too, with a notice saying so: what this version can read is read, and
+a feature it can't read stays on the timeline with an error saying so, so you can see what is
+missing. Saving such a design keeps what this version can't read and the file's format number, so
+the newer version finds its work again. Development (nightly) builds save a format number no release
+reads yet.
 
 Sketch patterns retain their live direction-line references and placement settings when saved.
 Older patterns keep their fixed vector directions and original placement defaults.
@@ -209,7 +220,7 @@ The control channel sets the same preference with `ui.prefs {"max_step_file_mb":
 ## Design properties
 
 **File → Design Properties…** (also under **Document Settings** in the Browser, and on the
-top component's right-click menu) records who made a design and what it is: project, part
+top component's right-click menu, under **Design**) records who made a design and what it is: project, part
 number, revision, author, organization, description and licence. **OK** applies the changes as
 one undo step. Scripts and agents use the same commands: `document.metadata` reads them,
 `document.metadata.set` (`key` and `value`, or `values: {key: value, …}`) and

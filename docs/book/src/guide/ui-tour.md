@@ -38,8 +38,8 @@ view.
   origin, bodies, sketches, construction planes, canvases, joints and components. The eye at the
   row's right end shows or hides an item (**Preferences › Interface › Eye next to the fold arrow**
   puts it back beside the fold arrow; press an eye and drag up or down over other eyes to show or hide them all at once, as one undo step), a component's radio button makes it the active component,
-  and right-clicking any row gives that item's menu. Right-click the design or a component and choose **Expand All** or
-  **Collapse All** to open or close every folder under that row (the design row stays visible
+  and right-clicking any row gives that item's menu. Right-click the design or a component and choose
+  **Organize → Expand All** or **Collapse All** to open or close every folder under that row (the design row stays visible
   when the whole tree is collapsed). Components start closed, so a large assembly opens as a
   short list; open one with its fold arrow, or use **Find in Browser** on a body to open the rows
   down to it (**Preferences › Interface › Components start open** opens every component from the
@@ -220,6 +220,14 @@ along the bar to reorder it; right-click it and choose **Remove from Quick Acces
 The bar is empty, and so not shown, until a command is added, and holds up to 24 commands. Narrow
 windows hide it with Undo and Redo. It is saved with the toolbar's customisations, so it is
 exported with the keyboard shortcuts and carried by settings profiles.
+
+Layout › **Show only the ribbon's tabs** (off by default) folds the ribbon to its tab
+row, so the view gets the room its panels took. Click a tab to show its panels over the view; they
+close again when a command starts, when the pointer leaves them, when Escape is pressed or when the
+open tab is clicked again. The command **Ribbon Tabs Only** (VIEW tab, the toolbar's right-click
+menu and command search) switches the option, so it can be given a key in Keyboard Shortcuts:
+choose it again to keep the whole ribbon shown. Scripts run `view.ribbon_tabs_only` with
+`{"on": true}` or `{"on": false}`, or with no parameters to switch.
 
 Interface › Layout › **Show origin and bodies at the top** (off by default) puts the active
 component's Bodies folder and the Origin (planes, axes and point) at the top of the History when

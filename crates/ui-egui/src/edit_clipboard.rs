@@ -56,7 +56,7 @@ pub fn body_is_cut(app: &SolveApp, name: &str) -> bool {
 }
 
 /// Leave text for the system clipboard: this app's next frame writes it ([`flush`]).
-fn leave_text(app: &mut SolveApp, text: String) {
+pub(crate) fn leave_text(app: &mut SolveApp, text: String) {
     app.clipboard_text = Some(text);
 }
 

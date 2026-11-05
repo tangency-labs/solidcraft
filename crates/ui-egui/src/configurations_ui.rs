@@ -190,7 +190,7 @@ pub(super) fn configurations_rows(
                                         .unwrap_or_default()
                                 });
                                 let (kind, _) = column_parts(column);
-                                let (response, choice) = value_control(ui, ui.id().with(column), &mut value, kind, &material_names);
+                                let (response, choice) = value_control(ui, ui.scope_id().with(column), &mut value, kind, &material_names);
                                 let picked = choice.is_some();
                                 if let Some(choice) = choice {
                                     value = choice;

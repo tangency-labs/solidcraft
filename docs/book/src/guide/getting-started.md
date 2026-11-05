@@ -20,6 +20,23 @@ cargo run --release -p solidcraft -- --sample   # opens with a sample part
 `solidcraft design.sc` opens a saved design. Windows builds cross-compile from Linux with
 `cargo xwin build --release --target x86_64-pc-windows-msvc -p solidcraft`.
 
+### The start page
+
+SolidCraft opens on the start page; the house at the top left brings it back.
+
+![The start page, numbered 1 to 6](../media/getting-started/start.png)
+
+**1** A new design in millimetres (or inches, beside it) · **2** Open a saved design ·
+**3** Import a STEP, IGES or mesh file as a new design · **4** Designs you opened recently ·
+**5** Samples to explore · **6** The File menu: save, export, preferences, shortcuts
+
+A sample opens as an ordinary design you can change; a click on its tile is enough.
+
+<video src="../media/getting-started/sample.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Clicking the Sample Plate tile on the start page: the sample opens, and the view turns to look round it"></video>
+
+From there, [A tour of the window](ui-tour.md) shows what's where, and
+[Sketching step by step](sketching.md#step-by-step) starts a part of your own.
+
 ### macOS
 
 Open the release `.dmg` and drag `SolidCraft.app` onto Applications.

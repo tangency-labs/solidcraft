@@ -321,6 +321,12 @@ pub struct Extent {
     /// Through all bodies in the direction(s) instead of `distance`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub through_all: bool,
+    /// Two Sides as older builds read it: `distance2` goes the other way from wherever the
+    /// first side went, so a negative entered distance sends it back along the normal. Saved
+    /// designs from before entered distances kept their sides carry it, so they rebuild as
+    /// they did whatever their expressions evaluate to; new and edited extrudes leave it off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub second_follows_first: bool,
     /// Taper angle (expression; positive grows the profile).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(angle = "Taper angle")]
@@ -665,6 +671,12 @@ impl AlignFrame {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FeatureKind {
+    /// A feature a newer SolidCraft saved that this build can't read ([`crate::newer_file`]): it
+    /// holds its place on the timeline, reports an error when evaluated, and goes back into the
+    /// file as it came.
+    NewerFileFeature {
+        raw: crate::newer_file::RawFeature,
+    },
     /// A recorded timeline ownership boundary. Geometry is converted from its
     /// current local frame into the destination component frame exactly once.
     BodyTransfer {
@@ -1487,7 +1499,7 @@ pub enum FeatureKind {
     },
     /// Plastic lip (raised band) or groove (recess) along the rim face picked at `face`.
     Lip {
-        face: Position,
+        face: FacePick,
         #[walk(length = "Width")]
         width: Expr,
         #[walk(length = "Height")]
@@ -2608,6 +2620,7 @@ impl FeatureKind {
     /// Short type name (timeline tooltip, `inspect`).
     pub fn type_name(&self) -> &'static str {
         match self {
+            FeatureKind::NewerFileFeature { .. } => "NewerFileFeature",
             FeatureKind::BodyTransfer { .. } => "BodyTransferFeature",
             FeatureKind::Sketch { .. } => "Sketch",
             FeatureKind::Extrude { .. } => "ExtrudeFeature",
@@ -2693,6 +2706,7 @@ impl FeatureKind {
     /// Design-file variant key (e.g. `"extrude"`, `"box"`, `"sheet_flange"`).
     pub fn kind_key(&self) -> &'static str {
         match self {
+            FeatureKind::NewerFileFeature { .. } => "newer_file_feature",
             FeatureKind::BodyTransfer { .. } => "body_transfer",
             FeatureKind::Sketch { .. } => "sketch",
             FeatureKind::Extrude { .. } => "extrude",
@@ -2855,6 +2869,7 @@ impl FeatureKind {
     /// Default name prefix (`Extrude` → `Extrude1`).
     pub fn base_name(&self) -> &'static str {
         match self {
+            FeatureKind::NewerFileFeature { .. } => "Unknown",
             FeatureKind::BodyTransfer { .. } => "BodyTransfer",
             FeatureKind::Sketch { .. } => "Sketch",
             FeatureKind::Extrude { .. } => "Extrude",
@@ -3127,6 +3142,10 @@ pub fn is_counted_body_name(name: &str) -> bool {
 /// The document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
+    /// Set when a newer SolidCraft saved the file this came from: what to tell the user, and what
+    /// this build couldn't read and keeps for the next save ([`crate::newer_file`]).
+    #[serde(skip)]
+    pub newer_file: Option<std::sync::Arc<crate::newer_file::NewerFile>>,
     /// Named image intent and immutable embedded HDR sources. Active jobs and device state are not saved.
     #[serde(default, skip_serializing_if = "crate::render_settings::RenderSettings::is_empty")]
     pub render: std::sync::Arc<crate::render_settings::RenderSettings>,
@@ -3488,6 +3507,7 @@ impl Document {
 
     pub fn new(name: &str) -> Self {
         Document {
+            newer_file: None,
             render: Default::default(),
             format: default_format(),
             format_pending: crate::format::pending_names(),
@@ -3909,7 +3929,12 @@ impl Document {
 
     /// Read a design file's JSON (any format this build knows; older ones are upgraded).
     pub fn from_json(s: &str) -> Result<Document> {
-        crate::render_resources::check_json_budget(s)?;
+        // A newer build's resources may not read here; the section stays out then (`newer_file`).
+        if let Err(why) = crate::render_resources::check_json_budget(s).and_then(|()| crate::render_texture_resources::check_json_budget(s))
+            && !crate::format::says_newer(s)
+        {
+            return Err(why);
+        }
         let mut d = crate::format::read(s)?;
         if d.features.len() > MAX_FEATURES || d.params.len() > MAX_PARAMS {
             return Err(DocError::Invalid("document too large".into()));
@@ -3921,6 +3946,11 @@ impl Document {
         Ok(d)
     }
     pub fn to_json(&self) -> String {
+        if self.newer_file.is_some() {
+            let mut value = serde_json::to_value(self).unwrap_or_default();
+            crate::newer_file::restore(self, &mut value);
+            return serde_json::to_string_pretty(&value).unwrap_or_default();
+        }
         serde_json::to_string_pretty(self).unwrap_or_default()
     }
 

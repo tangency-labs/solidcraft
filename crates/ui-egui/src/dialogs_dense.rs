@@ -989,8 +989,26 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Stock { margin } => {
             enter |= expr_row(ui, "Margin", margin);
         }
-        Kind::Scale { factor } => {
-            enter |= expr_row(ui, "Scale factor", factor);
+        Kind::Scale { factor, per_axis, factor_y, factor_z } => {
+            form_row(ui, "Type", |ui| {
+                let mut i = usize::from(*per_axis);
+                ui_kit::segmented(ui, &mut i, &["scale.uniform", "scale.per_axis"], Default::default());
+                if (i == 1) != *per_axis {
+                    *per_axis = i == 1;
+                    // Y and Z start at the factor, so nothing changes until one of them does.
+                    if *per_axis {
+                        factor_y.clone_from(factor);
+                        factor_z.clone_from(factor);
+                    }
+                }
+            });
+            if *per_axis {
+                enter |= expr_row(ui, "X", factor);
+                enter |= expr_row(ui, "Y", factor_y);
+                enter |= expr_row(ui, "Z", factor_z);
+            } else {
+                enter |= expr_row(ui, "Scale factor", factor);
+            }
         }
         Kind::OffsetFaces { distance } => {
             enter |= expr_row(ui, "Distance", distance);

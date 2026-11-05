@@ -30,7 +30,9 @@ fn painted(h: &mut Harness) -> BTreeSet<String> {
             egui::Shape::Text(t) => {
                 let text = t.galley.job.text.trim();
                 out.insert(text.to_string());
-                for part in text.split(['›', '·', '•']).flat_map(|p| p.split("   ")) {
+                // Split composed labels, but only on the spaced middle dot: the bare one is
+                // Catalan's l·l inside a word ("Cancel·la"), not a separator.
+                for part in text.split(['›', '•']).flat_map(|p| p.split(" · ")).flat_map(|p| p.split("   ")) {
                     out.insert(part.trim().to_string());
                 }
             }

@@ -17,6 +17,28 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
 Bends follow the rule's K-factor, so flat lengths match what a press brake will make. Tests
 check flat lengths against hand-computed bend allowances.
 
+## Step by step
+
+A tray: a plate with a flange up each long side, and its flat pattern.
+
+**1. Base flange.** Sketch an 80 × 50 mm rectangle on the Top plane and finish the sketch. On the
+**SHEET METAL** tab, click **Flange**, then the profile, then **OK**: a plate at the rule's
+thickness.
+
+<video src="../media/sheet-metal/base.mp4" autoplay loop muted playsinline controls width="100%" aria-label="A base flange from a sketched rectangle: Flange, click the profile, OK"></video>
+
+**2. Edge flanges.** Click **Flange** again, then the plate's two long top edges. Type the height
+(20) and press Enter. Each flange bends up at the rule's radius.
+
+<video src="../media/sheet-metal/flange.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Edge flanges 20 mm high from the plate's two long top edges"></video>
+
+**3. Flat pattern.** **Flat Pattern** shows the part laid flat, with a dashed line for each bend,
+its flat size and a table of bends to export as DXF or CSV.
+
+<video src="../media/sheet-metal/flat.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Create Flat Pattern: the tray laid flat with its two bend lines, flat size and bend table"></video>
+
+## Rules and tools
+
 A rule is saved in its design, and a new design starts with only the default steel rule. To use
 the same rules in every design, keep them as **personal rules**, saved in your profile: open
 **Personal rules** at the top of Sheet Metal Rules.

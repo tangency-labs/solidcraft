@@ -505,6 +505,8 @@ struct SurfacePrepare {
     scale: f64,
     #[serde(default)]
     plane: Plane,
+    #[serde(default)]
+    rotation_rad: f64,
 }
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -522,12 +524,18 @@ pub(super) fn prepare_surface(s: &mut Session, params: &Value) -> Result<Value> 
     if !input.scale.is_finite() || !(0.001..=1000.0).contains(&input.scale) {
         return Err(bad(command, "surface repeat scale must be finite in 0.001..1000"));
     }
+    if !input.rotation_rad.is_finite() || input.rotation_rad.abs() > 1e6 {
+        return Err(bad(command, "surface grain rotation must be finite and within one million radians"));
+    }
     let tile: [f64; 2] = serde_json::from_value(value["tile_mm"].clone()).map_err(|e| bad(command, e.to_string()))?;
     let (u, v) = (tile[0] * input.scale, tile[1] * input.scale);
+    let (sin, cos) = input.rotation_rad.sin_cos();
+    // Rotate the unit directions before applying the two physical repeat lengths.
+    // Mixing the already-scaled vectors would skew non-square wood tiles.
     let (u, v) = match input.plane {
-        Plane::Xy => ([u, 0.0, 0.0], [0.0, v, 0.0]),
-        Plane::Yz => ([0.0, u, 0.0], [0.0, 0.0, v]),
-        Plane::Zx => ([0.0, 0.0, u], [v, 0.0, 0.0]),
+        Plane::Xy => ([cos * u, sin * u, 0.0], [-sin * v, cos * v, 0.0]),
+        Plane::Yz => ([0.0, cos * u, sin * u], [0.0, -sin * v, cos * v]),
+        Plane::Zx => ([sin * u, 0.0, cos * u], [cos * v, 0.0, -sin * v]),
     };
     let scene = crate::product_scene::extract(s)?;
     let body = scene

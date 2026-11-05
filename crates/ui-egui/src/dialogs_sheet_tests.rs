@@ -173,7 +173,7 @@ fn shallow_pocket_overlay_labels_depth_without_drawing_a_through_void() {
         *data = Some(Ok(flat));
         let ctx = crate::fonts::test_context();
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
-            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("flat-pocket-test")));
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("flat-pocket-test")));
             assert!(overlay(&mut app, &painter, Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0)), &dialog));
         });
         let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text()).collect();
@@ -251,7 +251,7 @@ fn flat_pattern_islands_fit_before_the_actual_command_panel() {
             app.shell.content = Some(Rect::from_min_max(pos2(browser.right(), viewport.top()), pos2(viewport.right(), history.top())));
         }
         let ctx = crate::fonts::test_context();
-        let id = egui::Id::new(("sc_dialog", "FLAT PATTERN"));
+        let id = egui::Id::unique(("sc_dialog", "FLAT PATTERN"));
         let mut output = egui::FullOutput::default();
         for _ in 0..3 {
             output =
@@ -262,7 +262,7 @@ fn flat_pattern_islands_fit_before_the_actual_command_panel() {
                         .show(ui.ctx(), |ui| {
                             ui.label("Flat size: 50 × 10 × 2.5 mm");
                         });
-                    let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("island-fit")));
+                    let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("island-fit")));
                     assert!(overlay(
                         &mut app,
                         &painter,
@@ -314,7 +314,7 @@ fn coincident_top_and_bottom_pocket_depths_share_a_readable_annotation() {
         *data = Some(Ok(flat));
         let ctx = crate::fonts::test_context();
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
-            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("coincident-pocket-test")));
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("coincident-pocket-test")));
             assert!(overlay(&mut app, &painter, Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0)), &dialog));
         });
         let labels: Vec<_> =
@@ -1049,8 +1049,13 @@ fn flat_pattern_pans_and_zooms_like_the_design_viewport() {
                 assert!(panned + zoomed >= 1, "{preset}: the preset has a pan or zoom drag");
                 // The wheel zooms (to the cursor when asked), identically.
                 let before = flat.flat_view.cam;
-                let wheel =
-                    Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: vec2(0.0, 3.0), modifiers: none, phase: egui::TouchPhase::Move };
+                let wheel = Event::MouseWheel {
+                    source: egui::MouseWheelSource::Unknown,
+                    unit: egui::MouseWheelUnit::Line,
+                    delta: vec2(0.0, 3.0),
+                    modifiers: none,
+                    phase: egui::TouchPhase::Move,
+                };
                 for (app, ctx, t) in [(&mut flat, &flat_ctx, &mut ft), (&mut design, &design_ctx, &mut dt)] {
                     frame(app, ctx, t, none, vec![Event::PointerMoved(at)]);
                     frame(app, ctx, t, none, vec![wheel.clone()]);
@@ -1109,7 +1114,13 @@ fn design_camera_is_unchanged_while_the_flat_pattern_has_focus() {
                     frame(&mut app, &ctx, &mut t, mods, vec![Event::PointerButton { pos: at, button, pressed: false, modifiers: mods }]);
                 }
             }
-            let wheel = Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: vec2(0.0, 3.0), modifiers: none, phase: egui::TouchPhase::Move };
+            let wheel = Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
+                unit: egui::MouseWheelUnit::Line,
+                delta: vec2(0.0, 3.0),
+                modifiers: none,
+                phase: egui::TouchPhase::Move,
+            };
             frame(&mut app, &ctx, &mut t, none, vec![wheel]);
             frame(&mut app, &ctx, &mut t, none, vec![Event::Zoom(1.3)]);
             for _ in 0..30 {
@@ -1177,7 +1188,7 @@ fn flat_circles(app: &mut SolveApp, dialog: &Dialog, rect: Rect) -> Vec<egui::ep
     let ctx = crate::fonts::test_context();
     let input = egui::RawInput { screen_rect: Some(rect), ..Default::default() };
     let output = crate::test_support::frame(&ctx, input, |ui| {
-        let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("perforation-test")));
+        let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("perforation-test")));
         assert!(overlay(app, &painter, rect, dialog));
     });
     output.shapes.into_iter().filter_map(|s| if let egui::Shape::Circle(c) = s.shape { Some(c) } else { None }).collect()

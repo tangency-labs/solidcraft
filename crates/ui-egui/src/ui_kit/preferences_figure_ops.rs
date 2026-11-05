@@ -298,6 +298,23 @@ pub(super) fn paint(p: &Painter, rect: Rect, figure: &Figure, sample: Option<&Th
     paint_with_tokens(p, rect, figure, sample, clip, &Tokens::get(), Palette::Figure);
 }
 
+/// Clip every miniature-window operation, including its top bar, to its rounded outline.
+/// Rectangular scissoring alone leaves the bar's square corners outside the rounded ground.
+pub(super) fn paint_rounded(p: &Painter, rect: Rect, figure: &Figure, sample: &ThemeSample, radius: f32) {
+    let size = rect.size();
+    if !rect.is_finite() || !size.is_finite() || size.min_elem() < 1.0 || size.max_elem() > MAX_SIDE || !radius.is_finite() {
+        return;
+    }
+    let [fw, fh] = figure.size;
+    if !(fw > 0.0 && fh > 0.0) {
+        return;
+    }
+    let scale = (size.x / fw).min(size.y / fh);
+    let outline: Vec<_> =
+        rounded(Rect::from_min_size(Pos2::ZERO, vec2(fw, fh)), radius.max(0.0) / scale).into_iter().map(|point| [point.x, point.y]).collect();
+    paint(p, rect, figure, Some(sample), Some(&outline));
+}
+
 /// Reuse the six canonical figures with the semantic palette being previewed, without global state.
 pub(super) fn paint_colour_vision(p: &Painter, rect: Rect, index: usize, t: &Tokens) {
     use super::preferences_figure_data as figures;

@@ -1,6 +1,6 @@
-//! Portable built-in surface intent. Targets use definition/feature/occurrence identity,
-//! never a captured mesh ordinal. Frames are definition-local millimetres. Encoded map
-//! hashes pin the installed built-in resource revision; no paths or device objects are saved.
+//! Portable opaque surface intent with built-in or design-owned encoded sources.
+//! Targets use definition/feature/occurrence identity, never a captured mesh ordinal.
+//! Frames are definition-local millimetres; no paths or device objects are saved.
 use crate::{DocError, Result, render_resources::HdrId};
 use serde::{Deserialize, Serialize};
 use solidcraft_render::job::textures::PlanarFrame;
@@ -72,9 +72,73 @@ impl BuiltinSurfaceSource {
 #[serde(deny_unknown_fields)]
 pub struct SavedSurface {
     pub target: RenderBodyTarget,
-    pub source: BuiltinSurfaceSource,
+    pub source: SurfaceSource,
     pub local_frame: PlanarFrame,
     pub normal_strength: f64,
+}
+
+/// Built-in records retain their original wire shape. Embedded records explicitly
+/// identify each role; one digest may have several independently prepared uses.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SurfaceSource {
+    Builtin(BuiltinSurfaceSource),
+    Embedded(EmbeddedSurfaceSource),
+}
+impl From<BuiltinSurfaceSource> for SurfaceSource {
+    fn from(source: BuiltinSurfaceSource) -> Self {
+        Self::Builtin(source)
+    }
+}
+impl SurfaceSource {
+    pub fn validate(&self) -> Result<()> {
+        match self {
+            Self::Builtin(source) => source.validate(),
+            Self::Embedded(source) => source.validate(),
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EmbeddedSurfaceKind {
+    Embedded,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmbeddedSurfaceSource {
+    pub kind: EmbeddedSurfaceKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_color: Option<HdrId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal_open_gl: Option<HdrId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roughness: Option<HdrId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metallic: Option<HdrId>,
+    #[serde(default)]
+    pub flip_v: bool,
+}
+impl EmbeddedSurfaceSource {
+    pub fn role_resources(&self) -> impl Iterator<Item = (solidcraft_render::texture_input::MapRole, HdrId)> + '_ {
+        use solidcraft_render::texture_input::MapRole;
+        [
+            (MapRole::BaseColor, self.base_color),
+            (MapRole::NormalOpenGl, self.normal_open_gl),
+            (MapRole::Roughness, self.roughness),
+            (MapRole::Metallic, self.metallic),
+        ]
+        .into_iter()
+        .filter_map(|(role, id)| id.map(|id| (role, id)))
+    }
+    pub fn resources(&self) -> impl Iterator<Item = HdrId> + '_ {
+        [self.base_color, self.normal_open_gl, self.roughness, self.metallic].into_iter().flatten()
+    }
+    pub fn validate(&self) -> Result<()> {
+        if self.resources().next().is_none() {
+            return Err(invalid("an embedded surface requires at least one explicit map role"));
+        }
+        Ok(())
+    }
 }
 impl SavedSurface {
     pub fn validate(&self) -> Result<()> {
@@ -190,7 +254,8 @@ mod tests {
                 normal_sha256: HdrId::of(b"normal"),
                 roughness_sha256: HdrId::of(b"rough"),
                 metallic_sha256: HdrId::of(b"metal"),
-            },
+            }
+            .into(),
             local_frame: PlanarFrame { origin: [1., 2., 3.], u: [100., 0., 0.], v: [0., 100., 0.] },
             normal_strength: 0.75,
         }

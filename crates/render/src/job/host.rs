@@ -696,7 +696,8 @@ impl Running {
                 let request = work.request.ok_or_else(|| JobError::new(ErrorCode::Internal, "missing registered executor request"))?;
                 executor.begin(work.scene, request, work.handle.0.options, work.handle.0.cancel.clone()).map(WorkTask::Registered)
             } else {
-                WorkTask::new(work.scene, work.handle.0.request.clone(), work.handle.0.cancel.clone(), work.environment)
+                let request = work.request.unwrap_or_else(|| work.handle.0.request.clone());
+                WorkTask::new(work.scene, request, work.handle.0.cancel.clone(), work.environment)
             }
         }))
         .unwrap_or_else(|_| Err(JobError::new(ErrorCode::Internal, "image executor failed while preparing the job")));
@@ -1319,7 +1320,7 @@ impl ImageHost {
         let request_reservation = if request_bytes == 0 { None } else { Some(self.0.shared.budget.reserve(request_bytes)?) };
         // Preserve the original CPU option capacities in the retained request and its lease.
         // Registered executors instead move resource Arcs into work and keep a small public copy.
-        let (public_request, work_request) = if self.0.executor.is_some() {
+        let (public_request, work_request) = if self.0.executor.is_some() || request.textures.is_some() {
             (ImageRequest { environment: None, textures: None, ..request.clone() }, Some(request))
         } else {
             (request, None)

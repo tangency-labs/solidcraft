@@ -6,7 +6,7 @@ use solidcraft_doc::BodyName;
 use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::plastic::PlasticRule;
-use solidcraft_doc::{Dir, FacePick, Position};
+use solidcraft_doc::{Dir, FacePick};
 use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
@@ -237,7 +237,7 @@ fn lip(s: &mut Session, p: &Value) -> Result<Value> {
         Some(o) => return Err(bad(cmd, format!("unknown side `{o}` (inside or outside)"))),
     };
     let kind = FeatureKind::Lip {
-        face: Position(face),
+        face: FacePick(face),
         width: required(s, p, "width", Kind::Length, cmd)?,
         height: required(s, p, "height", Kind::Length, cmd)?,
         groove,
@@ -341,6 +341,27 @@ mod tests {
         // Outside band along the outer edge (80 x 50): 80·50 − 78·48 = 256, 2 deep.
         assert!(rel(v0 - volume(&mut g), 256.0 * 2.0) < 1e-6, "{}", v0 - volume(&mut g));
         assert!(g.execute("plastic.lip", &json!({"face": [40, 25, 0], "width": 1, "height": 2})).is_err(), "a face without an inner edge");
+    }
+
+    /// A lip follows its rim face when a parameter moves it (#11209): it was kept by a point
+    /// only, so a taller box left the point below the rim and the lip failed.
+    #[test]
+    fn a_lip_and_a_groove_follow_their_rim_when_a_parameter_moves_it() {
+        for groove in [false, true] {
+            let mut s = Session::default();
+            run(&mut s, "parameters.add", json!({"name": "h", "expression": "30 mm"}));
+            run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": "h"}));
+            run(&mut s, "solid.shell", json!({"faces": [[40, 25, 30]], "thickness": 2}));
+            let kind = if groove { "groove" } else { "lip" };
+            run(&mut s, "plastic.lip", json!({"face": [1, 25, 30], "width": 1, "height": 2, "type": kind}));
+            let before = volume(&mut s);
+            run(&mut s, "parameters.change", json!({"name": "h", "expression": "40 mm"}));
+            let failing: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+            assert!(failing.is_empty(), "{kind}: {failing:?}");
+            // 10 mm more of the shell's walls: (80·50 − 76·46) · 10, and the same band on top.
+            let walls = (80.0 * 50.0 - 76.0 * 46.0) * 10.0;
+            assert!(rel(volume(&mut s) - before, walls) < 1e-6, "{kind}: {} {walls}", volume(&mut s) - before);
+        }
     }
 
     #[test]
@@ -592,6 +613,26 @@ mod tests {
         assert!(rel(volume(&mut s) - v0, PI * 25.0 * 12.0) < 1e-3, "{}", volume(&mut s) - v0);
         assert!(s.execute("plastic.assign_rule", &json!({"bodies": [body], "rule": "Nope"})).is_err());
         assert!(s.execute("plastic.assign_rule", &json!({"bodies": ["Nope"], "rule": "Thick ABS"})).is_err());
+    }
+
+    /// #9623: `Thickness` in a rule's expressions is the rule's thickness, also when the design
+    /// has a parameter of that name; the rule's own `thickness` may still use that parameter.
+    #[test]
+    fn thickness_in_a_plastic_rule_is_the_rules_even_beside_a_parameter_of_that_name() {
+        let values = |param: Option<&str>, thickness: &str| -> Value {
+            let mut s = Session::default();
+            if let Some(e) = param {
+                run(&mut s, "parameters.add", json!({"name": "Thickness", "expression": e}));
+            }
+            run(&mut s, "plastic.manage_rules", json!({"name": "Thick ABS", "thickness": thickness, "clearance": "Thickness / 10"}))["rule"]["values"]
+                .clone()
+        };
+        let want = values(None, "3 mm");
+        assert_eq!((want["thickness"].as_f64(), want["nominal_radius"].as_f64()), (Some(3.0), Some(1.5)), "{want}");
+        assert!(want["clearance"].as_f64().is_some_and(|c| (c - 0.3).abs() < 1e-12), "{want}");
+        assert!(want["thickness_variation"].as_f64().is_some_and(|v| (v - 0.45).abs() < 1e-12), "{want}");
+        assert_eq!(values(Some("10 mm"), "3 mm"), want);
+        assert_eq!(values(Some("3 mm"), "Thickness"), want);
     }
 
     #[test]

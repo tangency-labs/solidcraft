@@ -118,7 +118,7 @@ fn fresh_frame(h: &mut crate::scenario::Harness) -> (Vec<egui::epaint::ClippedSh
     let mut shapes = Vec::new();
     for _ in 0..2 {
         let app = &mut h.app;
-        let out = h.ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+        let mut out = h.ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
             app.logic(ui.ctx());
             app.ui(ui);
         });
@@ -129,6 +129,7 @@ fn fresh_frame(h: &mut crate::scenario::Harness) -> (Vec<egui::epaint::ClippedSh
             colours.dedup();
             textures.insert(*id, colours);
         }
+        out.textures_delta.clear();
         shapes = out.shapes;
     }
     (shapes, textures)
