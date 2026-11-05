@@ -531,14 +531,14 @@ pub fn world_curve_parts(sk: &Sketch, i: usize, plane: &Plane) -> Vec<Vec<Vec3>>
     sk.segs(i).into_iter().map(|seg| seg.polyline(0.02).iter().map(|p| plane.to_world(*p)).collect()).collect()
 }
 
+pub use solidcraft_sketch::InfiniteLineVisibility;
+
 /// Sketch display paths with the same visibility and styling as [`sketch_lines`].
 ///
 /// The sampler receives each visible 2D curve once and returns world-coordinate
 /// parts. Parts remain separate, so a view-dependent sampler can leave clipping
 /// gaps without drawing a line across them. Already placed 3D wires retain their
 /// existing paths. Sampling changes only display geometry, never the sketch.
-pub use solidcraft_sketch::InfiniteLineVisibility;
-
 pub fn sketch_lines_with_sampler(
     sk: &Sketch,
     plane: &Plane,
@@ -549,6 +549,8 @@ pub fn sketch_lines_with_sampler(
     sketch_lines_in_mode(sk, plane, active, determined, sampler, &Palette::DEFAULT, InfiniteLineVisibility::default())
 }
 
+/// Sample sketch display paths using the caller's infinite-line visibility preference.
+/// Active sketches keep their datum references available for editing in every mode.
 pub fn sketch_lines_with_sampler_mode(
     sk: &Sketch,
     plane: &Plane,
@@ -572,6 +574,7 @@ fn sketch_lines_in(
     sketch_lines_in_mode(sk, plane, active, determined, sampler, p, InfiniteLineVisibility::AlwaysVisible)
 }
 
+/// Apply curve visibility and palette styling before sampling each visible sketch curve.
 fn sketch_lines_in_mode(
     sk: &Sketch,
     plane: &Plane,
@@ -582,8 +585,17 @@ fn sketch_lines_in_mode(
     mode: InfiniteLineVisibility,
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
+    let profiles = if !active
+        && mode != InfiniteLineVisibility::AlwaysVisible
+        && sk.curves.iter().enumerate().any(|(i, c)| !c.infinite && !c.construction && !c.centerline && sk.is_datum_reference(i))
+    {
+        solidcraft_sketch::find_profiles(sk)
+    } else {
+        Vec::new()
+    };
+    let visible = sk.curve_visibility_with_profiles(active, mode, &profiles);
     for (i, c) in sk.curves.iter().enumerate() {
-        if !sk.is_curve_visible_with(i, active, mode) {
+        if !visible.get(i).copied().unwrap_or(false) {
             continue;
         }
         let col = if c.link.is_some() && !sk.is_text_curve(i) {
@@ -660,6 +672,7 @@ pub struct SketchPointVisibility<'a> {
 }
 
 impl<'a> SketchPointVisibility<'a> {
+    /// Hide generated interior points and private datum endpoints while retaining editable points.
     pub fn new(sk: &'a Sketch) -> Self {
         let outputs: std::collections::HashSet<&str> = sk.freeform_offsets.iter().map(|o| o.output.as_str()).collect();
         // A repeated link ID names its first link, as Sketch::link does.

@@ -1616,6 +1616,7 @@ struct PlacementReads {
 }
 
 impl PlacementReads {
+    /// Whether evaluation can reuse this feature without checking any occurrence placements.
     fn is_empty(&self) -> bool {
         !self.all && self.components.is_empty() && self.paths.is_empty() && self.world_datum_paths.is_empty() && self.bodies.is_empty()
     }
@@ -1671,6 +1672,7 @@ impl PlacementReads {
         }
     }
 
+    /// Record the body, component, and author-occurrence placements read by a sketch link.
     fn link(&mut self, doc: &Document, st: Option<&ModelState>, source: &solidcraft_sketch::LinkSource) {
         use solidcraft_sketch::LinkSource as L;
         match source {
@@ -1752,6 +1754,8 @@ fn mirror_placements_digest(doc: &Document, f: &Feature, placements: &[Vec<u64>]
     h.finish()
 }
 
+/// Hash the placements a feature reads so cached geometry is invalidated when they change.
+/// World datum links include their author's absolute placement, even within the same component.
 fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64 {
     // No shortcut for a design without placements: its first component (placed where the
     // design is) must not change what its features read, or creating it evaluates them all.

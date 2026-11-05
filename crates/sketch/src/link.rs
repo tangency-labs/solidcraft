@@ -27,16 +27,17 @@ pub const MAX_LINK_ENTITIES: usize = 20_000;
 pub enum InfiniteLineVisibility {
     /// Follows sketch visibility: visible whenever the sketch is visible (both infinite construction lines and reference lines).
     AlwaysVisible,
-    /// Infinite construction lines follow sketch visibility, but datum reference lines are hidden when sketch is inactive.
+    /// Show construction lines and finite profile boundaries, hiding auxiliary datum references in inactive sketches.
     #[default]
     ConstructionOnly,
-    /// Hidden whenever the sketch is not active.
+    /// Hide auxiliary datum references and infinite construction lines in inactive sketches.
     AlwaysHide,
 }
 
 impl InfiniteLineVisibility {
     pub const ALL: [Self; 3] = [Self::AlwaysVisible, Self::ConstructionOnly, Self::AlwaysHide];
 
+    /// Stable identifier used to save the preference and identify its UI selection.
     pub fn id(self) -> &'static str {
         match self {
             Self::AlwaysVisible => "always_visible",
@@ -702,19 +703,47 @@ impl Sketch {
         self.is_datum_reference(ci) || self.curves.get(ci).is_some_and(|c| c.infinite)
     }
 
-    /// Whether curve `ci` should be visible given whether the sketch is active and the infinite line visibility setting.
+    /// Whether a curve is visible, preserving finite datum lines that bound a real profile.
+    /// Batch callers can reuse solved profiles through [`Sketch::curve_visibility_with_profiles`].
     pub fn is_curve_visible_with(&self, ci: usize, active: bool, mode: InfiniteLineVisibility) -> bool {
         let Some(c) = self.curves.get(ci) else { return false };
+        let in_profile = !active
+            && mode != InfiniteLineVisibility::AlwaysVisible
+            && !c.infinite
+            && !c.construction
+            && !c.centerline
+            && self.is_datum_reference(ci)
+            && crate::find_profiles(self)
+                .iter()
+                .any(|profile| profile.outer_curves.contains(&c.id) || profile.hole_curves.iter().any(|hole| hole.contains(&c.id)));
+        self.curve_visible(ci, active, mode, in_profile)
+    }
+
+    /// Build one visibility mask from already solved profiles, retaining their finite boundary curves.
+    /// Rendering and picking can share this policy without searching for profiles per curve.
+    pub fn curve_visibility_with_profiles(&self, active: bool, mode: InfiniteLineVisibility, profiles: &[crate::Profile]) -> Vec<bool> {
+        let boundaries: std::collections::HashSet<&str> = if !active && mode != InfiniteLineVisibility::AlwaysVisible {
+            profiles.iter().flat_map(|profile| profile.outer_curves.iter().chain(profile.hole_curves.iter().flatten())).map(String::as_str).collect()
+        } else {
+            std::collections::HashSet::new()
+        };
+        self.curves.iter().enumerate().map(|(i, c)| self.curve_visible(i, active, mode, boundaries.contains(c.id.as_str()))).collect()
+    }
+
+    /// Apply visibility settings after identifying any finite geometry used by a profile.
+    fn curve_visible(&self, ci: usize, active: bool, mode: InfiniteLineVisibility, in_profile: bool) -> bool {
+        let Some(c) = self.curves.get(ci) else { return false };
+        let profile_geometry = in_profile && !c.infinite && !c.construction && !c.centerline;
         if !active {
             match mode {
                 InfiniteLineVisibility::AlwaysVisible => {}
                 InfiniteLineVisibility::ConstructionOnly => {
-                    if self.is_datum_reference(ci) {
+                    if self.is_datum_reference(ci) && !profile_geometry {
                         return false;
                     }
                 }
                 InfiniteLineVisibility::AlwaysHide => {
-                    if c.infinite || self.is_datum_reference(ci) {
+                    if (c.infinite || self.is_datum_reference(ci)) && !profile_geometry {
                         return false;
                     }
                 }
@@ -794,6 +823,8 @@ impl Sketch {
         Ok(id)
     }
 
+    /// Materialize linked geometry, marking newly created datum lines as infinite construction.
+    /// Refreshes that retain existing entities preserve their stored curve flags.
     fn build_link(&mut self, id: &str, lay: &Layout) -> Result<()> {
         let mut idx: Vec<Option<usize>> = vec![None; lay.pts.len()];
         let mut point = |sk: &mut Sketch, li: usize| -> Result<usize> {

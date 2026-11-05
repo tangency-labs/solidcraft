@@ -82,6 +82,7 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
 }
 
+/// Edit sketch drawing preferences, including visibility outside the active sketch.
 fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui_kit::settings_section(ui, "drawing", app.tr("prefs.sketch.drawing"), |ui| {
@@ -524,6 +525,7 @@ fn dimension_values(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
     });
 }
 
+/// Select which infinite construction lines and datum references appear in inactive sketches.
 fn infinite_lines(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
     let t = Tokens::get();
     let label = app.tr("prefs.sketch.infinite_line_visibility").to_string();

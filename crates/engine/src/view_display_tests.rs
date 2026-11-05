@@ -343,6 +343,81 @@ fn infinite_line_visibility_modes_control_reference_and_construction_lines() {
 }
 
 #[test]
+fn legacy_finite_datums_hide_without_hiding_projected_profile_edges() {
+    let mut sk = Sketch::new();
+    let mut datums = Vec::new();
+    for source in [LinkSource::Axis { name: "X".into() }, LinkSource::Plane { name: "YZ".into() }, LinkSource::SketchAxis { name: "y".into() }] {
+        let geometry = [LinkGeom::Line(Vec2::new(-10., -10.), Vec2::new(-10., 10.))];
+        let link = sk.add_link(LinkKind::Project, source, &geometry).unwrap();
+        let curve = sk.link_curves(&link)[0];
+        // Older projections stored finite, non-construction lines.
+        sk.curves[curve].infinite = false;
+        sk.curves[curve].construction = false;
+        sk.update_link(&link, &[LinkGeom::Line(Vec2::new(-12., -10.), Vec2::new(-12., 10.))]).unwrap();
+        datums.push(curve);
+    }
+    let edge = sk
+        .add_link(
+            LinkKind::Project,
+            LinkSource::Edge { body: "Plate".into(), at: Vec3::new(1., 10., 0.) },
+            &[LinkGeom::Line(Vec2::new(0., 10.), Vec2::new(2., 10.))],
+        )
+        .unwrap();
+    let projected = sk.link_curves(&edge)[0];
+    sk.add_line(Vec2::new(2., 10.), Vec2::new(2., 12.), None, None, None).unwrap();
+    sk.add_line(Vec2::new(2., 12.), Vec2::new(0., 12.), None, None, None).unwrap();
+    sk.add_line(Vec2::new(0., 12.), Vec2::new(0., 10.), None, None, None).unwrap();
+    let profile_datum = sk
+        .add_link(LinkKind::Project, LinkSource::Plane { name: "Profile datum".into() }, &[LinkGeom::Line(Vec2::new(0., 20.), Vec2::new(2., 20.))])
+        .unwrap();
+    let profile_datum = sk.link_curves(&profile_datum)[0];
+    sk.curves[profile_datum].infinite = false;
+    sk.curves[profile_datum].construction = false;
+    sk.add_line(Vec2::new(2., 20.), Vec2::new(2., 22.), None, None, None).unwrap();
+    sk.add_line(Vec2::new(2., 22.), Vec2::new(0., 22.), None, None, None).unwrap();
+    sk.add_line(Vec2::new(0., 22.), Vec2::new(0., 20.), None, None, None).unwrap();
+    let loaded: Sketch = serde_json::from_str(&serde_json::to_string(&sk).unwrap()).unwrap();
+    let profiles = solidcraft_sketch::find_profiles(&loaded);
+    for curve in [projected, profile_datum] {
+        assert!(profiles.iter().any(|profile| profile.outer_curves.contains(&loaded.curves[curve].id)));
+    }
+    for curve in datums {
+        assert!(!loaded.curves[curve].infinite && !loaded.curves[curve].construction);
+        assert!(!sketch_curve_visible_with(&loaded, curve, false, InfiniteLineVisibility::default()));
+        assert!(sketch_curve_visible_with(&loaded, curve, false, InfiniteLineVisibility::AlwaysVisible));
+        assert!(sketch_curve_visible_with(&loaded, curve, true, InfiniteLineVisibility::AlwaysHide));
+    }
+    for mode in InfiniteLineVisibility::ALL {
+        let visibility = loaded.curve_visibility_with_profiles(false, mode, &profiles);
+        for curve in [projected, profile_datum] {
+            assert!(sketch_curve_visible_with(&loaded, curve, false, mode));
+            assert!(visibility[curve]);
+        }
+        let mut drawn = Vec::new();
+        sketch_lines_with_sampler_mode(
+            &loaded,
+            &Plane::XY,
+            false,
+            &[],
+            |_, i, _| {
+                drawn.push(i);
+                vec![vec![Vec3::ZERO, Vec3::X]]
+            },
+            mode,
+        );
+        assert_eq!(drawn, visibility.iter().enumerate().filter_map(|(i, visible)| visible.then_some(i)).collect::<Vec<_>>());
+        assert!(
+            loaded
+                .curves
+                .iter()
+                .enumerate()
+                .filter(|(_, curve)| curve.link.is_none())
+                .all(|(i, _)| sketch_curve_visible_with(&loaded, i, false, mode))
+        );
+    }
+}
+
+#[test]
 fn infinite_construction_points_stay_visible_and_private_datum_points_stay_hidden() {
     let mut sk = Sketch::new();
     let construction = line(&mut sk, 3.);

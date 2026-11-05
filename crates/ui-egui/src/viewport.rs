@@ -664,6 +664,7 @@ fn base_scene_key(app: &SolveApp) -> u64 {
     h.finish()
 }
 
+/// Fingerprint sketch display state, including preferences that change which references are drawn.
 fn sketch_scene_key(app: &SolveApp, proj: &Proj) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     scene_key(app).hash(&mut h);
@@ -2736,6 +2737,8 @@ impl<T: PartialOrd + Copy> Near<T> {
     }
 }
 
+/// Collect viewport hits under the cursor using the displayed placements and sketch visibility.
+/// Picking options control midpoint candidates, occlusion, and geometry from other sketches.
 fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, all: bool, include_midpoints: bool, through: bool) -> Vec<Hit> {
     let s = &app.session;
     let st = crate::open_meshing::shown_world(app);
@@ -2851,8 +2854,9 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         // yield so a drawn rectangle on a face is not refused as projected geometry (#8979).
         let trim_prefers_free = app.tool.as_ref().is_some_and(|t| matches!(t.cmd, "sketch.trim" | "sketch.extend" | "sketch.break"));
         let mode = app.preferences.infinite_line_visibility;
+        let visible = ss.sketch.curve_visibility_with_profiles(active, mode, &ss.profiles);
         for (i, c) in ss.sketch.curves.iter().enumerate() {
-            if !solidcraft_engine::view::sketch_curve_visible_with(&ss.sketch, i, active, mode) {
+            if !visible.get(i).copied().unwrap_or(false) {
                 continue;
             }
             let straight = matches!(c.kind, CurveKind::Line { .. });

@@ -2518,6 +2518,7 @@ fn c_tangent(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|(a, b)| ConstraintKind::Tangent { a, b })
     })
 }
+/// Constrain finite curves to equal size, refusing infinite references that have no length.
 fn c_equal(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("curves").is_some() {
         return equal_curves(s, p);
@@ -2904,6 +2905,8 @@ pub(super) fn line_pts(sk: &Sketch, l: usize) -> Option<(Vec2, Vec2)> {
     }
 }
 
+/// Create a dimension from sketch entities or linked model references and solve it atomically.
+/// A single infinite line cannot define a length, but it can participate in distances and angles.
 fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.dimension";
     // A dimension may measure model geometry (#7912): an `{edge: [x,y,z], body?}` or a

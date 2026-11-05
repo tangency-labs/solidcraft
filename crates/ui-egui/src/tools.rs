@@ -272,6 +272,7 @@ pub(crate) fn center_arc_sweep(t: &Tool, end: Vec2) -> f64 {
     if t.arc_turn < 0.0 && ccw > 0.0 { ccw - std::f64::consts::TAU } else { ccw }
 }
 
+/// Advance the active tool from a viewport pick, preserving snapped points and linked references.
 pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     // A click away dismisses the inline editor; it must not also pick the first entity of
     // the next dimension before that cancellation has been processed. The type-first value
@@ -443,7 +444,9 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                     hits.iter().find_map(|h| match h {
                         Hit::Edge { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), true, false)),
                         Hit::Vertex { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), false, false)),
-                        Hit::Axis { .. } | Hit::Plane { .. } if usable_reference(app, h, tool.cmd) => {
+                        // Once both operands are picked, a datum under the next click must
+                        // leave that click available to place the dimension text.
+                        Hit::Axis { .. } | Hit::Plane { .. } if tool.picks.len() < 2 && usable_reference(app, h, tool.cmd) => {
                             picked_model_ref(app, h).map(|r| (r.to_string(), false, false))
                         }
                         _ => None,
@@ -882,6 +885,7 @@ pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> O
         .collect()
 }
 
+/// World direction of a named origin axis, leaving construction-axis names for their own lookup.
 fn origin_axis_direction(name: &str) -> Option<Vec3> {
     match name {
         "X" => Some(Vec3::X),

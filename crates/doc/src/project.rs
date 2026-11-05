@@ -103,6 +103,8 @@ pub fn resolve(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, 
     Ok(r)
 }
 
+/// Resolve linked model geometry into the sketch plane, reporting missing or invalid references.
+/// World datums are transformed through the occurrence recorded when the link was authored.
 fn resolve_uncached(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -1379,6 +1381,7 @@ fn as_spline(pts: &[Vec2], tol: f64) -> Option<LinkGeom> {
     None
 }
 
+/// Transform world coordinates into the author occurrence's frame, refusing missing placements.
 fn world_datum_transform(doc: &Document, path: &[u64]) -> Result<crate::Mat> {
     doc.path_placement(path)
         .and_then(|(_, frame)| crate::mat_inverse(&frame))
@@ -1393,6 +1396,7 @@ pub fn world_datum_plane(doc: &Document, name: &str, path: &[u64]) -> Result<Pla
         .ok_or_else(|| DocError::Invalid("invalid world datum plane".into()))
 }
 
+/// Project an axis into sketch coordinates, producing a point when the axis is viewed end-on.
 fn axis_projection(plane: &Plane, origin: Vec3, direction: Vec3) -> LinkGeom {
     let origin = plane.to_local(origin);
     let projected = Vec2::new(direction.dot(plane.x), direction.dot(plane.y));
