@@ -3,9 +3,10 @@
 //! (`solidcraft_doc::occurrence_mirror`).
 
 use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_doc::occurrence_mirror::{self, OccurrenceMirror};
 use solidcraft_doc::{BodyName, FeatureKind, PlaneRef};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::params::{bad, bool_, string_list};
 use crate::schema::component::{MirrorComponentsResult, MirroredOccurrence};
@@ -170,7 +171,7 @@ fn opposite_hand(
     component: u64,
     parent: u64,
     part: &str,
-    mid: solidcraft_geom::Plane,
+    mid: solidcore_record::Plane,
     cmd: &str,
 ) -> Result<(u64, Option<u64>)> {
     if s.doc.occurrences.iter().any(|o| o.parent == component) {

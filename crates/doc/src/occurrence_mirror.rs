@@ -12,7 +12,9 @@
 //! and the plane.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Mesh, Plane, Vec3};
+use solidcore_record::{Plane, Vec3};
+use solidcraft_geom::Mesh;
+use solidcraft_geom::prelude::*;
 
 use crate::{DocError, Document, Mat, ModelState, PlaneRef, Result};
 
