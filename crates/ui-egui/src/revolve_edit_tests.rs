@@ -1,6 +1,7 @@
 use crate::scenario::Harness;
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{AxisRef, FeatureKind};
+use solidcraft_engine::geom::prelude::*;
 
 fn make(h: Harness, axis: Value) -> Harness {
     make_params(h, axis, json!({}))
@@ -36,7 +37,7 @@ fn unchanged_all_profiles_retains_future_geometry_but_reselection_is_explicit() 
         h.app.run("sketch.edit", json!({"sketch":"Profile"})).unwrap();
         h.app.run("sketch.rectangle.two_point", json!({"p0":[20,0],"p1":[25,5]})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let volume: f64 = state.bodies.iter().map(|b| solidcraft_engine::doc::kernel::measure(&b.body).unwrap().volume).sum();
         let expected = if reselect { 490.873852 } else { 1374.446786 };
         assert!((volume - expected).abs() < 0.3, "{volume} != {expected}");
@@ -50,7 +51,7 @@ fn to_object_noop_preserves_cut_targets_and_untargeted_body() {
         h.app.run("solid.box", json!({"length":20,"width":5,"height":20,"corner":[0,0,0],"body_name":name})).unwrap();
     }
     let mut h = make_params(h, json!("Y"), json!({"to":[0,2,12],"angle":"45 deg","operation":"cut","targets":["A"]}));
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     // A quarter annulus separates the stock into inner and outer solids. Both are
     // results of cutting A; checking only the first named solid loses material.
     let cut_volume = |state: &solidcraft_engine::doc::ModelState| -> f64 {
@@ -59,17 +60,21 @@ fn to_object_noop_preserves_cut_targets_and_untargeted_body() {
     let before_a = cut_volume(&state);
     let removed = 0.5 * (15.0f64.powi(2) - 10.0f64.powi(2)) * 5.0 * std::f64::consts::FRAC_PI_2;
     assert!((before_a - (2000.0 - removed)).abs() < 0.2, "cut results {:?}: {before_a}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
-    let in_cut_stock = |p| state.bodies.iter().filter(|b| b.name != "B").any(|b| b.body.contains(p));
-    assert!(in_cut_stock(solidcraft_engine::geom::Vec3::new(2.0, 2.0, 2.0)));
-    assert!(in_cut_stock(solidcraft_engine::geom::Vec3::new(18.0, 2.0, 18.0)));
-    assert!(!in_cut_stock(solidcraft_engine::geom::Vec3::new(9.0, 2.0, 9.0)));
-    assert!(state.body("B").unwrap().body.contains(solidcraft_engine::geom::Vec3::new(9.0, 2.0, 9.0)));
+    let in_cut_stock =
+        |p| state.bodies.iter().filter(|b| b.name != "B").any(|b| b.body.classify_point(p).unwrap() == solidcraft_engine::kernel::PointClass::Inside);
+    assert!(in_cut_stock(solidcore_record::Vec3::new(2.0, 2.0, 2.0)));
+    assert!(in_cut_stock(solidcore_record::Vec3::new(18.0, 2.0, 18.0)));
+    assert!(!in_cut_stock(solidcore_record::Vec3::new(9.0, 2.0, 9.0)));
+    assert_eq!(
+        state.body("B").unwrap().body.classify_point(solidcore_record::Vec3::new(9.0, 2.0, 9.0)).unwrap(),
+        solidcraft_engine::kernel::PointClass::Inside
+    );
     let before_bounds: Vec<_> = state.bodies.iter().map(|b| (b.name.clone(), b.mesh().bounds())).collect();
     let undo = h.app.session.undo.len();
     open(&mut h);
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.dialog.is_none());
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     assert!((solidcraft_engine::doc::kernel::measure(&state.body("B").unwrap().body).unwrap().volume - 2000.0).abs() < 1e-7);
     assert!((cut_volume(&state) - before_a).abs() < 1e-7);
     assert_eq!(state.bodies.iter().map(|b| (b.name.clone(), b.mesh().bounds())).collect::<Vec<_>>(), before_bounds);
@@ -88,7 +93,7 @@ fn to_object_noop_retains_dormant_secondary_angle_and_downstream_dimension() {
     h.step(&json!({"widget":"OK"})).unwrap();
     assert_eq!(serde_json::to_value(&h.app.session.doc.find_feature("Turn").unwrap().kind).unwrap(), original);
     assert_eq!(h.app.session.doc.find_feature("Turn").unwrap().param_names, names);
-    assert!((h.app.session.world_state().body("Dependent").unwrap().mesh().bounds().max.z - std::f64::consts::PI / 6.0).abs() < 1e-8);
+    assert!((h.app.session.world_state().unwrap().body("Dependent").unwrap().mesh().bounds().max.z - std::f64::consts::PI / 6.0).abs() < 1e-8);
 }
 
 #[test]
@@ -99,11 +104,11 @@ fn rotated_owner_to_point_remains_exact_on_noop_edit() {
     h.app.run("occurrence.move", json!({"occurrence":owner["occurrence"],"translate":[100,0,20],"axis":[0,0,1],"angle":"17 deg"})).unwrap();
     h.app.run("component.create", json!({"name":"Other","parent":0})).unwrap();
     let original = serde_json::to_value(&h.app.session.doc.find_feature("Turn").unwrap().kind).unwrap();
-    let bounds = h.app.session.world_state().body("Main").unwrap().mesh().bounds();
+    let bounds = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds();
     open(&mut h);
     h.step(&json!({"widget":"OK"})).unwrap();
     assert_eq!(serde_json::to_value(&h.app.session.doc.find_feature("Turn").unwrap().kind).unwrap(), original);
-    assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds(), bounds);
+    assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds(), bounds);
 }
 
 #[test]
@@ -116,8 +121,8 @@ fn second_active_occurrence_noop_preserves_definition_axis_target_and_instances(
     h.app.run("component.activate", json!({"component":owner["component"],"occurrence":second,"path":[second]})).unwrap();
     let original = serde_json::to_value(&h.app.session.doc.find_feature("Turn").unwrap().kind).unwrap();
     let frame = h.app.session.active_component_frame();
-    let expected_origin = solidcraft_engine::doc::apply_point(&frame, solidcraft_engine::geom::Vec3::ZERO);
-    let before: Vec<_> = h.app.session.world_state().bodies.iter().map(|b| (b.name.clone(), b.mesh().bounds())).collect();
+    let expected_origin = solidcraft_engine::doc::apply_point(&frame, solidcore_record::Vec3::ZERO);
+    let before: Vec<_> = h.app.session.world_state().unwrap().bodies.iter().map(|b| (b.name.clone(), b.mesh().bounds())).collect();
     open(&mut h);
     let (origin, _) = crate::canvas::revolve_axis(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert!((origin - expected_origin).len() < 1e-8);
@@ -133,7 +138,7 @@ fn second_active_occurrence_noop_preserves_definition_axis_target_and_instances(
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.dialog.is_none(), "OK must apply even underneath the Sweep badge");
     assert_eq!(serde_json::to_value(&h.app.session.doc.find_feature("Turn").unwrap().kind).unwrap(), original);
-    let after: Vec<_> = h.app.session.world_state().bodies.iter().map(|b| (b.name.clone(), b.mesh().bounds())).collect();
+    let after: Vec<_> = h.app.session.world_state().unwrap().bodies.iter().map(|b| (b.name.clone(), b.mesh().bounds())).collect();
     assert_eq!(after, before);
     assert_eq!(h.app.session.active_occurrence_path.as_ref(), Some(&vec![second.as_u64().unwrap()]));
 }
@@ -152,7 +157,7 @@ fn actual_noop_editor_retains_all_revolve_axis_kinds_and_analytic_volume() {
         let mut h = make(Harness::new(), axis_value.clone());
         let original = axis(&h);
         let names = h.app.session.doc.find_feature("Turn").unwrap().param_names.clone();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let body = state.body("Main").unwrap();
         let bounds = body.mesh().bounds();
         let radii = if axis_value == json!("l4") { 25.0 } else { 225.0 - 100.0 };
@@ -167,7 +172,7 @@ fn actual_noop_editor_retains_all_revolve_axis_kinds_and_analytic_volume() {
         assert!(h.app.dialog.is_none(), "{axis_value}: {:?}", h.app.session.log);
         assert_eq!(axis(&h), original);
         assert_eq!(h.app.session.doc.find_feature("Turn").unwrap().param_names, names);
-        assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds(), bounds);
+        assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds(), bounds);
     }
 }
 
@@ -183,10 +188,10 @@ fn revolve_angle_edit_preserves_axis_downstream_binding_and_one_undo() {
     h.step(&json!({"widget":"OK"})).unwrap();
     assert_eq!(axis(&h), original);
     assert_eq!(h.app.session.undo.len(), undo + 1);
-    assert!((h.app.session.world_state().body("Dependent").unwrap().mesh().bounds().max.z - std::f64::consts::PI).abs() < 1e-8);
+    assert!((h.app.session.world_state().unwrap().body("Dependent").unwrap().mesh().bounds().max.z - std::f64::consts::PI).abs() < 1e-8);
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(axis(&h), original);
-    assert!((h.app.session.world_state().body("Dependent").unwrap().mesh().bounds().max.z - std::f64::consts::FRAC_PI_2).abs() < 1e-8);
+    assert!((h.app.session.world_state().unwrap().body("Dependent").unwrap().mesh().bounds().max.z - std::f64::consts::FRAC_PI_2).abs() < 1e-8);
 }
 
 #[test]
@@ -198,7 +203,7 @@ fn rotated_owner_explicit_axis_is_lossless_with_another_component_active() {
     h.app.run("component.create", json!({"name":"Other","parent":0})).unwrap();
     let active = h.app.session.active_component;
     let original = axis(&h);
-    let bounds = h.app.session.world_state().body("Main").unwrap().mesh().bounds();
+    let bounds = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds();
     open(&mut h);
     let (origin, direction) = crate::canvas::revolve_axis(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert!((origin.x - 100.0).abs() < 1e-8 && (origin.z - 20.0).abs() < 1e-8);
@@ -207,7 +212,7 @@ fn rotated_owner_explicit_axis_is_lossless_with_another_component_active() {
     h.step(&json!({"widget":"OK"})).unwrap();
     assert_eq!(axis(&h), original);
     assert_eq!(h.app.session.active_component, active);
-    assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds(), bounds);
+    assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds(), bounds);
 }
 
 #[test]
@@ -282,4 +287,63 @@ fn only_the_active_selection_field_looks_active() {
     click(&mut h, "dialog:field:Axis");
     assert_eq!(border(&h, "Profile"), filled, "filled inactive");
     assert_ne!(filled, t.control_border, "filled inactive differs from empty inactive");
+}
+
+/// A solid (or surface) revolve named `Turn` about `axis`, made in a new component `Owner` that is
+/// turned and moved afterwards when `moved`, with parameter `W` = 40 mm.
+fn expression_axis_design(surface: bool, moved: bool) -> Harness {
+    let mut h = Harness::new();
+    h.app.run("parameters.add", json!({"name":"W","expression":"40 mm"})).unwrap();
+    let owner = h.app.run("component.create", json!({"name":"Owner","grounded":false})).unwrap();
+    let axis = json!({"origin":["W / 2", "5 mm", 0],"dir":[0,1,0]});
+    let mut h = if surface {
+        h.app.run("sketch.create", json!({"plane":"XY","name":"Profile"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[10,0],"p1":[15,5]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("surface.revolve", json!({"sketch":"Profile","axis":axis,"angle":"90 deg","name":"Turn"})).unwrap();
+        h
+    } else {
+        make(h, axis)
+    };
+    if moved {
+        h.app.run("occurrence.move", json!({"occurrence":owner["occurrence"],"translate":[100,0,20],"axis":[0,0,1],"angle":"17 deg"})).unwrap();
+        h.app.run("component.create", json!({"name":"Other","parent":0})).unwrap();
+    }
+    h
+}
+
+fn saved_axis(h: &Harness) -> Value {
+    match &h.app.session.doc.find_feature("Turn").unwrap().kind {
+        FeatureKind::Revolve { axis, .. } | FeatureKind::SurfaceRevolve { axis, .. } => serde_json::to_value(axis).unwrap(),
+        other => panic!("not a revolve: {other:?}"),
+    }
+}
+
+#[test]
+fn untouched_edit_keeps_an_explicit_axis_origin_expression_for_solid_and_surface_revolves() {
+    for (surface, moved) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut h = expression_axis_design(surface, moved);
+        let original = saved_axis(&h);
+        assert_eq!(original["origin"][0], json!("W / 2"));
+        open(&mut h);
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "OK did not apply the edit (surface: {surface}, moved: {moved})");
+        assert_eq!(saved_axis(&h), original, "surface: {surface}, moved: {moved}");
+    }
+}
+
+#[test]
+fn an_axis_origin_that_cannot_be_evaluated_is_kept_by_an_untouched_edit() {
+    for (surface, moved) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut h = expression_axis_design(surface, moved);
+        let original = saved_axis(&h);
+        // W is no longer a length: the revolve fails and its origin cannot be shown as numbers.
+        // (`parameters.change` refuses that, so the parameter is set directly.)
+        let mut doc = (*h.app.session.doc).clone();
+        doc.params.iter_mut().filter(|p| p.name == "W").for_each(|p| p.expr = "5 deg".into());
+        h.app.session.doc = std::sync::Arc::new(doc);
+        open(&mut h);
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert_eq!(saved_axis(&h), original, "surface: {surface}, moved: {moved}");
+    }
 }

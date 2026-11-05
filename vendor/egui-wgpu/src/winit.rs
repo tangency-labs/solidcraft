@@ -627,6 +627,52 @@ impl Painter {
         capture_data: Vec<UserData>,
         window: &Arc<winit::window::Window>,
     ) -> f32 {
+        // SolidCraft: a device lost while the frame is drawn, after its probe, panics inside wgpu
+        // at the first queue write to meet it (#10240). That panic is survived like a loss the
+        // probe meets: the painter draws nothing more and the app restarts.
+        let watch = self.render_state.as_ref().map(|rs| {
+            (
+                rs.device_lost.clone(),
+                rs.device.clone(),
+                rs.queue.clone(),
+            )
+        });
+        let context = self.context.clone();
+        let paint = || {
+            self.paint_frame(
+                viewport_id,
+                pixels_per_point,
+                clear_color,
+                clipped_primitives,
+                textures_delta,
+                capture_data,
+                window,
+            )
+        };
+        let Some((lost, device, queue)) = watch else {
+            return paint();
+        };
+        lost.survive(&device, &queue, paint).unwrap_or_else(|| {
+            log::error!(
+                "The graphics device was lost during a frame: {}",
+                lost.reason().unwrap_or_default()
+            );
+            context.request_repaint_of(viewport_id);
+            0.0
+        })
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    fn paint_frame(
+        &mut self,
+        viewport_id: ViewportId,
+        pixels_per_point: f32,
+        clear_color: [f32; 4],
+        clipped_primitives: &[epaint::ClippedPrimitive],
+        textures_delta: &mut epaint::textures::TexturesDelta,
+        capture_data: Vec<UserData>,
+        window: &Arc<winit::window::Window>,
+    ) -> f32 {
         profiling::function_scope!();
 
         /// Guard to ensure that commands are always submitted to the renderer queue
@@ -806,10 +852,13 @@ impl Painter {
         let texture = frame.texture.clone();
         let output_frame = crate::AcquiredFrame::new(frame, texture);
 
-        // SolidCraft: before the uploads, an empty submission asks the driver whether the device
-        // is still there. The first queue write to meet a lost device panics inside wgpu (#4172);
-        // the submission meets it instead, marks it lost, and the frame is dropped unpresented.
-        if render_state.device_lost.probe(&render_state.queue) {
+        // SolidCraft: before the uploads, a probe asks the driver whether the device is still
+        // there. The first queue write to meet a lost device panics inside wgpu (#4172, #6528);
+        // the probe meets it instead, marks it lost, and the frame is dropped unpresented.
+        if render_state
+            .device_lost
+            .probe(&render_state.device, &render_state.queue)
+        {
             if let Some(effect) = &render_state.renderer.read().frame_compositor {
                 effect.suspend();
             }

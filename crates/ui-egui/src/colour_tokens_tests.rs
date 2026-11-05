@@ -31,6 +31,8 @@ fn moved_colours_keep_the_values_they_were_drawn_with() {
         assert_eq!(t.logo, [Color32::from_rgb(96, 158, 236), Color32::from_rgb(58, 136, 238), Color32::from_rgb(55, 108, 197)]);
         assert_eq!(t.icons.marker_halo, Color32::from_black_alpha(150));
         assert_eq!(t.icons.agent, Color32::from_rgb(168, 85, 247));
+        assert_eq!(t.figure_white, Color32::WHITE);
+        assert_eq!(t.figure_black, Color32::BLACK);
     }
     let (l, d) = (Tokens::light(), Tokens::dark());
     assert_eq!((l.bend_up, l.bend_down), (Color32::from_rgb(30, 140, 50), Color32::from_rgb(200, 90, 20)));
@@ -69,7 +71,7 @@ fn stroke_colours(shapes: &[egui::epaint::ClippedShape]) -> std::collections::BT
 fn every_axis_is_drawn_in_one_set_of_colours() {
     use crate::theme::{ColorVision, set_dark, set_vision};
     use egui::{Pos2, Rect, vec2};
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let ctx = crate::fonts::test_context();
     let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
     let cam = solidcraft_engine::render::Camera::default();
@@ -141,8 +143,14 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 /// raise the file's count here and give the reason. Fewer is always fine. The icon sources may
 /// hold none at all.
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
+    ("gpu.rs", 1, "the white tint that shows the background picture as it is"),
     ("navigation.rs", 1, "the navigation cube's face shading, made from a token"),
     ("canvas.rs", 3, "white rings around manipulator handles"),
+    (
+        "body_gizmo.rs",
+        3,
+        "the custom view navigator's raster: the design's appearance and tokens, shaded, as pixels, drawn with the white image tint",
+    ),
     ("context_menu.rs", 1, "the radial menu's shadow"),
     ("dialogs_appearance.rs", 1, "a design appearance: the colour is the fact"),
     ("dialogs_save_mesh.rs", 1, "an installed slicer's own icon, drawn untinted"),
@@ -276,9 +284,10 @@ fn every_engine_colour_tag_is_placed() {
         "AXIS_Y",
         "AXIS_Z",
     ];
-    // Bodies, edges, profiles, the grid and the background: the GPU viewport draws these from
-    // their own tokens; the engine's values are only the headless snapshot's.
-    const NEUTRAL: &[&str] = &["BODY", "BODY_SELECTED", "EDGE", "PROFILE", "GRID", "GRID_MAJOR", "BG_TOP", "BG_BOTTOM", "SECTION_CAP"];
+    // Bodies, edges, profiles, the grid, the background and Isocurve Analysis curves (the accent):
+    // the GPU viewport draws these from their own tokens; the engine's values are only the
+    // headless snapshot's.
+    const NEUTRAL: &[&str] = &["BODY", "BODY_SELECTED", "EDGE", "PROFILE", "GRID", "GRID_MAJOR", "BG_TOP", "BG_BOTTOM", "SECTION_CAP", "ISOCURVE"];
     let src = include_str!("../../engine/src/view.rs");
     let start = src.find("pub mod colors {").unwrap_or(0);
     let block = &src[start..];

@@ -2,6 +2,7 @@
 //! which entity moves when a two-entity constraint is applied.
 
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{DimFrame, Sketch, dim_frame, dim_layout};
 
 use crate::Session;
@@ -53,7 +54,7 @@ fn every_dimension_kind_has_a_drawable_frame() {
     let mut kinds = Vec::new();
     for c in dims {
         let f = dim_frame(&sk, &c.kind).unwrap_or_else(|| panic!("no frame for {c:?}"));
-        let l = dim_layout(&f, None, 0.1, solidcraft_geom::Vec2::new(1.0, 0.5));
+        let l = dim_layout(&f, None, 0.1, solidcore_record::Vec2::new(1.0, 0.5));
         assert!(!l.lines.is_empty() && !l.arrows.is_empty(), "{c:?}");
         assert!(l.text.is_finite());
         kinds.push(std::mem::discriminant(&f));
@@ -80,10 +81,10 @@ fn dimension_text_is_stored_relative_to_the_dimension_and_follows_it() {
         let f = dim_frame(&sk, &c.kind).expect("frame");
         dim_layout(&f, c.text, 0.1, Default::default()).text
     };
-    assert!(text(&s).dist(solidcraft_geom::Vec2::new(20.0, -8.0)) < 1e-9);
+    assert!(text(&s).dist(solidcore_record::Vec2::new(20.0, -8.0)) < 1e-9);
     // Moved by the parameter name; then the line moves and the text goes with it.
     run(&mut s, "sketch.dimension_text", json!({"dimension": param, "at": [30, 12]}));
-    assert!(text(&s).dist(solidcraft_geom::Vec2::new(30.0, 12.0)) < 1e-9);
+    assert!(text(&s).dist(solidcore_record::Vec2::new(30.0, 12.0)) < 1e-9);
     run(&mut s, "sketch.move_point", json!({"point": "l1.start", "to": [0, 10]}));
     run(&mut s, "sketch.move_point", json!({"point": "l1.end", "to": [40, 10]}));
     // Still 10 along and 12 across from the middle of the (moved) line.
@@ -114,7 +115,7 @@ fn deleting_a_dimension_frees_its_parameter() {
 // ---------------------------------------------------------------------------------------------
 // Fix / Unfix
 
-fn pt(s: &Session, id: &str) -> solidcraft_geom::Vec2 {
+fn pt(s: &Session, id: &str) -> solidcore_record::Vec2 {
     let sk = sketch(s);
     sk.resolve_point(id).and_then(|i| sk.point(i)).unwrap_or_else(|| panic!("no point {id}"))
 }
@@ -160,10 +161,11 @@ fn fixing_curves_holds_their_points_and_radius() {
     assert_eq!(r["result"]["changed"], 4);
     assert_eq!(dof(&mut s), free - 17);
     let si = run(&mut s, "sketch.inspect", json!({}));
-    assert!(si["curves"].as_array().is_some_and(|c| c.iter().all(|c| c["fixed"] == true)), "{si}");
+    // The ellipse's construction axes were not picked.
+    assert!(si["curves"].as_array().is_some_and(|c| c.iter().filter(|c| c["construction"] != true).all(|c| c["fixed"] == true)), "{si}");
     // A fixed circle keeps centre and radius; a dimension on it conflicts.
     run(&mut s, "sketch.move_point", json!({"point": "c1.center", "to": [0, 0]}));
-    assert_eq!(pt(&s, "c1.center"), solidcraft_geom::Vec2::new(10.0, 10.0));
+    assert_eq!(pt(&s, "c1.center"), solidcore_record::Vec2::new(10.0, 10.0));
     assert!(s.execute("sketch.dimension", &json!({"entities": ["c1"], "value": 20})).is_err());
     let r0 = sketch(&s).radius(0);
     assert_eq!(r0, Some(5.0));
@@ -296,7 +298,7 @@ fn projected_geometry_can_become_construction() {
 // Two-entity constraints: the first pick stays, the second moves
 
 /// Positions of an entity's points (and its radius).
-fn snap(s: &Session, id: &str) -> (Vec<solidcraft_geom::Vec2>, Option<f64>) {
+fn snap(s: &Session, id: &str) -> (Vec<solidcore_record::Vec2>, Option<f64>) {
     let sk = sketch(s);
     if let Some(i) = sk.curve_index(id) {
         let pts = sk.curves[i].kind.point_ids().into_iter().filter_map(|p| sk.point(p)).collect();
@@ -305,7 +307,7 @@ fn snap(s: &Session, id: &str) -> (Vec<solidcraft_geom::Vec2>, Option<f64>) {
     (vec![pt(s, id)], None)
 }
 
-fn same(a: &(Vec<solidcraft_geom::Vec2>, Option<f64>), b: &(Vec<solidcraft_geom::Vec2>, Option<f64>)) -> bool {
+fn same(a: &(Vec<solidcore_record::Vec2>, Option<f64>), b: &(Vec<solidcore_record::Vec2>, Option<f64>)) -> bool {
     a.0.len() == b.0.len() && a.0.iter().zip(&b.0).all(|(p, q)| p.dist(*q) < 1e-9) && a.1.zip(b.1).is_none_or(|(x, y)| (x - y).abs() < 1e-9)
 }
 
@@ -437,7 +439,7 @@ fn point_constraints_keep_the_first_pick() {
     let (a0, l0) = (snap(&s, "p1"), snap(&s, "l1"));
     run(&mut s, "sketch.constraint.symmetry", json!({"a": "p1", "b": "p2", "line": "l1"}));
     assert!(same(&snap(&s, "p1"), &a0) && same(&snap(&s, "l1"), &l0));
-    assert!(pt(&s, "p2").dist(solidcraft_geom::Vec2::new(3.0, -7.0)) < 1e-6, "{:?}", pt(&s, "p2"));
+    assert!(pt(&s, "p2").dist(solidcore_record::Vec2::new(3.0, -7.0)) < 1e-6, "{:?}", pt(&s, "p2"));
 }
 
 #[test]
@@ -570,12 +572,12 @@ fn drag(s: &mut Session, e: &str, from: [f64; 2], to: [f64; 2]) {
     run(s, "sketch.drag", json!({"entity": e, "from": from, "to": to}));
 }
 
-fn v(x: f64, y: f64) -> solidcraft_geom::Vec2 {
-    solidcraft_geom::Vec2::new(x, y)
+fn v(x: f64, y: f64) -> solidcore_record::Vec2 {
+    solidcore_record::Vec2::new(x, y)
 }
 
 /// The corners of the polygon drawn by `out`, in order, and its support circle's centre and radius.
-fn polygon_shape(s: &Session, out: &Value) -> (Vec<solidcraft_geom::Vec2>, solidcraft_geom::Vec2, f64) {
+fn polygon_shape(s: &Session, out: &Value) -> (Vec<solidcore_record::Vec2>, solidcore_record::Vec2, f64) {
     use solidcraft_sketch::CurveKind;
     let sk = sketch(s);
     let corners = out["curves"]
@@ -593,7 +595,7 @@ fn polygon_shape(s: &Session, out: &Value) -> (Vec<solidcraft_geom::Vec2>, solid
 }
 
 /// A regular polygon: corners equally far from `c`, sides equally long.
-fn assert_regular(corners: &[solidcraft_geom::Vec2], c: solidcraft_geom::Vec2, what: &str) {
+fn assert_regular(corners: &[solidcore_record::Vec2], c: solidcore_record::Vec2, what: &str) {
     let n = corners.len();
     let reach: Vec<f64> = corners.iter().map(|q| q.dist(c)).collect();
     let sides: Vec<f64> = (0..n).map(|i| corners[i].dist(corners[(i + 1) % n])).collect();
@@ -781,7 +783,7 @@ fn arm_drags(links: Links) -> (usize, usize) {
         let v3 = v2 + v(b * (th1 + bend).cos(), b * (th1 + bend).sin());
         let (tr, tt) = (lo + rnd() * (hi - lo), rnd() * TAU);
         let to = o + v(tr * tt.cos(), tr * tt.sin());
-        let clear = |p: solidcraft_geom::Vec2| (lo..=hi).contains(&p.dist(o));
+        let clear = |p: solidcore_record::Vec2| (lo..=hi).contains(&p.dist(o));
         if !(0..=100).all(|i| clear(v3 + (to - v3) * (i as f64 / 100.0))) {
             continue;
         }
@@ -868,13 +870,13 @@ fn hanging_triangle_flips(n: usize) -> usize {
         let v3 = v2 + v(b * (th1 + bend).cos(), b * (th1 + bend).sin());
         let (tr, tt) = (lo + rnd() * (hi - lo), rnd() * TAU);
         let to = o + v(tr * tt.cos(), tr * tt.sin());
-        let clear = |p: solidcraft_geom::Vec2| (lo..=hi).contains(&p.dist(o));
+        let clear = |p: solidcore_record::Vec2| (lo..=hi).contains(&p.dist(o));
         if !(0..=100).all(|i| clear(v3 + (to - v3) * (i as f64 / 100.0))) {
             continue;
         }
         kept += 1;
         let turn = rnd() * TAU;
-        let u = solidcraft_geom::Vec2::from_angle(turn);
+        let u = solidcore_record::Vec2::from_angle(turn);
         let normal = u.perp() * if rnd() < 0.5 { 1.0 } else { -1.0 };
         let (tq, tr) = (v3 + u * 3.9, v3 + u * 1.95 + normal * (4.0f64 - 1.95 * 1.95).sqrt());
         {
@@ -1068,7 +1070,7 @@ fn a_dragged_fillet_stays_in_its_corner() {
         let arc_id = sk0.curves[arc].id.clone();
         let inside = |s: &Session| {
             let sk = sketch(s);
-            let side = |p: solidcraft_geom::Vec2, a: solidcraft_geom::Vec2, b: solidcraft_geom::Vec2| (b - a).cross(p - a).signum();
+            let side = |p: solidcore_record::Vec2, a: solidcore_record::Vec2, b: solidcore_record::Vec2| (b - a).cross(p - a).signum();
             let c = sk.center(arc).expect("centre");
             let (p0, k1, k2, p3) = (pt(s, "l1.start"), pt(s, "l1.end"), pt(s, "l2.start"), pt(s, "l2.end"));
             let r = sk.radius(arc).unwrap_or(0.0);
@@ -1379,8 +1381,8 @@ fn three_d_curves_need_the_option_and_move_joined() {
     let sk = sketch(&s);
     let w = &sk.wires[sk.wire_index(&sid).expect("spline")];
     assert!(w.pts.len() > 10);
-    assert!(w.pts.first().expect("p").dist(solidcraft_geom::Vec3::new(10.0, 0.0, 10.0)) < 1e-12);
-    assert!(w.pts.last().expect("p").dist(solidcraft_geom::Vec3::new(20.0, 0.0, 20.0)) < 1e-12);
+    assert!(w.pts.first().expect("p").dist(solidcore_record::Vec3::new(10.0, 0.0, 10.0)) < 1e-12);
+    assert!(w.pts.last().expect("p").dist(solidcore_record::Vec3::new(20.0, 0.0, 20.0)) < 1e-12);
     // The shared corner moves for both lines (and the spline that starts there).
     let r = run(&mut s, "sketch.move3d", json!({"wire": ids[1], "index": 1, "by": [0, 0, 5]}));
     assert_eq!(r["moved"], 2);
@@ -1512,6 +1514,301 @@ fn auto_dimension_orientation_follows_where_its_text_is_placed() {
     assert!(((end.x - start.x).abs() - 24.0).abs() < 1e-6 && ((end.y - start.y).abs() - 40.0).abs() < 1e-6, "{start:?} {end:?}");
 }
 
+/// An ellipse with half-axes 20 and 8, turned by 45 degrees when asked: its id, and its
+/// construction axis lines, major first.
+fn ellipse_with_axes(s: &mut Session, turn: bool) -> (String, String, String) {
+    let at = |x: f64, y: f64| if turn { [std::f64::consts::FRAC_1_SQRT_2 * (x - y), std::f64::consts::FRAC_1_SQRT_2 * (x + y)] } else { [x, y] };
+    let e = run(s, "sketch.ellipse", json!({"center": [0, 0], "major": at(20.0, 0.0), "minor_radius": 8}))["curves"][0]
+        .as_str()
+        .expect("the ellipse")
+        .to_string();
+    let sk = sketch(s);
+    let mut lines: Vec<(f64, String)> = sk
+        .curves
+        .iter()
+        .filter_map(|c| match c.kind {
+            solidcraft_sketch::CurveKind::Line { a, b } if c.construction => Some((sk.point(a)?.dist(sk.point(b)?), c.id.clone())),
+            _ => None,
+        })
+        .collect();
+    lines.sort_by(|x, y| y.0.total_cmp(&x.0));
+    let [(_, major), (_, minor)] = <[(f64, String); 2]>::try_from(lines).expect("two axis lines");
+    (e, major, minor)
+}
+
+/// D on an ellipse's outline gives a half-axis, the distance from the centre to an axis end,
+/// chosen as a line chooses horizontal or vertical, in the ellipse's own frame: text pulled
+/// across the major axis measures along it, text pulled out past an end of it measures across
+/// it. Near the boundary a placement keeps the half-axis it had. D on an axis line gives the
+/// whole axis. An ellipse without axes keeps its minor radius.
+#[test]
+fn an_ellipse_half_axis_dimension_follows_where_its_text_is_pulled() {
+    use solidcraft_sketch::ConstraintKind;
+    let dimension = |turn: bool, extra: Value| {
+        let mut s = new_sketch();
+        let (e, ..) = ellipse_with_axes(&mut s, turn);
+        let mut p = json!({"entities": [e]});
+        if let (Some(p), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
+            p.extend(extra.clone());
+        }
+        let r = run(&mut s, "sketch.dimension", p);
+        let sk = sketch(&s);
+        let kind = sk.constraints.iter().find(|c| c.kind.is_dimension()).map(|c| c.kind.clone()).expect("a dimension");
+        let ConstraintKind::Distance { p, q, .. } = kind else { return ("radius".to_string(), 0.0, r) };
+        let (pc, end) = (sk.point(p).expect("centre"), sk.point(q).expect("axis end"));
+        assert!(pc.len() < 1e-9, "measured from the centre: {pc:?}");
+        let which = if (pc.dist(end) - 20.0).abs() < 1e-6 { "major" } else { "minor" };
+        assert_eq!(r["axis"], json!(which), "{r}");
+        // The end on the text's side.
+        let side = extra.get("text_at").and_then(Value::as_array).map(|t| (t[0].as_f64().unwrap_or(0.0), t[1].as_f64().unwrap_or(0.0)));
+        (which.to_string(), side.map_or(1.0, |(x, y)| end.x * x + end.y * y), r)
+    };
+    let turned = |x: f64, y: f64, turn: bool| {
+        if turn { [std::f64::consts::FRAC_1_SQRT_2 * (x - y), std::f64::consts::FRAC_1_SQRT_2 * (x + y)] } else { [x, y] }
+    };
+    for turn in [false, true] {
+        for ((x, y), expected) in [
+            ((3.0, 16.0), "major"),
+            ((-4.0, -14.0), "major"),
+            ((18.0, 12.0), "major"),
+            ((30.0, 3.0), "minor"),
+            ((-28.0, -2.0), "minor"),
+            ((24.0, 6.0), "minor"),
+        ] {
+            let (which, side, r) = dimension(turn, json!({"text_at": turned(x, y, turn)}));
+            assert_eq!(which, expected, "turned {turn}, text at ({x}, {y}): {r}");
+            assert!(side > 0.0, "turned {turn}, text at ({x}, {y}): the end on the other side");
+        }
+        // Near the boundary (0.5 of the major half-axis along, 0.55 or 0.45 of the minor
+        // across) the half-axis a placement had is kept, from either side; well past it, it is not.
+        let near = json!(turned(10.0, 4.4, turn));
+        assert_eq!(dimension(turn, json!({"text_at": near})).0, "major");
+        assert_eq!(dimension(turn, json!({"text_at": near, "previous_axis": "minor"})).0, "minor");
+        let near = json!(turned(10.0, 3.6, turn));
+        assert_eq!(dimension(turn, json!({"text_at": near})).0, "minor");
+        assert_eq!(dimension(turn, json!({"text_at": near, "previous_axis": "major"})).0, "major");
+        assert_eq!(dimension(turn, json!({"text_at": turned(16.0, 4.0, turn), "previous_axis": "major"})).0, "minor");
+    }
+    // An explicit type wins; with no text, the minor half-axis; radius, and any other type,
+    // stays the minor radius as on an ellipse without axes.
+    assert_eq!(dimension(false, json!({"type": "major", "text_at": [30, 3]})).0, "major");
+    assert_eq!(dimension(false, json!({"type": "minor", "text_at": [3, 16]})).0, "minor");
+    assert_eq!(dimension(false, json!({})).0, "minor");
+    assert_eq!(dimension(false, json!({"type": "radius", "text_at": [3, 16]})).0, "radius");
+    assert_eq!(dimension(false, json!({"type": "diameter", "text_at": [3, 16]})).0, "radius");
+    assert_eq!(dimension(false, json!({"type": "horizontal", "text_at": [3, 16]})).0, "radius");
+    // With half_axes false (Draw ellipses with their axes off), auto is the minor radius
+    // wherever the text is, as before half-axes; an explicit type still gives its half-axis.
+    for at in [[3.0, 16.0], [30.0, 3.0]] {
+        assert_eq!(dimension(false, json!({"half_axes": false, "text_at": at})).0, "radius", "text at {at:?}");
+    }
+    assert_eq!(dimension(false, json!({"half_axes": false, "type": "major"})).0, "major");
+    let mut s = new_sketch();
+    let (e, ..) = ellipse_with_axes(&mut s, false);
+    assert!(s.execute("sketch.dimension", &json!({"entities": [e], "half_axes": "no"})).is_err());
+    // An axis line is a line: its length is the whole axis.
+    let mut s = new_sketch();
+    let (_, major, minor) = ellipse_with_axes(&mut s, true);
+    assert_eq!(run(&mut s, "sketch.dimension", json!({"entities": [major]}))["measured"], json!(40.0));
+    assert_eq!(run(&mut s, "sketch.dimension", json!({"entities": [minor]}))["measured"], json!(16.0));
+    // Also with the text beside or above the box a turned axis spans, where a free line gives
+    // its horizontal or vertical distance; and it holds that half-axis, so D on the outline
+    // then gives the other one.
+    for (axis, at, whole) in [("major", [30.0, 0.0], 40.0), ("major", [0.0, -30.0], 40.0), ("minor", [20.0, 0.0], 16.0), ("minor", [0.0, 20.0], 16.0)]
+    {
+        let mut s = new_sketch();
+        let (e, major, minor) = ellipse_with_axes(&mut s, true);
+        let line = if axis == "major" { major } else { minor };
+        let r = run(&mut s, "sketch.dimension", json!({"entities": [line], "text_at": at}));
+        assert!(r["measured"].as_f64().is_some_and(|v| (v - whole).abs() < 1e-6), "{axis} axis, text at {at:?}: {r}");
+        let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": [3, 16]}));
+        assert_ne!(r["axis"], json!(axis), "{axis} axis, text at {at:?}: {r}");
+    }
+    // With one axis deleted the half-axis is still chosen by where the text is, as if the axis
+    // were there: the major half-axis to the major end, the minor one to what is left of its axis
+    // or, with that gone, as the minor radius.
+    let placed = |gone: &str, extra: Value| {
+        let mut s = new_sketch();
+        let (e, major, minor) = ellipse_with_axes(&mut s, true);
+        run(&mut s, "sketch.delete", json!({"entities": [if gone == "major" { major } else { minor }]}));
+        let mut p = json!({"entities": [e]});
+        if let (Some(p), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
+            p.extend(extra.clone());
+        }
+        let r = run(&mut s, "sketch.dimension", p);
+        let sk = sketch(&s);
+        let kind = sk.constraints.iter().find(|c| c.kind.is_dimension()).map(|c| c.kind.clone()).expect("a dimension");
+        // Where the dimension ends: the axis end it measures to, none for a radius.
+        let end = match kind {
+            ConstraintKind::Distance { q, .. } => sk.point(q),
+            ConstraintKind::Radius { .. } => None,
+            other => panic!("a half-axis, not {other:?}"),
+        };
+        (r, end)
+    };
+    for gone in ["major", "minor"] {
+        for ((x, y), expected) in [((3.0, 16.0), "major"), ((-4.0, -14.0), "major"), ((30.0, 3.0), "minor"), ((-28.0, -2.0), "minor")] {
+            let at = [std::f64::consts::FRAC_1_SQRT_2 * (x - y), std::f64::consts::FRAC_1_SQRT_2 * (x + y)];
+            let (r, end) = placed(gone, json!({"text_at": at}));
+            assert_eq!(r["axis"], json!(expected), "{gone} axis deleted, text at ({x}, {y}): {r}");
+            let want = if expected == "major" { 20.0 } else { 8.0 };
+            assert!(r["measured"].as_f64().is_some_and(|v| (v - want).abs() < 1e-6), "{gone} axis deleted, text at ({x}, {y}): {r}");
+            // To the axis end on the text's side while there is one: the major end from either
+            // side once the point opposite is gone, a radius once the minor axis is.
+            match (gone, expected) {
+                ("minor", "minor") => assert!(end.is_none(), "the minor radius: {r}"),
+                ("major", "major") => {
+                    let m = solidcore_record::Vec2::new(20.0, 20.0) * std::f64::consts::FRAC_1_SQRT_2;
+                    assert!(end.is_some_and(|q| q.dist(m) < 1e-6), "the major end: {r}")
+                }
+                _ => assert!(
+                    end.is_some_and(|q| q.x * at[0] + q.y * at[1] > 0.0),
+                    "{gone} axis deleted, text at ({x}, {y}): the end on the other side"
+                ),
+            }
+        }
+    }
+    // With the major axis deleted and no text, the minor half-axis to its axis end, named in
+    // the reply as with both axes.
+    let (r, end) = placed("major", json!({}));
+    assert_eq!((r["axis"].clone(), r["type"].clone()), (json!("minor"), json!("LinearDimension")), "{r}");
+    assert!(end.is_some_and(|q| (q.len() - 8.0).abs() < 1e-6), "{r}");
+    // Without its axes (an older design, or both deleted) the half-axis is still chosen by
+    // where the text is: the major one to the ellipse's own major end, the minor one as its
+    // minor radius; with no text, the minor radius as before.
+    for ((x, y), expected, want) in [((3.0, 16.0), "major", 20.0), ((-4.0, -14.0), "major", 20.0), ((30.0, 3.0), "minor", 8.0)] {
+        let mut s = new_sketch();
+        let (e, major, minor) = ellipse_with_axes(&mut s, false);
+        run(&mut s, "sketch.delete", json!({"entities": [major, minor]}));
+        let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": [x, y]}));
+        assert_eq!(r["axis"], json!(expected), "text at ({x}, {y}): {r}");
+        assert!(r["measured"].as_f64().is_some_and(|v| (v - want).abs() < 1e-6), "text at ({x}, {y}): {r}");
+    }
+    let mut s = new_sketch();
+    let (e, major, minor) = ellipse_with_axes(&mut s, false);
+    run(&mut s, "sketch.delete", json!({"entities": [major, minor]}));
+    run(&mut s, "sketch.dimension", json!({"entities": [e]}));
+    assert!(sketch(&s).constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Radius { .. })));
+    // The mirror of an ellipse has no axes (Mirror copies no midpoints): D on it reaches the
+    // major half-axis as well.
+    let mut s = new_sketch();
+    let (e, major, minor) = ellipse_with_axes(&mut s, false);
+    run(&mut s, "sketch.delete", json!({"entities": [minor]}));
+    let line = run(&mut s, "sketch.line", json!({"points": [[40, -30], [40, 30]], "connect": false}))["curves"][0].as_str().unwrap().to_string();
+    let copy = run(&mut s, "sketch.mirror", json!({"entities": [e, major], "line": line}))["curves"][0].as_str().unwrap().to_string();
+    let sk = sketch(&s);
+    assert!(sk.ellipse_axis_lines(sk.curve_index(&copy).unwrap()).is_none(), "the mirror has no axes");
+    let r = run(&mut s, "sketch.dimension", json!({"entities": [copy], "text_at": [77, 16]}));
+    assert_eq!((r["axis"].clone(), r["measured"].clone()), (json!("major"), json!(20.0)), "{r}");
+}
+
+/// With one half-axis already dimensioned, D on the outline gives the other one wherever the
+/// text is pulled: guessing the one that is already there would only be refused. Either order,
+/// with both axes, with one deleted and with none.
+#[test]
+fn an_ellipse_s_second_half_axis_is_the_one_not_yet_dimensioned() {
+    for gone in [&[][..], &["major"][..], &["minor"][..], &["major", "minor"][..]] {
+        for (first, at, second) in [("major", [3.0, 16.0], "minor"), ("minor", [30.0, 3.0], "major")] {
+            let mut s = new_sketch();
+            let (e, major, minor) = ellipse_with_axes(&mut s, false);
+            let deleted: Vec<String> = gone.iter().map(|g| if *g == "major" { major.clone() } else { minor.clone() }).collect();
+            if !deleted.is_empty() {
+                run(&mut s, "sketch.delete", json!({"entities": deleted}));
+            }
+            let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": at}));
+            assert_eq!(r["axis"], json!(first), "{gone:?}: {r}");
+            let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": at}));
+            assert_eq!(r["axis"], json!(second), "{gone:?}, {first} first, then text at {at:?} again: {r}");
+            assert!(r["param"].is_string(), "{gone:?}: the second one drives: {r}");
+        }
+    }
+    // The whole axis held counts too: as a distance between its ends, or as its line's length
+    // with the other axis deleted.
+    for axis in ["major", "minor"] {
+        let mut s = new_sketch();
+        let (e, major, minor) = ellipse_with_axes(&mut s, false);
+        let line = if axis == "major" { &major } else { &minor };
+        run(&mut s, "sketch.dimension", json!({"entities": [format!("{line}.start"), format!("{line}.end")], "type": "distance"}));
+        let at = if axis == "major" { [3.0, 16.0] } else { [30.0, 3.0] };
+        let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": at}));
+        assert_ne!(r["axis"], json!(axis), "{axis} held between its ends: {r}");
+        let mut s = new_sketch();
+        let (e, major, minor) = ellipse_with_axes(&mut s, false);
+        let (line, other) = if axis == "major" { (major, minor) } else { (minor, major) };
+        run(&mut s, "sketch.delete", json!({"entities": [other]}));
+        run(&mut s, "sketch.dimension", json!({"entities": [line]}));
+        let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": at}));
+        assert_ne!(r["axis"], json!(axis), "{axis} held by its line, the other axis deleted: {r}");
+    }
+}
+
+/// A horizontal dimension across a level major axis is its length, so D on the outline then
+/// gives the minor half-axis; across a slanted axis it is only a projection, and the major
+/// half-axis is still free to take.
+#[test]
+fn a_horizontal_dimension_across_a_level_major_axis_counts_as_holding_it() {
+    for turn in [false, true] {
+        let mut s = new_sketch();
+        let (e, major, _) = ellipse_with_axes(&mut s, turn);
+        run(&mut s, "sketch.dimension", json!({"entities": [format!("{major}.start"), format!("{major}.end")], "type": "horizontal"}));
+        let at = if turn { [std::f64::consts::FRAC_1_SQRT_2 * (3.0 - 16.0), std::f64::consts::FRAC_1_SQRT_2 * (3.0 + 16.0)] } else { [3.0, 16.0] };
+        let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": at}));
+        let want = if turn { "major" } else { "minor" };
+        assert_eq!(r["axis"], json!(want), "turned {turn}: {r}");
+        assert!(r["param"].is_string(), "turned {turn}: it drives: {r}");
+    }
+}
+
+/// The same for the minor axis: a vertical dimension across its ends holds it while it stands
+/// upright, so D with the text out past the major axis's end then gives the major half-axis.
+#[test]
+fn a_vertical_dimension_across_an_upright_minor_axis_counts_as_holding_it() {
+    for turn in [false, true] {
+        let mut s = new_sketch();
+        let (e, _, minor) = ellipse_with_axes(&mut s, turn);
+        run(&mut s, "sketch.dimension", json!({"entities": [format!("{minor}.start"), format!("{minor}.end")], "type": "vertical"}));
+        let at = if turn { [std::f64::consts::FRAC_1_SQRT_2 * (30.0 - 3.0), std::f64::consts::FRAC_1_SQRT_2 * (30.0 + 3.0)] } else { [30.0, 3.0] };
+        let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": at}));
+        let want = if turn { "minor" } else { "major" };
+        assert_eq!(r["axis"], json!(want), "turned {turn}: {r}");
+        assert!(r["param"].is_string(), "turned {turn}: it drives: {r}");
+    }
+}
+
+/// A half-axis and its whole axis are one dimension: whichever comes second is determined by
+/// the first, so the Dimension tool's `if_redundant: "driven"` adds it as a reference, and
+/// without it the command refuses it. Both orders, both axes. After the whole axis, D on the
+/// outline with no type gives the other half-axis, the one not yet held; the same half-axis
+/// is asked for by its type.
+#[test]
+fn an_ellipse_half_axis_and_its_whole_axis_determine_each_other() {
+    for (axis, text_at) in [("major", [3.0, 16.0]), ("minor", [30.0, 3.0])] {
+        for half_first in [true, false] {
+            let mut s = new_sketch();
+            let (e, major, minor) = ellipse_with_axes(&mut s, false);
+            let line = if axis == "major" { major } else { minor };
+            let half = json!({"entities": [e], "text_at": text_at, "type": axis});
+            let whole = json!({"entities": [line]});
+            if !half_first {
+                let mut t = new_sketch();
+                let (e, major, minor) = ellipse_with_axes(&mut t, false);
+                run(&mut t, "sketch.dimension", json!({"entities": [if axis == "major" { major } else { minor }]}));
+                let r = run(&mut t, "sketch.dimension", json!({"entities": [e], "text_at": text_at}));
+                assert_ne!(r["axis"], json!(axis), "{axis}: after the whole axis, the other half-axis: {r}");
+            }
+            let (first, second) = if half_first { (half, whole) } else { (whole, half) };
+            let r = run(&mut s, "sketch.dimension", first);
+            assert!(r["param"].is_string(), "{axis}: the first one drives: {r}");
+            let refused = s.execute("sketch.dimension", &second).expect_err("the second one is determined").to_string();
+            assert!(refused.contains("already determined"), "{axis}: {refused}");
+            let mut second = second;
+            second["if_redundant"] = json!("driven");
+            let r = run(&mut s, "sketch.dimension", second);
+            assert_eq!((r["redundant"].clone(), r["driven"].clone()), (json!(true), json!(true)), "{axis}, half first {half_first}: {r}");
+        }
+    }
+}
+
 /// A two-link arm (B, elbow E, hand H) hanging off a rigid triangle A B C that only the cluster
 /// decomposition places: pinned at F by two of its corners and held at G by the third. Every
 /// line is dimensioned. Without decomposition budget the elbow's seed has nothing to build on.
@@ -1538,7 +1835,7 @@ fn hung_elbow_side(s: &Session) -> f64 {
 }
 
 /// The hand of `hung_arm` swung by `angle` about the shoulder.
-fn hung_hand_target(s: &Session, angle: f64, scale: f64) -> solidcraft_geom::Vec2 {
+fn hung_hand_target(s: &Session, angle: f64, scale: f64) -> solidcore_record::Vec2 {
     let (b, h) = (pt(s, "ab.end"), pt(s, "eh.end"));
     let r = h - b;
     let (c, si) = (angle.cos(), angle.sin());
@@ -1613,6 +1910,44 @@ fn a_scripted_drag_solves_the_steps_past_a_failure_at_once_and_ends_where_one_by
     assert_eq!(r2, r1);
     assert_eq!(points(&ahead), points(&one));
     assert_eq!((solves2.count, solves2.work), (solves1.count, solves1.work));
+}
+
+/// #7648: past a failed step, the first step solved ahead that solves becomes the sketch, so the
+/// walk doesn't solve it again, and a batch holds one step per core. The drag still ends where
+/// one by one ends it, with the same held solves counted. Out past the arm's reach, and swung
+/// round through the shoulder's hole and out of it again (a step fails, a later one solves).
+#[test]
+fn a_step_solved_ahead_that_solves_is_taken_not_solved_again() {
+    use super::drag::last_drag;
+    let start = hung_arm();
+    let h = pt(&start, "eh.end");
+    let points = |s: &Session| s.doc.sketch(s.active_sketch.unwrap()).unwrap().points.iter().map(|p| (p.id.clone(), p.pos)).collect::<Vec<_>>();
+    let cores = std::thread::available_parallelism().map_or(1, usize::from);
+    let mut taken_all = 0;
+    for (angle, scale) in [(2.0, 1.5), (3.1, 1.0)] {
+        let far = hung_hand_target(&start, angle, scale);
+        let drag = |s: &mut Session| run(s, "sketch.drag", json!({"entity": "eh.end", "from": [h.x, h.y], "to": [far.x, far.y]}));
+        let mut one = hung_arm();
+        let r1 = last_drag::one_by_one(|| drag(&mut one));
+        let solves1 = last_drag::get();
+        assert_eq!(last_drag::ahead_counts(), (0, 0), "one by one solves nothing ahead");
+        last_drag::skipped();
+        let mut ahead = hung_arm();
+        let r2 = drag(&mut ahead);
+        let solves2 = last_drag::get();
+        let (solved_ahead, taken) = last_drag::ahead_counts();
+        let skipped = last_drag::skipped();
+        assert_eq!(r2, r1, "{angle}");
+        assert_eq!(points(&ahead), points(&one), "{angle}");
+        assert_eq!((solves2.count, solves2.work), (solves1.count, solves1.work), "{angle}");
+        // What a batch solved is tried steps, the step taken, and the steps past it, which ran
+        // beside them on other cores.
+        assert!(skipped + taken <= solved_ahead, "{angle}: {solved_ahead} solved ahead, {skipped} tried, {taken} taken");
+        taken_all += taken;
+    }
+    if cores > 1 {
+        assert!(taken_all > 0, "the walk went on from a step solved ahead");
+    }
 }
 
 /// All the held solves of one live frame, halvings included, share one decomposition budget:
@@ -1717,8 +2052,17 @@ fn the_first_dimension_scales_shapes_joined_by_a_constraint() {
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [30, 10], "p1": [45, 20]}));
     run(&mut s, "sketch.constraint.coincident", json!({"a": "l1.start", "b": "l5.start"}));
+    let before = sketch(&s);
+    let f = 40.0 / pt(&s, "l1.end").dist(pt(&s, "l1.start"));
     let out = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "40 mm", "scale_sketch": true}));
-    assert!(out.get("scaled").is_some(), "{out}");
+    assert!((out["scaled"].as_f64().unwrap() - f).abs() < 1e-6, "{out}");
+    // l1 measures its value, and every point of both rectangles, the joined one too, scaled
+    // about the origin by the same factor: the joined rectangle keeps its shape at its scaled place.
+    assert!((pt(&s, "l1.end").dist(pt(&s, "l1.start")) - 40.0).abs() < 1e-6);
+    let after = sketch(&s);
+    for (p, q) in before.points.iter().zip(&after.points) {
+        assert!(q.pos.dist(p.pos * f) < 1e-6, "{} {:?} -> {:?}", p.id, p.pos, q.pos);
+    }
 }
 
 /// The cursor fallback shares the held solves' frame budget; a scripted drag can finish later.
@@ -1799,6 +2143,55 @@ fn budget_limited_cursor_progress_requests_a_frame_with_the_same_target() {
 
 // ---------------------------------------------------------------------------------------------
 // Cancel Sketch (#3838)
+
+fn sketch_below_a_solid() -> (Session, u64) {
+    let mut s = Session::default();
+    let id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    (s, id)
+}
+
+#[test]
+fn finishing_a_temporary_sketch_edit_at_the_undo_limit_keeps_the_original_design() {
+    let (mut s, id) = sketch_below_a_solid();
+    for i in 0..crate::MAX_UNDO {
+        run(&mut s, "browser.visibility", json!({"items": ["Body1"], "visible": i % 2 != 0}));
+    }
+    assert_eq!(s.undo.len(), crate::MAX_UNDO);
+    let before = s.doc.to_json();
+    run(&mut s, "sketch.edit", json!({"sketch": id, "restore_marker": null}));
+    for y in [20, 30] {
+        run(&mut s, "sketch.line", json!({"points": [[0, y], [10, y]]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    assert!(s.undo.len() <= crate::MAX_UNDO);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    assert_eq!(s.active_sketch, None);
+    assert_eq!(s.model.state().bodies.len(), 1);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.marker, None);
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 6);
+}
+
+#[test]
+fn undoing_cancel_then_finishing_restores_the_temporary_sketch_marker() {
+    let (mut s, id) = sketch_below_a_solid();
+    run(&mut s, "sketch.edit", json!({"sketch": id, "restore_marker": null}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [10, 20]]}));
+    run(&mut s, "sketch.cancel", json!({}));
+    assert_eq!(s.doc.marker, None);
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 4);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.active_sketch, Some(id));
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(s.doc.marker, None);
+    assert_eq!(s.active_sketch, None);
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 5);
+    assert_eq!(s.model.state().bodies.len(), 1);
+}
 
 #[test]
 fn cancel_removes_a_new_sketch_with_its_dimensions_and_undo_brings_it_back() {
@@ -1883,7 +2276,7 @@ fn dragging_an_end_of_a_tangent_line_leaves_its_other_end_still() {
     drag(&mut s, &format!("{l}.end"), [20.0, 10.0], [5.0, 12.0]);
     assert!(at(&s, &format!("{l}.start")).dist(start) < 1e-7, "the far end moved: {:?}", at(&s, &format!("{l}.start")));
     assert!(
-        at(&s, &format!("{l}.end")).dist(solidcraft_geom::Vec2::new(5.0, 12.0)) < 1e-6,
+        at(&s, &format!("{l}.end")).dist(solidcore_record::Vec2::new(5.0, 12.0)) < 1e-6,
         "the end went where dragged: {:?}",
         at(&s, &format!("{l}.end"))
     );
@@ -1967,12 +2360,12 @@ fn a_changed_length_dimension_keeps_its_first_point() {
     let width = run(&mut s, "sketch.dimension", json!({"entities": [bottom]}))["param"].as_str().unwrap().to_string();
     let height = run(&mut s, "sketch.dimension", json!({"entities": [right]}))["param"].as_str().unwrap().to_string();
     run(&mut s, "parameters.change", json!({"name": width, "expression": "60 mm"}));
-    assert!(at(&s, "p1").dist(solidcraft_geom::Vec2::new(10.0, 10.0)) < 1e-6, "the first corner stays: {:?}", at(&s, "p1"));
-    assert!(at(&s, "p2").dist(solidcraft_geom::Vec2::new(70.0, 10.0)) < 1e-6, "the far corner moves: {:?}", at(&s, "p2"));
+    assert!(at(&s, "p1").dist(solidcore_record::Vec2::new(10.0, 10.0)) < 1e-6, "the first corner stays: {:?}", at(&s, "p1"));
+    assert!(at(&s, "p2").dist(solidcore_record::Vec2::new(70.0, 10.0)) < 1e-6, "the far corner moves: {:?}", at(&s, "p2"));
     // Several at once: the right side grows up from its start, the bottom-right corner.
     run(&mut s, "parameters.change", json!({"changes": {height: "25 mm"}}));
-    assert!(at(&s, "p2").dist(solidcraft_geom::Vec2::new(70.0, 10.0)) < 1e-6, "{:?}", at(&s, "p2"));
-    assert!(at(&s, "p3").dist(solidcraft_geom::Vec2::new(70.0, 35.0)) < 1e-6, "{:?}", at(&s, "p3"));
+    assert!(at(&s, "p2").dist(solidcore_record::Vec2::new(70.0, 10.0)) < 1e-6, "{:?}", at(&s, "p2"));
+    assert!(at(&s, "p3").dist(solidcore_record::Vec2::new(70.0, 35.0)) < 1e-6, "{:?}", at(&s, "p3"));
 
     // Centred on the Y axis: holding a corner can't keep it symmetric, so both ends move.
     let mut s = new_sketch();

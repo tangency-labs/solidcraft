@@ -51,7 +51,7 @@ fn aging_mask(layer: AgingLayer, point:vec3<f32>, normal:vec3<f32>)->vec2<f32> {
     return vec2<f32>(clamp(coverage*layer.mask.x,0.0,1.0),field);
 }
 fn aged_surface(original:Triangle,point:vec3<f32>,outward:vec3<f32>)->Triangle {
-    if original.base.w>0.0 || original.interior.z>0.0 {return original;}
+    if original.base.w>0.0 || (u32(original.interior.z)&1u)!=0u {return original;}
     var result=original;
     for(var index=0u;index<8u;index+=1u) {
         let layer=u.aging[index];

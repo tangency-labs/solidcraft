@@ -132,14 +132,15 @@ impl HomeState {
 pub fn thumbnail(s: &Session) -> Option<egui::ColorImage> {
     let mut cam = Camera::default();
     cam.set_view(StandardView::Iso);
-    let b = solidcraft_engine::view::bounds(s);
+    // No picture of a model that cannot be placed.
+    let b = solidcraft_engine::view::bounds(s).ok()?;
     if b.is_empty() {
         return None;
     }
     cam.fit(&b);
     // Fill the card: the fit leaves room for a whole window's margins.
     cam.distance *= 0.7;
-    let scene = solidcraft_engine::view::scene(s, &cam);
+    let scene = solidcraft_engine::view::scene(s, &cam).ok()?;
     // Drawn on the GPU by the renderer the app installs; none (a browser): no picture.
     let picture = solidcraft_engine::capture::rgba(&scene, &cam, THUMB[0] as u32, THUMB[1] as u32).ok()?;
     Some(egui::ColorImage::from_rgba_unmultiplied(THUMB, &picture.rgba))
@@ -348,7 +349,7 @@ fn make_unless(key: &str, stopped: &dyn Fn() -> bool) -> Made {
     }
     if sample.is_some() {
         // Keep the first viewport frame warm even though the preview needs no new render.
-        s.world_state().warm_meshes(|| true);
+        crate::open_meshing::session_world(&s).warm_meshes(|| true);
     }
     let img = match sample {
         Some(i) => sample_picture(i),
@@ -1272,7 +1273,7 @@ mod tests {
         }
         let mut session = Session::default();
         session.execute("solid.box", &serde_json::json!({"length":10,"width":20,"height":30})).unwrap();
-        for body in &session.world_state().bodies {
+        for body in &session.world_state().unwrap().bodies {
             body.mesh();
         }
         let bytes = session.design_container(solidcraft_engine::io::DesignCompression::Fast, false, true).unwrap();
@@ -1340,7 +1341,7 @@ mod tests {
         let key = path.to_string_lossy().into_owned();
         let mut s = Session::default();
         s.execute("solid.box", &serde_json::json!({"length":10,"width":20,"height":30})).unwrap();
-        for b in &s.world_state().bodies {
+        for b in &s.world_state().unwrap().bodies {
             b.mesh();
         }
         let bytes = s.design_container(solidcraft_engine::io::DesignCompression::Fast, false, true).unwrap();

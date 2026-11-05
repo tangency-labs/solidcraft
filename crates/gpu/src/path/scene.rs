@@ -1,9 +1,10 @@
 //! Original median-split BVH. World geometry is rebased around the camera target for f32.
 #[path = "planar_patches.rs"]
 mod planar_patches;
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_render::{
     ProductScene,
     job::{CancelToken, ErrorCode, JobError, Result},
@@ -17,6 +18,7 @@ pub(super) struct Triangle {
     pub surface: OpaqueSurface,
     pub transmission: Option<Transmission>,
     pub medium: u32,
+    pub scalar_face: bool,
 }
 type MediumEdge = (usize, usize, i32);
 pub(super) fn medium_preparation_bytes(scene: &ProductScene) -> u64 {
@@ -155,7 +157,14 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
             if transmission.is_some() && surface.metallic() != 0.0 {
                 return Err(invalid("transmission requires a nonmetallic surface"));
             }
-            triangles.push(Triangle { p, indices: global_indices, surface, transmission, medium: body_index as u32 + 1 });
+            triangles.push(Triangle {
+                p,
+                indices: global_indices,
+                surface,
+                transmission,
+                medium: body_index as u32 + 1,
+                scalar_face: look.is_some(),
+            });
         }
         validate_medium(&triangles[body_start..], cancel)?;
         let body_triangles = &triangles[body_start..];
@@ -234,11 +243,8 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
             Vec3::new(
                 scatter.map_or(0.0, |s| s.scattering_per_mm),
                 scatter.map_or(0.0, |s| s.anisotropy),
-                if scene.meshes.get(t.medium.saturating_sub(1) as usize).is_some_and(|body| body.name.starts_with("__render_stage__/")) {
-                    1.0
-                } else {
-                    0.0
-                },
+                (u32::from(scene.meshes.get(t.medium.saturating_sub(1) as usize).is_some_and(|body| body.name.starts_with("__render_stage__/")))
+                    | (u32::from(t.scalar_face) << 1)) as f64,
             ),
             parent_triangle as f32,
         );

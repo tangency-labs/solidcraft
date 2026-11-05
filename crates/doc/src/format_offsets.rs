@@ -411,9 +411,9 @@ mod tests {
     #[test]
     fn formats_one_through_eleven_keep_legacy_offset_geometry_and_ids() {
         let mut sketch = solidcraft_sketch::Sketch::new();
-        let center = sketch.add_point(solidcraft_geom::Vec2::new(4., 7.), Some("center")).unwrap();
-        sketch.add_circle(solidcraft_geom::Vec2::new(4., 7.), 10., Some(center), Some("source")).unwrap();
-        sketch.add_circle(solidcraft_geom::Vec2::new(4., 7.), 9., Some(center), Some("offset")).unwrap();
+        let center = sketch.add_point(solidcore_record::Vec2::new(4., 7.), Some("center")).unwrap();
+        sketch.add_circle(solidcore_record::Vec2::new(4., 7.), 10., Some(center), Some("source")).unwrap();
+        sketch.add_circle(solidcore_record::Vec2::new(4., 7.), 9., Some(center), Some("offset")).unwrap();
         sketch.offsets.push(solidcraft_sketch::OffsetChain {
             sources: vec![("source".into(), true)],
             outputs: vec!["offset".into()],
@@ -447,7 +447,7 @@ mod tests {
     fn missing_boundary_or_defining_sketch_reopens_as_a_model_error_without_retarget() {
         for missing_sketch in [false, true] {
             let mut sketch = solidcraft_sketch::Sketch::new();
-            sketch.add_circle(solidcraft_geom::Vec2::new(0., 0.), 10., None, Some("unrelated-circle")).unwrap();
+            sketch.add_circle(solidcore_record::Vec2::new(0., 0.), 10., None, Some("unrelated-circle")).unwrap();
             let mut document = Document::new("repairable lost boundary");
             let id = document.add_feature(FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
             document
@@ -464,9 +464,11 @@ mod tests {
                             start_offset: None,
                             through_all: false,
                             taper: None,
+                            corner: Default::default(),
                             to: None,
                             to_offset: None,
                             from: None,
+                            to_body_apart: false,
                         },
                         operation: crate::Operation::NewBody,
                         targets: vec![],

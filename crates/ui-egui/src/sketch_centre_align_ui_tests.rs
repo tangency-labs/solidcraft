@@ -4,8 +4,9 @@
 //! silently did nothing.
 
 use serde_json::json;
+use solidcore_record::Vec2;
 use solidcraft_engine::Sel::{SketchCurve, SketchPoint};
-use solidcraft_engine::geom::Vec2;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::context_menu::{self, Target};
 use crate::scenario::Harness;
@@ -80,7 +81,7 @@ fn the_context_menu_offers_concentric_for_a_circle_and_the_origin() {
 #[test]
 fn selecting_the_centre_and_an_edge_preselects_the_alignment() {
     let h = square_with_circle();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let edge = || SketchCurve { id: "l2".into(), sketch: None };
     let centre = || SketchPoint { id: "c1.center".into() };

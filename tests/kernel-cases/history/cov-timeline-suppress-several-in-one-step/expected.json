@@ -1,0 +1,17 @@
+{
+ "sources": [],
+ "what": "timeline.suppress of a hole and a cut together",
+ "method": "both suppressed: the plain 40x30x10 block, V = 12000, 6 faces",
+ "body_count": 1,
+ "volume_mm3": 12000.0,
+ "faces": 6,
+ "results": [
+  {
+   "step": 7,
+   "json": {
+    "suppressed": true
+   }
+  }
+ ],
+ "source": "analytic"
+}

@@ -1,14 +1,24 @@
 use crate::scenario::Harness;
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{FeatureKind, FilletStyle, kernel};
+use solidcraft_engine::geom::prelude::*;
 
-/// A plate whose top narrows from 20 to 2 mm along 40 mm, its top front edge rounded at 3 mm
-/// with Taper to Fit.
-fn fixture() -> Harness {
-    let mut h = Harness::new();
+/// A plate whose top narrows from 20 to 2 mm along 40 mm, against a wall behind its slanted
+/// side from z = -15 to 30 (so a blend of its front edges has no cliff to run over and is cut
+/// short by the wall: the blend-overflow decision, 237f0ae74).
+fn plate(h: &mut Harness) {
     h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
     h.app.run("sketch.line", json!({"points": [[0, 0], [40, 0], [40, 2], [0, 20]], "closed": true})).unwrap();
     h.app.run("solid.extrude", json!({"distance": 15, "body_name": "Plate"})).unwrap();
+    h.app.run("sketch.create", json!({"plane": {"origin": [0, 0, -15], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[40, 2], [0, 20], [0, 30], [40, 30]], "closed": true})).unwrap();
+    h.app.run("solid.extrude", json!({"distance": 45, "operation": "join"})).unwrap();
+}
+
+/// [`plate`], its top front edge rounded at 3 mm with Taper to Fit.
+fn fixture() -> Harness {
+    let mut h = Harness::new();
+    plate(&mut h);
     h.app.run("solid.fillet", json!({"edges": [[20, 0, 15]], "radius": 3, "fit": "taper", "name": "Round"})).unwrap();
     h.frames(4);
     h
@@ -28,7 +38,7 @@ fn open(h: &mut Harness) {
 }
 
 fn volume(h: &Harness) -> f64 {
-    kernel::measure(&h.app.session.world_state().body("Plate").unwrap().body).unwrap().volume
+    kernel::measure(&h.app.session.world_state().unwrap().body("Plate").unwrap().body).unwrap().volume
 }
 
 #[test]
@@ -37,12 +47,11 @@ fn dragging_a_taper_handle_makes_the_fillet_a_spline() {
     let tapered = volume(&h);
     open(&mut h);
     let (_, taper) = h.app.preview.tapered.first().cloned().expect("the preview's taper");
-    let law =
-        if taper.start.dist(solidcraft_engine::geom::Vec3::new(0.0, 0.0, 15.0)) < 1e-9 { taper.spline.clone() } else { taper.spline.reversed() };
+    let law = if taper.start.dist(solidcore_record::Vec3::new(0.0, 0.0, 15.0)) < 1e-9 { taper.spline.clone() } else { taper.spline.reversed() };
     // A handle per control radius, each that radius into the body from the edge.
-    let into = solidcraft_engine::geom::Vec3::new(0.0, 1.0, -1.0) * std::f64::consts::FRAC_1_SQRT_2;
+    let into = solidcore_record::Vec3::new(0.0, 1.0, -1.0) * std::f64::consts::FRAC_1_SQRT_2;
     let at = |u: f64, r: f64| {
-        let p = solidcraft_engine::geom::Vec3::new(40.0 * u, 0.0, 15.0) + into * r;
+        let p = solidcore_record::Vec3::new(40.0 * u, 0.0, 15.0) + into * r;
         json!([p.x, p.y, p.z])
     };
     let g = law.greville();
@@ -116,7 +125,7 @@ fn dialog_spline(h: &Harness) -> kernel::RadiusSpline {
 /// A point `r` into the box from the top edge at y (0 or 30), x = 40 u.
 fn into_box(u: f64, y: f64, r: f64) -> Value {
     let side = if y == 0.0 { 1.0 } else { -1.0 };
-    let p = solidcraft_engine::geom::Vec3::new(40.0 * u, y + side * r * std::f64::consts::FRAC_1_SQRT_2, 20.0 - r * std::f64::consts::FRAC_1_SQRT_2);
+    let p = solidcore_record::Vec3::new(40.0 * u, y + side * r * std::f64::consts::FRAC_1_SQRT_2, 20.0 - r * std::f64::consts::FRAC_1_SQRT_2);
     json!({"world": [p.x, p.y, p.z]})
 }
 
@@ -168,15 +177,13 @@ fn double_clicks_add_and_remove_control_radii() {
         panic!("a spline fillet")
     };
     assert_eq!(radii.len() + 1, law.radii.len());
-    assert!(h.app.session.world_state().body("Box").is_some());
+    assert!(h.app.session.world_state().unwrap().body("Box").is_some());
 }
 
 #[test]
 fn a_taper_over_several_edges_keeps_the_radius_arrow() {
     let mut h = Harness::new();
-    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
-    h.app.run("sketch.line", json!({"points": [[0, 0], [40, 0], [40, 2], [0, 20]], "closed": true})).unwrap();
-    h.app.run("solid.extrude", json!({"distance": 15, "body_name": "Plate"})).unwrap();
+    plate(&mut h);
     h.app.run("solid.fillet", json!({"edges": [[20, 0, 15], [20, 0, 0]], "radius": 3, "fit": "taper", "name": "Round"})).unwrap();
     h.frames(4);
     open(&mut h);

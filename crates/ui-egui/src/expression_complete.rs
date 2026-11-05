@@ -35,6 +35,11 @@ struct Popup {
     empty: bool,
     /// Down arrow in the empty box opened it: every named parameter, however many (#9246).
     every: bool,
+    /// The box was typed in since it took the focus. Until then an unarmed list only shows
+    /// what longer names there are, for a value the window filled in (`T` in Edit Extrude
+    /// lists `tan(`): Escape passes it by and closes the window as it would without the list,
+    /// as Enter and Tab do (#9084).
+    typed: bool,
 }
 
 fn popup_id() -> egui::Id {
@@ -105,6 +110,7 @@ pub(crate) fn begin_frame(ctx: &egui::Context) {
                     // Unarmed, the typed word is complete: Enter submits it and Tab moves on.
                     Key::Enter | Key::Tab if !popup.armed => continue,
                     Key::Enter | Key::Tab => popup.accept = true,
+                    Key::Escape if !popup.armed && !popup.typed => continue,
                     Key::Escape => {
                         popup.dismissed = true;
                         popup.accept = false;
@@ -169,6 +175,7 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
     // Dismissed suggestions stay closed until this box is typed in: another control rewriting
     // its text (a slider dragged while the box keeps the focus) or a moved caret is no reason.
     let dismissed = previous.as_ref().is_some_and(|p| p.dismissed) && !resp.changed();
+    let typed = resp.changed() || previous.as_ref().is_some_and(|p| p.typed);
     // What the word follows, blanks aside.
     let before = text.chars().take(start).filter(|c| !c.is_whitespace()).last();
     // A word that is already a complete name opens unarmed: Enter submits it as typed. A unit is
@@ -191,7 +198,9 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
         keyed: false,
         empty: false,
         every: false,
+        typed,
     });
+    popup.typed = typed;
     popup.empty = text.is_empty();
     popup.armed = popup.keyed || armed;
     // Never over a control being dragged: the drag dismisses them.
@@ -251,10 +260,13 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
         popup.armed.then_some(popup.selected),
         &options,
         // Unarmed, the typed word is complete and Enter submits it; an arrow key arms the list.
+        // Escape is the window's until the box is typed in.
         crate::i18n::tr_label(if popup.armed {
             "↑ ↓ choose · Enter / Tab complete · Esc dismiss"
-        } else {
+        } else if popup.typed {
             "↑ ↓ choose · Enter applies what you typed · Esc dismiss"
+        } else {
+            "↑ ↓ choose · Enter applies this value"
         }),
     ) && pick.is_none()
         && !released_after_press
@@ -540,6 +552,26 @@ mod tests {
                 assert!(e.leaked.contains(&key), "{text:?} {key:?}");
             }
         }
+    }
+
+    /// A list that opened by itself on a value the window filled in leaves Escape to the window
+    /// (#9084); once the box is typed in, Escape dismisses the list first.
+    #[test]
+    fn escape_passes_an_unarmed_list_until_the_box_is_typed_in() {
+        let mut e = Editor::new("width");
+        assert_eq!(e.popup().map(|(_, armed)| armed), Some(false));
+        e.key(Key::Escape);
+        assert!(e.leaked.contains(&Key::Escape));
+        assert!(!e.ctx.memory(|m| m.has_focus(e.id)));
+
+        let mut e = Editor::new("widt");
+        e.frame(vec![egui::Event::Text("h".into())]);
+        assert_eq!(e.text, "width");
+        assert_eq!(e.popup().map(|(_, armed)| armed), Some(false));
+        e.key(Key::Escape);
+        assert!(e.leaked.is_empty());
+        assert!(!showing(&e.ctx, e.id));
+        assert!(e.ctx.memory(|m| m.has_focus(e.id)));
     }
 
     /// From the unarmed popup an arrow key picks a row (Down the first, Up the last); Enter or

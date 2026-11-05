@@ -10,6 +10,7 @@
 //! of the line of sight (Front 0°, Left 90°, Right −90°, Back 180°), pitch the eye's elevation
 //! (Top 90°, Bottom −90°), and a positive roll turns the model clockwise on screen.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Align2, FontId, Rect, Sense, pos2, vec2};
 use serde_json::json;
 use solidcraft_engine::render::{Camera, ViewAngles};
@@ -152,7 +153,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    let response = response.on_hover_text(crate::i18n::tr("ui.view_angles_help"));
+    let response = response.backing_on_hover_text(crate::i18n::tr("ui.view_angles_help"));
     if response.clicked() {
         draft = if draft.is_some() { None } else { Some(app.cam.view_angles()) };
     }
@@ -167,7 +168,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         .fixed_pos(chip.right_bottom() + vec2(0.0, 4.0));
     let mut applied = false;
     let card = area.show(ui.ctx(), |ui| {
-        Container::popup_frame(ui.style()).show(ui, |ui| {
+        let frame = Container::popup_frame(ui.style());
+        Container::show_backing(ui, frame, |ui| {
             ui.set_width(260.0);
             ui.label(egui::RichText::new(crate::i18n::tr("ui.view_angles")).semibold().color(t.text).size(t.font_caption));
             for (id, axis) in [("ui.view_angles_pitch", "pitch"), ("ui.view_angles_yaw", "yaw"), ("ui.view_angles_roll", "roll")] {
@@ -183,12 +185,12 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                     ui.horizontal(|ui| {
                         ui.add_enabled_ui(!locked, |ui| ui_kit::angle_field(ui, &mut value));
                         let zero = ui_kit::button(ui, "0°", ui_kit::Button::Enabled(!locked))
-                            .on_hover_text(crate::i18n::format("ui.view_angles_zero", &[("axis", axis_name)]));
+                            .backing_on_hover_text(crate::i18n::format("ui.view_angles_zero", &[("axis", axis_name)]));
                         zeroed = zero.clicked();
                         crate::scenario::publish_target(&format!("view_angles:zero:{axis}"), zero.rect);
                         let mut lock = locked;
                         let help = if locked { "ui.view_angles_unlock" } else { "ui.view_angles_lock" };
-                        let checkbox = ui_kit::checkbox(ui, "", &mut lock).on_hover_text(crate::i18n::format(help, &[("axis", axis_name)]));
+                        let checkbox = ui_kit::checkbox(ui, "", &mut lock).backing_on_hover_text(crate::i18n::format(help, &[("axis", axis_name)]));
                         crate::scenario::publish_target(&format!("view_angles:lock:{axis}"), checkbox.rect);
                         if lock != locked {
                             set_lock(app, axis, lock);

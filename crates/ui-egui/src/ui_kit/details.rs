@@ -1,4 +1,5 @@
 //! Description-driven details content. No tool, document or command knowledge lives here.
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{fonts::RichTextExt as _, scenario, theme::Tokens};
 use egui::{RichText, Ui};
 
@@ -45,13 +46,33 @@ pub(crate) fn details_field_owned_escape(ctx: &egui::Context) -> bool {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum DetailValue {
-    Number { value: f64, min: f64, max: f64, suffix: String },
-    Length { value: f64, units: String },
+    Number {
+        value: f64,
+        min: f64,
+        max: f64,
+        suffix: String,
+    },
+    /// Shown to `decimals` places, as the design shows lengths.
+    Length {
+        value: f64,
+        units: String,
+        decimals: u8,
+    },
     Angle(f64),
-    Slider { value: f64, min: f64, max: f64 },
-    Axis { value: [f64; 3], current: String },
+    Slider {
+        value: f64,
+        min: f64,
+        max: f64,
+    },
+    Axis {
+        value: [f64; 3],
+        current: String,
+    },
     Check(bool),
-    Choice { selected: usize, options: Vec<String> },
+    Choice {
+        selected: usize,
+        options: Vec<String>,
+    },
 }
 
 pub(crate) struct DetailSetting {
@@ -136,7 +157,7 @@ fn setting(ui: &mut Ui, field: &DetailSetting, focus: bool) -> Option<DetailEven
             ui.style_mut().drag_value_text_style = egui::TextStyle::Monospace;
             let response = match &mut value {
                 DetailValue::Number { value, min, max, suffix } => Some(super::number_field(ui, value, *min..=*max, 0.01, suffix)),
-                DetailValue::Length { value, units } => Some(super::length_field(ui, value, units, 6)),
+                DetailValue::Length { value, units, decimals } => Some(super::length_field(ui, value, units, *decimals)),
                 DetailValue::Angle(value) => Some(super::angle_field(ui, value)),
                 DetailValue::Slider { value, min, max } => Some(super::slider(ui, value, *min..=*max, Default::default())),
                 DetailValue::Check(value) => Some(super::checkbox(ui, "", value)),
@@ -213,7 +234,7 @@ fn setting(ui: &mut Ui, field: &DetailSetting, focus: bool) -> Option<DetailEven
     if let DetailValue::Axis { value: vector, current } = &value
         && ![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]].contains(vector)
     {
-        let response = ui.add(egui::Label::new(RichText::new(current).monospace()).wrap()).on_hover_text(current);
+        let response = ui.add(egui::Label::new(RichText::new(current).monospace()).wrap()).backing_on_hover_text(current);
         scenario::publish_target(&format!("details:current:{}", field.id), response.rect);
     }
     changed.then(|| DetailEvent::Change(field.id.clone(), value))
@@ -228,6 +249,9 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
     ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new(CONTROL_FOCUS), Vec::<egui::Id>::new()));
     ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new(OWNED_POPUPS), Vec::<egui::Id>::new()));
     ui.set_width((t.form_card_width + if description.findings.is_empty() { 0.0 } else { t.space_24 * 2.0 }).min(ui.available_width()));
+    // A card's area is as tall as it was last frame: allowed `max_height`, a body that grew
+    // after the first frame scrolls instead, and its last row was cut off (#10708).
+    ui.set_max_height(max_height);
     super::scope(ui, |ui| {
         let mut caption_height = 0.0;
         if let Some(caption) = &description.caption {
@@ -281,11 +305,11 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
                                             let (rect, _) = ui.allocate_exact_size(egui::vec2(t.space_16, t.space_16), egui::Sense::hover());
                                             crate::icons::paint_icon(ui.painter(), rect, "warning", 1.0);
                                         }
-                                        ui.label(&row.label).on_hover_text(&row.label);
+                                        ui.label(&row.label).backing_on_hover_text(&row.label);
                                     });
                                 });
                                 cells.cell(|ui| {
-                                    ui.label(RichText::new(&row.value).monospace().size(t.font_small)).on_hover_text(&row.value);
+                                    ui.label(RichText::new(&row.value).monospace().size(t.font_small)).backing_on_hover_text(&row.value);
                                 });
                                 cells.cell(|ui| {
                                     if row.target {

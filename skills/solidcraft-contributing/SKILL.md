@@ -24,6 +24,22 @@ not modelling a part through MCP.
   draft PR titled `<summary> (#N)`. The lowest-numbered open PR for an issue wins; close yours if it
   lost. The bot assigns you and labels the issue `in progress`. Do not claim by editing files; comment
   `/claim` only to stake a claim before you have a branch.
+- **Write the title and first sentence for a reader who has seen nothing else.** Not your chat, not the
+  issue, not the code. Maintainers pick what to review from the title, and it becomes the commit on
+  `main`. Say which part of the app changes and what a user now sees or can do, in everyday words. Don't
+  paste the issue's title unless it passes this too. Before opening the PR, and again before marking it
+  ready, read both with everything else closed: if "there", "it", "this" or "that" has nothing to point
+  at, or a term only makes sense after reading the diff, rewrite it. Keep the terms a user sees in the
+  app and explain the others.
+  - Unclear: `Send to Slicer: pick one print face per body there, and show print faces only while it is open`
+  - Clear: `3D printing: choose the face each body rests on in the Send to Slicer window, not the face menu`
+- **Write PR text in plain, literal English.** This follows the spirit of Simplified Technical English,
+  not its approved-word list. Keep the names a user sees in the app, even if they aren't everyday words.
+  - One idea per sentence, and about 20 words at most.
+  - Use active voice: "The view tints the face", not "The face is tinted".
+  - Use one word for one thing, and don't switch to a synonym partway through.
+  - Repeat the noun when "it" or "this" could be unclear.
+  - Don't stack nouns: "the option for picking in the face menu", not "face menu picking option".
 - **Push daily.** A draft with no pushes for 72 hours may be taken over: comment first, then open your
   own claim (you may start from its branch). The bot's automatic cleanup deadlines in CONTRIBUTING.md
   are separate.
@@ -59,6 +75,26 @@ not modelling a part through MCP.
 - **Start here.** What to work on: `ROADMAP.md`, "Where help is wanted most" in CONTRIBUTING.md and the open issues labelled `help wanted`, `good first issue`, `needs-triage`; check what is already open first. Architecture: `docs/architecture.md` and "How the code is laid out" in CONTRIBUTING.md; kernel work is paused ("Kernel work is paused" in CONTRIBUTING.md). Licence rules: `deny.toml` and `cargo xtask licences --check`; only `crates/kernel` may use `truck`. When the code, docs and rules settle a question, act; ask on the issue or PR only when the answer changes what users see or what the change covers.
 - **Do not open a second PR** for an issue a lower-numbered open PR already closes, and keep the `Changes a default:` line filled in: `pr-checks.yml` fails both.
 - **The gate reads the working tree.** Do not switch branches while `cargo xtask ci` runs: it compiles the other branch's code and fails on a change not in the PR. Run it in the background and wait for its log.
+
+## Working as an agent
+
+- **The code is English. The comments are English. Always.** Identifiers, doc comments,
+  inline comments, commit messages, branch names, test names, error messages and
+  documentation are all in English. This is not a preference: a comment in another
+  language is a defect, it is not reviewable by the people who maintain this code, and a
+  reviewer rejects it. If something is not obvious, write it in English and keep it
+  short. A user-visible string is not inline in the code: it goes to the message
+  catalogs in `assets/locales/` (a new one to `assets/locales/pending/<slug>.json`),
+  and `skills/solidcraft-ui-text/SKILL.md` says how to name and translate it.
+- **Parallel work runs in parallel.** When a task splits into independent parts (several
+  files, several areas, several checks that do not depend on each other), dispatch one
+  subagent per part and let them run concurrently instead of walking the list one item at
+  a time. Give every subagent a self-contained brief: what to change, what not to touch,
+  and what to report back. Read the answers before you continue; a subagent's report is
+  not a result you can assume.
+- **Do not parallelize what depends on itself.** A fix and the test that proves it, a
+  refactor and the callers it breaks, two edits to the same file: those stay sequential.
+  One subagent per independent unit of work, and no two units may write the same file.
 
 ## 1. Check the environment
 

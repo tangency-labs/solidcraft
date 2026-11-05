@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1979",
+  "tangency-labs/solidcraft#1980"
+ ],
+ "what": "on a folded sheet a rectangular cut-out and then twenty 4 mm holes in one sketch: a cut after a cut was dropped without a word, and many holes ran out of budget",
+ "source": "analytic",
+ "method": "T = 2, R = 2: base 60 x 36 + flange straight 16, 60 wide, bend (pi/2)(16-4)*60/2 = 565.487: V0 = 60*2*(36 + 16) + 565.487. Cuts through the flat base, clear of each other and of the bend: a 7 x 6 rectangle (42 mm2) and twenty holes of radius 2 (20*pi*4 mm2), each removing area*2. V = V0 - 2*(42 + 80*pi)",
+ "body_count": 1,
+ "volume_mm3": 6218.831853071796
+}

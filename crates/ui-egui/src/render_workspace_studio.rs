@@ -164,6 +164,7 @@ pub(super) fn tone_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+#[cfg(test)]
 pub(super) fn lens_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let lens = app.tr("render.studio_lens").to_string();
     ui_kit::checkbox(ui, &lens, &mut app.render_workspace.view.studio.lens_enabled);

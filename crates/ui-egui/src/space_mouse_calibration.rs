@@ -4,6 +4,7 @@
 //! (`solidcraft_space_mouse::Wizard`), and saves what it found for the device it started with.
 //! The window closes with Preferences, and when another device (or none) is read instead.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_space_mouse::{Calibration, Kind, Problem, Stage, Wizard};
 
 use crate::SolveApp;
@@ -112,7 +113,7 @@ pub(crate) fn dead_zone_pads(ui: &mut egui::Ui, calibration: &Calibration, raw: 
                 let dot = if dot.length() > 1.0 { dot.normalized() } else { dot };
                 let live = moving[h] != 0 || moving[v] != 0;
                 painter.circle_filled(centre + dot * radius, 3.5, if live { visuals.selection.stroke.color } else { faint });
-                response.on_hover_text(pad_tooltip(&shares, (h, v), stories));
+                response.backing_on_hover_text(pad_tooltip(&shares, (h, v), stories));
                 // As wide as the circle, so the labels don't push the circles apart.
                 ui.allocate_ui(egui::vec2(SIZE, 0.0), |ui| {
                     crate::ui_kit::text(ui, &format!("{} · {}", NAMES[h], NAMES[v]), crate::ui_kit::Text::Note("space_mouse_pad"));
@@ -245,7 +246,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::ui_kit::text(ui, app.tr("ui.3d_mouse_axes_reassigned"), crate::ui_kit::Text::Note("space_mouse_axes_reassigned"));
                 }
                 crate::ui_kit::row(ui, app.tr("ui.3d_mouse_dead_zone"), |ui| {
-                    dead_zone_slider(ui, &mut dead_zone).on_hover_text(app.tr("ui.3d_mouse_dead_zone_tip"));
+                    dead_zone_slider(ui, &mut dead_zone).backing_on_hover_text(app.tr("ui.3d_mouse_dead_zone_tip"));
                 });
             },
             |ui| {
@@ -256,7 +257,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         .clicked();
                     skip = can_skip
                         && crate::ui_kit::button(ui, app.tr("ui.3d_mouse_skip"), crate::ui_kit::Button::Normal)
-                            .on_hover_text(app.tr("ui.3d_mouse_skip_tip"))
+                            .backing_on_hover_text(app.tr("ui.3d_mouse_skip_tip"))
                             .clicked();
                     over =
                         matches!(result, Some(Err(_))) && crate::ui_kit::button(ui, app.tr("ui.start_over"), crate::ui_kit::Button::Normal).clicked();

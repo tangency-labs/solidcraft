@@ -7,11 +7,13 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use super::types::{
-    AngleExpr, AxisDir, AxisLine, ConventionParam, DirectionParam, ExtentKeyword, ExtrudeOperation, FacesParam, FeatureCommon, FromPoint,
-    GeoRefParam, IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneCommon, PlaneOrFace, Point3, PointExpr3, ProfilesParam, ScaleFactors,
-    SketchRef, StringList, ThinSideParam, ToPoint, feature_common, present,
+    AngleExpr, AxisDir, AxisLine, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FacesParam, FeatureCommon,
+    FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr, NumberExpr, OperationParam,
+    PlaneCommon, PlaneOrFace, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint, TouchingParam,
+    feature_common, present,
 };
 
 /// Add a box primitive.
@@ -41,6 +43,9 @@ pub struct BoxParams {
     /// `participants` lists bodies.
     #[serde(default)]
     pub targets: Option<StringList>,
+    /// What a join makes of pieces that share no face. Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
     /// The bodies a join, cut or intersect works on, in place of `targets`.
     #[serde(default)]
     pub participants: Option<StringList>,
@@ -138,6 +143,9 @@ pub struct ExtrudeParams {
     /// that body.
     #[serde(default)]
     pub targets: Option<StringList>,
+    /// What a join makes of pieces that share no face. Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
     /// The bodies taking part; overrides the default scope.
     #[serde(default)]
     pub participants: Option<StringList>,
@@ -167,6 +175,29 @@ pub struct ExtrudeParams {
     /// With `thin` and `side: two_sides`: the thickness outside.
     #[serde(default)]
     pub thickness2: Option<LengthExpr>,
+}
+
+/// Something a feature's result tells the user without stopping them, with an action to take.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FeatureNotice {
+    /// The text to show.
+    pub message: String,
+    /// How the bodies split off touched the others: `along_edge`, `at_point` or `touching` (along
+    /// a line or at a point their boundaries don't hold).
+    pub contact: String,
+    /// The command that changes the feature as the notice offers.
+    pub action: NoticeAction,
+}
+
+/// A command a notice offers to run.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct NoticeAction {
+    /// The action's label.
+    pub label: String,
+    /// The command's id.
+    pub command: String,
+    /// Its parameters.
+    pub params: Value,
 }
 
 /// Add a cylinder primitive.
@@ -402,6 +433,92 @@ pub struct PlaneAtAngleParams {
     pub common: PlaneCommon,
 }
 
+/// Round edges of a body: a constant radius by default, or a chord, a curvature-continuous
+/// section or a radius varying along each edge (`type`).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct FilletParams {
+    /// The edges to round: a point on each, or `{body, index}`.
+    pub edges: EdgeRefs,
+    /// The radius; the chord's width with `type: chord`, the equivalent circular setback with
+    /// `type: curvature`, the start radius with `type: variable` or `spline`.
+    pub radius: LengthExpr,
+    /// The body whose edges the points pick. Default: whichever body has an edge there.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// Round each picked edge's tangent chain with it. Default: true; false rounds exactly the
+    /// picked edges.
+    #[serde(default)]
+    pub tangent_chain: Option<bool>,
+    #[serde(default, rename = "type")]
+    pub kind: Option<FilletTypeParam>,
+    /// `type: variable`: the radius at the end away from `start`; it or `radius` may be 0, where
+    /// the round closes to the corner.
+    #[serde(default)]
+    pub radius2: Option<LengthExpr>,
+    /// `type: variable` or `spline`: a point near the end the radius starts from.
+    #[serde(default)]
+    pub start: Option<Point3>,
+    /// `type: variable`: radii between the ends, each `[position, radius]`, the position between 0
+    /// and 1 from the start end. At most 100 are read.
+    #[serde(default)]
+    pub mid: Option<Vec<(f64, LengthExpr)>>,
+    /// `type: variable`: smooth instead of straight between the radii. Default: false.
+    #[serde(default)]
+    pub smooth: Option<bool>,
+    /// `type: spline`: the control radii after `radius`. At most 100 are read.
+    #[serde(default)]
+    pub radii: Option<Vec<LengthExpr>>,
+    /// `type: spline`: the knot vector from 0 to 1, as many knots as all control radii, the
+    /// degree (1 to 3) and one more.
+    #[serde(default)]
+    pub knots: Option<Vec<f64>>,
+    #[serde(default)]
+    pub fit: Option<FilletFitParam>,
+    #[serde(default)]
+    pub corner: Option<FilletCornerParam>,
+    /// Corner setbacks: the corner at the vertex nearest each `vertex`, where every edge meeting it
+    /// is rounded, starts its patch `distance` along each of those edges from the vertex, past
+    /// where the rounds would meet. Constant-radius exact fillets only.
+    #[serde(default)]
+    pub setbacks: Option<Vec<SetbackParam>>,
+    #[serde(default)]
+    pub turn: Option<FilletTurnParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// A fillet corner set back.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SetbackParam {
+    /// A point at the corner's vertex.
+    pub vertex: Point3,
+    /// How far along each edge there the corner's patch starts.
+    pub distance: LengthExpr,
+}
+
+/// The radius `fit: reduce` gave one edge.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AppliedRadius {
+    /// A point on the edge.
+    pub edge: [f64; 3],
+    /// The radius it was rounded at.
+    pub radius: f64,
+}
+
+/// What `solid.fillet` returns: a feature command's reply, with the radii `fit: reduce` used.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FilletResult {
+    #[serde(flatten)]
+    pub feature: FeatureResult,
+    /// With `fit: reduce` where it reduced the radius: the smallest radius used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius_applied: Option<f64>,
+    /// With `fit: reduce` where it reduced the radius: each edge's radius.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radii_applied: Option<Vec<AppliedRadius>>,
+}
+
 /// What a feature command returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct FeatureResult {
@@ -420,6 +537,12 @@ pub struct FeatureResult {
     /// A warning from the evaluation (a Boolean that needed a retry, a reference found again
     /// elsewhere), or `null`.
     pub warning: Option<String>,
+    /// A join that split pieces into bodies of their own because they touch the others only along
+    /// an edge or at a point (its `touching: separate`): what to tell the user, and the edit that
+    /// makes them one body instead. Left out otherwise, also when the join kept pieces that touch
+    /// nothing in one body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<FeatureNotice>,
     /// How long the feature took to evaluate, in milliseconds.
     pub ms: Option<f64>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
