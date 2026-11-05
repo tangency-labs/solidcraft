@@ -2078,10 +2078,10 @@ fn a_circle_centre_is_dimensioned_from_a_sketch_axis() {
 }
 
 /// #3320: after a line or a line's end, the X axis is the second pick: an angle from the axis,
-/// and a distance from it.
+/// and a distance from it. The line is picked off its midpoint, which is a point pick (#4872).
 #[test]
 fn a_line_is_dimensioned_against_the_sketch_x_axis() {
-    for (picks, typed) in [(vec![[10., 10.], [3., 0.]], "30 deg"), (vec![[20., 20.], [3., 0.]], "12 mm")] {
+    for (picks, typed) in [(vec![[5., 5.], [3., 0.]], "30 deg"), (vec![[20., 20.], [3., 0.]], "12 mm")] {
         crate::dim_view::cancel();
         let mut h = Harness::new();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -2111,4 +2111,3 @@ fn a_line_is_dimensioned_against_the_sketch_x_axis() {
         }
     }
 }
-
