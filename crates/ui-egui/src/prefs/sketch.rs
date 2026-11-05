@@ -175,6 +175,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
         dimension_values(app, ui, t.space_24 * 8.0 + t.space_8);
+        infinite_lines(app, ui, t.space_24 * 8.0 + t.space_8);
     });
 }
 
@@ -519,6 +520,31 @@ fn dimension_values(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
                         .on_hover_text(crate::i18n::tr("prefs.dimension_step_angle"));
                 });
             });
+        });
+    });
+}
+
+fn infinite_lines(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    let t = Tokens::get();
+    let label = app.tr("prefs.sketch.infinite_line_visibility").to_string();
+    let current = app.preferences.infinite_line_visibility;
+    let choices = [
+        (InfiniteLineVisibility::AlwaysVisible, app.tr("prefs.infinite_line_visibility.always_visible").to_owned()),
+        (InfiniteLineVisibility::ConstructionOnly, app.tr("prefs.infinite_line_visibility.construction_only").to_owned()),
+        (InfiniteLineVisibility::AlwaysHide, app.tr("prefs.infinite_line_visibility.always_hide").to_owned()),
+    ];
+    let current_label = choices.iter().find(|(choice, _)| *choice == current).map_or("", |(_, label)| label.as_str());
+    ui_kit::settings_block_hint(ui, &label, app.tr("prefs.sketch.infinite_line_visibility_note"), label_width, |ui| {
+        ui_kit::settings_control_width(ui, t.space_24 * 8.0 + t.space_8, |ui| {
+            let response = ui_kit::dropdown_menu(ui, "pref_infinite_line_visibility", current_label, |ui| {
+                for (choice, label) in &choices {
+                    if ui_kit::list_picker(ui, choice.id(), label, current == *choice).clicked() {
+                        app.preferences.infinite_line_visibility = *choice;
+                    }
+                }
+            });
+            crate::scenario::publish_target("prefs:infinite_line_visibility", response.rect);
+            crate::scenario::publish_target(&format!("prefs:infinite_line_visibility:{}", current.id()), response.rect);
         });
     });
 }

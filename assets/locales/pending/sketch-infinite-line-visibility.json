@@ -1,0 +1,58 @@
+{
+  "en": {
+    "prefs.infinite_line_visibility.always_hide": "Always hide",
+    "prefs.infinite_line_visibility.always_visible": "Always visible",
+    "prefs.infinite_line_visibility.construction_only": "Construction only",
+    "prefs.sketch.infinite_line_visibility": "Infinite line visibility",
+    "prefs.sketch.infinite_line_visibility_note": "Controls whether infinite reference and construction lines appear when viewing the model outside of sketch mode."
+  },
+  "ar": {
+    "prefs.infinite_line_visibility.always_hide": "إخفاء دائمًا",
+    "prefs.infinite_line_visibility.always_visible": "إظهار دائمًا",
+    "prefs.infinite_line_visibility.construction_only": "خطوط الإنشاء فقط",
+    "prefs.sketch.infinite_line_visibility": "إظهار الخطوط اللانهائية",
+    "prefs.sketch.infinite_line_visibility_note": "يتحكم في ظهور خطوط المراجع والإنشاء اللانهائية عند عرض النموذج خارج وضع الرسم التخطيطي."
+  },
+  "de": {
+    "prefs.infinite_line_visibility.always_hide": "Immer ausblenden",
+    "prefs.infinite_line_visibility.always_visible": "Immer anzeigen",
+    "prefs.infinite_line_visibility.construction_only": "Nur Konstruktionslinien",
+    "prefs.sketch.infinite_line_visibility": "Sichtbarkeit unendlicher Linien",
+    "prefs.sketch.infinite_line_visibility_note": "Legt fest, ob unendliche Referenz- und Konstruktionslinien außerhalb des Skizzenmodus sichtbar sind."
+  },
+  "he": {
+    "prefs.infinite_line_visibility.always_hide": "להסתיר תמיד",
+    "prefs.infinite_line_visibility.always_visible": "להציג תמיד",
+    "prefs.infinite_line_visibility.construction_only": "קווי עזר בלבד",
+    "prefs.sketch.infinite_line_visibility": "נראות של קווים אינסופיים",
+    "prefs.sketch.infinite_line_visibility_note": "קובע אם קווי ייחוס וקווי עזר אינסופיים מוצגים בעת צפייה במודל מחוץ למצב סקיצה."
+  },
+  "ja": {
+    "prefs.infinite_line_visibility.always_hide": "常に非表示",
+    "prefs.infinite_line_visibility.always_visible": "常に表示",
+    "prefs.infinite_line_visibility.construction_only": "補助線のみ",
+    "prefs.sketch.infinite_line_visibility": "無限直線の表示",
+    "prefs.sketch.infinite_line_visibility_note": "スケッチモード外でモデルを表示するときに、無限の参照線と補助線を表示するかどうかを設定します。"
+  },
+  "ko": {
+    "prefs.infinite_line_visibility.always_hide": "항상 숨기기",
+    "prefs.infinite_line_visibility.always_visible": "항상 표시",
+    "prefs.infinite_line_visibility.construction_only": "구성선만",
+    "prefs.sketch.infinite_line_visibility": "무한 직선 표시",
+    "prefs.sketch.infinite_line_visibility_note": "스케치 모드 밖에서 모델을 볼 때 무한 참조선과 구성선을 표시할지 설정합니다."
+  },
+  "vi": {
+    "prefs.infinite_line_visibility.always_hide": "Luôn ẩn",
+    "prefs.infinite_line_visibility.always_visible": "Luôn hiện",
+    "prefs.infinite_line_visibility.construction_only": "Chỉ đường dựng",
+    "prefs.sketch.infinite_line_visibility": "Hiển thị đường thẳng vô hạn",
+    "prefs.sketch.infinite_line_visibility_note": "Quy định việc hiển thị các đường tham chiếu và đường dựng vô hạn khi xem mô hình ngoài chế độ phác thảo."
+  },
+  "zh": {
+    "prefs.infinite_line_visibility.always_hide": "始终隐藏",
+    "prefs.infinite_line_visibility.always_visible": "始终显示",
+    "prefs.infinite_line_visibility.construction_only": "仅构造线",
+    "prefs.sketch.infinite_line_visibility": "无限直线的可见性",
+    "prefs.sketch.infinite_line_visibility_note": "控制在草图模式之外查看模型时是否显示无限参考线和构造线。"
+  }
+}

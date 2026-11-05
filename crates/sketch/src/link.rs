@@ -21,6 +21,31 @@ mod loops;
 /// Most entities a single link may produce.
 pub const MAX_LINK_ENTITIES: usize = 20_000;
 
+/// Visibility of infinite reference and construction lines outside active sketch editing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InfiniteLineVisibility {
+    /// Follows sketch visibility: visible whenever the sketch is visible (both infinite construction lines and reference lines).
+    AlwaysVisible,
+    /// Infinite construction lines follow sketch visibility, but datum reference lines are hidden when sketch is inactive.
+    #[default]
+    ConstructionOnly,
+    /// Hidden whenever the sketch is not active.
+    AlwaysHide,
+}
+
+impl InfiniteLineVisibility {
+    pub const ALL: [Self; 3] = [Self::AlwaysVisible, Self::ConstructionOnly, Self::AlwaysHide];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::AlwaysVisible => "always_visible",
+            Self::ConstructionOnly => "construction_only",
+            Self::AlwaysHide => "always_hide",
+        }
+    }
+}
+
 /// How the geometry was brought in.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -653,6 +678,44 @@ impl Sketch {
         self.curves.get(ci).and_then(|c| c.link.as_deref()).and_then(|l| self.link(l)).is_some_and(|l| l.lost)
     }
 
+    /// Is this curve a datum reference line (linked from a plane, axis, or sketch axis)?
+    pub fn is_datum_reference(&self, ci: usize) -> bool {
+        let Some(c) = self.curves.get(ci) else { return false };
+        c.link
+            .as_deref()
+            .and_then(|l| self.link(l))
+            .is_some_and(|l| matches!(l.source, LinkSource::Plane { .. } | LinkSource::Axis { .. } | LinkSource::SketchAxis { .. }))
+    }
+
+    /// Is this curve a datum reference line or infinite line?
+    pub fn is_reference_line(&self, ci: usize) -> bool {
+        self.is_datum_reference(ci) || self.curves.get(ci).is_some_and(|c| c.infinite)
+    }
+
+    /// Whether curve `ci` should be visible given whether the sketch is active and the infinite line visibility setting.
+    pub fn is_curve_visible_with(&self, ci: usize, active: bool, mode: InfiniteLineVisibility) -> bool {
+        let Some(c) = self.curves.get(ci) else { return false };
+        if !active {
+            match mode {
+                InfiniteLineVisibility::AlwaysVisible => {}
+                InfiniteLineVisibility::ConstructionOnly => {
+                    if self.is_datum_reference(ci) {
+                        return false;
+                    }
+                }
+                InfiniteLineVisibility::AlwaysHide => {
+                    if c.infinite || self.is_datum_reference(ci) {
+                        return false;
+                    }
+                }
+            }
+        }
+        if c.link.is_some() && !self.is_text_curve(ci) {
+            return !self.view.hide_projected;
+        }
+        !(c.construction && self.view.hide_construction)
+    }
+
     /// The line of sketch axis `name` (`x` or `y`) when the sketch already has one (see
     /// [`Sketch::sketch_axis_line`]).
     pub fn sketch_axis_curve(&self, name: &str) -> Option<usize> {
@@ -676,6 +739,7 @@ impl Sketch {
         for c in &curves {
             if let Some(cu) = self.curves.get_mut(*c) {
                 cu.construction = true;
+                cu.infinite = true;
             }
         }
         curves.first().copied().map(Some).ok_or_else(|| SketchError::Invalid(format!("sketch {name} axis")))
@@ -754,15 +818,19 @@ impl Sketch {
                 }
             };
             let cid = self.fresh(prefix)?;
+            let is_ref =
+                self.link(id).is_some_and(|l| matches!(l.source, LinkSource::Plane { .. } | LinkSource::Axis { .. } | LinkSource::SketchAxis { .. }));
+            let infinite = is_ref && matches!(kind, CurveKind::Line { .. });
+            let construction = is_ref;
             self.curves.push(Curve {
                 id: cid,
                 kind,
-                construction: false,
+                construction,
                 reversed: false,
                 link: Some(id.to_string()),
                 centerline: false,
                 fixed: false,
-                infinite: false,
+                infinite,
             });
         }
         for li in &lay.lone {

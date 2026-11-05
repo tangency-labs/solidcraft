@@ -464,9 +464,8 @@ fn include_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     run_links(s, p, "sketch.include_3d", LinkKind::Include, true)
 }
 
-/// A constraint's operands may be model geometry (#6348): an `{edge: [x,y,z], body?}` or
-/// `{vertex: [x,y,z], body?}` under one of `keys` is projected into the sketch first, as
-/// Project does, and stands for the projected curve (or point) in the parameters returned.
+/// A constraint's operands may be model geometry: an edge, vertex, axis or plane under one of
+/// `keys` is projected into the sketch first and stands for the resulting curve or point.
 /// Any body's edges work, a mirrored or patterned copy's too; the link keeps the edge's
 /// persistent name, so the constraint follows the edge through rebuilds.
 pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&str]) -> Result<Value> {
@@ -480,6 +479,9 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
     let mut out = p.clone();
     for key in keys {
         let Some(v) = p.get(*key).filter(|v| model_ref(v)) else { continue };
+        if cmd == "sketch.constraint.equal" && (v.get("axis").is_some() || v.get("plane").is_some()) {
+            return Err(bad(cmd, "an axis or plane has no length to set equal"));
+        }
         out[*key] = json!(project_ref(s, &doc, id, &mut sk, v, cmd)?);
     }
     sketch_store::write(&mut doc, id, sk)?;
@@ -487,20 +489,30 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
     Ok(out)
 }
 
-/// A model's reference among a command's operands (#6348): an `{edge: [x,y,z], body?}` or a
-/// `{vertex: [x,y,z], body?}`.
+/// A model reference among a command's operands.
 fn model_ref(v: &Value) -> bool {
-    v.get("edge").is_some() || v.get("vertex").is_some()
+    v.get("edge").is_some() || v.get("vertex").is_some() || v.get("axis").is_some() || v.get("plane").is_some()
 }
 
-/// Project one model reference into the sketch and report the entity it stands for: an edge's
-/// projected curve (a point when it is seen end on) or a vertex's projected point.
+/// Project one model reference into the sketch and report its curve or point.
 fn project_ref(s: &mut Session, doc: &Document, id: u64, sk: &mut Sketch, v: &Value, cmd: &str) -> Result<String> {
     let src = source(s, v, cmd)?;
+    if let LinkSource::Plane { name } = &src {
+        let placed = placed_candidate(s, doc);
+        let st = s.model.state_before(id);
+        let st = state_for_sketch(s, &placed, id, &st)?;
+        let plane = sketch_plane(&placed, id, &st)?;
+        let reference = super::sketch::plane_ref(s, &json!({"plane": name}), cmd)?;
+        let (vals, _) = placed.param_values();
+        let other = placed.resolve_plane_in(&vals, &reference, 0, Some(&st))?;
+        if plane.normal().dot(other.normal()).abs() >= 1e-6 {
+            return Err(bad(cmd, format!("the reference plane `{name}` must be orthogonal to the sketch plane")));
+        }
+    }
     let what = src.describe();
     let link = add_link(s, doc, id, sk, LinkKind::Project, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
-    // An edge stands for its curve (a point when it is seen end on), a vertex for its point.
-    let curve = if v.get("edge").is_some() { sk.link_curves(&link).first().and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone()) } else { None };
+    // A vertex stands for its point; other references use their curve, or a point when seen end on.
+    let curve = if v.get("vertex").is_none() { sk.link_curves(&link).first().and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone()) } else { None };
     curve
         .or_else(|| sk.link_points(&link).first().and_then(|q| sk.points.get(*q)).map(|q| q.id.clone()))
         .ok_or_else(|| bad(cmd, format!("{what} projects to nothing on this sketch")))
@@ -510,9 +522,8 @@ fn project_ref(s: &mut Session, doc: &Document, id: u64, sk: &mut Sketch, v: &Va
 /// so the count is capped before any of them is projected.
 const MAX_PROJECTED_ENTITIES: usize = 1_000;
 
-/// A dimension's entities may be model geometry (#7912): an `{edge: [x,y,z], body?}` or
-/// `{vertex: [x,y,z], body?}` among them is projected into the sketch first, as Project does,
-/// and stands for the projected curve (or point) in the entities returned.
+/// A dimension's entities may be edges, vertices, axes or planes, projected into the sketch
+/// first as curves or points.
 pub(super) fn project_entities(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     let Some(Value::Array(entities)) = p.get("entities") else { return Ok(p.clone()) };
     // A long list is refused before anything is projected, so it costs nothing.

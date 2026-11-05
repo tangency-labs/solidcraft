@@ -1405,7 +1405,9 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         c.push(cmd(app, "sketch.constraint.parallel", "Parallel").with(ab.clone()));
         c.push(cmd(app, "sketch.constraint.perpendicular", "Perpendicular").with(ab.clone()));
         c.push(cmd(app, "sketch.constraint.collinear", "Collinear").with(ab.clone()));
-        c.push(cmd(app, "sketch.constraint.equal", "Equal").with(ab.clone()));
+        if !lines.iter().any(|id| ss.sketch.curve_index(id).and_then(|i| ss.sketch.curves.get(i)).is_some_and(|c| c.infinite)) {
+            c.push(cmd(app, "sketch.constraint.equal", "Equal").with(ab.clone()));
+        }
         c.push(cmd(app, "sketch.constraint.midpoint", "MidPoint").with(ab));
     }
     if r == 2 && n == 2 {

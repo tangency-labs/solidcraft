@@ -537,6 +537,8 @@ pub fn world_curve_parts(sk: &Sketch, i: usize, plane: &Plane) -> Vec<Vec<Vec3>>
 /// parts. Parts remain separate, so a view-dependent sampler can leave clipping
 /// gaps without drawing a line across them. Already placed 3D wires retain their
 /// existing paths. Sampling changes only display geometry, never the sketch.
+pub use solidcraft_sketch::InfiniteLineVisibility;
+
 pub fn sketch_lines_with_sampler(
     sk: &Sketch,
     plane: &Plane,
@@ -544,7 +546,18 @@ pub fn sketch_lines_with_sampler(
     determined: &[bool],
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
-    sketch_lines_in(sk, plane, active, determined, sampler, &Palette::DEFAULT)
+    sketch_lines_in_mode(sk, plane, active, determined, sampler, &Palette::DEFAULT, InfiniteLineVisibility::default())
+}
+
+pub fn sketch_lines_with_sampler_mode(
+    sk: &Sketch,
+    plane: &Plane,
+    active: bool,
+    determined: &[bool],
+    sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
+    mode: InfiniteLineVisibility,
+) -> Vec<(Vec<Vec3>, Rgb, bool)> {
+    sketch_lines_in_mode(sk, plane, active, determined, sampler, &Palette::DEFAULT, mode)
 }
 
 /// [`sketch_lines_with_sampler`] in the colours of `p`.
@@ -553,12 +566,24 @@ fn sketch_lines_in(
     plane: &Plane,
     active: bool,
     determined: &[bool],
+    sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
+    p: &Palette,
+) -> Vec<(Vec<Vec3>, Rgb, bool)> {
+    sketch_lines_in_mode(sk, plane, active, determined, sampler, p, InfiniteLineVisibility::default())
+}
+
+fn sketch_lines_in_mode(
+    sk: &Sketch,
+    plane: &Plane,
+    active: bool,
+    determined: &[bool],
     mut sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
+    mode: InfiniteLineVisibility,
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
     for (i, c) in sk.curves.iter().enumerate() {
-        if !sketch_curve_visible(sk, i) {
+        if !sk.is_curve_visible_with(i, active, mode) {
             continue;
         }
         let col = if c.link.is_some() && !sk.is_text_curve(i) {
@@ -602,6 +627,17 @@ fn sketch_lines_in(
     out
 }
 
+/// Should sketch curve `i` be drawn and picked in the given sketch activity state and visibility mode?
+pub fn sketch_curve_visible_with(sk: &Sketch, i: usize, active: bool, mode: InfiniteLineVisibility) -> bool {
+    sk.is_curve_visible_with(i, active, mode)
+}
+
+/// Should sketch curve `i` be drawn and picked in the given sketch activity state?
+/// Reference lines (infinite lines or traces of datum planes/axes) follow the default visibility setting.
+pub fn sketch_curve_visible_in(sk: &Sketch, i: usize, active: bool) -> bool {
+    sk.is_curve_visible_with(i, active, InfiniteLineVisibility::default())
+}
+
 /// Should sketch curve `i` be drawn and picked? The Sketch Palette's two geometry toggles each
 /// hide one category, and a curve belongs to the category its colour already names in
 /// [`sketch_lines_with_sampler`]: a linked curve is projected reference geometry (Projected
@@ -613,11 +649,7 @@ fn sketch_lines_in(
 /// Drawing and picking share this one answer so they cannot drift: geometry that is not on
 /// screen is never clickable, and geometry on screen always is.
 pub fn sketch_curve_visible(sk: &Sketch, i: usize) -> bool {
-    let Some(c) = sk.curves.get(i) else { return false };
-    if c.link.is_some() && !sk.is_text_curve(i) {
-        return !sk.view.hide_projected;
-    }
-    !(c.construction && sk.view.hide_construction)
+    sketch_curve_visible_in(sk, i, true)
 }
 
 /// Point roles shown and picked individually. Associated offsets keep their generated
@@ -645,6 +677,16 @@ impl<'a> SketchPointVisibility<'a> {
             let ends = curve.kind.ends();
             let interior = curve.kind.point_ids().into_iter().filter(|i| ends.is_none_or(|(a, b)| *i != a && *i != b));
             hidden.extend(interior.filter_map(|i| sk.points.get(i).map(|p| p.id.as_str())));
+        }
+        for curve in sk.curves.iter().filter(|c| c.infinite) {
+            let ends = curve.kind.ends();
+            for i in ends.into_iter().flat_map(|(a, b)| [a, b]) {
+                if sk.curves.iter().filter(|c| !c.infinite).all(|c| !c.kind.point_ids().contains(&i))
+                    && let Some(p) = sk.points.get(i)
+                {
+                    hidden.insert(p.id.as_str());
+                }
+            }
         }
         Self { hidden }
     }

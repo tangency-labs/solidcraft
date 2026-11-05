@@ -15,6 +15,35 @@ fn setup() -> Harness {
 }
 
 #[test]
+fn coincident_tool_picks_an_origin_axis() {
+    let mut h = setup();
+    h.app.set_origin_shown(true);
+    h.settle();
+    let before = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"start":"sketch.constraint.coincident"})).unwrap();
+    h.step(&json!({"click":{"world":[20,20,0]}})).unwrap();
+    h.step(&json!({"click":{"world":[0,10,0]}})).unwrap();
+    let state = h.app.session.world_state().unwrap();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    assert!(sk.point(sk.resolve_point("a").unwrap()).unwrap().x.abs() < 1e-6);
+    assert_eq!(sk.links.len(), 1);
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.to_json(), before);
+}
+
+#[test]
+fn equal_tool_refuses_to_pick_an_origin_plane_or_axis() {
+    let mut h = setup();
+    h.app.set_origin_shown(true);
+    h.settle();
+    h.step(&json!({"start":"sketch.constraint.equal"})).unwrap();
+    h.step(&json!({"click":{"world":[0,10,0]}})).unwrap();
+    assert!(h.app.tool.as_ref().unwrap().picks.is_empty(), "equal cannot pick an axis or plane");
+}
+
+#[test]
 fn clicked_point_constraint_preselection_applies_and_undoes_once() {
     // Pick the edge away from its selectable MID; the point/edge constraint is unchanged.
     for (command, picks) in [

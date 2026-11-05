@@ -10,7 +10,7 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::{Camera, Mat4, Rgb};
 use solidcraft_engine::sketch::CurveKind;
-use solidcraft_engine::view::{GridFade, GridPlane, colors, grid_ext, grid_lines, grid_plane, grid_step, sketch_lines_with_sampler};
+use solidcraft_engine::view::{GridFade, GridPlane, colors, grid_ext, grid_lines, grid_plane, grid_step, sketch_lines_with_sampler_mode};
 use std::hash::{Hash, Hasher};
 
 use crate::gpu::{Frame, GpuScene, GpuTarget, SceneSlot, ViewportCallback};
@@ -675,6 +675,7 @@ fn sketch_scene_key(app: &SolveApp, proj: &Proj) -> u64 {
     // Finished sketches are drawn over the bodies when the preference says so.
     app.preferences.reference_geometry_through_bodies.hash(&mut h);
     app.preferences.sketch_halo.hash(&mut h);
+    app.preferences.infinite_line_visibility.hash(&mut h);
     // The grid previews the plane Create Sketch would take (#6975).
     previewed_sketch_plane(app).map(|p| [p.origin, p.x, p.y].map(|v| [v.x, v.y, v.z].map(f64::to_bits))).hash(&mut h);
     // Conflicting curves in their own colour, or as before (#7244).
@@ -2050,14 +2051,21 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         // them, before the virtual corners and 3D curves: `owners` names each part's curve.
         let conflict = if active { Conflict::of(app, &ss.sketch, &ss.report) } else { Conflict::default() };
         let mut owners = Vec::new();
-        let lines = sketch_lines_with_sampler(&ss.sketch, &ss.plane, active, &ss.report.curve_determined, |_, index, plane| {
-            let parts = match typed {
-                Some(_) => typed_curves.remove(&index).unwrap_or_default(),
-                None => crate::sketch_display::curve_sample(app, sid, index, plane, proj).parts.clone(),
-            };
-            owners.extend(std::iter::repeat_n(index, parts.len()));
-            parts
-        });
+        let lines = sketch_lines_with_sampler_mode(
+            &ss.sketch,
+            &ss.plane,
+            active,
+            &ss.report.curve_determined,
+            |_, index, plane| {
+                let parts = match typed {
+                    Some(_) => typed_curves.remove(&index).unwrap_or_default(),
+                    None => crate::sketch_display::curve_sample(app, sid, index, plane, proj).parts.clone(),
+                };
+                owners.extend(std::iter::repeat_n(index, parts.len()));
+                parts
+            },
+            app.preferences.infinite_line_visibility,
+        );
         for (k, (pts, col, cons)) in lines.into_iter().enumerate() {
             let conflicting = owners.get(k).is_some_and(|&curve| conflict.curve(curve));
             let segs = sketch_segments(&pts, sketch_line_mode(col, cons), unit);
@@ -2198,7 +2206,7 @@ fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, b: solidcraft_engine::geom::
     }
 }
 
-/// The [`sketch_segments`] line type of a [`sketch_lines_with_sampler`] polyline: solid,
+/// The [`sketch_segments`] line type of a [`sketch_lines_with_sampler_mode`] polyline: solid,
 /// construction (dashed) or centerline (dash-dot).
 fn sketch_line_mode(col: Rgb, cons: bool) -> u8 {
     if !cons {
@@ -2842,8 +2850,9 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         // Trim / Extend / Break edit free curves; projected edges under the same click should
         // yield so a drawn rectangle on a face is not refused as projected geometry (#8979).
         let trim_prefers_free = app.tool.as_ref().is_some_and(|t| matches!(t.cmd, "sketch.trim" | "sketch.extend" | "sketch.break"));
+        let mode = app.preferences.infinite_line_visibility;
         for (i, c) in ss.sketch.curves.iter().enumerate() {
-            if !solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) {
+            if !solidcraft_engine::view::sketch_curve_visible_with(&ss.sketch, i, active, mode) {
                 continue;
             }
             let straight = matches!(c.kind, CurveKind::Line { .. });
@@ -3050,6 +3059,25 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             let dd = seg_dist(pos, a, b);
             if dd < 5.0 && besta.wants(dd) {
                 besta.offer(dd, Hit::Axis { name });
+            }
+        }
+    }
+    // Pick the edges of perpendicular planes even when the ray lies in the plane.
+    if let Some(ss) = s.active_sketch.and_then(|sid| st.sketch(sid)) {
+        let sk_normal = ss.plane.normal();
+        let planes = origin_planes(app).into_iter().map(|(name, normal, quad)| (name.to_owned(), normal, quad));
+        for (name, normal, q) in planes.chain(construction_quads(app)) {
+            if normal.dot(sk_normal).abs() >= 1e-6 {
+                continue;
+            }
+            for i in 0..4 {
+                if let (Some(a), Some(b)) = (proj.to_screen(q[i]), proj.to_screen(q[(i + 1) % 4])) {
+                    let dd = seg_dist(pos, a, b);
+                    if dd < 5.0 && besta.wants(dd) {
+                        let point = ray_segment_closest(o, d, q[i], q[(i + 1) % 4]);
+                        besta.offer(dd, Hit::Plane { name: name.clone(), point });
+                    }
+                }
             }
         }
     }
@@ -3824,7 +3852,7 @@ pub(crate) fn profile_fill(sc: &mut GpuScene, app: &SolveApp, sketch: u64, index
 /// A reference plane's square. `through` draws it over the model (Create Sketch: a plane inside
 /// a body stays visible and pickable; or the Preferences setting to show reference geometry
 /// through bodies), else it is depth-tested like the rest of the scene.
-fn quad(sc: &mut GpuScene, q: &[Vec3; 4], fill: Color32, edge: Color32, through: bool) {
+fn quad(sc: &mut GpuScene, q: &[Vec3; 4], fill: Color32, edge: Color32, width: f32, through: bool) {
     let col = sc.color(c4(fill));
     for i in [0, 1, 2, 0, 2, 3] {
         if let Some(p) = q.get(i) {
@@ -3837,7 +3865,7 @@ fn quad(sc: &mut GpuScene, q: &[Vec3; 4], fill: Color32, edge: Color32, through:
     }
     for i in 0..4 {
         let (a, b) = (q[i].to_f32(), q[(i + 1) % 4].to_f32());
-        reference_line(sc, a, b, c4(edge), 1.2, through);
+        reference_line(sc, a, b, c4(edge), width, through);
     }
 }
 
@@ -4233,7 +4261,15 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             } else {
                 *base
             };
-            quad(&mut sc, q, fill, if selected { t.sel_edge } else { t.origin_plane_edge }, through);
+            let edge = if selected {
+                t.sel_edge
+            } else if hovered {
+                t.hover_edge
+            } else {
+                t.origin_plane_edge
+            };
+            let width = if selected || hovered { 2.5 } else { 1.2 };
+            quad(&mut sc, q, fill, edge, width, through);
         }
         // Origin axes: solid near the origin, dashed beyond.
         for (name, dir) in origin_axes(app) {
@@ -4431,6 +4467,9 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 if let Some(ss) = st.sketch(*sketch)
                     && let Some(ci) = ss.sketch.curve_index(id)
                 {
+                    if !ss.sketch.is_curve_visible_with(ci, false, app.preferences.infinite_line_visibility) {
+                        continue;
+                    }
                     for pts in &crate::sketch_display::curve_sample(app, *sketch, ci, &ss.plane, &display_proj(app)).parts {
                         let mode = ss.sketch.curves.get(ci).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
                         for (a, b) in sketch_segments(pts, mode, grid_step(app.cam.half_height()).0) {
@@ -4464,10 +4503,16 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     // the model, also while the sketch is hidden or inside a body, so it is easy to find.
     let (unit, proj) = (grid_step(app.cam.half_height()).0, display_proj(app));
     let sel_edge = feedback.color(c4(t.sel_edge));
+    let mode = app.preferences.infinite_line_visibility;
     for ss in sketches.iter().filter_map(|id| st.sketch(*id)) {
-        for (pts, col, cons) in sketch_lines_with_sampler(&ss.sketch, &ss.plane, false, &[], |_, index, plane| {
-            crate::sketch_display::curve_sample(app, ss.feature, index, plane, &proj).parts.clone()
-        }) {
+        for (pts, col, cons) in sketch_lines_with_sampler_mode(
+            &ss.sketch,
+            &ss.plane,
+            false,
+            &[],
+            |_, index, plane| crate::sketch_display::curve_sample(app, ss.feature, index, plane, &proj).parts.clone(),
+            mode,
+        ) {
             for (a, b) in sketch_segments(&pts, sketch_line_mode(col, cons), unit) {
                 feedback.line(a.to_f32(), b.to_f32(), sel_edge, 3.5, true);
             }

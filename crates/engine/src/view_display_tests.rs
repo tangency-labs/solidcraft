@@ -271,3 +271,54 @@ fn cycling_component_color_is_saved_undoable_and_shared_by_instances() {
     assert!(s.execute("component.cycle_color", &json!({"component":"missing"})).is_err());
     assert!(s.execute("component.cycle_color", &json!({"component":0})).is_err());
 }
+
+#[test]
+fn infinite_line_visibility_modes_control_reference_and_construction_lines() {
+    let mut sk = Sketch::new();
+    let ordinary = line(&mut sk, 0.);
+
+    // Infinite construction line
+    let inf_cons = line(&mut sk, 1.);
+    sk.curves[inf_cons].construction = true;
+    sk.curves[inf_cons].infinite = true;
+
+    // Datum reference line
+    let axis =
+        sk.add_link(LinkKind::Project, LinkSource::Axis { name: "X".into() }, &[LinkGeom::Line(Vec2::new(-100., 0.), Vec2::new(100., 0.))]).unwrap();
+    let ref_line = sk.link_curves(&axis)[0];
+    sk.curves[ref_line].construction = true;
+    sk.curves[ref_line].infinite = true;
+
+    assert!(sk.is_datum_reference(ref_line));
+    assert!(!sk.is_datum_reference(inf_cons));
+
+    let drawn = |sk: &Sketch, active: bool, mode: InfiniteLineVisibility| -> Vec<usize> {
+        let mut seen = Vec::new();
+        sketch_lines_with_sampler_mode(
+            sk,
+            &Plane::XY,
+            active,
+            &[],
+            |_, i, _| {
+                seen.push(i);
+                vec![vec![Vec3::ZERO, Vec3::X]]
+            },
+            mode,
+        );
+        seen
+    };
+
+    // 1. In active sketch mode, all curves are always visible in any mode
+    for mode in InfiniteLineVisibility::ALL {
+        assert_eq!(drawn(&sk, true, mode), vec![ordinary, inf_cons, ref_line], "all visible when active in {mode:?}");
+    }
+
+    // 2. AlwaysVisible: both infinite construction line and reference line follow sketch visibility
+    assert_eq!(drawn(&sk, false, InfiniteLineVisibility::AlwaysVisible), vec![ordinary, inf_cons, ref_line]);
+
+    // 3. ConstructionOnly (default): infinite construction line is visible, reference line is hidden
+    assert_eq!(drawn(&sk, false, InfiniteLineVisibility::ConstructionOnly), vec![ordinary, inf_cons]);
+
+    // 4. AlwaysHide: both infinite construction line and reference line are hidden when inactive
+    assert_eq!(drawn(&sk, false, InfiniteLineVisibility::AlwaysHide), vec![ordinary]);
+}

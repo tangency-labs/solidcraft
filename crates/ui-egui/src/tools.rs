@@ -345,7 +345,20 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
             // (#1075); the command names those `x` / `y`.
             let axis_ok = tool.cmd == "sketch.constraint.symmetry" && tool.picks.len() == 2;
             let entity = hits.iter().find_map(|h| match h {
-                Hit::SketchPoint { id, .. } | Hit::SketchCurve { id, .. } => Some(id.clone()),
+                Hit::SketchPoint { id, .. } => Some(id.clone()),
+                Hit::SketchCurve { id, .. } => {
+                    if tool.cmd == "sketch.constraint.equal" {
+                        let state = crate::open_meshing::session_world(&app.session);
+                        let curve = app.session.active_sketch.and_then(|sid| state.sketch(sid)).and_then(|ss| {
+                            let ci = ss.sketch.curve_index(id)?;
+                            ss.sketch.curves.get(ci)
+                        });
+                        if curve.is_some_and(|c| c.infinite) {
+                            return None;
+                        }
+                    }
+                    Some(id.clone())
+                }
                 Hit::Axis { name } if axis_ok => sketch_axis_of(app, name).map(str::to_string),
                 _ => None,
             });
@@ -354,7 +367,12 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
             // copy too (#6348). Projected geometry is already fixed, so Fix takes sketch entities.
             let model = || {
                 hits.iter()
-                    .filter(|h| tool.cmd != "sketch.constraint.fix" && matches!(h, Hit::Edge { .. } | Hit::Vertex { .. }))
+                    .filter(|h| {
+                        tool.cmd != "sketch.constraint.fix"
+                            && (!matches!(h, Hit::Axis { .. } | Hit::Plane { .. }) || allows_datum_reference(tool.cmd))
+                            && matches!(h, Hit::Edge { .. } | Hit::Vertex { .. } | Hit::Axis { .. } | Hit::Plane { .. })
+                            && usable_reference(app, h)
+                    })
                     .find_map(|h| crate::sketch_tools::model_ref(app, h))
                     .map(|r| r.to_string())
             };
@@ -406,7 +424,14 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                     hits.iter().find_map(|h| match h {
                         Hit::SketchPoint { sketch, id, .. } if Some(*sketch) == app.session.active_sketch => Some((id.clone(), false, true)),
                         Hit::SketchCurve { sketch, id, straight, .. } if Some(*sketch) == app.session.active_sketch => {
-                            Some((id.clone(), true, *straight))
+                            let state = crate::open_meshing::session_world(&app.session);
+                            let infinite = app
+                                .session
+                                .active_sketch
+                                .and_then(|sid| state.sketch(sid))
+                                .and_then(|ss| ss.sketch.curve_index(id).and_then(|ci| ss.sketch.curves.get(ci)))
+                                .is_some_and(|c| c.infinite);
+                            Some((id.clone(), !infinite, *straight))
                         }
                         _ => None,
                     })
@@ -418,6 +443,9 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                     hits.iter().find_map(|h| match h {
                         Hit::Edge { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), true, false)),
                         Hit::Vertex { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), false, false)),
+                        Hit::Axis { .. } | Hit::Plane { .. } if usable_reference(app, h) => {
+                            crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), false, false))
+                        }
                         _ => None,
                     })
                 });
@@ -487,6 +515,27 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     if !crate::sketch_text::editing(app) && !crate::sketch_tools::image_placement_finished(&tool) {
         app.tool = Some(tool);
     }
+}
+
+/// Only planes orthogonal to the sketch plane can be picked as references (Creo-like).
+fn usable_reference(app: &SolveApp, hit: &Hit) -> bool {
+    let Hit::Plane { name, .. } = hit else { return true };
+    let state = crate::open_meshing::session_world(&app.session);
+    let Some(sketch) = app.session.active_sketch.and_then(|id| state.sketch(id)) else { return false };
+    crate::dialogs::plane_by_name(&app.session, name).is_some_and(|plane| plane.normal().dot(sketch.plane.normal()).abs() < 1e-6)
+}
+
+/// Datum axes and planes can only be picked for constraints that make geometric sense.
+fn allows_datum_reference(cmd: &str) -> bool {
+    matches!(
+        cmd,
+        "sketch.constraint.coincident"
+            | "sketch.constraint.parallel"
+            | "sketch.constraint.perpendicular"
+            | "sketch.constraint.collinear"
+            | "sketch.constraint.symmetry"
+            | "sketch.constraint.tangent"
+    )
 }
 
 /// A single edge still measures its length; a second pick uses the snapped midpoints.
@@ -831,8 +880,9 @@ fn symmetry_args(picks: &[Value], sketch: Option<&solidcraft_engine::sketch::Ske
         Some(id) => sketch.and_then(|sk| sk.curve_index(id).and_then(|i| sk.curves.get(i))),
         None => None,
     };
-    let is_line = |v: &Value| matches!(v.as_str(), Some("x" | "y")) || curve(v).is_some();
-    let is_axis = |v: &Value| matches!(v.as_str(), Some("x" | "y")) || curve(v).is_some_and(|c| c.construction || c.centerline);
+    let reference_line = |v: &Value| v.get("axis").is_some() || v.get("plane").is_some();
+    let is_line = |v: &Value| reference_line(v) || matches!(v.as_str(), Some("x" | "y")) || curve(v).is_some();
+    let is_axis = |v: &Value| reference_line(v) || matches!(v.as_str(), Some("x" | "y")) || curve(v).is_some_and(|c| c.construction || c.centerline);
     let only = |f: &dyn Fn(&Value) -> bool| {
         let hits: Vec<usize> = (0..picks.len()).filter(|i| picks.get(*i).is_some_and(f)).collect();
         hits.first().copied().filter(|_| hits.len() == 1)
