@@ -334,8 +334,7 @@ mod tests {
         // Saved as an older version saved it: with the print face in the file.
         let path = temp_file("older");
         run(&mut s, "file.save", json!({"path": path}));
-        let mut opened = Session::default();
-        opened.keep_print_faces = false;
+        let mut opened = Session { keep_print_faces: false, ..Session::default() };
         run(&mut opened, "doc.open", json!({"path": path}));
         assert!(opened.doc.print_faces.is_empty(), "the stored print face is dropped as the design opens");
         assert!(!opened.is_dirty(), "dropping it is not an unsaved change");

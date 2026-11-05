@@ -9,8 +9,19 @@ use crate::SolveApp;
 
 /// Whether the view tints print faces now (#11512): while the Send to Slicer window is open, or
 /// at all times with the "Keep print faces" preference on.
-pub(crate) fn shown(_app: &SolveApp) -> bool {
-    true
+pub(crate) fn shown(app: &SolveApp) -> bool {
+    app.preferences.keep_print_faces || send_to_slicer_open(app)
+}
+
+/// Whether the Send to Slicer window (or Open with EasyPrint, which shares it) is open.
+fn send_to_slicer_open(app: &SolveApp) -> bool {
+    app.dialog.as_ref().is_some_and(|d| matches!(&d.kind, crate::dialogs::Kind::SaveMesh(k) if k.sends()))
+}
+
+/// Hand the "Keep print faces" preference to `session`: whether a save keeps print faces and
+/// an opened design keeps the ones it has.
+pub(crate) fn sync(session: &mut solidcraft_engine::Session, prefs: &crate::prefs::Prefs) {
+    session.keep_print_faces = prefs.keep_print_faces;
 }
 
 /// Whether face `index` of `body` (as the viewport names it) is that body's print face now.

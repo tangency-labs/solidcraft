@@ -2293,6 +2293,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     apply_network(&app.preferences);
     // The features computed from now on are checked as the preference says.
     app.session.set_validation(app.preferences.validation);
+    crate::print_face_ui::sync(&mut app.session, &app.preferences);
     // The profiler records while the preference is on (switched when it changes; at start-up only
     // when on, so SOLIDCRAFT_PROFILE=1 is not undone by the default).
     let profile = app.preferences.profile_operations;
@@ -6078,6 +6079,7 @@ mod tests {
             ("Fold viewport status items", PAGE_GRAPHICS),
             ("Allow network locations in designs", PAGE_GENERAL),
             ("Print face highlight", PAGE_GENERAL),
+            ("Keep print faces", PAGE_GENERAL),
         ];
         let mut found = vec![Vec::new(); cases.len()];
         let mut h = crate::scenario::Harness::new();

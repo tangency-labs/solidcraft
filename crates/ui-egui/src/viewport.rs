@@ -3617,6 +3617,8 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.session.visibility.hidden_folders.hash(&mut h);
     // How strongly print faces are tinted (Preferences › General › Slicer).
     app.preferences.print_face_highlight.to_bits().hash(&mut h);
+    // And whether they are tinted at all: only while Send to Slicer is open, unless kept (#11512).
+    crate::print_face_ui::shown(app).hash(&mut h);
     h.finish()
 }
 
@@ -4019,8 +4021,9 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     // which lights over it.
     // The share of that colour is the user's (Preferences › General › Slicer, default a fifth); the
     // outline takes a little over twice it, so the face reads as marked without outshouting the model.
+    // Only while the Send to Slicer window is open, unless the user keeps print faces (#11512).
     let strength = app.preferences.print_face_highlight.clamp(0.0, 1.0);
-    if !product && strength > 0.0 {
+    if !product && strength > 0.0 && crate::print_face_ui::shown(app) {
         let cap = t.section_cap;
         let blend = |from: u8, to: u8, k: f32| (f32::from(from) + (f32::from(to) - f32::from(from)) * k).round().clamp(0.0, 255.0) as u8;
         let mix = |body: u8, tint: u8| blend(body, tint, strength);

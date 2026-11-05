@@ -849,6 +849,7 @@ mod tests {
             ("allow network locations", "Allow network locations in designs"),
             ("slicer that is already running", "Open files in a slicer that is already running"),
             ("print face highlight", "Print face highlight"),
+            ("keep print faces", "Keep print faces"),
             ("interface language", "Interface language"),
         ] {
             h.app.prefs_window.filter = query.into();

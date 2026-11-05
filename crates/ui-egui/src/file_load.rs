@@ -474,6 +474,7 @@ fn start(app: &mut SolveApp) {
     // evaluated under the user's validation mode.
     scratch.set_command_check(app.session.command_check());
     scratch.set_validation(app.preferences.validation);
+    crate::print_face_ui::sync(&mut scratch, &app.preferences);
     if insert {
         scratch.selection = app.session.selection.clone();
     }
@@ -602,6 +603,7 @@ fn start_staged(app: &mut SolveApp) {
     let mut session = if insert { app.session.scratch() } else { Session::default() };
     session.set_command_check(app.session.command_check());
     session.set_validation(app.preferences.validation);
+    crate::print_face_ui::sync(&mut session, &app.preferences);
     if insert {
         session.selection = app.session.selection.clone();
     }
