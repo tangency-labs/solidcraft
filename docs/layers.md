@@ -9,7 +9,7 @@ layer that needs another layer's job calls that layer; it never carries its own 
 
 ![One operation through the layers: a fillet asked for in SolidCraft](layers/layers.svg)
 
-*Follow the steps: the app only turns the user's input into a command (1) and draws the mesh (7). Ops runs the recipe; the kernel does every computation, or refuses with the size that fits; the result comes back as a record.*
+*Above the dashed line is the app, below it is solidcore. The app crosses the line only through ops (the command, and its result or refusal) and tess (the mesh to draw). Inside solidcore, the kernel does every computation and the result comes back as a record.*
 
 
 | Layer | Crate | Its job | Examples | Never in it |
