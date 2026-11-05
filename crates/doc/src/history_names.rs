@@ -560,6 +560,10 @@ pub(crate) fn matches_read(names: &Names, index: usize, name: &str, wanted: Opti
     if current == name || wanted.as_ref().is_some_and(|w| crate::persistent_name::same_face_read(current, w)) {
         return Some(Match::Exact);
     }
+    // A name in the older form reads as the name it was, and is compared in today's form: the
+    // checks below compare names as they are written now.
+    let canonical = wanted.as_ref().filter(|_| crate::persistent_name::in_old_form(name)).map(|w| w.to_string());
+    let name = canonical.as_deref().unwrap_or(name);
     // Another name of this very face; of a piece of it, when the face was split since.
     if info.is_some_and(|i| i.synonyms.iter().any(|a| a == name)) {
         return Some(if crate::naming::strip_piece(current) == current { Match::Exact } else { Match::Piece });
