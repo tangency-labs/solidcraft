@@ -806,8 +806,8 @@ fn a_sketch_on_a_thickened_surface_follows_the_face() {
     assert!(named.iter().all(|(_, exact)| *exact), "a thickened face must keep exact history: {named:?}");
     // Kept face keeps the sheet's name; the offset and the edge walls are the thicken feature's.
     assert!(named.iter().any(|(n, _)| n == "F2:side:l1"), "{named:?}");
-    assert!(named.iter().any(|(n, _)| n == "F3:inner:F2:side:l1"), "{named:?}");
-    assert_eq!(named.iter().filter(|(n, _)| n.starts_with("F3:blend:")).count(), 4, "{named:?}");
+    assert!(named.iter().any(|(n, _)| n == "F3:inner(F2:side:l1)"), "{named:?}");
+    assert_eq!(named.iter().filter(|(n, _)| n.starts_with("F3:blend(")).count(), 4, "{named:?}");
     run(&mut s, "sketch.circle.center", json!({"center": [20, 15], "radius": 3}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch": "OnFace", "distance": 4, "operation": "join", "name": "Boss"}));
