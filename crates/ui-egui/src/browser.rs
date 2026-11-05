@@ -3266,7 +3266,7 @@ fn sketch_contents_rows(
         let count = group.rows.len().to_string();
         let r = draw_row(
             ui,
-            ui.id().with(("sketch_contents_group", scope, slug)),
+            ui.scope_id().with(("sketch_contents_group", scope, slug)),
             &Row {
                 depth,
                 fold: Some(open),
@@ -3304,7 +3304,7 @@ fn sketch_contents_rows(
             let selected = contents_row_selected(app, row, sketch, editable);
             let rr = draw_row(
                 ui,
-                ui.id().with(("sketch_content", scope, slug, &row.id)),
+                ui.scope_id().with(("sketch_content", scope, slug, &row.id)),
                 &Row {
                     depth: depth + 1,
                     icon: row_icon(row.kind),
@@ -3356,7 +3356,7 @@ fn sketch_contents_rows(
             let show_all = crate::i18n::format("ui.details_show_all", &[("count", &total.to_string())]);
             let rr = draw_row(
                 ui,
-                ui.id().with(("sketch_contents_all", scope, slug)),
+                ui.scope_id().with(("sketch_contents_all", scope, slug)),
                 &Row { depth: depth + 1, label: &show_all, name: true, dim, ..Default::default() },
             );
             let handle = format!("browser:sketch-contents-all:{scope}:{slug}");
