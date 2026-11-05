@@ -38,6 +38,7 @@ use solidcraft_doc::drawing_view::TangentEdges;
 use solidcraft_doc::{DocError, ModelState, ids};
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_view::ViewFrame;
+use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_geom::paper::text::TextRun;
 use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, ObjectKind, Picture, Scene};
 use solidcraft_geom::prelude::*;
@@ -243,7 +244,7 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     });
     match lines {
         Ok((lines, rect)) => {
-            let mut group = paper_group(&lines, id);
+            let mut group = paper_group(&lines, id, LineGroup::DEFAULT);
             group.items.splice(0..0, picture_items(id, &view_parts(&set, styles), rect));
             if group.records() > MAX_RECORDS {
                 return none(Status::Failed(format!("its lines are more than a paper scene's {MAX_RECORDS} records: choose a smaller scale")));
@@ -261,7 +262,8 @@ fn draw_dimensions(s: &Session, d: &Drawing, wanted: &[Arc<Dimension>], frame: i
     let read = s.doc.resolve_dimensions(&s.model, d, &ids);
     let one = |at: usize, record: &Arc<Dimension>| match read.as_ref().map(|all| all.get(at)) {
         Ok(Some(resolved)) => {
-            let group = frame(record.view).and_then(|frame| crate::drawing_dimension_paper::paper_group(record, resolved, &frame));
+            let group =
+                frame(record.view).and_then(|frame| crate::drawing_dimension_paper::paper_group(record, resolved, &frame, LineGroup::DEFAULT));
             let nothing = group.is_none() && !resolved.points.is_empty() && frame(record.view).is_some();
             let why = nothing.then(|| "what it measures has no place to draw on its view".to_string());
             DrawnDimension { dimension: record.id, view: record.view, status: resolved.status.clone(), group, why }

@@ -13,14 +13,13 @@ use solidcraft_doc::drawing::dimension::{Dimension, DimensionKind, Resolved, Tex
 use solidcraft_geom::drawing_measure::LinearDirection;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::paper::annotate::{ArrowShape, Terminator};
+use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
 use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{DimFrame, DimSizes, dim_layout_sized};
 
 /// A dimension's sizes on paper, with its text above an unbroken line (ISO 129-1).
 const SIZES: DimSizes = DimSizes { arrow: 3.0, gap: 1.0, overshoot: 2.0, offset: 10.0, above: true };
-/// A dimension's lines, half as wide as a view's visible ones (ISO 128).
-const LINE_MM: f64 = 0.25;
 /// A filled arrowhead, its line stopped at its base by [`stop_at_base`].
 const ARROW: Terminator = Terminator::Arrow { shape: ArrowShape::Filled, length_mm: SIZES.arrow, angle: PI / 9.0 };
 /// The height of a dimension's text, for its estimated size.
@@ -40,7 +39,8 @@ struct Piece {
 /// `dimension`, read as `resolved`, on the view through `frame` (centred on the view): its group,
 /// or `None` when what it measures has no place to draw on the view: it wasn't found again, or it
 /// is a single point there.
-pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame) -> Option<Group> {
+pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame, group: LineGroup) -> Option<Group> {
+    let line_mm = LineKind::Thin.width_mm(group);
     let on: Vec<Vec2> = resolved.points.iter().map(|p| frame.to_paper(*p)).collect();
     let mut lines: Vec<Vec<Vec2>> = Vec::new();
     let mut arrows = Vec::new();
@@ -57,9 +57,9 @@ pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame
     for (tip, dir) in &arrows {
         lines.iter_mut().for_each(|line| stop_at_base(line, *tip, *dir));
     }
-    let mut items: Vec<Item> = lines.iter().filter_map(|line| stroke(line)).collect();
+    let mut items: Vec<Item> = lines.iter().filter_map(|line| stroke(line, line_mm)).collect();
     for (tip, dir) in &arrows {
-        items.extend(ARROW.place(*tip, *tip - *dir, LINE_MM).ok()?.0);
+        items.extend(ARROW.place(*tip, *tip - *dir, line_mm).ok()?.0);
     }
     Some(Group { object: dimension.id, kind: ObjectKind::Dimension, items })
 }
@@ -213,11 +213,11 @@ fn stop_at_base(line: &mut Vec<Vec2>, tip: Vec2, dir: Vec2) {
     }
 }
 
-/// `line` as a stroke, or nothing when it has no length.
-fn stroke(line: &[Vec2]) -> Option<Item> {
+/// `line` as a stroke `width_mm` wide, or nothing when it has no length.
+fn stroke(line: &[Vec2], width_mm: f64) -> Option<Item> {
     let pieces = line.iter().zip(line.iter().skip(1)).filter(|(a, b)| a != b);
     let path: Vec<Seg2> = pieces.map(|(a, b)| Seg2::Line { a: *a, b: *b }).collect();
-    (!path.is_empty()).then_some(Item::Stroke { path, closed: false, width_mm: LINE_MM, pattern: None })
+    (!path.is_empty()).then_some(Item::Stroke { path, closed: false, width_mm, pattern: None })
 }
 
 #[cfg(test)]

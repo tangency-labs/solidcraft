@@ -11,6 +11,7 @@ use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_doc::Mat;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::hlr::{Source, Visibility};
+use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::{Dashes, Group, Item, MAX_RECORDS, ObjectKind};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
@@ -191,35 +192,30 @@ fn within(a: Vec2, b: Vec2, area: &Aabb2) -> Option<(Vec2, Vec2)> {
     inside.then(|| (a + (b - a) * lo, a + (b - a) * hi))
 }
 
-/// A visible line's width on paper until D2 sets widths by kind of line: the thick line of ISO
-/// 128's 0.5 mm line group.
-pub const VISIBLE_MM: f64 = 0.5;
-/// A reference part's line on paper until D2 does: the thin line of the same group.
-pub const REFERENCE_MM: f64 = 0.25;
-/// A hidden line's width on paper until D2 does: the thin line of the same group.
-pub const HIDDEN_MM: f64 = 0.25;
-/// A hidden line's dash and gap on paper: ISO 128's dashed line, 12 and 3 line widths.
-pub const HIDDEN_DASHES_MM: [f64; 2] = [12.0 * HIDDEN_MM, 3.0 * HIDDEN_MM];
-
-/// `lines` as the paper scene group of the view `object`: each piece one stroke, closed when it ends
-/// where it starts. Painted from the bottom: hidden pieces, dashed and [`HIDDEN_MM`] wide, then
-/// reference parts' visible ones, [`REFERENCE_MM`] wide, then the model's, [`VISIBLE_MM`] wide.
-pub fn paper_group(lines: &Lines, object: u64) -> Group {
+/// `lines` as the paper scene group of the view `object`, in line `group`: each piece one stroke,
+/// closed when it ends where it starts. Painted from the bottom: hidden pieces, dashed hidden lines,
+/// then reference parts' visible ones as thin lines, then the model's as visible lines.
+pub fn paper_group(lines: &Lines, object: u64, group: LineGroup) -> Group {
     let stroke = |piece: &Piece, width_mm: f64| {
         let path: Vec<Seg2> = piece.path.iter().copied().filter_map(drawable).collect();
         let ends_meet = path.first().zip(path.last()).is_some_and(|(first, last)| last.end().dist(first.start()) <= EPS);
         // One straight line never closes on itself, however short.
         let closed = ends_meet && !matches!(path.as_slice(), [Seg2::Line { .. }]);
         let hidden = piece.visibility == Visibility::Hidden;
-        let pattern = hidden.then(|| Dashes { lengths_mm: HIDDEN_DASHES_MM.to_vec(), phase_mm: 0.0 });
+        let pattern = hidden.then(|| LineKind::Hidden.dashes_mm(group)).flatten().map(|d| Dashes { lengths_mm: d.to_vec(), phase_mm: 0.0 });
         (!path.is_empty()).then_some(Item::Stroke { path, closed, width_mm, pattern })
     };
     let strokes = |reference: bool, visibility: Visibility, width_mm: f64| {
         let pieces = lines.lines.iter().filter(move |l| l.reference == reference).flat_map(|l| &l.pieces);
         pieces.filter(move |p| p.visibility == visibility).filter_map(move |p| stroke(p, width_mm))
     };
-    let hidden = strokes(true, Visibility::Hidden, HIDDEN_MM).chain(strokes(false, Visibility::Hidden, HIDDEN_MM));
-    let visible = strokes(true, Visibility::Visible, REFERENCE_MM).chain(strokes(false, Visibility::Visible, VISIBLE_MM));
+    let hidden_mm = LineKind::Hidden.width_mm(group);
+    let hidden = strokes(true, Visibility::Hidden, hidden_mm).chain(strokes(false, Visibility::Hidden, hidden_mm));
+    let visible = strokes(true, Visibility::Visible, LineKind::Thin.width_mm(group)).chain(strokes(
+        false,
+        Visibility::Visible,
+        LineKind::Visible.width_mm(group),
+    ));
     Group { object, kind: ObjectKind::View, items: hidden.chain(visible).collect() }
 }
 
@@ -439,7 +435,7 @@ mod tests {
             piece(Visibility::Visible, vec![Seg2::Line { a: c, b: c }]),
             piece(Visibility::Visible, vec![Seg2::Arc { center: a, radius: 5.0, start: 0.0, sweep: 1e-13 }]),
         ]);
-        let group = paper_group(&lines, 7);
+        let group = paper_group(&lines, 7, LineGroup::DEFAULT);
         assert_eq!((group.object, group.kind), (7, ObjectKind::View));
         let strokes: Vec<(usize, bool, f64)> = group
             .items
@@ -471,7 +467,7 @@ mod tests {
             pieces: vec![piece(Visibility::Visible, vec![Seg2::Line { a, b }])],
         };
         let lines = Lines { lines: vec![line(false), line(true), line(false)], covered: 0, model_chord_mm: 0.01, stats: Stats::default() };
-        let widths: Vec<f64> = paper_group(&lines, 7)
+        let widths: Vec<f64> = paper_group(&lines, 7, LineGroup::DEFAULT)
             .items
             .iter()
             .filter_map(|i| match i {
@@ -479,7 +475,14 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(widths, [REFERENCE_MM, VISIBLE_MM, VISIBLE_MM]);
+        assert_eq!(
+            widths,
+            [
+                LineKind::Thin.width_mm(LineGroup::DEFAULT),
+                LineKind::Visible.width_mm(LineGroup::DEFAULT),
+                LineKind::Visible.width_mm(LineGroup::DEFAULT)
+            ]
+        );
     }
 
     /// Hidden pieces come first, the reference parts' and then the model's, whatever order they were
@@ -501,7 +504,7 @@ mod tests {
         let reference =
             line(true, vec![piece(Visibility::Visible, vec![Seg2::Line { a: b, b: c }]), piece(Visibility::Hidden, vec![Seg2::Line { a, b: c }])]);
         let lines = Lines { lines: vec![model, reference], covered: 0, model_chord_mm: 0.01, stats: Stats::default() };
-        let group = paper_group(&lines, 7);
+        let group = paper_group(&lines, 7, LineGroup::DEFAULT);
         let dashes = Dashes { lengths_mm: vec![3.0, 0.75], phase_mm: 0.0 };
         let strokes: Vec<(usize, bool, f64, Option<&Dashes>)> = group
             .items
@@ -516,12 +519,42 @@ mod tests {
             (1, false, hidden.0, hidden.1),
             (1, false, hidden.0, hidden.1),
             (3, true, hidden.0, hidden.1),
-            (1, false, REFERENCE_MM, None),
-            (1, false, VISIBLE_MM, None),
+            (1, false, LineKind::Thin.width_mm(LineGroup::DEFAULT), None),
+            (1, false, LineKind::Visible.width_mm(LineGroup::DEFAULT), None),
         ];
         assert_eq!(strokes, want);
         let scene = solidcraft_geom::paper::Scene::new(Vec2::new(420.0, 297.0), vec![group]);
         assert!(scene.validate().is_ok());
+    }
+
+    /// A view draws in its line group: in the 0.7 mm group its visible lines are 0.7 mm, a reference
+    /// part's and the hidden ones 0.35 mm, and a hidden line's dashes 4.2 and 1.05 mm.
+    #[test]
+    fn a_views_lines_take_their_widths_from_its_line_group() {
+        let (a, b) = (Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0));
+        let line = |reference: bool, visibility: Visibility| ViewLine {
+            shown: 0,
+            reference,
+            source: Source::Edge { edge: 0, tangent: false },
+            pieces: vec![piece(visibility, vec![Seg2::Line { a, b }])],
+        };
+        let lines = Lines {
+            lines: vec![line(false, Visibility::Visible), line(false, Visibility::Hidden), line(true, Visibility::Visible)],
+            covered: 0,
+            model_chord_mm: 0.01,
+            stats: Stats::default(),
+        };
+        let drawn: Vec<(f64, Option<Vec<f64>>)> = paper_group(&lines, 7, LineGroup::Mm0_7)
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Stroke { width_mm, pattern, .. } => Some((*width_mm, pattern.as_ref().map(|p| p.lengths_mm.clone()))),
+                _ => None,
+            })
+            .collect();
+        let narrow = LineKind::Hidden.width_mm(LineGroup::Mm0_7);
+        assert_eq!(narrow, 0.35);
+        assert_eq!(drawn, [(0.35, Some(vec![12.0 * narrow, 3.0 * narrow])), (0.35, None), (0.7, None)]);
     }
 
     /// A view's group past the paper scene's 100,000 records is caught by the scene's own check.
@@ -529,7 +562,7 @@ mod tests {
     fn a_group_past_the_scenes_records_is_refused_by_its_check() {
         let one = |i: usize| piece(Visibility::Visible, vec![Seg2::Line { a: Vec2::new(i as f64 * 1e-3, 0.0), b: Vec2::new(i as f64 * 1e-3, 1.0) }]);
         let lines = lines_of((0..MAX_RECORDS).map(one).collect());
-        let scene = solidcraft_geom::paper::Scene::new(Vec2::new(420.0, 297.0), vec![paper_group(&lines, 0)]);
+        let scene = solidcraft_geom::paper::Scene::new(Vec2::new(420.0, 297.0), vec![paper_group(&lines, 0, LineGroup::DEFAULT)]);
         assert!(scene.validate().is_err());
     }
 
