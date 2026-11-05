@@ -5310,6 +5310,7 @@ fn trim_source_and_two_offsets_independently_in_any_order() {
     }
 }
 
+/// Trimming one output preserves the source, sibling association and unrelated offsets; Undo restores the full design.
 #[test]
 fn trimming_one_offset_line_keeps_its_source_sibling_and_other_offsets() {
     let mut s = new_sketch();
@@ -5337,6 +5338,79 @@ fn trimming_one_offset_line_keeps_its_source_sibling_and_other_offsets() {
     assert_eq!(s.doc.to_json(), document, "one Undo restores the offset association as well as the trimmed end");
 }
 
+/// Deleting the driving dimension freezes its last distance; both Trim entry points must
+/// still cut the output, or remove it entirely without a crossing, and undo in one step.
+#[test]
+fn trim_offset_after_deleting_its_dimension_keeps_the_stored_distance() {
+    for distance in [2.0_f64, -3.0] {
+        for path in [false, true] {
+            for crossing in [false, true] {
+                let mut s = new_sketch();
+                run(&mut s, "sketch.line", json!({"points": [[0,0],[20,0]], "connect": false, "infer": false, "ids": ["source"]}));
+                run(&mut s, "sketch.constraint.fix", json!({"entities": ["source"]}));
+                let out = run(&mut s, "sketch.offset", json!({"curves": ["source"], "distance": distance, "chain": false}));
+                let output = ids(&out["curves"])[0].clone();
+                let parameter = out["param"].as_str().unwrap().to_string();
+                run(&mut s, "parameters.change", json!({"name": parameter, "expression": "4 mm"}));
+                let sk = sketch(&s);
+                let dimension = sk.constraints.iter().find(|c| c.param.as_deref() == Some(&parameter)).unwrap().id.clone();
+                run(&mut s, "sketch.delete", json!({"entities": [dimension]}));
+                assert!(s.doc.param(&parameter).is_none());
+                let before_sketch = sketch(&s);
+                let stored_distance = before_sketch.offsets[0].distance;
+                assert!((stored_distance.abs() - 4.0).abs() < 1e-6);
+                if crossing {
+                    run(&mut s, "sketch.line", json!({"points": [[10,-10],[10,10]], "connect": false, "infer": false}));
+                }
+                let before = s.doc.to_json();
+                let request = json!({"points": [[5,stored_distance-0.5],[5,stored_distance+0.5]]});
+                if path {
+                    let mut preview = request.clone();
+                    preview["dry_run"] = json!(true);
+                    let preview = run(&mut s, "sketch.trim.path", preview);
+                    assert_eq!(preview["trimmed"].as_array().unwrap().len(), 1, "{preview}");
+                    assert_eq!(s.doc.to_json(), before, "preview must leave the stored association intact");
+                    let result = run(&mut s, "sketch.trim.path", request);
+                    assert_eq!(result["trimmed"], preview["trimmed"]);
+                    assert!(result["skipped"].as_array().unwrap().is_empty());
+                } else {
+                    run(&mut s, "sketch.trim", json!({"curve": output, "at": [5,stored_distance]}));
+                }
+                let after_sketch = sketch(&s);
+                assert!(after_sketch.offsets.is_empty());
+                assert!(s.doc.param(&parameter).is_none(), "Trim must not resurrect the deleted parameter");
+                assert_eq!(
+                    after_sketch.polyline(after_sketch.curve_index("source").unwrap()),
+                    before_sketch.polyline(before_sketch.curve_index("source").unwrap())
+                );
+                if crossing {
+                    let solidcraft_sketch::Shape::Line { a, b } = after_sketch.shape(after_sketch.curve_index(&output).unwrap()).unwrap() else {
+                        panic!("line")
+                    };
+                    assert!((a.x.min(b.x) - 10.0).abs() < 1e-6 && (a.x.max(b.x) - 20.0).abs() < 1e-6, "{a:?} {b:?}");
+                    assert!((a.y - stored_distance).abs() < 1e-6 && (b.y - stored_distance).abs() < 1e-6);
+                } else {
+                    assert!(after_sketch.curve_index(&output).is_none(), "an uncut output must be removed completely");
+                }
+                let after = s.doc.to_json();
+                run(&mut s, "edit.undo", json!({}));
+                assert_eq!(s.doc.to_json(), before);
+                run(&mut s, "edit.redo", json!({}));
+                assert_eq!(s.doc.to_json(), after);
+                if crossing {
+                    run(&mut s, "sketch.move_point", json!({"point": format!("{output}.end"), "to": [25,stored_distance+2.0]}));
+                    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+                    let state = reopened.world_state().unwrap();
+                    let sk = &state.sketch(1).unwrap().sketch;
+                    let solidcraft_sketch::Shape::Line { a, b } = sk.shape(sk.curve_index(&output).unwrap()).unwrap() else { panic!("line") };
+                    assert!((a.y - stored_distance).abs() < 1e-6 && (b.y - stored_distance).abs() < 1e-6);
+                }
+            }
+        }
+    }
+}
+
+/// Path preview is inert; applying the same path trims all three lines at their own crossings in one undo step.
 #[test]
 fn trim_path_cuts_source_and_two_offsets_at_their_own_crossings() {
     let mut s = new_sketch();
@@ -5388,6 +5462,7 @@ fn trim_whole_source_keeps_its_offsets_and_unrelated_associations() {
     assert_eq!(s.doc.to_json(), doc_before);
 }
 
+/// All pick orders retain driving distances through repeated trims, dragging, parameter edits and native reload.
 #[test]
 fn trim_keeps_offset_distances_driving_after_trims_drag_and_reopen() {
     let verify = |s: &Session, distance: f64, parameter: &str| {

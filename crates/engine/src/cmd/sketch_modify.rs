@@ -66,7 +66,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("trim")
         .enabled(in_sketch)
         .params(concat!(
-            "points: [[x,y]…] (2…2000 positions: a path drawn across the sketch). Every piece the path crosses is removed as `sketch.trim` removes the piece at that crossing, in the order the path crosses them; a piece crossed again after it is gone is not trimmed twice; projected geometry, infinite lines, offset outputs and pieces trim refuses are passed over (why in `skipped`). dry_run?: bool (report without changing the design). One undo step → trimmed: [each trim's result], removed: [[[x,y]…]] (each removed piece as a polyline)",
+            "points: [[x,y]…] (2…2000 positions: a path drawn across the sketch). Every piece the path crosses is removed as `sketch.trim` removes the piece at that crossing, in the order the path crosses them; a piece crossed again after it is gone is not trimmed twice; eligible single-line offset outputs are trimmed while preserving their distance; projected geometry, infinite lines, other offset outputs and pieces trim refuses are passed over (why in `skipped`). dry_run?: bool (report without changing the design). One undo step → trimmed: [each trim's result], removed: [[[x,y]…]] (each removed piece as a polyline)",
             created_doc!()
         )),
     CommandSpec::new("sketch.extend", "Extend", extend)
@@ -501,6 +501,7 @@ fn refuse_offset_ends(sk: &Sketch, ci: usize, what: &str, cmd: &str) -> Result<(
     }
 }
 
+/// Trim the picked piece and release eligible offset extents in the same undo step.
 fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.trim";
     let at = req_vec2(cmd, p, "at")?;
@@ -519,7 +520,8 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Source lines and their single-line offsets can have independent endpoints. Materialize
 /// the affected line chains before Trim, retaining their original driving distance parameters
-/// as point-line dimensions. Closed or mixed-curve output chains still need their association.
+/// as point-line dimensions. Without a dimension, the stored distance stays a fixed distance.
+/// Closed or mixed-curve output chains still need their association.
 fn release_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usize, cmd: &str) -> Result<Vec<String>> {
     let Some(curve) = sk.curves.get(ci) else { return Ok(Vec::new()) };
     if curve.infinite || sk.is_linked_curve(ci) || !matches!(curve.kind, CurveKind::Line { .. }) {
@@ -559,10 +561,9 @@ fn release_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usi
                 matches!(&c.kind,
             ConstraintKind::OffsetDistance { output, .. } if record.outputs.contains(output))
             })
-            .cloned()
-            .ok_or_else(|| bad(cmd, "missing offset distance dimension"))?;
-        let value = match dimension.kind {
-            ConstraintKind::OffsetDistance { value, .. } => value,
+            .cloned();
+        let value = match dimension.as_ref().map(|c| &c.kind) {
+            Some(ConstraintKind::OffsetDistance { value, .. }) => *value,
             _ => record.distance.abs(),
         };
         sk.constraints.retain(|c| !matches!(&c.kind, ConstraintKind::OffsetDistance { output, .. } if record.outputs.contains(output)));
@@ -589,8 +590,10 @@ fn release_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usi
             }
             let p = sk.curves.get(target).and_then(|c| c.kind.ends()).map(|ends| ends.0).ok_or_else(|| bad(cmd, "missing offset line endpoint"))?;
             let kind = ConstraintKind::PointLineDistance { p, l: source, value };
-            let id = sk.add_constraint(kind.clone(), dimension.param.clone())?;
-            if let Some(added) = sk.constraints.iter_mut().find(|c| c.id == id) {
+            let id = sk.add_constraint(kind.clone(), dimension.as_ref().and_then(|c| c.param.clone()))?;
+            if let Some(dimension) = &dimension
+                && let Some(added) = sk.constraints.iter_mut().find(|c| c.id == id)
+            {
                 let mut kept = dimension.clone();
                 kept.id = if index == 0 { dimension.id.clone() } else { id };
                 kept.kind = kind;
@@ -821,6 +824,7 @@ fn seg_cross(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> Option<(f64, Vec2)> {
     ((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)).then(|| (t, a + r * t))
 }
 
+/// Preview or trim the pieces crossed by a path, skipping protected or unsupported geometry.
 fn trim_path(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.trim.path";
     let path = vec2_list(cmd, p, "points", MAX_PATH_POINTS)?;
