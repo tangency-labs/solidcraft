@@ -766,7 +766,7 @@ fn fits(a: Accept, s: &Sel) -> bool {
         // box selection and a pre-selection reach them the way a click already does.
         Sel::SketchPoint { .. } => a & (selection::POINTS | selection::SKETCH_POINTS) != 0,
         Sel::ExternalSketchPoint { .. } => a & selection::EXTERNAL_POINTS != 0,
-        Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } | Sel::Occurrence { .. } => false,
+        Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } | Sel::SketchPattern { .. } | Sel::Occurrence { .. } => false,
     }
 }
 
@@ -2880,6 +2880,7 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
             crate::i18n::format("dialog.selection_external_point", &[("point", &point), ("sketch", &sketch_name(*sketch))])
         }
         Sel::SketchConstraint { id } => crate::i18n::format("dialog.selection_constraint", &[("id", id)]),
+        Sel::SketchPattern { id } => crate::sketch_pattern_tree::active_label(s, id),
         Sel::Profile { sketch, index } => {
             crate::i18n::format("dialog.selection_profile", &[("sketch", &sketch_name(*sketch)), ("number", &index.saturating_add(1).to_string())])
         }

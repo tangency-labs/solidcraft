@@ -206,7 +206,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("curves: [ids], value?: bool (default: construction unless all of them already are)"),
     CommandSpec::new("sketch.delete", "Delete Sketch Entities", sketch_delete).icon("delete")
         .enabled(in_sketch)
-        .params("entities: [curve, point or constraint ids]"),
+        .params("entities: [curve, point, constraint or sketch pattern ids]; a pattern goes with its copies, its sources stay"),
     CommandSpec::new("sketch.move_point", "Drag Sketch Point", move_point).icon("sketch_move").enabled(in_sketch).params("point: ref, to: [x,y]"),
     CommandSpec::new("sketch.drag", "Drag Sketch Geometry", drag).icon("sketch_move").enabled(in_sketch).live(drag_live).params(
         "entity: point or curve, from: [x,y] where it was grabbed, to: [x,y], live?: bool: points and the material point grabbed on a line move toward `to` within the design constraints. When exact placement is impossible, bounded feasible steps minimize cursor distance. Splines slide by to - from; a circle or arc grabbed on its edge takes the radius to `to`. `with?`: [point or curve ids] moves the rest of a selection with the entity as one translation (circles keep their radii). Long moves retain the solution branch; arcs cannot sweep through their starts. Returns `reached`: progress projected onto the requested move (0..1), `at`: the grabbed position for the next frame, and `retry`: budget-limited progress can continue in another frame. `live: true` shares a work budget across held-solve decomposition and cursor correction; ordinary recovery and the final model evaluation retain their existing limits, not a wall-clock deadline. Later features stay stale until `sketch.drag_end`; `dof` stays from before the drag",
@@ -3624,6 +3624,14 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
             } else if sk.link(id).is_some() {
                 curves.extend(sk.link_curves(id));
                 points.extend(sk.link_points(id));
+            } else if let Some(i) = sk.patterns.iter().position(|pattern| &pattern.id == id) {
+                // A pattern goes with its copies and their relations; its sources stay (#12081).
+                let pattern = sk.patterns.remove(i);
+                for instance in &pattern.instances {
+                    curves.extend(instance.curves.iter().filter_map(|c| sk.curve_index(c)));
+                    points.extend(instance.points.iter().filter_map(|(_, q)| sk.point_index(q)));
+                    cons.extend(instance.constraints.iter().cloned());
+                }
             } else {
                 return Err(bad(cmd, format!("unknown sketch entity `{id}`")));
             }
