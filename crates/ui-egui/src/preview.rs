@@ -394,11 +394,13 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Drive { .. }))) {
         colors.ghost = app.preferences.drive_joints_ghost;
     }
-    if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Scale { .. })) {
-        colors.replaced_ghost = false;
-    }
     colors.tint_new = app.preferences.preview_tint_new_faces;
     colors.cut_tint = app.preferences.cut_preview_tint;
+    // Scale shows only its result, in the body's own colour: every face of a scaled body is new.
+    if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Scale { .. })) {
+        colors.replaced_ghost = false;
+        colors.tint_new = false;
+    }
     let key = job_key(&cmds, app.session.revision, colors);
     let stream_key = stream_key(&cmds, app.session.revision, colors);
     let tool = as_new_body(&cmds).is_some();

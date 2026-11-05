@@ -489,14 +489,16 @@ fn scale_takes_a_factor_per_axis() {
 /// world origin; a picked vertex is the point that stays put; reopening the Scale keeps its point.
 #[test]
 fn scale_about_a_base_point_or_the_bodies_centre() {
-    let scaled = |base: Option<Vec3>| -> (Harness, u64) {
+    // `on_box`: the base point is one of the box's vertices; otherwise it is the design origin,
+    // which the viewport hands over as a vertex of no body.
+    let scaled = |base: Option<Vec3>, on_box: bool| -> (Harness, u64) {
         let mut h = Harness::new();
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [10, 0, 0]})).unwrap();
         let body = h.app.session.model.state().bodies[0].name.clone();
         let mut d = Dialog::for_command(&h.app, "solid.scale").unwrap();
         d.inputs[0].items = vec![Sel::Body { name: body.clone() }];
         if let Some(point) = base {
-            d.inputs[1].items = vec![Sel::Vertex { body, point }];
+            d.inputs[1].items = vec![Sel::Vertex { body: if on_box { body } else { String::new() }, point }];
         }
         let Kind::Scale { factor, .. } = &mut d.kind else { panic!("not the Scale dialog") };
         *factor = "2".into();
@@ -510,12 +512,12 @@ fn scale_about_a_base_point_or_the_bodies_centre() {
     let near = |a: Vec3, b: Vec3| (a - b).len() < 1e-6;
 
     // The box spans (10,0,0)..(20,10,10), centre (15,5,5): doubled about it.
-    let (h, _) = scaled(None);
+    let (h, _) = scaled(None, true);
     let b = bounds(&h);
     assert!(near(b.min, Vec3::new(5.0, -5.0, -5.0)) && near(b.max, Vec3::new(25.0, 15.0, 15.0)), "{b:?}");
 
     // About its corner (10,0,0): that corner stays where it is.
-    let (h, id) = scaled(Some(Vec3::new(10.0, 0.0, 0.0)));
+    let (h, id) = scaled(Some(Vec3::new(10.0, 0.0, 0.0)), true);
     let b = bounds(&h);
     assert!(near(b.min, Vec3::new(10.0, 0.0, 0.0)) && near(b.max, Vec3::new(30.0, 20.0, 20.0)), "{b:?}");
 
@@ -523,6 +525,30 @@ fn scale_about_a_base_point_or_the_bodies_centre() {
     let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
     let (_, params) = apply_commands(&h.app, &d).unwrap().into_iter().next().unwrap();
     assert_eq!(params["params"]["origin"], json!([10.0, 0.0, 0.0]), "{params}");
+
+    // About the design origin: the box doubles and moves away from it.
+    let (h, _) = scaled(Some(Vec3::ZERO), false);
+    let b = bounds(&h);
+    assert!(near(b.min, Vec3::new(20.0, 0.0, 0.0)) && near(b.max, Vec3::new(40.0, 20.0, 20.0)), "{b:?}");
+
+    // About the box's top face: the centre of that face, (15,5,10), stays put.
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [10, 0, 0]})).unwrap();
+    let st = h.app.session.model.state();
+    let body = st.bodies[0].name.clone();
+    let b = &st.bodies[0].body;
+    let top = b.faces((b.size() * 2e-3).max(1e-3)).unwrap().into_iter()
+        .find(|f| f.plane_normal.is_some_and(|n| n.z > 0.99)).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.scale").unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: body.clone() }];
+    d.inputs[1].items = vec![Sel::Face { body, index: top.index, point: Vec3::new(12.0, 3.0, 10.0) }];
+    let Kind::Scale { factor, .. } = &mut d.kind else { panic!("not the Scale dialog") };
+    *factor = "2".into();
+    for (command, params) in apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    let b = bounds(&h);
+    assert!(near(b.min, Vec3::new(5.0, -5.0, -10.0)) && near(b.max, Vec3::new(25.0, 15.0, 10.0)), "{b:?}");
 
     // A shaft's side face stands for the centre of its nearer round end: picked near the bottom
     // of a cylinder standing on (10,0,0), that end's centre is the base point.

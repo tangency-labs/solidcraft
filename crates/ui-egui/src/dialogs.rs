@@ -138,7 +138,7 @@ crate::dialog_descriptor::dialog_descriptors! {
         // Uniform, or per axis (#10782): then `factor` is X's, beside Y's and Z's. The bodies
         // scale about the picked base point (a hole's or shaft's face: its round end's centre), else
         // the kept one, else their centre.
-        Scale("solid.scale", "SCALE", [("Bodies", BODIES, true), ("Base point", selection::VERTICES | selection::FACES | selection::EXTERNAL_POINTS | selection::ORIGIN, false)],
+        Scale("solid.scale", "SCALE", [("Bodies", BODIES, true), ("Base point", selection::VERTICES | selection::FACES | selection::POINTS | selection::EXTERNAL_POINTS | selection::ORIGIN, false)],
             FeatureKind::Scale { factor, factors, .. }) {
             factor: String = "2".into() => factors.as_ref().map_or_else(|| factor.to_string(), |f| f[0].to_string()),
             per_axis: bool = false => factors.is_some(),
@@ -5477,10 +5477,18 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             // The picked base point; else the one an edited Scale keeps (from `extra`); else the
             // centre of the bodies, so a new Scale grows them in place, not away from the origin.
             // A face stands for its centre: a hole's or shaft's round end, a flat face's middle.
-            let base = sels(d, 1).first().and_then(|x| match x {
-                Sel::Face { .. } => crate::dialogs_assembly::snap_of(s, x).map(|snap| snap.at),
-                _ => crate::primitive_placement::world_point(s, x),
-            });
+            // A pick that gives no point (a sphere's or torus's face) is refused, not swapped for
+            // another point the user didn't pick.
+            let base = match sels(d, 1).first() {
+                None => None,
+                Some(x) => Some(
+                    match x {
+                        Sel::Face { .. } => crate::dialogs_assembly::snap_of(s, x).map(|snap| snap.at),
+                        _ => crate::primitive_placement::world_point(s, x),
+                    }
+                    .ok_or("This face has no centre to scale about: pick a flat or round face, a vertex or a point")?,
+                ),
+            };
             if let Some(at) = base {
                 p["origin"] = pt(at);
             } else if !d.extra.contains_key("origin")
