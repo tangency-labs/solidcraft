@@ -1,0 +1,35 @@
+{
+  "en": {
+    "drawing_export.cancelled": "Sheet export canceled",
+    "drawing_export.exporting": "Exporting sheet",
+    "drawing_export.progress.rows": "Drawing the sheet's rows"
+  },
+  "en-GB": {
+    "drawing_export.cancelled": "Sheet export cancelled"
+  },
+  "ar": {
+    "drawing_export.cancelled": "أُلغي تصدير الورقة",
+    "drawing_export.exporting": "جارٍ تصدير الورقة",
+    "drawing_export.progress.rows": "رسم صفوف الورقة"
+  },
+  "he": {
+    "drawing_export.cancelled": "ייצוא הגיליון בוטל",
+    "drawing_export.exporting": "מייצא גיליון",
+    "drawing_export.progress.rows": "ציור שורות הגיליון"
+  },
+  "ja": {
+    "drawing_export.cancelled": "シートの書き出しをキャンセルしました",
+    "drawing_export.exporting": "シートを書き出しています",
+    "drawing_export.progress.rows": "シートの行を描画中"
+  },
+  "vi": {
+    "drawing_export.cancelled": "Đã hủy xuất bản vẽ",
+    "drawing_export.exporting": "Đang xuất bản vẽ",
+    "drawing_export.progress.rows": "Đang vẽ các hàng của bản vẽ"
+  },
+  "zh": {
+    "drawing_export.cancelled": "已取消导出图纸",
+    "drawing_export.exporting": "正在导出图纸",
+    "drawing_export.progress.rows": "正在绘制图纸的行"
+  }
+}

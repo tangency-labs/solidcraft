@@ -174,7 +174,16 @@ fn write(scene: &Prepared, options: PngOptions, pictures: &dyn Pictures, out: im
     let mut dithered = false;
     let mut row = Vec::with_capacity(width * 4);
     let mut top = 0;
+    // A watched export (the window writing a sheet in the background) says how far it is and stops
+    // between bands once cancelled; nothing has been written to the caller's file by then.
+    let watch = solidcraft_kernel::watch::current();
     while top < pixels[1] {
+        if let Some(watch) = &watch {
+            if watch.cancelled() {
+                return Err(IoError::Invalid("the sheet PNG: cancelled".into()));
+            }
+            watch.progress("sheet_png", top as usize, pixels[1] as usize);
+        }
         let n = rows.min(pixels[1] - top);
         band.fill(paper);
         let shift = Transform::from_translate(0.0, MARGIN as f32 - top as f32);
