@@ -43,6 +43,7 @@
     "what": "a pocket's corner (its two floor edges and the upright edge between them, all concave) filleted 2 as a curvature-continuous (G2) fillet"
   },
   "expressible": false,
+  "gallery_note": "the G2 corner patch meets the order-2 section's rounds only G1 at one face seam (its volume holds); the corner step rebuilds the patch",
   "operation_expressible": true,
   "outcome": {
     "ran": true,

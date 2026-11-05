@@ -185,6 +185,9 @@ dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; overflow-w
 .v { font-weight: 600; font-size: 0.82rem; white-space: nowrap; }
 .v-PASS { color: var(--green-ink); }
 .v-DEFERRED { color: var(--muted); }
+.v-REFUSED { color: var(--text-2); }
+table.gallery td.render { width: 240px; }
+table.gallery td.render img { display: block; width: 240px; max-width: 38vw; height: auto; border-radius: 4px; }
 .v-INCOMPLETE, .v-WRONG-TOPOLOGY, .v-ERROR, .v-FAIL { color: var(--bad-ink); }
 [hidden] { display: none !important; }
 .warn { background: var(--partial-bg); color: var(--partial-ink); padding: 6px 10px; border-radius: 6px; }

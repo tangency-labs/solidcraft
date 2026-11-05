@@ -118,6 +118,7 @@
     "what": "a cylinder r5 tilted 26.6 deg from Z cut flat at z = 10, its elliptical rim chamfered 1 and 2: one closed valid solid"
   },
   "expressible": true,
+  "gallery_note": "the two arcs of the rim take their chamfer offsets each at its own midpoint, where the faces' angle differs (78.5 and 101.5 deg), and their chamfers do not meet at the tangent corners (held for the owner's ruling on unequal chamfers of a varying angle)",
   "operation_expressible": true,
   "outcome": {
     "engine_error": "step 3 (solid.chamfer): SMLib chamfer: operation: SMLib failed (status 1001) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",

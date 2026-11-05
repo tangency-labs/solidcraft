@@ -231,12 +231,14 @@ own constructions. The policy (owner, 2026-11-04; supersedes 2026-11-02 and #101
 - **Record differences from the C++, don't hide them.** When solidcore is more correct and
   differs, the C++ is wrong for that case: record it as a confirmed `plan/upstream-issues/` entry
   and a `cpp_defect` known-mismatch marker (§1). Never loosen a tolerance.
-- **Cases with images.** A pull request that makes a SolidCraft rig case pass, or turns a known
-  failure into a correct refusal, updates its row in `docs/generic-blend.md` §7 and its render
-  (`docs/generic-blend/cases/<case>.jpg`) in the same change. No row changes without its image.
-  Choose the render's view from the case's geometry so it shows the issue (the corner, the seam,
-  the spot refused or fixed), framed close on it, with an inset of the whole part where it helps;
-  never a fixed angle.
+- **Cases with images.** A pull request that makes a kernel case pass, or turns a known failure
+  into a correct refusal, updates the case's entry (its expectation, and its `gallery_note` if the
+  gallery needs to say more), its line in `known_failing.json` and its render beside it
+  (`crates/solidcore/tests/kernel_cases/<area>/<case>.jpg`) in the same change, never a doc: the
+  site's case gallery is generated from them. No status changes without a new render. Choose the
+  render's view from the case's geometry so it shows the issue (the corner, the seam, the spot
+  refused or fixed), framed close on it, with an inset of the whole part where it helps; never a
+  fixed angle.
 - **Don't extend code that is going away.** Improve the construction that replaces it; an old
   path is deleted when its replacement lands, never kept as a fallback.
 - **Crash, UB, hang and nondeterminism fixes are unconditional**, e.g. the fix for UB-87.

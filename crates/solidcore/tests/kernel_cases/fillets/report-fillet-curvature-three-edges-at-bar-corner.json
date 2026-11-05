@@ -47,6 +47,7 @@
     "what": "a curvature-continuous fillet (equivalent radius 2) of the three edges at a top corner of a bar whose far end runs tangent into a cylinder: it built with SMLib's own corner patch, tangent to the rounds only (a 35.8 / mm curvature jump), seen as a dome on the corner; the corner must be a G2 patch; reported from the app (2026-10-30, test-peg part)"
   },
   "expressible": false,
+  "gallery_note": "the G2 corner patch meets the order-2 section's rounds only G1 at one face seam (its volume holds); the corner step rebuilds the patch",
   "operation_expressible": true,
   "outcome": {
     "ran": true,

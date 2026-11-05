@@ -135,6 +135,7 @@
     "what": "equal pipes R8 tee, rounded 1"
   },
   "expressible": false,
+  "gallery_note": "the two exact conic-pair rounds meet at the ellipses' crossings in a corner the old corner code cannot join",
   "operation_expressible": true,
   "outcome": {
     "engine_error": "step 3 (solid.fillet): SMLib fillet: operation: SMLib's result is not a closed solid (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",

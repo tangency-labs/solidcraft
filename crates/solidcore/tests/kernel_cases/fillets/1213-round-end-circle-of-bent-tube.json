@@ -102,6 +102,7 @@
     "what": "an R3 round on the end circle of a lofted tube whose axis bends 60 degrees"
   },
   "expressible": false,
+  "gallery_note": "the tube's bent axis is a 60 degree torus section",
   "operation_expressible": true,
   "outcome": {
     "ran": true,

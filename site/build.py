@@ -214,6 +214,105 @@ def load_solids():
     return d
 
 
+KERNEL_CASES = ROOT / "crates/solidcore/tests/kernel_cases"
+CASE_STATUS_TEXT = {"pass": "passes", "refused": "refused as expected", "failing": "known failing"}
+CASE_STATUS_CLASS = {"pass": "PASS", "refused": "REFUSED", "failing": "FAIL"}
+
+
+def load_gallery():
+    """{area: [case]} for the case gallery: every case of each area that has a render.
+
+    A render is `<area>/<case>.jpg` beside the case's entry. A case's status comes from the
+    data alone: listed in known_failing.json -> failing (with its reason); `expected.outcome`
+    "refused" -> refused as expected; otherwise it passes.
+    """
+    listed = {e["case"]: e for e in json.loads((KERNEL_CASES / "known_failing.json").read_text())}
+    areas = sorted({p.parent for p in KERNEL_CASES.rglob("*.jpg")})
+    gallery = {}
+    for d in areas:
+        area = d.relative_to(KERNEL_CASES).as_posix()
+        cases = []
+        for f in sorted(d.glob("*.json")):
+            if f.name.endswith(".bodies.json"):
+                continue
+            e = json.loads(f.read_text())
+            name = e.get("case", f.stem)
+            expected = e.get("expected") or {}
+            kf = listed.get(f"{area}/{name}")
+            if kf:
+                status, detail = "failing", kf.get("reason", "")
+            elif expected.get("outcome") == "refused":
+                status, detail = "refused", expected.get("refusal", "")
+            else:
+                status, detail = "pass", ""
+            img = f.with_suffix(".jpg")
+            cases.append({"case": name, "what": e.get("what", ""), "note": e.get("gallery_note", ""),
+                          "status": status, "detail": detail,
+                          "issue": kf.get("issue", "") if kf else "",
+                          "image": img if img.exists() else None})
+        gallery[area] = cases
+    return gallery
+
+
+def gallery_body(gallery):
+    counts = collections.Counter(c["status"] for cs in gallery.values() for c in cs)
+    total = sum(counts.values())
+    sections = []
+    for area, cases in gallery.items():
+        tid = "cases-" + re.sub(r"[^a-z0-9]+", "-", area.lower())
+        rows = []
+        for c in cases:
+            img = (f'<img src="cases/{esc(area)}/{esc(c["case"])}.jpg" width="240" loading="lazy" alt="{esc(c["case"])}">'
+                   if c["image"] else '<span class="muted">no render</span>')
+            if c["status"] == "failing":
+                issue = c["issue"]
+                # `issue` is `<repo>#<n>` (a repository of the organisation) or "to file".
+                ref = re.fullmatch(r"([\w.-]+)#(\d+)", issue)
+                issue_html = ""
+                if ref:
+                    url = f"https://github.com/{REPO.split('/')[0]}/{ref.group(1)}/issues/{ref.group(2)}"
+                    issue_html = f' (<a href="{esc(url)}">{esc(issue)}</a>)'
+                det = f'<div class="small">{inline(c["detail"])}{issue_html}</div>'
+            elif c["status"] == "refused" and c["detail"]:
+                det = f'<div class="small">the refusal names “{inline(c["detail"])}”</div>'
+            else:
+                det = ""
+            note = f'<div class="small">{inline(c["note"])}</div>' if c["note"] else ""
+            rows.append(
+                f'<tr data-status="{c["status"]}"><td class="render">{img}</td>'
+                f'<td><code>{esc(c["case"])}</code><div>{inline(c["what"])}</div>{note}</td>'
+                f'<td data-v="{c["status"]}"><span class="v v-{CASE_STATUS_CLASS[c["status"]]}">'
+                f'{CASE_STATUS_TEXT[c["status"]]}</span>{det}</td></tr>')
+        ac = collections.Counter(c["status"] for c in cases)
+        opts = "".join(f'<option value="{k}">{CASE_STATUS_TEXT[k]} ({ac[k]})</option>'
+                       for k in CASE_STATUS_TEXT if ac[k])
+        sections.append(f"""<section>
+<h2 id="{esc(area)}">{esc(area)}</h2>
+<p class="muted">{len(cases)} cases from <a href="{REPO_URL}/tree/main/crates/solidcore/tests/kernel_cases/{esc(area)}"><code>crates/solidcore/tests/kernel_cases/{esc(area)}/</code></a>.</p>
+<div class="filters" data-table="{tid}">
+<label>Search <input type="search" name="q" placeholder="case or text"></label>
+<label>Status <select name="status"><option value="">all</option>{opts}</select></label>
+<span class="count" aria-live="polite"></span>
+</div>
+<div class="scroll"><table id="{tid}" class="sortable gallery"><thead><tr><th>Render</th>
+<th data-sort="text">Case</th><th data-sort="text">Status</th></tr></thead>
+<tbody>{"".join(rows)}</tbody></table></div>
+</section>""")
+    return f"""
+<h1>Kernel cases</h1>
+<p class="muted">Every case of the kernel corpus's areas that have renders, with its render, what it is and its
+status: {counts["pass"]} pass, {counts["refused"]} are refused as they expect, {counts["failing"]} are known failing
+({total} in all). Generated from the entries in
+<a href="{REPO_URL}/tree/main/crates/solidcore/tests/kernel_cases"><code>crates/solidcore/tests/kernel_cases/</code></a>
+and <a href="{REPO_URL}/blob/main/crates/solidcore/tests/kernel_cases/known_failing.json"><code>known_failing.json</code></a>:
+a case on that list is known failing, with its reason; a case whose <code>expected.outcome</code> is
+<code>refused</code> is refused as expected; any other case passes. A render is
+<code>&lt;area&gt;/&lt;case&gt;.jpg</code> beside the case; a refused or stopped case shows the part as it was before
+the operation.</p>
+{"".join(sections)}
+"""
+
+
 def solids_counts(sol):
     """(total, built, passed) over the primitives."""
     prims = sol.get("primitives", []) if sol else []
@@ -514,6 +613,7 @@ def page(title, body, depth, nav, head_sha, head_date, description="", path="", 
     up = "../" * depth
     links = [("index.html", "Overview", "overview"), ("units/index.html", "Units", "units"),
              ("graph.html", "Graph", "graph"), ("solids.html", "Solids", "solids"),
+             ("cases.html", "Cases", "cases"),
              ("issues.html", "Upstream issues", "issues"), ("ssi.html", "SSI corpus", "ssi")]
     extra_js = "".join(f'\n<script src="{up}assets/{js}"></script>' for js in scripts)
     navhtml = "".join(
@@ -811,6 +911,7 @@ def build(out):
     reports = load_reports()
     solids = load_solids()
     ssi = json.loads((ROOT / "reports/ssi-corpus.json").read_text())
+    gallery = load_gallery()
     intro_md, issues = parse_issues()
     points, area_points, unit_hist = aggregate(timeline())
     tl0, tl1 = (points[0][0], points[-1][0]) if points else (0, 0)
@@ -942,6 +1043,7 @@ Rust and C++ are compared where the Rust path is ported: {par.get('compared', 0)
 <li><a href="units/index.html">All {len(units)} units</a>, with difftest results and blockers.</li>
 <li><a href="graph.html">Dependency graph</a>: what is ready to claim and what blocks the most.</li>
 <li><a href="solids.html">Solids</a>: {f"{s_built}/{s_total} primitives build, {s_passed}/{s_total} pass" if solids else "no data yet"}, and what blocks each.</li>
+<li><a href="cases.html">Kernel cases</a>: {sum(len(cs) for cs in gallery.values())} cases of the kernel corpus with their renders and status.</li>
 <li><a href="issues.html">{len(issues)} upstream issues</a> found while porting.</li>
 <li><a href="{VIEWER_URL}">Model viewer</a>: the upstream test models rendered by SMLib and by solidcore, side by side.</li>
 <li><a href="{REPO_URL}">Repository</a>: <a href="{REPO_URL}/blob/main/AGENTS.md">how to port a unit</a>,
@@ -1164,6 +1266,16 @@ counts). Click a column heading to sort.</p>
     write("solids.html", P("Solids · solidcore", solids_body(solids), 0, "solids", path="solids.html",
                            description="Which solids solidcore builds in pure Rust, and what blocks the rest."))
 
+    # ---- kernel case gallery
+    for area, cases in gallery.items():
+        for c in cases:
+            if c["image"]:
+                dst = out / "cases" / area / f'{c["case"]}.jpg'
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(c["image"], dst)
+    write("cases.html", P("Kernel cases · solidcore", gallery_body(gallery), 0, "cases", path="cases.html",
+                          description="Every kernel case with a render, and whether it passes, is refused as expected or is known failing."))
+
     # ---- issues
     sc = collections.Counter(e["series"] for e in issues)
     cc = collections.Counter(e["confirmed"] for e in issues)
@@ -1257,7 +1369,7 @@ the C++ result's.</p>
 <tbody>{''.join(crow)}</tbody></table></div>
 """
     write("ssi.html", P("SSI corpus · solidcore", body, 0, "ssi", path="ssi.html"))
-    return {"units": len(units), "areas": len(present), "issues": len(issues), "ssi": len(cases),
+    return {"units": len(units), "areas": len(present), "issues": len(issues), "ssi": len(cases), "cases": sum(len(cs) for cs in gallery.values()),
             "solids": "{1}/{0} build, {2}/{0} pass".format(*solids_counts(solids)) if solids else "no data",
             "timeline": len(points),
             "seconds": time.time() - t_start}
@@ -1291,7 +1403,7 @@ def main():
     ap.add_argument("--out", default=str(ROOT / "bin/site"))
     a = ap.parse_args()
     r = build(pathlib.Path(a.out).resolve())
-    print(f"site: {r['units']} unit pages, {r['areas']} module pages, {r['issues']} issues, {r['ssi']} SSI cases, solids {r['solids']}, "
+    print(f"site: {r['units']} unit pages, {r['areas']} module pages, {r['issues']} issues, {r['ssi']} SSI cases, {r['cases']} kernel cases, solids {r['solids']}, "
           f"{r['timeline']} timeline points -> {a.out} ({r['seconds']:.1f}s)")
 
 

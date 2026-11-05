@@ -47,6 +47,7 @@
     "what": "as report-fillet-curvature-three-edges-at-bar-corner, with the sketch solver's residues of the reported design; reported from the app (2026-10-30, test-peg part)"
   },
   "expressible": false,
+  "gallery_note": "the G2 corner patch meets the order-2 section's rounds only G1 at one face seam (its volume holds); the corner step rebuilds the patch",
   "operation_expressible": true,
   "outcome": {
     "ran": true,

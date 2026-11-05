@@ -134,6 +134,7 @@
     "what": "the front and right of the top rim edges of a sloped basin with a 1 mm front rim rounded R4, mitred at the rim's corners: past the thin rim the front round runs over the slab's front face and is cut from the slab"
   },
   "expressible": false,
+  "gallery_note": "builds to the analytic volume (rel 6e-9), but the continuity check (g1 at every blend seam) takes in the mitre's creases, G0 by the mitre ruling: the case's continuity seams need the owner's word",
   "operation_expressible": true,
   "outcome": {
     "ran": true,

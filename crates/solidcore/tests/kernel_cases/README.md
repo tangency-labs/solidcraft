@@ -31,6 +31,7 @@ Each case runs as the rig runs it, with the kernel's operations traced at the bo
 
 - `<area>/<case>.json`: one entry. A ladder case's area is `ladder/<tier>`.
 - `<area>/<case>.bodies.json.gz`: the entry's operand records, `{"b<n>": record}`, gzip.
+- `<area>/<case>.jpg`: the case's render, where it has one: the site's case gallery shows it.
 - `fixes.json`: the `UpstreamFixes` flags turned on, the same for every entry (SolidCraft's `fixes()`).
 - `manifest.json`: the counts per area and every case that isn't expressible, with its reasons.
 - `known_failing.json`: the kernel cases that fail today, the one list: `case` (`<area>/<case>`), `issue` and `reason`. Seeded from the entries' `rig.known_failing`; an entry whose `issue` is `to file` has none yet.
@@ -49,6 +50,7 @@ Each case runs as the rig runs it, with the kernel's operations traced at the bo
 | `expected` | SolidCraft's `expected.json`, unchanged (see its README for each field). |
 | `rig` | SolidCraft's result at the pin: `status`, `error`, `refused_with`, `measured` (body count, merged face, edge and vertex counts, volume, area) and `known_failing`, the case's line in its area's known-failing list. |
 | `golden` | A ladder case's golden status and counts (never its time). |
+| `gallery_note` | Optional: what the case gallery (the site's `cases.html`) says beyond `what` and the case's status, such as why it passes, how its round ends or what its failure means. Nothing reads it but the site. |
 | `operation_expressible` | The kernel alone accounts for the result: the last traced operation failed, or every final body is an operation's output or an operand. |
 | `expressible` | That, and every value graded is the kernel's. |
 | `why_not` | Why the operation isn't the kernel's alone. |

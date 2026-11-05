@@ -13,6 +13,7 @@
     "what": "the 5 slant edges of a 5-sided pyramid filleted 2 as a curvature-continuous (G2) fillet: a convex corner of 5 edges at the apex"
   },
   "expressible": false,
+  "gallery_note": "the default setback is shorter than where the rounds' contact lines meet (3.5056 mm from the apex); the corner should take a setback that works",
   "operation_expressible": false,
   "outcome": {
     "engine_error": "step 12 (solid.fillet): invalid input: the setback must be more than 3.5056 mm at the corner (-0.000, 0.000, 30.000): the rounds' contact lines meet 3.5056 mm from it along its edges, and the corner's patch starts past that",

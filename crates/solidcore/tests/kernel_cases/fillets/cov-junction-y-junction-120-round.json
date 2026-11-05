@@ -198,6 +198,7 @@
     "what": "three pipes R4 at 120 degrees in a plane, their intersection edges rounded 1"
   },
   "expressible": false,
+  "gallery_note": "a three-edge concave corner",
   "operation_expressible": true,
   "outcome": {
     "engine_error": "step 4 (solid.fillet): not supported yet: the fillet is larger than the faces beside its edges allow (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",

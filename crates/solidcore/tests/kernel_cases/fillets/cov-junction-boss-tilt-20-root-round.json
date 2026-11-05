@@ -114,6 +114,7 @@
     "what": "cylinder R6 tilted 20 degrees joined into a plate, its root edge rounded 1.5"
   },
   "expressible": false,
+  "gallery_note": "it failed the same way before the blend rework",
   "operation_expressible": true,
   "outcome": {
     "engine_error": "step 3 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
