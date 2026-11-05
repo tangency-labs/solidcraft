@@ -1125,7 +1125,9 @@ fn repair_body(s: &mut Session, p: &Value) -> Result<Value> {
     use solidcraft_doc::expr::Kind;
     use solidcraft_kernel::{Continuity, SurfaceKind};
     let cmd = "body.repair";
-    let name = str_(p, "body").filter(|b| !b.trim().is_empty()).ok_or_else(|| bad(cmd, "`body` must name the part to repair"))?.to_string();
+    let name = str_(p, "body").filter(|b| !b.trim().is_empty()).ok_or_else(|| bad(cmd, "`body` must name the part to repair"))?;
+    // A placed copy's name means the body it shows (#9740); the repair goes on that body.
+    let name = s.own_body_name(name).ok_or_else(|| bad(cmd, format!("no body `{name}`")))?;
     let state = s.model.state();
     let source = state.body(&name).ok_or_else(|| bad(cmd, format!("no body `{name}`")))?;
     if source.body.is_mesh() {
@@ -1476,6 +1478,23 @@ mod tests {
         run(&mut s, "edit.undo", json!({}));
         let back = world(&s);
         assert!(back.iter().any(|n| n == "KB") && back.iter().any(|n| n == "KB (K:2)"), "{back:?}");
+    }
+
+    /// Repair takes a placed copy's name (`KB (K:2)`) for the body it shows, as Rename does.
+    #[test]
+    fn repair_part_takes_a_placed_copys_name() {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "K"}));
+        run(&mut s, "solid.box", json!({"body_name": "KB", "length": 10, "width": 10, "height": 10}));
+        run(&mut s, "surface.unstitch", json!({"body": "KB", "faces": [[5, 5, 10]]}));
+        run(&mut s, "occurrence.copy", json!({"component": "K", "translate": [30, 0, 0]}));
+        assert!(s.model.state().body("KB").is_some_and(|b| b.body.is_surface()));
+        let features = s.doc.features.len();
+        run(&mut s, "body.repair", json!({"body": "KB (K:2)", "patch_holes": true}));
+        assert_eq!(s.doc.features.len(), features + 1);
+        assert!(s.model.state().body("KB").is_some_and(|b| !b.body.is_surface()), "the body both placements show is closed");
+        let err = s.execute("body.repair", &json!({"body": "KB (K:9)"})).unwrap_err().to_string();
+        assert!(err.contains("no body `KB (K:9)`"), "{err}");
     }
 
     #[test]

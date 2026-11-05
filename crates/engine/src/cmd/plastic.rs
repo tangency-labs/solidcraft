@@ -125,10 +125,20 @@ fn assign_rule(s: &mut Session, p: &Value) -> Result<Value> {
     if bodies.is_empty() || bodies.len() > 10_000 {
         return Err(bad(cmd, "`bodies` must list bodies"));
     }
+    // A placed copy's name means the body it shows (#9740); the rule is kept by that body's own
+    // name. The placed bodies are named once for the whole list, not once per name.
     let st = s.model.state();
-    if let Some(b) = bodies.iter().find(|b| st.body(b).is_none()) {
-        return Err(bad(cmd, format!("no body `{b}`")));
-    }
+    let mut frames = None;
+    let bodies = bodies
+        .iter()
+        .map(|b| {
+            if st.body(b).is_some() {
+                return Ok(b.clone());
+            }
+            let frames = frames.get_or_insert_with(|| s.body_frames());
+            frames.iter().find(|(world, ..)| world == b).map(|(_, own, _)| own.clone()).ok_or_else(|| bad(cmd, format!("no body `{b}`")))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let rule = str_(p, "rule").map(str::trim).unwrap_or_default().to_string();
     if !rule.is_empty() && s.doc.plastic_rule(&rule).is_none() {
         return Err(bad(cmd, format!("no plastic rule `{rule}` (plastic.rules lists them)")));
@@ -294,6 +304,22 @@ mod tests {
 
     fn rel(a: f64, b: f64) -> f64 {
         (a - b).abs() / b.abs().max(1e-12)
+    }
+
+    /// A placed copy's body name (`KB (K:2)`, as inspect.measure lists it) means the body it
+    /// shows: the rule goes on that body, under its own name, for every placement.
+    #[test]
+    fn a_rule_assigned_by_a_placed_copys_name_goes_on_the_body_it_shows() {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "K"}));
+        run(&mut s, "solid.box", json!({"body_name": "KB", "length": 10, "width": 10, "height": 10}));
+        run(&mut s, "occurrence.copy", json!({"component": "K", "translate": [30, 0, 0]}));
+        run(&mut s, "plastic.manage_rules", json!({"name": "Thin", "thickness": "1.2 mm"}));
+        let r = run(&mut s, "plastic.assign_rule", json!({"bodies": ["KB (K:2)"], "rule": "Thin"}));
+        assert_eq!(r["bodies"], json!(["KB"]), "{r}");
+        assert_eq!(s.doc.plastic.assigned.get("KB").map(String::as_str), Some("Thin"));
+        let err = s.execute("plastic.assign_rule", &json!({"bodies": ["KB (K:9)"], "rule": "Thin"})).unwrap_err().to_string();
+        assert!(err.contains("no body `KB (K:9)`"), "{err}");
     }
 
     #[test]
