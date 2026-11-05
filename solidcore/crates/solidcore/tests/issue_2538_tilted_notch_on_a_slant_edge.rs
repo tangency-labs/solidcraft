@@ -437,17 +437,17 @@ fn the_mirrored_notch_leaves_the_same_solid() {
 /// sketch origin to +8.5134e-06 mm at the upper cap, so the seam crosses the edge where
 /// the cylinder meets the slanted face instead of lying on it.
 ///
-/// That puts the whole seam in the band between `has_near_misses`'s threshold
+/// That puts part of the seam in the band between `has_near_misses`'s threshold
 /// (`EFF_ZERO * 1000` = 1e-09 mm, `intersect/curve_class/p7.rs`) and the bodies' 2e-05
 /// tolerance, where the seam still classifies as coincident with that edge but not
 /// exactly on it. Face test 36 fires, and at this gap the merge also leaves a ninth,
 /// sliver face and an edge whose radial angles do not increase, so the result is no
 /// longer a closed solid.
 ///
-/// What must happen: the same one closed solid of 8 faces the exact plane gives, of
-/// 641498.913182 mm3 (the closed form plus the 0.056814 mm3 the offset plane adds to
-/// the prism, derived in the finding). This test holds today's answer instead, so that
-/// a fix shows up as this test failing.
+/// The lower gap exceeds intersection tolerance, so this is a partial-coincidence
+/// case. It stays pinned as known failing while the wholly coincident rows below
+/// are repaired. The corrected closed form, including the first-order notch change,
+/// is approximately 641498.90887433 mm3 (see `perturbed_expected_volume` below).
 #[test]
 fn the_repros_rounded_slant_plane_leaves_a_sliver_near_the_seam() {
     let mut k = Kernel::default();
@@ -482,4 +482,479 @@ fn the_repros_rounded_slant_plane_leaves_a_sliver_near_the_seam() {
         names.contains(&"SmEdge#9".to_owned()),
         "the sliver's edge, test 9: {names:?}"
     );
+}
+
+/// The retained side is normal · (point - origin) <= 0.
+#[derive(Clone, Copy)]
+struct SlantPlane {
+    origin: Point3,
+    normal: Vec3,
+}
+
+fn perturbed_slant(tilt: f64, shift: f64) -> SlantPlane {
+    let n = slant_normal(false);
+    let (s, c) = tilt.sin_cos();
+    // Right-handed rotation about world y through the sketch origin.
+    let normal = Vec3::new(c * n.x + s * n.z, n.y, -s * n.x + c * n.z);
+    let p = Axis2Placement::new(axis_point(false) + normal * shift, normal, seam(false));
+    SlantPlane {
+        origin: p.origin(),
+        normal: p.x_axis(),
+    }
+}
+
+fn repro_slant() -> SlantPlane {
+    let cols = rot_cols();
+    let p = Axis2Placement::new(Point3::new(MOVE[0], MOVE[1], MOVE[2]), cols[0], cols[1]);
+    let normal = p.z_axis();
+    SlantPlane {
+        origin: p.origin() - normal * (HALF_SPACE / 2.0),
+        normal,
+    }
+}
+
+fn perturbed_half_space(k: &mut Kernel, plane: SlantPlane) -> Brep {
+    let half = HALF_SPACE / 2.0;
+    let mut b = api::create_box(
+        k,
+        Point3::new(0.0, -half, -half),
+        HALF_SPACE,
+        HALF_SPACE,
+        HALF_SPACE,
+    )
+    .unwrap();
+    let p = Axis2Placement::new(plane.origin, plane.normal, seam(false));
+    solidcore::topology::brep::p5::transform(k, &mut b, &p, None, false).unwrap();
+    b
+}
+
+/// [constant, coefficient of p, coefficient of q] in the notch frame.
+type AxialBound = [f64; 3];
+/// [coefficient of p, coefficient of q, constant], retained side >= 0.
+type HalfPlane = [f64; 3];
+
+/// Exact affine-plane volume, including finite tool caps and the box's z planes.
+///
+/// Write X=O+p*n0+q*seam+s*axis. The slant is A*p+B*q+C*s+D<=0, from its
+/// actual normal. The prism is the affine x(y,z) integral over the yz rectangle.
+/// In the cylinder p²+q²<=R², q>=0 and
+/// max(lo,lo+k*p)<=s<=min(hi,hi+k*p), k=sin(t)/cos(t). The slant adds the
+/// upper bound -(A*p+B*q+D)/C when C>0, or a lower bound when C<0.
+///
+/// For B=0, the unclipped section at s has boundary delta=-(C*s+D)/A:
+///
+///     integral(-R .. delta, sqrt(R²-p²) dp)
+///     = pi*R²/4 + (delta*sqrt(R²-delta²)+R²*asin(delta/R))/2.
+///
+/// Its derivative at zero is R=8, so the notch changes to first order.
+/// Integrating an infinite cylinder alone omits the original 512*k/3 cap ungula.
+///
+/// We partition the half disc by which affine upper/lower bounds are active.
+/// Each axial length is a+b*p+c*q; Green's theorem integrates it using exact
+/// area and first moments of straight segments and circle arcs. This includes
+/// the rounded repro's nonzero B, without discarding a small normal component.
+///
+/// The quadrature test independently integrates in p=R*sin(phi) with Simpson,
+/// using trapezoids for the piecewise-linear q sections. Every row is checked
+/// to 1e-7 mm³ independently of the kernel's mass integrator. The exact design
+/// is 641498.8563683027; the rounded repro is approximately 641498.90887433,
+/// replacing the earlier prism-only figure 641498.913182.
+fn perturbed_expected_volume(plane: SlantPlane) -> f64 {
+    let n = plane.normal;
+    let y = BOX_LO.y + BOX_SIZE.1 / 2.0;
+    let z = (BOT_Z + TOP_Z) / 2.0;
+    let x = plane.origin.x - n.y / n.x * (y - plane.origin.y) - n.z / n.x * (z - plane.origin.z);
+    let prism = BOX_SIZE.1 * BOX_SIZE.2 * (x - BOX_LO.x);
+    let [a, b, c, d] = slant_coefficients(plane);
+    let (s, co) = axis_sin_cos();
+    let (lo, hi) = (axial_at_z(BOT_Z), axial_at_z(TOP_Z));
+    let mut lower: Vec<AxialBound> = vec![[lo, 0.0, 0.0], [lo, s / co, 0.0]];
+    let mut upper: Vec<AxialBound> = vec![[hi, 0.0, 0.0], [hi, s / co, 0.0]];
+    if c > 0.0 {
+        upper.push([-d / c, -a / c, -b / c]);
+    } else if c < 0.0 {
+        lower.push([-d / c, -a / c, -b / c]);
+    }
+    let mut notch = 0.0;
+    for (li, l) in lower.iter().enumerate() {
+        for (ui, u) in upper.iter().enumerate() {
+            let h = [u[0] - l[0], u[1] - l[1], u[2] - l[2]];
+            let mut cuts = vec![[0.0, 1.0, 0.0], [h[1], h[2], h[0]]];
+            for (i, v) in lower.iter().enumerate() {
+                if i != li {
+                    cuts.push([l[1] - v[1], l[2] - v[2], l[0] - v[0]]);
+                }
+            }
+            for (i, v) in upper.iter().enumerate() {
+                if i != ui {
+                    cuts.push([v[1] - u[1], v[2] - u[2], v[0] - u[0]]);
+                }
+            }
+            if c == 0.0 {
+                cuts.push([-a, -b, -d]);
+            }
+            let m = clipped_disc_moments(&cuts);
+            notch += h[0] * m[0] + h[1] * m[1] + h[2] * m[2];
+        }
+    }
+    prism - notch
+}
+
+fn slant_coefficients(plane: SlantPlane) -> [f64; 4] {
+    [
+        plane.normal.dot(slant_normal(false)),
+        plane.normal.dot(seam(false)),
+        plane.normal.dot(axis(false)),
+        plane.normal.dot(axis_point(false) - plane.origin),
+    ]
+}
+
+/// [area, integral(p), integral(q)] of a disc clipped by linear half planes.
+/// Straight boundaries have the retained side on the left, arcs run CCW.
+/// Coincident parallel bounds contribute only once.
+fn clipped_disc_moments(input: &[HalfPlane]) -> [f64; 3] {
+    let mut cuts: Vec<HalfPlane> = Vec::new();
+    for &[a, b, c] in input {
+        let length = a.hypot(b);
+        if length == 0.0 {
+            if c < 0.0 {
+                return [0.0; 3];
+            }
+            continue;
+        }
+        let cut = [a / length, b / length, c / length];
+        if let Some(old) = cuts.iter_mut().find(|h| h[0] == cut[0] && h[1] == cut[1]) {
+            old[2] = old[2].min(cut[2]);
+        } else {
+            cuts.push(cut);
+        }
+    }
+    let mut result = [0.0; 3];
+    let mut angles = vec![0.0, 2.0 * PI];
+    for &[a, b, c] in &cuts {
+        if c.abs() > R {
+            continue;
+        }
+        let base = [-a * c, -b * c];
+        let tangent = [b, -a];
+        let radius = (R * R - c * c).max(0.0).sqrt();
+        let (mut lo, mut hi) = (-radius, radius);
+        for &[aa, bb, cc] in &cuts {
+            if [aa, bb, cc] == [a, b, c] {
+                continue;
+            }
+            let value = aa * base[0] + bb * base[1] + cc;
+            let slope = aa * tangent[0] + bb * tangent[1];
+            if slope > 0.0 {
+                lo = lo.max(-value / slope);
+            } else if slope < 0.0 {
+                hi = hi.min(-value / slope);
+            } else if value < 0.0 {
+                lo = 1.0;
+                hi = 0.0;
+            }
+        }
+        if hi > lo {
+            let p = [base[0] + lo * tangent[0], base[1] + lo * tangent[1]];
+            let q = [base[0] + hi * tangent[0], base[1] + hi * tangent[1]];
+            result[0] += (p[0] * q[1] - p[1] * q[0]) / 2.0;
+            result[1] += (q[1] - p[1]) * (p[0] * p[0] + p[0] * q[0] + q[0] * q[0]) / 6.0;
+            result[2] -= (q[0] - p[0]) * (p[1] * p[1] + p[1] * q[1] + q[1] * q[1]) / 6.0;
+        }
+        let center = b.atan2(a);
+        let angle = (-c / R).acos();
+        angles.extend([
+            (center - angle).rem_euclid(2.0 * PI),
+            (center + angle).rem_euclid(2.0 * PI),
+        ]);
+    }
+    angles.sort_by(f64::total_cmp);
+    for pair in angles.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let mid = (a + b) / 2.0;
+        if !cuts
+            .iter()
+            .all(|h| R * (h[0] * mid.cos() + h[1] * mid.sin()) + h[2] >= 0.0)
+        {
+            continue;
+        }
+        // Stable differences of sin - sin³/3 near the top of the circle.
+        let ds = 2.0 * mid.cos() * ((b - a) / 2.0).sin();
+        let dc = -2.0 * mid.sin() * ((b - a) / 2.0).sin();
+        result[0] += R * R * (b - a) / 2.0;
+        result[1] +=
+            R.powi(3) / 2.0 * ds * ((a.cos().powi(2) + b.cos().powi(2)) / 2.0 + ds * ds / 6.0);
+        result[2] -=
+            R.powi(3) / 2.0 * dc * ((a.sin().powi(2) + b.sin().powi(2)) / 2.0 + dc * dc / 6.0);
+    }
+    result
+}
+
+/// Independent quadrature: exact piecewise-linear q integration, Simpson in phi.
+fn perturbed_notch_quadrature(plane: SlantPlane) -> f64 {
+    let [a, b, c, d] = slant_coefficients(plane);
+    let (s, co) = axis_sin_cos();
+    let k = s / co;
+    let (lo, hi) = (axial_at_z(BOT_Z), axial_at_z(TOP_Z));
+    let mut breaks = vec![-PI / 2.0, 0.0, PI / 2.0];
+    for bound in [[lo, 0.0], [lo, k], [hi, 0.0], [hi, k]] {
+        let x = a + c * bound[1];
+        let z = d + c * bound[0];
+        if x != 0.0 && (-z / x).abs() < R {
+            breaks.push((-z / x / R).asin());
+        }
+        let length = x.hypot(b);
+        if length > 0.0 && z.abs() <= R * length {
+            let (nx, ny, distance) = (x / length, b / length, -z / length);
+            let radius = (R * R - distance * distance).max(0.0).sqrt();
+            for sign in [-1.0, 1.0] {
+                let p = nx * distance + sign * ny * radius;
+                let q = ny * distance - sign * nx * radius;
+                if q >= 0.0 {
+                    breaks.push((p / R).clamp(-1.0, 1.0).asin());
+                }
+            }
+        }
+    }
+    breaks.sort_by(f64::total_cmp);
+    let mut volume = 0.0;
+    for pair in breaks.windows(2) {
+        let (left, right) = (pair[0], pair[1]);
+        let ignore_plane = c == 0.0 && b == 0.0;
+        if ignore_plane && a * (R * ((left + right) / 2.0).sin()) + d > 0.0 {
+            continue;
+        }
+        let value = |phi: f64| {
+            let p = R * phi.sin();
+            let qmax = (R * R - p * p).max(0.0).sqrt();
+            let lower = lo + (k * p).max(0.0);
+            let upper = hi + (k * p).min(0.0);
+            let height = |q: f64| {
+                if ignore_plane {
+                    return upper - lower;
+                }
+                let offset = a * p + b * q + d;
+                if c > 0.0 {
+                    (upper.min(-offset / c) - lower).max(0.0)
+                } else if c < 0.0 {
+                    (upper - lower.max(-offset / c)).max(0.0)
+                } else if offset <= 0.0 {
+                    upper - lower
+                } else {
+                    0.0
+                }
+            };
+            let mut qs = vec![0.0, qmax];
+            if b != 0.0 {
+                for z in [lower, upper] {
+                    let q = -(a * p + d + c * z) / b;
+                    if q > 0.0 && q < qmax {
+                        qs.push(q);
+                    }
+                }
+            }
+            qs.sort_by(f64::total_cmp);
+            let section: f64 = qs
+                .windows(2)
+                .map(|v| (height(v[0]) + height(v[1])) * (v[1] - v[0]) / 2.0)
+                .sum();
+            section * R * phi.cos()
+        };
+        let steps = 512;
+        let width = (right - left) / f64::from(steps);
+        let mut sum = value(left) + value(right);
+        for i in 1..steps {
+            let weight = if i % 2 == 0 { 2.0 } else { 4.0 };
+            sum += weight * value(left + f64::from(i) * width);
+        }
+        volume += sum * width / 3.0;
+    }
+    volume
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SeamBand {
+    InBand,
+    Partial,
+    Past,
+}
+
+fn seam_band(plane: SlantPlane, tolerance: f64) -> (SeamBand, [f64; 2]) {
+    let gaps = [BOT_Z, TOP_Z].map(|z| {
+        let p = axis_point(false) + seam(false) * R + axis(false) * axial_at_z(z);
+        plane.normal.dot(p - plane.origin)
+    });
+    let (a, b) = (gaps[0].abs(), gaps[1].abs());
+    let band = if a.max(b) <= tolerance {
+        SeamBand::InBand
+    }
+    // Opposite signs with both caps far outside the band describe two
+    // separate edges crossing once, rather than wholly coincident edges.
+    else if a.min(b) > tolerance {
+        SeamBand::Past
+    } else {
+        SeamBand::Partial
+    };
+    (band, gaps)
+}
+
+struct PerturbedResult {
+    faces: usize,
+    solid: bool,
+    failures: Vec<String>,
+    volume: f64,
+    expected: f64,
+    band: SeamBand,
+}
+
+fn measure_perturbed(tilt: f64, shift: f64, repro: bool) -> PerturbedResult {
+    let mut k = Kernel::default();
+    k.fixes = UpstreamFixes::all();
+    let plane = if repro {
+        repro_slant()
+    } else {
+        perturbed_slant(tilt, shift)
+    };
+    let a = the_box(&mut k);
+    let hs = if repro {
+        the_repros_half_space(&mut k)
+    } else {
+        perturbed_half_space(&mut k, plane)
+    };
+    let tool = the_tool(&mut k, Tool::Primitive, Past(0.0), false);
+    let tolerance =
+        solidcore::geom::tol::xsect_tol_3d_from_zones(&k, hs.tolerance(), tool.tolerance());
+    let (band, gaps) = seam_band(plane, tolerance);
+    let clipped = boolean_difference(&mut k, a, hs).expect("half space cut");
+    let mut result = boolean_difference(&mut k, clipped, tool).expect("notch cut");
+    solidcore::topology::integrity::check(&result).unwrap();
+    let faces = solidcore::topology::brep::p1::faces(&result, None)
+        .unwrap()
+        .len();
+    let solid = solidcore::topology::brep::p2::is_manifold_solid(&result).unwrap();
+    let check = check_brep(&mut k, &mut result, CheckLevel::Level2).unwrap();
+    let failures: Vec<String> = check
+        .reports
+        .reports()
+        .iter()
+        .filter(|r| !r.ok)
+        .map(|r| {
+            format!(
+                "{}#{}:{}",
+                r.owner_type_string.unwrap_or("?"),
+                r.test_index,
+                r.name
+            )
+        })
+        .collect();
+    let store = AttributeStore::new();
+    let key_of = |_| ObjectKey(0);
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &key_of,
+    };
+    let volume = brep_volume(&k, &mut result, 1e-7, &attrs).unwrap();
+    let expected = perturbed_expected_volume(plane);
+    println!("ROW tilt={tilt:e} shift={shift:e} repro={repro} band={band:?} gaps={gaps:?} tol={tolerance:e} faces={faces} manifold={solid} Level2={failures:?} volume={volume:.12} expected={expected:.12} delta={:.12e}",volume-expected);
+    PerturbedResult {
+        faces,
+        solid,
+        failures,
+        volume,
+        expected,
+        band,
+    }
+}
+
+fn assert_perturbed(tilt: f64, shift: f64, expected_band: SeamBand, faces: usize) {
+    let result = measure_perturbed(tilt, shift, false);
+    assert_eq!(
+        result.band, expected_band,
+        "row classification follows the cap gaps"
+    );
+    assert_eq!(result.faces, faces);
+    assert!(result.solid, "closed manifold solid");
+    assert!(result.failures.is_empty(), "{:?}", result.failures);
+    assert!((result.volume - result.expected).abs() / result.expected.abs() <= VOLUME_REL_TOL);
+}
+
+macro_rules! perturbed_case {
+    ($name:ident,$tilt:expr,$shift:expr,$band:ident,$faces:expr) => {
+        #[test]
+        fn $name() {
+            assert_perturbed($tilt, $shift, SeamBand::$band, $faces);
+        }
+    };
+}
+perturbed_case!(in_band_tilt_3e11, 3e-11, 0.0, InBand, 8);
+perturbed_case!(in_band_tilt_1e10, 1e-10, 0.0, InBand, 8);
+perturbed_case!(in_band_tilt_1e9, 1e-9, 0.0, InBand, 8);
+perturbed_case!(in_band_tilt_minus_1e7, -1e-7, 0.0, InBand, 8);
+perturbed_case!(in_band_tilt_minus_2e7, -2e-7, 0.0, InBand, 8);
+perturbed_case!(in_band_tilt_minus_3e7, -3e-7, 0.0, InBand, 8);
+perturbed_case!(in_band_shift_1e9, 0.0, 1e-9, InBand, 8);
+perturbed_case!(in_band_shift_3e9, 0.0, 3e-9, InBand, 8);
+perturbed_case!(in_band_shift_1e8, 0.0, 1e-8, InBand, 8);
+perturbed_case!(past_tilt_minus_1e5, -1e-5, 0.0, Past, 9);
+perturbed_case!(past_tilt_minus_2e5, -2e-5, 0.0, Past, 9);
+
+fn perturbation_rows() -> [(f64, f64, bool); 16] {
+    [
+        (0.0, 0.0, false),
+        (3e-11, 0.0, false),
+        (1e-10, 0.0, false),
+        (1e-9, 0.0, false),
+        (-1e-7, 0.0, false),
+        (-2e-7, 0.0, false),
+        (-3e-7, 0.0, false),
+        (-4e-7, 0.0, false),
+        (-4.46e-7, 0.0, false),
+        (-1e-6, 0.0, false),
+        (-1e-5, 0.0, false),
+        (-2e-5, 0.0, false),
+        (0.0, 1e-9, false),
+        (0.0, 3e-9, false),
+        (0.0, 1e-8, false),
+        (0.0, 0.0, true),
+    ]
+}
+
+#[test]
+fn perturbed_closed_forms_agree_with_quadrature() {
+    assert!(
+        (perturbed_expected_volume(perturbed_slant(0.0, 0.0)) - expected_volume(Past(0.0))).abs()
+            < 1e-7
+    );
+    for (tilt, shift, repro) in perturbation_rows() {
+        let plane = if repro {
+            repro_slant()
+        } else {
+            perturbed_slant(tilt, shift)
+        };
+        let n = plane.normal;
+        let y = BOX_LO.y + BOX_SIZE.1 / 2.0;
+        let z = (BOT_Z + TOP_Z) / 2.0;
+        let prism = BOX_SIZE.1
+            * BOX_SIZE.2
+            * (plane.origin.x
+                - n.y / n.x * (y - plane.origin.y)
+                - n.z / n.x * (z - plane.origin.z)
+                - BOX_LO.x);
+        let closed = perturbed_expected_volume(plane);
+        let quadrature = prism - perturbed_notch_quadrature(plane);
+        println!("FORM tilt={tilt:e} shift={shift:e} repro={repro} ABCD={:?} closed={closed:.12} quadrature={quadrature:.12} delta={:.3e}",slant_coefficients(plane),closed-quadrature);
+        assert!(
+            (closed - quadrature).abs() < 1e-7,
+            "closed form vs independent quadrature"
+        );
+    }
+    assert!((perturbed_expected_volume(repro_slant()) - 641_498.908_874_33).abs() < 1e-7);
+}
+
+#[test]
+fn measure_the_full_perturbation_band() {
+    for (tilt, shift, repro) in perturbation_rows() {
+        let result = measure_perturbed(tilt, shift, repro);
+        assert!((result.volume - result.expected).abs() / result.expected.abs() <= VOLUME_REL_TOL);
+    }
 }
