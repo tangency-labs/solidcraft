@@ -31,6 +31,7 @@ Two columns of checkboxes.
 | Shortcut again switches mode | Checkbox | `Prefs.shortcut_cycles_modes` | `false` | "Off: it starts the tool again." | none | |
 | Clicking the running tool's button ends it | Checkbox | `Prefs.ribbon_click_ends_tool` | `true` | Existing `prefs.ribbon_click_ends_tool_note`: the lit ribbon button ends the tool and restores selection; off restarts it. | none | Retained newer control; immediately after shortcut cycling, before the Project pair. |
 | Project face edges into new sketches | Checkbox | `app.session.auto_project` (session; in the Snapshot) | per session | none | none | Not a `Prefs` field. |
+| Most instances in one sketch pattern | Number field (2 to 20 000) | `Prefs.sketch_pattern_limit`, pushed to every open document's `Session::pattern_limit` | `500` | `prefs.sketch.pattern_limit_note`: counts the original; larger patterns take longer to solve, and very large ones may not solve. | none | New in #7824; not in `PROFILE_KEYS`. The `sketch.pattern_limit` command sets the same value. An existing pattern larger than the limit stays editable up to its own size. |
 | Ask for Project options first | Checkbox | `Prefs.project_options_dialog` | `true` | none | none | |
 
 ## Opening and closing
