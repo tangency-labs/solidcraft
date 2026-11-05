@@ -1,6 +1,7 @@
 use super::*;
 use crate::prelude::*;
 use solidcore_record::brep::*;
+use solidcore_record::Vec3;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 fn segment(a: f64, b: f64) -> Curve2 {
@@ -792,4 +793,30 @@ fn queries_read_a_tube_side_on_its_form() {
     assert!(!q.face_contains(0, Vec3::new(1., 4., 9.), 1e-9), "past the top circle");
     let hit = q.ray(Vec3::new(1., 2., 5.5), Vec3::Y, 1e-9);
     assert!(hit.first().is_some_and(|h| h.1 == 0 && (h.0 - 2.0).abs() < 1e-12), "{hit:?}");
+}
+
+/// The flux of p / 3 out of a tetrahedron is its volume, 1/6, to rounding; a constant added to the
+/// field (as about a far origin) adds nothing, however large the faces' shares grow.
+#[test]
+fn the_flux_of_p_over_3_out_of_a_tetrahedron_is_its_volume() {
+    let b = tetra();
+    let Shell::Faces { faces, .. } = &b.shells[0] else { panic!("faces") };
+    for c in [Vec3::ZERO, Vec3::new(1e3, -2e3, 5e2)] {
+        let mut sum = 0.0;
+        for of in faces {
+            let face = &b.faces[of.face as usize];
+            let s = eval::SurfaceEval::new(&face.surface).unwrap();
+            let loops: Vec<Vec<(&Curve2, bool)>> = face
+                .loops
+                .iter()
+                .map(|l| match l {
+                    Loop::Edges { edges } => edges.iter().map(|e| (&e.pcurve, e.forward)).collect(),
+                    _ => Vec::new(),
+                })
+                .collect();
+            let flux = eval::face_flux(&s, face.domain[1][0], &loops, &|p| (p + c) * (1.0 / 3.0)).unwrap();
+            sum += if of.forward { flux } else { -flux };
+        }
+        assert!((sum - 1.0 / 6.0).abs() < 1e-12 * (1.0 + c.len()), "{c:?}: {sum}");
+    }
 }
