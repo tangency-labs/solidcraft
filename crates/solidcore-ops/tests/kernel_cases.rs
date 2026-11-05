@@ -18,6 +18,8 @@
 //! The corpus's rules: `transform` is a copy, then the copy moved in place; `tagged` changes no
 //! geometry and its history is not graded; picks are record indices, passed to the operations
 //! with the body's record [`Order`] (the one face index convention).
+//! Shell, face offset and thicken copy their inputs before editing, as SolidCraft does.
+//! A copy gets its own entity IDs; an existing pick order follows the kernel's copy map.
 //!
 //! The test is `#[ignore]`d, out of the workspace run: run it with `--ignored`.
 //!
@@ -149,6 +151,29 @@ struct Slot {
     order: Option<Order>,
 }
 
+impl Slot {
+    fn copied(&self) -> Result<Result<Self, String>, Stop> {
+        let copied = match &self.order {
+            Some(order) => self
+                .body
+                .copy_with_order(order)
+                .map(|(body, order)| (body, Some(order))),
+            None => self.body.copy().map(|body| (body, None)),
+        };
+        match copied {
+            Ok((body, order)) => Ok(Ok(Self {
+                body: Arc::new(body),
+                order,
+            })),
+            // Bad replay metadata is not a kernel refusal and must never satisfy one.
+            Err(solidcore_ops::Error::Record(why)) => {
+                Err(Stop::Fail(format!("copied input record order: {why}")))
+            }
+            Err(e) => Ok(Err(e.to_string())),
+        }
+    }
+}
+
 /// Why a case stopped before grading.
 #[derive(Debug)]
 enum Stop {
@@ -198,23 +223,25 @@ fn faces(slot: &mut Slot, pick: &Value) -> Result<(Vec<usize>, Order), Stop> {
 
 /// Runs one traced call: its output, or the operation's error as text.
 fn call(c: &Value, ins: &mut [Slot]) -> Result<Result<Slot, String>, Stop> {
+    call_with_copy(c, ins, Slot::copied)
+}
+
+fn call_with_copy(
+    c: &Value,
+    ins: &mut [Slot],
+    copy: impl Fn(&Slot) -> Result<Result<Slot, String>, Stop>,
+) -> Result<Result<Slot, String>, Stop> {
     let p = &c["params"];
     let bad = |what: &str| Stop::Fail(format!("{}: parameter {what}", c["op"]));
     let op = c["op"].as_str().unwrap();
     let first = || ins.first().cloned().ok_or_else(|| bad("input"));
+    // An internal preparation failure is not a refusal of the traced edit.
+    let copy_for_edit =
+        |s: &Slot| copy(s)?.map_err(|why| Stop::Fail(format!("copy before {op}: {why}")));
     let in_place =
         |slot: Slot, r: solidcore_ops::Result<()>| r.map(|()| slot).map_err(|e| e.to_string());
     Ok(match op {
-        "copy" => {
-            let s = first()?;
-            s.body
-                .copy()
-                .map(|b| Slot {
-                    body: Arc::new(b),
-                    order: s.order,
-                })
-                .map_err(|e| e.to_string())
-        }
+        "copy" => return copy(&first()?),
         "tagged" => Ok(first()?),
         "transform" => {
             let s = first()?;
@@ -223,17 +250,9 @@ fn call(c: &Value, ins: &mut [Slot]) -> Result<Result<Slot, String>, Stop> {
             for (row, v) in matrix.iter_mut().zip(m) {
                 *row = f64s::<4>(v).ok_or_else(|| bad("matrix"))?;
             }
-            match s.body.copy() {
-                Ok(b) => {
-                    let out = Slot {
-                        body: Arc::new(b),
-                        order: s.order,
-                    };
-                    let r = out.body.transform(&matrix);
-                    in_place(out, r)
-                }
-                Err(e) => Err(e.to_string()),
-            }
+            let out = copy_for_edit(&s)?;
+            let r = out.body.transform(&matrix);
+            in_place(out, r)
         }
         "make_sphere" => {
             let center = f64s::<3>(&p["center"]).ok_or_else(|| bad("center"))?;
@@ -246,23 +265,21 @@ fn call(c: &Value, ins: &mut [Slot]) -> Result<Result<Slot, String>, Stop> {
                 .map_err(|e| e.to_string())
         }
         "shell" => {
-            let s = ins.first_mut().ok_or_else(|| bad("input"))?;
-            let (open, order) = faces(s, &p["open_faces"])?;
+            let mut s = copy_for_edit(&first()?)?;
+            let (open, order) = faces(&mut s, &p["open_faces"])?;
             let t = p["thickness"].as_f64().ok_or_else(|| bad("thickness"))?;
-            let s = s.clone();
             let r = offset::shell(&s.body, &order, &open, t);
             in_place(Slot { order: None, ..s }, r)
         }
         "offset_faces" => {
-            let s = ins.first_mut().ok_or_else(|| bad("input"))?;
-            let (picked, order) = faces(s, &p["faces"])?;
+            let mut s = copy_for_edit(&first()?)?;
+            let (picked, order) = faces(&mut s, &p["faces"])?;
             let d = p["distance"].as_f64().ok_or_else(|| bad("distance"))?;
-            let s = s.clone();
             let r = offset::offset_faces(&s.body, &order, &picked, d);
             in_place(Slot { order: None, ..s }, r)
         }
         "thicken" => {
-            let s = first()?;
+            let s = copy_for_edit(&first()?)?;
             let t = p["thickness"].as_f64().ok_or_else(|| bad("thickness"))?;
             let sym = p["symmetric"].as_bool().ok_or_else(|| bad("symmetric"))?;
             let r = offset::thicken(&s.body, t, sym);
@@ -316,6 +333,13 @@ fn within(got: f64, want: f64, tol: &Value) -> bool {
 /// Runs a case's calls and grades the result against `rig` (or, for a hand-written case
 /// without one, `expected`): `Ok(deviation)` for a match.
 fn run_case(entry: &Path, e: &Value) -> Result<Option<f64>, Stop> {
+    run_case_with_records(e, || records(entry, e))
+}
+
+fn run_case_with_records(
+    e: &Value,
+    records: impl FnOnce() -> serde_json::Map<String, Value>,
+) -> Result<Option<f64>, Stop> {
     let calls = e["calls"].as_array().unwrap();
     // Check the entire trace before a terminal refusal or an unsupported import can
     // stop replay. A later malformed marker must not turn into an unchecked pass.
@@ -348,7 +372,7 @@ fn run_case(entry: &Path, e: &Value) -> Result<Option<f64>, Stop> {
             Ok(continued)
         })
         .collect::<Result<Vec<_>, Stop>>()?;
-    let recs = records(entry, e);
+    let recs = records();
     let mut bodies: HashMap<String, Slot> = HashMap::new();
     for (name, how) in e["bodies"].as_object().into_iter().flatten() {
         let record: Record = serde_json::from_value(recs[name].clone())
@@ -568,6 +592,213 @@ fn a_terminal_refusal_cannot_hide_later_invalid_markers() {
             matches!(run_case(Path::new("unused.json"), &e), Err(Stop::Fail(why)) if why.contains("continued"))
         );
     }
+}
+
+fn check_discarded_edit(record: Record, op: &str, params: &Value, made: &Value, retained: Value) {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let mut records = serde_json::Map::new();
+    records.insert("input".to_owned(), serde_json::to_value(record).unwrap());
+    let mut e = serde_json::json!({
+        "bodies": {"input": {"trusted": true}},
+        "calls": [{"op": op, "inputs": ["input"], "params": params,
+                   "outputs": ["discarded"]}],
+        "result": [{"made": "discarded"}],
+        "expected": made
+    });
+    e["expected"]["tolerance"] = serde_json::json!({"rel": 1e-9});
+    // First establish that the operation really builds its different, closed-form result.
+    assert!(run_case_with_records(&e, || records.clone())
+        .unwrap()
+        .is_some());
+    // The application can discard that result and keep its original operand instead.
+    e["result"] = serde_json::json!([{"operand": "input"}]);
+    e["expected"] = retained;
+    e["expected"]["tolerance"] = serde_json::json!({"rel": 1e-9});
+    run_case_with_records(&e, || records.clone()).unwrap();
+}
+
+#[test]
+fn a_discarded_shell_preserves_the_retained_box() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let record = solidcore_ops::make_box([0.0; 3], [30.0, 20.0, 10.0])
+        .unwrap()
+        .to_record()
+        .unwrap()
+        .0;
+    check_discarded_edit(
+        record,
+        "shell",
+        &serde_json::json!({"open_faces": {"picked": []}, "thickness": -2.0}),
+        &serde_json::json!({"body_count": 1, "volume_mm3": 6000.0 - 26.0 * 16.0 * 6.0}),
+        serde_json::json!({"body_count": 1, "volume_mm3": 6000.0}),
+    );
+}
+
+#[test]
+fn a_discarded_face_offset_preserves_the_retained_box() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let record = solidcore_ops::make_box([0.0; 3], [30.0, 20.0, 10.0])
+        .unwrap()
+        .to_record()
+        .unwrap()
+        .0;
+    let top = record
+        .faces
+        .iter()
+        .position(|f| matches!(f.surface, solidcore_record::brep::Surface::Plane { origin, .. } if origin[2] == 10.0))
+        .unwrap();
+    check_discarded_edit(
+        record,
+        "offset_faces",
+        &serde_json::json!({"faces": {"picked": [{"index": top}]}, "distance": 2.0}),
+        &serde_json::json!({"body_count": 1, "volume_mm3": 30.0 * 20.0 * 12.0}),
+        serde_json::json!({"body_count": 1, "volume_mm3": 6000.0}),
+    );
+}
+
+#[test]
+fn a_copied_edit_preserves_the_supplied_face_pick_order() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let body = Arc::new(solidcore_ops::make_box([0.0; 3], [30.0, 20.0, 10.0]).unwrap());
+    let (record, mut order) = body.to_record().unwrap();
+    let top = record
+        .faces
+        .iter()
+        .position(|f| matches!(f.surface, solidcore_record::brep::Surface::Plane { origin, .. } if origin[2] == 10.0))
+        .unwrap();
+    let top_id = order.faces[top];
+    // An imported record's index mapping need not be the body's current list order.
+    order.faces.rotate_left(1);
+    let pick = order.faces.iter().position(|&f| f == top_id).unwrap();
+    let mut input = Slot {
+        body: body.clone(),
+        order: Some(order),
+    };
+    for step in [
+        serde_json::json!({"op": "copy"}),
+        serde_json::json!({"op": "transform", "params": {"matrix": [
+            [1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]
+        ]}}),
+    ] {
+        input = call(&step, &mut [input]).unwrap().unwrap();
+    }
+    let out = call(
+        &serde_json::json!({"op": "offset_faces", "params": {
+            "faces": {"picked": [{"index": pick}]}, "distance": 2.0
+        }}),
+        &mut [input],
+    )
+    .unwrap()
+    .unwrap();
+    assert!((out.body.volume(1e-9).unwrap() - 7200.0).abs() <= 7200.0 * 1e-9);
+    let max_z = out
+        .body
+        .to_record()
+        .unwrap()
+        .0
+        .vertices
+        .iter()
+        .map(|v| v.point[2])
+        .fold(f64::NEG_INFINITY, f64::max);
+    assert!((max_z - 12.0).abs() <= 12.0 * 1e-9, "top is at {max_z}");
+    assert!((body.volume(1e-9).unwrap() - 6000.0).abs() <= 6000.0 * 1e-9);
+}
+
+#[test]
+fn a_pre_edit_copy_failure_cannot_count_as_the_edits_refusal() {
+    let input = Slot {
+        body: Arc::new(solidcore_ops::make_box([0.0; 3], [1.0; 3]).unwrap()),
+        order: None,
+    };
+    for op in ["copy", "transform", "shell", "offset_faces", "thicken"] {
+        let step = serde_json::json!({
+            "op": op, "error": "expected edit refusal",
+            "params": {"matrix": [
+                [1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]
+            ]}
+        });
+        // Inject failure at the copy boundary: no edit has been attempted yet.
+        let result = call_with_copy(&step, &mut [input.clone()], |_| {
+            Ok(Err("input copy failed".to_owned()))
+        });
+        match result {
+            Ok(Err(why)) if op == "copy" => assert_eq!(why, "input copy failed"),
+            Err(Stop::Fail(why)) if op != "copy" => {
+                assert!(why.contains("input copy failed"), "{why}");
+            }
+            Err(other) => panic!("{op}: wrong copy failure: {other:?}"),
+            Ok(Err(why)) => panic!("{op}: copy failure became the edit's refusal: {why}"),
+            Ok(Ok(_)) => panic!("{op}: failed copy accepted"),
+        }
+    }
+}
+
+#[test]
+fn an_invalid_copy_order_cannot_count_as_an_expected_refusal() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let body = Arc::new(solidcore_ops::make_box([0.0; 3], [1.0; 3]).unwrap());
+    let (_, mut order) = body.to_record().unwrap();
+    order
+        .faces
+        .push(solidcore::topology::FaceId::from_index(1_000_000));
+    let input = Slot {
+        body,
+        order: Some(order),
+    };
+    for mut step in [
+        serde_json::json!({"op": "copy"}),
+        serde_json::json!({"op": "transform", "params": {"matrix": [
+            [1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]
+        ]}}),
+        serde_json::json!({"op": "shell", "params": {
+            "open_faces": {"picked": []}, "thickness": -0.1
+        }}),
+        serde_json::json!({"op": "offset_faces", "params": {
+            "faces": {"picked": []}, "distance": 0.1
+        }}),
+        serde_json::json!({"op": "thicken", "params": {
+            "thickness": 0.1, "symmetric": false
+        }}),
+    ] {
+        step["error"] = serde_json::json!("expected refusal");
+        match call(&step, &mut [input.clone()]) {
+            Err(Stop::Fail(why)) => assert!(why.contains("record order"), "{why}"),
+            Err(other) => panic!("wrong mapping failure: {other:?}"),
+            Ok(Err(why)) => panic!("mapping error became an operation refusal: {why}"),
+            Ok(Ok(_)) => panic!("invalid mapping was accepted"),
+        }
+    }
+}
+
+#[test]
+fn a_discarded_thicken_preserves_the_retained_sheet() {
+    let mut k = solidcore::Kernel::default();
+    let line = solidcore::curve::line::Line::create_line_segment(
+        3,
+        solidcore::Vec3::ZERO,
+        solidcore::Vec3::new(30.0, 0.0, 0.0),
+        None,
+    )
+    .unwrap();
+    let curve = solidcore::curve::curve::Curve::from(line);
+    let mut sheet = solidcore::sweep::api_brep::create_linear_sweep(
+        &mut k,
+        &[Some(&curve)],
+        solidcore::Vec3::new(0.0, 1.0, 0.0),
+        20.0,
+        false,
+    )
+    .unwrap();
+    let record = solidcore_convert::brep::to_record(&mut k, &mut sheet)
+        .unwrap()
+        .0;
+    check_discarded_edit(
+        record,
+        "thicken",
+        &serde_json::json!({"thickness": 2.0, "symmetric": false}),
+        &serde_json::json!({"body_count": 1, "volume_mm3": 30.0 * 20.0 * 2.0}),
+        serde_json::json!({"body_count": 1, "faces": 1, "edges": 4, "vertices": 4}),
+    );
 }
 
 fn grade(entry: &Path, listed: &BTreeMap<String, Listed>, timeout: Duration) -> Graded {
