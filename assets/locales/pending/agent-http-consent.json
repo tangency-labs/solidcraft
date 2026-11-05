@@ -1,0 +1,42 @@
+{
+  "en": {
+    "ai.http.allow": "Allow insecure HTTP",
+    "ai.http.confirm": "Allow for this endpoint",
+    "ai.http.warning": "The API key and conversation will be sent unencrypted. Anyone with access to the network may read or change them. Use this only on a network you trust."
+  },
+  "ar": {
+    "ai.http.allow": "السماح باتصال HTTP غير آمن",
+    "ai.http.confirm": "السماح لهذه النقطة الطرفية",
+    "ai.http.warning": "سيُرسَل مفتاح API والمحادثة دون تشفير. يمكن لأي شخص لديه وصول إلى الشبكة قراءتهما أو تغييرهما. استخدم هذا الخيار فقط على شبكة تثق بها."
+  },
+  "de": {
+    "ai.http.allow": "Unsicheres HTTP erlauben",
+    "ai.http.confirm": "Für diesen Endpunkt erlauben",
+    "ai.http.warning": "Der API-Schlüssel und die Unterhaltung werden unverschlüsselt gesendet. Jeder mit Zugriff auf das Netzwerk kann sie lesen oder verändern. Verwenden Sie dies nur in einem vertrauenswürdigen Netzwerk."
+  },
+  "he": {
+    "ai.http.allow": "אפשר HTTP לא מאובטח",
+    "ai.http.confirm": "אפשר עבור נקודת קצה זו",
+    "ai.http.warning": "מפתח ה־API והשיחה יישלחו ללא הצפנה. כל מי שיש לו גישה לרשת יכול לקרוא או לשנות אותם. יש להשתמש באפשרות זו רק ברשת מהימנה."
+  },
+  "ja": {
+    "ai.http.allow": "安全でない HTTP を許可",
+    "ai.http.confirm": "このエンドポイントで許可",
+    "ai.http.warning": "API キーと会話は暗号化されずに送信されます。ネットワークにアクセスできる人は、内容を読み取ったり改ざんしたりする可能性があります。信頼できるネットワークでのみ使用してください。"
+  },
+  "ko": {
+    "ai.http.allow": "보안되지 않은 HTTP 허용",
+    "ai.http.confirm": "이 엔드포인트에 허용",
+    "ai.http.warning": "API 키와 대화가 암호화되지 않은 상태로 전송됩니다. 네트워크에 접근할 수 있는 누구나 이를 읽거나 변경할 수 있습니다. 신뢰하는 네트워크에서만 사용하세요."
+  },
+  "vi": {
+    "ai.http.allow": "Cho phép HTTP không bảo mật",
+    "ai.http.confirm": "Cho phép với điểm cuối này",
+    "ai.http.warning": "Khóa API và cuộc trò chuyện sẽ được gửi mà không mã hóa. Bất kỳ ai có quyền truy cập mạng đều có thể đọc hoặc thay đổi chúng. Chỉ sử dụng trên mạng mà bạn tin cậy."
+  },
+  "zh": {
+    "ai.http.allow": "允许不安全的 HTTP",
+    "ai.http.confirm": "允许此端点",
+    "ai.http.warning": "API 密钥和对话将以未加密的方式发送。任何能够访问该网络的人都可能读取或篡改它们。请仅在可信网络上使用。"
+  }
+}
