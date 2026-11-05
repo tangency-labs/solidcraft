@@ -2,11 +2,11 @@
 
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{
     Sel,
     doc::{FeatureKind, PlaneRef},
 };
-use solidcraft_engine::geom::prelude::*;
 
 use crate::scenario::Harness;
 
