@@ -2280,6 +2280,8 @@
   "prefs.mouse": "Souris et pavé tactile",
   "prefs.mouse_heading": "Souris",
   "prefs.mouse_mapping": "Affectation des boutons de la souris",
+  "prefs.move_drag_highlights": "Mettre en évidence ce qui est sous le pointeur pendant que les flèches de Déplacer font glisser un composant",
+  "prefs.move_drag_highlights_tip": "Désactivé : pendant que les flèches de Déplacer font glisser un composant, rien n’est mis en évidence sous le pointeur, ce qui garde les grands assemblages fluides. Avec une coupe ou une analyse affichée, la mise en évidence reste, et une pièce glissée le long de ses liaisons n’en montre jamais.",
   "prefs.navigation": "Navigation",
   "prefs.navigation_note": "Comment la souris, le pavé tactile et la souris 3D déplacent la vue.",
   "prefs.navigator_fit": "Cadrer le modèle après un changement de vue du repère de navigation",

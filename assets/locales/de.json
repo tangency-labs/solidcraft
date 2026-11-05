@@ -2479,6 +2479,8 @@
   "prefs.mouse": "Maus und Trackpad",
   "prefs.mouse_heading": "Maus",
   "prefs.mouse_mapping": "Mausbelegung",
+  "prefs.move_drag_highlights": "Hervorheben, was unter dem Zeiger liegt, während die Pfeile von Verschieben eine Komponente ziehen",
+  "prefs.move_drag_highlights_tip": "Aus: Solange die Pfeile von Verschieben eine Komponente ziehen, wird nichts unter dem Zeiger hervorgehoben; so bleiben große Baugruppen flüssig. Mit einem Schnitt oder einer Analyse wird es trotzdem hervorgehoben, und ein entlang seiner Gelenke gezogenes Teil hebt nie etwas hervor.",
   "prefs.navigation": "Navigation",
   "prefs.navigation.axes_signed": "Achsen",
   "prefs.navigation.cube_compact": "Würfel",

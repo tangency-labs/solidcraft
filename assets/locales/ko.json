@@ -2047,6 +2047,8 @@
   "prefs.mouse": "마우스 및 트랙패드",
   "prefs.mouse_heading": "마우스",
   "prefs.mouse_mapping": "마우스 매핑",
+  "prefs.move_drag_highlights": "이동 화살표로 구성 요소를 끄는 동안 포인터 아래 항목 강조 표시",
+  "prefs.move_drag_highlights_tip": "끄면 이동 화살표로 구성 요소를 끄는 동안 포인터 아래 항목을 강조 표시하지 않아 큰 어셈블리도 부드럽게 움직입니다. 단면이나 해석이 표시된 동안에는 그대로 강조 표시하며, 조인트를 따라 끄는 부품은 강조 표시하지 않습니다.",
   "prefs.navigation": "탐색",
   "prefs.navigation.axes_signed": "축",
   "prefs.navigation.cube_compact": "큐브",

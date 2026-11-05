@@ -2473,6 +2473,8 @@
   "prefs.mouse": "Ratón y panel táctil",
   "prefs.mouse_heading": "Ratón",
   "prefs.mouse_mapping": "Asignación del ratón",
+  "prefs.move_drag_highlights": "Resaltar lo que hay bajo el puntero mientras las flechas de Mover arrastran un componente",
+  "prefs.move_drag_highlights_tip": "Desactivado: mientras las flechas de Mover arrastran un componente no se resalta nada bajo el puntero, y los ensamblajes grandes se mueven con fluidez. Con un corte o un análisis visible se resalta igualmente, y una pieza arrastrada a lo largo de sus uniones nunca lo resalta.",
   "prefs.navigation": "Navegación",
   "prefs.navigation.axes_signed": "Ejes",
   "prefs.navigation.cube_compact": "Cubo",

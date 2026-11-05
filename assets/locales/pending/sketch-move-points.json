@@ -1,8 +1,0 @@
-{
-  "en": { "cmd.sketch_move_points": "Move Sketch Points" },
-  "ar": { "cmd.sketch_move_points": "سحب نقاط الرسم" },
-  "he": { "cmd.sketch_move_points": "גרירת נקודות סקיצה" },
-  "ja": { "cmd.sketch_move_points": "スケッチ点を移動" },
-  "vi": { "cmd.sketch_move_points": "Kéo các điểm phác thảo" },
-  "zh": { "cmd.sketch_move_points": "移动草图点" }
-}
