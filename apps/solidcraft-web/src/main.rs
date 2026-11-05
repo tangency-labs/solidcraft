@@ -1305,7 +1305,7 @@ fn main() {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    eprintln!("solidcraft-web only runs in the browser: build it with `trunk build --release` in apps/solidcraft-web");
+    solidcraft_engine::note!("solidcraft-web only runs in the browser: build it with `trunk build --release` in apps/solidcraft-web");
 }
 
 #[cfg(test)]

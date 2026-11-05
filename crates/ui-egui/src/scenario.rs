@@ -644,14 +644,18 @@ impl Harness {
                 return Ok(());
             } else if let Some(m) = s.get("print").and_then(Value::as_str) {
                 let r = self.call(m, s.get("params").cloned().unwrap_or(json!({})));
-                eprintln!("print {m}: {r}");
+                solidcraft_engine::note!("print {m}: {r}");
                 return Ok(());
             } else if s.get("debug").is_some() {
                 let ui = self.call("ui.inspect", json!({}));
                 let sel = self.call("ui.selection", json!({}));
-                eprintln!(
+                solidcraft_engine::note!(
                     "debug: dialog {} tool {} hover {}\nselection {}\nstatus {:?}",
-                    ui["result"]["dialog"], ui["result"]["tool"], ui["result"]["hover"], sel["result"]["selection"], self.app.status
+                    ui["result"]["dialog"],
+                    ui["result"]["tool"],
+                    ui["result"]["hover"],
+                    sel["result"]["selection"],
+                    self.app.status
                 );
                 if s["debug"] == json!("widgets") {
                     let texts: Vec<String> = self
@@ -664,11 +668,11 @@ impl Harness {
                             n.label().or(n.value()).map(|l| format!("{:?} {l}{at}", n.role()))
                         })
                         .collect();
-                    eprintln!("widgets: {texts:?}");
+                    solidcraft_engine::note!("widgets: {texts:?}");
                 }
                 if s["debug"] == json!("handles") {
                     let names: Vec<String> = HANDLES.with(|h| h.borrow().iter().map(|(n, p)| format!("{n} @{:.0},{:.0}", p.x, p.y)).collect());
-                    eprintln!("handles: {names:?}");
+                    solidcraft_engine::note!("handles: {names:?}");
                 }
                 return Ok(());
             } else if let Some(e) = s.get("until") {
