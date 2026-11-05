@@ -217,23 +217,19 @@ fn outer_loop_length(mesh: &Mesh, edges: &[usize], lengths: &[f64]) -> Option<f6
         }
     }
     let roots: Vec<usize> = (0..edges.len()).map(|edge| loop_root(&loop_of, edge)).collect();
-    let mut loops = roots.clone();
-    loops.sort_unstable();
-    loops.dedup();
-    if loops.len() < 2 {
-        return None;
-    }
-    let width = |id: usize| -> f64 {
-        let mut points = polylines.iter().zip(&roots).filter(|(_, r)| **r == id).flat_map(|(p, _)| p.iter());
-        let Some(first) = points.next() else { return 0.0 };
-        let (mut low, mut high) = (*first, *first);
-        for p in points {
+    // Each loop's box, in one pass over the border points.
+    let mut boxes: std::collections::BTreeMap<usize, (Vec3, Vec3)> = std::collections::BTreeMap::new();
+    for (polyline, root) in polylines.iter().zip(&roots) {
+        for p in polyline.iter() {
+            let (low, high) = boxes.entry(*root).or_insert((*p, *p));
             (low.x, low.y, low.z) = (low.x.min(p.x), low.y.min(p.y), low.z.min(p.z));
             (high.x, high.y, high.z) = (high.x.max(p.x), high.y.max(p.y), high.z.max(p.z));
         }
-        low.dist(high)
-    };
-    let outer = loops.into_iter().max_by(|a, b| width(*a).total_cmp(&width(*b)))?;
+    }
+    if boxes.len() < 2 {
+        return None;
+    }
+    let (outer, _) = boxes.into_iter().map(|(id, (low, high))| (id, low.dist(high))).max_by(|a, b| a.1.total_cmp(&b.1))?;
     Some(lengths.iter().zip(&roots).filter(|(_, r)| **r == outer).map(|(length, _)| *length).sum())
 }
 
