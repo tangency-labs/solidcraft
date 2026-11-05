@@ -1,0 +1,583 @@
+use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI};
+
+use super::super::{Clip, Dashes, Group, Invalid, Item, ObjectKind, Scene};
+use crate::bspline::tests::Lcg;
+use crate::prelude::*;
+use solidcore_record::{Seg2, Vec2};
+
+fn p(x: f64, y: f64) -> Vec2 {
+    Vec2::new(x, y)
+}
+
+fn line(a: Vec2, b: Vec2) -> Seg2 {
+    Seg2::Line { a, b }
+}
+
+fn arc(start: f64, sweep: f64) -> Seg2 {
+    Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start, sweep }
+}
+
+fn stroke(path: Vec<Seg2>, closed: bool, pattern: Option<Dashes>) -> Item {
+    Item::Stroke { path, closed, width_mm: 0.35, pattern }
+}
+
+fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Clip {
+    Clip::Rect { min: p(x0, y0), max: p(x1, y1) }
+}
+
+/// `scene`'s groups as a writer reads them with `clips` on it.
+fn groups_cut(scene: &Scene, clips: &[(u64, Clip)]) -> Result<Vec<Group>, Invalid> {
+    let scene = Scene { clips: clips.to_vec(), ..scene.clone() };
+    scene.prepare().map(|prepared| prepared.groups().to_vec())
+}
+
+/// What object 1's `items` become cut to `clip` on an A3 sheet.
+fn cut(items: Vec<Item>, clip: Clip) -> Vec<Item> {
+    let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::View, items }]);
+    groups_cut(&scene, &[(1, clip)]).unwrap()[0].items.clone()
+}
+
+/// A piece as numbers: a line's ends, an arc's centre, radius, start and sweep.
+fn numbers(seg: &Seg2) -> Vec<f64> {
+    match *seg {
+        Seg2::Line { a, b } => vec![a.x, a.y, b.x, b.y],
+        Seg2::Arc { center, radius, start, sweep } => vec![center.x, center.y, radius, start, sweep],
+        _ => panic!("lines and arcs"),
+    }
+}
+
+/// `a` and `b` the same strokes, each number within 1e-9.
+fn same(a: &[Item], b: &[Item]) -> bool {
+    let close = |x: &[f64], y: &[f64]| x.len() == y.len() && x.iter().zip(y).all(|(m, n)| (m - n).abs() < 1e-9);
+    let dashes = |d: &Option<Dashes>| d.as_ref().map(|d| [d.lengths_mm.clone(), vec![d.phase_mm]].concat());
+    a.len() == b.len()
+        && a.iter().zip(b).all(|pair| match pair {
+            (Item::Stroke { path: p, closed: c, width_mm: w, pattern: d }, Item::Stroke { path: q, closed: e, width_mm: v, pattern: f }) => {
+                c == e
+                    && w == v
+                    && p.len() == q.len()
+                    && p.iter().zip(q).all(|(s, t)| close(&numbers(s), &numbers(t)))
+                    && match (dashes(d), dashes(f)) {
+                        (Some(x), Some(y)) => close(&x, &y),
+                        (x, y) => x.is_none() && y.is_none(),
+                    }
+            }
+            _ => false,
+        })
+}
+
+/// A line keeps what lies inside: cut once by a rectangle, twice by one and by a circle, and kept
+/// along a rectangle's edge; one that only touches a circle is dropped, and so is one that reaches
+/// into it by less than EPS (a touch, never a chord of 1e-4 mm).
+#[test]
+fn a_line_keeps_what_lies_inside() {
+    let rule = |a, b| vec![stroke(vec![line(a, b)], false, None)];
+    let cases = [
+        (rule(p(0.0, 0.0), p(20.0, 0.0)), rect(5.0, -1.0, 30.0, 1.0), rule(p(5.0, 0.0), p(20.0, 0.0))),
+        (rule(p(-10.0, 0.0), p(40.0, 0.0)), rect(5.0, -1.0, 30.0, 1.0), rule(p(5.0, 0.0), p(30.0, 0.0))),
+        (rule(p(0.0, 0.0), p(20.0, 0.0)), Clip::Circle { center: p(10.0, 0.0), radius: 4.0 }, rule(p(6.0, 0.0), p(14.0, 0.0))),
+        (rule(p(0.0, 1.0), p(20.0, 1.0)), rect(5.0, -1.0, 30.0, 1.0), rule(p(5.0, 1.0), p(20.0, 1.0))),
+        (rule(p(0.0, 4.0), p(20.0, 4.0)), Clip::Circle { center: p(10.0, 0.0), radius: 4.0 }, vec![]),
+        (rule(p(0.0, 4.0 - 5e-10), p(20.0, 4.0 - 5e-10)), Clip::Circle { center: p(10.0, 0.0), radius: 4.0 }, vec![]),
+    ];
+    for (items, clip, expected) in cases {
+        let got = cut(items, clip);
+        assert!(same(&got, &expected), "{clip:?}: {got:?}");
+    }
+}
+
+/// A closed square cut by x >= 5: from its corner at the origin, outside, it is one open stroke
+/// from (5, 0) round to (5, 10); from (10, 5), inside, the parts either side of the seam rejoin
+/// into one, from (5, 0) through the seam to (5, 10). Wholly inside it stays closed and whole;
+/// wholly outside it is gone.
+#[test]
+fn a_closed_stroke_cut_open_rejoins_across_its_seam() {
+    let ring = |corners: &[Vec2]| (0..corners.len()).map(|i| line(corners[i], corners[(i + 1) % corners.len()])).collect::<Vec<_>>();
+    let clip = rect(5.0, -5.0, 20.0, 20.0);
+    let from_origin = ring(&[p(0.0, 0.0), p(10.0, 0.0), p(10.0, 10.0), p(0.0, 10.0)]);
+    let expected = [line(p(5.0, 0.0), p(10.0, 0.0)), line(p(10.0, 0.0), p(10.0, 10.0)), line(p(10.0, 10.0), p(5.0, 10.0))];
+    assert!(same(&cut(vec![stroke(from_origin, true, None)], clip), &[stroke(expected.to_vec(), false, None)]));
+    let mid_side = [
+        line(p(10.0, 5.0), p(10.0, 10.0)),
+        line(p(10.0, 10.0), p(0.0, 10.0)),
+        line(p(0.0, 10.0), p(0.0, 0.0)),
+        line(p(0.0, 0.0), p(10.0, 0.0)),
+        line(p(10.0, 0.0), p(10.0, 5.0)),
+    ];
+    let rejoined =
+        [line(p(5.0, 0.0), p(10.0, 0.0)), line(p(10.0, 0.0), p(10.0, 5.0)), line(p(10.0, 5.0), p(10.0, 10.0)), line(p(10.0, 10.0), p(5.0, 10.0))];
+    assert!(same(&cut(vec![stroke(mid_side.to_vec(), true, None)], clip), &[stroke(rejoined.to_vec(), false, None)]));
+    let inside = stroke(ring(&[p(6.0, 0.0), p(10.0, 0.0), p(10.0, 10.0)]), true, None);
+    assert_eq!(cut(vec![inside.clone()], clip), vec![inside]);
+    assert_eq!(cut(vec![stroke(ring(&[p(0.0, 0.0), p(4.0, 0.0), p(4.0, 4.0)]), true, None)], clip), vec![]);
+}
+
+/// Arcs are cut where their circle crosses the edge: a circle of radius 10 (two half turns) by
+/// x >= 0 keeps its right half, from 3/2 pi round through the seam at 0 to 1/2 pi; by the circle of
+/// radius 10 round (10, 0), which it crosses at -pi/3 and pi/3, it keeps from 5/3 pi to 1/3 pi. A
+/// half turn clockwise from the top, cut by y >= 0, keeps its first quarter.
+#[test]
+fn arcs_are_cut_where_they_cross_the_edge() {
+    let circle = || vec![stroke(vec![arc(0.0, PI), arc(PI, PI)], true, None)];
+    let got = cut(circle(), rect(0.0, -20.0, 20.0, 20.0));
+    assert!(same(&got, &[stroke(vec![arc(1.5 * PI, FRAC_PI_2), arc(0.0, FRAC_PI_2)], false, None)]), "{got:?}");
+    let got = cut(circle(), Clip::Circle { center: p(10.0, 0.0), radius: 10.0 });
+    assert!(same(&got, &[stroke(vec![arc(5.0 * PI / 3.0, PI / 3.0), arc(0.0, PI / 3.0)], false, None)]), "{got:?}");
+    let got = cut(vec![stroke(vec![arc(FRAC_PI_2, -PI)], false, None)], rect(-20.0, 0.0, 20.0, 20.0));
+    assert!(same(&got, &[stroke(vec![arc(FRAC_PI_2, -FRAC_PI_2)], false, None)]), "{got:?}");
+}
+
+/// A dashed stroke keeps its pattern: a line from 0 to 20 dashed 2-1 from 0.5 into the pattern,
+/// cut at x = 4.25, starts 4.75 into it, so 1.75 into a pattern. The closed square from (10, 5),
+/// 40 mm round, rejoins across its seam when dashed 2-2 (40 is ten patterns), its part from
+/// along 30 then 31 into the pattern, so 3; dashed 2-1, 40 is a third of a pattern over, so its
+/// parts stay apart, the first from its start and the second 31 in, so 1.
+#[test]
+fn a_dashed_stroke_keeps_its_pattern() {
+    let dashes = |lengths: &[f64], phase_mm: f64| Some(Dashes { lengths_mm: lengths.to_vec(), phase_mm });
+    let got = cut(vec![stroke(vec![line(p(0.0, 0.0), p(20.0, 0.0))], false, dashes(&[2.0, 1.0], 0.5))], rect(4.25, -1.0, 30.0, 1.0));
+    assert!(same(&got, &[stroke(vec![line(p(4.25, 0.0), p(20.0, 0.0))], false, dashes(&[2.0, 1.0], 1.75))]), "{got:?}");
+    let square = vec![
+        line(p(10.0, 5.0), p(10.0, 10.0)),
+        line(p(10.0, 10.0), p(0.0, 10.0)),
+        line(p(0.0, 10.0), p(0.0, 0.0)),
+        line(p(0.0, 0.0), p(10.0, 0.0)),
+        line(p(10.0, 0.0), p(10.0, 5.0)),
+    ];
+    let clip = rect(5.0, -5.0, 20.0, 20.0);
+    let (first, second) =
+        ([line(p(10.0, 5.0), p(10.0, 10.0)), line(p(10.0, 10.0), p(5.0, 10.0))], [line(p(5.0, 0.0), p(10.0, 0.0)), line(p(10.0, 0.0), p(10.0, 5.0))]);
+    let got = cut(vec![stroke(square.clone(), true, dashes(&[2.0, 2.0], 1.0))], clip);
+    assert!(same(&got, &[stroke([second.to_vec(), first.to_vec()].concat(), false, dashes(&[2.0, 2.0], 3.0))]), "{got:?}");
+    let got = cut(vec![stroke(square, true, dashes(&[2.0, 1.0], 1.0))], clip);
+    let expected = [stroke(first.to_vec(), false, dashes(&[2.0, 1.0], 1.0)), stroke(second.to_vec(), false, dashes(&[2.0, 1.0], 1.0))];
+    assert!(same(&got, &expected), "{got:?}");
+}
+
+/// Without clips the scene is borrowed as it is; with them only the objects named are cut, and
+/// one named that the scene doesn't have changes nothing.
+#[test]
+fn only_the_objects_named_are_cut() {
+    let group = |object| Group { object, kind: ObjectKind::View, items: vec![stroke(vec![line(p(0.0, 0.0), p(20.0, 0.0))], false, None)] };
+    let scene = Scene::new(p(420.0, 297.0), vec![group(1), group(2), group(1)]);
+    let plain = scene.prepare().unwrap();
+    assert!(std::ptr::eq(plain.groups().as_ptr(), scene.groups.as_ptr()));
+    let clipped = groups_cut(&scene, &[(1, rect(5.0, -1.0, 30.0, 1.0)), (9, rect(0.0, 0.0, 1.0, 1.0))]).unwrap();
+    let kept = [stroke(vec![line(p(5.0, 0.0), p(20.0, 0.0))], false, None)];
+    assert!(same(&clipped[0].items, &kept) && same(&clipped[2].items, &kept));
+    assert_eq!(clipped[1], group(2));
+}
+
+/// Clips outside the module's notes, a second clip for one object and an object with what can't be
+/// cut yet are refused; a clip at the coordinate limit is taken.
+#[test]
+fn what_cant_be_clipped_is_refused() {
+    let scene = |items| Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::View, items }]);
+    let plain = scene(vec![stroke(vec![line(p(0.0, 0.0), p(20.0, 0.0))], false, None)]);
+    let bad = "a clip is a rectangle from its lower-left to its upper-right corner, or a circle with a radius above 0, within 1e5 mm";
+    for clip in [
+        rect(5.0, 0.0, 5.0, 1.0),
+        rect(5.0, 1.0, 6.0, 0.0),
+        rect(f64::NAN, 0.0, 6.0, 1.0),
+        rect(0.0, 0.0, 1e5 + 1.0, 1.0),
+        Clip::Circle { center: p(0.0, 0.0), radius: 0.0 },
+        Clip::Circle { center: p(0.0, 0.0), radius: -1.0 },
+        Clip::Circle { center: p(0.0, 0.0), radius: f64::NAN },
+        Clip::Circle { center: p(f64::INFINITY, 0.0), radius: 1.0 },
+        Clip::Circle { center: p(0.0, 0.0), radius: 1e5 + 1.0 },
+    ] {
+        assert_eq!(groups_cut(&plain, &[(1, clip)]).err().map(|e| e.0), Some(bad), "{clip:?}");
+    }
+    groups_cut(&plain, &[(1, rect(-1e5, -1e5, 1e5, 1e5)), (2, Clip::Circle { center: p(1e5, -1e5), radius: 1e5 })]).unwrap();
+    let twice = groups_cut(&plain, &[(1, rect(0.0, 0.0, 1.0, 1.0)), (1, rect(0.0, 0.0, 2.0, 2.0))]);
+    assert_eq!(twice.err().map(|e| e.0), Some("an object has one clip"));
+    // A curve along the edge widened by EPS lies either side of it at every scale: it would take
+    // ever more halvings, so it is refused.
+    let along =
+        Seg2::Cubic { p0: p(2.0, 5.0 + crate::EPS), p1: p(4.0, 5.0 + crate::EPS), p2: p(6.0, 5.0 + crate::EPS), p3: p(8.0, 5.0 + crate::EPS) };
+    let edged = scene(vec![stroke(vec![along], false, None)]);
+    let refused = groups_cut(&edged, &[(1, rect(0.0, 0.0, 10.0, 5.0))]).err().map(|e| e.0);
+    assert_eq!(refused, Some("not supported yet: a curve this close along a clip's edge (#4890 A8)"));
+}
+
+/// A fill is kept wholly inside and dropped wholly outside, holes and all; one crossing the edge
+/// (a triangle whose corner pokes in, the middles of its sides all outside), or round the whole
+/// clip, isn't cut yet.
+#[test]
+fn a_fill_is_kept_or_dropped_whole() {
+    let square = |x0: f64, y0: f64, x1: f64, y1: f64| solidcore_record::Loop2::polygon(&[p(x0, y0), p(x1, y0), p(x1, y1), p(x0, y1)]);
+    let fill = |outer, holes| Item::Fill { region: solidcore_record::Region2 { outer, holes } };
+    let crossing = "not supported yet: a fill crossing a clip's edge (#4890 A8)";
+    for clip in [rect(0.0, 0.0, 10.0, 10.0), Clip::Circle { center: p(5.0, 5.0), radius: 7.5 }] {
+        for (item, kept) in [
+            (fill(square(2.0, 2.0, 8.0, 8.0), vec![square(4.0, 4.0, 6.0, 6.0)]), Some(true)),
+            (fill(square(20.0, 20.0, 30.0, 30.0), vec![]), Some(false)),
+            // Round the clip, its hole round it too: wholly outside.
+            (fill(square(-20.0, -20.0, 30.0, 30.0), vec![square(-15.0, -15.0, 25.0, 25.0)]), Some(false)),
+            (fill(solidcore_record::Loop2::polygon(&[p(8.0, 5.0), p(30.0, 0.0), p(30.0, 10.0)]), vec![]), None),
+            (fill(square(-20.0, -20.0, 30.0, 30.0), vec![]), None),
+        ] {
+            let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::View, items: vec![item.clone()] }]);
+            match (groups_cut(&scene, &[(1, clip)]), kept) {
+                (Ok(cut), Some(kept)) => assert_eq!(cut[0].items, if kept { vec![item] } else { vec![] }, "{clip:?}"),
+                (cut, kept) => assert_eq!((cut.err().map(|e| e.0), kept), (Some(crossing), None), "{clip:?}: {item:?}"),
+            }
+        }
+    }
+}
+
+/// Every point of `part` on `whole`, within 1e-9.
+fn on(whole: &Seg2, part: &Seg2) -> bool {
+    (0..=8).map(|k| part.point_at(k as f64 / 8.0)).all(|q| whole.point_at(whole.closest_param(q)).dist(q) < 1e-9)
+}
+
+/// Curves are cut where they cross the edge, to within 1e-9 mm, each part the same kind of piece
+/// on the same curve: a cubic arch from (-10, 0) to (10, 0) by |x| <= 3 keeps its middle, from
+/// x = -3 to 3 (the edge widened by EPS, to 1e-9 mm); a quarter of the ellipse with semi-axes 20 and 10, as a conic, by the circle of
+/// radius 15 round its centre keeps its end within 15 of the centre; a degree-5 wave by y >= 0
+/// keeps its humps above the axis, each ending on it. A cubic along the edge is inside, kept whole.
+#[test]
+fn curves_are_cut_where_they_cross_the_edge() {
+    let paths = |items: &[Item]| -> Vec<Vec<Seg2>> {
+        items.iter().map(|item| if let Item::Stroke { path, .. } = item { path.clone() } else { panic!("strokes") }).collect()
+    };
+    let arch = Seg2::Cubic { p0: p(-10.0, 0.0), p1: p(-5.0, 10.0), p2: p(5.0, 10.0), p3: p(10.0, 0.0) };
+    let kept = paths(&cut(vec![stroke(vec![arch], false, None)], rect(-3.0, -1.0, 3.0, 20.0)));
+    let [path] = kept.as_slice() else { panic!("{kept:?}") };
+    let [piece @ Seg2::Cubic { .. }] = path.as_slice() else { panic!("{path:?}") };
+    // The edge widened by EPS, and the cut found to within 1e-9 mm of it.
+    let near = crate::EPS + 1e-9;
+    assert!((piece.start().x + 3.0).abs() <= near && (piece.end().x - 3.0).abs() <= near && on(&arch, piece), "{piece:?}");
+
+    let quarter = Seg2::Conic { a: p(20.0, 0.0), apex: p(20.0, 10.0), b: p(0.0, 10.0), w: FRAC_1_SQRT_2 };
+    let kept = paths(&cut(vec![stroke(vec![quarter], false, None)], Clip::Circle { center: Vec2::ZERO, radius: 15.0 }));
+    let [path] = kept.as_slice() else { panic!("{kept:?}") };
+    let [piece @ Seg2::Conic { .. }] = path.as_slice() else { panic!("{path:?}") };
+    assert!((piece.start().len() - 15.0).abs() <= near && piece.end().dist(p(0.0, 10.0)) <= 1e-12 && on(&quarter, piece), "{piece:?}");
+
+    let points = [p(0.0, 0.0), p(2.0, 4.0), p(4.0, -4.0), p(6.0, 4.0), p(8.0, -4.0), p(10.0, 1.0)];
+    let wave = crate::bezier(&points).unwrap();
+    let kept = paths(&cut(vec![stroke(vec![wave], false, None)], rect(-1.0, 0.0, 11.0, 10.0)));
+    let pieces: Vec<&Seg2> = kept.iter().flatten().collect();
+    for piece in &pieces {
+        let on_axis = |q: Vec2| q.y.abs() <= near || q == p(0.0, 0.0) || q == p(10.0, 1.0);
+        assert!(matches!(piece, Seg2::Bezier { n: 5, .. }) && kept.iter().all(|path| path.len() == 1), "{kept:?}");
+        assert!(on_axis(piece.start()) && on_axis(piece.end()) && piece.point_at(0.5).y > 0.0 && on(&wave, piece), "{piece:?}");
+    }
+    for q in (0..=100).map(|k| wave.point_at(k as f64 / 100.0)).filter(|q| q.y > 1e-6) {
+        assert!(pieces.iter().any(|s| s.point_at(s.closest_param(q)).dist(q) < 1e-9), "{q:?} above the axis isn't drawn");
+    }
+
+    let along = vec![stroke(vec![Seg2::Cubic { p0: p(2.0, 5.0), p1: p(4.0, 5.0), p2: p(6.0, 5.0), p3: p(8.0, 5.0) }], false, None)];
+    assert_eq!(cut(along.clone(), rect(0.0, 0.0, 10.0, 5.0)), along);
+}
+
+/// A dashed curve keeps its pattern: the arch cut by |x| <= 3 starts as far along it as the part
+/// cut off before, half of what isn't kept, into its pattern.
+#[test]
+fn a_dashed_curve_keeps_its_pattern() {
+    let arch = Seg2::Cubic { p0: p(-10.0, 0.0), p1: p(-5.0, 10.0), p2: p(5.0, 10.0), p3: p(10.0, 0.0) };
+    let pattern = Dashes { lengths_mm: vec![2.0, 1.0], phase_mm: 0.5 };
+    let kept = cut(vec![stroke(vec![arch], false, Some(pattern))], rect(-3.0, -1.0, 3.0, 20.0));
+    let [Item::Stroke { path, pattern: Some(dashes), .. }] = kept.as_slice() else { panic!("{kept:?}") };
+    let before = (arch.length() - path.iter().map(Seg2::length).sum::<f64>()) / 2.0;
+    assert!((dashes.phase_mm - (0.5 + before).rem_euclid(3.0)).abs() < 1e-8, "{dashes:?}, {before}");
+}
+
+/// How far `q` is from `seg`: by `closest_param`, else by the nearest of 4096 samples, refined by
+/// halving the step about it (`closest_param` starts from 64 samples, and on a hairpin can settle
+/// on the other side of it).
+fn distance(seg: &Seg2, q: Vec2) -> f64 {
+    let d = |t: f64| seg.point_at(t.clamp(0.0, 1.0)).dist(q);
+    let near = d(seg.closest_param(q));
+    if near < 1e-6 {
+        return near;
+    }
+    let mut t = (0..=4096).map(|k| k as f64 / 4096.0).min_by(|a, b| d(*a).total_cmp(&d(*b))).unwrap_or(0.0);
+    let mut step = 1.0 / 4096.0;
+    while step > 1e-15 {
+        for c in [t - step, t + step] {
+            if d(c) < d(t) {
+                t = c;
+            }
+        }
+        step /= 2.0;
+    }
+    d(t)
+}
+
+/// How far `q` is inside `clip`: below 0 outside.
+fn depth(clip: &Clip, q: Vec2) -> f64 {
+    match *clip {
+        Clip::Rect { min, max } => (q.x - min.x).min(max.x - q.x).min(q.y - min.y).min(max.y - q.y),
+        Clip::Circle { center, radius } => radius - q.dist(center),
+    }
+}
+
+/// Random strokes of lines, arcs either way round, cubics, conics and Béziers of degree 4 to 9,
+/// open and closed, cut by random rectangles and circles: what comes out passes the scene's
+/// checks, every piece of it lies inside the clip, every point of the stroke well inside it is
+/// drawn, and nothing is longer than it was (to the length integral's 1e-6).
+#[test]
+fn fuzzed_clips_keep_exactly_what_lies_inside() {
+    let mut rng = Lcg(0xa8a);
+    let mut r = |lo: f64, hi: f64| lo + (hi - lo) * rng.unit();
+    for case in 0..500 {
+        let mut path = Vec::new();
+        let mut at = p(r(0.0, 100.0), r(0.0, 100.0));
+        for _ in 0..1 + case % 6 {
+            let kind = r(0.0, 1.0);
+            let mut near = || p(r(0.0, 100.0), r(0.0, 100.0));
+            let seg = if kind < 0.3 {
+                line(at, near())
+            } else if kind < 0.55 {
+                let (radius, start, sweep) = (r(1.0, 40.0), r(-PI, PI), r(-2.0 * PI, 2.0 * PI));
+                Seg2::Arc { center: at - Vec2::from_angle(start) * radius, radius, start, sweep }
+            } else if kind < 0.75 {
+                Seg2::Cubic { p0: at, p1: near(), p2: near(), p3: near() }
+            } else if kind < 0.9 {
+                Seg2::Conic { a: at, apex: near(), b: near(), w: r(0.1, 4.0) }
+            } else {
+                let mut points = vec![at];
+                points.extend((0..4 + case % 6).map(|_| near()));
+                crate::bezier(&points).unwrap()
+            };
+            at = seg.end();
+            path.push(seg);
+        }
+        let closed = path.len() > 1 && r(0.0, 1.0) < 0.3;
+        if closed && let (Some(first), Some(last)) = (path.first().map(Seg2::start), path.last().map(Seg2::end)) {
+            path.push(line(last, first));
+        }
+        path.retain(|seg| seg.length() > 1e-6);
+        if path.is_empty() {
+            continue;
+        }
+        let clip = if case % 2 == 0 {
+            let (x, y) = (r(0.0, 100.0), r(0.0, 100.0));
+            rect(x, y, x + r(1.0, 80.0), y + r(1.0, 80.0))
+        } else {
+            Clip::Circle { center: p(r(0.0, 100.0), r(0.0, 100.0)), radius: r(1.0, 60.0) }
+        };
+        let length: f64 = path.iter().map(Seg2::length).sum();
+        let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 3, kind: ObjectKind::View, items: vec![stroke(path.clone(), closed, None)] }]);
+        let prepared = groups_cut(&scene, &[(3, clip)]).unwrap_or_else(|e| panic!("case {case}: refused, {}: {path:?} by {clip:?}", e.0));
+        let out: Vec<&Seg2> = prepared[0]
+            .items
+            .iter()
+            .flat_map(|item| match item {
+                Item::Stroke { path, .. } => path.iter(),
+                _ => panic!("strokes"),
+            })
+            .collect();
+        for seg in &out {
+            assert!(depth(&clip, seg.point_at(0.5)) > -1e-6, "case {case}: {seg:?} outside {clip:?}");
+        }
+        for seg in &path {
+            for k in 0..=16 {
+                let q = seg.point_at(k as f64 / 16.0);
+                if depth(&clip, q) > 1e-6 {
+                    let drawn = out.iter().any(|s| distance(s, q) < 1e-6);
+                    assert!(drawn, "case {case}: {q:?} inside {clip:?} isn't drawn: {path:?} by {clip:?}");
+                }
+            }
+        }
+        assert!(out.iter().map(|s| s.length()).sum::<f64>() <= length * (1.0 + 1e-6) + 1e-9, "case {case}");
+    }
+}
+
+/// Strokes made at the clip's edge, not only random ones: vertices on it, half an EPS either side
+/// and two EPS either side; zigzags 10°, 50° and 80° off its normal, open and closed, lines along
+/// it, through a corner and tangent to it, arcs touching it from either side; pieces from 0.1 µm to
+/// 3 mm; every other stroke dashed. Every one is cut without refusal, every point of what is kept
+/// lies inside (64 samples a piece, to 3 EPS: a kept part reaches EPS past the edge either side of
+/// its middle), every point well inside is drawn, nothing grows, and a dash pattern is kept. A fill
+/// with an edge there is kept or dropped whole.
+#[test]
+fn shapes_at_the_clips_edge_keep_exactly_what_lies_inside() {
+    let offsets = [0.0, crate::EPS / 2.0, -crate::EPS / 2.0, 2.0 * crate::EPS, -2.0 * crate::EPS];
+    let steps = [1e-4, 0.05, 0.5, 3.0];
+    let polyline = |points: &[Vec2]| points.windows(2).map(|w| line(w[0], w[1])).collect::<Vec<_>>();
+    // The rectangle's bottom edge is y = 10, inside above it; `s` is how far inside a vertex is.
+    let rect_clip = rect(10.0, 10.0, 60.0, 40.0);
+    let mut shapes: Vec<(String, Clip, Vec<Seg2>)> = Vec::new();
+    for s in offsets {
+        for step in steps {
+            for degrees in [10.0_f64, 50.0, 80.0] {
+                let rise = step / degrees.to_radians().tan();
+                // It leaves the clip at its end, so it isn't kept whole and its parts are joined.
+                let mut zigzag: Vec<Vec2> = (0..9).map(|k| p(20.0 + k as f64 * step, if k % 2 == 0 { 10.0 + rise } else { 10.0 + s })).collect();
+                zigzag.push(p(30.0, 5.0));
+                shapes.push((format!("zigzag {degrees}° step {step} at {s:e}"), rect_clip, polyline(&zigzag)));
+                // Closed, with its seam at a vertex on the edge: twice, so one is dashed and one isn't.
+                let triangle = [p(20.0, 10.0 + s), p(20.0 + step, 10.0 + rise), p(30.0, 5.0), p(20.0 - step, 10.0 + rise), p(20.0, 10.0 + s)];
+                for _ in 0..2 {
+                    shapes.push((format!("closed {degrees}° step {step} at {s:e}"), rect_clip, polyline(&triangle)));
+                }
+            }
+            let n = ((60.0 / step) as usize).clamp(2, 400);
+            let along: Vec<Vec2> = (0..=n).map(|k| p(5.0 + k as f64 * 60.0 / n as f64, 10.0 + s)).collect();
+            shapes.push((format!("along the edge, {n} pieces at {s:e}"), rect_clip, polyline(&along)));
+            let corner: Vec<Vec2> = (0..=8).map(|k| p(6.0 + k as f64 + s, 6.0 + k as f64)).collect();
+            shapes.push((format!("through a corner at {s:e}"), rect_clip, polyline(&corner)));
+        }
+        let touching = Seg2::Arc { center: p(35.0, 15.0 - s), radius: 5.0, start: -FRAC_PI_2 - 1.0, sweep: 2.0 };
+        shapes.push((format!("an arc touching the edge at {s:e}"), rect_clip, vec![touching]));
+        let circle = Clip::Circle { center: p(35.0, 25.0), radius: 15.0 };
+        shapes.push((format!("a line touching a circle at {s:e}"), circle, vec![line(p(0.0, 40.0 - s), p(70.0, 40.0 - s))]));
+        let above = Seg2::Arc { center: p(35.0, 5.0 + s), radius: 5.0, start: FRAC_PI_2 - 1.0, sweep: 2.0 };
+        shapes.push((format!("an arc touching the edge from below at {s:e}"), rect_clip, vec![above]));
+        let over = Seg2::Arc { center: p(35.0, 45.0 - s), radius: 5.0, start: -FRAC_PI_2 - 1.0, sweep: 2.0 };
+        shapes.push((format!("an arc touching a circle from above at {s:e}"), circle, vec![over]));
+        let round = Seg2::Arc { center: p(35.0, 10.0 - s), radius: 30.0, start: FRAC_PI_2 - 0.3, sweep: 0.6 };
+        shapes.push((format!("an arc round a circle, touching it at {s:e}"), circle, vec![round]));
+    }
+    for (case, (name, clip, path)) in shapes.into_iter().enumerate() {
+        let pattern = case.is_multiple_of(2).then(|| Dashes { lengths_mm: vec![1.0, 0.5], phase_mm: 0.2 });
+        let length: f64 = path.iter().map(Seg2::length).sum();
+        let closed = path.last().zip(path.first()).is_some_and(|(a, b)| a.end() == b.start());
+        let items = vec![stroke(path.clone(), closed, pattern.clone())];
+        let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 3, kind: ObjectKind::View, items }]);
+        let groups = groups_cut(&scene, &[(3, clip)]).unwrap_or_else(|e| panic!("{name}: refused, {}", e.0));
+        let mut out: Vec<&Seg2> = Vec::new();
+        for item in &groups[0].items {
+            let Item::Stroke { path: kept, pattern: kept_pattern, .. } = item else { panic!("{name}: {item:?}") };
+            if let (Some(d), Some(k)) = (&pattern, kept_pattern) {
+                assert!(k.lengths_mm == d.lengths_mm && (0.0..1.5).contains(&k.phase_mm), "{name}: {k:?}");
+            }
+            out.extend(kept.iter());
+        }
+        for seg in &out {
+            for k in 0..=64 {
+                let q = seg.point_at(k as f64 / 64.0);
+                assert!(depth(&clip, q) > -3.0 * crate::EPS, "{name}: {q:?} of {seg:?} is outside {clip:?}");
+            }
+        }
+        for seg in &path {
+            for k in 0..=64 {
+                let q = seg.point_at(k as f64 / 64.0);
+                if depth(&clip, q) > 1e-6 {
+                    assert!(out.iter().any(|s| distance(s, q) < 1e-6), "{name}: {q:?} inside isn't drawn");
+                }
+            }
+        }
+        assert!(out.iter().map(|s| s.length()).sum::<f64>() <= length * (1.0 + 1e-9) + 1e-12, "{name}: longer than it was");
+    }
+    // A square with its bottom edge at the clip's edge is kept whole, unless that edge is two EPS
+    // outside, where it crosses and is refused by name; one below it, touching, is dropped whole,
+    // unless its top edge is two EPS inside. A fill that is the clip's own rectangle is kept.
+    let scene = |item: &Item| Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::View, items: vec![item.clone()] }]);
+    let fill =
+        |corners: &[Vec2]| Item::Fill { region: solidcore_record::Region2 { outer: solidcore_record::Loop2::polygon(corners), holes: vec![] } };
+    let own = fill(&[p(10.0, 10.0), p(60.0, 10.0), p(60.0, 40.0), p(10.0, 40.0)]);
+    assert_eq!(groups_cut(&scene(&own), &[(1, rect_clip)]).ok().map(|groups| groups[0].items.clone()), Some(vec![own.clone()]));
+    for s in offsets {
+        let inside = fill(&[p(12.0, 10.0 + s), p(20.0, 10.0 + s), p(20.0, 20.0), p(12.0, 20.0)]);
+        let outside = fill(&[p(12.0, 0.0), p(20.0, 0.0), p(20.0, 10.0 + s), p(12.0, 10.0 + s)]);
+        match groups_cut(&scene(&inside), &[(1, rect_clip)]) {
+            Ok(groups) => assert!(s >= -crate::EPS && groups[0].items == [inside.clone()], "{s:e}: kept whole"),
+            Err(e) => assert!(s < -crate::EPS && e.0.contains("not supported yet"), "{s:e}: {}", e.0),
+        }
+        match groups_cut(&scene(&outside), &[(1, rect_clip)]) {
+            Ok(groups) => assert!(s <= crate::EPS && groups[0].items.is_empty(), "{s:e}: dropped whole"),
+            Err(e) => assert!(s > crate::EPS && e.0.contains("not supported yet"), "{s:e}: {}", e.0),
+        }
+    }
+}
+
+/// Two parts too short to keep, either side of a vertex half an EPS outside the edge, leave more
+/// than EPS between the parts kept round them: those are two strokes, open or closed across the
+/// seam there, never one whose pieces don't meet.
+#[test]
+fn parts_kept_either_side_of_a_vertex_just_outside_are_two_strokes() {
+    let clip = rect(10.0, 10.0, 60.0, 40.0);
+    // 50° off the edge's normal, 0.05 mm across: each short part is 0.8 nm, 1.2 nm apart.
+    let rise = 0.05 / 50f64.to_radians().tan();
+    let (v, left, right, out) = (p(20.0, 10.0 - crate::EPS / 2.0), p(19.95, 10.0 + rise), p(20.05, 10.0 + rise), p(30.0, 5.0));
+    let open = vec![line(left, v), line(v, right), line(right, out)];
+    let closed = vec![line(v, right), line(right, out), line(out, left), line(left, v)];
+    for (path, closed) in [(open, false), (closed, true)] {
+        let kept = cut(vec![stroke(path, closed, None)], clip);
+        assert_eq!(kept.len(), 2, "closed {closed}: {kept:?}");
+    }
+}
+
+/// What the cuts make is checked again: a zigzag of 60,000 lines between y = -1 and 1 is 60,002
+/// records, and cut to |y| <= 0.5 each line's middle is its own stroke, 120,001 in all, more than
+/// a scene holds, so it is refused rather than handed to a writer.
+#[test]
+fn cuts_that_make_too_many_records_are_refused() {
+    let n = 60_000;
+    let corner = |i: usize| p(i as f64 * 1e-3, if i.is_multiple_of(2) { -1.0 } else { 1.0 });
+    let path: Vec<Seg2> = (0..n).map(|i| line(corner(i), corner(i + 1))).collect();
+    let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::View, items: vec![stroke(path, false, None)] }]);
+    scene.prepare().unwrap();
+    let refused = groups_cut(&scene, &[(1, rect(-1.0, -0.5, 100.0, 0.5))]);
+    assert_eq!(refused.err().map(|e| e.0), Some("more than 100,000 groups, items, loops and pieces"));
+}
+
+/// The clips go with the scene: written when there are some, left out when there are none.
+#[test]
+fn clips_are_part_of_the_scene() {
+    let mut scene = Scene::new(p(420.0, 297.0), vec![]);
+    assert!(serde_json::to_value(&scene).unwrap().get("clips").is_none());
+    scene.clips = vec![(1, rect(0.0, 0.0, 1.0, 1.0))];
+    let back: Scene = serde_json::from_value(serde_json::to_value(&scene).unwrap()).unwrap();
+    assert_eq!(back, scene);
+    scene.clips = vec![(1, rect(1.0, 1.0, 0.0, 0.0))];
+    assert!(scene.validate().is_err(), "validate checks them too");
+}
+
+/// Pictures aren't cut here: one wholly outside its object's clip is dropped, and one meeting it is
+/// kept whole, with the clip handed on to its writer.
+#[test]
+fn a_picture_is_dropped_or_handed_on_with_the_clip_it_crosses() {
+    let picture = crate::paper::Picture { source: 1, rect: crate::Aabb2 { min: p(0.0, 0.0), max: p(10.0, 10.0) }, opacity: 1.0 };
+    let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::View, items: vec![Item::Picture(picture)] }]);
+    let circle = |x: f64, y: f64, radius: f64| Clip::Circle { center: p(x, y), radius };
+    // The corners of the 10 mm square are 7.0711 mm from its middle; (13, 13) is 4.2426 mm from its
+    // corner, whose box the 4 mm circle's box overlaps though the disc doesn't reach it.
+    let cases = [
+        (rect(2.0, 2.0, 8.0, 8.0), Some(true)),
+        (rect(5.0, -5.0, 15.0, 5.0), Some(true)),
+        (rect(0.0, 0.0, 10.0, 10.0), Some(false)),
+        (rect(-1.0, -1.0, 11.0, 11.0), Some(false)),
+        (rect(20.0, 0.0, 30.0, 10.0), None),
+        (circle(5.0, 5.0, 2.0), Some(true)),
+        (circle(5.0, 5.0, 7.0), Some(true)),
+        (circle(5.0, 5.0, 7.1), Some(false)),
+        // Holding two opposite corners and a third, but not (10, 0), 11.3 mm away.
+        (circle(2.0, 8.0, 9.0), Some(true)),
+        (circle(13.0, 13.0, 4.0), None),
+        (circle(13.0, 13.0, 4.3), Some(true)),
+    ];
+    for (clip, expected) in cases {
+        let clipped = Scene { clips: vec![(1, clip)], ..scene.clone() };
+        let on = clipped.prepare().unwrap().on_grid(crate::paper::grid::Grid::NANOMETRE).unwrap();
+        let got = on.groups[0].items.first().map(|item| match item {
+            crate::paper::grid::GridItem::Picture { picture: drawn, clip: handed, .. } => {
+                assert_eq!(*drawn, picture, "the picture stays whole: {clip:?}");
+                assert!(handed.is_none_or(|handed| handed == clip), "{clip:?}");
+                handed.is_some()
+            }
+            other => panic!("{other:?}"),
+        });
+        assert_eq!(got, expected, "{clip:?}");
+    }
+    // Another object's clip leaves a picture alone.
+    assert_eq!(groups_cut(&scene, &[(2, circle(50.0, 50.0, 2.0))]).unwrap()[0].items, [Item::Picture(picture)]);
+
+    // What of it can show is one box for every writer: all of a picture on the sheet, the part
+    // inside its clip's box, and only the sheet's part of one past the sheet's edge.
+    let visible = |scene: &Scene| match &scene.prepare().unwrap().on_grid(crate::paper::grid::Grid::NANOMETRE).unwrap().groups[0].items[0] {
+        crate::paper::grid::GridItem::Picture { visible, .. } => *visible,
+        other => panic!("{other:?}"),
+    };
+    let area = |(x0, y0): (f64, f64), (x1, y1): (f64, f64)| crate::Aabb2 { min: p(x0, y0), max: p(x1, y1) };
+    assert_eq!(visible(&scene), picture.rect);
+    assert_eq!(visible(&Scene { clips: vec![(1, rect(5.0, -5.0, 15.0, 5.0))], ..scene.clone() }), area((5.0, 0.0), (10.0, 5.0)));
+    assert_eq!(visible(&Scene { clips: vec![(1, circle(5.0, 5.0, 2.0))], ..scene.clone() }), area((3.0, 3.0), (7.0, 7.0)));
+    let past = crate::paper::Picture { rect: area((415.0, 290.0), (425.0, 300.0)), ..picture };
+    let edge = Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::View, items: vec![Item::Picture(past)] }]);
+    assert_eq!(visible(&edge), area((415.0, 290.0), (420.0, 297.0)));
+}

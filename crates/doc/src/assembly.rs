@@ -9,7 +9,8 @@
 //! and the engine maps a new feature's geometry into the active component's frame.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Plane, Vec3};
+use solidcore_record::{Plane, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::{DocError, Document, FeatureKind, PlaneRef, Result};
 
@@ -99,6 +100,23 @@ pub fn mat_inverse(m: &Mat) -> Option<Mat> {
     let it = apply_vector(&out, t);
     out[3] = [-it.x, -it.y, -it.z, 1.0];
     Some(out)
+}
+
+/// Whether `m` is a placement an occurrence may have: finite, a rotation (orthonormal axes, not
+/// mirrored) and a translation within 1e9 mm, its last column `0, 0, 0, 1`. Every placement is
+/// checked against this where it enters the document (a design file, a command, an import).
+pub fn is_placement(m: &Mat) -> bool {
+    let axis = |i: usize| Vec3::new(m[i][0], m[i][1], m[i][2]);
+    let (x, y, z) = (axis(0), axis(1), axis(2));
+    m.iter().flatten().all(|v| v.is_finite())
+        && m[3][..3].iter().all(|v| v.abs() <= 1e9)
+        && [x, y, z].iter().all(|v| (v.dot(*v) - 1.0).abs() < 1e-6)
+        && x.dot(y).abs() < 1e-6
+        && x.dot(z).abs() < 1e-6
+        && y.dot(z).abs() < 1e-6
+        && x.cross(y).dot(z) > 0.0
+        && [m[0][3], m[1][3], m[2][3]].iter().all(|v| v.abs() < 1e-9)
+        && (m[3][3] - 1.0).abs() < 1e-9
 }
 
 /// A rigid transform: rotation by `angle` about `axis` through `origin`, then a translation.
@@ -219,12 +237,16 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
         }
         // Named origin planes and construction planes are the component's own.
         PlaneRef::Origin { .. } | PlaneRef::Construction { .. } => {}
-        PlaneRef::Tangent { face, at } => {
+        PlaneRef::Tangent { face, at, reference, .. } => {
             *at = apply_point(m, *at);
             map_geo_ref(m, face);
+            if let Some(r) = reference {
+                map_geo_ref(m, r);
+            }
         }
         PlaneRef::Midplane { .. }
         | PlaneRef::TwoEdges { .. }
+        | PlaneRef::AxisPoint { .. }
         | PlaneRef::ThreePoints { .. }
         | PlaneRef::AlongPath { .. }
         | PlaneRef::Perpendicular { .. } => {
@@ -325,6 +347,14 @@ impl Document {
         let types: std::collections::HashMap<u64, BomType> =
             self.components.iter().map(|c| (c.id, c.metadata.bom_type())).filter(|(_, t)| *t != BomType::Normal).collect();
         self.occurrences.iter().map(|o| o.bom_type.or_else(|| types.get(&o.component).copied()).unwrap_or_default()).collect()
+    }
+
+    /// The occurrences that count as reference ([`Document::occurrence_bom_types`]). A body placed
+    /// through any of them is a reference part: the bill of materials counts nothing inside a
+    /// reference, and a drawing draws all of it as reference.
+    pub fn reference_occurrences(&self) -> std::collections::HashSet<u64> {
+        let types = self.occurrences.iter().zip(self.occurrence_bom_types());
+        types.filter(|(_, bom_type)| *bom_type == BomType::Reference).map(|(o, _)| o.id).collect()
     }
 
     /// World transform of a component's frame (through its first occurrence and its parents').
@@ -497,6 +527,19 @@ impl Document {
         held
     }
 
+    /// Is `c` (or one of its ancestors) marked out of the History bar (#10393)? The root (0)
+    /// never is: its own features always show.
+    pub fn component_history_hidden(&self, mut c: u64) -> bool {
+        for _ in 0..1000 {
+            match self.components.iter().find(|x| x.id == c) {
+                Some(x) if x.history_hidden => return true,
+                Some(x) if x.parent != 0 => c = x.parent,
+                _ => return false,
+            }
+        }
+        false
+    }
+
     /// Would putting a placement of `component` into `parent` put it inside itself: is `parent`
     /// the component, or inside it, created in it or placed in it at any depth? Placements can sit
     /// apart from where their component was created ([`Self::component_within`] follows only
@@ -521,7 +564,8 @@ impl Document {
         false
     }
 
-    /// Add an occurrence of an existing component into `parent`.
+    /// Add an occurrence of an existing component into `parent`, placed by `transform` (which
+    /// must pass [`is_placement`]).
     pub fn add_occurrence(&mut self, component: u64, parent: u64, transform: Mat) -> Result<u64> {
         if component == 0 || !self.components.iter().any(|c| c.id == component) {
             return Err(DocError::Unknown(format!("component {component}")));
@@ -532,10 +576,20 @@ impl Document {
         if self.occurrences.len() >= 100_000 {
             return Err(DocError::Invalid("too many occurrences".into()));
         }
+        if !is_placement(&transform) {
+            return Err(DocError::Invalid("an occurrence's placement must be a rigid motion (no scaling or mirroring) within 1e9 mm".into()));
+        }
         let id = self.next_id.max(1);
         self.next_id = id.checked_add(1).ok_or_else(|| DocError::Invalid("too many items in the design".into()))?;
         let cname = self.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default();
-        let k = self.occurrences.iter().filter(|o| o.component == component).count() + 1;
+        // The next number, or, when an occurrence already has that name (one before it was
+        // deleted, or of another component of that name), the first number none has (#9738).
+        let next = self.occurrences.iter().filter(|o| o.component == component).count() + 1;
+        let free = |k: &usize| {
+            let name = format!("{cname}:{k}");
+            !self.occurrences.iter().any(|o| o.name == name)
+        };
+        let k = std::iter::once(next).chain(1..).find(free).unwrap_or(next);
         self.occurrences.push(crate::Occurrence { id, component, parent, name: format!("{cname}:{k}"), transform, grounded: false, bom_type: None });
         Ok(id)
     }

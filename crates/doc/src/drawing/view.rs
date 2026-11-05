@@ -6,30 +6,38 @@
 //!
 //! What a view sets itself is in [`ViewOverrides`]: each setting it leaves out follows its parent,
 //! then the default, and [`Drawing::resolve_view`] is that one rule for every reader. A projected
-//! view's source and basis come from its chain of parents, so neither is saved.
+//! view's source and basis come from its chain of parents, so neither is saved. Which occurrences it
+//! draws is such a setting too, and the paths aren't checked against the design: deleting an
+//! occurrence must never refuse the file, so what is left to draw is the reader's to say.
 //!
 //! The rules, beside the record's: a view is on one of the drawing's sheets; a base view draws one
 //! of its sources, has a scale and looks from a direction that makes a view; every parent is a view
 //! of the drawing, no chain of parents loops, and a chain is at most [`MAX_VIEW_DEPTH`] views; a
 //! view lined up with its parent is on the parent's sheet; a view's place is on paper
-//! ([`is_paper_coordinate`]); at most [`MAX_VIEWS`] views, listed by id ([`Drawing::add_views`]).
+//! ([`is_paper_coordinate`]); a view's occurrence paths keep [`check_occurrence_paths`]; at most
+//! [`MAX_VIEWS`] views, listed by id ([`Drawing::add_views`]).
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use solidcore_record::{Plane, Vec2};
 use solidcraft_geom::drawing_view::{ProjectedSide, Scale, is_paper_coordinate, projected_basis};
 use solidcraft_geom::paper::MAX_SIDE_MM;
-use solidcraft_geom::{Plane, Vec2};
 use solidcraft_render::VisualStyle;
 
 use super::{Drawing, add_by_id, in_id_order, require};
-use crate::drawing_view::{MAX_REFERENCE_MARGIN_MM, TangentEdges, ViewDirection, ViewOverrides, ViewSettings};
-use crate::{DocError, Result, ids};
+use crate::drawing_view::{MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, TangentEdges, ViewDirection, ViewOverrides, ViewSettings};
+use crate::{DocError, MAX_PLACEMENT_DEPTH, Result, ids};
 
 /// The most views a drawing may have.
 pub const MAX_VIEWS: usize = 4096;
 /// The most views in a chain, from a base view down through the views projected from it.
 pub const MAX_VIEW_DEPTH: usize = 32;
+/// Occurrence paths a view's `occurrences` or `hide` may hold, each.
+pub const MAX_PATHS: usize = 1_000;
+/// Ids a view's `occurrences` and `hide` may hold in all.
+pub const MAX_PATH_IDS: usize = 4_096;
 
 /// One view of a drawing.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -46,10 +54,10 @@ pub struct View {
     /// What it sets itself; each setting left out follows its parent, then the default.
     #[serde(default, skip_serializing_if = "ViewOverrides::is_empty")]
     pub settings: ViewOverrides,
-    /// Model millimetres added on every side of its extents, so reference parts around the model
-    /// show inside its boundary: 0 to [`MAX_REFERENCE_MARGIN_MM`], each view its own.
+    /// How far its boundary grows from the model's box towards the box that also holds its reference
+    /// parts, each side on its own: 0 to [`MAX_REFERENCE_SHOWN_PERCENT`], each view its own.
     #[serde(default, skip_serializing_if = "is_zero")]
-    pub reference_margin_mm: f64,
+    pub reference_shown_percent: f64,
 }
 
 /// What a view draws, and from where.
@@ -100,20 +108,38 @@ pub struct Setting<T> {
 }
 
 /// A view as it draws: the source it draws, which way it looks, and each setting with who gave it.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedView {
     pub source: u64,
     pub basis: Plane,
     pub scale: Setting<Scale>,
-    pub display_style: Setting<VisualStyle>,
+    pub visual_style: Setting<VisualStyle>,
     pub reference_style: Setting<VisualStyle>,
     pub reference_hides_model: Setting<bool>,
     pub tangent_edges: Setting<TangentEdges>,
-    pub reference_margin_mm: f64,
+    /// The subtrees it draws: every body when None.
+    pub occurrences: Setting<Option<OccurrencePaths>>,
+    /// The subtrees it leaves out: none when None.
+    pub hide: Setting<Option<OccurrencePaths>>,
+    pub reference_shown_percent: f64,
 }
 
 fn is_zero(v: &f64) -> bool {
     *v == 0.0
+}
+
+/// What occurrence paths a view may choose, saved or asked for: at most [`MAX_PATHS`] in each list
+/// and [`MAX_PATH_IDS`] ids in all, none deeper than an assembly goes, with `[]` (the design's own
+/// bodies) in `occurrences` only.
+pub fn check_occurrence_paths(occurrences: &[Vec<u64>], hide: &[Vec<u64>]) -> Result<()> {
+    let ids = occurrences.iter().chain(hide).map(Vec::len).fold(0usize, usize::saturating_add);
+    require(occurrences.len() <= MAX_PATHS && hide.len() <= MAX_PATHS && ids <= MAX_PATH_IDS, || {
+        format!("at most {MAX_PATHS} occurrence paths in source.occurrences and in hide, and {MAX_PATH_IDS} ids in all")
+    })?;
+    require(occurrences.iter().chain(hide).all(|path| path.len() <= MAX_PLACEMENT_DEPTH), || {
+        format!("an occurrence path is 1..{MAX_PLACEMENT_DEPTH} ids")
+    })?;
+    require(hide.iter().all(|path| !path.is_empty()), || "hide [] would leave out the design's own bodies: give source instead".into())
 }
 
 /// The views from `id` up to its base view, nearest first, each found by `find`: refused when a
@@ -143,7 +169,7 @@ fn chain<'a>(id: u64, find: impl Fn(u64) -> Option<&'a View>) -> Result<Vec<&'a 
 }
 
 /// The nearest view of `chain` (the view first) that sets a setting `field` reads, with its value.
-fn inherited<T: Copy>(chain: &[&View], field: impl Fn(&ViewOverrides) -> Option<T>) -> Option<Setting<T>> {
+fn inherited<T>(chain: &[&View], field: impl Fn(&ViewOverrides) -> Option<T>) -> Option<Setting<T>> {
     chain.iter().enumerate().find_map(|(i, view)| {
         let set_by = if i == 0 { SetBy::This } else { SetBy::Parent(view.id) };
         field(&view.settings).map(|value| Setting { value, set_by })
@@ -151,7 +177,7 @@ fn inherited<T: Copy>(chain: &[&View], field: impl Fn(&ViewOverrides) -> Option<
 }
 
 /// [`inherited`], or the default `value` when no view of the chain sets it.
-fn or_default<T: Copy>(chain: &[&View], field: impl Fn(&ViewOverrides) -> Option<T>, value: T) -> Setting<T> {
+fn or_default<T>(chain: &[&View], field: impl Fn(&ViewOverrides) -> Option<T>, value: T) -> Setting<T> {
     inherited(chain, field).unwrap_or(Setting { value, set_by: SetBy::Default })
 }
 
@@ -166,6 +192,25 @@ impl Drawing {
     /// View `id`, found by halves in the views' id order.
     pub fn view(&self, id: u64) -> Option<&View> {
         self.view_index(id).and_then(|i| self.views.get(i)).map(|v| &**v)
+    }
+
+    /// `views` and every view projected from them, directly or through others. A parent can sort
+    /// after its child, so each pass over the views finds at least one more level of a chain, which
+    /// is at most [`MAX_VIEW_DEPTH`] views.
+    pub fn with_projected(&self, views: &BTreeSet<u64>) -> BTreeSet<u64> {
+        let mut all = views.clone();
+        for _ in 0..MAX_VIEW_DEPTH {
+            let before = all.len();
+            for view in &self.views {
+                if matches!(view.kind, ViewKind::Projected { parent, .. } if all.contains(&parent)) {
+                    all.insert(view.id);
+                }
+            }
+            if all.len() == before {
+                break;
+            }
+        }
+        all
     }
 
     /// Where view `id` is in [`Drawing::views`].
@@ -187,15 +232,16 @@ impl Drawing {
     fn check_view(&self, view: &View) -> Result<()> {
         let on = |sheet: u64| format!("it is on sheet {}, which the drawing doesn't have", ids::encode(sheet));
         require(self.sheets.iter().any(|s| s.id == view.sheet), || on(view.sheet))?;
-        let margin = view.reference_margin_mm;
-        require(margin.is_finite() && (0.0..=MAX_REFERENCE_MARGIN_MM).contains(&margin), || {
-            format!("its reference margin is 0 to {MAX_REFERENCE_MARGIN_MM} model millimetres")
+        let percent = view.reference_shown_percent;
+        require(percent.is_finite() && (0.0..=MAX_REFERENCE_SHOWN_PERCENT).contains(&percent), || {
+            format!("its reference_shown_percent is 0 to {MAX_REFERENCE_SHOWN_PERCENT}")
         })?;
         let place = match view.place {
             ViewPlace::At([x, y]) => is_paper_coordinate(x) && is_paper_coordinate(y),
             ViewPlace::Aligned(along) => is_paper_coordinate(along),
         };
         require(place, || format!("its place is at most {MAX_SIDE_MM} mm from the sheet's origin"))?;
+        check_occurrence_paths(view.settings.occurrences.as_deref().unwrap_or_default(), view.settings.hide.as_deref().unwrap_or_default())?;
         match view.kind {
             ViewKind::Base { source, view: direction } => {
                 let drawn = || format!("it draws source {}, which the drawing doesn't have", ids::encode(source));
@@ -233,11 +279,13 @@ impl Drawing {
             source,
             basis,
             scale,
-            display_style: or_default(&chain, |s| s.display_style, defaults.display_style),
+            visual_style: or_default(&chain, |s| s.visual_style, defaults.visual_style),
             reference_style: or_default(&chain, |s| s.reference_style, defaults.reference_style),
             reference_hides_model: or_default(&chain, |s| s.reference_hides_model, defaults.reference_hides_model),
             tangent_edges: or_default(&chain, |s| s.tangent_edges, defaults.tangent_edges),
-            reference_margin_mm: chain.first().map_or(0.0, |view| view.reference_margin_mm),
+            occurrences: or_default(&chain, |s| s.occurrences.clone().map(Some), None),
+            hide: or_default(&chain, |s| s.hide.clone().map(Some), None),
+            reference_shown_percent: chain.first().map_or(0.0, |view| view.reference_shown_percent),
         })
     }
 

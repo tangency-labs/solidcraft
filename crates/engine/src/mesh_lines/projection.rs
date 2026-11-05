@@ -1,10 +1,14 @@
 //! Vector hidden-line removal: intersect each projected edge with triangle half planes and
 //! its depth plane, then union occluded parameter intervals. A BVH bounds the candidate work.
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_geom::Aabb3;
 #[cfg(test)]
 use solidcraft_geom::Mesh;
-use solidcraft_geom::{Aabb3, Plane, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 use solidcraft_render::Camera;
 use std::collections::BTreeMap;
+
+use super::Refused;
 
 pub(crate) struct Drawing {
     pub lines: Vec<Line>,
@@ -58,23 +62,23 @@ impl View {
 
     /// `p` in the view: right and up, and a depth that grows toward the eye (the distance
     /// along back, or its reciprocal's change in perspective).
-    pub(super) fn project(&self, p: Vec3) -> Result<Vec3, &'static str> {
+    pub(super) fn project(&self, p: Vec3) -> Result<Vec3, Refused> {
         if !p.is_finite() {
-            return Err("model contains invalid coordinates");
+            return Err(Refused::Invalid("the model contains invalid coordinates"));
         }
         let d = p - self.origin;
         let z = d.dot(self.back);
         let projected = if let Some(distance) = self.perspective {
             let w = distance - z;
             if w <= distance * 1e-6 {
-                return Err("model crosses the camera eye plane; zoom out before exporting");
+                return Err(Refused::EyePlane);
             }
             Vec3::new(d.dot(self.right) * distance / w, d.dot(self.up) * distance / w, 1. / w)
         } else {
             Vec3::new(d.dot(self.right), d.dot(self.up), z)
         };
         if !projected.is_finite() || projected.len() > 1e12 {
-            return Err("projected coordinates exceed the export range");
+            return Err(Refused::Invalid("the projected coordinates are past the range a view holds"));
         }
         Ok(projected)
     }
@@ -187,7 +191,7 @@ impl Tree {
 }
 
 /// Clip [lo,hi] by the linear inequality f(t) >= 0.
-pub(super) fn clip(lo: &mut f64, hi: &mut f64, f0: f64, f1: f64) -> bool {
+pub(crate) fn clip(lo: &mut f64, hi: &mut f64, f0: f64, f1: f64) -> bool {
     if f0 < 0.0 && f1 < 0.0 {
         return false;
     }

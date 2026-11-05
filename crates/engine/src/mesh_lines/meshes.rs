@@ -1,15 +1,18 @@
 //! Export-only mesh instances. Keep one geometry buffer per unambiguous definition, while
 //! retaining the current placed body's edge choices (tangent classification can vary after
 //! placement). Never modify the document, fuse parts, or share across separate exports.
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 use std::mem::size_of;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use solidcore_record::Vec3;
 use solidcraft_doc::{IDENTITY, Mat, ModelBody, mat_inverse, mat_mul};
-use solidcraft_geom::{Aabb3, Mesh, Vec3};
+use solidcraft_geom::{Aabb3, Mesh};
 use solidcraft_kernel::{KernelError, map_with_local_pools};
 
+use super::Refused;
 use super::progress::Stage;
 use crate::params::bad;
 use crate::{Result, Session};
@@ -30,6 +33,8 @@ pub(crate) struct Placement {
     pub tangent: Vec<bool>,
     /// The pairs of faces every edge between which is drawn, sorted.
     pub joins: Vec<[u32; 2]>,
+    /// A reference part: its lines merge apart from the model's, as both are drawn.
+    pub reference: bool,
 }
 pub(crate) struct Scene {
     pub meshes: Vec<Arc<Mesh>>,
@@ -38,6 +43,9 @@ pub(crate) struct Scene {
     pub bytes: usize,
     /// Whether each line keeps its source ([`Ask::sources`]).
     pub sources: bool,
+    /// Whether reference parts cover the model's lines, as every part does unless told otherwise.
+    /// Their own lines are always tested against everything.
+    pub reference_hides_model: bool,
 }
 
 /// What a caller asks of the meshes besides the chord. The view DXF asks for neither.
@@ -108,10 +116,17 @@ fn rigid(m: &Mat) -> bool {
 }
 
 /// The export meshes of the bodies `shown` keeps, at the chord `tolerance`, with what `ask` asks
-/// for. Errors about the placements name the command `cmd`; a body with no exportable surface, the
-/// memory budget and cancellation come back as the meshing stage's own errors.
-pub(crate) fn prepare(s: &Session, cmd: &str, tolerance: f64, ask: Ask, shown: impl Fn(&ModelBody) -> bool) -> Result<Scene> {
-    let world = s.world_state();
+/// for. Errors name the command `cmd`; a refusal says what `says` makes of it, and a body the
+/// kernel can't mesh comes back as the kernel's error.
+pub(crate) fn prepare(
+    s: &Session,
+    cmd: &str,
+    tolerance: f64,
+    ask: Ask,
+    shown: impl Fn(&ModelBody) -> bool,
+    says: fn(Refused) -> String,
+) -> Result<Scene> {
+    let world = s.world_state()?;
     let state = s.model.state();
     let mut definitions = BTreeMap::new();
     for body in &state.bodies {
@@ -122,7 +137,7 @@ pub(crate) fn prepare(s: &Session, cmd: &str, tolerance: f64, ask: Ask, shown: i
     let mut items = Vec::new();
     for (index, body) in world.bodies.iter().enumerate().filter(|(_, b)| shown(b)) {
         if items.len() >= MAX_BODIES {
-            return Err(bad(cmd, "too many placed bodies to export"));
+            return Err(bad(cmd, "too many placed bodies"));
         }
         let key = (body.component, body.definition_name(), body.feature);
         let unambiguous = definitions.get(&key) == Some(&1);
@@ -146,11 +161,14 @@ pub(crate) fn prepare(s: &Session, cmd: &str, tolerance: f64, ask: Ask, shown: i
     }
     let progress = Stage::new("dxf_meshes", items.len());
     let bytes = AtomicUsize::new(0);
+    // Each worker answers the kernel's error, or its body's mesh or why it was refused.
     let results = map_with_local_pools(&items, WORKERS, |item| {
-        progress.check().map_err(|e| KernelError::Failed(e.into()))?;
-        let mut mesh = item.body.body.reference_display_mesh_angular(tolerance, solidcraft_kernel::DISPLAY_ANGLE)?;
+        if let Err(refused) = progress.check() {
+            return Ok(Err(refused));
+        }
+        let mut mesh = item.body.body.mesh(&solidcraft_kernel::MeshTolerance { chord: tolerance, angle: Some(solidcraft_kernel::DISPLAY_ANGLE) })?;
         if mesh.triangles.is_empty() {
-            return Err(KernelError::Invalid(format!("{} has no exportable surface", item.body.name)));
+            return Err(KernelError::Invalid(format!("{} has no surface to mesh", item.body.name)));
         }
         let drawn = |i: usize| if ask.tangent_edges { mesh.edge_pickable(i) } else { mesh.shaded_edge_visible(i) };
         let visibility: Vec<bool> = (0..mesh.edges.len()).map(drawn).collect();
@@ -169,16 +187,19 @@ pub(crate) fn prepare(s: &Session, cmd: &str, tolerance: f64, ask: Ask, shown: i
             mesh.sharp_edges = Vec::new();
             mesh.edge_faces = Vec::new();
             if !claim(&bytes, buffer_bytes(&mesh), MESH_BYTES) {
-                return Err(KernelError::Invalid("view exceeds export memory budget; hide bodies or increase tolerance".into()));
+                return Ok(Err(Refused::Memory));
             }
             Some(Arc::new(mesh))
         } else {
             None
         };
-        progress.advance(1).map_err(|e| KernelError::Failed(e.into()))?;
-        Ok(Prepared { mesh, visibility, tangent, joins, triangles })
+        if let Err(refused) = progress.advance(1) {
+            return Ok(Err(refused));
+        }
+        Ok(Ok(Prepared { mesh, visibility, tangent, joins, triangles }))
     });
-    let mut prepared = results.into_iter().collect::<solidcraft_kernel::Result<Vec<_>>>()?;
+    let answered = results.into_iter().collect::<solidcraft_kernel::Result<Vec<_>>>()?;
+    let mut prepared = answered.into_iter().collect::<std::result::Result<Vec<_>, Refused>>().map_err(|e| bad(cmd, says(e)))?;
     let mut meshes: Vec<Option<Arc<Mesh>>> = vec![None; groups.len()];
     for (item, p) in items.iter().zip(&mut prepared) {
         if let Some(mesh) = p.mesh.take()
@@ -195,9 +216,16 @@ pub(crate) fn prepare(s: &Session, cmd: &str, tolerance: f64, ask: Ask, shown: i
             return Err(bad(cmd, "placed edge identity changed"));
         }
         triangles = triangles.saturating_add(p.triangles);
-        placements.push(Placement { mesh: item.group, transform: item.transform, visibility: p.visibility, tangent: p.tangent, joins: p.joins });
+        placements.push(Placement {
+            mesh: item.group,
+            transform: item.transform,
+            visibility: p.visibility,
+            tangent: p.tangent,
+            joins: p.joins,
+            reference: false,
+        });
     }
-    Ok(Scene { meshes, placements, triangles, bytes: bytes.load(Ordering::Relaxed), sources: ask.sources })
+    Ok(Scene { meshes, placements, triangles, bytes: bytes.load(Ordering::Relaxed), sources: ask.sources, reference_hides_model: true })
 }
 
 /// The pairs of faces (smaller first, sorted) every edge between which is drawn: a mesh side

@@ -2,12 +2,13 @@
 //! the drawing (none when nothing changes). A sheet is named by its id or, when only one has it,
 //! its name.
 //!
-//! A new sheet takes the paper, border and resolution of the sheet it follows, so a drawing's
-//! sheets match unless told otherwise. Changing a sheet's paper regrows its border and zones,
+//! A new sheet takes the paper, border, title block and resolution of the sheet it follows, so a
+//! drawing's sheets match unless told otherwise. Changing a sheet's paper regrows its border and zones,
 //! which nothing on it is saved against, and moves nothing (S5): the answer lists the sheet's views
 //! whose boundary the new paper leaves outside its drawing space. A sheet with anything on it is
 //! deleted only with what is on it, when asked, in the same undo step.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -15,6 +16,7 @@ use solidcraft_doc::drawing::view::ViewKind;
 use solidcraft_doc::drawing::{Drawing, Excluded, OnSheet, Sheet, SheetComponent};
 use solidcraft_doc::ids;
 use solidcraft_geom::drawing_sheet::{Orientation, SheetSize};
+use solidcraft_geom::title_block::{self, TitleBlock};
 
 use super::CommandSpec;
 use crate::params::{bad, num, str_};
@@ -37,8 +39,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<SheetsResult>)
         .params(
             "after?: a sheet (id or name; default the last); name?; size?: {standard: a3} or {custom: {sides_mm: [w, h]}}; \
-             orientation?: landscape|portrait; dpi?: 25..2400 (each defaulting to the sheet it follows); documents?: {source: id, \
-             component: id (0 the design)}; excluded?: {count?, print?} (none unless given) → sheet: the new sheet's id, sheets. \
+             orientation?: landscape|portrait; title_block?: a definition, \"built-in\" or null; dpi?: 25..2400 (each defaulting to the sheet it follows); documents?: {source: id, \
+             component: id (0 the design)}; excluded?: {count?, print?}; title_block_overrides?: {cell: text} (none of these unless given) → sheet: the new sheet's id, sheets. \
              One undo step.",
         ),
     CommandSpec::new("drawing.sheet.set", "Sheet Settings", crate::checked!("drawing.sheet.set", set))
@@ -48,9 +50,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SET)
         .output(output_schema_for::<SheetsResult>)
         .params(
-            "sheet: id or name; name?, size?, orientation?, dpi?; documents?: {source: id, component: id (0 the design)} or null; \
-             excluded?: {count?, print?} → the drawing's sheets, and after a change of paper `outside`: the sheet's views whose \
-             boundary leaves its drawing space (none is moved). One undo step, none when nothing changes.",
+            "sheet: id or name; name?, size?, orientation?, title_block?: a definition, \"built-in\" (its general tolerances empty) or null \
+             (a new block keeps the overrides of the text cells it still has), dpi?; \
+             documents?: {source: id, component: id (0 the design)} or null; excluded?: {count?, print?}; title_block_overrides?: {cell: text, shown in place of \
+             its value, or null to drop it} or null to drop them all → the drawing's sheets, and after a change of paper or title block `outside`: the sheet's views whose \
+             boundary leaves its drawing space or lies over its title block (none is moved), and after a new title block `lost`: the cells whose typed text \
+             it drops. One undo step, none when nothing changes.",
         ),
     CommandSpec::new("drawing.sheet.reorder", "Reorder Sheets", crate::checked!("drawing.sheet.reorder", reorder))
         .icon("reorder")
@@ -67,15 +72,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<SheetsResult>)
         .params(
             "sheet: id or name (a drawing keeps at least one); contents?: delete, to delete the views on it, their dimensions and \
-             balloons with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
+             balloons, and the images on it, with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
         ),
 ];
 
 /// The drawing's sheets, as each command answers (`sheet`: the one `drawing.sheet.add` made;
 /// `outside`: the views `drawing.sheet.set`'s paper leaves outside).
-fn answer(s: &Session, cmd: &str, sheet: Option<u64>, outside: Vec<OutsideResult>) -> Result<Value> {
+fn answer(s: &Session, cmd: &str, sheet: Option<u64>, outside: Vec<OutsideResult>, lost: Vec<String>) -> Result<Value> {
     let sheets = s.drawing(cmd)?.sheets.iter().map(|sheet| SheetName { id: ids::encode(sheet.id), name: sheet.name.clone() }).collect();
-    let reply = SheetsResult { sheet: sheet.map(ids::encode), sheets, outside, param_warnings: Vec::new() };
+    let reply = SheetsResult { sheet: sheet.map(ids::encode), sheets, outside, lost, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
@@ -97,8 +102,18 @@ fn listed(on: &OnSheet) -> String {
         let s = if list.len() == 1 { "" } else { "s" };
         (!list.is_empty()).then(|| format!("{} {what}{s} ({})", list.len(), named(list)))
     };
-    let mut kinds: Vec<String> =
-        [kind("view", &on.views), kind("dimension", &on.dimensions), kind("balloon", &on.balloons)].into_iter().flatten().collect();
+    let mut kinds: Vec<String> = [
+        kind("view", &on.views),
+        kind("dimension", &on.dimensions),
+        kind("balloon", &on.balloons),
+        kind("image", &on.images),
+        kind("revision tag", &on.tags),
+        kind("table", &on.tables),
+        kind("note", &on.notes),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     let last = kinds.pop().unwrap_or_default();
     if kinds.is_empty() { last } else { format!("{} and {last}", kinds.join(", ")) }
 }
@@ -109,8 +124,9 @@ fn sheet_at(cmd: &str, d: &Drawing, p: &Value, key: &str) -> Result<usize> {
     d.sheet_index(named).map_err(|e| bad(cmd, e.to_string()))
 }
 
-/// The settings `p` gives a sheet, over the ones it has.
-fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<()> {
+/// The settings `p` gives a sheet, over the ones it has. Answers the cells whose typed text a new
+/// title block drops ([`Sheet::set_title_block`]).
+fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<Vec<String>> {
     if let Some(name) = p.get("name") {
         sheet.name = name.as_str().ok_or_else(|| bad(cmd, "`name` must be text"))?.to_string();
     }
@@ -121,6 +137,29 @@ fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<()> {
     if let Some(orientation) = p.get("orientation") {
         sheet.sheet.orientation =
             serde_json::from_value::<Orientation>(orientation.clone()).map_err(|_| bad(cmd, "`orientation` is landscape or portrait"))?;
+    }
+    let lost = match p.get("title_block") {
+        None => Vec::new(),
+        Some(Value::Null) => sheet.set_title_block(None),
+        Some(Value::String(name)) if name == "built-in" => sheet.set_title_block(Some(title_block::default_block())),
+        Some(block) => {
+            let block = serde_json::from_value::<TitleBlock>(block.clone()).map_err(|e| bad(cmd, format!("`title_block`: {e}")))?;
+            sheet.set_title_block(Some(block))
+        }
+    };
+    match p.get("title_block_overrides") {
+        None => {}
+        Some(Value::Null) => sheet.title_block_overrides.clear(),
+        Some(Value::Object(cells)) => {
+            for (cell, text) in cells {
+                match text {
+                    Value::Null => sheet.title_block_overrides.remove(cell),
+                    Value::String(text) => sheet.title_block_overrides.insert(cell.clone(), text.clone()),
+                    _ => return Err(bad(cmd, format!("`title_block_overrides.{cell}` is text or null"))),
+                };
+            }
+        }
+        Some(_) => return Err(bad(cmd, "`title_block_overrides` is {cell: text or null} or null")),
     }
     if p.get("dpi").is_some() {
         sheet.dpi = num(p, "dpi").ok_or_else(|| bad(cmd, "`dpi` must be a number"))?;
@@ -146,7 +185,7 @@ fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<()> {
         };
         sheet.excluded = Excluded { count: flag("count", sheet.excluded.count)?, print: flag("print", sheet.excluded.print)? };
     }
-    Ok(())
+    Ok(lost)
 }
 
 fn add(s: &mut Session, p: &Value) -> Result<Value> {
@@ -157,28 +196,29 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         let after = if p.get("after").is_some() { sheet_at(cmd, d, p, "after")? } else { d.sheets.len().saturating_sub(1) };
         let model = d.sheets.get(after).ok_or_else(|| bad(cmd, "the drawing has no sheet to follow"))?;
         let free = (d.sheets.len() + 1..).map(|n| format!("Sheet {n}")).find(|name| d.sheets.iter().all(|s| s.name != *name)).unwrap_or_default();
-        let mut sheet = Sheet { id, name: free, documents: None, excluded: Excluded::default(), ..(**model).clone() };
+        let mut sheet =
+            Sheet { id, name: free, documents: None, excluded: Excluded::default(), title_block_overrides: BTreeMap::new(), ..(**model).clone() };
         apply(cmd, &mut sheet, p)?;
         d.sheets.insert(after + 1, Arc::new(sheet));
         Ok(())
     })?;
-    answer(s, cmd, Some(id), Vec::new())
+    answer(s, cmd, Some(id), Vec::new(), Vec::new())
 }
 
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.sheet.set";
-    let (id, paper) = s.edit_drawing(cmd, |d| {
+    let (id, room, lost) = s.edit_drawing(cmd, |d| {
         let at = sheet_at(cmd, d, p, "sheet")?;
         let sheet = Arc::make_mut(d.sheets.get_mut(at).ok_or_else(|| bad(cmd, "no such sheet"))?);
-        let was = sheet.sheet;
-        apply(cmd, sheet, p)?;
-        Ok((sheet.id, sheet.sheet != was))
+        let was = (sheet.sheet, sheet.title_block.clone());
+        let lost = apply(cmd, sheet, p)?;
+        Ok((sheet.id, (sheet.sheet, sheet.title_block.clone()) != was, lost))
     })?;
-    // Only a change of paper moves the drawing space; each view measured once.
+    // Only a change of paper or block changes the room views have; each view measured once.
     let d = s.drawing(cmd)?;
-    let on: Vec<u64> = if paper { d.on_sheet(id).views } else { Vec::new() };
+    let on: Vec<u64> = if room { d.on_sheet(id).views } else { Vec::new() };
     let outside = super::drawing_view::outside_results(crate::drawing_view::outside(s, d, &on, cmd)?);
-    answer(s, cmd, None, outside)
+    answer(s, cmd, None, outside, lost)
 }
 
 fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
@@ -204,16 +244,22 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
         d.sheets = sheets;
         Ok(())
     })?;
-    answer(s, cmd, None, Vec::new())
+    answer(s, cmd, None, Vec::new(), Vec::new())
+}
+
+/// Whether `p` asks for what is in the way to go too: `contents: "delete"`, refused otherwise with
+/// `what` goes.
+pub(super) fn contents_delete(cmd: &str, p: &Value, what: &str) -> Result<bool> {
+    match p.get("contents") {
+        None => Ok(false),
+        Some(v) if v.as_str() == Some("delete") => Ok(true),
+        Some(_) => Err(bad(cmd, format!("`contents` is delete: {what}"))),
+    }
 }
 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.sheet.delete";
-    let with_contents = match p.get("contents") {
-        None => false,
-        Some(v) if v.as_str() == Some("delete") => true,
-        Some(_) => return Err(bad(cmd, "`contents` is delete: the sheet goes with everything on it")),
-    };
+    let with_contents = contents_delete(cmd, p, "the sheet goes with everything on it")?;
     s.edit_drawing(cmd, |d| {
         let at = sheet_at(cmd, d, p, "sheet")?;
         if d.sheets.len() <= 1 {
@@ -243,7 +289,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         d.remove_sheet(sheet.id);
         Ok(())
     })?;
-    answer(s, cmd, None, Vec::new())
+    answer(s, cmd, None, Vec::new(), Vec::new())
 }
 
 #[cfg(test)]

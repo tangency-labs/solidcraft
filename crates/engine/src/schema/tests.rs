@@ -380,7 +380,7 @@ fn issues_are_read_from_the_commands_own_contract() {
     assert_eq!(messages(&issues), ["unknown key `operaton`; did you mean `operation`?"]);
     assert_eq!(issues, box_contract().check(&json!({"length": 1, "width": 1, "height": 1, "operaton": "cut"})));
     // No contract, or no such command: nothing to say.
-    assert!(super::issues("solid.fillet", &json!({"nonsense": 1})).is_empty());
+    assert!(super::issues("solid.chamfer", &json!({"nonsense": 1})).is_empty());
     assert!(super::issues("no.such", &json!({"nonsense": 1})).is_empty());
 }
 
@@ -389,6 +389,93 @@ fn a_level_is_read_back_from_its_name() {
     for level in ParamCheck::ALL {
         assert_eq!(ParamCheck::parse(level.name()), Some(level));
     }
+}
+
+#[test]
+fn ui_prefs_theme_options_input_schema_covers_updates_and_resets() {
+    use super::ui_prefs::PrefsParams;
+    let schema = input_schema_for::<PrefsParams>();
+    let schema = schema.as_value();
+    assert!(schema["properties"]["theme_options"].is_object());
+    for value in [
+        json!({}),
+        json!({"theme_options":{}}),
+        json!({"theme_options":{"a":{}}}),
+        json!({"theme_options":{"a":{"enabled":true,"amount":3.5,"style":"cool","reset":null}},"theme":"a"}),
+    ] {
+        assert!(serde_json::from_value::<PrefsParams>(value.clone()).is_ok(), "{value}");
+        assert!(conforms(schema, schema, &value), "{value}");
+    }
+    for value in [
+        json!({"theme_options":null}),
+        json!({"theme_options":[]}),
+        json!({"theme_options":{"a":true}}),
+        json!({"theme_options":{"a":{"enabled":{}}}}),
+        json!({"theme_options":{"a":{"amount":[]}}}),
+    ] {
+        assert!(serde_json::from_value::<PrefsParams>(value.clone()).is_err(), "{value}");
+    }
+}
+
+#[test]
+fn ui_prefs_theme_options_output_schema_matches_serialized_reply() {
+    use super::ui_prefs::*;
+    let options = ThemeOptionsReply {
+        theme_option_defs: vec![
+            ThemeOptionDef {
+                id: "enabled".into(),
+                kind: ThemeOptionKind::Bool { default: false },
+                label: "Enabled".into(),
+                help: String::new(),
+                parent: None,
+                advanced: false,
+                section: None,
+                standard: false,
+                available: true,
+                reason: None,
+            },
+            ThemeOptionDef {
+                id: "blur".into(),
+                kind: ThemeOptionKind::Range { default: 0.0, min: 0.0, max: 100.0, step: 1.0, unit: Some("px".into()) },
+                label: "blur".into(),
+                help: String::new(),
+                parent: None,
+                advanced: false,
+                section: None,
+                standard: true,
+                available: false,
+                reason: Some("not implemented".into()),
+            },
+            ThemeOptionDef {
+                id: "style".into(),
+                kind: ThemeOptionKind::Choice { default: "warm".into(), values: vec![ThemeChoice { id: "warm".into(), label: "Warm".into() }] },
+                label: "Style".into(),
+                help: String::new(),
+                parent: Some("enabled".into()),
+                advanced: true,
+                section: Some("Details".into()),
+                standard: false,
+                available: true,
+                reason: None,
+            },
+        ],
+        theme_option_values: [
+            ("enabled".into(), ThemeOptionValue::Bool(true)),
+            ("blur".into(), ThemeOptionValue::Num(0.0)),
+            ("style".into(), ThemeOptionValue::Choice("warm".into())),
+        ]
+        .into(),
+        theme_option_notices: vec![ThemeOptionNotice { id: "removed".into(), kind: ThemeOptionNoticeKind::UnknownOption }],
+    };
+    let reply = PrefsReply { options, settings: [("theme".into(), json!("a")), ("theme_options".into(), json!({"a":{"enabled":true}}))].into() };
+    let value = serde_json::to_value(&reply).unwrap();
+    let schema = output_schema_for::<PrefsReply>();
+    let schema = schema.as_value();
+    for field in ["theme_option_defs", "theme_option_values", "theme_option_notices"] {
+        assert!(schema["properties"][field].is_object(), "{schema}");
+    }
+    assert!(conforms(schema, schema, &value), "{schema}\n{value}");
+    assert_eq!(serde_json::to_value(serde_json::from_value::<PrefsReply>(value.clone()).unwrap()).unwrap(), value);
 }
 
 /// Whether `v` conforms to `node` of the schema `root`, for the keywords these schemas use
@@ -700,7 +787,7 @@ fn face_and_edge_refs_match_the_pick_readers() {
     assert!(parse::<EdgeRef>(json!({"body": "A", "index": 1.0})).is_none());
     assert_eq!(edge_schema["anyOf"][2]["properties"]["index"]["type"], "integer");
     assert_eq!(parse::<EdgeRef>(json!({"body": "A", "index": 4})), Some(EdgeRef::Index { body: "A".into(), index: 4 }));
-    assert_eq!(parse::<FaceRef>(json!({"point": [1, 2, 3]})), Some(FaceRef::Point(solidcraft_geom::Vec3::new(1.0, 2.0, 3.0))));
+    assert_eq!(parse::<FaceRef>(json!({"point": [1, 2, 3]})), Some(FaceRef::Point(solidcore_record::Vec3::new(1.0, 2.0, 3.0))));
 }
 
 /// The pick lists take 1 to 1000 picks, as `face_points` and `edge_points` do, and so do their
@@ -833,7 +920,8 @@ fn shared_types_keep_the_handlers_messages() {
     for (id, p, probe) in [
         ("solid.shell", json!({"thickness": 1, "faces": 5}), json!({"faces": 5})),
         ("solid.shell", json!({"thickness": 1, "faces": null}), json!({"faces": null})),
-        ("solid.shell", json!({"thickness": 1, "faces": []}), json!({"faces": []})),
+        // `solid.shell` takes no faces (a closed hollow body); the draft refuses them.
+        ("solid.draft", json!({"angle": 1, "faces": []}), json!({"faces": []})),
         ("solid.shell", json!({"thickness": 1, "faces": [true]}), json!({"faces": [true]})),
         ("solid.shell", json!({"thickness": 1, "faces": [""]}), json!({"faces": [""]})),
         ("solid.fillet", json!({"radius": 1, "edges": {}}), json!({"edges": {}})),
@@ -1055,4 +1143,39 @@ fn plane_names_match_check_plane_name() {
         assert_eq!(parse::<PlaneName>(json!(name)).is_none(), refused.is_some(), "{name:?}");
     }
     assert!(parse::<PlaneName>(json!(5)).is_none());
+}
+
+#[test]
+fn sketch_edit_contracts_validate_markers_before_changing_the_session() {
+    use crate::schema::sketch::{CancelResult, EditParams, EditResult, ExitParams, FinishResult};
+    use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
+    assert_keys(input_schema_for::<EditParams>(), &["restore_marker", "sketch"]);
+    assert_keys(input_schema_for::<ExitParams>(), &["restore_marker"]);
+    let mut s = crate::Session::default();
+    let run = |s: &mut crate::Session, id: &str, p: serde_json::Value| s.execute(id, &p).unwrap();
+    let id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    s.param_check = ParamCheck::Strict;
+    let before = s.doc.to_json();
+    for marker in [json!(-1), json!(3), json!(1.5), json!(true), json!([])] {
+        assert!(s.execute("sketch.edit", &json!({"sketch": id, "restore_marker": marker})).is_err());
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.active_sketch, None);
+    }
+    for exit in ["sketch.finish", "sketch.cancel"] {
+        let r = run(&mut s, "sketch.edit", json!({"sketch": id, "restore_marker": null}));
+        let schema = output_schema_for::<EditResult>();
+        assert!(conforms(schema.as_value(), schema.as_value(), &r));
+        for params in [json!({"restore_marker": "yes"}), json!({"unknown": true})] {
+            assert!(s.execute(exit, &params).is_err());
+            assert_eq!(s.active_sketch, Some(id));
+            assert_eq!(s.doc.marker, Some(1));
+        }
+        let r = run(&mut s, exit, json!({}));
+        let schema = if exit == "sketch.finish" { output_schema_for::<FinishResult>() } else { output_schema_for::<CancelResult>() };
+        assert!(conforms(schema.as_value(), schema.as_value(), &r));
+        assert_eq!(s.doc.to_json(), before);
+    }
 }

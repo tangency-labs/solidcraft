@@ -5,7 +5,8 @@
 //! or third-party ray-tracer implementation is used. See `docs/render-raytrace-core.md`.
 
 use crate::job::CancelToken;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 mod anisotropic_faces;
 pub mod area;

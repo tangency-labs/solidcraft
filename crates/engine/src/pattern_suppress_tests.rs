@@ -2,6 +2,7 @@
 //! pattern says so.
 
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -52,15 +53,15 @@ fn enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs() {
         s.doc.features.iter().find(|feature| feature.name == "USB" && matches!(feature.kind, solidcraft_doc::FeatureKind::Sketch { .. })).unwrap();
     assert!((s.model.state().sketch(usb.id).unwrap().plane.origin.y + 35.5).abs() < 1e-6);
     let assert_material = |session: &Session| {
-        let state = session.world_state();
+        let state = session.world_state().unwrap();
         let case = state.body("Case").unwrap().mesh();
         let lid = state.body("Lid").unwrap().mesh();
-        assert!(case.contains(solidcraft_geom::Vec3::new(-24.5, -21.5, 7.)));
-        assert!(!case.contains(solidcraft_geom::Vec3::new(-26.5, -21.5, 7.)));
-        assert!(!case.contains(solidcraft_geom::Vec3::new(-10., -35.25, 11.35)));
-        assert!(case.contains(solidcraft_geom::Vec3::new(-10., -35.25, 15.)));
+        assert!(case.contains(solidcore_record::Vec3::new(-24.5, -21.5, 7.)));
+        assert!(!case.contains(solidcore_record::Vec3::new(-26.5, -21.5, 7.)));
+        assert!(!case.contains(solidcore_record::Vec3::new(-10., -35.25, 11.35)));
+        assert!(case.contains(solidcore_record::Vec3::new(-10., -35.25, 15.)));
         assert!(
-            lid.contains(solidcraft_geom::Vec3::new(0., 32.2, 29.)),
+            lid.contains(solidcore_record::Vec3::new(0., 32.2, 29.)),
             "lid bounds {:?}; lip {:?}; probes {:?}",
             lid.bounds(),
             session
@@ -78,11 +79,11 @@ fn enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs() {
                 .unwrap()
                 .sketch
                 .links,
-            (20..35).map(|y| (y, lid.contains(solidcraft_geom::Vec3::new(0., f64::from(y) + 0.2, 29.)))).collect::<Vec<_>>()
+            (20..35).map(|y| (y, lid.contains(solidcore_record::Vec3::new(0., f64::from(y) + 0.2, 29.)))).collect::<Vec<_>>()
         );
-        assert!(!lid.contains(solidcraft_geom::Vec3::new(0., 32.9, 29.)));
-        assert!(!lid.contains(solidcraft_geom::Vec3::new(-33.5, -28.5, 32.)));
-        assert!(lid.contains(solidcraft_geom::Vec3::new(-31.5, -28.5, 32.)));
+        assert!(!lid.contains(solidcore_record::Vec3::new(0., 32.9, 29.)));
+        assert!(!lid.contains(solidcore_record::Vec3::new(-33.5, -28.5, 32.)));
+        assert!(lid.contains(solidcore_record::Vec3::new(-31.5, -28.5, 32.)));
     };
     assert_material(&s);
     let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
@@ -92,8 +93,8 @@ fn enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs() {
 
 #[test]
 fn enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen() {
+    use solidcore_record::{Vec2, Vec3};
     use solidcraft_doc::FeatureKind;
-    use solidcraft_geom::{Vec2, Vec3};
     use solidcraft_sketch::CurveKind;
 
     let mut s = Session::default();
@@ -144,7 +145,7 @@ fn enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen
         assert!((regions[0].area() - 332.570619298295).abs() < 1e-7, "area {}", regions[0].area());
         let ring = solidcraft_kernel::extrude(&solved.plane, &regions, 0., 2.).unwrap();
         assert_eq!(ring.len(), 1);
-        let precise_ring = ring[0].tessellate(1e-6).unwrap();
+        let precise_ring = ring[0].mesh(&solidcraft_kernel::MeshTolerance::chord(1e-6)).unwrap();
         let bounds = precise_ring.bounds();
         for (actual, expected) in
             [(bounds.min.x, -37.8), (bounds.max.x, 37.8), (bounds.min.y, -32.8), (bounds.max.y, 32.8), (bounds.min.z, 28.), (bounds.max.z, 30.)]
@@ -160,14 +161,14 @@ fn enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen
             .segs
             .iter()
             .map(|segment| match segment {
-                solidcraft_geom::Seg2::Arc { radius, sweep, .. } => radius.abs() * sweep.abs(),
-                solidcraft_geom::Seg2::Line { .. } => 0.,
+                solidcore_record::Seg2::Arc { radius, sweep, .. } => radius.abs() * sweep.abs(),
+                solidcore_record::Seg2::Line { .. } => 0.,
                 other => panic!("unexpected ring boundary {other:?}"),
             })
             .sum::<f64>();
         assert!((arc_perimeter - std::f64::consts::TAU * 0.8).abs() < 1e-8);
         assert_eq!(regions[0].holes.len(), 1);
-        assert!(regions[0].holes[0].segs.iter().all(|segment| matches!(segment, solidcraft_geom::Seg2::Line { .. })));
+        assert!(regions[0].holes[0].segs.iter().all(|segment| matches!(segment, solidcore_record::Seg2::Line { .. })));
         // Body::tessellate floors the requested sag tolerance at size * 1e-6.
         // Only the outer arcs incur chord error: their tolerance-wide boundary
         // strip bounds the volume error without changing CAD or export tolerances.
@@ -178,7 +179,7 @@ fn enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen
             (measured - analytic_volume).abs() <= discretization_bound,
             "ring mesh volume {measured}, analytic {analytic_volume}, bound {discretization_bound}"
         );
-        let lid = state.body("Lid").unwrap().body.tessellate(1e-4).unwrap();
+        let lid = state.body("Lid").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap();
         for (point, material) in [
             (Vec3::new(0., 32.2, 29.), true),
             (Vec3::new(0., 32.9, 29.), false),

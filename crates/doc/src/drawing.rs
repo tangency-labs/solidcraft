@@ -9,18 +9,23 @@
 //! - **Sources** are the designs it draws. For now a drawing draws the design it is in: at most one
 //!   source, an id and nothing else. What the design was when the drawing last saw it is not saved
 //!   here.
-//! - **Sheets**: the paper, a copy of its drawing border, the resolution its pictures are rendered
-//!   at, the component it documents, and whether it is left out of the sheet count or of printing.
-//!   The border is a copy of the profile it was made with, never a name, so a later built-in never
-//!   changes a saved drawing.
+//! - **Sheets**: the paper, a copy of its drawing border and of its title block with the text typed
+//!   over its cells' values, the resolution its pictures are rendered at, the component it
+//!   documents, and whether it is left out of the sheet count or of printing. The border and the
+//!   block are copies of what they were made with, never names, so a later built-in never changes a
+//!   saved drawing.
 //! - **Units** follow each view's design or are one length unit for the whole drawing. The
 //!   **language** is the content's, a BCP 47 tag chosen when the drawing is made, whatever the
 //!   interface's is. **Properties** follow [`Metadata`]'s rules.
+//! - The **font** its text is set in: a font family's name, never a file, so the drawing travels
+//!   (none: the built-in font; [`solidcraft_sketch::check_family`]).
 //! - **Views** of its designs on its sheets, base and projected ([`view`]), and the **projection**
 //!   (first or third angle) every projected view follows.
 //! - **Dimensions** on its views, each measuring named corners or edges of the view's model
 //!   ([`dimension`]).
 //! - **Balloons** on its views, each pointing at a placed part by a named edge of it ([`balloon`]).
+//! - **Images** on its sheets, each file kept once however many places it sits ([`image`]).
+//! - **Tables** on its sheets: parts lists and revision tables ([`table`]).
 //! - **Revisions**: one revision record for the whole drawing ([`RevisionRecord`]), its rows in the
 //!   order they were added, the newest last.
 //!
@@ -39,31 +44,43 @@
 //!
 //! [`Drawing::from_json`] reads a drawing in this order: at most [`MAX_DRAWING_BYTES`] of text,
 //! the family's format check, every number in range, the upgrade, the typed record with its views,
-//! dimensions and balloons by id, then [`Drawing::validate`]; [`Drawing::from_value`] the same from the
-//! format check on.
+//! dimensions, balloons, images and notes by id, then [`Drawing::validate`] and each image's file
+//! ([`Drawing::check_image_files`]); [`Drawing::from_value`] the same from the format check on.
 
 use std::borrow::Cow;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use solidcore_record::Vec2;
+use solidcraft_geom::Aabb2;
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile};
 use solidcraft_geom::revision::RevisionRecord;
-use solidcraft_geom::{Aabb2, Vec2};
+use solidcraft_geom::title_block::TitleBlock;
 
 use crate::format::DRAWING;
 use crate::ids::{self, IdSource};
 use crate::{DocError, Metadata, Result, expr};
 
 pub mod balloon;
+pub mod by_id;
 pub mod dimension;
+pub mod fields;
 pub mod hole_callout;
+pub mod image;
+pub mod note;
+pub mod table;
+pub mod template;
 pub mod view;
 
 use balloon::Balloon;
+use by_id::ById;
 use dimension::Dimension;
+use image::{ImageFile, SheetImage};
+use note::{Anchor, Note};
+use table::SheetTable;
 use view::View;
 
 /// The most drawings a design may hold.
@@ -112,6 +129,9 @@ pub struct Drawing {
     pub projection: Projection,
     /// The language of the drawing's content, a BCP 47 tag (`en-GB`).
     pub language: String,
+    /// The font family its text is set in, by name; empty: the built-in font.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub font: String,
     /// In order, each behind its own `Arc`, so an undo step shares every sheet it didn't change.
     pub sheets: Vec<Arc<Sheet>>,
     /// By id ([`Drawing::add_views`]), each behind its own `Arc`, as the sheets are.
@@ -120,9 +140,20 @@ pub struct Drawing {
     /// By id ([`Drawing::add_dimensions`]), each behind its own `Arc`, as the views are.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dimensions: Vec<Arc<Dimension>>,
-    /// By id ([`Drawing::add_balloons`]), as the dimensions are.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub balloons: Vec<Arc<Balloon>>,
+    #[serde(default, skip_serializing_if = "ById::is_empty")]
+    pub balloons: ById<Balloon>,
+    /// The image files, once each however many places they sit.
+    #[serde(default, skip_serializing_if = "ById::is_empty")]
+    pub images: ById<ImageFile>,
+    /// Where they sit on the sheets.
+    #[serde(default, skip_serializing_if = "ById::is_empty")]
+    pub sheet_images: ById<SheetImage>,
+    /// The saved tables on its sheets: parts lists and revision tables.
+    #[serde(default, skip_serializing_if = "ById::is_empty")]
+    pub tables: ById<SheetTable>,
+    /// The notes on its sheets and in its views.
+    #[serde(default, skip_serializing_if = "ById::is_empty")]
+    pub notes: ById<Note>,
     /// Behind an `Arc` as the sheets are, so an undo step shares it while it doesn't change.
     #[serde(default, skip_serializing_if = "no_revisions")]
     pub revisions: Arc<RevisionRecord>,
@@ -159,6 +190,14 @@ pub struct Sheet {
     pub sheet: drawing_sheet::Sheet,
     /// A copy of the drawing border's profile (`None`: no drawing border).
     pub border: Option<DrawingBorderProfile>,
+    /// A copy of its title block's definition (`None`: no title block), on the drawing border's
+    /// lower-right corner, so only a sheet with a border has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_block: Option<TitleBlock>,
+    /// Text shown in place of a title block cell's value, by the cell's name: the value is still
+    /// worked out, so it can be shown beside it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub title_block_overrides: BTreeMap<String, String>,
     /// The resolution its pictures (its shaded views) are rendered at, in dots per inch.
     #[serde(default = "default_dpi")]
     pub dpi: f64,
@@ -199,6 +238,25 @@ impl Sheet {
             None => Ok(Aabb2 { min: Vec2::ZERO, max: self.sheet.size_mm().map_err(from_sheet)? }),
         }
     }
+
+    /// Where its title block sits, in paper millimetres (none without one), once its drawing border
+    /// and the block on it lay out on the paper: the rule a sheet is held to, as drawing them uses it.
+    pub fn title_block_outline(&self) -> Result<Option<Aabb2>> {
+        let border = self.border.as_ref().map(|border| border.layout(&self.sheet)).transpose().map_err(from_sheet)?;
+        let Some(block) = &self.title_block else { return Ok(None) };
+        let border = border.ok_or_else(|| DocError::Invalid("its title block sits on a drawing border, and it has none".into()))?;
+        Ok(Some(block.layout(&border).map_err(|e| DocError::Invalid(e.to_string()))?.outline))
+    }
+
+    /// Gives the sheet `block` (`None`: no title block). Text typed over a cell stays while `block`
+    /// has a text cell of that name; answers the cells whose typed text is dropped.
+    pub fn set_title_block(&mut self, block: Option<TitleBlock>) -> Vec<String> {
+        let kept = |name: &String| fields::overridable(block.as_ref(), name);
+        let lost = self.title_block_overrides.keys().filter(|name| !kept(name)).cloned().collect();
+        self.title_block_overrides.retain(|name, _| kept(name));
+        self.title_block = block;
+        lost
+    }
 }
 
 /// What is on one of a drawing's sheets ([`Drawing::on_sheet`]), each kind by id.
@@ -209,12 +267,26 @@ pub struct OnSheet {
     pub dimensions: Vec<u64>,
     /// The balloons in its views.
     pub balloons: Vec<u64>,
+    /// The images placed on it.
+    pub images: Vec<u64>,
+    /// The revision tags on it.
+    pub tags: Vec<u64>,
+    /// The tables on it.
+    pub tables: Vec<u64>,
+    /// The notes on it and in its views.
+    pub notes: Vec<u64>,
 }
 
 impl OnSheet {
     /// Nothing is on the sheet.
     pub fn is_empty(&self) -> bool {
-        self.views.is_empty() && self.dimensions.is_empty() && self.balloons.is_empty()
+        self.views.is_empty()
+            && self.dimensions.is_empty()
+            && self.balloons.is_empty()
+            && self.images.is_empty()
+            && self.tags.is_empty()
+            && self.tables.is_empty()
+            && self.notes.is_empty()
     }
 }
 
@@ -237,8 +309,17 @@ impl Drawing {
     ) -> Result<Drawing> {
         let id = id_source.next(taken)?;
         let sheet_id = id_source.next(&BTreeSet::from([id]))?;
-        let first =
-            Sheet { id: sheet_id, name: sheet.into(), sheet: paper, border, dpi: DEFAULT_DPI, documents: None, excluded: Excluded::default() };
+        let first = Sheet {
+            id: sheet_id,
+            name: sheet.into(),
+            sheet: paper,
+            border,
+            title_block: None,
+            title_block_overrides: BTreeMap::new(),
+            dpi: DEFAULT_DPI,
+            documents: None,
+            excluded: Excluded::default(),
+        };
         let drawing = Drawing {
             format: DRAWING.format_string(DRAWING.current()),
             format_pending: DRAWING.pending_names(),
@@ -249,10 +330,15 @@ impl Drawing {
             units: Units::default(),
             projection: Projection::default(),
             language: language.into(),
+            font: String::new(),
             sheets: vec![Arc::new(first)],
             views: Vec::new(),
             dimensions: Vec::new(),
-            balloons: Vec::new(),
+            balloons: ById::default(),
+            images: ById::default(),
+            sheet_images: ById::default(),
+            tables: ById::default(),
+            notes: ById::default(),
             revisions: Arc::default(),
         };
         drawing.validate()?;
@@ -276,11 +362,16 @@ impl Drawing {
         DRAWING.check_numbers(&v, "properties")?;
         DRAWING.upgrade(&mut v, version, applied.as_deref())?;
         let mut d: Drawing = serde_json::from_value(v).map_err(damaged)?;
-        let (views, dimensions, balloons) = (std::mem::take(&mut d.views), std::mem::take(&mut d.dimensions), std::mem::take(&mut d.balloons));
+        let (views, dimensions) = (std::mem::take(&mut d.views), std::mem::take(&mut d.dimensions));
         d.add_views(views);
         d.add_dimensions(dimensions);
-        d.add_balloons(balloons);
+        d.balloons.put_in_order();
+        d.images.put_in_order();
+        d.sheet_images.put_in_order();
+        d.tables.put_in_order();
+        d.notes.put_in_order();
         d.validate().map_err(damaged)?;
+        d.check_image_files().map_err(damaged)?;
         Ok(Drawing { format: DRAWING.format_string(DRAWING.current()), format_pending: DRAWING.pending_names(), ..d })
     }
 
@@ -313,14 +404,32 @@ impl Drawing {
         }
     }
 
-    /// What is on sheet `id`: its views and the dimensions and balloons in them. Each later kind of record on a
-    /// sheet adds its own here, and goes with the sheet ([`Drawing::remove_sheet`]).
+    /// Whether `id` names an object a sheet shows: a view, a dimension or a balloon.
+    pub fn has_object(&self, id: u64) -> bool {
+        self.view(id).is_some() || self.dimension(id).is_some() || self.balloons.by_id(id).is_some() || self.notes.by_id(id).is_some()
+    }
+
+    /// What is on sheet `id`: its views and the dimensions and balloons in them, and the images placed on it.
+    /// Each later kind of record on a sheet adds its own here, and goes with the sheet
+    /// ([`Drawing::remove_sheet`]).
     pub fn on_sheet(&self, id: u64) -> OnSheet {
-        let views: Vec<u64> = self.views.iter().filter(|v| v.sheet == id).map(|v| v.id).collect();
-        // The views are listed by id, so the sheet's are too.
+        // The views are listed by id, so the sheet's are too, and so are its images, revision tags, tables and notes.
+        let mut on = self.with_contents(self.views.iter().filter(|v| v.sheet == id).map(|v| v.id).collect());
+        on.images = self.sheet_images.iter().filter(|i| i.sheet == id).map(|i| i.id).collect();
+        on.tags = self.revisions.tags().iter().filter(|t| t.sheet == id).map(|t| t.id).collect();
+        on.tables = self.tables.iter().filter(|t| t.sheet == id).map(|t| t.id).collect();
+        let in_views = |n: &Note| n.anchor.view().is_some_and(|v| on.views.binary_search(&v).is_ok());
+        on.notes = self.notes.iter().filter(|n| n.anchor == Anchor::Sheet(id) || in_views(n)).map(|n| n.id).collect();
+        on
+    }
+
+    /// `views`, listed by id, with the dimensions and balloons in them. An image sits on a sheet, never in a
+    /// view, so there are none.
+    pub fn with_contents(&self, views: Vec<u64>) -> OnSheet {
         let dimensions = self.dimensions.iter().filter(|d| views.binary_search(&d.view).is_ok()).map(|d| d.id).collect();
         let balloons = self.balloons.iter().filter(|b| views.binary_search(&b.view).is_ok()).map(|b| b.id).collect();
-        OnSheet { views, dimensions, balloons }
+        let notes = self.notes.iter().filter(|n| n.anchor.view().is_some_and(|v| views.binary_search(&v).is_ok())).map(|n| n.id).collect();
+        OnSheet { views, dimensions, balloons, images: Vec::new(), tags: Vec::new(), tables: Vec::new(), notes }
     }
 
     /// Takes sheet `id` out with everything on it ([`Drawing::on_sheet`]), and answers what that
@@ -329,10 +438,30 @@ impl Drawing {
     pub fn remove_sheet(&mut self, id: u64) -> OnSheet {
         let on = self.on_sheet(id);
         self.sheets.retain(|s| s.id != id);
-        self.views.retain(|v| v.sheet != id);
-        self.dimensions.retain(|d| on.dimensions.binary_search(&d.id).is_err());
-        self.balloons.retain(|b| on.balloons.binary_search(&b.id).is_err());
+        self.remove_objects(&on);
         on
+    }
+
+    /// Takes `objects` out, each list by id: the one rule a sheet's delete and a selection's delete
+    /// remove by, with the image files nothing uses any more. As in [`Drawing::remove_sheet`], what is
+    /// left must still keep the record's rules.
+    pub fn remove_objects(&mut self, objects: &OnSheet) {
+        self.views.retain(|v| objects.views.binary_search(&v.id).is_err());
+        self.dimensions.retain(|d| objects.dimensions.binary_search(&d.id).is_err());
+        self.balloons.retain(|b| objects.balloons.binary_search(&b.id).is_err());
+        self.sheet_images.retain(|i| objects.images.binary_search(&i.id).is_err());
+        self.drop_unused_images();
+        self.tables.retain(|t| objects.tables.binary_search(&t.id).is_err());
+        self.notes.retain(|n| objects.notes.binary_search(&n.id).is_err());
+        // A balloon outlives the list it named, and goes back to the lists it could read.
+        for balloon in self.balloons.iter_mut() {
+            if balloon.parts_list.is_some_and(|list| objects.tables.binary_search(&list).is_ok()) {
+                Arc::make_mut(balloon).parts_list = None;
+            }
+        }
+        if !objects.tags.is_empty() {
+            Arc::make_mut(&mut self.revisions).delete_tags(&objects.tags);
+        }
     }
 
     /// Every object's id, of every kind: what a new id must differ from. Each later kind adds its
@@ -344,6 +473,10 @@ impl Drawing {
             .chain(self.views.iter().map(|v| v.id))
             .chain(self.dimensions.iter().map(|d| d.id))
             .chain(self.balloons.iter().map(|b| b.id))
+            .chain(self.images.iter().map(|i| i.id))
+            .chain(self.sheet_images.iter().map(|i| i.id))
+            .chain(self.tables.iter().map(|t| t.id))
+            .chain(self.notes.iter().map(|n| n.id))
             .chain(self.revisions.ids())
     }
 
@@ -356,6 +489,7 @@ impl Drawing {
         require(is_language_tag(&self.language), || {
             format!("the language is not a BCP 47 tag of 2 to {MAX_LANGUAGE_CHARS} characters (such as `en` or `en-GB`)")
         })?;
+        solidcraft_sketch::check_family(&self.font).map_err(|e| DocError::Invalid(format!("the drawing's font: {e}")))?;
         if let Units::Fixed { unit } = &self.units {
             require(is_length_unit(unit), || "the drawing's unit is not a length unit (such as `mm` or `in`)".into())?;
         }
@@ -370,20 +504,32 @@ impl Drawing {
         // One record for the whole drawing until sheets keep their own (#3874).
         require(!self.revisions.per_sheet, || "a drawing keeps one revision record for all its sheets".into())?;
         self.revisions.validate().map_err(|e| DocError::Invalid(e.to_string()))?;
+        require(self.revisions.tags().iter().all(|t| self.sheets.iter().any(|s| s.id == t.sheet)), || {
+            "a revision tag is on one of the drawing's sheets".into()
+        })?;
         self.check_views()?;
         self.check_dimensions()?;
-        self.check_balloons()
+        self.check_tables()?;
+        self.check_balloons()?;
+        self.check_images()?;
+        self.check_notes()
     }
 
     /// A sheet's own rules, and that the source it documents is one of the drawing's.
     fn check_sheet(&self, sheet: &Sheet) -> Result<()> {
         check_name(&sheet.name, "its")?;
         sheet.sheet.size_mm().map_err(from_sheet)?;
-        // The border must lay out on the sheet: the one rule, as drawing it uses it. A few small
-        // lists per sheet, so every edit's check stays cheap.
-        if let Some(border) = &sheet.border {
-            border.layout(&sheet.sheet).map_err(from_sheet)?;
+        sheet.title_block_outline()?;
+        if let Some(block) = &sheet.title_block {
+            fields::check_block(block)?;
         }
+        // Each override names a text cell of its block, and its text is a cell's.
+        for name in sheet.title_block_overrides.keys() {
+            let named = || format!("its title block has no text cell `{name}` to override");
+            require(fields::overridable(sheet.title_block.as_ref(), name), named)?;
+        }
+        let texts = sheet.title_block_overrides.values().map(String::as_str);
+        solidcraft_geom::cell::check_text(texts).map_err(|e| DocError::Invalid(e.to_string()))?;
         require((MIN_DPI..=MAX_DPI).contains(&sheet.dpi), || format!("its pictures are {MIN_DPI} to {MAX_DPI} dpi"))?;
         match sheet.documents {
             Some(SheetComponent { source, .. }) => {

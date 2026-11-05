@@ -2,17 +2,22 @@
 //! and where a saved view sits on its sheet (#4816). The snapshot command and saved views use it;
 //! their pictures (W17b) will too.
 //!
-//! A view shows every body the design places, where its occurrences place it ([`shown`]). The
-//! browser's eye counts for nothing: hiding a part in the model never changes a drawing.
+//! A view shows the bodies the design places, where its occurrences place it ([`shown`]), less what
+//! it chooses to leave out ([`ShownSet::of_view`]). The browser's eye counts for nothing: hiding a
+//! part in the model never changes a drawing. A body placed through a reference occurrence is a
+//! reference part: it doesn't set the view's extents when model parts are there too ([`measure`]).
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
-use solidcraft_doc::drawing::Drawing;
+use solidcore_record::{Plane, Vec2};
+use solidcraft_doc::drawing::view::ResolvedView;
+use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
 use solidcraft_geom::drawing_view::{Scale, ViewFrame};
-use solidcraft_geom::{Aabb2, EPS, Plane, Vec2};
+use solidcraft_geom::{Aabb2, EPS};
 use solidcraft_render::VisualStyle;
 
 use crate::params::bad;
@@ -21,7 +26,7 @@ use crate::{Result, Session};
 #[path = "drawing_view_lines.rs"]
 mod lines;
 
-pub use lines::{CHORD_MM, CHORD_RANGE, Lines, MIN_MODEL_CHORD_MM, Piece, Stats, VISIBLE_MM, ViewLine, lines, paper_group};
+pub use lines::{CHORD_MM, CHORD_RANGE, LineRequest, Lines, MIN_MODEL_CHORD_MM, Piece, Stats, ViewLine, lines, paper_group};
 
 /// The paper millimetres each way of a view's boundary when there's nothing to measure, round its
 /// centre, so it can still be picked, moved and deleted.
@@ -43,7 +48,14 @@ pub enum Unmeasured {
     /// The assembly places more than a view walks, so a view of it would leave parts out.
     PastWalkLimit,
     NoBodies,
+    /// The bodies of the assembly can't be placed.
+    NotPlaced,
+    /// The view's `source` and `hide` leave nothing, as when the occurrences it drew were deleted.
+    NothingChosen,
 }
+
+/// Why a choice of occurrences that draws nothing is refused.
+pub const NOTHING_CHOSEN: &str = "the source and hide leave no bodies to draw";
 
 impl Unmeasured {
     /// Its name in replies.
@@ -51,6 +63,8 @@ impl Unmeasured {
         match self {
             Unmeasured::PastWalkLimit => "past_walk_limit",
             Unmeasured::NoBodies => "no_bodies",
+            Unmeasured::NotPlaced => "not_placed",
+            Unmeasured::NothingChosen => "nothing_chosen",
         }
     }
 }
@@ -63,6 +77,8 @@ impl fmt::Display for Unmeasured {
                 "the assembly is deeper than {MAX_PLACEMENT_DEPTH} levels or has more than {MAX_PLACEMENTS} placements: a view of it would leave parts out"
             ),
             Unmeasured::NoBodies => f.write_str("the view's source has no bodies"),
+            Unmeasured::NotPlaced => f.write_str("the assembly's bodies can't be placed"),
+            Unmeasured::NothingChosen => write!(f, "{NOTHING_CHOSEN}: the occurrences it chose may have been deleted"),
         }
     }
 }
@@ -76,20 +92,39 @@ pub struct Shown {
     pub path: Vec<u64>,
     /// Its definition's body name.
     pub body: String,
+    /// It is placed through a reference occurrence ([`solidcraft_doc::Document::reference_occurrences`]).
+    pub reference: bool,
+}
+
+/// How a view draws its two kinds of part.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Styles {
+    pub display: VisualStyle,
+    pub reference: VisualStyle,
+    pub reference_hides_model: bool,
+}
+
+impl From<&ResolvedView> for Styles {
+    fn from(view: &ResolvedView) -> Styles {
+        Styles { display: view.visual_style.value, reference: view.reference_style.value, reference_hides_model: view.reference_hides_model.value }
+    }
+}
+
+impl Styles {
+    /// Leaves out a shaded part's own lines: its picture draws it, and it still hides what lies
+    /// behind it.
+    pub fn leave_shaded_to_pictures(&self, lines: &mut Lines) {
+        lines.lines.retain(|l| !(if l.reference { self.reference } else { self.display }).is_shaded());
+    }
 }
 
 /// What a view shows, worked out once per request: the world state and each body it shows, in the
-/// world state's order. The extents and the lines read it; choosing occurrences and hiding parts
-/// (V4) and the reference split (V5) will filter it.
+/// world state's order. The extents and the lines read it.
+#[derive(Clone)]
 pub struct ShownSet {
     pub state: Arc<ModelState>,
     pub bodies: Vec<Shown>,
 }
-
-/// Occurrence paths a view's `source` or `hide` may hold, each.
-pub const MAX_PATHS: usize = 1_000;
-/// Ids a view's `source` and `hide` may hold in all.
-pub const MAX_PATH_IDS: usize = 4_096;
 
 impl ShownSet {
     /// The shown body in place.
@@ -104,6 +139,13 @@ impl ShownSet {
         let hide: HashSet<&[u64]> = hide.iter().map(Vec::as_slice).collect();
         self.bodies.retain(|b| chosen(&b.path, source.as_ref(), &hide));
         self
+    }
+
+    /// What saved view `view` shows of the set: [`ShownSet::keep`] by what it resolves to, which a
+    /// view that chooses nothing skips. Paths no occurrence makes any more match no body.
+    pub fn of_view(&self, view: &ResolvedView) -> Cow<'_, ShownSet> {
+        let (source, hide) = (view.occurrences.value.as_deref(), view.hide.value.as_deref().unwrap_or_default());
+        if source.is_none() && hide.is_empty() { Cow::Borrowed(self) } else { Cow::Owned(self.clone().keep(source, hide)) }
     }
 }
 
@@ -122,17 +164,19 @@ pub fn shown(s: &Session) -> std::result::Result<ShownSet, Unmeasured> {
     if !s.doc.placements_complete() {
         return Err(Unmeasured::PastWalkLimit);
     }
-    let state = s.world_state();
+    let state = s.world_state().map_err(|_| Unmeasured::NotPlaced)?;
     // The world state names each placed body as this walk does, so its name finds its path.
     let mut placed: BTreeMap<String, (Vec<u64>, String)> =
         s.doc.body_frames_with_source(&s.model.state()).into_iter().map(|(name, body, _, path, _)| (name, (path, body))).collect();
+    let references = s.doc.reference_occurrences();
     let bodies: Vec<Shown> = state
         .bodies
         .iter()
         .enumerate()
         .map(|(index, b)| {
             let (path, body) = placed.remove(&b.name).unwrap_or_else(|| (Vec::new(), b.definition_name().to_string()));
-            Shown { index, path, body }
+            let reference = path.iter().any(|occurrence| references.contains(occurrence));
+            Shown { index, path, body, reference }
         })
         .collect();
     if bodies.is_empty() { Err(Unmeasured::NoBodies) } else { Ok(ShownSet { state, bodies }) }
@@ -151,21 +195,32 @@ pub struct OnSheet {
 }
 
 /// Why a view drawing in `display` and `reference` styles can't be drawn yet, if it can't: shaded
-/// views need pictures, and a paper scene (`scene`) has no dashed lines for hidden ones. The
-/// snapshot and the sheet scene refuse alike.
-pub fn not_drawable(display: VisualStyle, reference: VisualStyle, scene: bool) -> Option<&'static str> {
-    if display.is_shaded() || reference.is_shaded() {
-        Some("not supported yet: shaded views need the drawing renderer (#5624)")
-    } else if scene && display == VisualStyle::VisibleHidden {
-        Some("not supported yet: hidden lines in the paper scene need dashed lines (#4890 A5)")
-    } else {
-        None
-    }
+/// views with lines need the view's exact lines. The snapshot and the sheet scene refuse alike.
+pub fn not_drawable(display: VisualStyle, reference: VisualStyle) -> Option<&'static str> {
+    let lined = |style: VisualStyle| style.is_shaded() && style != VisualStyle::Shaded;
+    (lined(display) || lined(reference)).then_some("not supported yet: shaded views with lines need the view's exact lines (W06)")
 }
 
-/// The extents of the bodies `shown` holds, seen on `basis`, or that they have nothing to measure.
+/// What saved view `view` shows of `shown`, with its extents on its plane, or why there's nothing to
+/// measure: the one rule its boundary, its fitted scale and its lines are worked out by.
+pub fn measured<'a>(
+    shown: &'a std::result::Result<ShownSet, Unmeasured>,
+    view: &ResolvedView,
+) -> std::result::Result<(Cow<'a, ShownSet>, Extents), Unmeasured> {
+    let set = shown.as_ref().map_err(|why| *why)?.of_view(view);
+    if set.bodies.is_empty() {
+        return Err(Unmeasured::NothingChosen);
+    }
+    let extents = measure(&set, &view.basis)?;
+    Ok((set, extents))
+}
+
+/// The extents of the bodies `shown` holds, seen on `basis`, or that they have nothing to measure:
+/// of its model parts when it has any, as a reference part only shows around them, else of its
+/// reference parts.
 pub fn measure(shown: &ShownSet, basis: &Plane) -> std::result::Result<Extents, Unmeasured> {
-    let bodies = shown.bodies.iter().filter_map(|b| shown.body(b));
+    let has_model = shown.bodies.iter().any(|b| !b.reference);
+    let bodies = shown.bodies.iter().filter(|b| !(has_model && b.reference)).filter_map(|b| shown.body(b));
     let extents = bodies.fold(Extents { model: Aabb2::EMPTY, error_mm: 0.0, bodies: 0 }, |e, body| Extents {
         model: e.model.union(&body.mesh_bounds_in(basis)),
         error_mm: e.error_mm.max(body.display_tol()),
@@ -174,53 +229,112 @@ pub fn measure(shown: &ShownSet, basis: &Plane) -> std::result::Result<Extents, 
     if extents.model.is_empty() { Err(Unmeasured::NoBodies) } else { Ok(extents) }
 }
 
-/// The view through `basis` at `scale` on paper, with the middle of `shown` (model mm on its
-/// plane) at `centre`: the one rule the snapshot and saved views are placed by.
-pub fn frame(basis: Plane, scale: Scale, shown: &Aabb2, centre: Vec2, cmd: &str) -> Result<ViewFrame> {
-    ViewFrame::new(basis, scale, shown.center(), centre).map_err(|e| bad(cmd, e.to_string()))
+/// What a view of `shown` shows on `basis`: its `extents`, each side grown on its own towards the box
+/// that also holds its reference parts, `percent` of the way. A side no reference part passes stays
+/// exactly where it is, and at 0 no reference part is measured.
+pub fn shows(shown: &ShownSet, basis: &Plane, extents: &Extents, percent: f64) -> Aabb2 {
+    if percent <= 0.0 {
+        return extents.model;
+    }
+    let references = shown.bodies.iter().filter(|b| b.reference).filter_map(|b| shown.body(b));
+    let all = references.fold(extents.model, |all, body| all.union(&body.mesh_bounds_in(basis)));
+    let part = percent / 100.0;
+    let side = |from: f64, to: f64| if from == to { from } else { from * (1.0 - part) + to * part };
+    let model = extents.model;
+    Aabb2 {
+        min: Vec2::new(side(model.min.x, all.min.x), side(model.min.y, all.min.y)),
+        max: Vec2::new(side(model.max.x, all.max.x), side(model.max.y, all.max.y)),
+    }
 }
 
-/// The boundary on the sheet of [`frame`]'s view: the box round `shown` there.
-pub fn boundary(basis: Plane, scale: Scale, shown: &Aabb2, centre: Vec2, cmd: &str) -> Result<Aabb2> {
-    frame(basis, scale, shown, centre, cmd)?.boundary(shown).map_err(|e| bad(cmd, e.to_string()))
+/// The view through `basis` at `scale` on paper, with the middle of the model's box (model mm on its
+/// plane) at `centre`, however far reference parts grow what it shows, so it stays lined up with its
+/// projected views: the one rule the snapshot and saved views are placed by.
+pub fn frame(basis: Plane, scale: Scale, model: &Aabb2, centre: Vec2, cmd: &str) -> Result<ViewFrame> {
+    ViewFrame::new(basis, scale, model.center(), centre).map_err(|e| bad(cmd, e.to_string()))
 }
 
-/// Saved view `id` of `drawing`, one of `s`'s design's drawings, on its sheet: the design's extents
-/// on its plane (a view's source is the design the drawing is in), grown by its reference margin,
-/// at its scale, with their middle on its centre ([`Drawing::view_centre`]); with nothing to
+/// Saved view `id` of `drawing`, one of `s`'s design's drawings, on its sheet: the extents of what it
+/// shows on its plane ([`measured`]; a view's source is the design the drawing is in), grown by
+/// [`shows`], at its scale, with the model's middle on its centre ([`Drawing::view_centre`]); with nothing to
 /// measure, a placeholder [`PLACEHOLDER_MM`] each way round its centre. It reads the model as it
 /// is evaluated: no model is evaluated.
 pub fn on_sheet(s: &Session, drawing: &Drawing, id: u64, cmd: &str) -> Result<OnSheet> {
     let view = drawing.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?;
     let centre = drawing.view_centre(id).map_err(|e| bad(cmd, e.to_string()))?;
+    let shown = shown(s);
+    let measured = measured(&shown, &view).map(|(set, e)| (e, shows(&set, &view.basis, &e, view.reference_shown_percent)));
+    placed(&view, measured, centre, cmd)
+}
+
+/// A view drawing as `view` does on its sheet, from what [`measure`] and [`shows`] said of it, with the
+/// model's middle on `centre`; with nothing to measure, the placeholder.
+pub fn placed(view: &ResolvedView, measured: std::result::Result<(Extents, Aabb2), Unmeasured>, centre: Vec2, cmd: &str) -> Result<OnSheet> {
     let scale = view.scale.value;
-    let (extents, shown, unmeasured) = match shown(s).and_then(|set| measure(&set, &view.basis)) {
-        Ok(extents) => (extents, extents.model.inflated(view.reference_margin_mm), None),
+    let (extents, shows, unmeasured) = match measured {
+        Ok((extents, shows)) => (extents, shows, None),
         Err(why) => {
             let half = PLACEHOLDER_MM / 2.0 / scale.factor();
             let model = Aabb2 { min: Vec2::new(-half, -half), max: Vec2::new(half, half) };
             (Extents { model, error_mm: 0.0, bodies: 0 }, model, Some(why))
         }
     };
-    Ok(OnSheet { boundary: boundary(view.basis, scale, &shown, centre, cmd)?, extents, unmeasured })
+    let boundary = frame(view.basis, scale, &extents.model, centre, cmd)?.boundary(&shows).map_err(|e| bad(cmd, e.to_string()))?;
+    Ok(OnSheet { boundary, extents, unmeasured })
 }
 
 /// Each of `views` of `drawing` (one of `s`'s design's) whose boundary leaves its sheet's drawing
-/// space ([`solidcraft_doc::drawing::Sheet::drawing_space`]), sides included, with where it sits:
-/// what a change of paper or a move to another sheet leaves outside. Nothing is moved.
+/// space ([`Sheet::drawing_space`]), sides included, or lies over its title block, with where it
+/// sits: what a change of paper or block, or a move to another sheet, leaves outside. Nothing is moved.
 pub fn outside(s: &Session, drawing: &Drawing, views: &[u64], cmd: &str) -> Result<Vec<(u64, OnSheet)>> {
     let mut out = Vec::new();
     for &id in views {
         let view = drawing.view(id).ok_or_else(|| bad(cmd, format!("no view {}", ids::encode(id))))?;
-        let sheet = drawing.sheets.iter().find(|s| s.id == view.sheet).ok_or_else(|| bad(cmd, format!("no sheet {}", ids::encode(view.sheet))))?;
-        // A view drawn up to the border, its sides on it, is inside: the margin takes rounding.
-        let space = sheet.drawing_space().map_err(|e| bad(cmd, e.to_string()))?.inflated(EPS);
         let placed = on_sheet(s, drawing, id, cmd)?;
-        if !(space.contains(placed.boundary.min) && space.contains(placed.boundary.max)) {
+        if leaves(sheet(drawing, view.sheet, cmd)?, &placed, cmd)? {
             out.push((id, placed));
         }
     }
     Ok(out)
+}
+
+/// Sheet `id` of `drawing`.
+pub fn sheet<'a>(drawing: &'a Drawing, id: u64, cmd: &str) -> Result<&'a Sheet> {
+    drawing.sheets.iter().find(|s| s.id == id).map(|s| &**s).ok_or_else(|| bad(cmd, format!("no sheet {}", ids::encode(id))))
+}
+
+/// Where a sheet's views belong: inside `space` and off `block`. One rule for the views [`outside`]
+/// lists and the scale a view is fitted at.
+#[derive(Clone, Copy, Debug)]
+pub struct Room {
+    pub space: Aabb2,
+    pub block: Option<Aabb2>,
+}
+
+impl Room {
+    /// `sheet`'s: its drawing space ([`Sheet::drawing_space`]) and its title block.
+    pub fn on(sheet: &Sheet, cmd: &str) -> Result<Room> {
+        let space = sheet.drawing_space().map_err(|e| bad(cmd, e.to_string()))?;
+        let block = sheet.title_block_outline().map_err(|e| bad(cmd, e.to_string()))?;
+        Ok(Room { space, block })
+    }
+
+    /// Whether `boundary` is off the block: drawn up to it, a side on its outline, it is.
+    pub fn clear_of_block(&self, boundary: &Aabb2) -> bool {
+        self.block.is_none_or(|block| !block.inflated(-EPS).overlaps(boundary))
+    }
+
+    /// Whether `boundary` is where a view belongs. Drawn up to the border, its sides on it, it is
+    /// inside: the margin takes rounding.
+    fn holds(&self, boundary: &Aabb2) -> bool {
+        let space = self.space.inflated(EPS);
+        space.contains(boundary.min) && space.contains(boundary.max) && self.clear_of_block(boundary)
+    }
+}
+
+/// Whether a view `placed` on `sheet` isn't where its [`Room`] says: [`outside`]'s rule.
+pub fn leaves(sheet: &Sheet, placed: &OnSheet, cmd: &str) -> Result<bool> {
+    Ok(!Room::on(sheet, cmd)?.holds(&placed.boundary))
 }
 
 #[cfg(test)]

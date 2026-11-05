@@ -1,9 +1,10 @@
 //! Original median-split BVH. World geometry is rebased around the camera target for f32.
 #[path = "planar_patches.rs"]
 mod planar_patches;
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_render::{
     ProductScene,
     job::{CancelToken, ErrorCode, JobError, Result},

@@ -1,4 +1,5 @@
 use crate::*;
+use solidcore_record::{MAX_BEZIER_CTRL, Plane, Seg2, Vec2, Vec3};
 
 fn cube_mesh(s: f64) -> Mesh {
     let p = |x: f64, y: f64, z: f64| Vec3::new(x * s, y * s, z * s);
@@ -95,6 +96,44 @@ fn raycast_never_slips_between_triangles() {
             assert!(hit.is_some_and(|(t, _)| (t - 50.0).abs() < 1e-6), "{p:?} along {d:?}: {hit:?}");
         }
     }
+}
+
+/// A ray through an edge that two triangles share crosses exactly one of them: the same grid,
+/// crossed at every inner edge's midpoint (and the middle of each cell, on its diagonal), straight
+/// down and obliquely. The bracket example's hole centre fell on such an edge of the base's top
+/// and was counted once for two faces.
+#[test]
+fn ray_crossings_count_a_shared_edge_once() {
+    let n = 6;
+    let positions: Vec<Vec3> =
+        (0..=n).flat_map(|j| (0..=n).map(move |i| Vec3::new(f64::from(i) * 40.0 / 6.0 + 100.0, f64::from(j) * 5.0, 20.0))).collect();
+    let id = |i: u32, j: u32| j * (n + 1) + i;
+    let mut triangles = Vec::new();
+    for j in 0..n {
+        for i in 0..n {
+            triangles.push([id(i, j), id(i + 1, j), id(i + 1, j + 1)]);
+            triangles.push([id(i, j), id(i + 1, j + 1), id(i, j + 1)]);
+        }
+    }
+    let tri_face = vec![0; triangles.len()];
+    let m = Mesh { positions, triangles, tri_face, ..Default::default() };
+    let dirs = [Vec3::new(-0.57735, 0.57735, -0.57735), Vec3::new(0.3, -0.7, -0.648), Vec3::new(-0.123456789, -0.2, -1.0), Vec3::new(0.0, 0.0, -1.0)];
+    for d in dirs {
+        for j in 1..2 * n {
+            for i in 1..2 * n {
+                if i % 2 == 0 && j % 2 == 0 {
+                    continue;
+                }
+                let p = Vec3::new(f64::from(i) * 20.0 / 6.0 + 100.0, f64::from(j) * 2.5, 20.0);
+                assert_eq!(m.ray_crossings(p - d * 50.0, d), 1, "{p:?} along {d:?}");
+                assert_eq!(m.ray_crossings(p + d * 50.0, d), 0, "{p:?} along {d:?}, from beyond");
+            }
+        }
+    }
+    // A closed cube: a ray through its top's diagonal crosses the top and the bottom.
+    let cube = cube_mesh(2.0);
+    assert_eq!(cube.ray_crossings(Vec3::new(0.5, 0.5, 5.0), Vec3::new(0.0, 0.0, -1.0)), 2);
+    assert_eq!(cube.ray_crossings(Vec3::new(0.5, 0.5, 1.0), Vec3::new(0.0, 0.0, -1.0)), 1);
 }
 
 #[test]
@@ -296,7 +335,7 @@ fn surface_patches_cross_only_hidden_seams() {
 
 #[test]
 fn cubic_and_conic_segments_measure_exactly() {
-    use crate::{Loop2, Seg2, Vec2};
+    use solidcore_record::{Loop2, Seg2, Vec2};
     // An ellipse (a = 5, b = 3) as four quarter conics: area π a b.
     let w = std::f64::consts::FRAC_1_SQRT_2;
     let (a, b) = (5.0, 3.0);
@@ -351,7 +390,7 @@ fn cubic_and_conic_segments_measure_exactly() {
 
 #[test]
 fn split_at_and_closest_param() {
-    use crate::{Seg2, Vec2};
+    use solidcore_record::{Seg2, Vec2};
     let w = std::f64::consts::FRAC_1_SQRT_2;
     let quarter = Seg2::Conic { a: Vec2::new(10.0, 0.0), apex: Vec2::new(10.0, 10.0), b: Vec2::new(0.0, 10.0), w };
     for t in [0.2, 0.5, 0.8] {
@@ -368,6 +407,17 @@ fn split_at_and_closest_param() {
     let (l, r) = c.split_at(0.37);
     assert!(l.end().dist(q) < 1e-12 && r.start().dist(q) < 1e-12);
     assert!((quarter.closest_param(Vec2::new(20.0, 20.0)) - 0.5).abs() < 1e-9);
+    // A part between two parameters ends where the whole is there, for every kind; a conic's too,
+    // though its tail after the first cut is re-normalised.
+    let skew = Seg2::Conic { a: Vec2::new(0.0, 0.0), apex: Vec2::new(-4.0, -2.0), b: Vec2::new(1.0, 2.0), w: 1.19 };
+    let arc = Seg2::Arc { center: Vec2::ZERO, radius: 3.0, start: 0.5, sweep: -2.0 };
+    for seg in [quarter, skew, c, arc, Seg2::Line { a: Vec2::ZERO, b: Vec2::new(3.0, 1.0) }] {
+        for (t0, t1) in [(0.0, 0.4), (0.3, 0.7), (0.6, 1.0), (0.1, 0.1 + 1e-6)] {
+            let piece = seg.part(t0, t1);
+            assert!(piece.start().dist(seg.point_at(t0)) < 1e-12 && piece.end().dist(seg.point_at(t1)) < 1e-12, "{seg:?} {t0} {t1}");
+            assert_eq!(std::mem::discriminant(&piece), std::mem::discriminant(&seg));
+        }
+    }
 }
 
 /// An axis-aligned box as a closed mesh, with `n` x `n` quads on each side.
@@ -941,22 +991,77 @@ fn a_box_from_points_holds_them_and_grows() {
     assert!(b.intersection(&far).is_empty());
 }
 
-/// A similarity moves every kind of segment exactly: the moved segment's points are the original's
-/// points moved, its length scales, and an arc stays an arc turning the same way.
-#[test]
-fn a_similarity_moves_each_kind_of_segment_exactly() {
-    let m = Similarity2::new(2.5, 0.7, Vec2::new(-3.0, 11.0)).unwrap();
+/// One segment of each kind: a line, an arc, a cubic, a conic and a quintic Bézier.
+fn every_kind_of_segment() -> [Seg2; 5] {
     let mut p = [Vec2::ZERO; MAX_BEZIER_CTRL];
     for (i, q) in p.iter_mut().take(6).enumerate() {
         *q = Vec2::new(i as f64, (i * i) as f64 * 0.3);
     }
-    let segments = [
+    [
         Seg2::Line { a: Vec2::new(1.0, 2.0), b: Vec2::new(4.0, -1.0) },
         Seg2::Arc { center: Vec2::new(2.0, 1.0), radius: 3.0, start: 0.4, sweep: -2.1 },
         Seg2::Cubic { p0: Vec2::ZERO, p1: Vec2::new(1.0, 2.0), p2: Vec2::new(3.0, 2.0), p3: Vec2::new(4.0, 0.0) },
         Seg2::Conic { a: Vec2::new(10.0, 0.0), apex: Vec2::new(10.0, 10.0), b: Vec2::new(0.0, 10.0), w: std::f64::consts::FRAC_1_SQRT_2 },
         Seg2::Bezier { n: 5, p },
-    ];
+    ]
+}
+
+/// A mirrored map moves every kind of segment exactly too: after a mirror in the x axis, a turn of
+/// 0.7, a scale of 2.5 and a shift, each segment's points are the original's mapped, its length
+/// scales and an arc's sweep reverses. And the arc numbers the sheet-metal flat and the sketch
+/// mirror wrote out by hand come out bit for bit.
+#[test]
+fn a_mirrored_map_moves_each_kind_of_segment_exactly() {
+    let (angle, scale, shift) = (0.7, 2.5, Vec2::new(-3.0, 11.0));
+    let (sin, cos) = f64::sin_cos(angle);
+    let f = |p: Vec2| Vec2::new(cos * p.x + sin * p.y, sin * p.x - cos * p.y) * scale + shift;
+    for seg in every_kind_of_segment() {
+        let moved = seg.mapped(f, ArcMap { angle, mirrored: true, scale });
+        for i in 0..=8 {
+            let t = f64::from(i) / 8.0;
+            assert!((moved.point_at(t) - f(seg.point_at(t))).len() < 1e-9, "{seg:?} at {t}");
+        }
+        assert!((moved.length() - seg.length() * scale).abs() < 1e-9 * seg.length().max(1.0), "{seg:?}");
+        if let (Seg2::Arc { sweep: s, .. }, Seg2::Arc { sweep: m, .. }) = (seg, moved) {
+            assert_eq!(m, -s);
+        }
+    }
+    // The sketch mirror's -start (a +0.0 start to -0.0), the mirrored flat's π - start, and the
+    // flat's rot - start mirrored or rot + start not.
+    let start_of = |s: Seg2| if let Seg2::Arc { start, .. } = s { start } else { f64::NAN };
+    let arc = |start: f64| Seg2::Arc { center: Vec2::ZERO, radius: 1.0, start, sweep: 1.0 };
+    let same = |p: Vec2| p;
+    for (start, angle, mirrored, want) in [
+        (0.4, -0.0, true, -0.4),
+        (0.0, -0.0, true, -0.0),
+        (0.4, std::f64::consts::PI, true, std::f64::consts::PI - 0.4),
+        (0.4, 1.1, true, 1.1 - 0.4),
+        (0.4, 1.1, false, 1.1 + 0.4),
+    ] {
+        assert_eq!(start_of(arc(start).mapped(same, ArcMap::turn(angle, mirrored))).to_bits(), f64::to_bits(want), "{start} {angle} {mirrored}");
+    }
+}
+
+/// A rigid map's arc map comes from where it puts the origin and the unit axes: the x axis's turn,
+/// whether the axes come out reversed, and a scale of exactly 1, whatever the shift.
+#[test]
+fn a_rigid_maps_arc_map_is_its_turn_and_its_mirror() {
+    let (sin, cos) = f64::sin_cos(0.7);
+    let shift = Vec2::new(-3.0, 11.0);
+    let mirrored = |p: Vec2| Vec2::new(cos * p.x + sin * p.y, sin * p.x - cos * p.y) + shift;
+    let turned = |p: Vec2| Vec2::new(cos * p.x - sin * p.y, sin * p.x + cos * p.y) + shift;
+    for (arc, mirror) in [(ArcMap::rigid(mirrored), true), (ArcMap::rigid(turned), false)] {
+        assert!((arc.angle - 0.7).abs() < 1e-12 && arc.mirrored == mirror && arc.scale == 1.0, "{arc:?}");
+    }
+    assert_eq!(ArcMap::rigid(|p| p), ArcMap::turn(0.0, false));
+}
+
+/// A similarity moves every kind of segment exactly: the moved segment's points are the original's
+/// points moved, its length scales, and an arc stays an arc turning the same way.
+#[test]
+fn a_similarity_moves_each_kind_of_segment_exactly() {
+    let m = Similarity2::new(2.5, 0.7, Vec2::new(-3.0, 11.0)).unwrap();
+    let segments = every_kind_of_segment();
     for seg in segments {
         let moved = seg.similar(&m);
         for i in 0..=8 {

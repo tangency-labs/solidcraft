@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 use solidcraft_geom::drawing_sheet::{self, Orientation, PaperSize};
 use solidcraft_geom::drawing_view::NamedView;
 
@@ -37,7 +37,7 @@ fn measured() -> (Drawing, [u64; 3]) {
     let (view, sheet) = (d.allocate_id(&mut id_source).unwrap(), d.sheets[0].id);
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let settings = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
-    d.add_views([Arc::new(View { id: view, sheet, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_margin_mm: 0.0 })]);
+    d.add_views([Arc::new(View { id: view, sheet, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_shown_percent: 0.0 })]);
     let kinds = [
         DimensionKind::Linear {
             a: corner(&["F1:front|F1:bottom", "F1:front|F1:left"]),
@@ -512,4 +512,70 @@ fn keep_last_good_never_writes_a_record_a_file_refuses() {
         let read = Drawing::from_json(&saved).unwrap_or_else(|e| panic!("{value}: {e}"));
         assert_eq!(read.dimension(linear).unwrap().last_good, doc.drawings[0].dimension(linear).unwrap().last_good, "{value}");
     }
+}
+
+/// A lost edge's leads, from its body's face names: the blend face that rounds it and a piece of that
+/// face (a later cut's), then the edges they bound, then the faces of the feature that made it, at most
+/// 16, no face twice. Another fillet's face rounds another edge, so it leads nowhere. A `~k` on the
+/// name finds the same blend; a name no blend rounds leads to its makers' faces only, as a face's
+/// does, and a name that doesn't read, or whose feature made nothing here, leads nowhere.
+#[test]
+fn lost_leads_list_the_blend_then_its_edges_then_the_makers_faces() {
+    let blends = ["F5:blend:F1:+z|F1:-y", "F5:blend:F1:+z|F1:-y#[F1:+x,F7:+z]", "F6:blend:F1:+x|F1:+z"];
+    let mut faces: Vec<String> = ["F1:+z", "F1:-y", "F1:+x"].into_iter().chain(blends).map(String::from).collect();
+    faces.extend((0..40).map(|k| format!("F1:face:{k}")));
+    let leads = Leads::new(BODY, &faces);
+    // Edges 0, 1, 3 and 5 bound the blend or its piece; 2 and 4 don't.
+    let edge_faces = [vec![0, 3], vec![1, 3], vec![0, 2], vec![3, 4], vec![2, 5], vec![4, 1]];
+    let lead_face = |index: usize| Candidate::Face { body: BODY.into(), index };
+    let lead_edge = |index: usize| Candidate::Edge { body: BODY.into(), index };
+    let box_faces = |n: usize| [0, 1, 2].into_iter().chain(6..).take(n).map(lead_face);
+    let mut expected = vec![lead_face(3), lead_face(4), lead_edge(0), lead_edge(1), lead_edge(3), lead_edge(5)];
+    expected.extend(box_faces(10));
+    let found = leads.for_edge("F1:+z|F1:-y", &edge_faces);
+    assert_eq!(found, expected);
+    assert_eq!(found.len(), MAX_CANDIDATES);
+    assert_eq!(leads.for_edge("F1:+z|F1:-y~2", &edge_faces), expected, "a numbered edge's blend");
+    let makers: Vec<Candidate> = box_faces(MAX_CANDIDATES).collect();
+    assert_eq!(leads.for_edge("F1:-y|F1:+x", &edge_faces), makers, "no blend rounds it");
+    assert_eq!(leads.for_face("F1:+z"), makers, "a face's");
+    assert!(leads.for_edge("F1:+z|", &edge_faces).is_empty(), "a name that doesn't read");
+    assert!(leads.for_edge("F9:+z|F9:-y", &edge_faces).is_empty(), "a feature that made nothing here");
+}
+
+/// Quarter arcs of radius `r` round `c` in the plane z = 0, from `from` degrees, as a tessellated edge.
+fn arc_at(c: [f64; 2], r: f64, from: f64) -> (usize, Vec<Vec3>) {
+    let at = |d: f64| Vec3::new(c[0] + r * (from + d).to_radians().cos(), c[1] + r * (from + d).to_radians().sin(), 0.0);
+    (0, (0..=9).map(|i| at(f64::from(i) * 10.0)).collect())
+}
+
+/// Pieces are one circle only when every one lies on it: another centre or radius, however near, is
+/// another circle, and a straight piece isn't a circle. Pieces too short to read a circle from alone
+/// are read together, so short arcs of one circle are it and of two circles aren't; a piece of only
+/// two points could be a chord, and no pieces are none.
+#[test]
+fn pieces_are_one_circle_only_when_they_all_lie_on_it() {
+    let c = [40.0, 15.0];
+    let first = arc_at(c, 6.0, 0.0);
+    let found = one_circle(&[first.clone(), arc_at(c, 6.0, 180.0)]).unwrap();
+    assert!(found.dist(Vec3::new(40.0, 15.0, 0.0)) < 1e-9, "{found:?}");
+    assert!(one_circle(std::slice::from_ref(&first)).is_some());
+    assert!(one_circle(&[first.clone(), arc_at([40.0 + 1e-9, 15.0], 6.0, 180.0)]).is_some(), "rounding is the same circle");
+    assert!(one_circle(&[first.clone(), arc_at([40.0 + 1e-3, 15.0], 6.0, 180.0)]).is_none(), "another centre");
+    assert!(one_circle(&[first.clone(), arc_at(c, 6.0 + 1e-3, 180.0)]).is_none(), "another radius");
+    let above: Vec<Vec3> = arc_at(c, 6.0, 180.0).1.iter().map(|p| Vec3::new(p.x, p.y, 5.0)).collect();
+    assert!(one_circle(&[first.clone(), (1, above)]).is_none(), "the same circle moved along its axis");
+    let tilted: Vec<Vec3> = arc_at(c, 6.0, 180.0).1.iter().map(|p| Vec3::new(40.0, p.y, p.x - 40.0)).collect();
+    assert!(one_circle(&[first.clone(), (1, tilted)]).is_none(), "round another axis");
+    let line: Vec<Vec3> = (0..5).map(|i| Vec3::new(f64::from(i), 0.0, 0.0)).collect();
+    assert!(one_circle(&[first.clone(), (1, line)]).is_none(), "a straight piece");
+    assert!(one_circle(&[first.clone(), (1, first.1[..3].to_vec())]).is_some(), "too short to read, but on it");
+    let off: Vec<Vec3> = first.1[..3].iter().map(|p| Vec3::new(p.x + 1e-3, p.y, p.z)).collect();
+    assert!(one_circle(&[first.clone(), (1, off)]).is_none(), "too short to read, and off it");
+    assert!(one_circle(&[first.clone(), (1, first.1[..2].to_vec())]).is_none(), "two points could be a chord");
+    let short = |c: [f64; 2]| (1, arc_at(c, 6.0, 180.0).1[..3].to_vec());
+    let three = (0, first.1[..3].to_vec());
+    assert!(one_circle(&[three.clone(), short(c)]).is_some(), "short arcs of one circle, read together");
+    assert!(one_circle(&[three, short([45.0, 15.0])]).is_none(), "short arcs of two circles of one radius");
+    assert!(one_circle(&[]).is_none());
 }

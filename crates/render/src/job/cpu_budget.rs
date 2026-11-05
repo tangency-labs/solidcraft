@@ -104,17 +104,54 @@ impl CpuBudget {
         Ok(())
     }
 
+    /// The smallest profile that admits this image, to name in a refusal. It is never
+    /// selected automatically: the person chooses it. `None` when no profile admits it.
+    pub fn smallest_admitting(width: u32, height: u32, progressive: Option<CpuProgressiveOptions>) -> Option<Self> {
+        Self::ALL.into_iter().find(|budget| budget.admits_image(width, height, progressive))
+    }
+
+    /// What `validate_image` accepts, without building its message (which names a profile).
+    fn admits_image(self, width: u32, height: u32, progressive: Option<CpuProgressiveOptions>) -> bool {
+        let (w, h) = (u64::from(width), u64::from(height));
+        let limits = self.image_limits(progressive.is_some());
+        let Some(pixels) = w.checked_mul(h) else { return false };
+        w > 0
+            && h > 0
+            && w <= limits.max_dimension
+            && h <= limits.max_dimension
+            && pixels <= limits.max_pixels
+            && progressive.is_none_or(|options| {
+                let samples = options.samples_per_pixel;
+                (1..=self.limits().max_samples_per_pixel).contains(&samples)
+                    && pixels.checked_mul(u64::from(samples)).is_some_and(|n| n <= self.limits().max_camera_samples)
+            })
+    }
+
+    /// The way out of a size refusal, for English messages: the profile that can render
+    /// the image, or only a smaller size when none can.
+    pub fn size_advice(width: u32, height: u32, progressive: Option<CpuProgressiveOptions>) -> String {
+        match Self::smallest_admitting(width, height, progressive) {
+            Some(budget) => format!("choose the {budget:?} CPU resource profile, or a smaller size"),
+            None => "no CPU resource profile accepts this size; choose a smaller size".into(),
+        }
+    }
+
     /// No geometry reads or allocations. This also validates offline saved intent.
     pub fn validate_image(self, width: u32, height: u32, progressive: Option<CpuProgressiveOptions>) -> Result<()> {
         let (w, h) = (u64::from(width), u64::from(height));
         let limits = self.image_limits(progressive.is_some());
         let pixels = w.checked_mul(h).ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "CPU pixel count overflow"))?;
-        if w == 0 || h == 0 || w > limits.max_dimension || h > limits.max_dimension || pixels > limits.max_pixels {
+        if w == 0 || h == 0 {
+            return Err(JobError::new(ErrorCode::LimitExceeded, format!("CPU {self:?} accepts dimensions 1..{}", limits.max_dimension)));
+        }
+        if w > limits.max_dimension || h > limits.max_dimension || pixels > limits.max_pixels {
             return Err(JobError::new(
                 ErrorCode::LimitExceeded,
                 format!(
-                    "CPU {self:?} accepts dimensions 1..{} and at most {} pixels; select a larger resource profile explicitly",
-                    limits.max_dimension, limits.max_pixels
+                    "CPU {self:?} accepts dimensions 1..{} and at most {} pixels; {}",
+                    limits.max_dimension,
+                    limits.max_pixels,
+                    Self::size_advice(width, height, progressive)
                 ),
             ));
         }
@@ -172,5 +209,40 @@ mod tests {
         let p = Some(CpuProgressiveOptions { samples_per_pixel: 4096, seed: 0 });
         assert!(CpuBudget::Workstation.validate_image(8192, 8192, p).is_err());
         assert!(CpuBudget::Workstation.validate_image(3840, 2160, p).is_ok());
+    }
+
+    /// #8941: a size refusal names the smallest profile that admits the image, and none when
+    /// even Workstation refuses it. The profile is only named, never selected.
+    #[test]
+    fn a_size_refusal_names_the_smallest_profile_that_admits_it() {
+        assert_eq!(CpuBudget::smallest_admitting(1920, 1080, None), Some(CpuBudget::Compact));
+        assert_eq!(CpuBudget::smallest_admitting(3840, 2160, None), Some(CpuBudget::Studio));
+        assert_eq!(CpuBudget::smallest_admitting(15360, 4320, None), Some(CpuBudget::Workstation));
+        assert_eq!(CpuBudget::smallest_admitting(16385, 1, None), None);
+        assert_eq!(CpuBudget::smallest_admitting(0, 1, None), None);
+        let message = CpuBudget::Compact.validate_image(3840, 2160, None).unwrap_err().to_string();
+        assert!(message.contains("choose the Studio CPU resource profile, or a smaller size"), "{message}");
+        let message = CpuBudget::Studio.validate_image(15360, 4320, None).unwrap_err().to_string();
+        assert!(message.contains("choose the Workstation CPU resource profile"), "{message}");
+        let message = CpuBudget::Workstation.validate_image(16384, 16384, None).unwrap_err().to_string();
+        assert!(message.contains("no CPU resource profile accepts this size"), "{message}");
+        assert!(!message.contains("Studio") && !message.contains("choose the"), "{message}");
+        // The message-free check agrees with validate_image everywhere, progressive included.
+        let sizes = [(0, 1), (1, 1), (2048, 2048), (3840, 2160), (4096, 4096), (7680, 4320), (8192, 8192), (16384, 4096), (u32::MAX, 2)];
+        for budget in CpuBudget::ALL {
+            for progressive in [
+                None,
+                Some(CpuProgressiveOptions { samples_per_pixel: 64, seed: 0 }),
+                Some(CpuProgressiveOptions { samples_per_pixel: 4096, seed: 0 }),
+            ] {
+                for (w, h) in sizes {
+                    assert_eq!(
+                        budget.admits_image(w, h, progressive),
+                        budget.validate_image(w, h, progressive).is_ok(),
+                        "{budget:?} {w}x{h} {progressive:?}"
+                    );
+                }
+            }
+        }
     }
 }

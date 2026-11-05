@@ -2,10 +2,14 @@ use std::sync::Arc;
 
 use serde_json::json;
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
+use solidcraft_doc::drawing::DEFAULT_DPI;
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_view::ProjectedSide;
+use solidcraft_geom::paper::NoPictures;
+use solidcraft_geom::paper::line::{LineGroup, LineKind};
 
 use super::*;
+use crate::drawing_scene::tests::two_cubes;
 use crate::schema::tests::conforms;
 
 const EPS: f64 = 1e-9;
@@ -52,18 +56,18 @@ pub(crate) fn three_views() -> (Session, [u64; 3]) {
 }
 
 /// [`three_views`] of the design `s`.
-fn three_views_of(mut s: Session) -> (Session, [u64; 3]) {
+pub(crate) fn three_views_of(mut s: Session) -> (Session, [u64; 3]) {
     run(&mut s, "drawing.create", json!({}));
     let mut d = (**s.drawing("test").unwrap()).clone();
     let mut id_source = solidcraft_doc::ids::IdSource::seeded(4816);
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let mut add = |d: &mut Drawing, kind: ViewKind, place: ViewPlace, settings: ViewOverrides| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_margin_mm: 0.0 })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0 })]);
         id
     };
     let front_settings =
-        ViewOverrides { scale: Some("1:2".parse().unwrap()), display_style: Some(VisualStyle::VisibleHidden), ..ViewOverrides::default() };
+        ViewOverrides { scale: Some("1:2".parse().unwrap()), visual_style: Some(VisualStyle::VisibleHidden), ..ViewOverrides::default() };
     let front = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let front = add(&mut d, front, ViewPlace::At([150.0, 150.0]), front_settings);
     let right = add(&mut d, ViewKind::Projected { parent: front, side: ProjectedSide::Right }, ViewPlace::Aligned(300.0), ViewOverrides::default());
@@ -104,17 +108,6 @@ fn nest(s: &mut Session, level: u64) {
     doc.occurrences.push(serde_json::from_value(occurrence).unwrap());
 }
 
-/// Part `Part` with a 10 mm cube `Cube` from the origin, placed twice: the second copy 30 mm along
-/// X. The session and the two occurrences.
-fn two_cubes() -> (Session, [u64; 2]) {
-    let mut s = Session::default();
-    let created = run(&mut s, "component.create", json!({"name": "Part"}));
-    let first = created["occurrence"].as_u64().unwrap();
-    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube", "operation": "new"}));
-    let second = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [30, 0, 0]}))["occurrence"].as_u64().unwrap();
-    (s, [first, second])
-}
-
 fn edit_refused(s: &mut Session, view: u64, set: Value) -> String {
     s.execute(EDIT, &json!({"view": ids::encode(view), "set": set})).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {set}"))
 }
@@ -132,7 +125,7 @@ fn inspect_says_where_each_setting_comes_from() {
         (json!("base"), json!("front"), json!({"at": [150.0, 150.0]}))
     );
     assert_eq!(base["settings"]["scale"], json!({"value": "1:2", "from": "this", "set": "1:2"}));
-    assert_eq!(base["settings"]["display_style"], json!({"value": "visible_hidden", "from": "this", "set": "visible_hidden"}));
+    assert_eq!(base["settings"]["visual_style"], json!({"value": "visible_hidden", "from": "this", "set": "visible_hidden"}));
     assert_eq!(base["settings"]["reference_style"], json!({"value": "visible", "from": "default", "set": null}));
     assert!(base.get("linked").is_none() && base.get("parent").is_none(), "a base view has no parent");
     let projected = inspect_view(&mut s, right);
@@ -147,9 +140,9 @@ fn inspect_says_where_each_setting_comes_from() {
     assert_eq!(projected["settings"]["scale"], json!({"value": "1:2", "from": "parent", "parent": front_id, "set": null}));
     assert_eq!(projected["source"], base["source"]);
     let chained = inspect_view(&mut s, top);
-    assert_eq!(chained["settings"]["display_style"], json!({"value": "visible_hidden", "from": "parent", "parent": front_id, "set": null}));
+    assert_eq!(chained["settings"]["visual_style"], json!({"value": "visible_hidden", "from": "parent", "parent": front_id, "set": null}));
     assert!(chained["direction"].get("named").is_none(), "the right view's top view is no named view: {chained}");
-    assert_eq!(chained["choices"]["display_style"].as_array().unwrap().len(), 5);
+    assert_eq!(chained["choices"]["visual_style"].as_array().unwrap().len(), 5);
     assert_eq!(chained["choices"]["scale"][0], "50:1");
     assert!(s.execute(INSPECT, &json!({"view": ids::encode(99)})).unwrap_err().to_string().contains("no view"));
 }
@@ -163,20 +156,20 @@ fn an_edit_is_one_undo_step_and_names_its_followers() {
     let (mut s, [front, right, top]) = three_views();
     let evaluations = s.evaluations;
     let steps = s.undo.len();
-    let edited = edit_view(&mut s, right, json!({"display_style": "visible"}));
-    assert_eq!((edited["changed"].clone(), edited["followers"].clone()), (json!(["display_style"]), json!([ids::encode(top)])));
+    let edited = edit_view(&mut s, right, json!({"visual_style": "visible"}));
+    assert_eq!((edited["changed"].clone(), edited["followers"].clone()), (json!(["visual_style"]), json!([ids::encode(top)])));
     assert_eq!(s.undo.len(), steps + 1);
     assert_eq!(inspect_view(&mut s, right)["linked"], "partly");
-    assert_eq!(inspect_view(&mut s, top)["settings"]["display_style"]["parent"], json!(ids::encode(right)));
+    assert_eq!(inspect_view(&mut s, top)["settings"]["visual_style"]["parent"], json!(ids::encode(right)));
     run(&mut s, "edit.undo", json!({}));
-    assert_eq!(inspect_view(&mut s, right)["settings"]["display_style"]["from"], "parent");
+    assert_eq!(inspect_view(&mut s, right)["settings"]["visual_style"]["from"], "parent");
     run(&mut s, "edit.redo", json!({}));
-    assert_eq!(edit_view(&mut s, right, json!({"display_style": null}))["changed"], json!(["display_style"]));
-    assert_eq!(inspect_view(&mut s, right)["settings"]["display_style"]["from"], "parent", "null follows the parent again");
+    assert_eq!(edit_view(&mut s, right, json!({"visual_style": null}))["changed"], json!(["visual_style"]));
+    assert_eq!(inspect_view(&mut s, right)["settings"]["visual_style"]["from"], "parent", "null follows the parent again");
     // Unlinked, the display settings are its own at the values they had; linked, they follow again.
     edit_view(&mut s, right, json!({"linked": false}));
     let unlinked = inspect_view(&mut s, right);
-    assert_eq!((unlinked["linked"].clone(), unlinked["settings"]["display_style"]["set"].clone()), (json!(false), json!("visible_hidden")));
+    assert_eq!((unlinked["linked"].clone(), unlinked["settings"]["visual_style"]["set"].clone()), (json!(false), json!("visible_hidden")));
     edit_view(&mut s, right, json!({"linked": true}));
     assert_eq!(inspect_view(&mut s, right)["linked"], true);
     // A base view keeps a scale and has nothing to link to; a projected view's direction is its side's.
@@ -192,9 +185,11 @@ fn an_edit_is_one_undo_step_and_names_its_followers() {
     assert_eq!(turned["changed"], json!(["scale", "view"]));
     assert_eq!(turned["followers"], json!([ids::encode(top), ids::encode(right)]), "by id");
     assert_eq!(edit_view(&mut s, right, json!({"place": {"at": [320.0, 150.0]}}))["changed"], json!(["place"]));
-    assert_eq!(edit_view(&mut s, top, json!({"reference_margin_mm": 5.0}))["changed"], json!(["reference_margin_mm"]));
-    assert_eq!(inspect_view(&mut s, top)["reference_margin_mm"], 5.0);
-    assert!(edit_refused(&mut s, top, json!({"reference_margin_mm": -1.0})).contains("reference margin"));
+    assert_eq!(edit_view(&mut s, top, json!({"reference_shown_percent": 5.0}))["changed"], json!(["reference_shown_percent"]));
+    assert_eq!(inspect_view(&mut s, top)["reference_shown_percent"], 5.0);
+    for percent in [-1.0, 100.001, 1e308] {
+        assert!(edit_refused(&mut s, top, json!({"reference_shown_percent": percent})).contains("reference_shown_percent"), "{percent}");
+    }
     // Nothing changed, no step.
     let steps = s.undo.len();
     assert_eq!(edit_view(&mut s, front, json!({"scale": "1:5"}))["changed"], json!([]));
@@ -349,10 +344,11 @@ fn a_side_view_copied_alone_is_a_base_view_looking_the_way_it_did() {
     assert_eq!(made.kind, ViewKind::Base { source, view: ViewDirection::Named(NamedView::Right) });
     let own = ViewOverrides {
         scale: Some("1:2".parse().unwrap()),
-        display_style: Some(VisualStyle::VisibleHidden),
+        visual_style: Some(VisualStyle::VisibleHidden),
         reference_style: Some(VisualStyle::Visible),
         reference_hides_model: Some(false),
         tangent_edges: Some(Default::default()),
+        ..ViewOverrides::default()
     };
     assert_eq!(made.settings, own);
     let of_top = copy(&mut s, top);
@@ -362,8 +358,301 @@ fn a_side_view_copied_alone_is_a_base_view_looking_the_way_it_did() {
     for (a, b) in [(was.x, is.x), (was.y, is.y), (was.origin, is.origin)] {
         assert!((a - b).len() < 1e-12, "{a:?} {b:?}");
     }
-    edit_view(&mut s, front, json!({"display_style": "visible", "scale": "1:10"}));
+    edit_view(&mut s, front, json!({"visual_style": "visible", "scale": "1:10"}));
     assert_eq!(saved(&s, of_right).settings, own, "the copy follows nothing");
+}
+
+/// `cmd` makes a view as `p` says, in one undo step: its reply, which matches its schema, and the
+/// new view's id.
+fn create(s: &mut Session, cmd: &str, p: Value) -> (Value, u64) {
+    let steps = s.undo.len();
+    let reply = run(s, cmd, p);
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+    let schema = output_schema_for::<CreateResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    let id = ids::decode(reply["view"].as_str().unwrap()).unwrap();
+    (reply, id)
+}
+
+/// `cmd` refuses `p`, leaving the drawing and the undo steps as they were: why.
+fn create_refused(s: &mut Session, cmd: &str, p: Value) -> String {
+    let (record, steps) = (s.drawing("test").ok().cloned(), s.undo.len());
+    let message = s.execute(cmd, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {p}"));
+    assert_eq!((s.drawing("test").ok().cloned(), s.undo.len()), (record, steps), "{p}");
+    message
+}
+
+/// A drawing of the block, with no views yet.
+fn block_drawing() -> Session {
+    let mut s = block();
+    run(&mut s, "drawing.create", json!({}));
+    s
+}
+
+/// A base view with no scale takes the largest preset at which it lies inside the sheet's drawing
+/// space (not the paper), centred where it goes: the 100 x 20 front view on A3
+/// at 2:1, as the snapshot fits it; that scale is saved as the view's own. A scale given is kept,
+/// the settings given are the view's own, each view is one undo step ([`create`]), and with nothing
+/// to measure the view takes 1:1.
+#[test]
+fn a_base_view_fits_its_sheet_and_saves_the_scale() {
+    let mut s = block_drawing();
+    let source = s.drawing("test").unwrap().sources[0].id;
+    let (made, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1"}));
+    assert_eq!((made["scale"]["text"].as_str(), made["scale"]["fitted"].as_bool()), (Some("2:1"), Some(true)));
+    assert_box(&made, [110.0, 128.5], [310.0, 168.5]);
+    assert!(made.get("outside").is_none(), "{made}");
+    let view = saved(&s, front);
+    assert_eq!((view.kind, view.place), (ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) }, ViewPlace::At([210.0, 148.5])));
+    assert_eq!(view.settings, ViewOverrides { scale: Some("2:1".parse().unwrap()), ..ViewOverrides::default() }, "the fitted scale is saved");
+    assert_eq!(inspect_view(&mut s, front)["settings"]["scale"], json!({"value": "2:1", "from": "this", "set": "2:1"}));
+    let near_the_left = create(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [108, 148.5]})).0;
+    assert_eq!(near_the_left["scale"]["text"], "1:1", "98 mm to the drawing border: 196 mm of room (the paper's edge would give 216)");
+    let p = json!({"sheet": "Sheet 1", "view": "top", "scale": "1:5", "position_mm": [100, 100], "visual_style": "visible_hidden", "reference_shown_percent": 50});
+    let (given, top) = create(&mut s, BASE, p);
+    assert_eq!((given["scale"]["text"].as_str(), given["scale"]["fitted"].as_bool()), (Some("1:5"), Some(false)));
+    assert_box(&given, [90.0, 95.0], [110.0, 105.0]);
+    let view = saved(&s, top);
+    assert_eq!(
+        view.settings,
+        ViewOverrides { scale: Some("1:5".parse().unwrap()), visual_style: Some(VisualStyle::VisibleHidden), ..ViewOverrides::default() }
+    );
+    assert_eq!(view.reference_shown_percent, 50.0, "it has no reference parts, so its box doesn't grow");
+    let before = s.drawing("test").unwrap().views.len();
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.drawing("test").unwrap().views.len(), before - 1, "one undo takes the view away");
+    assert!(s.drawing("test").unwrap().views.iter().all(|v| v.id != top));
+    // Nothing to measure: one sketch, something to draw (an empty design isn't), and no bodies.
+    let mut sketch_only = Session::default();
+    run(&mut sketch_only, "sketch.create", json!({"plane": "XY"}));
+    run(&mut sketch_only, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 5]}));
+    run(&mut sketch_only, "sketch.finish", json!({}));
+    run(&mut sketch_only, "drawing.create", json!({}));
+    let (placeholder, _) = create(&mut sketch_only, BASE, json!({"sheet": "Sheet 1"}));
+    assert_eq!((placeholder["scale"]["text"].as_str(), placeholder["scale"]["fitted"].as_bool()), (Some("1:1"), Some(false)));
+    assert_box(&placeholder, [200.0, 138.5], [220.0, 158.5]);
+}
+
+/// A projected view is lined up with its parent, its boundary 20 mm past the parent's on its side,
+/// and follows its parent's scale and settings: right of the 50 x 10 front view at 1:2 (185..235 x
+/// 143.5..153.5) the 25 x 10 right view goes to 255..280, left of it to 140..165, the 50 x 25 views
+/// above and below to 173.5..198.5 and 98.5..123.5. The view above shows the top in third angle and
+/// the bottom in first. A place given is kept; one past the drawing space is listed, not moved.
+#[test]
+fn a_projected_view_lines_up_a_gap_past_its_parent() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let project = |s: &mut Session, side: &str| create(s, PROJECTED, json!({"parent": ids::encode(front), "side": side}));
+    let (right, right_id) = project(&mut s, "right");
+    assert_box(&right, [255.0, 143.5], [280.0, 153.5]);
+    assert_eq!(right["scale"]["text"], "1:2");
+    assert_eq!(right["sheet"], json!(ids::encode(saved(&s, front).sheet)));
+    let view = saved(&s, right_id);
+    assert_eq!(
+        (view.kind, view.place, view.settings),
+        (ViewKind::Projected { parent: front, side: ProjectedSide::Right }, ViewPlace::Aligned(267.5), ViewOverrides::default())
+    );
+    let d = s.drawing("test").unwrap().clone();
+    assert!((d.view_centre(right_id).unwrap() - Vec2::new(267.5, 148.5)).len() < EPS, "on the parent's line");
+    assert_box(&project(&mut s, "left").0, [140.0, 143.5], [165.0, 153.5]);
+    let (above, above_id) = project(&mut s, "above");
+    assert_box(&above, [185.0, 173.5], [235.0, 198.5]);
+    assert_box(&project(&mut s, "below").0, [185.0, 98.5], [235.0, 123.5]);
+    assert_eq!(inspect_view(&mut s, above_id)["direction"]["named"], "top", "third angle");
+    set_projection(&mut s, Projection::First);
+    assert_eq!(inspect_view(&mut s, above_id)["direction"]["named"], "bottom", "first angle");
+    let at = json!({"parent": ids::encode(front), "side": "right", "place": {"at": [300.0, 60.0]}});
+    let (_, apart) = create(&mut s, PROJECTED, at);
+    assert_eq!(saved(&s, apart).place, ViewPlace::At([300.0, 60.0]));
+    let past = json!({"parent": ids::encode(front), "side": "right", "place": {"aligned": 405.0}});
+    let (beyond, beyond_id) = create(&mut s, PROJECTED, past);
+    assert_eq!(outside(&beyond).1, [beyond_id], "listed: {beyond}");
+    assert_eq!(saved(&s, beyond_id).place, ViewPlace::Aligned(405.0), "not moved");
+    // A projected view of a projected view lines up with its own parent.
+    let (_, back) = create(&mut s, PROJECTED, json!({"parent": ids::encode(right_id), "side": "right"}));
+    assert_eq!(saved(&s, back).place, ViewPlace::Aligned(267.5 + 12.5 + 20.0 + 25.0));
+    // On its parent's sheet, whichever that is.
+    let second = second_sheet(&mut s);
+    let (_, other) = create(&mut s, BASE, json!({"sheet": ids::encode(second), "scale": "1:2"}));
+    let (beside, beside_id) = create(&mut s, PROJECTED, json!({"parent": ids::encode(other), "side": "below"}));
+    assert_eq!((beside["sheet"].clone(), saved(&s, beside_id).sheet), (json!(ids::encode(second)), second));
+}
+
+/// A base view with no scale fits what its percent shows, the scale the snapshot gives for the same
+/// percent on a sheet with no block, as a snapshot has none, and stays inside the drawing space on the
+/// side the box grows on.
+#[test]
+fn a_base_view_fits_what_its_percent_shows() {
+    let (mut s, [_, block]) = plate_and_block(5.0);
+    run(&mut s, "occurrence.move", json!({"occurrence": block, "translate": [3000, 10, 5]}));
+    let snapshot = |s: &mut Session, percent: f64| snap(s, json!({"view": "top", "reference_shown_percent": percent}))["scale"]["text"].clone();
+    let (near, far) = (snapshot(&mut s, 0.0), snapshot(&mut s, 100.0));
+    assert_ne!(near, far);
+    // On the snapshot's A3, with no block, as a snapshot has none.
+    run(&mut s, "drawing.create", json!({"template": "iso-a3-assembly"}));
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": null}));
+    for (percent, scale) in [(0.0, near), (100.0, far)] {
+        let (made, id) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "view": "top", "reference_shown_percent": percent}));
+        assert_eq!((&made["scale"]["text"], made["scale"]["fitted"].as_bool()), (&scale, Some(true)), "{made}");
+        assert!(made.get("outside").is_none(), "{made}");
+        assert_eq!(saved(&s, id).reference_shown_percent, percent);
+    }
+}
+
+/// A 100 mm square view at the A3 sheet's middle would be 2:1 (200 mm across, 277 mm of room).
+/// A block in any corner reaching into that box brings it to 1:1, one whose side only meets it leaves
+/// it, one under the middle fits nothing, whatever preset, and no block is what the border alone says.
+#[test]
+fn a_fitted_view_keeps_off_a_block_in_any_corner() {
+    let model = Aabb2 { min: Vec2::ZERO, max: Vec2::new(100.0, 100.0) };
+    let extents = Extents { model, error_mm: 0.0, bodies: 1 };
+    let space = Aabb2 { min: Vec2::new(20.0, 10.0), max: Vec2::new(410.0, 287.0) };
+    let middle = Vec2::new(210.0, 148.5);
+    let scaled = |block: Option<Aabb2>| fit(&extents, model, middle, Room { space, block }, BASE).map(|scale| scale.to_string());
+    assert_eq!(scaled(None).unwrap(), "2:1");
+    let at = |x0: f64, y0: f64, x1: f64, y1: f64| Some(Aabb2 { min: Vec2::new(x0, y0), max: Vec2::new(x1, y1) });
+    // The box at 2:1 is 110 to 310 across and 48.5 to 248.5 up.
+    let corners = [at(230.0, 10.0, 410.0, 59.0), at(20.0, 10.0, 200.0, 59.0), at(230.0, 238.0, 410.0, 287.0), at(20.0, 238.0, 200.0, 287.0)];
+    for block in corners {
+        assert_eq!(scaled(block).unwrap(), "1:1", "{block:?}");
+    }
+    assert_eq!(scaled(at(230.0, 10.0, 410.0, 48.5)).unwrap(), "2:1", "a side on the box's is clear");
+    assert_eq!(scaled(at(310.0, 10.0, 410.0, 287.0)).unwrap(), "2:1", "a side on the box's is clear");
+    // The drawing space's whole, and past it: nothing is clear of them.
+    for block in [at(20.0, 10.0, 410.0, 287.0), at(0.0, 0.0, 420.0, 297.0), at(200.0, 140.0, 220.0, 150.0)] {
+        let refusal = scaled(block).unwrap_err().to_string();
+        assert!(refusal.contains("off its title block, at no preset scale from 50:1 to 1:10000"), "{refusal}");
+    }
+    // A view of a point has no box to keep off anything clear of the middle.
+    let point = Aabb2 { min: Vec2::ZERO, max: Vec2::ZERO };
+    let dot = Extents { model: point, ..extents };
+    assert_eq!(fit(&dot, point, middle, Room { space, block: corners[0] }, BASE).unwrap().to_string(), "50:1");
+}
+
+/// With no block the fit is what the border alone gives, scale for scale, at every size and place.
+#[test]
+fn a_fit_with_no_block_is_the_borders() {
+    let space = Aabb2 { min: Vec2::new(20.0, 10.0), max: Vec2::new(410.0, 287.0) };
+    for (w, h, x, y) in
+        [(100.0, 20.0, 210.0, 148.5), (1e4, 3.0, 40.0, 20.0), (0.01, 0.01, 409.0, 286.0), (400.0, 300.0, 210.0, 148.5), (10.0, 10.0, 5.0, 148.5)]
+    {
+        let model = Aabb2 { min: Vec2::ZERO, max: Vec2::new(w, h) };
+        let extents = Extents { model, error_mm: 0.0, bodies: 1 };
+        let at = Vec2::new(x, y);
+        let got = fit(&extents, model, at, Room { space, block: None }, BASE).ok();
+        let within = Vec2::new(2.0 * (at.x - space.min.x).min(space.max.x - at.x), 2.0 * (at.y - space.min.y).min(space.max.y - at.y));
+        assert_eq!(got, Scale::fit(model.size(), within), "{w} x {h} at {at:?}");
+    }
+}
+
+/// The base view on a real sheet, its built-in block 180 x 49 mm on the border's lower-right corner
+/// (230 to 410 across, 10 to 59 up): at 2:1 the 100 x 20 view at (210, 70) would reach down to 50, so
+/// it is 1:1, and listed as nothing. Over the block no scale will do, and that says so; with a scale
+/// given it goes there and is listed, as ever. A sheet with no block fits as the border says, however
+/// small, and a block the paper can't hold is refused where it's set.
+#[test]
+fn a_base_view_fits_around_the_sheets_block() {
+    let mut s = block_drawing();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": "built-in"}));
+    let (off, _) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [210, 70]}));
+    assert_eq!(off["scale"]["text"], "1:1", "{off}");
+    assert_box(&off, [160.0, 60.0], [260.0, 80.0]);
+    assert!(off.get("outside").is_none(), "{off}");
+    let (roomy, _) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [210, 148.5]}));
+    assert_eq!(roomy["scale"]["text"], "2:1", "{roomy}");
+    let refusal = create_refused(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [320, 35]}));
+    assert!(refusal.contains("off its title block, at no preset scale"), "{refusal}");
+    let (given, over) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [320, 35], "scale": "1:1"}));
+    assert_eq!(outside(&given).1, [over]);
+
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let bare = |s: &mut Session, sides: [f64; 2], at: [f64; 2]| {
+        sheet_set(s, sheet, json!({"size": {"custom": {"sides_mm": sides}}, "title_block": null}));
+        s.execute(BASE, &json!({"sheet": "Sheet 1", "position_mm": at}))
+    };
+    let free = bare(&mut s, [420.0, 297.0], [320.0, 35.0]).unwrap();
+    assert_eq!(free["scale"]["text"], "1:1", "the border's room: 180 x 50 mm: {free}");
+    let tiny = bare(&mut s, [45.0, 30.0], [22.5, 15.0]).unwrap();
+    assert_eq!(tiny["scale"]["text"], "1:5", "25 x 10 mm of room: {tiny}");
+    let past = bare(&mut s, [45.0, 30.0], [0.0, 15.0]).unwrap_err().to_string();
+    assert!(past.contains("drawing area at no preset scale"), "{past}");
+    let mut big = solidcraft_geom::title_block::default_block();
+    big.size_mm = Vec2::new(5000.0, 49.0);
+    let refused = s.execute("drawing.sheet.set", &json!({"sheet": "Sheet 1", "title_block": big})).unwrap_err().to_string();
+    assert!(refused.contains("a title block"), "{refused}");
+}
+
+/// What view creation refuses, each with the drawing and the undo steps unchanged: no drawing, a
+/// drawing that draws no design, unknown or badly given sheets, parents and sides, places and
+/// percents past their limits, a scale that doesn't fit, unknown fields, and a 33rd view in a chain.
+#[test]
+fn hostile_view_creation_is_refused() {
+    let mut s = block();
+    assert!(create_refused(&mut s, BASE, json!({"sheet": "Sheet 1"})).contains("drawing"));
+    let mut s = block_drawing();
+    let base = |p: Value| {
+        let mut p = p;
+        p["sheet"] = p.get("sheet").cloned().unwrap_or(json!("Sheet 1"));
+        p
+    };
+    for p in [
+        json!({"sheet": "Sheet 9"}),
+        json!({"sheet": 1}),
+        json!({"sheet": null}),
+        base(json!({"view": "sideways"})),
+        base(json!({"scale": "0:1"})),
+        base(json!({"scale": "1:1", "position_mm": [1e300, 0]})),
+        base(json!({"position_mm": [1e300, 0]})),
+        base(json!({"position_mm": [5, 148.5]})),
+        base(json!({"reference_shown_percent": 100.001})),
+        base(json!({"reference_shown_percent": -1})),
+        base(json!({"visual_style": "glossy"})),
+        base(json!({"colour": "red"})),
+        base(json!({"position_mm": null})),
+    ] {
+        create_refused(&mut s, BASE, p);
+    }
+    assert!(create_refused(&mut s, BASE, json!({})).contains("sheet"));
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let parent = json!(ids::encode(front));
+    for p in [
+        json!({"parent": ids::encode(99), "side": "right"}),
+        json!({"parent": 1, "side": "right"}),
+        json!({"parent": parent, "side": "behind"}),
+        json!({"parent": parent}),
+        json!({"parent": parent, "side": "right", "place": {"aligned": 1e300}}),
+        json!({"parent": parent, "side": "right", "place": {"at": [0, 1e300]}}),
+        json!({"parent": parent, "side": "right", "place": null}),
+        json!({"parent": parent, "side": "right", "scale": "1:1"}),
+    ] {
+        create_refused(&mut s, PROJECTED, p);
+    }
+    // A chain is at most 32 views: the base view and 31 projected from it, one from the next.
+    let mut last = front;
+    for _ in 1..32 {
+        last = create(&mut s, PROJECTED, json!({"parent": ids::encode(last), "side": "above", "place": {"at": [100.0, 100.0]}})).1;
+    }
+    let message = create_refused(&mut s, PROJECTED, json!({"parent": ids::encode(last), "side": "above"}));
+    assert!(message.contains("at most 32"), "{message}");
+    // A drawing that draws no design.
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    d.sources.clear();
+    d.views.clear();
+    s.doc_mut().put_drawing(Arc::new(d));
+    assert!(create_refused(&mut s, BASE, json!({"sheet": "Sheet 1"})).contains("draws no design"));
+}
+
+/// A view's ids come from the session's id source: sessions seeded alike make the same ids.
+#[test]
+fn a_new_views_id_comes_from_the_sessions_seed() {
+    let made = |seed: u64| {
+        let mut s = block_drawing();
+        s.seed_ids(seed);
+        let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1"}));
+        [front, create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "right"})).1]
+    };
+    assert_eq!(made(7), made(7));
+    assert_ne!(made(7), made(8));
 }
 
 /// The block's boundary in each view at 1:2, worked by hand: front 50 x 10, top 50 x 25, right
@@ -417,18 +706,16 @@ fn without_a_scale_the_view_fits_and_centres_on_its_sheet() {
     assert_eq!(a4["sheet"], json!({"size": {"standard": "a4"}, "orientation": "portrait", "dpi": 300.0}), "the sheet, its defaults filled in");
 }
 
-/// Scale and position only scale and move the boundary; the margin grows each side by the
-/// margin times the scale; the browser's eye counts for nothing; nothing in the design changes.
+/// Scale and position only scale and move the boundary; the browser's eye counts for nothing;
+/// nothing in the design changes.
 #[test]
-fn scale_position_and_margin_set_the_boundary_and_the_design_is_untouched() {
+fn scale_and_position_set_the_boundary_and_the_design_is_untouched() {
     let mut s = block();
     let (undo, doc) = (s.undo.len(), s.doc.clone());
     let dirty = s.is_dirty();
     let one = boundary(&snap(&mut s, json!({"scale": "1:1", "position_mm": [0, 0]})));
     let half = boundary(&snap(&mut s, json!({"scale": "1:2", "position_mm": [0, 0]})));
     assert!((one.0 - half.0 * 2.0).len() < EPS && one.1.len() < EPS && half.1.len() < EPS);
-    let margin = boundary(&snap(&mut s, json!({"scale": "1:2", "position_mm": [0, 0], "reference_margin_mm": 5})));
-    assert!((margin.0 - (half.0 + Vec2::new(5.0, 5.0))).len() < EPS, "2.5 mm a side at 1:2: {margin:?}");
     // The same call gives the same answer, apart from what working it out took.
     let answer = |mut v: Value| {
         if let Some(reply) = v.as_object_mut() {
@@ -444,9 +731,64 @@ fn scale_position_and_margin_set_the_boundary_and_the_design_is_untouched() {
     assert_eq!(snap(&mut s, json!({"view": "top"}))["boundary_mm"], first["boundary_mm"], "a hidden body is still drawn");
 }
 
-/// What the snapshot refuses, each with nothing changed: bad settings, the shaded styles until
-/// the drawing renderer, the sheet's resolution out of range, an empty design, a position off
-/// the sheet's limit, and a view that would reach past the paper's coordinates.
+/// A shaded view has a picture: the block's front view at 1:2 is 50 x 10 mm, 591 x 119 px at
+/// 300 dpi (rounded outward) and 2363 x 473 at 1200, and at 1200 too on a 2400 dpi sheet (lines may
+/// export finer, a picture is drawn at most at 1200); a view with nothing shaded in it has none. A
+/// shaded part's own lines are left out, its picture draws it: the block's, a model part's, when
+/// the model is shaded, not when only reference parts are.
+#[test]
+fn a_shaded_view_has_the_picture_of_its_boundary() {
+    let mut s = block();
+    let reply = snap(&mut s, json!({"visual_style": "shaded", "scale": "1:2"}));
+    let schema = output_schema_for::<SnapshotResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    assert_eq!(reply["lines"], json!([]), "the block is shaded: its picture draws it");
+    assert_eq!(reply["picture"]["pixels"], json!([591, 119]));
+    assert_eq!(reply["picture"]["dpi"], 300.0);
+    assert_eq!(reply["picture"]["rect_mm"], reply["boundary_mm"]);
+    let fine = snap(&mut s, json!({"visual_style": "shaded", "scale": "1:2", "sheet": {"dpi": 1200}}));
+    assert_eq!(fine["picture"]["pixels"], json!([2363, 473]));
+    let finest = snap(&mut s, json!({"visual_style": "shaded", "scale": "1:2", "sheet": {"dpi": 2400}}));
+    assert_eq!(
+        (&finest["picture"]["pixels"], &finest["picture"]["dpi"], &finest["sheet"]["dpi"]),
+        (&json!([2363, 473]), &json!(1200.0), &json!(2400.0))
+    );
+    assert!(snap(&mut s, json!({"scale": "1:2"})).get("picture").is_none(), "lines only");
+    let none = snap(&mut s, json!({"reference_style": "shaded", "scale": "1:2"}));
+    assert!(none.get("picture").is_none(), "shaded reference parts, and none in the design: {none}");
+    assert_eq!(none["lines"], snap(&mut s, json!({"scale": "1:2"}))["lines"], "the block's lines, as a model part's");
+}
+
+/// A shaded part's lines are left out and the other style's parts keep theirs: a plate, and a hinge
+/// holding a pin placed twice, the hinge a reference component. A shaded model leaves only the
+/// pins' lines; shaded reference parts leave only the plate's; between them, every body's.
+#[test]
+fn a_shaded_part_leaves_out_only_its_own_lines() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 3}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "component.create", json!({"name": "Hinge", "activate": false}));
+    run(&mut s, "component.create", json!({"name": "Pin", "parent": "Hinge"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 4, "height": 30}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.copy", json!({"component": "Hinge", "translate": [0, 50, 0]}));
+    run(&mut s, "component.metadata.set", json!({"component": "Hinge", "bom_type": "reference"}));
+    let references = |reply: &Value| -> Vec<bool> { reply["lines"].as_array().unwrap().iter().map(|l| l["reference"].as_bool().unwrap()).collect() };
+    let bodies = |reply: &Value| -> std::collections::BTreeSet<String> {
+        reply["lines"].as_array().unwrap().iter().map(|l| l["body"].as_str().unwrap().to_owned()).collect()
+    };
+    let all = snap(&mut s, json!({}));
+    let model_shaded = snap(&mut s, json!({"visual_style": "shaded"}));
+    let references_shaded = snap(&mut s, json!({"reference_style": "shaded"}));
+    assert!(!references(&model_shaded).is_empty() && references(&model_shaded).iter().all(|r| *r), "{model_shaded}");
+    assert!(!references(&references_shaded).is_empty() && references(&references_shaded).iter().all(|r| !*r), "{references_shaded}");
+    assert_eq!(bodies(&model_shaded).union(&bodies(&references_shaded)).cloned().collect::<std::collections::BTreeSet<_>>(), bodies(&all));
+}
+
+/// What the snapshot refuses, each with nothing changed: bad settings, the shaded styles with
+/// lines until the view's exact lines, the sheet's resolution out of range, an empty design, a
+/// position off the sheet's limit, and a view that would reach past the paper's coordinates.
 #[test]
 fn hostile_snapshots_are_refused() {
     let mut s = block();
@@ -462,14 +804,14 @@ fn hostile_snapshots_are_refused() {
         (json!({"view": {"direction": [0, 0, 0], "up": [0, 0, 1]}}), "direction"),
         (json!({"view": {"direction": [1e308, 1e308, 0], "up": [0, 0, 1]}}), "direction"),
         (json!({"view": {"direction": [0, 0, 1], "up": [0, 0, 2]}}), "along the view direction"),
-        (json!({"display_style": "shaded"}), "not supported yet"),
-        (json!({"reference_style": "shaded_visible"}), "not supported yet"),
-        (json!({"display_style": "Shaded"}), "unknown variant"),
+        (json!({"visual_style": "shaded_visible_hidden"}), "not supported yet"),
+        (json!({"reference_style": "shaded_visible"}), "not supported yet: shaded views with lines need the view's exact lines (W06)"),
+        (json!({"visual_style": "Shaded"}), "unknown variant"),
         (json!({"tangent_edges": "thin"}), "thin"),
         (json!({"sheet": {"dpi": 24.9}}), "dpi"),
         (json!({"sheet": {"dpi": 2400.1}}), "dpi"),
         (json!({"sheet": {"size": {"custom": {"sides_mm": [0, 10]}}}}), "sheet"),
-        (json!({"reference_margin_mm": -1}), "reference_margin_mm"),
+        (json!({"reference_shown_percent": -1}), "reference_shown_percent"),
         (json!({"position_mm": [1e308, 0]}), "point"),
         (json!({"position_mm": [5000.1, 0], "scale": "1:1"}), "position"),
         (json!({"scael": "1:2"}), "scael"),
@@ -572,7 +914,7 @@ fn a_views_lines_are_the_blocks_outline() {
 fn hidden_lines_are_drawn_only_when_the_style_asks() {
     let mut s = block();
     run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [40, 60, 0], "body_name": "Tower", "operation": "new"}));
-    let v = snap(&mut s, json!({"scale": "1:1", "display_style": "visible_hidden"}));
+    let v = snap(&mut s, json!({"scale": "1:1", "visual_style": "visible_hidden"}));
     assert!((drawn_length(&v, "hidden") - 40.0).abs() < 1e-6, "{v}");
     let tower = v["lines"].as_array().unwrap().iter().filter(|l| l["body"] == "Tower").count();
     assert!(tower > 0, "{v}");
@@ -591,6 +933,27 @@ fn each_copys_lines_name_its_occurrence() {
     let mut want = vec![json!([first]), json!([second])];
     want.sort_by_key(|p| p.to_string());
     assert_eq!(paths, want, "{v}");
+}
+
+/// A view cancelled while its lines are made says so in a drawing's words, never as a DXF export.
+#[test]
+fn a_view_cancelled_while_its_lines_are_made_says_so_on_a_drawing() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct CancelOcclusion(AtomicBool);
+    impl solidcraft_kernel::watch::Watch for CancelOcclusion {
+        fn cancelled(&self) -> bool {
+            self.0.load(Ordering::Relaxed)
+        }
+        fn progress(&self, stage: &'static str, _done: usize, _total: usize) {
+            if stage == "dxf_occlusion" {
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+    let mut s = block();
+    let watch = Arc::new(CancelOcclusion(AtomicBool::new(false)));
+    let e = solidcraft_kernel::watch::watching(watch, || s.execute(CMD, &json!({}))).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("drawing the view was cancelled") && !e.contains("DXF"), "{e}");
 }
 
 /// The mesh's chord is `chord_mm` on paper over the scale. Below 1:100 it passes 1 mm and is still
@@ -619,7 +982,7 @@ fn a_pocket_behind_the_front_face_is_hidden() {
     run(&mut s, "solid.box", json!({"length": 40, "width": 10, "height": 10, "corner": [30, 40, 5], "operation": "cut", "targets": ["Block"]}));
     let v = snap(&mut s, json!({"scale": "1:1"}));
     assert!(segments(&v, "hidden").is_empty() && (drawn_length(&v, "visible") - 240.0).abs() < 1e-6, "{v}");
-    let v = snap(&mut s, json!({"scale": "1:1", "display_style": "visible_hidden"}));
+    let v = snap(&mut s, json!({"scale": "1:1", "visual_style": "visible_hidden"}));
     assert!((drawn_length(&v, "hidden") - 100.0).abs() < 1e-6, "{v}");
     let on_pocket = |p: Vec2| {
         let inside = (190.0 - 1e-6..=230.0 + 1e-6).contains(&p.x) && (143.5 - 1e-6..=153.5 + 1e-6).contains(&p.y);
@@ -646,16 +1009,16 @@ fn two_touching_blocks_draw_their_shared_side_once() {
 }
 
 /// Every segment of `v`'s pieces at `visibility`, lines and arcs alike, on the sheet.
-fn drawn(v: &Value, visibility: &str) -> Vec<solidcraft_geom::Seg2> {
+fn drawn(v: &Value, visibility: &str) -> Vec<solidcore_record::Seg2> {
     let pieces = v["lines"].as_array().into_iter().flatten().flat_map(|l| l["pieces"].as_array().into_iter().flatten());
     let segs = pieces.filter(|p| p["visibility"] == visibility).flat_map(|p| p["path"].as_array().into_iter().flatten());
     segs.map(|seg| serde_json::from_value(seg.clone()).unwrap()).collect()
 }
 
 /// The points of `seg` furthest out: its ends, and for an arc each quarter-turn point it passes.
-fn reach(seg: &solidcraft_geom::Seg2) -> Vec<Vec2> {
+fn reach(seg: &solidcore_record::Seg2) -> Vec<Vec2> {
     let mut out = vec![seg.start(), seg.end()];
-    if let solidcraft_geom::Seg2::Arc { center, radius, start, sweep } = *seg {
+    if let solidcore_record::Seg2::Arc { center, radius, start, sweep } = *seg {
         let (lo, span) = if sweep >= 0.0 { (start, sweep) } else { (start + sweep, -sweep) };
         for k in 0..8 {
             let angle = f64::from(k) * std::f64::consts::FRAC_PI_2;
@@ -669,8 +1032,8 @@ fn reach(seg: &solidcraft_geom::Seg2) -> Vec<Vec2> {
 
 /// Whether `a` and `b` share a stretch longer than 1e-6 mm: collinear lines that overlap, or arcs
 /// of one circle whose turns overlap.
-fn share_a_stretch(a: &solidcraft_geom::Seg2, b: &solidcraft_geom::Seg2) -> bool {
-    use solidcraft_geom::Seg2::{Arc, Line};
+fn share_a_stretch(a: &solidcore_record::Seg2, b: &solidcore_record::Seg2) -> bool {
+    use solidcore_record::Seg2::{Arc, Line};
     use std::f64::consts::TAU;
     match (*a, *b) {
         (Line { a: p, b: q }, Line { a: c, b: d }) => {
@@ -707,8 +1070,8 @@ fn seeded_views_of_the_sample_stay_in_bounds_and_apart() {
             "view": view,
             "scale": scale,
             "chord_mm": chord,
-            "display_style": style,
-            "scene": style == "visible",
+            "visual_style": style,
+            "scene": true,
             "tangent_edges": tangent,
         });
         let v = snap(&mut s, p.clone());
@@ -719,12 +1082,12 @@ fn seeded_views_of_the_sample_stay_in_bounds_and_apart() {
         assert!(!visible.is_empty(), "{p}");
         assert!(visible.iter().chain(&hidden).all(|seg| reach(seg).iter().all(inside)), "{p}: a line leaves the boundary");
         assert!(!hidden.iter().any(|h| visible.iter().any(|w| share_a_stretch(h, w))), "{p}: a stretch is both visible and hidden");
-        if style == "visible" {
-            let scene: solidcraft_geom::paper::Scene = serde_json::from_value(v["scene"].clone()).unwrap();
-            assert!(scene.validate().is_ok(), "{p}");
-            let pieces = v["lines"].as_array().unwrap().iter().flat_map(|l| l["pieces"].as_array().unwrap()).count();
-            assert_eq!(strokes(&v).len(), pieces, "{p}: a stroke per piece");
-        }
+        let scene: solidcraft_geom::paper::Scene = serde_json::from_value(v["scene"].clone()).unwrap();
+        assert!(scene.validate().is_ok(), "{p}");
+        let pieces = v["lines"].as_array().unwrap().iter().flat_map(|l| l["pieces"].as_array().unwrap()).count();
+        assert_eq!(strokes(&v).len(), pieces, "{p}: a stroke per piece");
+        let widths: Vec<f64> = strokes(&v).iter().map(|(_, _, width)| *width).collect();
+        assert!(widths.is_sorted(), "{p}: hidden lines first, under the visible ones");
     }
 }
 
@@ -813,7 +1176,7 @@ fn a_hole_seen_end_on_is_its_exact_circle() {
 fn a_rim_cut_where_its_visibility_changes_stays_sampled() {
     let mut s = plate();
     run(&mut s, "solid.box", json!({"length": 30, "width": 4, "height": 2, "corner": [5, 18, 10], "body_name": "Bar", "operation": "new"}));
-    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "display_style": "visible_hidden"}));
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "visual_style": "visible_hidden"}));
     let hidden = 4.0 * 0.4f64.asin();
     for (visibility, want) in [("hidden", hidden), ("visible", std::f64::consts::TAU - hidden)] {
         let rims = arcs(&v, visibility);
@@ -848,14 +1211,14 @@ fn each_placements_hole_is_its_own_exact_circle() {
 }
 
 /// Every stroke of `v`'s paper scene: its path, whether it is closed, and its width.
-fn strokes(v: &Value) -> Vec<(Vec<solidcraft_geom::Seg2>, bool, f64)> {
+fn strokes(v: &Value) -> Vec<(Vec<solidcore_record::Seg2>, bool, f64)> {
     use solidcraft_geom::paper::{Item, Scene};
     let scene: Scene = serde_json::from_value(v["scene"].clone()).unwrap();
     let items = scene.groups.into_iter().flat_map(|g| g.items);
     items
         .filter_map(|item| match item {
-            Item::Stroke { path, closed, width_mm } => Some((path, closed, width_mm)),
-            Item::Fill { .. } => None,
+            Item::Stroke { path, closed, width_mm, .. } => Some((path, closed, width_mm)),
+            Item::Fill { .. } | Item::Text(_) | Item::Picture(_) => None,
         })
         .collect()
 }
@@ -878,10 +1241,49 @@ fn a_views_scene_is_its_visible_lines_as_strokes() {
     let length: f64 = strokes.iter().flat_map(|(path, _, _)| path).map(|seg| seg.start().dist(seg.end())).sum();
     assert!((length - 120.0).abs() < 1e-6, "{v}");
     let scene: solidcraft_geom::paper::Scene = serde_json::from_value(v["scene"].clone()).unwrap();
-    let (svg, _) = solidcraft_io::paper::paper_svg(&scene.prepare().unwrap()).unwrap();
+    let (svg, _) = solidcraft_io::paper::paper_svg(&scene.prepare().unwrap(), &NoPictures, DEFAULT_DPI).unwrap();
     let svg = String::from_utf8(svg).unwrap();
     let counts = (svg.matches("<g data-object=\"0\" data-kind=\"view\">").count(), svg.matches("<path").count());
     assert_eq!(counts, (1, strokes.len()), "{svg}");
+}
+
+/// The pocket behind the front face as a paper scene at 1:1: its four hidden edges are dashed 0.25 mm
+/// strokes under the block's outline, 100 mm of them beside its 240 mm, and the SVG writer dashes
+/// those and only those. In `visible` the same view has no dashes.
+#[test]
+fn a_views_hidden_lines_are_dashed_strokes_under_its_outline() {
+    use solidcraft_geom::paper::{Dashes, Item, Scene};
+    let mut s = block();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 10, "height": 10, "corner": [30, 40, 5], "operation": "cut", "targets": ["Block"]}));
+    let v = snap(&mut s, json!({"scale": "1:1", "scene": true, "visual_style": "visible_hidden"}));
+    let schema = output_schema_for::<SnapshotResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &v), "{v}");
+    let scene: Scene = serde_json::from_value(v["scene"].clone()).unwrap();
+    let mut dashed = (0usize, 0.0);
+    let mut solid = 0.0;
+    for item in &scene.groups[0].items {
+        let Item::Stroke { path, width_mm, pattern, .. } = item else { panic!("{item:?}") };
+        let length: f64 = path.iter().map(|seg| seg.length()).sum();
+        match pattern {
+            Some(dashes) => {
+                assert_eq!((dashes, *width_mm), (&Dashes { lengths_mm: vec![3.0, 0.75], phase_mm: 0.0 }, 0.25), "{v}");
+                assert_eq!(solid, 0.0, "a dashed stroke after a solid one would paint over it: {v}");
+                dashed = (dashed.0 + 1, dashed.1 + length);
+            }
+            None => {
+                assert_eq!(*width_mm, 0.5, "{v}");
+                solid += length;
+            }
+        }
+    }
+    assert_eq!(dashed.0, 4, "{v}");
+    assert!((dashed.1 - 100.0).abs() < 1e-6 && (solid - 240.0).abs() < 1e-6, "{dashed:?} {solid}");
+    let (svg, _) = solidcraft_io::paper::paper_svg(&scene.prepare().unwrap(), &NoPictures, DEFAULT_DPI).unwrap();
+    let svg = String::from_utf8(svg).unwrap();
+    assert_eq!(svg.matches("stroke-dasharray=\"3 0.75\"").count(), 4, "{svg}");
+    let plain = snap(&mut s, json!({"scale": "1:1", "scene": true}));
+    assert!(strokes(&plain).iter().all(|(_, _, width)| *width == 0.5), "{plain}");
+    assert_eq!(plain["scene"].to_string().matches("lengths_mm").count(), 0, "{plain}");
 }
 
 /// The plate's hole in the scene, from above at 1:1: its rim's strokes are arcs of radius 5 round
@@ -893,7 +1295,7 @@ fn a_holes_rim_is_arcs_in_the_scene() {
     let mut round = 0.0;
     for (path, closed, _) in strokes(&v) {
         for seg in &path {
-            if let solidcraft_geom::Seg2::Arc { center, radius, sweep, .. } = *seg {
+            if let solidcore_record::Seg2::Arc { center, radius, sweep, .. } = *seg {
                 assert!(center.dist(Vec2::new(210.0, 148.5)) < 1e-9 && (radius - 5.0).abs() < 1e-9, "{v}");
                 round += radius * sweep.abs();
                 let whole = path.len() == 1 && (sweep.abs() - std::f64::consts::TAU).abs() < 1e-9;
@@ -904,20 +1306,399 @@ fn a_holes_rim_is_arcs_in_the_scene() {
     assert!((round - std::f64::consts::TAU * 5.0).abs() < 1e-6, "{round}: {v}");
 }
 
-/// `scene` is true or false, and with `visible_hidden` it waits for dashed lines (V7b).
+/// `scene` is true or false.
 #[test]
-fn a_scene_with_hidden_lines_or_a_bad_flag_is_refused() {
+fn a_bad_scene_flag_is_refused() {
     let mut s = block();
     let doc = s.doc.clone();
-    for (p, says) in [
-        (json!({"scene": "yes"}), "scene"),
-        (json!({"scene": 1}), "scene"),
-        (json!({"scene": null}), "scene"),
-        (json!({"scene": true, "display_style": "visible_hidden"}), "not supported yet: hidden lines in the paper scene"),
-    ] {
+    for (p, says) in [(json!({"scene": "yes"}), "scene"), (json!({"scene": 1}), "scene"), (json!({"scene": null}), "scene")] {
         let e = refused(&mut s, p.clone());
         assert!(e.contains(says), "{p}: {e}");
         assert!(std::sync::Arc::ptr_eq(&doc, &s.doc), "{p}");
+    }
+}
+
+/// A 40 x 40 x 5 mm part from the origin, and a 20 x 20 x 10 mm part over its right side at
+/// x 30..50, y 10..30, from height `z`, set as reference. The session and the two occurrences.
+fn plate_and_block(z: f64) -> (Session, [u64; 2]) {
+    let mut s = Session::default();
+    let part = |s: &mut Session, name: &str, size: [f64; 3], body: &str| {
+        let occurrence = run(s, "component.create", json!({"name": name}))["occurrence"].as_u64().unwrap();
+        run(s, "solid.box", json!({"length": size[0], "width": size[1], "height": size[2], "body_name": body, "operation": "new"}));
+        run(s, "component.activate", json!({"component": 0}));
+        occurrence
+    };
+    let plate = part(&mut s, "PlatePart", [40.0, 40.0, 5.0], "Plate");
+    let block = part(&mut s, "BlockPart", [20.0, 20.0, 10.0], "Block");
+    run(&mut s, "occurrence.move", json!({"occurrence": block, "translate": [30, 10, z]}));
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": block, "bom_type": "reference"}));
+    (s, [plate, block])
+}
+
+/// How long `v`'s model lines, or its reference lines, at `visibility` are altogether, on the sheet.
+fn role_length(v: &Value, reference: bool, visibility: &str) -> f64 {
+    let lines: Vec<Value> = v["lines"].as_array().unwrap().iter().filter(|l| l["reference"] == reference).cloned().collect();
+    drawn_length(&json!({"lines": lines}), visibility)
+}
+
+fn assert_lengths(v: &Value, reference: bool, visible: f64, hidden: f64) {
+    let got = (role_length(v, reference, "visible"), role_length(v, reference, "hidden"));
+    assert!((got.0 - visible).abs() < 1e-6 && (got.1 - hidden).abs() < 1e-6, "{reference}: {got:?}, not ({visible}, {hidden})");
+}
+
+/// Worked by hand, top view at 1:1 showing all of the block. The plate's outline is
+/// 160 mm, 20 of it (x = 40, y 10..30) under the block when the block is above; the block's is 80,
+/// and when it is below, its parts at x 30..40 are under the plate: 40 hidden and 40 visible.
+/// Reference parts cover the model only when told, and the plate always covers the block.
+#[test]
+fn reference_lines_are_their_own_and_cover_the_model_only_when_told() {
+    let view = |hides: bool| {
+        json!({"view": "top", "scale": "1:1", "visual_style": "visible_hidden", "reference_style": "visible_hidden",
+               "reference_hides_model": hides, "reference_shown_percent": 100})
+    };
+    let (mut above, _) = plate_and_block(5.0);
+    let v = snap(&mut above, view(false));
+    assert_lengths(&v, false, 160.0, 0.0);
+    assert_lengths(&v, true, 80.0, 0.0);
+    let v = snap(&mut above, view(true));
+    assert_lengths(&v, false, 140.0, 20.0);
+    assert_lengths(&v, true, 80.0, 0.0);
+    let (mut below, _) = plate_and_block(-10.0);
+    for hides in [false, true] {
+        let v = snap(&mut below, view(hides));
+        assert_lengths(&v, false, 160.0, 0.0);
+        assert_lengths(&v, true, 40.0, 40.0);
+    }
+}
+
+/// Each style asks for its own hidden lines: reference ones only with `reference_style`, the
+/// model's only with `visual_style`.
+#[test]
+fn each_part_of_a_view_draws_hidden_lines_by_its_own_style() {
+    let (mut above, _) = plate_and_block(5.0);
+    let hides = json!({"view": "top", "scale": "1:1", "reference_hides_model": true, "reference_shown_percent": 100});
+    let v = snap(&mut above, hides.clone());
+    assert_lengths(&v, false, 140.0, 0.0);
+    let (mut below, _) = plate_and_block(-10.0);
+    let v = snap(&mut below, hides);
+    assert_lengths(&v, true, 40.0, 0.0);
+    let v = snap(&mut below, json!({"view": "top", "scale": "1:1", "reference_style": "visible_hidden", "reference_shown_percent": 100}));
+    assert_lengths(&v, true, 40.0, 40.0);
+}
+
+/// With model parts there, the boundary starts at theirs and reference lines stop at it. The block
+/// passes only the plate's right side, so that side alone grows, to x 50 at 100%: the block keeps
+/// x 30..40 at 0% (20 + 10 + 10), x 30..45 at 50% (20 + 15 + 15) and all of itself at 100%. The model
+/// stays where it is throughout, so a view stays lined up with its projected views.
+#[test]
+fn reference_parts_grow_the_boundary_on_their_own_side_as_far_as_asked() {
+    let (mut s, _) = plate_and_block(5.0);
+    let at = |s: &mut Session, percent: f64| snap(s, json!({"view": "top", "scale": "1:1", "reference_shown_percent": percent}));
+    let model_lines = |v: &Value| v["lines"].as_array().unwrap().iter().filter(|l| l["reference"] == false).cloned().collect::<Vec<_>>();
+    let none = at(&mut s, 0.0);
+    assert_box(&none, [190.0, 128.5], [230.0, 168.5]);
+    assert_eq!(none["source"]["bodies"], 2, "{none}");
+    assert_lengths(&none, true, 40.0, 0.0);
+    let half = at(&mut s, 50.0);
+    assert_box(&half, [190.0, 128.5], [235.0, 168.5]);
+    assert_lengths(&half, true, 50.0, 0.0);
+    let all = at(&mut s, 100.0);
+    assert_box(&all, [190.0, 128.5], [240.0, 168.5]);
+    assert_lengths(&all, true, 80.0, 0.0);
+    assert_eq!(model_lines(&none), model_lines(&half));
+    assert_eq!(model_lines(&none), model_lines(&all));
+    // A side no reference part passes is the model's, exactly, whatever the percent, and the side it
+    // passes only ever grows.
+    let mut reach = f64::MIN;
+    for percent in [0.0, 1e-9, 0.1, 33.3, 50.0, 99.999, 100.0] {
+        let v = at(&mut s, percent);
+        assert_eq!(none["boundary_mm"]["min"], v["boundary_mm"]["min"], "{percent}: {v}");
+        let right = v["boundary_mm"]["max"][0].as_f64().unwrap();
+        assert!(right >= reach && right <= 240.0, "{percent}: {v}");
+        reach = right;
+    }
+}
+
+/// Left out and 0 are one picture, reply for reply, apart from what working it out took.
+#[test]
+fn no_reference_shown_is_the_same_picture_as_not_asking() {
+    let (mut s, _) = plate_and_block(5.0);
+    let reply = |s: &mut Session, p: Value| {
+        let mut v = snap(s, p);
+        v.as_object_mut().unwrap().remove("stats");
+        v
+    };
+    let plain = reply(&mut s, json!({"view": "top", "scale": "1:1", "scene": true}));
+    assert_eq!(plain, reply(&mut s, json!({"view": "top", "scale": "1:1", "scene": true, "reference_shown_percent": 0})));
+}
+
+/// A part many times the model's size: at 100% the box holds it all and a fitted scale takes it in,
+/// and a scale that can't holds it is refused by name, while 0% still draws. A view with only
+/// reference parts is measured by them already, so the percent changes nothing.
+#[test]
+fn a_reference_part_much_bigger_than_the_model_is_held_or_refused() {
+    let mut s = Session::default();
+    let add = |s: &mut Session, name: &str, size: f64, body: &str| {
+        let occurrence = run(s, "component.create", json!({"name": name}))["occurrence"].as_u64().unwrap();
+        run(s, "solid.box", json!({"length": size, "width": size, "height": 5, "body_name": body, "operation": "new"}));
+        run(s, "component.activate", json!({"component": 0}));
+        occurrence
+    };
+    add(&mut s, "PlatePart", 10.0, "Plate");
+    let big = add(&mut s, "BigPart", 20000.0, "Big");
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": big, "bom_type": "reference"}));
+    let fitted = |s: &mut Session, percent: f64| snap(s, json!({"view": "top", "reference_shown_percent": percent}));
+    let (near, far) = (fitted(&mut s, 0.0), fitted(&mut s, 100.0));
+    assert_ne!(near["scale"], far["scale"], "{far}");
+    // At 0% the view shows the two sides of the big part that cross the model, cut off at the view's
+    // edges; at 100% all four.
+    let reference_lines = |v: &Value| v["lines"].as_array().unwrap().iter().filter(|l| l["reference"] == true).count();
+    assert_eq!((reference_lines(&near), reference_lines(&far)), (2, 4), "{far}");
+    // Fitted round the model's middle, the side it grows on still stays on the sheet.
+    let position = (point(&near["boundary_mm"]["min"]) + point(&near["boundary_mm"]["max"])) * 0.5;
+    let (low, high) = (point(&far["boundary_mm"]["min"]), point(&far["boundary_mm"]["max"]));
+    assert!(low.x >= 0.0 && low.y >= 0.0 && high.x <= position.x * 2.0 && high.y <= position.y * 2.0, "{far}");
+    let refused =
+        s.execute("drawing.view.snapshot", &json!({"view": "top", "scale": "100:1", "reference_shown_percent": 100})).unwrap_err().to_string();
+    assert!(refused.contains("reaches past"), "{refused}");
+    snap(&mut s, json!({"view": "top", "scale": "100:1"}));
+
+    let (mut only, [plate, _]) = plate_and_block(5.0);
+    run(&mut only, "occurrence.bom_type", json!({"occurrence": plate, "bom_type": "reference"}));
+    let at = |s: &mut Session, percent: f64| snap(s, json!({"view": "top", "scale": "1:1", "reference_shown_percent": percent}));
+    let (none, all) = (at(&mut only, 0.0), at(&mut only, 100.0));
+    assert_eq!((&none["boundary_mm"], &none["lines"]), (&all["boundary_mm"], &all["lines"]));
+}
+
+/// Reference lines test against everything: with both parts reference, the block hides 20 mm of the
+/// plate, the setting off.
+#[test]
+fn reference_parts_hide_each_other_whatever_the_setting() {
+    let (mut s, [plate, _]) = plate_and_block(5.0);
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": plate, "bom_type": "reference"}));
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "reference_style": "visible_hidden"}));
+    assert_lengths(&v, true, 220.0, 20.0);
+}
+
+/// A reference part's edge on a model part's: the block's right edge moved onto the plate's. Merged
+/// apart, each keeps its whole outline, so the model's line is drawn in the model's width.
+#[test]
+fn a_reference_line_never_takes_a_stretch_from_a_model_line() {
+    let (mut s, [_, block]) = plate_and_block(5.0);
+    run(&mut s, "occurrence.move", json!({"occurrence": block, "translate": [-10, 0, 0]}));
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
+    assert_lengths(&v, false, 160.0, 0.0);
+    assert_lengths(&v, true, 80.0, 0.0);
+}
+
+/// A plate, a hinge holding a pin, and the pin placed again at the top: with the hinge a reference
+/// component, the pin is a reference part through the hinge and a model part on its own.
+#[test]
+fn an_assemblys_type_reaches_its_parts_through_that_path_only() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 3}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "component.create", json!({"name": "Hinge", "activate": false}));
+    run(&mut s, "component.create", json!({"name": "Pin", "parent": "Hinge"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 4, "height": 30}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.copy", json!({"component": "Pin", "translate": [0, 50, 0]}));
+    run(&mut s, "component.metadata.set", json!({"component": "Hinge", "bom_type": "reference"}));
+    let through = |line: &Value| line["occurrence"].as_array().unwrap().len() == 2;
+    let all = snap(&mut s, json!({}));
+    let lines = all["lines"].as_array().unwrap();
+    assert!(lines.iter().any(through) && !lines.iter().all(through), "{all}");
+    assert!(lines.iter().all(|l| l["reference"] == through(l)), "{all}");
+}
+
+/// A view of only reference parts is measured by them and draws them whole.
+#[test]
+fn a_view_of_only_reference_parts_draws_them() {
+    let (mut s, [plate, _]) = plate_and_block(5.0);
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "hide": [[plate]]}));
+    assert_box(&v, [200.0, 138.5], [220.0, 158.5]);
+    assert_lengths(&v, true, 80.0, 0.0);
+    assert!(v["lines"].as_array().unwrap().iter().all(|l| l["reference"] == true), "{v}");
+}
+
+/// An assembly's type reaches every part in it, and so does a component's; a part's own type says
+/// nothing about the assembly round it, or about what else is placed.
+#[test]
+fn a_reference_assembly_makes_its_parts_reference() {
+    let mut s = Session::default();
+    let outer = run(&mut s, "component.create", json!({"name": "Outer"}))["occurrence"].as_u64().unwrap();
+    let inner = run(&mut s, "component.create", json!({"name": "Inner"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let reference = |s: &Session| crate::drawing_view::shown(s).unwrap().bodies.iter().map(|b| (b.path.clone(), b.reference)).collect::<Vec<_>>();
+    assert_eq!(reference(&s), [(vec![outer, inner], false)]);
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": outer, "bom_type": "reference"}));
+    assert_eq!(reference(&s), [(vec![outer, inner], true)]);
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": outer, "bom_type": null}));
+    assert_eq!(reference(&s), [(vec![outer, inner], false)]);
+    run(&mut s, "component.metadata.set", json!({"component": "Outer", "bom_type": "reference"}));
+    assert_eq!(reference(&s), [(vec![outer, inner], true)]);
+    // Its own type wins over its component's.
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": outer, "bom_type": "normal"}));
+    assert_eq!(reference(&s), [(vec![outer, inner], false)]);
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": inner, "bom_type": "reference"}));
+    assert_eq!(reference(&s), [(vec![outer, inner], true)]);
+}
+
+/// A design's own bodies are never reference, and a view with no reference parts draws the same
+/// lines whichever way the setting is.
+#[test]
+fn no_reference_parts_means_the_setting_changes_nothing() {
+    let (mut s, _) = two_cubes();
+    let plain = snap(&mut s, json!({"scale": "1:1"}));
+    let set = snap(&mut s, json!({"scale": "1:1", "reference_hides_model": true}));
+    assert_eq!(plain["lines"], set["lines"]);
+    assert!(plain["lines"].as_array().unwrap().iter().all(|l| l["reference"] == false), "{plain}");
+}
+
+/// The snapshot's scene draws reference parts as saved views do: thin, and first.
+#[test]
+fn a_scene_draws_reference_parts_thin_under_the_model() {
+    let (mut s, _) = plate_and_block(5.0);
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "scene": true, "reference_shown_percent": 100}));
+    let widths: Vec<f64> = strokes(&v).iter().map(|(_, _, width)| *width).collect();
+    let thin = widths.iter().take_while(|w| **w == LineKind::Thin.width_mm(LineGroup::DEFAULT)).count();
+    assert!(thin > 0 && widths[thin..].iter().all(|w| *w == LineKind::Visible.width_mm(LineGroup::DEFAULT)), "{widths:?}");
+}
+
+/// A scene's hidden reference lines are dashed as the model's are, by the reference parts' own
+/// style: with the block below the plate, its 40 mm under the plate (worked by hand above) is drawn
+/// dashed, 0.25 mm wide, before every solid stroke; with the reference parts in `visible`, not at all.
+#[test]
+fn a_scenes_hidden_reference_lines_are_dashed_by_their_own_style() {
+    use solidcraft_geom::paper::{Item, Scene};
+    let (mut s, _) = plate_and_block(-10.0);
+    let mut dashed = |style: &str| {
+        let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "scene": true, "reference_style": style, "reference_shown_percent": 100}));
+        let schema = output_schema_for::<SnapshotResult>();
+        assert!(conforms(schema.as_value(), schema.as_value(), &v), "{v}");
+        let scene: Scene = serde_json::from_value(v["scene"].clone()).unwrap();
+        let (mut length, mut solid) = (0.0, false);
+        for item in &scene.groups[0].items {
+            let Item::Stroke { path, width_mm, pattern, .. } = item else { panic!("{item:?}") };
+            match pattern {
+                Some(_) => {
+                    assert!(!solid && *width_mm == 0.25, "{v}");
+                    length += path.iter().map(|seg| seg.length()).sum::<f64>();
+                }
+                None => solid = true,
+            }
+        }
+        length
+    };
+    assert!((dashed("visible_hidden") - 40.0).abs() < 1e-6);
+    assert_eq!(dashed("visible"), 0.0);
+}
+
+/// The readings of `measure` on `v`, each (value, label).
+fn readings(v: &Value) -> Vec<(f64, String)> {
+    let value = |m: &Value| m.get("value_mm").or(m.get("value_rad")).and_then(Value::as_f64).unwrap();
+    v["measurements"].as_array().unwrap().iter().map(|m| (value(m), m["label"].as_str().unwrap().to_string())).collect()
+}
+
+/// From (0, 0, 0) to (30, 40, 0) seen from above, 1:2: 30 along x, 40 along y, 50 as it runs, half
+/// that on paper; a 45 degree line reads 45 degrees from the view's horizontal and from a line along
+/// x; a reply with none says nothing about them. Nothing changes or is evaluated.
+#[test]
+fn a_views_measurements_are_read_as_it_shows_them() {
+    let mut s = block();
+    let (doc, evaluations) = (s.doc.clone(), s.evaluations);
+    let (a, b) = (json!([0, 0, 0]), json!([30, 40, 0]));
+    let v = snap(
+        &mut s,
+        json!({"view": "top", "scale": "1:2", "measure": [
+            {"linear": {"along": "x", "from": a, "to": b}},
+            {"linear": {"along": "y", "from": a, "to": b}},
+            {"aligned": {"from": a, "to": b}},
+            {"angle": {"edge": [[0, 0, 0], [1, 1, 0]], "from": "horizontal"}},
+            {"angle": {"edge": [[0, 0, 0], [1, 1, 0]], "from": [[0, 0, 0], [1, 0, 0]]}},
+        ]}),
+    );
+    let schema = crate::schema::output_schema_for::<crate::schema::drawing_view::SnapshotResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &v), "{v}");
+    let got = readings(&v);
+    let want = [(30.0, "30.00"), (40.0, "40.00"), (50.0, "50.00"), (std::f64::consts::FRAC_PI_4, "45.00°"), (std::f64::consts::FRAC_PI_4, "45.00°")];
+    assert_eq!(got.len(), want.len());
+    for ((value, label), (expected, text)) in got.iter().zip(want) {
+        assert!((value - expected).abs() < 1e-9 && label == text, "{got:?}");
+    }
+    let first = &v["measurements"][0];
+    assert_eq!(
+        (&first["kind"], &first["paper_mm"], &first["meaning"], &first["foreshortened"]),
+        (&json!("linear"), &json!(15.0), &json!("projected"), &json!(false)),
+        "{v}"
+    );
+    assert_eq!(v["measurements"][3].get("value_mm"), None, "{v}");
+    assert_eq!(snap(&mut s, json!({"view": "top"})).get("measurements"), None);
+    assert!(Arc::ptr_eq(&doc, &s.doc) && s.evaluations == evaluations);
+}
+
+/// A 50 mm edge of a cube seen in iso reads 50 x sqrt(2/3) = 40.825 and says it is foreshortened;
+/// the label takes the units and decimals asked for.
+#[test]
+fn an_edge_in_iso_reads_foreshortened() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 50, "width": 50, "height": 50}));
+    let edge = json!({"aligned": {"from": [0, 0, 0], "to": [50, 0, 0]}});
+    let v = snap(&mut s, json!({"view": "iso", "measure": [edge], "decimals": 3}));
+    let got = readings(&v);
+    assert!((got[0].0 - 50.0 * (2.0f64 / 3.0).sqrt()).abs() < 1e-9 && got[0].1 == "40.825", "{got:?}");
+    assert_eq!(v["measurements"][0]["foreshortened"], true);
+    let inch = json!({"aligned": {"from": [0, 0, 0], "to": [25.4, 0, 0]}});
+    let v = snap(&mut s, json!({"view": "top", "measure": [inch], "units": "in", "decimals": 3}));
+    assert_eq!(readings(&v)[0].1, "1.000", "{v}");
+}
+
+/// A 20 mm hole reads R10 where the view sees it round, on paper at the view's scale, and is refused
+/// end on, by its place in the list.
+#[test]
+fn a_holes_radius_is_read_face_on_and_refused_end_on() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 20, "height": 7, "base": [20, 20, -1], "operation": "cut", "targets": ["Plate"]}));
+    let rim = json!({"radius": {"edge": [30, 20, 5]}});
+    let v = snap(&mut s, json!({"view": "top", "scale": "2:1", "measure": [rim]}));
+    let got = readings(&v);
+    assert!(got.len() == 1 && (got[0].0 - 10.0).abs() < 1e-9 && got[0].1 == "R10.00", "{v}");
+    let paper = v["measurements"][0]["paper_mm"].as_f64().unwrap();
+    assert!((paper - 20.0).abs() < 1e-9 && v["measurements"][0]["status"] == "exact", "{v}");
+    let e = refused(&mut s, json!({"view": "front", "measure": [{"aligned": {"from": [0, 0, 0], "to": [1, 0, 0]}}, rim]}));
+    assert!(e.contains("measure[1]") && e.contains("isn't a circle in this view"), "{e}");
+    let straight = json!({"radius": {"edge": [0, 20, 5]}});
+    let e = refused(&mut s, json!({"view": "top", "measure": [straight]}));
+    assert!(e.contains("measure[0]"), "{e}");
+}
+
+#[test]
+fn hostile_measurements_are_refused() {
+    let mut s = block();
+    let doc = s.doc.clone();
+    let one = json!({"aligned": {"from": [0, 0, 0], "to": [1, 0, 0]}});
+    let many = vec![one.clone(); 101];
+    let cases = [
+        (json!({"measure": many}), "at most 100"),
+        (json!({"measure": [{"aligned": {"from": [0, 0, 0], "to": [0, 0, 0]}}]}), "measure[0]"),
+        (json!({"view": "top", "measure": [{"aligned": {"from": [0, 0, 0], "to": [0, 0, 5]}}]}), "measure[0]"),
+        (json!({"measure": [{"aligned": {"from": [0, 0, 0], "to": [1e13, 0, 0]}}]}), "measure[0]"),
+        (json!({"measure": [{"linear": {"along": "z", "from": [0, 0, 0], "to": [1, 0, 0]}}]}), "measure"),
+        (json!({"measure": [{"aligned": {"from": [0, 0, 0], "to": ["a", 0, 0]}}]}), "measure"),
+        (json!({"measure": [{"angle": {"edge": [[0, 0, 0], [1, 0, 0]], "from": "horizontal"}}]}), "measure[0]"),
+        (json!({"measure": [{"radius": {"edge": [1e13, 0, 0]}}]}), "measure"),
+        (json!({"measure": [{"nothing": {}}]}), "measure"),
+        (json!({"measure": [one.clone()], "units": "parsec"}), "units"),
+        (json!({"measure": [one.clone()], "decimals": 7}), "decimals"),
+        (json!({"measure": [one], "decimals": -1}), "decimals"),
+    ];
+    for (p, says) in cases {
+        let e = refused(&mut s, p.clone());
+        assert!(e.contains(says), "{p}: {e}");
+        assert!(Arc::ptr_eq(&doc, &s.doc), "{p}");
     }
 }
 
@@ -1032,26 +1813,19 @@ fn a_saved_views_boundary_is_its_extents_at_its_scale_round_its_centre() {
 
 /// The right view follows the front view up and down when it moves, and keeps its own place
 /// across; at its own scale (1:1, 50 x 20) it is still lined up through its centre, and the top
-/// view projected from it takes that scale too. The top view's 5 mm reference margin grows it by
-/// 2.5 mm a side at 1:2, its extents unchanged. The largest margin at the largest scale still
-/// gives a finite box.
+/// view projected from it takes that scale too. The largest scale still gives a finite box.
 #[test]
-fn a_lined_up_view_follows_its_parent_and_a_margin_grows_the_boundary() {
+fn a_lined_up_view_follows_its_parent() {
     let (mut s, [front, right, top]) = three_views();
     edit_view(&mut s, front, json!({"place": {"at": [160.0, 140.0]}}));
     assert_box(&inspect_view(&mut s, front), [135.0, 135.0], [185.0, 145.0]);
     assert_box(&inspect_view(&mut s, right), [287.5, 135.0], [312.5, 145.0]);
-    edit_view(&mut s, top, json!({"reference_margin_mm": 5.0}));
-    let margin = inspect_view(&mut s, top);
-    assert_box(&margin, [285.0, 222.5], [315.0, 277.5]);
-    let size = point(&margin["extents"]["max"]) - point(&margin["extents"]["min"]);
-    assert!((size - Vec2::new(50.0, 100.0)).len() < EPS, "{margin}");
     edit_view(&mut s, right, json!({"scale": "1:1"}));
     assert_box(&inspect_view(&mut s, right), [275.0, 130.0], [325.0, 150.0]);
-    assert_box(&inspect_view(&mut s, top), [270.0, 195.0], [330.0, 305.0]);
-    edit_view(&mut s, top, json!({"reference_margin_mm": 100000.0, "scale": "50:1"}));
+    assert_box(&inspect_view(&mut s, top), [275.0, 200.0], [325.0, 300.0]);
+    edit_view(&mut s, top, json!({"scale": "1000:1"}));
     let (huge, centre) = boundary(&inspect_view(&mut s, top));
-    assert!(huge.x.is_finite() && huge.x > 1e7 && (centre - Vec2::new(300.0, 250.0)).len() < 1e-6, "{huge:?} {centre:?}");
+    assert!(huge.x.is_finite() && huge.x > 1e4 && (centre - Vec2::new(300.0, 250.0)).len() < 1e-6, "{huge:?} {centre:?}");
 }
 
 /// With nothing to measure a view gets a 20 x 20 mm placeholder round its centre, and says why:
@@ -1076,6 +1850,218 @@ fn a_view_with_nothing_to_measure_gets_a_placeholder() {
     run(&mut sketch_only, "sketch.finish", json!({}));
     let (mut sketch_only, [front, ..]) = three_views_of(sketch_only);
     assert_box(&placeholder(&mut sketch_only, front, "no_bodies"), [140.0, 140.0], [160.0, 160.0]);
+}
+
+/// The two copies of [`two_cubes`] in a drawing: a base view at 1:1 centred at (150, 150), and the
+/// session, its sheet, the view and the two occurrences.
+fn two_cubes_drawn() -> (Session, u64, [u64; 2]) {
+    let (mut s, copies) = two_cubes();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (_, view) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "position_mm": [150, 150]}));
+    (s, view, copies)
+}
+
+/// How wide view `id` is on its sheet, in paper millimetres.
+fn width(s: &mut Session, id: u64) -> f64 {
+    boundary(&inspect_view(s, id)).0.x
+}
+
+/// `source` and `hide` on a saved view: both copies are 40 mm across, one is 10 mm, and its
+/// boundary stays centred on its place. Inspect says where each comes from, null follows again, and
+/// an edit is one undo step that undoes.
+#[test]
+fn a_saved_views_source_and_hide_choose_what_it_measures() {
+    let (mut s, view, [_, second]) = two_cubes_drawn();
+    assert!((width(&mut s, view) - 40.0).abs() < 1e-6);
+    let inspected = inspect_view(&mut s, view);
+    assert_eq!(inspected["settings"]["occurrences"], json!({"value": null, "from": "default", "set": null}), "{inspected}");
+    assert_eq!(inspected["settings"]["hide"], json!({"value": null, "from": "default", "set": null}), "{inspected}");
+
+    let steps = s.undo.len();
+    let reply = edit_view(&mut s, view, json!({"hide": [[second]]}));
+    assert_eq!((reply["changed"].clone(), s.undo.len()), (json!(["hide"]), steps + 1));
+    assert!((width(&mut s, view) - 10.0).abs() < 1e-6);
+    assert_box(&inspect_view(&mut s, view), [145.0, 145.0], [155.0, 155.0]);
+    let inspected = inspect_view(&mut s, view);
+    assert_eq!(inspected["settings"]["hide"], json!({"value": [[second]], "from": "this", "set": [[second]]}), "{inspected}");
+
+    let reply = edit_view(&mut s, view, json!({"hide": null, "source": {"occurrences": [[second]]}}));
+    assert_eq!(reply["changed"], json!(["source", "hide"]));
+    assert!((width(&mut s, view) - 10.0).abs() < 1e-6);
+    edit_view(&mut s, view, json!({"source": null}));
+    assert!((width(&mut s, view) - 40.0).abs() < 1e-6, "null follows the default again");
+
+    run(&mut s, "edit.undo", json!({}));
+    assert!((width(&mut s, view) - 10.0).abs() < 1e-6);
+    assert_eq!(saved(&s, view).settings.occurrences.as_deref(), Some(&[vec![second]][..]));
+}
+
+/// A new base view takes its scale from what it shows: with the second copy hidden it fits one
+/// 10 mm cube, so it comes out larger than the view of both.
+#[test]
+fn a_base_views_fitted_scale_is_of_what_it_shows() {
+    let (mut s, _, [_, second]) = two_cubes_drawn();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (both, _) = create(&mut s, BASE, json!({"sheet": sheet}));
+    let (one, id) = create(&mut s, BASE, json!({"sheet": sheet, "hide": [[second]]}));
+    assert!(one["scale"]["factor"].as_f64().unwrap() > both["scale"]["factor"].as_f64().unwrap(), "{one} {both}");
+    assert_eq!(one["scale"]["fitted"], json!(true));
+    assert_eq!(saved(&s, id).settings.hide.as_deref(), Some(&[vec![second]][..]));
+}
+
+/// A projected view follows what its parent shows, naming it, and is among the followers of the
+/// edit that changes it; then it sets its own, and the parent's next change leaves it alone.
+#[test]
+fn a_projected_view_follows_what_its_parent_shows_until_it_sets_its_own() {
+    let (mut s, view, [first, second]) = two_cubes_drawn();
+    let (_, side) = create(&mut s, PROJECTED, json!({"parent": ids::encode(view), "side": "above", "place": {"at": [150, 250]}}));
+    let reply = edit_view(&mut s, view, json!({"hide": [[second]]}));
+    assert_eq!(reply["followers"], json!([ids::encode(side)]), "{reply}");
+    assert!((width(&mut s, side) - 10.0).abs() < 1e-6);
+    let inspected = inspect_view(&mut s, side);
+    assert_eq!(
+        inspected["settings"]["hide"],
+        json!({"value": [[second]], "from": "parent", "parent": ids::encode(view), "set": null}),
+        "{inspected}"
+    );
+
+    edit_view(&mut s, side, json!({"hide": []}));
+    assert!((width(&mut s, side) - 40.0).abs() < 1e-6, "an empty list hides nothing, whatever the parent hides");
+    let reply = edit_view(&mut s, view, json!({"hide": [[first]]}));
+    assert_eq!(reply["followers"], json!([]), "{reply}");
+    assert!((width(&mut s, side) - 40.0).abs() < 1e-6);
+    // A display link is its own switch: `linked` doesn't touch what a view shows.
+    edit_view(&mut s, side, json!({"linked": true}));
+    assert!((width(&mut s, side) - 40.0).abs() < 1e-6);
+}
+
+/// A view copied alone follows nothing, so it keeps what it showed: its parent's choice becomes its
+/// own, and the parent's next change leaves it alone. A view copied with its parent still follows.
+#[test]
+fn a_copied_view_keeps_what_it_shows() {
+    let (mut s, view, [first, second]) = two_cubes_drawn();
+    let (_, side) = create(&mut s, PROJECTED, json!({"parent": ids::encode(view), "side": "above"}));
+    edit_view(&mut s, view, json!({"hide": [[second]]}));
+    let alone = listed(&to_sheet(&mut s, COPY, json!({"view": ids::encode(side), "sheet": "Sheet 1", "position_mm": [300, 250]})))[0];
+    assert!(matches!(saved(&s, alone).kind, ViewKind::Base { .. }));
+    assert_eq!(saved(&s, alone).settings.hide.as_deref(), Some(&[vec![second]][..]));
+    assert!((width(&mut s, alone) - 10.0).abs() < 1e-6);
+    let together = listed(&to_sheet(&mut s, COPY, json!({"view": ids::encode(view), "sheet": "Sheet 1", "with_linked": true})));
+    let [copy, its_side] = together[..] else { panic!("{together:?}") };
+    edit_view(&mut s, view, json!({"hide": [[first]]}));
+    assert_eq!(saved(&s, alone).settings.hide.as_deref(), Some(&[vec![second]][..]), "the copy follows nothing");
+    let inspected = inspect_view(&mut s, its_side);
+    assert_eq!(inspected["settings"]["hide"]["parent"], json!(ids::encode(copy)), "{inspected}");
+}
+
+/// Deleting an occurrence never refuses the drawing. A `hide` path to it goes quiet, a `source` path
+/// to it with another left draws the other, and one with none left is a placeholder that says why;
+/// undoing the delete brings the lines back. The file still reads with the paths in it.
+#[test]
+fn a_deleted_occurrence_leaves_the_views_that_named_it() {
+    let (mut s, hides, [first, second]) = two_cubes_drawn();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    edit_view(&mut s, hides, json!({"hide": [[second]]}));
+    let (_, on_both) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "source": {"occurrences": [[first], [second]]}}));
+    let (_, on_second) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "source": {"occurrences": [[second]]}}));
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "selection.delete", json!({"occurrences": [second]}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert!((width(&mut s, hides) - 10.0).abs() < 1e-6);
+    assert!((width(&mut s, on_both) - 10.0).abs() < 1e-6);
+    let gone = inspect_view(&mut s, on_second);
+    assert_eq!((gone["extents"]["status"].as_str(), gone["extents"]["provenance"].as_str()), (Some("placeholder"), Some("nothing_chosen")), "{gone}");
+    assert_eq!(gone["settings"]["occurrences"]["value"], json!([[second]]), "the path stays, for an undo: {gone}");
+    let d = s.drawing("test").unwrap();
+    assert_eq!(&Drawing::from_json(&d.to_json().unwrap()).unwrap(), &**d);
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert!((width(&mut s, on_second) - 10.0).abs() < 1e-6);
+}
+
+/// Making or editing a view refuses what the snapshot refuses, with its reason, and leaves the
+/// drawing and the undo steps as they were: a path no occurrence makes, too many paths or ids, `[]`
+/// in `hide`, and a choice that leaves nothing. `[]` in `source` with only placed bodies is that.
+#[test]
+fn hostile_source_and_hide_on_a_saved_view_are_refused() {
+    let (mut s, view, [first, second]) = two_cubes_drawn();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let many: Vec<Vec<u64>> = vec![vec![first]; 1001];
+    let deep: Vec<Vec<u64>> = vec![vec![first; 64]; 65];
+    let cases = [
+        (json!({"source": {"occurrences": [[999]]}}), "source.occurrences path"),
+        (json!({"hide": [[999]]}), "hide path"),
+        (json!({"hide": [[first, first]]}), "repeats an id"),
+        (json!({"source": {"occurrences": [vec![first; 65]]}}), "1..64 ids"),
+        (json!({"hide": many}), "at most 1000 occurrence paths"),
+        (json!({"source": {"occurrences": deep}}), "4096 ids in all"),
+        (json!({"hide": [[]]}), "hide [] would leave out"),
+        (json!({"hide": [[first], [second]]}), NOTHING_CHOSEN),
+        (json!({"source": {"occurrences": []}}), NOTHING_CHOSEN),
+        (json!({"source": {"occurrences": [[]]}}), NOTHING_CHOSEN),
+        (json!({"source": {"occurrences": [[first]]}, "hide": [[first]]}), NOTHING_CHOSEN),
+        (json!({"hide": [[-1]]}), "hide"),
+        (json!({"source": {}}), "occurrences"),
+    ];
+    for (set, says) in cases {
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let e = edit_refused(&mut s, view, set.clone());
+        assert!(e.contains(says), "edit {}: {e}", set.to_string().chars().take(60).collect::<String>());
+        assert!(Arc::ptr_eq(&record, s.drawing("test").unwrap()) && s.undo.len() == steps, "edit");
+        let mut p = set.clone();
+        p["sheet"] = json!(sheet);
+        let e = create_refused(&mut s, BASE, p);
+        assert!(e.contains(says), "base {}: {e}", set.to_string().chars().take(60).collect::<String>());
+    }
+}
+
+/// With nothing to measure anyway, a choice isn't what leaves it empty: the view is made and gets
+/// its placeholder for the design's reason.
+#[test]
+fn a_choice_on_a_design_with_no_bodies_gets_the_designs_placeholder() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (_, view) = create(&mut s, BASE, json!({"sheet": sheet, "source": {"occurrences": [[]]}}));
+    assert_eq!(inspect_view(&mut s, view)["extents"]["provenance"], json!("no_bodies"));
+}
+
+/// Seeded choices on a view, edited one after another: each edit is refused exactly when the rule
+/// worked out the long way leaves nothing; otherwise the view is as wide as the copies left.
+#[test]
+fn seeded_choices_on_a_saved_view_agree_with_the_rule() {
+    let pick = |seed: u64, salt: u64, n: u64| ((seed ^ salt).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 33) % n;
+    let (mut s, view, [first, second]) = two_cubes_drawn();
+    for seed in 1..=120u64 {
+        let source: Option<Vec<Vec<u64>>> =
+            [None, Some(vec![vec![first]]), Some(vec![vec![second]]), Some(vec![vec![first], vec![second]]), Some(vec![vec![]])]
+                [pick(seed, 1, 5) as usize]
+                .clone();
+        let hide: Vec<Vec<u64>> = [vec![], vec![vec![first]], vec![vec![second]]][pick(seed, 2, 3) as usize].clone();
+        let shown = |copy: u64| source.as_ref().is_none_or(|paths| paths.contains(&vec![copy])) && !hide.contains(&vec![copy]);
+        let set = json!({"source": source.as_ref().map(|paths| json!({"occurrences": paths})), "hide": hide});
+        let want = match (shown(first), shown(second)) {
+            (true, true) => Some(40.0),
+            (false, false) => None,
+            _ => Some(10.0),
+        };
+        match want {
+            Some(want) => {
+                edit_view(&mut s, view, set);
+                let got = width(&mut s, view);
+                assert!((got - want).abs() < 1e-6, "seed {seed}: {got}");
+                let d = s.drawing("test").unwrap();
+                assert_eq!(&Drawing::from_json(&d.to_json().unwrap()).unwrap(), &**d, "seed {seed}");
+            }
+            None => assert!(edit_refused(&mut s, view, set).contains(NOTHING_CHOSEN), "seed {seed}"),
+        }
+    }
 }
 
 /// What a reply lists as outside its sheet's drawing space, and those views' ids.

@@ -89,7 +89,7 @@ pub(super) fn validate_targets(scene: &ProductScene, overrides: &[Override], com
         for x in [bounds.min.x, bounds.max.x] {
             for y in [bounds.min.y, bounds.max.y] {
                 for z in [bounds.min.z, bounds.max.z] {
-                    input.frame.uv(solidcraft_geom::Vec3::new(x, y, z)).map_err(|e| bad(command, e.to_string()))?;
+                    input.frame.uv(solidcore_record::Vec3::new(x, y, z)).map_err(|e| bad(command, e.to_string()))?;
                 }
             }
         }
@@ -156,7 +156,7 @@ mod tests {
                 color: [255; 3],
                 opacity: 1.,
                 surface: None,
-                transmission: Some(solidcraft_render::transmission::Transmission::new(solidcraft_geom::Vec3::ZERO, Some(1.)).unwrap()),
+                transmission: Some(solidcraft_render::transmission::Transmission::new(solidcore_record::Vec3::ZERO, Some(1.)).unwrap()),
                 faces: vec![],
             }],
         };

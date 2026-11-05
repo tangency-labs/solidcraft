@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5462"
+ ],
+ "what": "an inner wall of a rectangular opening through a block face-extruded 1 mm back into the material as a cut (what Press Pull runs on a flat face): 'boolean Cut: no result'",
+ "source": "analytic",
+ "method": "block 40x30x10 less the opening 30x20 = 6000; the wall at x = 5 moves to x = 4, removing 1 x 20 x 10: V = 5800, still 10 faces",
+ "body_count": 1,
+ "faces": 10,
+ "volume_mm3": 5800.0
+}

@@ -20,6 +20,7 @@ Each of `a` and `b` in `joint.create` is one of these:
 - `occurrence` is an occurrence name (`Wing:1`), an id, or a component name (its first occurrence). Without it, the body nearest the point is used, which can be the wrong part where two touch.
 - **Use the same form on both sides.** `point` picks its x axis from z. A `frame` with an `x` on one side and a `point` on the other turned a test panel 90 degrees when it was joined.
 - **`flip`:** `false` (the default) mates the origins as two faces meet: b's z points against a's. Two origins at one point with the same `z` then turn part b 180 degrees about the axis, and a joint that closes a loop reports a conflict ("off by 71 mm and 180 degrees" on SELENE). `true` lines b's z up with a's, so parts stay where they are. `joint.edit {"joint":..., "flip":true}` changes it afterwards.
+- **Moving a side:** `joint.edit` takes `a` or `b` in joint.create's form (a joint origin, or a name), so a joint moves its attachment without being deleted and recreated; its limits, values and expressions stay.
 
 ## Joint types
 

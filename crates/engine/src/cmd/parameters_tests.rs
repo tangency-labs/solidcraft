@@ -1,4 +1,5 @@
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 
 use crate::{EngineError, Session};
 
@@ -60,7 +61,9 @@ fn width_follows_an_expression() {
     run(&mut s, "parameters.change", json!({"name": "len", "expression": "5", "unit": "in"}));
     assert!(rel(volume(&mut s), 40.0 * 63.5 * 10.0) < 1e-9);
     let l = run(&mut s, "parameters.list", json!({}));
-    assert_eq!(row(&l, "len")["value"], 5.0, "{l}");
+    // `value` is mm in every reply; the own-unit number is `display_value` (#10747).
+    assert_eq!(row(&l, "len")["value"], 127.0, "{l}");
+    assert_eq!(row(&l, "len")["display_value"], 5.0, "{l}");
     assert_eq!(row(&l, "len")["unit"], "in");
     // A failing parameter fails the features using it, with its error.
     let e = err(&mut s, "parameters.change", json!({"name": "len", "expression": "5 deg"}));
@@ -326,6 +329,43 @@ fn csv_and_json_round_trip() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn csv_round_trips_comments_with_line_breaks() {
+    for comment in ["line one\nline two", "\r\nfirst, \"quoted\"\r\n\r\nlast\r\n", "one\rtwo"] {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "L", "expression": "30", "comment": comment}));
+        run(&mut s, "parameters.add", json!({"name": "W", "expression": "10"}));
+        let exported = run(&mut s, "parameters.export", json!({"format": "csv"}));
+
+        let mut fresh = Session::default();
+        let imported = run(&mut fresh, "parameters.import", json!({"text": exported["text"]}));
+        assert_eq!(imported["imported"], json!(["L", "W"]));
+        let list = run(&mut fresh, "parameters.list", json!({}));
+        assert_eq!(row(&list, "L")["comment"], comment);
+        assert_eq!(row(&list, "L")["value"], 30.0);
+        assert_eq!(row(&list, "W")["value"], 10.0);
+    }
+}
+
+#[test]
+fn csv_import_accepts_a_bom_before_the_header() {
+    let mut s = Session::default();
+    let csv = "\u{feff}\"NAME\",expression\r\n\r\nA,5";
+    let imported = run(&mut s, "parameters.import", json!({"text": csv}));
+    assert_eq!(imported["imported"], json!(["A"]));
+    assert_eq!(row(&run(&mut s, "parameters.list", json!({})), "A")["value"], 5.0);
+}
+
+#[test]
+fn csv_import_with_an_unclosed_quote_leaves_parameters_alone() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "10"}));
+    let before = s.doc.to_json();
+    let csv = "name,expression,comment\nL,30,updated\nW,5,\"unfinished\n";
+    assert!(s.execute("parameters.import", &json!({"text": csv})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+}
+
 /// #8960: the text marker accepts ASCII case variants without changing numeric units.
 #[test]
 fn text_parameter_imports_accept_mixed_case_units() {
@@ -352,7 +392,8 @@ fn text_parameter_imports_accept_mixed_case_units() {
                 assert_eq!(label["comment"], "quoted label");
                 assert!(label["value"].is_null());
                 assert_eq!(row(&list, "width")["unit"], "in");
-                assert_eq!(row(&list, "width")["value"], 1.0);
+                assert_eq!(row(&list, "width")["value"], 25.4);
+                assert_eq!(row(&list, "width")["display_value"], 1.0);
                 assert_eq!(s.doc.param_values().0["width"].v, 25.4);
             }
             // Export still uses the canonical marker and round-trips the unquoted text.
@@ -628,7 +669,7 @@ fn a_failed_auto_constrain_keeps_the_stored_sketch_consistent() {
 }
 
 /// The stored sketch's points, by id.
-fn stored_points(s: &Session, feature: u64) -> Vec<solidcraft_geom::Vec2> {
+fn stored_points(s: &Session, feature: u64) -> Vec<solidcore_record::Vec2> {
     s.doc.sketch(feature).unwrap().points.iter().map(|p| p.pos).collect()
 }
 
@@ -659,7 +700,7 @@ fn an_unsolvable_value_edit_is_refused_and_changes_nothing() {
 fn value_edits_continue_from_the_last_solved_state() {
     // A → B → C, each a small edit solved in one jump; C is solved from B (the stored state),
     // and setting both values back reproduces A (the linkage is fully constrained).
-    let close = |a: &[solidcraft_geom::Vec2], b: &[solidcraft_geom::Vec2], tol: f64| a.iter().zip(b).all(|(p, q)| p.dist(*q) < tol);
+    let close = |a: &[solidcore_record::Vec2], b: &[solidcore_record::Vec2], tol: f64| a.iter().zip(b).all(|(p, q)| p.dist(*q) < tol);
     let (mut s, feature, params) = linkage_session();
     run(&mut s, "sketch.finish", json!({}));
     let a = stored_points(&s, feature);
@@ -896,8 +937,8 @@ fn a_parameter_added_without_a_unit_takes_the_design_unit() {
         let r = run(s, "parameters.add", p);
         (r["unit"].as_str().unwrap_or("?").to_string(), r["value"].as_f64().unwrap_or(f64::NAN), r["display_value"].as_f64().unwrap_or(f64::NAN))
     };
-    let close = |got: (String, f64, f64), unit: &str, mm: f64, shown: f64| {
-        assert!(got.0 == unit && rel(got.1, mm) < 1e-9 && rel(got.2, shown) < 1e-9, "{got:?}, expected {unit} {mm} mm ({shown})");
+    let close = |got: (String, f64, f64), unit: &str, val: f64, shown: f64| {
+        assert!(got.0 == unit && rel(got.1, val) < 1e-9 && rel(got.2, shown) < 1e-9, "{got:?}, expected {unit} {val} ({shown})");
     };
     // A millimetre design is as it was.
     let mut s = Session::default();
@@ -914,8 +955,8 @@ fn a_parameter_added_without_a_unit_takes_the_design_unit() {
     // One that refers to another parameter: its bare number is an inch too.
     close(added(&mut s, json!({"name": "more", "expression": "v + 1"})), "in", 533.4, 21.0);
     close(added(&mut s, json!({"name": "half", "expression": "v / 2"})), "in", 254.0, 10.0);
-    // An angle stays in degrees, a unit-less count stays unit-less.
-    close(added(&mut s, json!({"name": "turn", "expression": "30 deg"})), "deg", 30f64.to_radians(), 30.0);
+    // An angle reports degrees like every other reply, a unit-less count stays unit-less.
+    close(added(&mut s, json!({"name": "turn", "expression": "30 deg"})), "deg", 30.0, 30.0);
     close(added(&mut s, json!({"name": "n", "expression": "4", "unit": ""})), "", 4.0, 4.0);
     close(added(&mut s, json!({"name": "twice", "expression": "n * 2"})), "", 8.0, 8.0);
     // parameters.change and parameters.import make a new parameter the same way.
@@ -1107,4 +1148,102 @@ fn a_feature_on_a_failed_sketch_names_the_sketch() {
     let r = run(&mut s, "parameters.change", json!({"name": width, "expression": "40"}));
     assert_eq!(r["errors"], json!([]), "{r}");
     assert!(rel(volume(&mut s), 40.0 * 20.0 * 5.0 + 500.0) < 1e-9);
+}
+
+/// A finished sketch with one line (0,0)-(30,0) whose length is dimensioned to parameter `L`.
+fn line_dimensioned_by_a_parameter() -> (Session, u64) {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "30"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "L"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let feature = s.doc.find_feature("Sketch1").map(|f| f.id).unwrap_or_default();
+    (s, feature)
+}
+
+/// #9729: `sketch.dimension` refuses 0 ("that would shrink l1 to a point") but a value edit
+/// let it through: the line collapsed to a point and every later value counted as a conflict,
+/// so only Undo recovered — and after a save and reopen there is no Undo. A value edit now
+/// runs the same shrink/fling checks `settle` runs, so the zero is refused where it happens.
+#[test]
+fn a_parameter_that_shrinks_a_dimensioned_line_to_a_point_is_refused() {
+    let (mut s, feature) = line_dimensioned_by_a_parameter();
+    let e = err(&mut s, "parameters.change", json!({"name": "L", "expression": "0"}));
+    assert!(e.contains("shrink l1 to a point") && e.contains("the values were not changed"), "{e}");
+    // The line is where it was and the sketch still solves.
+    assert!((far_x(&s, feature) - 30.0).abs() < 1e-6);
+    assert!(s.model.state().sketch(feature).unwrap().report.keeps_orientation());
+    // Other values still work, in both directions: the sketch was never stored collapsed.
+    run(&mut s, "parameters.change", json!({"name": "L", "expression": "20"}));
+    assert!((far_x(&s, feature) - 20.0).abs() < 1e-6);
+    run(&mut s, "parameters.change", json!({"name": "L", "expression": "30"}));
+    assert!((far_x(&s, feature) - 30.0).abs() < 1e-6);
+}
+
+/// The largest x among the stored sketch's points: the line's far end.
+fn far_x(s: &Session, feature: u64) -> f64 {
+    stored_points(s, feature).iter().map(|p| p.x).fold(f64::MIN, f64::max)
+}
+
+/// The same through a configuration row: activating a row whose value collapses the line is
+/// refused, and the Default row can still be activated afterwards.
+#[test]
+fn a_configuration_row_that_shrinks_a_dimensioned_line_to_a_point_is_refused() {
+    let (mut s, feature) = line_dimensioned_by_a_parameter();
+    run(&mut s, "config.configure", json!({"params": ["L"]}));
+    run(&mut s, "config.row", json!({"name": "Zero", "values": {"param:L": "0"}}));
+    let e = err(&mut s, "config.activate", json!({"row": "Zero"}));
+    assert!(e.contains("shrink l1 to a point"), "{e}");
+    // The Default row still activates and the line is untouched.
+    run(&mut s, "config.activate", json!({"row": "Default"}));
+    assert!((far_x(&s, feature) - 30.0).abs() < 1e-6);
+}
+
+/// #10747: `value` means millimetres (and degrees) in every reply — add, change and list —
+/// with the parameter's own unit in `display_value`. Reported numbers carry no float noise;
+/// stored values keep full precision.
+#[test]
+fn value_means_the_same_unit_in_every_reply() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    let a = run(&mut s, "parameters.add", json!({"name": "L", "expression": "2"}));
+    assert_eq!((a["value"].as_f64(), a["display_value"].as_f64()), (Some(50.8), Some(2.0)), "{a}");
+    // The change reply is rounded too: 3 in is 76.2, not 76.19999999999999.
+    let c = run(&mut s, "parameters.change", json!({"name": "L", "expression": "3"}));
+    assert_eq!((c["value"].as_f64(), c["display_value"].as_f64()), (Some(76.2), Some(3.0)), "{c}");
+    run(&mut s, "parameters.add", json!({"name": "d1", "expression": "L"}));
+    run(&mut s, "parameters.add", json!({"name": "d2", "expression": "1 in"}));
+    let l = run(&mut s, "parameters.list", json!({}));
+    // Every row's `value` is mm, whatever the parameter's own unit (#10747).
+    for (name, mm) in [("L", 76.2), ("d1", 76.2), ("d2", 25.4)] {
+        assert_eq!(row(&l, name)["value"], mm, "{name}: {l}");
+    }
+    assert_eq!(row(&l, "L")["display_value"], 3.0, "{l}");
+    assert_eq!(row(&l, "d2")["display_value"], 1.0, "{l}");
+    // An angle reports degrees like every other reply, without the noise.
+    let a = run(&mut s, "parameters.add", json!({"name": "ang", "expression": "30 deg"}));
+    assert_eq!((a["value"].as_f64(), a["display_value"].as_f64()), (Some(30.0), Some(30.0)), "{a}");
+    // Only what is reported is rounded: the stored value keeps full precision — the raw
+    // own-unit conversion still says 29.999999999999996.
+    let (vals, _) = s.doc.param_values();
+    assert_eq!(s.doc.param_display_value(&vals, "ang"), Some(29.999999999999996), "the stored angle keeps its bits");
+}
+
+/// #10747: exports carry the numbers a person would read, not float noise. The `value`
+/// column keeps the number in the parameter's own unit, as it always did.
+#[test]
+fn exports_round_reported_numbers() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "ang", "expression": "30 deg"}));
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "1.2 in"}));
+    run(&mut s, "parameters.add", json!({"name": "s", "expression": "0.1 + 0.2"}));
+    let csv = run(&mut s, "parameters.export", json!({"format": "csv"}))["text"].as_str().unwrap_or_default().to_string();
+    assert!(csv.contains("ang,deg,30 deg,30,,false"), "{csv}");
+    assert!(csv.contains("w,mm,1.2 in,30.48,,false"), "{csv}");
+    assert!(csv.contains("s,mm,0.1 + 0.2,0.3,,false"), "{csv}");
+    let json_text = run(&mut s, "parameters.export", json!({"format": "json"}))["text"].as_str().unwrap_or_default().to_string();
+    let rows: Vec<Value> = serde_json::from_str(&json_text).unwrap_or_default();
+    let vals: Vec<f64> = rows.iter().filter_map(|r| r["value"].as_f64()).collect();
+    assert_eq!(vals, vec![30.0, 30.48, 0.3], "{json_text}");
 }

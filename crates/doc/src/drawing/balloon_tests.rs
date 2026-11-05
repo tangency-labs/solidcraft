@@ -1,12 +1,14 @@
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use serde_json::{Value, json};
 use solidcraft_geom::drawing_sheet::{self, Orientation, PaperSize};
 use solidcraft_geom::drawing_view::NamedView;
 
 use super::*;
-use crate::drawing::Source;
+use crate::drawing::table::{Kind, SheetTable};
 use crate::drawing::view::{View, ViewKind, ViewPlace};
+use crate::drawing::{OnSheet, Sheet, Source};
 use crate::drawing_view::{ViewDirection, ViewOverrides};
 use crate::format::DRAWING;
 use crate::ids::IdSource;
@@ -34,12 +36,12 @@ fn ballooned() -> (Drawing, [u64; 2]) {
         kind,
         place: ViewPlace::At([150.0, 150.0]),
         settings: ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() },
-        reference_margin_mm: 0.0,
+        reference_shown_percent: 0.0,
     })]);
     let mut added = [0; 2];
     for ((path, at), id) in [(vec![3], [40.0, 25.0]), (vec![3, 7], [-35.5, 60.0])].into_iter().zip(&mut added) {
         *id = d.allocate_id(&mut id_source).unwrap();
-        d.add_balloons([Arc::new(Balloon { id: *id, view, edge: edge("F1:side|F2:head", path), at })]);
+        d.balloons.add([Arc::new(Balloon { id: *id, view, edge: edge("F1:side|F2:head", path), at, parts_list: None })]);
     }
     d.validate().unwrap();
     (d, added)
@@ -80,7 +82,7 @@ fn balloons_save_what_they_point_at_and_read_back_as_saved() {
         })
     );
     assert_eq!(balloon(&mut v, &placed)["edge"]["path"], json!([3]));
-    assert_eq!(d.balloon(added[1]).unwrap().occurrence(), [3, 7], "the part it numbers is its edge's path");
+    assert_eq!(d.balloons.by_id(added[1]).unwrap().occurrence(), [3, 7], "the part it numbers is its edge's path");
     let listed: Vec<u64> = v["balloons"].as_array().unwrap().iter().map(|x| ids::decode(x["id"].as_str().unwrap()).unwrap()).collect();
     let mut by_id = added.to_vec();
     by_id.sort_unstable();
@@ -191,4 +193,72 @@ fn a_sheets_balloons_go_with_it() {
     assert_eq!(d.remove_sheet(sheet), on);
     d.validate().unwrap();
     assert!(d.balloons.is_empty() && d.views.is_empty());
+}
+
+/// A parts list on `d`'s sheet `sheet`, with a fresh id.
+fn add_list(d: &mut Drawing, sheet: u64, id: u64) {
+    use crate::drawing::SheetComponent;
+    use crate::drawing::table::{MassFormat, PartsList};
+    let of = SheetComponent { source: d.sources[0].id, component: 0 };
+    let list =
+        PartsList { of, view: Default::default(), group: Default::default(), fold: false, purchased_contents: false, mass: MassFormat::default() };
+    let kind = Kind::PartsList(list);
+    d.tables.add([Arc::new(SheetTable { id, sheet, table: kind.default_table(), place: kind.default_place(), kind })]);
+}
+
+/// With no link a balloon reads its sheet's only list, else the drawing's only one, else none, with
+/// the choices listed; a revision table is no choice. Its link wins. Saved only when it names one.
+#[test]
+fn a_balloon_reads_the_list_it_names_else_the_only_one() {
+    let (mut d, [id, _]) = ballooned();
+    let sheet = d.sheets[0].id;
+    let read = |d: &Drawing| d.parts_list_for(d.balloons.by_id(id).unwrap()).map(|(list, _)| list);
+    assert_eq!(read(&d), Err(vec![]));
+    let saved: Value = serde_json::from_str(&d.to_json().unwrap()).unwrap();
+    assert_eq!(saved["balloons"][0].get("parts_list"), None);
+
+    let other = 1 << 40;
+    let a4 = drawing_sheet::Sheet::standard(PaperSize::A4, Orientation::Landscape);
+    d.sheets.push(Arc::new(Sheet { id: other, name: "Other".into(), sheet: a4, ..(*d.sheets[0]).clone() }));
+    add_list(&mut d, other, 1 << 41);
+    assert_eq!(read(&d), Ok(1 << 41), "the drawing's only one");
+    add_list(&mut d, sheet, 1 << 42);
+    assert_eq!(read(&d), Ok(1 << 42), "the sheet's only one comes first");
+    add_list(&mut d, sheet, 1 << 43);
+    assert_eq!(read(&d), Err(vec![1 << 41, 1 << 42, 1 << 43]), "the choices");
+    assert!(d.balloons_by_list().is_empty(), "with none to go by, a balloon reads no list");
+    let kind = Kind::Revision;
+    d.tables.add([Arc::new(SheetTable { id: 1 << 44, sheet, table: kind.default_table(), place: kind.default_place(), kind })]);
+    assert_eq!(read(&d).unwrap_err().len(), 3, "a revision table is no choice");
+
+    let at = d.balloons.index_of(id).unwrap();
+    Arc::make_mut(&mut d.balloons[at]).parts_list = Some(1 << 41);
+    assert_eq!(read(&d), Ok(1 << 41), "its link wins");
+    let by_list = d.balloons_by_list();
+    assert_eq!((by_list.len(), by_list[&(1 << 41)].iter().map(|b| b.id).collect::<Vec<_>>()), (1, vec![id]), "the other reads none");
+    d.validate().unwrap();
+    assert_eq!(Drawing::from_json(&d.to_json().unwrap()).unwrap(), d);
+
+    // The list goes, by its own delete or its sheet's: the balloon stays and reads what it can.
+    d.remove_objects(&OnSheet { tables: vec![1 << 41], ..Default::default() });
+    assert_eq!(d.balloons.by_id(id).unwrap().parts_list, None);
+    d.validate().unwrap();
+    assert_eq!(read(&d).unwrap_err(), vec![1 << 42, 1 << 43]);
+}
+
+/// A link names one of the drawing's parts lists.
+#[test]
+fn a_balloons_link_is_to_a_parts_list() {
+    let (mut d, [id, _]) = ballooned();
+    let sheet = d.sheets[0].id;
+    let kind = Kind::Revision;
+    d.tables.add([Arc::new(SheetTable { id: 1 << 44, sheet, table: kind.default_table(), place: kind.default_place(), kind })]);
+    let at = d.balloons.index_of(id).unwrap();
+    for bad in [1 << 44, 99] {
+        Arc::make_mut(&mut d.balloons[at]).parts_list = Some(bad);
+        assert!(d.validate().unwrap_err().to_string().contains("parts lists"), "{bad}");
+    }
+    let mut v: Value = serde_json::from_str(&Drawing { balloons: Default::default(), ..d.clone() }.to_json().unwrap()).unwrap();
+    v["balloons"] = json!([{"id": "x", "view": "x", "edge": {}, "at": [0.0, 0.0], "parts_list": 7}]);
+    assert!(Drawing::from_value(v).is_err(), "not an id");
 }

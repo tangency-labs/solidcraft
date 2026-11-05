@@ -6,8 +6,9 @@
 use super::curve::C3;
 use super::surface::{Analytic, S3};
 use super::trim::Trim;
-use crate::Vec3;
+use crate::prelude::*;
 use crate::section::CurveAccuracy;
+use solidcore_record::Vec3;
 
 const TAU: f64 = std::f64::consts::TAU;
 
@@ -32,8 +33,9 @@ fn extent(parts: &[(&S3, &Trim)], p: Vec3, a: Vec3) -> (f64, f64) {
 
 /// Silhouettes of a set of faces on one surface (`parts`: each face's chart and trim, all
 /// recognised as `an`): traced once and kept where they lie on any of the faces, so a
-/// silhouette along a seam between them is one curve.
-pub(crate) fn silhouettes(parts: &[(&S3, &Trim)], an: Analytic, d: Vec3, out: &mut Vec<Sil>) {
+/// silhouette along a seam between them is one curve. `stop` is asked before each face a
+/// curve is trimmed to; once it answers true the work ends and `out` is incomplete.
+pub(crate) fn silhouettes(parts: &[(&S3, &Trim)], an: Analytic, d: Vec3, out: &mut Vec<Sil>, stop: &dyn Fn() -> bool) {
     let Some(&(s, trim)) = parts.first() else { return };
     let mut push = |curve: C3, acc: CurveAccuracy| {
         // A traced curve's chords stand up to their deviation off the surface.
@@ -41,7 +43,13 @@ pub(crate) fn silhouettes(parts: &[(&S3, &Trim)], an: Analytic, d: Vec3, out: &m
             CurveAccuracy::Sampled { max_sample_deviation_mm: dev } => dev,
             _ => 0.,
         };
-        let mut ranges: Vec<[f64; 2]> = parts.iter().flat_map(|(s, trim)| inside_ranges(&curve, s, trim, slack)).collect();
+        let mut ranges: Vec<[f64; 2]> = Vec::new();
+        for (s, trim) in parts {
+            if stop() {
+                return;
+            }
+            ranges.extend(inside_ranges(&curve, s, trim, slack));
+        }
         ranges.sort_by(|a, b| a[0].total_cmp(&b[0]));
         let [t0, t1] = curve.domain();
         let mut merged: Vec<[f64; 2]> = Vec::with_capacity(ranges.len());

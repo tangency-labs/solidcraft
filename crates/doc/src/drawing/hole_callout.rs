@@ -42,7 +42,9 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
+use solidcraft_kernel::PointClass;
 
 use crate::expr::{Kind, Value};
 use crate::{DocError, Document, Feature, FeatureKind, HoleKind, Mat, Model, ModelState, Result, display_units};
@@ -436,7 +438,7 @@ struct Bore {
 /// `st`.
 fn in_sheet(st: &ModelState, at: Vec3, dir: Vec3, r: f64) -> bool {
     let inside = at + dir * (r.min(1.0) * 1e-3);
-    st.sheets.iter().filter_map(|sh| st.body(&sh.body)).any(|b| !b.body.is_mesh() && b.body.contains(inside))
+    st.sheets.iter().filter_map(|sh| st.body(&sh.body)).any(|b| !b.body.is_mesh() && matches!(b.body.classify_point(inside), Ok(PointClass::Inside)))
 }
 
 /// Whether a body of `st` has a face of a bore of feature `id` that lies on none of the axes of

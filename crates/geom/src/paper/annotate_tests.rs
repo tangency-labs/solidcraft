@@ -20,14 +20,16 @@ fn piece(x0: f64, y0: f64, x1: f64, y1: f64) -> [i64; 4] {
 /// A stroke's pieces, closed or not, and width; a fill's outline with no width.
 fn drawn(item: &Item) -> (Vec<[i64; 4]>, bool, Option<f64>) {
     match item {
-        Item::Stroke { path, closed, width_mm } => (ends(path), *closed, Some(*width_mm)),
+        Item::Stroke { path, closed, width_mm, .. } => (ends(path), *closed, Some(*width_mm)),
         Item::Fill { region } => (ends(&region.outer.segs), true, None),
+        Item::Text(_) => panic!("an annotation draws no text"),
+        Item::Picture(picture) => panic!("an annotation draws no picture: {picture:?}"),
     }
 }
 
 /// The items on an A3 sheet pass the paper scene's own checks.
 fn valid(items: Vec<Item>) {
-    Scene { size_mm: p(420.0, 297.0), groups: vec![Group { object: 1, kind: ObjectKind::DrawingBorder, items }] }.validate().unwrap();
+    Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::DrawingBorder, items }]).validate().unwrap();
 }
 
 fn arrow(shape: ArrowShape, length_mm: f64, angle: f64) -> Terminator {

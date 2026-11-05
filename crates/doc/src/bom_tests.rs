@@ -389,7 +389,7 @@ fn row_of_finds_the_row_a_placement_is_counted_in() {
     let path = |names: &[&str]| -> Vec<u64> { names.iter().map(|n| at[*n]).collect() };
     let state = ModelState::default();
     let mut tree = Tree::new(&doc, &state);
-    let name = |r: std::result::Result<&Row, Unlisted>| r.map(|r| r.names.join("; "));
+    let name = |r: std::result::Result<(Vec<u32>, &Row), Unlisted>| r.map(|(_, r)| r.names.join("; "));
     let flat = list_with(&mut tree, &Request::default(), true).unwrap();
     // Made for its rows alone, a list keeps no members.
     assert!(list(&mut tree, &Request::default()).unwrap().rows.iter().all(|r| r.members.is_empty()));
@@ -435,8 +435,8 @@ fn row_of_finds_the_row_a_placement_is_counted_in() {
     assert!(top.rows.iter().all(|r| r.stands_for == Holds::All));
 
     let kit = list_with(&mut tree, &folded(View::PartsOnly), true).unwrap();
-    let sub = kit.row_of(&tree, &path(&["Sub"])).unwrap();
-    let washer = kit.row_of(&tree, &path(&["Sub", "Washer"])).unwrap();
+    let (_, sub) = kit.row_of(&tree, &path(&["Sub"])).unwrap();
+    let (_, washer) = kit.row_of(&tree, &path(&["Sub", "Washer"])).unwrap();
     assert_eq!((sub.names.join(""), sub.stands_for, washer.names.join("")), ("Sub".into(), Holds::All, "Washer".into()));
     assert_eq!(washer.key.parents, [sub.key.member]);
 }
@@ -469,7 +469,7 @@ fn every_placement_is_in_one_row_or_none() {
                 assert_eq!(seen.len() as u64, bom.total.occurrences, "a placement in two rows: {request:?}");
                 for (_, r) in &deep {
                     for m in &r.members {
-                        assert_eq!(bom.row_of(&tree, m).map(|found| &found.key), Ok(&r.key), "{request:?} {m:?}");
+                        assert_eq!(bom.row_of(&tree, m).map(|(_, found)| &found.key), Ok(&r.key), "{request:?} {m:?}");
                     }
                 }
             }
@@ -890,4 +890,33 @@ fn a_quantity_uses_its_parameters_as_any_expression_does() {
     assert_eq!(doc.rename_param("span", "width").unwrap(), 1);
     assert_eq!(doc.components[0].metadata.bom_quantity(), Some("2 * width"));
     assert_eq!(amount(&doc, "2 * width").unwrap(), Amount::Length(200.0));
+}
+
+/// A balloon's item reads the row its part is counted in, by a path from the top of the design: in
+/// all levels with the rows it is under, in a component's list only below that component, and the
+/// reasons there is none stay apart.
+#[test]
+fn item_of_reads_a_balloons_row() {
+    let (doc, at) = mixed();
+    let path = |names: &[&str]| -> Vec<u64> { names.iter().map(|n| at[*n]).collect() };
+    let state = ModelState::default();
+    let mut tree = Tree::new(&doc, &state);
+    let all = list_with(&mut tree, &Request { view: View::AllLevels, ..Request::default() }, true).unwrap();
+    let (washer, _) = all.row_of(&tree, &path(&["Sub", "Washer"])).unwrap();
+    assert_eq!(washer.len(), 2, "under its subassembly");
+    assert_eq!(all.item_of(&tree, &path(&["Sub", "Washer"])), Ok(item_text(&washer)));
+    assert!(all.item_of(&tree, &path(&["Sub", "Washer"])).unwrap().contains('.'));
+
+    let sub = doc.find_component("Sub").unwrap();
+    let of_sub = list_with(&mut tree, &Request { source: sub, ..Request::default() }, true).unwrap();
+    assert_eq!(of_sub.item_of(&tree, &path(&["Sub", "Washer"])), Ok("1".to_string()), "cut to start below Sub");
+    assert_eq!(of_sub.item_of(&tree, &path(&["Sub"])), Err(Unlisted::NoRow), "the assembly listed has no row");
+    assert_eq!(of_sub.item_of(&tree, &path(&["Bolt"])), Err(Unlisted::NotFound), "not through Sub");
+    assert_eq!(of_sub.item_of(&tree, &[]), Err(Unlisted::NotFound));
+
+    assert_eq!(all.item_of(&tree, &path(&["Fixture", "Pin"])), Err(Unlisted::Reference));
+    assert_eq!(all.item_of(&tree, &[999]), Err(Unlisted::NotFound));
+    assert_eq!(all.item_of(&tree, &vec![at["Bolt"]; 65]), Err(Unlisted::NotFound));
+    assert!(of_sub.item_of(&tree, &vec![at["Sub"]; 65]).is_err());
+    assert_eq!(all.item_of(&tree, &[]), Err(Unlisted::NoRow));
 }

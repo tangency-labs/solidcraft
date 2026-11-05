@@ -173,6 +173,12 @@ and the [foundation ledger](docs/drawing-foundations.md) track the bounded imple
 packages. The first geometry increment defines validated section records in a plane-local
 frame; the ledger separates that contract from section producers and the Drawing workspace.
 
+Drawing UI scaffold: the native workspace now supplies the shared four-tab ribbon,
+source Browser, compact dockable sheet strip and resizable Sheet Settings/options
+panel. Planned tools remain unavailable; only existing source services execute.
+Drawing files and paper rendering are still deferred. See the
+[UI implementation roadmap](docs/drawing-workspace-ui.md).
+
 Desktop view DXF export runs in the file-operation worker with five-stage progress and
 cooperative cancellation. Curve tolerance (0.0001–1 mm, default 0.01 mm) is remembered alongside
 the hidden-edge setting. Cancelled exports preserve the model and the previous destination;
@@ -662,7 +668,9 @@ completed drawings publish atomically. The browser still exports synchronously.
   pieces survive unfold/refold as one logical sheet group, including split flanged sheets.
   Cut-outs made in the flat pattern cross bends at any angle or curved: their edges fold to
   helices and curves on the bend, their walls square to the sheet. Free-form bases use bounded
-  sampling.
+  sampling. A fold crosses the sheet's own outer edges the same way, slanted or on any curve,
+  with the outline exact in the flat pattern and its DXF, and flanges and other folds still go
+  on the panels.
   Parallel prismatic partial-depth cuts retain pocket side and depth through transfer and
   unfold/refold, with separate pocket contours in preview and DXF. Planar Intersect preserves
   exact holes and retained islands, including the union of multiple selected profiles, and

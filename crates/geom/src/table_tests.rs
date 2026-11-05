@@ -1,3 +1,4 @@
+use crate::prelude::*;
 use serde_json::json;
 
 use super::*;
@@ -13,7 +14,7 @@ fn field(key: &str) -> Content {
 }
 
 fn column(name: &str, heading: &str, align: HAlign) -> Column {
-    Column { name: name.into(), heading: heading.into(), content: field(name), width_mm: None, align }
+    Column { name: name.into(), heading: heading.into(), content: field(name), width_mm: None, align, printed: true }
 }
 
 /// Item, part number and quantity: 2.5 mm text, a 0.7 mm outline and 0.35 mm lines between cells.
@@ -162,7 +163,7 @@ fn overrides_show_their_text_and_keep_the_value() {
     let pin = &layout.rows[1].cells[2];
     assert_eq!((texts(pin), pin.replaced.as_deref()), (vec![], Some("2")), "a blank cell, still tracked");
     let frame = &layout.rows[2].cells[2];
-    assert_eq!((texts(frame), frame.replaced.as_deref()), (vec![MISSING], None), "a field the row doesn't have");
+    assert_eq!((texts(frame), frame.replaced.as_deref()), (vec![], None), "a field the row doesn't have shows nothing");
     assert_eq!(layout.rows.len(), 3, "an override of a row that has gone is kept and shows nowhere");
     // The fitted part number column is as wide as the override: "Part number" is still wider.
     assert!((layout.rows[0].cells[1].rect.size().x - WIDTHS[1]).abs() < 1e-9);
@@ -223,6 +224,58 @@ fn a_table_round_trips_through_json_and_unknown_fields_are_refused() {
         assert!(serde_json::from_value::<Table>(bad).is_err(), "{path}");
     }
     assert!(serde_json::from_value::<Heading>(json!("left")).is_err());
+}
+
+/// A column that isn't printed has no cells, lines or width on paper, and the others keep the places
+/// they have without it; its cells are still worked out, so a filter can read them. Saved only when
+/// it isn't printed.
+#[test]
+fn a_column_that_isnt_printed_is_left_off_paper() {
+    let mut with = table();
+    let note = Column { printed: false, ..column("note", "Note", HAlign::Left) };
+    with.columns.insert(1, note.clone());
+    with.columns.push(Column { printed: false, ..column(BALLOONED, "Ballooned", HAlign::Centre) });
+    let rows: Vec<Row> = rows()
+        .into_iter()
+        .map(|mut r| {
+            r.fields.insert("note".into(), "a long note no column of paper has room for".into());
+            r.fields.insert(BALLOONED.into(), "2".into());
+            r
+        })
+        .collect();
+    let corner = Vec2::new(400.0, 280.0);
+    let (laid, alone) = (with.layout(&rows, corner, &fixed).unwrap(), table().layout(&rows, corner, &fixed).unwrap());
+    assert_eq!(laid, alone);
+    assert_eq!(laid.paper(9, ObjectKind::PartsList), alone.paper(9, ObjectKind::PartsList));
+
+    with.filter.text.push(TextFilter { column: "note".into(), contains: "NOTE".into() });
+    with.overrides.push(Override { row: "pin".into(), column: "note".into(), text: "kept".into() });
+    let filtered = with.layout(&rows, corner, &fixed).unwrap();
+    assert_eq!(filtered.rows.iter().map(|r| r.key.as_deref().unwrap()).collect::<Vec<_>>(), ["plate", "frame"], "filtered on its text");
+
+    let json = serde_json::to_value(&with).unwrap();
+    assert_eq!((json["columns"][0].get("printed"), &json["columns"][1]["printed"]), (None, &json!(false)));
+    assert_eq!(serde_json::from_value::<Table>(json).unwrap(), with);
+}
+
+/// The ballooned field is for the editor: a printed column that reads it is refused, whatever else it
+/// shows. A table prints at least one column.
+#[test]
+fn the_ballooned_field_is_never_printed() {
+    let reads = |content: Vec<Part>, printed: bool| {
+        let mut t = table();
+        t.columns.push(Column { content: Content(content), printed, ..column("count", "Count", HAlign::Centre) });
+        t.validate()
+    };
+    let ballooned = || Part::Field { source: Source::Row, key: BALLOONED.into(), format: Format::default() };
+    let refusal = Err(Invalid("the ballooned column is for the editor only: it isn't printed"));
+    assert_eq!(reads(vec![ballooned()], true), refusal);
+    assert_eq!(reads(vec![Part::Text("x ".into()), ballooned()], true), refusal);
+    assert_eq!(reads(vec![ballooned()], false), Ok(()));
+    assert_eq!(reads(vec![Part::Field { source: Source::Row, key: "balloons".into(), format: Format::default() }], true), Ok(()));
+    let mut none = table();
+    none.columns.iter_mut().for_each(|c| c.printed = false);
+    assert_eq!(none.validate(), Err(Invalid("a table prints at least one column")));
 }
 
 #[test]
@@ -362,4 +415,99 @@ fn hostile_rows_and_measures_are_refused() {
     // No rows: the heading alone, on the outline both ways.
     let alone = t.layout(&[], corner, &fixed).unwrap();
     assert!(alone.rows.is_empty() && near(alone.outline, alone.heading.rect));
+}
+
+/// A paper group's strokes as each piece's ends in micrometres, closed or not, and width: what a
+/// hand-worked list is compared with.
+fn strokes(group: &Group) -> Vec<(Vec<[i64; 4]>, bool, f64)> {
+    let um = |v: f64| (v * 1000.0).round() as i64;
+    group
+        .items
+        .iter()
+        .map(|item| match item {
+            Item::Stroke { path, closed, width_mm, pattern: None } => {
+                (path.iter().map(|s| [um(s.start().x), um(s.start().y), um(s.end().x), um(s.end().y)]).collect(), *closed, *width_mm)
+            }
+            other => panic!("{other:?}"),
+        })
+        .collect()
+}
+
+/// One straight piece from (x0, y0) to (x1, y1) mm, open, `width` wide.
+fn piece(x0: f64, y0: f64, x1: f64, y1: f64, width: f64) -> (Vec<[i64; 4]>, bool, f64) {
+    let um = |v: f64| (v * 1000.0).round() as i64;
+    (vec![[um(x0), um(y0), um(x1), um(y1)]], false, width)
+}
+
+/// An outline round (x0, y0)..(x1, y1) mm, anticlockwise from its lower-left corner, 0.7 wide.
+fn outline(x0: f64, y0: f64, x1: f64, y1: f64) -> (Vec<[i64; 4]>, bool, f64) {
+    let um = |v: f64| (v * 1000.0).round() as i64;
+    let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)];
+    (corners.windows(2).map(|w| [um(w[0].0), um(w[0].1), um(w[1].0), um(w[1].1)]).collect(), true, 0.7)
+}
+
+/// By hand, from the layout above: the outline round 365.6..400 by 252..280; a 0.35 mm line across
+/// at the lower edge of the heading, the plate and the pin (273, 266, 259), not the frame's, which
+/// is the outline's; and one down at each column's right edge but the last (365.6 + 8.525, then
+/// + 18.85). Each end is the layout's own corner, the same number exactly.
+#[test]
+fn a_tables_lines_on_paper_are_its_outline_and_each_inner_edge_once() {
+    let layout = table().layout(&rows(), Vec2::new(400.0, 280.0), &fixed).unwrap();
+    let group = layout.paper(9, ObjectKind::PartsList);
+    assert_eq!((group.object, group.kind), (9, ObjectKind::PartsList));
+    let across = |y| piece(365.6, y, 400.0, y, 0.35);
+    let down = |x| piece(x, 252.0, x, 280.0, 0.35);
+    assert_eq!(strokes(&group), [outline(365.6, 252.0, 400.0, 280.0), across(273.0), across(266.0), across(259.0), down(374.125), down(392.975)]);
+    let Item::Stroke { path, .. } = &group.items[1] else { panic!("a stroke") };
+    assert_eq!(
+        (path[0].start(), path[0].end()),
+        (Vec2::new(layout.outline.min.x, layout.heading.rect.min.y), Vec2::new(layout.outline.max.x, layout.heading.rect.min.y))
+    );
+    let Item::Stroke { path, .. } = &group.items[4] else { panic!("a stroke") };
+    assert_eq!(path[0].start().x, layout.rows[2].cells[0].rect.max.x);
+    sheet(vec![group]).validate().unwrap();
+}
+
+/// With the heading at the bottom the rows run up from it: the lines across are at the lower edge
+/// of the frame, the pin and the plate (31, 24, 17), the heading's being the outline's.
+#[test]
+fn with_the_heading_at_the_bottom_the_lines_are_the_same_rule() {
+    let table = Table { heading: Heading::Bottom, ..table() };
+    let group = table.layout(&rows(), Vec2::new(400.0, 10.0), &fixed).unwrap().paper(3, ObjectKind::RevisionTable);
+    assert_eq!((group.object, group.kind), (3, ObjectKind::RevisionTable));
+    let across = |y| piece(365.6, y, 400.0, y, 0.35);
+    let down = |x| piece(x, 10.0, x, 38.0, 0.35);
+    assert_eq!(strokes(&group), [outline(365.6, 10.0, 400.0, 38.0), across(31.0), across(24.0), across(17.0), down(374.125), down(392.975)]);
+    sheet(vec![group]).validate().unwrap();
+}
+
+/// The shapes: a filter that lets no row through leaves the heading alone (no line across); one
+/// column has no line down; one row has one line across.
+#[test]
+fn a_heading_alone_and_one_column_have_only_the_lines_they_need() {
+    let none = Table { filter: Filter { only: Some(Only::Assemblies), text: vec![] }, ..table() };
+    let heading_alone = none.layout(&rows()[..2], Vec2::new(400.0, 280.0), &fixed).unwrap().paper(1, ObjectKind::PartsList);
+    let down = |x| piece(x, 273.0, x, 280.0, 0.35);
+    assert_eq!(strokes(&heading_alone), [outline(365.6, 273.0, 400.0, 280.0), down(374.125), down(392.975)]);
+    let one = Table { columns: vec![column("item", "Item", HAlign::Centre)], ..table() };
+    let layout = one.layout(&rows()[..1], Vec2::new(400.0, 280.0), &fixed).unwrap();
+    // Item alone: 6 mm of text, 2 mm of padding and half the outline on each side: 8.7 mm.
+    assert_eq!(strokes(&layout.paper(1, ObjectKind::PartsList)), [outline(391.3, 266.0, 400.0, 280.0), piece(391.3, 273.0, 400.0, 273.0, 0.35)]);
+}
+
+/// A table at its limits, 10,000 rows and 64 columns, is 10,064 strokes: within the paper scene's
+/// own checks.
+#[test]
+fn a_table_at_its_limits_is_a_valid_paper_group() {
+    let columns: Vec<Column> = (0..MAX_COLUMNS).map(|i| column(&format!("c{i}"), "C", HAlign::Left)).collect();
+    let rows: Vec<Row> = (0..MAX_ROWS).map(|i| row(&i.to_string(), RowKind::Part, false, &[])).collect();
+    let table = Table { columns, ..table() };
+    let group = table.layout(&rows, Vec2::new(400.0, 280.0), &fixed).unwrap().paper(1, ObjectKind::PartsList);
+    assert_eq!(group.items.len(), 1 + MAX_ROWS + MAX_COLUMNS - 1);
+    sheet(vec![group]).validate().unwrap();
+}
+
+/// An A3 landscape sheet with these groups.
+fn sheet(groups: Vec<Group>) -> crate::paper::Scene {
+    crate::paper::Scene::new(Vec2::new(420.0, 297.0), groups)
 }

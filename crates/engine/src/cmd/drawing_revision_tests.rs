@@ -48,7 +48,8 @@ fn revisions(reply: &Value) -> Vec<&str> {
 #[test]
 fn rows_take_the_next_revision_and_keep_what_is_typed() {
     let mut s = drawing_session();
-    assert_eq!(listed(&mut s), json!({"rows": [], "next": "1"}));
+    let empty = listed(&mut s);
+    assert_eq!((&empty["rows"], &empty["next"]), (&json!([]), &json!("1")), "{empty}");
     let steps = s.undo.len();
     let first = add(&mut s, json!({"description": "First issue", "designer": "CW", "date": "2026-10-29"}));
     assert_eq!(s.undo.len(), steps + 1, "one undo step, texts and all");
@@ -121,7 +122,8 @@ fn a_deleted_row_names_the_tags_it_leaves() {
     let row = add(&mut s, json!({}));
     let mut d = (**s.drawing("test").unwrap()).clone();
     let tag = d.allocate_id(&mut s.ids).unwrap();
-    Arc::make_mut(&mut d.revisions).add_tag(ids::decode(&row).unwrap(), tag).unwrap();
+    let sheet = d.sheets[0].id;
+    Arc::make_mut(&mut d.revisions).add_tag(ids::decode(&row).unwrap(), tag, sheet, [10.0, 20.0]).unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
     let deleted = run(&mut s, DELETE, json!({"row": row}));
     assert_eq!(deleted["tags_lost"], json!([ids::encode(tag)]));
@@ -173,4 +175,198 @@ fn a_rows_id_comes_from_the_sessions_seed() {
     };
     assert_eq!(made(7), made(7));
     assert_ne!(made(7), made(8));
+}
+
+/// A saved drawing with rows typed by hand, some labels no numbering can read, opens and is revised:
+/// every old row stays as it was, field by field, and the new one follows the highest number.
+#[test]
+fn revising_keeps_every_row_as_typed() {
+    let mut s = drawing_session();
+    for typed in ["5", "B-2", "rev C"] {
+        add(&mut s, json!({"revision": typed, "description": format!("was {typed}"), "date": "not a date"}));
+    }
+    let before = listed(&mut s)["rows"].clone();
+    let reply = run(&mut s, REVISE, json!({"set": {"description": "Tender"}}));
+    let after = listed(&mut s);
+    assert_eq!(after["rows"].as_array().unwrap()[..3], before.as_array().unwrap()[..], "the old rows are untouched");
+    assert_eq!(after["rows"][3]["revision"], json!("6"), "after the highest number");
+    assert_eq!(reply["issued"][0]["revision"], json!("6"), "{reply}");
+    assert_eq!(after["issued"][0]["description"], json!("Tender"));
+    assert_eq!(after["issued"][0]["date"], json!(""), "nothing is filled in");
+    assert_eq!(after["issued"][0]["designer"], json!(""));
+    assert_eq!(after["issued"][0].get("version"), None, "there is no version yet");
+    assert_eq!(reply.get("version"), None);
+    assert_eq!(reply["next"], json!("7"), "an issued revision isn't given out again");
+}
+
+/// Issuing a row changes nothing in it; twice is refused; the copy keeps what it read through an
+/// edit, a hide and a delete, and its revision isn't given out again. One undo step, undone and
+/// redone. It saves and opens again: the regression for a copy sharing its row's id.
+#[test]
+fn an_issued_copy_keeps_what_it_read() {
+    let mut s = drawing_session();
+    let row = add(&mut s, json!({"description": "First"}));
+    let before = listed(&mut s)["rows"].clone();
+    let steps = s.undo.len();
+    let reply = run(&mut s, REVISE, json!({"row": row}));
+    assert_eq!(s.undo.len(), steps + 1, "one step");
+    assert_eq!(reply["rows"], before, "the row is as it was");
+    assert_eq!(reply["issued"][0]["row"], json!(row));
+    assert!(refused(&mut s, REVISE, json!({"row": row})).contains("issued once"));
+    assert!(refused(&mut s, REVISE, json!({"row": row, "set": {"date": "x"}})).contains("as it reads"));
+    assert!(refused(&mut s, REVISE, json!({"row": ids::encode(1 << 41)})).contains("no row"));
+
+    let edited = run(&mut s, EDIT, json!({"row": row, "set": {"description": "Changed"}}));
+    assert_eq!(edited["warnings"], json!(["its issued copy keeps what it read"]), "{edited}");
+    let unchanged = run(&mut s, EDIT, json!({"row": row, "set": {"description": "Changed"}}));
+    assert_eq!(unchanged.get("warnings"), None, "nothing changed, nothing to say");
+    run(&mut s, EDIT, json!({"row": row, "set": {"hidden": true}}));
+    let gone = run(&mut s, DELETE, json!({"row": row}));
+    assert_eq!(gone["issued"][0]["description"], json!("First"), "{gone}");
+    assert_eq!(gone["next"], json!("2"), "its revision isn't given out again");
+
+    // The record with the copy passes its rules, and reads back after a save.
+    let d = s.drawing("test").unwrap().clone();
+    d.validate().unwrap();
+    assert_eq!(Drawing::from_json(&d.to_json().unwrap()).unwrap(), *d);
+
+    let count = s.drawing("test").unwrap().revisions.issued().len();
+    while s.undo.len() > steps {
+        s.execute("edit.undo", &json!({})).unwrap();
+    }
+    assert_eq!(s.drawing("test").unwrap().revisions.issued().len(), 0, "undone");
+    while s.execute("edit.redo", &json!({})).is_ok() {}
+    assert_eq!(s.drawing("test").unwrap().revisions.issued().len(), count, "redone");
+}
+
+/// Two rows issued in one session, each with the version the session gave, and a version that isn't
+/// one line refused with nothing changed.
+#[test]
+fn a_revision_names_the_version_it_was_issued_against() {
+    let mut s = drawing_session();
+    let version = |change: &str| ModelVersion { path: "parts/bracket.solidcraft".into(), change: change.into() };
+    let first = revise_against(&mut s, &json!({"set": {"description": "One"}}), Some(version("kpqmzrts"))).unwrap();
+    assert_eq!(first["version"], json!({"path": "parts/bracket.solidcraft", "change": "kpqmzrts"}), "{first}");
+    assert_eq!(first["issued"][0]["version"]["change"], json!("kpqmzrts"));
+    assert_eq!(first["rows"][0].get("version"), None, "a row has none, only its copy");
+    let second = revise_against(&mut s, &json!({}), None).unwrap();
+    assert_eq!(second["issued"].as_array().map(Vec::len), Some(2), "{second}");
+    assert_eq!(second["issued"][1].get("version"), None);
+
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    for bad in [version("x\ny"), ModelVersion { path: "a\nb".into(), change: "c".into() }] {
+        assert!(revise_against(&mut s, &json!({}), Some(bad)).is_err());
+    }
+    assert_eq!((s.drawing("test").unwrap(), s.undo.len()), (&record, steps), "nothing changed");
+    s.drawing("test").unwrap().validate().unwrap();
+}
+
+/// Revisions are numbered from 1 unless set to start at 0, never lettered: a revision typed with a
+/// letter is kept as typed and warned about by nothing, and letters are refused as a numbering.
+#[test]
+fn a_drawing_numbers_its_revisions() {
+    let mut s = drawing_session();
+    assert_eq!(listed(&mut s)["numbering"], json!({"start": 1}));
+    assert_eq!(listed(&mut s)["next"], json!("1"));
+    let set = |s: &mut Session, numbering: Value| s.execute("drawing.set", &json!({"revision_numbering": numbering}));
+    set(&mut s, json!({"start": 0})).unwrap();
+    let listed_now = listed(&mut s);
+    assert_eq!((&listed_now["numbering"], &listed_now["next"]), (&json!({"start": 0}), &json!("0")), "{listed_now}");
+    add(&mut s, json!({}));
+    let row = add(&mut s, json!({}));
+    assert_eq!(listed(&mut s)["next"], json!("2"));
+    let typed = run(&mut s, EDIT, json!({"row": row, "set": {"revision": "B"}}));
+    assert_eq!((&typed["rows"][1]["revision"], typed.get("warnings")), (&json!("B"), None), "{typed}");
+    assert_eq!(typed["next"], json!("1"), "the next follows the highest number");
+
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    for bad in [json!({"start": 2}), json!("letters"), json!({"numbers": {"start": 1}}), json!({}), json!(1), json!(null)] {
+        assert!(set(&mut s, bad.clone()).is_err(), "{bad}");
+    }
+    assert_eq!((s.drawing("test").unwrap(), s.undo.len()), (&record, steps));
+    // No change makes no step.
+    set(&mut s, json!({"start": 0})).unwrap();
+    assert_eq!(s.undo.len(), steps);
+}
+
+/// A tag is added on a sheet, shows its row's revision or its own text, moves and is deleted, each
+/// one step. A deleted row leaves it showing what it had. Inspect lists it, it saves and reads back.
+#[test]
+fn a_revision_tag_sits_on_a_sheet_and_shows_its_row() {
+    let mut s = drawing_session();
+    let row = add(&mut s, json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let added = run(&mut s, TAG_ADD, json!({"row": row, "sheet": sheet, "at": [100.0, 50.0]}));
+    let tag = added["tag"].as_str().unwrap().to_string();
+    assert_eq!(
+        added["tags"],
+        json!([{"tag": tag, "row": row, "sheet": sheet, "at": [100.0, 50.0], "size_mm": 5.0, "shows": "1", "lost": false}]),
+        "{added}"
+    );
+    assert_eq!(listed(&mut s)["tags"][0]["tag"], json!(tag));
+
+    let edited = run(&mut s, TAG_EDIT, json!({"tag": tag, "set": {"at": [120.0, 60.0], "size_mm": 8.0, "text": "A"}}));
+    assert_eq!(
+        (&edited["tags"][0]["at"], &edited["tags"][0]["size_mm"], &edited["tags"][0]["shows"]),
+        (&json!([120.0, 60.0]), &json!(8.0), &json!("A")),
+        "{edited}"
+    );
+    let cleared = run(&mut s, TAG_EDIT, json!({"tag": tag, "set": {"text": null}}));
+    assert_eq!(cleared["tags"][0]["shows"], json!("1"), "{cleared}");
+    let steps = s.undo.len();
+    run(&mut s, TAG_EDIT, json!({"tag": tag, "set": {"text": null}}));
+    assert_eq!(s.undo.len(), steps, "nothing changed, no step");
+
+    let d = s.drawing("test").unwrap().clone();
+    assert_eq!(Drawing::from_json(&d.to_json().unwrap()).unwrap(), *d);
+
+    let gone = run(&mut s, DELETE, json!({"row": row}));
+    assert_eq!((&gone["tags"][0]["shows"], &gone["tags"][0]["lost"]), (&json!("1"), &json!(true)), "{gone}");
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(listed(&mut s)["tags"][0]["lost"], json!(false), "undo binds it again");
+
+    let deleted = run(&mut s, TAG_DELETE, json!({"tag": tag}));
+    assert_eq!(deleted.get("tags"), None, "{deleted}");
+}
+
+/// A sheet's delete counts its tags as what is on it and takes them with `contents: delete`; a tag
+/// on another sheet stays. An unknown sheet, row or tag, and a place or size past the rules, are
+/// refused with nothing changed.
+#[test]
+fn a_sheets_delete_takes_its_tags_and_hostile_tags_are_refused() {
+    let mut s = drawing_session();
+    let row = add(&mut s, json!({}));
+    let first = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let second = s.execute("drawing.sheet.add", &json!({"name": "Other"})).unwrap()["sheet"].as_str().unwrap().to_string();
+    let on_first = run(&mut s, TAG_ADD, json!({"row": row, "sheet": first, "at": [10.0, 10.0]}))["tag"].clone();
+    let on_second = run(&mut s, TAG_ADD, json!({"row": row, "sheet": "Other", "at": [20.0, 20.0]}))["tag"].clone();
+    // An edit moves a tag to another sheet, by name or id.
+    let moved = run(&mut s, TAG_EDIT, json!({"tag": on_first, "set": {"sheet": "Other"}}));
+    assert_eq!(moved["tags"][0]["sheet"], json!(second), "{moved}");
+    run(&mut s, TAG_EDIT, json!({"tag": on_first, "set": {"sheet": first}}));
+
+    let held = s.execute("drawing.sheet.delete", &json!({"sheet": second})).unwrap_err().to_string();
+    assert!(held.contains("revision tag"), "{held}");
+    s.execute("drawing.sheet.delete", &json!({"sheet": second, "contents": "delete"})).unwrap();
+    let left = listed(&mut s);
+    assert_eq!(left["tags"].as_array().map(Vec::len), Some(1));
+    assert_eq!(left["tags"][0]["tag"], on_first);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(listed(&mut s)["tags"][1]["tag"], on_second, "undo brings it back");
+
+    for bad in [
+        json!({"row": "0000000000000", "sheet": first, "at": [0.0, 0.0]}),
+        json!({"row": row, "sheet": "no such", "at": [0.0, 0.0]}),
+        json!({"row": row, "sheet": first, "at": [1e300, 0.0]}),
+        json!({"row": row, "sheet": first, "at": [0.0, 0.0], "size_mm": 0.5}),
+        json!({"row": row, "sheet": first, "at": [0.0, 0.0], "size_mm": 51.0}),
+        json!({"row": row, "sheet": first, "at": [0.0, 0.0], "text": "x\ny"}),
+        json!({"row": row, "sheet": first}),
+    ] {
+        refused(&mut s, TAG_ADD, bad);
+    }
+    refused(&mut s, TAG_EDIT, json!({"tag": on_first, "set": {"sheet": "no such"}}));
+    refused(&mut s, TAG_EDIT, json!({"tag": on_first, "set": {"at": [1e300, 0.0]}}));
+    refused(&mut s, TAG_EDIT, json!({"tag": "0000000000000", "set": {"at": [0.0, 0.0]}}));
+    refused(&mut s, TAG_DELETE, json!({"tag": "0000000000000"}));
 }

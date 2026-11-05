@@ -12,7 +12,7 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
-use solidcraft_doc::drawing::dimension::{CornerPick, EdgePick, TextPlace};
+use solidcraft_doc::drawing::dimension::{CornerPick, EdgePick, MAX_CHAIN_POINTS, TextPlace};
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading, SilhouetteSide};
 
 use super::drawing_view::ViewIdParam;
@@ -24,6 +24,8 @@ const MAX_LISTED_EDGES: usize = 64;
 const EDGE: &str = "an edge is a point on it [x, y, z], or {point} or {body, index}, with path?";
 const FACE: &str = "a face is a point on it [x, y, z], or {point} or {body, index}, with path?";
 const CORNER: &str = "a corner is a point [x, y, z], or {point} or {edges: [edges]} or {centre: a circle or an arc}, with path?";
+const PICK: &str = "a pick is {edge: an edge}, {corner: a corner} or {face: a face}; a candidate of the slot's kind passes as it stands";
+const SLOT: &str = "a slot is `a`, `b`, `edge`, `face`, or a chain's point by its number from 0";
 
 /// An edge to measure: what picks it, and the occurrences its body is placed through.
 #[derive(Clone, Debug, PartialEq)]
@@ -44,6 +46,27 @@ pub struct CornerParam {
 pub struct FaceParam {
     pub pick: EdgePick,
     pub path: Vec<u64>,
+}
+
+/// What a repair puts into a reference, by the reference's kind: as `drawing.dimension.add` picks
+/// one, without a path (the reference keeps its own), so a candidate inspect lists is a pick as it
+/// stands.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PickParam {
+    Edge(EdgePick),
+    Corner(CornerPick),
+    Face(EdgePick),
+}
+
+/// Which reference of a dimension a repair is for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SlotParam {
+    A,
+    B,
+    Edge,
+    Face,
+    /// A chain's point, from 0.
+    Point(usize),
 }
 
 /// One of a cylinder's silhouettes to measure from: a face on the cylinder, and which silhouette.
@@ -121,6 +144,46 @@ fn corner_param(v: &Value) -> Result<CornerParam, String> {
     Ok(CornerParam { pick, path })
 }
 
+fn pick_param(v: &Value) -> Result<PickParam, String> {
+    let o = keys(v, &["edge", "corner", "face"], PICK)?;
+    let (kind, inner) = o.iter().next().filter(|_| o.len() == 1).ok_or_else(|| PICK.to_string())?;
+    // Another part is another reference: a repair keeps the one it has.
+    if inner.get("path").is_some() {
+        return Err("a repair's pick has no `path`: it keeps the reference's own (for another part, add a new one)".into());
+    }
+    match kind.as_str() {
+        "edge" => edge_pick(inner).map(PickParam::Edge),
+        "corner" => corner_param(inner).map(|c| PickParam::Corner(c.pick)),
+        "face" => pick(inner, "a face", FACE).map(PickParam::Face),
+        _ => Err(PICK.to_string()),
+    }
+}
+
+fn slot_param(v: &Value) -> Result<SlotParam, String> {
+    match v {
+        Value::String(s) => match s.as_str() {
+            "a" => Ok(SlotParam::A),
+            "b" => Ok(SlotParam::B),
+            "edge" => Ok(SlotParam::Edge),
+            "face" => Ok(SlotParam::Face),
+            _ => Err(SLOT.to_string()),
+        },
+        _ => v.as_u64().and_then(|k| usize::try_from(k).ok()).filter(|k| *k < MAX_CHAIN_POINTS).map(SlotParam::Point).ok_or_else(|| SLOT.to_string()),
+    }
+}
+
+impl<'de> Deserialize<'de> for PickParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        pick_param(&Value::deserialize(d)?).map_err(D::Error::custom)
+    }
+}
+
+impl<'de> Deserialize<'de> for SlotParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        slot_param(&Value::deserialize(d)?).map_err(D::Error::custom)
+    }
+}
+
 impl<'de> Deserialize<'de> for EdgeParam {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         edge_param(&Value::deserialize(d)?).map_err(D::Error::custom)
@@ -173,6 +236,30 @@ impl JsonSchema for CornerParam {
         json_schema!({
             "description": "A corner: a point [x, y, z] in the design's frame, or {point} or {edges: [2 to 16 edges that meet there]}, or {centre: an edge that is a circle or an arc} for its centre (a hole's), with path? as an edge's.",
             "anyOf": [{"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}, {"type": "object"}]
+        })
+    }
+}
+
+impl JsonSchema for PickParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DrawingReferencePick".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "What a reference names now: {edge: an edge}, {corner: a corner} or {face: a face}, each as drawing.dimension.add takes it but without path (the reference keeps its own); a candidate inspect lists is one as it stands.",
+            "type": "object"
+        })
+    }
+}
+
+impl JsonSchema for SlotParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DrawingDimensionSlot".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Which of a dimension's references: `a` or `b` (a linear dimension's corners, an angle's edges, or the faces of silhouettes or of faces), `edge` (a length's or a radial dimension's), `face` (a cylinder's), or a chain's point by its number from 0.",
+            "anyOf": [{"type": "string", "enum": ["a", "b", "edge", "face"]}, {"type": "integer", "minimum": 0, "maximum": MAX_CHAIN_POINTS - 1}]
         })
     }
 }
@@ -259,6 +346,15 @@ pub enum KindParam {
         a: SilhouetteParam,
         b: SilhouetteParam,
         /// As a linear dimension's; `aligned` (the default) is square to the silhouettes.
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Value")]
+        direction: Option<LinearDirection>,
+    },
+    /// The distance between two flat, parallel faces, on a view that sees both edge-on.
+    Faces {
+        a: FaceParam,
+        b: FaceParam,
+        /// As a linear dimension's; `aligned` (the default) is square to the faces.
         #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
         #[schemars(with = "Value")]
         direction: Option<LinearDirection>,
@@ -353,6 +449,17 @@ pub struct DimensionSet {
     pub diameter: Option<bool>,
 }
 
+/// What `drawing.dimension.repair` takes: the dimension, which of its references, and what that
+/// reference names now.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct RepairParams {
+    pub dimension: DimensionIdParam,
+    pub slot: SlotParam,
+    pub pick: PickParam,
+}
+
 /// What `drawing.dimension.edit` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct EditResult {
@@ -363,7 +470,8 @@ pub struct EditResult {
     pub param_warnings: Vec<String>,
 }
 
-/// One of the things an ambiguous dimension's name finds.
+/// One of the things an ambiguous reference's name finds, or a lead a lost one lists: as it stands,
+/// a repair's pick.
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CandidateResult {
@@ -390,9 +498,9 @@ pub struct DimensionResult {
     pub view: String,
     /// The record, as the drawing saves it.
     pub record: Value,
-    /// `ok`, `overridden`, `ambiguous`, `suppressed`, `lost` or `unmeasurable`.
+    /// `ok`, `overridden`, `ambiguous`, `suppressed`, `failed`, `lost` or `unmeasurable`.
     pub status: String,
-    /// Why it is lost or unmeasurable.
+    /// Why it failed, is lost or is unmeasurable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
     /// What it reads: model millimetres, or degrees for an angle; a chain's overall.
@@ -413,6 +521,7 @@ pub struct DimensionResult {
     pub last_good: Option<f64>,
     /// Every name it measures was found by exact history.
     pub exact: bool,
+    /// What its name finds when ambiguous, or the leads when lost: never taken but by a repair.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<CandidateResult>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

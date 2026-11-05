@@ -7,15 +7,19 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_doc::Mat;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::hlr::{Source, Visibility};
-use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, ObjectKind};
+use solidcraft_geom::paper::line::{LineGroup, LineKind};
+use solidcraft_geom::paper::{Dashes, Group, Item, MAX_RECORDS, ObjectKind};
+use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
-use solidcraft_geom::{EPS, Plane, Seg2, Similarity2, Vec2, Vec3};
+use solidcraft_geom::{Aabb2, EPS, Similarity2};
+use solidcraft_kernel::PlanarPiece;
 
 use super::ShownSet;
-use crate::mesh_lines::{self, Ask, Origin, Owner, Scene, View};
+use crate::mesh_lines::{self, Ask, Origin, Owner, Refused, Scene, View};
 use crate::params::bad;
 use crate::{Result, Session};
 
@@ -32,6 +36,8 @@ pub const MIN_MODEL_CHORD_MM: f64 = 0.0001;
 pub struct ViewLine {
     /// The index of the body among the shown set's.
     pub shown: usize,
+    /// The body is a reference part.
+    pub reference: bool,
     pub source: Source,
     pub pieces: Vec<Piece>,
 }
@@ -69,9 +75,26 @@ pub struct Stats {
     pub occlusion_ms: f64,
 }
 
-/// The lines of the bodies `shown` holds in the view `frame` places on paper: the hidden ones too
-/// when `hidden`, the tangent edges too when `tangent_edges`, sampled at `chord_mm` on paper.
-pub fn lines(s: &Session, shown: &ShownSet, frame: &ViewFrame, hidden: bool, tangent_edges: bool, chord_mm: f64, cmd: &str) -> Result<Lines> {
+/// What a view asks of its lines.
+#[derive(Clone, Copy, Debug)]
+pub struct LineRequest {
+    /// What the view's boundary holds, on its plane (model mm). Reference lines stop at it when the
+    /// view shows model parts too: only then can they reach past it.
+    pub shows: Aabb2,
+    /// The model's hidden lines too.
+    pub hidden: bool,
+    /// Reference parts' hidden lines too.
+    pub reference_hidden: bool,
+    pub reference_hides_model: bool,
+    /// The edges where faces meet smoothly too.
+    pub tangent_edges: bool,
+    /// The chord they are sampled at, on paper.
+    pub chord_mm: f64,
+}
+
+/// The lines of the bodies `shown` holds in the view `frame` places on paper, as `request` asks.
+pub fn lines(s: &Session, shown: &ShownSet, frame: &ViewFrame, request: &LineRequest, cmd: &str) -> Result<Lines> {
+    let LineRequest { shows, hidden, reference_hidden, reference_hides_model, tangent_edges, chord_mm } = *request;
     let scale = frame.scale();
     let model_chord_mm = chord_mm / scale.factor();
     if !(model_chord_mm.is_finite() && model_chord_mm >= MIN_MODEL_CHORD_MM) {
@@ -83,19 +106,31 @@ pub fn lines(s: &Session, shown: &ShownSet, frame: &ViewFrame, hidden: bool, tan
     }
     let started = web_time::Instant::now();
     let names: BTreeSet<&str> = shown.bodies.iter().filter_map(|b| shown.body(b)).map(|b| b.name.as_str()).collect();
-    let scene = mesh_lines::prepare(s, cmd, model_chord_mm, Ask { tangent_edges, sources: true }, |b| names.contains(b.name.as_str()))?;
+    let mut scene = mesh_lines::prepare(s, cmd, model_chord_mm, Ask { tangent_edges, sources: true }, |b| names.contains(b.name.as_str()), refused)?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
     if scene.placements.len() != shown.bodies.len() {
         return Err(bad(cmd, "two shown bodies have one name: the view can't tell their lines apart"));
     }
-    let drawing = mesh_lines::drawing(&scene, &[], &View::orthographic(&frame.basis())).map_err(|e| bad(cmd, e))?;
     // The scene places the shown bodies in the shown set's order, one placement each.
+    for (placement, body) in scene.placements.iter_mut().zip(&shown.bodies) {
+        placement.reference = body.reference;
+    }
+    scene.reference_hides_model = reference_hides_model;
+    let has_model = shown.bodies.iter().any(|b| !b.reference);
+    let is_reference = |owner: Owner| shown.bodies.get(owner.placement as usize).is_some_and(|b| b.reference);
+    let drawing = mesh_lines::drawing(&scene, &[], &View::orthographic(&frame.basis())).map_err(|e| bad(cmd, refused(e)))?;
     let mut by_owner: BTreeMap<Owner, Vec<(Vec2, Vec2, bool)>> = BTreeMap::new();
     let mut covered = 0;
-    for line in drawing.lines.iter().filter(|l| hidden || !l.hidden) {
+    for line in &drawing.lines {
         let Some(owner) = line.owner else { continue };
+        let reference = is_reference(owner);
+        if line.hidden && !(if reference { reference_hidden } else { hidden }) {
+            continue;
+        }
+        let kept = if reference && has_model { within(line.a, line.b, &shows) } else { Some((line.a, line.b)) };
+        let Some((a, b)) = kept else { continue };
         covered += usize::from(line.covered);
-        by_owner.entry(owner).or_default().push((line.a, line.b, line.hidden));
+        by_owner.entry(owner).or_default().push((a, b, line.hidden));
     }
     // The merge drops spans up to its tolerance long, so where two stretches meet each can stop
     // that short of the corner.
@@ -133,7 +168,7 @@ pub fn lines(s: &Session, shown: &ShownSet, frame: &ViewFrame, hidden: bool, tan
         if pieces_count > MAX_RECORDS {
             return Err(bad(cmd, format!("the view has more than {MAX_RECORDS} line pieces: raise chord_mm, or choose a smaller view")));
         }
-        out.push(ViewLine { shown: owner.placement as usize, source, pieces });
+        out.push(ViewLine { shown: owner.placement as usize, reference: is_reference(owner), source, pieces });
     }
     let stats = Stats {
         bodies: scene.placements.len(),
@@ -147,23 +182,41 @@ pub fn lines(s: &Session, shown: &ShownSet, frame: &ViewFrame, hidden: bool, tan
     Ok(Lines { lines: out, covered, model_chord_mm, stats })
 }
 
-/// A visible line's width on paper until D2 sets widths by kind of line: the thick line of ISO
-/// 128's 0.5 mm line group.
-pub const VISIBLE_MM: f64 = 0.5;
+/// The part of the line from `a` to `b` inside `area`, if any.
+fn within(a: Vec2, b: Vec2, area: &Aabb2) -> Option<(Vec2, Vec2)> {
+    let (mut lo, mut hi) = (0.0, 1.0);
+    let inside = mesh_lines::clip(&mut lo, &mut hi, a.x - area.min.x, b.x - area.min.x)
+        && mesh_lines::clip(&mut lo, &mut hi, area.max.x - a.x, area.max.x - b.x)
+        && mesh_lines::clip(&mut lo, &mut hi, a.y - area.min.y, b.y - area.min.y)
+        && mesh_lines::clip(&mut lo, &mut hi, area.max.y - a.y, area.max.y - b.y);
+    inside.then(|| (a + (b - a) * lo, a + (b - a) * hi))
+}
 
-/// `lines` as the paper scene group of the view `object`: each visible piece one stroke,
-/// [`VISIBLE_MM`] wide, closed when it ends where it starts. Hidden pieces are left out until the
-/// paper scene has dashed lines (V7b).
-pub fn paper_group(lines: &Lines, object: u64) -> Group {
-    let stroke = |piece: &Piece| {
+/// `lines` as the paper scene group of the view `object`, in line `group`: each piece one stroke,
+/// closed when it ends where it starts. Painted from the bottom: hidden pieces, dashed hidden lines,
+/// then reference parts' visible ones as thin lines, then the model's as visible lines.
+pub fn paper_group(lines: &Lines, object: u64, group: LineGroup) -> Group {
+    let stroke = |piece: &Piece, width_mm: f64| {
         let path: Vec<Seg2> = piece.path.iter().copied().filter_map(drawable).collect();
         let ends_meet = path.first().zip(path.last()).is_some_and(|(first, last)| last.end().dist(first.start()) <= EPS);
         // One straight line never closes on itself, however short.
         let closed = ends_meet && !matches!(path.as_slice(), [Seg2::Line { .. }]);
-        (!path.is_empty()).then_some(Item::Stroke { path, closed, width_mm: VISIBLE_MM })
+        let hidden = piece.visibility == Visibility::Hidden;
+        let pattern = hidden.then(|| LineKind::Hidden.dashes_mm(group)).flatten().map(|d| Dashes { lengths_mm: d.to_vec(), phase_mm: 0.0 });
+        (!path.is_empty()).then_some(Item::Stroke { path, closed, width_mm, pattern })
     };
-    let visible = lines.lines.iter().flat_map(|l| &l.pieces).filter(|p| p.visibility == Visibility::Visible);
-    Group { object, kind: ObjectKind::View, items: visible.filter_map(stroke).collect() }
+    let strokes = |reference: bool, visibility: Visibility, width_mm: f64| {
+        let pieces = lines.lines.iter().filter(move |l| l.reference == reference).flat_map(|l| &l.pieces);
+        pieces.filter(move |p| p.visibility == visibility).filter_map(move |p| stroke(p, width_mm))
+    };
+    let hidden_mm = LineKind::Hidden.width_mm(group);
+    let hidden = strokes(true, Visibility::Hidden, hidden_mm).chain(strokes(false, Visibility::Hidden, hidden_mm));
+    let visible = strokes(true, Visibility::Visible, LineKind::Thin.width_mm(group)).chain(strokes(
+        false,
+        Visibility::Visible,
+        LineKind::Visible.width_mm(group),
+    ));
+    Group { object, kind: ObjectKind::View, items: hidden.chain(visible).collect() }
 }
 
 /// `seg`, or nothing where it has no length to draw: a line whose ends are one point. An arc too
@@ -202,14 +255,7 @@ fn exact_arcs(shown: &ShownSet, scene: &Scene, basis: &Plane, runs: &[(Owner, Ve
         let Some(body) = shown.bodies.get(first as usize).and_then(|b| shown.body(b)) else { continue };
         let edges: Vec<usize> = edges.into_iter().collect();
         let exact = body.body.planar_edges(basis, &edges);
-        let arcs = edges
-            .iter()
-            .zip(exact)
-            .filter_map(|(edge, segs)| match segs.as_deref() {
-                Some([arc @ Seg2::Arc { .. }]) => Some((*edge, *arc)),
-                _ => None,
-            })
-            .collect();
+        let arcs = edges.iter().zip(exact).filter_map(|(edge, pieces)| one_arc(pieces.as_deref()?).map(|arc| (*edge, arc))).collect();
         found.insert(key, (first, arcs));
     }
     let mut out = HashMap::new();
@@ -225,6 +271,26 @@ fn exact_arcs(shown: &ShownSet, scene: &Scene, basis: &Plane, runs: &[(Owner, Ve
         }
     }
     out
+}
+
+/// An edge's pieces as one arc: the kernel gives a whole circle as two half circles. `None` unless
+/// every piece is an arc of one circle, each going on from where the last one ended.
+fn one_arc(pieces: &[PlanarPiece]) -> Option<Seg2> {
+    let arcs = |piece: &PlanarPiece| match *piece {
+        PlanarPiece::Seg(Seg2::Arc { center, radius, start, sweep }) => Some((center, radius, start, sweep)),
+        _ => None,
+    };
+    let (center, radius, start, mut sweep) = arcs(pieces.first()?)?;
+    for piece in pieces.get(1..)? {
+        let (c, r, s, turn) = arcs(piece)?;
+        let on_from_last = (start + sweep - s).rem_euclid(std::f64::consts::TAU);
+        let on_from_last = on_from_last.min(std::f64::consts::TAU - on_from_last);
+        if c.dist(center) > radius * 1e-9 || (r - radius).abs() > radius * 1e-9 || on_from_last > 1e-9 {
+            return None;
+        }
+        sweep += turn;
+    }
+    Some(Seg2::Arc { center, radius, start, sweep })
 }
 
 /// A placement's turn: its matrix's rotation, bit for bit.
@@ -323,12 +389,31 @@ fn chain(stretches: &[(Vec2, Vec2, bool)], join: f64) -> Vec<(bool, Vec<Vec2>)> 
     runs
 }
 
+/// What a refusal of a view's lines says on a drawing, with what to do about it there.
+fn refused(e: Refused) -> String {
+    match e {
+        Refused::Cancelled => "drawing the view was cancelled".into(),
+        Refused::Work | Refused::Memory => format!("{e}: raise chord_mm, or choose a smaller scale"),
+        Refused::EyePlane | Refused::Invalid(_) => e.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// A view's lines refused say what happened and what to do on a drawing, never in a DXF's terms.
+    #[test]
+    fn a_views_refused_lines_say_what_to_do_on_a_drawing() {
+        for e in [Refused::Cancelled, Refused::Work, Refused::Memory, Refused::EyePlane, Refused::Invalid("the model contains invalid coordinates")] {
+            let says = refused(e);
+            assert!(!["DXF", "export", "tolerance", "zoom", "bodies"].iter().any(|word| says.contains(word)), "{says}");
+        }
+        assert_eq!(refused(Refused::Memory), "the meshes take more memory than the limit allows: raise chord_mm, or choose a smaller scale");
+    }
+
     fn lines_of(pieces: Vec<Piece>) -> Lines {
-        let line = ViewLine { shown: 0, source: Source::Edge { edge: 0, tangent: false }, pieces };
+        let line = ViewLine { shown: 0, reference: false, source: Source::Edge { edge: 0, tangent: false }, pieces };
         Lines { lines: vec![line], covered: 0, model_chord_mm: 0.01, stats: Stats::default() }
     }
 
@@ -338,8 +423,7 @@ mod tests {
 
     /// Each visible piece is one stroke of the view's kind, 0.5 mm wide; a whole circle and a run
     /// that comes back to its start are closed; a line with no length is left out of its stroke,
-    /// and a piece with nothing left is no stroke; an arc too short to sweep is its chord; hidden
-    /// pieces aren't drawn yet.
+    /// and a piece with nothing left is no stroke; an arc too short to sweep is its chord.
     #[test]
     fn visible_pieces_are_strokes_and_closed_ones_join() {
         let (a, b, c) = (Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 5.0));
@@ -350,26 +434,127 @@ mod tests {
             piece(Visibility::Visible, vec![Seg2::Line { a, b }, Seg2::Line { a: b, b: c }, Seg2::Line { a: c, b: a }]),
             piece(Visibility::Visible, vec![Seg2::Line { a: c, b: c }]),
             piece(Visibility::Visible, vec![Seg2::Arc { center: a, radius: 5.0, start: 0.0, sweep: 1e-13 }]),
-            piece(Visibility::Hidden, vec![Seg2::Line { a, b: c }]),
         ]);
-        let group = paper_group(&lines, 7);
+        let group = paper_group(&lines, 7, LineGroup::DEFAULT);
         assert_eq!((group.object, group.kind), (7, ObjectKind::View));
         let strokes: Vec<(usize, bool, f64)> = group
             .items
             .iter()
             .filter_map(|i| match i {
-                Item::Stroke { path, closed, width_mm } => Some((path.len(), *closed, *width_mm)),
-                Item::Fill { .. } => None,
+                Item::Stroke { path, closed, width_mm, .. } => Some((path.len(), *closed, *width_mm)),
+                Item::Fill { .. } | Item::Text(_) | Item::Picture(_) => None,
             })
             .collect();
         assert_eq!(strokes, [(2, false, 0.5), (1, true, 0.5), (3, true, 0.5), (1, false, 0.5)]);
         let chord = group.items.last().and_then(|i| match i {
             Item::Stroke { path, .. } => path.first().copied(),
-            Item::Fill { .. } => None,
+            Item::Fill { .. } | Item::Text(_) | Item::Picture(_) => None,
         });
         assert!(matches!(chord, Some(Seg2::Line { .. })), "{chord:?}");
-        let scene = solidcraft_geom::paper::Scene { size_mm: Vec2::new(420.0, 297.0), groups: vec![group] };
+        let scene = solidcraft_geom::paper::Scene::new(Vec2::new(420.0, 297.0), vec![group]);
         assert!(scene.validate().is_ok());
+    }
+
+    /// Reference lines come first, whatever order the lines are in, so the model's paint over them,
+    /// and each role has its width.
+    #[test]
+    fn reference_strokes_are_thin_and_under_the_models() {
+        let (a, b) = (Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0));
+        let line = |reference: bool| ViewLine {
+            shown: 0,
+            reference,
+            source: Source::Edge { edge: 0, tangent: false },
+            pieces: vec![piece(Visibility::Visible, vec![Seg2::Line { a, b }])],
+        };
+        let lines = Lines { lines: vec![line(false), line(true), line(false)], covered: 0, model_chord_mm: 0.01, stats: Stats::default() };
+        let widths: Vec<f64> = paper_group(&lines, 7, LineGroup::DEFAULT)
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Stroke { width_mm, .. } => Some(*width_mm),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            widths,
+            [
+                LineKind::Thin.width_mm(LineGroup::DEFAULT),
+                LineKind::Visible.width_mm(LineGroup::DEFAULT),
+                LineKind::Visible.width_mm(LineGroup::DEFAULT)
+            ]
+        );
+    }
+
+    /// Hidden pieces come first, the reference parts' and then the model's, whatever order they were
+    /// found in, so every visible line paints over them: each dashed, 0.25 mm wide, and closed by the
+    /// same rule; a visible piece stays solid, and a hidden piece with nothing left is no stroke.
+    #[test]
+    fn hidden_pieces_are_dashed_strokes_under_the_visible_ones() {
+        let (a, b, c) = (Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 5.0));
+        let line = |reference: bool, pieces: Vec<Piece>| ViewLine { shown: 0, reference, source: Source::Edge { edge: 0, tangent: false }, pieces };
+        let model = line(
+            false,
+            vec![
+                piece(Visibility::Visible, vec![Seg2::Line { a, b }]),
+                piece(Visibility::Hidden, vec![Seg2::Line { a: b, b: c }]),
+                piece(Visibility::Hidden, vec![Seg2::Line { a, b }, Seg2::Line { a: b, b: c }, Seg2::Line { a: c, b: a }]),
+                piece(Visibility::Hidden, vec![Seg2::Line { a: c, b: c }]),
+            ],
+        );
+        let reference =
+            line(true, vec![piece(Visibility::Visible, vec![Seg2::Line { a: b, b: c }]), piece(Visibility::Hidden, vec![Seg2::Line { a, b: c }])]);
+        let lines = Lines { lines: vec![model, reference], covered: 0, model_chord_mm: 0.01, stats: Stats::default() };
+        let group = paper_group(&lines, 7, LineGroup::DEFAULT);
+        let dashes = Dashes { lengths_mm: vec![3.0, 0.75], phase_mm: 0.0 };
+        let strokes: Vec<(usize, bool, f64, Option<&Dashes>)> = group
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Stroke { path, closed, width_mm, pattern } => Some((path.len(), *closed, *width_mm, pattern.as_ref())),
+                Item::Fill { .. } | Item::Text(_) | Item::Picture(_) => None,
+            })
+            .collect();
+        let hidden = (0.25, Some(&dashes));
+        let want = [
+            (1, false, hidden.0, hidden.1),
+            (1, false, hidden.0, hidden.1),
+            (3, true, hidden.0, hidden.1),
+            (1, false, LineKind::Thin.width_mm(LineGroup::DEFAULT), None),
+            (1, false, LineKind::Visible.width_mm(LineGroup::DEFAULT), None),
+        ];
+        assert_eq!(strokes, want);
+        let scene = solidcraft_geom::paper::Scene::new(Vec2::new(420.0, 297.0), vec![group]);
+        assert!(scene.validate().is_ok());
+    }
+
+    /// A view draws in its line group: in the 0.7 mm group its visible lines are 0.7 mm, a reference
+    /// part's and the hidden ones 0.35 mm, and a hidden line's dashes 4.2 and 1.05 mm.
+    #[test]
+    fn a_views_lines_take_their_widths_from_its_line_group() {
+        let (a, b) = (Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0));
+        let line = |reference: bool, visibility: Visibility| ViewLine {
+            shown: 0,
+            reference,
+            source: Source::Edge { edge: 0, tangent: false },
+            pieces: vec![piece(visibility, vec![Seg2::Line { a, b }])],
+        };
+        let lines = Lines {
+            lines: vec![line(false, Visibility::Visible), line(false, Visibility::Hidden), line(true, Visibility::Visible)],
+            covered: 0,
+            model_chord_mm: 0.01,
+            stats: Stats::default(),
+        };
+        let drawn: Vec<(f64, Option<Vec<f64>>)> = paper_group(&lines, 7, LineGroup::Mm0_7)
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Stroke { width_mm, pattern, .. } => Some((*width_mm, pattern.as_ref().map(|p| p.lengths_mm.clone()))),
+                _ => None,
+            })
+            .collect();
+        let narrow = LineKind::Hidden.width_mm(LineGroup::Mm0_7);
+        assert_eq!(narrow, 0.35);
+        assert_eq!(drawn, [(0.35, Some(vec![12.0 * narrow, 3.0 * narrow])), (0.35, None), (0.7, None)]);
     }
 
     /// A view's group past the paper scene's 100,000 records is caught by the scene's own check.
@@ -377,7 +562,7 @@ mod tests {
     fn a_group_past_the_scenes_records_is_refused_by_its_check() {
         let one = |i: usize| piece(Visibility::Visible, vec![Seg2::Line { a: Vec2::new(i as f64 * 1e-3, 0.0), b: Vec2::new(i as f64 * 1e-3, 1.0) }]);
         let lines = lines_of((0..MAX_RECORDS).map(one).collect());
-        let scene = solidcraft_geom::paper::Scene { size_mm: Vec2::new(420.0, 297.0), groups: vec![paper_group(&lines, 0)] };
+        let scene = solidcraft_geom::paper::Scene::new(Vec2::new(420.0, 297.0), vec![paper_group(&lines, 0, LineGroup::DEFAULT)]);
         assert!(scene.validate().is_err());
     }
 
@@ -429,6 +614,22 @@ mod tests {
         let (part, whole) = on_arc(&circle, &[at(20.0), at(0.0), at(-20.0)], false, near, 1e-9).unwrap();
         let Seg2::Arc { start, sweep, .. } = part else { panic!("{part:?}") };
         assert!(!whole && (start - 20f64.to_radians()).abs() < 1e-12 && (sweep + 40f64.to_radians()).abs() < 1e-12, "{part:?}");
+    }
+
+    /// A line keeps what lies in the box: all of it, its middle, one end, or nothing; one along an
+    /// edge of the box is inside.
+    #[test]
+    fn a_line_is_cut_at_a_box() {
+        let area = Aabb2 { min: Vec2::new(0.0, 0.0), max: Vec2::new(10.0, 10.0) };
+        let p = Vec2::new;
+        assert_eq!(within(p(1.0, 1.0), p(9.0, 9.0), &area), Some((p(1.0, 1.0), p(9.0, 9.0))));
+        assert_eq!(within(p(-5.0, 5.0), p(15.0, 5.0), &area), Some((p(0.0, 5.0), p(10.0, 5.0))));
+        assert_eq!(within(p(5.0, 5.0), p(5.0, 20.0), &area), Some((p(5.0, 5.0), p(5.0, 10.0))));
+        assert_eq!(within(p(11.0, 0.0), p(20.0, 5.0), &area), None);
+        assert_eq!(within(p(-1.0, 12.0), p(12.0, 12.0), &area), None);
+        // Past a corner, though each end is inside the box along one axis.
+        assert_eq!(within(p(8.0, 13.0), p(13.0, 8.0), &area), None);
+        assert_eq!(within(p(10.0, 2.0), p(10.0, 8.0), &area), Some((p(10.0, 2.0), p(10.0, 8.0))));
     }
 
     /// Stretches of one source in any order and either way round join into one run per visibility

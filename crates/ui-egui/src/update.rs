@@ -16,6 +16,7 @@
 //! The host provides the HTTP client (`Services::http_get`), so this crate stays portable and
 //! the browser build never checks (it updates itself through its service worker).
 
+use crate::ui_kit::BackingTooltipExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -728,10 +729,21 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
-/// Check now (Preferences): ignores the daily interval, not GitHub's rate limit.
+/// Check now (Help or Preferences): show progress and the result, ignoring the daily interval,
+/// but not GitHub's rate limit. A check already in flight serves the manual request too.
 pub fn check_now(app: &mut SolveApp, ctx: &egui::Context) {
+    app.updater.open = true;
+    // Keep a download or a completed installation on screen without starting another check.
+    if app.updater.job.is_some() || app.updater.installed.as_ref().is_some_and(Result::is_ok) || !available(app) {
+        return;
+    }
+    if let Some((_, manual)) = &mut app.updater.rx {
+        *manual = true;
+        app.updater.last_manual = unix_now();
+        return;
+    }
     let now = unix_now();
-    if app.updater.rx.is_some() || now - app.updater.last_manual < MANUAL_COOLDOWN_S || !available(app) {
+    if now - app.updater.last_manual < MANUAL_COOLDOWN_S {
         return;
     }
     if now < app.preferences.update.rate_limited_until {
@@ -773,9 +785,9 @@ fn start(app: &mut SolveApp, ctx: &egui::Context, manual: bool) {
             let _ = tx.send(fetch());
             ctx.request_repaint();
         });
-        if spawned.is_err() {
+        if let Err(error) = spawned {
             app.updater.rx = None;
-            app.updater.status = Status::Idle;
+            app.updater.status = if manual { Status::Failed(error.to_string()) } else { Status::Idle };
         }
     }
     #[cfg(target_arch = "wasm32")]
@@ -801,10 +813,10 @@ fn poll(app: &mut SolveApp) {
             let newer = is_newer(&release.tag, current_version());
             app.updater.status = if newer { Status::Idle } else { Status::UpToDate };
             if newer && manual {
-                // Asked for: show it even if it was skipped or put off.
+                // Asked for: offer it even if it was skipped or put off. check_now already
+                // opened the window; don't reopen it if the user closed it while checking.
                 app.preferences.update.skipped.clear();
                 app.preferences.update.remind_after = 0.0;
-                app.updater.open = true;
             }
             if app.updater.job.is_none() && app.updater.release.as_ref().is_none_or(|known| !is_newer(&known.tag, &release.tag)) {
                 app.updater.release = Some(release);
@@ -889,6 +901,12 @@ fn poll_install(app: &mut SolveApp) {
         Err(TryRecvError::Disconnected) => Err("the update stopped".into()),
     };
     app.updater.job = None;
+    // Cancel already cleared the job in the UI; ignore a late "cancelled" result so Offer returns
+    // without an error banner (#8908).
+    if matches!(&result, Err(e) if e == "cancelled" || e.contains("cancelled")) {
+        app.updater.installed = None;
+        return;
+    }
     match &result {
         Ok(install::Outcome::Installer(program, args)) => {
             // The installer replaces this program: start it once SolidCraft has closed. On
@@ -937,7 +955,7 @@ pub fn button(app: &mut SolveApp, ui: &mut egui::Ui, span: egui::Rect, labeled: 
     let full = crate::i18n::format("update.button_version", &[("version", &version)]);
     let labels = [full.as_str(), crate::i18n::tr("update.button")];
     let (rect, response) = crate::toolbar::offer_pill(ui, span, labeled, &labels, TAB_ROOM, "update", "titlebar:update")?;
-    if response.on_hover_text(crate::i18n::format("update.available", &[("version", &version)])).clicked() {
+    if response.backing_on_hover_text(crate::i18n::format("update.available", &[("version", &version)])).clicked() {
         app.updater.open = !app.updater.open;
     }
     Some(rect)
@@ -948,10 +966,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if !app.updater.open {
         return;
     }
-    let Some(release) = app.updater.release.clone() else {
-        app.updater.open = false;
+    if app.updater.job.is_none()
+        && !app.updater.installed.as_ref().is_some_and(Result::is_ok)
+        && (matches!(app.updater.status, Status::Checking | Status::Failed(_)) || offered_or_newer(app).is_none())
+    {
+        show_check_status(app, ctx);
         return;
-    };
+    }
+    let Some(release) = app.updater.release.clone() else { return };
     let kind = app.updater.kind().clone();
     let install = install_method(app);
     let managed = app.updater.managed_by().map(str::to_string);
@@ -1084,12 +1106,43 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Some("restart") => restart(app),
         Some("close") => app.updater.open = false,
         Some("cancel_download") => {
-            if let Some((_, progress)) = &app.updater.job {
+            // Drop the job from the UI at once so Cancel leaves "Downloading" immediately; the
+            // worker still sees the flag and stops at the next feed/checksum/chunk check (#8908).
+            if let Some((_, progress)) = app.updater.job.take() {
                 progress.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
             }
+            app.updater.installed = None;
         }
         _ if closed => app.updater.open = false,
         _ => {}
+    }
+}
+
+/// Manual checks also have a visible result when no update can be offered.
+fn show_check_status(app: &mut SolveApp, ctx: &egui::Context) {
+    let (message, warning) = if !available(app) {
+        (crate::i18n::tr("update.check_unavailable").to_string(), false)
+    } else {
+        match &app.updater.status {
+            Status::Checking => (crate::i18n::tr("update.checking").to_string(), false),
+            Status::UpToDate => (crate::i18n::tr("update.up_to_date").to_string(), false),
+            Status::Failed(error) => (crate::i18n::format("update.failed", &[("error", error)]), true),
+            Status::Idle => (crate::i18n::tr("update.check_unavailable").to_string(), false),
+        }
+    };
+    let id = egui::Id::new("sc_update");
+    let (closed, action) = ui_kit::Window::new(id, "update", crate::i18n::tr("update.check_for_updates"))
+        .cards(1.7)
+        .actions("", crate::i18n::tr("ui.close"), None)
+        .show(ctx, true, |ui| {
+            ui_kit::text(ui, &message, ui_kit::Text::Report("check_status", warning));
+            ui_kit::text(ui, &crate::i18n::format("update.you_have", &[("version", current_version())]), ui_kit::Text::Note("have"));
+        });
+    if let Some(area) = ctx.memory(|m| m.area_rect(id)) {
+        crate::scenario::publish_rect("update:window", area);
+    }
+    if closed || action == ui_kit::Action::Cancel {
+        app.updater.open = false;
     }
 }
 
@@ -1110,30 +1163,6 @@ enum State {
 pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     let can = available(app);
     let kind = app.updater.kind().clone();
-    // Where nothing can check (the browser app, development builds, the Flatpak), the box and
-    // Check now would do nothing: the note below says how this copy updates instead.
-    if can {
-        ui_kit::checkbox(ui, crate::i18n::tr("update.check_automatically"), &mut app.preferences.check_updates);
-        ui.horizontal_wrapped(|ui| {
-            let busy = app.updater.status == Status::Checking;
-            let (status, warning) = match (&app.updater.status, offered_or_newer(app)) {
-                (Status::Checking, _) => (crate::i18n::tr("update.checking").to_string(), false),
-                (Status::Failed(e), _) => (crate::i18n::format("update.failed", &[("error", e)]), true),
-                (_, Some(v)) => (crate::i18n::format("update.available", &[("version", &v)]), false),
-                (Status::UpToDate, None) => (crate::i18n::tr("update.up_to_date").to_string(), false),
-                (Status::Idle, None) => (String::new(), false),
-            };
-            if !status.is_empty() {
-                ui_kit::settings_badge(ui, &status, warning);
-            }
-            let r = ui_kit::button(ui, crate::i18n::tr("update.check_now"), ui_kit::Button::Enabled(!busy));
-            crate::scenario::publish_rect("prefs:check_now", r.rect);
-            if r.clicked() {
-                let ctx = ui.ctx().clone();
-                check_now(app, &ctx);
-            }
-        });
-    }
     let note = if kind == InstallKind::Web {
         crate::i18n::tr("update.prefs_web").to_string()
     } else if can && let Some(manager) = app.updater.managed_by().map(str::to_string) {
@@ -1145,7 +1174,41 @@ pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else {
         crate::i18n::format("update.prefs_dev", &[("version", current_version())])
     };
-    ui_kit::text(ui, &note, ui_kit::Text::Hint("updates"));
+    ui.horizontal_wrapped(|ui| {
+        if can {
+            let (status, warning) = match (&app.updater.status, offered_or_newer(app)) {
+                (Status::Checking, _) => (crate::i18n::tr("update.checking").to_string(), false),
+                (Status::Failed(e), _) => (crate::i18n::format("update.failed", &[("error", e)]), true),
+                (_, Some(v)) => (crate::i18n::format("update.available", &[("version", &v)]), false),
+                (Status::UpToDate, None) => (crate::i18n::tr("update.up_to_date").to_string(), false),
+                (Status::Idle, None) => (String::new(), false),
+            };
+            if !status.is_empty() {
+                ui_kit::settings_badge(ui, &status, warning);
+            }
+            let last = app.preferences.update.last_check;
+            if last.is_finite() && last > 0.0 {
+                let time = solidcraft_engine::crash::utc(last as u64);
+                let checked = crate::i18n::format("prefs.general.last_check", &[("time", &time)]);
+                ui_kit::settings_inline_note(ui, &checked);
+            }
+        } else {
+            ui_kit::settings_inline_note(ui, crate::i18n::tr("update.check_unavailable"));
+        }
+        let busy = app.updater.status == Status::Checking;
+        let r = ui_kit::button(ui, crate::i18n::tr("update.check_now"), ui_kit::Button::Enabled(can && !busy));
+        crate::scenario::publish_target("prefs:check_now", r.rect);
+        if can && r.clicked() {
+            let ctx = ui.ctx().clone();
+            check_now(app, &ctx);
+        }
+        let help = ui_kit::help_icon(ui, &note);
+        crate::scenario::publish_target("prefs:updates_help", help.rect);
+    });
+    ui.add_enabled_ui(can, |ui| {
+        let check = ui_kit::checkbox(ui, crate::i18n::tr("update.check_automatically"), &mut app.preferences.check_updates);
+        crate::scenario::publish_target("prefs:check_updates", check.rect);
+    });
     if let Some(v) = offered_or_newer(app)
         && offered(app).is_none()
         && ui_kit::button(ui, crate::i18n::format("update.show", &[("version", &v)]), ui_kit::Button::Normal).clicked()
@@ -1331,7 +1394,7 @@ fn markdown(ui: &mut egui::Ui, src: &str, t: &Tokens) {
         ui.horizontal_wrapped(|ui| {
             ui.add_space(indent);
             for (text, url) in targets {
-                ui.hyperlink_to(RichText::new(text).size(t.font_caption), url).on_hover_text(url);
+                ui.hyperlink_to(RichText::new(text).size(t.font_caption), url).backing_on_hover_text(url);
             }
         });
     };

@@ -8,7 +8,8 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Aabb2, Vec2};
+use solidcore_record::Vec2;
+use solidcraft_geom::Aabb2;
 use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Sketch};
 
 use super::sketch::edit;
@@ -69,6 +70,38 @@ pub struct SketchClip {
     pub extent: f64,
     /// Pastes made without a position since the copy (each lands one offset further on).
     pub pastes: u32,
+}
+
+impl SketchClip {
+    /// This clipboard as another design pastes it (#9258): at the same sketch coordinates (its
+    /// sketch ids mean nothing there), and with nothing that names the copied design's
+    /// parameters. A dimension whose expression names a parameter keeps its value, in its unit
+    /// (another design's parameter of the same name would be another thing); a text keeps its
+    /// words, height and angle as numbers.
+    pub fn for_another_design(&self) -> SketchClip {
+        let mut clip = self.clone();
+        clip.sketch = u64::MAX;
+        clip.pastes = 0;
+        for c in &mut clip.constraints {
+            let Some((expr, unit)) = c.param.as_mut() else { continue };
+            if solidcraft_doc::expr::references(expr).is_empty() {
+                continue;
+            }
+            let v = c.kind.value().unwrap_or_default();
+            if solidcraft_doc::expr::unit_info(unit).is_none() {
+                *unit = if c.kind.is_angle() { "rad" } else { "mm" }.into();
+            }
+            let value = if c.kind.is_angle() { solidcraft_doc::expr::Value::angle(v) } else { solidcraft_doc::expr::Value::length(v) };
+            let shown = solidcraft_doc::expr::value_in_unit(value, unit);
+            *expr = format!("{}", if shown.is_finite() { shown } else { 0.0 });
+        }
+        for (src, _) in &mut clip.texts {
+            if let LinkSource::Text { exprs, .. } = src {
+                *exprs = Default::default();
+            }
+        }
+        clip
+    }
 }
 
 /// Curve and point ids named by `entities`, or the selected sketch geometry.

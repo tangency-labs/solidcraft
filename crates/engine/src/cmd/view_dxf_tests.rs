@@ -1,5 +1,6 @@
 use super::*;
-use solidcraft_geom::{Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 use solidcraft_render::StandardView;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -180,7 +181,7 @@ fn view_dxf_keeps_every_occurrence_while_sharing_geometry() {
     assert!(centers.len() >= 3, "{centers:?}");
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
     // The definition's first placement hidden: the others are still drawn from the shared mesh.
-    let first = s.world_state().bodies.first().map(|b| b.name.clone()).unwrap();
+    let first = s.world_state().unwrap().bodies.first().map(|b| b.name.clone()).unwrap();
     run(&mut s, "browser.visibility", json!({"items":[first],"visible":false}));
     let result = export(&mut s, camera(StandardView::Top), "dashed");
     assert_eq!((result["stats"]["bodies"].clone(), result["stats"]["shared_meshes"].clone()), (json!(2), json!(1)), "{result}");

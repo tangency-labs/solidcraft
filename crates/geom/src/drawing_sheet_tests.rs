@@ -1,4 +1,5 @@
 use super::*;
+use crate::prelude::*;
 
 const EPS: f64 = 1e-9;
 
@@ -619,8 +620,10 @@ fn drawn(group: &Group) -> Vec<(Vec<[i64; 4]>, bool, f64)> {
         .items
         .iter()
         .map(|item| match item {
-            Item::Stroke { path, closed, width_mm } => (ends(path), *closed, *width_mm),
+            Item::Stroke { path, closed, width_mm, .. } => (ends(path), *closed, *width_mm),
             Item::Fill { region } => (ends(&region.outer.segs), true, 0.0),
+            Item::Text(_) => panic!("a border has no text"),
+            Item::Picture(_) => panic!("a sheet draws no pictures"),
         })
         .collect()
 }
@@ -640,7 +643,7 @@ fn rect(x0: f64, y0: f64, x1: f64, y1: f64, width: f64) -> (Vec<[i64; 4]>, bool,
 }
 
 fn scene(layout: &SheetLayout, groups: Vec<Group>) -> crate::paper::Scene {
-    crate::paper::Scene { size_mm: layout.sheet_border.max, groups }
+    crate::paper::Scene::new(layout.sheet_border.max, groups)
 }
 
 /// A3 landscape, the built-in profile, by hand: the drawing border round 10..410 by 10..287, 0.7

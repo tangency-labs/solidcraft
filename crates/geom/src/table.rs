@@ -7,13 +7,16 @@
 //! worked out and formatted: nothing here works one out, so a filter hides rows and never changes
 //! a count or a quantity. [`Table::validate`] checks a definition on its own, as when one is read,
 //! and [`Table::layout`] places it with a text measurer: each shown row's rectangle and each cell's
-//! lines of text by the cell text rule. Nothing here is saved or drawn yet.
+//! lines of text by the cell text rule. Nothing here is saved yet; [`TableLayout::paper`] gives a
+//! placed table's lines to the paper scene (its text follows once the scene has text, #4813).
 //!
 //! - The table grows away from its heading. With the heading at the top the rows run down below
 //!   it; at the bottom (ISO 7573) the first row sits just above it and the rows run up.
 //! - A column without a set width is as wide as its widest line. Every cell breaks between words
 //!   to fit its column, and its row grows to hold its lines, [`LINE_PITCH`] cap heights apart; a
 //!   word wider than its column is shown whole with [`Warning::Width`], never cut.
+//! - A column that isn't printed is for an editor alone: its cells are worked out, and filters and
+//!   overrides read them, but it has no place on paper. The [`BALLOONED`] field is one such.
 //! - A row field the row doesn't have shows [`MISSING`]. An [`Override`] shows its text in one
 //!   cell and keeps the value it replaces; an empty one is a blank cell.
 //! - The outline is drawn `outline_line_mm` wide and the lines between cells `cell_line_mm`, each
@@ -24,9 +27,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::Aabb2;
 use crate::cell::{self, Content, HAlign, PADDING_MM, Part, Source, Warning, check_text, is_snake_case};
-use crate::paper::{MAX_COORDINATE_MM, MAX_LINE_MM, MAX_SIDE_MM};
-use crate::{Aabb2, Vec2};
+use crate::paper::{Group, Item, MAX_COORDINATE_MM, MAX_LINE_MM, MAX_SIDE_MM, ObjectKind};
+use solidcore_record::{Loop2, Seg2, Vec2};
 
 /// The most rows a table may list, and the most overrides it may keep.
 pub const MAX_ROWS: usize = 10_000;
@@ -34,13 +38,15 @@ pub const MAX_ROWS: usize = 10_000;
 pub const MAX_COLUMNS: usize = 64;
 /// The most bytes of text a table and its rows may hold in all.
 pub const MAX_TEXT_BYTES: usize = 1 << 20;
-/// What a cell shows for a row field its row doesn't have.
-pub const MISSING: &str = "-";
+use crate::cell::MISSING;
 /// The distance between baselines, in cap heights: ISO 3098-0's line spacing.
 pub const LINE_PITCH: f64 = 10.0 / 7.0;
 /// The longest row key, row field key or field.
 const MAX_KEY_BYTES: usize = 256;
 const MAX_ROW_HEIGHT_MM: f64 = 1000.0;
+/// The row field that says how many balloons point at a parts list's row: for its editor alone, so
+/// no printed column reads it.
+pub const BALLOONED: &str = "ballooned";
 
 /// A sheet table's definition.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -81,6 +87,17 @@ pub struct Column {
     pub width_mm: Option<f64>,
     #[serde(default)]
     pub align: HAlign,
+    /// On paper. Saved only when it isn't.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub printed: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_yes(b: &bool) -> bool {
+    *b
 }
 
 /// The side of the table its heading is on.
@@ -226,6 +243,7 @@ impl Table {
     /// [`Self::validate`], giving the bytes of text the definition holds.
     fn check(&self) -> Result<Budget> {
         require(!self.columns.is_empty() && self.columns.len() <= MAX_COLUMNS, "a table has 1 to 64 columns")?;
+        require(self.columns.iter().any(|c| c.printed), "a table prints at least one column")?;
         require(self.overrides.len() <= MAX_ROWS, "a table keeps at most 10,000 overrides")?;
         require(self.filter.text.len() <= MAX_COLUMNS, "a table has at most 64 text filters")?;
         let height = self.row_height_mm;
@@ -244,6 +262,7 @@ impl Table {
                     Part::Text(text) => budget.add(text)?,
                     Part::Field { source, key, format } => {
                         require(*source == Source::Row, "a table's cells read their row")?;
+                        require(!(column.printed && key == BALLOONED), "the ballooned column is for the editor only: it isn't printed")?;
                         require(format.unit.is_none() && format.decimals.is_none(), "a row field is shown as the row gives it")?;
                         budget.add(key)?;
                     }
@@ -293,15 +312,16 @@ impl Table {
             }
         }
         let shown = self.shown(rows, &mut budget)?;
+        let columns: Vec<&Column> = self.columns.iter().filter(|c| c.printed).collect();
         let width = |text: &str| {
             let w = measure(text, self.cap_mm);
             require(w.is_finite() && w >= 0.0, "a measured text is finite and at least 0 mm wide").map(|()| w)
         };
         // Each column's left and right edge, from the left.
-        let insets = self.insets(self.columns.len());
-        let mut edges = Vec::with_capacity(self.columns.len());
+        let insets = self.insets(columns.len());
+        let mut edges = Vec::with_capacity(columns.len());
         let mut x = 0.0;
-        for (i, column) in self.columns.iter().enumerate() {
+        for (i, column) in columns.iter().enumerate() {
             let (left, right) = insets.get(i).copied().unwrap_or_default();
             let w = match column.width_mm {
                 Some(w) => w,
@@ -322,12 +342,12 @@ impl Table {
         // Each row's lines, from the heading, wrapped to its column.
         let pitch = self.cap_mm * LINE_PITCH;
         let mut wrapped: Vec<Vec<(Vec<String>, bool)>> = Vec::with_capacity(shown.len() + 1);
-        let heading: Vec<&str> = self.columns.iter().map(|c| c.heading.as_str()).collect();
+        let heading: Vec<&str> = columns.iter().map(|c| c.heading.as_str()).collect();
         for texts in std::iter::once(heading).chain(shown.iter().map(|(_, cells)| cells.iter().map(|c| c.text.as_str()).collect())) {
             let mut cells = Vec::with_capacity(texts.len());
             for (i, text) in texts.into_iter().enumerate() {
                 let ((x0, x1), (left, right)) = (edges.get(i).copied().unwrap_or_default(), insets.get(i).copied().unwrap_or_default());
-                let fitted = self.columns.get(i).is_some_and(|c| c.width_mm.is_none());
+                let fitted = columns.get(i).is_some_and(|c| c.width_mm.is_none());
                 let room = x1 - x0 - left - right - 2.0 * PADDING_MM;
                 cells.push(if fitted { (lines_of(text), false) } else { wrap(text, room, &width)? });
             }
@@ -358,8 +378,8 @@ impl Table {
             let h = heights.get(r).copied().unwrap_or_default();
             let rect = Aabb2 { min: Vec2::new(outline.min.x, y - h), max: Vec2::new(outline.max.x, y) };
             let (above, below) = (half(place == 0), half(place == last));
-            let mut cells = Vec::with_capacity(self.columns.len());
-            for (i, column) in self.columns.iter().enumerate() {
+            let mut cells = Vec::with_capacity(columns.len());
+            for (i, column) in columns.iter().enumerate() {
                 let ((x0, x1), (left, right)) = (edges.get(i).copied().unwrap_or_default(), insets.get(i).copied().unwrap_or_default());
                 let cell_rect = Aabb2 { min: Vec2::new(outline.min.x + x0, rect.min.y), max: Vec2::new(outline.min.x + x1, rect.max.y) };
                 let inside = Aabb2 { min: cell_rect.min + Vec2::new(left, below), max: cell_rect.max - Vec2::new(right, above) };
@@ -387,8 +407,8 @@ impl Table {
         Ok(TableLayout { outline, outline_line_mm: self.outline_line_mm, cell_line_mm: self.cell_line_mm, heading, rows: placed.collect() })
     }
 
-    /// The rows the filter lets through, in order, each with its cells' text, counted against the
-    /// budget before it is built.
+    /// The rows the filter lets through, in order, each with its printed cells' text (the filters
+    /// read every column), counted against the budget before it is built.
     fn shown<'r>(&self, rows: &'r [Row], budget: &mut Budget) -> Result<Vec<(&'r Row, Vec<Shown>)>> {
         let overrides: HashMap<(&str, &str), &str> = self.overrides.iter().map(|o| ((o.row.as_str(), o.column.as_str()), o.text.as_str())).collect();
         let filters: Vec<(Option<usize>, String)> =
@@ -419,7 +439,8 @@ impl Table {
             let passes =
                 |(i, needle): &(Option<usize>, String)| i.and_then(|i| cells.get(i)).is_some_and(|c| c.text.to_lowercase().contains(needle.as_str()));
             if filters.iter().all(passes) {
-                shown.push((row, cells));
+                let printed = cells.into_iter().zip(&self.columns).filter(|(_, c)| c.printed).map(|(cell, _)| cell).collect();
+                shown.push((row, printed));
             }
         }
         Ok(shown)
@@ -430,6 +451,31 @@ impl Table {
     fn insets(&self, columns: usize) -> Vec<(f64, f64)> {
         let half = |outline: bool| if outline { self.outline_line_mm } else { self.cell_line_mm } / 2.0;
         (0..columns).map(|i| (half(i == 0), half(i + 1 == columns))).collect()
+    }
+}
+
+impl TableLayout {
+    /// The table's lines as one paper group, the `kind` of object `object` is: the outline as a
+    /// closed stroke `outline_line_mm` wide, and a stroke `cell_line_mm` wide across the whole table
+    /// at each row boundary inside it and down the whole table at each column boundary. Each line is
+    /// drawn once, centred on its edge, on the layout's own corners. The cells' text isn't here yet.
+    pub fn paper(&self, object: u64, kind: ObjectKind) -> Group {
+        let Aabb2 { min, max } = self.outline;
+        let stroke = |path, closed, width_mm| Item::Stroke { path, closed, width_mm, pattern: None };
+        let line = |a, b| stroke(vec![Seg2::Line { a, b }], false, self.cell_line_mm);
+        let corners = [min, Vec2::new(max.x, min.y), max, Vec2::new(min.x, max.y)];
+        let mut items = vec![stroke(Loop2::polygon(&corners).segs, true, self.outline_line_mm)];
+        // Rows from the top: each one's lower edge is a boundary but the lowest's, the outline's.
+        let mut rows: Vec<&RowLayout> = std::iter::once(&self.heading).chain(&self.rows).collect();
+        rows.sort_by(|a, b| b.rect.max.y.total_cmp(&a.rect.max.y));
+        for row in rows.iter().take(rows.len().saturating_sub(1)) {
+            items.push(line(Vec2::new(min.x, row.rect.min.y), Vec2::new(max.x, row.rect.min.y)));
+        }
+        // Each column's right edge but the last's, the same in every row.
+        for cell in self.heading.cells.iter().take(self.heading.cells.len().saturating_sub(1)) {
+            items.push(line(Vec2::new(cell.rect.max.x, min.y), Vec2::new(cell.rect.max.x, max.y)));
+        }
+        Group { object, kind, items }
     }
 }
 

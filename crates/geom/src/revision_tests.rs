@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use super::*;
-use crate::Vec2;
+use solidcore_record::Vec2;
 
 /// A fresh id, as the design's random ids are: never one handed out before in this run.
 fn fresh() -> u64 {
@@ -18,54 +18,38 @@ fn add(record: &mut RevisionRecord, sheet: Option<u64>) -> Result<u64> {
 /// Adds a tag with a fresh id: its id.
 fn add_tag(record: &mut RevisionRecord, row: u64) -> Result<u64> {
     let id = fresh();
-    record.add_tag(row, id).map(|()| id)
+    record.add_tag(row, id, 77, [10.0, 20.0]).map(|()| id)
 }
 
 fn labels(record: &RevisionRecord) -> Vec<&str> {
     record.rows().iter().map(|r| r.revision.as_str()).collect()
 }
 
+/// Revisions are numbered, never lettered: 1, 2, 3, or from 0. A record in letters is refused.
 #[test]
-fn numbers_run_from_1_or_0_and_letters_skip_six() {
+fn revisions_are_numbered_from_1_or_0() {
     let mut record = RevisionRecord::default();
     for _ in 0..3 {
         add(&mut record, None).unwrap();
     }
     assert_eq!(labels(&record), ["1", "2", "3"]);
-    let mut zero = RevisionRecord { numbering: Numbering::Numbers { start: 0 }, ..RevisionRecord::default() };
+    let mut zero = RevisionRecord { numbering: Numbering { start: 0 }, ..RevisionRecord::default() };
     add(&mut zero, None).unwrap();
     add(&mut zero, None).unwrap();
     assert_eq!(labels(&zero), ["0", "1"]);
-    let mut lettered = RevisionRecord { numbering: Numbering::Letters, ..RevisionRecord::default() };
-    for _ in 0..22 {
-        add(&mut lettered, None).unwrap();
-    }
-    assert_eq!(labels(&lettered).concat(), "ABCDEFGHJKLMNPRTUVWYAAAB", "I, O, Q, S, X and Z skipped, then AA");
-    // Past AY comes BA; past YY, AAA.
-    for (n, label) in [(0, "A"), (19, "Y"), (20, "AA"), (39, "AY"), (40, "BA"), (419, "YY"), (420, "AAA")] {
-        assert_eq!(letters(n), label);
-        assert_eq!(letters_index(label), Some(n), "{label}");
-    }
-    for not in ["", "I", "A1", "Ä"] {
-        assert_eq!(letters_index(not), None, "{not:?}");
-    }
+    let lettered = serde_json::from_value::<RevisionRecord>(json!({"numbering": "letters", "rows": []}));
+    assert!(lettered.is_err());
 }
 
-/// An issued revision is never given out again: a typed lower-case letter counts as its capital,
-/// the lettering counts on past eight letters, and past `u64` nothing is given out.
+/// An issued revision is never given out again: the next follows the highest number, typed or
+/// given, and past `u64` nothing is given out.
 #[test]
 fn the_next_revision_is_never_one_given_out_before() {
-    let mut lettered = RevisionRecord { numbering: Numbering::Letters, ..RevisionRecord::default() };
-    let a = add(&mut lettered, None).unwrap();
-    assert_eq!(lettered.set(a, Field::Revision, "c").unwrap(), None);
-    add(&mut lettered, None).unwrap();
-    assert_eq!(labels(&lettered), ["c", "D"]);
-    lettered.set(a, Field::Revision, "YYYYYYYY").unwrap();
-    assert_eq!(lettered.next_revision(None).as_deref(), Some("AAAAAAAAA"));
-    lettered.set(a, Field::Revision, &letters(u64::MAX)).unwrap();
-    assert_eq!(letters_index(&letters(u64::MAX)), Some(u64::MAX));
-    assert_eq!(lettered.next_revision(None), None);
-    assert_eq!(add(&mut lettered, None).unwrap_err().0, "no revision follows the highest one");
+    let mut record = RevisionRecord::default();
+    let a = add(&mut record, None).unwrap();
+    record.set(a, Field::Revision, "7").unwrap();
+    add(&mut record, None).unwrap();
+    assert_eq!(labels(&record), ["7", "8"]);
     let mut numbered = RevisionRecord::default();
     let first = add(&mut numbered, None).unwrap();
     numbered.set(first, Field::Revision, &(u64::MAX - 1).to_string()).unwrap();
@@ -76,26 +60,23 @@ fn the_next_revision_is_never_one_given_out_before() {
 
 #[test]
 fn a_row_is_added_with_its_revision_only_and_typed_text_is_kept() {
-    let mut record = RevisionRecord { numbering: Numbering::Letters, ..RevisionRecord::default() };
+    let mut record = RevisionRecord::default();
     let a = add(&mut record, None).unwrap();
     let row = &record.rows()[0];
     assert_eq!(
         (row.revision.as_str(), row.description.as_str(), row.designer.as_str(), row.checker.as_str(), row.date.as_str()),
-        ("A", "", "", "", "")
+        ("1", "", "", "", "")
     );
-    assert_eq!(record.set(a, Field::Description, "First issue\nfor tender").unwrap(), None);
-    assert_eq!(record.set(a, Field::Checker, "J. Smith").unwrap(), None, "a skipped letter outside the revision is no matter");
-    // A typed revision is kept; one with a skipped letter is warned about, and the next follows it.
-    assert_eq!(record.set(a, Field::Revision, "C").unwrap(), None);
-    let b = add(&mut record, None).unwrap();
-    assert_eq!(record.rows()[1].revision, "D");
-    assert_eq!(record.set(b, Field::Revision, "I").unwrap(), Some(SkippedLetter('I')));
-    assert_eq!(record.set(b, Field::Revision, "o").unwrap(), Some(SkippedLetter('o')));
-    assert_eq!(record.rows()[1].revision, "o");
-    // Numbers don't warn about letters, and typed text that isn't a number doesn't move the next one.
+    record.set(a, Field::Description, "First issue\nfor tender").unwrap();
+    record.set(a, Field::Checker, "J. Smith").unwrap();
+    // A typed revision is kept, and the next follows it.
+    record.set(a, Field::Revision, "3").unwrap();
+    add(&mut record, None).unwrap();
+    assert_eq!(record.rows()[1].revision, "4");
+    // Typed text that isn't a number is kept, and doesn't move the next one.
     let mut numbered = RevisionRecord::default();
     let first = add(&mut numbered, None).unwrap();
-    assert_eq!(numbered.set(first, Field::Revision, "Issue 1").unwrap(), None);
+    numbered.set(first, Field::Revision, "Issue 1").unwrap();
     add(&mut numbered, None).unwrap();
     assert_eq!(numbered.rows()[1].revision, "1");
     for (field, text, message) in [
@@ -136,7 +117,7 @@ fn hiding_and_deleting_keep_the_issued_history() {
     for taken in [one, two, tag] {
         assert_eq!(record.add(None, taken), Err(Invalid("that id is taken")), "{taken}");
     }
-    assert_eq!(record.add_tag(one, tag), Err(Invalid("that id is taken")));
+    assert_eq!(record.add_tag(one, tag, 77, [0.0, 0.0]), Err(Invalid("that id is taken")));
     assert_eq!(record.delete(two), Err(Invalid("no row has that id")));
     assert_eq!(record.issue(two, None), Err(Invalid("no row has that id")));
 }
@@ -211,28 +192,40 @@ fn a_record_per_sheet_numbers_each_sheet_apart() {
 
 #[test]
 fn a_record_round_trips_through_json_and_damaged_ones_are_refused() {
-    let mut record = RevisionRecord { numbering: Numbering::Letters, ..RevisionRecord::default() };
+    let mut record = RevisionRecord { numbering: Numbering { start: 0 }, ..RevisionRecord::default() };
     let a = add(&mut record, None).unwrap();
+    let b = add(&mut record, None).unwrap();
+    let version = |change: &str| ModelVersion { path: "parts/bracket.solidcraft".into(), change: change.into() };
     record.issue(a, None).unwrap();
-    record.issue(a, Some("3f2a9c1e")).unwrap();
+    record.issue(b, Some(version("3f2a9c1e"))).unwrap();
     add_tag(&mut record, a).unwrap();
     // The issued copies keep the model version they were issued against; the row has none.
-    let versions: Vec<_> = record.issued().iter().map(|r| r.model_version.as_deref()).collect();
-    assert_eq!((versions, record.rows()[0].model_version.as_deref()), (vec![None, Some("3f2a9c1e")], None));
-    assert_eq!(record.issue(a, Some("x\ny")), Err(Invalid("a label is one line of at most 4096 bytes")));
+    let versions: Vec<_> = record.issued().iter().map(|r| r.model_version.clone()).collect();
+    assert_eq!((versions, record.rows()[1].model_version.clone()), (vec![None, Some(version("3f2a9c1e"))], None));
+    let c = add(&mut record, None).unwrap();
+    for bad in [version("x\ny"), ModelVersion { path: "x\ny".into(), change: "c".into() }] {
+        assert_eq!(record.issue(c, Some(bad)), Err(Invalid("a label is one line of at most 4096 bytes")));
+    }
     assert_eq!(record.issued().len(), 2, "a refused version issues nothing");
+    // Once for each row, and its copy is counted with it.
+    assert_eq!(record.issue(a, None), Err(Invalid("a row is issued once: make a new revision")));
+    assert_eq!(record.ids().filter(|id| *id == a).count(), 1);
+    record.delete(a).unwrap();
+    assert_eq!(record.ids().filter(|id| *id == a).count(), 1, "the copy keeps its id with its row gone");
+    // A tag still bound, beside the one that has lost its row and answers for it itself.
+    add_tag(&mut record, b).unwrap();
     let json = serde_json::to_value(&record).unwrap();
-    assert_eq!(json["numbering"], json!("letters"));
+    assert_eq!(json["numbering"], json!({"start": 0}));
     let id = json!(crate::ids::encode(a));
     assert_eq!(
-        (&json["rows"][0]["id"], &json["tags"][0]["row"], &json["rows"][0]["sheet"]),
+        (&json["issued"][0]["id"], &json["tags"][0]["row"], &json["issued"][0]["sheet"]),
         (&id, &id, &json!(null)),
         "ids as every drawing writes them"
     );
     let back: RevisionRecord = serde_json::from_value(json.clone()).unwrap();
     assert_eq!(back, record);
     back.validate().unwrap();
-    assert_eq!(serde_json::to_value(RevisionRecord::default()).unwrap()["numbering"], json!({"numbers": {"start": 1}}));
+    assert_eq!(serde_json::to_value(RevisionRecord::default()).unwrap()["numbering"], json!({"start": 1}));
     for path in ["", "/rows/0", "/issued/0", "/tags/0"] {
         let mut bad = json.clone();
         bad.pointer_mut(path).unwrap().as_object_mut().unwrap().insert("colour".into(), json!(1));
@@ -245,21 +238,21 @@ fn a_record_round_trips_through_json_and_damaged_ones_are_refused() {
     };
     let ids = "each row and tag has its own id";
     for (change, message) in [
-        (
-            &(|v: &mut serde_json::Value| v["numbering"] = json!({"numbers": {"start": 2}})) as &dyn Fn(&mut serde_json::Value),
-            "numbers start at 0 or 1",
-        ),
+        (&(|v: &mut serde_json::Value| v["numbering"] = json!({"start": 2})) as &dyn Fn(&mut serde_json::Value), "numbers start at 0 or 1"),
         (&|v| v["tags"][0]["id"] = v["rows"][0]["id"].clone(), ids),
         (&|v| v["rows"] = json!([v["rows"][0], v["rows"][0]]), ids),
         (&|v| v["rows"][0]["sheet"] = json!(crate::ids::encode(3)), "a row has a sheet when the record is kept per sheet, and only then"),
         (&|v| v["tags"][0]["size_mm"] = json!(0.5), "a tag's side is 1 to 50 mm"),
         (&|v| v["tags"][0]["size_mm"] = json!(50.001), "a tag's side is 1 to 50 mm"),
-        (&|v| v["tags"][0]["row"] = json!(crate::ids::encode(99)), "a tag is bound to a row"),
+        (&|v| v["tags"][0]["at"] = json!([6000.0, 0.0]), "a tag is on paper"),
+        (&|v| v["tags"][1]["row"] = json!(crate::ids::encode(99)), "a tag is bound to a row"),
         (&|v| v["rows"] = json!([]), "a tag is bound to a row"),
         (&|v| v["rows"][0]["revision"] = json!("A\nB"), "a label is one line of at most 4096 bytes"),
         (&|v| v["issued"][0]["date"] = json!("\u{1}"), "a cell's text has no control character but a line break"),
         (&|v| v["tags"][0]["text"] = json!("x\ny"), "a label is one line of at most 4096 bytes"),
-        (&|v| v["issued"][1]["model_version"] = json!("x\ny"), "a label is one line of at most 4096 bytes"),
+        (&|v| v["issued"][1]["model_version"]["change"] = json!("x\ny"), "a label is one line of at most 4096 bytes"),
+        (&|v| v["issued"][1]["id"] = v["issued"][0]["id"].clone(), "a row is issued once"),
+        (&|v| v["tags"][0]["id"] = v["issued"][1]["id"].clone(), "each row and tag has its own id"),
         (&|v| v["rows"] = json!(vec![json!({"id": crate::ids::encode(1), "revision": "A"}); 1001]), "a record has at most 1000 rows"),
     ] {
         assert_eq!(damaged(change), Err(Invalid(message)), "{message}");
@@ -276,10 +269,41 @@ fn the_caps_hold() {
     assert_eq!(record.rows().last().unwrap().revision, "1000");
     let first = record.rows()[0].id;
     for _ in 0..MAX_ISSUED {
-        record.issue(first, None).unwrap();
         add_tag(&mut record, first).unwrap();
     }
+    // The copies of rows long deleted, as a record that has lived a while holds them.
+    let mut json = serde_json::to_value(&record).unwrap();
+    let copy = |i: usize| json!({"id": crate::ids::encode(u64::MAX / 2 + i as u64), "revision": "1"});
+    json["issued"] = (0..MAX_ISSUED).map(copy).collect();
+    let mut record: RevisionRecord = serde_json::from_value(json).unwrap();
     assert_eq!(record.issue(first, None), Err(Invalid("a record's issued history holds at most 10,000 entries")));
     assert_eq!(add_tag(&mut record, first), Err(Invalid("a record has at most 10,000 tags")));
     record.validate().unwrap();
+}
+
+/// A tag's place, size and text keep their rules through an edit, which changes nothing when refused.
+#[test]
+fn a_tags_edit_keeps_its_rules() {
+    let mut record = RevisionRecord::default();
+    let row = add(&mut record, None).unwrap();
+    let tag = add_tag(&mut record, row).unwrap();
+    record.edit_tag(tag, |t| t.at = [100.0, 50.0]).unwrap();
+    assert_eq!(record.tags()[0].at, [100.0, 50.0]);
+    let before = record.clone();
+    for (bad, why) in [
+        (&(|t: &mut Tag| t.at = [f64::NAN, 0.0]) as &dyn Fn(&mut Tag), "a tag is on paper"),
+        (&|t: &mut Tag| t.at = [0.0, 5001.0], "a tag is on paper"),
+        (&|t: &mut Tag| t.sheet = 0, "a tag is on a sheet"),
+        (&|t: &mut Tag| t.size_mm = 0.5, "a tag's side is 1 to 50 mm"),
+        (&|t: &mut Tag| t.size_mm = f64::INFINITY, "a tag's side is 1 to 50 mm"),
+        (&|t: &mut Tag| t.text = Some("x\ny".into()), "a label is one line of at most 4096 bytes"),
+    ] {
+        assert_eq!(record.edit_tag(tag, |t| bad(t)), Err(Invalid(why)), "{why}");
+    }
+    assert_eq!(record, before);
+    assert_eq!(record.edit_tag(9, |_| ()), Err(Invalid("no tag has that id")));
+    assert_eq!(record.delete_tag(9), Err(Invalid("no tag has that id")));
+    assert_eq!(record.add_tag(row, fresh(), 77, [f64::INFINITY, 0.0]), Err(Invalid("a tag is on paper")));
+    record.delete_tag(tag).unwrap();
+    assert!(record.tags().is_empty());
 }

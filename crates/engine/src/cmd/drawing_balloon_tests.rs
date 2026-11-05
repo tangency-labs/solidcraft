@@ -9,7 +9,7 @@ use crate::schema::tests::conforms;
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     let reply = s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
     let schema = output_schema_for::<BalloonResult>();
-    assert!(conforms(schema.as_value(), schema.as_value(), &reply) || !matches!(id, ADD | INSPECT), "{id}: {reply}");
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply) || !matches!(id, ADD | INSPECT | REPAIR), "{id}: {reply}");
     reply
 }
 
@@ -38,7 +38,7 @@ fn placed() -> (Session, u64, [u64; 2]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), ..ViewOverrides::default() };
-    d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At([200.0, 150.0]), settings, reference_margin_mm: 0.0 })]);
+    d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At([200.0, 150.0]), settings, reference_shown_percent: 0.0 })]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
     (s, id, bracket)
@@ -191,6 +191,52 @@ fn a_balloon_on_a_piece_is_not_exact_until_the_edge_is_whole_again() {
     ends_at(&whole, [40.0, 0.0, 0.0]);
 }
 
+/// A fillet inside the Bracket takes the Box's bottom front edge a balloon points at: inspect says it
+/// is lost and lists leads. The one where the fillet meets the front, at z = 5, passed back as it
+/// stands, repairs it on its part: it reads ok with its arrow on that edge's middle, its id, place
+/// and part kept, as one undo step, and once it reads it isn't repaired again. Undone, it is lost.
+/// A corner, or an edge with a path of its own, is refused and changes nothing.
+#[test]
+fn a_lost_balloon_is_repaired_on_its_part() {
+    let (mut s, view, [component, bracket]) = placed();
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    let id = add(&mut s, view, bracket)["balloon"].clone();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "component.activate", json!({"component": component}));
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 0, 0]], "radius": 5, "body": "Box"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "drawing.open", drawing);
+    let lost = run(&mut s, INSPECT, json!({"balloon": id}));
+    assert_eq!(lost["status"], "lost", "{lost}");
+    let front = {
+        let state = s.model.state();
+        let mesh = state.body("Box").unwrap().mesh();
+        mesh.edges.iter().position(|line| line.iter().all(|p| p.y.abs() < 1e-6 && (p.z - 5.0).abs() < 1e-6)).unwrap()
+    };
+    let front = json!({"edge": {"body": "Box", "index": front}});
+    let pick = lost["candidates"].as_array().and_then(|c| c.iter().find(|c| **c == front)).cloned();
+    let pick = pick.unwrap_or_else(|| panic!("the fillet's front edge is a lead: {lost}"));
+    let (before, steps) = (saved(&s), s.undo.len());
+    let p = json!({"balloon": id, "pick": pick});
+    let repaired = run(&mut s, REPAIR, p.clone());
+    assert_eq!(repaired["status"], "ok", "{repaired}");
+    ends_at(&repaired, [40.0, 0.0, 5.0]);
+    assert_eq!((&repaired["balloon"], &repaired["record"]["at"], &repaired["occurrence"]), (&id, &json!([60.0, 40.0]), &json!([bracket])));
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+    assert!(refused(&mut s, REPAIR, p).contains("it reads ok"));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(saved(&s), before);
+    assert_eq!(run(&mut s, INSPECT, json!({"balloon": id}))["status"], "lost");
+    for (pick, why) in [
+        (json!({"corner": [40, 0, 5]}), "this reference is an edge"),
+        (json!({"edge": {"point": [40, 0, 5], "path": [bracket]}}), "a repair's pick has no `path`"),
+    ] {
+        let e = refused(&mut s, REPAIR, json!({"balloon": id, "pick": pick}));
+        assert!(e.contains(why), "{e}");
+    }
+    assert_eq!((saved(&s), s.undo.len()), (before, steps));
+}
+
 /// Every place a value can go in `v`, as JSON pointers: `v` itself, then each member and item.
 fn places(v: &Value, at: String, out: &mut Vec<String>) {
     out.push(at.clone());
@@ -213,6 +259,7 @@ fn hostile_balloon_params_never_panic() {
         (ADD, json!({"view": v, "edge": {"body": "Box", "index": 0, "path": [bracket]}, "at": [1, 2]})),
         (EDIT, json!({"balloon": id, "set": {"at": [3, 4]}})),
         (INSPECT, json!({"balloon": id})),
+        (REPAIR, json!({"balloon": id, "pick": {"edge": {"body": "Box", "index": 0}}})),
     ];
     let mut values = crate::tests::hostile_values();
     values.extend([json!({"body": "Box", "index": u64::MAX}), Value::Array(vec![json!(1); 1000]), json!([1e308, 0]), json!("x".repeat(600))]);
@@ -265,4 +312,174 @@ fn balloons_go_with_their_view_when_it_is_copied_and_with_its_sheet() {
         run(&mut s, "edit.undo", json!({}));
     }
     assert_eq!(saved(&s), before);
+}
+
+/// A parts list on the drawing's first sheet: its id.
+fn list(s: &mut Session, set: Value) -> String {
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let reply = s.execute("drawing.table.add", &json!({"sheet": sheet, "kind": "parts_list", "set": set})).unwrap();
+    reply["table"].as_str().unwrap().to_string()
+}
+
+fn read(s: &mut Session, balloon: &str) -> Value {
+    run(s, INSPECT, json!({"balloon": balloon}))
+}
+
+/// A balloon with no list says so, and reads the only one when there is one: the row its part is
+/// counted in. Two lists leave it to choose, with the choices listed, until it names one. A list's
+/// delete reports the balloon that named it and leaves the balloon. One undo step each.
+#[test]
+fn a_balloon_reads_its_row_in_a_parts_list() {
+    let (mut s, view, [_, occurrence]) = placed();
+    let balloon = add(&mut s, view, occurrence)["balloon"].as_str().unwrap().to_string();
+    let alone = read(&mut s, &balloon);
+    assert_eq!((&alone["row_status"], alone.get("item"), alone.get("parts_list")), (&json!("no_list"), None, None), "{alone}");
+
+    let first = list(&mut s, json!({}));
+    let read1 = read(&mut s, &balloon);
+    assert_eq!((&read1["row_status"], &read1["item"], &read1["parts_list"]), (&json!("ok"), &json!("1"), &json!(first)), "{read1}");
+    assert!(s.drawing("test").unwrap().balloons.by_id(ids::decode(&balloon).unwrap()).unwrap().parts_list.is_none(), "worked out, not saved");
+
+    let second = list(&mut s, json!({"list": {"levels": "top"}}));
+    let both = read(&mut s, &balloon);
+    assert_eq!(both["row_status"], json!("no_list"), "{both}");
+    assert_eq!(both["choices"].as_array().map(Vec::len), Some(2));
+
+    let steps = s.undo.len();
+    let named = run(&mut s, EDIT, json!({"balloon": balloon, "set": {"parts_list": second}}));
+    assert_eq!((&named["changed"], s.undo.len()), (&json!(["parts_list"]), steps + 1), "{named}");
+    assert_eq!(read(&mut s, &balloon)["parts_list"], json!(second));
+    run(&mut s, EDIT, json!({"balloon": balloon, "set": {"parts_list": second}}));
+    assert_eq!(s.undo.len(), steps + 1, "nothing changed, no step");
+    assert!(refused(&mut s, EDIT, json!({"balloon": balloon, "set": {"parts_list": ids::encode(99)}})).contains("parts lists"));
+
+    let gone = s.execute("drawing.table.delete", &json!({"table": second})).unwrap();
+    assert_eq!(gone["balloons"], json!([balloon]), "{gone}");
+    assert_eq!(read(&mut s, &balloon)["parts_list"], json!(first), "the only one left");
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(read(&mut s, &balloon)["parts_list"], json!(second), "the undo brings its link back");
+    run(&mut s, EDIT, json!({"balloon": balloon, "set": {"parts_list": null}}));
+    assert_eq!(read(&mut s, &balloon)["row_status"], json!("no_list"));
+
+    let on_add = run(
+        &mut s,
+        ADD,
+        json!({"view": ids::encode(view), "edge": {"point": [40, 0, 0], "path": [occurrence]}, "at": [60, 40], "parts_list": first}),
+    );
+    assert_eq!(on_add["parts_list"], json!(first), "{on_add}");
+    refused(&mut s, ADD, json!({"view": ids::encode(view), "edge": {"point": [40, 0, 0], "path": [occurrence]}, "at": [60, 40], "parts_list": "x"}));
+}
+
+/// A balloon follows its row: renumbered, it shows the new number. What the model does to the row
+/// says what became of it, and never removes the balloon; undoing brings the number back.
+#[test]
+fn a_balloon_follows_its_row_through_the_model() {
+    let (mut s, view, [component, occurrence]) = placed();
+    let balloon = add(&mut s, view, occurrence)["balloon"].as_str().unwrap().to_string();
+    list(&mut s, json!({}));
+    assert_eq!(read(&mut s, &balloon)["item"], json!("1"));
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    let with_drawing_closed = |s: &mut Session, id: &str, p: Value| {
+        s.execute("drawing.close", &json!({})).unwrap();
+        s.execute(id, &p).unwrap();
+        s.execute("drawing.open", &json!({"drawing": drawing})).unwrap();
+    };
+
+    with_drawing_closed(&mut s, "assembly.bom.renumber", json!({"levels": "flat", "start": 7}));
+    assert_eq!(read(&mut s, &balloon)["item"], json!("7"), "renumbered");
+
+    with_drawing_closed(&mut s, "occurrence.bom_type", json!({"occurrence": occurrence, "bom_type": "reference"}));
+    let reference = read(&mut s, &balloon);
+    assert_eq!((&reference["row_status"], reference.get("item")), (&json!("reference"), None), "{reference}");
+    assert!(reference["warnings"][0].as_str().is_some_and(|w| w.contains("reference")), "{reference}");
+    with_drawing_closed(&mut s, "edit.undo", json!({}));
+    assert_eq!(read(&mut s, &balloon)["item"], json!("7"), "undone");
+
+    with_drawing_closed(&mut s, "occurrence.bom_type", json!({"occurrence": occurrence, "bom_type": "phantom"}));
+    assert_eq!(read(&mut s, &balloon)["row_status"], json!("ok"), "a phantom's own bodies are a row of their own");
+    with_drawing_closed(&mut s, "edit.undo", json!({}));
+
+    with_drawing_closed(&mut s, "component.delete", json!({"component": component}));
+    let deleted = read(&mut s, &balloon);
+    assert_eq!(deleted["row_status"], json!("not_found"), "{deleted}");
+    assert_eq!(s.drawing("test").unwrap().balloons.len(), 1, "the balloon stays");
+    with_drawing_closed(&mut s, "edit.undo", json!({}));
+    assert_eq!(read(&mut s, &balloon)["item"], json!("7"), "the part back, its number back");
+}
+
+/// How many balloons point at each row of each parts list, as `drawing.inspect` gives them, by the
+/// list's id.
+fn ballooned(s: &mut Session) -> Vec<(String, Vec<(String, u64)>)> {
+    let inspected = s.execute("drawing.inspect", &json!({})).unwrap();
+    let rows = |list: &Value| -> Vec<(String, u64)> {
+        list["ballooned"].as_array().unwrap().iter().map(|r| (r["item"].as_str().unwrap().into(), r["balloons"].as_u64().unwrap())).collect()
+    };
+    let lists = inspected["parts_lists"].as_array().unwrap();
+    let mut by_id: Vec<_> = lists.iter().map(|list| (list["table"].as_str().unwrap().into(), rows(list))).collect();
+    by_id.sort();
+    by_id
+}
+
+/// Each row of a parts list counts the balloons that read it, 0 included, in the list's order: a
+/// balloon reading another list, or none while two are on the sheet, counts for none, as does one
+/// whose part is gone. Worked out on each read and never saved.
+#[test]
+fn a_parts_list_counts_the_balloons_on_each_row() {
+    let (mut s, view, [component, occurrence]) = placed();
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    let with_drawing_closed = |s: &mut Session, id: &str, p: Value| {
+        s.execute("drawing.close", &json!({})).unwrap();
+        let reply = s.execute(id, &p).unwrap();
+        s.execute("drawing.open", &json!({"drawing": drawing})).unwrap();
+        reply
+    };
+    // A 10 mm pin of its own at x = 100, below the Bracket in the list.
+    let pin = with_drawing_closed(&mut s, "component.create", json!({"name": "Pin"}));
+    with_drawing_closed(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "body_name": "Pin"}));
+    let pin = pin["occurrence"].as_u64().unwrap();
+    let first = list(&mut s, json!({}));
+    let rows = |counts: [u64; 2]| vec![(first.clone(), vec![("1".to_string(), counts[0]), ("2".to_string(), counts[1])])];
+    assert_eq!(ballooned(&mut s), rows([0, 0]), "every row, none ballooned");
+
+    let on_bracket = add(&mut s, view, occurrence)["balloon"].as_str().unwrap().to_string();
+    assert_eq!(ballooned(&mut s), rows([1, 0]));
+    add(&mut s, view, occurrence);
+    assert_eq!(ballooned(&mut s), rows([2, 0]), "two on one row");
+    run(&mut s, ADD, json!({"view": ids::encode(view), "edge": {"point": [105, 0, 0], "path": [pin]}, "at": [-60, 40]}));
+    assert_eq!(ballooned(&mut s), rows([2, 1]));
+
+    let second = list(&mut s, json!({}));
+    let two = ballooned(&mut s);
+    assert_eq!(two.iter().map(|(_, r)| r.iter().map(|(_, n)| n).sum::<u64>()).collect::<Vec<_>>(), [0, 0], "none names a list: none counts");
+    run(&mut s, EDIT, json!({"balloon": on_bracket, "set": {"parts_list": second}}));
+    let mut named =
+        vec![(first.clone(), vec![("1".to_string(), 0), ("2".to_string(), 0)]), (second.clone(), vec![("1".to_string(), 1), ("2".to_string(), 0)])];
+    named.sort();
+    assert_eq!(ballooned(&mut s), named, "it counts on the list it names alone");
+    s.execute("drawing.table.delete", &json!({"table": first})).unwrap();
+    assert_eq!(ballooned(&mut s), vec![(second.clone(), vec![("1".to_string(), 2), ("2".to_string(), 1)])], "the only list again");
+
+    with_drawing_closed(&mut s, "component.delete", json!({"component": component}));
+    assert_eq!(
+        ballooned(&mut s),
+        vec![(second.clone(), vec![("2".to_string(), 1)])],
+        "the Bracket's balloons count for no row; the Pin keeps its number"
+    );
+    with_drawing_closed(&mut s, "assembly.bom.renumber", json!({"levels": "flat", "start": 1}));
+    assert_eq!(ballooned(&mut s), vec![(second, vec![("1".to_string(), 1)])], "nor for the row that takes the Bracket's number");
+}
+
+/// A list of the component the balloon's part is in reads it below that component; a list of the
+/// component a balloon's path doesn't run through, or one deleted since, finds nothing.
+#[test]
+fn a_balloon_reads_a_components_list_below_it() {
+    let (mut s, view, [component, occurrence]) = placed();
+    let balloon = add(&mut s, view, occurrence)["balloon"].as_str().unwrap().to_string();
+    list(&mut s, json!({"list": {"component": component}}));
+    assert_eq!(read(&mut s, &balloon)["row_status"], json!("no_row"), "the assembly listed has no row");
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    s.execute("drawing.close", &json!({})).unwrap();
+    s.execute("component.delete", &json!({"component": component})).unwrap();
+    s.execute("drawing.open", &json!({"drawing": drawing})).unwrap();
+    assert_eq!(read(&mut s, &balloon)["row_status"], json!("not_found"));
 }

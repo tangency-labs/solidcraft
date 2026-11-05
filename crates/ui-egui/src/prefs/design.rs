@@ -3,152 +3,257 @@ use super::*;
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    ui_kit::settings_heading(ui, app.tr("prefs.design"), app.tr("prefs.design_note"));
-    ui_kit::settings_section(ui, "units", app.tr("prefs.units_precision"), |ui| {
-        ui_kit::settings_form(ui, t.space_24 * 7.0 + t.space_2, |ui| {
-            ui_kit::row(ui, app.tr("ui.units_of_new_designs"), |ui| {
-                let mut selected = UNITS.iter().position(|u| *u == app.preferences.default_units).unwrap_or(0);
-                ui_kit::segmented(ui, &mut selected, UNITS, ui_kit::Segments { intrinsic: true, ..Default::default() });
-                if let Some(unit) = UNITS.get(selected)
-                    && app.preferences.default_units != *unit
-                {
-                    app.preferences.default_units = (*unit).into();
-                    default_units_changed(app);
-                }
+    let label_width = [
+        "ui.units_of_new_designs",
+        "ui.length_decimals",
+        "ui.angle_decimals",
+        "prefs.parameter_list_rows",
+        "prefs.origin_plane_names",
+        "prefs.stand_up_unknown",
+    ]
+    .into_iter()
+    .map(|id| ui_kit::ContentWidth::label(ui, app.tr(id)))
+    .fold(0.0, f32::max)
+        + t.space_16
+        + t.space_4;
+    ui_kit::settings_page(ui, |ui| {
+        ui_kit::settings_heading(ui, app.tr("prefs.design"), app.tr("prefs.design_note"));
+        ui_kit::settings_section(ui, "units", app.tr("prefs.units_precision"), |ui| {
+            ui_kit::settings_form(ui, label_width, |ui| {
+                ui_kit::row(ui, app.tr("ui.units_of_new_designs"), |ui| {
+                    let mut selected = UNITS.iter().position(|u| *u == app.preferences.default_units).unwrap_or(0);
+                    ui_kit::segmented(
+                        ui,
+                        &mut selected,
+                        UNITS,
+                        ui_kit::Segments {
+                            intrinsic: true,
+                            targets: &[
+                                "prefs:default_units:mm",
+                                "prefs:default_units:cm",
+                                "prefs:default_units:m",
+                                "prefs:default_units:in",
+                                "prefs:default_units:ft",
+                            ],
+                            ..Default::default()
+                        },
+                    );
+                    if let Some(unit) = UNITS.get(selected)
+                        && app.preferences.default_units != *unit
+                    {
+                        app.preferences.default_units = (*unit).into();
+                        default_units_changed(app);
+                    }
+                });
+                ui_kit::row(ui, app.tr("ui.length_decimals"), |ui| {
+                    ui.scope(|ui| {
+                        ui.spacing_mut().interact_size.x = t.space_24 * 2.0 + t.space_8;
+                        let response = ui_kit::number_field(ui, &mut app.preferences.length_decimals, 0..=6, 1.0, "");
+                        crate::scenario::publish_target("prefs:length_decimals", response.rect);
+                    });
+                    ui.add_space(t.space_6);
+                    let sample = format_length(
+                        12.5 * unit_scale(&app.preferences.default_units).0,
+                        &app.preferences.default_units,
+                        app.preferences.length_decimals,
+                    );
+                    ui_kit::settings_precision_sample(ui, &sample);
+                });
+                ui_kit::row(ui, app.tr("ui.angle_decimals"), |ui| {
+                    ui.scope(|ui| {
+                        ui.spacing_mut().interact_size.x = t.space_24 * 2.0 + t.space_8;
+                        let response = ui_kit::number_field(ui, &mut app.preferences.angle_decimals, 0..=6, 1.0, "");
+                        crate::scenario::publish_target("prefs:angle_decimals", response.rect);
+                    });
+                    ui.add_space(t.space_6);
+                    ui_kit::settings_precision_sample(ui, &format!("{:.*}°", usize::from(app.preferences.angle_decimals.min(6)), 45.0));
+                });
+                ui_kit::settings_row_help(ui, app.tr("prefs.parameter_list_rows"), app.tr("prefs.parameter_list_rows_tip"), |ui| {
+                    let response = ui_kit::named_control(ui, app.tr("prefs.design_tools.rows"), |ui| {
+                        ui_kit::settings_number(ui, &mut app.preferences.parameter_list_rows, PARAMETER_LIST_ROWS, 1.0)
+                    });
+                    crate::scenario::publish_target("prefs:parameter_list_rows", response.rect);
+                    crate::scenario::publish_target(&format!("dialog:{}", app.tr("prefs.parameter_list_rows")), response.rect);
+                });
             });
-            ui_kit::row(ui, app.tr("ui.length_decimals"), |ui| {
-                ui_kit::settings_number(ui, &mut app.preferences.length_decimals, 0..=6, 1.0);
-                ui.add_space(t.space_6);
-                let sample = format_length(
-                    12.5 * unit_scale(&app.preferences.default_units).0,
-                    &app.preferences.default_units,
-                    app.preferences.length_decimals,
-                );
-                ui_kit::settings_precision_sample(ui, &sample);
-            });
-            ui_kit::row(ui, app.tr("ui.angle_decimals"), |ui| {
-                ui_kit::settings_number(ui, &mut app.preferences.angle_decimals, 0..=6, 1.0);
-                ui.add_space(t.space_6);
-                ui_kit::settings_precision_sample(ui, &format!("{:.*}°", usize::from(app.preferences.angle_decimals.min(6)), 45.0));
-            });
-        });
-        let tip = app.tr("ui.step_values_tip").to_string();
-        let step = setting::step_values(app, ui).on_hover_text(tip);
-        crate::scenario::publish_handle("prefs:step_values", step.rect.center());
-    });
-    ui_kit::settings_section(ui, "drawings", app.tr("prefs.drawings"), |ui| {
-        ui_kit::settings_form(ui, t.space_24 * 7.0 + t.space_2, |ui| {
-            ui_kit::row(ui, app.tr("ui.projection_of_new_drawings"), |ui| {
-                let projections = [Projection::First, Projection::Third];
-                let labels = [app.tr("ui.first_angle"), app.tr("ui.third_angle")];
-                let mut selected = projections.iter().position(|p| *p == app.preferences.default_projection).unwrap_or(1);
-                ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() });
-                if let Some(projection) = projections.get(selected) {
-                    app.preferences.default_projection = *projection;
-                }
-            });
-        });
-    });
-    ui_kit::settings_section(ui, "orientation", app.tr("prefs.orientation"), |ui| {
-        ui.horizontal_wrapped(|ui| {
-            for (id, label, y_up) in [("z", "Z up", false), ("y", "Y up", true)] {
-                let subtitle = Some(if id == "z" { app.tr("prefs.default") } else { "" });
-                if ui_kit::option_card(ui, app.tr_label(label), subtitle, app.preferences.up_axis == id, true, ui_kit::PreferenceFigure::UpAxis(y_up))
-                    .clicked()
-                {
-                    app.preferences.up_axis = id.into();
-                }
+            for (setting, help, target, legacy) in [
+                (
+                    setting::step_values as fn(&mut SolveApp, &mut egui::Ui) -> egui::Response,
+                    "ui.step_values_tip",
+                    "step_values",
+                    "Step values with the arrow keys and the wheel",
+                ),
+                (
+                    setting::value_boxes_in_view,
+                    "prefs.value_boxes_in_view_tip",
+                    "value_boxes_in_view",
+                    "Show values beside their handles in the view",
+                ),
+            ] {
+                ui.horizontal_wrapped(|ui| {
+                    let response = setting(app, ui).backing_on_hover_text(app.tr(help));
+                    crate::scenario::publish_target(&format!("prefs:{target}"), response.rect);
+                    crate::scenario::publish_target(&format!("dialog:{legacy}"), response.rect);
+                    if !crate::prefs_search::suppress_chrome(ui) {
+                        ui_kit::help_icon(ui, app.tr(help));
+                    }
+                });
             }
         });
-        ui_kit::text(
-            ui,
-            crate::i18n::tr_label("Which axis points up in the views (axis view, Home, Look At). Designs are unchanged."),
-            ui_kit::Text::Hint("orientation"),
-        );
-        setting::offer_stand_up(app, ui);
-        ui_kit::text(ui, app.tr("prefs.stand_up_note"), ui_kit::Text::Hint("stand_up"));
-        // How a file from a program not known to save Y up is offered (#7717).
-        let offered = app.preferences.offer_stand_up;
-        ui_kit::settings_block_hint(
-            ui,
-            app.tr("prefs.stand_up_unknown"),
-            app.tr("prefs.stand_up_unknown_note"),
-            t.space_24 * 8.0 + t.space_8,
-            |ui| {
-                ui.add_enabled_ui(offered, |ui| {
-                    let unknown = &mut app.preferences.stand_up_unknown;
-                    ui_kit::settings_control_width(ui, t.space_24 * 7.0 + t.space_12, |ui| {
-                        ui_kit::dropdown_menu(ui, "pref_stand_up_unknown", crate::i18n::tr(unknown.label_id()), |ui| {
-                            for choice in StandUpUnknown::ALL {
-                                if ui_kit::list_picker(ui, choice.label_id(), crate::i18n::tr(choice.label_id()), *unknown == choice).clicked() {
-                                    *unknown = choice;
+        // When SMLib's full check runs while features are computed (`diagnostics.validation`).
+        ui_kit::settings_section(ui, "validation", app.tr("prefs.validation"), |ui| {
+            use solidcraft_engine::kernel::Validation;
+            let label = |v: &Validation| match v {
+                Validation::EachStep => "prefs.validation.each_step",
+                Validation::EachFeature => "prefs.validation.each_feature",
+                Validation::Off => "prefs.validation.off",
+            };
+            let labels: Vec<String> = Validation::ALL.iter().map(|v| app.tr(label(v)).to_string()).collect();
+            let options: Vec<&str> = labels.iter().map(String::as_str).collect();
+            let mut selected = Validation::ALL.iter().position(|v| *v == app.preferences.validation).unwrap_or(1);
+            ui_kit::row(ui, app.tr("prefs.validation.label"), |ui| {
+                ui_kit::segmented(ui, &mut selected, &options, ui_kit::Segments { intrinsic: true, ..Default::default() });
+            });
+            if let Some(v) = Validation::ALL.get(selected) {
+                app.preferences.validation = *v;
+            }
+            ui_kit::text(ui, app.tr("prefs.validation_note"), ui_kit::Text::Hint("validation"));
+        });
+        ui_kit::settings_section(ui, "drawings", app.tr("prefs.drawings"), |ui| {
+            ui_kit::settings_form(ui, t.space_24 * 7.0 + t.space_2, |ui| {
+                ui_kit::row(ui, app.tr("ui.projection_of_new_drawings"), |ui| {
+                    let projections = [Projection::First, Projection::Third];
+                    let labels = [app.tr("ui.first_angle"), app.tr("ui.third_angle")];
+                    let mut selected = projections.iter().position(|p| *p == app.preferences.default_projection).unwrap_or(1);
+                    ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() });
+                    if let Some(projection) = projections.get(selected) {
+                        app.preferences.default_projection = *projection;
+                    }
+                });
+                // Each kind's built-ins, by size: the kind is the row's, so each shows its paper's title.
+                let p = &mut app.preferences;
+                for (label, id, chosen, assembly) in [
+                    ("ui.template_for_new_part_drawings", "pref_part_drawing_template", &mut p.part_drawing_template, false),
+                    ("ui.template_for_new_assembly_drawings", "pref_assembly_drawing_template", &mut p.assembly_drawing_template, true),
+                ] {
+                    let names: Vec<&str> = template::BUILT_INS.iter().copied().filter(|name| super::is_template_for(name, assembly)).collect();
+                    let titles: Vec<String> = names.iter().filter_map(|name| template::title(name)).collect();
+                    let titles: Vec<&str> = titles.iter().map(String::as_str).collect();
+                    ui_kit::row(ui, crate::i18n::tr(label), |ui| {
+                        let mut selected = names.iter().position(|name| *name == chosen.as_str()).unwrap_or(0);
+                        ui_kit::dropdown(ui, id, &mut selected, &titles);
+                        if let Some(name) = names.get(selected) {
+                            *chosen = (*name).to_string();
+                        }
+                    });
+                }
+            });
+        });
+        ui_kit::settings_section(ui, "orientation", app.tr("prefs.orientation"), |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = t.space_10;
+                for (id, label, y_up) in [("z", "Z up", false), ("y", "Y up", true)] {
+                    let subtitle = Some(if id == "z" { app.tr("prefs.default") } else { "" });
+                    let response = ui_kit::option_card(
+                        ui,
+                        app.tr_label(label),
+                        subtitle,
+                        app.preferences.up_axis == id,
+                        true,
+                        ui_kit::PreferenceFigure::UpAxis(y_up),
+                    );
+                    crate::scenario::publish_target(&format!("prefs:up_axis:{id}"), response.rect);
+                    if response.clicked() {
+                        app.preferences.up_axis = id.into();
+                    }
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                let response = setting::offer_stand_up(app, ui).backing_on_hover_text(app.tr("prefs.stand_up_note"));
+                crate::scenario::publish_target("prefs:offer_stand_up", response.rect);
+                if !crate::prefs_search::suppress_chrome(ui) {
+                    ui_kit::help_icon(ui, app.tr("prefs.stand_up_note"));
+                }
+            });
+        });
+        ui_kit::settings_section(ui, "imported_files", app.tr("prefs.design_tools.imported_files"), |ui| {
+            ui_kit::settings_form(ui, label_width, |ui| {
+                ui_kit::settings_row_help(ui, app.tr("prefs.stand_up_unknown"), app.tr("prefs.stand_up_unknown_note"), |ui| {
+                    let offered = app.preferences.offer_stand_up;
+                    ui.add_enabled_ui(offered, |ui| {
+                        ui_kit::settings_control_width(ui, t.space_24 * 8.0 + t.space_8, |ui| {
+                            let mut selected = StandUpUnknown::ALL.iter().position(|v| *v == app.preferences.stand_up_unknown).unwrap_or(1);
+                            let options = [app.tr("prefs.design_tools.ask"), app.tr("prefs.design_tools.note"), app.tr("prefs.design_tools.off")];
+                            let response = ui_kit::dropdown(ui, "pref_stand_up_unknown", &mut selected, &options);
+                            crate::scenario::publish_target("prefs:stand_up_unknown", response.rect);
+                            crate::scenario::publish_target("dialog:For files from unknown programs", response.rect);
+                            for (choice, option) in StandUpUnknown::ALL.iter().zip(options) {
+                                if let Some(rect) = crate::scenario::rect_of(&format!("dialog:{}:{option}", app.tr("prefs.stand_up_unknown"))) {
+                                    crate::scenario::publish_target(&format!("dialog:list:{}", choice.label_id()), rect);
                                 }
+                            }
+                            if let Some(choice) = StandUpUnknown::ALL.get(selected) {
+                                app.preferences.stand_up_unknown = *choice;
                             }
                         });
                     });
                 });
-            },
-        );
-        setting::extrude_auto_to_object(app, ui);
-        let auto = setting::auto_operation(app, ui);
-        crate::scenario::publish_handle("prefs:auto_operation", auto.rect.center());
-        ui_kit::text(ui, app.tr("prefs.auto_operation_note"), ui_kit::Text::Hint("auto_operation"));
-        setting::hide_origin(app, ui);
-        ui_kit::text(ui, app.tr("ui.hide_origin_note"), ui_kit::Text::Hint("hide_origin"));
-    });
-    ui_kit::settings_section(ui, "joint_move", app.tr("joint_move.settings"), |ui| {
-        setting::assembly_move_handles(app, ui);
-        ui_kit::text(ui, app.tr("joint_move.legacy_hint"), ui_kit::Text::Hint("joint_move_legacy"));
-        ui_kit::settings_form(ui, t.space_24 * 7.0 + t.space_2, |ui| {
-            ui_kit::row(ui, app.tr("joint_move.coarse"), |ui| {
-                ui_kit::settings_number(ui, &mut app.preferences.joint_rotation_coarse, 0.001..=180.0, 0.1);
-            });
-            ui_kit::row(ui, app.tr("joint_move.fine"), |ui| {
-                ui_kit::settings_number(ui, &mut app.preferences.joint_rotation_fine, 0.001..=180.0, 0.01);
             });
         });
-        ui_kit::text(ui, app.tr("joint_move.precision"), ui_kit::Text::Hint("joint_move"));
-    });
-    // The Hole command's own settings, under its name.
-    ui_kit::settings_section(ui, "create_hole", crate::i18n::tr_label("Create Hole"), |ui| {
-        setting::hole_snaps(app, ui);
-        ui_kit::text(
-            ui,
-            crate::i18n::tr_label("A Single hole snaps to the middle of its face and to the centres of its round edges"),
-            ui_kit::Text::Hint("hole_snaps"),
-        );
-        setting::hole_moves(app, ui);
-        ui_kit::text(
-            ui,
-            crate::i18n::tr_label(
-                "A placed Single hole has a handle to drag it, and picking its face again moves the hole there instead of taking it out",
-            ),
-            ui_kit::Text::Hint("hole_moves"),
-        );
-    });
-    ui_kit::settings_section(ui, "placement", app.tr("prefs.placement"), |ui| {
-        setting::placement_handles(app, ui);
-    });
-    ui_kit::settings_section(ui, "linked_designs", app.tr("prefs.linked_designs"), |ui| {
-        setting::update_changed_links(app, ui);
-        setting::double_click_components(app, ui);
-        setting::insert_lists_open_designs(app, ui);
-    });
-    // Where the files a design names may be: never a network location the user hasn't allowed.
-    ui_kit::settings_section(ui, "network_locations", app.tr("prefs.network_locations_section"), |ui| {
-        setting::network_locations(app, ui);
-        ui_kit::text(ui, app.tr("prefs.network_locations_note"), ui_kit::Text::Hint("network_locations"));
-        let mut remove = None;
-        for (i, host) in app.preferences.network_hosts.iter().enumerate() {
-            ui.horizontal(|ui| {
-                ui_kit::text(ui, &format!("\\\\{host}"), ui_kit::Text::Hint("network_host"));
-                if ui_kit::button(ui, app.tr("prefs.network_host_remove"), ui_kit::Button::Small).clicked() {
-                    remove = Some(i);
+        origin_plane_names(app, ui, label_width);
+        ui_kit::settings_section(ui, "linked_designs", app.tr("prefs.linked_designs"), |ui| {
+            let response = setting::update_changed_links(app, ui);
+            crate::scenario::publish_target("prefs:update_changed_links", response.rect);
+            crate::scenario::publish_target("dialog:Update changed linked designs when a tab comes back", response.rect);
+            ui.horizontal_wrapped(|ui| {
+                let response = setting::double_click_components(app, ui).backing_on_hover_text(app.tr("prefs.design_tools.double_click_help"));
+                crate::scenario::publish_target("prefs:double_click_components", response.rect);
+                crate::scenario::publish_target("dialog:Double-click a component to activate it, or to edit a linked one in place", response.rect);
+                if !crate::prefs_search::suppress_chrome(ui) {
+                    ui_kit::help_icon(ui, app.tr("prefs.design_tools.double_click_help"));
                 }
             });
-        }
-        if let Some(i) = remove.filter(|i| *i < app.preferences.network_hosts.len()) {
-            app.preferences.network_hosts.remove(i);
-        }
+            let response = setting::insert_lists_open_designs(app, ui);
+            crate::scenario::publish_target("prefs:insert_lists_open_designs", response.rect);
+            crate::scenario::publish_target("dialog:Insert Design lists the designs open in other tabs first", response.rect);
+        });
+    });
+}
+
+/// These choices change only displayed names; the saved plane IDs remain XY, XZ and YZ.
+fn origin_plane_names(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    ui_kit::settings_section(ui, "origin_plane_names", app.tr("ui.origin"), |ui| {
+        let choices: Vec<String> =
+            OriginPlaneNames::ALL.iter().map(|names| OriginPlaneNames::PLANES.map(|plane| names.label(plane)).join(" . ")).collect();
+        let options: Vec<&str> = choices.iter().map(String::as_str).collect();
+        ui_kit::settings_form(ui, label_width, |ui| {
+            ui_kit::row(ui, app.tr("prefs.origin_plane_names"), |ui| {
+                let mut selected = OriginPlaneNames::ALL.iter().position(|names| *names == app.preferences.origin_plane_names).unwrap_or(0);
+                if ui_kit::segmented(
+                    ui,
+                    &mut selected,
+                    &options,
+                    ui_kit::Segments {
+                        intrinsic: true,
+                        targets: &["prefs:origin_plane_names:xyz", "prefs:origin_plane_names:top_front_right"],
+                        ..Default::default()
+                    },
+                ) && let Some(names) = OriginPlaneNames::ALL.get(selected)
+                {
+                    app.preferences.origin_plane_names = *names;
+                }
+                for (choice, key) in choices.iter().zip(["xyz", "top_front_right"]) {
+                    if let Some(rect) = crate::scenario::rect_of(&format!("prefs:origin_plane_names:{key}")) {
+                        crate::scenario::publish_target(
+                            &format!("dialog:{}:{}", app.tr("prefs.origin_plane_names"), choice.replace(" . ", " / ")),
+                            rect,
+                        );
+                    }
+                }
+            });
+        });
+        let response = setting::hide_origin(app, ui);
+        crate::scenario::publish_target("prefs:hide_origin", response.rect);
+        crate::scenario::publish_target("dialog:Hide origin by default", response.rect);
     });
 }

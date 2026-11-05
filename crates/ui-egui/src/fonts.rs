@@ -1,10 +1,13 @@
 //! Bundled IBM Plex interface faces, user overrides, and language-specific system fallbacks
 //! (CJK, Hangul, Thai, Hebrew).
-//! The same definitions are used on desktop and web; the web shell adds Japanese on demand.
+//! The same definitions are used on desktop and web; the web shell adds Japanese and Chinese
+//! faces on demand.
 
 use std::sync::Arc;
 
 use egui::{FontDefinitions, FontFamily, FontId, RichText};
+#[cfg(not(target_arch = "wasm32"))]
+use solidcraft_engine::sketch::fallback;
 
 const PLEX_SANS: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf"));
 const PLEX_MONO: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf"));
@@ -171,13 +174,28 @@ pub fn with_symbol_fallback(mut fonts: egui::FontDefinitions) -> egui::FontDefin
     fonts
 }
 
-/// UI languages whose text needs the CJK font. The web app's bundled font covers Japanese only;
-/// add Chinese or Korean here together with a font that covers them.
+/// UI languages whose text needs a CJK script font on the web.
 pub const CJK_LANGUAGES: &[&str] = &["ja", "zh", "zh-TW", "ko"];
 
 /// Whether the UI language needs a CJK font (the web app fetches one only then).
 pub fn needs_cjk_font(language: &str) -> bool {
     CJK_LANGUAGES.contains(&language)
+}
+
+/// Whether the UI language needs the Simplified or Traditional Chinese web font (#8894).
+pub fn needs_chinese_font(language: &str) -> bool {
+    matches!(language, "zh" | "zh-TW")
+}
+
+/// Which on-demand web face a CJK UI language loads: `"zh"`, `"zh-TW"`, or `"ja"` (also for
+/// Korean until a Hangul face ships). `None` when the language uses only the bundled Latin faces.
+pub fn web_script_font_kind(language: &str) -> Option<&'static str> {
+    match language {
+        "zh" => Some("zh"),
+        "zh-TW" => Some("zh-TW"),
+        "ja" | "ko" => Some("ja"),
+        _ => None,
+    }
 }
 
 /// Whether `text` has characters only the CJK fallback draws: kana, CJK ideographs and their
@@ -245,19 +263,48 @@ fn promote_font_to_front(fonts: &mut FontDefinitions, name: &str) {
     }
 }
 
-/// Install the downloaded font with the CJK UI's shared mixed-script baseline.
+/// Install the downloaded Japanese font with the CJK UI's shared mixed-script baseline.
 pub fn install_cjk_font_for(ctx: &egui::Context, bytes: Vec<u8>, language: &str) -> bool {
-    let fonts = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap_or_else(base_font_definitions);
-    match with_cjk_fallback(fonts, bytes) {
-        Some(mut fonts) => {
-            if needs_cjk_font(language) {
-                promote_font_to_front(&mut fonts, CJK_FALLBACK);
-            }
-            install(ctx, fonts);
-            true
-        }
-        None => false,
+    install_web_script_fonts(ctx, Some(bytes), None, language)
+}
+
+/// Install the web shell's on-demand Japanese and/or Chinese faces, ordered for `language`.
+/// Returns false only when at least one byte blob was supplied and none of them parsed as a font.
+pub fn install_web_script_fonts(ctx: &egui::Context, cjk: Option<Vec<u8>>, chinese: Option<Vec<u8>>, language: &str) -> bool {
+    if cjk.is_none() && chinese.is_none() {
+        setup_fonts_for(ctx, language, "");
+        return true;
     }
+    let mut fonts = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap_or_else(base_font_definitions);
+    // Drop prior script faces so a language change can replace them without stacking duplicates.
+    for name in [CJK_FALLBACK, CHINESE_FALLBACK] {
+        fonts.font_data.remove(name);
+        for family in all_families() {
+            if let Some(list) = fonts.families.get_mut(&family) {
+                list.retain(|entry| entry != name);
+            }
+        }
+    }
+    let mut any = false;
+    for (name, bytes) in [(CJK_FALLBACK, cjk), (CHINESE_FALLBACK, chinese)] {
+        let Some(bytes) = bytes else { continue };
+        any = true;
+        if let Some(next) = with_fallback(fonts.clone(), name, bytes) {
+            fonts = next;
+        }
+    }
+    if any && !fonts.font_data.contains_key(CJK_FALLBACK) && !fonts.font_data.contains_key(CHINESE_FALLBACK) {
+        return false;
+    }
+    if needs_cjk_font(language)
+        && let Some(primary) = fallback_order(language)
+            .into_iter()
+            .find(|name| [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK].contains(name) && fonts.font_data.contains_key(*name))
+    {
+        promote_font_to_front(&mut fonts, primary);
+    }
+    install(ctx, fonts);
+    true
 }
 
 /// Lower-case file-name fragments that identify CJK fonts. Deliberately specific: generic
@@ -319,8 +366,8 @@ pub fn is_chinese_font_name(file_name: &str) -> bool {
     CHINESE_FONT_KEYWORDS.iter().any(|k| name.contains(k))
 }
 
-/// Session state of the web app's on-demand CJK font. Pure state so it can be tested off the web:
-/// the shell does the fetch when [`CjkFontLoader::tick`] asks for it.
+/// Session state of the web app's on-demand script fonts. Pure state so it can be tested off the
+/// web: the shell does the fetch when [`CjkFontLoader::tick`] asks for it.
 #[derive(Debug, Default)]
 pub struct CjkFontLoader {
     status: CjkFontStatus,
@@ -342,19 +389,29 @@ impl CjkFontLoader {
         self.status
     }
 
-    /// Called every frame with the live language. Returns true when the font fetch should start
-    /// now (only for a CJK language, only once). After a failed load a CJK language falls back to
-    /// English for this session; the saved preference is kept (see [`Self::persisted_language`]).
-    pub fn tick(&mut self, language: &mut String) -> bool {
+    /// Called every frame with the live language (a `system` preference resolves to its catalog
+    /// via [`crate::i18n::effective_language`]). `ready` is true when the shell already has the
+    /// on-demand face that language needs. Returns true when a fetch should start now. After a
+    /// failed load a CJK language falls back to English for this session; the saved preference is
+    /// kept (see [`Self::persisted_language`]). Switching to another CJK language that still needs
+    /// a face starts another fetch (#8894).
+    pub fn tick(&mut self, language: &mut String, ready: bool) -> bool {
         if self.saved_language.is_some() && language != "en" {
             // The user picked a language themselves since the fallback: that is the preference now.
             self.saved_language = None;
+            if self.status == CjkFontStatus::Failed {
+                self.status = CjkFontStatus::Unloaded;
+            }
         }
-        if !needs_cjk_font(language) {
+        if !needs_cjk_font(crate::i18n::effective_language(language)) {
+            return false;
+        }
+        if ready {
+            self.status = CjkFontStatus::Installed;
             return false;
         }
         match self.status {
-            CjkFontStatus::Unloaded => {
+            CjkFontStatus::Unloaded | CjkFontStatus::Installed => {
                 self.status = CjkFontStatus::Loading;
                 true
             }
@@ -362,12 +419,12 @@ impl CjkFontLoader {
                 self.fall_back(language);
                 false
             }
-            CjkFontStatus::Loading | CjkFontStatus::Installed => false,
+            CjkFontStatus::Loading => false,
         }
     }
 
-    /// CJK text is on screen (whatever the UI language). Returns true when the font fetch should
-    /// start now: once, and never again after a failed load (the UI language stays as it is).
+    /// CJK text is on screen (whatever the UI language). Returns true when the Japanese font fetch
+    /// should start now: once, and never again after a failed load (the UI language stays as it is).
     pub fn text_needs_font(&mut self) -> bool {
         if self.status == CjkFontStatus::Unloaded {
             self.status = CjkFontStatus::Loading;
@@ -382,13 +439,14 @@ impl CjkFontLoader {
         self.status == CjkFontStatus::Unloaded
     }
 
-    /// Record the outcome of the fetch and install.
+    /// Record the outcome of the fetch and install. A `system` preference resolves to its
+    /// catalog first ([`Self::tick`]).
     pub fn finished(&mut self, installed: bool, language: &mut String) {
         if installed {
             self.status = CjkFontStatus::Installed;
         } else {
             self.status = CjkFontStatus::Failed;
-            if needs_cjk_font(language) {
+            if needs_cjk_font(crate::i18n::effective_language(language)) {
                 self.fall_back(language);
             }
         }
@@ -403,163 +461,6 @@ impl CjkFontLoader {
         self.saved_language.as_deref().unwrap_or(live)
     }
 }
-
-/// Candidate font paths to look for on different operating systems.
-#[cfg(not(target_arch = "wasm32"))]
-const FONT_CANDIDATES: &[&str] = &[
-    // Windows
-    "C:\\Windows\\Fonts\\meiryo.ttc",
-    "C:\\Windows\\Fonts\\YuGothM.ttc",
-    "C:\\Windows\\Fonts\\YuGothR.ttc",
-    "C:\\Windows\\Fonts\\msgothic.ttc",
-    "C:\\Windows\\Fonts\\BIZ-UDGothicR.ttc",
-    "C:\\Windows\\Fonts\\BIZ-UDMinchoM.ttc",
-    "C:\\Windows\\Fonts\\yumin.ttf",
-    // macOS
-    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
-    "/System/Library/Fonts/Hiragino Sans W3.ttc",
-    "/System/Library/Fonts/Hiragino Sans W4.ttc",
-    "/System/Library/Fonts/Hiragino Sans W6.ttc",
-    "/System/Library/Fonts/Supplemental/Hiragino Sans W3.ttc",
-    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-    "/System/Library/Fonts/Supplemental/Songti.ttc",
-    "/System/Library/Fonts/PingFang.ttc",
-    "/System/Library/Fonts/Hiragino Sans GB.ttc",
-    "/System/Library/Fonts/AppleSDGothicNeo.ttc",
-    "/Library/Fonts/Arial Unicode.ttf",
-    "/Library/Fonts/Hiragino Sans W3.ttc",
-    // Linux
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/noto-cjk/NotoSansCJKjp-Regular.otf",
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
-    "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
-    "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
-    "/usr/share/fonts/truetype/takao-gothic/TakaoPGothic.ttf",
-    "/usr/share/fonts/truetype/takao-gothic/TakaoGothic.ttf",
-    "/usr/share/fonts/truetype/vlgothic/VL-PGothic-Regular.ttf",
-    "/usr/share/fonts/truetype/ipafont/ipag.ttf",
-    "/usr/share/fonts/truetype/ipaexfont/ipaexg.ttf",
-    "/usr/share/fonts/opentype/ipafont/ipag.ttf",
-    "/usr/share/fonts/opentype/ipaexfont/ipaexg.ttf",
-    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
-    "/usr/share/fonts/cjkuni-uming/uming.ttc",
-];
-
-/// Hangul fonts, appended after the CJK fallback so Korean renders even when the CJK font found
-/// is a Japanese one without Hangul (Meiryo, Hiragino).
-#[cfg(not(target_arch = "wasm32"))]
-const HANGUL_FONT_CANDIDATES: &[&str] = &[
-    // Windows: Malgun Gothic
-    "C:\\Windows\\Fonts\\malgun.ttf",
-    // macOS: Apple SD Gothic Neo
-    "/System/Library/Fonts/AppleSDGothicNeo.ttc",
-    "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
-    // Linux: Nanum Gothic (Noto Sans CJK already covers Hangul)
-    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-    "/usr/share/fonts/nanum/NanumGothic.ttf",
-];
-
-/// Thai fonts, appended last: none of the Latin or CJK faces draw Thai, so without one Thai text
-/// shows as empty boxes (#1902).
-#[cfg(not(target_arch = "wasm32"))]
-const THAI_FONT_CANDIDATES: &[&str] = &[
-    // Windows: Leelawadee UI (Windows 8 and later), Leelawadee, Tahoma
-    "C:\\Windows\\Fonts\\LeelawUI.ttf",
-    "C:\\Windows\\Fonts\\leelawad.ttf",
-    "C:\\Windows\\Fonts\\tahoma.ttf",
-    // macOS: Thonburi, Ayuthaya
-    "/System/Library/Fonts/Thonburi.ttc",
-    "/System/Library/Fonts/Supplemental/Thonburi.ttc",
-    "/System/Library/Fonts/Supplemental/Ayuthaya.ttf",
-    "/Library/Fonts/Thonburi.ttf",
-    // Linux: Noto Sans Thai, TLWG Loma and Garuda
-    "/usr/share/fonts/noto/NotoSansThai-Regular.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf",
-    "/usr/share/fonts/google-noto/NotoSansThai-Regular.ttf",
-    "/usr/share/fonts/google-noto-vf/NotoSansThai[wght].ttf",
-    "/usr/share/fonts/opentype/noto/NotoSansThai-Regular.ttf",
-    "/usr/share/fonts/truetype/tlwg/Loma.ttf",
-    "/usr/share/fonts/opentype/tlwg/Loma.otf",
-    "/usr/share/fonts/truetype/tlwg/Garuda.ttf",
-    "/usr/share/fonts/opentype/tlwg/Garuda.otf",
-    "/usr/share/fonts/tlwg/Loma.otf",
-];
-
-/// Hebrew fonts, appended last: egui's built-in faces have no Hebrew, so without one the Hebrew
-/// interface and Hebrew names show as empty boxes (#3457).
-#[cfg(not(target_arch = "wasm32"))]
-const HEBREW_FONT_CANDIDATES: &[&str] = &[
-    // Windows: Segoe UI, Arial
-    "C:\\Windows\\Fonts\\segoeui.ttf",
-    "C:\\Windows\\Fonts\\arial.ttf",
-    // macOS: Arial Hebrew, SF Hebrew
-    "/System/Library/Fonts/ArialHB.ttc",
-    "/System/Library/Fonts/SFHebrew.ttf",
-    "/System/Library/Fonts/Supplemental/Arial.ttf",
-    // Linux: Noto Sans Hebrew, DejaVu Sans
-    "/usr/share/fonts/noto/NotoSansHebrew-Regular.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf",
-    "/usr/share/fonts/google-noto/NotoSansHebrew-Regular.ttf",
-    "/usr/share/fonts/google-noto-vf/NotoSansHebrew[wght].ttf",
-    "/usr/share/fonts/opentype/noto/NotoSansHebrew-Regular.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/TTF/DejaVuSans.ttf",
-    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-];
-
-/// Arabic fonts with the joining forms the shaper uses. egui's built-in faces have no Arabic.
-#[cfg(not(target_arch = "wasm32"))]
-const ARABIC_FONT_CANDIDATES: &[&str] = &[
-    // Windows: Segoe UI, Tahoma, Arial
-    "C:\\Windows\\Fonts\\segoeui.ttf",
-    "C:\\Windows\\Fonts\\tahoma.ttf",
-    "C:\\Windows\\Fonts\\arial.ttf",
-    // macOS: SF Arabic (11 and later), Geeza Pro, Damascus, Tahoma
-    "/System/Library/Fonts/SFArabic.ttf",
-    "/System/Library/Fonts/GeezaPro.ttc",
-    "/System/Library/Fonts/Supplemental/GeezaPro.ttc",
-    "/System/Library/Fonts/Supplemental/Damascus.ttc",
-    "/System/Library/Fonts/Supplemental/Tahoma.ttf",
-    // Linux: Noto Sans Arabic, Noto Naskh Arabic, KACST One, DejaVu Sans
-    "/usr/share/fonts/noto/NotoSansArabic-Regular.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
-    "/usr/share/fonts/google-noto/NotoSansArabic-Regular.ttf",
-    "/usr/share/fonts/google-noto-vf/NotoSansArabic[wght].ttf",
-    "/usr/share/fonts/opentype/noto/NotoSansArabic-Regular.ttf",
-    "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
-    "/usr/share/fonts/noto/NotoNaskhArabic-Regular.ttf",
-    "/usr/share/fonts/truetype/kacst-one/KacstOne.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/TTF/DejaVuSans.ttf",
-    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-];
-
-/// Fonts covering simplified Chinese, appended after the CJK fallback so Chinese renders even
-/// when the CJK font found is a Japanese one without simplified characters (Hiragino Gothic,
-/// Meiryo, Yu Gothic).
-#[cfg(not(target_arch = "wasm32"))]
-const CHINESE_FONT_CANDIDATES: &[&str] = &[
-    // Windows: Microsoft YaHei
-    "C:\\Windows\\Fonts\\msyh.ttc",
-    "C:\\Windows\\Fonts\\msyh.ttf",
-    // macOS: PingFang SC, Hiragino Sans GB, Songti SC, STHeiti, Arial Unicode MS
-    "/System/Library/Fonts/PingFang.ttc",
-    "/System/Library/Fonts/Hiragino Sans GB.ttc",
-    "/System/Library/Fonts/STHeiti Light.ttc",
-    "/System/Library/Fonts/STHeiti Medium.ttc",
-    "/System/Library/Fonts/Supplemental/Songti.ttc",
-    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-    "/Library/Fonts/Arial Unicode.ttf",
-    // Linux: Noto Sans CJK SC
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
-];
 
 /// Whether the first face in `bytes` draws `c`: some candidates (an older Arial, a trimmed
 /// DejaVu) may lack the script they are listed for.
@@ -620,22 +521,17 @@ fn scan_dir_for_font_where(dir: &std::path::Path, depth_remaining: usize, matche
     None
 }
 
-/// The font folders named by `SOLIDCRAFT_FONT_DIRS` (a path list), or else by the single folder
-/// in `CRAFT_FONTS_DIR` (the craft-fonts pack).
+/// The first of `candidates`' known files that parses as a font.
 #[cfg(not(target_arch = "wasm32"))]
-fn font_override_dirs(dirs: Option<std::ffi::OsString>, pack: Option<std::ffi::OsString>) -> Vec<std::path::PathBuf> {
-    match (dirs, pack) {
-        (Some(dirs), _) => std::env::split_paths(&dirs).collect(),
-        (None, Some(pack)) => vec![std::path::PathBuf::from(pack)],
-        (None, None) => Vec::new(),
-    }
+fn first_candidate(candidates: fallback::Candidates) -> Option<Vec<u8>> {
+    fallback::candidate_files(candidates).find_map(|path| try_read_font(std::path::Path::new(path)))
 }
 
 /// Find a CJK fallback font on the local system or in SOLIDCRAFT_FONT_DIRS / CRAFT_FONTS_DIR.
 #[cfg(not(target_arch = "wasm32"))]
 fn find_system_cjk_font() -> Option<Vec<u8>> {
     // 1. Check the font folders the user named.
-    for dir in font_override_dirs(std::env::var_os("SOLIDCRAFT_FONT_DIRS"), std::env::var_os("CRAFT_FONTS_DIR")) {
+    for dir in solidcraft_engine::sketch::font_override_dirs() {
         let names = ["BIZUDPGothic-Regular.ttf", "BIZ-UDGothicR.ttc", "NotoSansCJK-Regular.ttc", "NotoSansJP-Regular.ttf"];
         for name in names {
             if let Some(bytes) = try_read_font(&dir.join(name)) {
@@ -645,10 +541,8 @@ fn find_system_cjk_font() -> Option<Vec<u8>> {
     }
 
     // 2. Check well-known candidate paths.
-    for path in FONT_CANDIDATES {
-        if let Some(bytes) = try_read_font(std::path::Path::new(path)) {
-            return Some(bytes);
-        }
+    if let Some(bytes) = first_candidate(fallback::JAPANESE) {
+        return Some(bytes);
     }
 
     // 3. Platform-specific dynamic directory search.
@@ -656,7 +550,7 @@ fn find_system_cjk_font() -> Option<Vec<u8>> {
     {
         if let Ok(windir) = std::env::var("WINDIR").or_else(|_| std::env::var("SystemRoot")) {
             let fonts_dir = std::path::PathBuf::from(windir).join("Fonts");
-            let names = ["meiryo.ttc", "YuGothM.ttc", "YuGothR.ttc", "msgothic.ttc", "BIZ-UDGothicR.ttc"];
+            let names = fallback::candidate_files(fallback::JAPANESE).filter_map(|path| path.strip_prefix("C:\\Windows\\Fonts\\"));
             for name in names {
                 if let Some(bytes) = try_read_font(&fonts_dir.join(name)) {
                     return Some(bytes);
@@ -760,9 +654,10 @@ fn system_fallbacks() -> &'static SystemFonts {
     SYSTEM_FONTS.get_or_init(|| {
         let cjk = find_system_cjk_font();
         let chinese = find_system_chinese_font().filter(|bytes| cjk.as_ref() != Some(bytes));
-        let hangul = HANGUL_FONT_CANDIDATES.iter().find_map(|path| try_read_font(std::path::Path::new(path)));
-        let thai = THAI_FONT_CANDIDATES.iter().find_map(|path| try_read_font(std::path::Path::new(path)));
-        let hebrew = HEBREW_FONT_CANDIDATES.iter().find_map(|path| try_read_font(std::path::Path::new(path)).filter(|bytes| covers(bytes, 'א')));
+        let hangul = first_candidate(fallback::HANGUL);
+        let thai = first_candidate(fallback::THAI);
+        let hebrew =
+            fallback::candidate_files(fallback::HEBREW).find_map(|path| try_read_font(std::path::Path::new(path)).filter(|bytes| covers(bytes, 'א')));
         let arabic = arabic_font();
         SystemFonts { cjk, chinese, hangul, thai, hebrew, arabic }
     })
@@ -853,10 +748,8 @@ pub fn setup_fonts(ctx: &egui::Context) {
 /// system font directories for [`CHINESE_FONT_KEYWORDS`] names.
 #[cfg(not(target_arch = "wasm32"))]
 fn find_system_chinese_font() -> Option<Vec<u8>> {
-    for path in CHINESE_FONT_CANDIDATES {
-        if let Some(bytes) = try_read_font(std::path::Path::new(path)) {
-            return Some(bytes);
-        }
+    if let Some(bytes) = first_candidate(fallback::SIMPLIFIED_CHINESE) {
+        return Some(bytes);
     }
     find_chinese_font_in(&chinese_font_dirs())
 }
@@ -925,12 +818,12 @@ fn find_chinese_font_in(dirs: &[std::path::PathBuf]) -> Option<Vec<u8>> {
 fn arabic_font() -> Option<Vec<u8>> {
     let pack = std::env::var("CRAFT_FONTS_DIR").ok().map(|dir| std::path::PathBuf::from(dir).join("NotoSansArabic-Regular.ttf"));
     pack.into_iter()
-        .chain(ARABIC_FONT_CANDIDATES.iter().map(std::path::PathBuf::from))
+        .chain(fallback::candidate_files(fallback::ARABIC).map(std::path::PathBuf::from))
         .find_map(|path| try_read_font(&path).filter(|bytes| covers(bytes, 'ب')))
 }
 
-/// Web installs the bundled faces synchronously; Japanese is fetched by the shell on demand.
-/// Preserve that downloaded face when preferences change later in the session.
+/// Web installs the bundled faces synchronously; Japanese and Chinese are fetched by the shell
+/// on demand. Preserve those downloaded faces when preferences change later in the session.
 #[cfg(target_arch = "wasm32")]
 pub fn load_system_fonts_in_background(_ctx: &egui::Context) {}
 
@@ -948,8 +841,12 @@ pub fn setup_fonts_without_waiting(ctx: &egui::Context, language: &str, ui_font:
 pub fn setup_fonts_for(ctx: &egui::Context, language: &str, ui_font: &str) {
     let previous = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id()));
     let mut fonts = web_font_definitions(ui_font, previous);
-    if needs_cjk_font(language) {
-        promote_font_to_front(&mut fonts, CJK_FALLBACK);
+    if needs_cjk_font(language)
+        && let Some(primary) = fallback_order(language)
+            .into_iter()
+            .find(|name| [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK].contains(name) && fonts.font_data.contains_key(*name))
+    {
+        promote_font_to_front(&mut fonts, primary);
     }
     install(ctx, fonts);
 }
@@ -960,16 +857,20 @@ fn web_font_definitions(ui_font: &str, previous: Option<FontDefinitions>) -> Fon
     if let Some(font) = self::ui_font(ui_font) {
         fonts = with_ui_font(fonts, font);
     }
-    if let Some(data) = previous.and_then(|f| f.font_data.get(CJK_FALLBACK).cloned()) {
-        fonts.font_data.insert(CJK_FALLBACK.to_owned(), data);
-        for family in all_families() {
-            fonts.families.entry(family).or_default().push(CJK_FALLBACK.to_owned());
+    if let Some(prev) = previous {
+        for name in [CJK_FALLBACK, CHINESE_FALLBACK] {
+            if let Some(data) = prev.font_data.get(name).cloned() {
+                fonts.font_data.insert(name.to_owned(), data);
+                for family in all_families() {
+                    fonts.families.entry(family).or_default().push(name.to_owned());
+                }
+            }
         }
     }
     with_symbol_fallback(fonts)
 }
 
-/// Web starts with the bundled faces and symbol fallback; Japanese loads on demand.
+/// Web starts with the bundled faces and symbol fallback; script fonts load on demand.
 #[cfg(target_arch = "wasm32")]
 pub fn setup_fonts(ctx: &egui::Context) {
     setup_fonts_for(ctx, "en", "");
@@ -987,20 +888,12 @@ pub(crate) fn test_context() -> egui::Context {
 mod tests {
     use super::*;
 
-    /// `SOLIDCRAFT_FONT_DIRS` wins and may list several folders; `CRAFT_FONTS_DIR` is the fallback.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(target_os = "linux")]
     #[test]
-    fn cjk_font_folders_from_the_environment() -> Result<(), std::env::JoinPathsError> {
-        use std::path::PathBuf;
-        let list = std::env::join_paths(["/a", "/b"])?;
-        assert_eq!(font_override_dirs(Some(list), Some("/pack".into())), vec![PathBuf::from("/a"), PathBuf::from("/b")]);
-        assert_eq!(font_override_dirs(None, Some("/pack".into())), vec![PathBuf::from("/pack")]);
-        assert!(font_override_dirs(None, None).is_empty());
-        #[cfg(target_os = "linux")]
+    fn chinese_font_folders_include_flatpak_host_fonts() {
         for dir in ["/run/host/fonts", "/run/host/user-fonts"] {
-            assert!(chinese_font_dirs().contains(&PathBuf::from(dir)), "missing {dir}");
+            assert!(chinese_font_dirs().contains(&std::path::PathBuf::from(dir)), "missing {dir}");
         }
-        Ok(())
     }
 
     /// The system faces are searched for on a thread; installing fonts before they are found does
@@ -1179,8 +1072,10 @@ mod tests {
     }
 
     #[test]
-    fn default_ui_language_is_english() {
-        assert_eq!(crate::prefs::Prefs::default().language, "en");
+    fn default_ui_language_follows_the_system() {
+        // A first start follows the system (#10138); English, the fallback it lands on when
+        // nothing matches, needs no CJK face.
+        assert_eq!(crate::prefs::Prefs::default().language, crate::i18n::SYSTEM);
         assert!(!needs_cjk_font("en"));
     }
 
@@ -1225,7 +1120,7 @@ mod tests {
     /// machine has must parse and cover Thai, and the fonts set up must then draw it.
     #[test]
     fn a_thai_fallback_draws_thai() {
-        let found: Vec<Vec<u8>> = THAI_FONT_CANDIDATES.iter().filter_map(|path| try_read_font(std::path::Path::new(path))).collect();
+        let found: Vec<Vec<u8>> = fallback::candidate_files(fallback::THAI).filter_map(|path| try_read_font(std::path::Path::new(path))).collect();
         for bytes in &found {
             let face = ttf_parser::Face::parse(bytes, 0).unwrap();
             for c in "สวัสดี".chars() {
@@ -1243,12 +1138,27 @@ mod tests {
         assert!(thai(with_fallback(egui::FontDefinitions::default(), THAI_FALLBACK, bytes).unwrap()), "Thai draws with the fallback");
     }
 
+    /// The search reads each script's own list: what it found for Thai draws Thai, and what it found
+    /// for Hangul draws Hangul. A machine without one finds none, which says nothing.
+    #[test]
+    fn the_system_search_finds_each_script_in_its_own_list() {
+        let has = |bytes: &Vec<u8>, text: &str| {
+            let face = ttf_parser::Face::parse(bytes, 0).unwrap();
+            text.chars().all(|c| face.glyph_index(c).is_some())
+        };
+        let found = system_fallbacks();
+        assert!(found.thai.as_ref().is_none_or(|bytes| has(bytes, "สวัสดี")));
+        assert!(found.hangul.as_ref().is_none_or(|bytes| has(bytes, "안녕")));
+    }
+
     /// The Hebrew interface (#3457): every Hebrew candidate this machine has that passes the
     /// coverage check draws Hebrew, and the fonts set up must then draw it.
     #[test]
     fn a_hebrew_fallback_draws_hebrew() {
-        let found: Vec<Vec<u8>> =
-            HEBREW_FONT_CANDIDATES.iter().filter_map(|path| try_read_font(std::path::Path::new(path))).filter(|bytes| covers(bytes, 'א')).collect();
+        let found: Vec<Vec<u8>> = fallback::candidate_files(fallback::HEBREW)
+            .filter_map(|path| try_read_font(std::path::Path::new(path)))
+            .filter(|bytes| covers(bytes, 'א'))
+            .collect();
         for bytes in &found {
             let face = ttf_parser::Face::parse(bytes, 0).unwrap();
             for c in "שלום עולם".chars().filter(|c| !c.is_whitespace()) {
@@ -1271,7 +1181,8 @@ mod tests {
     /// screen. They must come out in the order the line has on screen (#3457).
     #[test]
     fn hebrew_messages_land_on_screen_in_display_order() {
-        let Some(bytes) = HEBREW_FONT_CANDIDATES.iter().filter_map(|path| try_read_font(std::path::Path::new(path))).find(|bytes| covers(bytes, 'א'))
+        let Some(bytes) =
+            fallback::candidate_files(fallback::HEBREW).filter_map(|path| try_read_font(std::path::Path::new(path))).find(|bytes| covers(bytes, 'א'))
         else {
             return;
         };
@@ -1504,14 +1415,46 @@ mod tests {
         let mut loader = CjkFontLoader::default();
         for lang in ["en", "de"] {
             let mut language = lang.to_owned();
-            assert!(!loader.tick(&mut language), "no CJK font fetch for {lang}");
+            assert!(!loader.tick(&mut language, false), "no CJK font fetch for {lang}");
         }
         let mut language = "ja".to_owned();
-        assert!(loader.tick(&mut language), "Japanese starts the fetch");
-        assert!(!loader.tick(&mut language), "the fetch starts once");
+        assert!(loader.tick(&mut language, false), "Japanese starts the fetch");
+        assert!(!loader.tick(&mut language, false), "the fetch starts once");
         loader.finished(true, &mut language);
         assert_eq!(loader.status(), CjkFontStatus::Installed);
         assert_eq!(language, "ja");
+        assert!(!loader.tick(&mut language, true), "ready face needs no fetch");
+    }
+
+    #[test]
+    fn chinese_ui_fetches_again_after_japanese_is_installed() {
+        let mut loader = CjkFontLoader::default();
+        let mut language = "ja".to_owned();
+        assert!(loader.tick(&mut language, false));
+        loader.finished(true, &mut language);
+        language = "zh".to_owned();
+        assert!(loader.tick(&mut language, false), "Chinese needs its own face (#8894)");
+        loader.finished(true, &mut language);
+        assert!(!loader.tick(&mut language, true));
+        assert_eq!(web_script_font_kind("zh"), Some("zh"));
+        assert_eq!(web_script_font_kind("zh-TW"), Some("zh-TW"));
+        assert_eq!(web_script_font_kind("ja"), Some("ja"));
+        assert!(needs_chinese_font("zh"));
+        assert!(!needs_chinese_font("ja"));
+    }
+
+    #[test]
+    fn web_chinese_subset_draws_simplified_settings() {
+        let bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/craft-ui-sc/CraftUI-SC.otf")).to_vec();
+        let ctx = test_context();
+        assert!(install_web_script_fonts(&ctx, None, Some(bytes), "zh"));
+        let installed = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap();
+        for family in sans_families() {
+            assert_eq!(installed.families[&family].first().map(String::as_str), Some(CHINESE_FALLBACK));
+        }
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        assert!(ctx.fonts_mut(|f| f.has_glyphs(&semibold(14.0), "设置")));
     }
 
     #[test]
@@ -1530,11 +1473,11 @@ mod tests {
     fn cjk_text_fetches_the_font_with_an_english_ui() {
         let mut loader = CjkFontLoader::default();
         let mut language = "en".to_owned();
-        assert!(!loader.tick(&mut language));
+        assert!(!loader.tick(&mut language, false));
         assert!(loader.watching_text());
         assert!(loader.text_needs_font(), "CJK text starts the fetch");
         assert!(!loader.text_needs_font(), "the fetch starts once");
-        assert!(!loader.tick(&mut language), "no second fetch from the language");
+        assert!(!loader.tick(&mut language, false), "no second fetch from the language");
         assert!(!loader.watching_text());
         loader.finished(false, &mut language);
         assert_eq!(loader.status(), CjkFontStatus::Failed);
@@ -1545,9 +1488,9 @@ mod tests {
         assert!(loader.text_needs_font());
         loader.finished(true, &mut language);
         assert_eq!(loader.status(), CjkFontStatus::Installed);
-        // Switching to Japanese afterwards needs no second fetch.
+        // Switching to Japanese afterwards needs no second fetch when the face is ready.
         let mut ja = "ja".to_owned();
-        assert!(!loader.tick(&mut ja));
+        assert!(!loader.tick(&mut ja, true));
     }
 
     /// The painted-text check finds CJK in the frame's labels and nothing else.
@@ -1571,16 +1514,16 @@ mod tests {
     fn failed_font_fetch_falls_back_for_the_session_without_changing_the_saved_language() {
         let mut loader = CjkFontLoader::default();
         let mut language = "ja".to_owned();
-        assert!(loader.tick(&mut language));
+        assert!(loader.tick(&mut language, false));
         loader.finished(false, &mut language);
         assert_eq!(language, "en", "this session shows English instead of tofu");
         assert_eq!(loader.persisted_language(&language), "ja", "the saved preference stays Japanese");
-        assert!(!loader.tick(&mut language));
+        assert!(!loader.tick(&mut language, false));
         assert_eq!(loader.persisted_language(&language), "ja");
 
         // Choosing a language afterwards makes that the saved preference.
         language = "de".to_owned();
-        assert!(!loader.tick(&mut language));
+        assert!(!loader.tick(&mut language, false));
         assert_eq!(loader.persisted_language(&language), "de");
     }
 }

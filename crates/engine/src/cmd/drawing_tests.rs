@@ -1,6 +1,7 @@
 use super::*;
 use crate::cmd::{Part, command_specs, find_command};
 use crate::tests::Folder;
+use solidcraft_doc::drawing::template;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"))
@@ -17,6 +18,154 @@ fn design() -> Session {
     s
 }
 
+/// A sheet's general tolerances, as `drawing.inspect` lists its cells.
+fn tolerances(made: &Value) -> Value {
+    let cells = made["sheets"][0]["title_block_cells"].as_array().unwrap();
+    cells.iter().find(|cell| cell["name"] == "general_tolerances").unwrap()["text"].clone()
+}
+
+/// A drawing starts from the template named, else its kind's: a part's on ISO A3 with the part
+/// note over its general tolerances, an assembly's on ISO A2 with the assembly note, which
+/// `drawing.template.list` marks for the design. It keeps the template's projection unless given
+/// one. An older name reads as that size's part template; an unknown one is refused with nothing
+/// changed, and undo takes the drawing away whole.
+#[test]
+fn a_drawing_starts_from_a_template() {
+    let mut s = design();
+    let default = |s: &mut Session| {
+        let listed = run(s, "drawing.template.list", json!({}))["templates"].clone();
+        let marked: Vec<Value> = listed.as_array().unwrap().iter().filter(|t| t["default"] == json!(true)).cloned().collect();
+        (listed, marked)
+    };
+    let (listed, marked) = default(&mut s);
+    let names: Vec<&str> = listed.as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(names, template::BUILT_INS);
+    assert_eq!(marked, [json!({"name": "iso-a3-part", "title": "ISO A3", "assembly": false, "default": true})]);
+    let made = run(&mut s, "drawing.create", json!({}));
+    assert_eq!((&made["sheets"][0]["size_mm"], &made["projection"]), (&json!([420.0, 297.0]), &json!("third")));
+    assert_eq!(tolerances(&made), json!(template::PART_NOTE));
+    run(&mut s, "drawing.close", json!({}));
+    let made = run(&mut s, "drawing.create", json!({"template": "iso-a4-assembly", "projection": "first", "language": "de"}));
+    let sheet = &made["sheets"][0];
+    assert_eq!((&sheet["size_mm"], &sheet["orientation"]), (&json!([210.0, 297.0]), &json!("portrait")), "the one named wins");
+    assert_eq!((&made["projection"], &made["language"], tolerances(&made)), (&json!("first"), &json!("de"), json!(template::ASSEMBLY_NOTE)));
+    assert_eq!(open_one(&s).sheets[0].title_block, Some(solidcraft_geom::title_block::default_block()), "the built-in block");
+    run(&mut s, "drawing.close", json!({}));
+    let made = run(&mut s, "drawing.create", json!({"template": "iso-a1"}));
+    assert_eq!((&made["sheets"][0]["size_mm"], tolerances(&made)), (&json!([841.0, 594.0]), json!(template::PART_NOTE)), "an older name");
+    let (undo, before) = (s.undo.len(), s.doc.drawings.clone());
+    for old in ["iso-b2", "iso-a3-parts", "iso-a5-part"] {
+        assert!(refused(&mut s, "drawing.create", json!({"template": old})).contains(&format!("no template `{old}`")), "{old}");
+    }
+    assert_eq!((s.undo.len(), &s.doc.drawings), (undo, &before), "nothing changed");
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.drawings.len(), 2, "undo takes the drawing away whole");
+
+    // An assembly of two components: A2, with the assembly note.
+    let mut s = Session::default();
+    for (name, corner) in [("Bracket", [0, 0, 0]), ("Pin", [100, 0, 0])] {
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": corner, "body_name": name}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+    }
+    assert_eq!(default(&mut s).1.iter().map(|t| t["name"].clone()).collect::<Vec<_>>(), [json!("iso-a2-assembly")]);
+    let made = run(&mut s, "drawing.create", json!({}));
+    assert_eq!((&made["sheets"][0]["size_mm"], &made["projection"]), (&json!([594.0, 420.0]), &json!("third")));
+    assert_eq!(tolerances(&made), json!(template::ASSEMBLY_NOTE));
+}
+
+/// A template applied to the drawing open: a dry run answers what would change and changes nothing;
+/// applying it is one undo step, and applying it again none. The views the new paper leaves
+/// outside are listed and stay where they were.
+#[test]
+fn a_template_applied_restyles_the_sheets_and_moves_nothing() {
+    let (mut s, [front, right, top]) = crate::cmd::drawing_view::tests::three_views();
+    let before = open_one(&s);
+    let (steps, sheet) = (s.undo.len(), ids::encode(before.sheets[0].id));
+    let dry = run(&mut s, "drawing.template.apply", json!({"template": "iso-a4-part", "dry_run": true}));
+    assert_eq!(dry["changed"], json!([{"sheet": sheet, "paper": true, "border": false, "title_block": false, "lost": []}]));
+    let outside: Vec<&str> = dry["outside"].as_array().unwrap().iter().map(|v| v["view"].as_str().unwrap()).collect();
+    assert!(outside.contains(&ids::encode(right).as_str()) && outside.contains(&ids::encode(top).as_str()), "{dry}");
+    assert!(!outside.contains(&ids::encode(front).as_str()), "{dry}");
+    assert_eq!((open_one(&s), s.undo.len()), (before.clone(), steps), "a dry run changes nothing");
+    let applied = run(&mut s, "drawing.template.apply", json!({"template": "iso-a4-part"}));
+    assert_eq!((&applied["changed"], &applied["outside"], &applied["dry_run"]), (&dry["changed"], &dry["outside"], &json!(false)));
+    let after = open_one(&s);
+    assert_eq!(after.sheets[0].sheet, template::built_in("iso-a4-part").unwrap().unwrap().sheets[0].sheet);
+    assert_eq!(after.views, before.views, "nothing moves");
+    assert_eq!(s.undo.len(), steps + 1);
+    let again = run(&mut s, "drawing.template.apply", json!({"template": "iso-a4-part"}));
+    assert_eq!((again["changed"].clone(), s.undo.len()), (json!([]), steps + 1), "nothing to change, no step");
+    for (p, why) in [
+        (json!({"template": "iso-b2"}), "no template `iso-b2`"),
+        (json!({}), "`template` must be a template's name"),
+        (json!({"template": "iso-a3-part", "dry_run": "yes"}), "`dry_run` is true or false"),
+    ] {
+        assert!(refused(&mut s, "drawing.template.apply", p.clone()).contains(why), "{p}");
+    }
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(open_one(&s).sheets, before.sheets, "undo puts the paper back");
+}
+
+/// A drawing saved as a template file starts new drawings and restyles others, with nothing of its
+/// model: a copy of the built-in with a company's changes is a template of its own. A later save
+/// changes no drawing made from it. Only a .json path is taken, and only inside
+/// the folders an agent may use while a scope is active.
+#[test]
+fn a_template_file_saves_and_starts_drawings() {
+    let (mut s, _) = crate::cmd::drawing_view::tests::three_views();
+    let folder = Folder::new("drawing-template");
+    let path = folder.path("company-a3.json");
+    // The company's name written into the built-in block, and its general tolerances typed over it.
+    let mut block = solidcraft_geom::title_block::default_block();
+    let owner = block.cells.iter_mut().find(|cell| cell.name == "legal_owner").unwrap();
+    let solidcraft_geom::title_block::CellKind::Text(owner) = &mut owner.kind else { panic!("the legal owner cell shows text") };
+    owner.content = solidcraft_geom::cell::Content(vec![solidcraft_geom::cell::Part::Text("Acme Ltd".into())]);
+    let changes = json!({"sheet": "Sheet 1", "title_block": block, "title_block_overrides": {"general_tolerances": "ISO 2768-m"}});
+    run(&mut s, "drawing.sheet.set", changes);
+    let saved = run(&mut s, "drawing.template.save", json!({"path": path}));
+    assert_eq!(saved["bytes"].as_u64(), Some(std::fs::metadata(&path).unwrap().len()));
+    let first = open_one(&s);
+    run(&mut s, "drawing.close", json!({}));
+    let made = run(&mut s, "drawing.create", json!({"name": "From the file", "template": path}));
+    let from_file = open_one(&s);
+    assert!(from_file.views.is_empty() && from_file.sheets[0].id != first.sheets[0].id, "{made}");
+    assert_eq!((from_file.sheets[0].sheet, &from_file.sheets[0].title_block), (first.sheets[0].sheet, &first.sheets[0].title_block));
+    assert_eq!(from_file.sheets[0].title_block_overrides, first.sheets[0].title_block_overrides);
+    let cells = run(&mut s, "drawing.inspect", json!({}))["sheets"][0]["title_block_cells"].clone();
+    let shown = |name: &str| cells.as_array().unwrap().iter().find(|cell| cell["name"] == name).unwrap()["text"].clone();
+    assert_eq!((shown("legal_owner"), shown("general_tolerances")), (json!("Acme Ltd"), json!("ISO 2768-m")), "the company's copy");
+    // A later save of another format changes no drawing made from the file.
+    run(&mut s, "drawing.template.apply", json!({"template": "iso-a4-part"}));
+    run(&mut s, "drawing.template.save", json!({"path": path}));
+    let other = s.doc.drawings.iter().find(|d| d.id == first.id).unwrap().clone();
+    assert_eq!(other.sheets, first.sheets, "the first drawing kept its own copy");
+    let applied = run(&mut s, "drawing.template.apply", json!({"template": path, "dry_run": true}));
+    assert_eq!(applied["changed"], json!([]), "the file now holds this drawing's own format: {applied}");
+    for (command, p, why) in [
+        ("drawing.template.save", json!({"path": folder.path("company.txt")}), "`path` must be a .json file"),
+        ("drawing.template.save", json!({}), "`path` must be a .json file"),
+        ("drawing.create", json!({"template": folder.path("missing.json")}), "template `"),
+        ("drawing.create", json!({"template": "company"}), "no template `company`"),
+    ] {
+        assert!(refused(&mut s, command, p.clone()).contains(why), "{command} {p}");
+    }
+    let plain = folder.path("plain.json");
+    std::fs::write(&plain, first.to_json().unwrap()).unwrap();
+    assert!(refused(&mut s, "drawing.create", json!({"template": plain})).contains("a template draws no design"));
+    // While a scope is active, only its folders.
+    let (inside, outside) = (Folder::new("drawing-template-in"), Folder::new("drawing-template-out"));
+    solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([inside.0.clone()])), || {
+        run(&mut s, "drawing.template.save", json!({"path": inside.path("ok.json")}));
+        let refusal = refused(&mut s, "drawing.template.save", json!({"path": outside.path("no.json")}));
+        assert!(refusal.contains("outside the folders this agent may use"), "{refusal}");
+        let refusal = refused(&mut s, "drawing.create", json!({"template": path}));
+        assert!(refusal.contains("outside the folders this agent may use"), "{refusal}");
+    });
+    assert!(std::path::Path::new(&inside.path("ok.json")).is_file() && !std::path::Path::new(&outside.path("no.json")).exists());
+}
+
 /// The drawing open, as the design holds it.
 fn open_one(s: &Session) -> Arc<Drawing> {
     s.drawing("test").unwrap().clone()
@@ -31,8 +180,8 @@ fn names(s: &Session) -> Vec<&str> {
     s.doc.drawings.iter().map(|d| d.name.as_str()).collect()
 }
 
-/// A drawing of the design: one A3 sheet with the ISO border, the design its one source, kept in
-/// the design and opened. Making it is one step of the model, and evaluates nothing.
+/// A drawing of the design: one A3 sheet with the ISO border and the built-in title block, the design
+/// its one source, kept in the design and opened. Making it is one step of the model, and evaluates nothing.
 #[test]
 fn a_drawing_of_the_design_is_kept_in_it_and_opened() {
     let mut s = design();
@@ -49,6 +198,9 @@ fn a_drawing_of_the_design_is_kept_in_it_and_opened() {
     let d = open_one(&s);
     assert_eq!(made["id"], json!(ids::encode(d.id)));
     assert!(d.sheets[0].border.is_some(), "the ISO border");
+    let built_in = template::built_in(template::default_for(false)).unwrap().unwrap();
+    assert_eq!(d.sheets[0].title_block, built_in.sheets[0].title_block, "the built-in block");
+    assert_eq!(sheet["title_block"]["size_mm"], json!([180.0, 49.0]));
     assert_eq!((s.doc.drawings.len(), s.open_drawing), (1, Some(d.id)));
     assert_eq!((s.undo.len(), s.undo.last().map(|u| u.part)), (undo + 1, Some(None)), "a step of the model");
     assert_eq!((s.evaluations, &s.doc.features), (evaluations, &features), "nothing evaluated, the model as it was");
@@ -190,6 +342,37 @@ fn a_drawings_projection_is_first_or_third_angle() {
     for bad in [json!("second"), json!("First"), json!(1), json!(null)] {
         assert!(refused(&mut s, "drawing.set", json!({"projection": bad})).contains("first or third"), "{bad}");
     }
+}
+
+/// A drawing's font is a family named by `drawing.create` or `drawing.set` (one undo step), saved
+/// with the design; the built-in font when none is named. A family this computer lacks is named in
+/// `font_note`, and a font file or anything but text is refused.
+#[test]
+fn a_drawings_font_is_a_family_by_name() {
+    let folder = Folder::new("drawing-font");
+    let mut s = design();
+    let made = run(&mut s, "drawing.create", json!({"font": " No Such Family Q7 "}));
+    assert_eq!(
+        (&made["font"], &made["font_note"]),
+        (&json!("No Such Family Q7"), &json!("No Such Family Q7 isn't on this computer: set in Liberation Sans"))
+    );
+    let steps = s.undo.len();
+    let set = run(&mut s, "drawing.set", json!({"font": "Liberation Sans"}));
+    assert_eq!((&set["font"], &set["font_note"], s.undo.len()), (&json!("Liberation Sans"), &Value::Null, steps + 1));
+    run(&mut s, "file.save", json!({"path": folder.path("plate.solidcraft")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("plate.solidcraft")}));
+    assert_eq!(opened.doc.drawings[0].font, "Liberation Sans");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, "drawing.inspect", json!({}))["font"], "No Such Family Q7");
+    assert_eq!(run(&mut s, "drawing.set", json!({"font": ""}))["font_note"], Value::Null);
+    for path in ["C:/Fonts/arial.ttf", "/usr/share/fonts/a", "Futura.otf"] {
+        let e = refused(&mut s, "drawing.set", json!({"font": path}));
+        assert!(e.contains("drawings name fonts by family, so they travel"), "{path}: {e}");
+        assert!(refused(&mut s, "drawing.create", json!({"font": path})).contains("by family"), "{path}");
+    }
+    assert!(refused(&mut s, "drawing.set", json!({"font": 3})).contains("`font` must be text"));
+    assert_eq!(open_one(&s).font, "");
 }
 
 /// Undo and redo go through the open part's steps only. With a drawing open, its own steps; the
@@ -477,4 +660,130 @@ fn drawing_steps_in_any_order_keep_the_rules() {
             assert!(s.open_drawing.is_none_or(|id| s.doc.drawing(id).is_some()), "{id}: the drawing open is the design's");
         }
     }
+}
+
+/// Inspect lists each sheet's views, each base view followed by those projected from it whichever way
+/// the ids sort, with what it is called and what is in it. A view whose parent is on another sheet
+/// heads its own list and still names the parent; a sheet with none lists none. Nothing is evaluated.
+#[test]
+fn inspect_lists_each_sheets_views_in_order() {
+    use solidcraft_doc::drawing::balloon::Balloon;
+    use solidcraft_doc::drawing::dimension::ModelEdge;
+    use solidcraft_doc::drawing::view::ViewPlace;
+    let (mut s, [front, right, top]) = crate::cmd::drawing_view::tests::three_views();
+    // A second view projected from the front, to its left, and a balloon in the right view.
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let mut source = ids::IdSource::seeded(4894);
+    let left = d.allocate_id(&mut source).unwrap();
+    let balloon = d.allocate_id(&mut source).unwrap();
+    let kind = ViewKind::Projected { parent: front, side: ProjectedSide::Left };
+    let sheet = d.sheets[0].id;
+    d.add_views([Arc::new(View {
+        id: left,
+        sheet,
+        kind,
+        place: ViewPlace::Aligned(50.0),
+        settings: Default::default(),
+        reference_shown_percent: 0.0,
+    })]);
+    // Inspect only lists it, so the part it numbers needn't be in the design.
+    let edge = ModelEdge { body: "Block".into(), origin_feature: s.doc.features[0].id, name: "edge".into(), path: vec![1] };
+    d.balloons.add([Arc::new(Balloon { id: balloon, view: right, edge, at: [20.0, 20.0], parts_list: None })]);
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d));
+    let [front_id, right_id, top_id, left_id] = [front, right, top, left].map(ids::encode);
+    let dimension = run(&mut s, "drawing.dimension.add", json!({"view": front_id, "kind": {"length": {"edge": [50, 0, 20]}}}));
+    let (features, evaluations) = (s.doc.features.clone(), s.evaluations);
+    let reply = run(&mut s, "drawing.inspect", json!({}));
+    let mut expected = vec![json!({"id": front_id, "kind": "base", "label": "Front", "dimensions": [dimension["record"]["id"]], "balloons": []})];
+    let right_and_top = [
+        json!({"id": right_id, "kind": "projected", "parent": front_id, "side": "right", "label": "Right of Front", "dimensions": [], "balloons": [ids::encode(balloon)]}),
+        json!({"id": top_id, "kind": "projected", "parent": right_id, "side": "above", "label": "Above Right of Front", "dimensions": [], "balloons": []}),
+    ];
+    let left_entry =
+        json!({"id": left_id, "kind": "projected", "parent": front_id, "side": "left", "label": "Left of Front", "dimensions": [], "balloons": []});
+    // The front's two views in id order, each followed by what is projected from it.
+    if right < left {
+        expected.extend(right_and_top);
+        expected.push(left_entry);
+    } else {
+        expected.push(left_entry);
+        expected.extend(right_and_top);
+    }
+    assert_eq!(reply["sheets"][0]["views"], json!(expected));
+    assert_eq!((s.evaluations, &s.doc.features), (evaluations, &features));
+
+    let other = run(&mut s, "drawing.sheet.add", json!({"name": "Other"}))["sheet"].clone();
+    let lists = |s: &mut Session| {
+        let reply = run(s, "drawing.inspect", json!({}));
+        let ids_of = |at: usize| reply["sheets"][at]["views"].as_array().unwrap().iter().map(|v| v["id"].clone()).collect::<Vec<_>>();
+        (ids_of(0), ids_of(1), reply["sheets"][1]["views"][0].clone())
+    };
+    assert_eq!(lists(&mut s).1, Vec::<Value>::new(), "{other}");
+    run(&mut s, "drawing.view.move_to_sheet", json!({"view": top_id, "sheet": "Other"}));
+    let (here, there, moved) = lists(&mut s);
+    let staying: Vec<Value> = expected.iter().map(|v| v["id"].clone()).filter(|id| *id != json!(top_id)).collect();
+    assert_eq!((here, there), (staying, vec![json!(top_id)]));
+    assert_eq!((&moved["parent"], &moved["label"]), (&json!(right_id), &json!("Above Right of Front")), "{moved}");
+}
+
+/// Base views come in id order whatever order they were added in, and a view looking any other way
+/// than a named one is `Custom`. A chain as deep as a chain goes is listed whole, top to bottom, and
+/// the many-view drawing a record allows answers.
+#[test]
+fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
+    use solidcraft_doc::drawing::view::{MAX_VIEWS, ViewPlace};
+    use solidcraft_doc::drawing_view::{Looking, ViewOverrides};
+    let mut s = design();
+    run(&mut s, "drawing.create", json!({}));
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let mut source = ids::IdSource::seeded(4894);
+    let (sheet, drawn) = (d.sheets[0].id, d.sources[0].id);
+    let scale = || ViewOverrides { scale: Some("1:1".parse().unwrap()), ..ViewOverrides::default() };
+    let looking = ViewDirection::Looking(Looking { direction: [1.0, 1.0, -1.0], up: [0.0, 0.0, 1.0], origin: [0.0; 3] });
+    let mut made = vec![d.allocate_id(&mut source).unwrap()];
+    let kind = ViewKind::Base { source: drawn, view: looking };
+    d.add_views([Arc::new(View { id: made[0], sheet, kind, place: ViewPlace::At([100.0, 100.0]), settings: scale(), reference_shown_percent: 0.0 })]);
+    for _ in 1..MAX_VIEW_DEPTH {
+        let id = d.allocate_id(&mut source).unwrap();
+        let parent = *made.last().unwrap();
+        let kind = ViewKind::Projected { parent, side: ProjectedSide::Below };
+        d.add_views([Arc::new(View {
+            id,
+            sheet,
+            kind,
+            place: ViewPlace::At([100.0, 100.0]),
+            settings: ViewOverrides::default(),
+            reference_shown_percent: 0.0,
+        })]);
+        made.push(id);
+    }
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d.clone()));
+    let listed = run(&mut s, "drawing.inspect", json!({}))["sheets"][0]["views"].clone();
+    let order: Vec<Value> = listed.as_array().unwrap().iter().map(|v| v["id"].clone()).collect();
+    assert_eq!(order, made.iter().map(|id| json!(ids::encode(*id))).collect::<Vec<_>>());
+    assert_eq!(listed[0]["label"], json!("Custom"));
+    assert_eq!(listed[MAX_VIEW_DEPTH - 1]["label"], json!(format!("{}Custom", "Below ".repeat(MAX_VIEW_DEPTH - 1))));
+
+    let base = |id: u64| View {
+        id,
+        sheet,
+        kind: ViewKind::Base { source: drawn, view: ViewDirection::default() },
+        place: ViewPlace::At([100.0, 100.0]),
+        settings: scale(),
+        reference_shown_percent: 0.0,
+    };
+    let more: Vec<Arc<View>> = (d.views.len()..MAX_VIEWS).map(|_| Arc::new(base(d.allocate_id(&mut source).unwrap()))).collect();
+    let mut many = d.clone();
+    many.add_views(more);
+    many.validate().unwrap();
+    let bases: Vec<Value> = many.views.iter().filter(|v| matches!(v.kind, ViewKind::Base { .. })).map(|v| json!(ids::encode(v.id))).collect();
+    s.doc_mut().put_drawing(Arc::new(many));
+    let listed = run(&mut s, "drawing.inspect", json!({}))["sheets"][0]["views"].clone();
+    assert_eq!(listed.as_array().map(Vec::len), Some(MAX_VIEWS));
+    let listed_bases: Vec<Value> = listed.as_array().unwrap().iter().filter(|v| v["kind"] == "base").map(|v| v["id"].clone()).collect();
+    assert_eq!(listed_bases, bases, "base views in id order");
+    let labelled = listed.as_array().unwrap().iter().filter(|v| v["label"] == json!("Front")).count();
+    assert_eq!(labelled, MAX_VIEWS - MAX_VIEW_DEPTH);
 }

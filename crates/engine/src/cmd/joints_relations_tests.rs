@@ -3,7 +3,8 @@
 //! parts are, and they keep holding as the parts change size.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::tests::{occ, place, run};
 use crate::Session;
@@ -58,6 +59,43 @@ fn near(a: Vec3, b: Vec3, tol: f64) -> bool {
 
 fn clean(r: &Value) -> bool {
     r["conflicts"] == json!([]) && r["errors"] == json!([])
+}
+
+#[test]
+fn closing_planar_joint_starts_from_the_current_placement() {
+    let mut s = Session::default();
+    for name in ["Base", "Part"] {
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 6}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+    }
+    let base = occ(&s, "Base");
+    run(&mut s, "occurrence.ground", json!({"occurrence": base, "grounded": true}));
+    let r = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "planar", "name": "First", "flip": true, "angle": 0,
+            "a": {"occurrence": "Base", "point": [0, 0, 0], "x": [1, 0, 0]},
+            "b": {"occurrence": "Part", "point": [0, 0, 0], "x": [1, 0, 0]}, "values": [50, 30, 120]}),
+    );
+    assert!(clean(&r), "{r}");
+    // Check a frame, so a turn as well as a translation is observable.
+    let points = [Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z];
+    let before = points.map(|p| place(&s, "Part", p));
+    let at = before[0];
+    let x = before[1] - at;
+    let r = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "planar", "name": "Closing", "flip": true, "angle": 0,
+            "a": {"occurrence": "Base", "point": [0, 0, 0], "x": [1, 0, 0]},
+            "b": {"occurrence": "Part", "point": [at.x, at.y, at.z], "x": [x.x, x.y, x.z]}}),
+    );
+    assert!(clean(&r), "{r}");
+    for (p, want) in points.into_iter().zip(before) {
+        let got = place(&s, "Part", p);
+        assert!(near(got, want, 1e-6), "{p:?}: {got:?}, expected {want:?}");
+    }
 }
 
 #[test]

@@ -15,7 +15,8 @@ use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 use std::ops::RangeInclusive;
 
 use super::{Invalid, Item, MAX_COORDINATE_MM, MAX_SIDE_MM, Result, require};
-use crate::{Loop2, Region2, Seg2, Vec2};
+use crate::prelude::*;
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 
 /// A leader's dot on a surface, in line widths across (ISO 128-2 clause 9).
 pub const DOT_PER_LINE_WIDTH: f64 = 5.0;
@@ -73,7 +74,7 @@ impl Terminator {
     /// the line stops: a closed or filled arrowhead's base, else `at`.
     pub fn place(self, at: Vec2, from: Vec2, width_mm: f64) -> Result<(Vec<Item>, Vec2)> {
         let along = (at - from).normalized().ok_or(Invalid("a terminator's line has a direction"))?;
-        let stroke = |path, closed| Item::Stroke { path, closed, width_mm };
+        let stroke = |path, closed| Item::Stroke { path, closed, width_mm, pattern: None };
         Ok(match self {
             Terminator::Arrow { shape, length_mm, angle } => {
                 require(size(length_mm), "an arrowhead is above 0 and at most 5000 mm long")?;
@@ -129,7 +130,7 @@ impl Leader {
             let way = if last.x < before.x { -landing } else { landing };
             path.push(line(last, last + Vec2::new(way, 0.0)));
         }
-        let mut items = vec![Item::Stroke { path, closed: false, width_mm: self.width_mm }];
+        let mut items = vec![Item::Stroke { path, closed: false, width_mm: self.width_mm, pattern: None }];
         items.append(&mut marks);
         Ok(items)
     }

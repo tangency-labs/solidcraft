@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Edit drawing table</title>
+  <path d="M10.5 10L53.5 10A2.5 2.5 0 0 1 56 12.5L56 51.5A2.5 2.5 0 0 1 53.5 54L10.5 54A2.5 2.5 0 0 1 8 51.5L8 12.5A2.5 2.5 0 0 1 10.5 10Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M10 12L54 12L54 23L10 23Z" fill="#b8c3cf"/>
+  <path d="M8 24L56 24M8 39L56 39M23 24L23 54" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M25 26L54 26L54 37L25 37Z" fill="#b9ddf8"/>
+  <path d="M32 32L47 32M42 27L47 32L42 37" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

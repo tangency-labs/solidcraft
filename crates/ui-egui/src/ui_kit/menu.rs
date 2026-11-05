@@ -34,7 +34,11 @@ impl Menu {
         Self::button_at(ui, |ui, _| item.show(ui), add, true)
     }
 
-    fn button_with<R>(ui: &mut Ui, button: impl FnOnce(&mut Ui, bool) -> Response, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
+    pub(crate) fn button_with<R>(
+        ui: &mut Ui,
+        button: impl FnOnce(&mut Ui, bool) -> Response,
+        add: impl FnOnce(&mut Ui) -> R,
+    ) -> egui::InnerResponse<Option<R>> {
         Self::button_at(ui, button, add, false)
     }
 
@@ -81,7 +85,11 @@ impl Menu {
             } else {
                 submenu
             };
-            submenu.show(ui, &response, content)
+            let slot = super::container::BackingSlot::reserve(ui.ctx(), egui::LayerId::new(egui::Order::Foreground, popup_id));
+            submenu.show(ui, &response, |ui| match slot {
+                Some(slot) => slot.body(ui, content),
+                None => content(ui),
+            })
         } else if beside {
             let open = Self::flyout_open(ui, &response, popup_id);
             let popup = Container::new(ui.ctx(), Surface::Popup).menu(&response).open(open).frame(frame);

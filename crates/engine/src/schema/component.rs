@@ -363,6 +363,54 @@ pub struct MoveFeaturesParams {
     pub component: Option<IdOrName>,
 }
 
+/// Move sketches to the part whose face they are drawn on (`component.move_sketches.to_parts`),
+/// in one undo step. A sketch whose plane is an exactly attached face of a part's body goes to
+/// that part, staying where it is on the face; the others stay where they are.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MoveSketchesToPartsParams {
+    /// The sketches to look at, by id or name. Default: every sketch in the design.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "Vec<IdOrName>")]
+    pub sketches: Option<Vec<IdOrName>>,
+}
+
+/// A sketch `component.move_sketches.to_parts` moved.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct SketchMovedToPart {
+    pub sketch: u64,
+    pub name: String,
+    /// The part it went to: its component id and name.
+    pub component: u64,
+    pub part: String,
+}
+
+/// A sketch `component.move_sketches.to_parts` left where it was, and why.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct SketchKeptInPlace {
+    pub sketch: u64,
+    pub name: String,
+    /// Why, as a code: `not_on_face`, `no_exact_attachment`, `design_body`, `part_missing` or
+    /// `already_in_part`; and in words.
+    pub code: String,
+    pub reason: String,
+}
+
+/// What `component.move_sketches.to_parts` returns.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct MoveSketchesToPartsResult {
+    /// How many sketches moved, and how many stayed.
+    pub moved: usize,
+    pub stayed: usize,
+    /// The sketches that moved, each with the part it went to.
+    pub sketches: Vec<SketchMovedToPart>,
+    /// The sketches that stayed, each with the reason.
+    pub kept: Vec<SketchKeptInPlace>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What `component.move_features` returns.
 #[derive(Debug, Default, Serialize, JsonSchema)]
 pub struct MoveFeaturesResult {

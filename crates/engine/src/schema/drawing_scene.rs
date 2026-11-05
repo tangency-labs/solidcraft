@@ -8,8 +8,8 @@ use solidcraft_doc::ids;
 use solidcraft_geom::paper::ObjectKind;
 
 use super::drawing_sheet::sheet_ref;
-use super::drawing_view::{LinesStatsResult, paper_scene_schema};
-use crate::drawing_scene::{Status, ViewState};
+use super::drawing_view::{BoxResult, LinesStatsResult, paper_scene_schema};
+use crate::drawing_scene::{SheetObject, ViewState};
 
 /// Draw one sheet of the open drawing. Read-only.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -21,8 +21,10 @@ pub struct SheetSceneParams {
 }
 
 /// A sheet's paper scene: its size and its groups in paint order, in paper millimetres from the
-/// sheet's lower-left corner: the drawing border's (object: the sheet), then each view's strokes
-/// (object: the view).
+/// sheet's lower-left corner: the drawing border's (object: the sheet), then each image's picture
+/// (object and source: the placement), then each view's strokes (object: the view), then each
+/// dimension's lines and arrowheads (object: the dimension), then the title block's (object: the
+/// sheet).
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct SheetPaperScene(pub solidcraft_geom::paper::Scene);
@@ -32,7 +34,11 @@ impl JsonSchema for SheetPaperScene {
         "SheetPaperScene".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        paper_scene_schema(generator, &[ObjectKind::DrawingBorder, ObjectKind::View], true)
+        paper_scene_schema(
+            generator,
+            &[ObjectKind::DrawingBorder, ObjectKind::SheetImage, ObjectKind::View, ObjectKind::Dimension, ObjectKind::TitleBlock],
+            true,
+        )
     }
 }
 
@@ -51,14 +57,77 @@ pub struct SheetSceneView {
 
 impl From<ViewState> for SheetSceneView {
     fn from(v: ViewState) -> Self {
-        let status = v.status.name();
-        let reason = match v.status {
-            Status::Drawn => None,
-            Status::Placeholder(why) => Some(why.to_string()),
-            Status::Failed(why) => Some(why),
-        };
-        SheetSceneView { view: ids::encode(v.view), status, reason, stats: v.stats.map(Into::into) }
+        SheetSceneView { view: ids::encode(v.view), status: v.status.name(), reason: v.status.reason(), stats: v.stats.map(Into::into) }
     }
+}
+
+/// One dimension of a view on the sheet: where it stands with the model, in
+/// `drawing.dimension.inspect`'s words, and whether its lines are in the scene, with why not.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneDimension {
+    pub dimension: String,
+    pub view: String,
+    pub status: &'static str,
+    pub drawn: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+/// Where one object of the scene sits on paper: the box round what it draws, along its lines' paths
+/// (with no lines, its boundary), and a view's boundary.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetObjectResult {
+    pub object: String,
+    #[schemars(with = "String")]
+    pub kind: ObjectKind,
+    pub bounds_mm: BoxResult,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub boundary_mm: Option<BoxResult>,
+}
+
+impl From<SheetObject> for SheetObjectResult {
+    fn from(o: SheetObject) -> Self {
+        let on_paper = |b: solidcraft_geom::Aabb2| BoxResult { min: b.min.into(), max: b.max.into() };
+        SheetObjectResult { object: ids::encode(o.object), kind: o.kind, bounds_mm: on_paper(o.bounds_mm), boundary_mm: o.boundary_mm.map(on_paper) }
+    }
+}
+
+/// Where the drawing open stands. It takes nothing.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct DrawingStatusParams {}
+
+/// One view: `current`, `out_of_date`, `placeholder` or `failed`, with why for the last two.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ViewStatusResult {
+    pub view: String,
+    pub sheet: String,
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// One dimension, in the words `drawing.dimension.inspect` uses.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DimensionStatusResult {
+    pub dimension: String,
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+/// What `drawing.status` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DrawingStatusResult {
+    /// Each view of the drawing, in id order.
+    pub views: Vec<ViewStatusResult>,
+    /// Each dimension, in id order.
+    pub dimensions: Vec<DimensionStatusResult>,
+    /// How many views are out of date.
+    pub waiting: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// What `drawing.scene` returns.
@@ -68,6 +137,10 @@ pub struct SheetSceneResult {
     pub scene: SheetPaperScene,
     /// Each view on the sheet, in id order.
     pub views: Vec<SheetSceneView>,
+    /// The sheet's border, then each view on it, then each dimension drawn, in paint order.
+    pub objects: Vec<SheetObjectResult>,
+    /// Each dimension of a view on the sheet, by view and id.
+    pub dimensions: Vec<SheetSceneDimension>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

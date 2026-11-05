@@ -2,13 +2,19 @@
 //! `drawing.view.snapshot` takes them whole; a saved view (W12) keeps the same fields, each one
 //! optional so that a projected view can follow its parent.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Deserializer, Serialize};
-use solidcraft_geom::Plane;
+use solidcore_record::Plane;
 use solidcraft_geom::drawing_view::{Invalid, NamedView, Scale, basis_looking};
 use solidcraft_render::VisualStyle;
 
-/// The largest reference margin, in model millimetres.
-pub const MAX_REFERENCE_MARGIN_MM: f64 = 1e5;
+/// The most of its reference parts a view shows, as a percent.
+pub const MAX_REFERENCE_SHOWN_PERCENT: f64 = 100.0;
+
+/// Occurrence paths from the design's root, each the subtree it places. Shared, so resolving a view
+/// on every redraw copies none of them.
+pub type OccurrencePaths = Arc<[Vec<u64>]>;
 
 /// Which way a view looks: by name, or along any direction with an up.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -81,47 +87,54 @@ pub struct ViewSettings {
     /// written when None: a snapshot refuses a null scale.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scale: Option<Scale>,
-    pub display_style: VisualStyle,
+    pub visual_style: VisualStyle,
     /// How reference parts draw (bill of materials type `reference`).
     pub reference_style: VisualStyle,
     /// Whether reference parts hide the model's lines behind them.
     pub reference_hides_model: bool,
-    /// Model millimetres added on every side of the view's extents, so reference parts around the
-    /// model show inside its boundary: 0 to [`MAX_REFERENCE_MARGIN_MM`].
-    pub reference_margin_mm: f64,
+    /// How far the view's boundary grows from the model's box towards the box that also holds its
+    /// reference parts, each side on its own: 0 to [`MAX_REFERENCE_SHOWN_PERCENT`].
+    pub reference_shown_percent: f64,
     pub tangent_edges: TangentEdges,
 }
 
 /// The settings a saved view sets itself, each on its own: one left out follows the view's parent,
 /// then [`ViewSettings`]'s default ([`crate::drawing::Drawing::resolve_view`]). None is written.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ViewOverrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scale: Option<Scale>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub display_style: Option<VisualStyle>,
+    pub visual_style: Option<VisualStyle>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reference_style: Option<VisualStyle>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reference_hides_model: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tangent_edges: Option<TangentEdges>,
+    /// The subtrees it draws, with `[]` for the design's own bodies: every body the design places
+    /// when no view of its chain sets them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub occurrences: Option<OccurrencePaths>,
+    /// The subtrees it leaves out: none when no view of its chain sets them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hide: Option<OccurrencePaths>,
 }
 
 impl ViewOverrides {
     /// Sets nothing: every setting follows.
     pub fn is_empty(&self) -> bool {
-        *self == ViewOverrides::default()
+        self == &ViewOverrides::default()
     }
 }
 
 impl ViewSettings {
-    /// What reading alone can't check: the margin's range and the view's basis.
+    /// What reading alone can't check: the percent's range and the view's basis.
     pub fn validate(&self) -> Result<Plane, Invalid> {
-        let margin = self.reference_margin_mm;
-        if !(margin.is_finite() && (0.0..=MAX_REFERENCE_MARGIN_MM).contains(&margin)) {
-            return Err(Invalid("reference_margin_mm is a number of model millimetres from 0 to 100000"));
+        let percent = self.reference_shown_percent;
+        if !(percent.is_finite() && (0.0..=MAX_REFERENCE_SHOWN_PERCENT).contains(&percent)) {
+            return Err(Invalid("reference_shown_percent is a number from 0 to 100"));
         }
         self.view.basis()
     }

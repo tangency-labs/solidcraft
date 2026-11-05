@@ -341,3 +341,35 @@ fn measurements_seeded_never_panic_and_keep_their_rules() {
     }
     assert!(lengths > 5_000 && angles > 20_000 && chains > 2_000 && silhouettes > 20_000, "{lengths} {angles} {chains} {silhouettes}");
 }
+
+/// Two faces the front view sees edge-on, square to X and 80 apart: 80 along the view or aligned, 80
+/// over cos 45° along a diagonal, whichever way round they are and whichever way they face. Refused:
+/// a face seen other than edge-on, faces not parallel, one plane, a direction along them, and a
+/// point or a normal that isn't a number.
+#[test]
+fn flat_faces_read_across_them_as_the_view_shows_them() {
+    let basis = front();
+    let (a, b) = ((Vec3::ZERO, Vec3::X), (Vec3::new(80.0, 40.0, 30.0), -Vec3::X));
+    for (direction, value) in [(Aligned, 80.0), (Horizontal, 80.0), (Along(Vec2::new(1.0, 1.0)), 80.0 * 2f64.sqrt())] {
+        for (x, y) in [(a, b), (b, a)] {
+            let read = between_faces(&basis, x, y, direction).unwrap();
+            assert!((read.value - value).abs() < 1e-9 && !read.foreshortened, "{direction:?}: {read:?}");
+        }
+    }
+    let refused = |a, b, direction, why: &str| {
+        let e = between_faces(&basis, a, b, direction).unwrap_err();
+        assert!(e.0.contains(why), "{}", e.0);
+    };
+    let facing_the_view = (Vec3::ZERO, Vec3::Y);
+    refused(facing_the_view, b, Aligned, "edge-on");
+    refused(a, facing_the_view, Aligned, "edge-on");
+    let tilted = (Vec3::new(80.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 1.0));
+    refused(a, tilted, Aligned, "parallel");
+    refused(a, (Vec3::new(0.0, 5.0, 9.0), Vec3::X), Aligned, "one plane");
+    refused(a, b, Vertical, "run along the direction");
+    refused(a, b, Along(Vec2::ZERO), "zero or not finite");
+    refused((Vec3::new(f64::NAN, 0.0, 0.0), Vec3::X), b, Aligned, "within 1e12");
+    refused((Vec3::new(2e12, 0.0, 0.0), Vec3::X), b, Aligned, "within 1e12");
+    refused((Vec3::ZERO, Vec3::ZERO), b, Aligned, "normal");
+    refused((Vec3::ZERO, Vec3::new(f64::INFINITY, 0.0, 0.0)), b, Aligned, "normal");
+}

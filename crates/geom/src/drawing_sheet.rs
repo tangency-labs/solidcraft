@@ -32,10 +32,11 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::Aabb2;
 /// The longest side a custom sheet may have, in millimetres: the paper scene's limit.
 pub use crate::paper::MAX_SIDE_MM;
 use crate::paper::{Group, Item, MAX_LINE_MM, ObjectKind};
-use crate::{Aabb2, Loop2, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 
 /// The most fields an equal division may cut each way.
 pub const MAX_EQUAL_FIELDS: u32 = 200;
@@ -445,8 +446,8 @@ impl SheetLayout {
     /// marks in the drawing border's width; the trimming marks, filled. The grid's labels are text,
     /// which the paper scene doesn't have yet.
     pub fn paper(&self, object: u64) -> Vec<Group> {
-        let line = |a, b, width_mm| Item::Stroke { path: vec![Seg2::Line { a, b }], closed: false, width_mm };
-        let outline = |r, width_mm| Item::Stroke { path: rectangle(r).segs, closed: true, width_mm };
+        let line = |a, b, width_mm| Item::Stroke { path: vec![Seg2::Line { a, b }], closed: false, width_mm, pattern: None };
+        let outline = |r, width_mm| Item::Stroke { path: rectangle(r).segs, closed: true, width_mm, pattern: None };
         let (d, g) = (self.drawing_border, self.grid_border);
         let mut grid = Vec::new();
         // No fields, or a grid reference border on the drawing border: no grid to draw.

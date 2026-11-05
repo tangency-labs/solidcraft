@@ -14,8 +14,9 @@
 //!   scales at which a view fits a space.
 //! - A **[`ViewFrame`]** places a view on paper: the point of the view's plane at `centre` lands at
 //!   `position_mm`, everything scaled by the scale. Its [`ViewFrame::paper_map`] moves the view's
-//!   curves ([`Seg2::similar`]) and their accuracy ([`CurveAccuracy::scaled`]) onto paper.
+//!   curves ([`Seg2Geom::similar`]) and their accuracy ([`CurveAccuracy::scaled`]) onto paper.
 
+use crate::prelude::*;
 use std::fmt;
 use std::str::FromStr;
 
@@ -24,7 +25,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::cell::Projection;
 use crate::paper::MAX_SIDE_MM;
 use crate::section::{CurveAccuracy, MAX_NUMBER, validate_plane};
-use crate::{Aabb2, Plane, Seg2, Similarity2, Vec2, Vec3};
+use crate::{Aabb2, Similarity2};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 
 /// The smallest scale: one paper millimetre for 100 m of model.
 pub const MIN_SCALE: f64 = 1e-5;

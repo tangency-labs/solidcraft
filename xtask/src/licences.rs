@@ -173,12 +173,24 @@ fn render(root: &Path, crates: &[Crate]) -> String {
          - BIZUDPGothic-Regular.ttf (assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf)\n  \
            Copyright 2022 The BIZ UDGothic Project Authors (https://github.com/googlefonts/morisawa-biz-ud-mincho)\n  \
            Source: https://github.com/googlefonts/morisawa-biz-ud-gothic\n\n\
+         - CraftUI-SC.otf (assets/fonts/craft-ui-sc/CraftUI-SC.otf)\n  \
+           Copyright 2014-2021 Adobe / Google Inc. (Noto Sans SC subset for SolidCraft web zh)\n  \
+           Source: https://github.com/notofonts/noto-cjk (Sans SubsetOTF/SC)\n\n\
+         - CraftUI-TC.otf (assets/fonts/craft-ui-tc/CraftUI-TC.otf)\n  \
+           Copyright 2014-2021 Adobe / Google Inc. (Noto Sans TC subset for SolidCraft web zh-TW)\n  \
+           Source: https://github.com/notofonts/noto-cjk (Sans SubsetOTF/TC)\n\n\
          - IBMPlexSans-Variable.ttf (assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf)\n  \
            Copyright 2017 IBM Corp. with Reserved Font Name \"Plex\"\n  \
            Source: https://github.com/IBM/plex\n\n\
          - IBMPlexMono-Regular.ttf (assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf)\n  \
            Copyright 2017 IBM Corp. with Reserved Font Name \"Plex\"\n  \
-           Source: https://github.com/IBM/plex\n\n"
+           Source: https://github.com/IBM/plex\n\n\
+         - NotoSansArabic-Regular.ttf (assets/fonts/noto-sans-arabic/NotoSansArabic-Regular.ttf)\n  \
+           Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic)\n  \
+           Source: https://github.com/notofonts/notofonts.github.io\n\n\
+         - NotoSansKR-Regular.otf, NotoSansSC-Regular.otf and NotoSansTC-Regular.otf (assets/fonts/noto-sans-kr, -sc and -tc)\n  \
+           Copyright 2014-2021 Adobe (http://www.adobe.com/)\n  \
+           Source: https://github.com/notofonts/noto-cjk\n\n"
     );
     let ofl_path = root.join("assets/fonts/biz-udp-gothic/OFL.txt");
     let fallback_path = root.join("assets/fonts/liberation-sans/OFL.txt");

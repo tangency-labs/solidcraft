@@ -411,7 +411,7 @@ fn rules_dialog_picks_the_corner_relief_shape() {
         // The rounds in the base of the tray, and the shape the open dialog shows.
         let rounds = |app: &SolveApp| {
             let state = app.session.model.state();
-            state.sheets.last().map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcraft_engine::geom::Seg2::Arc { .. })).count())
+            state.sheets.last().map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcore_record::Seg2::Arc { .. })).count())
         };
         let shown = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
             Some(Kind::Sheet(Sm::Rules { relief, .. })) => Some(*relief),
@@ -605,7 +605,7 @@ fn flange_dialog_picks_a_corner_relief_of_its_own() {
                 .state()
                 .sheets
                 .last()
-                .map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcraft_engine::geom::Seg2::Arc { .. })).count())
+                .map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcore_record::Seg2::Arc { .. })).count())
         };
         assert_eq!(arcs(&h.app), Some(1), "the round is cut at the one corner the two flanges make");
         // Edit Feature shows both again; Rule and an empty size take the feature back to the rule's relief.
@@ -910,7 +910,7 @@ fn path_flange_dialog_follows_the_path() {
         app.run("sketch.create", json!({"plane": {"origin": [0, 0, 15], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Path"})).unwrap();
         app.run("sketch.line", json!({"points": [[0, 0], [a, -a], [a + 30.0, -a]], "ids": ["p1", "p2"]})).unwrap();
         app.run("sketch.finish", json!({})).unwrap();
-        let path = app.session.world_state().sketches.last().map(|ss| ss.feature);
+        let path = crate::open_meshing::session_world(&app.session).sketches.last().map(|ss| ss.feature);
         // A newer sketch with the same line ids: the picks name the path's sketch (#3726).
         app.run("sketch.create", json!({"plane": {"origin": [0, 0, 60], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Other"})).unwrap();
         app.run("sketch.line", json!({"points": [[50, 50], [60, 50], [60, 60]], "ids": ["p1", "p2"]})).unwrap();
@@ -1186,7 +1186,7 @@ fn flat_circles(app: &mut SolveApp, dialog: &Dialog, rect: Rect) -> Vec<egui::ep
 #[test]
 fn flat_perforations_match_export_centres_and_cutout_style() {
     let (mut app, dialog) = perforated_flat();
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let sheet = state.sheets.last().unwrap();
     let holes = sheet.perforation_holes(&sheet.perforations[0]).unwrap();
     let rect = Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0));
@@ -1208,7 +1208,7 @@ fn flat_perforations_match_export_centres_and_cutout_style() {
     assert_eq!(flat_circles(&mut app, &dialog, rect).len(), 155);
     assert_eq!(app.flat_view.perforations.as_ptr(), cached, "navigation reuses the centres");
     app.run("sheet.perforate", json!({"diameter": 2, "pitch": 10})).unwrap();
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let sheet = state.sheets.last().unwrap();
     let expected: usize = sheet.perforations.iter().map(|p| sheet.perforation_holes(p).unwrap().len()).sum();
     assert!(expected > 155);
@@ -1253,7 +1253,7 @@ fn hem_handle_runs_along_the_hem_to_its_tip() {
         let commands = apply_commands(&app, &d).unwrap();
         run_all(&mut app, commands);
         // The 5 mm hem layer: its tip is the far end of the added layer, along the sheet.
-        let m = app.session.world_state().body(&body).unwrap().mesh();
+        let m = crate::open_meshing::session_world(&app.session).body(&body).unwrap().mesh();
         // The straight part of the layer, past the fold.
         let layer_z = |z: f64| if flipped { z > 2.505 } else { z < -0.01 };
         let tip_y = m.positions.iter().filter(|v| layer_z(v.z)).map(|v| v.y).fold(f64::NEG_INFINITY, f64::max);
@@ -1369,5 +1369,44 @@ fn flat_pattern_navigation_slots_hide_orbit_controls_and_keep_fit_home() {
     }
     for slot in ["pan", "zoom", "fit", "home", "display"] {
         assert!(crate::scenario::handle_at(&format!("nav:slot:{slot}")).is_some(), "{slot}");
+    }
+}
+
+/// Drawing reuses the source flat-pattern inspector without giving its camera to Design.
+#[test]
+fn source_flat_pattern_remains_visible_and_refittable_in_drawing() {
+    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        let ctx = crate::fonts::test_context();
+        let mut app = plate(mode);
+        app.run("sheet.flange", json!({"sketch":"Base"})).unwrap();
+        let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
+        let doc = app.session.doc.clone();
+        let design = app.cam;
+        crate::workspace::enter(&mut app, "drawing").unwrap();
+        app.start("sheet.flat_pattern");
+        let Some(Kind::Sheet(Sm::FlatPattern { data, .. })) = app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("source flat inspector") };
+        *data = Some(Ok(flat));
+        let render = |app: &mut SolveApp| {
+            let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))), ..Default::default() };
+            crate::test_support::frame(&ctx, raw, |ui| app.show_workspace(ui));
+        };
+        render(&mut app);
+        assert!(app.flat_view.fitted, "the Drawing route paints the existing source inspector");
+        let fitted = app.flat_view.cam;
+        for view in ["fit", "home"] {
+            app.flat_view.cam.pan(120.0, -80.0, 600.0);
+            app.animate_view(view);
+            assert!(!app.flat_view.fitted);
+            render(&mut app);
+            assert_eq!(app.flat_view.cam, fitted);
+            assert_eq!(app.cam, design);
+        }
+        app.flat_view.cam.pan(50.0, 50.0, 600.0);
+        app.fit_view();
+        render(&mut app);
+        assert_eq!(app.flat_view.cam, fitted);
+        assert_eq!(app.session.doc, doc);
+        assert_eq!(app.cam, design);
+        assert!(crate::drawing_workspace::active(&app));
     }
 }

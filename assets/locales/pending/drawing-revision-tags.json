@@ -1,0 +1,42 @@
+{
+  "en": {
+    "cmd.drawing_revision_tag_add": "Add Revision Tag",
+    "cmd.drawing_revision_tag_edit": "Edit Revision Tag",
+    "cmd.drawing_revision_tag_delete": "Delete Revision Tag"
+  },
+  "ar": {
+    "cmd.drawing_revision_tag_add": "إضافة علامة مراجعة",
+    "cmd.drawing_revision_tag_edit": "تحرير علامة المراجعة",
+    "cmd.drawing_revision_tag_delete": "حذف علامة المراجعة"
+  },
+  "de": {
+    "cmd.drawing_revision_tag_add": "Revisionskennzeichen hinzufügen",
+    "cmd.drawing_revision_tag_edit": "Revisionskennzeichen bearbeiten",
+    "cmd.drawing_revision_tag_delete": "Revisionskennzeichen löschen"
+  },
+  "he": {
+    "cmd.drawing_revision_tag_add": "הוספת תג גרסה",
+    "cmd.drawing_revision_tag_edit": "עריכת תג גרסה",
+    "cmd.drawing_revision_tag_delete": "מחיקת תג גרסה"
+  },
+  "ja": {
+    "cmd.drawing_revision_tag_add": "リビジョンタグを追加",
+    "cmd.drawing_revision_tag_edit": "リビジョンタグを編集",
+    "cmd.drawing_revision_tag_delete": "リビジョンタグを削除"
+  },
+  "ko": {
+    "cmd.drawing_revision_tag_add": "리비전 태그 추가",
+    "cmd.drawing_revision_tag_edit": "리비전 태그 편집",
+    "cmd.drawing_revision_tag_delete": "리비전 태그 삭제"
+  },
+  "vi": {
+    "cmd.drawing_revision_tag_add": "Thêm thẻ sửa đổi",
+    "cmd.drawing_revision_tag_edit": "Sửa thẻ sửa đổi",
+    "cmd.drawing_revision_tag_delete": "Xóa thẻ sửa đổi"
+  },
+  "zh": {
+    "cmd.drawing_revision_tag_add": "添加版本标记",
+    "cmd.drawing_revision_tag_edit": "编辑版本标记",
+    "cmd.drawing_revision_tag_delete": "删除版本标记"
+  }
+}

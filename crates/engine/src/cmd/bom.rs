@@ -13,15 +13,16 @@
 
 use serde_json::{Map, Value, json};
 use solidcraft_doc::BomType;
-use solidcraft_doc::bom::{self, Bom, Group, MAX_ITEM, Mass, Numbering, Order, Quantity, Request, Row, Tree, Uncounted, View};
+use solidcraft_doc::bom::{self, Bom, Group, ItemNumbers, MAX_ITEM, Mass, Numbering, Order, Quantity, Request, Row, Tree, Uncounted, View};
 use solidcraft_doc::metadata::{BOM_KEYS, BOM_QUANTITY, BOM_TYPE, MATERIAL, MAX_KEYS, Owner, PART_ONLY, VIRTUAL, check_text, key_list};
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
-use crate::schema::bom::{OccurrenceBomTypeParams, OccurrenceBomTypeResult};
+use crate::schema::bom::{BomParams, OccurrenceBomTypeParams, OccurrenceBomTypeResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const BOM_CONTRACT: TypedContract<BomParams> = TypedContract::new();
 const OCCURRENCE_BOM_TYPE_CONTRACT: TypedContract<OccurrenceBomTypeParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -54,7 +55,13 @@ pub static COMMANDS: &[CommandSpec] = &[
          (as its component again). One undo step → occurrence, bom_type (its own, or same_as_component), effective (the type it \
          counts as), changed",
     ),
-    CommandSpec::new("assembly.bom", "Bill of Materials", bom).at("SOLID", "INSPECT").icon("bom").noundo().params(
+    CommandSpec::new("assembly.bom", "Bill of Materials", crate::checked!("assembly.bom", bom))
+        .at("SOLID", "INSPECT")
+        .icon("bom")
+        .noundo()
+        .contract(&BOM_CONTRACT)
+        .output(output_schema_for::<crate::schema::bom::Bom>)
+        .params(
         "component?: id or name (default the design); levels?: flat (default: every part at any depth, counted through its \
          subassemblies) | top (the component's direct children, subassemblies as one row each) | all (as top, each subassembly's \
          own rows listed after it, to any depth: items 1.1, 1.1.1, as in the CSV); show_purchased_contents?: true (in all, a \
@@ -69,7 +76,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          a .csv (columns item, part_number, description, revision, count, definition, material, quantity) or .json file (children as \
          items 1.1, 1.2…); format?: csv|json (default from the path). Each placement counts as \
          its occurrence's bom_type, else its component's: phantom has no row (what it holds counts here; its own bodies, \
-         if it has any, are a row of their own), reference counts nowhere, purchased and inseparable are one row (in flat, an inseparable one's purchased parts are listed too); placements \
+         if it has any, are a row of their own), reference counts nowhere, purchased and inseparable are one row (in flat, an inseparable one's purchased parts are listed too, under it with group_children and a part number); placements \
          of one component that count as different types are different rows → rows: [{item, part_number, description, revision, \
          bom_type, count, definition, material (the physical materials of the definitions' own bodies, \"; \" between them; a \
          row that weighs what is placed inside it shows the one material all of that shares, else \"\"), mass_g?, quantity? \
@@ -82,7 +89,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          (the view's item numbers are saved: assembly.bom.renumber). In a numbered view each level is listed by item number \
          and a row says provisional (its number not saved yet: a row added since shows the next number at its level, saved \
          by the next change), locked and duplicate when true",
-    ),
+        ),
     CommandSpec::new("assembly.bom.renumber", "Renumber Items", renumber).icon("bom").params(
         "component?, levels?, group_by?, group_children?, show_purchased_contents?: the view, as assembly.bom takes them; \
          start?: 1; step?: 1 (whole numbers, 1 to 999999); order?: list (default: by part number, as an unnumbered view \
@@ -468,16 +475,34 @@ fn item_number(p: &Value, k: &str, default: Option<u32>, cmd: &str) -> Result<Op
 
 /// The view numbered as `how` says, its numbers saved (only a real change touches the design), and
 /// the view as `assembly.bom` gives it.
+fn save_numbers(s: &mut Session, numbers: ItemNumbers) {
+    let saved = &mut s.doc_mut().assembly.item_numbers;
+    match saved.iter_mut().find(|n| n.source == numbers.source && n.view == numbers.view) {
+        Some(old) => *old = numbers,
+        None => saved.push(numbers),
+    }
+}
+
+/// Saves the numbers a view shows, if it hasn't any saved: what placing it on a sheet does, so what
+/// is printed doesn't move. Its rows' positions are the numbers an unnumbered view shows.
+pub(super) fn keep_shown_numbers(s: &mut Session, request: &Request) -> solidcraft_doc::Result<()> {
+    if s.doc.assembly.item_numbers.iter().any(|n| n.source == request.source && n.view == request.view) {
+        return Ok(());
+    }
+    let state = s.model.state();
+    let how = Numbering::Renumber { start: 1, step: 1, order: Order::List };
+    if let Some(numbers) = bom::number(&mut Tree::new(&s.doc, &state), request, how)? {
+        save_numbers(s, numbers);
+    }
+    Ok(())
+}
+
 fn renumbered(s: &mut Session, p: &Value, how: Numbering, cmd: &str) -> Result<(Value, Bom)> {
     let request = Request { mass: false, ..request(s, p, cmd)? };
     let state = s.model.state();
     let numbers = bom::number(&mut Tree::new(&s.doc, &state), &request, how).map_err(|e| bad(cmd, e.to_string()))?;
     if let Some(numbers) = numbers {
-        let saved = &mut s.doc_mut().assembly.item_numbers;
-        match saved.iter_mut().find(|n| n.source == numbers.source && n.view == numbers.view) {
-            Some(old) => *old = numbers,
-            None => saved.push(numbers),
-        }
+        save_numbers(s, numbers);
     }
     let list = bom::list(&mut Tree::new(&s.doc, &state), &request).map_err(|e| bad(cmd, e.to_string()))?;
     let reply = json!({"component": request.source, "levels": request.view.as_str(), "numbered": list.numbered,

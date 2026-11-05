@@ -1,6 +1,7 @@
 //! Product-image work and its device-independent, session-scoped protocol.
 //! Hosts own execution; documents and history never contain these values.
 
+use solidcraft_geom::prelude::*;
 use std::fmt;
 use std::sync::{
     Arc,
@@ -45,7 +46,10 @@ pub use host::{
     CpuHost, HostKind, ImageHost, JobEnvironmentInfo, JobHandle, JobStatus, LinearAlphaConvention, LinearColourEncoding, LinearMasterInfo,
     PreviewInfo, RenderFrame, RenderPreview,
 };
-pub use image::{Admission, ImageTask, TaskPoll, admit, admit_geometry, admit_geometry_with_limits};
+pub use image::{
+    Admission, BodyRole, ImageTask, MAX_PICTURE_PIXEL_TESTS, MAX_TILES, OrthoFrame, PicturePoll, PictureRequest, PictureTask, PixelWindow,
+    Projection, Supersample, TaskPoll, admit, admit_geometry, admit_geometry_with_limits, admit_picture,
+};
 pub use lens::ThinLens;
 pub use lighting::{AreaLight, AreaLights, MAX_AREA_LIGHTS, StudioLighting, Sun, ToneMap};
 pub use png::PngTask;
@@ -963,7 +967,7 @@ impl RaytraceOptions {
         }
         if let Some(lights) = &self.area_lights {
             for light in lights {
-                use solidcraft_geom::Vec3;
+                use solidcore_record::Vec3;
                 let vec = |v: [f64; 3]| Vec3::new(v[0], v[1], v[2]);
                 let c = vec(light.center_mm);
                 let u = vec(light.edge_u_mm);

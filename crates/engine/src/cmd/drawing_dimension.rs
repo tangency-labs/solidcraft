@@ -1,24 +1,29 @@
-//! `drawing.dimension.add`, `.edit` and `.inspect` (W19d, #4896): a dimension on a saved view of
-//! the open drawing, its settings, and what it reads now. What a dimension measures is picked (a
-//! point, or an edge's index) and saved by name, never by the point picked
-//! ([`solidcraft_doc::Document::edge_reference`]); its value comes from the model each time it is
-//! read ([`solidcraft_doc::Document::resolve_dimensions`]). Adding and editing are one undo step
-//! of the drawing each, and none of the commands evaluates the model.
+//! `drawing.dimension.add`, `.edit`, `.repair` and `.inspect` (W19d, #4896; B5, #4892): a dimension
+//! on a saved view of the open drawing, its settings, a new name for a reference it lost, and what
+//! it reads now. What a dimension measures is picked (a point, or an edge's index) and saved by
+//! name, never by the point picked ([`solidcraft_doc::Document::edge_reference`]); its value comes
+//! from the model each time it is read ([`solidcraft_doc::Document::resolve_dimensions`]). Adding,
+//! editing and repairing are one undo step of the drawing each, and none of the commands evaluates
+//! the model.
 
 use std::sync::Arc;
 
 use serde_json::Value;
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::drawing::Drawing;
-use solidcraft_doc::drawing::dimension::{Candidate, DEFAULT_DECIMALS, Dimension, DimensionKind, Silhouette, Status, TextPlace, check_chain_length};
+use solidcraft_doc::drawing::dimension::{
+    Candidate, DEFAULT_DECIMALS, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Reference, Silhouette, Status, TextPlace,
+    check_chain_length,
+};
 use solidcraft_doc::ids;
-use solidcraft_geom::Vec3;
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::drawing_dimension::{
     AddParams, CandidateResult, CornerParam, DimensionResult, DimensionSet, EdgeParam, EditParams, EditResult, FaceParam, InspectParams, KindParam,
-    MemberResult, SilhouetteParam,
+    MemberResult, PickParam, RepairParams, SilhouetteParam, SlotParam,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -29,10 +34,16 @@ const EDIT: &str = "drawing.dimension.edit";
 const EDIT_CONTRACT: TypedContract<EditParams> = TypedContract::new();
 const INSPECT: &str = "drawing.dimension.inspect";
 const INSPECT_CONTRACT: TypedContract<InspectParams> = TypedContract::new();
+const REPAIR: &str = "drawing.dimension.repair";
+const REPAIR_CONTRACT: TypedContract<RepairParams> = TypedContract::new();
 
 /// How far a new dimension's line is from what it measures, on paper, until a dimension style
-/// gives it (D1).
+/// gives it (D1). A new linear, length or chain dimension takes its side ([`side_by_default`]).
 const DEFAULT_OFFSET_MM: f64 = 10.0;
+/// How far beside a line's middle, on paper, [`side_by_default`] looks for material.
+const LOOK_PAST_MM: f64 = 0.5;
+/// How near the middle of a view's model box, in model mm, a line's middle is on it.
+const ON_CENTRE_MM: f64 = 1e-6;
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new(ADD, "Add Drawing Dimension", crate::checked!("drawing.dimension.add", add))
@@ -47,12 +58,13 @@ pub static COMMANDS: &[CommandSpec] = &[
              other_side?}}, {radial: {edge: a circle or an arc the view sees face on, diameter?: by default for a whole circle or \
              half a turn or more}}, {cylinder: {face: a face of a whole cylinder the view doesn't see end-on, read as Ø between its \
              silhouettes}}, {silhouettes: {a, b: {face, side: near or far, the silhouette nearer the other cylinder or farther}, \
-             direction?: as a linear one's, aligned being square to them}: two of one cylinder make its cylinder dimension} or \
+             direction?: as a linear one's, aligned being square to them}: two of one cylinder make its cylinder dimension}, \
+             {faces: {a, b: flat, parallel faces the view sees edge-on, direction?: as a linear one's, aligned being square to them}} or \
              {chain: {points: [3 to 64 corners, in order along one line], direction?: as a linear one's, aligned being first to \
              last}}; an edge is a point on it [x, y, z] in the design's frame, {point} or {body, index}, and a \
              corner a point, {point}, {edges: [2 to 16 edges]} or {centre: an edge that is a circle or an arc}, and a face a point on \
              it, {point} or {body, index}, each with path?: the \
-             occurrences its body is placed through, from the top; offset_mm?: the dimension line's distance on paper (default 10); \
+             occurrences its body is placed through, from the top; offset_mm?: the dimension line's distance on paper (default 10;              a linear, length or chain one's on the side away from what it measures); \
              text?: centred (default) or {at: [x, y]} from the view's centre; decimals?: 0..6 (default 2); override_text? (not a \
              chain's) → what drawing.dimension.inspect answers for it. Saved by the edges' names, never the points picked; one the \
              view can't measure is refused. One undo step; no model is evaluated.",
@@ -70,6 +82,20 @@ pub static COMMANDS: &[CommandSpec] = &[
              {dimension, changed: [fields]}. What it measures stays: to measure something else, add a new one. One undo step, none \
              when nothing changes; no model is evaluated.",
         ),
+    CommandSpec::new(REPAIR, "Repair Drawing Dimension", crate::checked!("drawing.dimension.repair", repair))
+        .icon("dimension")
+        .in_drawing()
+        .doc_only()
+        .contract(&REPAIR_CONTRACT)
+        .output(output_schema_for::<DimensionResult>)
+        .params(
+            "dimension: its id, one that reads lost or ambiguous; slot: which of its references, a or b (a linear dimension's corners, \
+             an angle's edges, the faces of silhouettes or of faces), edge (a length's or a radial one's), face (a cylinder's) or a \
+             chain's point by its number from 0, one that no longer finds the one thing it names; pick: what that reference names \
+             now, {edge}, {corner} or {face}, each as add takes it but without path (it keeps its own); a candidate inspect lists \
+             of the slot's kind passes back as it stands → what drawing.dimension.inspect answers for it. Saved by name; its id, \
+             view, place and settings stay, and one the view can't measure is refused. One undo step; no model is evaluated.",
+        ),
     CommandSpec::new(INSPECT, "Inspect Drawing Dimension", crate::checked!("drawing.dimension.inspect", inspect))
         .icon("inspect")
         .in_drawing()
@@ -78,11 +104,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<DimensionResult>)
         .params(
-            "dimension: its id → {dimension, view, record: as saved, status: ok, overridden, ambiguous, suppressed, lost or unmeasurable, \
+            "dimension: its id → {dimension, view, record: as saved, status: ok, overridden, ambiguous, suppressed, failed, lost or unmeasurable, \
              why?, value? (model mm, or degrees for an angle; a chain's overall), foreshortened?, text? (none for a chain), \
              members?: a chain's [{value, text}] from its first point, last_good? (the value it last read, kept when the design \
-             is saved, when it has none now), exact, candidates?: [{edge: {body, index}}, {corner: [x, y, z]} or {face: {body, index}}]}. \
-             Read-only; no model is evaluated.",
+             is saved, when it has none now), exact, candidates?: [{edge: {body, index}}, {corner: [x, y, z]} or {face: {body, index}}]: \
+             what an ambiguous name finds, or a lost one's leads; one of a slot's kind passes back to drawing.dimension.repair as it \
+             stands}. Read-only; no model is evaluated.",
         ),
 ];
 
@@ -96,6 +123,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let corner = |c: &CornerParam| doc.corner_reference(model, &c.pick, &c.path).map_err(|why| bad(ADD, why.to_string()));
     let face = |f: &FaceParam| doc.face_reference(model, &f.pick, &f.path).map_err(|why| bad(ADD, why.to_string()));
     let choose_diameter = matches!(request.kind, KindParam::Radial { diameter: None, .. });
+    let choose_side = request.offset_mm.is_none();
     let kind = match request.kind {
         KindParam::Linear { a, b, direction, reading } => DimensionKind::Linear {
             a: corner(&a)?,
@@ -116,6 +144,9 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         KindParam::Silhouettes { a, b, direction } => {
             let silhouette = |s: &SilhouetteParam| face(&s.face).map(|face| Silhouette { face, side: s.side });
             doc.silhouettes_kind(model, silhouette(&a)?, silhouette(&b)?, direction).map_err(|why| bad(ADD, why.to_string()))?
+        }
+        KindParam::Faces { a, b, direction } => {
+            DimensionKind::Faces { a: face(&a)?, b: face(&b)?, direction: direction.unwrap_or(LinearDirection::Aligned) }
         }
         KindParam::Chain { points, direction } => {
             // Counted before any point is looked up.
@@ -145,11 +176,138 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     if choose_diameter && let DimensionKind::Radial { diameter, .. } = &mut dimension.kind {
         *diameter = read.first().is_some_and(|r| diameter_by_default(&r.points));
     }
+    if choose_side
+        && let DimensionKind::Linear { direction, .. } | DimensionKind::Length { direction, .. } | DimensionKind::Chain { direction, .. } =
+            &dimension.kind
+        && let Some(r) = read.first()
+    {
+        dimension.offset_mm = DEFAULT_OFFSET_MM * side_by_default(s, &record, view, *direction, &r.points);
+    }
     s.edit_drawing(ADD, |d| {
         d.add_dimensions([Arc::new(dimension)]);
         Ok(())
     })?;
     answer(s, ADD, id)
+}
+
+fn repair(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: RepairParams = crate::schema::read(REPAIR, p)?;
+    let id = request.dimension.0;
+    let unknown = || bad(REPAIR, format!("the drawing has no dimension {}", ids::encode(id)));
+    let d = s.drawing(REPAIR)?;
+    d.dimension(id).ok_or_else(unknown)?;
+    let read = s.doc.resolve_dimensions(&s.model, d, &[id]).map_err(|e| bad(REPAIR, e.to_string()))?;
+    let now = read.into_iter().next().map(|r| r.status).ok_or_else(unknown)?;
+    repair_reference(s, REPAIR, now, |s, copy| {
+        let record = copy.dimension_index(id).and_then(|at| copy.dimensions.get_mut(at)).map(Arc::make_mut).ok_or_else(unknown)?;
+        slot(&mut record.kind, request.slot)?.take(s, REPAIR, &request.pick)?;
+        // As add has it: two silhouettes of one cylinder are its diameter, a cylinder dimension.
+        if let DimensionKind::Silhouettes { a, b, .. } = &record.kind
+            && let Ok(DimensionKind::Cylinder { .. }) = s.doc.silhouettes_kind(&s.model, a.clone(), b.clone(), None)
+        {
+            return Err(bad(REPAIR, "both silhouettes would be on one cylinder: its diameter is a dimension of its own (add one)"));
+        }
+        // Read before it is kept, as add does: a reference its view can't measure would show nothing.
+        let read = s.doc.resolve_dimensions(&s.model, copy, &[id]).map_err(|e| bad(REPAIR, e.to_string()))?;
+        match read.first().map(|r| &r.status) {
+            Some(Status::Unmeasurable(why)) => Err(bad(REPAIR, why.clone())),
+            _ => Ok(()),
+        }
+    })?;
+    answer(s, REPAIR, id)
+}
+
+/// One reference of a record on a copy of the open drawing, for a repair to put a new name into.
+pub(super) enum Slot<'a> {
+    Edge(&'a mut ModelEdge),
+    Point(&'a mut ModelPoint),
+    Face(&'a mut ModelFace),
+}
+
+impl Slot<'_> {
+    /// `pick` named as `add` names one, on the reference's own occurrence path, and put in its
+    /// place. A reference that still finds the one thing it names is kept, and a pick of another
+    /// kind is refused, naming the kind it takes.
+    pub(super) fn take(self, s: &Session, cmd: &str, pick: &PickParam) -> Result<()> {
+        let (doc, model) = (&s.doc, &s.model);
+        let reference = match &self {
+            Slot::Edge(edge) => Reference::Edge(edge),
+            Slot::Point(point) => Reference::Point(point),
+            Slot::Face(face) => Reference::Face(face),
+        };
+        if doc.finds_one(model, reference) {
+            return Err(bad(cmd, "this reference still finds what it names: only a lost or ambiguous one is repaired"));
+        }
+        let named = |why: solidcraft_doc::DocError| bad(cmd, why.to_string());
+        match (self, pick) {
+            (Slot::Edge(edge), PickParam::Edge(p)) => *edge = doc.edge_reference(model, p, &edge.path).map_err(named)?,
+            (Slot::Point(point), PickParam::Corner(p)) => *point = doc.corner_reference(model, p, &point.path).map_err(named)?,
+            (Slot::Face(face), PickParam::Face(p)) => *face = doc.face_reference(model, p, &face.path).map_err(named)?,
+            (Slot::Edge(_), _) => return Err(bad(cmd, "this reference is an edge: give {edge: …}")),
+            (Slot::Point(_), _) => return Err(bad(cmd, "this reference is a corner: give {corner: …}")),
+            (Slot::Face(_), _) => return Err(bad(cmd, "this reference is a face: give {face: …}")),
+        }
+        Ok(())
+    }
+}
+
+/// Repairs a reference of the open drawing as `cmd`, the user's own pick for one whose record reads
+/// `now` lost or ambiguous: one that reads is changed by an edit (or a new one), and a suppressed or
+/// failed one comes back by itself. `put` finds the reference on a copy of the drawing, puts the
+/// pick in ([`Slot::take`]) and may read the copy; the copy is kept as one undo step. The record's
+/// id, view, place and settings stay. Balloons are repaired through it too.
+pub(super) fn repair_reference(s: &mut Session, cmd: &str, now: Status, put: impl FnOnce(&Session, &mut Drawing) -> Result<()>) -> Result<()> {
+    if !matches!(now, Status::Lost(..) | Status::Ambiguous(_)) {
+        let word = status_words(now).0;
+        return Err(bad(cmd, format!("it reads {word}: only a lost or ambiguous reference is repaired (to point at something else, add a new one)")));
+    }
+    let mut copy = Drawing::clone(s.drawing(cmd)?);
+    put(&*s, &mut copy)?;
+    s.edit_drawing(cmd, |d| {
+        *d = copy;
+        Ok(())
+    })
+}
+
+/// The reference of `kind` that `slot` names: a linear dimension's corners `a` and `b`, a length's
+/// or a radial one's `edge`, an angle's edges `a` and `b`, a chain's points by number, a cylinder's
+/// `face`, and the faces `a` and `b` of silhouettes (each keeps its side) or of faces.
+fn slot(kind: &mut DimensionKind, slot: SlotParam) -> Result<Slot<'_>> {
+    let fits = slots(kind);
+    let found = match kind {
+        DimensionKind::Linear { a, b, .. } => a_or_b(slot, a, b).map(Slot::Point),
+        DimensionKind::Length { edge, .. } | DimensionKind::Radial { edge, .. } => (slot == SlotParam::Edge).then_some(Slot::Edge(edge)),
+        DimensionKind::Angle { a, b, .. } => a_or_b(slot, a, b).map(Slot::Edge),
+        DimensionKind::Chain { points, .. } => match slot {
+            SlotParam::Point(k) => points.get_mut(k).map(Slot::Point),
+            _ => None,
+        },
+        DimensionKind::Cylinder { face } => (slot == SlotParam::Face).then_some(Slot::Face(face)),
+        DimensionKind::Silhouettes { a, b, .. } => a_or_b(slot, &mut a.face, &mut b.face).map(Slot::Face),
+        DimensionKind::Faces { a, b, .. } => a_or_b(slot, a, b).map(Slot::Face),
+    };
+    found.ok_or_else(|| bad(REPAIR, format!("this dimension's slots are {fits}")))
+}
+
+/// `a` for slot `a`, `b` for slot `b`, and nothing for any other.
+fn a_or_b<'a, T>(slot: SlotParam, a: &'a mut T, b: &'a mut T) -> Option<&'a mut T> {
+    match slot {
+        SlotParam::A => Some(a),
+        SlotParam::B => Some(b),
+        _ => None,
+    }
+}
+
+/// The slots a dimension of `kind` has, for a message.
+fn slots(kind: &DimensionKind) -> String {
+    match kind {
+        DimensionKind::Linear { .. } => "`a` and `b`, its corners".into(),
+        DimensionKind::Length { .. } | DimensionKind::Radial { .. } => "`edge`".into(),
+        DimensionKind::Angle { .. } => "`a` and `b`, its edges".into(),
+        DimensionKind::Chain { points, .. } => format!("its points, 0 to {}", points.len().saturating_sub(1)),
+        DimensionKind::Cylinder { .. } => "`face`".into(),
+        DimensionKind::Silhouettes { .. } | DimensionKind::Faces { .. } => "`a` and `b`, its faces".into(),
+    }
 }
 
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
@@ -168,6 +326,37 @@ fn diameter_by_default(points: &[Vec3]) -> bool {
     let (from, to) = (*start - *centre, *middle - *centre);
     // The middle is half the arc's turn from its start: a quarter turn or more away.
     from.dot(to) <= from.dot(from) * 1e-9
+}
+
+/// A new linear, length or chain dimension's side, as its offset's sign, from its points as read
+/// (a chain's first and last): away from the material beside its line's middle, so it clears what
+/// it measures. Beside means half a paper millimetre either way across the line in the view's
+/// plane, at the depth of what it measures, asked of each shown body's B-rep exactly (inside or on
+/// its boundary is material). With material on both sides or neither, away from the middle of the
+/// view's model box; on that middle (a centre line, a symmetric pair) the fixed rule is +1, above
+/// or to the left ([`crate::drawing_dimension_paper::line_direction`]).
+fn side_by_default(s: &Session, drawing: &Drawing, view: u64, direction: LinearDirection, points: &[Vec3]) -> f64 {
+    let (Ok(resolved), Ok(shown)) = (drawing.resolve_view(view), crate::drawing_view::shown(s)) else { return 1.0 };
+    let basis = resolved.basis;
+    let (Some(first), Some(last)) = (points.first(), points.last()) else { return 1.0 };
+    let (a, b) = (basis.to_local(*first), basis.to_local(*last));
+    // The plane's directions are paper's: a view's paper map only scales and shifts.
+    let Some(n) = crate::drawing_dimension_paper::line_direction(direction, b - a).map(Vec2::perp) else { return 1.0 };
+    let middle = (a + b) * 0.5;
+    let beside = (basis.x * n.x + basis.y * n.y) * (LOOK_PAST_MM / resolved.scale.value.factor());
+    let at = (*first + *last) * 0.5;
+    let material = |p: Vec3| {
+        let class = |body: &solidcraft_doc::ModelBody| body.body.classify_point(p).is_ok_and(|c| c != solidcraft_kernel::PointClass::Outside);
+        shown.bodies.iter().filter_map(|b| shown.body(b)).any(class)
+    };
+    match (material(at + beside), material(at - beside)) {
+        (true, false) => -1.0,
+        (false, true) => 1.0,
+        _ => {
+            let from_centre = crate::drawing_view::measure(&shown, &basis).map_or(0.0, |e| (middle - e.model.center()).dot(n));
+            if from_centre < -ON_CENTRE_MM { -1.0 } else { 1.0 }
+        }
+    }
 }
 
 /// `set` made on dimension `id` of `d`: the fields it changes, by name.
@@ -223,6 +412,12 @@ fn change(d: &mut Drawing, id: u64, set: &DimensionSet) -> Result<Vec<String>> {
             }
             *direction = set.direction.unwrap_or(*direction);
         }
+        DimensionKind::Faces { direction, .. } => {
+            if set.reading.is_some() || set.other_side.is_some() {
+                return Err(bad(EDIT, "a dimension between faces has only `direction`: it reads as the view shows them"));
+            }
+            *direction = set.direction.unwrap_or(*direction);
+        }
         DimensionKind::Cylinder { .. } => {
             if set.direction.is_some() || set.reading.is_some() || set.other_side.is_some() {
                 return Err(bad(EDIT, "a cylinder's diameter has no direction, reading or side: it reads between its silhouettes"));
@@ -240,7 +435,9 @@ fn kind_settings(kind: &DimensionKind) -> (Option<LinearDirection>, Option<Readi
         }
         DimensionKind::Angle { reading, other_side, .. } => (None, Some(*reading), *other_side, false),
         DimensionKind::Radial { diameter, .. } => (None, None, false, *diameter),
-        DimensionKind::Chain { direction, .. } | DimensionKind::Silhouettes { direction, .. } => (Some(*direction), None, false, false),
+        DimensionKind::Chain { direction, .. } | DimensionKind::Silhouettes { direction, .. } | DimensionKind::Faces { direction, .. } => {
+            (Some(*direction), None, false, false)
+        }
         DimensionKind::Cylinder { .. } => (None, None, false, false),
     }
 }
@@ -302,15 +499,16 @@ fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
 }
 
 /// How a command's answer says where a reference stands with the model: the status's word, why
-/// it is lost or can't be measured, and the candidates when several things match. Balloons say it
-/// the same way.
+/// it failed, is lost or can't be measured, and the candidates when several things match or the
+/// leads when it is lost. Balloons say it the same way.
 pub(super) fn status_words(status: Status) -> (&'static str, Option<String>, Vec<CandidateResult>) {
     match status {
         Status::Ok => ("ok", None, Vec::new()),
         Status::Overridden => ("overridden", None, Vec::new()),
         Status::Ambiguous(found) => ("ambiguous", None, found.into_iter().map(candidate).collect()),
         Status::Suppressed => ("suppressed", None, Vec::new()),
-        Status::Lost(why) => ("lost", Some(why), Vec::new()),
+        Status::Failed(why) => ("failed", Some(why), Vec::new()),
+        Status::Lost(why, leads) => ("lost", Some(why), leads.into_iter().map(candidate).collect()),
         Status::Unmeasurable(why) => ("unmeasurable", Some(why), Vec::new()),
     }
 }

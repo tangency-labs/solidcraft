@@ -1,9 +1,9 @@
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use serde_json::json;
 
 use super::*;
-use crate::{Loop2, MAX_BEZIER_CTRL};
+use solidcore_record::{Loop2, MAX_BEZIER_CTRL};
 
 fn p(x: f64, y: f64) -> Vec2 {
     Vec2::new(x, y)
@@ -14,7 +14,7 @@ fn line(a: Vec2, b: Vec2) -> Seg2 {
 }
 
 fn stroke(path: Vec<Seg2>, closed: bool, width_mm: f64) -> Item {
-    Item::Stroke { path, closed, width_mm }
+    Item::Stroke { path, closed, width_mm, pattern: None }
 }
 
 fn fill(outer: Loop2, holes: Vec<Loop2>) -> Item {
@@ -28,7 +28,7 @@ fn rectangle(min: Vec2, max: Vec2) -> Loop2 {
 
 /// An A3 landscape sheet with one object's items.
 fn sheet(items: Vec<Item>) -> Scene {
-    Scene { size_mm: p(420.0, 297.0), groups: vec![Group { object: 1, kind: ObjectKind::DrawingBorder, items }] }
+    Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::DrawingBorder, items }])
 }
 
 fn open(path: Vec<Seg2>) -> Scene {
@@ -83,6 +83,7 @@ fn each_kind_names_its_layer_in_the_capitals_of_its_id() {
         (TitleBlock, "TITLE_BLOCK"),
         (PartsList, "PARTS_LIST"),
         (RevisionTable, "REVISION_TABLE"),
+        (SheetImage, "SHEET_IMAGE"),
         (View, "VIEW"),
     ] {
         assert_eq!(kind.layer(), layer);
@@ -245,7 +246,7 @@ fn every_loop_of_a_fill_is_closed_within_1e_9_mm() {
 fn at_most_100_000_records_are_counted_before_any_geometry() {
     const REFUSED: Invalid = Invalid("more than 100,000 groups, items, loops and pieces");
     let group = |items| Group { object: 7, kind: ObjectKind::PartsList, items };
-    let scene = |groups| Scene { size_mm: p(420.0, 297.0), groups };
+    let scene = |groups| Scene::new(p(420.0, 297.0), groups);
     // Groups alone.
     scene(vec![group(vec![]); MAX_RECORDS]).validate().unwrap();
     assert_eq!(scene(vec![group(vec![]); MAX_RECORDS + 1]).validate(), Err(REFUSED));
@@ -263,6 +264,8 @@ fn at_most_100_000_records_are_counted_before_any_geometry() {
     scene(vec![group(vec![fill(polygon(5), holes.clone())])]).validate().unwrap();
     assert_eq!(group(vec![fill(polygon(5), holes.clone())]).records(), MAX_RECORDS);
     assert_eq!(scene(vec![group(vec![fill(polygon(6), holes)])]).validate(), Err(REFUSED));
+    // A picture is one record, as an item: with its group, 2.
+    assert_eq!(group(vec![picture(0.0, 0.0, 10.0, 10.0, 1.0)]).records(), 2);
     // Counted first: an over-budget scene with a non-finite piece reports the count.
     let mut bad = steps(MAX_RECORDS - 1);
     bad[0] = line(p(f64::NAN, 0.0), p(1.0, 0.0));
@@ -305,4 +308,348 @@ fn unknown_fields_kinds_and_ids_are_refused_when_read() {
     let mut v = value;
     v["groups"][0]["object"] = json!(u64::MAX);
     read(v).unwrap().validate().unwrap();
+}
+
+/// A grid counts whole steps: half a step and less rounds to the nearer, -0 is 0, and a number
+/// too large or not a number is refused. A grid has 1 to 1e9 steps a millimetre.
+#[test]
+fn a_grid_counts_whole_steps_and_refuses_what_it_cannot_hold() {
+    let nm = Grid::NANOMETRE;
+    assert_eq!((nm.steps(-0.0).unwrap(), nm.steps(4e-7).unwrap(), nm.steps(6e-7).unwrap()), (0, 0, 1));
+    assert_eq!(nm.steps(9e9).unwrap(), 9_000_000_000_000_000);
+    for v in [f64::NAN, f64::INFINITY, 1e10, -1e10] {
+        assert!(nm.steps(v).is_err(), "{v}");
+    }
+    for per_mm in [1.0, 2048.0, 1e9] {
+        assert_eq!(Grid::new(per_mm).map(Grid::per_mm), Some(per_mm));
+    }
+    for per_mm in [0.0, 0.999, 1e9 + 1.0, -2048.0, f64::NAN, f64::INFINITY] {
+        assert!(Grid::new(per_mm).is_none(), "{per_mm}");
+    }
+}
+
+/// The A3 border on the nanometre grid: y up as in the scene, the closing line left to the
+/// writer's close, each fill loop closed, nothing snapped or merged.
+#[test]
+fn a_scene_on_the_grid_keeps_y_up_and_leaves_the_closing_line_to_the_writer() {
+    let on = a3().prepare().unwrap().on_grid(Grid::NANOMETRE).unwrap();
+    let g = |x: i64, y: i64| GridPoint { x: x * 1_000_000, y: y * 1_000_000 };
+    assert_eq!(on.size, g(420, 297));
+    let group = &on.groups[0];
+    assert_eq!((group.object, group.kind, group.items.len()), (1, ObjectKind::DrawingBorder, 3));
+    let GridItem::Stroke { width, path, dashes: None } = &group.items[0] else { panic!("{:?}", group.items[0]) };
+    assert_eq!(*width, 700_000);
+    let lines = |points: &[GridPoint]| points.iter().map(|&to| Piece::Line { to }).collect::<Vec<_>>();
+    assert_eq!(*path, GridPath { start: g(20, 10), pieces: lines(&[g(410, 10), g(410, 287), g(20, 287)]), closed: true });
+    let GridItem::Fill { loops } = &group.items[1] else { panic!("{:?}", group.items[1]) };
+    assert_eq!(*loops, [GridPath { start: g(0, 0), pieces: lines(&[g(10, 0), g(10, 5), g(0, 5)]), closed: true }]);
+    assert_eq!(on.report, GridReport::default());
+}
+
+/// "AA" in a made-up font whose glyph is a 500 x 700 unit box: 3.5 mm capitals from (20, 30),
+/// turned a quarter and leaning 0.2.
+fn boxed_text() -> (text::TextRun, text::Font) {
+    let metrics = text::FontMetrics {
+        ascent: 900,
+        descent: -200,
+        cap_height: 700,
+        bbox: [0, 0, 500, 700],
+        italic_angle: 0.0,
+        flags: text::FontFlags::default(),
+        stem_v: 80,
+    };
+    let glyph = text::FontGlyph { advance: 600, outline: vec![rectangle(p(0.0, 0.0), p(500.0, 700.0))] };
+    let font = text::Font {
+        id: [1; 32],
+        bytes: std::sync::Arc::from(vec![1u8]),
+        face: 0,
+        postscript_name: "MadeUp".into(),
+        family: "Made Up".into(),
+        embed: text::Embed::Subset,
+        num_glyphs: 2,
+        units_per_em: 1000,
+        metrics,
+        glyphs: [(1, glyph)].into(),
+    };
+    let placed = |x: f64| text::PlacedGlyph { id: 1, x, rise: 0.0, advance: 3.0 };
+    let run = text::TextRun {
+        font: [1; 32],
+        scale: 0.005,
+        origin: p(20.0, 30.0),
+        angle: FRAC_PI_2,
+        slant: 0.2,
+        glyphs: vec![placed(0.0), placed(3.0)],
+        text: "AA".into(),
+        clusters: vec![text::Cluster { glyphs: 0..1, text: 0..1 }, text::Cluster { glyphs: 1..2, text: 1..2 }],
+        rtl: false,
+    };
+    (run, font)
+}
+
+/// A text run on the grid is its glyphs' outlines as the run places them, each loop walked as a
+/// fill's, and keeps its place among its group's items.
+#[test]
+fn text_on_the_grid_is_its_placed_outlines() {
+    let (run, font) = boxed_text();
+    let outlines: Vec<Loop2> = run.outlines(&font).collect();
+    let scene = Scene { fonts: vec![font], ..sheet(vec![stroke(vec![line(p(0.0, 0.0), p(5.0, 0.0))], false, 0.35), Item::Text(run)]) };
+    let on = scene.prepare().unwrap().on_grid(Grid::NANOMETRE).unwrap();
+    let GridItem::Text { item, loops } = &on.groups[0].items[1] else { panic!("{:?}", on.groups[0].items[1]) };
+    assert_eq!(*item, 1);
+    // By hand, the first glyph's box: (0, 0) at the origin; along the baseline (x + 0.2 y) * 0.005 mm
+    // and up y * 0.005 mm, turned a quarter, so along is up the page and up is to the left.
+    let g = |x: f64, y: f64| Grid::NANOMETRE.point(p(x, y)).unwrap();
+    let lines = |points: &[GridPoint]| points.iter().map(|&to| Piece::Line { to }).collect::<Vec<_>>();
+    let first = GridPath { start: g(20.0, 30.0), pieces: lines(&[g(20.0, 32.5), g(16.5, 33.2), g(16.5, 30.7)]), closed: true };
+    assert_eq!((loops.len(), &loops[0]), (2, &first));
+    // The same loops a fill of the placed outlines gives.
+    let filled = sheet(outlines.into_iter().map(|l| fill(l, vec![])).collect()).prepare().unwrap().on_grid(Grid::NANOMETRE).unwrap();
+    let walked: Vec<GridPath> = filled.groups[0]
+        .items
+        .iter()
+        .flat_map(|i| match i {
+            GridItem::Fill { loops } => loops.clone(),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(*loops, walked);
+}
+
+/// Each placed glyph is its whole outline on the grid, though the scene's records count it once:
+/// glyphs of 4,096 pieces (4,095 walked, the closing line left to the writer) fill the grid's pieces
+/// to within one glyph, and a glyph more is refused. A stroke's lines or a fill's sides make up the
+/// rest to the cap exactly, and one piece past it, of either, is refused too.
+#[test]
+fn text_past_the_grids_pieces_is_refused() {
+    let (mut run, mut font) = boxed_text();
+    let ring: Vec<Vec2> = (0..text::MAX_GLYPH_PIECES)
+        .map(|i| {
+            let a = i as f64 * TAU / text::MAX_GLYPH_PIECES as f64;
+            p(250.0 + 250.0 * a.cos(), 350.0 + 250.0 * a.sin())
+        })
+        .collect();
+    font.glyphs.insert(1, text::FontGlyph { advance: 600, outline: vec![Loop2::polygon(&ring)] });
+    let walked = text::MAX_GLYPH_PIECES - 1;
+    let on_grid = |run: &text::TextRun, glyphs: usize, mut with: Vec<Item>| {
+        let mut run = run.clone();
+        run.glyphs = (0..glyphs).map(|i| text::PlacedGlyph { id: 1, x: i as f64 * 3.0, rise: 0.0, advance: 3.0 }).collect();
+        run.text = "A".repeat(glyphs);
+        run.clusters = (0..glyphs as u32).map(|i| text::Cluster { glyphs: i..i + 1, text: i..i + 1 }).collect();
+        with.insert(0, Item::Text(run));
+        let scene = Scene { fonts: vec![font.clone()], ..sheet(with) };
+        scene.prepare().unwrap().on_grid(Grid::NANOMETRE).map(|on| on.groups[0].items.len())
+    };
+    run.angle = 0.0;
+    let fit = grid::MAX_GRID_PIECES / walked;
+    assert_eq!(on_grid(&run, fit, vec![]), Ok(1), "{fit} glyphs make {} pieces", fit * walked);
+    // An open stroke of `n` lines is `n` pieces; a square fill, three (its closing side left).
+    let lines = |n: usize| stroke((0..n).map(|i| line(p(i as f64 * 0.1, 5.0), p((i + 1) as f64 * 0.1, 5.0))).collect(), false, 0.35);
+    let square = || fill(rectangle(p(1.0, 1.0), p(2.0, 2.0)), vec![]);
+    let rest = grid::MAX_GRID_PIECES - fit * walked;
+    assert_eq!(on_grid(&run, fit, vec![lines(rest)]), Ok(2));
+    assert_eq!(on_grid(&run, fit, vec![lines(rest - 3), square()]), Ok(3));
+    for past in [vec![], vec![lines(rest + 1)], vec![lines(rest - 2), square()]] {
+        let glyphs = if past.is_empty() { fit + 1 } else { fit };
+        let e = on_grid(&run, glyphs, past).unwrap_err();
+        assert!(e.to_string().contains("on another sheet"), "{e}");
+    }
+}
+
+/// Slivers are measured in the grid's own steps: a 5 mm piece goes straight on to the next on a
+/// 1 mm grid, and stays on the nanometre grid. An arc's quarters keep its radius and turn, in
+/// steps; a width under half a step is one step. An ellipse comes as counted cubics.
+#[test]
+fn slivers_and_radii_are_in_the_grids_own_steps() {
+    let millimetre = Grid::new(1.0).unwrap();
+    let walk = |scene: &Scene, grid: Grid| scene.prepare().unwrap().on_grid(grid).unwrap();
+    let path = |on: &OnGrid| match &on.groups[0].items[0] {
+        GridItem::Stroke { width, path, .. } => (*width, path.clone()),
+        other => panic!("{other:?}"),
+    };
+    let three = open(vec![line(p(0.0, 0.0), p(100.0, 0.0)), line(p(100.0, 0.0), p(105.0, 0.0)), line(p(105.0, 0.0), p(200.0, 0.0))]);
+    let coarse = walk(&three, millimetre);
+    let to = |x: i64| Piece::Line { to: GridPoint { x, y: 0 } };
+    assert_eq!(path(&coarse).1.pieces, [to(100), to(200)]);
+    assert_eq!(
+        coarse.report,
+        GridReport { widths_snapped: 1, pieces_merged: 1, dashes_snapped: 0, curve_cubics: 0 },
+        "0.35 mm is under half a 1 mm step"
+    );
+    assert_eq!(path(&coarse).0, 1);
+    // The boundary both ways: 10 steps along x merge, 11 don't; a (6, 8) step merges, (7, 8) doesn't.
+    for (dx, dy, merged) in [(10.0, 0.0, 1), (11.0, 0.0, 0), (6.0, 8.0, 1), (7.0, 8.0, 0)] {
+        let (a, b) = (p(100.0, 0.0), p(100.0 + dx, dy));
+        let scene = open(vec![line(p(0.0, 0.0), a), line(a, b), line(b, p(200.0, 50.0))]);
+        assert_eq!(walk(&scene, millimetre).report.pieces_merged, merged, "({dx}, {dy})");
+    }
+    let fine = walk(&three, Grid::NANOMETRE);
+    assert_eq!((path(&fine).1.pieces.len(), fine.report), (3, GridReport::default()));
+    // A clockwise half turn of radius 10 round (50, 50) from the top: two quarters.
+    let half = open(vec![Seg2::Arc { center: p(50.0, 50.0), radius: 10.0, start: FRAC_PI_2, sweep: -PI }]);
+    let arc = |x, y| Piece::Arc { radius: 10, clockwise: true, to: GridPoint { x, y } };
+    assert_eq!(
+        path(&walk(&half, millimetre)).1,
+        GridPath { start: GridPoint { x: 50, y: 60 }, pieces: vec![arc(60, 50), arc(50, 40)], closed: false }
+    );
+    // An ellipse comes as cubics, counted, ending where it ends.
+    let arch = Seg2::Conic { a: p(0.0, 0.0), apex: p(10.0, 10.0), b: p(20.0, 0.0), w: 0.5 };
+    let ellipse = open(vec![arch]);
+    let on = walk(&ellipse, Grid::NANOMETRE);
+    let walked = path(&on).1;
+    assert!(on.report.curve_cubics > 1 && walked.pieces.len() == on.report.curve_cubics, "{:?}", on.report);
+    assert!(walked.pieces.iter().all(|piece| matches!(piece, Piece::Cubic { .. })));
+    assert_eq!(walked.pieces.last().map(Piece::to), Some(GridPoint { x: 20_000_000, y: 0 }));
+    // And within the curves' error of it: the cubics, flattened to a tenth of the error, are that
+    // close to the ellipse (a fine polyline of it), give or take the flattening.
+    let error = grid::CURVE_ERROR_MM;
+    let truth: Vec<Vec2> = (0..=20_000).map(|i| arch.point_at(f64::from(i) / 20_000.0)).collect();
+    let to_line = |q: Vec2, a: Vec2, b: Vec2| q.dist(a + (b - a) * ((q - a).dot(b - a) / (b - a).dot(b - a)).clamp(0.0, 1.0));
+    for q in flatten(&walked, error * 0.1 * 1e6).unwrap() {
+        let off = truth.windows(2).map(|ab| to_line(q * 1e-6, ab[0], ab[1])).fold(f64::INFINITY, f64::min);
+        assert!(off <= error * 1.2, "{off} mm from the ellipse");
+    }
+}
+
+fn picture(x0: f64, y0: f64, x1: f64, y1: f64, opacity: f64) -> Item {
+    Item::Picture(Picture { source: 9, rect: Aabb2 { min: p(x0, y0), max: p(x1, y1) }, opacity })
+}
+
+/// A picture is its rectangle, the name of its pixels and its opacity, read and written as such.
+#[test]
+fn a_picture_round_trips_and_its_grid_is_its_rectangles() {
+    let scene = sheet(vec![picture(20.0, 30.0, 120.0, 80.0, 1.0)]);
+    scene.validate().unwrap();
+    let value = serde_json::to_value(&scene).unwrap();
+    assert_eq!(
+        value["groups"][0]["items"][0],
+        json!({"kind": "picture", "source": 9, "rect": {"min": [20.0, 30.0], "max": [120.0, 80.0]}, "opacity": 1.0})
+    );
+    let restored: Scene = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(restored, scene);
+    let Item::Picture(picture) = &scene.groups[0].items[0] else { panic!("a picture") };
+    let grid = picture.grid(300.0).unwrap();
+    assert_eq!((grid.x0, grid.y0, grid.width, grid.height), (20.0, 30.0, 1182, 591));
+    for (at, key) in [("/groups/0/items/0", "pixels"), ("/groups/0/items/0/rect", "z")] {
+        let mut v = value.clone();
+        v.pointer_mut(at).unwrap()[key] = json!(1);
+        assert!(serde_json::from_value::<Scene>(v).is_err(), "an unknown field at {at:?}");
+    }
+    let mut v = value;
+    v["groups"][0]["items"][0].as_object_mut().unwrap().remove("source");
+    assert!(serde_json::from_value::<Scene>(v).is_err());
+}
+
+#[test]
+fn a_pictures_rectangle_has_area_within_the_bound_and_its_opacity_is_above_0_and_at_most_1() {
+    const RECTANGLE: Invalid = Invalid("a picture's rectangle is within 1e5 mm and above 0 on each side");
+    const OPACITY: Invalid = Invalid("a picture's opacity is above 0 and at most 1");
+    for item in [picture(-1e5, -1e5, 1e5, 1e5, 1.0), picture(0.0, 0.0, 1e-9, 1e-9, 1e-9), picture(10.0, 10.0, 11.0, 11.0, 0.5)] {
+        sheet(vec![item]).validate().unwrap();
+    }
+    for (x0, y0, x1, y1) in [
+        (10.0, 10.0, 10.0, 20.0),
+        (10.0, 10.0, 20.0, 10.0),
+        (20.0, 10.0, 10.0, 20.0),
+        (10.0, 20.0, 20.0, 10.0),
+        (0.0, 0.0, 1e5f64.next_up(), 1.0),
+        (-1e5 - 1e-6, 0.0, 1.0, 1.0),
+        (f64::NAN, 0.0, 1.0, 1.0),
+        (0.0, 0.0, 1.0, f64::INFINITY),
+        (f64::NEG_INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::INFINITY),
+    ] {
+        assert_eq!(sheet(vec![picture(x0, y0, x1, y1, 1.0)]).validate(), Err(RECTANGLE), "{x0} {y0} {x1} {y1}");
+    }
+    assert_eq!(sheet(vec![Item::Picture(Picture { source: 1, rect: Aabb2::EMPTY, opacity: 1.0 })]).validate(), Err(RECTANGLE));
+    for opacity in [0.0, -0.0, -0.5, 1f64.next_up(), 2.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(sheet(vec![picture(10.0, 10.0, 20.0, 20.0, opacity)]).validate(), Err(OPACITY), "{opacity}");
+    }
+    // A picture is one record.
+    let group = Group { object: 1, kind: ObjectKind::DrawingBorder, items: vec![picture(10.0, 10.0, 20.0, 20.0, 1.0); MAX_RECORDS - 1] };
+    Scene::new(p(420.0, 297.0), vec![group.clone()]).validate().unwrap();
+    let mut over = group;
+    over.items.push(picture(10.0, 10.0, 20.0, 20.0, 1.0));
+    assert_eq!(Scene::new(p(420.0, 297.0), vec![over]).validate(), Err(Invalid("more than 100,000 groups, items, loops and pieces")));
+}
+
+fn dashed(path: Vec<Seg2>, closed: bool, lengths_mm: &[f64], phase_mm: f64) -> Scene {
+    sheet(vec![Item::Stroke { path, closed, width_mm: 0.35, pattern: Some(Dashes { lengths_mm: lengths_mm.to_vec(), phase_mm }) }])
+}
+
+/// A pattern has 2 to 12 lengths, an even count, each above 0 and at most 1000 mm; its phase is
+/// from 0 up to, not including, the pattern's length.
+#[test]
+fn a_dash_pattern_is_an_even_2_to_12_lengths_with_its_phase_inside_it() {
+    let pattern = |lengths: &[f64], phase| dashed(vec![line(p(0.0, 0.0), p(100.0, 0.0))], false, lengths, phase).validate();
+    for n in [2, 4, 12] {
+        pattern(&vec![1.0; n], 0.0).unwrap();
+    }
+    for n in [0, 1, 3, 11, 13, 14] {
+        assert_eq!(pattern(&vec![1.0; n], 0.0), Err(Invalid("a dash pattern has an even count of 2 to 12 lengths")), "{n}");
+    }
+    for length in [1e-9, 1000.0] {
+        pattern(&[length, 1.0], 0.0).unwrap();
+        pattern(&[1.0, length], 0.0).unwrap();
+    }
+    for length in [0.0, -0.0, -1.0, 1000f64.next_up(), f64::NAN, f64::INFINITY] {
+        assert_eq!(pattern(&[1.0, length], 0.0), Err(Invalid("each dash and gap is above 0 and at most 1000 mm")), "{length}");
+    }
+    for phase in [0.0, -0.0, 1.5, 3f64.next_down()] {
+        pattern(&[1.0, 2.0], phase).unwrap();
+    }
+    for phase in [3.0, (-0.0f64).next_down(), -1.0, 4.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(pattern(&[1.0, 2.0], phase), Err(Invalid("a dash pattern's phase is from 0 up to its length")), "{phase}");
+    }
+}
+
+/// A dashed line needs at most a million dashes, counted as pairs along its length. A line of
+/// exactly a million patterns of 2⁻¹³ mm is the bound; an arc counts its own length, not its
+/// chord's.
+#[test]
+fn a_dashed_line_needs_at_most_a_million_dashes() {
+    const TOO_MANY: Invalid = Invalid("a dashed line needs at most 1,000,000 dashes");
+    let half = 2f64.powi(-14);
+    let along = |x: f64, lengths: &[f64]| dashed(vec![line(p(0.0, 0.0), p(x, 0.0))], false, lengths, 0.0).validate();
+    along(122.0703125, &[half, half]).unwrap();
+    assert_eq!(along(122.0703125f64.next_up(), &[half, half]), Err(TOO_MANY));
+    // Two dashes a pattern: the same length is twice the count.
+    assert_eq!(along(122.0703125, &[half / 2.0; 4]), Err(TOO_MANY));
+    along(61.03515625, &[half / 2.0; 4]).unwrap();
+    // A quarter turn of radius 100 is 157 mm long; its chord is 141 mm.
+    let quarter = vec![Seg2::Arc { center: p(0.0, 0.0), radius: 100.0, start: 0.0, sweep: FRAC_PI_2 }];
+    assert_eq!(dashed(quarter, false, &[7.5e-5, 7.5e-5], 0.0).validate(), Err(TOO_MANY));
+    along(141.5, &[7.5e-5, 7.5e-5]).unwrap();
+}
+
+/// A pattern is written only when a stroke has one, so a solid stroke reads and writes as before;
+/// unknown fields in it are refused.
+#[test]
+fn a_pattern_round_trips_and_a_solid_stroke_has_none() {
+    let scene = dashed(rectangle(p(20.0, 10.0), p(410.0, 287.0)).segs, true, &[4.2, 1.05], 0.5);
+    scene.validate().unwrap();
+    let value = serde_json::to_value(&scene).unwrap();
+    assert_eq!(value["groups"][0]["items"][0]["pattern"], json!({"lengths_mm": [4.2, 1.05], "phase_mm": 0.5}));
+    assert_eq!(serde_json::from_value::<Scene>(value.clone()).unwrap(), scene);
+    let mut v = value.clone();
+    v["groups"][0]["items"][0]["pattern"]["unit"] = json!("mm");
+    assert!(serde_json::from_value::<Scene>(v).is_err());
+    let solid = serde_json::to_value(a3()).unwrap();
+    assert!(solid["groups"][0]["items"][0].get("pattern").is_none());
+}
+
+/// On the grid a pattern is in whole steps: a length under half a step is one step, counted, and
+/// the phase, rounded on its own, is taken within the rounded pattern.
+#[test]
+fn a_pattern_on_the_grid_is_in_whole_steps() {
+    let stroke = |lengths: &[f64], phase, grid| {
+        let on = dashed(vec![line(p(0.0, 0.0), p(100.0, 0.0))], false, lengths, phase).prepare().unwrap().on_grid(grid).unwrap();
+        let GridItem::Stroke { dashes: Some(dashes), .. } = &on.groups[0].items[0] else { panic!("{:?}", on.groups[0].items[0]) };
+        (dashes.clone(), on.report.dashes_snapped)
+    };
+    let millimetre = Grid::new(1.0).unwrap();
+    let grid_dashes = |lengths: &[i64], phase| GridDashes { lengths: lengths.to_vec(), phase };
+    assert_eq!(stroke(&[4.2, 1.05], 0.5, Grid::NANOMETRE), (grid_dashes(&[4_200_000, 1_050_000], 500_000), 0));
+    assert_eq!(stroke(&[4.2, 1.05], 0.5, millimetre), (grid_dashes(&[4, 1], 1), 0));
+    assert_eq!(stroke(&[0.4, 0.3, 2.0, 0.5], 0.0, millimetre), (grid_dashes(&[1, 1, 2, 1], 0), 2));
+    // 2.7 rounds to 3, past the rounded pattern's 2: a step into it.
+    assert_eq!(stroke(&[1.4, 1.4], 2.7, millimetre), (grid_dashes(&[1, 1], 1), 0));
 }

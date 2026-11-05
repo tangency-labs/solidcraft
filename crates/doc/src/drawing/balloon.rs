@@ -9,24 +9,31 @@
 //! - **The balloon** sits at a place on paper, in millimetres from its view's centre, so it moves
 //!   with the view and not with the model.
 //!
-//! The number a balloon shows comes from a parts list, once parts lists are placed on sheets.
+//! The number a balloon shows comes from a parts list, worked out and never saved: the one it names,
+//! else its sheet's only one, else the drawing's only one ([`Drawing::parts_list_for`]). It keeps the
+//! balloon whatever becomes of the row. A parts list's editor shows how many balloons point at each of
+//! its rows ([`balloons_by_row`]), worked out the same way.
 //!
 //! The rules, beside the record's: a balloon is on one of the drawing's views; its edge reference
 //! keeps a dimension's rules, with an occurrence path of 1 to [`crate::MAX_PLACEMENT_DEPTH`] ids; its place
-//! is on paper ([`is_paper_coordinate`]); at most [`MAX_BALLOONS`] balloons, listed by id.
+//! is on paper ([`is_paper_coordinate`]); the list it names is one of the drawing's parts lists; at
+//! most [`MAX_BALLOONS`] balloons, listed by id.
 //!
 //! [`Document::resolve_balloons`] finds each balloon's edge again as a dimension's is found
 //! ([`super::dimension::Status`]): by name, strictly, and what it can't decide it says.
 
-use std::sync::Arc;
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_geom::drawing_view::is_paper_coordinate;
 use solidcraft_geom::paper::MAX_SIDE_MM;
 
-use super::dimension::{Lookup, ModelEdge, Status, check_edge, edge_candidates};
-use super::{Drawing, add_by_id, in_id_order, require};
+use super::by_id::Record;
+use super::dimension::{Lookup, ModelEdge, Status, check_edge};
+use super::table::{Kind, PartsList, SheetTable};
+use super::{Drawing, require};
+use crate::bom::{Bom, Tree, item_text};
 use crate::{DocError, Document, Model, Result, ids};
 
 /// The most balloons a drawing may have.
@@ -45,6 +52,9 @@ pub struct Balloon {
     pub edge: ModelEdge,
     /// The balloon's centre, in millimetres of paper from its view's centre.
     pub at: [f64; 2],
+    /// The parts list it names, when it names one.
+    #[serde(default, with = "crate::ids::option", skip_serializing_if = "Option::is_none")]
+    pub parts_list: Option<u64>,
 }
 
 impl Balloon {
@@ -54,40 +64,85 @@ impl Balloon {
     }
 }
 
+impl Record for Balloon {
+    fn id(&self) -> u64 {
+        self.id
+    }
+}
+
 impl Drawing {
-    /// Adds `balloons`, each where its id puts it, as [`Drawing::add_dimensions`] adds dimensions.
-    pub fn add_balloons(&mut self, balloons: impl IntoIterator<Item = Arc<Balloon>>) {
-        add_by_id(&mut self.balloons, balloons, |b| b.id);
-    }
-
-    /// Balloon `id`, found by halves in the balloons' id order.
-    pub fn balloon(&self, id: u64) -> Option<&Balloon> {
-        self.balloon_index(id).and_then(|i| self.balloons.get(i)).map(|b| &**b)
-    }
-
-    /// Where balloon `id` is in [`Drawing::balloons`].
-    pub fn balloon_index(&self, id: u64) -> Option<usize> {
-        self.balloons.binary_search_by_key(&id, |b| b.id).ok()
-    }
-
-    /// The balloons' rules (the module's notes). The views are checked first, so they are in id
-    /// order here.
-    pub(super) fn check_balloons(&self) -> Result<()> {
-        require(self.balloons.len() <= MAX_BALLOONS, || format!("a drawing has at most {MAX_BALLOONS} balloons"))?;
-        require(in_id_order(&self.balloons, |b| b.id), || "a drawing lists its balloons by id".into())?;
-        for balloon in &self.balloons {
-            self.check_balloon(balloon).map_err(|e| DocError::Invalid(format!("balloon {}: {e}", ids::encode(balloon.id))))?;
+    /// The parts list balloon `b` reads, by its id: the one it names, else its sheet's only one, else
+    /// the drawing's only one. With none to go by, the lists it could name, by id.
+    pub fn parts_list_for(&self, b: &Balloon) -> std::result::Result<(u64, PartsList), Vec<u64>> {
+        let list = |t: &SheetTable| match t.kind {
+            Kind::PartsList(list) => Some((t.id, list)),
+            Kind::Revision => None,
+        };
+        let lists: Vec<(u64, u64, PartsList)> = self.tables.iter().filter_map(|t| list(t).map(|(id, l)| (id, t.sheet, l))).collect();
+        if let Some(named) = lists.iter().find(|(id, ..)| Some(*id) == b.parts_list) {
+            return Ok((named.0, named.2));
         }
-        Ok(())
+        let sheet = self.view(b.view).map(|v| v.sheet);
+        let mut on_sheet = lists.iter().filter(|(_, on, _)| Some(*on) == sheet);
+        if let (Some(only), None) = (on_sheet.next(), on_sheet.next()) {
+            return Ok((only.0, only.2));
+        }
+        match lists.as_slice() {
+            [only] => Ok((only.0, only.2)),
+            _ => Err(lists.iter().map(|(id, ..)| *id).collect()),
+        }
+    }
+
+    /// The balloons that read each parts list ([`Self::parts_list_for`]), by the list's id: each
+    /// balloon's list worked out once. A balloon with no list to go by reads none.
+    pub fn balloons_by_list(&self) -> HashMap<u64, Vec<&Balloon>> {
+        let mut by_list: HashMap<u64, Vec<&Balloon>> = HashMap::new();
+        for b in &self.balloons {
+            if let Ok((list, _)) = self.parts_list_for(b) {
+                by_list.entry(list).or_default().push(b);
+            }
+        }
+        by_list
+    }
+
+    /// The balloons' rules (the module's notes). The views and the tables are checked first, so they
+    /// are in id order here.
+    pub(super) fn check_balloons(&self) -> Result<()> {
+        self.balloons.check(MAX_BALLOONS, "balloon", |b| self.check_balloon(b))
     }
 
     fn check_balloon(&self, b: &Balloon) -> Result<()> {
         require(self.view(b.view).is_some(), || format!("it is on view {}, which the drawing doesn't have", ids::encode(b.view)))?;
+        if let Some(list) = b.parts_list {
+            let named = || format!("it names table {}, which isn't one of the drawing's parts lists", ids::encode(list));
+            require(self.tables.by_id(list).is_some_and(|t| matches!(t.kind, Kind::PartsList(_))), named)?;
+        }
         check_edge(&b.edge)?;
         require(!b.edge.path.is_empty(), || "it points at a placed part: its edge's body is placed through an occurrence".into())?;
         let [x, y] = b.at;
         require(is_paper_coordinate(x) && is_paper_coordinate(y), || format!("its place is at most {MAX_SIDE_MM} mm on paper"))
     }
+}
+
+/// How many of `balloons`, those that read one parts list ([`Drawing::balloons_by_list`]), point at
+/// each of its rows, by item ("1.2"): every row of `listed` (that list, made from `tree` with its
+/// members) in its order, 0 included. A balloon whose row is lost counts for none.
+pub fn balloons_by_row(balloons: &[&Balloon], listed: &Bom, tree: &Tree) -> Vec<(String, usize)> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for b in balloons {
+        if let Ok(item) = listed.item_of(tree, b.occurrence()) {
+            *counts.entry(item).or_default() += 1;
+        }
+    }
+    listed
+        .rows_deep()
+        .iter()
+        .map(|(item, _)| {
+            let item = item_text(item);
+            let n = counts.get(&item).copied().unwrap_or(0);
+            (item, n)
+        })
+        .collect()
 }
 
 /// A balloon as the model has it now ([`Document::resolve_balloons`]): never saved.
@@ -110,19 +165,9 @@ impl Document {
         wanted
             .iter()
             .map(|id| {
-                let b = drawing.balloon(*id).ok_or_else(|| DocError::Unknown(format!("balloon {}", ids::encode(*id))))?;
-                Ok(match lookup.edges(&b.edge) {
-                    // A split edge has no one middle: the pieces are listed, and none is chosen.
-                    Ok(found) if !found.whole => {
-                        Resolved { status: Status::Ambiguous(edge_candidates(&b.edge.body, &found)), point: None, exact: false }
-                    }
-                    Ok(found) => {
-                        let point = found.pieces.first().and_then(|(_, line)| crate::joints::edge::middle(line)).map(|(p, _)| p);
-                        let status = if point.is_some() { Status::Ok } else { Status::Lost(format!("edge `{}` has no length", b.edge.name)) };
-                        Resolved { status, point, exact: found.exact }
-                    }
-                    Err(status) => Resolved { status, point: None, exact: false },
-                })
+                let b = drawing.balloons.by_id(*id).ok_or_else(|| DocError::Unknown(format!("balloon {}", ids::encode(*id))))?;
+                let (status, point, exact) = lookup.middle(&b.edge);
+                Ok(Resolved { status, point, exact })
             })
             .collect()
     }

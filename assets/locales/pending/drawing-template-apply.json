@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_template_apply": "Apply Drawing Template"
+  },
+  "ar": {
+    "cmd.drawing_template_apply": "تطبيق قالب لوحة"
+  },
+  "de": {
+    "cmd.drawing_template_apply": "Zeichnungsvorlage anwenden"
+  },
+  "he": {
+    "cmd.drawing_template_apply": "החלת תבנית שרטוט"
+  },
+  "ja": {
+    "cmd.drawing_template_apply": "図面テンプレートを適用"
+  },
+  "ko": {
+    "cmd.drawing_template_apply": "도면 템플릿 적용"
+  },
+  "vi": {
+    "cmd.drawing_template_apply": "Áp dụng mẫu bản vẽ"
+  },
+  "zh": {
+    "cmd.drawing_template_apply": "应用绘图模板"
+  }
+}
