@@ -3854,6 +3854,68 @@ fn flanges_go_on_a_curved_outline_folded_across_its_straight_part() {
     assert!(rel(v, t2_volume_from_flat(&f)) < 3e-4, "volume {v} vs the flat's {}: {f}", t2_volume_from_flat(&f));
 }
 
+/// A cut through a free-form rim leaves the rest of the rim as drawn, and the cut's own curves
+/// too: the outline holds the sketch's cubics and conics, not splines fitted to them, and the
+/// wall is a face per curve, far from the cut as well as beside it. It folds the same, and a
+/// piece the cut parts stays, a loose piece, as the cut says.
+#[test]
+fn a_cut_across_a_free_form_rim_keeps_its_curves() {
+    use solidcore_record::Seg2;
+    let spline = (
+        "sketch.spline.fit_point",
+        json!({"points": [[-37.22, 26.29], [-2.29, -8.73], [34, 17], [58.5, -6], [32.19, -37.73], [-2.1, -17.06], [-45.64, -35.44]], "periodic": true}),
+    );
+    let cut = |s: &mut Session, draw: (&str, Value)| -> Value {
+        run(s, "sketch.create", json!({"plane": "XY", "name": "Cut"}));
+        run(s, draw.0, draw.1);
+        run(s, "sketch.finish", json!({}));
+        run(s, "solid.extrude", json!({"sketch": "Cut", "distance": 20, "direction": "symmetric", "operation": "cut", "targets": ["Body1"]}))
+    };
+    // The lines, conics, cubics and anything else (a fitted arc) in the outlines of the sheet's
+    // panels and loose pieces.
+    let kinds = |s: &Session| -> [usize; 4] {
+        let st = s.model.state();
+        let sk = &st.surface_sheets[0];
+        let regions = sk.sheet.panels.iter().map(|p| &p.region).chain(sk.loose.iter().map(|l| &l.region));
+        let mut n = [0; 4];
+        for g in regions.flat_map(|r| std::iter::once(&r.outer).chain(&r.holes)).flat_map(|l| &l.segs) {
+            n[match g {
+                Seg2::Line { .. } => 0,
+                Seg2::Conic { .. } => 1,
+                Seg2::Cubic { .. } => 2,
+                _ => 3,
+            }] += 1;
+        }
+        n
+    };
+    let rectangle = ("sketch.rectangle.two_point", json!({"p0": [50.18, -45], "p1": [70.68, 27]}));
+    let ellipse = ("sketch.ellipse", json!({"center": [-2, -13], "major": [18, -13], "minor_radius": 8}));
+    // Top, bottom, the 7 cubics and one straight edge of the cut.
+    let mut s = Session::default();
+    t2_curved_blank(&mut s, std::slice::from_ref(&spline), "0.4");
+    cut(&mut s, rectangle);
+    assert_eq!(kinds(&s), [1, 0, 7, 0], "lines, conics, cubics, other");
+    assert!(faces(&mut s).0 <= 2 + 7 + 1, "{} faces", faces(&mut s).0);
+    let (v, f) = (volume(&mut s), flat(&mut s));
+    assert!(rel(v, t2_volume_from_flat(&f)) < 3e-4, "volume {v} vs the flat's {}", t2_volume_from_flat(&f));
+    assert!((bbox(&mut s)["max"][0].as_f64().unwrap_or(f64::NAN) - 50.18).abs() < 1e-6, "the cut's edge");
+    // Folded after, where the fold's lines cut two curves.
+    run(&mut s, "sheet.fold", json!({"points": [[-20, -300, 2], [-20, 300, 2]], "fixed": [40, 0, 2]}));
+    assert!(faces(&mut s).0 <= 2 + 7 + 1 + 12, "folded: {} faces", faces(&mut s).0);
+    let (v, f) = (volume(&mut s), flat(&mut s));
+    assert!(rel(v, t2_volume_from_flat(&f)) < 3e-4, "folded: volume {v} vs the flat's {}", t2_volume_from_flat(&f));
+    // An ellipse through the rim's narrow waist: its 4 conics as drawn, two on each side, and the
+    // lobe it parts from the rest stays.
+    let mut s = Session::default();
+    t2_curved_blank(&mut s, std::slice::from_ref(&spline), "0.4");
+    cut(&mut s, ellipse);
+    assert_eq!(kinds(&s), [0, 4, 7, 0], "lines, conics, cubics, other");
+    assert!(faces(&mut s).0 <= 2 + 7 + 4 + 2, "{} faces", faces(&mut s).0);
+    assert_eq!(s.model.state().surface_sheets[0].loose.len(), 1);
+    let (v, f) = (volume(&mut s), flat(&mut s));
+    assert!(rel(v, t2_volume_from_flat(&f)) < 3e-4, "volume {v} vs the flat's {}", t2_volume_from_flat(&f));
+}
+
 /// A sharp corner in the zone stays refused, by name: the material beside it wouldn't hang from
 /// anything. A fold clear of it, on the same outline, folds. Where the lines run smoothly into the
 /// arc is no corner.
