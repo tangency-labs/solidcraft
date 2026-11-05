@@ -1154,6 +1154,34 @@ fn draft_uses_the_picked_solid_beside_a_hidden_overlapping_mesh() {
 }
 
 #[test]
+fn offset_face_dialog_moves_the_body_clicked_where_two_bodies_touch_flush() {
+    use solidcraft_engine::doc::naming;
+    let mut h = Harness::new();
+    // Big (40 × 30 × 20, made first) and Small (10 × 10 × 5) touch flush at Y=0.
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "operation": "new", "body_name": "Big"})).unwrap();
+    h.app
+        .run("solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [10, -10, 5], "operation": "new", "body_name": "Small"}))
+        .unwrap();
+    let state = h.app.session.model.state();
+    let small = state.body("Small").unwrap();
+    let point = Vec3::new(15.0, 0.0, 7.5);
+    let name = naming::face_name_at_body(small, point).unwrap();
+    let (index, _) = naming::face_on_body(small, &name, point).unwrap();
+    h.app.session.selection = vec![Sel::Face { body: "Small".into(), index, point }];
+    let mut d = Dialog::for_command(&h.app, "solid.offset_face").unwrap();
+    d.kind = Kind::OffsetFaces { distance: "2".into() };
+    let commands = apply_commands(&h.app, &d).unwrap();
+    let (command, params) = &commands[0];
+    assert_eq!(params["body"], "Small");
+    h.app.run(command, params.clone()).unwrap();
+    let state = h.app.session.model.state();
+    let volume = |n: &str| solidcraft_engine::kernel::measure(&state.body(n).unwrap().body).unwrap().volume;
+    // Small grows to 10 × 12 × 5; Big keeps 40 × 30 × 20.
+    assert!((volume("Small") - 600.0).abs() < 1e-6, "{}", volume("Small"));
+    assert!((volume("Big") - 24000.0).abs() < 1e-6, "{}", volume("Big"));
+}
+
+#[test]
 fn draft_rejects_faces_from_different_bodies() {
     let h = Harness::new();
     let mut d = Dialog::for_command(&h.app, "solid.draft").unwrap();

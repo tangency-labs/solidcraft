@@ -537,3 +537,57 @@ fn shelled_cylinder_floor_keeps_its_cap_identity() {
         certificate_of(&s, floor)
     );
 }
+
+/// Two boxes touching flush at Y=0: "Big" (40 × 30 × 20 from the origin, made first) and
+/// "Small" (10 × 10 × 5 in front of it). Their end faces at Y=0 coincide where Small's lies.
+fn flush_boxes(s: &mut Session) {
+    run(s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "operation": "new", "body_name": "Big"}));
+    run(s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [10, -10, 5], "operation": "new", "body_name": "Small"}));
+}
+
+fn body_volume(s: &mut Session, name: &str) -> f64 {
+    s.refresh();
+    let state = s.model.state();
+    let b = state.bodies.iter().find(|b| b.name == name).unwrap_or_else(|| panic!("no body {name}"));
+    solidcraft_kernel::measure(&b.body).unwrap().volume
+}
+
+#[test]
+fn a_face_pick_on_coincident_faces_of_two_bodies_needs_the_body_named() {
+    let mut s = Session::default();
+    flush_boxes(&mut s);
+    // The point lies on Big's end face and on Small's: without `body` it says neither.
+    let err = s.execute("solid.offset_face", &json!({"faces": [[15, 0, 7.5]], "distance": 2})).unwrap_err().to_string();
+    assert!(err.contains("Big") && err.contains("Small") && err.contains("`body`"), "{err}");
+    assert!((body_volume(&mut s, "Big") - 24000.0).abs() < 1e-6);
+    assert!((body_volume(&mut s, "Small") - 500.0).abs() < 1e-6);
+}
+
+#[test]
+fn a_named_body_takes_a_pick_on_coincident_faces_even_when_hidden() {
+    let mut s = Session::default();
+    flush_boxes(&mut s);
+    // Small's end face moves 2 mm into Big's side: 10 × 12 × 5.
+    run(&mut s, "solid.offset_face", json!({"faces": [[15, 0, 7.5]], "distance": 2, "body": "Small"}));
+    assert!((body_volume(&mut s, "Small") - 600.0).abs() < 1e-6);
+    assert!((body_volume(&mut s, "Big") - 24000.0).abs() < 1e-6);
+    // A hidden body named outright is still the one changed: 40 × 32 × 20.
+    run(&mut s, "browser.visibility", json!({"visible": false, "items": ["Big"]}));
+    run(&mut s, "solid.offset_face", json!({"faces": [[15, 0, 7.5]], "distance": 2, "body": "Big"}));
+    assert!((body_volume(&mut s, "Big") - 25600.0).abs() < 1e-6);
+    assert!((body_volume(&mut s, "Small") - 600.0).abs() < 1e-6);
+}
+
+#[test]
+fn a_face_pick_on_one_body_of_several_saves_that_body_in_the_feature() {
+    let mut s = Session::default();
+    flush_boxes(&mut s);
+    // Small's front face at Y=-10 belongs to Small alone.
+    let out = run(&mut s, "solid.offset_face", json!({"faces": [[15, -10, 7.5]], "distance": 2}));
+    let id = out["feature"].as_u64().unwrap();
+    let kind = &s.doc.feature(id).unwrap().kind;
+    assert_eq!(kind.face_body(), Some("Small"));
+    // 10 × 12 × 5.
+    assert!((body_volume(&mut s, "Small") - 600.0).abs() < 1e-6);
+    assert!((body_volume(&mut s, "Big") - 24000.0).abs() < 1e-6);
+}
