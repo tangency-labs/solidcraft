@@ -1642,7 +1642,7 @@ preference_settings! {
     /// The most instances, the original included, one sketch pattern may make (#7824). The
     /// default keeps the earlier fixed cap; every open design's session follows it
     /// (`sync_pattern_limit`).
-    sketch_pattern_limit: u32 = solidcraft_engine::sketch::DEFAULT_PATTERN_COPIES as u32, PAGE_SKETCH, accept(2..=solidcraft_engine::sketch::MAX_PATTERN_COPIES as u32) => number("prefs.sketch.pattern_limit", 2..=solidcraft_engine::sketch::MAX_PATTERN_COPIES as u32);
+    sketch_pattern_limit: u32 = solidcraft_engine::sketch::DEFAULT_PATTERN_COPIES as u32, PAGE_SKETCH, accept(2..=solidcraft_engine::sketch::MAX_PATTERN_COPIES as u32);
     /// Opening or editing a sketch turns the view to face it (the default). Off: the view stays as
     /// it is, and Look At faces the sketch when asked.
     sketch_open_look_at: bool = true, PAGE_SKETCH;
@@ -9964,6 +9964,21 @@ mod tests {
         h.frames(3);
         assert_eq!(h.app.preferences.sketch_pattern_limit, 1500);
         assert!(std::iter::once(&h.app.session).chain(h.app.docs.background()).all(|s| s.pattern_limit == 1500));
+    }
+
+    /// The pattern limit is a full-width block with its note under the label, so its long label
+    /// is not cut to fit one of the Drawing columns (#7824).
+    #[test]
+    fn pattern_limit_row_spans_the_page_with_its_field() {
+        let mut h = crate::scenario::Harness::new();
+        super::control(&mut h.app, &json!({"open":"Sketch"})).unwrap();
+        h.frames(5);
+        let label = h.app.tr("prefs.sketch.pattern_limit").to_string();
+        let row = crate::scenario::rect_of(&format!("dialog:row:{label}")).expect("the pattern limit is a block row");
+        let field = crate::scenario::rect_of("prefs:sketch_pattern_limit").unwrap();
+        assert!(row.contains_rect(field), "{field:?} in {row:?}");
+        let body = crate::scenario::rect_of("dialog:page_body").unwrap();
+        assert!(row.width() > body.width() * 0.6, "{row:?} spans the page, not one column of {body:?}");
     }
 
     #[test]

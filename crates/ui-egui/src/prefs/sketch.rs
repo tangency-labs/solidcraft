@@ -175,11 +175,6 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if check(ui, "auto_project", "ui.project_face_edges_sketch", None, &mut auto).changed() {
                     let _ = app.run("sketch.auto_project", json!({"value": auto}));
                 }
-                let response = setting::sketch_pattern_limit(app, ui).backing_on_hover_text(app.tr("prefs.sketch.pattern_limit_note"));
-                crate::scenario::publish_target("prefs:sketch_pattern_limit", response.rect);
-                if response.changed() {
-                    sync_pattern_limit(app);
-                }
                 check(
                     ui,
                     "project_options_dialog",
@@ -190,6 +185,25 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
         dimension_values(app, ui, t.space_24 * 8.0 + t.space_8);
+        pattern_limit(app, ui, t.space_24 * 8.0 + t.space_8);
+    });
+}
+
+/// The most instances one sketch pattern may make (#7824): a full-width block, so its label and
+/// note wrap under each other rather than being cut to one Drawing column.
+fn pattern_limit(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    let t = Tokens::get();
+    let label = app.tr("prefs.sketch.pattern_limit").to_string();
+    let note = app.tr("prefs.sketch.pattern_limit_note").to_string();
+    ui_kit::settings_block_hint(ui, &label, note.as_str(), label_width, |ui| {
+        ui_kit::settings_control_width(ui, t.space_24 * 4.0, |ui| {
+            let most = solidcraft_engine::sketch::MAX_PATTERN_COPIES as u32;
+            let response = ui_kit::number_field(ui, &mut app.preferences.sketch_pattern_limit, 2..=most, 1.0, "");
+            crate::scenario::publish_target("prefs:sketch_pattern_limit", response.rect);
+            if response.changed() {
+                sync_pattern_limit(app);
+            }
+        });
     });
 }
 
