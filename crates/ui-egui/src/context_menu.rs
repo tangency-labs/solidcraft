@@ -576,12 +576,13 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 params["appearance"] = json!(look.name);
                 params["color"] = json!(crate::dialogs_appearance::hex(look.color));
                 params["opacity"] = json!(look.opacity);
-                let mut child = cmd(app, "appearance.assign", &look.name).with(params);
+                // The A key opens the editor, so only the editor's row shows it.
+                let mut child = cmd(app, "appearance.assign", &look.name).key("").with(params);
                 child.swatch = Some(look.color);
                 item.children.push(child);
             }
             item.children.push(Item::sep());
-            item.children.push(cmd(app, "appearance.assign", "Remove override").with(targets));
+            item.children.push(cmd(app, "appearance.assign", "Remove override").key("").with(targets));
         }
     });
     v
