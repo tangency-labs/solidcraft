@@ -352,6 +352,14 @@ rebuilds it; `run` then exits with status 1, lists the failing features and writ
 its `--out` and `--save` files, because the bodies lack what those features should have made.
 `--allow-errors` writes them anyway.
 
+`--quality standard|fine|finest` sets how closely an STL, OBJ or 3MF written by `--out`
+follows curved faces, as `file.export`'s `quality` does: a chord tolerance of 2e-4, 5e-5 or
+1e-5 of each body's size. The default is `standard`.
+
+```sh
+solidcraft-cli run --in part.sc --out part.stl --quality fine
+```
+
 `--param-check warn|strict` checks each step against its command's parameter contract, for the
 commands that have one (`describe_command` in the MCP server shows them); the default, `off`,
 checks nothing. A misspelt optional key, such as `operaton` for `solid.box`'s `operation`, is
