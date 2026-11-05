@@ -25,6 +25,7 @@ fn cloud(points: &[[f32; 3]], segments: &[u32], triangles: &[u32], columns: Vec<
         color_property: None,
         filters: Vec::new(),
         source: String::new(),
+        max_points: None,
     }
 }
 

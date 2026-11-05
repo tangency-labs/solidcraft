@@ -27,7 +27,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("import")
         .contract(&RELOAD_CONTRACT)
         .output(output_schema_for::<PointCloudReloadResult>)
-        .params("cloud: id or name (its file is read again from where it was inserted; name, placement, units, colouring and the filters on properties it still has are kept; a cloud that was thinned stays thinned to as many points, any other is read as a new insert would) → cloud, points, segments, triangles, warnings"),
+        .params("cloud: id or name (its file is read again from where it was inserted; name, placement, units, colouring and the filters on properties it still has are kept; read under the limit it was inserted with, so a file that grew is thinned only past that limit) → cloud, points, segments, triangles, warnings"),
     CommandSpec::new("pointcloud.delete", "Delete Point Cloud", delete).icon("delete").params("cloud: id or name → deleted"),
     CommandSpec::new("pointcloud.list", "Point Clouds", list)
         .icon("list")
@@ -242,6 +242,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
         color_property: None,
         filters: filters(p, cmd)?.unwrap_or_default(),
         source: std::path::absolute(path).map(|a| a.to_string_lossy().to_string()).unwrap_or_else(|_| path.to_string()),
+        max_points: Some(max_points as u64),
     };
     set_colors(&mut cloud, colors.0, colors.1, colors.2);
     check_properties(&cloud, cmd)?;
@@ -328,13 +329,12 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"cloud": id}))
 }
 
-/// The most points a reload keeps. A thinned cloud's own count: thinning keeps one point in
-/// `stride`, the smallest with `file / stride <= limit`, and that count gives the same stride
-/// back, so an unchanged file reads as the same points. A cloud with all its file's points says
-/// nothing of the limit it was read under: a file that grew is read as a new insert would be,
-/// never cut to the count it had.
+/// The most points a reload keeps: the limit the cloud was read under. A read is a function of
+/// the file and that limit, so an unchanged file reads as the very same points, and a file that
+/// grew is thinned only past the limit. The counts cannot say this: a cloud has fewer points than
+/// its file when some could not be read, too, thinned or not.
 fn reload_limit(c: &PointCloud) -> usize {
-    if (c.len() as u64) < c.source_points { c.len().max(1) } else { solidcraft_io::DEFAULT_MAX_POINTS.max(c.len()) }
+    c.max_points.map_or(solidcraft_io::DEFAULT_MAX_POINTS, |n| usize::try_from(n).unwrap_or(MAX_POINTS))
 }
 
 /// Read the cloud's file again where it was read from, keeping its name, placement, units and
@@ -631,11 +631,38 @@ mod tests {
         // The same file reads as the very same points.
         s.execute("pointcloud.reload", &json!({"cloud": "Thin"})).unwrap();
         assert_eq!(s.doc.point_clouds[1].points, thinned.points);
-        // A grown one, thinned to as many at most.
+        // A grown one, thinned under the same limit.
         layered(&thin, 500, false);
         let r = s.execute("pointcloud.reload", &json!({"cloud": "Thin"})).unwrap();
-        assert_eq!(r["points"].as_u64(), Some(10));
+        assert_eq!(r["points"].as_u64(), Some(11));
         assert_eq!(s.doc.point_clouds[1].source_points, 500);
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn a_reload_takes_no_unreadable_point_for_thinning() {
+        let d = dir("reload-unreadable");
+        // `count` points in a line, with the one at `far` out of range, so it cannot be read.
+        let line = |count: usize, far: usize| -> Vec<[f32; 3]> { (0..count).map(|i| [if i == far { 1e30 } else { i as f32 }, 0.0, 0.0]).collect() };
+        let whole = ply(&d, "whole.ply", &line(4, 1), false);
+        let thin = ply(&d, "thin.ply", &line(100, 10), false);
+        let mut s = Session::default();
+        s.execute("pointcloud.insert", &json!({"path": whole, "name": "Whole"})).unwrap();
+        s.execute("pointcloud.insert", &json!({"path": thin, "name": "Thin", "max_points": 10})).unwrap();
+        let (kept_whole, kept_thin) = (s.doc.point_clouds[0].clone(), s.doc.point_clouds[1].clone());
+        assert_eq!((kept_whole.len(), kept_whole.source_points), (3, 4));
+        assert_eq!((kept_thin.len(), kept_thin.source_points), (9, 100));
+
+        // The same files read as the very same points.
+        s.execute("pointcloud.reload", &json!({"cloud": "Whole"})).unwrap();
+        s.execute("pointcloud.reload", &json!({"cloud": "Thin"})).unwrap();
+        assert_eq!(s.doc.point_clouds[0].points, kept_whole.points);
+        assert_eq!(s.doc.point_clouds[1].points, kept_thin.points);
+
+        // A file that grew comes in whole, not cut to the count it had.
+        ply(&d, "whole.ply", &line(100, 1), false);
+        let r = s.execute("pointcloud.reload", &json!({"cloud": "Whole"})).unwrap();
+        assert_eq!(r["points"].as_u64(), Some(99));
         let _ = std::fs::remove_dir_all(d);
     }
 

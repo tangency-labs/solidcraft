@@ -7,8 +7,8 @@ use super::types::IdOrName;
 
 /// Read a point cloud's file again from where it was inserted. The points, colours, segments,
 /// triangles and properties are replaced; the name, placement, units, point size and colouring
-/// are kept, and so are the filters on properties the file still has. A cloud that was thinned
-/// stays thinned to as many points; any other is read as a new insert would.
+/// are kept, and so are the filters on properties the file still has. The file is read under the
+/// limit the cloud was inserted with, so a file that grew is thinned only past that limit.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PointCloudReloadParams {

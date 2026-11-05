@@ -83,6 +83,10 @@ pub struct PointCloud {
     /// The file the cloud was read from, to read again (`pointcloud.reload`).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub source: String,
+    /// The most points the file was read under, which a reload reads it under again; `None`: the
+    /// reader's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_points: Option<u64>,
 }
 
 /// Where a property's values come from on one kind of element.
@@ -560,6 +564,7 @@ mod tests {
             color_property: None,
             filters: Vec::new(),
             source: String::new(),
+            max_points: None,
         }
     }
 

@@ -27,8 +27,9 @@ file that changed can be read again: **Reload from file** in the Edit Point Clou
 `pointcloud.reload`. The points, colours, segments, triangles and properties are replaced; the
 name, placement, units, point size and colouring are kept, and so are the filters on properties
 the file still has. Colouring by a property the file no longer has goes back to the file's
-colours. A cloud that was thinned stays thinned to as many points; any other is read as a new
-insert would be, so a file that grew comes in whole. The file is read beside the window, with
+colours. The file is read under the limit the cloud was inserted with (`max_points`), so the same
+file reads as the very same points and a file that grew comes in whole unless it passes that
+limit, when it is thinned as an insert would thin it. The file is read beside the window, with
 progress and Cancel. A cloud opened from a design saved before it remembered its file cannot be
 reloaded. A file on another computer (`\\host\share`) is treated as a linked design's is:
 **Reload from file** asks before it connects to that server, and `pointcloud.reload` is refused
