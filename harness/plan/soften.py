@@ -5,7 +5,7 @@ A dependency U -> D is *soft* when U's functions call at most MAX_CALLS distinct
 of D and D owns no methods of a class U's own classes are or derive from (so U needs no
 type from D). A soft dependency does not block claiming U: the calls into D are stubbed
 with `UNPORTED(<D>)` and the cases that reach them are deferred, exactly like a back-edge
-(AGENTS.md section 4a). Hard dependencies stay in `depends_on`.
+(docs/porting.md §4a). Hard dependencies stay in `depends_on`.
 
 Needs the call graph: `harness/callgraph/run.sh` (writes bin/callgraph/graph.json; set
 CALLGRAPH=<path> to use another copy, e.g. from a worktree).

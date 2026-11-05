@@ -4,7 +4,7 @@
 `solidcore-ffi`)** and the **solidcore Rust port** on identical inputs and
 compares the results. A unit may be marked `status = "green"` in
 `plan/units/<id>.toml` only when `difftest --status-of <id>` prints `green`, and
-`status = "partial"` only when it prints `partial` (AGENTS.md section 4a).
+`status = "partial"` only when it prints `partial` (docs/porting.md §4a).
 
 `audit.recursion` is a crate-wide audit rather than a port: it has no standalone
 C++ counterpart or runner and is excluded from `--green`. Its plan status records
@@ -316,7 +316,7 @@ $X stats --seeds-dir <dir> --cases N [--stage ..]            # error-site histog
 ## Deferred cases, `partial` units
 
 A unit's Rust code may call into a unit that is not ported yet; it then returns
-`SolidError::Unported { upstream, unit }` (AGENTS.md section 4a). In
+`SolidError::Unported { upstream, unit }` (docs/porting.md §4a). In
 `run_rust`, map that to `Output::deferred(unit, symbol)`, most simply:
 
 ```rust

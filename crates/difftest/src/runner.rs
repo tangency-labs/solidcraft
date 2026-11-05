@@ -273,7 +273,7 @@ impl CaseResult {
     }
 }
 
-/// Status of a unit run (AGENTS.md section 4a).
+/// Status of a unit run (docs/porting.md §4a).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnitStatus {
     /// No failures, deferrals or known mismatches (platform skips excluded). Parked cases

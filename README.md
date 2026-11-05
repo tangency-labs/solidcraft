@@ -133,7 +133,7 @@ and fixing bugs.
 3. Describe the intended behavior, affected paths, related PRs and validation, and
    list independent follow-ups others can take. Compare against C++ and rerun affected
    units with existing tolerances and coverage. CI is the merge gate. See
-   [AGENTS.md, section 4](AGENTS.md#4-porting-a-unit-pr-workflow) for the claim template,
+   [AGENTS.md §4](AGENTS.md#4-pull-requests) for the claim template,
    handoffs and inactivity rules.
 
 To keep parallel PRs from conflicting: edit only your unit's `plan/units/<unit id>.toml`,

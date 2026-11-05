@@ -19,7 +19,7 @@ use solidcore::SolidError;
 /// * `deferred`: set only by the Rust side (via [`Output::deferred`] or
 ///   [`Output::unported`]) when the port reached code that is not ported yet
 ///   ([`SolidError::Unported`]). The case is then *deferred*: neither pass nor
-///   fail, and nothing is compared (AGENTS.md section 4a).
+///   fail, and nothing is compared (docs/porting.md §4a).
 /// * `rejected`: set by the C++ side only when fixture construction failed before
 ///   the operation ran, or an FFI guard or crash trap refused an input that is
 ///   undefined in C++ (AGENTS.md section 4, step 5.6). No Rust call or parity
