@@ -31,7 +31,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("open")
         .key("Ctrl+O")
         .noundo()
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh)"),
+        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
     CommandSpec::new("file.insert_step", "Insert STEP", insert_step)
         .at("SOLID", "INSERT")
         .icon("import")
@@ -427,6 +427,11 @@ fn opened_design(
     if read_only {
         out["read_only"] = json!(true);
     }
+    // A newer SolidCraft saved it: opened all the same, and the reply says so.
+    if let Some(file) = &s.doc.newer_file {
+        out["newer_file"] = file.report();
+        out["warnings"] = json!(file.warnings());
+    }
     let now = solidcraft_io::design_lock::now_secs();
     if let Some(lock) = solidcraft_io::design_lock::held_elsewhere(std::path::Path::new(path), now) {
         out["open_elsewhere"] = json!({"host": lock.host, "user": lock.user, "app": lock.app, "opened": lock.opened});
@@ -583,7 +588,21 @@ fn write_bytes(
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
     s.mark_saved();
-    Ok(json!({"path": path, "bytes": bytes.len(), "name": s.doc.name}))
+    let mut out = json!({"path": path, "bytes": bytes.len(), "name": s.doc.name});
+    // A newer SolidCraft's file keeps what this version can't read, and its format number. What
+    // couldn't go back, because the design was changed around it, is said.
+    if s.doc.newer_file.is_some() {
+        let mut lost = solidcraft_doc::newer_file::not_kept(&s.doc);
+        if format == "json" && s.doc.newer_file.as_ref().is_some_and(|file| file.needs_container()) {
+            lost.push("the parts of the file beside the design, which plain JSON has no room for: save as .sc to keep them".to_string());
+        }
+        out["kept_format"] = json!(s.doc.format);
+        if !lost.is_empty() {
+            out["warnings"] = json!(lost.iter().map(|what| format!("Not kept: {what}. The previous file is `{path}.bak`.")).collect::<Vec<_>>());
+            out["not_kept"] = json!(lost);
+        }
+    }
+    Ok(out)
 }
 
 impl Session {
@@ -1399,6 +1418,60 @@ mod tests {
         // Save As to the new extension leaves the old file as it was.
         s.execute("file.save_as", &json!({"path": dir.join("Bracket.sc").to_string_lossy()})).unwrap();
         assert!(old.is_file() && dir.join("Bracket.sc").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A design a newer SolidCraft saved opens through the command agents and the app use: the
+    /// reply warns, what it can't read shows as that feature's error, work goes on around it, and
+    /// saving keeps the feature and the file's number in both encodings.
+    #[test]
+    fn a_newer_design_opens_and_saving_keeps_what_it_cant_read() {
+        let dir = std::env::temp_dir().join(format!("sc_newer_design_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+        let mut file: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+        let newer = solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1);
+        file["format"] = json!(newer);
+        let future = json!({"id": 900, "name": "Lattice1", "type": "gyroid_lattice", "cell": 2.5});
+        file["features"].as_array_mut().unwrap().push(future.clone());
+        file["future_section"] = json!([1, 2]);
+        for name in ["newer.json", "newer.sc"] {
+            let path = dir.join(name);
+            let source = solidcraft_doc::Document::from_json(&file.to_string()).unwrap();
+            let bytes = if name.ends_with(".sc") { solidcraft_io::write_design_container(&source).unwrap() } else { file.to_string().into_bytes() };
+            std::fs::write(&path, bytes).unwrap();
+            let path = path.to_string_lossy().to_string();
+            let mut opened = Session::default();
+            let reply = opened.execute("doc.open", &json!({"path": path})).unwrap();
+            assert_eq!(reply["errors"], 1, "{reply}");
+            assert_eq!(reply["features"], 2, "{reply}");
+            assert!(reply["newer_file"]["not_understood"].to_string().contains("gyroid_lattice"), "{reply}");
+            let first = reply["warnings"][0].as_str().unwrap();
+            assert_eq!(
+                first,
+                format!(
+                    "Saved by a newer SolidCraft (format {}, this version reads up to {}). If something's missing, update.",
+                    solidcraft_doc::format::FORMAT + 1,
+                    solidcraft_doc::format::FORMAT
+                )
+            );
+            assert_eq!(opened.model.state().bodies.len(), 1, "the box still builds");
+            let lattice = opened.doc.features.iter().position(|f| f.name == "Lattice1").unwrap();
+            assert!(opened.model.results[lattice].error.as_deref().unwrap().contains("gyroid_lattice"));
+            opened.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).unwrap();
+            let saved = opened.execute("file.save", &json!({})).unwrap();
+            assert_eq!(saved["kept_format"], json!(newer), "{saved}");
+            assert!(saved.get("not_kept").is_none(), "{saved}");
+            let mut again = Session::default();
+            again.execute("doc.open", &json!({"path": path})).unwrap();
+            assert_eq!(again.doc.features.len(), 3);
+            assert_eq!(again.model.state().bodies.len(), 2);
+            let written: Value = serde_json::from_str(&again.doc.to_json()).unwrap();
+            assert_eq!(written["format"], json!(newer));
+            assert_eq!(written["future_section"], json!([1, 2]));
+            assert!(written["features"].as_array().unwrap().contains(&future));
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

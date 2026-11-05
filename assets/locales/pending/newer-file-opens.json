@@ -1,0 +1,7 @@
+{
+  "en": {
+    "document.newer_file": "Saved by a newer SolidCraft (format {format}, this version reads up to {reads}). If something's missing, update.",
+    "document.newer_file_change": "Saved by a newer SolidCraft (format {format} with `{change}`, which this version doesn't know). If something's missing, update.",
+    "document.newer_file_not_read": "Not read: {what}. Saving keeps it."
+  }
+}

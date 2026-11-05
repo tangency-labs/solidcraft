@@ -439,6 +439,7 @@ fn recovered(app: &mut SolveApp, request: &Request) {
         let _ = app.session.execute("doc.recovery_discard", &json!({"id": id, "dir": dir}));
     }
     app.set_status(format!("recovered {}: save it to keep it", request.path), false);
+    app.say_newer_file();
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1141,6 +1142,9 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                         },
                         false,
                     );
+                    if !request.insert() {
+                        app.say_newer_file();
+                    }
                 }
                 request.answer(Ok(made.result));
             }

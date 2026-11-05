@@ -2,8 +2,9 @@
 //!
 //! A design file starts with `"format": "solidcraft/N"`. A file of an older format is read and
 //! upgraded step by step (N → N+1 → … → current): JSON-level steps first, for changes in the
-//! file's shape, then document-level steps. A file of a newer format than this build knows is
-//! refused with a message saying so, never guessed at.
+//! file's shape, then document-level steps. A file a newer build saved opens too, with a warning:
+//! what this build reads is read, what it doesn't is reported by name and kept for the next save
+//! (`crate::newer_file`).
 //!
 //! History:
 //! - 1: every design up to 2026-10-08 (format string since M0). Fields added over time all
@@ -264,7 +265,7 @@ const FORMATS: Formats<'static> = Formats { hand: &JSON_STEPS, folded: FOLDED, p
 
 /// A kind of file whose format is versioned here: designs, and drawings (#3890). Each family has
 /// its own format tag, its own numbers and its own folder of change files (`build.rs` lists them);
-/// reading a file's format, refusing a file a newer build saved and the upgrade are the same code
+/// reading a file's format, telling a file a newer build saved and the upgrade are the same code
 /// for every family.
 pub struct Family<'a> {
     /// What a file of the family is called in messages.
@@ -317,8 +318,8 @@ impl Family<'_> {
     }
 
     /// Read a file's format and take its `format_pending` out of its JSON, before anything else
-    /// in it is read: a file that isn't this family's, or that a newer build saved, is refused
-    /// here, so nothing a newer build saved is judged by this build's rules.
+    /// in it is read: a file that isn't this family's is refused here. One a newer build saved is
+    /// not: [`Family::newer`] says so.
     pub fn take_version(&self, v: &mut Value) -> Result<(u32, Option<Vec<String>>)> {
         let noun = self.noun;
         let not_ours = |what: String| DocError::Invalid(format!("not a SolidCraft {noun} ({what})"));
@@ -329,8 +330,17 @@ impl Family<'_> {
             Some(_) => return Err(not_ours("format is not a string".into())),
         };
         let applied = take_names(v, "format_pending", noun)?;
-        self.formats.check(noun, version, applied.as_deref())?;
+        if version == 0 {
+            return Err(not_ours("format 0".into()));
+        }
         Ok((version, applied))
+    }
+
+    /// What says a file of format `version` with the changes `applied` came from a newer build:
+    /// a number past this build's, or a change this build doesn't have anywhere in its history.
+    /// `None` for a file this build fully knows.
+    pub fn newer(&self, version: u32, applied: Option<&[String]>) -> Option<Newer> {
+        self.formats.newer(version, applied)
     }
 
     /// Bring a file of format `version` up to this build's; `applied` is its `format_pending`
@@ -348,6 +358,17 @@ impl Family<'_> {
             v => check_numbers(v, self.noun, 0),
         }
     }
+}
+
+/// How a file shows a newer build saved it ([`Family::newer`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Newer {
+    /// The number the file says.
+    pub format: u32,
+    /// The number this build reads up to.
+    pub reads_up_to: u32,
+    /// The changes the file names that this build doesn't have.
+    pub unknown_changes: Vec<String>,
 }
 
 /// The names of the pending changes this build writes into a design (`format_pending`).
@@ -394,35 +415,25 @@ impl Formats<'_> {
         }
     }
 
-    /// Refuse a `noun` of format `version` that this build can't read: format 0, a newer number,
-    /// or a change `applied` (its `format_pending`) names that this build doesn't have anywhere in
-    /// its history, which only a newer build's file can. Changes are recognized across the entire
-    /// history: a branch's pending change may have landed at a later number. A list beside a format
-    /// that isn't made of changes means nothing (a tool or a test set an older number on a newer
-    /// file).
-    fn check(&self, noun: &str, version: u32, applied: Option<&[String]>) -> Result<()> {
-        let newer = |what: String| DocError::Invalid(format!("this {noun} was saved by a newer SolidCraft ({what}): update SolidCraft to open it"));
+    /// [`Family::newer`]. Changes are recognized across the entire history: a branch's pending
+    /// change may have landed at a later number. A list beside a format that isn't made of changes
+    /// means nothing (a tool or a test set an older number on a newer file).
+    fn newer(&self, version: u32, applied: Option<&[String]>) -> Option<Newer> {
         let current = self.current();
-        if version == 0 {
-            return Err(DocError::Invalid(format!("not a SolidCraft {noun} (format 0)")));
-        }
-        if version > current {
-            return Err(newer(format!("file format {version}; this version reads formats up to {current}")));
-        }
-        let applied = applied.filter(|_| self.parts(version).is_some()).unwrap_or_default();
-        match applied.iter().find(|name| !self.knows_part_name(self.canonical_applied_name(version, name))) {
-            Some(unknown) => Err(newer(format!("file format {version} with `{unknown}`, which this version doesn't know"))),
-            None => Ok(()),
-        }
+        let listed = applied.filter(|_| version > current || self.parts(version).is_some()).unwrap_or_default();
+        let unknown_changes: Vec<String> =
+            listed.iter().filter(|name| !self.knows_part_name(self.canonical_applied_name(version, name))).cloned().collect();
+        (version > current || !unknown_changes.is_empty()).then_some(Newer { format: version, reads_up_to: current, unknown_changes })
     }
 
     /// Bring a `noun` of format `version` up to [`Formats::current`]. `applied` is the file's
     /// `format_pending`: the changes of its format it already has, when it was written while they
-    /// were pending; the others' steps run first. A file [`Formats::check`] refuses is refused,
-    /// whoever calls, before anything is changed; already-applied changes never run again at
-    /// their later number.
+    /// were pending; the others' steps run first, and already-applied changes never run again at
+    /// their later number. A file past this build's number has no steps to run.
     fn upgrade(&self, noun: &str, v: &mut Value, version: u32, applied: Option<&[String]>) -> Result<()> {
-        self.check(noun, version, applied)?;
+        if version == 0 {
+            return Err(DocError::Invalid(format!("not a SolidCraft {noun} (format 0)")));
+        }
         // A list beside a format that isn't made of changes is ignored, like any field an upgrade
         // drops.
         let applied = applied.filter(|_| self.parts(version).is_some());
@@ -677,18 +688,53 @@ fn v2_to_v3(v: &mut Value) -> Result<()> {
 pub fn read(s: &str) -> Result<Document> {
     let mut v: Value = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("not a SolidCraft design: {e}")))?;
     let (version, applied) = DESIGN.take_version(&mut v)?;
-    check_design_numbers(&v)?;
-    crate::config::validate_rules_json(&v)?;
-    crate::config::validate_styles_json(&v)?;
-    crate::face_anchor::validate_face_anchors_json(&v)?;
-    validate_versioned_geometry(&v)?;
-    validate_emboss_targets(&v)?;
-    validate_freeform_offsets(&v)?;
-    validate_sketch_sizes(&v)?;
-    crate::format_offsets::validate_raw(&v)?;
-    let legacy_wires = validate_wires(&v, version)?;
+    match DESIGN.newer(version, applied.as_deref()) {
+        Some(newer) => crate::newer_file::read(v, version, applied, newer),
+        None => decode(v, version, applied.as_deref()),
+    }
+}
+
+/// Whether a design's text says a newer build saved it, read before anything else in it is.
+pub fn says_newer(text: &str) -> bool {
+    #[derive(serde::Deserialize)]
+    struct Says {
+        format: Option<String>,
+        format_pending: Option<Vec<String>>,
+    }
+    serde_json::from_str::<Says>(text)
+        .ok()
+        .and_then(|says| Some((DESIGN.version_of(&says.format?)?, says.format_pending)))
+        .is_some_and(|(version, applied)| DESIGN.newer(version, applied.as_deref()).is_some())
+}
+
+/// The checks of a design's JSON that need nothing outside the part of it they are given.
+pub(crate) fn check_raw(v: &Value, version: u32) -> Result<Vec<(usize, usize)>> {
+    check_design_numbers(v)?;
+    crate::config::validate_rules_json(v)?;
+    crate::config::validate_styles_json(v)?;
+    crate::face_anchor::validate_face_anchors_json(v)?;
+    validate_versioned_geometry(v)?;
+    validate_emboss_targets(v)?;
+    validate_freeform_offsets(v)?;
+    validate_sketch_sizes(v)?;
+    crate::format_offsets::validate_raw(v)?;
+    validate_wires(v, version)
+}
+
+/// [`check_raw`], the upgrade and the typed record alone: what a piece of a design must pass by
+/// itself ([`crate::newer_file`]), with nothing else in the file for it to refer to.
+pub(crate) fn check_piece(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<()> {
+    check_raw(&v, version)?;
+    DESIGN.upgrade(&mut v, version, applied)?;
+    let d: Document = serde_json::from_value(v).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
+    check_typed_numbers(&d)
+}
+
+/// A design's JSON, its format taken out, as the document it holds.
+pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<Document> {
+    let legacy_wires = check_raw(&v, version)?;
     validate_body_transfers(&v)?;
-    DESIGN.upgrade(&mut v, version, applied.as_deref())?;
+    DESIGN.upgrade(&mut v, version, applied)?;
     let mut d: Document = serde_json::from_value(v).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
     check_typed_numbers(&d)?;
     let mut legacy_by_feature = std::collections::BTreeMap::<usize, Vec<usize>>::new();
@@ -1327,9 +1373,9 @@ mod tests {
         let mut v = serde_json::json!({});
         formats.upgrade("design", &mut v, next, Some(&["a-first".into(), "b-second".into()])).unwrap();
         assert_eq!(trace_of(&v), Vec::<&str>::new());
-        // A change this build doesn't know is a newer build's: refused, not guessed at.
-        let err = formats.upgrade("design", &mut serde_json::json!({}), next, Some(&["c-later".into()])).unwrap_err();
-        assert!(err.to_string().contains("newer SolidCraft"), "{err}");
+        // A change this build doesn't know is a newer build's: said, and kept.
+        let said = formats.newer(next, Some(&["c-later".into()])).unwrap();
+        assert_eq!(said, Newer { format: next, reads_up_to: next, unknown_changes: vec!["c-later".into()] });
         // A list on a format that isn't made of changes means nothing.
         let mut v = serde_json::json!({});
         formats.upgrade("design", &mut v, HAND_WRITTEN, Some(&["a-first".into()])).unwrap();
@@ -1372,15 +1418,12 @@ mod tests {
     }
 
     #[test]
-    fn personal_card_alias_without_support_refuses_before_mutation() {
+    fn personal_card_alias_without_support_is_a_newer_builds() {
         let hand: [JsonStep; 27] = [|_| Ok(()); 27];
         let first = [traced("a-first")];
         let formats = Formats { hand: &hand, folded: &[(29, &first)], pending: &[] };
-        let mut file = serde_json::json!({"trace": [], "sentinel": 7});
-        let original = file.clone();
-        let error = formats.upgrade("design", &mut file, 29, Some(&["physical-material-cards".into()])).unwrap_err();
-        assert!(error.to_string().contains("physical-material-cards"), "{error}");
-        assert_eq!(file, original);
+        let said = formats.newer(29, Some(&["physical-material-cards".into()])).unwrap();
+        assert_eq!(said.unknown_changes, ["physical-material-cards"]);
     }
 
     #[test]
@@ -1391,11 +1434,8 @@ mod tests {
         let cards = [traced("material-engineering-cards")];
         let formats = Formats { hand: &hand, folded: &[(28, &first), (29, &second), (30, &cards)], pending: &[] };
         for version in [28, 30] {
-            let mut file = serde_json::json!({"trace": []});
-            let original = file.clone();
-            let error = formats.upgrade("design", &mut file, version, Some(&["physical-material-cards".into()])).unwrap_err();
-            assert!(error.to_string().contains("physical-material-cards"), "{error}");
-            assert_eq!(file, original);
+            let said = formats.newer(version, Some(&["physical-material-cards".into()])).unwrap();
+            assert_eq!(said.unknown_changes, ["physical-material-cards"]);
         }
     }
 
@@ -1408,11 +1448,7 @@ mod tests {
         for names in
             [["physical-material-cards".into(), "unknown-card-codec".into()], ["unknown-card-codec".into(), "physical-material-cards".into()]]
         {
-            let mut file = serde_json::json!({"trace": ["b"]});
-            let original = file.clone();
-            let error = formats.upgrade("design", &mut file, 29, Some(&names)).unwrap_err();
-            assert!(error.to_string().contains("unknown-card-codec"), "{error}");
-            assert_eq!(file, original);
+            assert_eq!(formats.newer(29, Some(&names)).unwrap().unknown_changes, ["unknown-card-codec"]);
         }
     }
 
@@ -1446,18 +1482,14 @@ mod tests {
     }
 
     /// An experimental producer can use a number that a release later folds without its
-    /// change. Its unknown concept must still be refused before any migration runs.
+    /// change. Its unknown concept is still a newer build's.
     #[test]
-    fn unknown_pending_concepts_are_refused_after_folding() {
+    fn unknown_pending_concepts_are_said_after_folding() {
         let parts = [traced("a-first")];
         let later = [traced("b-second")];
         for pending in [&[][..], &later[..]] {
             let formats = Formats { hand: &[], folded: &[(2, &parts)], pending };
-            let mut file = serde_json::json!({"trace": []});
-            let original = file.clone();
-            let err = formats.upgrade("design", &mut file, 2, Some(&["experimental-card".into()])).unwrap_err();
-            assert!(err.to_string().contains("experimental-card") && err.to_string().contains("update SolidCraft"), "{err}");
-            assert_eq!(file, original, "refuse before applying even a known migration");
+            assert_eq!(formats.newer(2, Some(&["experimental-card".into()])).unwrap().unknown_changes, ["experimental-card"]);
         }
     }
 
@@ -1479,23 +1511,20 @@ mod tests {
         }
     }
 
-    /// A design naming a pending change this build doesn't have is a newer build's, refused as
-    /// such before anything else in it is checked (as a newer number is), so a newer build's
-    /// fields never read as damage.
+    /// A design naming a pending change this build doesn't have is a newer build's: what it can't
+    /// read of it doesn't read as damage.
     #[test]
-    fn a_newer_builds_pending_change_is_refused_before_the_design_is_checked() {
+    fn a_newer_builds_pending_change_opens_and_its_fields_are_not_damage() {
         let mut file: Value = serde_json::from_str(&Document::new("A").to_json()).unwrap();
         file["format_pending"] = serde_json::json!(["not-a-change-anyone-made"]);
         file["features"] = serde_json::json!([{"type": "emboss", "face": {"body": "Body", "at": [0, 0, 0], "a_newer_key": true}}]);
-        let error = read(&file.to_string()).unwrap_err().to_string();
+        let opened = read(&file.to_string()).unwrap();
         // With changes pending, FORMAT is made of them; once they are folded it is the folded
         // format, which is made of changes too. Either way an unknown change is a newer build's.
-        assert_eq!(
-            error,
-            format!(
-                "this design was saved by a newer SolidCraft (file format {FORMAT} with `not-a-change-anyone-made`, which this version doesn't know): update SolidCraft to open it"
-            )
-        );
+        let said = opened.newer_file.as_ref().unwrap();
+        assert_eq!(said.unknown_changes, ["not-a-change-anyone-made"]);
+        assert!(said.notice().contains(&format!("format {FORMAT} with `not-a-change-anyone-made`")), "{}", said.notice());
+        assert!(matches!(opened.features[0].kind, crate::FeatureKind::NewerFileFeature { .. }));
     }
 
     /// Drawings follow the same rules from their own first format: folded formats follow on from 1
@@ -1575,17 +1604,17 @@ mod tests {
         fn tagged(family: &Family<'_>, n: u32) -> Value {
             serde_json::json!({"format": family.format_string(n)})
         }
-        fn newer(noun: &str, n: u32, current: u32) -> String {
-            format!(
-                "this {noun} was saved by a newer SolidCraft (file format {n}; this version reads formats up to {current}): update SolidCraft to open it"
-            )
-        }
-        assert_eq!(refusal(&DESIGN, tagged(&DESIGN, FORMAT + 1)), newer("design", FORMAT + 1, FORMAT));
-        assert_eq!(read(&tagged(&DESIGN, FORMAT + 1).to_string()).unwrap_err().to_string(), newer("design", FORMAT + 1, FORMAT));
+        // A newer number isn't refused: it is said.
+        let says = |family: &Family<'_>, mut file: Value| {
+            let (version, applied) = family.take_version(&mut file).unwrap();
+            family.newer(version, applied.as_deref())
+        };
+        assert_eq!(says(&DESIGN, tagged(&DESIGN, FORMAT + 1)), Some(Newer { format: FORMAT + 1, reads_up_to: FORMAT, unknown_changes: vec![] }));
+        assert_eq!(read(&tagged(&DESIGN, FORMAT + 1).to_string()).unwrap().newer_file.unwrap().format, FORMAT + 1);
         let current = DRAWING.current();
         assert!(matches!(DRAWING.take_version(&mut tagged(&DRAWING, current)), Ok((v, None)) if v == current));
         for n in [current + 1, u32::MAX] {
-            assert_eq!(refusal(&DRAWING, tagged(&DRAWING, n)), newer("drawing", n, current));
+            assert_eq!(says(&DRAWING, tagged(&DRAWING, n)), Some(Newer { format: n, reads_up_to: current, unknown_changes: vec![] }));
         }
         for (family, noun) in [(&DESIGN, "design"), (&DRAWING, "drawing")] {
             assert_eq!(refusal(family, tagged(family, 0)), format!("not a SolidCraft {noun} (format 0)"));
@@ -1607,12 +1636,7 @@ mod tests {
         let design = Family { formats: Formats { hand: &JSON_STEPS, folded: FOLDED, pending: &pending }, ..DESIGN };
         let next = design.current();
         let file = json!({"format": format_string(next), "format_pending": ["c-later"]});
-        assert_eq!(
-            refusal(&design, file),
-            format!(
-                "this design was saved by a newer SolidCraft (file format {next} with `c-later`, which this version doesn't know): update SolidCraft to open it"
-            )
-        );
+        assert_eq!(says(&design, file), Some(Newer { format: next, reads_up_to: next, unknown_changes: vec!["c-later".into()] }));
         assert!(matches!(DESIGN.take_version(&mut json!({})), Ok((1, None))));
         assert_eq!(refusal(&DRAWING, json!({})), "not a SolidCraft drawing (no format)");
     }
@@ -1639,19 +1663,13 @@ mod tests {
         assert_eq!(open(json!({"format": "solidcraft-drawing/2", "format_pending": ["a-first"]})).unwrap(), Vec::<String>::new());
         // A list beside format 1 means nothing: the step still runs.
         assert_eq!(open(json!({"format": "solidcraft-drawing/1", "format_pending": ["c-later"]})).unwrap(), ["a"]);
-        let error = open(json!({"format": "solidcraft-drawing/2", "format_pending": ["a-first", "c-later"]})).unwrap_err().to_string();
-        assert_eq!(
-            error,
-            "this drawing was saved by a newer SolidCraft (file format 2 with `c-later`, which this version doesn't know): update SolidCraft to open it"
-        );
-        let error = open(json!({"format": "solidcraft-drawing/3"})).unwrap_err().to_string();
-        assert_eq!(
-            error,
-            "this drawing was saved by a newer SolidCraft (file format 3; this version reads formats up to 2): update SolidCraft to open it"
-        );
-        // An upgrade called without `take_version` refuses in the drawing's words too, format 0 included.
-        let error = drawing.upgrade(&mut json!({}), 3, None).unwrap_err().to_string();
-        assert!(error.starts_with("this drawing was saved by a newer SolidCraft (file format 3;"), "{error}");
+        // Of a newer build: said, and what can run runs.
+        let list = ["a-first".to_string(), "c-later".to_string()];
+        assert_eq!(drawing.newer(2, Some(&list)).unwrap().unknown_changes, ["c-later"]);
+        assert_eq!(open(json!({"format": "solidcraft-drawing/2", "format_pending": list})).unwrap(), Vec::<String>::new());
+        assert_eq!(drawing.newer(3, None).unwrap(), Newer { format: 3, reads_up_to: 2, unknown_changes: vec![] });
+        assert_eq!(open(json!({"format": "solidcraft-drawing/3"})).unwrap(), Vec::<String>::new());
+        // An upgrade called without `take_version` still says format 0 isn't one.
         assert_eq!(drawing.upgrade(&mut json!({}), 0, None).unwrap_err().to_string(), "not a SolidCraft drawing (format 0)");
     }
 
@@ -1666,7 +1684,8 @@ mod tests {
             assert!(read(&file.to_string()).is_err());
         }
         file["format_pending"] = serde_json::json!(["not-a-change-anyone-made"]);
-        assert!(read(&file.to_string()).is_err(), "unknown pending concepts are refused even after folding");
+        let newer = read(&file.to_string()).unwrap();
+        assert_eq!(newer.newer_file.as_ref().unwrap().unknown_changes, ["not-a-change-anyone-made"], "even after folding");
         file["format_pending"] = Value::from(pending_names());
         let opened = read(&file.to_string()).unwrap();
         assert_eq!(opened.format_pending, pending_names());
@@ -2138,8 +2157,9 @@ mod tests {
             value["features"] = serde_json::json!([{"type":"sketch", "sketch":{"freeform_offsets":records}}]);
             let error = read(&value.to_string()).unwrap_err().to_string();
             assert!(error.contains("free-form offset metadata"), "{error}");
+            // A newer build's file isn't held to this: the feature waits for that build.
             value["format"] = Value::from(format_string(FORMAT + 1));
-            assert!(read(&value.to_string()).unwrap_err().to_string().contains("newer SolidCraft"));
+            assert!(matches!(read(&value.to_string()).unwrap().features[0].kind, crate::FeatureKind::NewerFileFeature { .. }));
         }
     }
 
@@ -2163,8 +2183,7 @@ mod tests {
             let error = read(&value.to_string()).unwrap_err().to_string();
             assert!(error.contains("emboss face"), "{error}");
             value["format"] = Value::from(format_string(FORMAT + 1));
-            let error = read(&value.to_string()).unwrap_err().to_string();
-            assert!(error.contains("newer SolidCraft"), "{error}");
+            assert!(matches!(read(&value.to_string()).unwrap().features[0].kind, crate::FeatureKind::NewerFileFeature { .. }));
         }
     }
 
@@ -2207,7 +2226,7 @@ mod tests {
     }
 
     #[test]
-    fn version_seven_styles_upgrade_and_newer_versions_are_refused_before_columns() {
+    fn version_seven_styles_upgrade_and_a_newer_versions_columns_are_kept() {
         use crate::config::{Column, ConfigRow};
         let mut d = Document::new("configured styles");
         d.configs.columns = vec![Column::Material("Body".into()), Column::Appearance("Body".into())];
@@ -2227,9 +2246,11 @@ mod tests {
         value["format"] = Value::from(format_string(FORMAT + 1));
         value["configs"]["columns"] = serde_json::json!([{"unknown_future_column":"Body"}]);
         value["configs"]["rules"] = serde_json::json!({"unknown_future_rule": true});
-        let error = read(&value.to_string()).unwrap_err().to_string();
-        assert!(error.contains("newer SolidCraft") && error.contains("update SolidCraft"), "{error}");
-        assert!(!error.contains("unknown variant"), "format refusal precedes decoding new variants");
+        let opened = read(&value.to_string()).unwrap();
+        let said = opened.newer_file.as_ref().unwrap();
+        assert!(said.not_understood.iter().any(|what| what.contains("configs")), "{:?}", said.not_understood);
+        let saved: Value = serde_json::from_str(&opened.to_json()).unwrap();
+        assert_eq!(saved["configs"], value["configs"], "kept for the build that reads them");
     }
 
     #[test]
@@ -2284,8 +2305,10 @@ mod tests {
         assert_eq!(read(&saved.to_string()).unwrap(), d);
         saved["format"] = Value::from(format_string(FORMAT + 1));
         saved["features"][0]["sketch"]["constraints"][0]["type"] = Value::from("future_dimension");
-        let error = read(&saved.to_string()).unwrap_err().to_string();
-        assert!(error.contains("newer SolidCraft") && !error.contains("unknown variant"), "{error}");
+        let opened = read(&saved.to_string()).unwrap();
+        assert!(matches!(opened.features[0].kind, crate::FeatureKind::NewerFileFeature { .. }));
+        let again: Value = serde_json::from_str(&opened.to_json()).unwrap();
+        assert_eq!(again["features"][0], saved["features"][0]);
     }
 
     #[test]
@@ -2392,15 +2415,14 @@ mod tests {
     }
 
     #[test]
-    fn older_upgraded_newer_refused_others_rejected() {
+    fn older_upgraded_newer_opened_others_rejected() {
         let mut v: Value = serde_json::from_str(&Document::new("A").to_json()).unwrap();
         v["format"] = Value::from("solidcraft/1");
         assert_eq!(read(&v.to_string()).unwrap().format, format_string(FORMAT));
         v.as_object_mut().unwrap().remove("format");
         assert!(read(&v.to_string()).is_ok(), "a file without a format is format 1");
         v["format"] = Value::from(format_string(FORMAT + 1));
-        let e = read(&v.to_string()).unwrap_err().to_string();
-        assert!(e.contains("newer SolidCraft"), "{e}");
+        assert_eq!(read(&v.to_string()).unwrap().newer_file.unwrap().format, FORMAT + 1);
         for bad in ["solidcraft/0", "acad/3", "solidcraft/-1", "solidcraft/99999999999999999999"] {
             v["format"] = Value::from(bad);
             assert!(read(&v.to_string()).is_err(), "{bad}");

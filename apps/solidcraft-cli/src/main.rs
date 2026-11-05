@@ -318,6 +318,19 @@ fn load_checked(path: &str, check: solidcraft_engine::schema::ParamCheck) -> Res
 /// `load_checked`, the features computed under `validation` (`diagnostics.validation`), which
 /// the session keeps.
 fn load_with(path: &str, check: solidcraft_engine::schema::ParamCheck, validation: solidcraft_engine::kernel::Validation) -> Result<Session, String> {
+    let s = read_session(path, check, validation)?;
+    // A newer SolidCraft's file opens all the same; stderr says so, stdout stays the caller's.
+    for warning in s.doc.newer_file.iter().flat_map(|file| file.warnings()) {
+        eprintln!("{path}: warning: {warning}");
+    }
+    Ok(s)
+}
+
+fn read_session(
+    path: &str,
+    check: solidcraft_engine::schema::ParamCheck,
+    validation: solidcraft_engine::kernel::Validation,
+) -> Result<Session, String> {
     let mut s = Session::default();
     s.param_check = check;
     s.set_validation(validation);
@@ -579,7 +592,7 @@ fn cmd_eval(args: &[String]) -> Result<(), String> {
     let mut s = open(flag(args, "--in"), positional(args), solidcraft_engine::schema::ParamCheck::Off)?;
     let m = s.execute("inspect.measure", &json!({})).map_err(|e| e.to_string())?;
     let d = s.execute("document.inspect", &json!({})).map_err(|e| e.to_string())?;
-    let out = json!({
+    let mut out = json!({
         "body_count": m["body_count"],
         "bodies": m["bodies"],
         "total": m["total"],
@@ -587,6 +600,10 @@ fn cmd_eval(args: &[String]) -> Result<(), String> {
         "params": d["params"],
         "sketches": d["sketches"],
     });
+    if let Some(file) = &s.doc.newer_file {
+        out["newer_file"] = file.report();
+        out["warnings"] = json!(file.warnings());
+    }
     print_json(&out, json_out)
 }
 

@@ -2440,6 +2440,7 @@ fn image_host_availability(host: Option<&render::job::ImageHost>, expected: &ren
 /// to be decided on here.
 fn same_but_features(a: &Document, b: &Document) -> bool {
     let Document {
+        newer_file: _,
         render,
         format,
         format_pending,
