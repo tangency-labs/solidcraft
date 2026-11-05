@@ -3315,6 +3315,18 @@ fn contents_target(app: &SolveApp, kind: RowKind, id: &str, sketch: u64, editabl
         RowKind::Constraint | RowKind::Dimension if editable => vec![Sel::SketchConstraint { id }],
         RowKind::Constraint | RowKind::Dimension if expand || has_external_selection(app, sketch) => external_constraint_targets(app, sketch, &id),
         RowKind::Link | RowKind::Text => link_targets(app, sketch, &id, editable),
+        // An equation curve's id is a curve id; a 3D curve has no selectable sketch curve.
+        RowKind::Other => {
+            let world = crate::open_meshing::session_world(&app.session);
+            let solved = world.sketch(sketch).map(|solved| &solved.sketch);
+            let stored = app.session.doc.sketch(sketch).ok();
+            let Some(sk) = solved.or(stored) else { return Vec::new() };
+            if sk.curve_index(&id).is_some() {
+                if editable { vec![Sel::SketchCurve { id, sketch: None }] } else { vec![Sel::ExternalSketchCurve { sketch, id }] }
+            } else {
+                Vec::new()
+            }
+        }
         _ => Vec::new(),
     }
 }

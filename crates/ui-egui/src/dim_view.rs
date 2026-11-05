@@ -663,6 +663,7 @@ pub(crate) fn open_for(app: &mut SolveApp, sketch: u64, constraint: &str) -> boo
             live: None,
             selection: None,
             owned: false,
+            typed: false,
             shown: None,
             picked: None,
             sketch: Some(sketch),
