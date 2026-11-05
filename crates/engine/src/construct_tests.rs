@@ -621,6 +621,22 @@ fn construction_lives_in_the_component_frame() {
     assert!(near(point(&s, "PinTop"), Vec3::new(50.0, 20.0, 10.0)), "{:?}", point(&s, "PinTop"));
 }
 
+/// A construction plane in a moved component sections where the viewport draws it, not where
+/// the component was modelled.
+#[test]
+fn a_section_on_a_construction_plane_cuts_where_the_component_stands() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Mid"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 0, 30]}));
+    let r = run(&mut s, "inspect.section", json!({"plane": "Mid"}));
+    let z = r["section"]["origin"][2].as_f64().unwrap();
+    assert!((z - 35.0).abs() < 1e-9, "the cut goes through the placed plane: {r}");
+    let n = &r["section"]["normal"];
+    assert!((n[2].as_f64().unwrap().abs() - 1.0).abs() < 1e-9, "{r}");
+}
+
 #[test]
 fn plane_perpendicular_to_a_plane_through_a_line() {
     let mut s = part();
