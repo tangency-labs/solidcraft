@@ -118,7 +118,7 @@ jobs:
       - uses: actions/checkout@v4
       # upstream/ for the tests that read its TestFiles, sccache for every build here,
       # and the C++ reference for the difftest runner tests below.
-      - name: Upstream sources, sccache and the C++ reference
+      - name: Upstream sources and sccache for the workspace tests
         uses: ./.github/actions/cpp-reference
       - uses: Swatinem/rust-cache@v2
         with:
