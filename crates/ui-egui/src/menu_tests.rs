@@ -279,6 +279,38 @@ fn body_menu_isolates_renames_locks_and_deletes() {
     assert_eq!(app.session.model.state().bodies.len(), n - 1);
 }
 
+/// #12334: a right-click in the Browser on one of several selected bodies sends them all to the
+/// slicer (and saves, exports and hides them all), as the viewport's body menu does. A
+/// right-click on a body outside the selection still acts on that body alone.
+#[test]
+fn browser_body_menu_acts_on_the_selected_bodies_it_was_opened_on() {
+    let mut app = sample_app();
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0]})).unwrap();
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [300, 0, 0]})).unwrap();
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [400, 0, 0]})).unwrap();
+    let names: Vec<String> = app.session.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert!(names.len() >= 4, "{names:?}");
+    let (chosen, other) = names.split_at(3);
+    let items: Vec<serde_json::Value> = chosen.iter().map(|n| json!({"type": "body", "name": n})).collect();
+    app.run("select.set", json!({ "items": items })).unwrap();
+    let menu = context_menu::items(&app, &Target::Body { name: chosen[1].clone() });
+    for label in ["Send to Slicer", "Save As Mesh", "Export…"] {
+        let params = find(&menu, label).params.unwrap_or_default();
+        assert_eq!(params["bodies"], json!(chosen), "{label}: {params}");
+    }
+    // Save As Mesh starts with the three bodies picked.
+    context_menu::run_item(&mut app, &find(&menu, "Save As Mesh"), pos2(0.0, 0.0));
+    let picked: Vec<solidcraft_engine::Sel> = chosen.iter().map(|n| solidcraft_engine::Sel::Body { name: n.clone() }).collect();
+    assert_eq!(app.session.selection, picked);
+    // A body outside the selection keeps its own menu.
+    app.dialog = None;
+    let items: Vec<serde_json::Value> = chosen.iter().map(|n| json!({"type": "body", "name": n})).collect();
+    app.run("select.set", json!({ "items": items })).unwrap();
+    let alone = context_menu::items(&app, &Target::Body { name: other[0].clone() });
+    assert_eq!(find(&alone, "Send to Slicer").params.unwrap_or_default()["bodies"], json!([other[0]]));
+    assert!(find(&alone, "Rename").enabled);
+}
+
 #[test]
 fn properties_measure_the_body() {
     let mut app = sample_app();
