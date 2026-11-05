@@ -1,0 +1,7 @@
+# WR-13: measured growth_after_all_removed case after default record preservation.
+
+[[mismatch]]
+unit = "geom.hash_table"
+case = "growth_after_all_removed"
+why = "WR-13: ints.ints[490] is cpp=0 rust=123456789. C++ zeroes removed bucket records on growth, marking 60 records active while its counts imply two; Rust preserves the removed records and marks two active."
+cpp_defect = "WR-13"
