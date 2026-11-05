@@ -36,6 +36,9 @@
 //! | `wrapped` (private module)            | `SmOffsetSurface::AssertValid`, `SmSrfInVolume::AssertValid` |
 //!
 //! Deviations:
+//! - **Closed control nets (#2683).** Both monotonicity walks compare their last
+//!   direction with their first, completing the cycle upstream leaves open. The
+//!   rounding-aware walk also closes across steps that carry no direction (WR-737).
 //! - **Levels.** `level` is the `SmAssertTestLevel` value (`SM_LEVEL_0` .. `SM_LEVEL_2`,
 //!   [`LEVEL_GIVEN`]). As the release build's report macros do, a test runs when
 //!   `level >= ` its test level and `pTestRequests` is ignored; [`LEVEL_GIVEN`] skips
@@ -1095,6 +1098,9 @@ pub fn has_degenerate_control_point_row(b: &BSplineSurface, tol: f64) -> Result<
 /// neighbouring differences (coincident pairs skipped). As upstream, a failing column
 /// clears the row flag.
 ///
+/// Closed rows and columns compare the final difference with the closing difference
+/// as well (#2683); upstream omits that last turn.
+///
 /// A pair counts as coincident below an absolute `SM_EFF_ZERO`, as upstream. Test #5 of
 /// `AssertValid` takes [`grid_has_non_monotonic_points_to_rounding`] instead, which counts
 /// a step within the rounding of the two points it is between; this entry point is left
@@ -1136,6 +1142,8 @@ pub fn grid_has_non_monotonic_points(
 /// over too, so a reversal across a step of rounding would go unseen. A step within
 /// rounding carries no direction, so it is passed over instead and the last one that had a
 /// direction is kept (#2560).
+/// For a closed line this includes the comparison between the last and first steps
+/// carrying a direction, across any coincident steps at the seam (#2683).
 ///
 /// # Errors
 ///
@@ -1242,6 +1250,7 @@ fn grid_non_monotonic(
         // get first point pair difference
         let mut vec0 = at(j1)? - at(j0)?;
         let mut zero0 = zero.is_zero(vec0, at(j0)?, at(j1)?);
+        let mut first_direction = (!zero0).then_some(vec0);
 
         // next row start
         idx += row_size;
@@ -1255,6 +1264,11 @@ fn grid_non_monotonic(
 
             // skip coincident control points
             if zero0 || zero1 {
+                // A directionless closing step must not prevent the rounding walk
+                // from closing against the first real direction it encounters.
+                if !zero.carries_forward() && !zero1 && first_direction.is_none() {
+                    first_direction = Some(vec1);
+                }
                 // a step that carries no direction does not become the difference the
                 // next step is compared against unless `zero` carries it forward
                 // (upstream does, and a reversal across it goes unseen); until a step
@@ -1279,6 +1293,9 @@ fn grid_non_monotonic(
             j1 += 1;
             j0 = j1 - 1;
         }
+        if closed_row && !zero0 && first_direction.is_some_and(|first| turns_back(first, vec0)) {
+            monotonic_row = false;
+        }
         ii += 1;
     }
 
@@ -1296,6 +1313,7 @@ fn grid_non_monotonic(
         // get first point pair difference
         let mut vec0 = at(i1)? - at(i0)?;
         let mut zero0 = zero.is_zero(vec0, at(i0)?, at(i1)?);
+        let mut first_direction = (!zero0).then_some(vec0);
 
         // next col start
         idx += 1;
@@ -1309,6 +1327,9 @@ fn grid_non_monotonic(
 
             // skip coincident control points (as in the row pass above)
             if zero0 || zero1 {
+                if !zero.carries_forward() && !zero1 && first_direction.is_none() {
+                    first_direction = Some(vec1);
+                }
                 if zero.carries_forward() || zero0 {
                     vec0 = vec1;
                     zero0 = zero1;
@@ -1329,6 +1350,9 @@ fn grid_non_monotonic(
             zero0 = zero1;
             i1 += row_size;
             i0 = i1 - row_size;
+        }
+        if closed_col && !zero0 && first_direction.is_some_and(|first| turns_back(first, vec0)) {
+            monotonic_row = false;
         }
         jj += 1;
     }
@@ -3076,6 +3100,136 @@ mod tests {
             !grid_has_non_monotonic_points_to_rounding(&points, 4, false, true).unwrap(),
             "the closing step is within the rounding of its own two points"
         );
+    }
+
+    /// Put the same closed line along rows and columns. The other direction has only
+    /// one step, so it cannot account for either result.
+    fn expect_closed_grid_line(line: &[Point3], absolute: bool, rounding: bool) {
+        for closed_col in [false, true] {
+            let lifted = |p: Point3| p + Vec3::new(0.0, 0.0, 10.0);
+            let points: Vec<_> = if closed_col {
+                line.iter().flat_map(|&p| [p, lifted(p)]).collect()
+            } else {
+                line.iter()
+                    .copied()
+                    .chain(line.iter().copied().map(lifted))
+                    .collect()
+            };
+            let row_size = if closed_col { 2 } else { line.len() };
+            assert_eq!(
+                grid_has_non_monotonic_points(&points, row_size, closed_col, !closed_col).unwrap(),
+                absolute,
+                "absolute criterion, closed_col={closed_col}, line={line:?}"
+            );
+            assert_eq!(
+                grid_has_non_monotonic_points_to_rounding(
+                    &points,
+                    row_size,
+                    closed_col,
+                    !closed_col
+                )
+                .unwrap(),
+                rounding,
+                "rounding criterion, closed_col={closed_col}, line={line:?}"
+            );
+        }
+    }
+
+    /// The only reversal is at (2, 0): the incoming step (1, 0) turns 180 degrees
+    /// against the closing step (-2, 0). Every other turn is at most 135 degrees.
+    #[test]
+    fn issue_2683_closed_seam_reversal_is_found_from_every_start() {
+        for base in [0.0, 1.0e5] {
+            let p = |x, y| Point3::new(base + x, y, 0.0);
+            let line = [p(0.0, 0.0), p(0.0, 1.0), p(1.0, 0.0), p(2.0, 0.0)];
+            for reverse in [false, true] {
+                let mut line = line.to_vec();
+                if reverse {
+                    line.reverse();
+                }
+                for _ in 0..line.len() {
+                    expect_closed_grid_line(&line, true, true);
+                    line.rotate_left(1);
+                }
+            }
+        }
+    }
+
+    /// A repeated seam carries no direction. The rounding walk must compare the
+    /// first and last real steps across it, even with repeated points at both ends.
+    #[test]
+    fn issue_2683_closed_seam_reversal_across_coincident_points_is_found() {
+        let p = |x, y| Point3::new(x, y, 0.0);
+        let coincident = vec![
+            p(0.0, 0.0),
+            p(0.0, 0.0),
+            p(-1.0, 0.0),
+            p(-1.0, 1.0),
+            p(-2.0, 0.0),
+            p(0.0, 0.0),
+            p(0.0, 0.0),
+        ];
+        let rounding = vec![
+            p(1.0e5, 0.0),
+            p(1.0e5 + 1.0e-11, 0.0),
+            p(1.0e5 - 1.0, 0.0),
+            p(1.0e5 - 1.0, 1.0),
+            p(1.0e5 - 2.0, 0.0),
+            p(1.0e5 - 1.0e-11, 0.0),
+            p(1.0e5, 0.0),
+        ];
+        for (line, absolute) in [(coincident, false), (rounding, true)] {
+            for reverse in [false, true] {
+                let mut line = line.clone();
+                if reverse {
+                    line.reverse();
+                }
+                for _ in 0..line.len() {
+                    // The absolute criterion still skips pairs adjacent to a zero step.
+                    expect_closed_grid_line(&line, absolute, true);
+                    line.rotate_left(1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn issue_2683_open_line_does_not_gain_a_closing_step() {
+        let line = [O, Y, X, X * 2.0];
+        let lifted = |p: Point3| p + Vec3::new(0.0, 0.0, 10.0);
+        let rows: Vec<_> = line
+            .into_iter()
+            .chain(line.into_iter().map(lifted))
+            .collect();
+        let cols: Vec<_> = line.into_iter().flat_map(|p| [p, lifted(p)]).collect();
+        for (points, row_size) in [(rows, 4), (cols, 2)] {
+            assert!(!grid_has_non_monotonic_points(&points, row_size, false, false).unwrap());
+            assert!(
+                !grid_has_non_monotonic_points_to_rounding(&points, row_size, false, false)
+                    .unwrap()
+            );
+        }
+    }
+
+    /// Completing the cycle must still accept a square, an entirely collapsed line
+    /// and #2560's triangle whose closing step is only coordinate rounding.
+    #[test]
+    fn issue_2683_closed_lines_without_a_real_reversal_are_accepted() {
+        let p = |x, y| Point3::new(x, y, 0.0);
+        let square = vec![p(0.0, 0.0), p(0.0, 1.0), p(1.0, 1.0), p(1.0, 0.0)];
+        let collapsed = vec![p(1.0e5, 0.0); 4];
+        let noisy_seam = vec![
+            p(1.0e5, 0.0),
+            p(1.0e5 - 1.0, 0.0),
+            p(1.0e5 - 1.0, 1.0),
+            p(1.0e5 - 1.0e-11, 1.0e-13),
+        ];
+        for (mut line, absolute) in [(square, false), (collapsed, false), (noisy_seam, true)] {
+            for _ in 0..line.len() {
+                expect_closed_grid_line(&line, absolute, false);
+                line.rotate_left(1);
+            }
+        }
     }
 
     #[test]
