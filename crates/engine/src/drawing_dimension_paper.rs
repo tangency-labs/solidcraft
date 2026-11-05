@@ -89,7 +89,7 @@ fn pieces(dimension: &Dimension, resolved: &Resolved, on: &[Vec2]) -> Option<Vec
 
 /// The unit direction a linear dimension's line runs in, on paper. Turned to run right, or up when
 /// it is upright, so a positive offset is above it or to its left whichever way round its points are.
-fn line_direction(direction: LinearDirection, seen: Vec2) -> Option<Vec2> {
+pub(crate) fn line_direction(direction: LinearDirection, seen: Vec2) -> Option<Vec2> {
     let dir = match direction {
         LinearDirection::Horizontal => Vec2::X,
         LinearDirection::Vertical => Vec2::new(0.0, 1.0),

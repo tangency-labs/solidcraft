@@ -86,7 +86,8 @@ fn a_dimension_is_added_by_points_or_edges_and_saved_by_name() {
     assert_eq!((by_points["exact"].clone(), by_points["foreshortened"].clone()), (json!(true), json!(false)));
     assert_eq!(s.undo.len(), steps + 1, "one undo step");
     let record = &by_points["record"];
-    assert_eq!((&record["offset_mm"], &record["text"], &record["decimals"]), (&json!(10.0), &json!("centred"), &json!(2)), "the defaults");
+    // Below the box's bottom edge, away from the box.
+    assert_eq!((&record["offset_mm"], &record["text"], &record["decimals"]), (&json!(-10.0), &json!("centred"), &json!(2)), "the defaults");
     let corner = &record["kind"]["linear"]["a"];
     assert_eq!((corner["body"].as_str(), corner["edges"].as_array().map(Vec::len)), (Some("Box"), Some(3)), "a box corner: three edges");
     assert!(corner.get("point").is_none() && corner.to_string().contains('|'), "names, not the point: {corner}");
@@ -128,6 +129,78 @@ fn an_added_dimension_is_one_undo_step() {
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
     run(&mut s, "edit.redo", json!({}));
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), after);
+}
+
+/// The offset `add` saved for a dimension of `kind` on `view`, with `more` params.
+fn offset_of(s: &mut Session, view: u64, kind: Value, more: Value) -> f64 {
+    let mut p = json!({"view": ids::encode(view), "kind": kind});
+    p.as_object_mut().unwrap().extend(more.as_object().unwrap().clone());
+    run(s, ADD, p)["record"]["offset_mm"].as_f64().unwrap()
+}
+
+/// A new linear, length or chain dimension sits on the side of its line away from the box: below
+/// the bottom edge, above the top one, left of the left one and right of the right one. Radial and
+/// angle dimensions keep +10.
+#[test]
+fn a_new_dimension_sits_away_from_what_it_measures() {
+    let (mut s, view) = front_view();
+    let mut offset = |kind: Value| offset_of(&mut s, view, kind, json!({}));
+    assert_eq!(offset(json!({"length": {"edge": [40, 0, 0]}})), -10.0, "below the bottom edge");
+    assert_eq!(offset(json!({"length": {"edge": [40, 0, 30]}})), 10.0, "above the top edge");
+    assert_eq!(offset(json!({"length": {"edge": [0, 0, 15]}})), 10.0, "left of the left edge");
+    assert_eq!(offset(json!({"length": {"edge": [80, 0, 15]}})), -10.0, "right of the right edge");
+    assert_eq!(offset(json!({"linear": {"a": [80, 0, 0], "b": [80, 0, 30], "direction": "vertical"}})), -10.0, "the right corners");
+    assert_eq!(offset(json!({"angle": {"a": [40, 0, 0], "b": [0, 0, 15]}})), 10.0, "an angle keeps +10");
+}
+
+/// An L-shape's view isn't centred on its outline's middle, so the material decides: right of the
+/// step's upright edge (on the middle's own upright line) and above its flat one. A line with
+/// material on both sides goes away from the middle of the view's box.
+#[test]
+fn an_l_shapes_inner_edges_take_the_open_side() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 40, "height": 30, "body_name": "Box"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 30, "corner": [0, 0, 30], "operation": "join", "targets": ["Box"]}));
+    let (mut s, view) = drawn_from_the_front(s);
+    let mut offset = |kind: Value| offset_of(&mut s, view, kind, json!({}));
+    assert_eq!(offset(json!({"length": {"edge": [40, 0, 45]}})), -10.0, "right of the upright inner edge");
+    assert_eq!(offset(json!({"length": {"edge": [60, 0, 30]}})), 10.0, "above the flat inner edge");
+    let across = json!({"linear": {"a": [0, 0, 0], "b": [80, 0, 30], "direction": "horizontal"}});
+    assert_eq!(offset(across), -10.0, "inside the part, away from the box's middle (40, 30)");
+    let bottom = json!({"chain": {"points": [[0, 0, 0], [40, 0, 30], [80, 0, 0]], "direction": "horizontal"}});
+    assert_eq!(offset(bottom), -10.0, "a chain by its first and last points: below the bottom");
+}
+
+/// A slot's floor and walls have their material on the side the middle of the view's box would
+/// send them, so only the material puts them in the open: above the floor, into the slot from
+/// each wall.
+#[test]
+fn a_slots_floor_and_walls_take_the_open_side() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 40, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 50, "height": 35, "corner": [20, -5, 10], "operation": "cut", "targets": ["Block"]}));
+    let (mut s, view) = drawn_from_the_front(s);
+    let mut offset = |kind: Value| offset_of(&mut s, view, kind, json!({}));
+    assert_eq!(offset(json!({"length": {"edge": [30, 0, 10]}})), 10.0, "above the floor, below the box's middle (30, 20)");
+    assert_eq!(offset(json!({"length": {"edge": [20, 0, 25]}})), -10.0, "right of the left wall");
+    assert_eq!(offset(json!({"length": {"edge": [40, 0, 25]}})), 10.0, "left of the right wall");
+}
+
+/// A line through the middle of the view's box with material on both sides (a symmetric pair of
+/// corners) takes the fixed rule: above.
+#[test]
+fn a_line_through_the_views_middle_goes_above() {
+    let (mut s, view) = front_view();
+    let corners = json!({"linear": {"a": [0, 0, 0], "b": [80, 0, 30], "direction": "horizontal"}});
+    assert_eq!(offset_of(&mut s, view, corners, json!({})), 10.0);
+}
+
+/// An offset given keeps its sign, wherever the material is.
+#[test]
+fn an_offset_given_keeps_its_sign() {
+    let (mut s, view) = front_view();
+    assert_eq!(offset_of(&mut s, view, json!({"length": {"edge": [40, 0, 0]}}), json!({"offset_mm": 10})), 10.0, "into the box");
+    assert_eq!(offset_of(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}), json!({"offset_mm": -5})), -5.0, "into the box");
 }
 
 /// A copied view's dimensions are copies with ids of their own, measuring the same, and one undo

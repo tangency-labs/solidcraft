@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use serde_json::Value;
-use solidcore_record::Vec3;
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::dimension::{Candidate, Dimension, DimensionKind, Silhouette, Status, TextPlace, check_chain_length};
 use solidcraft_doc::ids;
@@ -32,8 +32,12 @@ const INSPECT: &str = "drawing.dimension.inspect";
 const INSPECT_CONTRACT: TypedContract<InspectParams> = TypedContract::new();
 
 /// How far a new dimension's line is from what it measures, on paper, until a dimension style
-/// gives it (D1).
+/// gives it (D1). A new linear, length or chain dimension takes its side ([`side_by_default`]).
 const DEFAULT_OFFSET_MM: f64 = 10.0;
+/// How far beside a line's middle, on paper, [`side_by_default`] looks for material.
+const LOOK_PAST_MM: f64 = 0.5;
+/// How near the middle of a view's model box, in model mm, a line's middle is on it.
+const ON_CENTRE_MM: f64 = 1e-6;
 /// How many decimals a new dimension shows unless told.
 const DEFAULT_DECIMALS: u8 = 2;
 
@@ -56,7 +60,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              last}}; an edge is a point on it [x, y, z] in the design's frame, {point} or {body, index}, and a \
              corner a point, {point}, {edges: [2 to 16 edges]} or {centre: an edge that is a circle or an arc}, and a face a point on \
              it, {point} or {body, index}, each with path?: the \
-             occurrences its body is placed through, from the top; offset_mm?: the dimension line's distance on paper (default 10); \
+             occurrences its body is placed through, from the top; offset_mm?: the dimension line's distance on paper (default 10;              a linear, length or chain one's on the side away from what it measures); \
              text?: centred (default) or {at: [x, y]} from the view's centre; decimals?: 0..6 (default 2); override_text? (not a \
              chain's) → what drawing.dimension.inspect answers for it. Saved by the edges' names, never the points picked; one the \
              view can't measure is refused. One undo step; no model is evaluated.",
@@ -100,6 +104,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let corner = |c: &CornerParam| doc.corner_reference(model, &c.pick, &c.path).map_err(|why| bad(ADD, why.to_string()));
     let face = |f: &FaceParam| doc.face_reference(model, &f.pick, &f.path).map_err(|why| bad(ADD, why.to_string()));
     let choose_diameter = matches!(request.kind, KindParam::Radial { diameter: None, .. });
+    let choose_side = request.offset_mm.is_none();
     let kind = match request.kind {
         KindParam::Linear { a, b, direction, reading } => DimensionKind::Linear {
             a: corner(&a)?,
@@ -152,6 +157,13 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     if choose_diameter && let DimensionKind::Radial { diameter, .. } = &mut dimension.kind {
         *diameter = read.first().is_some_and(|r| diameter_by_default(&r.points));
     }
+    if choose_side
+        && let DimensionKind::Linear { direction, .. } | DimensionKind::Length { direction, .. } | DimensionKind::Chain { direction, .. } =
+            &dimension.kind
+        && let Some(r) = read.first()
+    {
+        dimension.offset_mm = DEFAULT_OFFSET_MM * side_by_default(s, &record, view, *direction, &r.points);
+    }
     s.edit_drawing(ADD, |d| {
         d.add_dimensions([Arc::new(dimension)]);
         Ok(())
@@ -175,6 +187,37 @@ fn diameter_by_default(points: &[Vec3]) -> bool {
     let (from, to) = (*start - *centre, *middle - *centre);
     // The middle is half the arc's turn from its start: a quarter turn or more away.
     from.dot(to) <= from.dot(from) * 1e-9
+}
+
+/// A new linear, length or chain dimension's side, as its offset's sign, from its points as read
+/// (a chain's first and last): away from the material beside its line's middle, so it clears what
+/// it measures. Beside means half a paper millimetre either way across the line in the view's
+/// plane, at the depth of what it measures, asked of each shown body's B-rep exactly (inside or on
+/// its boundary is material). With material on both sides or neither, away from the middle of the
+/// view's model box; on that middle (a centre line, a symmetric pair) the fixed rule is +1, above
+/// or to the left ([`crate::drawing_dimension_paper::line_direction`]).
+fn side_by_default(s: &Session, drawing: &Drawing, view: u64, direction: LinearDirection, points: &[Vec3]) -> f64 {
+    let (Ok(resolved), Ok(shown)) = (drawing.resolve_view(view), crate::drawing_view::shown(s)) else { return 1.0 };
+    let basis = resolved.basis;
+    let (Some(first), Some(last)) = (points.first(), points.last()) else { return 1.0 };
+    let (a, b) = (basis.to_local(*first), basis.to_local(*last));
+    // The plane's directions are paper's: a view's paper map only scales and shifts.
+    let Some(n) = crate::drawing_dimension_paper::line_direction(direction, b - a).map(Vec2::perp) else { return 1.0 };
+    let middle = (a + b) * 0.5;
+    let beside = (basis.x * n.x + basis.y * n.y) * (LOOK_PAST_MM / resolved.scale.value.factor());
+    let at = (*first + *last) * 0.5;
+    let material = |p: Vec3| {
+        let class = |body: &solidcraft_doc::ModelBody| body.body.classify_point(p).is_ok_and(|c| c != solidcraft_kernel::PointClass::Outside);
+        shown.bodies.iter().filter_map(|b| shown.body(b)).any(class)
+    };
+    match (material(at + beside), material(at - beside)) {
+        (true, false) => -1.0,
+        (false, true) => 1.0,
+        _ => {
+            let from_centre = crate::drawing_view::measure(&shown, &basis).map_or(0.0, |e| (middle - e.model.center()).dot(n));
+            if from_centre < -ON_CENTRE_MM { -1.0 } else { 1.0 }
+        }
+    }
 }
 
 /// `set` made on dimension `id` of `d`: the fields it changes, by name.
