@@ -49,6 +49,10 @@ pub struct Colors {
     /// red): the see-through cut and the ghost of the shape a feature replaces. Off: those fills
     /// are left out altogether, so they are fully transparent and only outlines are drawn.
     pub cut_tint: bool,
+    /// Whether the old shape of a body the preview replaces is drawn as a ghost, and a body that
+    /// lost volume shows its new faces in the cut colour. Off (Scale): only the new body shows,
+    /// in its own colour, so a smaller result is never hidden inside or tinted by its old self.
+    pub replaced_ghost: bool,
 }
 
 impl Colors {
@@ -63,6 +67,7 @@ impl Colors {
             ghost: true,
             tint_new: true,
             cut_tint: true,
+            replaced_ghost: true,
         }
     }
 
@@ -389,6 +394,9 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Drive { .. }))) {
         colors.ghost = app.preferences.drive_joints_ghost;
     }
+    if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Scale { .. })) {
+        colors.replaced_ghost = false;
+    }
     colors.tint_new = app.preferences.preview_tint_new_faces;
     colors.cut_tint = app.preferences.cut_preview_tint;
     let key = job_key(&cmds, app.session.revision, colors);
@@ -695,7 +703,9 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         }
         // Material removed from a body (a hole, a pocket): its new faces also show through the
         // body in the cut colour, so the cut is seen from any side.
-        let cut = c.cut_tint && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
+        // Not for a body only resized (Scale): smaller is not cut material, and the tint would
+        // colour the whole result.
+        let cut = c.cut_tint && c.replaced_ghost && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
         // Which of the body's faces the feature made, asked only when something is drawn from
         // the answer: the cut above, and the tint the preference offers. A changed body is
         // otherwise drawn as itself, so a preview looks like the model and nothing has to be
@@ -753,7 +763,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             continue;
         }
         let m = b.mesh();
-        if c.cut_tint {
+        if c.cut_tint && c.replaced_ghost {
             // A changed body's surface it keeps is not removed material: drawn as ghost there it
             // lies on the new body's face, and where that face is curved and meshed anew (its
             // boundary moved) the two triangulations cross by up to their chord error, far past the
@@ -1031,6 +1041,7 @@ mod tests {
             ghost: true,
             tint_new: true,
             cut_tint: true,
+            replaced_ghost: true,
         }
     }
 
@@ -1482,6 +1493,21 @@ mod tests {
         assert!(!b.scene.ghost.is_empty());
         assert_eq!(s.revision, rev);
         assert_eq!(s.undo.len(), undo);
+    }
+
+    /// Scale's preview hides the old body and draws no ghost of it, so a body scaled down is not
+    /// covered by its old self; the new body is still drawn and still stands in for the old one.
+    #[test]
+    fn scale_preview_draws_no_ghost_of_the_old_body() {
+        let s = plate();
+        let cmds = [("solid.scale".to_string(), json!({"bodies": ["Body1"], "factor": 0.5}))];
+        let b = compute(&s, &cmds, Colors { replaced_ghost: false, ..colors() }).unwrap();
+        assert_eq!(b.replaced, vec!["Body1".to_string()]);
+        assert!(!b.scene.tris.is_empty(), "the scaled body is drawn");
+        assert!(b.scene.ghost.is_empty(), "no ghost of the old body");
+        assert!(b.scene.xray.is_empty(), "the smaller body is not shown as cut material");
+        let ghosted = compute(&s, &cmds, colors()).unwrap();
+        assert!(!ghosted.scene.ghost.is_empty(), "other tools keep the ghost");
     }
 
     /// A fillet running into a boss: the boss's cylinder face keeps its surface but is meshed

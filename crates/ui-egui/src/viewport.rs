@@ -4284,8 +4284,12 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 }
             }
             Sel::Body { name } => {
+                // Scale's preview stands in for the body, so its old shape is not lit over the new
+                // one (a body scaled down stayed hidden inside its highlight). Other tools keep it lit.
+                let scaling = app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Scale { .. }));
                 if let Some(b) = by_name.get(name)
                     && app.body_visible(name)
+                    && !(scaling && replaced(name))
                 {
                     let lit = WholeBody { selected: true, colour: c4(t.body_selected) };
                     if !light_whole_body(app, b, &active_bodies, lit, &body_slots, &mut feedback, &mut selected_instances) {

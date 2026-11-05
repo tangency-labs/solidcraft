@@ -135,8 +135,10 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::ConstructionPlane { plane: PlaneRef::Tangent { angle, .. } }) {
             angle: String = "0 deg".into() => angle.as_ref().map_or_else(|| "0 deg".to_string(), ToString::to_string),
         } => json!({"angle": angle});
-        // Uniform, or per axis (#10782): then `factor` is X's, beside Y's and Z's.
-        Scale("solid.scale", "SCALE", [("Bodies", BODIES, true)],
+        // Uniform, or per axis (#10782): then `factor` is X's, beside Y's and Z's. The bodies
+        // scale about the picked base point (a hole's or shaft's face: its round end's centre), else
+        // the kept one, else their centre.
+        Scale("solid.scale", "SCALE", [("Bodies", BODIES, true), ("Base point", selection::VERTICES | selection::FACES | selection::EXTERNAL_POINTS | selection::ORIGIN, false)],
             FeatureKind::Scale { factor, factors, .. }) {
             factor: String = "2".into() => factors.as_ref().map_or_else(|| factor.to_string(), |f| f[0].to_string()),
             per_axis: bool = false => factors.is_some(),
@@ -4836,6 +4838,25 @@ pub(crate) fn emboss_profile_plane(app: &SolveApp, sketch: u64) -> Result<Option
     .ok_or_else(|| "the Emboss author frame is degenerate".into())
 }
 
+/// The centre of the exact bounding box of the bodies a Scale picks, where they are before it (after
+/// the earlier features when it is being edited).
+fn scale_center(app: &SolveApp, d: &Dialog, bodies: &[String]) -> Option<Vec3> {
+    let st = match d.editing {
+        Some((id, _)) => app.session.model.state_before(id),
+        None => app.session.model.state(),
+    };
+    let mut bb: Option<(Vec3, Vec3)> = None;
+    for n in bodies {
+        let Some(b) = st.body(n) else { continue };
+        let Ok(x) = b.body.exact_bounds() else { continue };
+        bb = Some(match bb {
+            None => (x.min, x.max),
+            Some((lo, hi)) => (lo.min(x.min), hi.max(x.max)),
+        });
+    }
+    bb.map(|(lo, hi)| (lo + hi) * 0.5).filter(|c| c.is_finite())
+}
+
 /// The commands (id, parameters) a dialog's OK runs.
 fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
@@ -5451,7 +5472,23 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Scale { .. } => {
             need(0, "bodies")?;
-            ("solid.scale", json!({"bodies": sels(d, 0).body_names()}))
+            let bodies = sels(d, 0).body_names();
+            let mut p = json!({"bodies": bodies});
+            // The picked base point; else the one an edited Scale keeps (from `extra`); else the
+            // centre of the bodies, so a new Scale grows them in place, not away from the origin.
+            // A face stands for its centre: a hole's or shaft's round end, a flat face's middle.
+            let base = sels(d, 1).first().and_then(|x| match x {
+                Sel::Face { .. } => crate::dialogs_assembly::snap_of(s, x).map(|snap| snap.at),
+                _ => crate::primitive_placement::world_point(s, x),
+            });
+            if let Some(at) = base {
+                p["origin"] = pt(at);
+            } else if !d.extra.contains_key("origin")
+                && let Some(c) = scale_center(app, d, &bodies)
+            {
+                p["origin"] = pt(c);
+            }
+            ("solid.scale", p)
         }
         Kind::OffsetFaces { .. } => {
             need(0, "faces")?;
@@ -7431,6 +7468,7 @@ mod refused_ok_tests {
                 ghost: false,
                 tint_new: true,
                 cut_tint: true,
+                replaced_ghost: true,
             },
         )
         .expect("the angled plane previews");
