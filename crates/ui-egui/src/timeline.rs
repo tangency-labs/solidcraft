@@ -2177,7 +2177,6 @@ mod tests {
                     h.step(&json!({"click": {"handle": format!("timeline:{feature}")}, "button": "right"})).unwrap();
                     h.step(&json!({"widget": "Affected bodies"})).unwrap();
                     h.step(&json!({"click": {"handle": "timeline:affected:Plate"}})).unwrap();
-                    h.step(&json!({"key": "Escape"})).unwrap();
                 } else {
                     // The bottom timeline's menu is the shared one (#10745): the flyout's rows are its items.
                     let id = h.app.session.doc.find_feature(feature).map(|f| f.id).unwrap();
@@ -2189,6 +2188,9 @@ mod tests {
                     crate::context_menu::run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
                 }
                 assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Body { name: "Plate".into() }], "left: {left}, {feature}");
+                if left {
+                    h.step(&json!({"key": "Escape"})).unwrap();
+                }
                 h.app.run("select.set", json!({"items": []})).unwrap();
             }
         }
