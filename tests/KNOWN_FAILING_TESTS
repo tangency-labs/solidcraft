@@ -12,6 +12,7 @@ solidcraft-cli::model_cache::a_later_round_after_opening_blends_the_saved_rounds
 solidcraft-cli::naming_corpus::corpus_designs_name_alike_every_build_and_fail_where_a_reference_is_gone oracle/83-boundary-loop-thicken does not load: step 8, thicken status 1001, as on C++
 solidcraft-doc::eval::cost_tests::a_tap_marking_searches_only_the_bodies_near_it main's mesh-based version (#10303) not taken; the exact replacement is to come
 solidcraft-doc::eval::cost_tests::a_tap_marking_still_searches_the_bodies_within_its_reach main's mesh-based version (#10303) not taken; the exact replacement is to come
+solidcraft-engine::cmd::drawing_dimension::tests::a_new_hole_never_takes_the_dimension_of_an_undone_one a hole made after an undo takes the undone hole's feature id, and with it the undone hole's dimension (gap 2 on #4892, #5308)
 solidcraft-engine::cmd::edit::tests::inserting_variable_fillet_control_preserves_parameters_at_existing_positions solidcore refuses a variable fillet whose law has a corner (solidcore#430)
 solidcraft-engine::cmd::file::tests::each_format_has_an_export_command_of_its_own the box's planar faces are meshed into 124 triangles, not 12 (the STL is 6284 bytes, the test counts 84 + 50 x 12), as on SMLib
 solidcraft-engine::cmd::sketch_project::tests::intersection_curve_of_picked_faces_spans_the_whole_surface its premise fails off truck: the fit-point spline wall's 3 span faces are not one surface patch in the kernel's mesh (surface_patch gives 1 face, the test wants 3), as on SMLib

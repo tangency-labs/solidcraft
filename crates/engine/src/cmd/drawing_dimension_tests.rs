@@ -1660,3 +1660,32 @@ fn fillets_on_the_plates_corners_leave_its_five_dimensions_read() {
         read_as(&mut s, &five, PLATE);
     }
 }
+
+/// A dimension on a hole that an undo took away stays lost when a new hole is made, whatever id the
+/// new hole gets (gap 2 on #4892, #5308): Bore3, Ø6 at (80, 20), gets a dimension; the hole is
+/// undone, and the dimension is lost with its last value 6; then Bore4, Ø8 at (80, 60), is made.
+/// The dimension stays lost with its last value 6 and reads nothing of Bore4, and Bore1 and Bore2
+/// still read Ø10. Every model edit is made with the drawing closed.
+#[test]
+fn a_new_hole_never_takes_the_dimension_of_an_undone_one() {
+    let (mut s, drawing, first, second) = workshop_plate_dimensions();
+    let drawing = json!({"drawing": ids::encode(drawing)});
+    let hole = |name: &str, at: [f64; 3], diameter: f64| json!({"position": at, "direction": [0, 0, -1], "diameter": diameter, "name": name, "type": "simple"});
+    closed_edit(&mut s, &drawing, "solid.hole", hole("Bore3", [80.0, 20.0, 20.0], 6.0));
+    let rim = json!({"body": "Plate", "index": workshop_plate_round_index(&s, "Plate", [80.0, 20.0, 20.0], 3.0)});
+    let on_bore3 = run(&mut s, ADD, json!({"view": first["view"], "kind": {"radial": {"edge": rim}}}));
+    reads(&on_bore3, 6.0, "Ø6.00");
+    let lost_as_bore3 = |read: &Value| {
+        assert_eq!(read["record"]["kind"], on_bore3["record"]["kind"], "Bore3's reference moved: {read}");
+        assert_eq!(read["status"], "lost", "Bore3's dimension reads another hole: {read}");
+        assert!(read.get("value").is_none() && read.get("text").is_none(), "a lost dimension reads nothing: {read}");
+        assert!(read["last_good"].as_f64().is_some_and(|last| (last - 6.0).abs() < 1e-9), "its last value is 6: {read}");
+    };
+    closed_edit(&mut s, &drawing, "edit.undo", json!({}));
+    lost_as_bore3(&run(&mut s, INSPECT, json!({"dimension": on_bore3["dimension"]})));
+    closed_edit(&mut s, &drawing, "solid.hole", hole("Bore4", [80.0, 60.0, 20.0], 8.0));
+    lost_as_bore3(&run(&mut s, INSPECT, json!({"dimension": on_bore3["dimension"]})));
+    for bore in [&first, &second] {
+        reads(&run(&mut s, INSPECT, json!({"dimension": bore["dimension"]})), 10.0, "Ø10.00");
+    }
+}
