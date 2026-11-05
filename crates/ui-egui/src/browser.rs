@@ -2466,6 +2466,7 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
 pub(crate) struct CanvasEditDrag {
     /// 0 move, 1 scale, 2 rotate, 3 opacity.
     pub(crate) kind: u8,
+    pub(crate) depth: usize,
     pub(crate) pointer: [f64; 2],
     pub(crate) center: [f64; 2],
     pub(crate) width: f64,

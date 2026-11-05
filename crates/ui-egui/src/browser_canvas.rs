@@ -176,7 +176,7 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
                 return true;
             }
             panel.edit_drag = Some(crate::browser::CanvasEditDrag {
-                kind, pointer: [local.x, local.y], center: [c.center.x, c.center.y],
+                kind, depth: app.session.undo.len(), pointer: [local.x, local.y], center: [c.center.x, c.center.y],
                 width: c.width, angle: c.angle,
             });
         }
@@ -203,8 +203,13 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
         }
         _ => return false,
     }
+    let depth = drag.depth;
     app.tree.canvas_panel = Some(panel);
-    let _ = app.run("canvas.edit", params);
+    if app.run("canvas.edit", params).is_ok() && app.session.undo.len() > depth + 1 {
+        let keep = app.session.undo.get(depth).cloned();
+        app.session.undo.truncate(depth);
+        app.session.undo.extend(keep);
+    }
     true
 }
 

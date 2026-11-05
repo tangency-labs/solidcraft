@@ -4830,6 +4830,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         || app.cam_anim.is_some();
     let joint_handle_pointer = hover.is_some_and(|p| inside && crate::joint_handles::owns_pointer(app, &proj, p));
     let canvas_handle_pointer = hover.is_some_and(|p| inside && crate::browser_canvas::owns_pointer(app, &proj, p));
+    // Calibration markers keep their own click path. Only Edit Canvas grips block a click here.
+    let canvas_grip_pointer = canvas_handle_pointer && !app.tree.canvas_panel.as_ref().is_some_and(|panel| panel.calibrate);
     // Nor while a component's triad drags it as a layer, unless the preference asks for the
     // highlight (`drag_layer::holds_pointer`). A part dragged along its joint owns the pointer
     // too: nothing under it lights up (#5137).
@@ -5143,7 +5145,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             dialog.restore_value_focus = true;
         }
-        if resp.clicked() && !held && !reference_pick && !joint_handle_pointer && !canvas_dragging && !app.viewport.draw_drag_handled {
+        if resp.clicked() && !held && !reference_pick && !joint_handle_pointer && !canvas_grip_pointer && !canvas_dragging && !app.viewport.draw_drag_handled {
             if crate::browser_canvas::click(app, &proj, p) {
                 // Calibrate Canvas: the click sets Point A or B on the image (#9108).
             } else if app.tool.is_some() {
