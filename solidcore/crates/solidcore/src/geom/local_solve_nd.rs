@@ -962,12 +962,11 @@ mod tests {
     }
 
     #[test]
-    fn failing_first_evaluation_reports_found() {
+    fn wr20_failing_first_evaluation_finds_no_solution_by_default() {
         let mut e = Failing;
         let mut s = LocalSolveNd::new(&mut e, None, None);
         let r = s.solve_it(&[1.0, 2.0], EFF_ZERO).unwrap();
-        // upstream quirk: a failed first evaluation is reported as found
-        assert!(r.found);
+        assert!(!r.found, "an unevaluated guess is not a solution");
         assert_eq!(s.termination_reason(), TerminationReason::UnableToConverge);
         assert_eq!(r.x, vec![1.0, 2.0]);
     }
@@ -981,6 +980,175 @@ mod tests {
         s.set_skips_failed_evaluations(true);
         let r = s.solve_it(&[1.0, 2.0], EFF_ZERO).unwrap();
         assert!(!r.found);
+        assert_eq!(s.termination_reason(), TerminationReason::UnableToConverge);
+    }
+
+    fn bounds(extents: &[(f64, f64)]) -> ExtentNd {
+        let mut out = ExtentNd::new(extents.len());
+        for (i, &(lo, hi)) in extents.iter().enumerate() {
+            *out.get_mut(i).unwrap() = Extent1d::from_min_max(lo, hi);
+        }
+        out
+    }
+
+    struct QuadraticAndLinear;
+
+    impl EvalNFunctions for QuadraticAndLinear {
+        fn evaluate(
+            &mut self,
+            x: &[f64],
+            f: &mut [f64],
+            jacobian: Option<&mut Matrix>,
+        ) -> Result<bool> {
+            f[0] = x[0] * x[0] - 1.0;
+            f[1] = x[1] - 4.0;
+            if let Some(j) = jacobian {
+                j.set_at(0, 0, 2.0 * x[0])?;
+                j.set_at(0, 1, 0.0)?;
+                j.set_at(1, 0, 0.0)?;
+                j.set_at(1, 1, 1.0)?;
+            }
+            Ok(false)
+        }
+    }
+
+    #[test]
+    fn scaled_step_uses_the_jacobian_at_its_own_point() {
+        let mut e = QuadraticAndLinear;
+        let ivls = bounds(&[(0.0, 1.5), (0.0, 1.0)]);
+        let mut s = LocalSolveNd::new(&mut e, Some(&ivls), None);
+        s.set_maximum_iterations(2);
+        let r = s.solve_it(&[0.5, 0.0], EFF_ZERO).unwrap();
+        // The first Newton point is (1.25, 4). Clamping gives (1.25, 1),
+        // scaling gives (11/16, 1), whose residual is smaller. The next x is
+        // Newton's (x + 1/x)/2 at 11/16, not at the rejected clamped point.
+        let expected = (11.0 / 16.0 + 16.0 / 11.0) / 2.0;
+        assert!((r.x[0] - expected).abs() < 1e-14, "{r:?}");
+        assert_eq!(r.x[1], 1.0);
+        assert!(!r.found); // y = 4 is outside the bounds.
+    }
+
+    struct BoundedLinear {
+        reject_scaled: bool,
+    }
+
+    impl EvalNFunctions for BoundedLinear {
+        fn evaluate(
+            &mut self,
+            x: &[f64],
+            f: &mut [f64],
+            jacobian: Option<&mut Matrix>,
+        ) -> Result<bool> {
+            if x[0] == 1.0 && ((x[1] < 0.25) == self.reject_scaled) {
+                // Failed evaluators may leave apparently converged output.
+                f.fill(0.0);
+                return Err(sm_err("test::bounded_linear"));
+            }
+            f[0] = x[0] - 3.0;
+            f[1] = x[1] - 0.5;
+            if let Some(j) = jacobian {
+                j.set_at(0, 0, 1.0)?;
+                j.set_at(0, 1, 0.0)?;
+                j.set_at(1, 0, 0.0)?;
+                j.set_at(1, 1, 1.0)?;
+            }
+            Ok(false)
+        }
+    }
+
+    #[test]
+    fn failed_scaled_evaluation_cannot_replace_the_valid_clamped_step() {
+        let mut e = BoundedLinear {
+            reject_scaled: true,
+        };
+        let ivls = bounds(&[(0.0, 1.0), (0.0, 1.0)]);
+        let mut s = LocalSolveNd::new(&mut e, Some(&ivls), None);
+        let r = s.solve_it(&[0.0, 0.0], EFF_ZERO).unwrap();
+        assert!(!r.found, "{r:?}");
+        assert_eq!(r.x, [1.0, 0.5]);
+    }
+
+    #[test]
+    fn failed_clamped_evaluation_keeps_the_last_valid_scaled_point() {
+        let mut e = BoundedLinear {
+            reject_scaled: false,
+        };
+        let ivls = bounds(&[(0.0, 1.0), (0.0, 1.0)]);
+        let mut s = LocalSolveNd::new(&mut e, Some(&ivls), None);
+        let r = s.solve_it(&[0.0, 0.0], EFF_ZERO).unwrap();
+        assert!(!r.found, "{r:?}");
+        assert_eq!(r.x[0], 1.0);
+        assert!((r.x[1] - 1.0 / 6.0).abs() < 1e-14, "{r:?}");
+    }
+
+    struct OnlyInitialIsEvaluable;
+
+    impl EvalNFunctions for OnlyInitialIsEvaluable {
+        fn evaluate(
+            &mut self,
+            x: &[f64],
+            f: &mut [f64],
+            jacobian: Option<&mut Matrix>,
+        ) -> Result<bool> {
+            if x[0] != 0.0 {
+                f.fill(0.0);
+                return Err(sm_err("test::only_initial"));
+            }
+            f[0] = -2.0;
+            if let Some(j) = jacobian {
+                j.set_at(0, 0, 1.0)?;
+            }
+            Ok(false)
+        }
+    }
+
+    #[test]
+    fn a_failed_next_evaluation_cannot_create_a_solution() {
+        for bounded in [false, true] {
+            let mut e = OnlyInitialIsEvaluable;
+            let ivls = bounds(&[(0.0, 1.0)]);
+            let mut s = LocalSolveNd::new(&mut e, bounded.then_some(&ivls), None);
+            let r = s.solve_it(&[0.0], EFF_ZERO).unwrap();
+            assert!(!r.found, "bounded {bounded}: {r:?}");
+            assert_eq!(r.x, [0.0]);
+            assert_eq!(s.termination_reason(), TerminationReason::UnableToConverge);
+        }
+    }
+
+    struct BestReevaluationFails {
+        calls: usize,
+    }
+
+    impl EvalNFunctions for BestReevaluationFails {
+        fn evaluate(
+            &mut self,
+            x: &[f64],
+            f: &mut [f64],
+            jacobian: Option<&mut Matrix>,
+        ) -> Result<bool> {
+            self.calls += 1;
+            if self.calls == 4 {
+                f.fill(0.0);
+                return Err(sm_err("test::best_reevaluation"));
+            }
+            f[0] = x[0] * x[0] * x[0] - 2.0 * x[0] + 2.0;
+            if let Some(j) = jacobian {
+                j.set_at(0, 0, 3.0 * x[0] * x[0] - 2.0)?;
+            }
+            Ok(false)
+        }
+    }
+
+    #[test]
+    fn a_best_point_that_fails_reevaluation_is_not_a_solution() {
+        let mut e = BestReevaluationFails { calls: 0 };
+        let mut s = LocalSolveNd::new(&mut e, None, None);
+        s.set_maximum_iterations(2);
+        // Newton cycles 0 -> 1 -> 0. The best point is 1, with residual 1,
+        // but its mandatory reevaluation fails before it can be accepted.
+        let r = s.solve_it(&[0.0], 1.5).unwrap();
+        assert!(!r.found, "{r:?}");
+        assert_eq!(r.x, [1.0]);
         assert_eq!(s.termination_reason(), TerminationReason::UnableToConverge);
     }
 
