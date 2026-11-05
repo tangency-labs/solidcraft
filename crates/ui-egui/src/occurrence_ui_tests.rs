@@ -669,7 +669,8 @@ fn sketches_folder_moves_its_sketches_to_the_part_they_are_on() {
     let target = Target::Folder { component: 0, folder: "sketches".into(), scope: "c0".into() };
     let items = context_menu::items(&h.app, &target);
     let item = items.iter().find(|i| i.id == "component.move_sketches.to_parts").expect("on the Sketches folder's menu");
-    assert_eq!(item.params.as_ref().unwrap()["sketches"], json!([on_face.to_string(), on_xy.to_string()]));
+    // Ids, as numbers: a string would be a sketch's name first.
+    assert_eq!(item.params.as_ref().unwrap()["sketches"], json!([on_face, on_xy]));
     context_menu::run_item(&mut h.app, item, egui::Pos2::ZERO);
     assert_eq!(h.app.session.doc.feature(on_face).unwrap().component, component);
     assert_eq!(h.app.session.doc.feature(on_xy).unwrap().component, 0);
