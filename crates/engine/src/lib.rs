@@ -633,8 +633,7 @@ pub struct Session {
     /// Record this session's top-level commands in the crash journal (the app's own design;
     /// never previews or other scratch sessions). See [`crash`].
     pub crash_journal: bool,
-    /// Full model evaluations (`refresh`), for tests.
-    #[cfg(test)]
+    /// Live-model evaluations after this session's initialization; never serialized.
     pub(crate) evaluations: usize,
     /// Resolved associative trace inputs, independent of the document revision and view state.
     pub(crate) motion_traces: cmd::motion::associative::Cache,
@@ -870,7 +869,6 @@ impl Session {
             camera: None,
             render_viewport: None,
             render_jobs: Default::default(),
-            #[cfg(test)]
             evaluations: 0,
             motion_traces: Default::default(),
             command_check: None,
@@ -1276,12 +1274,17 @@ impl Session {
         self.doc.find_component(key).or_else(|| self.doc.occurrences.iter().find(|o| o.name == key).map(|o| o.component)).filter(|id| *id != 0)
     }
 
+    /// Number of live-model evaluations after this session's initialization.
+    /// Construction, other sessions and trial evaluations of cloned models are
+    /// excluded. This is not a count of all geometry work. Reading the counter
+    /// never evaluates geometry or warms display meshes.
+    pub fn evaluation_count(&self) -> usize {
+        self.evaluations
+    }
+
     pub fn refresh(&mut self) {
         if self.model.evaluate_shared(&self.doc) {
-            #[cfg(test)]
-            {
-                self.evaluations += 1;
-            }
+            self.evaluations = self.evaluations.saturating_add(1);
         }
         self.revision += 1;
         self.prune_occurrence_state();
@@ -1306,10 +1309,7 @@ impl Session {
                     break;
                 }
                 self.model.evaluate(&self.doc);
-                #[cfg(test)]
-                {
-                    self.evaluations += 1;
-                }
+                self.evaluations = self.evaluations.saturating_add(1);
             }
         }
         cmd::motion::associative::refresh(self);
@@ -1977,7 +1977,6 @@ impl Session {
             render_viewport: self.render_viewport.clone(),
             render_jobs: self.render_jobs.scratch(),
             saved_visibility: self.saved_visibility.clone(),
-            #[cfg(test)]
             evaluations: 0,
             motion_traces: self.motion_traces.clone(),
             command_check: self.command_check.clone(),
