@@ -617,6 +617,59 @@ fn middle_implied(sk: &Sketch, m: usize, l: usize) -> bool {
     add_c(&mut with, ConstraintKind::Midpoint { p: m, l }).is_ok() && dof_now(&with) == dof_now(sk)
 }
 
+/// Points held at the middle of line `ci`: `release_extent` drops that hold, so a cut there
+/// remembers them (a center rectangle's centre on its first diagonal).
+fn held_midpoints(sk: &Sketch, ci: usize) -> Vec<usize> {
+    sk.constraints
+        .iter()
+        .filter_map(|k| match k.kind {
+            ConstraintKind::Midpoint { p, l } if l == ci => Some(p),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A point a Midpoint constraint holds at `at`, on a line `on` accepts.
+fn held_middle(sk: &Sketch, at: Vec2, on: impl Fn(usize) -> bool) -> Option<usize> {
+    sk.constraints.iter().find_map(|k| match k.kind {
+        ConstraintKind::Midpoint { p, l } if on(l) && sk.point(p).is_some_and(|q| q.dist(at) < TOL * 10.0) => Some(p),
+        _ => None,
+    })
+}
+
+/// Hold the new point `pi` that `cutter` cut a line at. A cut on a point already held there ends
+/// the pieces on that point instead, with no second point: the point to put in place of `pi` is
+/// returned. `midpoints` are the points held at the cut line's middle before `release_extent`
+/// (`held_midpoints`), and `before` the sketch as it was then.
+fn hold_cut(sk: &mut Sketch, before: Option<&Sketch>, midpoints: &[usize], pi: usize, cutter: usize) -> Result<Option<usize>> {
+    let Some(at) = sk.point(pi) else { return Ok(None) };
+    // The cutter's middle, held there, is taken as its ends are (`pin`).
+    if let Some(m) = held_middle(sk, at, |l| l == cutter) {
+        return Ok(Some(m));
+    }
+    let Some(m) = midpoints.iter().copied().find(|m| sk.point(*m).is_some_and(|q| q.dist(at) < TOL * 10.0)) else {
+        pin(sk, pi, cutter)?;
+        return Ok(None);
+    };
+    // The cut line's middle: it moves to the cutter's middle when the sketch makes it that too (a
+    // center rectangle's diagonals bisect each other), else it stays on the cutter. A cutter
+    // whose middle is there only by chance gets no hold it never had.
+    let middle = match sk.curves.get(cutter).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) => sk.point(*a).zip(sk.point(*b)).map(|(a, b)| (a + b) * 0.5),
+        _ => None,
+    };
+    let implied = match before {
+        Some(was) if middle.is_some_and(|q| q.dist(at) < TOL * 10.0) => middle_implied(was, m, cutter),
+        _ => false,
+    };
+    if implied {
+        add_c(sk, ConstraintKind::Midpoint { p: m, l: cutter })?;
+    } else {
+        pin(sk, m, cutter)?;
+    }
+    Ok(Some(m))
+}
+
 /// Remove the piece of curve `ci` around `at`: between the nearest intersections on either
 /// side, or the whole curve when nothing crosses it. Returns what `sketch.trim` reports and the
 /// removed piece as a polyline.
@@ -661,14 +714,7 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
         .collect();
     // Points held at the middle of the trimmed line (a center rectangle's centre on its first
     // diagonal): `release_extent` drops that hold, so remember them for the cuts below.
-    let midpoints: Vec<usize> = sk
-        .constraints
-        .iter()
-        .filter_map(|k| match k.kind {
-            ConstraintKind::Midpoint { p, l } if l == ci => Some(p),
-            _ => None,
-        })
-        .collect();
+    let midpoints = held_midpoints(sk, ci);
     // The sketch as it was, for `middle_implied`: only needed when a midpoint can be cut.
     let before = (!midpoints.is_empty()).then(|| sk.clone());
     release_extent(sk, ci);
@@ -685,36 +731,8 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
     // A cut on a point already held there ends the piece on that point: no second point.
     let mut welds: Vec<(usize, usize)> = Vec::new();
     for (pi, c) in pts.iter().zip(&cuts) {
-        let cutter = c.2;
-        let Some(at) = sk.point(*pi) else { continue };
-        let near = |sk: &Sketch, p: usize| sk.point(p).is_some_and(|q| q.dist(at) < TOL * 10.0);
-        // The cutter's middle, held there, is taken as its ends are (`pin`).
-        let held = sk.constraints.iter().find_map(|k| match k.kind {
-            ConstraintKind::Midpoint { p, l } if l == cutter && near(sk, p) => Some(p),
-            _ => None,
-        });
-        if let Some(m) = held {
+        if let Some(m) = hold_cut(sk, before.as_ref(), &midpoints, *pi, c.2)? {
             welds.push((*pi, m));
-        } else if let Some(m) = midpoints.iter().copied().find(|m| near(sk, *m)) {
-            // The trimmed line's middle: it moves to the cutter's middle when the sketch makes it
-            // that too (a center rectangle's diagonals bisect each other), else it stays on the
-            // cutter. A cutter whose middle is there only by chance gets no hold it never had.
-            welds.push((*pi, m));
-            let middle = match sk.curves.get(cutter).map(|c| &c.kind) {
-                Some(CurveKind::Line { a, b }) => sk.point(*a).zip(sk.point(*b)).map(|(a, b)| (a + b) * 0.5),
-                _ => None,
-            };
-            let implied = match &before {
-                Some(was) if middle.is_some_and(|q| q.dist(at) < TOL * 10.0) => middle_implied(was, m, cutter),
-                _ => false,
-            };
-            if implied {
-                add_c(sk, ConstraintKind::Midpoint { p: m, l: cutter })?;
-            } else {
-                pin(sk, m, cutter)?;
-            }
-        } else {
-            pin(sk, *pi, cutter)?;
         }
     }
     let gone = pieces.get(k).copied().ok_or_else(|| bad(cmd, "piece"))?;
@@ -942,15 +960,27 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "the curve is already broken there"));
         }
         let (ts, cutters): (Vec<f64>, Vec<Option<usize>>) = kept.into_iter().unzip();
+        // A cut on a point held at the middle of either line joins the pieces at that point.
+        let midpoints = held_midpoints(sk, ci);
+        let before = (!midpoints.is_empty()).then(|| sk.clone());
         // Its length (and its midpoint, an equal length) measured the whole curve: left on the
         // first piece, it would stretch that piece back to the old size and skew the sketch.
         release_extent(sk, ci);
         let (pieces, pts) = split_at(sk, ci, &ts, cmd)?;
+        let mut welded = Vec::new();
         for (pi, c) in pts.iter().zip(&cutters) {
-            if let Some(c) = c {
-                pin(sk, *pi, *c)?;
+            if let Some(c) = c
+                && let Some(m) = hold_cut(sk, before.as_ref(), &midpoints, *pi, *c)?
+            {
+                for piece in &pieces {
+                    if let Some(curve) = sk.curves.get_mut(*piece) {
+                        curve.kind.map_points(&|p| if p == *pi { m } else { p });
+                    }
+                }
+                welded.push(*pi);
             }
         }
+        sk.remove_points(&welded);
         tie(sk, &pieces)?;
         Ok(ids_of(sk, &pieces))
     })?;
@@ -1294,13 +1324,19 @@ fn add_arc_extension(sk: &mut Sketch, ci: usize, aim: &ArcAim, stop: Option<usiz
 }
 
 /// The point the extension stops at when the sketch already has one there: an end of another
-/// curve at the hit. Joining that point keeps the extension attached to the geometry that is
-/// there instead of laying a second point over it. `None` when the stop needs a new point.
+/// curve at the hit, or a point held at another line's middle there (a center rectangle's
+/// centre). Joining that point keeps the extension attached to the geometry that is there
+/// instead of laying a second point over it. `None` when the stop needs a new point.
 fn stop_point(sk: &Sketch, ci: usize, q: Vec2) -> Option<usize> {
-    sk.curves.iter().enumerate().filter(|(i, _)| *i != ci).find_map(|(_, c)| {
-        let (a, b) = c.kind.ends()?;
-        [a, b].into_iter().find(|p| sk.point(*p).is_some_and(|pt| pt.dist(q) <= TOL * 10.0))
-    })
+    sk.curves
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != ci)
+        .find_map(|(_, c)| {
+            let (a, b) = c.kind.ends()?;
+            [a, b].into_iter().find(|p| sk.point(*p).is_some_and(|pt| pt.dist(q) <= TOL * 10.0))
+        })
+        .or_else(|| held_middle(sk, q, |l| l != ci))
 }
 
 /// Add the line an extension needs, from the growing end to the stop: the sketch's own point
