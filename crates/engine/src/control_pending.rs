@@ -33,6 +33,7 @@ impl Effect {
 const READ_METHODS: &[&str] = &[
     "control.pending",
     "control.subscribe",
+    "document.export",
     "document.inspect",
     "document.revision",
     "engine.commands",
@@ -57,6 +58,7 @@ pub fn command_reads_only(id: &str) -> bool {
         || id.ends_with(".inspect")
         || id.ends_with(".list")
         || id == "document.revision"
+        || id == "view.status_items"
         || matches!(id, "document.inspect" | "engine.commands" | "render.status" | "render.backends" | "render.settings.get" | "file.slicers")
 }
 
@@ -118,8 +120,10 @@ mod tests {
         for (m, p) in [
             ("ui.inspect", json!({})),
             ("ui.screenshot", json!({})),
+            ("document.export", json!({})),
             ("document.inspect", json!({"measure": true})),
             ("engine.execute", json!({"command": "sketch.inspect"})),
+            ("engine.execute", json!({"command": "view.status_items", "params": {}})),
             ("engine.execute", json!({"command": "inspect.measure"})),
             ("engine.execute", json!({"command": "model.edges", "params": {"body": "Body1"}})),
             ("engine.execute", json!({"command": "parameters.export", "params": {"format": "csv"}})),
@@ -133,6 +137,8 @@ mod tests {
             ("engine.batch", json!({"commands": []})),
             ("ui.click", json!({"x": 1, "y": 2})),
             ("app.quit", json!({})),
+            ("document.import", json!({"text": "{}"})),
+            ("document.saved", json!({"revision": 1})),
         ] {
             assert!(!reads_only(m, &p), "{m} {p}");
             assert_eq!(effect(m, &p), Effect::Changes, "{m} {p}");

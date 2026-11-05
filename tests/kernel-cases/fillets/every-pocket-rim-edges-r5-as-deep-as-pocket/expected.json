@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "a 5 mm deep pocket's rim edges rounded r5: the rounds use up the walls and meet the floor where the walls met it",
+ "source": "analytic",
+ "method": "plate 60x40x10 with the pocket 30x20x5 (x 15..45, y 10..30, floor z = 5, sharp vertical corners): V0 = 24000 - 3000 = 21000. As every-pocket-rim-edges-r2 with r = 5, the wall's height: each round reaches the floor tangent to the wall exactly at the floor edge, so the walls are used up (a round may use up a face). Removed = 100 (1-pi/4) 25 + 4 * 125 (5/3-pi/2) = 584.4398. V = 20415.5602. Faces 11 - 4 walls + 4 rounds = 11.",
+ "body_count": 1,
+ "volume_mm3": 20415.560238557737,
+ "faces": 11,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   10
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

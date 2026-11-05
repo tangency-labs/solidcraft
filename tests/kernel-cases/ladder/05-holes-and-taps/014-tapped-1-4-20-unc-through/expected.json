@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a 1/4-20 UNC tapped hole through the stock: drilled #7 (0.201 in), cosmetic thread",
+ "source": "analytic",
+ "method": "ASME B1.1 1/4-20 UNC: D = 0.25 in, P = 1/20 in, basic minor D1 = D - 1.082532 P = 0.1959 in; the tap drill is #7, 0.201 in = 5.1054 mm (the cutting-tap drill for about 75% thread, Guhring's table in thread_catalog.rs); removed pi 2.5527^2 20; the cosmetic thread adds no geometry: + one cylinder face",
+ "body_count": 1,
+ "volume_mm3": 47590.57022274,
+ "faces": 7
+}

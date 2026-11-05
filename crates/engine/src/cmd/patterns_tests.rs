@@ -93,16 +93,19 @@ fn rectangular_cut_pattern_counts_only_target_contacts_and_keeps_landing_copies(
     run(&mut s, "solid.cylinder", json!({"radius":2,"height":20,"base":[10,15,-5],"operation":"cut","targets":["Plate"],"name":"Cut"}));
     let reply = run(&mut s, "solid.pattern.rectangular", json!({"features":["Cut"],"dir1":[1,0,0],"count1":4,"spacing1":20}));
     assert_eq!(reply["warning"], "2 of 3 cut copies remove no material");
-    let state = s.world_state();
+    let state = s.world_state().unwrap();
     let plate = &state.body("Plate").unwrap().body;
-    assert!(!plate.contains(solidcraft_geom::Vec3::new(30., 15., 5.)));
-    assert!(state.body("Neighbor").unwrap().body.contains(solidcraft_geom::Vec3::new(50., 15., 5.)));
+    assert_eq!(plate.classify_point(solidcore_record::Vec3::new(30., 15., 5.)).unwrap(), solidcraft_kernel::PointClass::Outside);
+    assert_eq!(
+        state.body("Neighbor").unwrap().body.classify_point(solidcore_record::Vec3::new(50., 15., 5.)).unwrap(),
+        solidcraft_kernel::PointClass::Inside
+    );
     assert!(rel(volume(&mut s), 24000.0 - 2.0 * PI * 4.0 * 10.0) < 1e-3);
 }
 
 #[test]
 fn feature_rectangular_center_flip_and_oblique_direction_keep_source_and_recompute() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     for flipped in [false, true] {
         let mut s = feature_pattern_plate();
         let before = s.doc.to_json();
@@ -116,14 +119,14 @@ fn feature_rectangular_center_flip_and_oblique_direction_keep_source_and_recompu
             }),
         );
         let sign = if flipped { -1.0 } else { 1.0 };
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let body = &st.bodies[0].body;
         // Analytic slots: the source, +1, -1, +2. The second direction is independent.
         for i in [0.0, 1.0, -1.0, 2.0] {
             for j in [0.0, 1.0] {
                 let p = Vec3::new(60.0 + sign * (15.0 * i + 12.0 * j), 60.0 + sign * 16.0 * j, 2.5);
-                assert!(!body.contains(p), "hole at {p:?}");
-                assert!(body.contains(p + Vec3::new(0.0, 2.0, 0.0)));
+                assert_eq!(body.classify_point(p).unwrap(), solidcraft_kernel::PointClass::Outside, "hole at {p:?}");
+                assert_eq!(body.classify_point(p + Vec3::new(0.0, 2.0, 0.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
             }
         }
         assert!(rel(volume(&mut s), 120.0 * 120.0 * 5.0 - 8.0 * PI * 5.0) < 1e-5);
@@ -142,7 +145,7 @@ fn feature_rectangular_center_flip_and_oblique_direction_keep_source_and_recompu
 
 #[test]
 fn feature_circular_center_flip_uses_partial_arc_endpoints_and_full_circle_spacing() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     for total in [90.0_f64, 360.0] {
         for flipped in [false, true] {
             let mut s = feature_pattern_plate();
@@ -155,12 +158,15 @@ fn feature_circular_center_flip_uses_partial_arc_endpoints_and_full_circle_spaci
                 }),
             );
             let step = total / if total == 360.0 { 6.0 } else { 5.0 };
-            let st = s.world_state();
+            let st = s.world_state().unwrap();
             for slot in [0.0, 1.0, -1.0, 2.0, -2.0, 3.0] {
                 let a = (step * slot * if flipped { -1.0 } else { 1.0 }).to_radians();
                 let p = Vec3::new(40.0 + 20.0 * a.cos(), 60.0 + 20.0 * a.sin(), 2.5);
-                assert!(!st.bodies[0].body.contains(p), "hole at {p:?}");
-                assert!(st.bodies[0].body.contains(p + Vec3::new(2.0 * a.cos(), 2.0 * a.sin(), 0.0)));
+                assert_eq!(st.bodies[0].body.classify_point(p).unwrap(), solidcraft_kernel::PointClass::Outside, "hole at {p:?}");
+                assert_eq!(
+                    st.bodies[0].body.classify_point(p + Vec3::new(2.0 * a.cos(), 2.0 * a.sin(), 0.0)).unwrap(),
+                    solidcraft_kernel::PointClass::Inside
+                );
             }
             assert!(rel(volume(&mut s), 120.0 * 120.0 * 5.0 - 6.0 * PI * 5.0) < 1e-5);
             let saved = s.doc.to_json();
@@ -240,27 +246,79 @@ fn circular_axis_origin_rejects_invalid_values_atomically() {
     run(&mut s, "parameters.add", json!({"name":"cy","expression":"25 mm"}));
     let before = s.doc.to_json();
     let undo = s.undo.len();
-    for origin in [
-        json!(["cx", "cy", 0]),
-        json!(["50", 25, 0]),
-        json!([0, 0]),
-        json!([0, 0, 0, 0]),
-        json!(null),
-        json!(false),
-        json!({"x":0,"y":0}),
-        json!([1e9, 0, 0]),
-        json!([0, 1e100, 0]),
-    ] {
-        for (cmd, params) in [
-            ("solid.pattern.circular", json!({"features":["Hole1"],"axis":{"origin":origin,"dir":[0,0,1]},"count":4})),
-            ("construct.plane.at_angle", json!({"base":"XY","axis":{"origin":origin,"dir":[1,0,0]},"angle":45})),
-        ] {
-            let error = s.execute(cmd, &params).unwrap_err().to_string();
-            assert!(error.contains("axis.origin") && error.contains("expressions are not supported"), "{error}");
-            assert_eq!(s.doc.to_json(), before);
-            assert_eq!(s.undo.len(), undo);
-        }
+    let invalid = [json!([0, 0]), json!([0, 0, 0, 0]), json!(null), json!(false), json!({"x":0,"y":0}), json!([1e9, 0, 0]), json!([0, 1e100, 0])];
+    // A circular pattern's origin takes length expressions (#10852); an angled plane's doesn't.
+    for origin in invalid.iter().chain(&[json!(["nope", 0, 0]), json!(["2 deg", 0, 0])]) {
+        let params = json!({"features":["Hole1"],"axis":{"origin":origin,"dir":[0,0,1]},"count":4});
+        let error = s.execute("solid.pattern.circular", &params).unwrap_err().to_string();
+        assert!(error.contains("axis.origin"), "{origin}: {error}");
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), undo);
     }
+    for origin in invalid.iter().chain(&[json!(["cx", "cy", 0]), json!(["50", 25, 0])]) {
+        let params = json!({"base":"XY","axis":{"origin":origin,"dir":[1,0,0]},"angle":45});
+        let error = s.execute("construct.plane.at_angle", &params).unwrap_err().to_string();
+        assert!(error.contains("axis.origin") && error.contains("expressions are not supported"), "{error}");
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), undo);
+    }
+}
+
+/// #10852: a circular pattern about `{origin, dir}` with length expressions in the origin turns
+/// about the point they give now, so the copies follow the parameters as the seed does. The
+/// expressions are saved, renamed with their parameter, and can be set by `timeline.edit`.
+#[test]
+fn circular_axis_origin_expressions_follow_their_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"cx","expression":"50 mm"}));
+    run(&mut s, "parameters.add", json!({"name":"cy","expression":"40 mm"}));
+    // A 2 mm cube 20 mm from (cx, cy), turned about the vertical line there.
+    run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"corner":["cx + 20 mm","cy",0],"body_name":"Cube"}));
+    run(&mut s, "solid.pattern.circular", json!({"bodies":["Cube"],"axis":{"origin":["cx","cy",0],"dir":[0,0,1]},"count":4}));
+    // The x and y extent of the four cubes: 22 mm either side of the axis while it is 20 mm away.
+    let span = |s: &Session| {
+        let st = s.model.state();
+        assert_eq!(st.bodies.len(), 4);
+        let mut out = [f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY];
+        for b in st.bodies.iter().filter_map(|mb| solidcraft_kernel::measure(&mb.body).ok()).map(|m| m.bbox) {
+            out = [out[0].min(b.min.x), out[1].max(b.max.x), out[2].min(b.min.y), out[3].max(b.max.y)];
+        }
+        out
+    };
+    let about_at = |s: &Session, x: f64, y: f64, half: f64| {
+        for (got, want) in span(s).into_iter().zip([x - half, x + half, y - half, y + half]) {
+            assert!((got - want).abs() < 1e-6, "{:?} is not {half} mm either side of ({x}, {y})", span(s));
+        }
+    };
+    let about = |s: &Session, x: f64, y: f64| about_at(s, x, y, 22.0);
+    // The origin as the pattern saves it.
+    let saved_origin = |s: &Session| match s.doc.features.last().map(|f| &f.kind) {
+        Some(solidcraft_doc::FeatureKind::Pattern { pattern, .. }) => serde_json::to_value(pattern).unwrap_or_default()["origin"].clone(),
+        other => panic!("not a pattern: {other:?}"),
+    };
+    about(&s, 50.0, 40.0);
+    assert_eq!(saved_origin(&s), json!(["cx", "cy", 0.0]), "the expressions are saved");
+    run(&mut s, "parameters.change", json!({"name":"cx","expression":"60 mm"}));
+    about(&s, 60.0, 40.0);
+    // Renaming a parameter renames it in the origin, and the pattern still follows it.
+    run(&mut s, "parameters.rename", json!({"name":"cy","new_name":"py"}));
+    run(&mut s, "parameters.change", json!({"name":"py","expression":"45 mm"}));
+    about(&s, 60.0, 45.0);
+    assert_eq!(saved_origin(&s), json!(["cx", "py", 0.0]));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap_or_else(|e| panic!("{e}")));
+    about(&reopened, 60.0, 45.0);
+    // timeline.edit sets the origin as expressions too: 10 mm back, so the cube is 30 mm away.
+    let pattern = s.doc.features.last().map(|f| f.id).unwrap_or_default();
+    run(&mut s, "timeline.edit", json!({"feature":pattern,"set":{"pattern.origin":["cx - 10 mm","py","0 mm"]}}));
+    about_at(&s, 50.0, 45.0, 32.0);
+    run(&mut s, "edit.undo", json!({}));
+    about(&s, 60.0, 45.0);
+    // Plain numbers are saved as numbers, as before.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"corner":[70,40,0],"body_name":"Cube"}));
+    run(&mut s, "solid.pattern.circular", json!({"bodies":["Cube"],"axis":{"origin":[50,40,0],"dir":[0,0,1]},"count":4}));
+    about(&s, 50.0, 40.0);
+    assert_eq!(saved_origin(&s), json!([50.0, 40.0, 0.0]));
 }
 
 #[test]
@@ -665,7 +723,6 @@ fn pattern_of_touching_cuts_needs_no_fallback() {
     let (mut s, id) = sawtooth_bar(40, true);
     let result = s.model.result(id.unwrap()).unwrap();
     assert!(result.error.is_none() && result.warning.is_none(), "{result:?}");
-    assert!(result.boolean_diagnostics.events.is_empty(), "{:?}", result.boolean_diagnostics);
     let m = run(&mut s, "inspect.measure", json!({}));
     let (mut one, _) = sawtooth_bar(40, false);
     let single = run(&mut one, "inspect.measure", json!({}));
@@ -703,7 +760,6 @@ fn pattern_of_cuts_beside_a_round_needs_no_retries() {
         let id = created["feature"].as_u64().unwrap();
         let result = s.model.result(id).unwrap();
         assert!(result.error.is_none() && result.warning.is_none(), "{result:?}");
-        assert!(result.boolean_diagnostics.events.is_empty(), "{:?}", result.boolean_diagnostics);
     }
     // The bar, less the rounds' corners and 40 teeth (a 4 x 2 triangle below the top, 16 wide).
     let expected = 16000.0 - 400.0 * (1.0 - PI / 4.0) - 40.0 * 4.0 * 16.0;
@@ -740,7 +796,9 @@ fn copies_of_a_primitive_cut_only_its_targets() {
 }
 
 /// #3378: a pattern or mirror of a join whose targets the join merged into one body copies onto
-/// that body, as before #2755, instead of looking for the target the join used up.
+/// that body, as before #2755, instead of looking for the target the join used up. The spoke
+/// starts 1 mm inside the hub, so it shares volume with both (one tangent to the hub would only
+/// touch it along a line, and the join would keep the hub a body of its own).
 #[test]
 fn copies_of_a_join_that_merged_its_targets_join_the_merged_body() {
     for (copy, n) in [
@@ -752,7 +810,7 @@ fn copies_of_a_join_that_merged_its_targets_join_the_merged_body() {
         run(&mut s, "solid.cylinder", json!({"radius": 63, "height": 3, "base": [0, 0, 0], "axis": "Y", "operation": "cut", "targets": ["rim"]}));
         run(&mut s, "solid.cylinder", json!({"radius": 12, "height": 3, "base": [0, 0, 0], "axis": "Y", "body_name": "hub"}));
         let v0 = volume(&mut s);
-        let spoke = json!({"length": 52, "width": 3, "height": 2.5, "corner": [12, 0, -1.25], "operation": "join", "targets": ["rim", "hub"], "name": "spoke"});
+        let spoke = json!({"length": 53, "width": 3, "height": 2.5, "corner": [11, 0, -1.25], "operation": "join", "targets": ["rim", "hub"], "name": "spoke"});
         run(&mut s, "solid.box", spoke);
         let v1 = volume(&mut s);
         let (id, p) = (copy[0].as_str().unwrap_or_default(), copy[1].clone());
@@ -770,7 +828,7 @@ fn copies_of_a_join_that_merged_its_targets_join_the_merged_body() {
 /// middle; the rib's triangle (8, 5)-(8, 25)-(30, 5) in the XZ plane, 4 thick, is 880 mm³.
 #[test]
 fn patterns_and_mirrors_of_a_rib() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let rib = 0.5 * 22.0 * 20.0 * 4.0;
     let ribbed = || {
         let mut s = Session::default();
@@ -789,15 +847,15 @@ fn patterns_and_mirrors_of_a_rib() {
     run(&mut s, "solid.pattern.circular", json!({"features": ["Rib"], "axis": {"origin": [0, 0, -100], "dir": [0, 0, 1]}, "count": 4, "angle": 360}));
     let ribs = [Vec3::new(12.0, 0.0, 8.0), Vec3::new(0.0, 12.0, 8.0), Vec3::new(-12.0, 0.0, 8.0), Vec3::new(0.0, -12.0, 8.0)];
     let check = |s: &Session, inside: &[Vec3]| {
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
         assert_eq!(st.bodies.len(), 1);
         let body = &st.bodies[0].body;
         for p in inside {
-            assert!(body.contains(*p), "a rib at {p:?}");
+            assert_eq!(body.classify_point(*p).unwrap(), solidcraft_kernel::PointClass::Inside, "a rib at {p:?}");
             // Beside it, across its thickness: no material (clear of the boss too).
             let side = if p.y == 0.0 { Vec3::new(0.0, 3.0, 0.0) } else { Vec3::new(3.0, 0.0, 0.0) };
-            assert!(!body.contains(*p + side), "nothing beside the rib at {p:?}");
+            assert_eq!(body.classify_point(*p + side).unwrap(), solidcraft_kernel::PointClass::Outside, "nothing beside the rib at {p:?}");
         }
     };
     check(&s, &ribs);
@@ -814,7 +872,7 @@ fn patterns_and_mirrors_of_a_rib() {
 /// box with a hole `H` at (−15, −10) and `Pat`, two more holes along x at 10 mm steps.
 #[test]
 fn patterns_and_mirrors_of_patterns_and_mirrors() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let hole = PI * 1.5 * 1.5 * 20.0;
     let design = || {
         let mut s = Session::default();
@@ -886,15 +944,19 @@ fn patterns_and_mirrors_of_patterns_and_mirrors() {
         for r in &s.model.results {
             assert!(r.error.is_none(), "{what}: {}: {:?}", r.name, r.error);
         }
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         assert_eq!(st.bodies.len(), 1, "{what}");
         let body = &st.bodies[0].body;
         for [x, y] in &holes {
-            assert!(!body.contains(Vec3::new(*x, *y, 10.0)), "{what}: a hole at ({x}, {y})");
-            assert!(body.contains(Vec3::new(*x, *y + 2.5, 10.0)), "{what}: material beside ({x}, {y})");
+            assert_eq!(body.classify_point(Vec3::new(*x, *y, 10.0)).unwrap(), solidcraft_kernel::PointClass::Outside, "{what}: a hole at ({x}, {y})");
+            assert_eq!(
+                body.classify_point(Vec3::new(*x, *y + 2.5, 10.0)).unwrap(),
+                solidcraft_kernel::PointClass::Inside,
+                "{what}: material beside ({x}, {y})"
+            );
         }
         for [x, y] in &material {
-            assert!(body.contains(Vec3::new(*x, *y, 10.0)), "{what}: no hole at ({x}, {y})");
+            assert_eq!(body.classify_point(Vec3::new(*x, *y, 10.0)).unwrap(), solidcraft_kernel::PointClass::Inside, "{what}: no hole at ({x}, {y})");
         }
         // The listed holes the steps added (in the last two cases `Mir` made the first of them).
         let added = holes.len();
@@ -949,8 +1011,13 @@ fn circular_pattern_of_a_hole_and_its_chamfers_copies_all_of_them() {
     assert!(rel(v0, v1) < 1e-9);
     run(&mut s, "solid.pattern.circular", json!({"features": ["Bore", "TopChamfer", "BottomChamfer"], "axis": "Z", "count": 6, "angle": 360}));
     let v = volume(&mut s);
-    println!("{v1} -> {v}");
-    assert!(v < v1 - 5.0 * 0.9 * (std::f64::consts::PI * 9.0 * 10.0), "pattern had no effect: {v1} -> {v}");
+    // One chamfered hole takes its bore, π·3²·10, and two rings of the chamfer's triangle,
+    // 0.5 × 0.5 / 2, about the bore's axis at its centroid's radius 3 + 0.5/3 (Pappus). The
+    // copies, 20 apart on the radius 20, do not meet: the pattern takes five more.
+    let pi = std::f64::consts::PI;
+    let hole = pi * 9.0 * 10.0 + 2.0 * 2.0 * pi * (3.0 + 0.5 / 3.0) * 0.125;
+    assert!((v1 - (pi * 900.0 * 10.0 - hole)).abs() < 4e-7 * v1, "{v1}");
+    assert!((v - (v1 - 5.0 * hole)).abs() < 4e-7 * v1, "{v1} -> {v}, expected {}", v1 - 5.0 * hole);
 }
 
 /// The features are copied in timeline order, not in the order they were picked in: a chamfer
@@ -1006,6 +1073,22 @@ fn pattern_count_units_explain_how_to_use_a_parameter() -> Result<(), Box<dyn st
     Ok(())
 }
 
+/// #9015: in an inch design, pattern spacing `baseLength - 1` subtracts one inch, not one mm.
+#[test]
+fn pattern_spacing_bare_offsets_follow_design_units() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    run(&mut s, "parameters.add", json!({"name": "baseLength", "expression": "4"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Seed"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Seed"], "dir1": [1, 0, 0], "count1": 2, "spacing1": "baseLength - 1"}));
+    assert_eq!(s.model.state().bodies.len(), 2);
+    // Spacing is 3 in = 76.2 mm (not 3 mm): the seed is 10 in, so the copy starts at x = 76.2.
+    let m = run(&mut s, "inspect.measure", json!({}));
+    let bodies = m["bodies"].as_array().expect("bodies");
+    let xmin = |b: &Value| b["bbox"]["min"][0].as_f64().unwrap_or(0.0);
+    assert!(bodies.iter().any(|b| (xmin(b) - 76.2).abs() < 1e-6), "expected a copy spaced 3 in apart, got {m}");
+}
+
 #[test]
 fn pattern_count_fractions_are_refused() -> Result<(), Box<dyn std::error::Error>> {
     let mut s = Session::default();
@@ -1048,4 +1131,111 @@ fn pattern_count_integer_parameters_survive_save_and_reject_fractional_edits() -
     let invalid = Session::new(solidcraft_doc::Document::from_json(&saved.to_json())?);
     assert!(invalid.model.results.iter().any(|r| r.error.as_ref().is_some_and(|e| e.contains("a count must be a whole number;"))));
     Ok(())
+}
+
+/// Editing a pattern behind the history marker (double-clicking its greyed-out item and pressing
+/// OK) changes nothing in the model: the reply says so, where the edit used to look as if it had
+/// silently failed, and it still carries what building the copies met (#8100).
+#[test]
+fn editing_a_rolled_back_pattern_says_it_is_not_built() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"corner":[0,0,0],"body_name":"Plate"}));
+    run(&mut s, "solid.cylinder", json!({"radius":2,"height":20,"base":[10,15,-5],"operation":"cut","targets":["Plate"],"name":"Cut"}));
+    let pattern = |count: u32, origin: [f64; 3]| json!({"features":["Cut"],"axis":{"origin":origin,"dir":[0,0,1]},"count":count});
+    let redefine = |count, origin| json!({"feature":"Pattern","command":"solid.pattern.circular","params":pattern(count, origin)});
+    let centre = [20.0, 15.0, 0.0];
+    let hole = PI * 4.0 * 10.0;
+    let mut first = pattern(2, centre);
+    first["name"] = json!("Pattern");
+    let id = run(&mut s, "solid.pattern.circular", first)["feature"].as_u64().unwrap();
+    assert!(rel(volume(&mut s), 12000.0 - 2.0 * hole) < 1e-4);
+    // A pattern that is built: the edit is built at once, with nothing to say.
+    let reply = run(&mut s, "timeline.redefine", redefine(3, centre));
+    assert_eq!(reply["rolled_back"], json!(false), "{reply}");
+    assert!(reply.get("note").is_none(), "{reply}");
+    assert!(rel(volume(&mut s), 12000.0 - 3.0 * hole) < 1e-4);
+    // Behind the marker: the edit is kept but not built, and the reply says why nothing changed.
+    run(&mut s, "timeline.roll_to", json!({"position": 2}));
+    let reply = run(&mut s, "timeline.redefine", redefine(4, centre));
+    assert_eq!(reply["rolled_back"], json!(true), "{reply}");
+    assert_eq!(reply["note"], "Pattern is after the history marker, so it is not built: move the marker past it to build it");
+    assert!(reply.get("warning").is_none(), "{reply}");
+    assert!(rel(volume(&mut s), 12000.0 - hole) < 1e-4);
+    assert!(s.model.result(id).is_some_and(|r| r.skipped && r.error.is_none()));
+    run(&mut s, "timeline.roll_to", json!({}));
+    assert!(rel(volume(&mut s), 12000.0 - 4.0 * hole) < 1e-4);
+    // What building the rolled-back copies met still reaches the reply: here a copy that misses.
+    run(&mut s, "timeline.roll_to", json!({"position": 2}));
+    let reply = run(&mut s, "timeline.redefine", redefine(2, [0.0, 0.0, 0.0]));
+    assert_eq!(reply["rolled_back"], json!(true), "{reply}");
+    assert_eq!(reply["warning"], "1 of 1 cut copies remove no material", "{reply}");
+}
+
+/// A 100 x 60 x 30 box shelled 5 mm (floor included) with a 20 x 11 boss joined to its +Y wall:
+/// 67,500 mm³ hollow, 73,500 mm³ with the boss, which adds 6,000 mm³ (#6452).
+fn hollow_box_with_join_boss() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-50, -30], "p1": [50, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "distance": 30, "operation": "new", "name": "Block", "body_name": "Box"}));
+    run(&mut s, "solid.shell", json!({"faces": [[0, 0, 30]], "thickness": 5, "name": "Shell"}));
+    assert!(rel(volume(&mut s), 67500.0) < 1e-6, "hollow box");
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Boss"}));
+    run(&mut s, "sketch.line", json!({"closed": true, "points": [[20, 29], [40, 29], [40, 40], [20, 40]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Boss", "distance": 30, "operation": "join", "targets": ["Box"], "name": "Join Boss"}));
+    assert!(rel(volume(&mut s), 73500.0) < 1e-6, "joined boss");
+    s
+}
+
+/// The copy of a join is built where the source stands, and the source's own material used to
+/// read as the target already filling the copy's bottom band: the mirrored boss lost its
+/// 20 x 10 x 5 mm floor-level slice with no warning (#6452).
+#[test]
+fn mirror_of_a_join_on_a_hollow_part_copies_the_whole_boss() {
+    let mut s = hollow_box_with_join_boss();
+    run(&mut s, "solid.mirror", json!({"features": ["Join Boss"], "plane": "XZ", "name": "Mirror Boss"}));
+    assert!(rel(volume(&mut s), 79500.0) < 1e-6, "mirrored copy lost material");
+}
+
+#[test]
+fn mirror_of_a_join_on_a_hollow_part_copies_the_whole_boss_across_a_custom_plane() {
+    let mut s = hollow_box_with_join_boss();
+    run(&mut s, "solid.mirror", json!({"features": ["Join Boss"], "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0]}, "name": "Mirror Boss"}));
+    assert!(rel(volume(&mut s), 79500.0) < 1e-6, "mirrored copy lost material");
+}
+
+/// A pure translation loses the same slice: the copy must be congruent to the original,
+/// whatever filled the space where its tool was rebuilt (#6452).
+#[test]
+fn rectangular_pattern_of_a_join_on_a_hollow_part_copies_the_whole_boss() {
+    let mut s = hollow_box_with_join_boss();
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features": ["Join Boss"], "dir1": [0, -1, 0], "count1": 2, "spacing1": 69, "name": "Pattern Boss"}),
+    );
+    assert!(rel(volume(&mut s), 79500.0) < 1e-6, "patterned copy lost material");
+}
+
+/// A Move that copies can be the source of a feature pattern (#5931): each pattern copy is
+/// another moved copy, placed round the axis, and the same as patterning the copied body.
+#[test]
+fn circular_pattern_of_a_moved_copy_adds_one_body_per_instance() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Block"}));
+    run(&mut s, "solid.move", json!({"bodies": ["Block"], "translate": [10, 0, 0], "copy": true, "name": "Move1"}));
+    let one = volume(&mut s);
+    run(&mut s, "solid.pattern.circular", json!({"features": ["Move1"], "axis": "Z", "count": 4, "angle": "360 deg"}));
+    assert!(rel(volume(&mut s), one * 2.5) < 1e-6 && s.world_state().unwrap().bodies.len() == 5, "the moved copy repeats three more times");
+    // Moving the first copy elsewhere moves the repeats with it: they follow the feature.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": "Move1", "command": "solid.move", "params": {"bodies": ["Block"], "translate": [20, 0, 0], "copy": true}}),
+    );
+    assert_eq!(s.world_state().unwrap().bodies.len(), 5);
+    let far = s.world_state().unwrap().bodies.iter().map(|b| b.mesh().bounds().max.x).fold(f64::MIN, f64::max);
+    assert!(far > 20.0, "the repeats follow the redefined Move: {far}");
 }

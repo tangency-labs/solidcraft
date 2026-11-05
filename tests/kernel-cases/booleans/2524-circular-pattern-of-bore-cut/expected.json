@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2524"
+ ],
+ "what": "a circular pattern (count 2, 360 deg, about Y) of a cut made off-axis: 'boolean Cut: no result'",
+ "source": "analytic",
+ "method": "block 40x20x40 = 32000 centred on the Y axis; a through bore r3 along Y at x=10 and its half-turn copy at x=-10 (they do not meet): V = 32000 - 2*pi*9*20 = 32000 - 360 pi",
+ "body_count": 1,
+ "volume_mm3": 30869.026644707676
+}

@@ -1,0 +1,10 @@
+{
+ "sources": [],
+ "what": "the stock shelled 2 mm with no face open: a closed body with a sealed void",
+ "source": "analytic",
+ "method": "void 56x36x16: V = 48000 - 32256; faces 6 outer + 6 inner; one body, an outer and an inner shell",
+ "body_count": 1,
+ "shells": 2,
+ "volume_mm3": 15744,
+ "faces": 12
+}

@@ -2,6 +2,7 @@
 use crate::navigation::NavCaps;
 use crate::navigation_bar::{self, Edge, Idle, Kind, Labels, MenuDisplay, NavigationBar, Position, Slot};
 use crate::theme::Tokens;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{self, Container, Surface};
 use crate::{SolveApp, viewport::NavMode};
 use egui::{Align2, Rect, pos2, vec2};
@@ -119,7 +120,12 @@ pub(crate) fn editor_layout(stage: Rect, prefs: &NavigationBar, label_width: imp
         Position::Centre => stage.center().x - bar.rect.width() / 2.0,
         Position::Right => stage.right() - ui_kit::NAV_BORDER - ui_kit::NAV_STAGE_INSET - bar.rect.width(),
     };
-    let delta = pos2(x, stage.center().y - bar.rect.height() / 2.0) - bar.rect.min;
+    // The same inset from the top or bottom edge as from the side, as in the live view.
+    let y = match prefs.edge {
+        navigation_bar::Edge::Top => stage.top() + ui_kit::NAV_BORDER + ui_kit::NAV_STAGE_INSET,
+        navigation_bar::Edge::Bottom => stage.bottom() - ui_kit::NAV_BORDER - ui_kit::NAV_STAGE_INSET - bar.rect.height(),
+    };
+    let delta = pos2(x, y) - bar.rect.min;
     bar.rect = bar.rect.translate(delta);
     for (_, rect) in &mut bar.slots {
         *rect = rect.translate(delta);
@@ -205,7 +211,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         return;
     }
     crate::scenario::publish_rect("nav:outer", bar.rect);
-    let menu_id = ui.id().with("navigation_bar_menu");
+    let menu_id = ui.scope_id().with("navigation_bar_menu");
     let mut open = ui.data(|d| d.get_temp::<String>(menu_id)).unwrap_or_default();
     let active = ui.rect_contains_pointer(bar.rect)
         || ui.rect_contains_pointer(crate::viewport::axis_rect(app, rect))
@@ -217,7 +223,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         || app.viewport.spin
         || !open.is_empty();
     let opacity = ui_kit::navigation_opacity(app.preferences.navigation_bar.idle, active);
-    let background = ui.interact(bar.rect, ui.id().with("navigation_bar_context"), egui::Sense::click());
+    let background = ui.interact(bar.rect, ui.scope_id().with("navigation_bar_context"), egui::Sense::click());
     let opacity = if app.preferences.navigation_bar.idle == Idle::Hide {
         ui.ctx().animate_value_with_time(menu_id.with("opacity"), opacity, if active { ui_kit::NAV_FADE_SECONDS } else { 0.0 })
     } else {
@@ -349,7 +355,7 @@ pub(crate) fn paint_row(
                         ui_kit::navigation_separator(ui, *bounds);
                         ui.interact(
                             *bounds,
-                            ui.id().with("separator"),
+                            ui.scope_id().with("separator"),
                             if editing.is_some() { egui::Sense::click_and_drag() } else { egui::Sense::click() },
                         )
                     } else {
@@ -380,15 +386,14 @@ pub(crate) fn paint_row(
             .inner;
         let mut hidden = None;
         if let Some((selected, caps, render)) = editing {
-            response
-                .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected == Some(index), app.tr(slot.label)));
+            response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected == Some(index), app.tr(slot.label)));
             ui_kit::navigation_edit_outline(ui, *bounds, !slot.available(caps), selected == Some(index));
             if !slot.available(caps) {
                 hidden = Some(if render { "navbar.custom.hidden_render" } else { "navbar.custom.hidden_design" });
             }
         } else {
             response.widget_info(|| {
-                egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected(app, slot.id) || open == slot.id, app.tr(slot.label))
+                egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected(app, slot.id) || open == slot.id, app.tr(slot.label))
             });
         }
         // The settings' preview keeps its tips above, wherever the bar sits in the view.
@@ -433,7 +438,7 @@ pub(crate) fn context_menu(app: &mut SolveApp, response: &egui::Response, index:
 
 fn style_menu(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let mut chosen = false;
-    for (index, style) in ["shaded_with_edges", "shaded", "wireframe", "shaded_with_hidden_edges"].into_iter().enumerate() {
+    for (index, style) in navigation_bar::VISUAL_STYLES.iter().map(|(style, _)| *style).enumerate() {
         let label = format!("navbar.style.{style}");
         let mut item = ui_kit::NavigationMenuRow::new(style, app.tr(&label), navigation_bar::visual_style_icon(index as u8));
         item.selected = app.ui.visual_style == index as u8;
@@ -526,7 +531,7 @@ fn display_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
         item.selected = app.ui.perspective == perspective;
         item.enabled = !projection_locked(app);
         let response = item.show(ui);
-        let response = if projection_locked(app) { response.on_hover_text(app.tr("nav.perspective.sketch")) } else { response };
+        let response = if projection_locked(app) { response.backing_on_hover_text(app.tr("nav.perspective.sketch")) } else { response };
         crate::scenario::publish_target(if perspective { "view:projection" } else { "view:orthographic" }, response.rect);
         if response.clicked() && app.ui.perspective != perspective {
             toggle_projection(app);
@@ -551,7 +556,7 @@ fn display_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
     // The View angles readout under the orientation gizmo (#6032).
     let mut angles = NavigationMenuRow::new("view_angles", app.tr("ui.view_angles"), "select");
     angles.selected = app.preferences.show_view_angles;
-    let response = angles.show(ui).on_hover_text(app.tr("ui.view_angles_help"));
+    let response = angles.show(ui).backing_on_hover_text(app.tr("ui.view_angles_help"));
     crate::scenario::publish_target("view:view_angles", response.rect);
     if response.clicked() {
         let _ = app.run("view.angle_readout", json!({"enabled": !app.preferences.show_view_angles}));

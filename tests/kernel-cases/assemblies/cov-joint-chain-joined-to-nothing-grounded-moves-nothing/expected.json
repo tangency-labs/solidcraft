@@ -1,0 +1,40 @@
+{
+ "sources": [],
+ "what": "a revolute between Gear and a free peg beside a grounded hinge chain",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Gear: box 10x10x10 from (60,-5,0), centre (65,0,5), on revolute G2 about z through (50,0,0), here G2 joins a free Peg (not Base) to Gear while Hinge joins Arm to grounded Base: the Peg-Gear chain reaches nothing fixed, so a drive answers moved: false and Gear stays at (65,0,5)",
+ "body_count": 4,
+ "volume_mm3": 9064.0,
+ "results": [
+  {
+   "step": 16,
+   "json": {
+    "moved": false
+   }
+  },
+  {
+   "step": 17,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      65.0,
+      0.0,
+      5.0
+     ]
+    }
+   }
+  },
+  {
+   "step": 18,
+   "json": {
+    "floating": [
+     {
+      "joints": [
+       "G2"
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

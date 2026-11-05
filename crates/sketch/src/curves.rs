@@ -2,9 +2,10 @@
 //! control points) and conics (rational quadratic Béziers). Evaluation works on positions so
 //! the solver can use it with trial values.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 
 /// Polyline samples per spline span / conic / ellipse quarter.
 const SPAN_SAMPLES: usize = 24;
@@ -153,7 +154,7 @@ pub fn spline_point(p: &[Vec2], control: bool, degree: u8, t: f64) -> Vec2 {
         return p.first().copied().unwrap_or_default();
     }
     if control {
-        return bspline_at(p, degree.clamp(1, solidcraft_geom::MAX_BEZIER_DEGREE as u8) as usize, t);
+        return bspline_at(p, degree.clamp(1, solidcore_record::MAX_BEZIER_DEGREE as u8) as usize, t);
     }
     let spans = fit_spans(p);
     let n = spans.len().max(1);
@@ -190,7 +191,12 @@ pub fn fit_beziers(p: &[Vec2]) -> Vec<[Vec2; 4]> {
 pub fn fit_beziers_mode(p: &[Vec2], periodic: bool) -> crate::model::Result<Vec<[Vec2; 4]>> {
     if periodic { crate::periodic_beziers(p) } else { Ok(fit_beziers(p)) }
 }
-pub fn spline_point_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool, t: f64) -> Vec2 {
+/// Point of a spline at `t` in [0, 1]: through its points, over them as a clamped uniform
+/// B-spline, or with its own knots and weights (`nurbs`).
+pub fn spline_point_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool, nurbs: Option<&crate::Nurbs>, t: f64) -> Vec2 {
+    if let Some(nurbs) = nurbs {
+        return nurbs.point(p, degree, t).unwrap_or_else(|| p.first().copied().unwrap_or_default());
+    }
     if !periodic {
         return spline_point(p, control, degree, t);
     }
@@ -211,7 +217,11 @@ pub fn spline_point_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool, 
     let t = (remaining / lengths[i]).clamp(0.0, 1.0);
     a * (1.0 - t).powi(3) + b * (3.0 * t * (1.0 - t).powi(2)) + c * (3.0 * t * t * (1.0 - t)) + d * t.powi(3)
 }
-pub fn spline_polyline_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool) -> Vec<Vec2> {
+/// Polyline of a spline, as [`spline_point_mode`] reads it.
+pub fn spline_polyline_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool, nurbs: Option<&crate::Nurbs>) -> Vec<Vec2> {
+    if let Some(nurbs) = nurbs {
+        return nurbs.polyline(p, degree);
+    }
     if !periodic {
         return spline_polyline(p, control, degree);
     }
@@ -292,7 +302,7 @@ pub fn spline_polyline(p: &[Vec2], control: bool, degree: u8) -> Vec<Vec2> {
         return p.to_vec();
     }
     if control {
-        return bspline_polyline(p, degree.clamp(1, solidcraft_geom::MAX_BEZIER_DEGREE as u8) as usize);
+        return bspline_polyline(p, degree.clamp(1, solidcore_record::MAX_BEZIER_DEGREE as u8) as usize);
     }
     let mut out = Vec::new();
     for (p0, p1, t0, t1) in fit_spans(p) {
@@ -307,6 +317,7 @@ pub fn spline_polyline(p: &[Vec2], control: bool, degree: u8) -> Vec<Vec2> {
 }
 
 /// Unit tangent of a spline at its start (`at_end == false`) or end, pointing along the curve.
+/// A control spline's runs along its end leg whatever its knots and (positive) weights.
 pub fn spline_end_tangent(p: &[Vec2], control: bool, at_end: bool) -> Option<Vec2> {
     let n = p.len();
     if n < 2 {

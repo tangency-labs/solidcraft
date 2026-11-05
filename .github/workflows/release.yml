@@ -21,6 +21,8 @@
 # releases/latest/download/<name> links in the README keep working across releases.
 #
 # A dry run: dispatch with draft=false (the default). Only the release branch may create drafts.
+# The release gate (release-gate.yml) calls it as such a dry run, without secrets (unsigned) and
+# without the release job (packages_only).
 # A dry run from any branch also test-signs the Windows files when SIGNPATH_API_TOKEN exists:
 #   gh workflow run release.yml --ref <branch> -f draft=false [-f signpath_signing_policy=test-signing]
 name: Release
@@ -33,6 +35,25 @@ on:
     branches: [release]
   workflow_dispatch:
     inputs:
+      draft:
+        description: "Create/update a draft (release branch only; off: build artifacts only)"
+        type: boolean
+        default: false
+      signpath_signing_policy:
+        description: "SignPath signing policy for the Windows files (empty: the repository variable, else test-signing)"
+        type: string
+        default: ""
+  # The release gate (release-gate.yml): a dry run (draft false) of every package and its checks.
+  # The event stays the caller's (workflow_dispatch), so a call runs as a dispatched dry run does.
+  # The gate passes no secrets, so nothing is signed (the signing steps skip without their
+  # secrets, as on a fork), and packages_only skips the release job (checksums, update signing,
+  # publishing).
+  workflow_call:
+    inputs:
+      packages_only:
+        description: "Build and check every package only: no release job"
+        type: boolean
+        default: false
       draft:
         description: "Create/update a draft (release branch only; off: build artifacts only)"
         type: boolean
@@ -213,6 +234,8 @@ jobs:
     if: needs.version.outputs.build == 'true'
     # makepkg only repackages the tarball's prebuilt binaries, so both architectures build here.
     runs-on: ubuntu-24.04
+    # A pre-release or nightly without an Arch package is still worth having; a stable release isn't.
+    continue-on-error: ${{ contains(needs.version.outputs.version, '-') }}
     strategy:
       fail-fast: false
       matrix:
@@ -229,10 +252,29 @@ jobs:
       # makepkg in an archlinux:base-devel container. The package is named after the tarball's
       # .desktop file (io.tangencylabs.solidcraft) and written as
       # dist/release/solidcraft-<version>-linux-<arch>.pkg.tar.zst.
+      # An Arch version can't hold a hyphen, and the action reads the version from the tarball's name
+      # (a hyphenated one comes out as 0.0.0): 0.40.0-rc.1 goes in as 0.40.0rc.1, which pacman sorts
+      # before 0.40.0, and the package keeps the release's name.
+      - id: pkgver
+        name: Arch version
+        run: |
+          pkgver="${VERSION//-/}"
+          echo "pkgver=$pkgver" >>"$GITHUB_OUTPUT"
+          if [ "$pkgver" != "$VERSION" ]; then
+            cp "dist/linux/solidcraft-$VERSION-linux-$ARCH.tar.gz" "dist/linux/solidcraft-$pkgver-linux-$ARCH.tar.gz"
+          fi
+        env:
+          ARCH: ${{ matrix.arch }}
       - uses: storytold/craft-common-actions/actions/arch-package@fa5ef18780cf5e7d5d3b8de068de56cffc83cac5 # main
         with:
-          tarball: dist/linux/solidcraft-${{ env.VERSION }}-linux-${{ matrix.arch }}.tar.gz
+          tarball: dist/linux/solidcraft-${{ steps.pkgver.outputs.pkgver }}-linux-${{ matrix.arch }}.tar.gz
           arch: ${{ matrix.arch }}
+      - name: The package under the release's version
+        if: steps.pkgver.outputs.pkgver != env.VERSION
+        env:
+          ARCH: ${{ matrix.arch }}
+          PKGVER: ${{ steps.pkgver.outputs.pkgver }}
+        run: sudo mv "dist/release/solidcraft-$PKGVER-linux-$ARCH.pkg.tar.zst" "dist/release/solidcraft-$VERSION-linux-$ARCH.pkg.tar.zst"
       - name: Check the package
         env:
           PKG: dist/release/solidcraft-${{ env.VERSION }}-linux-${{ matrix.arch }}.pkg.tar.zst
@@ -350,7 +392,7 @@ jobs:
     name: macOS build ${{ matrix.arch }}
     needs: version
     if: needs.version.outputs.build == 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     strategy:
       fail-fast: false
       matrix:
@@ -384,7 +426,7 @@ jobs:
     name: macOS universal
     needs: [version, macos-build]
     if: needs.version.outputs.build == 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
@@ -612,7 +654,8 @@ jobs:
   release:
     name: GitHub Release or dry-run artifacts
     needs: [version, linux, flatpak, arch, snap, freebsd, macos, windows, web]
-    if: needs.version.outputs.build == 'true'
+    # Not for the release gate (packages_only): it builds and checks the packages, nothing more.
+    if: needs.version.outputs.build == 'true' && !inputs.packages_only
     runs-on: ubuntu-latest
     permissions:
       contents: write

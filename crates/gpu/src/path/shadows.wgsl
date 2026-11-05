@@ -33,6 +33,7 @@ fn shadow_transmittance(origin: vec3<f32>, direction: vec3<f32>, limit: f32) -> 
             return result;
         }
         if step==64u { return blocked_shadow(); }
+        if OPAQUE_SCENE {return blocked_shadow();}
         let t = triangle(hit.triangle);
         if t.base.w<=0.0 || t.coat.w<=0.0 { return blocked_shadow(); }
         var position=surface_point(t,hit.bary);

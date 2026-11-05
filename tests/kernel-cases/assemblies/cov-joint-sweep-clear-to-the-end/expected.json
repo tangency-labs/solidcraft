@@ -1,0 +1,17 @@
+{
+ "sources": [],
+ "what": "joint.sweep of the hinged arm from 0 to 30, short of the block",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Stop: box 50x10x10 from (-10,30,0), grounded; the arm's corner (40,5) turned \u03b8 reaches y = 40 sin \u03b8 + 5 cos \u03b8, which is 30 at \u03b8 = asin(30/\u221a1625) - atan(5/40) = 40.9676; 30 < 40.97, so nothing stops it: stopped_at and stopped_by null",
+ "body_count": 3,
+ "volume_mm3": 13000.0,
+ "results": [
+  {
+   "step": 13,
+   "json": {
+    "stopped_at": null,
+    "stopped_by": null
+   }
+  }
+ ]
+}

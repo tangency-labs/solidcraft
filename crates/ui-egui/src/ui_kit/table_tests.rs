@@ -12,18 +12,19 @@ fn fitting_flex_tables_have_no_horizontal_scrollbar_at_card_widths_and_pixel_sca
                     ui.set_width(width);
                     // Include a non-zero inherited scroll margin: the grid owns its insets.
                     ui.spacing_mut().scroll.content_margin = egui::Margin::same(1);
-                    table(
+                    table_custom(
                         ui,
                         "fit",
                         &[Column::new("Name", 1.1).flex(), Column::new("Expression", 1.5).flex(), Column::new("Value", 1.1).flex()],
                         "Empty",
                         |ui, table| {
+                            table.headers(ui, |_, _| false);
                             table.row(ui, "row", false, |row| {
                                 row.cell(|ui| {
                                     ui_kit::text(ui, "Width", ui_kit::Text::Cell);
                                 });
                                 row.cell(|ui| {
-                                    ui_kit::cell_editor(ui, ui.id().with("value"), &mut "10 mm".into(), "", false);
+                                    ui_kit::cell_editor(ui, ui.scope_id().with("value"), &mut "10 mm".into(), "", false);
                                 });
                                 row.cell(|ui| {
                                     ui_kit::text(ui, "10 mm", ui_kit::Text::MonoCell);
@@ -58,7 +59,8 @@ fn fitting_flex_tables_have_no_horizontal_scrollbar_at_card_widths_and_pixel_sca
 fn genuinely_wide_tables_keep_horizontal_scrolling() {
     let ctx = crate::fonts::test_context();
     harness::frame(&ctx, vec![], |ui| {
-        table(ui, "overflow", &[Column::new("Name", 1.0).flex().min_content_width(400.0)], "Empty", |ui, table| {
+        table_custom(ui, "overflow", &[Column::new("Name", 1.0).flex().min_content_width(400.0)], "Empty", |ui, table| {
+            table.headers(ui, |_, _| false);
             table.row(ui, "row", false, |row| {
                 row.cell(|ui| ui_kit::text(ui, "Name", ui_kit::Text::Cell));
             });
@@ -77,7 +79,7 @@ fn row_hover_paints_under_every_interactive_child_and_respects_clip_and_enabled(
     let mut selected = 0;
     let mut draw = |ui: &mut Ui| {
         ui.set_width(600.0);
-        table(
+        table_custom(
             ui,
             "hover",
             &[
@@ -88,12 +90,13 @@ fn row_hover_paints_under_every_interactive_child_and_respects_clip_and_enabled(
             ],
             "Empty",
             |ui, table| {
+                table.headers(ui, |_, _| false);
                 table.row(ui, "row", false, |row| {
                     row.cell(|ui| {
                         ui_kit::text(ui, "Width", ui_kit::Text::Cell);
                     });
                     row.cell(|ui| {
-                        ui_kit::cell_editor(ui, ui.id().with("value"), &mut value, "", false);
+                        ui_kit::cell_editor(ui, ui.scope_id().with("value"), &mut value, "", false);
                     });
                     row.cell(|ui| {
                         ui_kit::dropdown(ui, "choice", &mut selected, &["mm", "in"]);
@@ -139,7 +142,8 @@ fn row_hover_paints_under_every_interactive_child_and_respects_clip_and_enabled(
 fn add_prompt_is_short_rounded_and_uses_a_hand_cursor() {
     let ctx = crate::fonts::test_context();
     let mut draw = |ui: &mut Ui| {
-        table(ui, "prompt", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+        table_custom(ui, "prompt", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+            table.headers(ui, |_, _| false);
             table.add_prompt(ui, "Add configuration", "Add configuration");
         });
     };
@@ -199,7 +203,7 @@ fn hover_remove_bin_prompt_and_plus_menu_share_one_grid() {
                     if pending {
                         table.row(ui, "draft", false, |row| {
                             row.cell(|ui| {
-                                ui_kit::cell_editor(ui, ui.id().with("name"), &mut String::new(), "Name", false);
+                                ui_kit::cell_editor(ui, ui.scope_id().with("name"), &mut String::new(), "Name", false);
                             });
                             row.cell(|ui| {
                                 deleted |= bin_button(ui, "Delete").clicked();
@@ -283,7 +287,8 @@ fn horizontal_bar_is_painted_only_for_actual_table_overflow() {
                     ui.set_width(280.0);
                     ui_kit::scope(ui, |ui| {
                         let column = Column::new("Name", 1.0).flex().min_content_width(if overflow { 400.0 } else { 0.0 });
-                        table(ui, "bar", &[column], "Empty", |ui, table| {
+                        table_custom(ui, "bar", &[column], "Empty", |ui, table| {
+                            table.headers(ui, |_, _| false);
                             table.row(ui, "row", false, |row| {
                                 row.cell(|ui| ui_kit::text(ui, "Width", ui_kit::Text::Cell));
                             });
@@ -347,4 +352,20 @@ fn name_list_gives_the_name_the_width_the_other_cells_leave() {
         assert_eq!(scenario::count_of(&format!("dialog:name:{long}:cut")), Some(f64::from(u8::from(cut))), "{width}: name {name:?}");
         assert_eq!(scenario::count_of("dialog:name:b.step:cut"), Some(0.0));
     }
+}
+
+/// #8563: names sort in natural order: numbers by value, letters without regard to case.
+#[test]
+fn natural_order_compares_numbers_by_value_and_ignores_case() {
+    let mut names = vec!["d10", "width", "d2", "Alpha", "d1", "alpha", "Beta", "d02", "x", "x1", "p99999999999999999999999", "p100"];
+    Sort::Ascending.apply(&mut names, |s| *s);
+    assert_eq!(names, ["Alpha", "alpha", "Beta", "d1", "d2", "d02", "d10", "p100", "p99999999999999999999999", "width", "x", "x1"]);
+    Sort::Descending.apply(&mut names, |s| *s);
+    assert_eq!(names, ["x1", "x", "width", "p99999999999999999999999", "p100", "d10", "d02", "d2", "d1", "Beta", "alpha", "Alpha"]);
+    let mut listed = vec!["d10", "d2", "d1"];
+    Sort::Listed.apply(&mut listed, |s| *s);
+    assert_eq!(listed, ["d10", "d2", "d1"], "the listed order is left alone");
+    assert_eq!(natural_cmp("", ""), std::cmp::Ordering::Equal);
+    assert_eq!(natural_cmp("", "a"), std::cmp::Ordering::Less);
+    assert_eq!([Sort::Listed.next(), Sort::Ascending.next(), Sort::Descending.next()], [Sort::Ascending, Sort::Descending, Sort::Listed]);
 }

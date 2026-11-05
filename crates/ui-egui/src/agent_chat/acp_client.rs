@@ -3,6 +3,7 @@
 //! sign-in). The panel sees only [`Event`]s.
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -18,7 +19,11 @@ enum Pending {
     Authenticate,
     SetMode,
     SetModel,
+    SetConfig,
 }
+
+/// Give a cancelled prompt time to finish before disconnecting an unresponsive agent.
+const CANCEL_GRACE: Duration = Duration::from_secs(5);
 
 /// Variables the agent doesn't inherit: a control token set for the app's own `--control` port
 /// would otherwise reach the agent and outrank the chat endpoint's own token file.
@@ -28,6 +33,10 @@ pub struct AcpBackend {
     proc: AgentProcess,
     cwd: std::path::PathBuf,
     bridge: Option<acp::McpBridge>,
+    /// The agent's `initialize` reply: which routes the system note can take into a session.
+    init: Value,
+    /// The system note the next session gets ([`acp::system_note`]).
+    note: String,
     next_id: u64,
     pending: HashMap<u64, Pending>,
     session: Option<String>,
@@ -38,7 +47,10 @@ pub struct AcpBackend {
     /// Open permission questions: our key → the agent's request id.
     permissions: HashMap<u64, Value>,
     next_key: u64,
+    cancelling: Option<(u64, Instant)>,
     exited: bool,
+    config_pending: Option<(u64, String)>,
+    modern_config: bool,
 }
 
 impl AcpBackend {
@@ -53,6 +65,8 @@ impl AcpBackend {
             proc,
             cwd,
             bridge,
+            init: Value::Null,
+            note: acp::SYSTEM_NOTE.to_string(),
             next_id: 0,
             pending: HashMap::new(),
             session: None,
@@ -62,7 +76,10 @@ impl AcpBackend {
             auth: Vec::new(),
             permissions: HashMap::new(),
             next_key: 0,
+            cancelling: None,
             exited: false,
+            config_pending: None,
+            modern_config: false,
         };
         b.request(Pending::Initialize, "initialize", acp::initialize_params(env!("CARGO_PKG_VERSION")));
         Ok(b)
@@ -75,7 +92,9 @@ impl AcpBackend {
     }
 
     fn new_session(&mut self) {
-        let params = acp::session_new_params(&self.cwd, self.bridge.as_ref());
+        self.config_pending = None;
+        self.pending.retain(|_, request| *request != Pending::SetConfig);
+        let params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init, &self.note);
         self.request(Pending::SessionNew, "session/new", params);
     }
 
@@ -83,22 +102,41 @@ impl AcpBackend {
         match msg {
             Incoming::Reply { id, result } => {
                 let Some(what) = self.pending.remove(&id) else { return };
+                if self.cancelling.is_some_and(|(request, _)| request == id) {
+                    self.cancelling = None;
+                }
                 match (what, result) {
                     (Pending::Initialize, Ok(v)) => {
                         self.agent = acp::agent_info(&v);
                         self.images = acp::takes_images(&v);
                         self.documents = acp::takes_documents(&v);
                         self.auth = acp::auth_methods(&v);
+                        self.init = v;
                         self.new_session();
                     }
                     (Pending::SessionNew, Ok(v)) => match v.get("sessionId").and_then(Value::as_str) {
                         Some(s) => {
-                            self.session = Some(s.to_string());
-                            if let Some((current, available)) = acp::modes(&v) {
-                                out.push(Event::Modes { current, available });
+                            // New chat has opened successfully: retire the old turn before Ready.
+                            // Its late reply and cancellation deadline must not end the new turn.
+                            if let Some((request, _)) = self.cancelling.take() {
+                                self.pending.remove(&request);
+                                out.push(Event::TurnEnded { reason: "cancelled".into() });
                             }
-                            if let Some((current, available)) = acp::models(&v) {
-                                out.push(Event::Models { current, available });
+                            self.session = Some(s.to_string());
+                            match acp::config_options(&v) {
+                                acp::ConfigParse::Snapshot(options) => {
+                                    self.modern_config = true;
+                                    out.push(Event::ConfigOptions(options));
+                                }
+                                _ => {
+                                    self.modern_config = false;
+                                    if let Some((current, available)) = acp::modes(&v) {
+                                        out.push(Event::Modes { current, available });
+                                    }
+                                    if let Some((current, available)) = acp::models(&v) {
+                                        out.push(Event::Models { current, available });
+                                    }
+                                }
                             }
                             out.push(Event::Documents(self.documents));
                             out.push(Event::Ready { agent: self.agent.clone(), images: self.images });
@@ -112,15 +150,43 @@ impl AcpBackend {
                     // Signed in: try the session again.
                     (Pending::Authenticate, Ok(_)) => self.new_session(),
                     (Pending::SetMode | Pending::SetModel, Ok(_)) => {}
+                    (Pending::SetConfig, Ok(v)) => {
+                        if let Some((request_id, config_id)) = self.config_pending.take()
+                            && request_id == id
+                        {
+                            let result = match acp::config_options(&v) {
+                                acp::ConfigParse::Snapshot(o) => Ok(o),
+                                _ => Err("The agent returned no valid configuration options.".into()),
+                            };
+                            out.push(Event::ConfigOptionFinished { id: config_id, result });
+                        }
+                    }
+                    // `session/set_model` is still unstable in ACP: an agent can list `models` and
+                    // still not serve it (#9970). It keeps its own model; that is no error to show.
+                    (Pending::SetModel, Err((acp::METHOD_NOT_FOUND, message))) => {
+                        log::debug!("agent does not serve session/set_model: {message}");
+                    }
                     (what, Err((code, message))) => {
+                        let config_error = what == Pending::SetConfig;
+                        if what == Pending::SetConfig
+                            && let Some((request_id, config_id)) = self.config_pending.take()
+                            && request_id == id
+                        {
+                            out.push(Event::ConfigOptionFinished { id: config_id, result: Err(message.clone()) });
+                        }
                         let auth = code == acp::AUTH_REQUIRED || message.to_ascii_lowercase().contains("auth");
                         if auth {
                             self.session = None;
+                            self.modern_config = false;
+                            self.config_pending = None;
+                            self.pending.retain(|_, request| *request != Pending::SetConfig);
                             if what == Pending::Prompt {
                                 out.push(Event::TurnEnded { reason: "auth".into() });
                             }
                             out.push(Event::AuthRequired { methods: self.auth.clone() });
-                        } else {
+                        } else if what == Pending::SetModel {
+                            out.push(Event::ModelRejected(message));
+                        } else if !config_error {
                             if what == Pending::Prompt {
                                 out.push(Event::TurnEnded { reason: "error".into() });
                             }
@@ -132,24 +198,35 @@ impl AcpBackend {
             Incoming::Text { thought, text } => out.push(Event::Text { thought, text }),
             Incoming::Tool { id, title, kind, status, input, output } => out.push(Event::Tool { id, title, kind, status, input, output }),
             Incoming::Plan(p) => out.push(Event::Plan(p)),
-            Incoming::Permission { rpc, title, options } => {
+            Incoming::Permission { rpc, title, kind, options } => {
                 self.next_key += 1;
                 self.permissions.insert(self.next_key, rpc);
-                out.push(Event::Permission { key: self.next_key, title, options });
+                out.push(Event::Permission { key: self.next_key, title, kind, options });
             }
             Incoming::AuthStatus(s) => out.push(Event::AuthStatus(s)),
-            Incoming::ModeChanged(m) => out.push(Event::Modes { current: m, available: Vec::new() }),
-            Incoming::ModelChanged(m) => out.push(Event::Models { current: m, available: Vec::new() }),
+            Incoming::ModeChanged(m) if !self.modern_config => out.push(Event::Modes { current: m, available: Vec::new() }),
+            Incoming::ModelChanged(m) if !self.modern_config => out.push(Event::Models { current: m, available: Vec::new() }),
+            Incoming::ConfigOptions { session, options } if self.session.as_deref() == Some(session.as_str()) => {
+                out.push(Event::ConfigOptions(options))
+            }
+            Incoming::ModeChanged(_) | Incoming::ModelChanged(_) | Incoming::ConfigOptions { .. } => {}
             Incoming::Unsupported { rpc, method } => {
                 self.proc.send(&acp::reply_error(rpc, acp::METHOD_NOT_FOUND, &format!("SolidCraft does not serve `{method}`")));
             }
             Incoming::Ignored => {}
         }
     }
-}
 
-impl ChatBackend for AcpBackend {
-    fn poll(&mut self) -> Vec<Event> {
+    fn finish_exit(&mut self, tail: Vec<String>) -> Event {
+        self.exited = true;
+        self.session = None;
+        self.pending.clear();
+        self.cancelling = None;
+        self.config_pending = None;
+        Event::Exited { tail }
+    }
+
+    fn poll_at(&mut self, now: Instant) -> Vec<Event> {
         let mut out = Vec::new();
         if self.exited {
             return out;
@@ -162,16 +239,24 @@ impl ChatBackend for AcpBackend {
                     }
                 }
                 Ok(FromAgent::Exited(tail)) => {
-                    self.exited = true;
-                    self.session = None;
-                    self.pending.clear();
-                    out.push(Event::Exited { tail });
+                    out.push(self.finish_exit(tail));
                     break;
                 }
                 Err(_) => break,
             }
         }
+        // Drain replies first: an acknowledgement already waiting must keep the connection.
+        if self.cancelling.is_some_and(|(_, started)| now.saturating_duration_since(started) >= CANCEL_GRACE) {
+            self.proc.shutdown(false);
+            out.push(self.finish_exit(vec![crate::i18n::tr("ui.agent_chat_cancel_timeout").to_string()]));
+        }
         out
+    }
+}
+
+impl ChatBackend for AcpBackend {
+    fn poll(&mut self) -> Vec<Event> {
+        self.poll_at(Instant::now())
     }
 
     fn prompt(&mut self, parts: &[PromptPart]) {
@@ -187,6 +272,11 @@ impl ChatBackend for AcpBackend {
         }
         if let Some(s) = &self.session {
             self.proc.send(&acp::notification("session/cancel", json!({"sessionId": s})));
+            // Repeated Stop presses must not postpone the fallback. An idle session needs none.
+            if self.cancelling.is_none() {
+                self.cancelling =
+                    self.pending.iter().find_map(|(&id, request)| (*request == Pending::Prompt).then_some(id)).map(|id| (id, Instant::now()));
+            }
         }
     }
 
@@ -195,7 +285,14 @@ impl ChatBackend for AcpBackend {
             self.cancel();
         }
         self.session = None;
+        self.modern_config = false;
+        self.config_pending = None;
+        self.pending.retain(|_, request| *request != Pending::SetConfig);
         self.new_session();
+    }
+
+    fn set_instructions(&mut self, text: &str) {
+        self.note = acp::system_note(text);
     }
 
     fn answer_permission(&mut self, key: u64, option: Option<&str>) {
@@ -217,6 +314,16 @@ impl ChatBackend for AcpBackend {
     fn set_model(&mut self, model: &str) {
         if let Some(s) = self.session.clone() {
             self.request(Pending::SetModel, "session/set_model", acp::set_model_params(&s, model));
+        }
+    }
+
+    fn set_config_option(&mut self, id: &str, value: &str) {
+        if self.config_pending.is_some() {
+            return;
+        }
+        if let Some(s) = self.session.clone() {
+            self.request(Pending::SetConfig, "session/set_config_option", acp::set_config_option_params(&s, id, value));
+            self.config_pending = Some((self.next_id, id.to_string()));
         }
     }
 
@@ -262,7 +369,7 @@ pub fn test_agent(argv: &[String], cwd: &std::path::Path) -> Result<String, Test
     let init = wait_for(&p, 1);
     let session_cwd = if acp::runs_in_wsl(argv) { acp::wsl_path(cwd) } else { cwd.to_path_buf() };
     let result = init.and_then(|v| {
-        p.send(&acp::request(2, "session/new", acp::session_new_params(&session_cwd, None)));
+        p.send(&acp::request(2, "session/new", acp::session_new_params(&session_cwd, None, &v, acp::SYSTEM_NOTE)));
         wait_for(&p, 2).map(|_| {
             let who = acp::agent_info(&v);
             crate::i18n::format("ui.ai_test_acp_ok", &[("agent", if who.is_empty() { "?" } else { &who })])
@@ -270,4 +377,143 @@ pub fn test_agent(argv: &[String], cwd: &std::path::Path) -> Result<String, Test
     });
     p.shutdown(true);
     result
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use crate::agent_chat::backend::StartContext;
+
+    fn ready_backend() -> Result<AcpBackend, String> {
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let mut backend = AcpBackend::start(&["sh".into(), "-c".into(), "cat >/dev/null".into()], ctx)?;
+        let mut events = Vec::new();
+        backend.handle(Incoming::Reply { id: 1, result: Ok(json!({"agentInfo":{"name":"fake"}})) }, &mut events);
+        backend.handle(Incoming::Reply { id: 2, result: Ok(json!({"sessionId":"s1"})) }, &mut events);
+        Ok(backend)
+    }
+
+    #[test]
+    fn an_unresponsive_cancel_disconnects_the_agent() {
+        let mut backend = ready_backend().unwrap();
+        backend.prompt(&[PromptPart::Text("stalled search".into())]);
+        backend.cancel();
+        let started = backend.cancelling.unwrap().1;
+        assert!(backend.poll_at(started + CANCEL_GRACE - Duration::from_millis(1)).is_empty());
+        backend.cancel();
+        let events = backend.poll_at(started + CANCEL_GRACE);
+        assert!(matches!(events.as_slice(), [Event::Exited { .. }]), "Stop must not wait indefinitely: {events:?}");
+        assert!(backend.pid().is_none());
+        assert!(backend.session.is_none() && backend.pending.is_empty());
+        assert!(backend.poll().is_empty(), "the exit is reported only once");
+    }
+
+    #[test]
+    fn a_cancelled_prompt_reply_keeps_the_connection() {
+        for reply in [Ok(json!({"stopReason":"cancelled"})), Err((-32603, "operation aborted".into()))] {
+            let mut backend = ready_backend().unwrap();
+            backend.prompt(&[PromptPart::Text("search".into())]);
+            let request = backend.next_id;
+            backend.cancel();
+            let mut events = Vec::new();
+            backend.handle(Incoming::Reply { id: request, result: reply }, &mut events);
+            assert!(events.iter().any(|e| matches!(e, Event::TurnEnded { .. })));
+            assert!(backend.poll_at(Instant::now() + CANCEL_GRACE).is_empty());
+            assert!(backend.pid().is_some() && !backend.exited);
+            backend.shutdown(true);
+        }
+    }
+
+    #[test]
+    fn cancelling_an_idle_session_does_not_disconnect_it() {
+        let mut backend = ready_backend().unwrap();
+        backend.cancel();
+        assert!(backend.poll_at(Instant::now() + CANCEL_GRACE).is_empty());
+        assert!(backend.pid().is_some() && !backend.exited);
+        backend.shutdown(true);
+    }
+
+    #[test]
+    fn a_new_session_retires_the_old_cancelled_prompt() {
+        let mut backend = ready_backend().unwrap();
+        backend.prompt(&[PromptPart::Text("old search".into())]);
+        let old_prompt = backend.next_id;
+        backend.cancel();
+        ChatBackend::new_session(&mut backend);
+        let mut events = Vec::new();
+        backend.handle(Incoming::Reply { id: backend.next_id, result: Ok(json!({"sessionId":"s2"})) }, &mut events);
+        assert!(matches!(events.first(), Some(Event::TurnEnded { reason }) if reason == "cancelled"));
+        assert!(matches!(events.last(), Some(Event::Ready { .. })));
+        backend.prompt(&[PromptPart::Text("new search".into())]);
+        assert!(backend.poll_at(Instant::now() + CANCEL_GRACE).is_empty(), "a new session has no stale cancellation deadline");
+        backend.cancel();
+        events.clear();
+        backend.handle(Incoming::Reply { id: old_prompt, result: Ok(json!({"stopReason":"cancelled"})) }, &mut events);
+        assert!(events.is_empty(), "an old reply must not end the new turn or clear its cancellation deadline");
+        assert!(matches!(backend.poll_at(Instant::now() + CANCEL_GRACE).as_slice(), [Event::Exited { .. }]));
+    }
+
+    fn snapshot(session: &str, value: &str) -> Value {
+        json!({"sessionId":session,"configOptions":[{"id":"provider.model","category":"model","name":"Model","type":"select","currentValue":value,"options":[{"value":"fast","name":"Fast"},{"value":"smart","name":"Smart"}]}]})
+    }
+
+    #[test]
+    fn config_updates_and_replies_are_isolated_to_the_active_session() {
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let mut backend = AcpBackend::start(&["sh".into(), "-c".into(), "cat >/dev/null".into()], ctx).unwrap();
+        let mut events = Vec::new();
+        backend.handle(Incoming::Reply { id: 1, result: Ok(json!({"agentInfo":{"name":"fake"}})) }, &mut events);
+        backend.handle(Incoming::Reply { id: 2, result: Ok(snapshot("s1", "fast")) }, &mut events);
+        assert_eq!(backend.session.as_deref(), Some("s1"));
+        events.clear();
+        backend.set_config_option("provider.model", "smart");
+        let old_request = backend.config_pending.as_ref().map(|p| p.0).unwrap();
+        ChatBackend::new_session(&mut backend);
+        let new_session_request = backend.next_id;
+        assert!(backend.config_pending.is_none());
+        let old_notification = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"config_option_update","configOptions":[]}}}"#;
+        backend.handle(acp::parse(old_notification).unwrap(), &mut events);
+        assert!(events.is_empty());
+        backend.handle(Incoming::Reply { id: new_session_request, result: Ok(snapshot("s2", "fast")) }, &mut events);
+        assert_eq!(backend.session.as_deref(), Some("s2"));
+        events.clear();
+        backend.set_config_option("provider.model", "smart");
+        let new_request = backend.config_pending.as_ref().map(|p| p.0).unwrap();
+        backend.handle(Incoming::Reply { id: old_request, result: Ok(snapshot("s1", "smart")) }, &mut events);
+        backend.handle(Incoming::Reply { id: old_request, result: Err((-32001, "old rejected request".into())) }, &mut events);
+        backend.handle(acp::parse(old_notification).unwrap(), &mut events);
+        assert!(events.is_empty(), "old requests and session notifications are ignored");
+        assert_eq!(backend.config_pending.as_ref().map(|p| p.0), Some(new_request), "an old reply cannot clear the new session's pending request");
+        let new_notification = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s2","update":{"sessionUpdate":"config_option_update","configOptions":[]}}}"#;
+        backend.handle(acp::parse(new_notification).unwrap(), &mut events);
+        assert!(matches!(events.as_slice(), [Event::ConfigOptions(options)] if options.is_empty()));
+        assert_eq!(backend.config_pending.as_ref().map(|p| p.0), Some(new_request), "a notification is not an acknowledgement");
+        events.clear();
+        backend.handle(Incoming::Reply { id: new_request, result: Ok(snapshot("s2", "smart")) }, &mut events);
+        assert!(backend.config_pending.is_none());
+        assert!(matches!(events.as_slice(), [Event::ConfigOptionFinished { result: Ok(options), .. }] if options[0].current_value == "smart"));
+        backend.shutdown(true);
+    }
+
+    /// A refused model is the picker's business, not an error of the chat; signing in stays as it was.
+    #[test]
+    fn a_refused_model_is_reported_as_such() {
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let mut backend = AcpBackend::start(&["sh".into(), "-c".into(), "cat >/dev/null".into()], ctx).unwrap();
+        let mut events = Vec::new();
+        backend.handle(Incoming::Reply { id: 1, result: Ok(json!({"agentInfo":{"name":"fake"}})) }, &mut events);
+        backend.handle(Incoming::Reply { id: 2, result: Ok(json!({"sessionId":"s1"})) }, &mut events);
+        events.clear();
+        backend.set_model("zzz");
+        backend.handle(Incoming::Reply { id: backend.next_id, result: Err((-32602, "no such model".into())) }, &mut events);
+        assert!(matches!(events.as_slice(), [Event::ModelRejected(message)] if message == "no such model"), "{events:?}");
+        events.clear();
+        backend.set_model("fast");
+        backend.handle(Incoming::Reply { id: backend.next_id, result: Ok(json!({})) }, &mut events);
+        assert!(events.is_empty(), "{events:?}");
+        backend.set_model("zzz");
+        backend.handle(Incoming::Reply { id: backend.next_id, result: Err((acp::AUTH_REQUIRED, "sign in".into())) }, &mut events);
+        assert!(matches!(events.as_slice(), [Event::AuthRequired { .. }]), "{events:?}");
+        backend.shutdown(true);
+    }
 }

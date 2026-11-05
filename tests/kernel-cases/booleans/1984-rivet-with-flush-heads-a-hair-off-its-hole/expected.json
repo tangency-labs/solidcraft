@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1984"
+ ],
+ "what": "a rivet (shank r=2, heads r=4 flat on both faces of a 1.5 mm sheet) 0.004 mm off the axis of its hole: overlap with the sheet is the shank's crescent; the heads touch the sheet faces over an area but add no volume",
+ "source": "analytic",
+ "method": "overlap = 1.5 x crescent(r=2, d=0.004) = 1.5 x (pi r^2 - 2 r^2 acos(d/2r) + (d/2) sqrt(4 r^2 - d^2)) = 0.024000 (the PR's 1.5 x crescent = 0.0240). The heads (z -1..0 and 1.5..2.5) only touch the sheet's faces, sharing no volume. One body",
+ "body_count": 1,
+ "volume_mm3": 0.023999996
+}

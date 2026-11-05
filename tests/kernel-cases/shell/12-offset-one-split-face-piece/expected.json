@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#12"
+ ],
+ "what": "Offset Face on one piece of a split face moves only that piece, not the coplanar neighbour",
+ "source": "analytic",
+ "method": "box 40x30x10, top face split at x=20; the x<20 piece moves up 2 mm: V=12000+20*30*2=13200; faces: bottom, front, back, left, right, two top pieces, step wall at x=20 = 8; bbox z 0..12",
+ "body_count": 1,
+ "volume_mm3": 13200,
+ "faces": 8
+}

@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4143"
+ ],
+ "what": "an R4 round on the rim of an R5 notch where its cylinder meets an extruded B-spline ramp, both ends running into a square wall",
+ "source": "invariants",
+ "method": "a plate extruded from a profile with a cubic B-spline ramp, a 30 mm slot with an R5 half-round relief notch cut through it; the edge where the notch cylinder meets the ramp is an ordinary smooth-surface convex edge with room for R4 (the same fillet works on a flat top and in another CAD). No closed form for the removed volume, so only validity is graded: one closed valid solid.",
+ "body_count": 1,
+ "continuity": {
+  "order": "g1"
+ }
+}

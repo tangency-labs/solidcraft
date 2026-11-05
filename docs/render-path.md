@@ -17,6 +17,11 @@ the pending/ready/failed host, and failures are not retried on each viewport ins
 It opens its independent job device on the viewport's selected adapter,
 so software fallback and safe mode do not rediscover a failing hardware driver.
 An incompatible explicit GPU policy leaves progressive rendering unavailable there.
+A driver that crashes the process while it compiles the path pipeline (#9236) is beyond error
+scopes and unwind guards, so a running setup keeps `gpu-path-setup.json` (its adapter key) in the
+settings folder and removes it when the setup answers or the app closes normally. A launch that
+finds it for the same adapter key leaves the setup failed with that explanation until the user
+chooses **Try again**; a driver update changes the key and so tries again.
 The path tracer runs on Vulkan, or on Metal on macOS (#3217). A viewport on D3D12 is reopened on the
 same GPU through Vulkan. Where there is no Vulkan or Metal driver (Windows over
 Remote Desktop or on the WARP software adapter, older drivers), the path executor reports

@@ -1,12 +1,23 @@
 //! Layout elements for dense cards; see `docs/ui-kit.md` for tokens and usage.
 use super::{metrics::*, text::paint_text};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{scenario, theme::Tokens};
 use egui::{Response, RichText, Ui, vec2};
+use solidcraft_engine::kernel::Continuity;
 
 pub(super) const FORM: &str = "sc_dense_form";
 
 pub(super) const LABEL: &str = "sc_form_label";
 pub(super) const FIXED_LABEL: &str = "sc_fixed_label_width";
+pub(super) const GROW_LABEL: &str = "sc_grow_label_column";
+
+/// A form whose card widens so its widest label fits (#10620). Each pass the form publishes,
+/// under `key`, the width its label column needs beyond the design's 1.6x cap; the card's
+/// owner reads that before opening the card, so the card settles one frame later.
+/// Tokens: `form_label_width, font_label, dialog_label, space_4`.
+pub(super) fn scope_grow<R>(ui: &mut Ui, key: egui::Id, add: impl FnOnce(&mut Ui) -> R) -> R {
+    scope_inner(ui, Some(key), add)
+}
 
 /// A deliberate label grid for multi-column settings, inherited by the existing shared rows.
 pub(crate) fn settings_form<R>(ui: &mut Ui, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
@@ -17,7 +28,15 @@ pub(crate) fn settings_form<R>(ui: &mut Ui, label_width: f32, add: impl FnOnce(&
 /// Mark a form without global state: children inherit this tag through their UI stack.
 /// Inherited form styling and label-column identity. Tokens: `space_4/8, form_gap_y, control_height, font_label, accent, selected_bg, dialog_rule, control_fill/border/radius, text`.
 pub(crate) fn scope<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
-    ui.scope_builder(egui::UiBuilder::new().ui_stack_info(egui::UiStackInfo::default().with_tag(FORM)), |ui| {
+    scope_inner(ui, None, add)
+}
+
+fn scope_inner<R>(ui: &mut Ui, grow: Option<egui::Id>, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let mut info = egui::UiStackInfo::default().with_tag(FORM);
+    if let Some(key) = grow {
+        info = info.with_tag_value(GROW_LABEL, key);
+    }
+    ui.scope_builder(egui::UiBuilder::new().ui_stack_info(info), |ui| {
         let t = Tokens::get();
         ui.spacing_mut().item_spacing = vec2(t.space_4, t.form_gap_y);
         ui.spacing_mut().interact_size.y = row_height();
@@ -78,14 +97,14 @@ pub(crate) fn catalog_footer(ui: &mut Ui, text: &str) -> Response {
     job.wrap.max_rows = 1;
     let galley = ui.painter().layout_job(job);
     ui.painter().galley(rect.left_top() + vec2(t.space_24, t.space_8), galley, t.form_dim);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
     crate::scenario::publish_rect("catalog:footer", rect);
     response
 }
 
 /// A short note with further guidance on its information icon and text.
 pub(crate) fn catalog_footer_with_tip(ui: &mut Ui, text: &str, tip: &str) {
-    catalog_footer(ui, text).on_hover_text(tip);
+    catalog_footer(ui, text).backing_on_hover_text(tip);
 }
 
 /// A filling catalog body above a measured, bottom-anchored footer. Long detail
@@ -149,16 +168,16 @@ pub(crate) fn label(ui: &Ui) -> &str {
 }
 
 /// Publish accessibility and scenario geometry. Tokens: `none`.
-pub(super) fn publish(ui: &Ui, response: &Response, kind: egui::WidgetType) {
+pub(super) fn publish(ui: &Ui, response: &Response, kind: egui::Role) {
     let t = Tokens::get();
     match kind {
-        egui::WidgetType::TextEdit => {
+        egui::Role::TextInput => {
             t.input_bevel(ui, response);
             if response.has_focus() {
                 crate::prefs_search::note_key_sink(ui.ctx());
             }
         }
-        egui::WidgetType::ComboBox | egui::WidgetType::Button => t.button_bevel(ui, response, false),
+        egui::Role::ComboBox | egui::Role::Button => t.button_bevel(ui, response, false),
         _ => {}
     }
     let label = label(ui);
@@ -194,8 +213,14 @@ pub(crate) fn status_line(ui: &mut Ui, text: &str, tone: StatusTone) -> Response
 }
 
 /// Declarative expression row; retains the field's completion and accepted Enter. Tokens: `row, field`.
+/// Dragging the label sideways changes a literal value (`fields::scrub`).
 pub(crate) fn expr_row(ui: &mut Ui, label: &str, value: &mut String) -> bool {
-    row(ui, label, |ui| super::field(ui, value))
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::fields::scrub(ui, scrub, value);
+        }
+        super::field(ui, value)
+    })
 }
 
 /// Whole-number count row with step arrows; retains completion and accepted Enter. Tokens: `row, count_field`.
@@ -204,8 +229,26 @@ pub(crate) fn count_row(ui: &mut Ui, label: &str, value: &mut String, limits: &s
 }
 
 /// Expression row with an empty-value hint. Tokens: `row, hint_field`.
+/// Its label scrubs a literal value as `expr_row`'s does.
 pub(crate) fn hint_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> bool {
-    row(ui, label, |ui| super::hint_field(ui, value, hint))
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::fields::scrub(ui, scrub, value);
+        }
+        super::hint_field(ui, value, hint)
+    })
+}
+
+/// Expression row with an empty-value hint whose value the form checks: with `warning`, the
+/// field is outlined in the warning colour and the message sits under it in that colour, so the
+/// colour is never the only cue. Returns accepted Enter and the field's response. Tokens: `row,
+/// checked_field, warning_caption`.
+pub(crate) fn checked_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str, warning: Option<&str>) -> (bool, Response) {
+    let out = row(ui, label, |ui| super::checked_field(ui, value, hint, warning.is_some()));
+    if let Some(message) = warning {
+        warning_caption(ui, label, message);
+    }
+    out
 }
 
 /// Plain text row; the caller retains Enter/change ownership. Tokens: `row, text_field`.
@@ -218,27 +261,74 @@ pub(crate) fn choice_row(ui: &mut Ui, label: &str, id: &str, selected: &mut usiz
     row(ui, label, |ui| super::dropdown(ui, id, selected, options))
 }
 
+/// The one control that chooses a continuity order, wherever one is chosen: a dropdown of
+/// `allowed` (what the construction builds, `Construction::offered`). Its labels are the orders'
+/// plain words and its hover text a line per order naming its code, both from the kernel's one
+/// table of orders; a value not in `allowed` shows the first. Tokens: `row, dropdown`.
+pub(crate) fn continuity_row(ui: &mut Ui, label: &str, id: &str, value: &mut Continuity, allowed: &[Continuity]) -> Response {
+    continuity_row_explained(ui, label, id, value, allowed, &continuity_tip(allowed))
+}
+
+/// [`continuity_row`] whose hover text says what each order builds there (`tip`, which names
+/// each order's code), for a choice whose orders stand for constructions (a fillet's corners).
+pub(crate) fn continuity_row_explained(ui: &mut Ui, label: &str, id: &str, value: &mut Continuity, allowed: &[Continuity], tip: &str) -> Response {
+    let labels: Vec<&str> = allowed.iter().map(|g| g.label_id()).collect();
+    let mut index = allowed.iter().position(|g| g == value).unwrap_or(0);
+    let response = choice_row(ui, label, id, &mut index, &labels);
+    if let Some(g) = allowed.get(index) {
+        *value = *g;
+    }
+    response.backing_on_hover_text(tip)
+}
+
+/// The hover text of a continuity choice: each order's own line, which names its code.
+pub(crate) fn continuity_tip(allowed: &[Continuity]) -> String {
+    allowed.iter().map(|g| crate::i18n::tr(g.tip_id())).collect::<Vec<_>>().join("\n")
+}
+
 /// Internal form geometry for controls which need several lines (e.g. text areas).
 pub(super) fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(&mut Ui) -> R) -> R {
+    row_with(ui, text, height, false, |ui, _| control(ui))
+}
+
+/// A row whose label also senses a drag; the control gets that drag first (None while a
+/// Preferences search hides the row). Tokens: `row`.
+fn scrub_row<R>(ui: &mut Ui, text: &str, control: impl FnOnce(&mut Ui, Option<&Response>) -> R) -> R {
+    row_with(ui, text, row_height(), true, control)
+}
+
+fn row_with<R>(ui: &mut Ui, text: &str, height: f32, scrub: bool, control: impl FnOnce(&mut Ui, Option<&Response>) -> R) -> R {
     let mut passthrough = false;
     if crate::prefs_search::querying(ui) {
-        crate::prefs_search::set_control(ui, text);
+        // A row with no label has no words to match; its controls supply them (#9265).
+        let unlabelled = text.is_empty();
+        if unlabelled {
+            crate::prefs_search::set_unlabelled_control(ui);
+        } else {
+            crate::prefs_search::set_control(ui, text);
+        }
         if !crate::prefs_search::visible(ui, &[text]) {
-            let result = crate::prefs_search::run_hidden(ui, text, control);
+            if unlabelled {
+                crate::prefs_search::push_unlabelled(ui);
+            }
+            let result = crate::prefs_search::run_hidden(ui, text, |ui| control(ui, None));
+            if unlabelled {
+                crate::prefs_search::pop_unlabelled(ui);
+            }
             crate::prefs_search::recheck(ui, &[text]);
             return result;
         }
         crate::prefs_search::push_passthrough(ui);
         passthrough = true;
     }
-    let result = sized_row_body(ui, text, height, control);
+    let result = sized_row_body(ui, text, height, scrub, control);
     if passthrough {
         crate::prefs_search::pop_passthrough(ui);
     }
     result
 }
 
-fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(&mut Ui) -> R) -> R {
+fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, scrub: bool, control: impl FnOnce(&mut Ui, Option<&Response>) -> R) -> R {
     let t = Tokens::get();
     let width = dimension(ui.available_width());
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
@@ -250,11 +340,40 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(
     // Measuring takes the original text and prepares it the same way, so column and row agree.
     let label_width = label_column(ui, text, width);
     let label_rect = egui::Rect::from_min_size(rect.min, vec2(label_width, rect.height()));
-    ui.scope_builder(egui::UiBuilder::new().max_rect(label_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-        // Left aligned in the label column, as in the design.
-        ui.add(egui::Label::new(RichText::new(shown.clone()).size(t.font_label).color(t.dialog_label)).truncate()).on_hover_text(shown);
-    });
-    let control_rect = egui::Rect::from_min_max(egui::pos2((label_rect.right() + label_gap(ui, width)).min(rect.right()), rect.top()), rect.max);
+    let help = ui.stack().iter().find_map(|node| node.tags().get_downcast::<String>(super::preferences_small::ROW_HELP)).cloned();
+    if label_width > 0.0 {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(label_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+            // Left aligned in the label column, as in the design.
+            if let Some(help) = &help {
+                ui.spacing_mut().item_spacing.x = t.space_4;
+                let width = (label_width - t.space_16 - t.space_4).max(0.0);
+                let label = ui
+                    .scope_builder(
+                        egui::UiBuilder::new()
+                            .max_rect(egui::Rect::from_min_size(label_rect.min, vec2(width, height)))
+                            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                        |ui| {
+                            ui.add(egui::Label::new(RichText::new(shown.clone()).size(t.font_label).color(t.dialog_label)).truncate())
+                                .backing_on_hover_text(&shown)
+                        },
+                    )
+                    .inner;
+                let help = super::help_icon(ui, help);
+                scenario::publish_rect(&format!("dialog:row_label:{text}"), label.rect);
+                scenario::publish_rect(&format!("dialog:row_help:{text}"), help.rect);
+            } else {
+                ui.add(egui::Label::new(RichText::new(shown.clone()).size(t.font_label).color(t.dialog_label)).truncate())
+                    .backing_on_hover_text(shown);
+            }
+        });
+    }
+    // Sensed after the label, so a drag on it reaches this rather than the label; a help icon
+    // beside the label keeps its own hover and click.
+    let scrub_width = if help.is_some() { (label_width - t.space_16 - t.space_4).max(0.0) } else { label_width };
+    let scrub_rect = egui::Rect::from_min_size(label_rect.min, vec2(scrub_width, rect.height()));
+    let drag = (scrub && scrub_width > 0.0).then(|| ui.interact(scrub_rect, ui.scope_id().with(("sc_row_scrub", text)), egui::Sense::drag()));
+    let gutter = if label_width > 0.0 { label_gap(ui, width) } else { 0.0 };
+    let control_rect = egui::Rect::from_min_max(egui::pos2((label_rect.right() + gutter).min(rect.right()), rect.top()), rect.max);
     let result = ui
         .scope_builder(
             egui::UiBuilder::new()
@@ -265,7 +384,7 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(
             |ui| {
                 ui.set_clip_rect(ui.clip_rect().intersect(control_rect));
                 ui.spacing_mut().text_edit_width = control_rect.width();
-                control(ui)
+                control(ui, drag.as_ref())
             },
         )
         .inner;
@@ -280,6 +399,16 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(
 /// row's control. It says in words what a colour or an icon shows, so colour is never the only cue.
 /// Dim helper beneath a row control. Tokens: `form_icon_size, font_small, text_dim, space_8; label-column tokens`.
 pub(crate) fn caption(ui: &mut Ui, aligned_to: &str, text: &str) {
+    caption_in(ui, aligned_to, text, Tokens::get().form_dim);
+}
+
+/// [`caption`] in the warning colour, for what is wrong with the row's value (a value the
+/// operation would refuse). Tokens: `caption tokens, warning`.
+pub(crate) fn warning_caption(ui: &mut Ui, aligned_to: &str, text: &str) {
+    caption_in(ui, aligned_to, text, Tokens::get().warning);
+}
+
+fn caption_in(ui: &mut Ui, aligned_to: &str, text: &str, color: egui::Color32) {
     if crate::prefs_search::suppress_chrome(ui) {
         return;
     }
@@ -288,8 +417,20 @@ pub(crate) fn caption(ui: &mut Ui, aligned_to: &str, text: &str) {
     let (rect, _) = ui.allocate_exact_size(vec2(width, t.form_icon_size), egui::Sense::hover());
     let left = (rect.left() + label_column(ui, aligned_to, width) + label_gap(ui, width)).min(rect.right());
     let text_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), rect.max);
-    paint_text(ui, text_rect, text, egui::FontId::proportional(t.font_small), t.form_dim, false);
+    paint_text(ui, text_rect, text, egui::FontId::proportional(t.font_small), color, false);
     scenario::publish_rect(&format!("dialog:caption:{aligned_to}"), text_rect);
+}
+
+/// Natural-height content aligned beneath an indexed row's control, bounded independently of the form.
+pub(crate) fn below_row_control<R>(ui: &mut Ui, label: &str, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let available = dimension(ui.available_width());
+    let inset = (label_column(ui, label, available) + label_gap(ui, available)).min(available);
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.add_space(inset);
+        ui.allocate_ui_with_layout(vec2(width.min((available - inset).max(0.0)), 0.0), egui::Layout::top_down(egui::Align::Min), add).inner
+    })
+    .inner
 }
 
 /// Where a [`figure_rows`] field went (in the order given): the field's rect, and whether it is
@@ -349,10 +490,10 @@ pub(crate) fn figure_rows(
     enter
 }
 
+#[allow(dead_code, reason = "composed by the independent Preferences panels of #9863")]
 /// Memory belongs to the enclosing dialog ID; animation is avoided so each row keeps its fixed height.
 /// Persisted disclosure with a rule and uppercase title. Tokens: `control_height, space_2, radius_sm, hover, dialog_rule, form_section_icon_size, form_gap_y, font_caption, font_section_tracking, text_dim`.
-/// Static section caption for an Inspector group that stays expanded.
-#[cfg(test)]
+/// Static section caption for a group that stays expanded.
 pub(crate) fn section_heading(ui: &mut Ui, title: &str) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_16), egui::Sense::hover());
@@ -438,7 +579,16 @@ fn section_with_badge<R>(
     let id = ui.make_persistent_id(id);
     let mut open = !pending && (searching || ui.ctx().data_mut(|data| data.get_persisted::<bool>(id)).unwrap_or(default_open));
     let (rect, response) = ui.allocate_exact_size(
-        vec2(dimension(ui.available_width()), if compact { t.control_height - t.space_4 } else { row_height() }),
+        vec2(
+            dimension(ui.available_width()),
+            if compact {
+                t.control_height - t.space_4
+            } else if super::settings_page_active(ui) {
+                t.control_height + t.space_2
+            } else {
+                row_height()
+            },
+        ),
         egui::Sense::click(),
     );
     crate::prefs_search::follow(ui, title, rect);
@@ -489,7 +639,9 @@ fn section_with_badge<R>(
     if rule_left < rule_right {
         t.secondary_hline(ui.painter(), rule_left..=rule_right, rect.center().y, t.dialog_rule);
     }
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::CollapsingHeader, ui.is_enabled(), open, crate::i18n::tr_label(title)));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::DisclosureTriangle, ui.is_enabled(), open, crate::i18n::tr_label(title)));
+    // A disclosure says whether it is open as expanded, as egui's own collapsing header does.
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(open));
     scenario::publish_handle(&format!("dialog:section:{title}"), response.rect.center());
     scenario::publish_rect(&format!("dialog:section:{title}"), rect);
     if response.clicked() && !pending && !searching {
@@ -513,7 +665,7 @@ fn section_with_badge<R>(
 /// query changes, so a short word does not lay out every command.
 pub(crate) fn search_fold<R>(ui: &mut Ui, title: &str, count: usize, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
     let t = Tokens::get();
-    let id = egui::Id::new(("prefs_search_fold", title));
+    let id = egui::Id::unique(("prefs_search_fold", title));
     let query = crate::prefs_search::query(ui);
     let mut open = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
     let previous = ui.data(|data| data.get_temp::<String>(id.with("query"))).unwrap_or_default();
@@ -562,7 +714,9 @@ pub(crate) fn search_fold<R>(ui: &mut Ui, title: &str, count: usize, add: impl F
         t.secondary_hline(ui.painter(), rule_left..=rect.right(), rect.center().y, t.dialog_rule);
     }
     let accessible = format!("{title} ({count})");
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::CollapsingHeader, ui.is_enabled(), open, &accessible));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::DisclosureTriangle, ui.is_enabled(), open, &accessible));
+    // A disclosure says whether it is open as expanded, as egui's own collapsing header does.
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(open));
     scenario::publish_rect("prefs:search:shortcuts", rect);
     scenario::publish_handle("prefs:search:shortcuts", response.rect.center());
     if response.clicked() {
@@ -580,19 +734,20 @@ pub(crate) fn search_fold<R>(ui: &mut Ui, title: &str, count: usize, add: impl F
     })
 }
 
-/// Picked-item list entry with a remove action. Returns that action's Response.
+/// Picked-item list entry with a remove action. Returns that action's Response, hovered while
+/// the pointer is anywhere on the row (its item lights up in the view, #3683).
 /// Tokens: control_height, space_8, font_label, text and icon-button tokens.
 /// Picked-item row with a remove action. Tokens: `control_height, space_8, font_label, text; icon-button tokens`.
 pub(crate) fn list_row(ui: &mut Ui, key: &str, text: &str) -> Response {
     let t = Tokens::get();
-    let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::hover());
+    let (rect, row) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::hover());
     let remove = egui::Rect::from_min_max(egui::pos2((rect.right() - row_height()).max(rect.left()), rect.top()), rect.max);
     let label = egui::Rect::from_min_max(rect.min, egui::pos2((remove.left() - t.space_8).max(rect.left()), rect.bottom()));
     paint_text(ui, label, text, egui::FontId::proportional(t.font_label), t.form_ink, false);
     let response = ui.push_id(key, |ui| super::icon_button_at(ui, remove, "close", "Remove")).inner;
     scenario::publish_rect(&format!("dialog:list:{key}"), rect);
     scenario::publish_handle(&format!("dialog:list:{key}:remove"), remove.center());
-    response
+    response.union(row)
 }
 
 /// Full-width rule; Tokens: dialog_rule. Use between groups without extra padding.
@@ -608,7 +763,7 @@ pub(crate) fn divider(ui: &mut Ui, key: &str) {
 
 /// Give a compound row's subfield its accessible name without allocating layout space.
 /// Name a subfield without allocating another row. Tokens: `none`.
-pub(super) fn named_control<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+pub(crate) fn named_control<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
     ui.scope_builder(egui::UiBuilder::new().id_salt(label).ui_stack_info(egui::UiStackInfo::default().with_tag_value(LABEL, label.to_owned())), add)
         .inner
 }
@@ -616,7 +771,13 @@ pub(super) fn named_control<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut U
 /// Publish geometry without replacing native accessibility. Tokens: `none`.
 pub(super) fn publish_geometry(ui: &Ui, response: &Response) {
     let label = label(ui);
-    scenario::publish_target_as(&format!("dialog:{label}"), &format!("dialog:widget:{label}"), response.rect);
+    scenario::publish_rect(&format!("dialog:widget:{label}"), response.rect);
+    // A click lands where the field shows: a field scrolled out of a dialog's field area, under
+    // its footer, has no handle (a click at its centre would press the button over it).
+    let shown = response.rect.intersect(ui.clip_rect());
+    if shown.is_positive() {
+        scenario::publish_handle(&format!("dialog:{label}"), shown.center());
+    }
 }
 
 #[cfg(test)]
@@ -633,7 +794,7 @@ pub(crate) fn text_lines(ui: &mut Ui, id: &str, text: &str) {
     let height = ui.fonts_mut(|f| f.row_height(&font));
     let response = egui::ScrollArea::vertical().id_salt(id).max_height(t.control_height * 15.0).show_rows(ui, height, lines.len(), |ui, rows| {
         for line in lines.get(rows).unwrap_or_default() {
-            ui.add(egui::Label::new(RichText::new(*line).font(font.clone()).color(t.form_ink)).truncate()).on_hover_text(*line);
+            ui.add(egui::Label::new(RichText::new(*line).font(font.clone()).color(t.form_ink)).truncate()).backing_on_hover_text(*line);
         }
     });
     scenario::publish_rect(&format!("dialog:lines:{id}"), response.inner_rect);
@@ -650,6 +811,7 @@ pub(crate) enum Text<'a> {
     Inline,
     Cell,
     NameCell(bool),
+    SelectedNameCell,
     MonoCell,
     Value(&'a str, bool),
 }
@@ -666,6 +828,15 @@ pub(crate) fn note_height(ui: &Ui, text: &str) -> f32 {
 }
 
 pub(crate) fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
+    text_impl(ui, text, style, None)
+}
+
+/// One name-cell tooltip: the action hint, with the full name only if the cell clips it.
+pub(crate) fn name_cell_with_hint(ui: &mut Ui, name: &str, strong: bool, hint: &str) -> Response {
+    text_impl(ui, name, Text::NameCell(strong), Some(hint))
+}
+
+fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>) -> Response {
     if crate::prefs_search::querying(ui) {
         let heading = matches!(style, Text::Heading(_));
         if heading {
@@ -683,16 +854,17 @@ pub(crate) fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
         }
     }
     let t = Tokens::get();
-    let fixed = matches!(style, Text::Cell | Text::NameCell(_) | Text::MonoCell | Text::Value(_, _));
+    let fixed = matches!(style, Text::Cell | Text::NameCell(_) | Text::SelectedNameCell | Text::MonoCell | Text::Value(_, _));
     let ink = match style {
         Text::Hint(_) | Text::Note(_) | Text::MonoNote(_) => t.form_dim,
         Text::Inline if in_catalog(ui) => t.form_dim,
         Text::Report(_, true) | Text::Value(_, true) | Text::Error(_) => t.form_error,
+        Text::SelectedNameCell => t.selected_ink,
         _ => t.form_ink,
     };
     let font = match style {
         Text::Inline if in_catalog(ui) => crate::fonts::semibold(t.font_small),
-        Text::NameCell(true) => crate::fonts::semibold(t.font_label),
+        Text::NameCell(true) | Text::SelectedNameCell => crate::fonts::semibold(t.font_label),
         Text::NameCell(false) => crate::fonts::medium(t.font_label),
         Text::Heading(_) => crate::fonts::semibold(t.font_button),
         Text::MonoCell | Text::Value(_, _) => egui::FontId::monospace(t.font_body),
@@ -706,38 +878,48 @@ pub(crate) fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
             vec2(dimension(ui.available_width()), row_height()),
             if matches!(style, Text::Value(_, _)) { egui::Sense::hover() } else { egui::Sense::click() },
         );
+        let tooltip = hover_hint.map(|hint| {
+            if ui.painter().layout_no_wrap(text.to_owned(), font.clone(), ink).size().x > rect.width() {
+                format!("{text}\n{hint}")
+            } else {
+                hint.to_owned()
+            }
+        });
         paint_text(ui, rect, text, font, ink, false);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
-        response.on_hover_text(text)
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
+        response.backing_on_hover_text(tooltip.as_deref().unwrap_or(text))
     } else if matches!(style, Text::Error(_)) {
-        egui::Frame::NONE
-            .fill(t.form_error_fill)
-            .corner_radius(t.control_radius)
-            .inner_margin(egui::Margin::symmetric(t.form_inset as i8, t.space_6 as i8))
-            .show(ui, |ui| {
+        crate::ui_kit::Container::show_backing(
+            ui,
+            egui::Frame::NONE
+                .fill(t.form_error_fill)
+                .corner_radius(t.control_radius)
+                .inner_margin(egui::Margin::symmetric(t.form_inset as i8, t.space_6 as i8)),
+            |ui| {
                 ui.set_min_width(dimension(ui.available_width()));
                 ui.add(egui::Label::new(RichText::new(text).font(font).color(ink)).wrap())
-            })
-            .inner
+            },
+        )
+        .inner
     } else if matches!(style, Text::Hint(_) | Text::Note(_) | Text::MonoNote(_)) {
         let width = dimension(ui.available_width());
         let galley = if matches!(style, Text::Note(_)) { note_galley(ui, text) } else { ui.painter().layout(text.to_owned(), font, ink, width) };
         let padding = if matches!(style, Text::Note(_) | Text::MonoNote(_)) { t.space_4 } else { 0.0 };
         let (rect, response) = ui.allocate_exact_size(vec2(width, galley.size().y + padding * 2.0), egui::Sense::hover());
         ui.painter().galley(egui::pos2(rect.left(), rect.top() + padding), galley, ink);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
         response
     } else {
         let label = egui::Label::new(RichText::new(text).font(font).color(ink));
         ui.add(if matches!(style, Text::Inline) { label.truncate() } else { label.wrap() })
     };
-    let response = if matches!(style, Text::Hint(_)) { response.on_hover_text(text) } else { response };
+    let response = if matches!(style, Text::Hint(_)) { response.backing_on_hover_text(text) } else { response };
     let (kind, key) = match style {
         Text::Hint(key) => ("hint", key),
         Text::Note(key) | Text::MonoNote(key) => ("note", key),
         Text::Report(key, _) | Text::Value(key, _) | Text::Error(key) | Text::Heading(key) => ("report", key),
         Text::Inline => ("inline", text),
-        Text::Cell | Text::MonoCell | Text::NameCell(_) => ("cell", text),
+        Text::Cell | Text::MonoCell | Text::NameCell(_) | Text::SelectedNameCell => ("cell", text),
     };
     let id = format!("dialog:{kind}:{key}");
     scenario::publish_rect(&id, response.rect);
@@ -760,7 +942,7 @@ pub(crate) fn summary_row(ui: &mut Ui, name: &str, summary: &str, enabled: &mut 
     let check = egui::Rect::from_min_size(rect.min + vec2(t.space_6, 0.0), vec2(t.space_24, rect.height()));
     let changed = ui
         .scope_builder(egui::UiBuilder::new().max_rect(check).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-            super::checkbox(ui, "", enabled).on_hover_text(crate::i18n::tr_label("Enable rule")).changed()
+            super::checkbox(ui, "", enabled).backing_on_hover_text(crate::i18n::tr_label("Enable rule")).changed()
         })
         .inner;
     let right = (rect.right() - dimension(actions_width) - t.space_6).max(check.right());
@@ -772,8 +954,8 @@ pub(crate) fn summary_row(ui: &mut Ui, name: &str, summary: &str, enabled: &mut 
     let detail = egui::Rect::from_min_max(egui::pos2(text.left(), text.center().y), text.max);
     paint_text(ui, title, name, crate::fonts::semibold(t.font_label), t.form_ink, false);
     paint_text(ui, detail, summary, egui::FontId::proportional(t.font_small), t.form_dim, false);
-    let response = ui.interact(text, ui.id().with("summary"), egui::Sense::hover()).on_hover_text(summary);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), format!("{name}: {summary}")));
+    let response = ui.interact(text, ui.scope_id().with("summary"), egui::Sense::hover()).backing_on_hover_text(summary);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), format!("{name}: {summary}")));
     scenario::publish_rect(&format!("dialog:inline:{name}"), title);
     scenario::publish_rect("dialog:report:rule_report", detail);
     ui.scope_builder(

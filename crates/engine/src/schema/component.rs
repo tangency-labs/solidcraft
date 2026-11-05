@@ -351,6 +351,130 @@ pub struct OccurrenceAlignResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Move timeline features (sketches too) into a component. Their ids, names and timeline order
+/// stay, the geometry stays where it is in the world, and the bodies they made move with them.
+/// Nothing changes when the move would break a feature, while the timeline is rolled back, or
+/// for a component placed more than once.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MoveFeaturesParams {
+    /// The features to move, by id or name.
+    pub features: Vec<IdOrName>,
+    /// The component they go to, by id or name. Default: the active component.
+    #[serde(default, deserialize_with = "present")]
+    pub component: Option<IdOrName>,
+}
+
+/// Move sketches to the part whose face they are drawn on (`component.move_sketches.to_parts`),
+/// in one undo step. A sketch whose plane is an exactly attached face of a part's body goes to
+/// that part, staying where it is on the face; the others stay where they are.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MoveSketchesToPartsParams {
+    /// The sketches to look at, by id or name. Default: every sketch in the design.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "Vec<IdOrName>")]
+    pub sketches: Option<Vec<IdOrName>>,
+}
+
+/// A sketch `component.move_sketches.to_parts` moved.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct SketchMovedToPart {
+    pub sketch: u64,
+    pub name: String,
+    /// The part it went to: its component id and name.
+    pub component: u64,
+    pub part: String,
+}
+
+/// A sketch `component.move_sketches.to_parts` left where it was, and why.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct SketchKeptInPlace {
+    pub sketch: u64,
+    pub name: String,
+    /// Why, as a code: `not_on_face`, `no_exact_attachment`, `design_body`, `part_missing` or
+    /// `already_in_part`; and in words.
+    pub code: String,
+    pub reason: String,
+}
+
+/// What `component.move_sketches.to_parts` returns.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct MoveSketchesToPartsResult {
+    /// How many sketches moved, and how many stayed.
+    pub moved: usize,
+    pub stayed: usize,
+    /// The sketches that moved, each with the part it went to.
+    pub sketches: Vec<SketchMovedToPart>,
+    /// The sketches that stayed, each with the reason.
+    pub kept: Vec<SketchKeptInPlace>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `component.move_features` returns.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct MoveFeaturesResult {
+    /// The names of the features that moved.
+    pub moved: Vec<String>,
+    /// The component they went to.
+    pub component: u64,
+    /// The bodies that moved with them.
+    pub bodies: Vec<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// A placement: an occurrence id, or its path of occurrence ids from the top of the design.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum PlacementRef {
+    Id(u64),
+    Path(Vec<u64>),
+}
+
+/// Move placements, timeline features and bodies into a component in one undo step, all or
+/// nothing. Placements move first and take what they hold, then features, which take the bodies
+/// they made, then the bodies still elsewhere (a body transfer, which leaves its features
+/// behind). Anything already in the component is left alone.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ReparentItemsParams {
+    /// The placements to move.
+    #[serde(default, deserialize_with = "present")]
+    pub occurrences: Option<Vec<PlacementRef>>,
+    /// The features to move, by id or name.
+    #[serde(default, deserialize_with = "present")]
+    pub features: Option<Vec<IdOrName>>,
+    /// The bodies to move, by name.
+    #[serde(default, deserialize_with = "present")]
+    pub bodies: Option<Vec<String>>,
+    /// The component they go to, by id or name. Default: the active component.
+    #[serde(default, deserialize_with = "present")]
+    pub component: Option<IdOrName>,
+    /// The placement of that component to place them by, as occurrence ids from the top.
+    #[serde(default, deserialize_with = "present")]
+    pub component_path: Option<Vec<u64>>,
+}
+
+/// What `browser.reparent` returns.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct ReparentItemsResult {
+    /// The component they went to.
+    pub component: u64,
+    /// The occurrence ids that moved.
+    pub occurrences: Vec<u64>,
+    /// The names of the features that moved.
+    pub features: Vec<String>,
+    /// The bodies that were transferred on their own.
+    pub bodies: Vec<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// Mirror components across a plane. Each occurrence is placed again as its mirror image, as
 /// the same part (`as: instance`, for a part symmetric about one of its own mid-planes) or as a
 /// new opposite-hand part (`as: opposite_hand`). A placement is a rigid move: the mirror image

@@ -13,7 +13,7 @@ use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("parameters.change", "Change Parameters", change_param).at("SOLID", "MODIFY").icon("params").params(
-        "name, expression (number or text), unit?: mm|cm|m|in|ft|deg|rad|\"\"|text (new parameters default to their value's unit; \
+        "name, expression (number or text), unit?: mm|cm|m|in|ft|deg|rad|\"\"|text (new parameters default to their value's unit, a length the design's units; \
          a text parameter's expression is its text, quotes round it optional: sketch texts' words are built from it), comment?, \
              favorite?: bool, new_name?: rename (references follow; an expression `new = value` renames to `new` and sets value, \
          or sets `new` when the expression is just `new`); or delete: name; or changes: {name: expression, …} (existing \
@@ -23,8 +23,8 @@ pub static COMMANDS: &[CommandSpec] = &[
          activation; driven parameters and restrictions wait for a configuration edit or activation)",
     ),
     CommandSpec::new("parameters.list", "List Parameters", list).icon("list").noundo().doc_only().params(
-        "favorites?: bool (only favourites), filter?: all|user|sketch|feature|favorites → parameters (name, expression, unit, value in its unit, \
-         source, feature/input, comment, favorite, uses, used_by, error) and cycles",
+        "favorites?: bool (only favourites), filter?: all|user|sketch|feature|favorites → parameters (name, expression, unit, value (mm/deg in every \
+         reply), display_value (in its own unit), source, feature/input, comment, favorite, uses, used_by, error) and cycles",
     ),
     CommandSpec::new("parameters.add", "Add User Parameter", add)
         .icon("new")
@@ -35,7 +35,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("parameters.delete", "Delete Parameter", delete)
         .icon("delete")
         .params("name (refused while something uses it; the error lists the users)"),
-    CommandSpec::new("parameters.favorite", "Favourite Parameter", favorite).icon("star").params("name, favorite?: bool (default true)"),
+    CommandSpec::new("parameters.favorite", "Favorite Parameter", favorite).icon("star").params("name, favorite?: bool (default true)"),
     CommandSpec::new("parameters.move", "Move Parameter", move_param)
         .icon("reorder")
         .params("name, before | after: another user parameter; the user parameter is listed just before or after it"),
@@ -177,8 +177,8 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(t) = s.doc.text_param(&name) {
         out["text"] = json!(t.text);
     }
-    out["value"] = json!(vals.get(&name).map(|v| v.v));
-    out["display_value"] = json!(s.doc.param_display_value(&vals, &name));
+    out["value"] = json!(vals.get(&name).map(|v| expr::round_reported(expr::reported_value(*v))));
+    out["display_value"] = json!(s.doc.param_display_value(&vals, &name).map(expr::round_reported));
     out["recomputed"] = json!(s.model.last_recomputed);
     out["restored"] = json!(s.model.last_restored);
     out["errors"] = json!(failing(s));
@@ -230,7 +230,18 @@ fn keep_dimension_start(s: &mut Session, name: &str) {
         }
         let reference: Vec<_> = stored.points.iter().map(|p| p.pos).collect();
         let hold = Hold { points: vec![start], radii: Vec::new() };
-        if !solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation() {
+        let solved = if trial.offsets.is_empty() && trial.freeform_offsets.is_empty() {
+            solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation()
+        } else {
+            // A solve against stale offset points can stretch an attached cap into a different
+            // tangency branch. Keep the start through the complete solve/refresh sequence.
+            let Some(p) = trial.points.get_mut(start) else { continue };
+            p.fixed = true;
+            s.doc
+                .solve_sketch_with_analysis(&vals, &mut trial, &stored.driving_values(), Some(stored), Analysis::StatusOnly)
+                .is_ok_and(|report| report.keeps_orientation())
+        };
+        if !solved {
             continue;
         }
         if stored.points.len() == trial.points.len() {
@@ -269,7 +280,8 @@ fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -
     }
     s.settle_value_edit(solved)?;
     let (vals, _) = s.doc.param_values();
-    let values: serde_json::Map<String, Value> = list.iter().map(|(n, _)| (n.clone(), json!(vals.get(n).map(|v| v.v)))).collect();
+    let values: serde_json::Map<String, Value> =
+        list.iter().map(|(n, _)| (n.clone(), json!(vals.get(n).map(|v| expr::round_reported(expr::reported_value(*v)))))).collect();
     let mut out = json!({"changed": values, "recomputed": s.model.last_recomputed, "restored": s.model.last_restored, "errors": failing(s)});
     if !switched.is_empty() {
         out["switched"] = json!(switched);
@@ -332,7 +344,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         return Ok(json!({"name": name, "unit": solidcraft_doc::text_params::TEXT_UNIT, "text": t.text, "value": null}));
     }
     Ok(
-        json!({"name": name, "unit": s.doc.param(&name).map(|x| x.unit.clone()), "value": vals.get(&name).map(|v| v.v), "display_value": s.doc.param_display_value(&vals, &name)}),
+        json!({"name": name, "unit": s.doc.param(&name).map(|x| x.unit.clone()), "value": vals.get(&name).map(|v| expr::round_reported(expr::reported_value(*v))), "display_value": s.doc.param_display_value(&vals, &name).map(expr::round_reported)}),
     )
 }
 
@@ -415,7 +427,9 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
                 .param_rows()
                 .into_iter()
                 .filter(|r| r.source == "user")
-                .map(|r| json!({"name": r.name, "expression": r.expression, "unit": r.unit, "value": r.value, "comment": r.comment, "favorite": r.favorite}))
+                // The `value` field keeps the number in the parameter's own unit, as the CSV
+                // column does, rounded for reading (#10747).
+                .map(|r| json!({"name": r.name, "expression": r.expression, "unit": r.unit, "value": r.display_value.or(r.value), "comment": r.comment, "favorite": r.favorite}))
                 .collect();
             serde_json::to_string_pretty(&rows).map_err(|e| bad(cmd, e.to_string()))?
         }
@@ -467,7 +481,9 @@ fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
         (None, None) => None,
     };
     let (vals, _) = s.doc.param_values();
-    let defaults = expr::Defaults::for_unit(unit.unwrap_or(""), 1.0);
+    // Bare numbers follow the asked-for unit when given, else the design's length unit (#9015).
+    let doc_len = expr::unit_info(s.doc.units.trim()).filter(|(k, _)| *k == Kind::Length).map(|(_, s)| s).unwrap_or(1.0);
+    let defaults = expr::Defaults::for_unit(unit.unwrap_or(""), doc_len);
     let refs = expr::references(&e);
     let lookup = |n: &str| vals.get(n).copied().ok_or_else(|| solidcraft_doc::DocError::Expr(format!("unknown parameter `{n}`")));
     let r = expr::eval_with_defaults(&e, &lookup, defaults).and_then(|v| match kind {
@@ -488,7 +504,7 @@ fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
                 (None, Kind::Angle) => v.to_degrees(),
                 (None, _) => v,
             };
-            json!({"ok": true, "value": v, "kind": k, "display_value": shown, "references": refs})
+            json!({"ok": true, "value": expr::round_reported(v), "kind": k, "display_value": expr::round_reported(shown), "references": refs})
         }
         Err(err) => json!({"ok": false, "error": err.to_string().trim_start_matches("expression: ").to_string(), "references": refs}),
     };
@@ -513,7 +529,8 @@ fn complete(s: &mut Session, p: &Value) -> Result<Value> {
     // parameters, then the others.
     rows.sort_by_key(|r| (!starts(&r.name), !r.favorite, r.source != "user"));
     for r in rows.into_iter().take(200) {
-        let v = r.value.map(|v| format!("{v:.4} {}", r.unit).trim().to_string()).unwrap_or_else(|| "error".into());
+        // The completion shows the parameter's own unit, so it reads `display_value`.
+        let v = r.display_value.or(r.value).map(|v| format!("{v:.4} {}", r.unit).trim().to_string()).unwrap_or_else(|| "error".into());
         let mut detail = format!("{} = {v}", r.expression);
         if let (Some(f), Some(i)) = (&r.feature, r.input) {
             detail.push_str(&format!(" ({f} {i})"));

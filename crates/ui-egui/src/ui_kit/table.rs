@@ -1,5 +1,6 @@
 //! Dense editable tables. Geometry and typography share the form label-column tokens.
 use super::metrics::*;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use crate::{scenario, theme::Tokens};
 use egui::{Response, Ui, vec2};
@@ -48,16 +49,7 @@ pub(crate) struct Table<'a> {
     reveal: Option<egui::Rect>,
 }
 
-/// Header, horizontally scrolling body and empty state. Regular rows use table_row_height.
-/// Tokens: form_label_width, font_label, dialog_label, space_4/8, dialog_rule, text/dim, selected_bg.
-pub(crate) fn table<R>(ui: &mut Ui, id: &str, columns: &[Column<'_>], empty: &str, add: impl FnOnce(&mut Ui, &mut Table<'_>) -> R) -> R {
-    table_custom(ui, id, columns, empty, |ui, table| {
-        table.headers(ui, |_, _| false);
-        add(ui, table)
-    })
-}
-
-/// The same table grid with caller-supplied header actions through Table::headers.
+/// Table grid with caller-supplied header actions through Table::headers.
 /// Custom cells own their actions; all body rows share the same widths and metrics.
 pub(crate) fn table_custom<R>(ui: &mut Ui, id: &str, columns: &[Column<'_>], empty: &str, add: impl FnOnce(&mut Ui, &mut Table<'_>) -> R) -> R {
     let mut reveal = None;
@@ -206,7 +198,10 @@ impl Table<'_> {
         let (rect, response) = ui.allocate_exact_size(vec2(self.width(), row_height() - t.space_4), egui::Sense::click());
         let stroke = t.control_border_stroke(t.control_border);
         let mut outline = Vec::new();
-        egui::epaint::tessellator::path::rounded_rectangle(&mut outline, rect.shrink(stroke.width * 0.5), f32::from(t.control_radius).into());
+        egui::epaint::tessellator::path::rounded_rectangle(
+            &mut outline,
+            egui::epaint::RoundedRect::new(rect.shrink(stroke.width * 0.5), f32::from(t.control_radius)),
+        );
         if let Some(first) = outline.first().copied() {
             outline.push(first);
         }
@@ -221,10 +216,10 @@ impl Table<'_> {
             t.form_dim,
             false,
         );
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), crate::i18n::tr_label(label)));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), crate::i18n::tr_label(label)));
         scenario::publish_handle(&format!("dialog:table:{}:add", self.id), rect.center());
         scenario::publish_rect(&format!("dialog:table:{}:add", self.id), rect);
-        response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(crate::i18n::tr_label(tooltip))
+        response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(crate::i18n::tr_label(tooltip))
     }
 
     fn row_content(&self, ui: &mut Ui, key: &str, selected: bool, force: bool, add: impl FnOnce(&mut TableRow<'_>)) -> Response {
@@ -236,7 +231,7 @@ impl Table<'_> {
         if selected || (ui.is_enabled() && ui.rect_contains_pointer(rect)) {
             ui.painter().rect_filled(rect, t.control_radius, if selected { t.selected_bg } else { t.hover });
         }
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), selected, key));
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, key));
         scenario::publish_rect(&format!("dialog:table:{}:{key}", self.id), rect);
         let ppp = ui.ctx().pixels_per_point().max(0.5);
         let left = (rect.left() * ppp).round() / ppp + t.space_8;
@@ -305,7 +300,102 @@ pub(crate) fn label_actions(ui: &mut Ui, text: &str, add: impl FnOnce(&mut Ui)) 
 fn header_label(ui: &mut Ui, label: &str) {
     let t = Tokens::get();
     ui.add(egui::Label::new(egui::RichText::new(crate::i18n::tr_label(label)).size(t.font_small).strong().color(t.form_dim)).truncate())
-        .on_hover_text(crate::i18n::tr_label(label));
+        .backing_on_hover_text(crate::i18n::tr_label(label));
+}
+
+/// How a table orders its rows by one column. `Listed` keeps the order the owner gave them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) enum Sort {
+    #[default]
+    Listed,
+    Ascending,
+    Descending,
+}
+
+impl Sort {
+    /// A click on the header steps ascending, descending, then back to the listed order.
+    pub(crate) fn next(self) -> Self {
+        match self {
+            Sort::Listed => Sort::Ascending,
+            Sort::Ascending => Sort::Descending,
+            Sort::Descending => Sort::Listed,
+        }
+    }
+
+    /// Order `items` by `key` in natural order (stable: equal names keep their listed order).
+    pub(crate) fn apply<T>(self, items: &mut [T], key: impl Fn(&T) -> &str) {
+        match self {
+            Sort::Listed => {}
+            Sort::Ascending => items.sort_by(|a, b| natural_cmp(key(a), key(b))),
+            Sort::Descending => items.sort_by(|a, b| natural_cmp(key(b), key(a))),
+        }
+    }
+}
+
+/// Natural order for names: runs of digits compare by value ("d2" before "d10"), letters
+/// ignore case ("Alpha" between "a" and "b"); exact ties fall back to the plain comparison.
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let (mut x, mut y) = (a.chars().peekable(), b.chars().peekable());
+    while let (Some(&p), Some(&q)) = (x.peek(), y.peek()) {
+        let order = if p.is_ascii_digit() && q.is_ascii_digit() {
+            let run = |it: &mut std::iter::Peekable<std::str::Chars<'_>>| {
+                let mut digits = String::new();
+                while let Some(c) = it.next_if(char::is_ascii_digit) {
+                    digits.push(c);
+                }
+                digits
+            };
+            let (m, n) = (run(&mut x), run(&mut y));
+            let (m_value, n_value) = (m.trim_start_matches('0'), n.trim_start_matches('0'));
+            // Compare the values by length then digits, so no run can overflow an integer;
+            // "01" sorts after "1".
+            m_value.len().cmp(&n_value.len()).then_with(|| m_value.cmp(n_value)).then_with(|| m.len().cmp(&n.len()))
+        } else {
+            x.next();
+            y.next();
+            p.to_lowercase().cmp(q.to_lowercase())
+        };
+        if order != Ordering::Equal {
+            return order;
+        }
+    }
+    x.next().is_some().cmp(&y.next().is_some()).then_with(|| a.cmp(b))
+}
+
+/// A header that sorts the table by its column. Clicking steps through [`Sort::next`]; the
+/// chevron shows the current direction (up for ascending), and none when rows are as listed.
+/// Tokens: control_radius, hover, space_4/14, font_small, form_dim/primary.
+pub(crate) fn sort_header(ui: &mut Ui, label: &str, sort: &mut Sort) -> Response {
+    let t = Tokens::get();
+    let rect = ui.max_rect();
+    let response = ui.allocate_rect(rect, egui::Sense::click());
+    if response.hovered() {
+        ui.painter().rect_filled(rect, t.control_radius, t.hover);
+    }
+    let text = crate::i18n::tr_label(label);
+    let font = crate::fonts::semibold(t.font_small);
+    let width = ui.painter().layout_no_wrap(text.to_owned(), font.clone(), t.form_dim).size().x.ceil();
+    let text_rect = egui::Rect::from_min_max(rect.min, egui::pos2((rect.left() + width).min(rect.right() - t.space_14 - t.space_4), rect.bottom()));
+    super::text::paint_text(ui, text_rect, text, font, t.form_dim, false);
+    let icon =
+        egui::Rect::from_center_size(egui::pos2(text_rect.right() + t.space_4 + t.space_14 * 0.5, rect.center().y), vec2(t.space_14, t.space_14));
+    match *sort {
+        Sort::Ascending => crate::icons::paint_ink_flipped(ui.painter(), icon, "chevron", t.form_primary),
+        Sort::Descending => crate::icons::paint_ink(ui.painter(), icon, "chevron", t.form_primary),
+        Sort::Listed if response.hovered() => crate::icons::paint_ink(ui.painter(), icon, "chevron", t.form_dim.gamma_multiply(0.5)),
+        Sort::Listed => {}
+    }
+    if response.clicked() {
+        *sort = sort.next();
+    }
+    let tip = match *sort {
+        Sort::Listed => "Sort A to Z",
+        Sort::Ascending => "Sort Z to A",
+        Sort::Descending => "Back to the original order",
+    };
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), text));
+    response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(crate::i18n::tr_label(tip))
 }
 
 /// Column removal appears inside the hovered header only. Keeps the former × button handle.
@@ -376,7 +466,7 @@ pub(crate) fn active_pill(ui: &mut Ui) {
     let (rect, response) = ui.allocate_exact_size(vec2(width, t.font_small + t.space_6), egui::Sense::hover());
     ui.painter().rect(rect, t.radius_xl, t.control_fill, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
     super::text::paint_text(ui, rect.shrink2(vec2(t.space_8, 0.0)), label, crate::fonts::semibold(t.font_small), t.form_primary, false);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), label));
     scenario::publish_handle(&format!("dialog:inline:{label}"), rect.center());
     scenario::publish_rect(&format!("dialog:inline:{label}"), rect);
 }

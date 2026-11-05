@@ -1,0 +1,44 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "radius": 20,
+    "height": 10,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     6,
+     0,
+     -1
+    ],
+    "radius": 5,
+    "height": 12,
+    "operation": "cut",
+    "targets": [
+     "Part"
+    ],
+    "name": "H"
+   }
+  },
+  {
+   "command": "solid.pattern.circular",
+   "params": {
+    "features": [
+     "H"
+    ],
+    "axis": "Z",
+    "count": 6
+   }
+  }
+ ]
+}

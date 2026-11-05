@@ -1,0 +1,32 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     -1,
+     0,
+     0
+    ],
+    "axis": "X",
+    "radius": 40,
+    "height": 2,
+    "body_name": "Disc"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     -3,
+     0,
+     0
+    ],
+    "axis": "X",
+    "radius": 20,
+    "height": 6,
+    "operation": "cut"
+   }
+  }
+ ]
+}
