@@ -29,8 +29,6 @@ pub const RESERVED: &[&str] = &[
     "Ctrl+O",
     "Ctrl+W",
     "Ctrl+Comma",
-    // The browser's search (`browser::browser_contents`).
-    "Ctrl+F",
     "Ctrl+C",
     "Ctrl+X",
     "Ctrl+V",

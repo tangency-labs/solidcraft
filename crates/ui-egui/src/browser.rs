@@ -1445,8 +1445,10 @@ pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else if ui.rect_contains_pointer(ui.max_rect())
         && !ui.ctx().text_edit_focused()
         && ui.input(|i| i.modifiers.command_only() && i.key_pressed(egui::Key::F))
+        && crate::keymap::commands_for(app, &crate::keymap::key_name(egui::Key::F, egui::Modifiers::COMMAND)).is_empty()
     {
-        // A field being typed in keeps the keyboard.
+        // A field being typed in keeps the keyboard, and a command given this key keeps it: the
+        // magnifier opens the search then.
         show_search(app);
     }
     if !crate::render_workspace::browser_mode(app, ui) {
@@ -3321,7 +3323,9 @@ fn entry_row(
         return;
     }
     app.tree.remember(&e.row_key);
-    let pattern_key = e.patterns.as_deref();
+    // A search lists what it found and what holds it. A sketch's patterns aren't searched, so a
+    // found sketch shows neither them nor their fold until the search ends.
+    let pattern_key = e.patterns.as_deref().filter(|_| !app.tree.search.on());
     let start_open = rows_start_open(app);
     let patterns_open = pattern_key.is_some_and(|key| is_open(app, key, start_open));
     let revealed = folder == "bodies" && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b));

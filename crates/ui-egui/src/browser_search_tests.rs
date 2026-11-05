@@ -519,10 +519,6 @@ fn the_search_is_in_both_browser_layouts() {
 
 #[test]
 fn ctrl_f_over_the_browser_takes_the_keyboard() {
-    assert!(
-        crate::keymap::RESERVED.contains(&crate::keymap::key_name(egui::Key::F, egui::Modifiers::COMMAND).as_str()),
-        "it can't be given to a command"
-    );
     let mut h = assembly();
     let row = handle_at("row:Document Settings").unwrap();
     h.call("ui.move", json!({"x": row.x, "y": row.y}));
@@ -548,6 +544,44 @@ fn ctrl_f_opens_a_bar_that_waits() {
     h.call("ui.text", json!({"text": "web"}));
     h.frames(2);
     assert_eq!(h.app.tree.search.text, "web");
+}
+
+/// Ctrl+F isn't the app's own key: a command given it before the search keeps it, saved or
+/// bound now, and the magnifier opens the search instead.
+#[test]
+fn a_command_given_ctrl_f_keeps_it() {
+    let key = crate::keymap::key_name(egui::Key::F, egui::Modifiers::COMMAND);
+    assert_eq!(crate::keymap::saved_keys("view.fit", &json!(key)), Some(vec![key.clone()]), "a saved binding loads");
+    let mut h = assembly();
+    crate::keymap::bind(&mut h.app, "view.fit", &key, false).unwrap();
+    let row = handle_at("row:Document Settings").unwrap();
+    h.call("ui.move", json!({"x": row.x, "y": row.y}));
+    h.frames(1);
+    h.call("ui.key", json!({"key": "F", "cmd": true}));
+    h.frames(2);
+    assert!(handle_at("browser:search").is_none(), "the command has the key");
+    open(&mut h);
+}
+
+/// A found sketch shows no pattern rows: patterns aren't searched, so they would be rows the
+/// search didn't find. They come back when it ends.
+#[test]
+fn a_found_sketch_keeps_its_patterns_folded() {
+    let mut h = assembly();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Patterned Sketch"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.app.run("sketch.line", json!({"points": [[10, 5], [15, 5]], "ids": ["source"]})).unwrap();
+    let pattern = h.app.run("sketch.pattern.circular", json!({"entities": ["source"], "center": "origin", "count": 3})).unwrap();
+    h.app.finish_sketch();
+    h.frames(6);
+    let row = format!("browser:sketch-pattern:{sketch}:{}", pattern["pattern"].as_str().unwrap());
+    assert!(handle_at(&row).is_some(), "the pattern's row, before the search");
+    search(&mut h, "Patterned");
+    assert_eq!((total(&h), count("Patterned Sketch")), (1, 1));
+    assert!(handle_at(&row).is_none() && handle_at("fold:Patterned Sketch").is_none());
+    h.app.tree.search.clear();
+    h.frames(2);
+    assert!(handle_at(&row).is_some());
 }
 
 /// Names in other scripts match, ignoring case where the script has one, and the field's limit
