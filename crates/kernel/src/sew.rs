@@ -1508,7 +1508,16 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
     let mut volume = vec![0.0; groups.len()];
     for (k, g) in groups.iter().enumerate() {
         if closed.get(k).copied().unwrap_or(false) {
-            let v = flux_of(g, &|p| p * (1.0 / 3.0))?;
+            // About a point of the shell: each face's share is then as large as the shell, where
+            // about a far origin the shares are large and cancel down to the volume.
+            let c = g
+                .first()
+                .and_then(|f| faces.get(*f))
+                .and_then(|f| f.loops.first()?.first())
+                .and_then(|u| edges.get(u.edge as usize))
+                .and_then(|e| vertices.get(e.vertices[0] as usize))
+                .map_or(Vec3::ZERO, |p| v3(*p));
+            let v = flux_of(g, &|p| (p - c) * (1.0 / 3.0))?;
             if !(v.abs() > 0.0) || !v.is_finite() {
                 return Err(fail("a closed shell encloses no volume".into()));
             }

@@ -585,8 +585,11 @@ const GAUSS4: [(f64, f64); 4] = [
     (0.861_136_311_594_052_6, 0.347_854_845_137_453_8),
 ];
 
-/// Pieces each pcurve is integrated in, and how many Gauss panels cover a v range.
-const FLUX_PIECES: usize = 32;
+/// Gauss pieces to each knot span of a pcurve: one for a straight one (on a plane the integrand is
+/// then a polynomial the Gauss rule takes exactly), two for a curved one; the most one pcurve
+/// takes, past which they are spread evenly over it; and how many Gauss panels cover a v range.
+const FLUX_SPAN_PIECES: [usize; 2] = [1, 2];
+const FLUX_MAX_PIECES: usize = 64;
 const FLUX_PANELS: usize = 4;
 
 /// The flux of `field` through a face, `∫∫ field(S)·(S_u × S_v) du dv` over the (u, v) region its
@@ -610,16 +613,35 @@ pub fn face_flux(s: &SurfaceEval, v0: f64, loops: &[Vec<(&Curve2, bool)>], field
     };
     let mut total = 0.0;
     for (c, forward) in loops.iter().flatten() {
-        let [t0, t1] = c.interval()?;
-        let at = |k: f64| {
-            let f = k / FLUX_PIECES as f64;
-            // Exactly the ends at f = 0 and 1, whatever the interval's rounding.
-            super::pcurve::eval(c, if *forward { t0 * (1.0 - f) + t1 * f } else { t1 * (1.0 - f) + t0 * f })
-        };
-        for k in 0..FLUX_PIECES {
-            let (a, m, z) = (at(k as f64)?, at(k as f64 + 0.5)?, at(k as f64 + 1.0)?);
-            total -= g(m[0], m[1])? * (z[0] - a[0]);
+        // `∫ −G u′ dt` over the pcurve, Gauss–Legendre on each piece; a use against the pcurve's
+        // direction runs it backwards.
+        let sign = if *forward { 1.0 } else { -1.0 };
+        for [a, b] in flux_pieces(c)? {
+            let (mid, half) = (0.5 * (a + b), 0.5 * (b - a));
+            for (x, w) in GAUSS4 {
+                let (p, d) = super::pcurve::eval_d1(c, mid + half * x)?;
+                total -= sign * w * half * g(p[0], p[1])? * d[0];
+            }
         }
     }
     total.is_finite().then_some(total)
+}
+
+/// The pieces `face_flux` integrates pcurve `c` in: [`FLUX_SPAN_PIECES`] to each of its knot
+/// spans, or [`FLUX_MAX_PIECES`] spread evenly over it where that is more.
+fn flux_pieces(c: &Curve2) -> Option<Vec<[f64; 2]>> {
+    let [t0, t1] = c.interval()?;
+    let (knots, count, rational) = match c {
+        Curve2::Spline { knots, points } => (knots, points.len(), false),
+        Curve2::RationalSpline { knots, homogeneous } => (knots, homogeneous.len(), true),
+    };
+    let straight = !rational && knots.len().checked_sub(count + 1)? == 1;
+    let each = FLUX_SPAN_PIECES[usize::from(!straight)];
+    let spans: Vec<[f64; 2]> = knots.windows(2).filter(|w| w[1] > w[0] && w[0] >= t0 && w[1] <= t1).map(|w| [w[0], w[1]]).collect();
+    let even = |n: usize, [a, b]: [f64; 2]| (0..n).map(move |k| [a + (b - a) * k as f64 / n as f64, a + (b - a) * (k + 1) as f64 / n as f64]);
+    Some(if spans.is_empty() || spans.len() * each > FLUX_MAX_PIECES {
+        even(FLUX_MAX_PIECES, [t0, t1]).collect()
+    } else {
+        spans.into_iter().flat_map(|s| even(each, s)).collect()
+    })
 }

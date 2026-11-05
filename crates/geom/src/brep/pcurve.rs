@@ -697,6 +697,35 @@ pub fn eval(c: &Curve2, t: f64) -> Option<[f64; 2]> {
     (s[2].abs() > 0.0).then(|| [s[0] / s[2], s[1] / s[2]])
 }
 
+/// The point of pcurve `c` at `t` and its first derivative (`None` outside its interval or for a
+/// malformed record).
+pub fn eval_d1(c: &Curve2, t: f64) -> Option<([f64; 2], [f64; 2])> {
+    let (knots, count) = match c {
+        Curve2::Spline { knots, points } => (knots, points.len()),
+        Curve2::RationalSpline { knots, homogeneous } => (knots, homogeneous.len()),
+    };
+    let p = knots.len().checked_sub(count + 1)?;
+    let (first, ders) = crate::bspline::basis_derivatives(knots, p, count, t, 1)?;
+    // The homogeneous point and its derivative, then the quotient rule: C' = (A' − w′C) / w.
+    let (mut a, mut d) = ([0.0; 3], [0.0; 3]);
+    for (j, n) in ders.iter().enumerate() {
+        let q = match c {
+            Curve2::Spline { points, .. } => points.get(first + j).map(|&[u, v]| [u, v, 1.0])?,
+            Curve2::RationalSpline { homogeneous, .. } => *homogeneous.get(first + j)?,
+        };
+        let (n0, n1) = (*n.first()?, n.get(1).copied().unwrap_or(0.0));
+        for k in 0..3 {
+            a[k] += n0 * q[k];
+            d[k] += n1 * q[k];
+        }
+    }
+    if !(a[2].abs() > 0.0) {
+        return None;
+    }
+    let pt = [a[0] / a[2], a[1] / a[2]];
+    Some((pt, [(d[0] - d[2] * pt[0]) / a[2], (d[1] - d[2] * pt[1]) / a[2]]))
+}
+
 /// The `p + 1` basis functions non-zero on knot span `span` at `t`, of any degree (NURBS Book
 /// A2.2).
 fn basis(knots: &[f64], p: usize, span: usize, t: f64) -> Option<Vec<f64>> {
