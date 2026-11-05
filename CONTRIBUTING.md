@@ -91,4 +91,4 @@ accepted.
 - **Every commit builds,** and the tests it touches pass, or are listed known failing with their
   reason.
 - **Show the evidence:** the commands you ran and their results
-  ([docs/completion-evidence.md](docs/completion-evidence.md)).
+  ([the completion evidence checklist](docs/porting.md#completion-evidence-checklist)).

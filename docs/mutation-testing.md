@@ -1,14 +1,13 @@
 # Mutation testing
 
-Mutation testing changes the code in small, behavior-changing ways and asks whether
-the checks notice. For solidcore the useful question is narrower than the usual one:
-a unit has **two** checks — its Rust unit tests and its difftest parity against the C++
-reference — and a wrong implementation matters only if **both** let it through.
-`scripts/mutants.sh` measures exactly that.
+Mutation testing changes the code in small, behaviour-changing ways and asks whether the checks
+notice. A mutant that every check lets through is behaviour nothing constrains: a missing
+assertion, an unexercised branch, or an equivalent or unreachable mutation to triage away.
 
-A mutant that passes the unit tests *and* the unit's difftest is behavior nothing
-constrains: either a missing assertion, a difftest record that does not export the
-state, an unexercised branch, or an equivalent/unreachable mutation to triage away.
+solidcore's correctness is proved directly, by closed forms, geometric checks and invariants
+(AGENTS.md §1), so its own tests are the check that counts. `scripts/mutants.sh` also runs the
+unit's difftest against the C++ reference; that comparison matters only for code ported
+unchanged, and a mutant the tests miss is a missing test whatever the difftest says.
 
 ## Quick start
 
