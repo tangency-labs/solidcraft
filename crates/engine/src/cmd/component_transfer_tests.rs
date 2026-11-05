@@ -667,3 +667,15 @@ fn sketches_to_parts_takes_a_name_that_looks_like_an_id_as_the_name() {
     let kept: Vec<u64> = r["kept"].as_array().unwrap().iter().filter_map(|k| k["sketch"].as_u64()).collect();
     assert_eq!(kept, [named], "{r}");
 }
+
+/// `component.move_sketches` with `"2"` moves the sketch named "2", and with the number 2 the
+/// sketch with that id, as the other component commands (#9748).
+#[test]
+fn move_sketches_takes_a_name_that_looks_like_an_id_as_the_name() {
+    for (key, moves_named) in [(json!("2"), true), (json!(2), false)] {
+        let (mut s, part, named, numbered) = sketch_named_like_an_id();
+        run(&mut s, "component.move_sketches", json!({"sketches": [key], "component": part}));
+        let component = |id: u64| s.doc.feature(id).map(|f| f.component);
+        assert_eq!((component(named) == Some(part), component(numbered) == Some(part)), (moves_named, !moves_named), "{key}");
+    }
+}
