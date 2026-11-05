@@ -802,6 +802,14 @@ impl Sketch {
         }
     }
 
+    /// Forget the id counters a fingerprint must not see: they advance with every id made,
+    /// including ones since deleted. The document keeps them; only a copy about to be hashed
+    /// calls this. The display options stay, because `three_d` and the `hide_*` flags change
+    /// what the evaluated sketch does.
+    pub fn clear_id_counters(&mut self) {
+        self.counters.clear();
+    }
+
     /// A new unused id with the given prefix (`l` → `l3`).
     pub fn fresh(&mut self, prefix: &str) -> Result<String> {
         let mut n = self.counters.get(prefix).copied().unwrap_or(0);
