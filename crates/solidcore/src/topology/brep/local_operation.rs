@@ -157,7 +157,12 @@ pub fn local_operation(
     executive.set_local_surfaces(&all_faces, new_list);
     // A face's surface is extended to meet the moved surfaces, which the box is to hold
     // (WR-534), not to meet an offset: by upstream's five half-radii of the sphere bounding
-    // it (more than its diameter, the farthest any point in it lies from a face in it)
+    // it (more than its diameter, the farthest any point in it lies from a face in it).
+    // Still upstream's multiple, not a reach derived from the moved surfaces: a derived
+    // reach is zero (or rounding) beside faces where nothing moves, and the local operation
+    // has no offset to add past it, so those meetings touch their surfaces' sides and the
+    // results open (plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md,
+    // "The local operation's derived reach")
     executive.set_extension_bound(Some(2.5 * radius));
     // the shell faces get copied without being offset: none
     executive.set_shell_faces(&[]);

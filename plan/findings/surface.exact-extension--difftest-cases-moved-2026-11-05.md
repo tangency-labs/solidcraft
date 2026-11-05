@@ -746,3 +746,56 @@ The two inset defeature cases now take the C++ reference's least x (4 and 2.0000
 - `pe_Fillet_cyl_on_box_f2_d0_in_ext` (rounding): `values.result.geometry[2]` C++ -1.1102230246251565e-16, Rust -2.220446049250313e-16 — **rounding (within 1e-11 relative at part scale)**
 - `pe_Fillet_cyl_on_box_w_fillet1_f2_d0_in_ext` (rounding): `values.result.geometry[1]` C++ -1.1102230246251565e-16, Rust -7.771561172376096e-16 — **rounding (within 1e-11 relative at part scale)**
 - `pe_Fillet_cyl_on_box_w_fillet2_f1_d0_out_ext` (geometry): `values.result.geometry[4]` C++ 7.500000000000007e-1, Rust 5.75e0; `ints.result.counts[2]` C++ 8, Rust 11 (+6 more) — **unproved: unsound on both (check lines main 3, branch 4), no sound reference**
+
+
+## The local operation's derived reach: tried, not kept (2026-11-05, eighteenth agent)
+
+The local operation still extends every surface by upstream's 2.5 radii of the bounding sphere.
+A reach derived from the geometry, the way the offset's is (`reach::extension_reach`), was built
+and measured: `reach::local_extension_reach` (commit e293bbdd0, reverted by the next commit; also
+`notes-f-split/local-op-reach-draft.patch`). Each face's tangent plane meets its neighbours' (moved
+faces at their new surfaces' nearest points) along each edge and at each corner; the margin is that
+reach plus the largest move beside the face. Its closed-form tests pass: a raised top gives
+(reach, move) = (h, h), a top tilted by θ gives (tan θ, sin θ), and nothing moved gives (0, 0).
+
+**Why it can't serve yet.** The executive re-intersects every face with its neighbours, including
+faces where nothing moved. There the derived reach is 0, or a rounding residue, and the local
+operation has no offset to add past it. (The offset adds one offset distance so that each meeting
+crosses the extended surface's side rather than touching it.) So:
+- with margin 0 the surface is not extended, its meetings lie on its own sides, and the result
+  opens: `box_face0_same` (a face replaced by its own plane: all six faces have reach 0 and move 0);
+- with a rounding-sized margin the exact extension fails: `wr_566_local_operation_closes_a_wall`
+  face 6 got 7.1e-15 and `analytic_extended_sides` returned SM_ERR (both wr_566 tests and both
+  `wr_648_offset_faces_closed_wall_join` tests fail).
+No quantity of the operation sizes that crossing margin when nothing moves. A tolerance-sized one
+is below what the extension certifies, and any other is a chosen multiple again. The honest fixes
+change the structure, so they are the owner's call:
+- (a) keep the edges between faces that keep their surfaces, instead of re-intersecting them;
+- (b) give the crossing margin a certified size, such as the intersector's own resolution at the
+  part's scale.
+
+**What moved under the derived reach** (difftest `topology.brep_local_operation` against the
+03:24 report of this branch, which uses 2.5R; `SOLIDCORE_CPP_DIR=~/work/retire-flags-0335/bin/cpp`):
+58 of 165 cases changed values. One known-mismatch case is new: `fc0029` passed before, and after
+the change `values.geometry[447]` is C++ 5.238277689001029e-4 against Rust 5.321193916485071e-4, and
+`[459]` 1e-5 against 1.748554651052564e-5, with the same body (manifold, volume 1252.27026386999,
+the input's). Measured with `difftest::soundness` (main / 2.5R / derived):
+- *Better, 8*: `gen0041`, `gen0044`, `gen0045`, `gen0063`, `gen0075`, `gen0083`, `gen0088`, `gen0091`
+  become sound (0 check lines, manifold, volume 591.8358 or 983422.1666). They are unsound on main
+  and with 2.5R. These are extrusion/pyramid moves where 2.5R overshoots.
+- *Worse, 10*: these go from a manifold solid to not manifold: `box_face0_same` and its
+  `attributed_` copy, `gen0002`,
+  `gen0054`, `gen0082` (all faces replaced by themselves, offset 0, no tilt); `fc0000`, `fc0003`,
+  `fc0020` (one "same" face among the moves); and `fc0014`, `fc0025`. In `fc0014` the 14 faces away
+  from the moved one get reach 0 and move 0, the case above.
+- *The same state, 39*: the other moved cases keep their manifold state. Their volumes, where
+  there is one, agree with 2.5R within 6e-11 relative for the boxes (the exact 1050, 950 or 1020)
+  and within 2e-8 for the other generated cases. Seven generated cases are unsound under all three and
+  differ more: `gen0003`, `gen0033`, `gen0042`, `gen0047`, `gen0058` and `gen0081` by 2e-7 to 3e-6,
+  and `gen0007` by 2.4e-4 (2264.36 derived, 2263.81 with 2.5R, 2261.60 on main).
+- Suite: `wr_534_default_leaves_the_far_top_open` fails because the derived reach closes the far
+  top without the WR-534 fix (an improvement; the test pins upstream's open result). The wr_566 and
+  wr_648 failures are above. The other local-op tests pass (issue_1442, 1462, 1875, 1945, 2020,
+  2260, wr_530 ×2, wr650, fork_a96ce9f, 1061).
+
+With the revert, the branch's local-op results are as recorded above (2.5R), unchanged.
