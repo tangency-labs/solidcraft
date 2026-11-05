@@ -106,8 +106,8 @@ that circle. The frame itself is then the exact closed form, not built from the 
 
 ![The same profile carried along a path in a rotation-minimizing frame and in a Frenet frame.](procedural-sweep/rmf-vs-frenet.svg)
 
-*Figure 1. Look at the green normals staying on one side of the path, and the red Frenet normals
-vanishing on the straight and flipping at the inflection.*
+*Figure 1. Look at the rotation-minimizing normals staying on one side of the path, and the Frenet
+normals vanishing on the straight and flipping at the inflection.*
 
 The frame is a property of the path alone, its rotation-minimizing (parallel transport) frame
 [1, 2, 6]: x = T′ / |T′|, z the unit normal that turns with x and no further, y = z × x. It obeys
