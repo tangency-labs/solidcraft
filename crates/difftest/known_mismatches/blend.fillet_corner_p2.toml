@@ -10,3 +10,32 @@ why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--ble
 unit = "blend.fillet_corner_p2"
 case = "p1_corner_tangent_nx1_closed_g1_query0"
 why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the closed Nx1 corner's GetTangentFilletSolver override is deleted (a closed edge meeting itself G1 is the Join); main with fillet_blend_corner on gives the same result (values.solvers[0]: cpp=0e0 rust=-1e0)"
+
+# The exact surface extension replaces the fitted one (branch land-me/split-ext): passed on
+# main 4b10d7d6e (the old path), moves on the branch; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md
+# names each case and its value.
+
+[[mismatch]]
+unit = "blend.fillet_corner_p2"
+case = "corner_adjust_concave_face_05"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.fillet_corner_p2"
+case = "corner_adjust_concave_face_46"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.fillet_corner_p2"
+case = "corner_adjust_concave_face_48"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.fillet_corner_p2"
+case = "corner_adjust_concave_face_67"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.fillet_corner_p2"
+case = "corner_adjust_concave_face_69"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"

@@ -10,3 +10,292 @@ case = "single_face_box_with_large_fillet_2"
 libc = "glibc"
 cpp_defect = "UB-280"
 why = "C++ heap-layout dependent (UB-280): crashes or returns a build-dependent result; the Rust output is the same in every build"
+
+# The exact surface extension replaces the fitted one (branch land-me/split-ext): passed on
+# main 4b10d7d6e (the old path), moves on the branch; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md
+# names each case and its value.
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "add_by_faces_extrusion"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "attributes_add_by_faces_extrusion"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "attributes_rebuild_fillets_defillet"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "ext_dist_-1.0_box_with_large_fillet"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "ext_dist_0.001_box_with_large_fillet"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "extended_surface_1_inset_cube_1x1fillet"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "extended_surface_2_inset_cube_1x2fillet"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "extended_surface_3_inset_cube_1x3fillet"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "extended_surface_4_inset_cube_3x1fillet"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "extended_surface_5_flathead_screw_top"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "extended_surface_6_brep1"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "extended_surface_7_LShape_I"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "extended_surface_7_LShape_I_feat_rb0"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "extended_surface_7_LShape_I_feat_rb2"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "extended_surface_8_LShape_II"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "extended_surface_9_Platte"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "extended_surface_9_Platte_feat_rb0"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "extended_surface_9_Platte_feat_rb2"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "fillet_each_cyl_on_box_w_fillet"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "fillet_each_filleted_box"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "fillet_each_filleted_box_pair"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "fillet_each_torii_fillet"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "fillet_each_torii_fillet_b"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "fillet_group_fillet1019_rb23"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "fillet_group_inset_cube_1x3fillet_rb23"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "fillet_group_inset_cube_3x1fillet_rb23"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "mitred_rounds_box_top_r3"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "multi_feature_adv_extrusion"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "multi_feature_extrusion"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "multi_rebuild_0_extrusion"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "rb_13_box_with_large_fillet_6"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "rb_13_filleted_box_9"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "rb_22_box_with_large_fillet_6"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "rb_22_defillet_8"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "rb_33_defillet_8"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "rebuild_fillets_defillet"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "restore_before_defeature_defillet"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_box_with_large_fillet_1"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_box_with_large_fillet_4"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_box_with_large_fillet_6"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_cyl_on_box_w_fillet_1"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_cyl_on_box_w_fillet_5"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_cyl_on_box_w_fillet_6"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_cyl_on_box_w_fillet_7"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_cyl_on_box_w_fillet_8"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_defillet_0"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_defillet_2"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_defillet_8"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_fillet1019_4"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_fillet1019_6"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_fillet1019_8"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_filleted_box_6"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_filleted_box_7"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_filleted_box_8"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_filleted_box_9"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_inset_cube_1x1fillet_4"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_loop_circle_defillet_2"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"

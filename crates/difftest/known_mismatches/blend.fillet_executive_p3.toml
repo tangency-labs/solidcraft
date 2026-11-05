@@ -786,3 +786,18 @@ why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--ble
 unit = "blend.fillet_executive_p3"
 case = "preview-radius-tiny"
 why = "solidcore refuses the 1e-12 round as RoundTooSmall naming 2.414e-5 (status 1001, plan/findings/blend.fillet_executive_p3--2718-moved-four-cases-too-small-refusal-and-check-writing-to-the-body-2026-11-05.md); C++ previews it (values.preview.len: cpp=111 rust=5)"
+
+[[mismatch]]
+unit = "blend.fillet_executive_p3"
+case = "private-upstream-rollover-404-cyl-on-box1-edge12-r2"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.fillet_executive_p3"
+case = "real-box-fillet1v-r3-shell-closed"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "blend.fillet_executive_p3"
+case = "real-box-fillet4v-r3-shell-closed"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"

@@ -1,0 +1,511 @@
+# The exact surface extension moves 446 difftest cases (2026-11-05)
+
+Branch `land-me/split-ext` (on main 4b10d7d6e) replaces the kernel's fitted surface extension
+(`CreateExtendedSurface` on `N_SrfExtendByDist` / `ST_surxsdr`: an estimated distance, a
+least-squares fit, knot removal within a tolerance that can move the source's own part) by the
+exact extension (`surface::extend`: `extended_sides`, `extended_by_distance`), and deletes the old
+path. Every consumer that extended a surface now extends exactly: the offset executive's extended
+surfaces, the feature executive's ExtSurfaceRebuild, the lamina and seam extensions, and the
+fillet rails. The offset executive's margin is `|offset| * 5` (none for a zero offset). Upstream
+passes the signed distance, which the exact extension refuses.
+
+**How the old result was reproduced.** Each case below passes on main 4b10d7d6e and fails on the
+branch. Main is the old fitted path, which is upstream's construction. Both trees were measured
+by running the same `difftest --features cpp` units against the same C++ reference
+(`SOLIDCORE_CPP_DIR` is the pinned build, cpp-ref key v1-3fd5b9548d19-726643fb17a52b7d), and
+the reports were compared case by case. Each case lists its first mismatches: the C++ value is
+the old path's, the Rust value is the exact path's.
+
+**Kinds of move.**
+- *Rounding*: every listed difference is within 1e-11 relative at the part's scale. It comes
+  from the extension's parameters or net no longer passing through knot removal. Precision at
+  part scale is enough (owner).
+- *Refusal* (`offset.offset_executive_p1`, generated and `extend_*` cases): the exact extension
+  refuses an extension it can't certify (`NotExact`), naming the longest distance that works when
+  it finds one. The old path returned a fitted surface it never certified, for asks up to five
+  offsets on arbitrary generated nets and for the `huge` and `tiny` asks.
+- *Geometry*: the extension's surface differs past the side. It is now exactly mirrored, ruled or
+  natural rows; before, it was the old fit's least-squares shape, which folded over itself in
+  `single_face_defillet_2`. So downstream values move: domains, samples and topology counts.
+  Three of these were measured one by one:
+  - `blend.feature_executive` `single_face_defillet_2`: the defeatured body equals the C++
+    reference. Only an unused loop patch's face count moves, 0 to 1
+    (`tests/defeature_imprint_without_vertex_sector.rs`).
+  - `topology.assert_valid` `copy_offset_issue2111_patch_sheet_*`: the C++ and the old path report
+    1 to 4 failures, the exact path none. The offset patch sheet is sound
+    (`tests/issue_2111_offset_patch_sheet_gaps.rs`).
+  - `offset.offset_executive_p2` `defeature_extrusion_face0_inset2_extended`: the C++ body is
+    unsound too (`tests/offset_shell_extrusion_extend.rs`, ignored until #2350).
+
+  The other geometry moves are recorded here with their values but are **not individually
+  proved right**. Until they are measured, they are known mismatches, not C++ defects.
+
+Fixed by the same change (failed on main, pass on the branch): `blend.feature_executive` `single_face_fillet1019_1`.
+
+
+## `blend.feature_executive` (57 cases: 44 geometry, 13 rounding)
+
+- `add_by_faces_extrusion` (geometry): `values.base_geometry[219]` C++ 1e-5, Rust 2.3943099314925872e-5; `values.base_geometry[227]` C++ 1e-5, Rust 2.3943099314925872e-5 (+672 more)
+- `attributes_add_by_faces_extrusion` (geometry): `values.base_geometry[219]` C++ 1e-5, Rust 2.3943099314925872e-5; `values.base_geometry[227]` C++ 1e-5, Rust 2.3943099314925872e-5 (+672 more)
+- `attributes_rebuild_fillets_defillet` (rounding): `values.base_geometry[238]` C++ -4.718447854656915e-16, Rust 4.163336342344337e-16; `values.base_geometry[290]` C++ -4.440892098500626e-16, Rust 4.440892098500626e-16 (+10 more)
+- `ext_dist_-1.0_box_with_large_fillet` (geometry): `values.base_geometry[213]` C++ -3.5527136788004994e-15, Rust 0e0; `values.base_geometry[223]` C++ -5.218048215738235e-15, Rust 0e0 (+369 more)
+- `ext_dist_0.001_box_with_large_fillet` (geometry): `values.base_geometry[171]` C++ 3.3643950928666363e-3, Rust 3.3643950889908052e-3; `values.base_geometry[267]` C++ -1e1, Rust 0e0 (+369 more)
+- `extended_surface_1_inset_cube_1x1fillet` (geometry): `values.base_geometry[208]` C++ -3.3306690738754696e-16, Rust 5.551115123125783e-16; `values.base_geometry[221]` C++ -4.440892098500626e-16, Rust 0e0 (+56 more)
+- `extended_surface_2_inset_cube_1x2fillet` (rounding): `values.base_geometry[242]` C++ 8.881784197001252e-16, Rust 0e0; `values.base_geometry[322]` C++ -7.771561172376096e-16, Rust -4.857225732735057e-16 (+62 more)
+- `extended_surface_3_inset_cube_1x3fillet` (geometry): `values.base_geometry[293]` C++ -4.440892098500626e-16, Rust -3.3306690738754696e-16; `values.base_geometry[381]` C++ -1.0269562977782679e-14, Rust -1.94289029309402e-15 (+80 more)
+- `extended_surface_4_inset_cube_3x1fillet` (rounding): `values.base_geometry[381]` C++ -1.1796119636642286e-15, Rust -4.857225732735057e-16; `values.base_geometry[396]` C++ -2.220446049250313e-15, Rust -4.857225732735057e-16 (+50 more)
+- `extended_surface_5_flathead_screw_top` (geometry): `values.base_record[158]` C++ 5.227291375341335e-16, Rust 1.0430483093399782e-16; `values.base_record[214]` C++ -6.344131569286853e-17, Rust 6.344131569286586e-17 (+96 more)
+- `extended_surface_6_brep1` (geometry): `values.base_geometry[350]` C++ -6.785099210266102e-15, Rust 0e0; `values.base_geometry[354]` C++ -1.776356839400251e-15, Rust 0e0 (+978 more)
+- `extended_surface_7_LShape_I` (geometry): `values.base_geometry[656]` C++ -7.105427357601002e-14, Rust -1.4210854715202004e-14; `values.base_geometry[659]` C++ -2.1316282072803006e-14, Rust 0e0 (+521 more)
+- `extended_surface_7_LShape_I_feat_rb0` (geometry): `values.base_geometry[656]` C++ -7.105427357601002e-14, Rust -1.4210854715202004e-14; `values.base_geometry[659]` C++ -2.1316282072803006e-14, Rust 0e0 (+12 more)
+- `extended_surface_7_LShape_I_feat_rb2` (geometry): `values.base_geometry[656]` C++ -7.105427357601002e-14, Rust -1.4210854715202004e-14; `values.base_geometry[659]` C++ -2.1316282072803006e-14, Rust 0e0 (+12 more)
+- `extended_surface_8_LShape_II` (geometry): `values.base_geometry[451]` C++ 1.944871731838422e-5, Rust 1e-5; `values.base_geometry[455]` C++ 1.944871731838422e-5, Rust 1e-5 (+16 more)
+- `extended_surface_9_Platte` (geometry): `values.base_record[12174]` C++ 5.684341886080802e-14, Rust 0e0; `values.base_record[12186]` C++ 5.684341886080802e-14, Rust 0e0 (+246 more)
+- `extended_surface_9_Platte_feat_rb0` (rounding): `values.base_record[12174]` C++ 5.684341886080802e-14, Rust 0e0; `values.base_record[12186]` C++ 5.684341886080802e-14, Rust 0e0 (+1 more)
+- `extended_surface_9_Platte_feat_rb2` (rounding): `values.base_record[12174]` C++ 5.684341886080802e-14, Rust 0e0; `values.base_record[12186]` C++ 5.684341886080802e-14, Rust 0e0 (+1 more)
+- `fillet_each_cyl_on_box_w_fillet` (rounding): `values.base_geometry[229]` C++ -8.881784197001256e-16, Rust 0e0; `values.base_geometry[234]` C++ -7.327471962526033e-15, Rust -7.105427357601002e-15 (+40 more)
+- `fillet_each_filleted_box` (geometry): `values.base_geometry[437]` C++ 0e0, Rust -3.552713678800501e-15; `values.base_geometry[446]` C++ 0e0, Rust -3.552713678800501e-15 (+1086 more)
+- `fillet_each_filleted_box_pair` (geometry): `values.base_geometry[349]` C++ 0e0, Rust -3.552713678800501e-15; `values.base_geometry[352]` C++ -3.552713678800501e-15, Rust 0e0 (+807 more)
+- `fillet_each_torii_fillet` (geometry): `values.base_geometry[425]` C++ -3.8309518948453043e0, Rust -6e0; `values.base_geometry[428]` C++ 1.1999999999999996e1, Rust 1e1 (+2003 more)
+- `fillet_each_torii_fillet_b` (geometry): `values.record[32]` C++ 9e0, Rust 1.1e1; `values.record[33]` C++ 9e0, Rust 1.1e1
+- `fillet_group_fillet1019_rb23` (geometry): `values.base_geometry[386]` C++ 2.5104651783234e-2, Rust 7.937091500720299e0; `values.base_geometry[387]` C++ 2.5e-1, Rust 8.417899529494614e0 (+275 more)
+- `fillet_group_inset_cube_1x3fillet_rb23` (geometry): `values.base_geometry[290]` C++ -2.498001805406602e-16, Rust 4.163336342344337e-16; `values.base_geometry[381]` C++ -2.220446049250313e-16, Rust 0e0 (+80 more)
+- `fillet_group_inset_cube_3x1fillet_rb23` (geometry): `values.base_geometry[290]` C++ 1.1102230246251565e-16, Rust -3.3306690738754696e-16; `values.base_geometry[381]` C++ -1.1796119636642286e-15, Rust -4.857225732735057e-16 (+78 more)
+- `mitred_rounds_box_top_r3` (geometry): `values.base_geometry[256]` C++ -4.263256414560601e-14, Rust -7.105427357601002e-15; `values.base_geometry[261]` C++ -1.4210854715202004e-14, Rust 0e0 (+1069 more)
+- `multi_feature_adv_extrusion` (geometry): `values.base_geometry[271]` C++ 1e-5, Rust 2.3943099322504693e-5; `values.base_geometry[327]` C++ 3.552713678800501e-15, Rust 0e0 (+727 more)
+- `multi_feature_extrusion` (geometry): `values.base_geometry[231]` C++ 1e-5, Rust 2.3943099322504693e-5; `values.base_geometry[235]` C++ 1e-5, Rust 2.3943099322504693e-5 (+831 more)
+- `multi_rebuild_0_extrusion` (geometry): `values.base_geometry[231]` C++ 1e-5, Rust 2.3943099322504693e-5; `values.base_geometry[235]` C++ 1e-5, Rust 2.3943099322504693e-5 (+854 more)
+- `rb_13_box_with_large_fillet_6` (rounding): `values.feature0_geometry[101]` C++ -5.218048215738235e-15, Rust 0e0; `values.feature0_geometry[116]` C++ -3.5527136788004994e-15, Rust 0e0 (+8 more)
+- `rb_13_filleted_box_9` (rounding): `values.feature0_geometry[96]` C++ -1.7763568394002498e-14, Rust -1.4210854715202004e-14; `values.feature0_geometry[106]` C++ -3.552713678800501e-15, Rust 0e0 (+8 more)
+- `rb_22_box_with_large_fillet_6` (geometry): `values.base_geometry[213]` C++ -3.5527136788004994e-15, Rust 0e0; `values.base_geometry[223]` C++ -5.218048215738235e-15, Rust 0e0 (+359 more)
+- `rb_22_defillet_8` (rounding): `values.base_geometry[238]` C++ -4.718447854656915e-16, Rust 4.163336342344337e-16; `values.base_geometry[290]` C++ -4.440892098500626e-16, Rust 4.440892098500626e-16 (+4 more)
+- `rb_33_defillet_8` (geometry): `values.record[28]` C++ 0e0, Rust 1e0; `values.record[29]` C++ 0e0, Rust 1e0 (+2 more)
+- `rebuild_fillets_defillet` (rounding): `values.base_geometry[238]` C++ -4.718447854656915e-16, Rust 4.163336342344337e-16; `values.base_geometry[290]` C++ -4.440892098500626e-16, Rust 4.440892098500626e-16 (+10 more)
+- `restore_before_defeature_defillet` (rounding): `values.base_geometry[238]` C++ -4.718447854656915e-16, Rust 4.163336342344337e-16; `values.base_geometry[290]` C++ -4.440892098500626e-16, Rust 4.440892098500626e-16 (+10 more)
+- `single_face_box_with_large_fillet_1` (geometry): `values.record[29]` C++ 3e0, Rust 4e0; `values.record[30]` C++ 3e0, Rust 4e0
+- `single_face_box_with_large_fillet_4` (geometry): `values.base_geometry.len` C++ 269, Rust 215; `values.base_record.len` C++ 786, Rust 608 (+13 more)
+- `single_face_box_with_large_fillet_6` (geometry): `values.base_geometry[213]` C++ -3.5527136788004994e-15, Rust 0e0; `values.base_geometry[223]` C++ -5.218048215738235e-15, Rust 0e0 (+369 more)
+- `single_face_cyl_on_box_w_fillet_1` (geometry): `values.record[31]` C++ 0e0, Rust 4e0; `values.record[32]` C++ 0e0, Rust 4e0
+- `single_face_cyl_on_box_w_fillet_5` (geometry): `values.base_geometry[131]` C++ 1e-5, Rust 1.029868189778811e-5; `values.base_geometry[135]` C++ 1e-5, Rust 1.0298681907738848e-5 (+6 more)
+- `single_face_cyl_on_box_w_fillet_6` (geometry): `values.base_geometry[127]` C++ 1e-5, Rust 1.029868189778811e-5; `values.base_geometry[131]` C++ 1e-5, Rust 1.0298681907738848e-5 (+6 more)
+- `single_face_cyl_on_box_w_fillet_7` (geometry): `values.record[30]` C++ 0e0, Rust 5e0; `values.record[31]` C++ 0e0, Rust 5e0
+- `single_face_cyl_on_box_w_fillet_8` (geometry): `values.base_geometry[240]` C++ -7.327471962526033e-15, Rust -7.105427357601002e-15; `values.base_geometry[285]` C++ -8.881784197001256e-16, Rust 0e0 (+236 more)
+- `single_face_defillet_0` (geometry): `values.record[28]` C++ 0e0, Rust 1e0; `values.record[29]` C++ 0e0, Rust 1e0
+- `single_face_defillet_2` (geometry): `values.record[44]` C++ 0e0, Rust 1e0; `values.record[45]` C++ 0e0, Rust 1e0
+- `single_face_defillet_8` (rounding): `values.base_geometry[238]` C++ -4.718447854656915e-16, Rust 4.163336342344337e-16; `values.base_geometry[290]` C++ -4.440892098500626e-16, Rust 4.440892098500626e-16 (+10 more)
+- `single_face_fillet1019_4` (geometry): `values.base_geometry[171]` C++ 2.81953169796288e-4, Rust 2.9690686227531955e-4; `values.record[30]` C++ 1e0, Rust 5e0 (+1 more)
+- `single_face_fillet1019_6` (geometry): `values.base_geometry.len` C++ 323, Rust 502; `values.base_record.len` C++ 899, Rust 1344 (+6 more)
+- `single_face_fillet1019_8` (geometry): `values.record[29]` C++ 7e0, Rust 4e0; `values.record[30]` C++ 7e0, Rust 4e0
+- `single_face_filleted_box_6` (geometry): `values.base_geometry[301]` C++ 0e0, Rust -3.552713678800501e-15; `values.base_geometry[339]` C++ -7.105427357601002e-15, Rust 0e0 (+651 more)
+- `single_face_filleted_box_7` (geometry): `values.base_geometry[304]` C++ -3.552713678800501e-15, Rust 0e0; `values.base_geometry[309]` C++ -5.329070518200751e-15, Rust 0e0 (+516 more)
+- `single_face_filleted_box_8` (geometry): `values.base_geometry[302]` C++ 0e0, Rust -3.552713678800501e-15; `values.base_geometry[329]` C++ -3.19744231092045e-14, Rust -2.842170943040401e-14 (+383 more)
+- `single_face_filleted_box_9` (geometry): `values.base_geometry[309]` C++ -3.552713678800501e-15, Rust 0e0; `values.base_geometry[359]` C++ -1.7763568394002498e-14, Rust -1.4210854715202004e-14 (+184 more)
+- `single_face_inset_cube_1x1fillet_4` (rounding): `values.base_geometry[304]` C++ -4.996003610813202e-16, Rust -4.440892098500631e-17; `values.base_geometry[305]` C++ -4.052314039881821e-16, Rust -4.440892098500631e-17 (+147 more)
+- `single_loop_circle_defillet_2` (geometry): `values.record[26]` C++ 0e0, Rust 1e0; `values.record[27]` C++ 0e0, Rust 1e0
+
+## `blend.fillet_corner_p2` (5 cases: 5 geometry)
+
+- `corner_adjust_concave_face_05` (geometry): `values.corner_edges.len` C++ 6, Rust 3; `values.corner_flags[1]` C++ 0e0, Rust 1e0 (+3 more)
+- `corner_adjust_concave_face_46` (geometry): `values.corner_edges.len` C++ 6, Rust 3; `values.corner_flags[1]` C++ 0e0, Rust 1e0 (+3 more)
+- `corner_adjust_concave_face_48` (geometry): `values.corner_edges.len` C++ 6, Rust 3; `values.corner_flags[1]` C++ 0e0, Rust 1e0 (+3 more)
+- `corner_adjust_concave_face_67` (geometry): `values.corner_edges.len` C++ 6, Rust 3; `values.model.len` C++ 490, Rust 434 (+1 more)
+- `corner_adjust_concave_face_69` (geometry): `values.corner_edges.len` C++ 6, Rust 3; `values.corner_flags[5]` C++ 1e0, Rust 0e0 (+2 more)
+
+## `blend.fillet_executive_p3` (3 cases: 3 geometry)
+
+- `private-upstream-rollover-404-cyl-on-box1-edge12-r2` (geometry): `values.mass_properties[4]` C++ -1.0790569224605662e-7, Rust -1.0790569116534039e-7; `values.mass_properties[11]` C++ -3.3651145806047795e-4, Rust -3.3651146240813446e-4 (+142 more)
+- `real-box-fillet1v-r3-shell-closed` (geometry): `values.shell_geometry[57]` C++ 1.7999999705438658e1, Rust 1.7999999414401547e1; `values.shell_geometry[59]` C++ 2.029456140616126e-5, Rust 2.058559845328432e-5 (+32 more)
+- `real-box-fillet4v-r3-shell-closed` (geometry): `values.shell_geometry[65]` C++ 1.799999949532269e1, Rust 1.7999999938883114e1; `values.shell_geometry[67]` C++ 2.0504677309720593e-5, Rust 2.0061116885797512e-5 (+121 more)
+
+## `offset.offset_executive_p1` (295 cases: 120 geometry, 163 refusal, 12 rounding)
+
+- `extend_bilinear_huge` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `extend_bilinear_huge_scale` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `extend_bilinear_moderate_boundary_samples` (geometry): `values.action.0.domain[0]` C++ -3.0998693378332465e-1, Rust -3.1008683647302115e-1; `values.action.0.domain[1]` C++ -3.113576649013739e-1, Rust -3.1189143077590264e-1 (+428 more)
+- `extend_bilinear_negative_zero` (geometry): `values.action.0.domain[0]` C++ -1e-6, Rust 0e0; `values.action.0.domain[1]` C++ -1e-6, Rust 0e0 (+258 more)
+- `extend_bilinear_positive` (geometry): `values.action.0.domain[0]` C++ -6.199738675666493e-1, Rust -6.201736729460423e-1; `values.action.0.domain[1]` C++ -6.216337496884308e-1, Rust -6.237828615518053e-1 (+258 more)
+- `extend_bilinear_tiny` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `extend_bilinear_zero` (geometry): `values.action.0.domain[0]` C++ -1e-6, Rust 0e0; `values.action.0.domain[1]` C++ -1e-6, Rust 0e0 (+258 more)
+- `extend_mixed_degrees_subdomain` (geometry): `values.action.0.domain[0]` C++ -5.718790171989342e0, Rust -5.296866500366529e0; `values.action.0.domain[1]` C++ 5.134948340259093e-1, Rust 7.63419546454867e-1 (+172 more)
+- `extend_plane_huge` (geometry): `values.action.0.samples[24]` C++ 5e-1, Rust 4.997779130935669e-1; `values.action.0.samples[25]` C++ 5e-1, Rust 4.997779130935669e-1 (+8 more)
+- `extend_plane_negative_zero` (geometry): `values.action.0.domain[0]` C++ -1e-6, Rust 0e0; `values.action.0.domain[1]` C++ -1e-6, Rust 0e0 (+103 more)
+- `extend_plane_tiny` (geometry): `values.action.0.domain[0]` C++ -1e-6, Rust -4.999999999999052e-12; `values.action.0.domain[1]` C++ -1e-6, Rust -4.999999999999052e-12 (+98 more)
+- `extend_plane_zero` (geometry): `values.action.0.domain[0]` C++ -1e-6, Rust 0e0; `values.action.0.domain[1]` C++ -1e-6, Rust 0e0 (+103 more)
+- `extend_quadratic_huge` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 327436540.9959863")
+- `extend_quadratic_moderate_boundary_samples` (geometry): `values.action.0.domain[0]` C++ -1.2439849758901034e0, Rust -1.244542782574098e0; `values.action.0.domain[1]` C++ -1.23683320835607e0, Rust -1.247611756221971e0 (+458 more)
+- `extend_quadratic_negative_zero` (geometry): `values.action.0.domain[0]` C++ -1e-6, Rust 0e0; `values.action.0.domain[1]` C++ -1e-6, Rust 0e0 (+258 more)
+- `extend_quadratic_positive` (geometry): `values.action.0.domain[0]` C++ -6.219924879450517e-1, Rust -6.22271391287049e-1; `values.action.0.domain[1]` C++ -6.216443066401126e-1, Rust -6.237943970561098e-1 (+283 more)
+- `extend_quadratic_tiny` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `extend_quadratic_tiny_scale` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `extend_quadratic_zero` (geometry): `values.action.0.domain[0]` C++ -1e-6, Rust 0e0; `values.action.0.domain[1]` C++ -1e-6, Rust 0e0 (+258 more)
+- `extend_rational_quadratic_huge` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 23.99999986956681")
+- `extend_rational_quadratic_moderate_boundary_samples` (geometry): `values.action.0.domain[0]` C++ -2.487406580796045e0, Rust -2.4288551942948375e0; `values.action.0.domain[1]` C++ -2.4318700224587566e0, Rust -8.500628646570997e0 (+468 more)
+- `extend_rational_quadratic_negative_zero` (geometry): `values.action.0.domain[0]` C++ -1e-6, Rust 0e0; `values.action.0.domain[1]` C++ -1e-6, Rust 0e0 (+258 more)
+- `extend_rational_quadratic_positive` (geometry): `values.action.0.domain[0]` C++ -6.218516451990113e-1, Rust -5.58745514761786e-1; `values.action.0.domain[1]` C++ -6.216300105872541e-1, Rust -5.836031237351884e-1 (+288 more)
+- `extend_rational_quadratic_tiny` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `extend_rational_quadratic_zero` (geometry): `values.action.0.domain[0]` C++ -1e-6, Rust 0e0; `values.action.0.domain[1]` C++ -1e-6, Rust 0e0 (+258 more)
+- `gen0004` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 1160985.358715577")
+- `gen0005` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0008` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0009` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0012` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 2.045545759570629")
+- `gen0013` (geometry): `values.action.0.domain[0]` C++ 1.9999980000000002e0, Rust 2e0; `values.action.0.domain[1]` C++ 2.9999985e0, Rust 3e0 (+228 more)
+- `gen0015` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0016` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0017` (rounding): `values.action.0.samples[33]` C++ 6.938893903907228e-18, Rust -0e0; `values.action.1.samples[33]` C++ 6.938893903907228e-18, Rust -0e0 (+5 more)
+- `gen0018` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0021` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0022` (geometry): `values.action.0.domain[0]` C++ -2.000002e0, Rust -2e0; `values.action.0.domain[1]` C++ -1.5e-6, Rust 0e0 (+223 more)
+- `gen0026` (geometry): `values.action.0.domain[0]` C++ 1.9999980000000002e0, Rust 2e0; `values.action.0.domain[1]` C++ 9.999985e-1, Rust 1e0 (+228 more)
+- `gen0028` (geometry): `values.action.0.domain[0]` C++ -3.000002e0, Rust -3e0; `values.action.0.domain[1]` C++ -2.0000015e0, Rust -2e0 (+228 more)
+- `gen0029` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 4782.404162769804")
+- `gen0030` (geometry): `values.action.0.domain[0]` C++ -4.000002e0, Rust -4e0; `values.action.0.domain[1]` C++ -2.0000015e0, Rust -2e0 (+159 more)
+- `gen0031` (geometry): `values.action.0.domain[0]` C++ -2e-6, Rust 0e0; `values.action.0.domain[1]` C++ -3.0000015e0, Rust -3e0 (+228 more)
+- `gen0033` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0035` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0036` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.059326097755329474")
+- `gen0037` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0045` (geometry): `values.action.0.domain[0]` C++ 9.999980000000002e-1, Rust 1e0; `values.action.0.domain[1]` C++ 1.9999984999999998e0, Rust 2e0 (+228 more)
+- `gen0046` (geometry): `values.action.0.domain[0]` C++ -2e-6, Rust 0e0; `values.action.0.domain[1]` C++ 2.9999985e0, Rust 3e0 (+150 more)
+- `gen0047` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0049` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0051` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0052` (geometry): `values.action.0.domain[0]` C++ -1.000002e0, Rust -1e0; `values.action.0.domain[1]` C++ 1.9999984999999998e0, Rust 2e0 (+153 more)
+- `gen0053` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0055` (geometry): `values.action.0.domain[0]` C++ -4.000002e0, Rust -4e0; `values.action.0.domain[1]` C++ -3.0000015e0, Rust -3e0 (+228 more)
+- `gen0058` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0065` (geometry): `values.action.0.domain[0]` C++ -4.000002e0, Rust -4e0; `values.action.0.domain[1]` C++ -1.0000015e0, Rust -1e0 (+228 more)
+- `gen0066` (geometry): `values.action.0.domain[0]` C++ -2.000002e0, Rust -2e0; `values.action.0.domain[1]` C++ -1.5e-6, Rust 0e0 (+153 more)
+- `gen0069` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0073` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0075` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0076` (rounding): `values.action.0.samples[33]` C++ 7.105427357601004e-18, Rust -1.4210854715202004e-17; `values.action.0.samples[39]` C++ -0e0, Rust -2.842170943040401e-17 (+6 more)
+- `gen0077` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0078` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0079` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0081` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0082` (geometry): `values.action.0.domain[0]` C++ -6.730189370054774e6, Rust -6.73320720853638e6; `values.action.0.domain[1]` C++ -3.522137889626864e1, Rust -2.1105245179816105e1 (+149 more)
+- `gen0083` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.000032454228351556595")
+- `gen0086` (geometry): `values.action.0.domain[0]` C++ -4.000002e0, Rust -4e0; `values.action.0.domain[1]` C++ -1.5e-6, Rust 0e0 (+153 more)
+- `gen0089` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0090` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.000002892488931099668")
+- `gen0091` (geometry): `values.action.0.domain[0]` C++ -2.000002e0, Rust -2.0000000005e0; `values.action.0.domain[1]` C++ 1.9999984999999998e0, Rust 1.9999999993333333e0 (+106 more)
+- `gen0092` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 6286041.18188268")
+- `gen0093` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0095` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0098` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.3933775733340901")
+- `gen0100` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0102` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.041800795222879585")
+- `gen0104` (geometry): `values.action.0.domain[0]` C++ -1.000002e0, Rust -1e0; `values.action.0.domain[1]` C++ 9.999985e-1, Rust 1e0 (+228 more)
+- `gen0106` (geometry): `values.action.0.domain[0]` C++ -2.000002e0, Rust -2e0; `values.action.0.domain[1]` C++ 9.999985e-1, Rust 1e0 (+228 more)
+- `gen0107` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0109` (geometry): `values.action.0.samples[27]` C++ 0e0, Rust -7.105427357601004e-18; `values.action.0.samples[33]` C++ 5.329070518200752e-18, Rust 3.552713678800502e-18 (+102 more)
+- `gen0110` (geometry): `values.action.0.domain[0]` C++ -1.788548265389771e6, Rust -1.7893502563737654e6; `values.action.0.domain[1]` C++ -3.722145380738779e1, Rust -3.1481515880533675e3 (+255 more)
+- `gen0111` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0112` (geometry): `values.action.0.samples[24]` C++ -3.362063318490982e-3, Rust -3.3665038645267487e-3; `values.action.0.samples[25]` C++ 7.316660135984421e-3, Rust 7.302790880203247e-3 (+14 more)
+- `gen0113` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 1.8607758578444842")
+- `gen0115` (geometry): `values.action.0.domain[0]` C++ -4.000002e0, Rust -4e0; `values.action.0.domain[1]` C++ -2.0000015e0, Rust -2e0 (+228 more)
+- `gen0116` (geometry): `values.action.0.domain` C++ present, Rust missing; `values.action.0.samples` C++ present, Rust missing (+66 more)
+- `gen0120` (geometry): `values.action.0.samples[24]` C++ -8.530914783477783e-7, Rust -2.259761095046997e-5; `values.action.0.samples[25]` C++ -2.6263296604156494e-6, Rust 2.0675361156463623e-5 (+10 more)
+- `gen0124` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.0001760614301366127")
+- `gen0126` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0128` (geometry): `values.action.0.samples[33]` C++ -3.970466940254532e-21, Rust -2.6469779601696886e-21; `values.action.0.samples[39]` C++ -0e0, Rust -5.293955920339377e-21 (+111 more)
+- `gen0132` (geometry): `values.action.0.domain[0]` C++ 9.957808000820365e-1, Rust 9.955573463239048e-1; `values.action.0.domain[1]` C++ -2.0032479594158814e0, Rust -2.0033634854441376e0 (+246 more)
+- `gen0133` (geometry): `values.action.0.domain[0]` C++ 9.999980000000002e-1, Rust 1e0; `values.action.0.domain[1]` C++ -2.0000015e0, Rust -2e0 (+156 more)
+- `gen0135` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0138` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0139` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.01186235499182239")
+- `gen0146` (geometry): `values.action.0.samples[24]` C++ 3.722986526787281e0, Rust 3.722997061908245e0; `values.action.0.samples[25]` C++ 3.7194858379662037e0, Rust 3.719463348388672e0 (+17 more)
+- `gen0147` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0148` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0149` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.46605259655635006")
+- `gen0153` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 1630.2202046610535")
+- `gen0154` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.000009253657034858355")
+- `gen0158` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0162` (geometry): `values.action.0.domain[0]` C++ -3.000002e0, Rust -3e0; `values.action.0.domain[1]` C++ -3.0000015e0, Rust -3e0 (+228 more)
+- `gen0163` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.1154717734473818")
+- `gen0164` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0165` (geometry): `values.action.0.domain[0]` C++ -1.0887521513402282e-3, Rust -1.0891030347371647e-3; `values.action.0.domain[1]` C++ 2.9991788889280406e0, Rust 2.9991784190818205e0 (+222 more)
+- `gen0169` (geometry): `values.action.0.domain[0]` C++ -3.000002e0, Rust -3e0; `values.action.0.domain[1]` C++ -3.0000015e0, Rust -3e0 (+154 more)
+- `gen0172` (geometry): `values.action.0.samples[24]` C++ 1.188327744603157e-2, Rust 1.1878836899995804e-2; `values.action.0.samples[25]` C++ 2.6717938482761383e-2, Rust 2.6704072952270508e-2 (+19 more)
+- `gen0174` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 1.8870173268607344")
+- `gen0175` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0176` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 3.997784111008053")
+- `gen0179` (geometry): `values.action.0.domain[0]` C++ 9.939555881687028e-1, Rust 9.934929876410972e-1; `values.action.0.domain[1]` C++ 9.954418845895727e-1, Rust 9.950846077028088e-1 (+246 more)
+- `gen0180` (geometry): `values.action.0.domain[0]` C++ -1.000002e0, Rust -1e0; `values.action.0.domain[1]` C++ 9.999985e-1, Rust 1e0 (+226 more)
+- `gen0182` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 19661.258738978115")
+- `gen0184` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0187` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0188` (geometry): `values.action.0.domain[0]` C++ -7.935243925376142e2, Rust -7.937801298365601e2; `values.action.0.domain[1]` C++ -4.1800257990498075e1, Rust -6.017997343715356e2 (+228 more)
+- `gen0189` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0190` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0196` (geometry): `values.action.0.domain[0]` C++ -2.000002e0, Rust -2e0; `values.action.0.domain[1]` C++ -1.0000015e0, Rust -1e0 (+228 more)
+- `gen0197` (geometry): `values.action.0.domain[0]` C++ -1.8990748498520982e0, Rust -2.234906303364238e0; `values.action.0.domain[1]` C++ -3.682980248531085e0, Rust -4.671920653297926e0 (+196 more)
+- `gen0199` (rounding): `values.action.0.samples[27]` C++ 0e0, Rust 2.910383045673371e-17; `values.action.1.samples[27]` C++ 0e0, Rust 2.910383045673371e-17 (+3 more)
+- `gen0202` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0203` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0204` (geometry): `values.action.0.domain` C++ present, Rust missing; `values.action.0.samples` C++ present, Rust missing (+66 more)
+- `gen0209` (geometry): `values.action.0.domain[0]` C++ -3.000002e0, Rust -3e0; `values.action.0.domain[1]` C++ -3.0000015e0, Rust -3e0 (+95 more)
+- `gen0210` (geometry): `values.action.0.domain[0]` C++ -3.000002e0, Rust -3e0; `values.action.0.domain[1]` C++ -1.0000015e0, Rust -1e0 (+150 more)
+- `gen0211` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0213` (geometry): `values.action.0.samples[27]` C++ 0e0, Rust -1.387778780781445e-17; `values.action.0.samples[33]` C++ 6.9388939039072276e-18, Rust -6.938893903907225e-18 (+106 more)
+- `gen0214` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 640.2631532403071")
+- `gen0215` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.000011221143055261062")
+- `gen0219` (rounding): `values.action.0.samples[33]` C++ -7.105427357601002e-18, Rust 3.552713678800501e-18; `values.action.1.samples[33]` C++ -7.105427357601002e-18, Rust 3.552713678800501e-18 (+5 more)
+- `gen0222` (geometry): `values.action.0.domain[0]` C++ -4.003555806577789e0, Rust -4.003062005326315e0; `values.action.0.domain[1]` C++ -3.0026739522156722e0, Rust -3.003462199192047e0 (+176 more)
+- `gen0225` (geometry): `values.action.0.samples[24]` C++ -2.3757368993217176e-6, Rust -2.3757368833865478e-6; `values.action.0.samples[25]` C++ -4.621057185238975e-7, Rust -4.621057379528004e-7 (+111 more)
+- `gen0228` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0229` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0230` (geometry): `values.action.0.domain[0]` C++ 1.9972451127541149e0, Rust 1.9972442249081588e0; `values.action.0.domain[1]` C++ -1.002077665967149e0, Rust -1.0020788595367358e0 (+155 more)
+- `gen0231` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0236` (geometry): `values.action.0.domain[0]` C++ 9.999980000000002e-1, Rust 1e0; `values.action.0.domain[1]` C++ 2.9999985e0, Rust 3e0 (+228 more)
+- `gen0237` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0238` (geometry): `values.action.0.domain[0]` C++ -5.063172256047423e6, Rust -5.06544259893499e6; `values.action.0.domain[1]` C++ -3.722138782802862e1, Rust -2.3105247537026177e1 (+234 more)
+- `gen0241` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.042321288466002395")
+- `gen0242` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 1.144751405461561")
+- `gen0246` (geometry): `values.action.0.domain[0]` C++ -4.004021210719346e0, Rust -4.004023013842583e0; `values.action.0.domain[1]` C++ -3.0030228476283587e0, Rust -3.0030245893579868e0 (+153 more)
+- `gen0247` (geometry): `values.action.0.domain[0]` C++ -3.000002e0, Rust -3e0; `values.action.0.domain[1]` C++ -3.0000015e0, Rust -3e0 (+157 more)
+- `gen0257` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 19.103512924018904")
+- `gen0258` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0270` (geometry): `values.action.0.samples[33]` C++ 4.547473508864642e-19, Rust 1.3642420526593926e-18; `values.action.0.samples[45]` C++ 1.8189894035458564e-18, Rust 4.547473508864642e-19 (+96 more)
+- `gen0271` (rounding): `values.action.2.samples[33]` C++ 1.4210854715202e-17, Rust -1.4210854715202e-17; `values.action.2.samples[45]` C++ 0e0, Rust -7.105427357601e-18 (+2 more)
+- `gen0272` (geometry): `values.action.0.domain[0]` C++ -2e-6, Rust 0e0; `values.action.0.domain[1]` C++ 9.999985e-1, Rust 1e0 (+225 more)
+- `gen0273` (rounding): `values.action.2.samples[27]` C++ 0e0, Rust -1.455191522836686e-17; `values.action.2.samples[33]` C++ -1.4551915228366857e-17, Rust 7.275957614183427e-18 (+4 more)
+- `gen0275` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0276` (geometry): `values.action.0.domain[0]` C++ 1.9999980000000002e0, Rust 2e0; `values.action.0.domain[1]` C++ 9.999985e-1, Rust 1e0 (+228 more)
+- `gen0280` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 640.2631553097955")
+- `gen0283` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0285` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0286` (geometry): `values.action.0.domain[0]` C++ -4.000002e0, Rust -4e0; `values.action.0.domain[1]` C++ -1.0000015e0, Rust -1e0 (+156 more)
+- `gen0287` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 5168.885354669588")
+- `gen0289` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0291` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0292` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0295` (rounding): `values.action.0.samples[33]` C++ 1.7347234759768075e-18, Rust -1.734723475976807e-18; `values.action.0.samples[39]` C++ 6.93889390390723e-18, Rust 0e0 (+15 more)
+- `gen0296` (geometry): `values.action.0.domain[0]` C++ -3.000002e0, Rust -3e0; `values.action.0.domain[1]` C++ 1.9999984999999998e0, Rust 2e0 (+103 more)
+- `gen0298` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0299` (geometry): `values.action.0.domain[0]` C++ -3.000002e0, Rust -3e0; `values.action.0.domain[1]` C++ -1.0000015e0, Rust -1e0 (+228 more)
+- `gen0300` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0301` (geometry): `values.action.0.domain[0]` C++ -3.003811468379965e0, Rust -3.0038126967412326e0; `values.action.0.domain[1]` C++ 2.997125491525126e0, Rust 2.9971238360471943e0 (+140 more)
+- `gen0302` (geometry): `values.action.0.samples[24]` C++ -3.1156564173073775e-7, Rust -3.115661488806154e-7; `values.action.0.samples[25]` C++ -2.3613525090837584e-7, Rust -2.3613599431371313e-7 (+104 more)
+- `gen0304` (geometry): `values.action.0.domain[0]` C++ -6.121835386095599e-3, Rust -6.124580435885479e-3; `values.action.0.domain[1]` C++ 2.9953980717479256e0, Rust 2.9953954069975457e0 (+253 more)
+- `gen0305` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0307` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0308` (geometry): `values.action.0.samples[33]` C++ 2.8421709430404006e-20, Rust -5.684341886080801e-20; `values.action.0.samples[39]` C++ -5.6843418860808e-20, Rust 0e0 (+11 more)
+- `gen0312` (geometry): `values.action.0.domain[0]` C++ -3.000002e0, Rust -3e0; `values.action.0.domain[1]` C++ 2.9999985e0, Rust 3e0 (+223 more)
+- `gen0317` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0318` (geometry): `values.action.0.domain[0]` C++ 1.9999980000000002e0, Rust 2e0; `values.action.0.domain[1]` C++ 9.999985e-1, Rust 1e0 (+174 more)
+- `gen0321` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0325` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0326` (geometry): `values.action.0.domain[0]` C++ -1.8558292884406245e2, Rust -1.856427385706435e2; `values.action.0.domain[1]` C++ -3.444034178936436e1, Rust -1.4104233460340492e2 (+238 more)
+- `gen0328` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0329` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0333` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 2.0364854084927955")
+- `gen0337` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.000018266879566843737")
+- `gen0338` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0342` (geometry): `values.action.0.domain[0]` C++ -1.000002e0, Rust -1e0; `values.action.0.domain[1]` C++ 1.9999984999999998e0, Rust 2e0 (+105 more)
+- `gen0343` (geometry): `values.action.0.domain[0]` C++ -2e-6, Rust 0e0; `values.action.0.domain[1]` C++ -1.5e-6, Rust 0e0 (+178 more)
+- `gen0345` (geometry): `values.action.0.domain[0]` C++ -4.000002e0, Rust -4e0; `values.action.0.domain[1]` C++ 1.9999984999999998e0, Rust 2e0 (+150 more)
+- `gen0351` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 11002.042773052694")
+- `gen0354` (geometry): `values.action.0.domain[0]` C++ -4.000002e0, Rust -4e0; `values.action.0.domain[1]` C++ 1.9999984999999998e0, Rust 2e0 (+223 more)
+- `gen0355` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0360` (geometry): `values.action.0.domain[0]` C++ -3.000002e0, Rust -3e0; `values.action.0.domain[1]` C++ -3.0000015e0, Rust -3e0 (+173 more)
+- `gen0362` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 2153.678622072281")
+- `gen0365` (geometry): `values.action.0.samples[24]` C++ 3.7550926208496094e-6, Rust -1.7993152141571045e-5; `values.action.0.samples[25]` C++ 1.0915100574493408e-6, Rust 2.4393200874328613e-5 (+8 more)
+- `gen0366` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0371` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 3274363.692292317")
+- `gen0373` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 6419603.019414775")
+- `gen0374` (geometry): `values.action.0.samples[33]` C++ 5.293955920339375e-21, Rust -5.2939559203393756e-21; `values.action.0.samples[39]` C++ 0e0, Rust 5.2939559203393756e-21 (+99 more)
+- `gen0376` (geometry): `values.action.0.domain[0]` C++ -1.000002e0, Rust -1e0; `values.action.0.domain[1]` C++ -3.0000015e0, Rust -3e0 (+175 more)
+- `gen0378` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0383` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 12308.677929506637")
+- `gen0384` (geometry): `values.action.0.domain[0]` C++ -2.003624744970458e0, Rust -2.003625913154444e0; `values.action.0.domain[1]` C++ -2.733687322254292e-3, Rust -2.735261002542952e-3 (+137 more)
+- `gen0390` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0391` (geometry): `values.action.0.domain[0]` C++ -4.000002e0, Rust -4e0; `values.action.0.domain[1]` C++ 1.9999984999999998e0, Rust 2e0 (+228 more)
+- `gen0392` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0393` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 6419603.018262975")
+- `gen0394` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0397` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0398` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0404` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0405` (rounding): `values.action.0.samples[33]` C++ -1.4210854715202004e-17, Rust -2.1316282072803012e-17; `values.action.0.samples[45]` C++ 2.842170943040401e-17, Rust -2.842170943040401e-17 (+6 more)
+- `gen0407` (geometry): `values.action.0.domain[0]` C++ -4.000002e0, Rust -4e0; `values.action.0.domain[1]` C++ 9.999985e-1, Rust 1e0 (+150 more)
+- `gen0409` (geometry): `values.action.0.samples[24]` C++ 7.779313754662871e2, Rust 7.779313746206462e2; `values.action.0.samples[25]` C++ 2.756973871804774e3, Rust 2.756973894763738e3 (+15 more)
+- `gen0412` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0413` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0416` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0421` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0423` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0424` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.08890918878795413")
+- `gen0429` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 3.4970930034212824")
+- `gen0431` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0435` (geometry): `values.action.0.domain[0]` C++ -4.000002e0, Rust -4e0; `values.action.0.domain[1]` C++ -2.0000015e0, Rust -2e0 (+153 more)
+- `gen0438` (geometry): `values.action.0.domain[0]` C++ -1.000002e0, Rust -1e0; `values.action.0.domain[1]` C++ -1.0000015e0, Rust -1e0 (+153 more)
+- `gen0440` (geometry): `values.action.0.domain[0]` C++ -2.000002e0, Rust -2e0; `values.action.0.domain[1]` C++ -1.5e-6, Rust 0e0 (+153 more)
+- `gen0445` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 113.52734899131713")
+- `gen0446` (rounding): `values.action.0.samples[33]` C++ 2.2737367544323215e-19, Rust -4.54747350886464e-19; `values.action.1.samples[33]` C++ 2.2737367544323215e-19, Rust -4.54747350886464e-19 (+5 more)
+- `gen0447` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0448` (geometry): `values.action.0.domain[0]` C++ -1.000002e0, Rust -1e0; `values.action.0.domain[1]` C++ -1.5e-6, Rust 0e0 (+223 more)
+- `gen0450` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0451` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 4413880.372309048")
+- `gen0457` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0459` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0461` (rounding): `values.action.0.samples[27]` C++ -7.275957614183427e-18, Rust -0e0; `values.action.0.samples[33]` C++ -7.275957614183429e-18, Rust 3.637978807091713e-18 (+15 more)
+- `gen0462` (geometry): `values.action.0.samples[24]` C++ 1.5678466348256759e-6, Rust 1.567846412836582e-6; `values.action.0.samples[25]` C++ 1.2975350585642254e-6, Rust 1.2975350346944303e-6 (+117 more)
+- `gen0466` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 2.1065958169353145")
+- `gen0470` (geometry): `values.action.0.domain[0]` C++ -2e-6, Rust 0e0; `values.action.0.domain[1]` C++ 2.9999985e0, Rust 3e0 (+228 more)
+- `gen0471` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 3274363.6927147023")
+- `gen0472` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0473` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0474` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0475` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 7335450.614974626")
+- `gen0478` (geometry): `values.action.0.samples[24]` C++ 3.0460867285728455e0, Rust 3.0460972636938095e0; `values.action.0.samples[25]` C++ 3.0482484214007854e0, Rust 3.0482259318232536e0 (+17 more)
+- `gen0479` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0481` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0485` (geometry): `values.action.0.domain[0]` C++ -3.000002e0, Rust -3e0; `values.action.0.domain[1]` C++ 1.9999984999999998e0, Rust 2e0 (+228 more)
+- `gen0486` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.46415471760051685")
+- `gen0487` (geometry): `values.action.0.domain[0]` C++ -3.1538019200485348e0, Rust -3.155140608680391e0; `values.action.0.domain[1]` C++ -7.483907468028494e-2, Rust -1.34491528865178e-1 (+228 more)
+- `gen0490` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0496` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.1286894150639171")
+- `gen0497` (geometry): `values.action.0.domain[0]` C++ -4.000002e0, Rust -4e0; `values.action.0.domain[1]` C++ 2.9999985e0, Rust 3e0 (+176 more)
+- `gen0498` (geometry): `values.action.0.samples[33]` C++ -6.505213034913027e-19, Rust 2.1684043449710093e-19; `values.action.0.samples[39]` C++ 0e0, Rust 8.673617379884035e-19 (+96 more)
+- `gen0500` (geometry): `values.action.0.domain[0]` C++ -4.000002e0, Rust -4e0; `values.action.0.domain[1]` C++ -1.0000015e0, Rust -1e0 (+147 more)
+- `gen0504` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 325.69922794269775")
+- `gen0505` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0509` (rounding): `values.action.0.samples[33]` C++ 2.910383045673371e-17, Rust -1.455191522836686e-17; `values.action.0.samples[39]` C++ -5.82076609134674e-17, Rust 0e0 (+11 more)
+- `gen0512` (geometry): `values.action.0.domain[0]` C++ -2e-6, Rust 0e0; `values.action.0.domain[1]` C++ -3.0000015e0, Rust -3e0 (+178 more)
+- `gen0515` (geometry): `values.action.0.samples[24]` C++ 6.293379026827139e-4, Rust 6.293379047752623e-4; `values.action.0.samples[45]` C++ 0e0, Rust -5.293955920339377e-21 (+98 more)
+- `gen0516` (geometry): `values.action.0.domain[0]` C++ 9.999980000000002e-1, Rust 1e0; `values.action.0.domain[1]` C++ -1.0000015e0, Rust -1e0 (+156 more)
+- `gen0520` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0522` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0523` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0525` (geometry): `values.action.0.domain[0]` C++ 9.999980000000002e-1, Rust 1e0; `values.action.0.domain[1]` C++ -1.0000015e0, Rust -1e0 (+228 more)
+- `gen0526` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 4.6211106197106355")
+- `gen0528` (geometry): `values.action.0.domain[0]` C++ -1.000002e0, Rust -1e0; `values.action.0.domain[1]` C++ -1.0000015e0, Rust -1e0 (+228 more)
+- `gen0532` (geometry): `values.action.0.domain[0]` C++ 1.9999980000000002e0, Rust 2e0; `values.action.0.domain[1]` C++ -1.0000015e0, Rust -1e0 (+225 more)
+- `gen0534` (geometry): `values.action.0.domain[0]` C++ -2.000002e0, Rust -2e0; `values.action.0.domain[1]` C++ 9.999985e-1, Rust 1e0 (+223 more)
+- `gen0537` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0539` (geometry): `values.action.0.domain[0]` C++ -2.5125090518670515e6, Rust -2.5136356686428897e6; `values.action.0.domain[1]` C++ -4.122142442136125e1, Rust -3.1520233326137713e3 (+255 more)
+- `gen0540` (geometry): `values.action.0.domain[0]` C++ -2.000002e0, Rust -2e0; `values.action.0.domain[1]` C++ -2.0000015e0, Rust -2e0 (+178 more)
+- `gen0543` (geometry): `values.action.0.domain[0]` C++ -2.000002e0, Rust -2e0; `values.action.0.domain[1]` C++ 9.999985e-1, Rust 1e0 (+176 more)
+- `gen0546` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 10234.013742998934")
+- `gen0547` (geometry): `values.action.0.domain[0]` C++ -3.000002e0, Rust -3e0; `values.action.0.domain[1]` C++ -1.5e-6, Rust 0e0 (+228 more)
+- `gen0549` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0550` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0552` (geometry): `values.action.0.domain[0]` C++ -2.000002e0, Rust -2e0; `values.action.0.domain[1]` C++ 2.9999985e0, Rust 3e0 (+228 more)
+- `gen0553` (geometry): `values.action.0.domain[0]` C++ 1.9999980000000002e0, Rust 2e0; `values.action.0.domain[1]` C++ -1.0000015e0, Rust -1e0 (+228 more)
+- `gen0555` (geometry): `values.action.0.domain[0]` C++ -2.000002e0, Rust -2e0; `values.action.0.domain[1]` C++ -2.0000015e0, Rust -2e0 (+153 more)
+- `gen0558` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.07246202980347809")
+- `gen0560` (geometry): `values.action.0.domain[0]` C++ -2.0088515896309675e0, Rust -2.0087099661631322e0; `values.action.0.domain[1]` C++ 1.9933254328076693e0, Rust 1.9929033349655472e0 (+258 more)
+- `gen0561` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0566` (geometry): `values.action.0.domain[0]` C++ -2.000002e0, Rust -2e0; `values.action.0.domain[1]` C++ -2.0000015e0, Rust -2e0 (+228 more)
+- `gen0568` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0572` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 2492063.1447606804")
+- `gen0578` (geometry): `values.action.0.domain[0]` C++ -3.000002e0, Rust -3.0000000511798e0; `values.action.0.domain[1]` C++ 9.999985e-1, Rust 9.999999317602674e-1 (+166 more)
+- `gen0580` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 0.000004671550547680812")
+- `gen0582` (geometry): `values.action.0.domain[0]` C++ -3.000002e0, Rust -3e0; `values.action.0.domain[1]` C++ -1.0000015e0, Rust -1e0 (+153 more)
+- `gen0584` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0586` (geometry): `values.action.0.domain[0]` C++ -1.000002e0, Rust -1e0; `values.action.0.domain[1]` C++ 9.999985e-1, Rust 1e0 (+147 more)
+- `gen0587` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0589` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0590` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 1.5219063027428503")
+- `gen0593` (rounding): `values.action.0.samples[24]` C++ 7.736861150631213e-7, Rust 7.736861258704486e-7; `values.action.0.samples[25]` C++ -1.0502855747954176e-7, Rust -1.0502857738375893e-7 (+15 more)
+- `gen0595` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0596` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact); the largest size that works is 1.3199940583285896")
+- `gen0597` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+- `gen0599` (refusal): `error` C++ None, Rust Some("Rust operation: surface::extend::Surface::extended_by_distance: extension refused (NotExact)")
+
+## `offset.offset_executive_p2` (40 cases: 24 geometry, 16 rounding)
+
+- `api_offset_cylinder_extend_merge_out` (rounding): `values.result.geometry[3]` C++ -1.1102230246251565e-16, Rust 0e0
+- `api_offset_cylinder_out` (rounding): `values.result.geometry[3]` C++ -1.1102230246251565e-16, Rust 0e0
+- `api_shell_cylinder_r5_top_open_tol_1e6` (rounding): `values.result.geometry[2]` C++ 0e0, Rust -4.440892098500626e-16; `values.result.geometry[5]` C++ 6.661338147750939e-16, Rust 0e0
+- `boolean_domain_problemShell12_face0_extend` (rounding): `values.result.geometry[2]` C++ 1.013844517327982e-15, Rust 2.027689034655964e-15; `values.result.geometry[3]` C++ 8.881784197001252e-16, Rust 0e0 (+1 more)
+- `defeature_extrusion_face0_inset2_5_extended` (geometry): `values.result.geometry[1]` C++ 2.0000000003897114e0, Rust 2.4999999999999996e0; `values.result.geometry[3]` C++ 0e0, Rust -4.4289967785532397e-16 (+3 more)
+- `defeature_extrusion_face0_inset2_extended` (geometry): `values.result.geometry[1]` C++ 3.999999999999994e0, Rust 1.9999999999999993e0; `values.result.geometry[3]` C++ -1.7763568394002505e-15, Rust 0e0 (+4 more)
+- `extended_cylinder_outset` (rounding): `values.result.geometry[3]` C++ -1.1102230246251565e-16, Rust 0e0
+- `fill_gap_extrudeHoles1_face0_extend_d13` (geometry): `values.result.geometry[2]` C++ -8.546420068629413e0, Rust -9.959066838382125e0; `values.result.geometry[3]` C++ -6.370645165272691e1, Rust -6.371957094363669e1 (+6 more)
+- `fill_gap_open_shell_face0_extend_outset` (geometry): `values.result.geometry[2]` C++ -2.5172325345111406e2, Rust -2.2417800387499804e2
+- `fillet2_f0_d0_in_ext` (rounding): `values.result.geometry[3]` C++ -8.038613719986432e-16, Rust -1.2622823793162485e-15
+- `fillet2_f0_d0_out_ext` (rounding): `values.result.geometry[3]` C++ -2.5470619537115713e-16, Rust -2.365043278704224e-27
+- `fillet2_f1_d0_in_ext` (geometry): `values.result.geometry[4]` C++ 1.0585804796439625e1, Rust 1.0585804779277655e1; `values.result.geometry[5]` C++ 1.2747804039838174e1, Rust 1.2747802590970068e1
+- `fillet2_f2_d0_in_ext` (geometry): `values.result.geometry[4]` C++ 1.0585804796439625e1, Rust 1.0585804779277655e1
+- `issue2174_cap_two_rim_edges_api_shell_in` (geometry): `values.result.geometry[2]` C++ -6.58827982977048e0, Rust 0e0; `values.result.geometry[5]` C++ 6.588279830171325e0, Rust 1.1e-15 (+9 more)
+- `issue2611_half_pipe_arc_r20_api_shell_out` (geometry): `values.result.geometry[1]` C++ -2.6978391469510925e1, Rust -2.697839135308108e1; `values.result.geometry[4]` C++ 2.697839146951092e1, Rust 2.697839135308108e1 (+1 more)
+- `mate_two_curves_problemShell15_face8_inset` (geometry): `values.result.geometry[3]` C++ -7.699642757512342e-14, Rust -8.126467424809406e-14; `ints.result.counts[0]` C++ 1, Rust 2 (+4 more)
+- `mate_two_curves_problemShell15_face8_outset` (geometry): `values.result.geometry[1]` C++ -9.974241780995082e1, Rust -9.974052624391713e1; `values.result.geometry[2]` C++ -3.2490089824903016e1, Rust -3.2490025982337116e1 (+8 more)
+- `mate_two_curves_problemShell15_face9_inset` (geometry): `values.result.geometry[2]` C++ -1.7683831315747188e1, Rust -1.7683831270992776e1; `ints.result.counts[0]` C++ 1, Rust 2 (+4 more)
+- `mate_two_curves_problemShell15_face9_outset` (geometry): `values.result.geometry[1]` C++ -9.265849541642099e1, Rust -9.265831042970848e1; `values.result.geometry[2]` C++ -3.333709931578162e1, Rust -3.3301317656307035e1 (+4 more)
+- `member_cylinder_extend_outset` (rounding): `values.result.geometry[3]` C++ -1.1102230246251565e-16, Rust 0e0
+- `member_cylinder_extend_outset_large` (rounding): `values.result.geometry[2]` C++ -8.881784197001252e-16, Rust 0e0; `values.result.geometry[5]` C++ 8.881784197001252e-16, Rust 0e0
+- `member_cylinder_extend_outset_tiny` (rounding): `values.result.geometry[2]` C++ 0e0, Rust 5.421010862427522e-20; `values.result.geometry[5]` C++ 2.710505431213761e-20, Rust 5.421010862427522e-20
+- `member_shell_cylinder_side` (rounding): `values.result.geometry[2]` C++ -5.551115123125783e-17, Rust 0e0; `values.result.geometry[5]` C++ 0e0, Rust 1.1102230246251565e-16
+- `pe_Fillet_box_diff_cyl_big_rad_f1_d0_in_ext` (rounding): `values.result.geometry[6]` C++ 0e0, Rust -3.552713678800501e-15
+- `pe_Fillet_box_diff_cyl_big_rad_f1_d0_out_ext` (rounding): `values.result.geometry[6]` C++ 0e0, Rust 5.329070518200751e-15
+- `pe_Fillet_cyl_on_box_f2_d0_out_ext` (rounding): `values.result.geometry[2]` C++ 0e0, Rust -2.7755575615628914e-16
+- `pe_Fillet_cyl_on_box_w_fillet1_f0_d0_in_ext` (rounding): `values.result.geometry[3]` C++ -4.440892098500626e-16, Rust -1.1102230246251565e-16
+- `pe_Fillet_cyl_on_box_w_fillet1_f0_d0_out_ext` (rounding): `values.result.geometry[3]` C++ 0e0, Rust -2.7755575615628914e-16
+- `pe_Fillet_cyl_on_box_w_fillet2_f0_d0_in_ext` (geometry): `values.result.geometry[3]` C++ -4.250000894374965e0, Rust -4.25e0
+- `pe_Fillet_cyl_on_box_w_fillet2_f0_d0_out_ext` (geometry): `values.result.geometry[6]` C++ 5.750000562624008e0, Rust 5.750000000000037e0
+- `pe_Fillet_cyl_on_box_w_fillet2_f1_d0_in_ext` (geometry): `values.result.geometry[3]` C++ -4.250000894374965e0, Rust -4.25e0; `values.result.geometry[4]` C++ 4.25e0, Rust -7.500000000000002e-1 (+7 more)
+- `pe_Fillet_cyl_on_box_w_fillet2_f2_d0_in_ext` (geometry): `values.result.geometry[3]` C++ -4.250000894374965e0, Rust -4.25e0
+- `pe_Fillet_cyl_on_box_w_fillet_f0_d0_in_ext` (geometry): `values.result.geometry[1]` C++ 3.749992781880858e-1, Rust 3.749999999999999e-1
+- `pe_Fillet_cyl_on_box_w_fillet_f0_d0_out_ext` (geometry): `values.result.geometry[1]` C++ -3.750004938189052e-1, Rust -3.75e-1; `values.result.geometry[3]` C++ 0e0, Rust -2.7755575615628914e-16
+- `pe_Fillet_cyl_on_box_w_fillet_f1_d0_in_ext` (geometry): `values.result.geometry[1]` C++ 3.749992781880858e-1, Rust 3.749999999999999e-1
+- `pe_Fillet_cyl_on_box_w_fillet_f1_d0_out_ext` (geometry): `values.result.geometry[1]` C++ -3.750004938189052e-1, Rust -3.75e-1
+- `pe_Fillet_cyl_on_box_w_fillet_f2_d0_in_ext` (geometry): `values.result.geometry[1]` C++ 3.749992781880858e-1, Rust 3.7499999999999983e-1
+- `pe_Fillet_cyl_on_box_w_fillet_f2_d0_out_ext` (geometry): `values.result.geometry[1]` C++ -3.750004938189052e-1, Rust -3.75e-1
+- `shell_file_problemShell15_face0_extend` (geometry): `values.result.geometry[2]` C++ -1.7683831315747188e1, Rust -1.7683831270992776e1
+- `shell_file_problemShell2_face1_extend` (geometry): `values.result.geometry[2]` C++ -1.755278982919615e1, Rust -1.75527898060607e1; `values.result.geometry[4]` C++ 3.0965995600435217e1, Rust 3.096599552489583e1
+
+## `offset.offset_geometry_creation` (42 cases: 40 geometry, 2 rounding)
+
+- `gen0020` (rounding): `values.state[24]` C++ 0e0, Rust -1.2824829865237153e-16; `values.state[25]` C++ 0e0, Rust -1.2824829865237153e-16 (+6 more)
+- `gen0039` (geometry): `values.state.len` C++ 1913, Rust 385
+- `gen0040` (geometry): `values.state.len` C++ 1418, Rust 1628
+- `gen0070` (geometry): `values.state[204]` C++ 2.183881798226854e-1, Rust 2.1251544971143832e-1; `values.state[205]` C++ 9.168065913539326e-1, Rust 9.23576790600199e-1
+- `gen0074` (geometry): `values.state[13]` C++ 5.000000946782812e0, Rust 4.999999857344991e0; `values.state[14]` C++ 1.006965709818794e0, Rust 1.0069664263086615e0 (+51 more)
+- `gen0087` (geometry): `values.state.len` C++ 209, Rust 269
+- `gen0101` (geometry): `values.state[40]` C++ -7.694053665833576e-2, Rust -4.41888314533599e-2; `values.state[41]` C++ 8.326672684688674e-17, Rust 3.804286504868937e-2 (+102 more)
+- `gen0120` (geometry): `values.state.len` C++ 683, Rust 703
+- `gen0155` (geometry): `values.state.len` C++ 1225, Rust 461
+- `gen0178` (geometry): `values.state.len` C++ 408, Rust 398
+- `gen0202` (geometry): `values.state[89]` C++ -1.148050297095272e1, Rust -1.913417161825446e1; `values.state[90]` C++ 2.0079177854681027e-2, Rust -1.148050297095272e1
+- `gen0298` (geometry): `values.state[144]` C++ 2.658788851059398e-1, Rust 0e0; `values.state[145]` C++ 7.341211148940581e-1, Rust 9.825799996635236e-1
+- `gen0304` (geometry): `values.state[112]` C++ -4.616252378125249e0, Rust -4.616249487105602e0; `values.state[114]` C++ 1.10761354794274e0, Rust 1.1076142264409061e0 (+104 more)
+- `gen0306` (geometry): `values.state[17]` C++ 2.3809523809523725e-1, Rust 5e0; `values.state[21]` C++ -2.3809523809523991e-1, Rust -5e0 (+80 more)
+- `gen0310` (geometry): `values.state[7]` C++ 2.4704067040192149e-1, Rust 0e0
+- `gen0348` (geometry): `values.state[265]` C++ 7.985315638906418e0, Rust 8.401248504751576e0
+- `gen0355` (geometry): `values.state[55]` C++ 5.894500487140527e-3, Rust 5.862027397979998e-3; `values.state[56]` C++ 9.930701722382462e-1, Rust 9.931083238574101e-1
+- `gen0377` (geometry): `values.state.len` C++ 144, Rust 142
+- `gen0391` (geometry): `values.state.len` C++ 211, Rust 407
+- `gen0397` (geometry): `values.state.len` C++ 619, Rust 1507
+- `gen0413` (geometry): `values.state.len` C++ 409, Rust 379
+- `gen0454` (geometry): `values.state.len` C++ 1704, Rust 1724
+- `gen0455` (geometry): `values.state[60]` C++ -3.5271955808363076e-1, Rust 0e0; `values.state[61]` C++ 1.2998226576648395e0, Rust 1e0
+- `gen0464` (geometry): `values.state[538]` C++ 5.324691659615642e0, Rust 5.3195488984603205e0
+- `gen0471` (geometry): `values.state.len` C++ 134, Rust 178
+- `gen0504` (geometry): `values.state[7]` C++ 5.91350406324714e-1, Rust 7.912250944065763e-1
+- `gen0545` (geometry): `values.state.len` C++ 15590, Rust 19140
+- `gen0558` (geometry): `values.state[12]` C++ 5e0, Rust 4.500000000000028e0; `values.state[16]` C++ -5.000000000000028e0, Rust -4.499999999999972e0 (+22 more)
+- `gen0600` (rounding): `values.state[155]` C++ 0e0, Rust 3.703836134319102e-14
+- `gen0650` (geometry): `values.state.len` C++ 23, Rust 25
+- `gen0658` (geometry): `values.state[17]` C++ 8.401508061984433e0, Rust 1.785183614043932e0; `values.state[20]` C++ -4.440892098500626e-16, Rust 7.875162886385094e-1 (+12 more)
+- `gen0666` (geometry): `values.state[9]` C++ 6.724795733810487e0, Rust 8.963753372436745e0; `values.state[10]` C++ 9.600263351283491e0, Rust 1.0328020758266426e1 (+70 more)
+- `gen0680` (geometry): `values.state.len` C++ 248, Rust 263
+- `gen0682` (geometry): `values.state.len` C++ 639, Rust 654
+- `gen0690` (geometry): `values.state[10]` C++ 9.063853369613271e-1, Rust 7.849235477055443e-1
+- `gen0708` (geometry): `values.state.len` C++ 231, Rust 229
+- `gen0715` (geometry): `values.state[13]` C++ 3.6162748964683616e-1, Rust 1e0
+- `gen0726` (geometry): `values.state.len` C++ 1401, Rust 1416
+- `gen0747` (geometry): `values.state.len` C++ 2157, Rust 665
+- `gen0762` (geometry): `values.state.len` C++ 356, Rust 354
+- `gen0767` (geometry): `values.state.len` C++ 386, Rust 722
+- `gen0777` (geometry): `values.state.len` C++ 313, Rust 311
+
+## `topology.assert_valid` (4 cases: 4 geometry)
+
+- `copy_offset_issue2111_patch_sheet_0_5` (geometry): `ints.assert_valid[0]` C++ -1, Rust 1; `ints.failure_count[0]` C++ 3, Rust 0 (+2 more)
+- `copy_offset_issue2111_patch_sheet_0_75` (geometry): `ints.failure_count[0]` C++ 3, Rust 0; `ints.lines.len` C++ 427, Rust 0 (+1 more)
+- `copy_offset_issue2111_patch_sheet_1_0` (geometry): `ints.failure_count[0]` C++ 1, Rust 0; `ints.lines.len` C++ 143, Rust 0 (+1 more)
+- `copy_offset_issue2111_patch_sheet_m0_75` (geometry): `ints.failure_count[0]` C++ 4, Rust 0; `ints.lines.len` C++ 571, Rust 0 (+1 more)

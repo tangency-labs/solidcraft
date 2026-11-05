@@ -37,3 +37,207 @@ unit = "offset.offset_executive_p2"
 case = "tiny_tolerance_sheet_above_boundary"
 cpp_defect = "WR-749"
 why = "C++ shells a sheet of tolerance 1e-15 into a result of tolerance 1e-15 (below SM_EFF_ZERO, WR-749); Rust refuses the effectively zero offset tolerance by name (ToleranceUnresolved)"
+
+# The exact surface extension replaces the fitted one (branch land-me/split-ext): passed on
+# main 4b10d7d6e (the old path), moves on the branch; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md
+# names each case and its value.
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "api_offset_cylinder_extend_merge_out"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "api_offset_cylinder_out"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "api_shell_cylinder_r5_top_open_tol_1e6"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "boolean_domain_problemShell12_face0_extend"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "defeature_extrusion_face0_inset2_5_extended"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "defeature_extrusion_face0_inset2_extended"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "extended_cylinder_outset"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "fill_gap_extrudeHoles1_face0_extend_d13"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "fill_gap_open_shell_face0_extend_outset"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "fillet2_f0_d0_in_ext"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "fillet2_f0_d0_out_ext"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "fillet2_f1_d0_in_ext"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "fillet2_f2_d0_in_ext"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "issue2174_cap_two_rim_edges_api_shell_in"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "issue2611_half_pipe_arc_r20_api_shell_out"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "mate_two_curves_problemShell15_face8_inset"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "mate_two_curves_problemShell15_face8_outset"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "mate_two_curves_problemShell15_face9_inset"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "mate_two_curves_problemShell15_face9_outset"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "member_cylinder_extend_outset"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "member_cylinder_extend_outset_large"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "member_cylinder_extend_outset_tiny"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "member_shell_cylinder_side"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_box_diff_cyl_big_rad_f1_d0_in_ext"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_box_diff_cyl_big_rad_f1_d0_out_ext"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_cyl_on_box_f2_d0_out_ext"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_cyl_on_box_w_fillet1_f0_d0_in_ext"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_cyl_on_box_w_fillet1_f0_d0_out_ext"
+why = "the exact surface extension replaces the fitted one (rounding; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_cyl_on_box_w_fillet2_f0_d0_in_ext"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_cyl_on_box_w_fillet2_f0_d0_out_ext"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_cyl_on_box_w_fillet2_f1_d0_in_ext"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_cyl_on_box_w_fillet2_f2_d0_in_ext"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_cyl_on_box_w_fillet_f0_d0_in_ext"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_cyl_on_box_w_fillet_f0_d0_out_ext"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_cyl_on_box_w_fillet_f1_d0_in_ext"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_cyl_on_box_w_fillet_f1_d0_out_ext"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_cyl_on_box_w_fillet_f2_d0_in_ext"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "pe_Fillet_cyl_on_box_w_fillet_f2_d0_out_ext"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "shell_file_problemShell15_face0_extend"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "shell_file_problemShell2_face1_extend"
+why = "the exact surface extension replaces the fitted one (geometry; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case and its value)"
