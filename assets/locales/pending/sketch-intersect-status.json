@@ -5,5 +5,40 @@
     "ui.sketch_links_added_point": "{command} added 1 point to the sketch.",
     "ui.sketch_links_added_points": "{command} added {count} points to the sketch.",
     "ui.sketch_links_hidden": "The result is hidden because {option} is off in the sketch palette."
+  },
+  "ar": {
+    "ui.sketch_links_added_curve": "أضاف {command} منحنى واحدًا إلى الرسم.",
+    "ui.sketch_links_added_curves": "أضاف {command} منحنيات إلى الرسم (العدد: {count}).",
+    "ui.sketch_links_added_point": "أضاف {command} نقطة واحدة إلى الرسم.",
+    "ui.sketch_links_added_points": "أضاف {command} نقاطًا إلى الرسم (العدد: {count}).",
+    "ui.sketch_links_hidden": "النتيجة مخفية لأن خيار {option} مُعطَّل في خيارات الرسم."
+  },
+  "he": {
+    "ui.sketch_links_added_curve": "{command} הוסיף עקומה אחת לסקיצה.",
+    "ui.sketch_links_added_curves": "{command} הוסיף {count} עקומות לסקיצה.",
+    "ui.sketch_links_added_point": "{command} הוסיף נקודה אחת לסקיצה.",
+    "ui.sketch_links_added_points": "{command} הוסיף {count} נקודות לסקיצה.",
+    "ui.sketch_links_hidden": "התוצאה מוסתרת כי האפשרות {option} כבויה באפשרויות הסקיצה."
+  },
+  "ja": {
+    "ui.sketch_links_added_curve": "{command} でスケッチに曲線を 1 本追加しました。",
+    "ui.sketch_links_added_curves": "{command} でスケッチに曲線を {count} 本追加しました。",
+    "ui.sketch_links_added_point": "{command} でスケッチに点を 1 個追加しました。",
+    "ui.sketch_links_added_points": "{command} でスケッチに点を {count} 個追加しました。",
+    "ui.sketch_links_hidden": "スケッチオプションの {option} がオフのため、結果は表示されていません。"
+  },
+  "vi": {
+    "ui.sketch_links_added_curve": "{command} đã thêm 1 đường cong vào bản phác thảo.",
+    "ui.sketch_links_added_curves": "{command} đã thêm {count} đường cong vào bản phác thảo.",
+    "ui.sketch_links_added_point": "{command} đã thêm 1 điểm vào bản phác thảo.",
+    "ui.sketch_links_added_points": "{command} đã thêm {count} điểm vào bản phác thảo.",
+    "ui.sketch_links_hidden": "Kết quả bị ẩn vì {option} đang tắt trong Tùy chọn phác thảo."
+  },
+  "zh": {
+    "ui.sketch_links_added_curve": "{command} 已向草图添加 1 条曲线。",
+    "ui.sketch_links_added_curves": "{command} 已向草图添加 {count} 条曲线。",
+    "ui.sketch_links_added_point": "{command} 已向草图添加 1 个点。",
+    "ui.sketch_links_added_points": "{command} 已向草图添加 {count} 个点。",
+    "ui.sketch_links_hidden": "结果已隐藏，因为草图选项中的“{option}”已关闭。"
   }
 }
