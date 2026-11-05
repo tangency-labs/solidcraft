@@ -23,14 +23,21 @@ use solidcraft_io::Format;
 use super::CommandSpec;
 use super::print_face;
 use crate::params::{bad, bool_, num, str_, string_list};
+use crate::schema::file::{
+    NewerFileReport, OpenElsewhere, OpenResult, OpenedDesign, OpenedDrawing, OpenedFile, OpenedPointCloud, RecoverParams, RecoverResult,
+    RecoveredDesign, RecoveryDiscardParams, RecoveryDiscardResult, RecoveryListParams, RecoveryListResult,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.new", "New Design", new_doc).icon("new").key("Ctrl+N").noundo().params("name?"),
-    CommandSpec::new("doc.open", "Open", open)
+    CommandSpec::new("doc.open", "Open", crate::checked!("doc.open", open))
         .icon("open")
         .key("Ctrl+O")
         .noundo()
+        .contract(&OPEN_CONTRACT)
+        .output(output_schema_for::<OpenResult>)
         .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
     CommandSpec::new("file.insert_step", "Insert STEP", insert_step)
         .at("SOLID", "INSERT")
@@ -50,13 +57,22 @@ pub static COMMANDS: &[CommandSpec] = &[
         .key("Ctrl+Shift+S")
         .noundo()
         .params("path (a design file name, .sc as a rule; one that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file)"),
-    CommandSpec::new("doc.recovery_list", "Recoverable Designs", recovery_list).icon("restore")
+    CommandSpec::new("doc.recovery_list", "Recoverable Designs", crate::checked!("doc.recovery_list", recovery_list)).icon("restore")
         .noundo()
+        .contract(&RECOVERY_LIST_CONTRACT)
+        .output(output_schema_for::<RecoveryListResult>)
         .params("dir? (default: the recovery folder) → designs autosaved by apps that crashed or closed with unsaved changes"),
-    CommandSpec::new("doc.recover", "Recover Design", recover).icon("restore")
+    CommandSpec::new("doc.recover", "Recover Design", crate::checked!("doc.recover", recover)).icon("restore")
         .noundo()
+        .contract(&RECOVER_CONTRACT)
+        .output(output_schema_for::<RecoverResult>)
         .params("id (from doc.recovery_list); dir?; discard?: bool (delete the entry once open) — opens it with its file path, unsaved"),
-    CommandSpec::new("doc.recovery_discard", "Discard Recovered Design", recovery_discard).icon("delete").noundo().params("id, or all: true; dir?"),
+    CommandSpec::new("doc.recovery_discard", "Discard Recovered Design", crate::checked!("doc.recovery_discard", recovery_discard))
+        .icon("delete")
+        .noundo()
+        .contract(&RECOVERY_DISCARD_CONTRACT)
+        .output(output_schema_for::<RecoveryDiscardResult>)
+        .params("id, or all: true; dir?"),
     CommandSpec::new("file.export", "Export", export)
         .icon("export")
         .noundo()
@@ -122,6 +138,10 @@ fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"name": name}))
 }
 
+const OPEN_CONTRACT: TypedContract<crate::schema::file::OpenParams> = TypedContract::new();
+const RECOVERY_LIST_CONTRACT: TypedContract<RecoveryListParams> = TypedContract::new();
+const RECOVER_CONTRACT: TypedContract<RecoverParams> = TypedContract::new();
+const RECOVERY_DISCARD_CONTRACT: TypedContract<RecoveryDiscardParams> = TypedContract::new();
 const EXPORT_STEP_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportStepParams> = crate::schema::TypedContract::new();
 const EXPORT_STL_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMeshParams> = crate::schema::TypedContract::new();
 const EXPORT_3MF_CONTRACT: crate::schema::TypedContract<crate::schema::file::Export3mfParams> = crate::schema::TypedContract::new();
@@ -129,7 +149,32 @@ const EXPORT_OBJ_CONTRACT: crate::schema::TypedContract<crate::schema::file::Exp
 const EXPORT_URDF_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportUrdfParams> = crate::schema::TypedContract::new();
 
 fn path_arg<'a>(p: &'a Value, cmd: &str) -> Result<&'a str> {
-    str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))
+    str_(p, "path").filter(|x| usable_path(x)).ok_or_else(|| bad(cmd, "`path` is required"))
+}
+
+/// Whether `path` is one a command takes: not blank, under 4096 bytes.
+pub(crate) fn usable_path(path: &str) -> bool {
+    !path.trim().is_empty() && path.len() < 4096
+}
+
+/// What `up` says when it is not `z` or `y`.
+pub(crate) const UP_MESSAGE: &str = "`up` must be \"z\" (the file's axes are kept) or \"y\" (the file has Y up: its Y becomes Z)";
+/// What `names` says when it is not one of its words.
+pub(crate) const NAMES_MESSAGE: &str = "`names` must be \"auto\", \"solid\", \"product\" or \"instance\"";
+
+/// `up` as a file is read with it: `Some(true)` for `y`, `Some(false)` for `z` (any case, spaces
+/// around it ignored), `None` for anything else.
+pub(crate) fn up_form(v: &Value) -> Option<bool> {
+    match v.as_str().map(|u| u.trim().to_ascii_lowercase()).as_deref() {
+        Some("z") => Some(false),
+        Some("y") => Some(true),
+        _ => None,
+    }
+}
+
+/// `names` as a STEP or IGES file is read with it, `None` for anything that is not a word of it.
+pub(crate) fn names_form(v: &Value) -> Option<solidcraft_io::StepNames> {
+    v.as_str().and_then(solidcraft_io::StepNames::parse)
 }
 
 /// How a STEP or IGES file comes in beyond its path: which way is up in the file, and what its
@@ -144,18 +189,11 @@ struct StepOptions {
 fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
     let y_up = match p.get("up") {
         None | Some(Value::Null) => false,
-        Some(v) => match v.as_str().map(|u| u.trim().to_ascii_lowercase()).as_deref() {
-            Some("z") => false,
-            Some("y") => true,
-            _ => return Err(bad(cmd, "`up` must be \"z\" (the file's axes are kept) or \"y\" (the file has Y up: its Y becomes Z)")),
-        },
+        Some(v) => up_form(v).ok_or_else(|| bad(cmd, UP_MESSAGE))?,
     };
     let names = match p.get("names") {
         None | Some(Value::Null) => solidcraft_io::StepNames::default(),
-        Some(v) => v
-            .as_str()
-            .and_then(solidcraft_io::StepNames::parse)
-            .ok_or_else(|| bad(cmd, "`names` must be \"auto\", \"solid\", \"product\" or \"instance\""))?,
+        Some(v) => names_form(v).ok_or_else(|| bad(cmd, NAMES_MESSAGE))?,
     };
     Ok(StepOptions { y_up, names })
 }
@@ -340,14 +378,21 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
         let mut fresh = Session::new(Document::new(&stem));
         fresh.set_validation(s.validation());
-        let mut out = fresh.execute(command, &json!({"path": path}))?;
+        let made: DrawingInserted = reply_from(fresh.execute(command, &json!({"path": path}))?, command)?;
         fresh.undo.clear();
         s.replace_design(fresh);
-        out["path"] = json!(path);
-        out["name"] = json!(s.doc.name);
-        out["features"] = json!(s.doc.features.len());
-        out["errors"] = json!(s.model.results.iter().filter(|r| r.error.is_some()).count());
-        return Ok(out);
+        return reply(OpenResult::Drawing(OpenedDrawing {
+            sketch: made.sketch,
+            created_sketch: made.created_sketch,
+            curves: made.curves,
+            texts: made.texts,
+            info: made.info,
+            path: path.to_string(),
+            name: s.doc.name.clone(),
+            features: s.doc.features.len(),
+            errors: s.model.results.iter().filter(|r| r.error.is_some()).count(),
+            param_warnings: Vec::new(),
+        }));
     }
     if solidcraft_io::is_point_cloud_path(path) {
         // A new, unsaved design holding the points.
@@ -360,12 +405,20 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
                 q.insert(k.into(), v.clone());
             }
         }
-        let r = fresh.execute("pointcloud.insert", &Value::Object(q))?;
+        let r: CloudInserted = reply_from(fresh.execute("pointcloud.insert", &Value::Object(q))?, "pointcloud.insert")?;
         fresh.undo.clear();
         s.replace_design(fresh);
-        return Ok(
-            json!({"path": path, "features": 0, "errors": 0, "cloud": r["cloud"], "points": r["points"], "source_points": r["source_points"], "bounds": r["bounds"], "warnings": r["warnings"]}),
-        );
+        return reply(OpenResult::PointCloud(OpenedPointCloud {
+            path: path.to_string(),
+            features: 0,
+            errors: 0,
+            cloud: r.cloud,
+            points: r.points,
+            source_points: r.source_points,
+            bounds: r.bounds,
+            warnings: r.warnings,
+            param_warnings: Vec::new(),
+        }));
     }
     if solidcraft_io::is_step_path(path) || solidcraft_io::is_mesh_path(path) {
         // A new, unsaved design holding the file's bodies.
@@ -385,13 +438,24 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         fresh.undo.clear();
         s.replace_design(fresh);
         let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
-        let mut out = json!({"path": path, "features": s.doc.features.len(), "errors": errors, "bodies": r["bodies"], "warnings": r["warnings"]});
-        for k in ["component", "component_name", "occurrence", "subcomponents", "rigid_joints", "stand_up", "system", "exporter", "exporter_up"] {
-            if let Some(v) = r.get(k) {
-                out[k] = v.clone();
-            }
-        }
-        return Ok(out);
+        let r: ImportedFile = reply_from(r, "the import")?;
+        return reply(OpenResult::File(OpenedFile {
+            path: path.to_string(),
+            features: s.doc.features.len(),
+            errors,
+            bodies: r.bodies,
+            warnings: r.warnings,
+            component: r.component,
+            component_name: r.component_name,
+            occurrence: r.occurrence,
+            subcomponents: r.subcomponents,
+            rigid_joints: r.rigid_joints,
+            stand_up: r.stand_up,
+            system: r.system,
+            exporter: r.exporter,
+            exporter_up: r.exporter_up,
+            param_warnings: Vec::new(),
+        }));
     }
     let read_only = bool_(p, "read_only").unwrap_or(false);
     // Stamped before it is read: a write while it is being read is a change too.
@@ -423,20 +487,86 @@ fn opened_design(
     s.disk = disk;
     s.read_only = read_only;
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
-    let mut out = json!({"path": path, "features": s.doc.features.len(), "errors": errors, "name": s.doc.name});
-    if read_only {
-        out["read_only"] = json!(true);
-    }
-    // A newer SolidCraft saved it: opened all the same, and the reply says so.
-    if let Some(file) = &s.doc.newer_file {
-        out["newer_file"] = file.report();
-        out["warnings"] = json!(file.warnings());
-    }
     let now = solidcraft_io::design_lock::now_secs();
-    if let Some(lock) = solidcraft_io::design_lock::held_elsewhere(std::path::Path::new(path), now) {
-        out["open_elsewhere"] = json!({"host": lock.host, "user": lock.user, "app": lock.app, "opened": lock.opened});
-    }
-    Ok(out)
+    let open_elsewhere = solidcraft_io::design_lock::held_elsewhere(std::path::Path::new(path), now).map(|lock| OpenElsewhere {
+        host: lock.host,
+        user: lock.user,
+        app: lock.app,
+        opened: lock.opened,
+    });
+    reply(OpenResult::Design(OpenedDesign {
+        path: path.to_string(),
+        features: s.doc.features.len(),
+        errors,
+        name: s.doc.name.clone(),
+        read_only: read_only.then_some(true),
+        open_elsewhere,
+        newer_file: s.doc.newer_file.as_ref().map(|file| NewerFileReport {
+            format: file.format,
+            reads_up_to: file.reads_up_to,
+            unknown_changes: file.unknown_changes.clone(),
+            not_understood: file.not_understood.clone(),
+            notice: file.notice(),
+        }),
+        warnings: s.doc.newer_file.as_ref().map(|file| file.warnings()),
+        param_warnings: Vec::new(),
+    }))
+}
+
+/// `doc.open`'s reply, as JSON.
+fn reply(result: OpenResult) -> Result<Value> {
+    serde_json::to_value(result).map_err(|e| EngineError::Other(format!("doc.open: {e}")))
+}
+
+/// What `doc.open` takes from the reply of the command that did the work (`from`).
+fn reply_from<T: serde::de::DeserializeOwned>(reply: Value, from: &str) -> Result<T> {
+    serde_json::from_value(reply).map_err(|e| EngineError::Other(format!("doc.open: the reply of {from}: {e}")))
+}
+
+/// What `sketch.insert_dxf` and `sketch.insert_svg` reply, as far as `doc.open` passes it on.
+#[derive(serde::Deserialize)]
+struct DrawingInserted {
+    sketch: u64,
+    #[serde(default)]
+    created_sketch: Option<u64>,
+    curves: usize,
+    texts: usize,
+    #[serde(default)]
+    info: Value,
+}
+
+/// What `pointcloud.insert` replies, as far as `doc.open` passes it on.
+#[derive(serde::Deserialize)]
+struct CloudInserted {
+    cloud: u64,
+    points: usize,
+    source_points: u64,
+    #[serde(default)]
+    bounds: Option<[[f64; 3]; 2]>,
+    warnings: Vec<String>,
+}
+
+/// What an import (`add_step`, `add_mesh`) replies, as far as `doc.open` passes it on.
+#[derive(serde::Deserialize)]
+struct ImportedFile {
+    bodies: Vec<String>,
+    warnings: Vec<String>,
+    component: u64,
+    component_name: String,
+    #[serde(default)]
+    occurrence: Option<u64>,
+    #[serde(default)]
+    subcomponents: Option<usize>,
+    #[serde(default)]
+    rigid_joints: Option<usize>,
+    #[serde(default)]
+    stand_up: Option<u64>,
+    #[serde(default)]
+    system: Option<String>,
+    #[serde(default)]
+    exporter: Option<String>,
+    #[serde(default)]
+    exporter_up: Option<String>,
 }
 
 /// The name a design never given one by its user is shown under.
@@ -1110,7 +1240,9 @@ fn recovery_dir(p: &Value, cmd: &str) -> Result<std::path::PathBuf> {
 
 fn recovery_list(_s: &mut Session, p: &Value) -> Result<Value> {
     let dir = recovery_dir(p, "doc.recovery_list")?;
-    Ok(json!({"dir": dir, "designs": crate::recovery::orphans(&dir)}))
+    let designs = crate::recovery::orphans(&dir).into_iter().map(RecoveredDesign::from).collect();
+    serde_json::to_value(RecoveryListResult { dir, designs, param_warnings: Vec::new() })
+        .map_err(|e| EngineError::Other(format!("doc.recovery_list: {e}")))
 }
 
 fn recover(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1127,7 +1259,9 @@ fn recover(s: &mut Session, p: &Value) -> Result<Value> {
         crate::recovery::remove(&dir, id)?;
     }
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
-    Ok(json!({"id": id, "path": entry.path, "name": entry.name, "features": s.doc.features.len(), "errors": errors}))
+    let reply =
+        RecoverResult { id: id.to_string(), path: entry.path, name: entry.name, features: s.doc.features.len(), errors, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(format!("{cmd}: {e}")))
 }
 
 fn recovery_discard(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -1141,7 +1275,7 @@ fn recovery_discard(_s: &mut Session, p: &Value) -> Result<Value> {
     for id in &ids {
         crate::recovery::remove(&dir, id)?;
     }
-    Ok(json!({"discarded": ids}))
+    serde_json::to_value(RecoveryDiscardResult { discarded: ids, param_warnings: Vec::new() }).map_err(|e| EngineError::Other(format!("{cmd}: {e}")))
 }
 
 #[cfg(test)]

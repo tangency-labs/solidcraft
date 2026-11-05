@@ -39,10 +39,6 @@ component.replace_with_link
 component.revert_position
 component.unlock
 component.update_links
-doc.open
-doc.recover
-doc.recovery_discard
-doc.recovery_list
 document.inspect
 engine.commands
 explode.create
