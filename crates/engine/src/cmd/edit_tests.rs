@@ -1705,7 +1705,7 @@ fn reorder_reports_where_the_feature_is_or_why_it_did_not_move() {
     assert!(out["note"].as_str().is_some_and(|n| n.contains("nothing moved") && n.contains("past the end")), "{out}");
     // Ahead of its own sketch: refused, naming the cause.
     let e = s.execute("timeline.reorder", &json!({"feature": "Pad", "position": 0})).unwrap_err().to_string();
-    assert!(e.contains("before something it uses") && e.contains("move that earlier first"), "{e}");
+    assert!(e.contains("breaks Pad") && e.contains("move that feature earlier first"), "{e}");
     assert_eq!(names(&s), ["Block", "Profile", "Pad"], "a refused move leaves the order");
     // Moving the sketch first lets the extrude follow; the reply gives the real index.
     let out = run(&mut s, "timeline.reorder", json!({"feature": "Profile", "position": 0}));
@@ -1714,4 +1714,20 @@ fn reorder_reports_where_the_feature_is_or_why_it_did_not_move() {
     assert_eq!((out["position"].as_u64(), out["moved"].as_bool()), (Some(1), Some(true)));
     assert!(out.get("note").is_none(), "{out}");
     assert_eq!(names(&s), ["Profile", "Pad", "Block"]);
+    // `active` on a feature left in place: the note says only the marker moved.
+    run(&mut s, "timeline.reorder", json!({"feature": "Block", "position": 2, "active": false}));
+    let out = run(&mut s, "timeline.reorder", json!({"feature": "Block", "position": 2, "active": true}));
+    assert_eq!((out["moved"].as_bool(), s.doc.marker), (Some(false), None));
+    assert!(out["note"].as_str().is_some_and(|n| n.contains("only the history marker moved")), "{out}");
+}
+
+#[test]
+fn reorder_refusal_after_a_feature_that_removes_its_body_does_not_blame_the_order_of_its_inputs() {
+    // A fillet moved behind a cut that removes its whole body fails though what it uses is earlier.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 5, 10]], "radius": 1, "name": "Round"}));
+    run(&mut s, "solid.box", json!({"length": 30, "width": 30, "height": 30, "corner": [-10, -10, -10], "operation": "cut", "name": "Clear"}));
+    let e = s.execute("timeline.reorder", &json!({"feature": "Round", "position": 2})).unwrap_err().to_string();
+    assert!(e.contains("breaks Round") && e.contains("changes what it works on") && !e.contains("earlier first"), "{e}");
 }

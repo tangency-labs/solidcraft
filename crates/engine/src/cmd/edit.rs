@@ -1544,15 +1544,16 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     // `allow_errors`: made anyway, with what it broke said (#5962).
     let allow = allow_errors(p, cmd)?;
     if !broken.is_empty() && !allow {
-        // The moved feature itself failing means it would come before something it uses, such as
-        // an extrude moved ahead of its sketch: say so, and what to move first (#12140).
+        // The moved feature itself failing: say why, and only when it moved earlier suggest that
+        // it now comes before something it uses, such as an extrude ahead of its sketch (#12140).
+        // Moved later, it fails for another reason, such as a feature that removed its body.
         if let Some((_, error)) = broken.iter().find(|(n, _)| *n == name) {
-            return Err(bad(
-                cmd,
-                format!(
-                    "moving {name} to position {to} breaks {name}: it would come before something it uses ({error}); move that earlier first, or pick a later position"
-                ),
-            ));
+            let hint = if to < from {
+                "; if it uses a feature that would now come after it, move that feature earlier first"
+            } else {
+                "; a feature it would now come after changes what it works on"
+            };
+            return Err(bad(cmd, format!("moving {name} to position {to} breaks {name} ({error}){hint}")));
         }
         let list: Vec<String> = broken.iter().map(|(n, e)| format!("{n} ({e})")).collect();
         return Err(bad(cmd, format!("moving {name} there breaks {}", list.join("; "))));
@@ -1574,8 +1575,14 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
         *s.doc_mut() = next;
     }
     let mut out = json!({"feature": id, "position": now, "from": from, "moved": now != from});
-    if let Some(capped) = capped {
-        out["note"] = json!(capped);
+    // With `active`, a feature left in place may still cross the history marker: say which.
+    let stayed = (now == from).then(|| {
+        let what = if s.doc.marker == marker { "nothing moved" } else { "only the history marker moved" };
+        format!("{what}: {name} is already at position {now}")
+    });
+    let note: Vec<String> = [capped, stayed].into_iter().flatten().collect();
+    if !note.is_empty() {
+        out["note"] = json!(note.join("; "));
     }
     if allow {
         out["broken"] = broken_json(&broken);
