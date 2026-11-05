@@ -467,22 +467,124 @@ fn after_a_model_change_the_last_scene_shows_until_its_views_are_drawn_again() {
     assert_eq!((last.stale.len(), s.drawing_scenes.projections, bytes(&last.scene)), (0, projections + 2, bytes(&now)));
 }
 
-/// Closing the drawing drops its scenes and the world states they hold; opened again, every view
-/// is out of date.
+/// Closing the drawing drops its scenes and the world states they hold, and keeps each view's lines.
+/// Opened again with nothing changed, its views show those lines, up to date, and none is drawn:
+/// only its dimensions are read again.
 #[test]
-fn closing_the_drawing_drops_its_scenes() {
-    let (mut s, sheet, _) = front_and_top();
+fn closing_the_drawing_keeps_its_lines_for_when_it_opens_again() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    top_edge(&mut s, front);
     let drawing = ids::encode(s.open_drawing.unwrap());
     let before = settled(&mut s, sheet);
-    assert_eq!(s.drawing_scenes.views.len(), 2);
     run(&mut s, "drawing.close", json!({}));
     let cache = &s.drawing_scenes;
-    assert!(cache.views.is_empty() && cache.last.is_none() && cache.shown.is_none() && cache.drawing.is_none());
+    assert!(cache.views.is_empty() && cache.dimensions.is_empty() && cache.last.is_none() && cache.shown.is_none() && cache.drawing.is_none());
     assert!(!step(&mut s));
     run(&mut s, "drawing.open", json!({"drawing": drawing}));
     let reopened = extract(&mut s, sheet).unwrap();
     // A new scene, so a new number: the page can't take it for the one it showed before.
-    assert!(reopened.stale.len() == 2 && reopened.generation > before.generation);
+    assert!(reopened.stale.is_empty() && reopened.generation > before.generation, "{:?}", reopened.stale);
+    assert_eq!(reopened.stale_dimensions.len(), 1);
+    let after = settled(&mut s, sheet);
+    assert_eq!((bytes(&after.scene), s.drawing_scenes.projections), (bytes(&before.scene), 0));
+}
+
+/// A change that leaves every body where it was and as it was draws no view: a sketch (a new feature,
+/// so a new world state, that adds no body), and a model edit taken back before its views were drawn
+/// again.
+#[test]
+fn a_change_that_shows_the_same_draws_no_view() {
+    let (mut s, sheet, _) = front_and_top();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    let before = settled(&mut s, sheet);
+    let state = s.world_state().unwrap();
+    let checkpoint = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].clone();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Note"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "drawing.open", drawing.clone());
+    assert!(!Arc::ptr_eq(&state, &s.world_state().unwrap()), "a new world state");
+    assert!(extract(&mut s, sheet).unwrap().stale.is_empty());
+
+    run(&mut s, "drawing.close", json!({}));
+    let block = s.doc.features[0].id;
+    run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"height": 40}}));
+    run(&mut s, "drawing.open", drawing);
+    assert_eq!(extract(&mut s, sheet).unwrap().stale.len(), 2, "40 tall shows otherwise");
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": checkpoint}));
+    // A step straight after the change, with no extract between, finds nothing to draw either.
+    assert!(!step(&mut s));
+    let back = extract(&mut s, sheet).unwrap();
+    assert!(back.stale.is_empty(), "{:?}", back.stale);
+    assert_eq!((bytes(&back.scene), s.drawing_scenes.projections), (bytes(&before.scene), 0));
+}
+
+/// A body renamed while the drawing was closed draws its views again, so a press on a line names it
+/// as it is called now.
+#[test]
+fn a_renamed_body_draws_again() {
+    let (mut s, sheet, _) = front_and_top();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    settled(&mut s, sheet);
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "body.rename", json!({"body": "Block", "name": "Brick"}));
+    run(&mut s, "drawing.open", drawing);
+    assert_eq!(extract(&mut s, sheet).unwrap().stale.len(), 2);
+    settled(&mut s, sheet);
+    assert_eq!(line_under(&mut s, sheet, [150.0, 155.2], 0.5)["body"], json!("Brick"));
+}
+
+/// A part made a reference while the drawing was closed stands where it stood, but draws as a
+/// reference part now: its views draw again.
+#[test]
+fn a_part_made_reference_draws_again() {
+    let (design, over) = under_and_over();
+    let (mut s, sheet, _) = front_and_top_of(design);
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    settled(&mut s, sheet);
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": over, "bom_type": "reference"}));
+    run(&mut s, "drawing.open", drawing);
+    assert_eq!(extract(&mut s, sheet).unwrap().stale.len(), 2);
+}
+
+/// Opened again after a model change, with a view's scale changed too, a drawing shows its last
+/// lines, out of date, until each view is drawn; then it draws as the built scene does.
+#[test]
+fn a_drawing_opened_after_a_change_shows_its_last_lines_until_drawn() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    let before = settled(&mut s, sheet);
+    run(&mut s, "drawing.close", json!({}));
+    let block = s.doc.features[0].id;
+    run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"height": 40}}));
+    run(&mut s, "drawing.open", drawing);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:4"}}));
+    let reopened = extract(&mut s, sheet).unwrap();
+    assert_eq!(reopened.stale.len(), 2);
+    for id in [front, top] {
+        assert_eq!(bytes_of(group_of(&reopened.scene, id)), bytes_of(group_of(&before.scene, id)), "{id}");
+    }
+    let now = settled(&mut s, sheet);
+    assert_eq!((bytes(&now.scene), s.drawing_scenes.projections), (bytes(&built(&s, sheet).scene), 2));
+}
+
+/// A drawing's kept lines go with it: deleted, nothing of it is kept.
+#[test]
+fn a_deleted_drawings_lines_are_not_kept() {
+    let (mut s, sheet, _) = front_and_top();
+    let drawing = s.open_drawing.unwrap();
+    settled(&mut s, sheet);
+    run(&mut s, "drawing.close", json!({}));
+    assert_eq!(s.drawing_scenes.kept.of(drawing).count(), 2);
+    run(&mut s, "drawing.delete", json!({"drawing": ids::encode(drawing)}));
+    assert_eq!(s.drawing_scenes.kept.of(drawing).count(), 0);
+}
+
+/// A set with nothing to show has no key, so a view drawn from it always draws again.
+#[test]
+fn nothing_to_show_has_no_source_key() {
+    assert_eq!(SourceKey::of(&Err(Unmeasured::NoBodies)), None);
 }
 
 /// A view whose lines would take the sheet past a paper scene's records fails and is left out;
