@@ -438,7 +438,7 @@ fn hook(info: &std::panic::PanicHookInfo<'_>) -> bool {
     if graphics_device_lost(&message, &location) {
         // What met the loss survives it (the window's painter, a command), and the app starts
         // again as for any lost device: not a crash to report.
-        eprintln!("SolidCraft graphics: the device was lost during GPU work ({location}); starting again");
+        solidcraft_geom::note!("SolidCraft graphics: the device was lost during GPU work ({location}); starting again");
         IN_HOOK.store(false, Ordering::SeqCst);
         return true;
     }
