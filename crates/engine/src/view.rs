@@ -1661,6 +1661,56 @@ mod tests {
         assert!((free(10.5, 20.0, 5.0) - 10.5).abs() < 1e-9);
         assert!((free(14.0, 10.0, 5.0) - 14.0).abs() < 1e-9);
     }
+
+    /// A point snaps only to a crossing the grid draws (#7114).
+    ///
+    /// At the middle of the cross-fade between the levels 2 and 5 the grid draws only the lines
+    /// the two levels share, every 10 mm: the level of 5 mm is not drawn there, so there is no
+    /// crossing at 5 mm for the point to land on. The step the sketch snaps to is the step of
+    /// the lines that are drawn, not the step of the level that is fading out.
+    #[test]
+    fn a_point_snaps_only_to_a_crossing_the_grid_draws() {
+        // The lines the viewport draws at that zoom: the ones the two levels share.
+        let drawn: Vec<f64> = grid_lines(50.0, 0.0, 40.0, 8).iter().map(|l| l.offset).collect();
+        assert!(drawn.iter().all(|o| (o / 10.0).round() * 10.0 == *o), "the lines drawn: {drawn:?}");
+        assert!(!drawn.iter().any(|o| (*o - 5.0).abs() < 1e-9), "there is no line at 5 mm");
+        // The step the sketch snaps to: the one of the lines that are drawn.
+        let (minor, fine) = sketch_grid_step(50.0);
+        assert_eq!(minor, 10.0, "the step of the lines that are drawn");
+        assert_eq!(fine, 0.5, "the finer lattice's step");
+        // A pointer at 5.3125 is not near a crossing of the drawn grid: it does not land on the
+        // crossing 5 that is not drawn.
+        let p = sketch_grid_point(Vec2::new(5.3125, 10.0), minor, fine);
+        assert!(p.dist(Vec2::new(5.0, 10.0)) > 1e-9, "the point landed on the crossing 5 that is not drawn: {p:?}");
+    }
+
+    /// The finer lattice holds the point when the grid refuses the crossing (#7114).
+    ///
+    /// The grid's helpers never give the pointer back: when there is no crossing to take it, the
+    /// point lands on the finer lattice, which holds the value the user placed.
+    #[test]
+    fn the_fine_lattice_holds_the_point_when_the_grid_refuses_the_crossing() {
+        let (minor, fine) = sketch_grid_step(50.0);
+        // At that zoom the grid draws the lines every 10 mm only: there is no crossing at 5 mm,
+        // so the point lands on the lattice's own point 5.5.
+        let p = sketch_grid_point(Vec2::new(5.3125, 10.0), minor, fine);
+        assert!(p.dist(Vec2::new(5.5, 10.0)) < 1e-9, "the point lands at {p:?}");
+        // The pointer itself is never the answer.
+        assert!(p.dist(Vec2::new(5.3125, 10.0)) > 1e-9, "the point landed on the pointer");
+    }
+
+    /// The crossing of the drawn grid does not take a pointer that is more than two fine steps
+    /// away from it (#7114).
+    ///
+    /// With the drawn step 5 and the fine step 0.5, a pointer at 21.2 is 1.2 mm from the
+    /// crossing 20 (two and a half fine steps) and 0.2 from the lattice's own point 21: the
+    /// lattice holds the pointer, so the point does not move more than two fine steps away from
+    /// where it was.
+    #[test]
+    fn the_crossing_of_the_grid_does_not_take_a_pointer_more_than_two_fine_steps_away() {
+        let p = sketch_grid_point(Vec2::new(21.2, 20.0), 5.0, 0.5);
+        assert!(p.dist(Vec2::new(21.0, 20.0)) < 1e-9, "the point lands at {p:?}");
+    }
 }
 
 #[cfg(test)]
