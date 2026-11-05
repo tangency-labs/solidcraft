@@ -1,6 +1,16 @@
 {
  "commands": [
   {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Rule",
+    "thickness": "2 mm",
+    "active": true,
+    "bend_radius": "2 mm",
+    "k_factor": 0.5
+   }
+  },
+  {
    "command": "solid.box",
    "params": {
     "length": 30,
@@ -117,7 +127,8 @@
      10.5,
      10.5,
      2
-    ]
+    ],
+    "rule": "Rule"
    }
   },
   {

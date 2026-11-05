@@ -1,6 +1,16 @@
 {
  "commands": [
   {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Rule",
+    "thickness": "2 mm",
+    "active": true,
+    "bend_radius": "2 mm",
+    "k_factor": 0.5
+   }
+  },
+  {
    "command": "sketch.create",
    "params": {
     "plane": {
@@ -136,6 +146,7 @@
      -10,
      0
     ],
+    "rule": "Rule",
     "bends": [
      [
       38.82842712474619,
