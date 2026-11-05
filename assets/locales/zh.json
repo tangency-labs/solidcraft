@@ -4116,6 +4116,8 @@
   "sample.plate.name": "示例板",
   "sample.vents.about": "按矩形阵列排列的槽：行数、列数和间距均为参数",
   "sample.vents.name": "通风板",
+  "scale.per_axis": "按轴",
+  "scale.uniform": "等比",
   "search.command_keys": "Enter 运行     Shift+Enter 运行并保持打开     Esc 关闭",
   "search.commands": "命令",
   "search.design": "此设计中",

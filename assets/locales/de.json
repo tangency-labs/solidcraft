@@ -4076,6 +4076,8 @@
   "sample.plate.name": "Beispielplatte",
   "sample.vents.about": "Langlöcher in einem Rechteckmuster: Zeilen, Spalten und Abstand sind Parameter",
   "sample.vents.name": "Lüftungsplatte",
+  "scale.per_axis": "Je Achse",
+  "scale.uniform": "Gleichmäßig",
   "search.command_keys": "Eingabe ausführen     Umschalt+Eingabe ausführen und offen lassen     Esc schließen",
   "search.commands": "Befehle",
   "search.design": "In diesem Design",

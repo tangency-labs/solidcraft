@@ -4116,6 +4116,8 @@
   "sample.plate.name": "サンプル プレート",
   "sample.vents.about": "矩形パターンに並んだスロット: 行数、列数、ピッチはパラメータ",
   "sample.vents.name": "通気プレート",
+  "scale.per_axis": "軸ごと",
+  "scale.uniform": "均等",
   "search.command_keys": "Enter 実行     Shift+Enter 実行して開いたままにする     Esc 閉じる",
   "search.commands": "コマンド",
   "search.design": "このデザイン内",

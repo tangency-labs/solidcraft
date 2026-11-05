@@ -3814,6 +3814,8 @@
   "sample.plate.name": "Plaque d'exemple",
   "sample.vents.about": "Rainures en répétition rectangulaire : lignes, colonnes et pas sont des paramètres",
   "sample.vents.name": "Plaque d'aération",
+  "scale.per_axis": "Par axe",
+  "scale.uniform": "Uniforme",
   "search.command_keys": "Entrée exécuter     Maj+Entrée exécuter et garder ouvert     Échap fermer",
   "search.commands": "Commandes",
   "search.design": "Dans cette conception",

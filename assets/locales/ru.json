@@ -3751,6 +3751,8 @@
   "sample.plate.name": "Образец пластины",
   "sample.vents.about": "Пазы в прямоугольном массиве: число рядов, столбцов и шаг заданы параметрами",
   "sample.vents.name": "Вентиляционная пластина",
+  "scale.per_axis": "По осям",
+  "scale.uniform": "Равномерно",
   "search.command_keys": "Enter выполнить     Shift+Enter выполнить и оставить открытым     Esc закрыть",
   "search.commands": "Команды",
   "search.design": "В этом дизайне",

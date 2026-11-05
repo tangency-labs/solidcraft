@@ -2964,6 +2964,8 @@
   "sample.plate.name": "샘플 플레이트",
   "sample.vents.about": "직사각형 패턴의 슬롯: 행, 열, 피치가 매개변수",
   "sample.vents.name": "통풍 플레이트",
+  "scale.per_axis": "축별",
+  "scale.uniform": "균일",
   "search.command_keys": "Enter 실행     Shift+Enter 실행 후 열어 두기     Esc 닫기",
   "search.commands": "명령",
   "search.design": "이 디자인에서",

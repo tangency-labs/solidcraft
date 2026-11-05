@@ -3813,6 +3813,8 @@
   "sample.plate.name": "Piastra di esempio",
   "sample.vents.about": "Asole in ripetizione rettangolare: righe, colonne e passo sono parametri",
   "sample.vents.name": "Piastra di ventilazione",
+  "scale.per_axis": "Per asse",
+  "scale.uniform": "Uniforme",
   "search.command_keys": "Invio esegui     Maiusc+Invio esegui e tieni aperto     Esc chiudi",
   "search.commands": "Comandi",
   "search.design": "In questo progetto",

@@ -3813,6 +3813,8 @@
   "sample.plate.name": "範例板",
   "sample.vents.about": "依矩形陣列排列的槽：列數、欄數和間距均為參數",
   "sample.vents.name": "通風板",
+  "scale.per_axis": "依軸",
+  "scale.uniform": "等比",
   "search.command_keys": "Enter 執行     Shift+Enter 執行並保持開啟     Esc 關閉",
   "search.commands": "命令",
   "search.design": "此設計中",

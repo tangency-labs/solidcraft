@@ -4116,6 +4116,8 @@
   "sample.plate.name": "لوح نموذجي",
   "sample.vents.about": "شقوق في نمط مستطيلي: الصفوف والأعمدة والخطوة معاملات",
   "sample.vents.name": "لوح تهوية",
+  "scale.per_axis": "لكل محور",
+  "scale.uniform": "موحّد",
   "search.command_keys": "Enter تشغيل     Shift+Enter تشغيل مع الإبقاء مفتوحًا     Esc إغلاق",
   "search.commands": "الأوامر",
   "search.design": "في هذا التصميم",

@@ -3807,6 +3807,8 @@
   "sample.plate.name": "Placă exemplu",
   "sample.vents.about": "Canale într-o matrice dreptunghiulară: rândurile, coloanele și pasul sunt parametri",
   "sample.vents.name": "Placă de ventilație",
+  "scale.per_axis": "Pe axe",
+  "scale.uniform": "Uniform",
   "search.command_keys": "Enter execută     Shift+Enter execută și păstrează deschis     Esc închide",
   "search.commands": "Comenzi",
   "search.design": "În acest proiect",

@@ -3807,6 +3807,8 @@
   "sample.plate.name": "Eksempelplade",
   "sample.vents.about": "Slidser i et rektangulært mønster: Rækker, kolonner og deling er parametre",
   "sample.vents.name": "Ventilationsplade",
+  "scale.per_axis": "Per akse",
+  "scale.uniform": "Ensartet",
   "search.command_keys": "Enter kør     Shift+Enter kør og hold åben     Esc luk",
   "search.commands": "Kommandoer",
   "search.design": "I dette design",

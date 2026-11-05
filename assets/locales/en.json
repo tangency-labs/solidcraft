@@ -4116,6 +4116,8 @@
   "sample.plate.name": "Sample Plate",
   "sample.vents.about": "Slots in a rectangular pattern: rows, columns and pitch are parameters",
   "sample.vents.name": "Vent Plate",
+  "scale.per_axis": "Per axis",
+  "scale.uniform": "Uniform",
   "search.command_keys": "Enter run     Shift+Enter run and keep open     Esc close",
   "search.commands": "Commands",
   "search.design": "In this design",
