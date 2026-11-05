@@ -967,7 +967,7 @@ impl Document {
                     if variable == old {
                         continue;
                     }
-                    let r = expr::rename_reference(e, old, new);
+                    let r = rename(e, old, new);
                     if r != *e {
                         *e = r;
                         n += 1;

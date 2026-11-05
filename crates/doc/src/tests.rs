@@ -512,8 +512,24 @@ fn parameters_named_after_units_are_renamed_as_an_older_build_read_them() {
     doc.set_param("mm_param", "1", Some(""), None).unwrap();
     doc.params.push(Param { name: "turn".into(), expr: "deg / 2 + mm".into(), unit: "mm".into(), comment: String::new(), model: false });
     doc.favorites.insert("mm".into());
+    // An equation curve's formula too: `2 mm * t` was 2 × the parameter `mm` times t.
+    let mut sketch = Sketch::new();
+    let (x, y) = (Some("t".to_string()), "2 mm * t".to_string());
+    let (start, end) = ("0".to_string(), "1".to_string());
+    sketch.equations.push(solidcraft_sketch::EquationCurve {
+        curve: "c1".into(),
+        x,
+        y,
+        start,
+        end,
+        tolerance: 0.01,
+        variable_unit: Default::default(),
+    });
+    let curve = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
     let names = ["mm".to_string(), "deg".into(), "mm".into(), "width".into()];
     doc.rename_unit_word_params(&names).unwrap();
+    let FeatureKind::Sketch { sketch, .. } = &doc.feature(curve).unwrap().kind else { panic!("a sketch") };
+    assert_eq!(sketch.equations[0].y, "2 mm_param2 * t");
     assert_eq!(doc.feature(id).unwrap().param_names[0], "deg_param");
     assert!(doc.param("mm").is_none() && doc.param("mm_param2").is_some(), "the next free name");
     assert_eq!(doc.param("turn").map(|p| p.expr.as_str()), Some("deg_param / 2 + mm_param2"));
