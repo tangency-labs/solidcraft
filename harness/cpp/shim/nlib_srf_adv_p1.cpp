@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // difftest shim for unit `nlib.srf_adv_p1`.
-// Wraps N_SrfExtendByDist, N_SrfOffsetGetMaxDeriv, N_SrfEvalPtDerivsUnbounded,
-// N_CreateSkinSpine and N_CrossBoundaryDerivsVectorField (upstream
-// source/SMLib/src/NL_SrfAdv.cpp).
+// Wraps N_SrfOffsetGetMaxDeriv, N_SrfEvalPtDerivsUnbounded, N_CreateSkinSpine and
+// N_CrossBoundaryDerivsVectorField (upstream source/SMLib/src/NL_SrfAdv.cpp).
 //
 // One entry point, sc_nlib_srf_adv_p1_eval(op, in, n_in, out, cap, out_len): `op`
 // selects the routine, `in` holds its inputs, `out` receives a flat record of
 // doubles: the status (0 = ok, else NL_ERROR.eno, cleared before the call; 1000 if
-// the flag was set without a number), then, on success only, the results.
+// the flag was set without a number), then, on success only, the results. Op 0 (the
+// surface extension by a distance, N_SrfExtendByDist) was removed with the port's
+// fitted extension; its number is not reused.
 //
 // A surface in `in` is: n m p q, then (n+1)*(m+1) control points (x y z w,
 // row-major), n+p+2 u knots, m+q+2 v knots. A curve is: n p, then n+1 control points
@@ -64,7 +65,6 @@ NL_CURVE* read_crv(const double* in, int64_t* at, NL_STACKS* S)
 
 } // namespace
 
-// op 0 extend by distance: surface, dist dflg end cont inplace -> status, surface.
 // op 1 offset max derivatives: surface, d -> status, Muu Muv Mvv.
 // op 2 unbounded evaluation: surface, cflg ndr cnt, cnt (u v) pairs -> for each pair
 //      until the first failure: status, then D[i][j] (xyz, i + j <= ndr, i outer; the
@@ -87,28 +87,6 @@ SC_EXPORT int32_t sc_nlib_srf_adv_p1_eval(int32_t op, const double* in, int64_t 
     N_ErrClear();
     switch (op)
     {
-        case 0:
-        {
-            NL_SURFACE* sur = read_srf(in, &at, &S);
-            if (sur == NULL)
-            {
-                rc = SC_ERR_ARG;
-                break;
-            }
-            const double* prm = in + at;
-            bool inplace = prm[4] != 0.0;
-            NL_SURFACE* res = inplace ? sur : null_srf(&S);
-            if (res == NULL)
-            {
-                rc = SC_ERR_ARG;
-                break;
-            }
-            err = N_SrfExtendByDist(sur, prm[0], (NL_FLAG)prm[1], (NL_FLAG)prm[2], (NL_FLAG)prm[3], res, &S, &S);
-            o.push_back(nl_status(err));
-            if (err == NL_NO)
-                dump_srf(o, res);
-            break;
-        }
         case 1:
         {
             NL_SURFACE* sur = read_srf(in, &at, &S);

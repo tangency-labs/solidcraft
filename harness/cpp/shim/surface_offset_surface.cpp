@@ -6,8 +6,6 @@
 // STEPInversion, SwapUV, Transform, TrimWithDomain, CreateOffsetSurface, ReadFromDB,
 // IsKindOf, AssertValid and the setters, run as a script on one offset so that the extension upstream's
 // const evaluators store is seen by the following ops. WriteToDB is a generator helper.
-// CreateExtendedSurface steps are refused: UB-107 and the HANG-6/HANG-22 searches inside it
-// cannot be guarded in process.
 //
 // One entry point, sc_surface_offset_surface_eval(op, in, n_in, out, cap, out_len). Layouts
 // are documented in crates/solidcore-ffi/src/units/surface_offset_surface.rs, which
@@ -92,8 +90,7 @@ enum : int64_t
     S_TRIM = 12,
     S_SPLIT = 13,
     S_CREATE_OFFSET = 14,
-    S_EXTEND = 15,
-    S_EXTEND_DIR = 16,
+    // 15, 16: CreateExtendedSurface (refused here), removed with the port's fitted extension.
     S_COPY = 17,
     S_EQ = 18,
     S_SET_DIST = 19,
@@ -752,11 +749,6 @@ void run_step(int64_t step, Rd& rd, const SmContext& ctx, SmOffsetSurface* s, st
         }
         break;
     }
-    case S_EXTEND:
-    case S_EXTEND_DIR:
-        // CreateExtendedSurface reaches UB-107 and the HANG-6/HANG-22 searches, which cannot
-        // be guarded in process: refused (the FFI refuses these steps before calling).
-        throw ScOffsetUnsafeInput{};
     case S_CREATE_OFFSET:
     case S_COPY:
     {

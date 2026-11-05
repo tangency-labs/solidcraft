@@ -2,7 +2,7 @@
 // difftest shim for unit `nurbs.b_spline_surface_n_lib_p1`.
 // Wraps the SmBSplineSurface members owned by the unit (source/SMLib/src/SmBSplineSurfaceNLib.cpp):
 // ApproximateOffsetSurface, CreateCoonsPatch (with the static sm_CreateCoonsSrf),
-// CreateExtendedSurface (both overloads), JoinSurface, CreateNSidedPatch, CreateRuledSurface
+// JoinSurface, CreateNSidedPatch, CreateRuledSurface
 // (with the static sm_BuildNlibCurve), CreateSweepSurface, CreateSwungSurface,
 // EvaluatePointOnExtendedSurface, Reparameterize, Reverse, ExpandBoundarySpan, EvaluateSimple
 // and EvaluatePoint.
@@ -347,7 +347,7 @@ enum : int32_t
 {
     // surface ops (`this` from a surface block)
     OP_OFFSET = 0,
-    OP_EXTEND = 1,
+    // 1: CreateExtendedSurface, removed with the port's fitted extension.
     OP_JOIN = 2,
     OP_EXT_EVAL = 3,
     OP_REPARAM = 4,
@@ -565,18 +565,6 @@ void surface_op(int32_t op, Rd& rd, const SmContext& ctx, SmBSplineSurface* s, s
         int pt = (int)rd.idx();
         SmBSplineSurface* r = NULL;
         SmStatus stt = s->ApproximateOffsetSurface(ctx, d, tol, r, pt);
-        put_new(o, stt, r);
-        break;
-    }
-    case OP_EXTEND:
-    {
-        bool dir_overload = rd.flag();
-        SmSurfParamType dir = (SmSurfParamType)rd.idx();
-        double dist = rd.num();
-        SmContinuityType cont = (SmContinuityType)rd.idx();
-        SmSurface* r = NULL;
-        SmStatus stt = dir_overload ? s->CreateExtendedSurface(ctx, dir, dist, cont, r)
-                                    : s->CreateExtendedSurface(ctx, dist, cont, r);
         put_new(o, stt, r);
         break;
     }

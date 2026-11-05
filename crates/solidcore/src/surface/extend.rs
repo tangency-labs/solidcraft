@@ -1,10 +1,10 @@
 //! A surface extended past one side of its parameter box by a distance measured across that
 //! side, exactly: [`Surface::extended_by_distance`].
 //!
-//! Not upstream: the kernel's own extension (`N_SrfExtendByDist`, `srf_adv::p2`) estimates
+//! Not upstream: upstream's extension (`CreateExtendedSurface` on `N_SrfExtendByDist`) estimates
 //! its distance, fits a rational curvature-continuous extension by least squares and ends by
-//! removing knots within a tolerance, which can move the source's own part. This is a separate
-//! exact path; that one and its callers are unchanged.
+//! removing knots within a tolerance, which can move the source's own part. It is not ported;
+//! every surface extension in the kernel is this exact one.
 //!
 //! **The construction.** The surface's B-spline form (an analytic kind's only once proved on
 //! its label, [`AnalyticSupport::check`]) is worked on its homogeneous net `(H, w)`, one row of

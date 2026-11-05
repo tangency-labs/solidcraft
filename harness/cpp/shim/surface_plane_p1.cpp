@@ -83,8 +83,7 @@ enum : int32_t
     OP_INHERITED = 23,
     OP_REVERSE = 24,
     OP_SWAP = 25,
-    OP_EXTEND = 26,
-    OP_LAST = 26,
+    OP_LAST = 25,
 };
 
 // Reads the protected STEP flags through pointers to members named in a derived class.
@@ -781,30 +780,6 @@ void run_op(int32_t op, Rd& rd, const SmContext& ctx, SmPlane* a, std::vector<do
         break;
     }
     case OP_SWAP: o.push_back(st(a->SwapUV())); break;
-    case OP_EXTEND:
-    {
-        bool has_dir = rd.flag();
-        SmSurfParamType dir = (SmSurfParamType)rd.idx(0, SM_SP_VMAX);
-        double dist = rd.num();
-        SmContinuityType cont = (SmContinuityType)rd.idx(0, SM_CT_CINFINITY);
-        // upstream copies a NULL NURB (N_SrfCopy) when none can be made
-        if (a->GetOrCreateGwNurbPointer() == NULL)
-        {
-            o.push_back(st(SM_ERR)); // the port returns SM_ERR (no NURB)
-            break;
-        }
-        SmSurface* e = NULL;
-        SmStatus stt = has_dir ? a->CreateExtendedSurface(ctx, dir, dist, cont, e)
-                               : a->CreateExtendedSurface(ctx, dist, cont, e);
-        o.push_back(st(stt));
-        if (stt == SM_SUCCESS)
-        {
-            SmBSplineSurface* bs = e ? SM_CAST_PTR(SmBSplineSurface, e) : NULL;
-            put_surface_nurb(o, bs ? bs->GetGwNurbPointer() : NULL);
-        }
-        delete e;
-        break;
-    }
     default: throw Bad();
     }
 }

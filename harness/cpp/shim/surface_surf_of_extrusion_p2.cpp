@@ -79,8 +79,7 @@ enum : int32_t
     Q_BBOX = 2,
     Q_DEGEN_POINT = 3,
     Q_DEGEN_CURVE = 4,
-    Q_EXTEND = 5,
-    Q_EXTEND_DIR = 6,
+    // 5, 6: CreateExtendedSurface (both forms), removed with the port's fitted extension.
     Q_PLANAR = 7,
     Q_NUM_CPTS = 8,
     Q_BILINEAR = 9,
@@ -656,29 +655,6 @@ SmBSplineSurface* read_test_surface(Rd& rd, const SmContext& ctx, const uint8_t*
     return t;
 }
 
-// A NURB `p q n+1 m+1 cpts(x y z w, v fastest) nu U nv V`.
-void put_nurb(std::vector<double>& o, const gw_SURFACE* sur)
-{
-    o.push_back((double)sur->p);
-    o.push_back((double)sur->q);
-    o.push_back((double)(sur->net->n + 1));
-    o.push_back((double)(sur->net->m + 1));
-    for (gw_INDEX i = 0; i <= sur->net->n; i++)
-        for (gw_INDEX j = 0; j <= sur->net->m; j++)
-        {
-            o.push_back(sur->net->Pw[i][j].x);
-            o.push_back(sur->net->Pw[i][j].y);
-            o.push_back(sur->net->Pw[i][j].z);
-            o.push_back(sur->net->Pw[i][j].w);
-        }
-    o.push_back((double)(sur->knu->m + 1));
-    for (gw_INDEX i = 0; i <= sur->knu->m; i++)
-        o.push_back(sur->knu->U[i]);
-    o.push_back((double)(sur->knv->m + 1));
-    for (gw_INDEX i = 0; i <= sur->knv->m; i++)
-        o.push_back(sur->knv->U[i]);
-}
-
 // Copy of the file-local sm_CrossedSeamOrPole of SmSurface.cpp.
 SmBoolean crossed_seam_or_pole(SmSurface* pSurf, const SmPoint2d& crPrevUV, const SmPoint2d& crCurrUV,
                                const SmExtent2d& crDomain)
@@ -775,29 +751,6 @@ void lazy_query(Rd& rd, const SmContext& ctx, SmSurface* s, std::vector<double>&
         SmExtent2d d = rd.domain();
         double tol = rd.num();
         o.push_back(flg(s->IsDegenerateCurve(ang, has ? &d : NULL, tol)));
-        break;
-    }
-    case Q_EXTEND:
-    case Q_EXTEND_DIR:
-    {
-        SmSurfParamType dir = (SmSurfParamType)rd.idx();
-        double dist = rd.num();
-        SmContinuityType cont = (SmContinuityType)rd.idx();
-        SmSurface* e = NULL;
-        SmStatus stt = q == Q_EXTEND ? s->CreateExtendedSurface(ctx, dist, cont, e)
-                                     : s->CreateExtendedSurface(ctx, dir, dist, cont, e);
-        o.push_back(st(stt));
-        if (stt == SM_SUCCESS)
-        {
-            const gw_SURFACE* sur = e && e->IsKindOf(SmBSplineSurface_TYPE)
-                                        ? ((SmBSplineSurface*)e)->GetGwNurbPointer()
-                                        : NULL;
-            o.push_back(e ? (double)e->GetType() : 0.0);
-            o.push_back(flg(sur != NULL));
-            if (sur)
-                put_nurb(o, sur);
-        }
-        delete e;
         break;
     }
     case Q_PLANAR:

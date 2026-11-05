@@ -23,7 +23,6 @@ use solidcore::geom::assert_array::{AssertArray, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
-use solidcore::geom::geom_utility::p2::ContinuityType;
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
@@ -206,15 +205,6 @@ enum StepIn {
     CreateOffset {
         d: f64,
     },
-    Extend {
-        dist: f64,
-        cont: u8,
-    },
-    ExtendDir {
-        param: u8,
-        dist: f64,
-        cont: u8,
-    },
     Copy,
     Eq {
         other: OffIn,
@@ -394,15 +384,6 @@ fn ffi_step(s: &StepIn) -> Result<ffi::Step, HarnessError> {
             param: *param,
         },
         StepIn::CreateOffset { d } => F::CreateOffset { d: *d },
-        StepIn::Extend { dist, cont } => F::Extend {
-            dist: *dist,
-            cont: *cont,
-        },
-        StepIn::ExtendDir { param, dist, cont } => F::ExtendDir {
-            param: *param,
-            dist: *dist,
-            cont: *cont,
-        },
         StepIn::Copy => F::Copy,
         StepIn::Eq { other } => F::Eq {
             other: Box::new(ffi_off(other)?),
@@ -465,27 +446,6 @@ fn flag(b: bool) -> f64 {
 
 fn param_of(v: u8) -> Result<SurfParamType, HarnessError> {
     SurfParamType::from_code(u64::from(v)).ok_or_else(|| harness(format!("bad param {v}")))
-}
-
-fn continuity_of(v: u8) -> Result<ContinuityType, HarnessError> {
-    use ContinuityType as C;
-    Ok(match v {
-        0 => C::Undefined,
-        1 => C::Discontinuous,
-        2 => C::C0,
-        3 => C::G1,
-        4 => C::G1R,
-        5 => C::G1G2,
-        6 => C::G1G2G3,
-        7 => C::C1,
-        8 => C::C1G2,
-        9 => C::C1G2G3,
-        10 => C::C1C2,
-        11 => C::C1C2G3,
-        12 => C::C1C2C3,
-        13 => C::CInfinity,
-        _ => return Err(harness(format!("bad continuity {v}"))),
-    })
 }
 
 /// The `SmStatus` of a Rust error.
@@ -833,18 +793,6 @@ fn run_step(
         }
         StepIn::CreateOffset { d } => {
             push_res(o, s.create_offset_surface(k, *d), |o, r| put_result(k, o, &r))
-        }
-        StepIn::Extend { dist, cont } => {
-            let c = continuity_of(*cont)?;
-            push_res(o, s.create_extended_surface(k, *dist, c), |o, r| {
-                put_result(k, o, &r)
-            })
-        }
-        StepIn::ExtendDir { param, dist, cont } => {
-            let (p, c) = (param_of(*param)?, continuity_of(*cont)?);
-            push_res(o, s.create_extended_surface_dir(k, p, *dist, c), |o, r| {
-                put_result(k, o, &r)
-            })
         }
         StepIn::Copy => push_res(o, s.copy(k), |o, c| put_result(k, o, &Surface::from(c))),
         StepIn::Eq { other } => match rust_off(k, other)? {
@@ -1511,17 +1459,6 @@ fn gen_step(rng: &mut Rng, d: [f64; 4], scale: f64, size: f64, can_via: bool) ->
                 rng.uniform(-1.0, 1.0) * scale
             },
         },
-        // (`ffi::check` refuses `CreateExtendedSurface` in process, UB-107/HANG-6/HANG-22,
-        // so `gen_case` drops a script with one of these)
-        86..=87 => StepIn::Extend {
-            dist: rng.uniform(0.05, 0.4) * size,
-            cont: *rng.choose(&[3, 4, 5, 13]).unwrap_or(&3),
-        },
-        88 => StepIn::ExtendDir {
-            param: *rng.choose(&[0, 1, 3, 5, 6, 7, 8]).unwrap_or(&0),
-            dist: rng.uniform(0.05, 0.4) * size,
-            cont: *rng.choose(&[3, 4, 5, 13]).unwrap_or(&3),
-        },
         89..=91 => StepIn::Copy,
         92..=93 => StepIn::Eq {
             other: gen_off(rng, scale, 2),
@@ -1591,10 +1528,7 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
             bytes: Some(bytes),
         });
     }
-    let mut steps = gen_steps(rng, &off, d, scale, size);
-    if let Some(degree_1) = degree_1_directions(&k, &off) {
-        avoid_reflection_extensions(&mut steps, degree_1);
-    }
+    let steps = gen_steps(rng, &off, d, scale, size);
     let fsteps = ffi_steps(&steps).ok()?;
     ffi::check(&foff, &fsteps).ok()?;
     // Domain/zero-offset guards depend on the actual C++ state after preceding
@@ -1691,74 +1625,6 @@ fn gen_assert_valid_case(rng: &mut Rng) -> Option<Inputs> {
         return None;
     }
     Some(Inputs::Script { off, steps })
-}
-
-/// Which directions (`[u, v]`) of the B-spline NLib extends for this offset (its base,
-/// looking through nested offsets, curve-bounded and STEP wrappers) have degree 1;
-/// `None` when neither does.
-fn degree_1_directions(k: &Kernel, off: &OffIn) -> Option<[bool; 2]> {
-    let Ok(Ok(base)) = rust_srf(k, &off.base) else {
-        return None;
-    };
-    let mut s = &base;
-    for _ in 0..=solidcore::surface::offset_surface::MAX_SURFACE_NESTING {
-        s = match s.kind() {
-            SurfaceKind::OffsetSurface(o) => o.base_surface(),
-            SurfaceKind::CurveBounded(c) => c.basis(),
-            SurfaceKind::Step(st) => st.surface()?,
-            SurfaceKind::BSpline(_)
-            | SurfaceKind::ProceduralBlend(_)
-            | SurfaceKind::BallPatch(_)
-            | SurfaceKind::Plane(_)
-            | SurfaceKind::Cone(_)
-            | SurfaceKind::Sphere(_)
-            | SurfaceKind::Torus(_)
-            | SurfaceKind::SurfOfRevolution(_)
-            | SurfaceKind::SurfOfExtrusion(_) => {
-                let d = [
-                    s.degree(SurfParamType::U) == 1,
-                    s.degree(SurfParamType::V) == 1,
-                ];
-                return (d[0] || d[1]).then_some(d);
-            }
-            SurfaceKind::SrfInVolume(_) => return None,
-        };
-    }
-    None
-}
-
-/// UB-32 (`plan/upstream-issues.md`): a reflection extension (`G1`, `G1G2`) in a
-/// degree-1 direction can make `ST_surxsdr`'s reflection-plane fallback read past its
-/// scratch row; the port reports `InvalidInput` there. As in `nlib.srf_adv_p1`, keep
-/// such extensions to C-max, only for the extensions that reach a degree-1 direction
-/// (`degree_1` is `[u, v]` of the base; `SwapUV` exchanges them as the script runs).
-/// (Applied after generation, so the random stream and the other cases are unchanged;
-/// the evaluation-triggered extension is ruled and safe.)
-fn avoid_reflection_extensions(steps: &mut [StepIn], degree_1: [bool; 2]) {
-    use SurfParamType as P;
-    let [mut du, mut dv] = degree_1;
-    for step in steps {
-        let (cont, reaches) = match step {
-            StepIn::Swap => {
-                core::mem::swap(&mut du, &mut dv);
-                continue;
-            }
-            StepIn::Extend { cont, .. } => (cont, du || dv),
-            StepIn::ExtendDir { param, cont, .. } => {
-                let reaches = match param_of(*param) {
-                    Ok(P::U | P::UMin | P::UMax) => du,
-                    Ok(P::V | P::VMin | P::VMax) => dv,
-                    Ok(P::Neither) => false,
-                    _ => du || dv,
-                };
-                (cont, reaches)
-            }
-            _ => continue,
-        };
-        if reaches && matches!(*cont, 3 | 5) {
-            *cont = 13;
-        }
-    }
 }
 
 /// Fills a fixture's placeholders from the base built on the Rust side: a `dom` of

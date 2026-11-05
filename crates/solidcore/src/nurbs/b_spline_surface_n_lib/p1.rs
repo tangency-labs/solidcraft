@@ -17,8 +17,6 @@
 //! | [`create_coons_srf`], [`CoonsWarning`]                | `sm_CreateCoonsSrf` (static)                     |
 //! | [`BSplineSurface::create_coons_patch`], [`BSplineSurface::create_coons_patch_on_faces`] | `CreateCoonsPatch` |
 //! | `face_side_twist` (private)                           | the fork's `sm_FaceSideTwist` (static)           |
-//! | [`BSplineSurface::create_extended_surface`]           | `CreateExtendedSurface` (distance from each side) |
-//! | [`BSplineSurface::create_extended_surface_dir`]       | `CreateExtendedSurface` (with `SmSurfParamType`) |
 //! | [`BSplineSurface::join_surface`]                      | `JoinSurface`                                    |
 //! | [`BSplineSurface::create_n_sided_patch`]              | `CreateNSidedPatch`                              |
 //! | [`BSplineSurface::create_ruled_surface`]              | `CreateRuledSurface`                             |
@@ -100,13 +98,6 @@
 //!   `NER` for other curve types) and the caller's
 //!   [`Surface`](crate::surface::surface::Surface) as base surface (with its kind and
 //!   owner, as upstream's `SmSurface*`).
-//! - **`CreateExtendedSurface`** halves the extension distance after each failed
-//!   extension until it drops below `dDist / 100`, which never happens for a zero or
-//!   NaN distance (upstream then loops forever); the port stops after
-//!   [`MAX_EXTEND_HALVINGS`] halvings with [`SolidError::NotConverged`]. After a
-//!   successful extension it doubles the distance until it reaches `dDist / 2`, which
-//!   a negative distance never does (it doubles towards `-inf`, upstream HANG-16); the
-//!   port stops after [`MAX_EXTEND_DOUBLINGS`] doublings with the same error.
 //! - **`N_LinearMultiplyCrv`** returns nothing upstream; its port fails only for a
 //!   degree-0 cross-boundary derivative (no Greville abscissae), which
 //!   [`create_coons_srf`] passes on.
@@ -119,7 +110,6 @@ use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
-use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::tol::are_same;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
@@ -137,7 +127,6 @@ use crate::nurbs::math::{
     combine2_pts, power_basis_srf_eval_pts, srf_power_basis_eval_derivs, CPoint,
 };
 use crate::nurbs::srf_adv::p1::eval_pt_derivs_unbounded;
-use crate::nurbs::srf_adv::p2::{extend_by_dist_in_place, SrfContinuity};
 use crate::nurbs::srf_adv::p3::{
     create_swung_srf, create_trans_sweep_srf, extend_by_param_dist, ExtendContinuity,
 };
@@ -150,20 +139,6 @@ use crate::nurbs::srf_common::ruled_srf;
 use crate::nurbs::srf_tool::p3::{join, make_compatible as make_surfaces_compatible};
 use crate::nurbs::srf_tool::p4::make_compatible_uv;
 
-/// Largest number of distance halvings of one side of
-/// [`BSplineSurface::create_extended_surface_dir`] (upstream has no bound and loops
-/// forever for a zero or NaN distance; halving a positive distance reaches zero after
-/// fewer than 1100 steps).
-pub const MAX_EXTEND_HALVINGS: usize = 1100;
-
-/// Largest number of distance doublings of one side of
-/// [`BSplineSurface::create_extended_surface_dir`]. A positive distance is doubled back
-/// at most once more than it was halved, so only a negative distance reaches this:
-/// upstream doubles it away from the loop's exit (`dExtDist < dDist/2.0`) towards
-/// `-inf` and loops forever while the extensions succeed (`plan/upstream-issues.md`
-/// HANG-16).
-pub const MAX_EXTEND_DOUBLINGS: usize = MAX_EXTEND_HALVINGS + 1;
-
 const OP_BUILD_CURVE: &str = "nurbs::b_spline_surface_n_lib::p1::build_nlib_curve";
 const OP_NLIB_CURVE: &str = "nurbs::b_spline_surface_n_lib::p1::create_nlib_curve";
 const OP_NLIB_SURFACE: &str = "nurbs::b_spline_surface_n_lib::p1::create_nlib_surface";
@@ -172,8 +147,6 @@ const OP_OFFSET: &str =
 const OP_NONRAT: &str = "nurbs::b_spline_surface_n_lib::p1::create_non_rational_curve";
 const OP_COONS_SRF: &str = "nurbs::b_spline_surface_n_lib::p1::create_coons_srf";
 const OP_COONS: &str = "nurbs::b_spline_surface_n_lib::p1::BSplineSurface::create_coons_patch";
-const OP_EXTEND: &str =
-    "nurbs::b_spline_surface_n_lib::p1::BSplineSurface::create_extended_surface_dir";
 const OP_JOIN: &str = "nurbs::b_spline_surface_n_lib::p1::BSplineSurface::join_surface";
 const OP_NSIDED: &str = "nurbs::b_spline_surface_n_lib::p1::BSplineSurface::create_n_sided_patch";
 const OP_RULED: &str = "nurbs::b_spline_surface_n_lib::p1::BSplineSurface::create_ruled_surface";
@@ -221,25 +194,6 @@ fn surface_nurb<'a>(surface: &'a BSplineSurface, operation: &'static str) -> Res
 }
 
 // ---- unported SmSurface methods ------------------------------------------------------
-
-/// `SmSurface::IsSingularity(uv, dir)`: whether `uv` is a singularity and its
-/// direction.
-fn is_singularity(k: &Kernel, srf: &BSplineSurface, uv: Point2) -> Result<(bool, SurfParamType)> {
-    // the SmSurface body (surface.surface_p5), on a surface holding a copy
-    let surface = crate::surface::surface::Surface::from(srf.clone_exact());
-    let s = surface.is_singularity(k, uv, crate::math::EFF_ZERO, false)?;
-    Ok((s.singular, s.direction))
-}
-
-/// `SmSurface::IsClosed(domain, dir)`.
-fn is_closed(
-    k: &Kernel,
-    srf: &BSplineSurface,
-    domain: &Extent2d,
-    dir: SurfParamType,
-) -> Result<bool> {
-    Ok(crate::surface::surface::p7::base_is_closed(k, srf, domain, dir, None, false)?.0)
-}
 
 /// The curves dropped by `SmSurface::DropCurve` (with its two distance outputs, which
 /// the caller here ignores).
@@ -1313,199 +1267,6 @@ impl BSplineSurface {
         Ok(Self::from_gw_nurb(&sur))
     }
 
-    /// The surface extended by `dist` across each side ([`SurfParamType::Both`]) with
-    /// continuity `extension_continuity` (`CreateExtendedSurface(crContext, dDist,
-    /// eExtensionContinuity, rpExtended)`).
-    ///
-    /// # Errors
-    ///
-    /// The errors of [`BSplineSurface::create_extended_surface_dir`].
-    pub fn create_extended_surface(
-        &self,
-        k: &Kernel,
-        dist: f64,
-        extension_continuity: ContinuityType,
-    ) -> Result<BSplineSurface> {
-        // pass the call along
-        self.create_extended_surface_dir(k, SurfParamType::Both, dist, extension_continuity)
-    }
-
-    /// The surface extended by `dist` across the sides named by `ext_direction`
-    /// (`CreateExtendedSurface` with `SmSurfParamType`): [`SurfParamType::U`] /
-    /// [`SurfParamType::V`] both sides of one direction, `UMin`, `VMin`, `UMax`,
-    /// `VMax` one side, `Both` all four, `Neither` none.
-    ///
-    /// The continuity is `NL_G1` for [`ContinuityType::G1`] (and any type not listed),
-    /// `NL_G1R` for `G1R`, `NL_G2` for `G1G2` and `NL_CMAX` for `CInfinity`. Sides at a
-    /// singularity and directions in which the surface is closed are not extended; a
-    /// surface closed in both directions is copied. A failing extension is retried with
-    /// half the distance (down to `dist / 100`), then repeated with doubled distances
-    /// until about `dist` is reached.
-    ///
-    /// # Errors
-    ///
-    /// `SM_ERR` without NURB, when no extension succeeds, a repeated extension fails
-    /// or an extended surface is invalid; [`SolidError::Unported`] from the
-    /// singularity and closedness tests.
-    pub fn create_extended_surface_dir(
-        &self,
-        k: &Kernel,
-        ext_direction: SurfParamType,
-        dist: f64,
-        extension_continuity: ContinuityType,
-    ) -> Result<BSplineSurface> {
-        self.create_extended_surface_dispatched(
-            ext_direction,
-            dist,
-            extension_continuity,
-            &|uv| is_singularity(k, self, uv),
-            &|domain, dir| is_closed(k, self, domain, dir),
-        )
-    }
-
-    /// The body of [`BSplineSurface::create_extended_surface_dir`] with the virtual
-    /// `IsSingularity(uv, dir)` and `IsClosed(domain, dir)` of the calling object
-    /// passed in (an `SmPlane` overrides both), as upstream's virtual dispatch.
-    pub(crate) fn create_extended_surface_dispatched(
-        &self,
-        ext_direction: SurfParamType,
-        dist: f64,
-        extension_continuity: ContinuityType,
-        is_singularity: &dyn Fn(Point2) -> Result<(bool, SurfParamType)>,
-        is_closed: &dyn Fn(&Extent2d, SurfParamType) -> Result<bool>,
-    ) -> Result<BSplineSurface> {
-        const OP: &str = OP_EXTEND;
-
-        // copy input surface into local object
-        let mut esur = surface_nurb(self, OP)?.clone();
-
-        let uv_domain = self.natural_uv_domain();
-        let mut ext_dist = dist;
-
-        // pick continuity level
-        let gflg = match extension_continuity {
-            ContinuityType::G1R => SrfContinuity::G1R,
-            ContinuityType::G1G2 => SrfContinuity::G2,
-            ContinuityType::CInfinity => SrfContinuity::Cmax,
-            _ => SrfContinuity::G1, // SM_CT_G1 and anything else
-        };
-
-        // sort out where extension is needed
-        let u_dir = matches!(
-            ext_direction,
-            SurfParamType::U | SurfParamType::UMin | SurfParamType::UMax
-        );
-        let v_dir = matches!(
-            ext_direction,
-            SurfParamType::V | SurfParamType::VMin | SurfParamType::VMax
-        );
-        let ext_u_or_v = if u_dir {
-            SurfParamType::U
-        } else if v_dir {
-            SurfParamType::V
-        } else {
-            SurfParamType::Both
-        };
-        let neither = ext_direction == SurfParamType::Neither;
-        let mut skip_umin = neither || v_dir || ext_direction == SurfParamType::UMax;
-        let mut skip_vmin = neither || u_dir || ext_direction == SurfParamType::VMax;
-        let mut skip_umax = neither || v_dir || ext_direction == SurfParamType::UMin;
-        let mut skip_vmax = neither || u_dir || ext_direction == SurfParamType::VMin;
-
-        // Don't extend through singularities in U or V
-        let (sing, sing_direction) = is_singularity(uv_domain.min())?;
-        if sing {
-            if sing_direction == SurfParamType::U {
-                skip_vmin = true;
-            } else {
-                skip_umin = true;
-            }
-        }
-        let (sing, sing_direction) = is_singularity(uv_domain.max())?;
-        if sing {
-            if sing_direction == SurfParamType::U {
-                skip_vmax = true;
-            } else {
-                skip_umax = true;
-            }
-        }
-
-        // when asked and allowed - extend in U direction
-        if (ext_u_or_v == SurfParamType::U || ext_u_or_v == SurfParamType::Both)
-            && !is_closed(&uv_domain, SurfParamType::U)?
-        {
-            // when extending in the UMin direction
-            if !skip_umin {
-                extend_side(
-                    &mut esur,
-                    dist,
-                    &mut ext_dist,
-                    Direction::U,
-                    CurveEnd::Start,
-                    gflg,
-                )?;
-            }
-
-            // reset the extension distance
-            ext_dist = dist;
-
-            // when asked - extend in the UMax direction
-            if !skip_umax {
-                extend_side(
-                    &mut esur,
-                    dist,
-                    &mut ext_dist,
-                    Direction::U,
-                    CurveEnd::End,
-                    gflg,
-                )?;
-            }
-        }
-
-        // when asked - extend in the V direction
-        if (ext_u_or_v == SurfParamType::V || ext_u_or_v == SurfParamType::Both)
-            && !is_closed(&uv_domain, SurfParamType::V)?
-        {
-            // reset extension distance
-            ext_dist = dist;
-
-            // when asked - extend in the V Min direction
-            if !skip_vmin {
-                extend_side(
-                    &mut esur,
-                    dist,
-                    &mut ext_dist,
-                    Direction::V,
-                    CurveEnd::Start,
-                    gflg,
-                )?;
-            }
-
-            // reset the extension distance
-            ext_dist = dist;
-
-            // when asked - extend in the V Max direction
-            if !skip_vmax {
-                extend_side(
-                    &mut esur,
-                    dist,
-                    &mut ext_dist,
-                    Direction::V,
-                    CurveEnd::End,
-                    gflg,
-                )?;
-            }
-        }
-
-        // build output SmBSplineSurface from esur SURFACE object
-        if is_closed(&uv_domain, SurfParamType::U)? && is_closed(&uv_domain, SurfParamType::V)? {
-            // surfaces closed in both directions - don't get extended - copy input
-            Ok(self.copy())
-        } else {
-            Ok(Self::from_gw_nurb(&esur))
-        }
-    }
-
     /// Joins the surface with `surface_to_join` along a common boundary
     /// (`JoinSurface`): with [`SurfParamType::U`] the v-maximum isocurve of `self`
     /// meets the v-minimum isocurve of `surface_to_join` (made compatible in v), with
@@ -2135,69 +1896,6 @@ impl BSplineSurface {
     }
 }
 
-/// One side of `CreateExtendedSurface`: extends `esur` across `end` of `dir` by
-/// `ext_dist`, halving the distance after each failure (`SM_ERR` below
-/// `dist / 100`), checks validity, then repeats with doubled distances while the
-/// distance is below `dist / 2` (at most [`MAX_EXTEND_DOUBLINGS`] times).
-fn extend_side(
-    esur: &mut Surface,
-    dist: f64,
-    ext_dist: &mut f64,
-    dir: Direction,
-    end: CurveEnd,
-    gflg: SrfContinuity,
-) -> Result<()> {
-    const OP: &str = OP_EXTEND;
-
-    // extend Surf - shorter dists until extension succeeds (in place: a failed
-    // extension can leave its extended surface in esur, which the retry extends)
-    let mut halvings = 0usize;
-    loop {
-        match extend_by_dist_in_place(esur, *ext_dist, dir, end, gflg) {
-            Ok(()) => break,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
-            Err(_) => {
-                *ext_dist /= 2.0;
-                if *ext_dist < dist / 100.0 {
-                    return Err(SolidError::sm_err(OP));
-                }
-                // upstream loops forever when dist is 0 or NaN
-                halvings += 1;
-                if halvings > MAX_EXTEND_HALVINGS {
-                    return Err(SolidError::NotConverged {
-                        operation: OP,
-                        iterations: u32::try_from(MAX_EXTEND_HALVINGS).unwrap_or(u32::MAX),
-                    });
-                }
-            }
-        }
-    }
-
-    // quit - when extended surface is no good
-    if esur.is_valid().is_err() {
-        return Err(SolidError::sm_err(OP));
-    }
-
-    // if needed - multiple extensions until Extension gets to be near requested size
-    let mut doublings = 0usize;
-    while *ext_dist < dist / 2.0 {
-        // upstream loops forever for a negative distance (HANG-16)
-        doublings += 1;
-        if doublings > MAX_EXTEND_DOUBLINGS {
-            return Err(SolidError::NotConverged {
-                operation: OP,
-                iterations: u32::try_from(MAX_EXTEND_DOUBLINGS).unwrap_or(u32::MAX),
-            });
-        }
-        *ext_dist *= 2.0;
-        extend_by_dist_in_place(esur, *ext_dist, dir, end, gflg).map_err(SolidError::nl_ser(OP))?;
-        if esur.is_valid().is_err() {
-            return Err(SolidError::sm_err(OP));
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2359,14 +2057,6 @@ mod tests {
     }
 
     #[test]
-    fn extended_surface_runs() {
-        let k = &Kernel::default();
-        let s = plane_surface();
-        let r = s.create_extended_surface(k, 0.1, ContinuityType::G1);
-        assert!(r.is_ok(), "{r:?}");
-    }
-
-    #[test]
     fn missing_nurb() {
         let s = BSplineSurface::new();
         assert!(matches!(
@@ -2376,18 +2066,6 @@ mod tests {
                 ..
             })
         ));
-    }
-
-    #[test]
-    fn negative_extension_distance_stops() {
-        // upstream doubles a negative distance towards -inf forever (HANG-16)
-        let k = &Kernel::default();
-        let r = plane_surface().create_extended_surface(k, -5.0, ContinuityType::G1R);
-        assert!(matches!(r, Err(SolidError::NotConverged { .. })), "{r:?}");
-        // a positive distance is unaffected
-        assert!(plane_surface()
-            .create_extended_surface(k, 0.5, ContinuityType::G1R)
-            .is_ok());
     }
 
     #[test]

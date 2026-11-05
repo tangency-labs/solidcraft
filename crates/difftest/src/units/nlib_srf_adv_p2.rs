@@ -1,41 +1,30 @@
-//! Runner for unit `nlib.srf_adv_p2`: NLib surface extension by a distance
-//! (`ST_surxsdr`, the recursive core of `N_SrfExtendByDist`) and the derivatives of
-//! the unit surface normal (`N_SrfEvalPtNormalDeriv`).
+//! Runner for unit `nlib.srf_adv_p2`: the derivatives of the unit surface normal
+//! (`N_SrfEvalPtNormalDeriv`).
 //!
 //! C++: `solidcore_ffi::units::nlib_srf_adv_p2` (upstream
 //! `source/SMLib/src/NL_SrfAdv.cpp`). Rust: `solidcore::nurbs::srf_adv::p2`.
 //!
 //! Each case runs one *op* (`inputs.op`). Both sides produce the same flat record of
 //! doubles, split into keys by [`to_output`]: `status` (`0` ok, else the `NL_*_ERR`
-//! number; `1000` for upstream's bare error flag past the recursion limit, the Rust
-//! `NotConverged` of the extension; `-1` on the Rust side for any other non-NLib
-//! error, which never matches), then on success the results: the extended
-//! surface for `extend` (`dims = [n, m, p, q, r, s]`, the control points `net`, x y z
-//! w row-major, the knots `u`, `v`), and `nd` (`N_u, N_v, N_uu, N_uv, N_vv`, xyz each)
-//! for `normal_deriv`. Upstream's in-place mode (`inplace`, the way every upstream
-//! caller uses `N_SrfExtendByDist`) is compared against the same Rust call.
+//! number; `-1` on the Rust side for any non-NLib error, which never matches), then
+//! on success `nd` (`N_u, N_v, N_uu, N_uv, N_vv`, xyz each) for `normal_deriv`.
 //!
-//! Past its recursion limit upstream returns a bare error flag with a stale
-//! `NL_ERROR` number (left by an earlier recovered error or cleared by a callee; see
-//! `plan/findings.md`). When the Rust side reports the recursion limit, a failing C++
-//! side is therefore reported as the bare flag (`1000`) instead of that number; a
-//! C++ success still fails the case.
+//! The surface extension by a distance (`extend`, `ST_surxsdr`) was removed with the
+//! port's fitted extension.
 //!
 //! A surface input is inline (`net` rows of `[x, y, z, w]`, degrees, knots) or an
 //! upstream `.sms` file (`{"sms": {"$upstream_file": "Surface.sms"}}`). Inputs must be
 //! valid clamped surfaces (the FFI wrapper rejects anything else). Generated surfaces
-//! are random nets or smooth grid-like nets with noise; extension distances are drawn
-//! relative to the net size (small to several times the size, which exercises the
-//! recursion). Every run has at least [`MIN_GENERATED`] generated cases.
+//! are random nets or smooth grid-like nets with noise. Every run has at least
+//! [`MIN_GENERATED`] generated cases.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use solidcore::nurbs::crv_adv::p1::CurveEnd;
 use solidcore::nurbs::knots::Side;
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
-use solidcore::nurbs::srf_adv::p2::{self as adv, SrfContinuity};
-use solidcore::nurbs::srf_basic::{Direction, Surface};
+use solidcore::nurbs::srf_adv::p2 as adv;
+use solidcore::nurbs::srf_basic::Surface;
 use solidcore::{Result as SolidResult, SolidError};
 use solidcore_ffi::units::nlib_srf_adv_p2::{self as ffi, Op};
 use solidcore_ffi::FfiError;
@@ -76,17 +65,6 @@ enum SrfIn {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum Inputs {
-    Extend {
-        sur: SrfIn,
-        dist: f64,
-        dir: i32,
-        end: i32,
-        cont: i32,
-        #[serde(default)]
-        depth: usize,
-        #[serde(default)]
-        inplace: bool,
-    },
     NormalDeriv {
         sur: SrfIn,
         u: f64,
@@ -99,7 +77,7 @@ enum Inputs {
 impl Inputs {
     fn sur(&self) -> &SrfIn {
         match self {
-            Inputs::Extend { sur, .. } | Inputs::NormalDeriv { sur, .. } => sur,
+            Inputs::NormalDeriv { sur, .. } => sur,
         }
     }
 }
@@ -182,33 +160,6 @@ fn take<'a>(flat: &'a [f64], at: &mut usize, k: usize) -> Result<&'a [f64], Harn
     Ok(part)
 }
 
-fn count(x: f64) -> Result<usize, HarnessError> {
-    if x.fract() != 0.0 || !(0.0..=1e7).contains(&x) {
-        return Err(harness(format!("bad count {x} in record")));
-    }
-    Ok(x as usize)
-}
-
-/// Splits a surface dump starting at `at` into `<pfx>dims`, `<pfx>net`, `<pfx>u`,
-/// `<pfx>v`.
-fn split_srf(
-    flat: &[f64],
-    at: &mut usize,
-    pfx: &str,
-    mut out: Output,
-) -> Result<Output, HarnessError> {
-    let dims = take(flat, at, 6)?;
-    let dim = |k: usize| count(dims.get(k).copied().unwrap_or(f64::NAN));
-    let (n, m, r, s) = (dim(0)?, dim(1)?, dim(4)?, dim(5)?);
-    out = out.values(&format!("{pfx}dims"), dims.to_vec());
-    let net = take(flat, at, 4 * (n + 1) * (m + 1))?;
-    out = out.values(&format!("{pfx}net"), net.to_vec());
-    let u = take(flat, at, r + 1)?;
-    out = out.values(&format!("{pfx}u"), u.to_vec());
-    let v = take(flat, at, s + 1)?;
-    Ok(out.values(&format!("{pfx}v"), v.to_vec()))
-}
-
 fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
     let mut out = Output::new();
     let mut at = 0usize;
@@ -217,7 +168,6 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
     out = out.values("status", status);
     if ok {
         match i {
-            Inputs::Extend { .. } => out = split_srf(flat, &mut at, "", out)?,
             Inputs::NormalDeriv { .. } => out = out.values("nd", take(flat, &mut at, 15)?.to_vec()),
         }
     }
@@ -236,25 +186,6 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
     let mut o = Vec::new();
     encode(&resolve(i.sur())?, &mut o)?;
     let op = match i {
-        Inputs::Extend {
-            dist,
-            dir,
-            end,
-            cont,
-            depth,
-            inplace,
-            ..
-        } => {
-            o.extend([
-                *dist,
-                f64::from(*dir),
-                f64::from(*end),
-                f64::from(*cont),
-                *depth as f64,
-                if *inplace { 1.0 } else { 0.0 },
-            ]);
-            Op::ExtendByDist
-        }
         Inputs::NormalDeriv { u, v, ufl, vfl, .. } => {
             o.extend([*u, *v, f64::from(*ufl), f64::from(*vfl)]);
             Op::NormalDeriv
@@ -263,28 +194,10 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
     Ok((op, o))
 }
 
-/// Status of the upstream bare error flag (no `NL_ERROR` number of its own).
-const BARE_FLAG: f64 = 1000.0;
-
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
     let (op, input) = cpp_input(i)?;
     match ffi::eval(op, &input) {
-        Ok(mut flat) => {
-            // Past the recursion limit `ST_surxsdr` returns a bare error flag and
-            // `NL_ERROR` still holds whatever an earlier, recovered error (or a
-            // callee's `N_ErrClear`) left there: that number is not a result of the
-            // routine. When the port reports the recursion limit, an upstream failure
-            // is compared as the bare flag.
-            if matches!(i, Inputs::Extend { .. })
-                && flat.first().is_some_and(|&st| st != 0.0)
-                && rust_flat(i)?.first() == Some(&BARE_FLAG)
-            {
-                if let Some(st) = flat.first_mut() {
-                    *st = BARE_FLAG;
-                }
-            }
-            to_output(i, &flat)
-        }
+        Ok(flat) => to_output(i, &flat),
         Err(FfiError::InvalidArgument(m)) => Err(harness(format!("ffi rejected: {m}"))),
         Err(e) => Err(harness(format!("shim failure: {e}"))),
     }
@@ -292,32 +205,13 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- Rust side --------------------------------------------------------------------
 
-/// `0` for `Ok`, the `NL_*_ERR` number for an NLib error, `1000` for the recursion
-/// limit of the extension (upstream's bare error flag), `-1` otherwise.
+/// `0` for `Ok`, the `NL_*_ERR` number for an NLib error, `-1` otherwise.
 fn status<T>(r: &SolidResult<T>) -> f64 {
     match r {
         Ok(_) => 0.0,
         Err(SolidError::Nlib { code, .. }) => f64::from(code.code()),
-        Err(SolidError::NotConverged { operation, .. })
-            if operation.ends_with("srf_adv::p2::extend_by_dist_at_depth") =>
-        {
-            BARE_FLAG
-        }
         Err(_) => -1.0,
     }
-}
-
-fn dump(o: &mut Vec<f64>, s: &Surface) {
-    let (n, m, r, ss) = s.array_sizes();
-    let (p, q) = s.degrees();
-    o.extend([n, m, p, q, r, ss].map(|k| k as f64));
-    for row in s.rows() {
-        for c in row {
-            o.extend_from_slice(&c.to_array());
-        }
-    }
-    o.extend_from_slice(s.u_knots());
-    o.extend_from_slice(s.v_knots());
 }
 
 fn side(f: i32) -> Result<Side, HarnessError> {
@@ -332,24 +226,6 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
     let s = build(&resolve(i.sur())?)?;
     let mut o = Vec::new();
     match i {
-        Inputs::Extend {
-            dist,
-            dir,
-            end,
-            cont,
-            depth,
-            ..
-        } => {
-            let dir = Direction::from_flag(*dir).ok_or_else(|| harness("bad direction flag"))?;
-            let end = CurveEnd::from_flag(*end).ok_or_else(|| harness("bad end flag"))?;
-            let cont =
-                SrfContinuity::from_flag(*cont).ok_or_else(|| harness("bad continuity flag"))?;
-            let r = adv::extend_by_dist_at_depth(&s, *dist, dir, end, cont, *depth);
-            o.push(status(&r));
-            if let Ok(q) = r {
-                dump(&mut o, &q);
-            }
-        }
         Inputs::NormalDeriv { u, v, ufl, vfl, .. } => {
             let r = adv::eval_pt_normal_deriv(&s, *u, *v, side(*ufl)?, side(*vfl)?);
             o.push(status(&r));
@@ -584,89 +460,22 @@ fn gen_smooth(rng: &mut Rng) -> InlineSrf {
     InlineSrf { net, p, q, u, v }
 }
 
-/// Size of a net: the largest coordinate range of its Euclidean points.
-fn net_size(s: &InlineSrf) -> f64 {
-    let pts: Vec<[f64; 3]> = s
-        .net
-        .iter()
-        .flatten()
-        .map(|c| {
-            let w = if c[3] == NOW { 1.0 } else { c[3] };
-            let z = if c[2] == NOZ { 0.0 } else { c[2] / w };
-            [c[0] / w, c[1] / w, z]
-        })
-        .collect();
-    (0..3)
-        .map(|k| {
-            let lo = pts
-                .iter()
-                .filter_map(|p| p.get(k).copied())
-                .fold(f64::INFINITY, f64::min);
-            let hi = pts
-                .iter()
-                .filter_map(|p| p.get(k).copied())
-                .fold(f64::NEG_INFINITY, f64::max);
-            hi - lo
-        })
-        .fold(0.0, f64::max)
-}
-
-fn gen_cont(rng: &mut Rng) -> i32 {
-    match rng.below(4) {
-        0 => 2,
-        1 => 3,
-        2 => 4,
-        _ => 6,
-    }
-}
-
 fn gen_case(rng: &mut Rng) -> Inputs {
     let s = if rng.chance(0.7) {
         gen_smooth(rng)
     } else {
         gen_srf(rng)
     };
-    if rng.chance(0.25) {
-        let (ufl, vfl) = (1 + rng.below(2) as i32, 1 + rng.below(2) as i32);
-        let (ou, ov) = (rng.chance(0.1), rng.chance(0.1));
-        let u = param(rng, &s.u, ou);
-        let v = param(rng, &s.v, ov);
-        return Inputs::NormalDeriv {
-            sur: SrfIn::Inline(s),
-            u,
-            v,
-            ufl,
-            vfl,
-        };
-    }
-    let size = net_size(&s).max(1e-6);
-    let dist = size
-        * match rng.below(20) {
-            0 => 0.0,
-            1 => -0.1,
-            2 | 3 => rng.uniform(1.0, 4.0),
-            4 => rng.uniform(1e-4, 1e-2),
-            _ => rng.uniform(0.02, 0.8),
-        };
-    let depth = if rng.chance(0.05) {
-        rng.below(12) as usize
-    } else {
-        0
-    };
-    // A zero distance makes upstream's G2 iso-curve extension (used for G1 and G2)
-    // loop forever; keep it to Cmax / G1R.
-    let mut cont = gen_cont(rng);
-    if dist == 0.0 && cont < 4 {
-        cont = 4;
-    }
-    Inputs::Extend {
+    let (ufl, vfl) = (1 + rng.below(2) as i32, 1 + rng.below(2) as i32);
+    let (ou, ov) = (rng.chance(0.1), rng.chance(0.1));
+    let u = param(rng, &s.u, ou);
+    let v = param(rng, &s.v, ov);
+    Inputs::NormalDeriv {
         sur: SrfIn::Inline(s),
-        dist,
-        dir: 1 + rng.below(2) as i32,
-        end: 1 + rng.below(2) as i32,
-        cont,
-        depth,
-        inplace: rng.chance(0.3),
+        u,
+        v,
+        ufl,
+        vfl,
     }
 }
 
@@ -700,46 +509,17 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
 
-    /// The generator reaches successful and failing extensions of every continuity
-    /// and both normal-derivative outcomes.
-    ///
-    /// Deep-but-bounded extension recursion (`ST_curxcdr` fails only past 50 levels,
-    /// nested in `ST_surxsdr`'s 10) must fit the thread stack: generated cases reach
-    /// the recursion limits, and a debug build's frames are much larger than
-    /// upstream's, so the loop runs on a dedicated thread with a raised stack (same
-    /// pattern as the reader fuzz `run_guarded`); the release difftest profile needs
-    /// the default stack.
+    /// The generator reaches successful normal derivatives.
     #[test]
     fn generated_cases_cover_outcomes() {
-        const STACK: usize = 64 * 1024 * 1024;
-        let h = std::thread::Builder::new()
-            .stack_size(STACK)
-            .spawn(|| {
-                let mut stats = [0usize; 6];
-                for seed in 0..1500u64 {
-                    let mut rng = Rng::new(seed);
-                    let i = gen_case(&mut rng);
-                    let flat = rust_flat(&i).unwrap();
-                    let ok = flat.first() == Some(&0.0);
-                    match (&i, ok) {
-                        (Inputs::Extend { cont, .. }, true) => {
-                            stats[match cont {
-                                2 => 0,
-                                3 => 1,
-                                4 => 2,
-                                _ => 3,
-                            }] += 1;
-                        }
-                        (Inputs::Extend { .. }, false) => stats[4] += 1,
-                        (Inputs::NormalDeriv { .. }, true) => stats[5] += 1,
-                        (Inputs::NormalDeriv { .. }, false) => {}
-                    }
-                }
-                stats
-            })
-            .expect("spawn");
-        let stats = h.join().unwrap();
-        eprintln!("{stats:?}");
-        assert!(stats.iter().all(|&k| k >= 10), "{stats:?}");
+        let mut ok = 0usize;
+        for seed in 0..1500u64 {
+            let mut rng = Rng::new(seed);
+            let i = gen_case(&mut rng);
+            let flat = rust_flat(&i).unwrap();
+            ok += usize::from(flat.first() == Some(&0.0));
+        }
+        eprintln!("{ok}");
+        assert!(ok >= 10, "{ok}");
     }
 }

@@ -9,4 +9,4 @@ tests = ["prog_test:my_test_ss_nurb", "prog_test:my_test_surface_point_intersect
 status = "green"
 claimed_by = "swarm-nlib.srf_adv_p2-a1"
 claimed_at = "2026-10-12T23:00:10Z"
-notes = "2 fns; largest: ST_surxsdr, N_SrfEvalPtNormalDeriv; unit-SCC #22 (220 units); 182 upstream test entry points reach this unit; difftest 1695 cases (195 fixtures + 1500 generated), 0 deferred, bit-identical"
+notes = "2 fns; largest: ST_surxsdr, N_SrfEvalPtNormalDeriv; unit-SCC #22 (220 units); 182 upstream test entry points reach this unit; difftest 1695 cases (195 fixtures + 1500 generated), 0 deferred, bit-identical UPDATE (2026-11-04): ST_surxsdr's port deleted with the fitted surface extension; its difftest op extend removed (175 fixtures, the 3-entry fuzz corpus, shim op 0). difftest covers N_SrfEvalPtNormalDeriv only: 1520 cases (20 fixtures + 1500 generated), all pass bit-identical."

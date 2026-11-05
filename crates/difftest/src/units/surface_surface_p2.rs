@@ -232,15 +232,6 @@ enum OpIn {
         tol: f64,
         guess: Option<[f64; 2]>,
     },
-    Extend {
-        dist: f64,
-        cont: u8,
-    },
-    ExtendDir {
-        dir: u8,
-        dist: f64,
-        cont: u8,
-    },
     AdjustStep {
         dom: [f64; 4],
     },
@@ -452,8 +443,6 @@ impl OpIn {
             OpIn::Trim { .. } => Op::Trim,
             OpIn::Split { .. } => Op::Split,
             OpIn::StepInv { .. } => Op::StepInv,
-            OpIn::Extend { .. } => Op::Extend,
-            OpIn::ExtendDir { .. } => Op::ExtendDir,
             OpIn::AdjustStep { .. } => Op::AdjustStep,
             OpIn::MaxAnal => Op::MaxAnal,
             OpIn::Copy => Op::Copy,
@@ -543,111 +532,6 @@ fn shape(s: &InlineSrf) -> Result<(usize, usize), HarnessError> {
 
 fn flag(b: bool) -> f64 {
     f64::from(u8::from(b))
-}
-
-/// Whether `CreateExtendedSurface` would retry a failed `N_SrfExtendByDist`: upstream
-/// extends in place (`surP == surQ`), and a failed attempt leaves the surface on freshly
-/// allocated, partly written `NL_STACKS` storage that the halved retry then reads
-/// (undefined; its outcome depends on earlier calls in the process, see
-/// `plan/findings.md`). Such cases are not generated. The side sequence is the one of
-/// `create_extended_surface_dispatched` (singular and closed sides skipped); any failure
-/// of the emulation counts as a retry.
-fn extension_retries_in_place(i: &Inputs) -> bool {
-    let (dir, dist, cont) = match &i.op {
-        OpIn::Extend { dist, cont } => (SurfParamType::Both, *dist, *cont),
-        OpIn::ExtendDir { dir, dist, cont } => match param_of(*dir) {
-            Ok(d) => (d, *dist, *cont),
-            Err(_) => return false,
-        },
-        _ => return false,
-    };
-    let Some(b) = i
-        .this
-        .as_ref()
-        .filter(|t| !t.base)
-        .and_then(|t| t.bss.as_ref())
-    else {
-        return false;
-    };
-    let Ok(bs) = bss_of(b) else {
-        return false;
-    };
-    !matches!(extension_needs_no_retry(&bs, dir, dist, cont), Ok(true))
-}
-
-/// The first attempts of [`extension_retries_in_place`]: `Ok(true)` when every side
-/// extends at the full distance.
-fn extension_needs_no_retry(
-    bs: &BSplineSurface,
-    dir: SurfParamType,
-    dist: f64,
-    cont: u8,
-) -> solidcore::Result<bool> {
-    use solidcore::nurbs::crv_adv::p1::CurveEnd;
-    use solidcore::nurbs::srf_adv::p1::extend_by_dist;
-    use solidcore::nurbs::srf_adv::p2::SrfContinuity;
-    use solidcore::nurbs::srf_basic::Direction;
-    use SurfParamType as P;
-
-    let Some(nurb) = bs.gw_nurb() else {
-        return Ok(true);
-    };
-    let k = Kernel::default();
-    let s = Surface::from(bs.clone_exact());
-    let dom = bs.natural_uv_domain();
-    let gflg = match continuity_of(cont) {
-        Ok(ContinuityType::G1R) => SrfContinuity::G1R,
-        Ok(ContinuityType::G1G2) => SrfContinuity::G2,
-        Ok(ContinuityType::CInfinity) => SrfContinuity::Cmax,
-        _ => SrfContinuity::G1,
-    };
-    let u_dir = matches!(dir, P::U | P::UMin | P::UMax);
-    let v_dir = matches!(dir, P::V | P::VMin | P::VMax);
-    let neither = dir == P::Neither;
-    let mut skip_umin = neither || v_dir || dir == P::UMax;
-    let mut skip_umax = neither || v_dir || dir == P::UMin;
-    let mut skip_vmin = neither || u_dir || dir == P::VMax;
-    let mut skip_vmax = neither || u_dir || dir == P::VMin;
-    let sing = s.is_singularity(&k, dom.min(), solidcore::math::EFF_ZERO, false)?;
-    if sing.singular {
-        if sing.direction == P::U {
-            skip_vmin = true;
-        } else {
-            skip_umin = true;
-        }
-    }
-    let sing = s.is_singularity(&k, dom.max(), solidcore::math::EFF_ZERO, false)?;
-    if sing.singular {
-        if sing.direction == P::U {
-            skip_vmax = true;
-        } else {
-            skip_umax = true;
-        }
-    }
-    let mut cur = nurb.clone();
-    let mut sides = Vec::new();
-    if !v_dir && !s.is_closed(&k, &dom, P::U, None, false)?.0 {
-        sides.extend([
-            (Direction::U, CurveEnd::Start, skip_umin),
-            (Direction::U, CurveEnd::End, skip_umax),
-        ]);
-    }
-    if !u_dir && !s.is_closed(&k, &dom, P::V, None, false)?.0 {
-        sides.extend([
-            (Direction::V, CurveEnd::Start, skip_vmin),
-            (Direction::V, CurveEnd::End, skip_vmax),
-        ]);
-    }
-    for (d, e, skipped) in sides {
-        if skipped {
-            continue;
-        }
-        match extend_by_dist(&cur, dist, d, e, gflg) {
-            Ok(x) => cur = x,
-            Err(_) => return Ok(false),
-        }
-    }
-    Ok(true)
 }
 
 // ---- C++ side -----------------------------------------------------------------------
@@ -799,10 +683,6 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
             o.push(*tol);
             o.push(flag(guess.is_some()));
             o.extend_from_slice(&guess.unwrap_or([0.0, 0.0]));
-        }
-        OpIn::Extend { dist, cont } => o.extend([*dist, f64::from(*cont)]),
-        OpIn::ExtendDir { dir, dist, cont } => {
-            o.extend([f64::from(*dir), *dist, f64::from(*cont)]);
         }
         OpIn::DropFast { dom, p } => {
             o.extend_from_slice(dom);
@@ -1602,29 +1482,6 @@ fn rust_surface_op(k: &Kernel, op: &OpIn, t: &This) -> Result<Run, HarnessError>
             o.push(f64::from(loc as i32));
             Ok(())
         }),
-        OpIn::Extend { dist, cont } => {
-            let cont = continuity_of(*cont)?;
-            record(|o| {
-                let e = match &s {
-                    Some(x) => x.create_extended_surface(k, *dist, cont)?,
-                    None => sp2::base_create_extended_surface()?,
-                };
-                dump_state(o, Some(&e));
-                Ok(())
-            })
-        }
-        OpIn::ExtendDir { dir, dist, cont } => {
-            let cont = continuity_of(*cont)?;
-            let dir = param_of(*dir)?;
-            record(|o| {
-                let e = match &s {
-                    Some(x) => x.create_extended_surface_dir(k, dir, *dist, cont)?,
-                    None => sp2::base_create_extended_surface()?,
-                };
-                dump_state(o, Some(&e));
-                Ok(())
-            })
-        }
         OpIn::AdjustStep { dom } => edit(&mut s, |x| {
             x.adjust_step_uv_domain(&Kernel::default(), &dom_of(*dom))
         }),
@@ -2555,15 +2412,6 @@ fn gen_surface_case(rng: &mut Rng) -> Inputs {
             tol: 1.0e-6,
             guess: rng.chance(0.3).then(|| gen_uv(rng, d)),
         },
-        13 => OpIn::Extend {
-            dist: rng.uniform(0.05, 0.5),
-            cont: *rng.choose(&[2u8, 3, 4, 5, 13]).unwrap_or(&3),
-        },
-        14 => OpIn::ExtendDir {
-            dir: *rng.choose(&[0u8, 1, 3, 5, 6, 7, 8]).unwrap_or(&0),
-            dist: rng.uniform(0.05, 0.5),
-            cont: *rng.choose(&[2u8, 3, 4, 5, 13]).unwrap_or(&3),
-        },
         15 => OpIn::AdjustStep {
             dom: gen_sub_dom(rng, d),
         },
@@ -3085,9 +2933,6 @@ impl UnitDiff for Runner {
             let Ok((op, input)) = cpp_input(&i) else {
                 continue;
             };
-            if extension_retries_in_place(&i) {
-                continue;
-            }
             if ffi::validate(op, &input).is_ok() {
                 return serde_json::to_value(i).ok();
             }

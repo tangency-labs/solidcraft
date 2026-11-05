@@ -36,7 +36,6 @@
 //! | `Copy`          | `Copy`                                        | state |
 //! | `Grazing`       | `sm_IsGrazingIntersection` (file static, copied into the shim) | flag |
 //! | `Inherited`     | of a copy: `GetNaturalUVDomain`, `GetMaxAnalyticDomain`, `IsBilinear`, `IsParallelToVector(v)`, `GetDegree` and `GetNumberControlPoints` (u, v) | values |
-//! | `Extend`        | of a copy: `CreateExtendedSurface(dist, cont)` or `CreateExtendedSurface(dir, dist, cont)` | the extension's NURB `has [..]` |
 //!
 //! [`run`] accepts only finite inputs of magnitude at most [`MAX_COORD`], well-formed
 //! clamped B-splines (at most [`MAX_INDEX`] + 1 control points per direction, degree
@@ -292,17 +291,6 @@ pub enum Op {
     Reverse(bool),
     /// `SwapUV()`.
     Swap,
-    /// `CreateExtendedSurface` of a copy: without a direction the `SM_SP_BOTH`
-    /// overload, else with `SmSurfParamType` `dir` (at most `SM_SP_VMAX`, 8). The
-    /// distance must be positive.
-    Extend {
-        /// The `SmSurfParamType` code, or `None` for the overload without one.
-        dir: Option<u8>,
-        /// Extension distance.
-        dist: f64,
-        /// The `SmContinuityType` code (at most `SM_CT_CINFINITY`, 13).
-        cont: u8,
-    },
 }
 
 fn finite(x: f64) -> Result<f64, FfiError> {
@@ -662,21 +650,6 @@ impl Enc {
                 self.flag(*v_dir);
             }
             Op::Swap => self.int(25),
-            Op::Extend { dir, dist, cont } => {
-                if dir.is_some_and(|d| d > 8) || *cont > 13 {
-                    return Err(bad("extension direction or continuity"));
-                }
-                // upstream halves a failing extension until it falls below dDist / 100,
-                // which never happens for a zero distance (an endless loop)
-                if dist.is_nan() || *dist <= 0.0 {
-                    return Err(bad("extension distance must be positive"));
-                }
-                self.int(26);
-                self.flag(dir.is_some());
-                self.int(usize::from(dir.unwrap_or(0)));
-                self.num(*dist)?;
-                self.int(usize::from(*cont));
-            }
         }
         Ok(())
     }

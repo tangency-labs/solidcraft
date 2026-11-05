@@ -29,8 +29,6 @@
 //! | `Trim`           | `TrimWithDomain`                 | `D`                                          |
 //! | `Split`          | `SplitAt`                        | `t dir`                                      |
 //! | `StepInv`        | `STEPInversion`                  | `D V tol has_guess gu gv`                    |
-//! | `Extend`         | `CreateExtendedSurface`          | `dist cont`                                  |
-//! | `ExtendDir`      | `CreateExtendedSurface` (dir)    | `dir dist cont`                              |
 //! | `AdjustStep`     | `AdjustSTEPUVDomain`             | `D`                                          |
 //! | `MaxAnal`        | `GetMaxAnalyticDomain`           | -                                            |
 //! | `Copy`, `CopyAnal` | `Copy`, `CopyAndAddAnalytics`  | -                                            |
@@ -95,8 +93,6 @@ pub enum Op {
     Trim,
     Split,
     StepInv,
-    Extend,
-    ExtendDir,
     AdjustStep,
     MaxAnal,
     Copy,
@@ -149,8 +145,8 @@ impl Op {
             Trim => 9,
             Split => 10,
             StepInv => 11,
-            Extend => 12,
-            ExtendDir => 13,
+            // 12, 13: `CreateExtendedSurface` (both forms), removed with the port's fitted
+            // extension; not reused.
             AdjustStep => 14,
             MaxAnal => 15,
             Copy => 16,
@@ -473,15 +469,6 @@ fn validate_surface_op(op: Op, rd: &mut Reader<'_>, dom: Option<[f64; 4]>) -> Re
             rd.positive("step inversion tol")?;
             rd.flag()?;
             rd.finites(2)?;
-        }
-        Extend => {
-            rd.positive("extension distance")?;
-            rd.index(13)?;
-        }
-        ExtendDir => {
-            rd.index(8)?;
-            rd.positive("extension distance")?;
-            rd.index(13)?;
         }
         DropFast => {
             rd.domain()?;

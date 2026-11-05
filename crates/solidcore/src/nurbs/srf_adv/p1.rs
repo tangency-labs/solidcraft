@@ -1,12 +1,10 @@
-//! Surface extension by a distance, maximal second derivatives of an offset surface,
-//! evaluation outside the parameter domain (by extension or periodic wrap), skinning
+//! Maximal second derivatives of an offset surface, evaluation outside the parameter domain (by extension or periodic wrap), skinning
 //! along a spine curve, and cross-boundary derivative strips from a vector field.
 //!
 //! Upstream: `source/SMLib/src/NL_SrfAdv.cpp`, `source/SMLib/inc/NL_SrfAdv.h`.
 //!
 //! | Rust                                                  | Upstream                           |
 //! |-------------------------------------------------------|------------------------------------|
-//! | [`extend_by_dist`]                                    | `N_SrfExtendByDist`                |
 //! | [`offset_get_max_deriv`], [`MaxSecondDerivs`]         | `N_SrfOffsetGetMaxDeriv`           |
 //! | [`eval_pt_derivs_unbounded`], [`UnboundedExtension`]  | `N_SrfEvalPtDerivsUnbounded`       |
 //! | [`create_skin_spine`], [`SkinSpineOptions`], [`SpineAlignment`], [`SkinDerivs`] | `N_CreateSkinSpine` |
@@ -68,7 +66,7 @@ use crate::nurbs::geom::{dist_cpt_cpt, dist_pt_pt, transform_matrix_from_axes, F
 use crate::nurbs::index::{at, at2, oob, put};
 use crate::nurbs::knots::{KnotVector, Side};
 use crate::nurbs::math::{CPoint, MODEL_TOL};
-use crate::nurbs::srf_adv::p2::{eval_pt_normal_deriv, extend_by_dist_at_depth, SrfContinuity};
+use crate::nurbs::srf_adv::p2::eval_pt_normal_deriv;
 use crate::nurbs::srf_adv::p3::{create_skin_srf, extend_by_param_dist, ExtendContinuity};
 use crate::nurbs::srf_adv::p4::create_b_vectors;
 use crate::nurbs::srf_basic::{Direction, Surface};
@@ -87,27 +85,6 @@ const OP_MAXD: &str = "nurbs::srf_adv::p1::offset_get_max_deriv";
 const OP_UNB: &str = "nurbs::srf_adv::p1::eval_pt_derivs_unbounded";
 const OP_SPINE: &str = "nurbs::srf_adv::p1::create_skin_spine";
 const OP_VFIELD: &str = "nurbs::srf_adv::p1::cross_boundary_derivs_vector_field";
-
-// ---- N_SrfExtendByDist ----------------------------------------------------------------
-
-/// Extends `sur` across the boundary `end` of direction `dir` by approximately the
-/// distance `dist` (upstream `N_SrfExtendByDist`), with the continuity `cont` at the
-/// old boundary. This is the entry point of the recursive
-/// [`extend_by_dist_at_depth`] at depth `0`.
-///
-/// # Errors
-///
-/// The errors of [`extend_by_dist_at_depth`].
-pub fn extend_by_dist(
-    sur: &Surface,
-    dist: f64,
-    dir: Direction,
-    end: CurveEnd,
-    cont: SrfContinuity,
-) -> Result<Surface> {
-    // Pass the call along to the recursive function.
-    extend_by_dist_at_depth(sur, dist, dir, end, cont, 0)
-}
 
 // ---- N_SrfOffsetGetMaxDeriv -----------------------------------------------------------
 

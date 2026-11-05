@@ -240,24 +240,6 @@
    }
   },
   {
-   "name": "Surface_extend",
-   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point)",
-   "inputs": {
-    "this": {
-     "oob": false,
-     "form": 11,
-     "srf": {
-      "sms": {
-       "$upstream_file": "Surface.sms"
-      }
-     }
-    },
-    "op": "extend",
-    "dist": 0.1,
-    "cont": 3
-   }
-  },
-  {
    "name": "Surface_seval",
    "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point)",
    "inputs": {
@@ -567,24 +549,6 @@
     },
     "op": "reverse",
     "dir": 0
-   }
-  },
-  {
-   "name": "DropCurveSurface_extend",
-   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (prog_test drop-curve surface input)",
-   "inputs": {
-    "this": {
-     "oob": false,
-     "form": 11,
-     "srf": {
-      "sms": {
-       "$upstream_file": "DropCurveSurface.sms"
-      }
-     }
-    },
-    "op": "extend",
-    "dist": 0.1,
-    "cont": 3
    }
   },
   {
@@ -900,24 +864,6 @@
    }
   },
   {
-   "name": "offset_nurb_extend",
-   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
-   "inputs": {
-    "this": {
-     "oob": false,
-     "form": 11,
-     "srf": {
-      "sms": {
-       "$upstream_file": "offset_nurb.sms"
-      }
-     }
-    },
-    "op": "extend",
-    "dist": 0.1,
-    "cont": 3
-   }
-  },
-  {
    "name": "offset_nurb_seval",
    "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
    "inputs": {
@@ -1189,31 +1135,6 @@
      "base": true
     },
     "op": "max_anal"
-   }
-  },
-  {
-   "name": "base_extend",
-   "upstream_ref": "SmSurface.h inline base-class defaults",
-   "inputs": {
-    "this": {
-     "base": true
-    },
-    "op": "extend",
-    "dist": 0.1,
-    "cont": 3
-   }
-  },
-  {
-   "name": "base_extend_dir",
-   "upstream_ref": "SmSurface.h inline base-class defaults",
-   "inputs": {
-    "this": {
-     "base": true
-    },
-    "op": "extend_dir",
-    "dir": 0,
-    "dist": 0.1,
-    "cont": 3
    }
   },
   {

@@ -15,7 +15,6 @@
 //! | [`Op`]        | upstream                              | parameters                                   |
 //! |---------------|---------------------------------------|----------------------------------------------|
 //! | `Offset`      | `ApproximateOffsetSurface`            | `dist tol param_type`                        |
-//! | `Extend`      | `CreateExtendedSurface`               | `dir_overload dir dist continuity`           |
 //! | `Join`        | `JoinSurface`                         | surface `dir tol`                            |
 //! | `ExtEval`     | `EvaluatePointOnExtendedSurface`      | `u v`                                        |
 //! | `Reparam`     | `Reparameterize`                      | `D[4]`                                       |
@@ -88,7 +87,6 @@ const FORM_POLYNOMIAL: usize = 10;
 #[allow(missing_docs)]
 pub enum Op {
     Offset,
-    Extend,
     Join,
     ExtEval,
     Reparam,
@@ -111,7 +109,8 @@ impl Op {
     fn code(self) -> i32 {
         match self {
             Op::Offset => 0,
-            Op::Extend => 1,
+            // 1: `CreateExtendedSurface`, removed with the port's fitted extension; not
+            // reused.
             Op::Join => 2,
             Op::ExtEval => 3,
             Op::Reparam => 4,
@@ -456,12 +455,6 @@ fn validate_surface_op(
             rd.finite()?;
             rd.positive("offset tol")?;
             rd.index(3)?;
-        }
-        Op::Extend => {
-            rd.flag()?;
-            rd.index(9)?;
-            rd.positive("extend dist")?;
-            rd.index(13)?;
         }
         Op::Join => {
             surface(rd)?;

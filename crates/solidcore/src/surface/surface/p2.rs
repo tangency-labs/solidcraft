@@ -21,7 +21,6 @@
 //! | [`Surface::owner`]                                | `GetOwner`                                       |
 //! | [`Surface::copy`], [`Surface::copy_and_add_analytics`] | `Copy`, `CopyAndAddAnalytics`               |
 //! | [`Surface::adjust_step_uv_domain`]                | `AdjustSTEPUVDomain`                             |
-//! | [`Surface::create_extended_surface`], [`Surface::create_extended_surface_dir`] | `CreateExtendedSurface` (both) |
 //! | [`Surface::drop_point_fast`]                      | `DropPointFast`                                  |
 //! | [`Surface::evaluate`], [`Surface::evaluate_point`] | `Evaluate`, `EvaluatePoint`                     |
 //! | [`Surface::natural_uv_domain_if_built`], [`Surface::step_uv_domain`] | `GetNaturalUVDomain`, `GetSTEPUVDomain` |
@@ -3793,257 +3792,15 @@ impl Surface {
         }
     }
 
-    /// The surface extended by `dist` on every side (`CreateExtendedSurface`; the
-    /// kernel is the context the new surface is constructed in).
-    ///
-    /// # Errors
-    ///
-    /// Those of the kind's override (the base default is `SM_ERR`).
-    pub fn create_extended_surface(
-        &self,
-        k: &Kernel,
-        dist: f64,
-        extension_continuity: ContinuityType,
-    ) -> Result<Self> {
-        let made = self.create_extended_surface_of_kind(k, dist, extension_continuity)?;
-        Ok(self.carry_exact_round_on_extension(made, extension_continuity))
-    }
-
-    /// An exact round's definition carried onto `extension`, this surface extended by the
-    /// same NURBS pieces continued (`CInfinity`, #2487): the analytic class continued, still
-    /// on S. Another continuity (a ruled `G1R` extension) leaves S, so it carries none, and
-    /// so does a corner's face (#2488), whose net continued leaves its patch's definition.
-    fn carry_exact_round_on_extension(
-        &self,
-        extension: Self,
-        extension_continuity: ContinuityType,
-    ) -> Self {
-        let round = matches!(self.definition.as_deref(), Some(KeptDefinition::Round(_)));
-        if round && extension_continuity == ContinuityType::CInfinity {
-            self.carry_definition(extension)
-        } else {
-            extension
-        }
-    }
-
     /// An exact round's definition carried onto `continuation`, this surface's own NURBS
-    /// net continued Natural (`surface::extend`'s analytic kinds): still on S, as
-    /// [`Surface::create_extended_surface`]'s `CInfinity` carries it (#2487).
+    /// net continued Natural (`surface::extend`'s analytic kinds): the analytic class
+    /// continued, still on S (#2487). A corner's face (#2488), whose net continued leaves its
+    /// patch's definition, carries none.
     pub(crate) fn carry_round_on_continuation(&self, continuation: Self) -> Self {
-        self.carry_exact_round_on_extension(continuation, ContinuityType::CInfinity)
-    }
-
-    /// [`Surface::create_extended_surface`] of the kind alone.
-    fn create_extended_surface_of_kind(
-        &self,
-        k: &Kernel,
-        dist: f64,
-        extension_continuity: ContinuityType,
-    ) -> Result<Self> {
-        match self.kind_with_nurb(k)? {
-            SurfaceKind::BSpline(s) => Ok(Self::from(s.create_extended_surface(
-                k,
-                dist,
-                extension_continuity,
-            )?)),
-            // (the fork's SmBallPatch inherits SmBSplineSurface's: the net extended, a
-            // plain B-spline)
-            SurfaceKind::BallPatch(s) => Ok(Self::from(s.net().create_extended_surface(
-                k,
-                dist,
-                extension_continuity,
-            )?)),
-            // SmBSplineSurface's: the net extended, its singularity and closure tests
-            // (virtual, on the blend) taking the definition's points
-            SurfaceKind::ProceduralBlend(pb) => {
-                Ok(Self::from(pb.net().create_extended_surface_dispatched(
-                    SurfParamType::Both,
-                    dist,
-                    extension_continuity,
-                    &|uv| {
-                        self.is_singularity(k, uv, EFF_ZERO, false)
-                            .map(|r| (r.singular, r.direction))
-                    },
-                    &|domain, param| self.is_closed(k, domain, param, None, false).map(|r| r.0),
-                )?))
-            }
-            SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
-                base_create_extended_surface()
-            }
-            SurfaceKind::Plane(s) => Ok(Self::from(
-                s.create_extended_surface(dist, extension_continuity)?,
-            )),
-            SurfaceKind::Sphere(s) => Ok(Self::from(
-                s.base().base().create_extended_surface_dispatched(
-                    SurfParamType::Both,
-                    dist,
-                    extension_continuity,
-                    &|uv| {
-                        self.is_singularity(k, uv, EFF_ZERO, false)
-                            .map(|r| (r.singular, r.direction))
-                    },
-                    &|domain, param| self.is_closed(k, domain, param, None, false).map(|r| r.0),
-                )?,
-            )),
-            SurfaceKind::Torus(s) => Ok(Self::from(
-                s.base().base().create_extended_surface_dispatched(
-                    SurfParamType::Both,
-                    dist,
-                    extension_continuity,
-                    &|uv| {
-                        self.is_singularity(k, uv, EFF_ZERO, false)
-                            .map(|r| (r.singular, r.direction))
-                    },
-                    &|domain, param| self.is_closed(k, domain, param, None, false).map(|r| r.0),
-                )?,
-            )),
-            SurfaceKind::Cone(s) => Ok(Self::from(
-                s.rev().base().create_extended_surface_dispatched(
-                    SurfParamType::Both,
-                    dist,
-                    extension_continuity,
-                    &|uv| {
-                        self.is_singularity(k, uv, EFF_ZERO, false)
-                            .map(|r| (r.singular, r.direction))
-                    },
-                    &|domain, param| self.is_closed(k, domain, param, None, false).map(|r| r.0),
-                )?,
-            )),
-            SurfaceKind::OffsetSurface(s) => {
-                s.create_extended_surface(k, dist, extension_continuity)
-            }
-            SurfaceKind::SurfOfRevolution(s) => Ok(Self::from(s.base().create_extended_surface(
-                k,
-                dist,
-                extension_continuity,
-            )?)),
-            // (`GetOrCreateGwNurbPointer` makes a recognised extrusion's NURB)
-            SurfaceKind::SurfOfExtrusion(s) => Ok(Self::from(
-                s.base_with_nurb(k)?
-                    .create_extended_surface(k, dist, extension_continuity)?,
-            )),
-        }
-    }
-
-    /// The surface extended by `dist` in `ext_direction` (`CreateExtendedSurface`
-    /// with a direction; the kernel is the context the new surface is constructed in).
-    ///
-    /// # Errors
-    ///
-    /// Those of the kind's override (the base default is `SM_ERR`).
-    pub fn create_extended_surface_dir(
-        &self,
-        k: &Kernel,
-        ext_direction: SurfParamType,
-        dist: f64,
-        extension_continuity: ContinuityType,
-    ) -> Result<Self> {
-        crate::profile::profile_scope!(k, "surface::create_extended_surface_dir");
-        let made =
-            self.create_extended_surface_dir_of_kind(k, ext_direction, dist, extension_continuity)?;
-        Ok(self.carry_exact_round_on_extension(made, extension_continuity))
-    }
-
-    /// [`Surface::create_extended_surface_dir`] of the kind alone.
-    fn create_extended_surface_dir_of_kind(
-        &self,
-        k: &Kernel,
-        ext_direction: SurfParamType,
-        dist: f64,
-        extension_continuity: ContinuityType,
-    ) -> Result<Self> {
-        match self.kind_with_nurb(k)? {
-            SurfaceKind::BSpline(s) => Ok(Self::from(s.create_extended_surface_dir(
-                k,
-                ext_direction,
-                dist,
-                extension_continuity,
-            )?)),
-            // (the fork's SmBallPatch inherits SmBSplineSurface's: the net extended)
-            SurfaceKind::BallPatch(s) => Ok(Self::from(s.net().create_extended_surface_dir(
-                k,
-                ext_direction,
-                dist,
-                extension_continuity,
-            )?)),
-            // SmBSplineSurface's: the net extended, its singularity and closure tests
-            // (virtual, on the blend) taking the definition's points
-            SurfaceKind::ProceduralBlend(pb) => {
-                Ok(Self::from(pb.net().create_extended_surface_dispatched(
-                    ext_direction,
-                    dist,
-                    extension_continuity,
-                    &|uv| {
-                        self.is_singularity(k, uv, EFF_ZERO, false)
-                            .map(|r| (r.singular, r.direction))
-                    },
-                    &|domain, param| self.is_closed(k, domain, param, None, false).map(|r| r.0),
-                )?))
-            }
-            SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
-                base_create_extended_surface()
-            }
-            SurfaceKind::Plane(s) => Ok(Self::from(s.create_extended_surface_dir(
-                ext_direction,
-                dist,
-                extension_continuity,
-            )?)),
-            SurfaceKind::Sphere(s) => Ok(Self::from(
-                s.base().base().create_extended_surface_dispatched(
-                    ext_direction,
-                    dist,
-                    extension_continuity,
-                    &|uv| {
-                        self.is_singularity(k, uv, EFF_ZERO, false)
-                            .map(|r| (r.singular, r.direction))
-                    },
-                    &|domain, param| self.is_closed(k, domain, param, None, false).map(|r| r.0),
-                )?,
-            )),
-            SurfaceKind::Torus(s) => Ok(Self::from(
-                s.base().base().create_extended_surface_dispatched(
-                    ext_direction,
-                    dist,
-                    extension_continuity,
-                    &|uv| {
-                        self.is_singularity(k, uv, EFF_ZERO, false)
-                            .map(|r| (r.singular, r.direction))
-                    },
-                    &|domain, param| self.is_closed(k, domain, param, None, false).map(|r| r.0),
-                )?,
-            )),
-            SurfaceKind::Cone(s) => Ok(Self::from(
-                s.rev().base().create_extended_surface_dispatched(
-                    ext_direction,
-                    dist,
-                    extension_continuity,
-                    &|uv| {
-                        self.is_singularity(k, uv, EFF_ZERO, false)
-                            .map(|r| (r.singular, r.direction))
-                    },
-                    &|domain, param| self.is_closed(k, domain, param, None, false).map(|r| r.0),
-                )?,
-            )),
-            SurfaceKind::OffsetSurface(s) => {
-                s.create_extended_surface_dir(k, ext_direction, dist, extension_continuity)
-            }
-            SurfaceKind::SurfOfRevolution(s) => {
-                Ok(Self::from(s.base().create_extended_surface_dir(
-                    k,
-                    ext_direction,
-                    dist,
-                    extension_continuity,
-                )?))
-            }
-            // (`GetOrCreateGwNurbPointer` makes a recognised extrusion's NURB)
-            SurfaceKind::SurfOfExtrusion(s) => Ok(Self::from(
-                s.base_with_nurb(k)?.create_extended_surface_dir(
-                    k,
-                    ext_direction,
-                    dist,
-                    extension_continuity,
-                )?,
-            )),
+        if matches!(self.definition.as_deref(), Some(KeptDefinition::Round(_))) {
+            self.carry_definition(continuation)
+        } else {
+            continuation
         }
     }
 
@@ -5147,11 +4904,6 @@ pub const fn base_copy_and_add_analytics() -> Result<Surface> {
 
 /// `SmSurface::AdjustSTEPUVDomain`: `SM_ERR`.
 pub const fn base_adjust_step_uv_domain() -> Result<()> {
-    Err(base_err())
-}
-
-/// `SmSurface::CreateExtendedSurface` (both overloads): `SM_ERR`.
-pub const fn base_create_extended_surface() -> Result<Surface> {
     Err(base_err())
 }
 

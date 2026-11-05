@@ -19,15 +19,14 @@
 //! derivatives, knots.
 //!
 //! Cases whose Rust side reaches an unported `SmSurface` method are deferred (none
-//! now: `CreateExtendedSurface` and `sm_CreateNonRationalCurve`'s `DropCurve`, unit
-//! `intersect.surface_drop_lib_p3`, are ported). Every run has at least
+//! now: `sm_CreateNonRationalCurve`'s `DropCurve`, unit
+//! `intersect.surface_drop_lib_p3`, is ported). Every run has at least
 //! [`MIN_GENERATED`] generated cases.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::geom::extent2d::Extent2d;
-use solidcore::geom::geom_utility::p2::ContinuityType;
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
@@ -122,12 +121,6 @@ enum OpIn {
         tol: f64,
         #[serde(default)]
         param: u8,
-    },
-    Extend {
-        dir_overload: bool,
-        dir: u8,
-        dist: f64,
-        cont: u8,
     },
     Join {
         other: SrfIn,
@@ -229,7 +222,6 @@ impl OpIn {
     fn ffi(&self) -> Op {
         match self {
             OpIn::Offset { .. } => Op::Offset,
-            OpIn::Extend { .. } => Op::Extend,
             OpIn::Join { .. } => Op::Join,
             OpIn::ExtEval { .. } => Op::ExtEval,
             OpIn::Reparam { .. } => Op::Reparam,
@@ -254,7 +246,6 @@ impl OpIn {
         matches!(
             self,
             OpIn::Offset { .. }
-                | OpIn::Extend { .. }
                 | OpIn::Join { .. }
                 | OpIn::Coons { .. }
                 | OpIn::Ruled { .. }
@@ -388,17 +379,6 @@ fn cpp_input(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
     }
     match &i.op {
         OpIn::Offset { dist, tol, param } => o.extend([*dist, *tol, f64::from(*param)]),
-        OpIn::Extend {
-            dir_overload,
-            dir,
-            dist,
-            cont,
-        } => o.extend([
-            flag(*dir_overload),
-            f64::from(*dir),
-            *dist,
-            f64::from(*cont),
-        ]),
         OpIn::Join { other, dir, tol } => {
             push_srf(&mut o, &srf(other)?)?;
             o.extend([f64::from(*dir), *tol]);
@@ -764,26 +744,6 @@ fn param_of(v: u8) -> Result<SurfParamType, HarnessError> {
     })
 }
 
-fn continuity_of(v: u8) -> Result<ContinuityType, HarnessError> {
-    Ok(match v {
-        0 => ContinuityType::Undefined,
-        1 => ContinuityType::Discontinuous,
-        2 => ContinuityType::C0,
-        3 => ContinuityType::G1,
-        4 => ContinuityType::G1R,
-        5 => ContinuityType::G1G2,
-        6 => ContinuityType::G1G2G3,
-        7 => ContinuityType::C1,
-        8 => ContinuityType::C1G2,
-        9 => ContinuityType::C1G2G3,
-        10 => ContinuityType::C1C2,
-        11 => ContinuityType::C1C2G3,
-        12 => ContinuityType::C1C2C3,
-        13 => ContinuityType::CInfinity,
-        _ => return Err(harness(format!("bad SmContinuityType {v}"))),
-    })
-}
-
 fn offset_param_of(v: u8) -> Result<OffsetParamType, HarnessError> {
     Ok(match v {
         0 => OffsetParamType::Inherited,
@@ -860,7 +820,7 @@ fn fail(e: &SolidError) -> Fail {
 }
 
 /// Runs a member op; returns the flat record.
-fn rust_member(k: &solidcore::kernel::Kernel, this: &mut BSplineSurface, op: &OpIn) -> Result<Result<Vec<f64>, Fail>, HarnessError> {
+fn rust_member(this: &mut BSplineSurface, op: &OpIn) -> Result<Result<Vec<f64>, Fail>, HarnessError> {
     let mut o = vec![0.0];
     let new = |o: &mut Vec<f64>, r: solidcore::Result<BSplineSurface>| match r {
         Ok(s) => {
@@ -875,20 +835,6 @@ fn rust_member(k: &solidcore::kernel::Kernel, this: &mut BSplineSurface, op: &Op
             &mut o,
             this.approximate_offset_surface(*dist, *tol, offset_param_of(*param)?),
         ),
-        OpIn::Extend {
-            dir_overload,
-            dir,
-            dist,
-            cont,
-        } => {
-            let cont = continuity_of(*cont)?;
-            let r = if *dir_overload {
-                this.create_extended_surface_dir(k, param_of(*dir)?, *dist, cont)
-            } else {
-                this.create_extended_surface(k, *dist, cont)
-            };
-            new(&mut o, r)
-        }
         OpIn::Join { other, dir, tol } => {
             let mut other = BSplineSurface::from_nurb(surface_of(&srf(other)?)?, false);
             new(&mut o, this.join_surface(&mut other, param_of(*dir)?, *tol))
@@ -1179,11 +1125,11 @@ fn rust_static(op: &OpIn) -> Result<Result<Vec<f64>, Fail>, HarnessError> {
     Ok(res.map(|()| o))
 }
 
-fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessError> {
+fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let res = match &i.this {
         Some(t) => {
             let mut this = this_of(t)?;
-            rust_member(k, &mut this, &i.op)?
+            rust_member(&mut this, &i.op)?
         }
         None => rust_static(&i.op)?,
     };
@@ -1711,12 +1657,6 @@ fn gen_member(rng: &mut Rng) -> Inputs {
             tol: *rng.choose(&[1e-2, 3e-2]).unwrap_or(&1e-2),
             param: rng.below(4) as u8,
         },
-        1 => OpIn::Extend {
-            dir_overload: rng.chance(0.7),
-            dir: rng.below(9) as u8,
-            dist: rng.uniform(0.05, 1.0),
-            cont: *rng.choose(&[3, 4, 5, 13, 2]).unwrap_or(&3),
-        },
         2 => {
             let along_v = rng.chance(0.5);
             let s_nr = InlineSrf {
@@ -1843,7 +1783,6 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        let k = &solidcore::Kernel::default();
-        rust(k, &case.parse()?)
+        rust(&case.parse()?)
     }
 }

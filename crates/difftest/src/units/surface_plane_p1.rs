@@ -24,7 +24,6 @@ use solidcore::curve::line::Line;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
-use solidcore::geom::geom_utility::p2::ContinuityType;
 use solidcore::geom::global_solver::SolverOperation;
 use solidcore::geom::solution_array::{ObjectKind, SolutionArray, SolutionObject, SolutionType};
 use solidcore::geom::vector2d::{Point2, Vec2};
@@ -224,12 +223,6 @@ enum OpIn {
         v_dir: bool,
     },
     Swap,
-    Extend {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        dir: Option<u8>,
-        dist: f64,
-        cont: u8,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -423,11 +416,6 @@ fn ffi_op(o: &OpIn) -> ffi::Op {
         OpIn::Inherited { v } => ffi::Op::Inherited(*v),
         OpIn::Reverse { v_dir } => ffi::Op::Reverse(*v_dir),
         OpIn::Swap => ffi::Op::Swap,
-        OpIn::Extend { dir, dist, cont } => ffi::Op::Extend {
-            dir: *dir,
-            dist: *dist,
-            cont: *cont,
-        },
     }
 }
 
@@ -972,43 +960,8 @@ fn rust_op(k: &Kernel, op: &OpIn, a: &mut Plane, o: &mut Vec<f64>) -> Result<(),
         OpIn::Swap => {
             st(o, a.swap_uv())?;
         }
-        OpIn::Extend { dir, dist, cont } => {
-            let cont = continuity_of(*cont)?;
-            let r = match dir {
-                Some(d) => {
-                    let d = SurfParamType::from_code(u64::from(*d))
-                        .ok_or_else(|| harness(format!("bad direction {d}")))?;
-                    a.create_extended_surface_dir(d, *dist, cont)
-                }
-                None => a.create_extended_surface(*dist, cont),
-            };
-            if let Some(e) = st(o, r)? {
-                put_surface_nurb(o, e.gw_nurb());
-            }
-        }
     }
     Ok(())
-}
-
-fn continuity_of(v: u8) -> Result<ContinuityType, HarnessError> {
-    use ContinuityType as C;
-    Ok(match v {
-        0 => C::Undefined,
-        1 => C::Discontinuous,
-        2 => C::C0,
-        3 => C::G1,
-        4 => C::G1R,
-        5 => C::G1G2,
-        6 => C::G1G2G3,
-        7 => C::C1,
-        8 => C::C1G2,
-        9 => C::C1G2G3,
-        10 => C::C1C2,
-        11 => C::C1C2G3,
-        12 => C::C1C2C3,
-        13 => C::CInfinity,
-        _ => return Err(harness(format!("bad continuity {v}"))),
-    })
 }
 
 fn op_code(op: &OpIn) -> Result<f64, HarnessError> {
@@ -1533,14 +1486,6 @@ fn gen_op(rng: &mut Rng, m: &MakeIn, g: &Geo) -> OpIn {
                     t: rng.uniform(0.0, 1.0),
                     line: [l0, l1],
                     s: rng.uniform(0.0, 1.0),
-                }
-            } else if rng.chance(0.25) {
-                OpIn::Extend {
-                    dir: rng
-                        .chance(0.6)
-                        .then(|| pick(rng, &[0u8, 1, 2, 3, 4, 5, 6, 7, 8])),
-                    dist: pick(rng, &[0.01, 0.1, 0.5, 2.0]),
-                    cont: pick(rng, &[2u8, 3, 4, 5, 13]),
                 }
             } else if rng.chance(0.5) {
                 OpIn::Reverse {

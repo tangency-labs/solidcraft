@@ -31,7 +31,6 @@ use serde_json::Value;
 
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
-use solidcore::geom::geom_utility::p2::ContinuityType;
 use solidcore::geom::vector2d::{Point2, Vec2};
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
@@ -45,7 +44,7 @@ use solidcore::surface::plane::Plane;
 use solidcore::surface::surf_of_extrusion::p2::{ExtrusionIntersection, IntersectTarget};
 use solidcore::surface::surf_of_extrusion::SurfOfExtrusion;
 use solidcore::surface::surface::p1::crossed_seam_or_pole;
-use solidcore::surface::surface::{Surface, SurfaceKind};
+use solidcore::surface::surface::Surface;
 use solidcore::topology::database_io::{DatabaseReader, FileType};
 use solidcore_ffi::units::surface_surf_of_extrusion_p2 as ffi;
 
@@ -306,12 +305,6 @@ enum QueryIn {
         #[serde(default)]
         dom: Option<[f64; 4]>,
         tol: f64,
-    },
-    Extend {
-        #[serde(default)]
-        dir: Option<u8>,
-        dist: f64,
-        cont: u8,
     },
     Planar {
         tol: f64,
@@ -714,7 +707,6 @@ fn ffi_query(q: &QueryIn) -> ffi::Query {
         QueryIn::BBox { dom, expand } => ffi::Query::BBox { dom, expand },
         QueryIn::DegenPoint { tol, dom } => ffi::Query::DegenPoint { tol, dom },
         QueryIn::DegenCurve { ang, dom, tol } => ffi::Query::DegenCurve { ang, dom, tol },
-        QueryIn::Extend { dir, dist, cont } => ffi::Query::Extend { dir, dist, cont },
         QueryIn::Planar { tol } => ffi::Query::Planar { tol },
         QueryIn::NumCpts { dir } => ffi::Query::NumCpts { dir },
         QueryIn::Bilinear => ffi::Query::Bilinear,
@@ -1226,40 +1218,6 @@ fn rust_query(k: &Kernel, s: &Surface, q: &QueryIn, o: &mut Vec<f64>) -> Result<
         QueryIn::DegenCurve { ang, dom, tol } => {
             truth(o, s.is_degenerate_curve(k, ang, opt(dom).as_ref(), tol))?;
         }
-        QueryIn::Extend { dir, dist, cont } => {
-            let cont = continuity_of(cont);
-            let r = match dir {
-                None => s.create_extended_surface(k, dist, cont),
-                Some(d) => match SurfParamType::from_code(u64::from(d)) {
-                    Some(d) => s.create_extended_surface_dir(k, d, dist, cont),
-                    None => Err(solidcore::SolidError::invalid_input(
-                        "difftest",
-                        "parameter type",
-                    )),
-                },
-            };
-            if let Some(e) = st(o, r)? {
-                o.push(e.type_code() as f64);
-                let sur = match e.kind() {
-                    SurfaceKind::BSpline(b) => b.gw_nurb(),
-                    _ => None,
-                };
-                o.push(flag(sur.is_some()));
-                if let Some(sur) = sur {
-                    let ix = sur.indices();
-                    o.extend([ix.p, ix.q, ix.n + 1, ix.m + 1].map(|x| x as f64));
-                    for row in sur.rows() {
-                        for p in row {
-                            o.extend([p.x, p.y, p.z, p.w]);
-                        }
-                    }
-                    o.push(sur.u_knots().len() as f64);
-                    o.extend_from_slice(sur.u_knots());
-                    o.push(sur.v_knots().len() as f64);
-                    o.extend_from_slice(sur.v_knots());
-                }
-            }
-        }
         QueryIn::Planar { tol } => match s.is_planar(k, tol) {
             Ok(p) => {
                 o.push(flag(p.is_planar));
@@ -1325,27 +1283,6 @@ fn rust_query(k: &Kernel, s: &Surface, q: &QueryIn, o: &mut Vec<f64>) -> Result<
 fn param_code(c: u8) -> solidcore::Result<SurfParamType> {
     SurfParamType::from_code(u64::from(c))
         .ok_or_else(|| solidcore::SolidError::invalid_input("difftest", "parameter type"))
-}
-
-/// `SmContinuityType` by code (as the `surface.surface_p2` runner).
-fn continuity_of(v: u8) -> ContinuityType {
-    use ContinuityType as C;
-    match v {
-        0 => C::Undefined,
-        1 => C::Discontinuous,
-        2 => C::C0,
-        3 => C::G1,
-        4 => C::G1R,
-        5 => C::G1G2,
-        6 => C::G1G2G3,
-        7 => C::C1,
-        8 => C::C1G2,
-        9 => C::C1G2G3,
-        10 => C::C1C2,
-        11 => C::C1C2G3,
-        12 => C::C1C2C3,
-        _ => C::CInfinity,
-    }
 }
 
 // ---- generation -----------------------------------------------------------------------

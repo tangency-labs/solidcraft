@@ -336,15 +336,6 @@ pub enum Query {
         /// `dOpt3DTol`.
         tol: f64,
     },
-    /// `CreateExtendedSurface(ctx, [dir,] dist, cont, e)`.
-    Extend {
-        /// `eExtDirection` (`SmSurfParamType` code); `None` for the overload without it.
-        dir: Option<u8>,
-        /// `dDist`.
-        dist: f64,
-        /// `SmContinuityType` code.
-        cont: u8,
-    },
     /// `IsPlanar(tol, &point, &normal, &deviation)`.
     Planar {
         /// `dTol3d`.
@@ -796,9 +787,7 @@ pub fn is_nurb(test: &TestSurf, scale: f64) -> Result<Vec<f64>, FfiError> {
 /// returns the shim's record: as [`is_nurb`] up to `0 1 had_nurb`, then the query's
 /// outputs. `EvalSimple`, `EvalFirst`: status, then on success the `(hu + 1) (hv + 1)`
 /// derivatives `x y z` (U order major). `BBox`: status, then on success the box corners.
-/// `DegenPoint`, `DegenCurve`: the flag. `Extend`: status, then on success the new
-/// surface's type, whether it has a NURB and that NURB (`p q n+1 m+1 cpts(x y z w) nu U nv
-/// V`). `Planar`: the flag, point, normal and deviation. `NumCpts`: the count.
+/// `DegenPoint`, `DegenCurve`: the flag. `Planar`: the flag, point, normal and deviation. `NumCpts`: the count.
 /// `Bilinear`, `Parallel`, `Seam`: the flag. `Knots`: status, then on success `n knots m
 /// mults`. `TessSplits`: status, then on success `n splits`.
 ///
@@ -863,21 +852,6 @@ pub fn lazy(test: &TestSurf, scale: f64, query: &Query) -> Result<Vec<f64>, FfiE
             o.extend([4.0, *ang]);
             opt_dom(o, *dom)?;
             o.push(*tol);
-        }
-        Query::Extend { dir, dist, cont } => {
-            finite(&[*dist], "extension distance")?;
-            if *dist <= 0.0 {
-                return Err(bad("extension distance not positive"));
-            }
-            if dir.is_some_and(|d| d > 8) || *cont > 13 {
-                return Err(bad("extension enumerator out of range"));
-            }
-            o.extend([
-                if dir.is_some() { 6.0 } else { 5.0 },
-                f64::from(dir.unwrap_or(0)),
-                *dist,
-                f64::from(*cont),
-            ]);
         }
         Query::Planar { tol } => {
             finite(&[*tol], "planar tolerance")?;

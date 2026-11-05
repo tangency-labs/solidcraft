@@ -662,8 +662,7 @@ enum : int32_t
     OP_TRIM = 9,
     OP_SPLIT = 10,
     OP_STEP_INV = 11,
-    OP_EXTEND = 12,
-    OP_EXTEND_DIR = 13,
+    // 12, 13: CreateExtendedSurface (both forms), removed with the port's fitted extension.
     OP_ADJUST_STEP = 14,
     OP_MAX_ANAL = 15,
     OP_COPY = 16,
@@ -1097,23 +1096,6 @@ void surface_op(int32_t op, Rd& rd, const SmContext& ctx, SmSurface* s, std::vec
             put2(o, uv);
             o.push_back((double)loc);
         }
-        break;
-    }
-    case OP_EXTEND:
-    case OP_EXTEND_DIR:
-    {
-        SmSurfParamType dir = SM_SP_U;
-        if (op == OP_EXTEND_DIR)
-            dir = (SmSurfParamType)rd.idx();
-        double dist = rd.num();
-        SmContinuityType cont = (SmContinuityType)rd.idx();
-        SmSurface* e = NULL;
-        SmStatus stt = op == OP_EXTEND ? s->CreateExtendedSurface(ctx, dist, cont, e)
-                                       : s->CreateExtendedSurface(ctx, dir, dist, cont, e);
-        o.push_back(st(stt));
-        if (stt == SM_SUCCESS)
-            put_state(o, e);
-        delete e;
         break;
     }
     case OP_ADJUST_STEP:

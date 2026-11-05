@@ -1,6 +1,6 @@
-//! Runner for unit `nlib.srf_adv_p1`: NLib surface extension by a distance, offset
-//! second-derivative bounds, unbounded evaluation, skinning along a spine and
-//! cross-boundary derivative strips from a vector field.
+//! Runner for unit `nlib.srf_adv_p1`: NLib offset second-derivative bounds, unbounded
+//! evaluation, skinning along a spine and cross-boundary derivative strips from a
+//! vector field.
 //!
 //! C++: `solidcore_ffi::units::nlib_srf_adv_p1` (upstream
 //! `source/SMLib/src/NL_SrfAdv.cpp`). Rust: `solidcore::nurbs::srf_adv::p1`.
@@ -10,7 +10,7 @@
 //! number, `1000` for upstream's bare error flag; `-1` on the Rust side for any other
 //! error, which never matches), then on success the results: the surface
 //! (`dims = [n, m, p, q, r, s]`, `net` x y z w row-major, `u`, `v`) for
-//! `extend_by_dist`, `skin_spine` (followed by every profile after the call,
+//! `skin_spine` (followed by every profile after the call,
 //! `c<i>dims = [n, p, m]`, `c<i>net`, `c<i>u`, since upstream modifies them in place)
 //! and `vector_field`; `max = [Muu, Muv, Mvv]` for `max_deriv`. `unbounded` runs a
 //! sequence of evaluations sharing the extension (`esur` / `gflg` upstream): per
@@ -27,11 +27,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::math::Vec3;
-use solidcore::nurbs::crv_adv::p1::{CurveEnd, BARE_FLAG_REASON};
+use solidcore::nurbs::crv_adv::p1::BARE_FLAG_REASON;
 use solidcore::nurbs::crv_basic::{Boundary, Curve};
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::srf_adv::p1 as adv;
-use solidcore::nurbs::srf_adv::p2::SrfContinuity;
 use solidcore::nurbs::srf_adv::p3::ExtendContinuity;
 use solidcore::nurbs::srf_basic::{Direction, Surface};
 use solidcore::{Result as SolidResult, SolidError};
@@ -93,15 +92,6 @@ enum CrvIn {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum Inputs {
-    ExtendByDist {
-        sur: SrfIn,
-        dist: f64,
-        dir: i32,
-        end: i32,
-        cont: i32,
-        #[serde(default)]
-        inplace: bool,
-    },
     MaxDeriv {
         sur: SrfIn,
         d: f64,
@@ -323,24 +313,6 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
 fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
     let mut o = Vec::new();
     let op = match i {
-        Inputs::ExtendByDist {
-            sur,
-            dist,
-            dir,
-            end,
-            cont,
-            inplace,
-        } => {
-            encode(&resolve(sur)?, &mut o)?;
-            o.extend([
-                *dist,
-                f64::from(*dir),
-                f64::from(*end),
-                f64::from(*cont),
-                flag(*inplace),
-            ]);
-            Op::ExtendByDist
-        }
         Inputs::MaxDeriv { sur, d } => {
             encode(&resolve(sur)?, &mut o)?;
             o.push(*d);
@@ -400,21 +372,7 @@ const BARE_FLAG: f64 = 1000.0;
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
     let (op, input) = cpp_input(i)?;
     match ffi::eval(op, &input) {
-        Ok(mut flat) => {
-            // Past its recursion limit `ST_surxsdr` returns a bare error flag and
-            // `NL_ERROR` still holds whatever an earlier, recovered error left there
-            // (plan/findings.md, nlib.srf_adv_p2). When the port reports the recursion
-            // limit, an upstream failure is compared as the bare flag.
-            if matches!(i, Inputs::ExtendByDist { .. })
-                && flat.first().is_some_and(|&st| st != 0.0)
-                && rust_flat(i)?.first() == Some(&BARE_FLAG)
-            {
-                if let Some(st) = flat.first_mut() {
-                    *st = BARE_FLAG;
-                }
-            }
-            to_output(i, &flat)
-        }
+        Ok(flat) => to_output(i, &flat),
         Err(FfiError::InvalidArgument(m)) => Err(harness(format!("ffi rejected: {m}"))),
         Err(e) => Err(harness(format!("shim failure: {e}"))),
     }
@@ -429,11 +387,6 @@ fn status<T>(r: &SolidResult<T>) -> f64 {
         Ok(_) => 0.0,
         Err(SolidError::Nlib { code, .. }) => f64::from(code.code()),
         Err(SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. }) if *reason == BARE_FLAG_REASON => BARE_FLAG,
-        Err(SolidError::NotConverged { operation, .. })
-            if operation.ends_with("srf_adv::p2::extend_by_dist_at_depth") =>
-        {
-            BARE_FLAG
-        }
         Err(_) => -1.0,
     }
 }
@@ -441,23 +394,6 @@ fn status<T>(r: &SolidResult<T>) -> f64 {
 fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
     let mut o = Vec::new();
     match i {
-        Inputs::ExtendByDist {
-            sur,
-            dist,
-            dir,
-            end,
-            cont,
-            ..
-        } => {
-            let s = build(&resolve(sur)?)?;
-            let end = CurveEnd::from_flag(*end).ok_or_else(|| harness("bad end flag"))?;
-            let cont = SrfContinuity::from_flag(*cont).ok_or_else(|| harness("bad cont flag"))?;
-            let r = adv::extend_by_dist(&s, *dist, direction(*dir)?, end, cont);
-            o.push(status(&r));
-            if let Ok(q) = r {
-                dump(&mut o, &q);
-            }
-        }
         Inputs::MaxDeriv { sur, d } => {
             let s = build(&resolve(sur)?)?;
             let r = adv::offset_get_max_deriv(&s, *d);
@@ -828,32 +764,6 @@ fn cont_flag(rng: &mut Rng) -> i32 {
     *rng.choose(&[2, 3, 4, 6]).unwrap_or(&2)
 }
 
-fn gen_extend(rng: &mut Rng) -> Inputs {
-    let s = gen_srf(rng);
-    let dist = match rng.below(10) {
-        0 => 1e-6,
-        1 => rng.uniform(3.0, 20.0),
-        _ => rng.uniform(0.01, 3.0),
-    };
-    let dir = 1 + rng.below(2) as i32;
-    let mut cont = cont_flag(rng);
-    // A degree-1 extension direction makes upstream's reflection-plane fallback read
-    // past its scratch row (plan/findings.md, nlib.srf_adv_p2); the port reports
-    // `InvalidInput` there. Keep degree-1 extensions to C-max.
-    let ext_deg = if dir == 1 { s.p } else { s.q };
-    if ext_deg == 1 && cont != 4 {
-        cont = 4;
-    }
-    Inputs::ExtendByDist {
-        sur: SrfIn::Inline(s),
-        dist,
-        dir,
-        end: 1 + rng.below(2) as i32,
-        cont,
-        inplace: rng.chance(0.3),
-    }
-}
-
 fn unbounded_param(rng: &mut Rng, k: &[f64]) -> f64 {
     let a = k.first().copied().unwrap_or(0.0);
     let b = k.last().copied().unwrap_or(1.0);
@@ -1071,17 +981,16 @@ fn gen_vector_field(rng: &mut Rng) -> Inputs {
 }
 
 fn gen_case(rng: &mut Rng) -> Inputs {
-    match rng.below(10) {
-        0 | 1 => gen_extend(rng),
-        2 => Inputs::MaxDeriv {
+    match rng.below(8) {
+        0 => Inputs::MaxDeriv {
             sur: SrfIn::Inline(gen_srf(rng)),
             d: match rng.below(4) {
                 0 => 0.0,
                 _ => rng.uniform(-3.0, 3.0),
             },
         },
-        3..=5 => gen_unbounded(rng),
-        6..=8 => gen_skin_spine(rng),
+        1..=3 => gen_unbounded(rng),
+        4..=6 => gen_skin_spine(rng),
         _ => gen_vector_field(rng),
     }
 }
@@ -1121,25 +1030,23 @@ mod tests {
     /// closed spine skins with end and all derivatives.
     #[test]
     fn generated_cases_cover_outcomes() {
-        // [extend ok, extend err, maxd ok, unb ok, unb err, unb wrapped, unb ext,
-        //  spine none ok, spine ends ok, spine all ok, spine err, spine rational ok,
-        //  vfield ok, vfield err]
-        let mut stats = [0usize; 14];
+        // [maxd ok, unb ok, unb err, unb wrapped, unb ext, spine none ok, spine ends ok,
+        //  spine all ok, spine err, spine rational ok, vfield ok, vfield err]
+        let mut stats = [0usize; 12];
         for seed in 0..3000u64 {
             let mut rng = Rng::new(seed);
             let i = gen_case(&mut rng);
             let flat = rust_flat(&i).unwrap();
             let ok = flat.first() == Some(&0.0);
             match &i {
-                Inputs::ExtendByDist { .. } => stats[usize::from(!ok)] += 1,
-                Inputs::MaxDeriv { .. } => stats[2] += usize::from(ok),
+                Inputs::MaxDeriv { .. } => stats[0] += usize::from(ok),
                 Inputs::Unbounded { .. } => {
                     let out = to_output(&i, &flat).unwrap();
                     let all_ok = out.values.contains_key("has_ext");
-                    stats[3 + usize::from(!all_ok)] += 1;
+                    stats[1 + usize::from(!all_ok)] += 1;
                     match out.values.get("gflg").and_then(|g| g.first()) {
-                        Some(&g) if g > 0.0 => stats[5] += 1,
-                        Some(_) => stats[6] += 1,
+                        Some(&g) if g > 0.0 => stats[3] += 1,
+                        Some(_) => stats[4] += 1,
                         None => {}
                     }
                 }
@@ -1148,19 +1055,19 @@ mod tests {
                 } => {
                     if ok {
                         stats[match derivs {
-                            1 => 7,
-                            2 => 8,
-                            _ => 9,
+                            1 => 5,
+                            2 => 6,
+                            _ => 7,
                         }] += 1;
                         let c0 = resolve_crv(&curves[0]).unwrap();
                         if c0.cpts[0][3] != NOW && *derivs != 1 {
-                            stats[11] += 1;
+                            stats[9] += 1;
                         }
                     } else {
-                        stats[10] += 1;
+                        stats[8] += 1;
                     }
                 }
-                Inputs::VectorField { .. } => stats[12 + usize::from(!ok)] += 1,
+                Inputs::VectorField { .. } => stats[10 + usize::from(!ok)] += 1,
             }
         }
         eprintln!("{stats:?}");

@@ -3,8 +3,8 @@
 //! callers that extend a surface "on every side" take.
 //!
 //! Not upstream: upstream's `CreateExtendedSurface` extends every side by an estimated
-//! distance, fits its extension by least squares and removes knots within a tolerance; this
-//! is the exact path side by side.
+//! distance, fits its extension by least squares and removes knots within a tolerance; it is
+//! not ported, this exact path replaces it.
 //!
 //! Each asked side, in [`BoxSide::ALL`]'s order, is extended on the box the sides before it
 //! left (the result's natural box), so a later side runs along the earlier extensions. A side

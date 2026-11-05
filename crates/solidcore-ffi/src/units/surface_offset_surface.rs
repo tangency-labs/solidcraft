@@ -34,7 +34,6 @@
 //! | `Trim`         | `TrimWithDomain`                      | the (snapped) domain                   |
 //! | `Split`        | `SplitAt`                             | both halves' states                    |
 //! | `CreateOffset` | `CreateOffsetSurface`                 | the result's state                     |
-//! | `Extend`, `ExtendDir` | `CreateExtendedSurface`        | (refused, see below)                   |
 //! | `Copy`         | `Copy`                                | the copy's state                       |
 //! | `Eq`           | `operator==` with another offset and itself | `eq self_eq`                     |
 //! | `IsPlanar`     | `IsPlanar` (`SmSurface` body, virtual box) | `planar P N dev`                  |
@@ -51,10 +50,8 @@
 //! may lie outside the base domain (the base-class box of the offset asks the offset
 //! again for the outside part, without bound once an extension exists, and its surface
 //! cache subdivision runs away for small trimmed bases), no planarity test once an
-//! extension may exist, and no `CreateExtendedSurface` ([`Step::Extend`],
-//! [`Step::ExtendDir`]): its in-place retry reads arrays a failed extension half-wrote
-//! (UB-107) and its arc-length searches can stall or crawl (HANG-6, HANG-22), which
-//! nothing outside NLib can detect before the C++ runs in this process. The shim checks
+//! extension may exist. (Step codes `15` and `16`, `CreateExtendedSurface`, were removed
+//! with the port's fitted extension; they are not reused.) The shim checks
 //! the state-dependent cases on the actual surfaces as the script runs: the non-zero
 //! offset writing past the caller's array for `bOnlyUpperHalf` orders (UB-171, only
 //! when the compound distance is not exactly `0.0`), zero-distance delegation to an
@@ -269,22 +266,6 @@ pub enum Step {
         /// Signed distance.
         d: f64,
     },
-    /// `CreateExtendedSurface(dist, cont)` (refused: module docs).
-    Extend {
-        /// Distance.
-        dist: f64,
-        /// `SmContinuityType` code.
-        cont: u8,
-    },
-    /// `CreateExtendedSurface(param, dist, cont)` (refused: module docs).
-    ExtendDir {
-        /// `SmSurfParamType` code.
-        param: u8,
-        /// Distance.
-        dist: f64,
-        /// `SmContinuityType` code.
-        cont: u8,
-    },
     /// `Copy`.
     Copy,
     /// `operator==` with another offset, then with itself.
@@ -347,8 +328,6 @@ impl Step {
             Step::Trim { .. } => 12,
             Step::Split { .. } => 13,
             Step::CreateOffset { .. } => 14,
-            Step::Extend { .. } => 15,
-            Step::ExtendDir { .. } => 16,
             Step::Copy => 17,
             Step::Eq { .. } => 18,
             Step::SetDist { .. } => 19,
@@ -791,11 +770,6 @@ fn push_steps(o: &mut Vec<f64>, off: &Off, info: BaseInfo, steps: &[Step]) -> Re
                 finite(&[*d], "offset distance")?;
                 o.push(*d);
             }
-            Step::Extend { .. } | Step::ExtendDir { .. } => {
-                return Err(bad(
-                    "extend: CreateExtendedSurface is not run in process (UB-107, HANG-6, HANG-22)",
-                ));
-            }
             Step::Eq { other } => {
                 push_off(o, other, 1)?;
             }
@@ -1134,41 +1108,6 @@ mod tests {
             ..plane(1e-10)
         };
         assert!(refused(&script(&tiny, &[Step::State, eval(1, 1, false)])));
-    }
-
-    /// UB-107, HANG-6 and HANG-22 are inside `CreateExtendedSurface`, which cannot be
-    /// guarded in process: the FFI refuses every extension step, and the shim refuses
-    /// one sent past the FFI without running it.
-    #[test]
-    fn extension_steps_are_refused_in_process() {
-        let off = Off {
-            base: bss(1.0),
-            ..plane(0.25)
-        };
-        let steps = [
-            Step::Extend { dist: 0.1, cont: 5 },
-            Step::ExtendDir {
-                param: 7,
-                dist: 0.1,
-                cont: 13,
-            },
-        ];
-        for step in steps {
-            assert!(matches!(
-                check(&off, std::slice::from_ref(&step)),
-                Err(FfiError::InvalidArgument(_))
-            ));
-            assert!(refused(&script(&off, &[Step::State, step])));
-        }
-        let mut input = Vec::new();
-        push_off(&mut input, &off, 0).unwrap();
-        input.extend([2.0, 0.0, 15.0, 0.1, 5.0]);
-        assert!(refused(&call(OP_SCRIPT, &input)));
-        input.truncate(input.len() - 4);
-        input.extend([16.0, 7.0, 0.1, 13.0]);
-        assert!(refused(&call(OP_SCRIPT, &input)));
-        // a refusal leaves nothing behind for the next call
-        assert!(script(&off, &[Step::State, eval(1, 1, false)]).is_ok());
     }
 
     #[test]
