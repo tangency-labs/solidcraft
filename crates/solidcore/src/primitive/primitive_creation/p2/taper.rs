@@ -19,7 +19,9 @@
 //! their input indices, and sit in the access's attribute store on faces. An
 //! analytic offset continues as its B-spline after its ruled surface is built.
 //! Ignored statuses keep their outputs; with `Kernel::fixes.sweep_statuses_pass_on`
-//! (fork c8f6a31, WR-662) the ones the fork wraps in `SER` are returned. No recursion. SolidCraft changes
+//! (fork c8f6a31, WR-662) the ones the fork wraps in `SER` are returned. No recursion.
+//! The surface intersection method checks the kernel's cancel token before each face of
+//! its extraneous-face loop (#2756); results are unchanged. SolidCraft changes
 //! (tangency-labs/smlib 54148db, e8f23e0, in `taper_walls`):
 //! [`OffsetCornerType::CurveExtension`] and, under opt-in
 //! `fixes.taper_tangent_corner_planes` (WR-521), linear-extension corners of a profile
@@ -52,6 +54,8 @@ use crate::surface::surface::Surface;
 use crate::topology::BrepId;
 
 const OP: &str = "primitive::primitive_creation::p2::taper";
+const SURFACE_INTERSECTION_OP: &str =
+    "primitive::primitive_creation::p2::taper::surface_intersection_method";
 
 /// Whether two B-splines are the same split curve: equal natural intervals and end
 /// points, bit for bit.
@@ -667,6 +671,9 @@ fn surface_intersection_method(
 
     // Iterate over Faces to remove extraneous faces
     for face in a.faces(intersections)? {
+        // A deletion walks the shells of the whole merged B-rep, whose faces grow as the
+        // square of the profile's curves, so one iteration can be long (#2756).
+        a.kernel(brep)?.check_cancelled(SURFACE_INTERSECTION_OP)?;
         // the map attribute of the curve that generated the face
         let map = a
             .offset_map((intersections, face))?
