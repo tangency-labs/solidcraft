@@ -1632,6 +1632,8 @@ fn a_second_placements_face_and_edge_project_where_it_is_placed() {
     check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()), 15.0);
 }
 
+/// The active sketch holds at least two linked arcs or circles, each of `radius` about `center`
+/// (sketch coordinates): the projected rim of a round hole.
 fn assert_rim(s: &mut Session, radius: f64, center: [f64; 2]) {
     let si = inspect(s);
     let arcs: Vec<Value> = linked_curves(&si).into_iter().filter(|c| c["type"] == "arc" || c["type"] == "circle").collect();

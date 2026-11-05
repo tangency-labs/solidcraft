@@ -1197,6 +1197,7 @@ const HOLE_MAX_LOOP_EDGES: usize = 128;
 /// in world space, on `body`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HoleRim {
+    /// Name of the body whose face the hole is cut through.
     pub body: String,
     /// Where the ray crosses the opening.
     pub at: Vec3,
@@ -1243,6 +1244,8 @@ pub fn hole_rim_along_ray(st: &ModelState, origin: Vec3, dir: Vec3, visible: imp
     best.map(|(_, rim)| rim)
 }
 
+/// The ray `origin + t·dir` in the body's own mesh coordinates, undoing its placement.
+/// `None` when the placement cannot be inverted or the result is not finite.
 fn ray_in_place(place: &crate::Mat, origin: Vec3, dir: Vec3) -> Option<(Vec3, Vec3)> {
     if crate::is_identity(place) {
         return Some((origin, dir));
@@ -1252,6 +1255,7 @@ fn ray_in_place(place: &crate::Mat, origin: Vec3, dir: Vec3) -> Option<(Vec3, Ve
     (o.is_finite() && d.is_finite() && d.len2() > 1e-24).then_some((o, d))
 }
 
+/// A point in the body's mesh coordinates moved to world space by its placement.
 fn point_in_world(place: &crate::Mat, p: Vec3) -> Vec3 {
     if crate::is_identity(place) { p } else { crate::apply_point(place, p) }
 }
@@ -1374,12 +1378,20 @@ fn hole_edges(mesh: &Mesh, face: usize, plane: &Plane, at: Vec2) -> Option<Vec<V
     (!points.is_empty()).then_some(points)
 }
 
+/// One closed boundary loop of a planar face, as found by [`walk_loop`].
 struct Opening {
+    /// Mesh edge indices around the loop, in walk order.
     edges: Vec<usize>,
+    /// The loop as a polygon in face-plane coordinates.
     ring: Vec<Vec2>,
+    /// Signed area of `ring`; its magnitude ranks nested loops.
     area: f64,
 }
 
+/// Walks end to end from `start_edge` through `face_edges` until the chain closes, and returns
+/// the loop it closed. Edges already in `used` are skipped. Only a closed loop marks its edges
+/// used, so a chain that dead-ends leaves them for a later start. `tol` is the end-point match
+/// distance. `None` when the chain does not close or exceeds `HOLE_MAX_LOOP_EDGES`.
 fn walk_loop(mesh: &Mesh, face_edges: &[usize], used: &mut [bool], start_edge: usize, plane: &Plane, tol: f64) -> Option<Opening> {
     let pts = mesh.edges.get(start_edge)?;
     let start = *pts.first()?;
@@ -1440,6 +1452,8 @@ fn walk_loop(mesh: &Mesh, face_edges: &[usize], used: &mut [bool], start_edge: u
     area.is_finite().then_some(Opening { edges, ring, area })
 }
 
+/// Signed area of a closed polygon (shoelace formula): positive when counter-clockwise, zero
+/// for fewer than three points.
 fn ring_area(ring: &[Vec2]) -> f64 {
     let n = ring.len();
     if n < 3 {
@@ -1453,6 +1467,8 @@ fn ring_area(ring: &[Vec2]) -> f64 {
     twice * 0.5
 }
 
+/// The point halfway along a polyline by arc length, which names the edge unambiguously.
+/// Falls back to the first point when the polyline has no length.
 fn polyline_mid(pts: &[Vec3]) -> Option<Vec3> {
     let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
     if !(len.is_finite() && len > 0.0) {

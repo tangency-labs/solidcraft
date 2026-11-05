@@ -1142,6 +1142,8 @@ pub fn periodic_start_snap(app: &SolveApp, tool: &Tool, proj: &Proj, pos: Pos2) 
     (screen.distance(pos) <= 8.0).then_some(first)
 }
 
+/// A viewport click while a sketch tool is running: picks under `pos` and dispatches on the
+/// tool's mode. Sketch Project goes through `project_click`.
 pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
     let Some(m) = mode(tool.cmd) else { return };
     let hits = pick(app, proj, pos);
