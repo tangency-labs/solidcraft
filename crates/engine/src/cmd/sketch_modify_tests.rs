@@ -687,6 +687,103 @@ fn trimming_at_a_held_midpoint_on_an_unrelated_line_adds_no_hold_to_that_line() 
     assert_eq!(sk.points.iter().filter(|p| p.pos.dist(Vec2::new(5.0, 0.0)) < 1e-7).count(), 1, "one point at the cut");
 }
 
+/// Breaking a center rectangle's diagonal at the centre left two points there, one held by
+/// nothing: dragging a corner pulled them apart. Either diagonal, both pieces meet at the one
+/// centre point, which stays where the diagonals cross.
+#[test]
+fn breaking_a_center_rectangle_diagonal_at_its_centre_keeps_one_centre() {
+    for (diagonal, at) in [(0, [7.5, 4.25]), (1, [7.5, -0.25])] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.rectangle.center", json!({"center": [3, 2], "corner": [12, 6.5]}));
+        let sk = sketch(&s);
+        let diagonals: Vec<String> = sk.curves.iter().filter(|c| c.construction).map(|c| c.id.clone()).collect();
+        assert_eq!(diagonals.len(), 2, "{diagonals:?}");
+        let (cut, other) = (diagonals[diagonal].clone(), diagonals[1 - diagonal].clone());
+        run(&mut s, "sketch.break", json!({"curve": cut, "at": at}));
+        let sk = sketch(&s);
+        let at_centre = sk.points.iter().filter(|p| p.pos.dist(Vec2::new(3.0, 2.0)) < 1e-7).count();
+        assert_eq!(at_centre, 1, "diagonal {cut}: {} points at the centre", at_centre);
+        let si = run(&mut s, "sketch.inspect", json!({}));
+        assert_eq!(si["dof"], 4, "diagonal {cut}: {si}");
+        assert_ne!(si["status"], "conflict", "diagonal {cut}: {si}");
+        assert!(si["status"].as_str().is_none_or(|t| !t.contains("over")), "diagonal {cut}: {si}");
+        // Drag a corner: both pieces still end where the diagonals cross.
+        run(&mut s, "sketch.drag", json!({"entity": "l2.end", "from": [12, 6.5], "to": [16, 9]}));
+        let sk = sketch(&s);
+        let ends = |i: usize| {
+            let (a, b) = sk.curves[i].kind.ends().unwrap();
+            (sk.point(a).unwrap(), sk.point(b).unwrap())
+        };
+        let (o0, o1) = ends(sk.curve_index(&other).unwrap());
+        let centre = (o0 + o1) * 0.5;
+        let pieces: Vec<usize> = (0..sk.curves.len()).filter(|i| sk.curves[*i].construction && sk.curves[*i].id != other).collect();
+        assert_eq!(pieces.len(), 2, "diagonal {cut}: {pieces:?}");
+        for piece in pieces {
+            let (c0, c1) = ends(piece);
+            assert!(c0.dist(centre).min(c1.dist(centre)) < 1e-6, "diagonal {cut}: {c0:?} {c1:?}, centre {centre:?}");
+        }
+    }
+}
+
+/// A line's held midpoint broken at a crossing line that only happens to have its middle there
+/// joins the two pieces at that point and keeps it on the crossing line, without tying the
+/// crossing line's middle to it.
+#[test]
+fn breaking_at_a_held_midpoint_on_an_unrelated_line_adds_no_hold_to_that_line() {
+    let mut s = new_sketch();
+    let broken = ids(&run(&mut s, "sketch.line", json!({"points": [[0,0], [10,0]], "connect": false, "infer": false}))["curves"])[0].clone();
+    let crossing = ids(&run(&mut s, "sketch.line", json!({"points": [[5,-3], [5,3]], "connect": false, "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.point", json!({"point": format!("mid:{broken}")}));
+    let sk = sketch(&s);
+    let mid = sk.points.iter().find(|p| p.pos.dist(Vec2::new(5.0, 0.0)) < 1e-7).map(|p| p.id.clone()).unwrap();
+    run(&mut s, "sketch.break", json!({"curve": broken, "at": [8, 0]}));
+    let sk = sketch(&s);
+    let l = sk.curve_index(&crossing).unwrap();
+    let m = sk.resolve_point(&mid).unwrap();
+    assert!(
+        !sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { l: cl, .. } if cl == l)),
+        "the crossing line gets no midpoint hold: {:?}",
+        sk.constraints
+    );
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p, c: cc } if p == m && cc == l)),
+        "the old midpoint stays on the crossing line: {:?}",
+        sk.constraints
+    );
+    assert_eq!(sk.points.iter().filter(|p| p.pos.dist(Vec2::new(5.0, 0.0)) < 1e-7).count(), 1, "one point at the cut");
+}
+
+/// Extending a line up to a center rectangle's centre ends it on the centre point, as an
+/// extension up to a curve's end joins that end. It used to end on one diagonal only, free to
+/// slide along it, so a corner drag took the line's end off the centre.
+#[test]
+fn extending_a_line_to_a_center_rectangle_centre_ends_it_on_the_centre() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.center", json!({"center": [3, 2], "corner": [12, 6.5]}));
+    let line = ids(&run(&mut s, "sketch.line", json!({"points": [[3, -1], [3, 0]], "connect": false, "infer": false}))["curves"])[0].clone();
+    let dof = run(&mut s, "sketch.inspect", json!({}))["dof"].as_i64().unwrap();
+    run(&mut s, "sketch.extend", json!({"curve": line, "at": [3, -0.1]}));
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    assert_eq!(si["dof"], dof - 2, "the extended end is held at the centre: {si}");
+    assert!(si["status"].as_str().is_none_or(|t| !t.contains("over")), "{si}");
+    run(&mut s, "sketch.drag", json!({"entity": "l2.end", "from": [12, 6.5], "to": [16, 9]}));
+    let sk = sketch(&s);
+    let diagonal = sk.curves.iter().find(|c| c.construction).unwrap();
+    let (a, b) = diagonal.kind.ends().unwrap();
+    let centre = (sk.point(a).unwrap() + sk.point(b).unwrap()) * 0.5;
+    let (e0, e1) = sk.curves[sk.curve_index(&line).unwrap()].kind.ends().unwrap();
+    let reach = sk.point(e0).unwrap().dist(centre).min(sk.point(e1).unwrap().dist(centre));
+    // The extension may be a new line from the old end: any line ending at the centre counts.
+    let joined = reach < 1e-6
+        || sk
+            .curves
+            .iter()
+            .filter(|c| !c.construction)
+            .filter_map(|c| c.kind.ends())
+            .any(|(p, q)| [p, q].iter().any(|e| sk.point(*e).is_some_and(|x| x.dist(centre) < 1e-6)));
+    assert!(joined, "no line ends at the centre {centre:?} after the drag");
+}
+
 #[test]
 fn exact_extend_ellipse_preserves_support_target_and_history() {
     for (y, expected_x) in [(3.0, 12.0), (5.0, 20.0)] {
