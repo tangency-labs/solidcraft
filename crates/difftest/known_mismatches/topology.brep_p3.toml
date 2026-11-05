@@ -1,0 +1,85 @@
+# Known mismatches of topology.brep_p3 (format: crates/difftest/src/known.rs).
+
+# The exact surface extension replaces the fitted one (branch land-me/split-ext): TurnToNURBS
+# extends each approximated offset surface by 2% of its box diagonal; passed on main, moves on
+# the branch. plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names each case, its value and its proof.
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_Mouse_0.1"
+why = "the exact surface extension replaces the fitted one in TurnToNURBS's offset arm (geometry: the converted surface's natural domain; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case, its value and its proof)"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_Mouse_-0.05"
+why = "the exact surface extension replaces the fitted one in TurnToNURBS's offset arm (geometry: the converted surface's natural domain; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case, its value and its proof)"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_Endcap_0.1"
+why = "the exact surface extension replaces the fitted one in TurnToNURBS's offset arm (geometry: the converted surface's natural domain; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case, its value and its proof)"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_Endcap_-0.05"
+why = "the exact surface extension replaces the fitted one in TurnToNURBS's offset arm (geometry: the converted surface's natural domain; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case, its value and its proof)"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_box_with_large_fillet_0.1"
+why = "the exact surface extension replaces the fitted one in TurnToNURBS's offset arm (geometry: the converted surface's natural domain; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case, its value and its proof)"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_box_with_large_fillet_-0.05"
+why = "the exact surface extension replaces the fitted one in TurnToNURBS's offset arm (geometry: the converted surface's natural domain; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case, its value and its proof)"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_ellips_ts2_0.1"
+why = "the exact surface extension replaces the fitted one in TurnToNURBS's offset arm (geometry: the converted surface's natural domain; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case, its value and its proof)"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_ellips_ts2_-0.05"
+why = "the exact surface extension replaces the fitted one in TurnToNURBS's offset arm (geometry: the converted surface's natural domain; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case, its value and its proof)"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_surf_extrude_0.1"
+why = "the exact surface extension replaces the fitted one in TurnToNURBS's offset arm (geometry: the converted surface's natural domain; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case, its value and its proof)"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_surf_extrude_-0.05"
+why = "the exact surface extension replaces the fitted one in TurnToNURBS's offset arm (geometry: the converted surface's natural domain; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case, its value and its proof)"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_surf_rev_0.1"
+why = "the exact surface extension replaces the fitted one in TurnToNURBS's offset arm (geometry: the converted surface's natural domain; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case, its value and its proof)"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_surf_rev_-0.05"
+why = "the exact surface extension replaces the fitted one in TurnToNURBS's offset arm (geometry: the converted surface's natural domain; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case, its value and its proof)"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_surf_sphere150_0.1"
+why = "the exact surface extension replaces the fitted one in TurnToNURBS's offset arm (geometry: the converted surface's natural domain; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case, its value and its proof)"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_surf_sphere150_-0.05"
+why = "the exact surface extension replaces the fitted one in TurnToNURBS's offset arm (geometry: the converted surface's natural domain; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case, its value and its proof)"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_vase_rev_0.1"
+why = "the exact surface extension replaces the fitted one in TurnToNURBS's offset arm (geometry: the converted surface's natural domain; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case, its value and its proof)"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_vase_rev_-0.05"
+why = "the exact surface extension replaces the fitted one in TurnToNURBS's offset arm (geometry: the converted surface's natural domain; plan/findings/surface.exact-extension--difftest-cases-moved-2026-11-05.md names the case, its value and its proof)"

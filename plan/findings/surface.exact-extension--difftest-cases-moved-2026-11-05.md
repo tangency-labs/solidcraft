@@ -734,6 +734,47 @@ checked on all 30:
 - `fc0031` (geometry): `values.geometry[33]` C++ 1.297308926950791e-10, Rust 1.4210854715202004e-14; `values.record[28]` C++ 1.4033e4, Rust 1.401e4 (+1 more) — **unproved: unsound on both (check lines main 3, branch 3), no sound reference**
 
 
+## `topology.brep_p3` (16 cases: 16 geometry; recorded 2026-11-05)
+
+`TurnToNURBS`'s offset arm (`topology::brep::p3::turn_to_nurbs_in`) approximates each offset face
+surface (cubic, chord length, ten B-rep tolerances) and extends it, tangent continuous, by
+`0.02 *` its box diagonal past every side; the branch makes that extension exact
+(`extended_sides`, `Continuity::Tangent`) where main fitted it to an estimated parameter reach.
+In every moved case the only values that move are the converted surfaces' natural domains (the
+`turn_nurbs_offset` output's per-face `[umin, vmin, umax, vmax]`); the status, every edge curve,
+every surface type and the counts agree. Sides that stay planar or straight (degree 1 across)
+agree with the C++ too: there its estimate was exact; closed and collapsed sides are kept on both.
+
+**Proof (independent of the C++).** The difftest test
+`turned_offsets_are_the_approximation_and_reach_the_extension` (crates/difftest/src/units/
+topology_brep_p3.rs) rebuilds every face's approximation with the kernel's own call and checks
+the converted surface: over the approximation's box it is the approximation (0 of its size at
+17 x 17 samples, every face); past each extended side the iso curve through the side's middle
+runs on for the asked distance, its length measured as a dense polyline (2^15 and 2^16 chords,
+Richardson-extrapolated) within 1.1e-10 relative in every case (worst `nurbs_off_Endcap_0.1`
+vmax); and the iso curve crosses the side tangent continuously (one-sided directions within
+1.4e-7 rad at a step of 1e-7 of the extension). The extended part lies outside the box the
+face's trims were built on (the edge curves agree with the C++), so only the untrimmed margin
+moves. **Every
+move PROVED: the extension reaches exactly the distance asked; the C++ estimated it.**
+
+- `nurbs_off_Mouse_0.1` (geometry): `values.out[1698]` C++ -3.881927659863838e-1, Rust -3.697020131873322e-1; `values.out[1699]` C++ -4.7483454708635014e-1, Rust -3.227192928283104e-1 (+6 more) — **PROVED: the extension measured on its own: 16 extended sides on 4 faces reach the asked 2% of the box diagonal within 2.1e-11 relative, tangent continuous within 1.4e-07 rad, the approximation over its box exactly**
+- `nurbs_off_Mouse_-0.05` (geometry): `values.out[1698]` C++ -3.9190086077525843e-1, Rust -3.7388193127735747e-1; `values.out[1699]` C++ -4.7632382340037854e-1, Rust -3.209393118890918e-1 (+6 more) — **PROVED: the extension measured on its own: 16 extended sides on 4 faces reach the asked 2% of the box diagonal within 1.2e-11 relative, tangent continuous within 1.4e-07 rad, the approximation over its box exactly**
+- `nurbs_off_Endcap_0.1` (geometry): `values.out[73]` C++ -1.1477733100851854e-1, Rust -9.12754174467206e-2; `values.out[74]` C++ -1.347507967804098e-1, Rust -1.4986317022793488e-1 (+2 more) — **PROVED: the extension measured on its own: 4 extended sides on 1 face reach the asked 2% of the box diagonal within 1.1e-10 relative, tangent continuous within 1.9e-08 rad, the approximation over its box exactly**
+- `nurbs_off_Endcap_-0.05` (geometry): `values.out[73]` C++ -1.1467026610958139e-1, Rust -9.185655241097931e-2; `values.out[74]` C++ -1.3306539446823645e-1, Rust -1.4902259900896092e-1 (+2 more) — **PROVED: the extension measured on its own: 4 extended sides on 1 face reach the asked 2% of the box diagonal within 9.8e-11 relative, tangent continuous within 2.3e-08 rad, the approximation over its box exactly**
+- `nurbs_off_box_with_large_fillet_0.1` (geometry): `values.out[327]` C++ -2.915910151836775e-2, Rust -3.0209183307803034e-2; `values.out[329]` C++ 1.0291594598996354e0, Rust 1.0302091833078049e0 — **PROVED: the extension measured on its own: 28 extended sides on 7 faces reach the asked 2% of the box diagonal within 4.8e-11 relative, tangent continuous within 1.2e-07 rad, the approximation over its box exactly**
+- `nurbs_off_box_with_large_fillet_-0.05` (geometry): `values.out[327]` C++ -2.9453724775997094e-2, Rust -3.052549393655244e-2; `values.out[329]` C++ 1.0294540937617627e0, Rust 1.0305254939365533e0 — **PROVED: the extension measured on its own: 28 extended sides on 7 faces reach the asked 2% of the box diagonal within 4.8e-11 relative, tangent continuous within 5.9e-08 rad, the approximation over its box exactly**
+- `nurbs_off_ellips_ts2_0.1` (geometry): `values.out[5808]` C++ -6.359508661234845e-1, Rust -5.530274831698154e-1; `values.out[5809]` C++ -5.2420944545164e-1, Rust -5.521525163512315e-1 (+2 more) — **PROVED: the extension measured on its own: 4 extended sides on 1 face reach the asked 2% of the box diagonal within 2.5e-11 relative, tangent continuous within 2.6e-08 rad, the approximation over its box exactly**
+- `nurbs_off_ellips_ts2_-0.05` (geometry): `values.out[5808]` C++ -6.385458256339659e-1, Rust -5.553043346548415e-1; `values.out[5809]` C++ -5.216802224830571e-1, Rust -5.487794786690596e-1 (+2 more) — **PROVED: the extension measured on its own: 4 extended sides on 1 face reach the asked 2% of the box diagonal within 2.5e-11 relative, tangent continuous within 5.6e-08 rad, the approximation over its box exactly**
+- `nurbs_off_surf_extrude_0.1` (geometry): `values.out[130]` C++ -1.461968021993446e-1, Rust -1.4620141825979913e-1; `values.out[132]` C++ 8.547704942980276e0, Rust 8.547706599521504e0 — **PROVED: the extension measured on its own: 4 extended sides on 1 face reach the asked 2% of the box diagonal within 1.4e-11 relative, tangent continuous within 7.8e-08 rad, the approximation over its box exactly**
+- `nurbs_off_surf_extrude_-0.05` (geometry): `values.out[130]` C++ -1.4637435235398147e-1, Rust -1.4637898480300407e-1; `values.out[132]` C++ 8.547882493502694e0, Rust 8.547884220966772e0 — **PROVED: the extension measured on its own: 4 extended sides on 1 face reach the asked 2% of the box diagonal within 1.3e-11 relative, tangent continuous within 7.6e-08 rad, the approximation over its box exactly**
+- `nurbs_off_surf_rev_0.1` (geometry): `values.out[161]` C++ -1.1112910627884378e0, Rust -8.414264716142595e-1; `values.out[162]` C++ -7.193641073128466e-1, Rust -7.193196356150628e-1 (+2 more) — **PROVED: the extension measured on its own: 4 extended sides on 1 face reach the asked 2% of the box diagonal within 5.0e-11 relative, tangent continuous within 4.3e-08 rad, the approximation over its box exactly**
+- `nurbs_off_surf_rev_-0.05` (geometry): `values.out[161]` C++ -1.1620266807423725e0, Rust -8.846376893811959e-1; `values.out[162]` C++ -7.123489099210631e-1, Rust -7.12327527836107e-1 (+2 more) — **PROVED: the extension measured on its own: 4 extended sides on 1 face reach the asked 2% of the box diagonal within 5.3e-11 relative, tangent continuous within 4.0e-08 rad, the approximation over its box exactly**
+- `nurbs_off_surf_sphere150_0.1` (geometry): `values.out[71]` C++ -9.451451108671494e-1, Rust -3.8653588199157507e-1; `values.out[73]` C++ 1.6293456959436543e1, Rust 1.573307564157104e1 — **PROVED: the extension measured on its own: 2 extended sides on 1 face reach the asked 2% of the box diagonal within 8.3e-11 relative, tangent continuous within 2.8e-08 rad, the approximation over its box exactly**
+- `nurbs_off_surf_sphere150_-0.05` (geometry): `values.out[71]` C++ -9.451451745152486e-1, Rust -3.8653590896719814e-1; `values.out[73]` C++ 1.6293457023264633e1, Rust 1.573307566854666e1 — **PROVED: the extension measured on its own: 2 extended sides on 1 face reach the asked 2% of the box diagonal within 8.3e-11 relative, tangent continuous within 1.2e-16 rad, the approximation over its box exactly**
+- `nurbs_off_vase_rev_0.1` (geometry): `values.out[172]` C++ -1.674042071024548e0, Rust -1.674011748676379e0; `values.out[174]` C++ 9.37851700295022e1, Rust 9.378510291382224e1 — **PROVED: the extension measured on its own: 2 extended sides on 1 face reach the asked 2% of the box diagonal within 3.7e-11 relative, tangent continuous within 1.3e-07 rad, the approximation over its box exactly**
+- `nurbs_off_vase_rev_-0.05` (geometry): `values.out[172]` C++ -1.6576856096753487e0, Rust -1.6576564727063954e0; `values.out[174]` C++ 9.376881193383616e1, Rust 9.376874972240599e1 — **PROVED: the extension measured on its own: 2 extended sides on 1 face reach the asked 2% of the box diagonal within 3.6e-11 relative, tangent continuous within 5.6e-08 rad, the approximation over its box exactly**
+
 ## `offset.offset_executive_p2`: moved by the derived margin (5ecc60214)
 
 The offset executive's margin is now the offsets' reach past each face and one offset, not five
