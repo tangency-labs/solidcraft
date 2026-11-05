@@ -640,6 +640,15 @@ After a request is cancelled or stopped the connection is free at once (`control
 outlasted its wait can be cancelled from the connection that sent it: 60 s, or 3600 s for
 `engine.batch` and for every request from the agent chat's own connection.
 
+### Params
+
+A field may be left out where a method marks it optional (`?`), but a field that is present must
+have the documented type: a wrong type, or `null` for a field with a default (such as `shift` or
+`delta`), is refused with an error naming the field, and nothing runs. Screen points (`x`, `y`)
+must lie within ±1 000 000. In particular, `engine.execute` takes `command` or its alias `id`,
+not both; `ui.help` refuses an item it doesn't know; and `ui.menu` needs both `x` and `y` to open
+a menu (neither describes the open one).
+
 ## Engine
 
 | Method | Params | Result |
