@@ -17,7 +17,7 @@ pub(crate) struct ReviewAndApply<'a> {
 
 impl ReviewAndApply<'_> {
     pub(crate) fn show(&self, ctx: &egui::Context, valid: bool, acknowledged: &mut bool, content: impl FnOnce(&mut egui::Ui)) -> (bool, Action) {
-        Confirm::new(egui::Id::new("render_review_apply"), "inspect", self.title)
+        Confirm::new(egui::Id::unique("render_review_apply"), "inspect", self.title)
             .actions(self.apply, tr("ui.cancel"), self.copy.then(|| tr("render.physical_copy_plan")))
             .secondary_left()
             .show(ctx, valid && *acknowledged, |ui| self.content(ui, acknowledged, content))
@@ -40,9 +40,13 @@ impl ReviewAndApply<'_> {
         });
         if let Some(notice) = self.notice {
             let t = crate::theme::Tokens::get();
-            egui::Frame::NONE.fill(t.accent_soft).corner_radius(t.control_radius).inner_margin(egui::Margin::same(t.space_8 as i8)).show(ui, |ui| {
-                text(ui, notice, Text::Note("review:physical"));
-            });
+            crate::ui_kit::Container::show_backing(
+                ui,
+                egui::Frame::NONE.fill(t.accent_soft).corner_radius(t.control_radius).inner_margin(egui::Margin::same(t.space_8 as i8)),
+                |ui| {
+                    text(ui, notice, Text::Note("review:physical"));
+                },
+            );
         }
         content(ui);
         for (label, value, key) in

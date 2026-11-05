@@ -113,6 +113,12 @@ pub fn close(app: &mut SolveApp) {
 
 pub(crate) fn ago(secs: u64) -> String {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(secs);
+    ago_between(now, secs)
+}
+
+/// How long before `now` the moment `secs` was (both in seconds since 1970), as "just now",
+/// "5 min ago"…: for hosts whose clock isn't `SystemTime` (the browser, #10220).
+pub fn ago_between(now: u64, secs: u64) -> String {
     let d = now.saturating_sub(secs);
     match d {
         0..=59 => crate::i18n::tr("recovery.just_now").to_string(),
@@ -125,39 +131,145 @@ pub(crate) fn ago(secs: u64) -> String {
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // File view presents the same entries inline, without a second window covering them.
     if app.home.open || app.recoverable.is_empty() {
+        app.recovery_discard_all = false;
+        return;
+    }
+    if app.recovery_discard_all {
+        confirm_discard_all(app, ctx);
         return;
     }
     let mut act: Option<(Entry, bool)> = None;
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_recover_prompt"), "restore", crate::i18n::tr_label("Recover unsaved design?"))
+    let mut discard_all = false;
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_recover_prompt"), "restore", crate::i18n::tr_label("Recover unsaved design?"))
         .actions("", crate::i18n::tr_label("Later"), None)
-        .show(ctx, true, |ui| {
-            ui_kit::text(
-                ui,
-                crate::i18n::tr_label("SolidCraft closed before these designs were saved. Their last autosave can be opened."),
-                ui_kit::Text::Report("intro", false),
-            );
-            for (index, e) in app.recoverable.iter().take(20).enumerate() {
-                ui_kit::divider(ui, &format!("entry:{index}"));
-                ui_kit::label_actions(ui, &e.name, |ui| {
-                    if ui_kit::button(ui, crate::i18n::tr_label("Recover"), ui_kit::Button::Normal).clicked() {
-                        act = Some((e.clone(), true));
-                    }
-                    if ui_kit::button(ui, crate::i18n::tr_label("Discard"), ui_kit::Button::Normal).clicked() {
-                        act = Some((e.clone(), false));
-                    }
-                });
-                let file = e.path.clone().unwrap_or_else(|| crate::i18n::tr("recovery.never_saved").to_string());
-                let detail =
-                    crate::i18n::format("recovery.detail", &[("file", &file), ("features", &e.features.to_string()), ("when", &ago(e.saved_at))]);
-                ui_kit::text(ui, &detail, ui_kit::Text::Note(&format!("detail:{index}")));
-            }
-        });
+        .show_with_left(
+            ctx,
+            true,
+            |ui| {
+                ui_kit::text(
+                    ui,
+                    crate::i18n::tr_label("SolidCraft closed before these designs were saved. Their last autosave can be opened."),
+                    ui_kit::Text::Report("intro", false),
+                );
+                for (index, e) in app.recoverable.iter().take(20).enumerate() {
+                    ui_kit::divider(ui, &format!("entry:{index}"));
+                    ui_kit::label_actions(ui, &e.name, |ui| {
+                        if ui_kit::button(ui, crate::i18n::tr_label("Recover"), ui_kit::Button::Normal).clicked() {
+                            act = Some((e.clone(), true));
+                        }
+                        if ui_kit::button(ui, crate::i18n::tr_label("Discard"), ui_kit::Button::Normal).clicked() {
+                            act = Some((e.clone(), false));
+                        }
+                    });
+                    let file = e.path.clone().unwrap_or_else(|| crate::i18n::tr("recovery.never_saved").to_string());
+                    let detail =
+                        crate::i18n::format("recovery.detail", &[("file", &file), ("features", &e.features.to_string()), ("when", &ago(e.saved_at))]);
+                    ui_kit::text(ui, &detail, ui_kit::Text::Note(&format!("detail:{index}")));
+                }
+            },
+            // Away from Later: it asks first, then discards every listed autosave (#9299).
+            |ui| {
+                let response = ui_kit::button(ui, crate::i18n::tr("recovery.discard_all"), ui_kit::Button::Normal);
+                crate::scenario::publish_target("recovery:discard_all", response.rect);
+                discard_all = response.clicked();
+            },
+        );
+    if discard_all {
+        app.recovery_discard_all = true;
+        return;
+    }
     let later = closed || action != ui_kit::Action::None;
     if let Some((entry, recover)) = act {
         apply(app, entry, recover);
     }
     if later {
         app.recoverable.clear();
+    }
+}
+
+/// A design copy the web app kept in the browser (#10220), as its "Restore unsaved design?"
+/// window lists it.
+pub struct BrowserCopy<'a> {
+    pub name: &'a str,
+    /// When it last changed, as "5 min ago" ([`ago_between`]).
+    pub when: String,
+    /// Its file can be opened as last saved (Open saved version).
+    pub open_saved: bool,
+}
+
+/// An answer in that window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyAnswer {
+    Restore,
+    OpenSaved,
+    Discard,
+}
+
+/// The web app's "Restore unsaved design: <name>, changed <time>?" window (#10220): one window
+/// for every copy, each with Restore, Open saved version (when it has a file) and Discard, in the
+/// same words as the desktop's recovery window. Answers which copy and what was chosen.
+pub fn browser_copies_window(ctx: &egui::Context, language: &str, copies: &[BrowserCopy]) -> Option<(usize, CopyAnswer)> {
+    let _language = crate::i18n::scope(language);
+    copies.first()?;
+    let title = match copies {
+        [one] => crate::i18n::format("recovery.restore_title_one", &[("name", &crate::i18n::tr_name(one.name)), ("when", &one.when)]),
+        _ => crate::i18n::tr("recovery.restore_title").to_string(),
+    };
+    let mut act = None;
+    let _ = ui_kit::Window::new(egui::Id::unique("sc_browser_keep_restore"), "restore", &title).required().show_body(ctx, |ui| {
+        ui_kit::text(ui, crate::i18n::tr("recovery.restore_intro"), ui_kit::Text::Report("intro", false));
+        for (index, c) in copies.iter().enumerate() {
+            if copies.len() > 1 {
+                ui_kit::divider(ui, &format!("entry:{index}"));
+                let row = crate::i18n::format("recovery.restore_row", &[("name", &crate::i18n::tr_name(c.name)), ("when", &c.when)]);
+                ui_kit::text(ui, &row, ui_kit::Text::Report(&format!("row:{index}"), false));
+            }
+            ui.horizontal(|ui| {
+                let mut answers = vec![(CopyAnswer::Restore, crate::i18n::tr("recovery.restore"))];
+                if c.open_saved {
+                    answers.push((CopyAnswer::OpenSaved, crate::i18n::tr("recovery.open_saved")));
+                }
+                answers.push((CopyAnswer::Discard, crate::i18n::tr_label("Discard")));
+                for (answer, text) in answers {
+                    if ui_kit::button(ui, text, ui_kit::Button::Normal).clicked() {
+                        act = Some((index, answer));
+                    }
+                }
+            });
+        }
+    });
+    act
+}
+
+/// Discard all asks first; Cancel (or the close button) goes back to the list unchanged.
+fn confirm_discard_all(app: &mut SolveApp, ctx: &egui::Context) {
+    let count = app.recoverable.len();
+    let title = if count == 1 {
+        crate::i18n::tr("recovery.discard_all_title_one").to_string()
+    } else {
+        crate::i18n::format("recovery.discard_all_title", &[("count", &count.to_string())])
+    };
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_recover_discard_all"), "delete", &title)
+        .tone(ui_kit::Tone::Danger)
+        .actions(crate::i18n::tr("recovery.discard_all"), crate::i18n::tr("ui.cancel"), None)
+        .show(ctx, true, |ui| {
+            ui_kit::text(ui, crate::i18n::tr("recovery.discard_all_detail"), ui_kit::Text::Report("discard_all", false));
+        });
+    match action {
+        ui_kit::Action::Ok => {
+            app.recovery_discard_all = false;
+            discard_all(app);
+        }
+        ui_kit::Action::Cancel => app.recovery_discard_all = false,
+        _ if closed => app.recovery_discard_all = false,
+        _ => {}
+    }
+}
+
+/// Discard every listed autosave, each the way its own Discard button does.
+fn discard_all(app: &mut SolveApp) {
+    for entry in std::mem::take(&mut app.recoverable) {
+        apply(app, entry, false);
     }
 }
 
@@ -491,5 +603,51 @@ mod tests {
         h.step(&json!({"widget": "Later"})).unwrap();
         h.frames(2);
         assert!(h.app.recoverable.is_empty(), "Later hides the card for this launch");
+    }
+
+    /// #9299: Discard all asks first; Cancel keeps every entry, confirming discards them all.
+    #[test]
+    fn discard_all_asks_first_then_discards_every_listed_autosave() {
+        let (mut crashed, dir) = app("discard-all", Duration::ZERO);
+        for i in 0..3 {
+            if i > 0 {
+                documents::new_tab(&mut crashed);
+            }
+            name(&mut crashed, &format!("Design {i}"));
+            edit(&mut crashed);
+        }
+        tick_and_wait(&mut crashed);
+        drop(crashed);
+        assert_eq!(recovery::orphans(&dir).len(), 3);
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        start(&mut h.app, &dir, Duration::from_secs(3600));
+        h.frames(4);
+        assert_eq!(h.app.recoverable.len(), 3);
+        assert!(crate::scenario::handle_at("recovery:discard_all").is_some());
+        h.step(&json!({"widget": "Discard all"})).unwrap();
+        h.frames(2);
+        assert!(h.app.recovery_discard_all, "Discard all opens its confirmation");
+        assert!(h.widget("Cancel").is_some() && h.widget("Discard all").is_some(), "a confirmation first");
+        assert!(h.widget("Discard 3 autosaves?").is_some(), "the title counts the autosaves");
+        assert!(h.widget("Later").is_none(), "the confirmation replaces the list");
+        assert_eq!(recovery::orphans(&dir).len(), 3, "nothing discarded before the answer");
+        h.step(&json!({"widget": "Cancel"})).unwrap();
+        h.frames(2);
+        assert!(h.widget("Later").is_some(), "Cancel goes back to the list");
+        assert_eq!(h.app.recoverable.len(), 3);
+        assert_eq!(recovery::orphans(&dir).len(), 3);
+
+        h.step(&json!({"widget": "Discard all"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "Discard all"})).unwrap();
+        h.frames(2);
+        assert!(h.app.recoverable.is_empty());
+        assert!(!h.app.recovery_discard_all);
+        assert!(recovery::orphans(&dir).is_empty(), "every listed autosave is gone");
+        assert!(h.widget("Later").is_none());
+        drop(h);
+        let _ = fs::remove_dir_all(dir);
     }
 }

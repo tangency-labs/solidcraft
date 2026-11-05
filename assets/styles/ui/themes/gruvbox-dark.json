@@ -122,7 +122,6 @@
     "control_fill": "#1d2021",
     "control_border": "#7c6f64",
     "dialog_label": "#ebdbb2",
-    "selected_ink": "#ebdbb2",
     "selected_bg": "#48544f",
     "on_accent": "#1d2021"
   },
@@ -168,5 +167,124 @@
       "#fe9755",
       "#e97926"
     ]
-  }
+  },
+  "options": [
+    {
+      "id": "contrast",
+      "type": "choice",
+      "default": "standard",
+      "label": {
+        "de": "Kontrast",
+        "en": "Contrast",
+        "ja": "コントラスト",
+        "ko": "대비",
+        "zh": "对比度"
+      },
+      "help": {
+        "de": "Wähle die weiche, normale oder harte Gruvbox-Palette.",
+        "en": "Choose the soft, standard or hard Gruvbox palette.",
+        "ja": "Gruvboxのソフト・標準・ハードのパレットを選びます。",
+        "ko": "Gruvbox의 부드러운, 표준 또는 강한 팔레트를 선택합니다.",
+        "zh": "选择柔和、标准或强对比的 Gruvbox 配色。"
+      },
+      "values": [
+        {
+          "id": "soft",
+          "label": {
+            "de": "Weich",
+            "en": "Soft",
+            "ja": "ソフト",
+            "ko": "부드럽게",
+            "zh": "柔和"
+          }
+        },
+        {
+          "id": "standard",
+          "label": {
+            "de": "Standard",
+            "en": "Standard",
+            "ja": "標準",
+            "ko": "표준",
+            "zh": "标准"
+          }
+        },
+        {
+          "id": "hard",
+          "label": {
+            "de": "Hart",
+            "en": "Hard",
+            "ja": "ハード",
+            "ko": "강하게",
+            "zh": "强对比"
+          }
+        }
+      ]
+    }
+  ],
+  "overlays": [
+    {
+      "when": {
+        "opt": "contrast",
+        "eq": "soft"
+      },
+      "colors": {
+        "toolbar": "#32302f",
+        "panel": "#32302f",
+        "accent_soft": "#4e5954",
+        "viewport_top": "#373432",
+        "viewport_bottom": "#373432",
+        "glyph_bg": "#373432",
+        "overlay": "#32302ff0",
+        "timeline_item_error": "#702b28",
+        "surface_soft": "#4a3a2c",
+        "surface_ink": "#fe8b2e",
+        "mesh_soft": "#4a412f",
+        "form_soft": "#453a3c",
+        "form_tab_ink": "#d996a8",
+        "sheet_soft": "#3d4138",
+        "render_soft": "#4a3330",
+        "render_ink": "#fc7e6f",
+        "sketch_soft": "#42412e",
+        "form_error_fill": "#702b28",
+        "dialog_body": "#32302f",
+        "selected_bg": "#4e5954"
+      }
+    },
+    {
+      "when": {
+        "opt": "contrast",
+        "eq": "hard"
+      },
+      "colors": {
+        "app_bar": "#141617",
+        "toolbar": "#1d2021",
+        "panel": "#1d2021",
+        "accent_soft": "#414f4b",
+        "timeline": "#141617",
+        "body_edge": "#141617",
+        "viewport_top": "#2c2c2c",
+        "viewport_bottom": "#2c2c2c",
+        "sketch_halo": "#141617",
+        "glyph_bg": "#2c2c2c",
+        "overlay": "#1d2021f0",
+        "timeline_item_error": "#63221f",
+        "field": "#141617",
+        "surface_soft": "#382c20",
+        "mesh_soft": "#383323",
+        "form_soft": "#332c30",
+        "form_tab_ink": "#d3869b",
+        "sheet_soft": "#2b332c",
+        "render_soft": "#382523",
+        "render_ink": "#fb5d4a",
+        "sketch_soft": "#303322",
+        "form_error_fill": "#63221f",
+        "dialog_body": "#1d2021",
+        "control_fill": "#141617",
+        "selected_bg": "#414f4b"
+      },
+      "icon_palette": {
+        "ink": "#141617"
+      }
+    }
+  ]
 }

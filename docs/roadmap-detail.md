@@ -151,6 +151,12 @@ completed drawings publish atomically. The browser still exports synchronously.
 
 ## Render foundation
 
+- Wood surface images (#1345): native CPU and GPU opaque rendering share physical
+  repeat frames and filtered mip chains. Imported maps retain exact bytes and
+  declared provenance in the design, reopen offline, and expose grain-angle
+  controls. Scalar face appearances suppress body maps. Planar projection and
+  CPU encoding/optical limits remain explicit; see [portable surfaces](render-portable-surfaces-and-stages.md).
+
 - Original starter appearances (#1722): 34 opaque recipes through existing commands, with six explicitly unavailable glass recipes and preserved legacy looks; see [the contract](render-starter-appearances.md).
 
 - Bounded linear film accumulation (#1696) supplies caller-admitted mean/variance storage and complete-pass views; actual progressive consumers remain separate. See [the film contract](render-film.md).
@@ -404,6 +410,10 @@ completed drawings publish atomically. The browser still exports synchronously.
 
 - Associative shell-face sketches require a unique certified planar source. Nested shell
   attachments and ambiguous coincident sources remain unsupported.
+- Print faces (#8429) are held like sketches on faces, so the same limit applies: after a shell
+  of a body that is already shelled, no face of that body has an exact name, and none can be
+  marked (`body.print_face` says so). Fixing it needs the shell to report its face history,
+  which is kernel work, paused for now (CONTRIBUTING.md, "Kernel work is paused").
 - G2 fillets: exact quintic blends of straight edges between planar faces, with one planar
   end face at each end, including sloped ends (#2708). The UI and `solid.fillet` expose
   `curvature` (alias `g2`); the size is an equivalent circular setback. Curved faces/edges,

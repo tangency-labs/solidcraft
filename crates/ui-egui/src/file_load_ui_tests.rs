@@ -4,6 +4,7 @@
 use egui::{Event, PointerButton, Pos2, RawInput, Rect, ViewportCommand, ViewportId, pos2, vec2};
 use serde_json::json;
 use solidcraft_engine::Session;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 
@@ -12,13 +13,15 @@ struct Win {
     ctx: egui::Context,
     app: SolveApp,
     time: f64,
+    /// The window's size in points; a test that changes it moves the viewport's layout.
+    size: egui::Vec2,
 }
 
 impl Win {
     fn new() -> Self {
         let mut app = SolveApp::new(Session::default(), Default::default());
         app.custom_titlebar = true;
-        let mut w = Win { ctx: crate::fonts::test_context(), app, time: 0.0 };
+        let mut w = Win { ctx: crate::fonts::test_context(), app, time: 0.0, size: vec2(1600.0, 1000.0) };
         for _ in 0..3 {
             w.frame(vec![]);
         }
@@ -29,7 +32,7 @@ impl Win {
     fn frame(&mut self, events: Vec<Event>) -> Vec<ViewportCommand> {
         self.time += 1.0 / 60.0;
         let raw = RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1000.0))),
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)),
             time: Some(self.time),
             focused: true,
             events,
@@ -77,10 +80,10 @@ fn scratch(name: &str) -> std::path::PathBuf {
 
 /// What two sessions must agree on after opening the same file.
 fn fingerprint(s: &Session) -> serde_json::Value {
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let bodies: Vec<_> = world.bodies.iter().map(|b| (b.name.clone(), b.mesh().triangles.len())).collect();
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
-    let b = solidcraft_engine::view::bounds(s);
+    let b = solidcraft_engine::view::bounds(s).unwrap();
     json!({
         "name": s.doc.name,
         "path": s.path,
@@ -408,7 +411,7 @@ fn a_control_import_passes_up_and_names_on() {
         assert_eq!(reply["ok"], true, "{params}: {reply}");
         let mut sync = Session::default();
         assert_eq!(reply["result"], sync.execute("file.insert_step", &params).unwrap(), "the window's reply is the session's");
-        let b = solidcraft_engine::view::bounds(&w.app.session);
+        let b = solidcraft_engine::view::bounds(&w.app.session).unwrap();
         (reply, [b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z], w.app.stand_up.is_some())
     };
 
@@ -452,10 +455,41 @@ fn a_control_import_passes_its_matrix_and_name_on() {
     assert_eq!(reply["ok"], true, "{reply}");
     let mut sync = Session::default();
     assert_eq!(reply["result"], sync.execute("file.insert_step", &params).unwrap(), "the window's reply is the session's");
-    let b = solidcraft_engine::view::bounds(&w.app.session);
+    let b = solidcraft_engine::view::bounds(&w.app.session).unwrap();
     assert!((b.min.x - 100.0).abs() < 1e-6 && (b.max.x - 160.0).abs() < 1e-6, "moved by the matrix: {b:?}");
     assert!(w.app.session.doc.components.iter().any(|c| c.name == "Bracket"), "named as asked");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #10198: the web build cannot start the meshing thread. An opened design is still drawn whole
+/// and its "Loading parts" note goes, instead of an empty view with "Loading parts n/n" for good.
+#[test]
+fn an_opened_design_is_drawn_whole_when_meshing_has_no_thread() {
+    let dir = scratch("progressive-no-thread");
+    let path = large_design(&dir, 6);
+    let mut w = Win::new();
+    let (tx, rx) = std::sync::mpsc::channel();
+    w.app.control_rx = Some(rx);
+    let (open, open_rx) = crate::control::ControlRequest::new("engine.execute", json!({"command": "doc.open", "params": {"path": path}}));
+    tx.send(open).unwrap();
+    crate::open_meshing::without_threads(|| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        while open_rx.try_recv().is_err() {
+            w.frame(vec![]);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            assert!(std::time::Instant::now() < deadline, "the open answers");
+        }
+        for _ in 0..100 {
+            if !crate::open_meshing::active(&w.app) {
+                break;
+            }
+            w.frame(vec![]);
+        }
+    });
+    assert!(!crate::open_meshing::active(&w.app), "the parts are in: {:?}", crate::open_meshing::progress(&w.app));
+    let world = w.app.session.world_state().unwrap();
+    assert!(!world.bodies.is_empty());
+    assert_eq!(crate::open_meshing::shown_world(&w.app).bodies.len(), world.bodies.len(), "the whole design is drawn");
 }
 
 /// An opened design is in the window before its bodies are meshed: the view draws the bodies
@@ -480,12 +514,12 @@ fn an_opened_design_shows_its_bodies_as_they_are_meshed() {
         let shown = crate::open_meshing::shown_world(&w.app);
         assert!(shown.bodies.iter().all(|b| b.cached_mesh().is_some()), "only meshed bodies are drawn");
         let (done, total) = crate::open_meshing::progress(&w.app).unwrap();
-        assert!(done <= total && total == w.app.session.world_state().bodies.len(), "Loading parts {done}/{total}");
+        assert!(done <= total && total == w.app.session.world_state().unwrap().bodies.len(), "Loading parts {done}/{total}");
         seen.push(shown.bodies.len());
         w.frame(vec![]);
     }
     assert!(seen.windows(2).all(|p| p[0] <= p[1]), "the picture only grows: {seen:?}");
-    let world = w.app.session.world_state();
+    let world = w.app.session.world_state().unwrap();
     // Then the whole design (in the order its bodies came, kept until the design changes).
     let names = |st: &solidcraft_engine::doc::ModelState| {
         let mut n: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
@@ -508,7 +542,7 @@ fn an_opened_design_shows_its_bodies_as_they_are_meshed() {
     // An edit after that: the viewport draws the session's world again.
     w.app.session.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "operation": "new"})).unwrap();
     w.frame(vec![]);
-    assert!(std::sync::Arc::ptr_eq(&crate::open_meshing::shown_world(&w.app), &w.app.session.world_state()));
+    assert!(std::sync::Arc::ptr_eq(&crate::open_meshing::shown_world(&w.app), &w.app.session.world_state().unwrap()));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -591,7 +625,7 @@ fn open_timed(path: &str) -> (Win, (f64, &'static str)) {
         assert!(std::time::Instant::now() < deadline, "{path} opens");
     }
     let slowest = w.app.frame_watch.slowest;
-    eprintln!("{path}: slowest frame {:.1} ms while {}, {} bodies", slowest.0, slowest.1, w.app.session.world_state().bodies.len());
+    eprintln!("{path}: slowest frame {:.1} ms while {}, {} bodies", slowest.0, slowest.1, w.app.session.world_state().unwrap().bodies.len());
     (w, slowest)
 }
 
@@ -612,7 +646,7 @@ fn opening_a_large_design_never_stalls_the_window() {
     let step = step_assembly(&dir);
     let (mut w, (ms, phase)) = open_timed(&step);
     assert!(ms < BUDGET_MS, "STEP import: a {ms:.0} ms frame while {phase}");
-    assert!(w.app.session.world_state().bodies.len() >= 200);
+    assert!(w.app.session.world_state().unwrap().bodies.len() >= 200);
     for (name, cache) in [("cached.solidcraft", true), ("plain.solidcraft", false)] {
         let path = dir.join(name).to_string_lossy().to_string();
         w.app.session.execute("file.save_as", &json!({"path": path, "cache": cache})).unwrap();
@@ -671,5 +705,109 @@ fn cancelling_a_step_open_releases_the_slot_before_the_worker_returns() {
         w.frame(vec![]);
     }
     assert_eq!(fingerprint(&w.app.session), fingerprint(&expected));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An opened design comes up at the home view, framed on its own model: the angle the design
+/// before it was left at doesn't carry over, and a design opened while the Home screen is over
+/// the viewport is framed when the viewport is drawn, not against the layout of what was there
+/// before (which left the design wherever the camera happened to be).
+#[test]
+fn an_opened_design_comes_up_at_the_home_view() {
+    use solidcraft_engine::render::StandardView;
+    let dir = scratch("home-view");
+    let path = large_design(&dir, 4);
+    let home_angles = {
+        let mut cam = solidcraft_engine::render::Camera::default();
+        cam.set_view(StandardView::Iso);
+        (cam.yaw, cam.pitch, cam.roll)
+    };
+    let mut w = Win::new();
+    // The view the design before it was left at: straight down, zoomed right in.
+    w.app.cam.set_view(StandardView::Top);
+    w.app.cam.distance = 12.0;
+    w.app.cam.target = solidcore_record::Vec3::new(50.0, -70.0, 3.0);
+    // Opened from the Home screen, which covers the viewport while the design goes in: the
+    // viewport is not drawn, so the layout a fit would be framed into is the one left over from
+    // what was there before, which cannot frame anything.
+    let revision = w.app.session.revision;
+    w.app.home.show(revision);
+    let stale = Rect::from_min_size(Pos2::ZERO, vec2(24.0, 24.0));
+    w.app.open_path_async(&path);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while w.app.file_load.busy() {
+        w.app.viewport.rect = Some(stale);
+        w.frame(vec![]);
+        assert!(std::time::Instant::now() < deadline, "the open finishes");
+        std::thread::yield_now();
+    }
+    // The design is meshed and framed while the Home screen is still over the viewport, as it is
+    // for a design opened from it: nothing draws the viewport in between, so nothing frames the
+    // design again afterwards.
+    while crate::open_meshing::active(&w.app) {
+        w.app.viewport.rect = Some(stale);
+        w.frame(vec![]);
+        assert!(std::time::Instant::now() < deadline, "the meshing finishes");
+        std::thread::yield_now();
+    }
+    for _ in 0..4 {
+        w.app.viewport.rect = Some(stale);
+        w.frame(vec![]);
+    }
+    // The Home screen closes and the viewport is drawn for the first time since the open.
+    w.app.home.open = false;
+    for _ in 0..4 {
+        w.frame(vec![]);
+    }
+    assert_eq!((w.app.cam.yaw, w.app.cam.pitch, w.app.cam.roll), home_angles, "opened at the home view");
+    // Framed on its model, as a fit asked for now frames it: not left at the default camera.
+    let opened = w.app.cam;
+    w.app.fit_view();
+    let refitted = w.app.cam;
+    assert!((refitted.target - opened.target).len() < 1e-6, "framed on the model: {opened:?} vs {refitted:?}");
+    assert!((refitted.distance - opened.distance).abs() < 1e-6, "framed on the model: {opened:?} vs {refitted:?}");
+    // A synchronous open (the control channel's) into a blank design, which keeps its tab and so
+    // its camera, comes up at the home view too.
+    let other = scratch("home-view-sync");
+    let second = large_design(&other, 2);
+    crate::documents::new_design(&mut w.app);
+    w.frame(vec![]);
+    w.app.cam.set_view(StandardView::Front);
+    w.app.open_path(&second);
+    for _ in 0..4 {
+        w.frame(vec![]);
+    }
+    assert_eq!((w.app.cam.yaw, w.app.cam.pitch, w.app.cam.roll), home_angles, "a synchronous open too");
+    let _ = std::fs::remove_dir_all(&other);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A design a newer SolidCraft saved opens in the window: the status line says so without a
+/// dialog, Messages names what wasn't read, and editing that feature says why it can't be edited.
+#[test]
+fn a_newer_design_opens_with_a_notice_and_no_dialog() {
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    let dir = scratch("newer_design");
+    let mut design = Session::default();
+    design.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+    let mut file: serde_json::Value = serde_json::from_str(&design.doc.to_json()).unwrap();
+    let (reads, newer) = (solidcraft_engine::doc::format::FORMAT, solidcraft_engine::doc::format::FORMAT + 1);
+    file["format"] = json!(solidcraft_engine::doc::format::format_string(newer));
+    file["features"].as_array_mut().unwrap().push(json!({"id": 900, "name": "Lattice1", "type": "gyroid_lattice"}));
+    let path = dir.join("newer.json");
+    std::fs::write(&path, file.to_string()).unwrap();
+
+    app.open_path(&path.to_string_lossy());
+
+    let (text, _, error) = app.status.clone().unwrap();
+    assert_eq!(text, format!("Saved by a newer SolidCraft (format {newer}, this version reads up to {reads}). If something's missing, update."));
+    assert!(!error);
+    assert!(app.dialog.is_none());
+    assert!(app.messages.iter().any(|m| m.text.contains("Lattice1") && m.text.contains("Saving keeps it")));
+    assert_eq!(app.session.model.state().bodies.len(), 1);
+    app.edit_feature(900);
+    let (text, _, error) = app.status.clone().unwrap();
+    assert!(error && text.contains("gyroid_lattice"), "{text}");
+    assert!(app.dialog.is_none() && !app.ui.palette_open);
     let _ = std::fs::remove_dir_all(&dir);
 }

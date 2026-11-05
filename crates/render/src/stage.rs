@@ -7,7 +7,9 @@ use crate::{
     surface::OpaqueSurface,
 };
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Aabb3, Mesh, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
+use solidcraft_geom::{Aabb3, Mesh};
 use std::{collections::BTreeSet, fmt, sync::Arc};
 
 pub const MAX_STAGE_PANELS: usize = 32;

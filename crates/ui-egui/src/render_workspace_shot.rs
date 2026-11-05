@@ -190,7 +190,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
     let mut name = app.render_workspace.view.frame.name.as_ref().map(|(_, text)| text.clone()).unwrap_or_else(|| shot.into());
     let invalid = RenderSettings::validate_name(&name).is_err();
     let response = ui_kit::row(ui, app.tr("render.frame_name"), |ui| {
-        ui_kit::bounded_cell_editor(ui, ui.id().with(("shot_name", shot)), &mut name, "", invalid, 128)
+        ui_kit::bounded_cell_editor(ui, ui.scope_id().with(("shot_name", shot)), &mut name, "", invalid, 128)
     });
     crate::scenario::publish_target("render:shot:name", response.rect);
     let commit = response.lost_focus() || (response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
@@ -266,7 +266,6 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
             crate::scenario::publish_target("render:shot:output", response.rect);
             if response.clicked() {
                 let _ = app.run("view.render_select", json!({"kind":"output"}));
-                app.render_workspace.view.inspector.page = inspector::Page::Output;
             }
         });
     });
@@ -322,7 +321,7 @@ fn camera(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
     ui_kit::row(ui, app.tr("render.shot_target"), |ui| {
         ui_kit::number_fields(ui, &mut target, -1e9..=1e9, 0.1, "");
     });
-    camera.target = solidcraft_engine::geom::Vec3::new(target[0], target[1], target[2]);
+    camera.target = solidcore_record::Vec3::new(target[0], target[1], target[2]);
     for (key, value) in [("camera.shot_yaw", &mut camera.yaw), ("camera.shot_pitch", &mut camera.pitch), ("camera.shot_roll", &mut camera.roll)] {
         let mut degrees = value.to_degrees();
         if ui_kit::row(ui, app.tr(key), |ui| ui_kit::number_field(ui, &mut degrees, (-1e6f64).to_degrees()..=1e6f64.to_degrees(), 0.5, "°")).changed()
@@ -451,9 +450,7 @@ pub(super) fn frame_rect(aspect: f64, viewport: Rect) -> Option<Rect> {
 }
 
 pub(crate) fn overlay_visible(app: &SolveApp) -> bool {
-    !app.render_workspace.view.result
-        && (app.render_workspace.view.stage == Stage::Frame
-            || (app.render_workspace.view.inspector.page == inspector::Page::Camera && selected(app).is_some()))
+    !app.render_workspace.view.result && (app.render_workspace.view.stage == Stage::Frame || selected(app).is_some())
 }
 
 pub(crate) fn preview_rect(app: &SolveApp, viewport: Rect) -> Option<Rect> {
@@ -485,7 +482,7 @@ pub(crate) fn overlay(app: &mut SolveApp, ui: &mut egui::Ui, viewport: Rect) {
     let label = format!("{aspect} · {} × {}", saved.width, saved.height);
     ui_kit::Container::navigation_card(
         ui.ctx(),
-        egui::Id::new("render_frame_size_chip"),
+        egui::Id::unique("render_frame_size_chip"),
         frame.left_top() + vec2(t.space_8, t.space_8),
         egui::Align2::LEFT_TOP,
         |ui| {
@@ -501,7 +498,7 @@ pub(crate) fn overlay(app: &mut SolveApp, ui: &mut egui::Ui, viewport: Rect) {
     };
     ui_kit::Container::navigation_card(
         ui.ctx(),
-        egui::Id::new("render_frame_lens_chip"),
+        egui::Id::unique("render_frame_lens_chip"),
         pos2(frame.left() + t.space_8, frame.bottom() - t.space_8),
         egui::Align2::LEFT_BOTTOM,
         |ui| {

@@ -63,7 +63,7 @@ fn model(name: &str, s: &Session) -> Value {
         .iter()
         .map(|r| json!({"id": r.id, "name": r.name, "error": r.error, "warning": r.warning, "skipped": r.skipped, "state": state(name, &r.state)}))
         .collect();
-    json!({"results": results, "world": state(name, &s.world_state())})
+    json!({"results": results, "world": state(name, &s.world_state().unwrap())})
 }
 
 /// The same edit on both: a parameter's value when the design has one, else a new body.
@@ -287,4 +287,102 @@ fn undoing_an_edit_after_opening_reuses_the_saved_results() {
     assert!(s.model.results.iter().zip(&read).all(|(r, st)| Arc::ptr_eq(&r.state, st)), "the very states read from the file");
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+}
+
+/// A saved model holds the results of the body check mode it was evaluated under: opened under
+/// the same mode it is taken as it is, under another the design is evaluated again.
+#[test]
+fn a_model_saved_under_another_check_mode_is_evaluated_again() {
+    let plate = solidcraft_engine::sample::samples().into_iter().find(|s| s.name == "Sample Plate").unwrap();
+    let mut built = Session::default();
+    for c in (plate.script)()["commands"].as_array().unwrap() {
+        built.execute(c["command"].as_str().unwrap(), &c["params"]).unwrap();
+    }
+    let path = temp("mode");
+    built.execute("file.save_as", &json!({"path": path.to_string_lossy()})).unwrap();
+    let same = open(&path);
+    assert_eq!(same.model.validation(), built.model.validation());
+    assert_eq!(same.model.recomputed, 0, "taken from the file");
+    let mut other = Session::default();
+    other.set_validation(solidcraft_engine::kernel::Validation::EachStep);
+    assert_ne!(other.validation(), built.model.validation());
+    other.execute("doc.open", &json!({"path": path.to_string_lossy()})).unwrap();
+    assert_eq!(other.validation(), solidcraft_engine::kernel::Validation::EachStep);
+    assert!(other.model.recomputed > 0, "evaluated again under its own mode");
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+}
+
+/// A body made by rounds keeps, in the saved model, the rounds and the body they were made on: a
+/// later round at the corner where they meet blends them again with it whether the design was
+/// opened from its model or evaluated anew. Two edges of a 20 mm box rounded r2 (a mitre at the
+/// corner (20, 0, 20)), saved; opened, the upright edge there rounded r3: the corner all three
+/// rounded at once make (SMLib's setback corner, kernel `three_rounds_at_a_corner`), 15 faces and
+/// 7928.142563938 mm³, the same body as the design evaluated anew.
+#[test]
+fn a_later_round_after_opening_blends_the_saved_rounds_again() {
+    let mut built = Session::default();
+    built.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20, "body_name": "Box"})).unwrap();
+    built.execute("solid.fillet", &json!({"edges": [[20, 10, 20], [10, 0, 20]], "radius": 2})).unwrap();
+    let path = temp("later-round");
+    built.execute("file.save_as", &json!({"path": path.to_string_lossy()})).unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    let mut cached = open(&path);
+    assert_eq!(cached.model.last_recomputed, 0, "opened without evaluating");
+    let mut rebuilt = Session::new(solidcraft_engine::io::read_design(&bytes).unwrap());
+    for s in [&mut cached, &mut rebuilt] {
+        s.execute("solid.fillet", &json!({"edges": [[20, 0, 10]], "radius": 3})).unwrap();
+        let st = s.model.state();
+        let b = &st.body("Box").unwrap().body;
+        let v = solidcraft_engine::kernel::measure(b).unwrap().volume;
+        assert_eq!(b.face_count(), 15);
+        assert!((v - 7928.142563938).abs() < 1e-6, "{v}");
+    }
+    assert_eq!(model("later round", &cached), model("later round", &rebuilt));
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+}
+
+/// A design saved before body names were pinned (#6403) pins them as it opens, as its first
+/// command would, and opening it is no change. That command pinned them as part of itself, so
+/// undoing it went back to the unpinned design, which no evaluated result matched: the first
+/// undo after opening from the command line evaluated every feature again (82-93 s in a
+/// 5,484-feature design); `doc.open` pinned them after opening, which marked the design changed.
+#[test]
+fn a_design_saved_before_names_were_pinned_opens_pinned_and_unchanged() {
+    let plate = solidcraft_engine::sample::samples().into_iter().find(|s| s.name == "Sample Plate").unwrap();
+    let mut built = Session::default();
+    for c in (plate.script)()["commands"].as_array().unwrap() {
+        built.execute(c["command"].as_str().unwrap(), &c["params"]).unwrap();
+    }
+    let mut doc = built.design().into_owned();
+    for f in &mut doc.features {
+        f.body_names.clear();
+    }
+    doc.reserved_body_names.clear();
+    let unpinned = Session::new(doc);
+    let design = unpinned.design();
+    let saved = unpinned.model.saved(&design).unwrap();
+    let bytes = solidcraft_engine::io::write_design_container_with_cache(&design, solidcraft_engine::io::DesignCompression::Fast, None, Some(&saved))
+        .unwrap();
+    let path = temp("unpinned");
+    std::fs::write(&path, &bytes).unwrap();
+    let file = path.to_string_lossy().to_string();
+    // As the command line opens a design (`load`), and as the app does (`doc.open`).
+    let (doc, saved) = solidcraft_engine::io::read_design_file(&file, None::<fn(solidcraft_engine::io::DesignPreview)>).unwrap();
+    for (how, mut s) in [("opened_at", Session::opened_at(doc, saved.as_ref(), Some(&file))), ("doc.open", open(&path))] {
+        assert_eq!(s.model.last_recomputed, 0, "{how}: taken from the file");
+        assert!(s.doc.features.iter().any(|f| !f.body_names.is_empty()), "{how}: the names are pinned");
+        assert!(!s.is_dirty(), "{how}: opening is no change");
+        let read: Vec<Arc<ModelState>> = s.model.results.iter().map(|r| r.state.clone()).collect();
+        s.execute("solid.box", &json!({"length": 3, "width": 3, "height": 3, "operation": "new"})).unwrap();
+        // As in a large design, whose evaluation cache keeps only a few results: undo finds the
+        // results in the model itself or evaluates them again.
+        *s.model.cache.lock().unwrap() = Default::default();
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.model.last_recomputed, 0, "{how}: the first undo evaluates nothing");
+        assert!(s.model.results.iter().zip(&read).all(|(r, st)| Arc::ptr_eq(&r.state, st)), "{how}: the states read from the file");
+        assert!(!s.is_dirty(), "{how}: undone to the design as opened");
+    }
+    let _ = std::fs::remove_file(&path);
 }

@@ -1,4 +1,5 @@
 //! Shot strip adapters. Commands own saved intent; the kit owns every control and layout.
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, ui_kit};
 use serde_json::json;
 use solidcraft_engine::{doc::render_settings::RenderSettings, render::job::Phase};
@@ -7,13 +8,6 @@ pub(super) const SIZE_PRESETS: [(&str, u32, u32); 3] = [("HD", 1280, 720), ("Ful
 
 pub(super) fn camera_modified(app: &SolveApp, name: &str) -> bool {
     app.session.doc.render.setups.get(name).is_some_and(|setup| setup.camera != app.cam)
-}
-
-/// Update just the saved camera, preserving all the shot's other saved intent.
-pub(super) fn update_camera(app: &mut SolveApp) -> Result<(), String> {
-    let name = app.render_workspace.view.name.clone();
-    app.run("render.settings.set", json!({"name":name,"set":{"camera":app.cam}}))?;
-    Ok(())
 }
 
 pub(crate) fn contents(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -45,6 +39,8 @@ pub(crate) fn contents(app: &mut SolveApp, ui: &mut egui::Ui) {
             )
         })
         .unwrap_or_else(|| app.tr("render.shots_no_result").to_string());
+    let queue = app.session.render_queue_state();
+    let queue_label = crate::i18n::format("render.batch_status", &[("running", &queue.running.to_string()), ("waiting", &queue.waiting.to_string())]);
     let (mut hide, mut start, mut save, mut chosen, mut size) = (false, false, false, None, None);
     let mut visible = Vec::new();
     ui_kit::Panel::strip_contents(
@@ -53,15 +49,22 @@ pub(crate) fn contents(app: &mut SolveApp, ui: &mut egui::Ui) {
             let response = ui_kit::strip_toggle(ui, true, crate::i18n::tr_label("Hide Shots strip"));
             crate::scenario::publish_target("render:shots:hide", response.rect);
             hide = response.clicked();
+            let response = ui_kit::completion_text(ui, &queue_label, false);
+            crate::scenario::publish_rect("render:shots:queue", response.rect);
             let response = ui_kit::icon_label_action(ui, app.tr("cmd.render_start"), Some("play"), ready.is_ok(), true);
-            let response = if let Err(reason) = &ready { response.on_disabled_hover_text(reason) } else { response };
+            let response = if let Err(reason) = &ready { response.backing_on_disabled_hover_text(reason) } else { response };
             crate::scenario::publish_target("render:shots:render", response.rect);
             start = response.clicked();
             let response = ui_kit::compact_dropdown_menu(ui, "render_shots_size", &size_label, |ui| {
                 for (label, width, height) in SIZE_PRESETS {
-                    if ui_kit::list_picker(ui, label, &format!("{label} · {width} × {height}"), draft.width == width && draft.height == height)
-                        .clicked()
-                    {
+                    let text = format!("{label} · {width} × {height}");
+                    let mark = super::inspector::size_mark(app, &text, Some((u64::from(width), u64::from(height))));
+                    let mut response =
+                        ui_kit::list_picker(ui, label, mark.as_deref().unwrap_or(&text), draft.width == width && draft.height == height);
+                    if mark.is_some() {
+                        response = response.backing_on_hover_text(super::inspector::size_limit_reason(app, width, height));
+                    }
+                    if response.clicked() {
                         size = Some((width, height));
                         ui.close();
                     }
@@ -127,7 +130,7 @@ pub(super) fn confirmation(app: &mut SolveApp, ctx: &egui::Context) {
     let title = app.tr("render.shots_save").to_string();
     let cancel = app.tr("ui.cancel").to_string();
     let (closed, answer) =
-        ui_kit::Confirm::new(egui::Id::new("render_save_shot"), "save", &title).actions(&title, &cancel, None).show(ctx, valid, |ui| {
+        ui_kit::Confirm::new(egui::Id::unique("render_save_shot"), "save", &title).actions(&title, &cancel, None).show(ctx, valid, |ui| {
             ui_kit::text(ui, app.tr("render.shots_name_help"), ui_kit::Text::Note("render.shots_name_help"));
             ui_kit::row(ui, app.tr("render.shot_new_name"), |ui| {
                 ui_kit::focused_text_field(ui, &mut name, "");

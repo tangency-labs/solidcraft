@@ -77,7 +77,7 @@ impl EditInPlace {
 
 /// A linked component the window edits in place when it is double-clicked: in a saved design
 /// (its links are found from its file) with `double_click_components` on.
-fn edits_on_double_click(app: &SolveApp, component: u64) -> bool {
+pub(crate) fn edits_on_double_click(app: &SolveApp, component: u64) -> bool {
     app.preferences.double_click_components && app.session.path.is_some() && app.session.doc.links.contains_key(&component)
 }
 
@@ -101,7 +101,7 @@ pub(crate) fn double_click_face(app: &mut SolveApp, body: &str) -> bool {
     if !app.preferences.double_click_components {
         return false;
     }
-    let Some(component) = app.session.world_state().body(body).map(|b| b.component).filter(|c| *c != 0) else { return false };
+    let Some(component) = crate::open_meshing::session_world(&app.session).body(body).map(|b| b.component).filter(|c| *c != 0) else { return false };
     let placement = app
         .session
         .doc
@@ -165,7 +165,7 @@ fn working(app: &SolveApp) -> bool {
 /// at `placement`: how many, their triangles and their extent. `None` when the placement is gone.
 fn snapshot(session: &Session, component: u64, placement: &[u64]) -> Option<(usize, Vec<([f32; 3], [f32; 3])>, Aabb3)> {
     let frame = session.occurrence_placement(placement).ok().and_then(|p| mat_inverse(&p.world))?;
-    let world = session.world_state();
+    let world = crate::open_meshing::session_world(session);
     let (mut bodies, mut triangles, mut bounds) = (0, Vec::new(), Aabb3::default());
     for b in world.bodies.iter().filter(|b| b.component != component && session.body_visible(&b.name)) {
         let (mesh, placed) = b.mesh_in_place();

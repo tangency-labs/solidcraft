@@ -52,7 +52,7 @@ fn layer_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             }];
             let row = ui_kit::tree_row(
                 ui,
-                ui.id().with(("aging-layer", index)),
+                ui.scope_id().with(("aging-layer", index)),
                 &ui_kit::Row { label: &label, name: true, selected: index == editor.selected_aging, actions: &actions, ..Default::default() },
             );
             if let Some(rect) = row.rect {
@@ -120,7 +120,7 @@ fn layer_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
             let search_label = app.tr("render.aging_target_search").to_string();
-            ui_kit::bounded_cell_editor(ui, ui.id().with("aging_target_search"), &mut editor.search, &search_label, false, 128);
+            ui_kit::bounded_cell_editor(ui, ui.scope_id().with("aging_target_search"), &mut editor.search, &search_label, false, 128);
             let selected = layer.target.as_ref().map_or_else(
                 || app.tr("render.aging_all_bodies").to_string(),
                 |identity| {

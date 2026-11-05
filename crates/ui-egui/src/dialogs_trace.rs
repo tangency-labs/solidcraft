@@ -5,8 +5,8 @@
 use crate::ui_kit::{choice_row, expr_row, text_row};
 use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::{IDENTITY, Mat, apply_point, mat_inverse, mat_mul};
-use solidcraft_engine::geom::Vec3;
 use solidcraft_engine::{Sel, Session};
 
 use super::{Hover, body_of, capital, movable, num, pt, sel_items, snap_of};

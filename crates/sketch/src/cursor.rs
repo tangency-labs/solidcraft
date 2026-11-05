@@ -9,7 +9,8 @@ use crate::{
     linalg::{Mat, rref},
     union_find::{find, union},
 };
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 const MAX_VARIABLES: usize = 400;
 const MAX_STEPS: usize = 96;
@@ -166,11 +167,7 @@ fn move_cursor_towards(
             break;
         }
         let (_, j, _) = local_system(&problem, &lay, &sub, &mut x, &col, n);
-        let null_work = n.saturating_mul(n).saturating_mul(j.rows.saturating_add(n));
-        if !within_budget(&mut budget, null_work) {
-            break;
-        }
-        let z = null_space(j);
+        let Some(z) = null_space(j, &mut budget) else { break };
         if z.is_empty() {
             break;
         }
@@ -231,7 +228,11 @@ fn move_cursor_towards(
                 }
                 let next = position(&trial);
                 let cost = (target - next).dot(target - next);
-                if !cost.is_finite() || cost >= old_cost - 1e-14 * old_cost.max(1.0) {
+                // The cursor itself must move. Retracting onto the constraints moves it by
+                // rounding even along freedom that can't reach it (the far end of a line held only
+                // by its direction): taking such a step for the rounding moved that end a whole
+                // step, and step after step it walked away or collapsed its line to a point (#8944).
+                if !cost.is_finite() || cost >= old_cost - 1e-14 * old_cost.max(1.0) || next.dist(at) < trial_tol {
                     continue;
                 }
                 if !within_budget(&mut budget, setup_work.saturating_mul(4)) {
@@ -272,7 +273,13 @@ fn in_range(sk: &Sketch) -> bool {
             .all(|c| !matches!(c.kind, CurveKind::Circle { r, .. } | CurveKind::Ellipse { r, .. } if !crate::model::radius_in_range(r)))
 }
 
-fn null_space(j: Mat) -> Vec<Vec<f64>> {
+fn null_space(j: Mat, budget: &mut Option<&mut Budget>) -> Option<Vec<Vec<f64>>> {
+    // A pivot processes at most all rows and columns. A rectangular matrix has at
+    // most as many pivots as its smaller dimension.
+    let reduction_work = j.rows.saturating_mul(j.cols).saturating_mul(j.rows.min(j.cols));
+    if !within_budget(budget, reduction_work) {
+        return None;
+    }
     // Equilibrate before the rank analysis. A near-zero-length construction line makes its
     // angle row's entries on that line ~1e7 while the same row's entries on the line it
     // measures are ~1: per-row scaling alone hides those (physically meaningful) small
@@ -296,6 +303,13 @@ fn null_space(j: Mat) -> Vec<Vec<f64>> {
         }
     }
     let pivots = rref(&mut a, NULL_SPACE_TOL);
+    // Only the free directions are orthogonalized. In a nearly determined sketch,
+    // reserving work for a full basis could consume the frame before any motion.
+    let free = a.cols.saturating_sub(pivots.len());
+    let basis_work = a.cols.saturating_mul(free).saturating_mul(free);
+    if !within_budget(budget, basis_work) {
+        return None;
+    }
     let mut z: Vec<Vec<f64>> = Vec::new();
     for free in (0..a.cols).filter(|c| !pivots.contains(c)) {
         let mut v = vec![0.0; a.cols];
@@ -326,7 +340,7 @@ fn null_space(j: Mat) -> Vec<Vec<f64>> {
             z.push(v);
         }
     }
-    z
+    Some(z)
 }
 
 /// The second weight component multiplies a 90-degree rotation of the endpoint.

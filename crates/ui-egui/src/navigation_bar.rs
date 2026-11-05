@@ -17,6 +17,14 @@ pub(crate) const SELECTION_MODE_ICONS: &[(&str, &str)] = &[
     ("sketch", "select_sketch"),
 ];
 
+/// The engine's style ids in index order (`ui.visual_style` 0..3), with the English menu label.
+pub(crate) const VISUAL_STYLES: [(&str, &str); 4] = [
+    ("shaded_with_edges", "Shaded with edges"),
+    ("shaded", "Shaded"),
+    ("wireframe", "Wireframe"),
+    ("shaded_with_hidden_edges", "Shaded with hidden edges"),
+];
+
 pub(crate) fn visual_style_icon(style: u8) -> &'static str {
     match style {
         1 => "style_shaded",

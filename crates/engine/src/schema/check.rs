@@ -28,12 +28,24 @@ pub enum ParamCheck {
 }
 
 impl ParamCheck {
+    /// Every level, least checking first.
+    pub const ALL: [ParamCheck; 3] = [ParamCheck::Off, ParamCheck::Warn, ParamCheck::Strict];
+
     pub fn parse(s: &str) -> Option<ParamCheck> {
         match s.trim().to_ascii_lowercase().as_str() {
             "off" => Some(ParamCheck::Off),
             "warn" => Some(ParamCheck::Warn),
             "strict" => Some(ParamCheck::Strict),
             _ => None,
+        }
+    }
+
+    /// The level's word, as [`ParamCheck::parse`] reads it (the control channel's `param_check`).
+    pub fn name(self) -> &'static str {
+        match self {
+            ParamCheck::Off => "off",
+            ParamCheck::Warn => "warn",
+            ParamCheck::Strict => "strict",
         }
     }
 }
@@ -127,6 +139,16 @@ const WHOLE: char = '\u{1}';
 /// `message`, marked as complete (see [`WHOLE`]).
 pub(crate) fn whole(message: impl std::fmt::Display) -> String {
     format!("{WHOLE}{message}")
+}
+
+/// Marks a deserializer's message that the handler gives after the key and a colon, as it is
+/// (serde's own wording for a saved reference, such as "missing field `at`", which
+/// [`parse_issue`] would otherwise reword).
+const KEYED: char = '\u{3}';
+
+/// `message`, to follow the key and a colon as it is (see [`KEYED`]).
+pub(crate) fn keyed(message: impl std::fmt::Display) -> String {
+    format!("{KEYED}{message}")
 }
 
 /// Marks a deserializer's message that carries its own path: an error from a flattened
@@ -233,6 +255,9 @@ pub(crate) fn parse_issue(e: &serde_path_to_error::Error<serde_json::Error>) -> 
         Some((field, inner)) => (format!("{path}.{field}"), inner),
         None => (path, inner),
     };
+    if let Some(after) = inner.strip_prefix(KEYED) {
+        return Issue { path: path.clone(), message: truncate(&format!("`{path}`: {after}"), MAX_WHOLE_LEN), suggestion: None };
+    }
     if let Some(complete) = inner.strip_prefix(WHOLE) {
         // The handler's own message, which names the caller's value: in full up to a generous
         // cap, since the contract also checks keys the handler ignores (`side` without `thin`).
@@ -258,6 +283,14 @@ pub(crate) fn parse_issue(e: &serde_path_to_error::Error<serde_json::Error>) -> 
     };
     // serde quotes the caller's value, which may be long.
     Issue { path, message: truncate(&message, MAX_MESSAGE_LEN), suggestion: None }
+}
+
+/// What is wrong with `params` for the command `id` by its typed contract: the issues a call gets
+/// at [`ParamCheck::Warn`] (the first is the refusal at [`ParamCheck::Strict`]). None for a
+/// command without a contract, or an id the registry lacks (a runner in another process may be
+/// another version).
+pub fn issues(id: &str, params: &Value) -> Vec<Issue> {
+    crate::cmd::find_command(id).and_then(|c| c.contract).map(|c| c.check(params)).unwrap_or_default()
 }
 
 /// Run `handler` as the command `id`, checking the call against the contract `id` publishes

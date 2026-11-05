@@ -8,24 +8,40 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Aabb2, Vec2};
+use solidcore_record::Vec2;
+use solidcraft_geom::Aabb2;
 use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Sketch};
 
 use super::sketch::edit;
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, string_list, vec2};
+use crate::schema::sketch_clipboard::{Copied, CopyParams, CutParams, PasteParams, Pasted};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
 
+const COPY_CONTRACT: TypedContract<CopyParams> = TypedContract::new();
+const CUT_CONTRACT: TypedContract<CutParams> = TypedContract::new();
+const PASTE_CONTRACT: TypedContract<PasteParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.copy", "Copy Sketch Entities", copy).icon("copy")
+    CommandSpec::new("sketch.copy", "Copy Sketch Entities", crate::checked!("sketch.copy", copy)).icon("copy")
         .noundo()
         .enabled(in_sketch)
+        .contract(&COPY_CONTRACT)
+        .output(output_schema_for::<Copied>)
         .params("entities?: [curve or point ids] (default: the selected sketch geometry); the constraints and dimensions among them come along"),
-    CommandSpec::new("sketch.cut", "Cut Sketch Entities", cut).icon("cut")
+    CommandSpec::new("sketch.cut", "Cut Sketch Entities", crate::checked!("sketch.cut", cut)).icon("cut")
         .enabled(in_sketch)
+        .contract(&CUT_CONTRACT)
+        .output(output_schema_for::<Copied>)
         .params("entities?: [curve or point ids] (default: the selected sketch geometry): copies them as sketch.copy does, then deletes them (one undo step)"),
-    CommandSpec::new("sketch.paste", "Paste Sketch Entities", paste).icon("paste").enabled(in_sketch).params(
+    CommandSpec::new("sketch.paste", "Paste Sketch Entities", crate::checked!("sketch.paste", paste))
+        .icon("paste")
+        .enabled(in_sketch)
+        .contract(&PASTE_CONTRACT)
+        .output(output_schema_for::<Pasted>)
+        .params(
         "at?: [x, y] (sketch point the copy's centre goes to) | translate?: [x, y]; without either, offset from the original in its own sketch and at the same coordinates in another; sketch?: target (default: the active sketch)",
     ),
 ];
@@ -69,6 +85,38 @@ pub struct SketchClip {
     pub extent: f64,
     /// Pastes made without a position since the copy (each lands one offset further on).
     pub pastes: u32,
+}
+
+impl SketchClip {
+    /// This clipboard as another design pastes it (#9258): at the same sketch coordinates (its
+    /// sketch ids mean nothing there), and with nothing that names the copied design's
+    /// parameters. A dimension whose expression names a parameter keeps its value, in its unit
+    /// (another design's parameter of the same name would be another thing); a text keeps its
+    /// words, height and angle as numbers.
+    pub fn for_another_design(&self) -> SketchClip {
+        let mut clip = self.clone();
+        clip.sketch = u64::MAX;
+        clip.pastes = 0;
+        for c in &mut clip.constraints {
+            let Some((expr, unit)) = c.param.as_mut() else { continue };
+            if solidcraft_doc::expr::references(expr).is_empty() {
+                continue;
+            }
+            let v = c.kind.value().unwrap_or_default();
+            if solidcraft_doc::expr::unit_info(unit).is_none() {
+                *unit = if c.kind.is_angle() { "rad" } else { "mm" }.into();
+            }
+            let value = if c.kind.is_angle() { solidcraft_doc::expr::Value::angle(v) } else { solidcraft_doc::expr::Value::length(v) };
+            let shown = solidcraft_doc::expr::value_in_unit(value, unit);
+            *expr = format!("{}", if shown.is_finite() { shown } else { 0.0 });
+        }
+        for (src, _) in &mut clip.texts {
+            if let LinkSource::Text { exprs, .. } = src {
+                *exprs = Default::default();
+            }
+        }
+        clip
+    }
 }
 
 /// Curve and point ids named by `entities`, or the selected sketch geometry.
@@ -196,15 +244,20 @@ fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     clip.center = bounds.center();
     let size = bounds.size();
     clip.extent = size.x.max(size.y);
-    let out = json!({
-        "curves": clip.curves.len() + texts.iter().map(|t| sk.link_curves(t).len()).sum::<usize>(),
-        "points": clip.lone.len(),
-        "texts": texts.len(),
-        "constraints": clip.constraints.len(),
-        "center": [clip.center.x, clip.center.y],
-    });
+    let out = Copied {
+        curves: clip.curves.len() + texts.iter().map(|t| sk.link_curves(t).len()).sum::<usize>(),
+        points: clip.lone.len(),
+        texts: texts.len(),
+        constraints: clip.constraints.len(),
+        center: [clip.center.x, clip.center.y],
+        param_warnings: Vec::new(),
+    };
     s.sketch_clipboard = Some(clip);
-    Ok(out)
+    reply(cmd, out)
+}
+
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn cut(s: &mut Session, p: &Value) -> Result<Value> {
@@ -328,7 +381,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
             .chain(lone.iter().map(|id| Sel::SketchPoint { id: id.clone() }))
             .collect();
     }
-    Ok(json!({"curves": curves, "points": lone, "constraints": constraints, "translate": [t.x, t.y], "sketch": info}))
+    reply(cmd, Pasted { curves, points: lone, constraints, translate: [t.x, t.y], sketch: info, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

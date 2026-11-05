@@ -1,0 +1,76 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "corner": [
+     60,
+     40
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 40,
+    "taper": "-5 deg",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      58.25022672948152,
+      38.25022672948152,
+      20
+     ],
+     [
+      58.25022672948152,
+      -38.25022672948152,
+      20
+     ],
+     [
+      -58.25022672948152,
+      38.25022672948152,
+      20
+     ],
+     [
+      -58.25022672948152,
+      -38.25022672948152,
+      20
+     ]
+    ],
+    "radius": 4
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      0,
+      0,
+      40
+     ]
+    ],
+    "thickness": 2
+   }
+  }
+ ]
+}

@@ -42,7 +42,7 @@ fn component(app: &SolveApp, sel: &Sel) -> Option<u64> {
     match sel {
         Sel::Occurrence { path } => app.session.placed_document().path_placement(path).map(|(id, _)| id).filter(|id| *id != 0),
         Sel::Body { name } | Sel::Face { body: name, .. } | Sel::Edge { body: name, .. } => {
-            let state = app.session.world_state();
+            let state = crate::open_meshing::session_world(&app.session);
             state.body(name).map(|body| app.session.doc.model_body_component(body)).filter(|id| *id != 0)
         }
         _ => None,
@@ -253,9 +253,7 @@ fn drop_preview(app: &SolveApp, look: Value, hit: &Hit, sel: &Sel, mods: Modifie
     }
     let whole_component = mods.ctrl || mods.command || app.ui.pick_components;
     if whole_component && let Some(id) = component(app, sel) {
-        let bodies = app
-            .session
-            .world_state()
+        let bodies = crate::open_meshing::session_world(&app.session)
             .bodies
             .iter()
             .filter(|b| {
@@ -506,7 +504,7 @@ pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::R
     for x in [bounds.min.x, bounds.max.x] {
         for y in [bounds.min.y, bounds.max.y] {
             for z in [bounds.min.z, bounds.max.z] {
-                if let Some(p) = proj.to_screen(solidcraft_engine::geom::Vec3::new(x, y, z)).filter(|p| p.is_finite()) {
+                if let Some(p) = proj.to_screen(solidcore_record::Vec3::new(x, y, z)).filter(|p| p.is_finite()) {
                     screen.extend_with(p);
                 }
             }
@@ -531,11 +529,11 @@ pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::R
         })
         .collect::<Vec<_>>();
     let anchor = egui::pos2(
-        screen.center().x.clamp(free.left(), free.right()),
-        (screen.top() - crate::theme::Tokens::get().space_12).clamp(free.top(), free.bottom()),
+        crate::shell::within(screen.center().x, free.left(), free.right()),
+        crate::shell::within(screen.top() - crate::theme::Tokens::get().space_12, free.top(), free.bottom()),
     );
     let ctx = ui.ctx().clone();
-    let pill = ui_kit::Container::selection_card(&ctx, egui::Id::new("render_selection"), anchor, free, |ui| {
+    let pill = ui_kit::Container::selection_card(&ctx, egui::Id::unique("render_selection"), anchor, free, |ui| {
         ui_kit::selection_actions(ui, &selection_name(app, &sel), &actions)
     });
     crate::scenario::publish_rect("render:selection", pill.response.rect);
@@ -563,61 +561,6 @@ pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::R
 }
 
 /// Existing appearance commands exposed alongside the shared inheritance widget.
-pub(crate) fn selection_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let Some(sel) = app.session.selection.last().cloned() else { return };
-    let Ok(target) = chain_target(app, &sel) else { return };
-    if let Ok(chain) = app.session.execute("appearance.chain", &json!({"target":target})) {
-        let steps = chain["steps"].as_array().map(Vec::as_slice).unwrap_or_default();
-        let looks =
-            std::array::from_fn(|index| steps.get(index).and_then(|s| s.get("look")).filter(|l| !l.is_null()).map(super::library::tile_sphere));
-        let active = match chain["active"].as_str() {
-            Some("face") => ui_kit::LookStep::Face,
-            Some("body") => ui_kit::LookStep::Body,
-            Some("component") => ui_kit::LookStep::Component,
-            _ => ui_kit::LookStep::Material,
-        };
-        if ui_kit::look_chain(
-            ui,
-            "render:look_chain",
-            [app.tr("render.pick_face"), app.tr("render.pick_body"), app.tr("render.pick_component"), app.tr("render.look_material")],
-            looks,
-            active,
-        )
-        .is_some()
-        {
-            app.start("appearance.assign");
-        }
-    }
-    ui_kit::dropdown_menu(ui, "render_selection_actions", app.tr("cmd.appearance_assign"), |ui| {
-        for (id, label) in
-            [("appearance.assign", "cmd.appearance_assign"), ("appearance.replace", "render.replace_all"), ("appearance.copy", "cmd.appearance_copy")]
-        {
-            if let Some(command) = solidcraft_engine::find_command(id) {
-                let info = command.info(&app.session);
-                if ui_kit::command_menu_button(
-                    ui,
-                    id,
-                    app.tr(label),
-                    command.icon,
-                    &crate::keymap::display_for(app, id).unwrap_or_default(),
-                    info.enabled,
-                )
-                .clicked()
-                {
-                    app.start(id);
-                    ui.close();
-                }
-            }
-        }
-        if ui_kit::command_menu_button(ui, "render_remove_override", app.tr("render.remove_override"), "delete", "", true).clicked() {
-            if let Ok(targets) = targets(app, &app.session.selection) {
-                let _ = app.run("appearance.assign", targets);
-            }
-            ui.close();
-        }
-    });
-}
-
 pub(crate) fn replacement_dialog(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(pending) = app.render_workspace.view.assign.replacement.clone() else { return };
     if pending.revision != app.session.revision || !pending.document.ptr_eq(&std::sync::Arc::downgrade(&app.session.doc)) {
@@ -629,7 +572,7 @@ pub(crate) fn replacement_dialog(app: &mut SolveApp, ctx: &egui::Context) {
     let entries: Vec<_> = entries.into_iter().filter(|entry| entry["available"] != false).collect();
     let mut selected = app.render_workspace.view.assign.replacement_index;
     let title = app.tr("render.replace_all").to_string();
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("render_replace_look"), "reorder", &title)
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("render_replace_look"), "reorder", &title)
         .actions(&title, app.tr_label("Cancel"), None)
         .show(ctx, !entries.is_empty(), |ui| {
             ui_kit::text(ui, from["name"].as_str().unwrap_or(""), ui_kit::Text::Inline);

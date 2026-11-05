@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4782"
+ ],
+ "what": "both vertical edges of a 20 mm wide box end rounded r10, half the width: the rounds meet tangent and use up the end face (a full round), fit reduce",
+ "source": "analytic",
+ "method": "box 80x20x20, the end x=80 rounded r10 on both vertical edges: removed 2 (1-pi/4) r^2 H; the end face is used up, the rounds meet along x=70..80's middle line tangentially: 4 planes + 2 rounds",
+ "body_count": 1,
+ "volume_mm3": 31141.592653589792,
+ "faces": 6,
+ "continuity": {
+  "order": "g1"
+ }
+}

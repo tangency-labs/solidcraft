@@ -66,7 +66,7 @@ fn run() -> Result<(), String> {
     let mut session = Session::default();
     eprintln!("Generating original CAD scene from {recipe_path}");
     let generation_start = Instant::now();
-    let (commands, command_timings) = session.run_script_timed(&recipe, false).map_err(|e| e.to_string())?;
+    let (commands, command_timings) = session.run_script_timed(&recipe, false, &mut |_, _| {}).map_err(|e| e.to_string())?;
     let generation_seconds = generation_start.elapsed().as_secs_f64();
     let design_path = output.with_extension(solidcraft_engine::io::DESIGN_EXT);
     session.execute("file.save_as", &json!({"path":design_path})).map_err(|e| e.to_string())?;

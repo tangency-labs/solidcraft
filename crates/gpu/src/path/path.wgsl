@@ -7,7 +7,7 @@ struct Triangle {
     // optics.xyz: extinction per mm, optics.w: body/medium identity (1..16384).
     base: vec4<f32>, parameters: vec4<f32>, optics: vec4<f32>,
     coat: vec4<f32>, // weight, perceptual roughness, IOR, shadow transmission flag
-    interior: vec4<f32>, // scattering/mm, HG g, reserved, immediate parent triangle+1
+    interior: vec4<f32>, // scattering/mm, HG g, flags (stage=1, scalar face=2), immediate parent triangle+1
 };
 struct Node { lo: vec3<f32>, first: u32, hi: vec3<f32>, count: u32 };
 struct AreaLight { center: vec4<f32>, u: vec4<f32>, v: vec4<f32>, radiance: vec4<f32> };
@@ -57,6 +57,8 @@ fn medium_failure(radiance: vec3<f32>, coverage: f32, pixel: u32, bounce: u32, c
 }
 const PI: f32 = 3.141592653589793;
 const FAR: f32 = 1e30;
+override OPAQUE_SCENE: bool = false;
+override HAS_TEXTURES: bool = false;
 
 // Header: triangle count, vertex offset, material offset, planar-patch offset (all words).
 // Indexed triangles contain three vertex indices and one resolved material ID.
@@ -101,7 +103,7 @@ struct Medium { id: f32, ior: f32, sigma: vec3<f32>, scatter: vec2<f32> };
 // Establish the complete certified containment stack even when the camera starts
 // inside a liquid or a ray starts on an opaque object inside a container. Parent
 // references are immutable CPU-certified material references, never AABB guesses.
-fn initialize_media(hit_index:u32,d:vec3<f32>,stack:ptr<function,array<Medium,16>>,count:ptr<function,u32>) -> bool {
+fn initialize_media(hit_index:u32,d:vec3<f32>,stack:ptr<function,array<Medium,MEDIUM_CAPACITY>>,count:ptr<function,u32>) -> bool {
     let first=triangle(hit_index);
     if first.base.w<=0.0 || first.parameters.w>=0.0 {return true;}
     let outward=unit(cross(first.p1.xyz-first.p0.xyz,first.p2.xyz-first.p0.xyz));
@@ -109,7 +111,7 @@ fn initialize_media(hit_index:u32,d:vec3<f32>,stack:ptr<function,array<Medium,16
     var reference=select(hit_index+1u,u32(first.interior.w),entering);
     var length=0u;
     while reference>0u {
-        if length>=16u {return false;}
+        if length>=MEDIUM_CAPACITY {return false;}
         let t=triangle(reference-1u);
         (*stack)[length]=Medium(t.optics.w,t.parameters.z,t.optics.xyz,t.interior.xy);
         reference=u32(t.interior.w);
@@ -574,17 +576,22 @@ fn dominant_vertex(bary: vec3<f32>) -> u32 {
     if bary.z>bary[anchor] { anchor=2u; }
     return anchor;
 }
+// The vertex after `a`, as (a+1)%3. Not written with `%`: NVIDIA's Vulkan compiler crashes on
+// that index after a BVH walk (#6705).
+fn next_vertex(a: u32) -> u32 {
+    return select(a+1u,0u,a>=2u);
+}
 fn surface_point(t: Triangle, bary: vec3<f32>) -> vec3<f32> {
     // Anchor near the hit, retaining the two other directly computed weights.
     // A tiny weight on a distant vertex can encode an entire corner clearance.
     // Do not recover that weight by subtracting the other two from one.
     let p=array<vec3<f32>,3>(t.p0.xyz,t.p1.xyz,t.p2.xyz);
-    let a=dominant_vertex(bary); let b=(a+1u)%3u; let c=(a+2u)%3u;
+    let a=dominant_vertex(bary); let b=next_vertex(a); let c=next_vertex(b);
     return p[a]+((p[b]-p[a])*bary[b]+(p[c]-p[a])*bary[c]);
 }
 fn surface_point_precise(t: Triangle, bary: vec3<f32>) -> PrecisePoint {
     let p=array<vec3<f32>,3>(t.p0.xyz,t.p1.xyz,t.p2.xyz);
-    let a=dominant_vertex(bary); let b=(a+1u)%3u; let c=(a+2u)%3u;
+    let a=dominant_vertex(bary); let b=next_vertex(a); let c=next_vertex(b);
     // Keep the world anchor separate from its local displacement.
     return PrecisePoint(p[a],(p[b]-p[a])*bary[b]+(p[c]-p[a])*bary[c]);
 }
@@ -595,7 +602,7 @@ fn surface_ray_depth_precise(t: Triangle, bary: vec3<f32>, origin: vec3<f32>, or
 }
 fn surface_ray_depth(t: Triangle, bary: vec3<f32>, origin: vec3<f32>, axis: u32) -> f32 {
     let p=array<vec3<f32>,3>(t.p0.xyz,t.p1.xyz,t.p2.xyz);
-    let a=dominant_vertex(bary); let b=(a+1u)%3u; let c=(a+2u)%3u;
+    let a=dominant_vertex(bary); let b=next_vertex(a); let c=next_vertex(b);
     // Original vertex differences avoid subtracting two rounded ray-relative
     // coordinates; adding the anchor last preserves distant thin-hit ordering.
     return (p[a][axis]-origin[axis])+((p[b][axis]-p[a][axis])*bary[b]+(p[c][axis]-p[a][axis])*bary[c]);
@@ -660,16 +667,6 @@ fn area_pdf(light: AreaLight, delta: vec3<f32>) -> f32 {
     if cosine<=0.0 { return 0.0; }
     return dot(delta,delta)/(light.center.w*cosine);
 }
-fn visible(o: vec3<f32>, d: vec3<f32>, distance: f32) -> ShadowResult {
-    if emitter_hit(o,d).distance<distance-u.lighting.x*2.0 { return blocked_shadow(); }
-    var visibility=shadow_transmittance(o,d,distance);
-    if u.volume_min.w>0.0 {
-        let attenuation=volume_transmittance(o,d,distance);
-        visibility.transmittance*=attenuation;
-        visibility.branch_pdf*=attenuation;
-    }
-    return visibility;
-}
 struct EnvironmentSample { direction: vec3<f32>, radiance: vec3<f32>, pdf: f32 };
 fn environment_to_world(d: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(u.environment_map.x*d.x-u.environment_map.y*d.y,u.environment_map.y*d.x+u.environment_map.x*d.y,d.z);
@@ -723,43 +720,67 @@ fn sun_sample(rng:ptr<function,u32>)->EnvironmentSample {
     let direction=from_local(vec3<f32>(radius*cos(phi),radius*sin(phi),z),u.sun_direction.xyz);
     return EnvironmentSample(direction,u.sun_radiance.xyz,u.sun_radiance.w);
 }
-fn direct_studio(t: Triangle, position: vec3<f32>, o: vec3<f32>, n: vec3<f32>, geometric: vec3<f32>, v: vec3<f32>, remaining: u32, rng: ptr<function,u32>) -> vec3<f32> {
+// The three fixed lights of the preview without studio lighting: direction and intensity.
+const FIXED_LIGHTS = array<vec4<f32>,3>(vec4<f32>(0.6,0.0,0.8,3.0),vec4<f32>(-0.8,0.0,0.6,1.0),vec4<f32>(0.0,-0.6,0.8,1.5));
+// Next-event estimation for every light source family through ONE shadow-ray call site, like
+// volume_direct. Native compilers inline each call of the BVH walk; one walk per source family
+// made `main` too large for NVIDIA's Vulkan compiler (#6705). Studio lighting visits every area
+// light, then the environment, then the sun, drawing random numbers in that order; without it
+// the three fixed lights are used.
+fn direct_light(t: Triangle, position: vec3<f32>, o: vec3<f32>, n: vec3<f32>, geometric: vec3<f32>, v: vec3<f32>, remaining: u32, rng: ptr<function,u32>) -> vec3<f32> {
     var result = vec3<f32>(0.0);
     let opaque = 1.0-t.base.w;
-    if opaque<=0.0 { return result; }
-    for (var i=0u; i<u32(u.light_count.w); i+=1u) {
-        let light = u.area_lights[i];
-        let point = light.center.xyz + light.u.xyz*(2.0*random(rng)-1.0) + light.v.xyz*(2.0*random(rng)-1.0);
-        let delta = point-position;
-        let direction = unit(delta);
-        let pdf = area_pdf(light,delta);
-        let nl = dot(n,direction);
-        if pdf<=0.0 || nl<=0.0 || dot(geometric,direction)<=0.0 { continue; }
-        let shadow = point-o;
-        let visibility=visible(o,unit(shadow),length(shadow));
-        let competing=opaque*surface_pdf(t,n,v,direction)*visibility.branch_pdf;
-        let weight=select(power_weight(pdf,competing),1.0,visibility.solid || visibility.crossings>=remaining);
-        result += visibility.transmittance*brdf(t,n,v,direction)*light.radiance.xyz*(opaque*nl*weight/pdf);
-    }
-    if u.environment_map.w>0.0 || any(u.environment.xyz>vec3<f32>(0.0)) {
-        let sample=env_sample(rng);
-        let nl=dot(n,sample.direction);
-        if sample.pdf>0.0 && nl>0.0 && dot(geometric,sample.direction)>0.0 {
-            let visibility=visible(o,sample.direction,FAR);
-            let competing=opaque*surface_pdf(t,n,v,sample.direction)*visibility.branch_pdf;
-            let weight=select(power_weight(sample.pdf,competing),1.0,visibility.solid || visibility.crossings>=remaining);
-            result+=visibility.transmittance*brdf(t,n,v,sample.direction)*sample.radiance*(opaque*nl*weight/sample.pdf);
+    let studio = u.environment.w > 0.0;
+    if studio && opaque<=0.0 { return result; }
+    let area_count = u32(u.light_count.w);
+    let count = select(3u, area_count+2u, studio);
+    for (var source=0u; source<count; source+=1u) {
+        var sample = EnvironmentSample(vec3<f32>(0.0,0.0,1.0),vec3<f32>(0.0),0.0);
+        var shadow_direction = vec3<f32>(0.0,0.0,1.0);
+        var shadow_distance = FAR;
+        if !studio {
+            let light = FIXED_LIGHTS[source];
+            if u.lighting.z <= 0.0 || dot(geometric,light.xyz)<=0.0 || dot(n,light.xyz)<=0.0 { continue; }
+            sample = EnvironmentSample(light.xyz,vec3<f32>(light.w*u.lighting.z*u.studio_weights[source]),1.0);
+            shadow_direction = light.xyz;
+        } else {
+            if source<area_count {
+                let light = u.area_lights[source];
+                let point = light.center.xyz + light.u.xyz*(2.0*random(rng)-1.0) + light.v.xyz*(2.0*random(rng)-1.0);
+                let delta = point-position;
+                sample = EnvironmentSample(unit(delta),light.radiance.xyz,area_pdf(light,delta));
+                let shadow = point-o;
+                shadow_direction = unit(shadow);
+                shadow_distance = length(shadow);
+            } else if source==area_count {
+                if u.environment_map.w<=0.0 && !any(u.environment.xyz>vec3<f32>(0.0)) { continue; }
+                sample = env_sample(rng);
+                shadow_direction = sample.direction;
+            } else {
+                if u.sun_radiance.w<=0.0 { continue; }
+                sample = sun_sample(rng);
+                shadow_direction = sample.direction;
+            }
+            if sample.pdf<=0.0 || dot(n,sample.direction)<=0.0 || dot(geometric,sample.direction)<=0.0 { continue; }
         }
-    }
-    if u.sun_radiance.w>0.0 {
-        let sample=sun_sample(rng);
-        let nl=dot(n,sample.direction);
-        if nl>0.0 && dot(geometric,sample.direction)>0.0 {
-            let visibility=visible(o,sample.direction,FAR);
-            let competing=opaque*surface_pdf(t,n,v,sample.direction)*visibility.branch_pdf;
-            let weight=select(power_weight(sample.pdf,competing),1.0,visibility.solid || visibility.crossings>=remaining);
-            result+=visibility.transmittance*brdf(t,n,v,sample.direction)*sample.radiance*(opaque*nl*weight/sample.pdf);
+        // Studio emitters block a connection that passes them; studio volumes attenuate it.
+        var visibility = blocked_shadow();
+        if !studio || emitter_hit(o,shadow_direction).distance>=shadow_distance-u.lighting.x*2.0 {
+            visibility = shadow_transmittance(o,shadow_direction,shadow_distance);
+            if studio && u.volume_min.w>0.0 {
+                let attenuation=volume_transmittance(o,shadow_direction,shadow_distance);
+                visibility.transmittance*=attenuation;
+                visibility.branch_pdf*=attenuation;
+            }
         }
+        let nl = dot(n,sample.direction);
+        if !studio {
+            result += visibility.transmittance * brdf(t,n,v,sample.direction) * (opaque*nl*sample.radiance);
+            continue;
+        }
+        let competing=opaque*surface_pdf(t,n,v,sample.direction)*visibility.branch_pdf;
+        let weight=select(power_weight(sample.pdf,competing),1.0,visibility.solid || visibility.crossings>=remaining);
+        result += visibility.transmittance*brdf(t,n,v,sample.direction)*sample.radiance*(opaque*nl*weight/sample.pdf);
     }
     return result;
 }
@@ -814,15 +835,15 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
     var coverage = 0.0;
     var previous_pdf = 0.0;
     var previous_delta = true;
-    var media: array<Medium,16>;
+    var media: array<Medium,MEDIUM_CAPACITY>;
     var medium_count = 0u;
-    let lights = array<vec4<f32>,3>(vec4<f32>(0.6,0.0,0.8,3.0),vec4<f32>(-0.8,0.0,0.6,1.0),vec4<f32>(0.0,-0.6,0.8,1.5));
+    var texture_path_length = 0.0;
     for (var bounce = 0u; bounce < u.sampling.y; bounce += 1u) {
         // Closed-glass continuations set an excluded producing triangle; every
         // other launch (camera, opaque or thin-sheet surface) does not.
         let continued = ray_excluded != 0xffffffffu;
         let hit = trace_precise(o,o_low,d,false,ray_excluded,ray_minimum,medium_count>0u);
-        if u.lighting.w>0.0 && medium_count==0u && hit.triangle!=0xffffffffu {
+        if !OPAQUE_SCENE && u.lighting.w>0.0 && medium_count==0u && hit.triangle!=0xffffffffu {
             if !initialize_media(hit.triangle,d,&media,&medium_count) {return medium_failure(radiance,coverage,pixel,bounce,4u);}
         }
         if medium_count>0u && media[medium_count-1u].scatter.x>0.0 {
@@ -830,6 +851,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
             let boundary=min(hit.distance,emitter_hit_precise(o,o_low,d,ray_minimum).distance);
             let travel=-log(1.0-random(&rng))/current.scatter.x;
             if travel<boundary {
+                texture_path_length+=travel;
                 let position=o+o_low+d*travel;
                 let traversed=precise_point_delta(position,vec3<f32>(0.0),previous_position,previous_position_low);
                 throughput*=exp(-current.sigma*length(traversed));
@@ -853,6 +875,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
             if length>0.0 {
                 let travel=-log(1.0-random(&rng))/u.volume_min.w;
                 if travel<length {
+                    texture_path_length+=segment.x+travel;
                     let position=o+o_low+d*(segment.x+travel);
                     coverage=1.0;
                     throughput*=u.volume_albedo.xyz;
@@ -914,50 +937,37 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         }
         coverage = 1.0;
         ray_excluded = 0xffffffffu; ray_minimum = u.lighting.x;
-        var t = triangle(hit.triangle); let v = -d;
-        var geometric = unit(cross(t.p1.xyz-t.p0.xyz,t.p2.xyz-t.p0.xyz));
-        let entering = dot(geometric,v)>=0.0;
-        if !entering { geometric = -geometric; }
+        let captured = triangle(hit.triangle); let v = -d;
+        let outward = unit(cross(captured.p1.xyz-captured.p0.xyz,captured.p2.xyz-captured.p0.xyz));
+        let entering = dot(outward,v)>=0.0;
+        let geometric = select(-outward,outward,entering);
         var ni = 1.0;
-        if medium_count > 0u {
-            let current = media[medium_count-1u];
-            ni = current.ior;
-        }
-        var n = unit(t.n0.xyz*hit.bary.x+t.n1.xyz*hit.bary.y+t.n2.xyz*hit.bary.z);
-        if dot(n,geometric)<0.0 { n = -n; }
-        if dot(n,v)<=0.0 { n = geometric; }
-        // Recover the surface point from barycentrics. A distant ray's f32 distance
-        // loses precision on skinny triangles; o+d*t can land behind the surface
-        // and make the next shadow ray intersect the same face.
-        var position = surface_point(t,hit.bary);
+        if medium_count > 0u {ni = media[medium_count-1u].ior;}
+        var position = surface_point(captured,hit.bary);
         var position_low = vec3<f32>(0.0);
-        if t.base.w>0.0 && t.parameters.w<0.0 {
-            let point=surface_point_precise(t,hit.bary);
-            position=point.hi; position_low=point.lo;
+        if captured.base.w>0.0 && captured.parameters.w<0.0 {
+            let point=surface_point_precise(captured,hit.bary);
+            position=point.hi;position_low=point.lo;
         }
-        let shading_position = position+position_low;
-        t = texture_surface(t,shading_position);
-        t = aged_surface(t,shading_position,unit(cross(t.p1.xyz-t.p0.xyz,t.p2.xyz-t.p0.xyz)));
-        let original_normal = n;
-        n = texture_normal(t,shading_position,n,geometric);
-        if dot(n,v)<=0.0 { n=original_normal; }
+        let shading_position=position+position_low;
+        texture_path_length+=length(precise_point_delta(position,position_low,o,o_low));
         if medium_count > 0u {
             let segment=precise_point_delta(position,position_low,previous_position,previous_position_low);
             throughput *= exp(-media[medium_count-1u].sigma*length(segment));
         }
         previous_position = position; previous_position_low=position_low;
         o = position + geometric*(u.lighting.x*2.0); o_low=vec3<f32>(0.0);
-        if u.environment.w > 0.0 {
-            radiance += throughput*direct_studio(t,position,o,n,geometric,v,u.sampling.y-bounce-1u,&rng);
-        }
-        for (var i=0u; i<3u && u.environment.w==0.0; i+=1u) {
-            let light = lights[i];
-            if u.lighting.z > 0.0 && dot(geometric,light.xyz)>0.0 && dot(n,light.xyz)>0.0 {
-                let visibility=shadow_transmittance(o,light.xyz,FAR);
-                radiance += visibility.transmittance * throughput * brdf(t,n,v,light.xyz) * ((1.0-t.base.w)*light.w*dot(n,light.xyz)*u.lighting.z*u.studio_weights[i]);
-            }
-        }
-        if t.base.w > 0.0 && random(&rng) < t.base.w {
+        // Captured dielectric flags are exactly one, and opaque flags zero.
+        // Maps are admitted only on opaque bodies; aging also leaves glass
+        // unchanged. Resolve glass before any sampler temporaries become live.
+        if !OPAQUE_SCENE && captured.base.w > 0.0 && random(&rng) < captured.base.w {
+            let t=captured;
+            let interpolated=unit(captured.n0.xyz*hit.bary.x+captured.n1.xyz*hit.bary.y+captured.n2.xyz*hit.bary.z);
+            let winding_normal=select(interpolated,-interpolated,dot(interpolated,geometric)<0.0);
+            let n=select(geometric,winding_normal,dot(winding_normal,v)>0.0);
+            // The dielectric flag makes every direct-light closure weight zero;
+            // direct_light consumes no random values on this zero-weight branch.
+            var optical_normal=n;
             var nt = t.parameters.z;
             if t.parameters.w < 0.0 && entering && medium_count > 0u && u.lighting.w==0.0 {
                 return medium_failure(radiance,coverage,pixel,bounce,4u);
@@ -985,14 +995,14 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 nt = 1.0;
                 if medium_count > 1u { nt = media[medium_count-2u].ior; }
             }
-            var f = dielectric(clamp(dot(n,v),0.0,1.0),ni,nt);
-            var transmitted = refract(d,n,ni/nt);
+            var f = dielectric(clamp(dot(optical_normal,v),0.0,1.0),ni,nt);
+            var transmitted = refract(d,optical_normal,ni/nt);
             // A bent shading normal must not send a transmitted ray into the wrong
             // geometric hemisphere. Fall back to the geometric interface there.
-            if (f.z >= 0.0 && dot(transmitted,geometric) >= 0.0) || dot(reflect(d,n),geometric) <= 0.0 {
-                n = geometric;
-                f = dielectric(clamp(dot(n,v),0.0,1.0),ni,nt);
-                transmitted = refract(d,n,ni/nt);
+            if (f.z >= 0.0 && dot(transmitted,geometric) >= 0.0) || dot(reflect(d,optical_normal),geometric) <= 0.0 {
+                optical_normal = geometric;
+                f = dielectric(clamp(dot(optical_normal,v),0.0,1.0),ni,nt);
+                transmitted = refract(d,optical_normal,ni/nt);
             }
             // The first Fresnel choice is stratified conditionally on the same
             // primary/prefix path. Each stratum is weighted equally; later random
@@ -1012,7 +1022,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 if branch < probability {
                     previous_delta=true; previous_scatter_position=position; previous_scatter_position_low=position_low; suppress_direct=false;
                     throughput *= weights.reflection/probability;
-                    d = reflect(d,n);
+                    d = reflect(d,optical_normal);
                 } else {
                     throughput *= weights.transmission/(1.0-probability);
                     if t.coat.w>0.0 { previous_pdf*=1.0-probability; }
@@ -1024,13 +1034,13 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 }
             } else if branch < (f.x+f.y)*0.5 {
                 previous_delta=true; previous_scatter_position=position; previous_scatter_position_low=position_low; suppress_direct=false;
-                d = reflect(d,n);
+                d = reflect(d,optical_normal);
             } else {
                 if t.coat.w>0.0 { suppress_direct=suppress_direct || !previous_delta; }
                 else { suppress_direct=false; }
                 previous_delta=true; previous_scatter_position=position; previous_scatter_position_low=position_low;
                 if entering {
-                    if medium_count >= 16u { return medium_failure(radiance,coverage,pixel,bounce,4u); }
+                    if medium_count >= MEDIUM_CAPACITY { return medium_failure(radiance,coverage,pixel,bounce,4u); }
                     media[medium_count] = Medium(t.optics.w,nt,t.optics.xyz,t.interior.xy);
                     medium_count += 1u;
                 } else { medium_count -= 1u; }
@@ -1054,6 +1064,18 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
             }
             continue;
         }
+        let map_record=texture_record(captured.optics.w);
+        let gradients=texture_gradients(map_record,geometric,d,hit.distance,texture_path_length,bounce);
+        let mapped_surface=texture_surface(map_record,captured.base.xyz,captured.parameters.x,captured.parameters.y,shading_position,gradients,(u32(captured.interior.z)&2u)!=0u);
+        // Retain immutable geometry and medium data across optical map evaluation.
+        let textured=Triangle(captured.p0,captured.p1,captured.p2,captured.n0,captured.n1,captured.n2,vec4<f32>(mapped_surface.color,captured.base.w),vec4<f32>(mapped_surface.metallic,mapped_surface.roughness,captured.parameters.zw),captured.optics,captured.coat,captured.interior);
+        let t=aged_surface(textured,shading_position,outward);
+        let interpolated=unit(captured.n0.xyz*hit.bary.x+captured.n1.xyz*hit.bary.y+captured.n2.xyz*hit.bary.z);
+        let winding_normal=select(interpolated,-interpolated,dot(interpolated,geometric)<0.0);
+        let original_normal=select(geometric,winding_normal,dot(winding_normal,v)>0.0);
+        let mapped_normal=texture_normal(map_record,mapped_surface.normal,original_normal,geometric);
+        let n=select(original_normal,mapped_normal,dot(mapped_normal,v)>0.0);
+        radiance += throughput*direct_light(t,position,o,n,geometric,v,u.sampling.y-bounce-1u,&rng);
         d = sample_surface(t,n,v,&rng);
         let nl = dot(n,d);
         if nl<=0.0 || dot(geometric,d)<=0.0 { break; }
@@ -1097,7 +1119,7 @@ fn adaptive_target(mean: vec4<f32>, m2: vec4<f32>) -> u32 {
     return clamp(u32(max(max(need.x,need.y),max(need.z,need.w))),u.adaptive_budget.y,maximum);
 }
 
-@compute @workgroup_size(64)
+@compute @workgroup_size(32)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let pixel = u.image.w + gid.x;
     let pixels = u.image.x*u.image.y;
@@ -1105,14 +1127,22 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let pilots = u.adaptive_budget.x;
     let strata = max(1u,u.adaptive_budget.z);
     let lane = u32(u.adaptive_error.w);
+    // Settle first whether this invocation samples at all, then take the path sample at one call
+    // site: every call is inlined, and three copies of the integrator were more than NVIDIA's
+    // Vulkan compiler could build (#6705).
+    var budget_count = 0u;
+    if pilots > 0u && u.image.z >= pilots {
+        budget_count = u32(accumulation[2u*pixels+pixel].x);
+        if u.image.z-pilots >= budget_count { return; }
+    }
+    let value = sample_path(pixel);
     if pilots == 0u {
-        let sample = sample_path(pixel)/f32(strata);
+        let sample = value/f32(strata);
         if u.image.z == 0u && lane == 0u { accumulation[pixel] = sample; }
         else { accumulation[pixel] += sample; }
         return;
     }
     if u.image.z < pilots {
-        let value = sample_path(pixel);
         var mean = accumulation[pixels+pixel];
         var m2 = accumulation[2u*pixels+pixel];
         if u.image.z == 0u { mean=vec4<f32>(0.0); m2=vec4<f32>(0.0); }
@@ -1127,10 +1157,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
         return;
     }
-    let budget_count=u32(accumulation[2u*pixels+pixel].x);
     let ordinal=u.image.z-pilots;
-    if ordinal>=budget_count { return; }
-    accumulation[pixel] += sample_path(pixel)/f32(strata);
+    accumulation[pixel] += value/f32(strata);
     // Per-pixel production means enter both raw EXR and denoising. Pilots do not.
     if ordinal+1u == budget_count && lane+1u == strata { accumulation[pixel] /= f32(budget_count); }
 }
@@ -1153,6 +1181,8 @@ fn camera_reference() {
     // Bias signed test coordinates for the radiance readback's nonnegative contract.
     accumulation[0] = vec4<f32>(ray.origin+vec3<f32>(16.0),1.0);
     accumulation[1] = vec4<f32>(ray.direction+vec3<f32>(2.0),1.0);
+    accumulation[2] = vec4<f32>(texture_camera_direction_delta(ray.direction,2.0*u.right.xyz/f32(u.image.x))+vec3<f32>(16.0),1.0);
+    accumulation[3] = vec4<f32>(texture_camera_direction_delta(ray.direction,-2.0*u.up.xyz/f32(u.image.y))+vec3<f32>(16.0),1.0);
 }
 
 // Deterministic image-space ball-lens check. Uses the production BVH/intersection

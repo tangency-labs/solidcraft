@@ -5,12 +5,14 @@
 //! (`F3:inner:<face>`), or, without history, a body and an index (`Body1:face:3`). Suffixes
 //! follow: a pattern copy (`@F7.2`), a piece of a split face told apart by the faces around it
 //! (`#[<face>,…]`, `#k` after it for a tie), an older design's numbered piece (`#k`). An edge is
-//! the two faces it separates, `~k` for one of several between them.
+//! the two faces it separates, `~k` for one of several between them; a seam, whose two sides are
+//! the same face, names that face once.
 //!
 //! The text form, read by [`FaceName::parse`] and [`EdgeName::parse`] and written by `Display`:
 //!
 //! ```text
-//! edge     = face { "|" face } [TIE]       one face for an open boundary, more where several meet
+//! edge     = face { "|" face } [TIE]       one face for an open boundary or a seam (both of an
+//!                                          edge's sides on one face), more where several meet
 //! face     = base { suffix }
 //! base     = FEATURE ":" "blend" ":" ( edge | NUMBER )
 //!          | FEATURE ":" "inner" ":" face
@@ -150,6 +152,27 @@ pub enum NameError {
         at: usize,
         what: &'static str,
     },
+}
+
+/// Whether `text` can be written into a name whole.
+///
+/// A curve's id goes into the name of the faces the curve makes (`F2:side:<id>`), and a
+/// name reads some characters as its own: `|` separates the faces of an edge, `,` the faces
+/// around a piece, `~` numbers the edges between two faces, `#` numbers a piece and `]`
+/// closes one. An id holding one of them splits every name it lands in: the id `c|1` gave
+/// the edges of an extrusion the names `F2:side:c|1#1|F2:side:c|1#2~1`, three separators
+/// where an edge names two faces and separates them once (#5858).
+///
+/// The test is the name's own round trip rather than a list of characters: the text is
+/// written into a name and read back, and it must read back as itself. A list would have
+/// to follow every change of the grammar (#5861), and would miss an id that reads back as
+/// something else (`s1.l4` reads as profile 1 of curve `l4`).
+pub fn text_fits_name(text: &str) -> bool {
+    let name = format!("F0:side:{text}");
+    match FaceName::parse(&name) {
+        Ok(f) => f.to_string() == name && matches!(&f.base, Base::Made { role: Role::Side { profile: None, curve }, .. } if curve == text),
+        Err(_) => false,
+    }
 }
 
 impl FaceName {

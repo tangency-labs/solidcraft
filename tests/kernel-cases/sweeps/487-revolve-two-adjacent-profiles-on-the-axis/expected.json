@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#487",
+  "tangency-labs/solidcraft#490"
+ ],
+ "what": "two rectangles sharing an edge, both resting on the axis, revolved together (zero-area faces along the axis)",
+ "source": "analytic",
+ "method": "the two 30 x 20 rectangles merge into one 60 x 20 region on the axis: a cylinder r = 20, length 60: V = pi 20^2 60, A = 2 pi 20 60 + 2 pi 20^2; 3 faces (side and two disks), none of zero area.",
+ "body_count": 1,
+ "volume_mm3": 75398.22368615503,
+ "area_mm2": 10053.096491487338,
+ "faces": 3
+}

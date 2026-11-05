@@ -23,6 +23,11 @@ uses only the software renderer and keeps your settings.
 
 ## A design won't open or hangs while opening
 
+- **A design that stopped the app while it was being reopened is skipped once.** If SolidCraft
+  crashes or hangs while reopening the designs from the last session, the next start does not
+  reopen them: it says which design the last session stopped on and opens the start page
+  instead, so the app stays usable. Open the design yourself if you want it; the skip clears
+  itself either way.
 - **Open the previous save.** Every save keeps the version it replaced next to it as
   `<file>.bak` (see [Files](files.md)). Copy it to a new name ending in `.sc`, for
   example `bracket-previous.sc`, and open that. Work saved after the previous save is
@@ -158,15 +163,29 @@ When the graphics driver stops responding, the system resets it (on Windows, "Di
 stopped responding and has recovered"), and the graphics device SolidCraft draws with is gone
 for good: the window can't draw anything more. SolidCraft then closes, keeps your unsaved
 changes for recovery as it does after a crash, and starts again; the new window says what
-happened and offers the changes back. If the device is reset again within ten minutes of that
-restart, the next start uses software rendering, which doesn't depend on the graphics driver.
-Updating the graphics driver from the GPU maker usually stops the resets.
+happened, with what the graphics driver reported, and offers the changes back. The old window
+closes on its own; SolidCraft doesn't wait for the driver to release it. If the device is reset
+again within ten minutes of that restart, the next start uses software rendering, which doesn't
+depend on the graphics driver. Updating the graphics driver from the GPU maker usually stops the
+resets. Laptops that lose the device on waking from sleep (often with an NVIDIA GPU that doesn't
+drive the screen) can keep SolidCraft on the integrated GPU instead: Preferences › Graphics.
+
+## SolidCraft closed while the GPU path tracer was being set up
+
+Choosing **GPU path tracing** in the Render workspace first has the graphics driver compile the
+path tracer, which can take minutes. A few drivers crash while compiling it, and the crash takes
+SolidCraft with it; nothing inside SolidCraft can catch a crash inside the driver. SolidCraft
+remembers that setup (`gpu-path-setup.json` in the settings folder) and doesn't run it again by
+itself on that graphics adapter and driver: the Render workspace says what happened and offers
+**Try again**. CPU ray tracing still works. A driver update also tries the setup again, and so
+does deleting that file.
 
 ## A design saved by 0.10 won't open in an older version
 
-Designs saved by a newer SolidCraft use a newer file format. Older versions refuse them with
-"this design was saved by a newer SolidCraft" and don't change the file. Open them with the
-current version.
+Designs saved by a newer SolidCraft use a newer file format. Older versions may refuse them with
+"this design was saved by a newer SolidCraft" and don't change the file: open them with the current
+version. Recent versions open them with a notice, and a feature they can't read shows an error
+on the timeline; update to build it.
 
 ## Save As says the file can't be found (Windows)
 

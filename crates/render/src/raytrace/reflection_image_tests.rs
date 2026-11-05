@@ -274,8 +274,14 @@ fn prepared_hit_preserves_original_winding_identity_and_never_certifies_glass() 
     let mut builder = BvhBuilder::new(vec![triangle], limits(job::CpuBudget::Compact), &cancel).unwrap();
     while !builder.step(1, &cancel).unwrap().complete {}
     let bvh = builder.finish().unwrap();
-    let primitives =
-        [PreparedPrimitive { body_index: 0, face: Some(0), vertices, normals: [geometry.geometric_normal; 3], surface: primitive.surface.unwrap() }];
+    let primitives = [PreparedPrimitive {
+        has_face_override: false,
+        body_index: 0,
+        face: Some(0),
+        vertices,
+        normals: [geometry.geometric_normal; 3],
+        surface: primitive.surface.unwrap(),
+    }];
     let prepared = PreparedScene { bvh: &bvh, primitives: &primitives, source: &source };
     let shared = prepared.resolve_hit(ray, super::super::Hit { primitive_index: 0, geometry }).unwrap();
     assert_eq!(shared.body_name, "Mirror");
@@ -291,6 +297,7 @@ fn shared_spawn_excludes_signed_zero_self_hit_without_skipping_thin_blockers() {
         let ray = Ray::new(Vec3::new(x + 5.0, 5.0, 10.0), -Vec3::Z, 0.0, 20.0).unwrap();
         let geometry = triangle.intersect(&ray).unwrap();
         let primitive = PreparedPrimitive {
+            has_face_override: false,
             body_index: 0,
             face: Some(0),
             vertices,

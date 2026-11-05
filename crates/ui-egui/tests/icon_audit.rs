@@ -10,6 +10,7 @@ use solidcraft_ui_egui::{icon_svg, scenario::Harness, workspace};
 fn harness() -> Harness {
     let mut h = Harness::new();
     h.app.preferences.auto_operation = false;
+    h.app.preferences.browser_components_open = true;
     h
 }
 
@@ -70,21 +71,25 @@ fn menu(h: &mut Harness, target: Value, surface: &str, requested: &mut BTreeMap<
         let intentional = id == "-" || id.starts_with('#') || (id == "ui.workspace" && item["shortcut"] == "coming later");
         assert!(!blank || intentional, "{surface}: icon-less menu item {item}");
         assert_eq!(item["placeholder"], false, "{surface}: {item}");
-        if let Some(children) = item["children"].as_array() {
-            for child in children {
-                let id = child["id"].as_str().unwrap();
-                assert!(!id.is_empty(), "{surface}: child has no identity");
-                if id == "-" || id.starts_with('#') {
-                    continue;
-                }
-                let icon = child["icon"].as_str().unwrap();
-                assert!(!icon.is_empty(), "{surface}: submenu row has no icon: {child}");
-                assert!(!solidcraft_ui_egui::icon_svg::resolve(icon).placeholder, "{surface}: submenu placeholder {icon}");
-            }
-        }
+        flyout_icons(item, surface);
     }
     collect(h, surface, requested);
     escape(h);
+}
+
+/// The rows of an item's flyout, and of the flyouts inside it, all have real icons.
+fn flyout_icons(item: &Value, surface: &str) {
+    for child in item["children"].as_array().into_iter().flatten() {
+        let id = child["id"].as_str().unwrap();
+        assert!(!id.is_empty(), "{surface}: child has no identity");
+        if id == "-" || id.starts_with('#') {
+            continue;
+        }
+        let icon = child["icon"].as_str().unwrap();
+        assert!(!icon.is_empty(), "{surface}: submenu row has no icon: {child}");
+        assert_eq!(child["placeholder"], false, "{surface}: submenu placeholder {icon}");
+        flyout_icons(child, surface);
+    }
 }
 
 fn ribbon(h: &mut Harness, requested: &mut BTreeMap<String, bool>) {
@@ -180,6 +185,12 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         h.call("ui.status_fixture", json!({"preset":preset}));
         h.frames(3);
         collect(&mut h, "viewport status specimens", &mut requested);
+        if preset == "kinds" {
+            click(&mut h, "viewport_status:summary");
+            h.frames(3);
+            collect(&mut h, "viewport status summary menu", &mut requested);
+            escape(&mut h);
+        }
     }
     h.call("ui.status_fixture", json!({"preset":"off"}));
     collect(&mut h, "initial browser and timeline", &mut requested);
@@ -243,7 +254,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     h.frames(3);
 
     let body = h.app.session.model.state().bodies.first().unwrap().name.clone();
-    let sketch = h.app.session.world_state().sketches.first().unwrap().feature;
+    let sketch = h.app.session.world_state().unwrap().sketches.first().unwrap().feature;
     for target in [
         json!({"type":"viewport"}),
         json!({"type":"body","name":body}),
@@ -260,11 +271,21 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         json!({"type":"folder","component":0,"scope":"c0","folder":"bodies"}),
         json!({"type":"folder","component":0,"scope":"c0","folder":"sketches"}),
         json!({"type":"folder","component":0,"scope":"c0","folder":"construction"}),
-        json!({"type":"section"}),
-        json!({"type":"canvas","id":1}),
     ] {
         menu(&mut h, target.clone(), &target.to_string(), &mut requested);
     }
+    // The Section Analysis and a canvas have a menu only while they are there (#10745).
+    h.app.run("inspect.section", json!({"plane": "YZ"})).unwrap();
+    menu(&mut h, json!({"type":"section"}), "section", &mut requested);
+    h.app.run("inspect.section", json!({"clear": true})).unwrap();
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend(400u32.to_be_bytes());
+    png.extend(200u32.to_be_bytes());
+    png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
+    let canvas = h.app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].clone();
+    menu(&mut h, json!({"type":"canvas","id":canvas}), "canvas", &mut requested);
+    h.app.run("selection.delete", json!({"canvases": [canvas]})).unwrap();
     for selection in [
         json!({"type":"face","body":body,"index":0,"point":[0,0,0]}),
         json!({"type":"edge","body":body,"index":0,"point":[0,0,0]}),
@@ -462,7 +483,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     documents.call("ui.resize", json!({"width":640,"height":1000}));
     click(&mut documents, "tab:overflow");
     documents.frames(3);
-    assert!(documents.ctx.data(|d| d.get_temp::<bool>(egui::Id::new("sc_doc_more"))).unwrap_or(false), "the document list must actually be open");
+    assert!(documents.ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_doc_more"))).unwrap_or(false), "the document list must actually be open");
     collect(&mut documents, "document overflow list (active icon is a selection marker)", &mut requested);
     // Diagnostic badges and Copy Error/Warning Message only appear on troubled features.
     for failing in [false, true] {

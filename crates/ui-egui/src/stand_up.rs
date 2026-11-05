@@ -17,6 +17,7 @@
 //! context menu's "Turn Up Axis" fixes it any time.
 
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::prefs::StandUpUnknown;
@@ -56,7 +57,7 @@ pub enum Upright {
 /// The flat area of `mesh` facing down Z, facing down Y and facing up Y, looking at no more than
 /// `budget` triangles.
 pub fn flat_areas(mesh: &solidcraft_engine::geom::Mesh, budget: usize) -> [f64; 3] {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     struct Face {
         first: Vec3,
         area: f64,
@@ -128,7 +129,7 @@ pub fn upright(z_down: f64, y_either: f64, size: [f64; 3]) -> Upright {
 /// Which axis the bodies named `bodies` in the current design seem to have up. Looks at most
 /// `MAX_BODIES` bodies and `MAX_TRIANGLES` triangles; a body that can't be meshed adds nothing.
 pub fn estimate(app: &SolveApp, bodies: &[String]) -> Upright {
-    let world = app.session.world_state();
+    let world = crate::open_meshing::session_world(&app.session);
     let mut areas = [0.0_f64; 3];
     let mut bounds = solidcraft_engine::geom::Aabb3::EMPTY;
     let mut budget = MAX_TRIANGLES;
@@ -159,7 +160,8 @@ pub fn offer(app: &mut SolveApp, path: &str, before: &[String], result: Option<&
     if text("system") == Some("SolidCraft") || text("exporter_up") == Some("z") {
         return;
     }
-    let bodies: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|n| !before.contains(n)).collect();
+    let bodies: Vec<String> =
+        crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).filter(|n| !before.contains(n)).collect();
     if bodies.is_empty() {
         return;
     }
@@ -243,14 +245,25 @@ pub(crate) fn note_due(app: &mut SolveApp, ctx: &egui::Context) -> Option<String
     Some(crate::i18n::tr_label(text).to_string())
 }
 
-/// The handles of the note's buttons, in order: the quarter turn, turning the offer off, then the
-/// dismissal. They are published for scripts; `stand_up:stand` and `stand_up:never` are the
-/// dialog's handles too.
-pub const NOTE_HANDLES: [&str; 3] = ["stand_up:stand", "stand_up:never", "stand_up:dismiss"];
+/// The handles of the note's buttons, in order: the quarter turn, then turning the offer off. They
+/// are published for scripts and are the dialog's handles too.
+pub const NOTE_HANDLES: [&str; 2] = ["stand_up:stand", "stand_up:never"];
+
+/// The handles of the note's close (×), which leaves the file as it opened (#7971):
+/// `toast:stand_up:close`, as every toast's, and `stand_up:dismiss`, the handle of the Close
+/// button it replaces, kept for scripts.
+pub const NOTE_CLOSE_HANDLES: [&str; 2] = ["toast:stand_up:close", "stand_up:dismiss"];
 
 /// The note's button labels, in the order of `NOTE_HANDLES`.
-pub(crate) fn note_labels() -> [String; 3] {
-    [crate::i18n::tr_label("Stand it up").to_string(), crate::i18n::tr_label("Don't ask again").to_string(), crate::i18n::tr("ui.close").to_string()]
+pub(crate) fn note_labels() -> [String; 2] {
+    [crate::i18n::tr_label("Stand it up").to_string(), crate::i18n::tr_label("Don't ask again").to_string()]
+}
+
+/// The share of the note's time left now, 1 to 0, for the countdown ring around its close (×).
+/// Pointing at it (`note_keep`) starts its time again, so the ring is full while it is pointed at.
+pub(crate) fn note_left(app: &SolveApp, ctx: &egui::Context) -> f32 {
+    let now = ctx.input(|i| i.time);
+    app.stand_up_note_since.map_or(1.0, |since| crate::viewport::countdown_left(since, now, NOTE_SECONDS))
 }
 
 /// The note was drawn at `rect`: a pointer on it keeps it from going.
@@ -283,7 +296,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let title = if app.stand_up_assembly { "Stand this assembly up?" } else { "Stand this part up?" };
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_stand_up"), "move", crate::i18n::tr_label(title))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_stand_up"), "move", crate::i18n::tr_label(title))
         .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 140.0))
         .actions("Stand it up", "Leave it", Some("Don't ask again"))
         .show(ctx, true, |ui| {

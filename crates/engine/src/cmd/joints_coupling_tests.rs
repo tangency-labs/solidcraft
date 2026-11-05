@@ -188,6 +188,22 @@ fn a_screw_advances_its_pitch_per_turn() {
     assert!(close_to(shown(&mut s, "Lift"), 10.0), "{}", shown(&mut s, "Lift"));
 }
 
+/// A coupling's length reads a bare number as millimetres in any design, so a parameter defined
+/// in it (`lead = 1.5`) keeps that millimetre, while `parameters.add` without a unit takes the
+/// design's units (#8865): the screw advances 1.5 mm a turn in an inch design too.
+#[test]
+fn a_pitch_defined_in_an_inch_design_reads_as_the_screw_does() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    base(&mut s);
+    part(&mut s, "Nut", [-1.0, -1.0, 0.0]);
+    pin(&mut s, "cylindrical", "Thread", "Base", "Nut", Vec3::ZERO, Vec3::Z);
+    run(&mut s, "joint.screw", json!({"joint": "Thread", "pitch": "lead = 1.5"}));
+    assert_eq!(s.doc.param("lead").map(|p| (p.expr.as_str(), p.unit.as_str())), Some(("1.5", "mm")));
+    let r = run(&mut s, "joint.drive", json!({"joint": "Thread", "values": [720]}));
+    assert!(close_to(r["values"][1]["value"].as_f64().unwrap_or(f64::NAN), 3.0), "{r}");
+}
+
 /// A motor gear turns the four-bar's crank: half as fast, the other way round, and the loop
 /// follows.
 #[test]
@@ -391,4 +407,25 @@ fn a_motion_link_takes_its_driven_joints_freedom_with_nothing_grounded() {
             assert_eq!(dof_of(&mut s, part), want, "{part}, gear first: {gear_first}");
         }
     }
+}
+
+/// Rolling the marker back works a gear's ratio out from the faces as they were then, so the
+/// editor's pinned model and its source differ in the link's ratio, and the edit still goes
+/// through.
+#[test]
+fn an_editor_accepts_the_ratios_rolling_the_marker_works_out() {
+    let mut s = gear_train();
+    let before = s.doc.features.len();
+    // G1's wall moves out to a radius of 12, so the link's ratio goes from -0.5 to -0.6.
+    run(&mut s, "solid.offset_face", json!({"faces": [[10, 0, 2.5]], "distance": 2}));
+    let ratio = |s: &Session| s.doc.assembly.links.first().map(|l| l.ratio).unwrap_or(f64::NAN);
+    assert!(close_to(ratio(&s), -0.6), "{}", ratio(&s));
+    let original = s.scratch();
+    run(&mut s, "timeline.roll_to", json!({"position": before}));
+    let source = s.scratch();
+    assert!(close_to(ratio(&source), -0.5), "before the offset, the pitch radius is 10: {}", ratio(&source));
+    let prepared = s.scratch().compute_editor_commands(&[], &source, original).unwrap();
+    s.accept_commands(prepared).unwrap();
+    assert_eq!(s.doc.marker, None);
+    assert!(close_to(ratio(&s), -0.6), "{}", ratio(&s));
 }

@@ -7,15 +7,17 @@
 //! renderer that drew it (`gpu`, `gpu-software` or `cpu`); `hardware` and `software` fail with an
 //! error that names the policy.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use solidcraft_geom::Vec3;
-use solidcraft_render::{AnalysisMode, Camera, Rgb, SECTION_CAP, Scene};
+use solidcore_record::Vec3;
+use solidcraft_render::hatch::Hatch;
+use solidcraft_render::{AnalysisMode, Camera, Rgb, SECTION_CAP, Scene, SceneMesh};
 use wgpu::util::DeviceExt;
 
-use crate::view::{AccessMap, Frame, GpuScene, GpuTarget, Renderer, analysis_colors, analysis_uniform};
+use crate::view::{AccessMap, DrawStats, Frame, GpuScene, GpuTarget, Palette, PaletteIndex, Renderer, analysis_colors, analysis_uniform};
 use crate::{GpuError, Result, caught, error_scopes};
 
 /// The colour format pictures are drawn in: sRGB bytes as they are, like the viewport's usual
@@ -106,13 +108,17 @@ impl Capturer {
         self.lost.load(Ordering::Acquire)
     }
 
-    /// [`Capturer::is_lost`], asking the driver first: an empty submission meets a loss the
-    /// driver reports and marks it, where the picture's first upload would panic inside wgpu.
+    /// [`Capturer::is_lost`], asking the driver first: a submission that opens a command list
+    /// meets a loss the driver reports and marks it, where the picture's first upload would
+    /// panic inside wgpu. As `egui_wgpu::DeviceLost::probe`: an empty submission only signals a
+    /// fence, which a reset D3D12 device let through (#6528).
     fn probe_lost(&self) -> bool {
         if self.is_lost() {
             return true;
         }
-        self.queue.submit([]);
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("device lost probe") });
+        encoder.insert_debug_marker("device lost probe");
+        self.queue.submit([encoder.finish()]);
         self.is_lost()
     }
 
@@ -176,6 +182,17 @@ impl Capturer {
     /// [`Capturer::rgba`] with `highlight` drawn as the viewport draws its highlight scene
     /// (selection and hover feedback), over the model scene.
     pub fn rgba_highlighted(&self, scene: &Scene, highlight: Option<GpuScene>, cam: &Camera, width: u32, height: u32) -> Result<Vec<u8>> {
+        self.draw(scene, highlight, cam, width, height).map(|(rgba, _)| rgba)
+    }
+
+    /// [`Capturer::rgba`] and what the picture drew ([`DrawStats`]). Both come from the same
+    /// turn on the device, so another thread's picture can't put its counts in their place.
+    pub fn rgba_with_stats(&self, scene: &Scene, cam: &Camera, width: u32, height: u32) -> Result<(Vec<u8>, DrawStats)> {
+        self.draw(scene, None, cam, width, height)
+    }
+
+    /// The picture and what it drew, both read while this call has the device to itself.
+    fn draw(&self, scene: &Scene, highlight: Option<GpuScene>, cam: &Camera, width: u32, height: u32) -> Result<(Vec<u8>, DrawStats)> {
         if !(1..=self.max_side).contains(&width) || !(1..=self.max_side).contains(&height) {
             return Err(GpuError::Render(format!("a picture is 1 to {} pixels a side, not {width} × {height}", self.max_side)));
         }
@@ -199,6 +216,12 @@ impl Capturer {
         // is built), so the previous picture's highlight would show in this one.
         frame.hl_key = state.key;
         frame.hl_slot = Arc::new(Mutex::new(Some(highlight.unwrap_or_default())));
+        self.picture(state, &frame, scene.background.unwrap_or(BACKGROUND), [width, height])
+    }
+
+    /// `frame` drawn over the `background` gradient, read back as straight RGBA, and what it
+    /// drew (read while the caller holds `state`).
+    fn picture(&self, state: &mut State, frame: &Frame, (top, bottom): (Rgb, Rgb), [width, height]: [u32; 2]) -> Result<(Vec<u8>, DrawStats)> {
         let (device, queue) = (&self.device, &self.queue);
         let scopes = error_scopes(device);
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
@@ -219,10 +242,9 @@ impl Capturer {
         let depth = texture("sc_capture_depth", self.depth, self.samples, wgpu::TextureUsages::RENDER_ATTACHMENT);
         let (resolved_view, depth_view) = (resolved.create_view(&Default::default()), depth.create_view(&Default::default()));
         let multisampled_view = multisampled.as_ref().map(|t| t.create_view(&Default::default()));
-        let (top, bottom) = scene.background.unwrap_or(BACKGROUND);
         let background = background_vertices(device, top, bottom);
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_capture") });
-        state.renderer.prepare(device, queue, &mut encoder, &frame);
+        state.renderer.prepare(device, queue, &mut encoder, frame);
         {
             let (view, resolve_target, store) = match &multisampled_view {
                 Some(ms) => (ms, Some(&resolved_view), wgpu::StoreOp::Discard),
@@ -254,7 +276,7 @@ impl Capturer {
             pass.set_pipeline(&state.background);
             pass.set_vertex_buffer(0, background.slice(..));
             pass.draw(0..6, 0..1);
-            state.renderer.paint(&frame, &mut pass, [0.0, 0.0, width as f32, height as f32]);
+            state.renderer.paint(frame, &mut pass, [0.0, 0.0, width as f32, height as f32]);
         }
         let row = width * 4;
         let padded = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
@@ -288,11 +310,7 @@ impl Capturer {
         device
             .poll(wgpu::PollType::Wait { submission_index: Some(submission), timeout: Some(TIMEOUT) })
             .map_err(|e| GpuError::Render(format!("waiting for the picture: {e}")))?;
-        match rx.try_recv() {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(GpuError::Render(format!("reading the picture back: {e}"))),
-            Err(_) => return Err(GpuError::Unsupported("reading a picture back without waiting for the browser".into())),
-        }
+        read_back(&rx)?;
         let data = slice.get_mapped_range().map_err(|e| GpuError::Render(format!("reading the picture back: {e}")))?;
         let mut rgba = Vec::with_capacity((row as usize) * (height as usize));
         for r in data.chunks(padded as usize).take(height as usize) {
@@ -301,13 +319,8 @@ impl Capturer {
         if rgba.len() != (row as usize) * (height as usize) {
             return Err(GpuError::Render("the picture read back short".into()));
         }
-        Ok(rgba)
-    }
-
-    /// What the last picture drew ([`crate::view::DrawStats`]).
-    pub fn last_stats(&self) -> crate::view::DrawStats {
-        let Ok(state) = self.state.lock() else { return Default::default() };
-        state.renderer.stats().lock().map(|s| *s).unwrap_or_default()
+        let stats = state.renderer.stats().lock().map(|s| *s).unwrap_or_default();
+        Ok((rgba, stats))
     }
 
     /// [`Capturer::rgba`] as PNG bytes.
@@ -389,13 +402,14 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         pv_key: 0,
         pv_slot: empty(),
         pv_hide: false,
+        preview_bounds: None,
         view_proj: cam.view_proj(f64::from(width) / f64::from(height.max(1)), scene.radius.max(1.0)).to_f32(),
         back: cam.back().to_f32(),
         size_px: [width as f32, height as f32],
         clip: scene.clip.map_or([0.0; 4], |(n, d)| [n.x as f32, n.y as f32, n.z as f32, d as f32]),
         cap: [f32::from(cap.0) / 255.0, f32::from(cap.1) / 255.0, f32::from(cap.2) / 255.0, if scene.plain_cap { 0.0 } else { 1.0 }],
         images: Vec::new(),
-        points: Vec::new(),
+        clouds: Vec::new(),
         analysis: analysis_uniform(mode, access.as_ref()),
         analysis_colors: scene.analysis.map_or([0.0; 36], |a| analysis_colors(&a.colors)),
         access,
@@ -403,9 +417,12 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         eye: [eye[0], eye[1], eye[2], if cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
         ao_samples: crate::view::AO_SAMPLES,
+        sky: [0.0; 4],
         ssaa: 1.0,
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
+        hatch: scene.part_hatch.map_or_else(Default::default, |c| c.map(|Rgb(r, g, b)| [r, g, b].map(|x| f32::from(x) / 255.0))),
+        moving: None,
     }
 }
 
@@ -413,24 +430,54 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
 /// normals; a face normal where a vertex has none), lines as wide lines (over everything when
 /// `on_top`), the grid under everything. A body whose appearance is see-through
 /// ([`solidcraft_render::SceneMesh::glass`]) goes into the scene's glass, drawn as the viewport
-/// draws glass: far sides first, then near sides, so what lies inside it shows through.
+/// draws glass: far sides first, then near sides, so what lies inside it shows through. When the
+/// scene hatches its cut by part ([`Scene::part_hatch`]), each body's colours are palette entries
+/// of its own, carrying its hatch.
 pub fn scene_geometry(scene: &Scene) -> GpuScene {
-    let mut sc = GpuScene::default();
-    for m in &scene.meshes {
-        let alpha = (m.alpha() * 255.0).round().clamp(0.0, 255.0) as u8;
-        let c4 = |c: Rgb| [c.0, c.1, c.2, alpha];
+    let by_part = scene.part_hatch.is_some() && scene.clip.is_some();
+    // Per body, its colours' stable entries (by part), and the stable palette they make.
+    let mut own: Vec<HashMap<[u8; 4], PaletteIndex>> = Vec::new();
+    let mut stable: Vec<[u8; 4]> = Vec::new();
+    let mut hatches: Vec<(PaletteIndex, Hatch)> = Vec::new();
+    let c4 = |m: &SceneMesh, c: Rgb| [c.0, c.1, c.2, (m.alpha() * 255.0).round().clamp(0.0, 255.0) as u8];
+    if by_part {
+        for m in &scene.meshes {
+            let mut map = HashMap::new();
+            for c in std::iter::once(m.color).chain(m.face_colors.iter().map(|(_, c)| *c)) {
+                map.entry(c4(m, c)).or_insert_with(|| {
+                    let i = PaletteIndex(u32::try_from(stable.len()).unwrap_or(0));
+                    stable.push(c4(m, c));
+                    hatches.push((i, m.hatch));
+                    i
+                });
+            }
+            own.push(map);
+        }
+    }
+    let mut palette = Palette::with_stable(stable);
+    for (i, h) in hatches {
+        palette.set_hatch(i, h);
+    }
+    let mut sc = GpuScene::with_palette(palette);
+    for (mi, m) in scene.meshes.iter().enumerate() {
         let faces: HashMap<u32, Rgb> = m.face_colors.iter().copied().collect();
         let mesh = &m.mesh;
         for (ti, t) in mesh.triangles.iter().enumerate() {
-            let col = sc.color(c4(mesh.tri_face.get(ti).and_then(|f| faces.get(f)).copied().unwrap_or(m.color)));
+            let rgba = c4(m, mesh.tri_face.get(ti).and_then(|f| faces.get(f)).copied().unwrap_or(m.color));
+            let col = match own.get(mi).and_then(|o| o.get(&rgba)) {
+                Some(i) => *i,
+                None => sc.color(rgba),
+            };
             let [Some(a), Some(b), Some(c)] = t.map(|k| mesh.positions.get(k as usize).copied()) else { continue };
             let flat = (b - a).cross(c - a).normalized().unwrap_or(Vec3::Z);
             for (k, p) in t.iter().zip([a, b, c]) {
                 let n = mesh.normals.get(*k as usize).copied().filter(|n| n.is_finite() && n.len() > 0.5).unwrap_or(flat);
                 if m.glass() {
                     sc.glass_tri(p.to_f32(), n.to_f32(), col);
-                } else {
+                } else if m.closed {
                     sc.tri(p.to_f32(), n.to_f32(), col);
+                } else {
+                    sc.open_tri(p.to_f32(), n.to_f32(), col);
                 }
             }
         }
@@ -462,6 +509,19 @@ fn watch_lost(device: &wgpu::Device) -> Arc<AtomicBool> {
         seen.store(true, Ordering::Release);
     });
     lost
+}
+
+/// The answer to a picture's read-back, once the wait for its submission is over. The read-back
+/// is ready by then, but its answer may still be on its way: any other submit or poll on the
+/// device (the window's frames, another picture's device check) can pick it up and answer it on
+/// its own thread once it lets go of the device. So a native picture waits for the answer; a
+/// browser answers later, on its own, and a picture can't wait for it there.
+fn read_back(answer: &std::sync::mpsc::Receiver<std::result::Result<(), wgpu::BufferAsyncError>>) -> Result<()> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let answer = answer.recv_timeout(TIMEOUT).map_err(|e| GpuError::Render(format!("reading the picture back: {e}")))?;
+    #[cfg(target_arch = "wasm32")]
+    let answer = answer.try_recv().map_err(|_| GpuError::Unsupported("reading a picture back without waiting for the browser".into()))?;
+    answer.map_err(|e| GpuError::Render(format!("reading the picture back: {e}")))
 }
 
 /// The background gradient: the viewport's top colour at the top, its bottom one at the bottom,
@@ -544,7 +604,6 @@ mod tests {
     use super::*;
     use crate::view::TRI_SIZE;
     use solidcraft_geom::Mesh;
-    use solidcraft_render::SceneMesh;
     use std::sync::Arc;
 
     /// One triangle facing the camera.
@@ -569,7 +628,14 @@ mod tests {
     /// headless picture of a translucent target shows the tool inside it.
     #[test]
     fn a_see_through_body_is_glass_at_its_own_alpha_and_a_solid_one_is_not() {
-        let mesh = |opacity: f32| SceneMesh { mesh: sheet(), color: Rgb(200, 30, 30), face_colors: Vec::new(), opacity };
+        let mesh = |opacity: f32| SceneMesh {
+            mesh: sheet(),
+            color: Rgb(200, 30, 30),
+            face_colors: Vec::new(),
+            opacity,
+            closed: true,
+            hatch: Default::default(),
+        };
         let geometry = |opacity: f32| scene_geometry(&Scene { meshes: vec![mesh(opacity)], ..Default::default() });
 
         let solid = geometry(1.0);
@@ -589,11 +655,109 @@ mod tests {
         assert_eq!(color(&trace, &trace.glass).map(|c| c[3]), Some(13), "0.05 of 255");
     }
 
+    /// Bodies dragged as a layer of their own ([`crate::view::MovingLayer`]) are drawn moved by
+    /// its transform: the picture is the one of the bodies built where they were moved to, and
+    /// the bodies go back to the model scene when the drag ends (on this machine's GPU, skipped
+    /// without one).
+    #[test]
+    fn a_moving_layer_is_drawn_moved_by_its_transform() {
+        let Ok(capturer) = Capturer::headless_single_sample() else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let wide = Arc::new(Mesh {
+            positions: vec![Vec3::new(-1.0, 0.0, -0.5), Vec3::new(0.2, 0.0, -0.5), Vec3::new(-0.4, 0.0, 0.6)],
+            ..(*sheet()).clone()
+        });
+        let shift = Vec3::new(0.6, 0.0, 0.3);
+        let at = |offset: Vec3| {
+            let mesh = Mesh { positions: wide.positions.iter().map(|p| *p + offset).collect(), ..(*wide).clone() };
+            Scene { meshes: vec![SceneMesh::solid(Arc::new(mesh), Rgb(200, 30, 30))], ..Default::default() }
+        };
+        // Two and a half units of the view's height either side.
+        let cam = Camera { distance: 6.0, ..Camera::default() };
+        let size = [64, 64];
+        let slot = |sc: GpuScene| Arc::new(Mutex::new(Some(sc)));
+        let Ok(mut state) = capturer.state.lock() else { panic!("capturer state") };
+        // Drawn where it was moved to.
+        let moved = frame(&at(shift), &cam, size, 1, None);
+        let expected = capturer.picture(&mut state, &moved, BACKGROUND, size).unwrap().0;
+        assert!(expected.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count() > 50, "the body shows");
+        // Drawn where it was, moved by the layer; the model scene empty.
+        let mut layered = frame(&Scene::default(), &cam, size, 2, None);
+        let transform = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [shift.x as f32, shift.y as f32, shift.z as f32, 1.0]];
+        layered.moving = Some(crate::view::MovingLayer { key: 3, slot: slot(scene_geometry(&at(Vec3::ZERO))), transform });
+        let drawn = capturer.picture(&mut state, &layered, BACKGROUND, size).unwrap().0;
+        let differ = expected.chunks(4).zip(drawn.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
+        assert!(differ <= 4, "{differ} pixels differ from the body drawn where it was moved to");
+        // The drag over: the model scene draws it, and nothing is drawn twice or left behind.
+        let after = frame(&at(shift), &cam, size, 4, None);
+        let back = capturer.picture(&mut state, &after, BACKGROUND, size).unwrap().0;
+        assert_eq!(back, expected);
+    }
+
+    /// A dragged component's parts drawn as instances (one copy of a part's triangles, placed
+    /// many times) move with its layer too, lit flat or smooth: the layer built where the drag
+    /// found them and moved by its transform draws what the model scene draws with the
+    /// placements moved.
+    #[test]
+    fn a_moving_layers_instances_are_drawn_moved_by_its_transform() {
+        let Ok(capturer) = Capturer::headless_single_sample() else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let flat = Mesh { positions: vec![Vec3::new(-1.0, 0.0, -0.5), Vec3::new(0.2, 0.0, -0.5), Vec3::new(-0.4, 0.0, 0.6)], ..(*sheet()).clone() };
+        let smooth = Mesh { normals: vec![Vec3::new(-0.2, -1.0, 0.0), Vec3::new(0.2, -1.0, 0.0), Vec3::new(0.0, -1.0, 0.2)], ..flat.clone() };
+        let shift = [0.6_f32, 0.0, 0.3];
+        let cam = Camera { distance: 6.0, ..Camera::default() };
+        let size = [64, 64];
+        let Ok(mut state) = capturer.state.lock() else { panic!("capturer state") };
+        for (k, mesh) in [flat, smooth].iter().enumerate() {
+            let tris = Arc::new(crate::view::SharedTris::new(mesh));
+            assert_eq!(tris.flat, k == 0);
+            let placed_at = |[x, y, z]: [f32; 3]| {
+                let mut inst = crate::view::InstancedMesh {
+                    key: 1,
+                    tris: tris.clone(),
+                    instances: Vec::new(),
+                    look: crate::view::InstanceLook::Opaque,
+                    levels: Vec::new(),
+                    closed: true,
+                };
+                let mut sc = GpuScene::default();
+                let red = sc.color([200, 30, 30, 255]);
+                inst.place([[1.0, 0.0, 0.0, x], [0.0, 1.0, 0.0, y], [0.0, 0.0, 1.0, z]], red);
+                sc.instanced = vec![inst];
+                Arc::new(Mutex::new(Some(sc)))
+            };
+            let key = 10 * k as u64;
+            // The model scene with the placement where it was moved to.
+            let mut moved = frame(&Scene::default(), &cam, size, key + 1, None);
+            moved.slot = placed_at(shift);
+            let expected = capturer.picture(&mut state, &moved, BACKGROUND, size).unwrap().0;
+            assert!(expected.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count() > 50, "the part shows");
+            // Placed where it was, in the layer moved by the drag; the model scene empty.
+            let mut layered = frame(&Scene::default(), &cam, size, key + 2, None);
+            let transform = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [shift[0], shift[1], shift[2], 1.0]];
+            layered.moving = Some(crate::view::MovingLayer { key: key + 3, slot: placed_at([0.0; 3]), transform });
+            let drawn = capturer.picture(&mut state, &layered, BACKGROUND, size).unwrap().0;
+            let differ = expected.chunks(4).zip(drawn.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
+            assert!(differ <= 4, "flat {}: {differ} pixels differ from the part placed where it was moved to", k == 0);
+        }
+    }
+
     /// A face with a colour of its own is drawn in that colour, and takes its body's opacity:
     /// painting one face does not make the body solid again.
     #[test]
     fn a_painted_face_keeps_its_bodys_opacity() {
-        let mesh = SceneMesh { mesh: sheet(), color: Rgb(200, 30, 30), face_colors: vec![(0, Rgb(0, 255, 0))], opacity: 0.5 };
+        let mesh = SceneMesh {
+            mesh: sheet(),
+            color: Rgb(200, 30, 30),
+            face_colors: vec![(0, Rgb(0, 255, 0))],
+            opacity: 0.5,
+            closed: true,
+            hatch: Default::default(),
+        };
         let sc = scene_geometry(&Scene { meshes: vec![mesh], ..Default::default() });
         assert_eq!(sc.tris.len(), 0);
         assert_eq!(color(&sc, &sc.glass), Some([0, 255, 0, 128]), "the face's own colour at the body's alpha");
