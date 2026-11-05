@@ -12,6 +12,9 @@ use crate::options::Options;
 
 /// Most commands in one `batch` call.
 const MAX_BATCH: usize = 10_000;
+
+/// The largest script file `batch` reads (`path`).
+const MAX_SCRIPT_BYTES: usize = 32 << 20;
 /// Largest image returned by `screenshot`.
 const MAX_IMAGE_BYTES: usize = 32 << 20;
 /// Relative tolerance on an expected volume (`expect.tol`) when the call gives none.
@@ -179,9 +182,10 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              rollback: false), so the batch is all-or-nothing; the reply names the failing step (index from 0), its error, \
              every result before it, whether the design really went back (rolled_back), the steps whose changes are in the \
              design (applied) and those never sent (not_run). The usual way to build a part: sketch, draw, dimension, \
-             finish, extrude, fillet… in one call. Give `expect` {volume_mm3, tol, bodies, bbox} with the numbers you computed \
-             beforehand: after the last step the design is measured and compared, so no separate measure call is needed; a \
-             mismatch is flagged as an error naming it, and the design is kept as built.",
+             finish, extrude, fillet… in one call. A long one (a polyline of hundreds of points) can be written to a JSON \
+             file and passed as `path` instead of `commands`. Give `expect` {volume_mm3, tol, bodies, bbox} with the numbers \
+             you computed beforehand: after the last step the design is measured and compared, so no separate measure call is \
+             needed; a mismatch is flagged as an error naming it, and the design is kept as built.",
             obj(
                 json!({
                     "commands": {
@@ -189,6 +193,9 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                         "description": "Steps: [{\"command\": id, \"params\": {...}}, ...]",
                         "items": {"type": "object", "properties": {"command": {"type": "string"}, "params": {"type": "object"}}, "required": ["command"]},
                     },
+                    "path": string("Instead of `commands`: a JSON file holding the steps, an array or {\"commands\": [...]} (as \
+                     `solidcraft-cli run` takes and `solidcraft-cli script` writes), read by this server within the folders the \
+                     agent may use; the steps run as if they had been sent here"),
                     "rollback": {"type": "boolean", "description": "Undo completed steps when one fails (default true)"},
                     "coalesce_parameters": {"type": "boolean", "description": "Set each run of consecutive plain parameter edits (parameters.change or set_parameter with a name and a value, or changes) together, rebuilding the design once for the run instead of once per edit; a run that is refused goes step by step, naming the refused step. Other steps still see the design up to date. Each step keeps its own result; the run is one undo step (default false)"},
                     "timings": {"type": "boolean", "description": "Add `timings`: [{index, command, ms}] for every step run (the failing one included) and `total_ms` (default false)"},
@@ -196,7 +203,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "verbose": {"type": "boolean", "description": "false: a compact reply. Feature steps leave out the full body list (created_bodies, changed_bodies and removed_bodies stay), sketch steps the ids they repeat outside `created` (default true)"},
                     "expect": expect_schema(),
                 }),
-                &["commands"],
+                &[],
             ),
             Effect::Files,
         ),
@@ -1359,6 +1366,32 @@ fn inspect_design_compact(b: &mut dyn Backend, a: &Map<String, Value>) -> Result
     Ok(d)
 }
 
+/// The steps of the script file `batch` was given as `path` (`None`: it was given `commands`).
+/// A file it can't read, or whose steps aren't a list, fails the batch before anything is sent.
+fn script_file(a: &Map<String, Value>) -> Result<Option<Vec<Value>>, String> {
+    let Some(path) = a.get("path") else { return Ok(None) };
+    let Some(path) = path.as_str().map(str::trim).filter(|p| !p.is_empty()) else {
+        return Err("`path` must name a script file".into());
+    };
+    if a.contains_key("commands") {
+        return Err("give `commands` or `path`, not both".into());
+    }
+    let text = vfs::read_to_string(path, MAX_SCRIPT_BYTES).map_err(|e| format!("script file `{path}`: {e}"))?;
+    let script: Value = serde_json::from_str(&text).map_err(|e| format!("script file `{path}` is not JSON: {e}"))?;
+    let steps = match script {
+        Value::Array(steps) => steps,
+        Value::Object(mut o) => match o.remove("commands") {
+            Some(Value::Array(steps)) => steps,
+            _ => return Err(format!("script file `{path}`: no `commands` array")),
+        },
+        _ => return Err(format!("script file `{path}`: steps must be an array or {{\"commands\": [...]}}")),
+    };
+    if steps.is_empty() {
+        return Err(format!("script file `{path}` has no steps"));
+    }
+    Ok(Some(steps))
+}
+
 /// `set_parameter`'s new value: `value` or `expression` (the parameters.change name), one of
 /// them, or both when they agree (`50` and `"50"` do).
 fn parameter_value(a: &Map<String, Value>) -> Result<Value, String> {
@@ -1466,7 +1499,11 @@ fn atomic_layout_refusal(count: usize, rule: solidcraft_engine::panels::Rule, de
 
 /// The batch itself: its reply and whether it failed.
 fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
-    let Some(steps) = a.get("commands").and_then(Value::as_array) else {
+    let from_file = match script_file(a) {
+        Ok(f) => f,
+        Err(e) => return (json!(e), true),
+    };
+    let Some(steps) = from_file.as_ref().map_or_else(|| a.get("commands").and_then(Value::as_array), Some) else {
         return (json!("`commands` must be an array of {command, params}"), true);
     };
     if steps.len() > MAX_BATCH {
