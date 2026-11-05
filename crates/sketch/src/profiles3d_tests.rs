@@ -1,14 +1,15 @@
 //! Tests for planar 3D loop detection (#741): the pyramid of the issue report, skew loops,
 //! nesting, tolerance, and the no-duplication rule against the 2D profiles.
 
-use solidcraft_geom::{Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::model::{CurveKind, Sketch};
 use crate::profiles3d::find_planar_3d_profiles;
 use crate::wire::WireSpace;
 
 fn wire(id: &str, pts: &[Vec3]) -> crate::wire::Wire {
-    crate::wire::Wire { id: id.into(), pts: pts.to_vec(), space: WireSpace::Component, link: None, fit: Vec::new(), arc: None }
+    crate::wire::Wire { id: id.into(), pts: pts.to_vec(), space: WireSpace::Component, link: None, fit: Vec::new(), arc: None, exact: Vec::new() }
 }
 
 /// The issue's pyramid: a 20×20 square on XY, 3D lines from its corners to an apex at (0,0,15).

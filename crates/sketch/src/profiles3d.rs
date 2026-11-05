@@ -16,7 +16,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use solidcraft_geom::{Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Plane, Region2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::model::{Curve, CurveKind, Sketch};
 use crate::profiles::find_profiles;
