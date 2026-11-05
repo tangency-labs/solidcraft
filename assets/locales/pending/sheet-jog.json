@@ -25,5 +25,32 @@
     "Offset": "偏移",
     "Start of Jog": "错位起点",
     "cmd.sheet_jog": "错位折弯"
+  },
+  "ar": {
+    "End of Jog": "نهاية الخطوة",
+    "Jog Line": "خط الخطوة",
+    "Measure": "القياس",
+    "Middle of Jog": "منتصف الخطوة",
+    "Offset": "الإزاحة",
+    "Start of Jog": "بداية الخطوة",
+    "cmd.sheet_jog": "خطوة إزاحة"
+  },
+  "he": {
+    "End of Jog": "סוף המדרגה",
+    "Jog Line": "קו המדרגה",
+    "Measure": "מדידה",
+    "Middle of Jog": "אמצע המדרגה",
+    "Offset": "היסט",
+    "Start of Jog": "תחילת המדרגה",
+    "cmd.sheet_jog": "מדרגה"
+  },
+  "vi": {
+    "End of Jog": "Cuối bậc",
+    "Jog Line": "Đường bậc",
+    "Measure": "Cách đo",
+    "Middle of Jog": "Giữa bậc",
+    "Offset": "Độ lệch",
+    "Start of Jog": "Đầu bậc",
+    "cmd.sheet_jog": "Bậc lệch"
   }
 }
