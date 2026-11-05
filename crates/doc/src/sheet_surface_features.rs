@@ -42,12 +42,13 @@ fn straight(e: &FreeEdge) -> Result<(Vec2, Vec2, Vec2)> {
 impl SurfaceSheet {
     /// The free edge of the sheet nearest the point `p` (the body's coordinates), on a face of a
     /// planar panel or its rim: one no joint runs along. `None` when no such edge is within twice
-    /// the thickness of `p`.
+    /// the thickness of `p`; refused where a bend's edge is nearer than any free one.
     pub fn free_edge_at(&self, p: Vec3) -> Result<Option<FreeEdge>> {
         let dev = develop(&self.sheet, 0).map_err(|e| DocError::Invalid(e.to_string()))?;
         let folded = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places)?;
         let t = self.sheet.thickness;
         let mut best: Option<(f64, FreeEdge)> = None;
+        let mut bent = f64::INFINITY;
         for (i, (panel, place)) in self.sheet.panels.iter().zip(&folded.places).enumerate() {
             let (Surface::Plane, Some(place)) = (&panel.surface, place) else { continue };
             let q = place.inverse().point(p);
@@ -58,17 +59,23 @@ impl SurfaceSheet {
             for l in std::iter::once(&panel.region.outer).chain(&panel.region.holes) {
                 for s in &l.segs {
                     let Seg2::Line { a, b } = *s else { continue };
-                    if self.joined(i, a, b) {
-                        continue;
-                    }
                     let d = s.point_at(s.closest_param(at).clamp(0.0, 1.0)).dist(at);
                     let off = (q.z.clamp(0.0, t) - q.z).abs();
                     let dist = (d * d + off * off).sqrt();
+                    if let Some(j) = self.joint_along(i, a, b) {
+                        if matches!(j.kind, JointKind::Bend(_)) {
+                            bent = bent.min(dist);
+                        }
+                        continue;
+                    }
                     if dist <= t * 2.0 + 1e-3 && best.as_ref().is_none_or(|(x, _)| dist < *x) {
                         best = Some((dist, FreeEdge { panel: i, a, b, far_face: q.z > t / 2.0 }));
                     }
                 }
             }
+        }
+        if bent <= t * 2.0 + 1e-3 && best.as_ref().is_none_or(|(x, _)| bent < *x) {
+            return err("that is a bend line, not a free edge of the sheet: pick a free edge");
         }
         Ok(best.map(|(_, e)| e))
     }
@@ -219,13 +226,26 @@ impl SurfaceSheet {
                 .any(|j| matches!(j.kind, JointKind::Rip(_)) && ((j.a.panel == i && j.b.panel == k) || (j.a.panel == k && j.b.panel == i)))
     }
 
-    /// Whether a joint runs along the edge `a`–`b` of panel `i` (its anchor line holds both ends).
-    fn joined(&self, i: usize, a: Vec2, b: Vec2) -> bool {
-        let on = |an: &Anchor| {
-            let off = |p: Vec2| (p - an.origin).cross(an.dir).abs();
-            an.panel == i && off(a) <= 1e-6 && off(b) <= 1e-6
-        };
-        self.sheet.joints.iter().any(|j| on(&j.a) || on(&j.b))
+    /// The joint that runs along the edge `a`–`b` of panel `i`: its anchor line holds both ends,
+    /// or, a bend's, the edge lies beside the bend in the strip its band takes, up to a thickness
+    /// past its anchor away from the panel's material (where the bend's sharp was drawn inside the
+    /// panel's edge).
+    fn joint_along(&self, i: usize, a: Vec2, b: Vec2) -> Option<&Joint> {
+        let t = self.sheet.thickness;
+        self.sheet.joints.iter().find(|j| {
+            let (band, length) = match &j.kind {
+                JointKind::Bend(bend) => (t, Some(bend.length)),
+                _ => (0.0, None),
+            };
+            // The `a` anchor's material lies on its left, the `b` anchor's on its right.
+            [(&j.a, 1.0), (&j.b, -1.0)].into_iter().any(|(an, side)| {
+                let off = |p: Vec2| -side * an.dir.cross(p - an.origin);
+                let (oa, ob) = (off(a), off(b));
+                let along = (a.lerp(b, 0.5) - an.origin).dot(an.dir);
+                let beside = length.is_none_or(|l| along >= -1e-6 && along <= l + 1e-6);
+                an.panel == i && (oa - ob).abs() <= 1e-6 && oa >= -1e-6 && oa <= band + 1e-6 && beside
+            })
+        })
     }
 
     /// Moves the edge `a`–`b` of panel `i` `by` mm outward (inward where negative): the panel
@@ -321,6 +341,10 @@ impl SurfaceSheet {
             return err("the flange angle must be between 0 and 180°");
         }
         let (a, b, d) = straight(&edge)?;
+        let on = |l: &Loop2| l.segs.iter().any(|s| matches!(*s, Seg2::Line { a: x, b: y } if x.dist(a) <= 1e-9 && y.dist(b) <= 1e-9));
+        if self.sheet.panels.get(edge.panel).is_some_and(|x| x.region.holes.iter().any(on)) {
+            return err("not supported yet: a flange on the edge of a hole");
+        }
         let t = self.sheet.thickness;
         let half = (angle / 2.0).tan();
         // How far inside the edge the bend starts, as a flange-built sheet has it.

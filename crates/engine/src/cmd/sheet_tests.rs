@@ -59,10 +59,7 @@ fn plain_solid_sheet_operations_explain_how_to_start_sheet_metal() {
         let error = s.execute(command, &params).unwrap_err();
         let crate::EngineError::BadParams { cmd, msg } = error else { panic!("{error}") };
         assert_eq!(cmd, command);
-        assert_eq!(
-            msg,
-            "there is no sheet metal body: start one with Flange > Base, or turn a body into sheet metal with Convert to Sheet Metal"
-        );
+        assert_eq!(msg, "there is no sheet metal body: start one with Flange > Base, or turn a body into sheet metal with Convert to Sheet Metal");
         assert_eq!(s.doc.to_json(), before);
     }
 }
@@ -497,8 +494,9 @@ fn base_and_edge_flange_follow_the_k_factor() {
     assert!((f["flat_size_mm"][1].as_f64().unwrap_or(0.0) - want).abs() < 1e-6, "{f}");
     assert_eq!(f["bends"][0]["direction"], "up");
     assert!(rel(volume(&mut s), 18972.622) < 1e-4, "{}", volume(&mut s));
+    // An L run 100 along X: eight faces round its section and its two ends.
     let m = run(&mut s, "inspect.measure", json!({}));
-    assert_eq!(m["total"]["faces"], 14, "{m}");
+    assert_eq!(m["total"]["faces"], 10, "{m}");
     // The angle is a parameter: 45° (oracle 70 uses height 15).
     let names = s.doc.features.last().map(|f| f.param_names.clone()).unwrap_or_default();
     run(&mut s, "parameters.change", json!({"name": names[0], "expression": "15"}));
@@ -1756,10 +1754,8 @@ fn an_edge_flange_made_after_a_cut_runs_along_the_edge_the_cut_left() {
     let bends = f["bends"].as_array().cloned().unwrap_or_default();
     assert_eq!(bends.len(), 1, "{f}");
     let x = |k: &str| bends[0][k][0].as_f64().unwrap_or(f64::NAN);
-    assert!(
-        (x("start") - 100.0).abs() < 1e-9 && (x("end") - 200.0).abs() < 1e-9 && (bends[0]["length"].as_f64().unwrap_or(0.0) - 100.0).abs() < 1e-9,
-        "{f}"
-    );
+    let (lo, hi) = (x("start").min(x("end")), x("start").max(x("end")));
+    assert!((lo - 100.0).abs() < 1e-9 && (hi - 200.0).abs() < 1e-9 && (bends[0]["length"].as_f64().unwrap_or(0.0) - 100.0).abs() < 1e-9, "{f}");
     assert_eq!(f["outline"].as_array().map(Vec::len), Some(1), "{f}");
     // The flat pattern: the plate less the cut, and the flange (π of bend, 37 of panel) on 100 mm.
     assert!((flat_area(&f) - (14_000.0 + 100.0 * (PI + 37.0))).abs() < 1e-6, "{}", flat_area(&f));
@@ -1838,13 +1834,17 @@ fn edge_flanges_on_either_side_of_a_notch_span_the_side_they_were_picked_on() {
         assert!(no_errors_or_warnings(&s), "{edges}: {:?}", s.model.results);
         let f = flat(&mut s);
         let want: Vec<(f64, f64)> = [(0.0, 80.0), (120.0, 200.0)].into_iter().zip(sides).filter_map(|(span, on)| on.then_some(span)).collect();
-        let bends: Vec<(f64, f64)> = f["bends"]
+        let mut bends: Vec<(f64, f64)> = f["bends"]
             .as_array()
             .cloned()
             .unwrap_or_default()
             .iter()
-            .map(|b| (b["start"][0].as_f64().unwrap_or(f64::NAN), b["end"][0].as_f64().unwrap_or(f64::NAN)))
+            .map(|b| {
+                let (x0, x1) = (b["start"][0].as_f64().unwrap_or(f64::NAN), b["end"][0].as_f64().unwrap_or(f64::NAN));
+                (x0.min(x1), x0.max(x1))
+            })
             .collect();
+        bends.sort_by(|a, b| a.0.total_cmp(&b.0));
         assert!(
             bends.len() == want.len() && bends.iter().zip(&want).all(|(b, w)| (b.0 - w.0).abs() < 1e-9 && (b.1 - w.1).abs() < 1e-9),
             "{edges}: {f}"
@@ -1868,26 +1868,27 @@ fn edge_flanges_on_either_side_of_a_notch_span_the_side_they_were_picked_on() {
             assert!(rel(volume(&mut s), area * 2.0) < 1e-4, "{edges}, {command}: {}", volume(&mut s));
         }
     }
-    // An edge that a cut has taken whole is refused.
+    // An edge that a cut has taken whole is refused: there is no edge where it was.
     let mut s = Session::default();
     plate_with_a_cut(&mut s, [[-10.0, -10.0], [210.0, 30.0]]);
     let e = s.execute("sheet.flange", &json!({"edges": [[100, 0, 2]], "height": 40})).map(|_| ()).unwrap_err().to_string();
-    assert!(e.contains("a cut-out has taken that edge away"), "{e}");
+    assert!(e.contains("no free edge of the sheet lies at (100.000, 0.000, 2.000)"), "{e}");
 }
 
 #[test]
 fn an_edge_flange_beside_a_ledge_as_tall_as_its_setback_or_a_little_taller_folds() {
     // A 100 x 60 plate (2 mm, K 0.5) with a ledge 3 wide beside the right end of its bottom edge,
     // and a 90° flange 20 high on that edge, radius 1: setback 3 inside, half of it in the
-    // middle; BA π, panel 17. A ledge as tall as the setback goes with the strip the setback
-    // takes, and the bend runs along what the base keeps, x 0 … 97. One 0.05 taller keeps that
-    // sliver above the bend line, and the bend runs on under it, x 0 … 100. Both used to fail
-    // with "sew: a degenerate edge": the first square to the axes, the second turned off them
-    // (a 5-12-13 slope) in the middle.
+    // middle; BA π, panel 17. The flange spans the edge picked, x 0 … 100: a ledge as tall as
+    // the setback goes with the strip the setback takes, one 0.05 taller keeps that sliver above
+    // the bend line, and the bend runs under the ledge either way (a ledge a hair shorter or
+    // taller doesn't move it 3 mm). Both used to fail with "sew: a degenerate edge": the first
+    // square to the axes, the second turned off them (a 5-12-13 slope) in the middle.
     for turn in [0.0, (5.0f64 / 13.0).asin()] {
         let at = |x: f64, y: f64| [x * turn.cos() - y * turn.sin(), x * turn.sin() + y * turn.cos()];
         for (position, setback) in [("inside", 3.0), ("middle", 3.0 / 2.0)] {
-            for (taller, len) in [(0.0, 97.0), (0.05, 100.0)] {
+            for taller in [0.0, 0.05] {
+                let len = 100.0;
                 let what = format!("{position}, ledge {setback} + {taller}, turned {turn:.4}");
                 let ledge = setback + taller;
                 let mut s = Session::default();
@@ -1920,7 +1921,7 @@ fn an_edge_flange_beside_a_ledge_as_tall_as_its_setback_or_a_little_taller_folds
                     contains(&s, [x, y, z])
                 };
                 assert!(here(50.0, setback - 2.0, 10.0) && here(95.0, 10.0, 1.0) && !here(98.5, 10.0, 1.0), "{what}");
-                assert_eq!(here(98.5, setback - 2.0, 10.0), taller > 0.0, "{what}");
+                assert!(here(98.5, setback - 2.0, 10.0), "{what}");
                 let state = s.model.state();
                 let body = &state.bodies[0].body;
                 assert!(body.validity().is_empty() && body.shell_count() == 1, "{what}");
@@ -1951,8 +1952,13 @@ fn an_edge_flange_on_a_flange_runs_along_what_a_flat_cut_left_of_its_far_edge() 
     assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
     let f = flat(&mut s);
     let bends = f["bends"].as_array().cloned().unwrap_or_default();
-    let spans: Vec<(f64, f64)> =
-        bends.iter().map(|b| (b["start"][0].as_f64().unwrap_or(f64::NAN), b["end"][0].as_f64().unwrap_or(f64::NAN))).collect();
+    let spans: Vec<(f64, f64)> = bends
+        .iter()
+        .map(|b| {
+            let (x0, x1) = (b["start"][0].as_f64().unwrap_or(f64::NAN), b["end"][0].as_f64().unwrap_or(f64::NAN));
+            (x0.min(x1), x0.max(x1))
+        })
+        .collect();
     let close = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9;
     assert!(spans.len() == 2 && close(spans[0], (0.0, 200.0)) && close(spans[1], (60.0, 200.0)), "{f}");
     // The plate, the wall less the cut's 60 × (π + 7), and 140 × (π + 12) of the flange on it.
@@ -3259,7 +3265,7 @@ fn a_bend_relief_left_out_is_reported_on_the_flange() {
     run(&mut s, "sheet.manage_rules", json!({"name": "AL2", "relief_width": "0 mm"}));
     run(&mut s, "sheet.flange", json!({"edges": [[90, 30, 2]], "height": 15, "angle": 90}));
     let w = s.model.results.last().and_then(|r| r.warning.clone()).unwrap_or_default();
-    assert!(w.contains("no bend relief at (20.000, 27.000, 0.000)") && w.contains("relief width"), "{w}");
+    assert!(w.contains("no bend relief at (20.000, 27.000, 2.000)") && w.contains("relief width"), "{w}");
     assert!(contains(&s, [10.0, 50.0, 1.0]), "the leg is kept");
 }
 

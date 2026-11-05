@@ -25,6 +25,11 @@ use crate::{DocError, Result};
 const SAMPLES: usize = 16;
 /// How far (mm) a folded edge's points may lie from the line or the arc it is taken for.
 const ON_CURVE: f64 = 1e-9;
+/// How far an arc of an edge may lie off the plane of the arc a thickness away and the wall
+/// between them still be that plane (a bend's or a roll's end). Folding a part 100 mm across
+/// leaves its points about 1e-9 off where they would be exactly; a wall taken for a cone that near
+/// its plane would be a cone with no height (a half angle of 90°), which no kernel takes.
+const IN_PLANE: f64 = 1e-7;
 /// How far (mm) a chain of cubic pieces may lie from the folded edge it stands in for.
 const CHAIN_TOL: f64 = 1e-7;
 /// The most cubic pieces the kernel takes in one chain.
@@ -372,7 +377,7 @@ fn wall(bottom: &EdgeSpec, top: &EdgeSpec) -> Result<SurfSpec> {
         (&EdgeSpec::Arc { a, b, mid }, &EdgeSpec::Arc { a: ta, b: tb, mid: tm }) => {
             let (c, n) = circle(a, mid, b).ok_or_else(|| DocError::Invalid("an arc of the folded sheet has no circle".into()))?;
             // In one plane: a bend's or a roll's end.
-            if [ta, tb, tm].iter().all(|p| (*p - c).dot(n).abs() <= ON_CURVE) {
+            if [ta, tb, tm].iter().all(|p| (*p - c).dot(n).abs() <= IN_PLANE) {
                 return Ok(SurfSpec::Plane);
             }
             // Moved square off its panel: a round edge of a planar panel.

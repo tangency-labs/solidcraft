@@ -56,6 +56,9 @@ pub struct Development {
     /// What is cut from the flat, from every piece it reaches: the corners' reliefs, then the
     /// sheet's cuts.
     pub cuts: Vec<Region2>,
+    /// The bend ends a panel runs on past where the bend's relief has no width to cut: the
+    /// bend's joint, the panel, and where along the joint the end lies.
+    pub unrelieved: Vec<(usize, usize, f64)>,
 }
 
 /// A panel laid flat, its rips' cuts taken off. For each loop of its region, `origins` gives what
@@ -916,7 +919,11 @@ fn add_zone(
         for (relief, u, out_dir) in [(bend.relief.0, u0, -1.0), (bend.relief.1, u1, 1.0)] {
             let Relief::Slot { width: w, depth: d } = relief else { continue };
             let runs_on = if out_dir < 0.0 { lo < u - w - EDGE_TOL } else { hi > u + w + EDGE_TOL };
-            if !(runs_on && w > 0.0) {
+            if !runs_on {
+                continue;
+            }
+            if !(w > 0.0) {
+                out.unrelieved.push((j, panel, u));
                 continue;
             }
             let (s0, s1) = if out_dir < 0.0 { (u - w, u) } else { (u, u + w) };

@@ -2457,6 +2457,8 @@ impl SurfaceSheet {
         }
         self.settle(&dev)?;
         let dev = develop(&self.sheet, 0).map_err(|e| DocError::Invalid(e.to_string()))?;
+        let unrelieved = self.unrelieved(&dev)?;
+        self.notes.extend(unrelieved);
         let mut work = FlatWork::new();
         let pieces = crate::sheet_surface::pieces(&dev, &mut work)?;
         let regions = crate::sheet_surface::join_pieces(&pieces, &mut work)?;
@@ -2546,6 +2548,30 @@ impl SurfaceSheet {
                 .ok_or_else(|| DocError::Invalid("a recess takes the whole sheet".into()))?;
         }
         Ok(body)
+    }
+
+    /// Where `dev` cut no bend relief past a bend's end that a panel runs on past, the relief
+    /// having no width: a note for each, at the end on that panel's tangent line.
+    fn unrelieved(&self, dev: &Development) -> Result<Vec<String>> {
+        if dev.unrelieved.is_empty() {
+            return Ok(Vec::new());
+        }
+        let places = fold_onto(&self.sheet, dev, &self.places)?.places;
+        let t = self.sheet.thickness;
+        let mut notes = Vec::new();
+        for &(j, panel, u) in &dev.unrelieved {
+            let Some(Joint { a, b, kind: JointKind::Bend(bend) }) = self.sheet.joints.get(j) else { continue };
+            // The `a` panel's material lies left of its anchor, the `b` panel's right.
+            let (an, side) = if a.panel == panel { (a, 1.0) } else { (b, -1.0) };
+            let c = an.origin + an.dir * u + an.dir.perp() * (side * bend.setback(t));
+            let Some(place) = places.get(panel).copied().flatten() else { continue };
+            let note =
+                format!("no bend relief at {}: the relief width {:.4} mm leaves nothing to cut", at(place.point(c.extend(0.0))), self.reliefs.width);
+            if !notes.contains(&note) {
+                notes.push(note);
+            }
+        }
+        Ok(notes)
     }
 
     /// Settles where the sheet's bends end (see [`settle`]), from where its development `dev`

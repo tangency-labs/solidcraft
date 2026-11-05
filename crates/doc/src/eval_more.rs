@@ -572,8 +572,23 @@ fn surface_sheet_at(st: &ModelState, body: &Option<crate::BodyName>, pick: Optio
     if let Some(n) = body {
         return st.surface_sheets.iter().position(|s| &s.body == n);
     }
+    // A sheet that refuses the pick (a bend line, not a free edge) is the pick's, so its reason
+    // is the feature's.
     let p = pick?;
-    st.surface_sheets.iter().position(|s| s.free_edge_at(p).ok().flatten().is_some())
+    st.surface_sheets.iter().position(|s| !matches!(s.free_edge_at(p), Ok(None)))
+}
+
+/// Whether every sheet of the model is made from surfaces (and there is one).
+fn only_surface_sheets(st: &ModelState) -> bool {
+    st.sheets.is_empty() && !st.surface_sheets.is_empty()
+}
+
+/// Why a pick no sheet made from surfaces holds an edge at was refused.
+fn no_free_edge(pick: Option<Vec3>) -> DocError {
+    match pick {
+        Some(p) => DocError::Invalid(format!("no free edge of the sheet lies at ({:.3}, {:.3}, {:.3}): pick one on the sheet", p.x, p.y, p.z)),
+        None => DocError::Invalid("pick a free edge of the sheet".into()),
+    }
 }
 
 /// The sheet made from surfaces a fold is on, and its line's ends where they are now: the sketch
@@ -801,6 +816,7 @@ pub(super) fn sheet_eval(
             }
             Ok(())
         }
+        FeatureKind::SheetFlange { edges, body: None, .. } if only_surface_sheets(st) => Err(no_free_edge(edges.first().map(|e| e.point.0))),
         FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief, height_from } => {
             let i = sheet_for(st, body, edges.first().map(|e| e.point.0))?;
             let (h, a) = (val(vals, height, Kind::Length)?, val(vals, angle, Kind::Angle)?);
@@ -890,6 +906,7 @@ pub(super) fn sheet_eval(
             }
             rebuild_surface_sheet(st, i)
         }
+        FeatureKind::SheetPath { edge, body: None, .. } if only_surface_sheets(st) => Err(no_free_edge(Some(edge.0))),
         FeatureKind::SheetPath { edge, sketch, curves, radius, body } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
             if curves.is_empty() || curves.len() > sheet::MAX_PATH_LINES {
@@ -1030,6 +1047,7 @@ pub(super) fn sheet_eval(
             }
             rebuild_surface_sheet(st, i)
         }
+        FeatureKind::SheetHem { edges, body: None, .. } if only_surface_sheets(st) => Err(no_free_edge(edges.first().map(|p| p.0))),
         FeatureKind::SheetHem { edges, length, gap, flip, body } => {
             let i = sheet_for(st, body, edges.first().copied().map(Vec3::from))?;
             let l = val(vals, length, Kind::Length)?;
