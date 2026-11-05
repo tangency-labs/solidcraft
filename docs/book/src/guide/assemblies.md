@@ -564,7 +564,7 @@ geometry, so it doesn't evaluate the model or re-seat joints again.
 
 ## Finding things in the browser
 
-The magnifier in the browser's header row (or Ctrl+F with the pointer over the browser) opens a
+The magnifier in the browser's header row (or Ctrl+F with the pointer over the browser, unless you gave Ctrl+F to a command) opens a
 field over that row, which keeps its height. It finds components, bodies, sketches, construction planes and joints by name. It finds the text anywhere in a name,
 ignoring case. With `*` (any text) or `?` (any one character) in it, the whole name must match:
 `*:1` finds every first instance. Each placement of a component is found on its own, so a bolt

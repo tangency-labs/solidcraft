@@ -1439,8 +1439,10 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     } else if ui.rect_contains_pointer(ui.max_rect())
         && !ui.ctx().text_edit_focused()
         && ui.input(|i| i.modifiers.command_only() && i.key_pressed(egui::Key::F))
+        && crate::keymap::commands_for(app, &crate::keymap::key_name(egui::Key::F, egui::Modifiers::COMMAND)).is_empty()
     {
-        // A field being typed in keeps the keyboard.
+        // A field being typed in keeps the keyboard, and a command given this key keeps it: the
+        // magnifier opens the search then.
         show_search(app);
     }
     if !render {
@@ -1520,12 +1522,15 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     let bodies = app.session.model.state().bodies.len();
     let key = if bodies == 1 { "ui.browser_bodies_one" } else { "ui.browser_bodies_other" };
     let count = crate::i18n::format(key, &[("count", &bodies.to_string())]);
-    let galley = ui.painter().layout_no_wrap(count, FontId::proportional(t.font_body), t.text_dim);
-    // A narrow card has no room for the count beside the title and any action.
+    let galley = ui.painter().layout_no_wrap(count.clone(), FontId::proportional(t.font_body), t.text_dim);
+    // A narrow card has no room for the count beside the title and any action: the header's
+    // tooltip gives it instead.
     if right - galley.size().x >= title_right + t.space_4 {
         let at = pos2(right - galley.size().x, rect.center().y - galley.size().y / 2.0);
         crate::scenario::publish_rect("browser:body-count", egui::Rect::from_min_size(at, galley.size()));
         ui.painter().galley(at, galley, t.text_dim);
+    } else if !searching {
+        crate::ui_kit::Container::tooltip(&response, &count);
     }
     if collapsible {
         let tip = crate::i18n::tr(if collapsed { "ui.browser_expand" } else { "ui.browser_collapse" });
@@ -3240,7 +3245,9 @@ fn entry_row(
         return;
     }
     app.tree.remember(&e.row_key);
-    let pattern_key = e.patterns.as_deref();
+    // A search lists what it found and what holds it. A sketch's patterns aren't searched, so a
+    // found sketch shows neither them nor their fold until the search ends.
+    let pattern_key = e.patterns.as_deref().filter(|_| !app.tree.search.on());
     let start_open = rows_start_open(app);
     let patterns_open = pattern_key.is_some_and(|key| is_open(app, key, start_open));
     let rect = row_rect(ui);
