@@ -200,6 +200,7 @@ fn scan_type(text: &str, from: usize) -> (Stop, usize) {
                 continue;
             }
             '(' | ')' if depth == 0 => return (Stop::Description, i),
+            '.' if depth == 0 && ends_sentence(text, i) => return (Stop::End, i),
             '|' if depth == 0 => {
                 let following = skip_ws(text, i + 1);
                 if spec_head(text, following) {
@@ -213,6 +214,11 @@ fn scan_type(text: &str, from: usize) -> (Stop, usize) {
         i += c.len_utf8();
     }
     (Stop::End, i)
+}
+
+/// Whether the full stop at `i` ends a sentence: a space, then a capital letter.
+fn ends_sentence(text: &str, i: usize) -> bool {
+    text[i + 1..].starts_with(' ') && text[i + 1..].chars().nth(1).is_some_and(|c| c.is_ascii_uppercase())
 }
 
 /// The name at `i`, whether it is optional, and the index after it.
