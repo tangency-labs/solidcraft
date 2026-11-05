@@ -1542,3 +1542,18 @@ fn woken_points_stand_for_their_item_only_where_its_snap_is() {
     };
     assert_eq!(woken_pick(&app, true, Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 10.0, 10.0) }), face);
 }
+
+/// A face of the rim's own body crossed on the way to its centre adds its centre to the rim's
+/// points; that centre, picked, is the face, and the rim's middle is still the rim.
+#[test]
+fn a_crossed_faces_centre_is_the_face() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let edge = edge_sel(&app.session, Vec3::new(10.0, 0.0, 10.0)).unwrap();
+    let face = face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let mut points = solidcraft_engine::snap::snap_points(&app.session, &edge);
+    points.extend(solidcraft_engine::snap::snap_points(&app.session, &face));
+    app.viewport.woken = crate::snap_wake::Woken { item: Some(edge.clone()), face: Some(face.clone()), points, revision: app.session.revision };
+    assert_eq!(woken_pick(&app, true, Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 10.0, 10.0) }), face);
+    assert_eq!(woken_pick(&app, true, Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 0.0, 10.0) }), edge);
+}
