@@ -1778,7 +1778,7 @@ fn feature_effects_identify_components_and_select_all_current_occurrences() {
     assert_eq!(s.selection.len(), 2);
     for item in &s.selection {
         let Sel::Body { name } = item else { panic!("not a body") };
-        assert!(s.world_state().body(name).is_some());
+        assert!(s.world_state().unwrap().body(name).is_some());
     }
 }
 

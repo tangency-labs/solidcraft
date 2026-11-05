@@ -1172,7 +1172,7 @@ impl Session {
         let old: BTreeMap<_, _> = before.bodies.iter().map(|b| (b.name.as_str(), b)).collect();
         let now: BTreeMap<_, _> = after.bodies.iter().map(|b| (b.name.as_str(), b)).collect();
         let current = self.model.state();
-        let world = self.world_state();
+        let world = self.world_state().ok();
         let describe = |body: &solidcraft_doc::ModelBody| {
             let component = self.doc.model_body_component(body);
             let present = current.body(&body.name).is_some_and(|b| b.feature == body.feature);
@@ -1181,7 +1181,7 @@ impl Session {
                 component,
                 component_name: self.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()),
                 selectable_bodies: if present {
-                    world.bodies.iter().filter(|b| b.definition_name() == body.name).map(|b| b.name.clone()).collect()
+                    world.iter().flat_map(|w| w.bodies.iter()).filter(|b| b.definition_name() == body.name).map(|b| b.name.clone()).collect()
                 } else {
                     Vec::new()
                 },
