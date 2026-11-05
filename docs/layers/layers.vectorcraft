@@ -2666,7 +2666,7 @@
                 ],
                 "runs": [
                   {
-                    "text": "the command",
+                    "text": "intent",
                     "style": {
                       "font_family": "Helvetica",
                       "font_style": "Regular",
@@ -2954,7 +2954,7 @@
                 ],
                 "runs": [
                   {
-                    "text": "the result, or the refusal",
+                    "text": "result / refusal",
                     "style": {
                       "font_family": "Helvetica",
                       "font_style": "Regular",
@@ -4011,7 +4011,7 @@
                 ],
                 "runs": [
                   {
-                    "text": "ops takes it",
+                    "text": "result to ops",
                     "style": {
                       "font_family": "Helvetica",
                       "font_style": "Regular",
@@ -4299,7 +4299,7 @@
                 ],
                 "runs": [
                   {
-                    "text": "mesh it",
+                    "text": "request mesh",
                     "style": {
                       "font_family": "Helvetica",
                       "font_style": "Regular",
@@ -5637,7 +5637,7 @@
       "copyrightNotice": "",
       "copyrightUrl": "",
       "created": 1793887324,
-      "modified": 1793887365
+      "modified": 1793887569
     }
   },
   "images": {}
