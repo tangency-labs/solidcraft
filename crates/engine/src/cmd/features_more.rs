@@ -382,8 +382,11 @@ fn face_points(s: &Session, p: &Value, k: &str, cmd: &str) -> Result<Vec<Vec3>> 
 fn replace_face(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.replace_face";
     let faces = face_points(s, p, "faces", cmd)?;
+    let refs = p.get("faces").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    // The body first: a face flush with another body's is looked up on that body alone.
+    let body = super::face::faces_body(s, p, refs, &faces, cmd)?;
     for f in &faces {
-        if super::face::face_normal(s, *f).is_none() {
+        if super::face::face_normal_in(s, *f, body.as_deref()).is_none() {
             return Err(bad(cmd, "not supported yet: replacing a face that is not planar"));
         }
     }
@@ -395,8 +398,6 @@ fn replace_face(s: &mut Session, p: &Value) -> Result<Value> {
         }
         None => plane_param(s, p.get("target"), cmd)?,
     };
-    let refs = p.get("faces").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
-    let body = super::face::faces_body(s, p, refs, &faces, cmd)?;
     add_feature(s, p, FeatureKind::ReplaceFace { faces: faces.into_iter().map(FacePick).collect(), target, body: body.map(BodyName) })
 }
 
