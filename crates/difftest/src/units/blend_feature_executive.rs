@@ -564,9 +564,23 @@ impl UnitDiff for Runner {
                         None => out = out.int(&format!("feature{fi}_none"), 1),
                     }
                 }
+                crate::soundness::measure(&mut b);
                 Ok(out)
             }
             Err(e) => Output::unported(&e).ok_or_else(|| herr(e)),
         }
+    }
+}
+
+#[cfg(test)]
+mod soundness_probe {
+    use super::*;
+
+    /// The Rust base bodies of the cases moved from the C++ reference, measured on their own
+    /// ([`crate::soundness::probe`]).
+    #[test]
+    #[ignore = "a measurement for the moved cases' record, run on demand"]
+    fn moved_cases_results_measured() {
+        crate::soundness::probe(&Runner, "blend.feature_executive");
     }
 }

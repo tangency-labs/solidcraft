@@ -297,6 +297,8 @@ impl UnitDiff for Runner {
         match run() {
             Ok(None) => Ok(Output::new()),
             Ok(Some(record)) => {
+                // (a probe's measure, before the export strips the body: capture off, none)
+                crate::soundness::measure(&mut b);
                 strip_unrecorded(&mut b).map_err(herr)?;
                 normalize_face_shells(&mut b).map_err(herr)?;
                 // (the serial whose topology keys name the edit's new geometry)
@@ -469,4 +471,17 @@ fn strip_unrecorded(b: &mut Brep) -> SolidResult<()> {
         b.loop_mut(id)?.edges.clear();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod soundness_probe {
+    use super::*;
+
+    /// The Rust result bodies of the cases moved from the C++ reference, measured on their
+    /// own ([`crate::soundness::probe`]).
+    #[test]
+    #[ignore = "a measurement for the moved cases' record, run on demand"]
+    fn moved_cases_results_measured() {
+        crate::soundness::probe(&Runner, "topology.brep_local_operation");
+    }
 }

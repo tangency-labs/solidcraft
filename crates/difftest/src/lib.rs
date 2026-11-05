@@ -29,6 +29,7 @@ pub mod report;
 pub mod rng;
 pub mod runner;
 pub mod solidcraft;
+pub mod soundness;
 pub mod ssi;
 pub mod step;
 pub mod util;

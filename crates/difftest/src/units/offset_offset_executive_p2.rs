@@ -2218,6 +2218,9 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
             .values("volumes", [source_volume, result_volume].concat())
             .values("operand", source_state);
     }
+    if let Some(result) = result.as_mut() {
+        crate::soundness::measure(result);
+    }
     Ok(output)
 }
 
@@ -2493,6 +2496,14 @@ fn generated(rng: &mut Rng) -> Inputs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Rust result bodies of the cases moved from the C++ reference, measured on their
+    /// own ([`crate::soundness::probe`]).
+    #[test]
+    #[ignore = "a measurement for the moved cases' record, run on demand"]
+    fn moved_cases_results_measured() {
+        crate::soundness::probe(&Runner, "offset.offset_executive_p2");
+    }
     use std::collections::BTreeSet;
 
     use crate::case::repo_root;
