@@ -1,9 +1,9 @@
-//! `drawing.balloon.add`, `.edit` and `.inspect` (W26, #3874): a balloon on a saved view of the
-//! open drawing, pointing at a placed part by an edge of it, and where it stands with the model
-//! now. The edge is picked as a dimension's is and saved by name
-//! ([`solidcraft_doc::Document::edge_reference`]); its path is the part the balloon numbers.
-//! Adding and editing are one undo step of the drawing each, and none of the commands evaluates
-//! the model.
+//! `drawing.balloon.add`, `.edit`, `.repair` and `.inspect` (W26, #3874; B5, #4892): a balloon on a
+//! saved view of the open drawing, pointing at a placed part by an edge of it, a new name for the
+//! edge when it is lost, and where it stands with the model now. The edge is picked as a
+//! dimension's is and saved by name ([`solidcraft_doc::Document::edge_reference`]); its path is the
+//! part the balloon numbers, and a repair keeps it. Adding, editing and repairing are one undo step
+//! of the drawing each, and none of the commands evaluates the model.
 //!
 //! The number it shows is its row's item in the parts list it reads
 //! ([`solidcraft_doc::drawing::Drawing::parts_list_for`]), worked out on each read and never saved.
@@ -18,9 +18,9 @@ use solidcraft_doc::drawing::balloon::Balloon;
 use solidcraft_doc::ids;
 
 use super::CommandSpec;
-use super::drawing_dimension::status_words;
+use super::drawing_dimension::{Slot, repair_reference, status_words};
 use crate::params::bad;
-use crate::schema::drawing_balloon::{AddParams, BalloonResult, EditParams, EditResult, InspectParams};
+use crate::schema::drawing_balloon::{AddParams, BalloonResult, EditParams, EditResult, InspectParams, RepairParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
@@ -30,6 +30,8 @@ const EDIT: &str = "drawing.balloon.edit";
 const EDIT_CONTRACT: TypedContract<EditParams> = TypedContract::new();
 const INSPECT: &str = "drawing.balloon.inspect";
 const INSPECT_CONTRACT: TypedContract<InspectParams> = TypedContract::new();
+const REPAIR: &str = "drawing.balloon.repair";
+const REPAIR_CONTRACT: TypedContract<RepairParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new(ADD, "Add Balloon", crate::checked!("drawing.balloon.add", add))
@@ -55,6 +57,18 @@ pub static COMMANDS: &[CommandSpec] = &[
             "balloon: its id; set: {at?: [x, y], parts_list?: a table's id, or null to read the only list} → {balloon, changed: [fields]}. What it points at stays: to number another part, add \
              a new one. One undo step, none when nothing changes; no model is evaluated.",
         ),
+    CommandSpec::new(REPAIR, "Repair Balloon", crate::checked!("drawing.balloon.repair", repair))
+        .icon("edit")
+        .in_drawing()
+        .doc_only()
+        .contract(&REPAIR_CONTRACT)
+        .output(output_schema_for::<BalloonResult>)
+        .params(
+            "balloon: its id, one that reads lost or ambiguous; pick: {edge}, the edge it points at now, as add takes it but without \
+             path (it keeps its own, the part it numbers); an edge candidate inspect lists passes back as it stands → what \
+             drawing.balloon.inspect answers for it. Saved by the edge's name; its id, place and parts list stay. One undo step; no \
+             model is evaluated.",
+        ),
     CommandSpec::new(INSPECT, "Inspect Balloon", crate::checked!("drawing.balloon.inspect", inspect))
         .icon("inspect")
         .in_drawing()
@@ -63,9 +77,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<BalloonResult>)
         .params(
-            "balloon: its id → {balloon, view, record: as saved, occurrence: the part it numbers, status: ok, ambiguous, suppressed or \
-             lost, why?, point?: where its arrow ends (its edge's middle, in the design's frame), exact, candidates?: [{edge: {body, \
-             index}}], parts_list?: the list it reads, choices?: with none to go by, those it could name, item?: its row's item (\"1.2\"), \
+            "balloon: its id → {balloon, view, record: as saved, occurrence: the part it numbers, status: ok, ambiguous, suppressed, \
+             failed or lost, why?, point?: where its arrow ends (its edge's middle, in the design's frame), exact, candidates?: [{edge: \
+             {body, index}}] what an ambiguous edge's name finds, or a lost one's leads ({face: {body, index}} too), parts_list?: the \
+             list it reads, choices?: with none to go by, those it could name, item?: its row's item (\"1.2\"), \
              row_status: ok, no_list, reference, no_row or not_found, warnings?}. A lost row never removes it. Read-only; no model is \
              evaluated.",
         ),
@@ -105,6 +120,21 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     })?;
     let reply = EditResult { balloon: ids::encode(id), changed, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn repair(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: RepairParams = crate::schema::read(REPAIR, p)?;
+    let id = request.balloon.0;
+    let unknown = || bad(REPAIR, format!("the drawing has no balloon {}", ids::encode(id)));
+    let d = s.drawing(REPAIR)?;
+    d.balloons.by_id(id).ok_or_else(unknown)?;
+    let read = s.doc.resolve_balloons(&s.model, d, &[id]).map_err(|e| bad(REPAIR, e.to_string()))?;
+    let now = read.into_iter().next().map(|r| r.status).ok_or_else(unknown)?;
+    repair_reference(s, REPAIR, now, |s, copy| {
+        let balloon = copy.balloons.index_of(id).and_then(|at| copy.balloons.get_mut(at)).map(Arc::make_mut).ok_or_else(unknown)?;
+        Slot::Edge(&mut balloon.edge).take(s, REPAIR, &request.pick)
+    })?;
+    answer(s, REPAIR, id)
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {

@@ -9,7 +9,7 @@ use crate::schema::tests::conforms;
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     let reply = s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
     let schema = output_schema_for::<BalloonResult>();
-    assert!(conforms(schema.as_value(), schema.as_value(), &reply) || !matches!(id, ADD | INSPECT), "{id}: {reply}");
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply) || !matches!(id, ADD | INSPECT | REPAIR), "{id}: {reply}");
     reply
 }
 
@@ -191,6 +191,52 @@ fn a_balloon_on_a_piece_is_not_exact_until_the_edge_is_whole_again() {
     ends_at(&whole, [40.0, 0.0, 0.0]);
 }
 
+/// A fillet inside the Bracket takes the Box's bottom front edge a balloon points at: inspect says it
+/// is lost and lists leads. The one where the fillet meets the front, at z = 5, passed back as it
+/// stands, repairs it on its part: it reads ok with its arrow on that edge's middle, its id, place
+/// and part kept, as one undo step, and once it reads it isn't repaired again. Undone, it is lost.
+/// A corner, or an edge with a path of its own, is refused and changes nothing.
+#[test]
+fn a_lost_balloon_is_repaired_on_its_part() {
+    let (mut s, view, [component, bracket]) = placed();
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    let id = add(&mut s, view, bracket)["balloon"].clone();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "component.activate", json!({"component": component}));
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 0, 0]], "radius": 5, "body": "Box"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "drawing.open", drawing);
+    let lost = run(&mut s, INSPECT, json!({"balloon": id}));
+    assert_eq!(lost["status"], "lost", "{lost}");
+    let front = {
+        let state = s.model.state();
+        let mesh = state.body("Box").unwrap().mesh();
+        mesh.edges.iter().position(|line| line.iter().all(|p| p.y.abs() < 1e-6 && (p.z - 5.0).abs() < 1e-6)).unwrap()
+    };
+    let front = json!({"edge": {"body": "Box", "index": front}});
+    let pick = lost["candidates"].as_array().and_then(|c| c.iter().find(|c| **c == front)).cloned();
+    let pick = pick.unwrap_or_else(|| panic!("the fillet's front edge is a lead: {lost}"));
+    let (before, steps) = (saved(&s), s.undo.len());
+    let p = json!({"balloon": id, "pick": pick});
+    let repaired = run(&mut s, REPAIR, p.clone());
+    assert_eq!(repaired["status"], "ok", "{repaired}");
+    ends_at(&repaired, [40.0, 0.0, 5.0]);
+    assert_eq!((&repaired["balloon"], &repaired["record"]["at"], &repaired["occurrence"]), (&id, &json!([60.0, 40.0]), &json!([bracket])));
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+    assert!(refused(&mut s, REPAIR, p).contains("it reads ok"));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(saved(&s), before);
+    assert_eq!(run(&mut s, INSPECT, json!({"balloon": id}))["status"], "lost");
+    for (pick, why) in [
+        (json!({"corner": [40, 0, 5]}), "this reference is an edge"),
+        (json!({"edge": {"point": [40, 0, 5], "path": [bracket]}}), "a repair's pick has no `path`"),
+    ] {
+        let e = refused(&mut s, REPAIR, json!({"balloon": id, "pick": pick}));
+        assert!(e.contains(why), "{e}");
+    }
+    assert_eq!((saved(&s), s.undo.len()), (before, steps));
+}
+
 /// Every place a value can go in `v`, as JSON pointers: `v` itself, then each member and item.
 fn places(v: &Value, at: String, out: &mut Vec<String>) {
     out.push(at.clone());
@@ -213,6 +259,7 @@ fn hostile_balloon_params_never_panic() {
         (ADD, json!({"view": v, "edge": {"body": "Box", "index": 0, "path": [bracket]}, "at": [1, 2]})),
         (EDIT, json!({"balloon": id, "set": {"at": [3, 4]}})),
         (INSPECT, json!({"balloon": id})),
+        (REPAIR, json!({"balloon": id, "pick": {"edge": {"body": "Box", "index": 0}}})),
     ];
     let mut values = crate::tests::hostile_values();
     values.extend([json!({"body": "Box", "index": u64::MAX}), Value::Array(vec![json!(1); 1000]), json!([1e308, 0]), json!("x".repeat(600))]);

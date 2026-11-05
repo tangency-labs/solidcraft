@@ -699,6 +699,20 @@ fn hostile_dimension_params_never_panic() {
     let id = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}))["dimension"].clone();
     // Aligned from the first corner to the last, each corner past the one before.
     let chain = add(&mut s, view, json!({"chain": {"points": [[0, 0, 0], [80, 0, 0], [80, 0, 30]]}}))["dimension"].clone();
+    // A radial dimension and a chain on a hole that is then deleted: lost, so a repair goes as far as
+    // its slot and its pick.
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    run(&mut s, "drawing.close", json!({}));
+    let cut = json!({"radius": 6, "height": 42, "base": [40, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"], "name": "Hole"});
+    run(&mut s, "solid.cylinder", cut);
+    run(&mut s, "drawing.open", drawing.clone());
+    let hole = json!({"body": "Box", "index": round_index(&s, [40.0, 0.0, 15.0], 6.0)});
+    let lost = add(&mut s, view, json!({"radial": {"edge": hole}}))["dimension"].clone();
+    let through = json!({"chain": {"points": [[0, 0, 0], {"centre": hole}, [80, 0, 0]], "direction": "horizontal"}});
+    let lost_chain = add(&mut s, view, through)["dimension"].clone();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "timeline.delete", json!({"feature": "Hole"}));
+    run(&mut s, "drawing.open", drawing);
     let v = json!(ids::encode(view));
     let corner = json!({"edges": [{"body": "Box", "index": 0}, {"point": [0, 0, 15]}], "path": [1]});
     let calls = [
@@ -731,6 +745,8 @@ fn hostile_dimension_params_never_panic() {
             "reading": "projected"}}),
         ),
         (INSPECT, json!({"dimension": id})),
+        (REPAIR, json!({"dimension": lost, "slot": "edge", "pick": {"edge": {"body": "Box", "index": 0}}})),
+        (REPAIR, json!({"dimension": lost_chain, "slot": 1, "pick": {"corner": {"edges": [{"body": "Box", "index": 0}, {"point": [0, 0, 15]}]}}})),
     ];
     let many = |v: Value| Value::Array(vec![v; 1000]);
     let mut values = crate::tests::hostile_values();
@@ -741,6 +757,8 @@ fn hostile_dimension_params_never_panic() {
         many(json!(1)),
         json!([1e308, 0, 0]),
         json!("x".repeat(600)),
+        // The last point a chain may have: past the lost chain's three.
+        json!(63),
     ]);
     let mut internal = Vec::new();
     for (cmd, template) in calls {
@@ -828,6 +846,193 @@ fn a_lost_dimension_keeps_its_last_good_value_after_reopening() {
         assert!(read.get("value").is_none() && read.get("text").is_none(), "{name}, never its value: {read}");
         assert_eq!(read["last_good"], json!(80.0), "{name}: {read}");
         assert!(!opened.is_dirty(), "{name}: a read leaves nothing to save");
+    }
+}
+
+/// After a fillet takes the edge a length measures, inspect says it is lost and lists leads. The
+/// one that is the fillet's 80 long edge on the front, passed back as it stands, repairs it: it
+/// reads 80 again, with its id, view, offset, text place and decimals, and only its edge's name
+/// changed, as one undo step. A linear dimension from the corner the fillet took is repaired by a
+/// corner the fillet made.
+#[test]
+fn fillet_then_repair_reads_again_with_the_same_id_and_place() {
+    let (mut s, view) = front_view();
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    let p = json!({"view": ids::encode(view), "kind": {"length": {"edge": [40, 0, 30]}}, "offset_mm": -12.5, "text": {"at": [0, 40]}});
+    let id = run(&mut s, ADD, p)["dimension"].clone();
+    let corner = add(&mut s, view, json!({"linear": {"a": [0, 0, 30], "b": [80, 0, 0], "direction": "horizontal"}}))["dimension"].clone();
+    run(&mut s, "drawing.close", json!({}));
+    lose_the_edge(&mut s);
+    run(&mut s, "drawing.open", drawing);
+    let lost = run(&mut s, INSPECT, json!({"dimension": id}));
+    assert_eq!(lost["status"], "lost", "{lost}");
+    let front = json!({"edge": {"body": "Box", "index": edge_index(&s, [0.0, 0.0, 25.0], [80.0, 0.0, 25.0])}});
+    let pick = lost["candidates"].as_array().and_then(|c| c.iter().find(|c| **c == front)).cloned();
+    let pick = pick.unwrap_or_else(|| panic!("the fillet's front edge is a lead: {lost}"));
+    let steps = s.undo.len();
+    let repaired = run(&mut s, REPAIR, json!({"dimension": id, "slot": "edge", "pick": pick}));
+    reads(&repaired, 80.0, "80.00");
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+    assert_eq!((&repaired["dimension"], &repaired["view"]), (&id, &lost["view"]));
+    let (before, after) = (&lost["record"], &repaired["record"]);
+    assert_ne!(after["kind"]["length"]["edge"]["name"], before["kind"]["length"]["edge"]["name"], "{repaired}");
+    let mut renamed = before.clone();
+    renamed["kind"]["length"]["edge"]["name"] = after["kind"]["length"]["edge"]["name"].clone();
+    assert_eq!(&renamed, after, "only the edge's name changed");
+    assert_eq!((&after["offset_mm"], &after["text"], &after["decimals"]), (&json!(-12.5), &json!({"at": [0.0, 40.0]}), &json!(2)));
+    assert_eq!(run(&mut s, INSPECT, json!({"dimension": corner}))["status"], "lost");
+    let moved = run(&mut s, REPAIR, json!({"dimension": corner, "slot": "a", "pick": {"corner": [0, 0, 25]}}));
+    reads(&moved, 80.0, "80.00");
+}
+
+/// A repair is one undo step: undone, the record is as it was and reads lost with the same leads,
+/// because reading never rewrote it; redone, it reads 80. Repaired, it reads ok, so the same pick
+/// again is refused and adds no step.
+#[test]
+fn a_repair_is_one_undo_step_and_undone_is_lost_again() {
+    let (mut s, drawing, dimension) = read_once();
+    lose_the_edge(&mut s);
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let lost = inspect_of(&mut s, dimension);
+    assert!(lost["candidates"].as_array().is_some_and(|c| !c.is_empty()), "{lost}");
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let front = edge_index(&s, [0.0, 0.0, 25.0], [80.0, 0.0, 25.0]);
+    let p = json!({"dimension": ids::encode(dimension), "slot": "edge", "pick": {"edge": {"body": "Box", "index": front}}});
+    let steps = s.undo.len();
+    run(&mut s, REPAIR, p.clone());
+    let after = s.drawing("test").unwrap().to_json().unwrap();
+    assert_eq!(s.undo.len(), steps + 1);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+    let again = inspect_of(&mut s, dimension);
+    assert_eq!((&again["status"], &again["candidates"]), (&json!("lost"), &lost["candidates"]), "{again}");
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), after);
+    reads(&inspect_of(&mut s, dimension), 80.0, "80.00");
+    let steps = s.undo.len();
+    let e = s.execute(REPAIR, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {p}"));
+    assert!(e.contains("it reads ok: only a lost or ambiguous reference is repaired"), "{e}");
+    assert_eq!((s.undo.len(), s.drawing("test").unwrap().to_json().unwrap()), (steps, after));
+}
+
+/// A repair that doesn't fit is refused with its reason, and the drawing and its undo steps stay as
+/// they were: a slot the dimension hasn't got, a pick of another kind, a pick that names nothing or
+/// several edges or an edge the body hasn't got, a pick with a path of its own, a radial dimension
+/// repaired to a straight edge, a corner still found of a dimension whose other corner is lost,
+/// silhouettes repaired onto the other's cylinder, a dimension that reads, one the drawing hasn't
+/// got, and unknown keys.
+#[test]
+fn a_bad_repair_pick_changes_nothing() {
+    let (mut s, view) = front_view();
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    run(&mut s, "drawing.close", json!({}));
+    let cut = json!({"radius": 6, "height": 42, "base": [40, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"], "name": "Hole"});
+    run(&mut s, "solid.cylinder", cut);
+    // Two bosses along X on the right face, as two_cylinders_read_between_the_silhouettes_given has them.
+    for (radius, z, name) in [(5, 15, "Big"), (3, 25, "Small")] {
+        let boss = json!({"radius": radius, "height": 20, "base": [80, 20, z], "axis": "X", "operation": "join", "targets": ["Box"], "name": name});
+        run(&mut s, "solid.cylinder", boss);
+    }
+    run(&mut s, "drawing.open", drawing.clone());
+    let on = |r: f64, z: f64| json!([90.0, 20.0 + r * 30f64.to_radians().sin(), z + r * 30f64.to_radians().cos()]);
+    let between = json!({"silhouettes": {"a": {"face": on(5.0, 15.0), "side": "near"}, "b": {"face": on(3.0, 25.0), "side": "near"}}});
+    let silhouettes = add(&mut s, view, between)["dimension"].clone();
+    let hole = json!({"body": "Box", "index": round_index(&s, [40.0, 0.0, 15.0], 6.0)});
+    let radial = add(&mut s, view, json!({"radial": {"edge": hole}}))["dimension"].clone();
+    let length = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}))["dimension"].clone();
+    let linear = add(&mut s, view, json!({"linear": {"a": [0, 0, 30], "b": [80, 0, 0]}}))["dimension"].clone();
+    let ok = add(&mut s, view, json!({"length": {"edge": [40, 0, 0]}}))["dimension"].clone();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "timeline.delete", json!({"feature": "Hole"}));
+    run(&mut s, "timeline.delete", json!({"feature": "Small"}));
+    lose_the_edge(&mut s);
+    run(&mut s, "drawing.open", drawing);
+    assert_eq!(run(&mut s, INSPECT, json!({"dimension": silhouettes}))["status"], "lost");
+    let (before, steps) = (s.drawing("test").unwrap().to_json().unwrap(), s.undo.len());
+    let call = |dimension: &Value, slot: Value, pick: Value| json!({"dimension": dimension, "slot": slot, "pick": pick});
+    let front = json!({"edge": [40, 0, 25]});
+    let cases = [
+        (call(&length, json!("b"), front.clone()), "slots are `edge`"),
+        (call(&length, json!(5), front.clone()), "slots are `edge`"),
+        (call(&linear, json!("edge"), front.clone()), "slots are `a` and `b`, its corners"),
+        (call(&length, json!("edge"), json!({"face": [40, 20, 0]})), "this reference is an edge: give {edge: …}"),
+        (call(&linear, json!("a"), front.clone()), "this reference is a corner: give {corner: …}"),
+        (call(&length, json!("edge"), json!({"edge": [40, 20, 15]})), "no edge at [40, 20, 15]"),
+        (call(&length, json!("edge"), json!({"edge": [0, 0, 0]})), "[0, 0, 0] is on 3 edges"),
+        (call(&length, json!("edge"), json!({"edge": {"body": "Box", "index": 999}})), "body `Box` has no edge 999"),
+        (call(&length, json!("edge"), json!({"edge": {"point": [40, 0, 25], "path": [1]}})), "a repair's pick has no `path`"),
+        (call(&length, json!("edge"), json!({"edge": [40, 0, 25], "face": [40, 20, 0]})), "a pick is {edge: an edge}"),
+        (call(&radial, json!("edge"), json!({"edge": [40, 0, 0]})), "isn't a circle or an arc"),
+        (call(&linear, json!("b"), json!({"corner": [80, 0, 0]})), "this reference still finds what it names"),
+        (call(&silhouettes, json!("a"), json!({"face": on(5.0, 15.0)})), "this reference still finds what it names"),
+        (call(&silhouettes, json!("b"), json!({"face": on(-5.0, 15.0)})), "both silhouettes would be on one cylinder"),
+        (call(&ok, json!("edge"), front.clone()), "it reads ok: only a lost or ambiguous reference is repaired"),
+        (call(&json!(ids::encode(99)), json!("edge"), front.clone()), "the drawing has no dimension"),
+        (json!({"dimension": length, "slot": "edge", "pick": front, "set": {}}), "unknown field `set`"),
+    ];
+    for (p, why) in cases {
+        let e = s.execute(REPAIR, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {p}"));
+        assert!(e.contains(why), "{p}: {e}");
+    }
+    assert_eq!((s.drawing("test").unwrap().to_json().unwrap(), s.undo.len()), (before, steps));
+}
+
+/// A notch splits the top front edge, so its length reads ambiguous and lists both pieces. The left
+/// piece, passed back as it stands, repairs it to read that piece's 35, as one undo step.
+#[test]
+fn an_ambiguous_length_is_repaired_to_one_piece() {
+    let (mut s, drawing, dimension) = read_once();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 5, "height": 5, "corner": [35, -1, 26], "operation": "cut", "targets": ["Box"]}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let split = inspect_of(&mut s, dimension);
+    assert_eq!(split["status"], "ambiguous", "{split}");
+    let left = json!({"edge": {"body": "Box", "index": edge_index(&s, [0.0, 0.0, 30.0], [35.0, 0.0, 30.0])}});
+    assert!(split["candidates"].as_array().is_some_and(|c| c.contains(&left)), "{split}");
+    let steps = s.undo.len();
+    let repaired = run(&mut s, REPAIR, json!({"dimension": ids::encode(dimension), "slot": "edge", "pick": left}));
+    reads(&repaired, 35.0, "35.00");
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+}
+
+/// Each slot reaches its own reference of each kind of dimension, and every other slot is refused:
+/// `slot` on records made up for it, with no model.
+#[test]
+fn each_slot_reaches_its_own_reference() {
+    let edge = |name: &str| ModelEdge { body: "Box".into(), origin_feature: 1, name: format!("edge {name}"), path: Vec::new() };
+    let point =
+        |name: &str| ModelPoint { body: "Box".into(), origin_feature: 1, edges: vec![format!("corner {name}")], centre: false, path: Vec::new() };
+    let face = |name: &str| ModelFace { body: "Box".into(), origin_feature: 1, name: format!("face {name}"), path: Vec::new() };
+    let side = |name: &str| Silhouette { face: face(name), side: solidcraft_geom::drawing_measure::SilhouetteSide::Far };
+    let (direction, reading) = (LinearDirection::Aligned, Reading::Projected);
+    let (a, b) = (SlotParam::A, SlotParam::B);
+    let mut kinds = [
+        (DimensionKind::Linear { a: point("a"), b: point("b"), direction, reading }, vec![(a, "corner a"), (b, "corner b")]),
+        (DimensionKind::Length { edge: edge("e"), direction, reading }, vec![(SlotParam::Edge, "edge e")]),
+        (DimensionKind::Angle { a: edge("a"), b: edge("b"), reading, other_side: false }, vec![(a, "edge a"), (b, "edge b")]),
+        (DimensionKind::Radial { edge: edge("e"), diameter: false }, vec![(SlotParam::Edge, "edge e")]),
+        (
+            DimensionKind::Chain { points: vec![point("0"), point("1")], direction },
+            vec![(SlotParam::Point(0), "corner 0"), (SlotParam::Point(1), "corner 1")],
+        ),
+        (DimensionKind::Cylinder { face: face("f") }, vec![(SlotParam::Face, "face f")]),
+        (DimensionKind::Silhouettes { a: side("a"), b: side("b"), direction }, vec![(a, "face a"), (b, "face b")]),
+        (DimensionKind::Faces { a: face("a"), b: face("b"), direction }, vec![(a, "face a"), (b, "face b")]),
+    ];
+    let every = [a, b, SlotParam::Edge, SlotParam::Face, SlotParam::Point(0), SlotParam::Point(1), SlotParam::Point(2)];
+    for (kind, slots) in &mut kinds {
+        for wanted in every {
+            let reached = match slot(kind, wanted) {
+                Ok(Slot::Edge(e)) => Some(e.name.clone()),
+                Ok(Slot::Point(p)) => Some(p.edges.concat()),
+                Ok(Slot::Face(f)) => Some(f.name.clone()),
+                Err(e) => {
+                    assert!(e.to_string().contains("this dimension's slots are"), "{e}");
+                    None
+                }
+            };
+            let expected = slots.iter().find(|(s, _)| *s == wanted).map(|(_, name)| name.to_string());
+            assert_eq!(reached, expected, "{wanted:?} of {kind:?}");
+        }
     }
 }
 

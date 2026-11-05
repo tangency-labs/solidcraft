@@ -1,0 +1,34 @@
+{
+  "en": {
+    "cmd.drawing_balloon_repair": "Repair Balloon",
+    "cmd.drawing_dimension_repair": "Repair Drawing Dimension"
+  },
+  "ar": {
+    "cmd.drawing_balloon_repair": "إصلاح البالون",
+    "cmd.drawing_dimension_repair": "إصلاح بُعد اللوحة"
+  },
+  "de": {
+    "cmd.drawing_balloon_repair": "Positionsnummer reparieren",
+    "cmd.drawing_dimension_repair": "Zeichnungsbemaßung reparieren"
+  },
+  "he": {
+    "cmd.drawing_balloon_repair": "תיקון בלון",
+    "cmd.drawing_dimension_repair": "תיקון מידת שרטוט"
+  },
+  "ja": {
+    "cmd.drawing_balloon_repair": "バルーンを修復",
+    "cmd.drawing_dimension_repair": "図面寸法を修復"
+  },
+  "ko": {
+    "cmd.drawing_balloon_repair": "벌룬 복구",
+    "cmd.drawing_dimension_repair": "도면 치수 복구"
+  },
+  "vi": {
+    "cmd.drawing_balloon_repair": "Sửa chữa bóng chú thích",
+    "cmd.drawing_dimension_repair": "Sửa chữa kích thước bản vẽ"
+  },
+  "zh": {
+    "cmd.drawing_balloon_repair": "修复零件序号",
+    "cmd.drawing_dimension_repair": "修复绘图尺寸"
+  }
+}

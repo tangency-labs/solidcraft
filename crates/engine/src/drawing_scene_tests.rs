@@ -1087,7 +1087,7 @@ fn a_lost_dimension_leaves_the_sheet_drawn_and_is_listed() {
     delete_hole(&mut s, &drawing);
     let lost = settled(&mut s, sheet);
     let state = lost.dimensions.iter().find(|d| d.dimension == id).unwrap();
-    assert!(!state.drawn && matches!(state.status, solidcraft_doc::drawing::dimension::Status::Lost(_)), "{state:?}");
+    assert!(!state.drawn && matches!(state.status, solidcraft_doc::drawing::dimension::Status::Lost(..)), "{state:?}");
     assert!(lost.scene.groups.iter().all(|g| g.object != id));
     assert!(lost.scene.groups.iter().any(|g| g.object == front), "the sheet is still drawn");
     assert_eq!(bytes(&lost.scene), bytes(&built(&s, sheet).scene));
