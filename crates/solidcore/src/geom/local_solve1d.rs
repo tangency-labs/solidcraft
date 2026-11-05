@@ -52,11 +52,15 @@
 //!   then writes out of bounds; upstream's only queue has 8 slots).
 //! - `SE(...)`/`SER` error-log side effects and `SM_DEBUG_CODE` tracing are not
 //!   ported.
-//! - Opt-in [`Kernel::fixes`] flags (`oscillating_skips_failed_guesses` for WR-253 and
-//!   `local_solve1d_unbounded_newton_step` for WR-19), off by default for pinned C++
-//!   parity; see [`LocalSolve1d::new_with_kernel`],
-//!   [`LocalSolve1d::with_interval_and_kernel`],
-//!   [`LocalSolve1d::set_failed_guess_no_sign_change`], and
+//! - A failed evaluation has no value (WR-253, tangency-labs/solidcore#481 and #2574):
+//!   `eval_into` leaves the iteration value as it was, `SolveOscillating` takes a sign
+//!   change only from an interior guess that evaluated, and `SolveIt` without an interval
+//!   returns a failed first evaluation's status instead of iterating from it. Upstream
+//!   copies whatever the evaluator wrote before failing, so an evaluator that zeroes its
+//!   outputs first hands the iteration a zero of `F`.
+//! - Opt-in [`Kernel::fixes`] flag `local_solve1d_unbounded_newton_step` for WR-19, off
+//!   by default for pinned C++ parity; see [`LocalSolve1d::new_with_kernel`],
+//!   [`LocalSolve1d::with_interval_and_kernel`], and
 //!   [`LocalSolve1d::set_unbounded_newton_step`].
 
 use crate::error::{ignored, Result, SolidError};
@@ -348,11 +352,6 @@ pub struct LocalSolve1d {
     pub upper_bound_hits: u64,
     /// Why the last solve stopped.
     pub termination_reason: TerminationReason,
-    /// Not upstream (WR-253, tangency-labs/solidcore#481): `SolveOscillating` takes a
-    /// sign change only from an interior guess that evaluated, and `SolveIt` without an
-    /// interval returns a failed first evaluation's status instead of iterating from it
-    /// (`false`, the default: upstream reads the failed evaluation's leftover `F` in both).
-    failed_guess_no_sign_change: bool,
     /// Not upstream (WR-19, tangency-labs/solidcore#2150): `SolveIt` clamps the Newton
     /// step to `0.08 * interval.length() + EFF_ZERO` (scaled by `0.99`) only when
     /// `use_interval` is `true`, instead of clamping against the default inside-out
@@ -394,18 +393,15 @@ impl LocalSolve1d {
             lower_bound_hits: UNDEF_ULONG,
             upper_bound_hits: UNDEF_ULONG,
             termination_reason: TerminationReason::Undefined,
-            failed_guess_no_sign_change: false,
             unbounded_newton_step: false,
         }
     }
 
     /// A Newton solver on the whole real line configured with `k`'s local-solver
-    /// [`crate::kernel::UpstreamFixes`] flags (`oscillating_skips_failed_guesses` and
-    /// `local_solve1d_unbounded_newton_step`).
+    /// [`crate::kernel::UpstreamFixes`] flag `local_solve1d_unbounded_newton_step`.
     #[must_use]
     pub fn new_with_kernel(k: &Kernel) -> Self {
         Self {
-            failed_guess_no_sign_change: k.fixes.oscillating_skips_failed_guesses,
             unbounded_newton_step: k.fixes.local_solve1d_unbounded_newton_step,
             ..Self::new()
         }
@@ -425,12 +421,10 @@ impl LocalSolve1d {
 
     /// A Newton solver restricted to `interval` (wrapping instead of clamping when
     /// `is_periodic`) configured with `k`'s local-solver
-    /// [`crate::kernel::UpstreamFixes`] flags (`oscillating_skips_failed_guesses` and
-    /// `local_solve1d_unbounded_newton_step`).
+    /// [`crate::kernel::UpstreamFixes`] flag `local_solve1d_unbounded_newton_step`.
     #[must_use]
     pub fn with_interval_and_kernel(k: &Kernel, interval: Extent1d, is_periodic: bool) -> Self {
         Self {
-            failed_guess_no_sign_change: k.fixes.oscillating_skips_failed_guesses,
             unbounded_newton_step: k.fixes.local_solve1d_unbounded_newton_step,
             ..Self::with_interval(interval, is_periodic)
         }
@@ -470,16 +464,6 @@ impl LocalSolve1d {
     /// (`SetSolutionInterval`).
     pub fn set_solution_interval(&mut self, interval: Extent1d) {
         self.interval = interval;
-    }
-
-    /// Not upstream (WR-253, tangency-labs/solidcore#481): whether `SolveOscillating`
-    /// ignores an interior guess whose evaluation failed when it looks for a sign change
-    /// (`true`), instead of reading the `F` the failed evaluation left behind (`false`,
-    /// upstream and the default). With `true`, `SolveIt` without an interval also returns
-    /// the evaluator's error when the first evaluation fails, where upstream iterates
-    /// from the failed guess (the fork's tangency-labs/smlib@d2757e1).
-    pub fn set_failed_guess_no_sign_change(&mut self, on: bool) {
-        self.failed_guess_no_sign_change = on;
     }
 
     /// Not upstream (WR-19, tangency-labs/solidcore#2150): whether [`Self::solve_it`]
@@ -760,8 +744,13 @@ impl LocalSolve1d {
         }
     }
 
-    /// Evaluates at `value.t` into `value.f` / `value.f_prime` and `found`, keeping
-    /// whatever the evaluator wrote even when it fails.
+    /// Evaluates at `value.t` into `value.f` / `value.f_prime` and `found`. A failed
+    /// evaluation has no value, so `value` and `found` keep what they held.
+    ///
+    /// Upstream copies the evaluator's outputs before returning its error, and an
+    /// evaluator that zeroes them first (`SmCurvePropertyEFO::Evaluate`) therefore hands
+    /// the iteration a zero of `F` where its objective cannot be evaluated at all
+    /// (WR-253, #2574).
     fn eval_into<E: EvalFunction + ?Sized>(
         eval: &mut E,
         value: &mut IterationValue,
@@ -773,11 +762,11 @@ impl LocalSolve1d {
             f_prime: value.f_prime,
             found_answer: *found,
         };
-        let r = eval.evaluate(value.t, &mut val, signal_errors);
+        eval.evaluate(value.t, &mut val, signal_errors)?;
         value.f = val.f;
         value.f_prime = val.f_prime;
         *found = val.found_answer;
-        r
+        Ok(())
     }
 
     /// Resolves an oscillating Newton iteration between `prev1` and `curr`: look
@@ -824,13 +813,9 @@ impl LocalSolve1d {
                 }
             }
 
-            // (upstream tests the last guess's `F`, failed or not: WR-253)
-            let sign_change = if self.failed_guess_no_sign_change {
-                evaluated_sign_change
-            } else {
-                temp.f * curr_f <= 0.0
-            };
-            if sign_change {
+            // Only a guess that evaluated can show a sign change; upstream tests the
+            // last guess's `F` whether its evaluation succeeded or not (WR-253).
+            if evaluated_sign_change {
                 // Curr and prev have the same sign, opposite to mid: pick the end on
                 // the side of the given guess.
                 let pick_curr = if guess_t < temp.t {
@@ -992,7 +977,7 @@ impl LocalSolve1d {
                 }
                 Self::eval_into(eval, &mut self.curr, &mut found_answer, true)
                     .map_err(|err| eval_failed(err, OP))?;
-            } else if self.failed_guess_no_sign_change {
+            } else {
                 // No other start point: the failed evaluation left `curr` with no
                 // function value to iterate from, so its status is returned. Upstream
                 // iterates from it (WR-253; the fork's tangency-labs/smlib@d2757e1).
@@ -1291,24 +1276,14 @@ mod tests {
         }
     }
 
-    /// WR-253 (the fork's tangency-labs/smlib@d2757e1): without an interval, upstream
-    /// iterates from a failed first evaluation. Its zeroed `F` reads as converged, so
-    /// upstream reports `t = 1` as a root of `t^2 - 2`; the port does the same.
+    /// WR-253 (the fork's tangency-labs/smlib@d2757e1, tangency-labs/solidcore#2574): a
+    /// failed first evaluation without an interval returns the evaluator's status, as the
+    /// interval case does when its tweaked start fails too. Upstream iterates from it
+    /// instead, and its zeroed `F` reads as converged, reporting `t = 1` as a root of
+    /// `t^2 - 2`. A good start is unaffected.
     #[test]
-    fn failed_first_evaluation_without_interval_is_a_root_as_upstream() {
+    fn failed_first_evaluation_without_interval_has_no_value() {
         let mut s = LocalSolve1d::new();
-        let r = s.solve_it(&mut SqFailingAtOne, 1.0, 1e-9).unwrap();
-        assert!(r.found);
-        assert_eq!(r.t, 1.0);
-    }
-
-    /// WR-253 (the fork's tangency-labs/smlib@d2757e1): with the opt-in, a failed first
-    /// evaluation without an interval returns the evaluator's status, as the interval
-    /// case does when its tweaked start fails too. A good start is unaffected.
-    #[test]
-    fn d2757e1_failed_first_evaluation_without_interval_fails_with_the_flag() {
-        let mut s = LocalSolve1d::new();
-        s.set_failed_guess_no_sign_change(true);
         let e = s.solve_it(&mut SqFailingAtOne, 1.0, 1e-9).unwrap_err();
         assert!(
             matches!(
@@ -1360,47 +1335,33 @@ mod tests {
         assert!(r.t.is_finite());
     }
 
-    /// WR-253 (#481): a failed interior evaluation in `SolveOscillating` leaves
-    /// its zeroed `F` behind, and the sign test after the guesses reads it as a
-    /// sign change. `F = t^3 - 2t + 2` has no root between the two values Newton
-    /// cycles on, so the clean solve finds nothing; when the last guess fails,
-    /// upstream brackets that guess with `F = 0`, bisection keeps it, and the solve
-    /// reports it converged there. The port does the same.
-    #[test]
-    fn failed_guess_is_read_as_a_sign_change_as_upstream() {
-        let mut s = LocalSolve1d::with_interval(Extent1d::from_min_max(-3.0, 3.0), false);
-        let clean = s.solve_it(&mut Cycle, 0.0, 1e-9).unwrap();
-        assert!(!clean.found);
-        assert_eq!(s.termination_reason(), TerminationReason::UnableToConverge);
-
-        let mut s = LocalSolve1d::with_interval(Extent1d::from_min_max(-3.0, 3.0), false);
-        let r = s.solve_it(&mut CycleFailingAtLastGuess, 0.0, 1e-9).unwrap();
-        assert!(r.found);
-        assert_eq!(r.t.to_bits(), LAST_GUESS.to_bits());
-        assert_eq!(
-            s.termination_reason(),
-            TerminationReason::FoundAnswerConverged
-        );
-        assert_eq!(
-            (s.lower_bracket_t.to_bits(), s.lower_bracket_f),
-            (LAST_GUESS.to_bits(), 0.0)
-        );
-        // F really is about 0.95 there.
-        let mut out = FunctionValue::default();
-        Cycle.evaluate(LAST_GUESS, &mut out, true).unwrap();
-        assert!(out.f > 0.9);
-    }
-
-    /// tangency-labs/solidcore#481 (WR-253): with the opt-in, the failed last guess is
-    /// no sign change, and the solve finds nothing, as on the clean function.
+    /// tangency-labs/solidcore#481 (WR-253): the failed last guess is no sign change, and
+    /// the solve finds nothing, as on the clean function. `F = t^3 - 2t + 2` has no root
+    /// between the two values Newton cycles on. Upstream reads the `F` the failed
+    /// evaluation left behind, brackets that guess with `F = 0` and reports it converged
+    /// there, although `F` is about 0.95 at that parameter.
     #[test]
     fn issue_481_failed_guess_is_no_sign_change() {
+        let mut clean_solver =
+            LocalSolve1d::with_interval(Extent1d::from_min_max(-3.0, 3.0), false);
+        let clean = clean_solver.solve_it(&mut Cycle, 0.0, 1e-9).unwrap();
+        assert!(!clean.found);
+        assert_eq!(
+            clean_solver.termination_reason(),
+            TerminationReason::UnableToConverge
+        );
+
         let mut s = LocalSolve1d::with_interval(Extent1d::from_min_max(-3.0, 3.0), false);
-        s.set_failed_guess_no_sign_change(true);
         let r = s.solve_it(&mut CycleFailingAtLastGuess, 0.0, 1e-9).unwrap();
         assert!(!r.found, "{r:?}");
         assert_ne!(r.t.to_bits(), LAST_GUESS.to_bits());
         assert_ne!(s.lower_bracket_t.to_bits(), LAST_GUESS.to_bits());
+        assert_eq!(s.termination_reason(), TerminationReason::UnableToConverge);
+
+        // F really is about 0.95 there.
+        let mut out = FunctionValue::default();
+        Cycle.evaluate(LAST_GUESS, &mut out, true).unwrap();
+        assert!(out.f > 0.9);
     }
 
     /// A failed final sample must not replace the valid, same-sign samples with
@@ -1412,7 +1373,6 @@ mod tests {
         let clean = clean_solver.solve_it(&mut Cycle, 0.0, 1e-9).unwrap();
         assert!(!clean.found);
         let mut solver = LocalSolve1d::with_interval(interval, false);
-        solver.set_failed_guess_no_sign_change(true);
         let result = solver
             .solve_it(&mut CycleFailingAtLastGuess, 0.0, 1e-9)
             .unwrap();
@@ -1444,7 +1404,6 @@ mod tests {
         }
         for failed_value in [0.0, -1.0] {
             let mut solver = LocalSolve1d::new();
-            solver.set_failed_guess_no_sign_change(true);
             solver.prev1 = IterationValue {
                 t: 0.0,
                 f: 1.0,
@@ -1481,7 +1440,6 @@ mod tests {
             }
         }
         let mut solver = LocalSolve1d::new();
-        solver.set_failed_guess_no_sign_change(true);
         solver.prev1 = IterationValue {
             t: 0.0,
             f: 0.5525,
@@ -1726,8 +1684,8 @@ mod tests {
     }
 
     /// WR-19 (#2150): verifies `UpstreamFixes` flag lookup and that `new_with_kernel` /
-    /// `with_interval_and_kernel` forward both `local_solve1d_unbounded_newton_step` and
-    /// `oscillating_skips_failed_guesses` (WR-253).
+    /// `with_interval_and_kernel` forward `local_solve1d_unbounded_newton_step`, with
+    /// WR-253's "a failed evaluation has no value" holding by default (#2574).
     #[test]
     fn wr19_flag_lookup_and_kernel_constructors() {
         let mut k = Kernel::default();
@@ -1751,8 +1709,6 @@ mod tests {
         s_toggle.set_unbounded_newton_step(false);
         assert!(!s_toggle.unbounded_newton_step());
 
-        // Enable WR-253 alongside WR-19 and verify both flags are forwarded.
-        k.fixes.oscillating_skips_failed_guesses = true;
         let mut s = LocalSolve1d::new_with_kernel(&k);
         assert!(s.unbounded_newton_step());
 
@@ -1774,7 +1730,7 @@ mod tests {
         assert!(ok.found);
         assert!((ok.t - 2.0_f64.sqrt()).abs() < 1e-12);
 
-        // `with_interval_and_kernel` also forwards `oscillating_skips_failed_guesses`.
+        // `with_interval_and_kernel` forwards the flag and keeps WR-253's default.
         let mut s_ivl =
             LocalSolve1d::with_interval_and_kernel(&k, Extent1d::from_min_max(-3.0, 3.0), false);
         assert!(s_ivl.unbounded_newton_step());

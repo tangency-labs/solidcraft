@@ -39,8 +39,8 @@
 //!   `NormalizedEvaluate` may build missing UV trim curves; the port takes `&mut Brep`.
 //! - **Null pointers.** A loop edge or primary edge use upstream dereferences while
 //!   `NULL` is [`SolidError::InvalidInput`].
-//! - **Failed solver guesses.** Opt-in, `Kernel::fixes.oscillating_skips_failed_guesses`
-//!   reaches the 1-D solve of `FindFilletMinMaxRadii` (WR-253; off: upstream).
+//! - **Failed solver guesses.** The 1-D solve of `FindFilletMinMaxRadii` takes no value
+//!   from a failed guess (WR-253, #2574), as every 1-D solve does.
 //! - No recursion.
 
 use crate::curve::curve::p2::FindCurveDistanceExtrema;
@@ -654,7 +654,7 @@ pub fn find_fillet_min_max_radii(
 
     let mut efo = FindCurveDistanceExtrema::new(k, &rail1, &rail2, domain, tol);
 
-    let mut ls = radii_solver(k, domain);
+    let mut ls = radii_solver(domain);
 
     let num_steps: u32 = 30;
     let denom = f64::from(num_steps);
@@ -690,14 +690,11 @@ pub fn find_fillet_min_max_radii(
 
 /// The 1-D solve `FindFilletMinMaxRadii` refines a distance extremum with
 /// (`SmLocalSolve1d sLS( sEFO, sDomain, FALSE )`). Not upstream (WR-253,
-/// tangency-labs/solidcore#481): opt-in, with `fixes.oscillating_skips_failed_guesses`
-/// a failed guess is no sign change in `SolveOscillating`, as for every other 1-D
-/// solve (the fork's tangency-labs/smlib@d2757e1 makes the change in the solver, so
-/// it applies here too).
-fn radii_solver(k: &Kernel, domain: Extent1d) -> LocalSolve1d {
-    let mut ls = LocalSolve1d::with_interval(domain, false);
-    ls.set_failed_guess_no_sign_change(k.fixes.oscillating_skips_failed_guesses);
-    ls
+/// tangency-labs/solidcore#481 and #2574): a failed guess is no sign change in
+/// `SolveOscillating`, as for every other 1-D solve (the fork's
+/// tangency-labs/smlib@d2757e1 makes the change in the solver, so it applies here too).
+fn radii_solver(domain: Extent1d) -> LocalSolve1d {
+    LocalSolve1d::with_interval(domain, false)
 }
 
 // ---- SmFace::IdentifyFillet / IdentifyFilletUOrV --------------------------------------
@@ -1074,38 +1071,25 @@ mod tests {
         }
     }
 
-    /// WR-253 / tangency-labs/solidcore#2009 (the fork's tangency-labs/smlib@d2757e1):
-    /// `FindFilletMinMaxRadii`'s solve takes the kernel's
-    /// `oscillating_skips_failed_guesses`. With it the failed last guess is no sign
-    /// change and the solve finds nothing, as on the clean function; without it (the
-    /// default, upstream) the zeroed `F` there is bracketed and reported as a root.
+    /// WR-253 / tangency-labs/solidcore#2009 (the fork's tangency-labs/smlib@d2757e1,
+    /// #2574): `FindFilletMinMaxRadii`'s solve takes no value from a failed guess, so the
+    /// failed last guess is no sign change and the solve finds nothing, as on the clean
+    /// function. Upstream brackets the zeroed `F` there and reports it as a root.
     #[test]
-    fn issue_2009_radii_solve_honours_oscillating_skips_failed_guesses() {
+    fn issue_2009_radii_solve_takes_no_value_from_a_failed_guess() {
         let domain = Extent1d::from_min_max(-3.0, 3.0);
-        let mut fixed = Kernel::default();
-        fixed.fixes.oscillating_skips_failed_guesses = true;
-        let r = radii_solver(&fixed, domain)
+        let r = radii_solver(domain)
             .solve_it(&mut CycleFailingAtLastGuess, 0.0, 1e-9)
             .unwrap();
         assert!(!r.found, "{r:?}");
         assert_ne!(r.t.to_bits(), LAST_GUESS.to_bits());
 
-        let upstream = Kernel::default();
-        assert!(!upstream.fixes.oscillating_skips_failed_guesses);
-        let r = radii_solver(&upstream, domain)
-            .solve_it(&mut CycleFailingAtLastGuess, 0.0, 1e-9)
-            .unwrap();
-        assert!(r.found);
-        assert_eq!(r.t.to_bits(), LAST_GUESS.to_bits());
-
-        // the clean function has no root either way
-        for k in [&fixed, &upstream] {
-            assert!(
-                !radii_solver(k, domain)
-                    .solve_it(&mut Cycle, 0.0, 1e-9)
-                    .unwrap()
-                    .found
-            );
-        }
+        // the clean function has no root either
+        assert!(
+            !radii_solver(domain)
+                .solve_it(&mut Cycle, 0.0, 1e-9)
+                .unwrap()
+                .found
+        );
     }
 }

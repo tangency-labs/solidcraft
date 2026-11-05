@@ -2604,7 +2604,9 @@ mod tests {
         let mut k = Kernel::default();
         // main: test 3 (coincident first control points)
         assert_eq!(edge_failed_tests(&k, &c, Some(&tangent)), vec![3]);
-        // main with the minimum radius read: also test 14 (radius 0 at t = 0)
+        // with the minimum radius read: also test 14. Before tangency-labs/solidcore#2574
+        // the 0 it compared came from the objective failing at the zero-speed end; it is
+        // now the radius where the search stopped, still below the tolerance (#2669).
         k.fixes.bspline_check_min_radius = true;
         assert_eq!(edge_failed_tests(&k, &c, Some(&tangent)), vec![3, 14]);
 

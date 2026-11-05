@@ -325,20 +325,26 @@ fn step4_round_matches_the_fork_and_checks_clean() {
     assert!(lines.is_empty(), "{lines:#?}");
 }
 
-/// Without it (upstream's `SolveIt`): the rail's UV trim keeps its short span (test #15).
-/// With SolidCraft's tangent end (WR-600's flag, the fork's tangency-labs/smlib@856b54e)
-/// the end rib on the boss is no longer marched into its tangential start, and the
-/// upstream solve leaves a near cusp in a 2D curve instead (test #13): the body is still
-/// refused.
+/// Without the N-D opt-in this case builds the same body: since
+/// tangency-labs/solidcore#2574 the one-dimensional solve takes no value from a failed
+/// evaluation by default, and `oscillating_skips_failed_guesses` no longer changes the
+/// result here — the fork's topology and volume, bit for bit what `run(true)` builds, and
+/// a clean check. Before #2574 the rail's UV trim kept its short span (test #15), and
+/// with SolidCraft's tangent end (WR-600's flag, the fork's tangency-labs/smlib@856b54e)
+/// the upstream solve left a false near cusp in a straight 2D trim instead (test #13), so
+/// the body was refused.
 #[test]
-fn step4_round_upstream_solve_keeps_short_trim_span() {
-    let (_, _, _, _, lines) = run(false);
-    assert!(!lines.is_empty());
-    assert!(
-        lines
-            .iter()
-            .any(|l| l.contains("#15") || l.contains("Repeated CPts") || l.contains("#13")),
-        "{lines:#?}"
+fn step4_round_without_the_nd_opt_in_builds_the_same_body() {
+    let (f, e, v, vol, lines) = run(false);
+    assert_eq!((f, e, v), (11, 25, 16));
+    let fork = 49712.42808748303;
+    assert!((vol - fork).abs() <= 1e-9 * fork, "V {vol} vs fork {fork}");
+    assert!(lines.is_empty(), "{lines:#?}");
+    let (_, _, _, with_opt_in, _) = run(true);
+    assert_eq!(
+        vol.to_bits(),
+        with_opt_in.to_bits(),
+        "V {vol} vs {with_opt_in}"
     );
 }
 

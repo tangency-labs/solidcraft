@@ -1,0 +1,20 @@
+# curve.curve_p5 -- measured pinned-C++ defects for PR #2637 / issue #2574.
+# Values: supplied 2026-11-04 difftest at 2148ea293; records name every case.
+
+[[mismatch]]
+unit = "curve.curve_p5"
+case = "gen0508"
+why = "values.out.len: cpp=0 rust=1; ints.status[0]: cpp=1001 rust=0; minimum radius on straight spans: C++ reports the evaluator's error, solidcore succeeds and reports no solution (WR-253, addendum 2026-11-05)"
+cpp_defect = "WR-253"
+
+[[mismatch]]
+unit = "curve.curve_p5"
+case = "gen1302"
+why = "values.out.len: cpp=0 rust=1; ints.status[0]: cpp=1001 rust=0; minimum radius on straight spans: C++ reports the evaluator's error, solidcore succeeds and reports no solution (WR-253, addendum 2026-11-05)"
+cpp_defect = "WR-253"
+
+[[mismatch]]
+unit = "curve.curve_p5"
+case = "gen2745"
+why = "values.out.len: cpp=0 rust=1; ints.status[0]: cpp=1001 rust=0; minimum radius on straight spans: C++ reports the evaluator's error, solidcore succeeds and reports no solution (WR-253, addendum 2026-11-05)"
+cpp_defect = "WR-253"

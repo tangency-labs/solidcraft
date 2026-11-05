@@ -1295,7 +1295,6 @@ impl Curve {
             op,
         );
         let mut ls = LocalSolve1d::with_interval(*interval, false);
-        ls.set_failed_guess_no_sign_change(k.fixes.oscillating_skips_failed_guesses);
         // acceptable accuracy when Func(t) < tolerance
         let r = match ls.solve_it(&mut efo, guess, 1.0e-8) {
             Ok(r) => r,
