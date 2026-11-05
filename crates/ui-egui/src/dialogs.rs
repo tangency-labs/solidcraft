@@ -4880,23 +4880,41 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
 /// nothing, so it looked as if the click had done nothing.
 fn link_status(app: &SolveApp, cmd: &str, reply: &Value) -> Option<String> {
     let links = reply.get("links").and_then(Value::as_array)?;
-    let count = |key: &str| links.iter().map(|l| l.get(key).and_then(Value::as_array).map_or(0, Vec::len)).sum::<usize>();
-    // A curve's ends are points of its link too: name the curves when there are any.
-    let (curves, points) = (count("curves"), count("points"));
-    let (n, one, many) = if curves > 0 {
-        (curves, "ui.sketch_links_added_curve", "ui.sketch_links_added_curves")
-    } else {
-        (points, "ui.sketch_links_added_point", "ui.sketch_links_added_points")
+    let ids = |key: &str| -> Vec<&str> {
+        links.iter().flat_map(|l| l.get(key).and_then(Value::as_array).into_iter().flatten()).filter_map(Value::as_str).collect()
+    };
+    let (curves, points) = (ids("curves"), ids("points"));
+    let world = app.session.world_state().ok();
+    let sketch = app.session.active_sketch.and_then(|id| world.as_ref()?.sketch(id)).map(|s| &s.sketch);
+    // A curve's ends and centre are points of its link too: a point counts on its own only when
+    // no curve uses it (a projected vertex beside a projected edge).
+    let lone = match sketch {
+        Some(sk) => points
+            .iter()
+            .filter(|id| sk.points.iter().position(|p| p.id == **id).is_some_and(|i| !sk.curves.iter().any(|c| c.kind.point_ids().contains(&i))))
+            .count(),
+        None if curves.is_empty() => points.len(),
+        None => 0,
     };
     let command = crate::i18n::tr(if cmd == "sketch.intersect" { "ui.intersect" } else { "ui.project" });
-    let mut text = crate::i18n::format(if n == 1 { one } else { many }, &[("command", command), ("count", &n.to_string())]);
+    let counted = |id: &str, n: usize| crate::i18n::format(id, &[("command", command), ("count", &n.to_string())]);
+    let mut text = match (curves.len(), lone) {
+        (0, 0) => return None,
+        (1, 0) => counted("ui.sketch_links_added_curve", 1),
+        (n, 0) => counted("ui.sketch_links_added_curves", n),
+        (0, 1) => counted("ui.sketch_links_added_point", 1),
+        (0, n) => counted("ui.sketch_links_added_points", n),
+        (c, p) => crate::i18n::format(
+            "ui.sketch_links_added_curves_and_points",
+            &[
+                ("command", command),
+                ("curves", &counted(if c == 1 { "ui.sketch_links_curve_count_one" } else { "ui.sketch_links_curve_count" }, c)),
+                ("points", &counted(if p == 1 { "ui.sketch_links_point_count_one" } else { "ui.sketch_links_point_count" }, p)),
+            ],
+        ),
+    };
     let linked = links.iter().any(|l| l.get("link").is_some_and(|l| !l.is_null()));
-    let hidden = linked
-        && app
-            .session
-            .active_sketch
-            .is_some_and(|id| app.session.world_state().ok().and_then(|w| w.sketch(id).map(|s| s.sketch.view.hide_projected)).unwrap_or(false));
-    if hidden {
+    if linked && sketch.is_some_and(|sk| sk.view.hide_projected) {
         text.push(' ');
         text.push_str(&crate::i18n::format("ui.sketch_links_hidden", &[("option", crate::i18n::tr("ui.show_projected_geometries"))]));
     }

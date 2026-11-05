@@ -288,6 +288,30 @@ fn intersect_dialog_takes_a_line_of_another_sketch() {
     assert!(at[0].dist(solidcore_record::Vec3::new(20.0, 0.0, 0.0)) < 1e-6, "{at:?}");
 }
 
+/// A Project of an edge and a vertex beside it names both in the status line: the curve, and
+/// the point that is not one of its ends.
+#[test]
+fn project_status_names_a_lone_point_beside_a_curve() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Post"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","offset":30})).unwrap();
+    h.settle();
+    h.app.start("sketch.project");
+    h.settle();
+    {
+        let d = h.app.dialog.as_mut().expect("Project opens its dialog");
+        d.inputs[0].items = vec![
+            Sel::Edge { body: "Post".into(), index: 0, point: solidcore_record::Vec3::new(20.0, 0.0, 20.0) },
+            Sel::Vertex { body: "Post".into(), point: solidcore_record::Vec3::new(40.0, 30.0, 20.0) },
+        ];
+    }
+    h.app.status = None;
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.status.clone().map(|(text, _, error)| (text, error)), Some(("Project added 1 curve and 1 point to the sketch.".into(), false)));
+}
+
 #[test]
 fn project_dialog_keeps_geometry_targets_and_can_project_whole_bodies_unlinked() {
     let mut h = Harness::new();
