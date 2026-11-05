@@ -5932,8 +5932,7 @@ mod command_start_tab_tests {
             "edit.restore_checkpoint",
             "parameters.move",
             "library.inspect",
-            "surface.fair",
-            "surface.match",
+            // surface.fair and surface.match open their dialogs (#4644), so they start something.
             "sheet.export_bend_table",
         ] {
             let mut h = on_model_with_a_box();

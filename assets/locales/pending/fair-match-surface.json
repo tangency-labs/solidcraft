@@ -1,0 +1,90 @@
+{
+  "en": {
+    "Surface or face": "Surface or face",
+    "Surface or faces": "Surface or faces",
+    "Target edges": "Target edges",
+    "ui.fair_iterations": "Iterations",
+    "ui.fair_keep_edges": "Keep edges",
+    "ui.fair_strength": "Strength",
+    "ui.fair_surface_title": "FAIR SURFACE",
+    "ui.fair_tolerance_default": "0.001 of body size",
+    "ui.match_surface_title": "MATCH SURFACE"
+  },
+  "ja": {
+    "Surface or face": "サーフェスまたは面",
+    "Surface or faces": "サーフェスまたは面",
+    "Target edges": "ターゲットのエッジ",
+    "ui.fair_iterations": "反復回数",
+    "ui.fair_keep_edges": "エッジを保持",
+    "ui.fair_strength": "強度",
+    "ui.fair_surface_title": "サーフェスフェアリング",
+    "ui.fair_tolerance_default": "ボディサイズの 0.001 倍",
+    "ui.match_surface_title": "サーフェス一致"
+  },
+  "zh": {
+    "Surface or face": "曲面或面",
+    "Surface or faces": "曲面或面",
+    "Target edges": "目标边",
+    "ui.fair_iterations": "迭代次数",
+    "ui.fair_keep_edges": "保持边",
+    "ui.fair_strength": "强度",
+    "ui.fair_surface_title": "曲面光顺",
+    "ui.fair_tolerance_default": "实体尺寸的 0.001 倍",
+    "ui.match_surface_title": "曲面匹配"
+  },
+  "de": {
+    "Surface or face": "Flächenkörper oder Fläche",
+    "Surface or faces": "Flächenkörper oder Flächen",
+    "Target edges": "Zielkanten",
+    "ui.fair_iterations": "Iterationen",
+    "ui.fair_keep_edges": "Kanten behalten",
+    "ui.fair_strength": "Stärke",
+    "ui.fair_surface_title": "FLÄCHENBEGRADIGUNG",
+    "ui.fair_tolerance_default": "0,001 der Körpergröße",
+    "ui.match_surface_title": "FLÄCHENANPASSUNG"
+  },
+  "ko": {
+    "Surface or face": "곡면 또는 면",
+    "Surface or faces": "곡면 또는 면",
+    "Target edges": "대상 모서리",
+    "ui.fair_iterations": "반복 횟수",
+    "ui.fair_keep_edges": "모서리 유지",
+    "ui.fair_strength": "강도",
+    "ui.fair_surface_title": "서피스 페어링",
+    "ui.fair_tolerance_default": "바디 크기의 0.001배",
+    "ui.match_surface_title": "서피스 일치"
+  },
+  "ar": {
+    "Surface or face": "سطح أو وجه",
+    "Surface or faces": "سطح أو أوجه",
+    "Target edges": "الحواف المستهدفة",
+    "ui.fair_iterations": "عدد التكرارات",
+    "ui.fair_keep_edges": "الحفاظ على الحواف",
+    "ui.fair_strength": "شدة التنعيم",
+    "ui.fair_surface_title": "تنعيم السطح",
+    "ui.fair_tolerance_default": "0.001 من حجم الجسم",
+    "ui.match_surface_title": "مطابقة السطح"
+  },
+  "he": {
+    "Surface or face": "משטח או פאה",
+    "Surface or faces": "משטח או פאות",
+    "Target edges": "מקצועות יעד",
+    "ui.fair_iterations": "מספר איטרציות",
+    "ui.fair_keep_edges": "שמירה על המקצועות",
+    "ui.fair_strength": "עוצמה",
+    "ui.fair_surface_title": "החלקת משטח",
+    "ui.fair_tolerance_default": "0.001 מגודל הגוף",
+    "ui.match_surface_title": "התאמת משטח"
+  },
+  "vi": {
+    "Surface or face": "Bề mặt hoặc mặt",
+    "Surface or faces": "Bề mặt hoặc các mặt",
+    "Target edges": "Các cạnh đích",
+    "ui.fair_iterations": "Số lần lặp",
+    "ui.fair_keep_edges": "Giữ các cạnh",
+    "ui.fair_strength": "Cường độ",
+    "ui.fair_surface_title": "LÀM MƯỢT BỀ MẶT",
+    "ui.fair_tolerance_default": "0,001 lần kích thước thân khối",
+    "ui.match_surface_title": "KHỚP BỀ MẶT"
+  }
+}
