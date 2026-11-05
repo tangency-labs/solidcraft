@@ -84,6 +84,25 @@ SolidCraft changes:
   `egui_pipeline` shader compilation, #6648) returns `WgpuError::CreateRendererError` through
   eframe so startup can retry another backend instead of invoking wgpu's panic handler.
 
+## wgpu-hal 30.0.1 (MIT OR Apache-2.0, gfx-rs developers, https://github.com/gfx-rs/wgpu)
+
+The published package, with both original licence texts. Not copied: `README.md`, `examples/`
+and the package's `Cargo.lock`. Drop this copy when SolidCraft moves to a wgpu release that has
+gfx-rs/wgpu#10805, or another fix for gfx-rs/wgpu#10547.
+
+SolidCraft changes:
+- `src/dx12/mod.rs`, `src/dx12/shader_compilation.rs`, `src/dx12/device.rs`: gfx-rs/wgpu#10805,
+  backported. Direct3D 12's shader cache keeps an `Arc<[u8]>` copy of each compiled shader, not
+  the compiler's COM object. With FXC (SolidCraft's compiler on Windows unless `dxcompiler.dll`
+  is beside the app), the threads that build pipelines from the same shader got clones of one
+  `ID3DBlob`. FXC counts that object's references without atomic operations, so a lost
+  reference freed it while the cache still held it, and the next cache hit crashed. SolidCraft
+  has built the viewport's pipelines on several threads since 0.25.0
+  (`crates/gpu/src/concurrent.rs`), so the app could crash during start (#8530, #9065, #11743).
+  DXC's output is copied the same way.
+- `Cargo.toml`: drop the example targets and the dev-dependencies (their sources are not
+  vendored).
+
 ## winit 0.30.13 (Apache-2.0, © The winit contributors, https://github.com/rust-windowing/winit)
 
 Original package sources from the 0.30.13 release, with the upstream licence retained. Example
