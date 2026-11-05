@@ -314,6 +314,17 @@ fn tensor_text(t: &[[f64; 3]; 3]) -> String {
     t.iter().map(|r| r.map(|x| x.to_string()).join("\t")).collect::<Vec<_>>().join("\n")
 }
 
+/// What an inertia cell reads as: its entry's name from the row's label ("Ixx, Ixy, Ixz") and its
+/// value, or the row's label and the cell's place when the label does not name each cell (the
+/// principal moments).
+fn cell_name(label: &str, cells: usize, i: usize, value: &str) -> String {
+    let names: Vec<&str> = label.split(',').map(str::trim).collect();
+    match names.get(i) {
+        Some(name) if names.len() == cells => format!("{name}: {value}"),
+        _ => format!("{label} {}: {value}", i + 1),
+    }
+}
+
 /// The rows under Moment of inertia (#8095): label and cells, the tensor's three first.
 fn inertia_rows(app: &SolveApp, total: &Value) -> Vec<(String, Vec<String>)> {
     let k = crate::prefs::unit_scale(&app.session.doc.units).0;
@@ -440,10 +451,13 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
         // Each value copies itself as shown, unit and all, when clicked (#12218).
         for (label, value) in &rows {
-            ui_kit::row(ui, crate::i18n::tr_label(label), |ui| copied |= ui_kit::copy_cell(ui, value, false, &copy_hint));
+            let label = crate::i18n::tr_label(label);
+            let name = format!("{label}: {value}");
+            ui_kit::row(ui, label, |ui| copied |= ui_kit::copy_cell(ui, value, &name, false, &copy_hint));
         }
         if let Some(first) = &first {
-            ui_kit::row(ui, &first_label, |ui| copied |= ui_kit::copy_cell(ui, first, false, &copy_hint));
+            let name = format!("{first_label}: {first}");
+            ui_kit::row(ui, &first_label, |ui| copied |= ui_kit::copy_cell(ui, first, &name, false, &copy_hint));
         }
         if !inertia.is_empty() || unavailable {
             ui_kit::section(ui, "sc_props_inertia", &section, true, |ui| {
@@ -455,8 +469,9 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
                 for (n, (label, cells)) in inertia.iter().enumerate() {
                     ui_kit::row(ui, label, |ui| {
                         ui.columns(cells.len(), |columns| {
-                            for (column, cell) in columns.iter_mut().zip(cells) {
-                                copied |= ui_kit::copy_cell(column, cell, true, &copy_hint);
+                            for (i, (column, cell)) in columns.iter_mut().zip(cells).enumerate() {
+                                let name = cell_name(label, cells.len(), i, cell);
+                                copied |= ui_kit::copy_cell(column, cell, &name, true, &copy_hint);
                             }
                         })
                     });
@@ -628,7 +643,8 @@ mod tests {
 
         // #12218: a click on a value copies it as shown, and the status bar says so.
         let mass = format!("{m:.3} g");
-        let [x, y] = h.widget(&mass).expect("the mass cell");
+        // It reads as what it is and its value.
+        let [x, y] = h.widget(&format!("Mass: {mass}")).expect("the mass cell");
         let (request, _reply) = crate::control::ControlRequest::new("ui.click", json!({"x": x, "y": y}));
         crate::control::handle(&mut h.app, &h.ctx, &request);
         let mut copied = Vec::new();
@@ -769,5 +785,13 @@ mod tests {
         h.step(&json!({"click": {"chevron": "Document Settings"}})).unwrap();
         h.step(&json!({"click": {"browser": "Design Properties"}})).unwrap();
         assert!(h.app.design_properties.is_some());
+    }
+
+    /// #12218: an inertia cell reads as its entry and value; a row whose label does not name each
+    /// cell, as the label and the cell's place.
+    #[test]
+    fn inertia_cells_read_as_their_entry() {
+        assert_eq!(super::cell_name("Ixx, Ixy, Ixz", 3, 1, "4.5"), "Ixy: 4.5");
+        assert_eq!(super::cell_name("Principal moments", 3, 2, "7"), "Principal moments 3: 7");
     }
 }
