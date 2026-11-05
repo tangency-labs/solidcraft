@@ -505,14 +505,14 @@ fn provider_settings_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             egui::ComboBox::from_id_salt("sc_active_ai_provider").selected_text(label).show_ui(ui, |ui| {
                 if ui.selectable_label(current == "lm_studio", "LM Studio (Local)").clicked() {
                     app.preferences.ai_provider = "lm_studio".into();
-                    app.preferences.ai_endpoint_url = "http://localhost:1234/v1/chat/completions".into();
+                    app.preferences.ai_endpoint_url = "http://localhost:1234/v1".into();
                     if app.preferences.ai_model_name == "local-model" || app.preferences.ai_model_name.is_empty() {
                         app.preferences.ai_model_name = "qwen2.5-coder".into();
                     }
                 }
                 if ui.selectable_label(current == "ollama", "Ollama (Local)").clicked() {
                     app.preferences.ai_provider = "ollama".into();
-                    app.preferences.ai_endpoint_url = "http://localhost:11434/v1/chat/completions".into();
+                    app.preferences.ai_endpoint_url = "http://localhost:11434/v1".into();
                     if app.preferences.ai_model_name == "local-model" || app.preferences.ai_model_name.is_empty() {
                         app.preferences.ai_model_name = "llama3".into();
                     }

@@ -1535,13 +1535,13 @@ preference_settings! {
     /// Active AI Provider ("lm_studio", "ollama", "antigravity", "custom").
     ai_provider: String = "lm_studio".into(), PAGE_ASSISTANT;
     /// Endpoint URL for the active AI Provider.
-    ai_endpoint_url: String = "http://localhost:1234/v1/chat/completions".into(), PAGE_ASSISTANT;
+    ai_endpoint_url: String = "http://localhost:1234/v1".into(), PAGE_ASSISTANT;
     /// API Key for the active AI Provider (optional).
     ai_api_key: String = String::new(), PAGE_ASSISTANT;
     /// Model name for the active AI Provider.
     ai_model_name: String = "local-model".into(), PAGE_ASSISTANT;
     /// Customizable system prompt defining the AI's role as a parametric CAD engineer.
-    ai_system_prompt: String = "You are an expert parametric 3D CAD engineer in SolidCraft. When the user asks you to model a part, use the available CAD tools (sketching on planes, drawing profiles, dimensions, constraints, extrusions, fillets, chamfers, holes) to build precise 3D geometry step by step. Always ensure sketches are closed before extruding, use exact millimeter dimensions, and inspect the resulting bodies.".into(), PAGE_ASSISTANT;
+    ai_system_prompt: String = "You are an expert parametric 3D CAD engineer in SolidCraft. When asked to create or change geometry, ALWAYS call tools immediately. For simple shapes like a box, plate, or cube, call execute with command 'solid.box' (parameters: x, y, z in mm). For a cylinder, call execute with command 'solid.cylinder' (radius, height). For sketches and extrusions, call execute with 'sketch.create' and 'solid.extrude'. Never just respond with plain text when asked to design or model a part; always call tools.".into(), PAGE_ASSISTANT;
 
     // ---- Sketch / selection modifier bindings (classic defaults; alternate mapping is opt-in) ----
     /// Modifier that suppresses sketch auto-snap while drawing or dragging a sketch point.

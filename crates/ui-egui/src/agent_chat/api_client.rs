@@ -976,6 +976,18 @@ impl Worker {
                         | "hole"
                         | "solid_hole"
                         | "solid.hole"
+                        | "box"
+                        | "solid_box"
+                        | "solid.box"
+                        | "cylinder"
+                        | "solid_cylinder"
+                        | "solid.cylinder"
+                        | "fillet"
+                        | "solid_fillet"
+                        | "solid.fillet"
+                        | "chamfer"
+                        | "solid_chamfer"
+                        | "solid.chamfer"
                 );
                 let (text, failed) = if self.cancel.load(Ordering::Relaxed) {
                     ("cancelled by the user".to_string(), true)
@@ -985,7 +997,7 @@ impl Worker {
                 } else if !self.tool_names.iter().any(|n| n == &c.name) && !is_custom_cad {
                     (format!("unknown tool `{}`", c.name), true)
                 } else {
-                    let mcp_payload = match c.name.as_str() {
+                    let mut mcp_payload = match c.name.as_str() {
                         "extrude" | "solid_extrude" | "solid.extrude" => {
                             json!({"name": "execute", "arguments": {"command": "solid.extrude", "params": args}})
                         }
@@ -998,8 +1010,35 @@ impl Worker {
                         "place_hole" | "hole" | "solid_hole" | "solid.hole" => {
                             json!({"name": "execute", "arguments": {"command": "solid.hole", "params": args}})
                         }
+                        "box" | "solid_box" | "solid.box" => {
+                            json!({"name": "execute", "arguments": {"command": "solid.box", "params": args}})
+                        }
+                        "cylinder" | "solid_cylinder" | "solid.cylinder" => {
+                            json!({"name": "execute", "arguments": {"command": "solid.cylinder", "params": args}})
+                        }
+                        "fillet" | "solid_fillet" | "solid.fillet" => {
+                            json!({"name": "execute", "arguments": {"command": "solid.fillet", "params": args}})
+                        }
+                        "chamfer" | "solid_chamfer" | "solid.chamfer" => {
+                            json!({"name": "execute", "arguments": {"command": "solid.chamfer", "params": args}})
+                        }
                         _ => json!({"name": c.name, "arguments": args}),
                     };
+                    if let Some(cmd) = mcp_payload.pointer("/arguments/command").and_then(Value::as_str) {
+                        let normalized_cmd = match cmd {
+                            "extrude" | "solid_extrude" => "solid.extrude",
+                            "box" | "solid_box" => "solid.box",
+                            "cylinder" | "solid_cylinder" => "solid.cylinder",
+                            "fillet" | "solid_fillet" => "solid.fillet",
+                            "chamfer" | "solid_chamfer" => "solid.chamfer",
+                            "hole" | "solid_hole" => "solid.hole",
+                            "sketch" | "sketch_create" => "sketch.create",
+                            other => other,
+                        };
+                        if normalized_cmd != cmd {
+                            mcp_payload["arguments"]["command"] = json!(normalized_cmd);
+                        }
+                    }
                     match self.mcp_call("tools/call", mcp_payload) {
                         Ok(r) => tool_text(&r),
                         Err(e) => (e, true),
@@ -1067,7 +1106,27 @@ impl Worker {
             self.no_reasoning.set(true);
             body["reasoning_effort"] = json!("none");
             let (status, v) = self.post(&body)?;
+            if let Some(err) = v.get("error") {
+                let msg = if let Some(m) = err.get("message").and_then(Value::as_str) {
+                    m.to_string()
+                } else if let Some(s) = err.as_str() {
+                    s.to_string()
+                } else {
+                    err.to_string()
+                };
+                return Err(msg);
+            }
             return if status == 200 { Ok(reply(self.cfg.protocol, &v)) } else { Err(http_error(status, &v)) };
+        }
+        if let Some(err) = v.get("error") {
+            let msg = if let Some(m) = err.get("message").and_then(Value::as_str) {
+                m.to_string()
+            } else if let Some(s) = err.as_str() {
+                s.to_string()
+            } else {
+                err.to_string()
+            };
+            return Err(msg);
         }
         if status != 200 {
             return Err(http_error(status, &v));
@@ -1254,7 +1313,18 @@ impl Worker {
         let url = match self.cfg.protocol {
             Protocol::OpenAi => {
                 let trimmed = self.cfg.base_url.trim().trim_end_matches('/');
-                if trimmed.ends_with("/chat/completions") { trimmed.to_string() } else { format!("{trimmed}/chat/completions") }
+                if trimmed.ends_with("/chat/completions") {
+                    trimmed.to_string()
+                } else if trimmed.ends_with("/v1") {
+                    format!("{trimmed}/chat/completions")
+                } else {
+                    let after_scheme = trimmed.split("://").nth(1).unwrap_or(trimmed);
+                    if after_scheme.contains('/') {
+                        format!("{trimmed}/chat/completions")
+                    } else {
+                        format!("{trimmed}/v1/chat/completions")
+                    }
+                }
             }
             Protocol::Anthropic => {
                 headers.push(("anthropic-version".to_string(), ANTHROPIC_VERSION.to_string()));
@@ -1782,7 +1852,23 @@ fn listed_models(body: &Value, name_key: &str) -> Result<Vec<(String, Option<Str
 /// `GET {base_url}/models`: the models, in the order the endpoint lists them. The picker shows the
 /// ids, so an endpoint's own name for a model is its description.
 fn model_entries(http: &HttpFn, base_url: &str, headers: Vec<(String, String)>) -> Result<Vec<ModelInfo>, String> {
-    let req = HttpRequest { method: "GET", url: format!("{base_url}/models"), headers, body: None, timeout_s: 15 };
+    let trimmed = base_url.trim().trim_end_matches('/');
+    let url = if trimmed.ends_with("/models") {
+        trimmed.to_string()
+    } else if trimmed.ends_with("/chat/completions") {
+        let prefix = trimmed.strip_suffix("/chat/completions").unwrap_or(trimmed);
+        format!("{prefix}/models")
+    } else if trimmed.ends_with("/v1") {
+        format!("{trimmed}/models")
+    } else {
+        let after_scheme = trimmed.split("://").nth(1).unwrap_or(trimmed);
+        if after_scheme.contains('/') {
+            format!("{trimmed}/models")
+        } else {
+            format!("{trimmed}/v1/models")
+        }
+    };
+    let req = HttpRequest { method: "GET", url, headers, body: None, timeout_s: 15 };
     let (status, bytes) = http(&req)?;
     let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
     if status != 200 {
