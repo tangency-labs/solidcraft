@@ -15,16 +15,16 @@ use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_expr, req_vec2, str_, string_list, vec2, vec2_list};
 use crate::schema::sketch_modify::{
     BreakParams, BreakResult, ChamferDistanceAngleParams, ChamferEqualParams, ChamferResult, ChamferTwoParams, CircularPatternParams, ExtendParams,
-    ExtendResult, FilletParams, FilletResult, MAX_BREAK_POINTS, MAX_INSTANCES, MAX_PATH_POINTS, MirrorParams, MirrorResult, MoveParams,
-    MoveResult, OffsetBreakParams, OffsetBreakResult, OffsetParams, OffsetResult, OffsetSide, PatternResult, RectangularPatternParams, ScaleParams,
-    ScaleResult, TrimOutcome, TrimParams, TrimPathParams, TrimPathResult, TrimResult,
+    ExtendResult, FilletParams, FilletResult, MAX_BREAK_POINTS, MAX_INSTANCES, MAX_PATH_POINTS, MirrorParams, MirrorResult, MoveParams, MoveResult,
+    OffsetBreakParams, OffsetBreakResult, OffsetParams, OffsetResult, OffsetSide, PatternLimitParams, PatternLimitResult, PatternResult,
+    RectangularPatternParams, ScaleParams, ScaleResult, TrimOutcome, TrimParams, TrimPathParams, TrimPathResult, TrimResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 #[path = "sketch_pattern.rs"]
 mod pattern;
-pub(crate) use pattern::pattern_limit_for;
+pub(crate) use pattern::{pattern_limit_for, pattern_limit_problem, pattern_limit_value};
 #[path = "sketch_support.rs"]
 mod support;
 
@@ -43,6 +43,7 @@ const MOVE_CONTRACT: TypedContract<MoveParams> = TypedContract::new();
 const SCALE_CONTRACT: TypedContract<ScaleParams> = TypedContract::new();
 const CIRCULAR_PATTERN_CONTRACT: TypedContract<CircularPatternParams> = TypedContract::new();
 const RECTANGULAR_PATTERN_CONTRACT: TypedContract<RectangularPatternParams> = TypedContract::new();
+const PATTERN_LIMIT_CONTRACT: TypedContract<PatternLimitParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.fillet", "Fillet", crate::checked!("sketch.fillet", fillet))
@@ -164,6 +165,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch_rect_pattern")
         .enabled(in_sketch)
         .params(concat!("entities: [ids], count, spacing; count2?, spacing2?; counts: positive integer numbers or expressions, at most the pattern limit in total (sketch.pattern_limit, default 500; an edited pattern keeps its own size if larger); spacings: length numbers or expressions; direction?, direction2?: sketch line ids (live references); dir?, dir2?: [x,y] vectors (defaults: sketch x, perpendicular to direction 1); alignment?, alignment2?: left|center|right (default right). Signed spacings reverse each direction. reversed?, reversed2?: bool (default false); reverses placement and the extra side of even centered totals. Quantities include the original. Adds associative pattern constraints. Returns pattern id. pattern?: existing pattern id to edit (omitted values retained; surviving instance ids retained)", created_doc!())),
+    CommandSpec::new("sketch.pattern_limit", "Sketch Pattern Limit", crate::checked!("sketch.pattern_limit", pattern::limit))
+        .icon("sketch_rect_pattern")
+        .noundo()
+        .contract(&PATTERN_LIMIT_CONTRACT)
+        .output(output_schema_for::<PatternLimitResult>)
+        .params("value?: whole number 2…20000: the most instances (the original included) one sketch pattern may make; omitted: report it. The user's setting, kept across designs, not saved in a design, not an undo step; an edited pattern keeps its own size if larger. Returns pattern_limit"),
 ];
 
 /// A reply built from its typed value, which is what the command's output schema describes.

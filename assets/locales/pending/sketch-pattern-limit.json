@@ -1,0 +1,7 @@
+{
+  "en": { "cmd.sketch_pattern_limit": "Sketch Pattern Limit" },
+  "de": { "cmd.sketch_pattern_limit": "Grenze für Skizzenmuster" },
+  "ja": { "cmd.sketch_pattern_limit": "スケッチパターンの上限" },
+  "ko": { "cmd.sketch_pattern_limit": "스케치 패턴 한도" },
+  "zh": { "cmd.sketch_pattern_limit": "草图阵列上限" }
+}
