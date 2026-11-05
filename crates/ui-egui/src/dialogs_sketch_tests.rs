@@ -764,9 +764,12 @@ fn intersect_says_what_it_added_and_that_projected_geometries_hides_it() {
         ))
     );
     assert_eq!(links, 1);
-    // The same side again adds nothing.
+    // The same side again adds nothing, and the refusal is guidance: nothing to report.
     let (status, again, more) = intersect(&mut h, [10.0, 0.0, 0.0]);
     assert_eq!((again, more), (links, points), "{status:?}");
+    h.frames(2);
+    assert!(h.app.dialog.as_ref().and_then(|d| d.error.clone()).is_some_and(|e| e.contains("already intersected")), "{status:?}");
+    assert!(scenario::handle_at("dialog:create_issue").is_none(), "no Create Issue for a pick the sketch holds");
     h.app.dialog = None;
     // Shown, the status says only what was added.
     h.app.run("sketch.options", json!({"show_projected": true})).unwrap();
