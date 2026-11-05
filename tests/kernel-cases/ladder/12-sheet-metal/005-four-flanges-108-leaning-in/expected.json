@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "20 mm flanges at 108 deg on all four edges, made together and closed at the corners, leaning in over the base: the panel ends are cut back along a slant where they would overlap",
+ "source": "analytic",
+ "method": "T = 2, R = 1, K = 0.5, the corner gap g = 0.5. A bend zone is BA = theta (R + K T) wide in the flat; folded it is an annular sector holding theta T (R + T/2) a mm of bend, T BA with K = 0.5, and every panel moves rigidly, so V = T x the flat area. An edge flange's outer virtual sharp is on the picked edge: the base is cut back s0 = (R + T) tan(theta/2), the bend starts there, and its panel is H - s0 long (H from the sharp along the outer face). Closing a corner (sheet.rs close_corner): every point of a panel's end keeps g/2 from the plane halving the two flanges' inner faces. For the flange on y = 0, its bend along x from the corner (s0, s0), a point s up its panel (rigid, turned theta about the bend axis T + R up) on the face z of the sheet keeps that distance from x = s0 - R sin(theta) - s cos(theta) + g/sqrt2 + (T - z) sin(theta) on; the inner face z = T needs least, so the end is the line x = s0 - e - s cos(theta), e = R sin(theta) - g/sqrt2: the panel runs on e past its bend's end at its foot and a further cos(theta) per mm up it (outward below 90 deg, cut back above). Each panel is the trapezoid leg x (L + 2e + leg cos(theta)), its bend BA x L, L the base's edge less 2 s0 (the bend ends square at the corner). At 108 deg: s0 = 3 tan54 = 4.129146, BA = 3.769911, leg 15.870854, e = 0.597503, the slant cos(theta) = -0.309017 a mm up. V = 2 x the flat area = 20295.276640. Bbox: the walls lean in: what reaches furthest out is each bend's outer face a quarter turn in, s0 - (R + T) = 1.129146 inside the edge, and the outer face's far edge is highest, H sin(theta)",
+ "body_count": 1,
+ "volume_mm3": 20295.276640444,
+ "bbox": {
+  "min": [
+   1.1291457614135192,
+   1.1291457614135192,
+   0
+  ],
+  "max": [
+   98.87085423858647,
+   58.87085423858648,
+   19.021130325903073
+  ]
+ }
+}

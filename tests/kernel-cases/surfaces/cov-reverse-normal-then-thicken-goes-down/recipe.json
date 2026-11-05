@@ -1,0 +1,76 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Sheet sketch"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     10,
+     10
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.patch",
+   "params": {
+    "sketch": "Sheet sketch",
+    "body_name": "Sheet"
+   }
+  },
+  {
+   "command": "surface.reverse_normal",
+   "params": {
+    "body": "Sheet"
+   }
+  },
+  {
+   "command": "surface.thicken",
+   "params": {
+    "bodies": [
+     "Sheet"
+    ],
+    "thickness": 2,
+    "operation": "new",
+    "body_name": "Slab"
+   }
+  },
+  {
+   "command": "solid.remove",
+   "params": {
+    "bodies": [
+     "Sheet"
+    ]
+   }
+  }
+ ]
+}

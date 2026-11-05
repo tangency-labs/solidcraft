@@ -1,10 +1,10 @@
 //! Helpers to read hostile JSON parameters.
 
 use serde_json::Value;
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::Expr;
-use solidcraft_geom::{Vec2, Vec3};
 
-use crate::{EngineError, Result};
+use crate::{EngineError, Result, kernel};
 
 pub fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
     EngineError::BadParams { cmd: cmd.to_string(), msg: msg.into() }
@@ -88,14 +88,16 @@ pub fn req_expr(cmd: &str, p: &Value, k: &str) -> Result<Expr> {
 }
 
 /// The most names a list parameter may carry.
-const MAX_STRING_LIST: usize = 10_000;
+pub(crate) const MAX_STRING_LIST: usize = 10_000;
 
 /// The command name for a caller that does not know it: the engine names the command that ran
 /// when the error reaches it.
 pub const UNKNOWN_COMMAND: &str = "";
 
-/// A short description of a value that is not a name, for the message that refuses it.
-fn json_brief(v: &Value) -> String {
+/// A short description of a value that is not a name, for the message that refuses it. The
+/// schema contracts quote it too (`schema::config::NameList`), so strict refuses with the same
+/// words.
+pub(crate) fn json_brief(v: &Value) -> String {
     match v {
         Value::Null => "null".to_string(),
         Value::Bool(b) => b.to_string(),
@@ -179,6 +181,21 @@ pub fn string_list_or_default(p: &Value, k: &str) -> Vec<String> {
         Some(Value::String(s)) => vec![s.clone()],
         _ => Vec::new(),
     }
+}
+
+/// A continuity word (`g0` … `g4`, [`kernel::Continuity::parse`]) for `what` (the key or entry
+/// it was given as), refused when it is not a word and when `by` does not build that order: the
+/// kernel's [`kernel::Construction`] table says which orders it does.
+pub fn continuity(cmd: &str, v: Option<&Value>, what: &str, by: kernel::Construction) -> Result<kernel::Continuity> {
+    let (lowest, highest) = by.orders();
+    let g = v
+        .and_then(Value::as_str)
+        .and_then(kernel::Continuity::parse)
+        .ok_or_else(|| bad(cmd, format!("{what} must be {}", kernel::Continuity::words(lowest, highest))))?;
+    g.built_by(by).map_err(|e| match e {
+        kernel::KernelError::Invalid(why) => bad(cmd, format!("{what}: {why}")),
+        other => other.into(),
+    })
 }
 
 /// Whether any text in `p` is shaped like a definition, `name = expression` (#4071), so the

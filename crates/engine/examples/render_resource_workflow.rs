@@ -45,8 +45,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     restored.execute("render.scene", &json!({}))?;
     let before = restored.doc.to_json();
     require(
-        restored.execute("render.settings.set", &json!({"name":"Mapped","set":{"job":{"method":"cpu_raytrace","options":{}}}})).is_err(),
-        "unsupported CPU maps were silently discarded",
+        restored.execute("render.settings.set", &json!({"name":"Mapped","set":{"job":{"method":"raster"}}})).is_err(),
+        "unsupported raster maps were silently discarded",
     )?;
     require(restored.doc.to_json() == before, "failed method change mutated saved design")?;
     let target = restored.doc.render.setups["Mapped"].surfaces.iter().next().ok_or("surface target missing")?.target.clone();

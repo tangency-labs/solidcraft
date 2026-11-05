@@ -1,5 +1,6 @@
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::CurveKind;
 
 fn sketch() -> Harness {
@@ -74,7 +75,7 @@ fn construction_angle_accepts_inline_value_and_undo_is_one_step() {
     dim.locked = true;
     dim.value = "30 deg".into();
     let mut tool = h.app.tool.take().unwrap();
-    super::place_point(&mut h.app, &mut tool, (solidcraft_engine::geom::Vec2::new(15., 15.), None));
+    super::place_point(&mut h.app, &mut tool, (solidcore_record::Vec2::new(15., 15.), None));
     let sid = h.app.session.active_sketch.unwrap();
     let sk = h.app.session.doc.sketch(sid).unwrap();
     let curve = sk.curves.last().unwrap();
@@ -182,9 +183,9 @@ fn a_typed_length_makes_two_clicks_draw_a_dimensioned_segment() {
         assert!(!curve.infinite && curve.construction, "{id}: {curve:?}");
         let CurveKind::Line { a, b } = curve.kind else { panic!("{id}: a line") };
         let (a, b) = (sk.point(a).unwrap(), sk.point(b).unwrap());
-        assert!(a.dist(solidcraft_engine::geom::Vec2::new(start[0], start[1])) < 1e-6, "{id}: starts at the snapped point {a:?}");
+        assert!(a.dist(solidcore_record::Vec2::new(start[0], start[1])) < 1e-6, "{id}: starts at the snapped point {a:?}");
         assert!((a.dist(b) - 8.0).abs() < 1e-6, "{id}: {a:?} {b:?}");
-        let s = solidcraft_engine::geom::Vec2::new(side[0], side[1]);
+        let s = solidcore_record::Vec2::new(side[0], side[1]);
         assert!((b - a).dot(s - a) > 0.0, "{id}: runs towards the side clicked");
         assert!(sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Length { .. })), "{id}");
         let tool = h.app.tool.as_ref().unwrap();
@@ -268,4 +269,26 @@ fn the_normal_switch_needs_a_length_and_draws_a_normal_line() {
     let sk = h.app.session.doc.sketch(sid).unwrap();
     let curve = sk.curves.last().unwrap();
     assert!(curve.construction && curve.infinite, "{curve:?}");
+}
+
+#[test]
+fn perpendicular_click_on_reference_endpoint_places_line() {
+    // #10600: after picking the reference line, a click exactly on that line's own endpoint
+    // must reach the tool and place the perpendicular through the endpoint. The Length box
+    // waits beside the pointer there, and its click must not swallow the endpoint's.
+    let mut h = sketch();
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.perpendicular", &[[10., 0.], [20., 0.]]);
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "endpoint click swallowed: tool={:?} status={:?}", h.app.tool, h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(curve.infinite && curve.construction, "{curve:?}");
+    let CurveKind::Line { a, b } = curve.kind else { panic!("a line") };
+    let (p, q) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+    let d = q - p;
+    let end = sk.resolve_point("a.end").and_then(|i| sk.point(i)).unwrap();
+    // Through a.end (20, 0) and perpendicular to a, which runs along the sketch x axis.
+    assert!((end - p).x.abs() < 1e-6, "not through a.end: {p:?} {q:?}");
+    assert!(d.x.abs() < 1e-6, "not perpendicular to a: {d:?}");
 }

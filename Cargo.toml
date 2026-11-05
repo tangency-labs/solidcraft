@@ -5,7 +5,7 @@ members = ["crates/*", "apps/*", "xtask"]
 exclude = ["vendor"]
 
 [workspace.package]
-version = "0.29.0"
+version = "0.40.0-rc.2"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -16,9 +16,13 @@ repository = "https://github.com/bherbruck/solidcraft"
 robust = "1.2"
 # internal
 solidcraft-geom = { path = "crates/geom" }
+solidcraft-profile = { path = "crates/profile" }
 solidcraft-sketch = { path = "crates/sketch" }
 solidcraft-kernel = { path = "crates/kernel" }
+solidcraft-smlib = { path = "crates/smlib" }
+solidcraft-step = { path = "crates/step" }
 solidcraft-render = { path = "crates/render" }
+solidcraft-dynamics = { path = "crates/dynamics" }
 solidcraft-gpu = { path = "crates/gpu" }
 solidcraft-doc = { path = "crates/doc" }
 solidcraft-io = { path = "crates/io" }
@@ -28,6 +32,16 @@ solidcraft-space-mouse = { path = "crates/space-mouse" }
 solidcraft-mcp = { path = "crates/mcp" }
 solidcraft-derive = { path = "crates/derive" }
 solidcraft-3dx-client = { path = "crates/threedx-client" }
+# The Rust port of NVIDIA's SMLib (Apache-2.0), the B-rep kernel behind crates/smlib. Pinned;
+# move the rev on its own commit. For a
+# local checkout, add `[patch."https://github.com/tangency-labs/solidcore"] solidcore = { path =
+# "../solidcore/crates/solidcore" }` to a `.cargo/config.toml` outside the repository.
+solidcore = { git = "https://github.com/tangency-labs/solidcore", rev = "8ddce901671f1cebd9214a31d21895d725e886c8" }
+# Geometry as data (solidcore's layers §1, "Record"): the B-rep record, its structural validation
+# and the native body file. Pinned like solidcore; for a local checkout, patch it as above.
+solidcore-record = { git = "https://github.com/tangency-labs/solidcore", rev = "f5e8e9a29e0c9b7cf6c4040a5bc8878382b3c62f" }
+# test tooling: a dev-dependency only (xtask/src/layers.rs)
+solidcraft-testkit = { path = "crates/testkit" }
 
 # foundation
 thiserror = "2"
@@ -45,14 +59,7 @@ sha2 = "0.10"
 moxcms = { version = "0.8.1", default-features = false, features = ["extended_range"] }
 semver = "1"
 
-# geometry kernel (Apache-2.0; see plan/adr/0001-geometry-kernel.md). Only crates/kernel uses it.
-truck-modeling = "0.6"
-truck-shapeops = { version = "0.4", default-features = false }
-truck-meshalgo = { version = "0.4", default-features = false, features = ["tessellation", "analyzers"] }
-truck-stepio = { version = "0.3", default-features = false }
-truck-topology = "0.6"
-# constrained Delaunay + Ruppert refinement for trimmed faces (MIT OR Apache-2.0); already in the
-# tree through truck-meshalgo.
+# constrained Delaunay + Ruppert refinement for trimmed faces (MIT OR Apache-2.0).
 spade = { version = "2.15", default-features = false, features = ["std"] }
 rayon = "1.12"
 
@@ -75,9 +82,9 @@ gethostname = "1"
 # Pinned: its IR and codec APIs change between minor versions. Open formats only: no default
 # features, so cadmpeg's codecs for commercial formats (f3d, sldprt, inventor, catia, creo, nx)
 # and its ShapeManager/ACIS `sat` codec are not compiled in. `step` is the writer we restate through.
-cadmpeg-core = "=0.6.3"
-cadmpeg-ir = "=0.6.3"
-cadmpeg-registry = { version = "=0.6.3", default-features = false, features = ["fcstd", "rhino", "step"] }
+cadmpeg-core = "=0.6.7"
+cadmpeg-ir = "=0.6.7"
+cadmpeg-registry = { version = "=0.6.7", default-features = false, features = ["fcstd", "rhino", "step"] }
 
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "variable-fonts"] }
@@ -96,11 +103,12 @@ tiny-skia = { version = "0.12", default-features = false, features = ["std", "si
 toml = "1"
 
 # ui
-egui = "0.36"
-eframe = { version = "0.36", default-features = false, features = ["persistence"] }
+# default_fonts: the built-in Hack is the UI's symbol fallback (#2955); 0.37 no longer turns it on.
+egui = { version = "0.37", features = ["default_fonts"] }
+eframe = { version = "0.37", default-features = false, features = ["persistence"] }
 # Instant/SystemTime that also work in the browser (std panics on wasm32-unknown-unknown).
 web-time = "1"
-egui-wgpu = "0.36"
+egui-wgpu = "0.37"
 # the wgpu egui-wgpu uses, for compute (crates/gpu); backends come from the apps' features
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl"] }
 naga = { version = "30", default-features = false }
@@ -125,9 +133,7 @@ opt-level = 2
 opt-level = 1
 
 # Tests and lints (`cargo xtask ci`, GitHub CI): quick to build, quick enough to run. Light
-# optimisation, line tables only (file:line in backtraces), no LTO. Debug assertions are off because
-# truck's debug-only checks reject valid geometry (seam edges, closed edges); that was the only
-# reason the tests used to build with --release, which cost most of CI's time.
+# optimisation, line tables only (file:line in backtraces), no LTO, no debug assertions.
 [profile.ci]
 inherits = "dev"
 opt-level = 1
@@ -150,23 +156,15 @@ codegen-units = 16
 # binary). See docs/crash-reports.md.
 debug = "line-tables-only"
 
-# truck-shapeops with SolidCraft fixes (Apache-2.0, see vendor/truck-shapeops and ATTRIBUTION.md).
-[patch.crates-io]
-truck-geometry = { path = "vendor/truck-geometry" }
-truck-shapeops = { path = "vendor/truck-shapeops" }
-truck-stepio = { path = "vendor/truck-stepio" }
-truck-meshalgo = { path = "vendor/truck-meshalgo" }
-matext4cgmath = { path = "vendor/matext4cgmath" }
 
+# Vendored crates with SolidCraft fixes (see vendor/README.md and ATTRIBUTION.md).
+[patch.crates-io]
 # Keep OpenGL pipelines, resolve textures and CAD callbacks at the same safe sample count.
 egui-wgpu = { path = "vendor/egui-wgpu" }
 
 # Deliver trackpad pinch and rotation gestures on Wayland (zwp_pointer_gestures_v1), which
-# winit 0.30 never binds and eframe 0.36 still requires winit 0.30.
+# winit 0.30 never binds and eframe 0.37 still requires winit 0.30.
 winit = { path = "vendor/winit" }
-
-# macOS: dropping the accessibility adapter leaves AppKit's key-value observers intact (#7535).
-accesskit_macos = { path = "vendor/accesskit_macos" }
 
 # Mutation testing (cargo-mutants, docs/mutation-testing.md): the ci profile with incremental
 # builds, since every mutant rebuilds the crates above the one it changes.

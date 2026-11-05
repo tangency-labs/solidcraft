@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2069"
+  ],
+  "what": "a 210-degree ring with a chamfered outer edge, notched through its chamfer cone and then moved 1000 mm: where the notch meets the cone the mesh used to leave a crack, and the measured volume then grew with the distance from the origin",
+  "source": "analytic",
+  "method": "Section (r,z): 20..30 by 0..10 with the outer top corner chamfered 4x4 (points (20,0),(30,0),(30,6),(26,10),(20,10)): area 100-8=92, centroid radius (100*25-8*86/3)/92=24.6812. Pappus over 210 deg: V_ring = (210 pi/180)*92*24.6812 = 8322.428. The notch is the box x 24..32, y -2..2, z 5..11, centred on the revolve's seam: it removes the integral over its footprint of (min(10,36-r)-5) for r<=30 (r=sqrt(x^2+y^2); the top of the section is z=10 for r<=26 and z=36-r on the chamfer), midpoint rule 1600x1600: 87.5295 (converged to 3e-6). V = 8322.428 - 87.5295 = 8234.899, wherever the body sits (the ring is then moved 1000 mm along x).",
+  "body_count": 1,
+  "volume_mm3": 8234.899
+}

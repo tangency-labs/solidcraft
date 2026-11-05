@@ -1,0 +1,142 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#4194",
+  "why": "no geometry: the report arrived empty, and the error didn't come back"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4279",
+  "why": "no reproduction: shell of a user's part with a free-form face (dup of #2432), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4285",
+  "why": "UI only: sketch offset's second distance has no drag handle"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4300",
+  "why": "UI only: sketch offset's drag handle goes one way"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4306",
+  "why": "no reproduction: shell of a user's part with a free-form face (dup of #2432), screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4331",
+  "why": "no reproduction: the report arrived empty (a screenshot)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4345",
+  "why": "no kernel geometry: an offset plane's origin placed at the world origin's foot (construction)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4385",
+  "why": "UI only: sketch offset's second distance dimension"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4464",
+  "why": "no geometry: sketch offset removes degrees of freedom (sketch solver)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4467",
+  "why": "no reproduction: shell removing six faces of a user's 4-feature part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4484",
+  "why": "duplicate of #4879: the thicken now builds; the cut into it is #4879's case"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4503",
+  "why": "no reproduction: shell of a user's twisted swept slot (free-form, dup of #2432), screenshots only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4510",
+  "why": "no geometry: delete face in the surface workspace heals instead of opening (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4522",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4555",
+  "why": "no kernel geometry: a face given by a point resolves to the other body's coplanar face (engine face lookup)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4573",
+  "why": "no kernel geometry: \"select at least one face to remove\" on a picked face (dup of #4555, engine face lookup)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4574",
+  "why": "no reproduction: shell beside a tangent face of an unknown part, screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4583",
+  "why": "no geometry: sketch offset with unsolved constraints (sketch)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4742",
+  "why": "no reproduction: a 0.1 mm shell after a draft and fillets on an unknown part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4743",
+  "why": "duplicate of the free-form shell case from #4567 (a loft's walls instead of a revolve's)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4775",
+  "why": "no geometry: Offset Face run with no faces picked (user error)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4822",
+  "why": "no reproduction: a screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4886",
+  "why": "no geometry: sketch offset of a mixed line/spline chain (sketch, a stated limit)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4988",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4990",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5019",
+  "why": "no geometry: sketch offset joining coincident ends (sketch)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5050",
+  "why": "no reproduction: shell of a user's revolved free-form profile (a stated limit; a plain tapered cup works); see the case from #4567"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5076",
+  "why": "no reproduction: shell of a user's loft (free-form, a stated limit); see the loft shell case from #4743"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5245",
+  "why": "render: cursor offset on old Intel OpenGL (dup of #2063)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5247",
+  "why": "no reproduction: \"shell worked fine in previous versions\", no message or design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5249",
+  "why": "no reproduction: a shell refused on a box with a sketched circle, screenshots only (it worked in an earlier version)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5301",
+  "why": "no geometry: a sketch offset circle not fully constrained (sketch)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5330",
+  "why": "no geometry: sketch offset of an offset spline (sketch curve fitting)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5339",
+  "why": "no geometry: a spline's offset is fitted from many points (sketch curve fitting, dup of #5330)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5378",
+  "why": "no reproduction: Thicken fails, no message or design"
+ }
+]

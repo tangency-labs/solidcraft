@@ -5,12 +5,14 @@
 //! (`F3:inner:<face>`), or, without history, a body and an index (`Body1:face:3`). Suffixes
 //! follow: a pattern copy (`@F7.2`), a piece of a split face told apart by the faces around it
 //! (`#[<face>,…]`, `#k` after it for a tie), an older design's numbered piece (`#k`). An edge is
-//! the two faces it separates, `~k` for one of several between them.
+//! the two faces it separates, `~k` for one of several between them; a seam, whose two sides are
+//! the same face, names that face once.
 //!
 //! The text form, read by [`FaceName::parse`] and [`EdgeName::parse`] and written by `Display`:
 //!
 //! ```text
-//! edge     = face { "|" face } [TIE]       one face for an open boundary, more where several meet
+//! edge     = face { "|" face } [TIE]       one face for an open boundary or a seam (both of an
+//!                                          edge's sides on one face), more where several meet
 //! face     = base { suffix }
 //! base     = FEATURE ":" "blend" ":" ( edge | NUMBER )
 //!          | FEATURE ":" "inner" ":" face

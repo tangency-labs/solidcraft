@@ -3,10 +3,11 @@
 //! a component's over the physical material's look; a body with none of these keeps the colour
 //! it was imported with.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::Document;
 

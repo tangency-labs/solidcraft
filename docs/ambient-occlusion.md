@@ -3,7 +3,9 @@
 Enable **Ambient occlusion** in the viewport's **View settings** menu or in
 **Preferences → Graphics**. It adds soft contact shading at corners, recesses and
 nearby opaque surfaces. It is off by default, applies immediately, and is saved
-between runs. The shared **Graphics Preset** selector in both settings surfaces
+between runs. It also shades contacts with the viewport's virtual ground, independently
+of the Ground shadow setting. Turning Ground shadow off leaves AO contacts enabled.
+The shared **Graphics Preset** selector in both settings surfaces
 combines AO with the display-quality and supersampling controls from #1319 and #1321:
 
 | Preset | Ambient occlusion | Display quality | Supersampling |
@@ -15,7 +17,7 @@ combines AO with the display-quality and supersampling controls from #1319 and #
 Custom is derived from the current settings, not a third preset that overwrites them.
 Individual controls remain editable. Selecting a preset applies all three settings
 immediately; MSAA, ground shadow, projection and visual style stay unchanged.
-Graphics preferences support Cancel, Apply and Restore Defaults. Adaptive supersampling
+Graphics preferences support Cancel, Apply and Restore page defaults. Adaptive supersampling
 keeps #1321's 0.25-second settling delay, texture limit and 384 MiB memory cap;
 the requested 2× may be reduced or skipped when the device cannot accommodate it.
 
@@ -33,16 +35,27 @@ only display preferences, without adding a modelling undo step or moving the cam
 The GPU viewport uses 32 hemisphere samples per shaded pixel against an opaque depth
 prepass (at most 2048 pixels on its longest side), the sample pattern turned by a
 different angle at each pixel. One pattern for every pixel drew faint shifted copies of
-nearby parts (#4167) and stepped bands along contacts (#3407); turned, they become an
-even fine grain, which 2× supersampling smooths further. While the view moves (orbit, pan,
-zoom, resize), frames take 8 samples on the same turned pattern, and the full 32 follow once
-the view has held still for 0.25 s, the settling time adaptive supersampling uses (#7165).
-The AO grain changes when the full count arrives, as the edges do when adaptive supersampling
-does. `ui.screenshot` waits for that full-quality frame (at most half a second). The radius follows
+nearby parts (#4167) and stepped bands along contacts (#3407); turned, they become a grain,
+which a 4 × 4 blur by depth takes out: the term has its own texture, worked out once for each
+pixel of the prepass (#9327). While the view moves (orbit, pan, zoom, resize), frames take 8
+samples, and the full 32 follow once the view has held still for 0.25 s, the settling time
+adaptive supersampling uses (#7165). `ui.screenshot` waits for that full-quality frame (at most half a second). The radius follows
 model size, and depth-range rejection avoids shadows from distant foreground objects.
 It supports orthographic and perspective cameras and respects section clipping.
 Wireframe, transparent bodies, overlays and surface-analysis colours are unaffected.
 Disabling it skips the depth prepass and sampling and releases the full-size depth map.
+
+The ground follows the existing ellipse's visible-body bounds and up-axis convention,
+slightly below their lowest point; it is not the origin grid or a saved floor object.
+It appears only in shaded views from above. The receiver adds two triangles to the
+existing depth prepass and draws contact opacity over the background, without another
+texture or body-mesh copy. Its fragment sampling still adds GPU work, especially on
+software adapters and with supersampling. The existing structured SSAO bands remain
+a separate quality issue (#3407).
+
+Live-preview bounds update the small receiver through frame metadata, without changing
+the model scene's cache key or re-uploading unchanged model colours. Only its extent
+grows to cover the preview; the existing ground height remains unchanged.
 
 This is screen-space shading: off-screen and hidden surfaces cannot contribute.
 The software fallback and CPU model snapshots do not apply this GPU effect. Capture

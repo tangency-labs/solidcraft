@@ -6,7 +6,9 @@
 //! viewport, a double-click on a sketch edits it, and a right-click opens the item's menu
 //! ([`crate::context_menu`]).
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
+use solidcraft_engine::geom::prelude::*;
 
 #[path = "browser_cache.rs"]
 mod cache;
@@ -30,45 +32,104 @@ pub(crate) fn reveal_feature(app: &mut SolveApp, id: u64, body: &str) {
     features::reveal(app, id, body);
 }
 
-/// Find in Browser for a body: open every row that holds it (the document, the placements down
-/// to it, its Bodies folder and any group around it) and scroll its row into view. The rows
-/// are opened here, not while drawing, because a collapsed ancestor never draws its children.
-pub(crate) fn reveal_body(app: &mut SolveApp, body: &str) {
-    app.ui.show_browser = true;
-    app.preferences.timeline_left_browser_collapsed = false;
-    app.tree.reveal_feature = None;
-    app.tree.reveal = Some(body.to_string());
-    let state = app.session.model.state();
-    let Some(source) = app.session.world_state().body(body).map(|selected| selected.definition_name().to_string()) else { return };
-    let Some(component) = state.body(&source).map(|definition| definition.component) else { return };
-    // Every component's first placement keeps the definition's name, so the owner must match too.
-    let Some((_, path, _)) = app
-        .session
-        .doc
-        .placements()
-        .into_iter()
-        .find(|(owner, path, _)| *owner == component && app.session.doc.world_body_name(&state, &source, *owner, path) == body)
-    else {
-        return;
-    };
-    app.tree.collapsed.remove("c0");
-    for depth in 1..=path.len() {
-        app.tree.collapsed.remove(&occurrence_key(&path[..depth]));
-    }
-    let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
-    app.tree.collapsed.remove(&scope);
-    app.tree.collapsed.remove(&format!("{scope}/bodies"));
-    open_group_chain(app, &scope, component, "bodies", &source);
+/// Whether folders start open: unless Preferences › Layout › Browser rows start closed is on,
+/// when they, and placements whatever "Components start open" says ([`placement_open`]), open
+/// with their arrow, Find in Browser or Expand All (#8768). The design's own row always starts
+/// open.
+pub(crate) fn rows_start_open(app: &SolveApp) -> bool {
+    !app.preferences.browser_rows_start_closed
 }
 
-/// Open the group holding an item, and the groups holding that one.
-fn open_group_chain(app: &mut SolveApp, scope: &str, component: u64, folder: &str, key: &str) {
-    let mut at = app.session.doc.group_of_item(component, folder, key).map(|g| g.id);
-    for _ in 0..=solidcraft_engine::doc::MAX_GROUP_NESTING {
-        let Some(id) = at else { return };
-        app.tree.collapsed.remove(&if scope.is_empty() { format!("g{id}") } else { format!("{scope}/g{id}") });
-        at = app.session.doc.browser_group(id).and_then(|g| g.parent);
+/// Whether the Browser follows the 3D view: a body picked there opens the Browser down to its row
+/// (#3005), and the rows above what is selected or under the pointer are marked (#3009). It does
+/// while the rows start open; while they start closed, only Find in Browser opens them.
+fn follows_view(app: &SolveApp) -> bool {
+    rows_start_open(app)
+}
+
+/// Find in Browser for a body: show the Browser and find the body there ([`find_in_tree`]).
+pub(crate) fn reveal_body(app: &mut SolveApp, body: &str) {
+    sync_reveals(app);
+    app.ui.show_browser = true;
+    app.preferences.timeline_left_browser_collapsed = false;
+    find_in_tree(app, body);
+}
+
+/// What the last Find in Browser found.
+struct Found {
+    /// The body, by its name in the world.
+    body: String,
+    /// The placement it is in (empty for a body of the design itself).
+    path: Vec<u64>,
+    /// The selection the find left: the path lights the rows above the body until it changes.
+    selection: Vec<Sel>,
+}
+
+/// Open the rows that hold a body and no others: the document, the placements down to it, its
+/// Bodies folder and any group around it. While the rows start closed, the rows the last find
+/// opened close again, unless they were opened or closed by hand since or are on this path. The
+/// body's row is scrolled into view, and the path lights the rows leading to it. The path is
+/// looked up once, here: the rows are opened before drawing, because a closed row never draws
+/// what is inside it.
+fn find_in_tree(app: &mut SolveApp, body: &str) {
+    app.tree.reveal_feature = None;
+    app.tree.reveal = Some(body.to_string());
+    remember_reveal_source(app, body);
+    let Some((component, source, path)) = body_placement(app, body) else { return };
+    let start_open = rows_start_open(app);
+    // A body of the design itself is in no placement: its folder is the design's (`c0`).
+    let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
+    let mut rows = vec![("c0".to_string(), true)];
+    rows.extend((1..=path.len()).map(|depth| (occurrence_key(&path[..depth]), start_open)));
+    rows.push((format!("{scope}/bodies"), start_open));
+    rows.extend(group_chain(app, component, "bodies", &source).into_iter().map(|id| (format!("{scope}/g{id}"), start_open)));
+    // Rows that start open stay open after a find, as they always have: only rows that start
+    // closed close again at the next one.
+    if start_open {
+        app.tree.found_rows.clear();
     }
+    let mut opened = Vec::new();
+    for (key, default) in std::mem::take(&mut app.tree.found_rows) {
+        if rows.iter().any(|(row, _)| *row == key) {
+            opened.push((key, default));
+        } else {
+            set_open(app, &key, default, false);
+        }
+    }
+    for (key, default) in rows {
+        if set_open(app, &key, default, true) && !start_open {
+            opened.push((key, default));
+        }
+    }
+    app.tree.found_rows = opened;
+    app.tree.found = Some(Found { body: body.to_string(), path, selection: app.session.selection.clone() });
+}
+
+/// Another design is shown: the rows the last Find in Browser opened were that design's, and the
+/// next Find leaves this one's rows as they are.
+pub(crate) fn forget_found(app: &mut SolveApp) {
+    app.tree.found_rows.clear();
+    app.tree.found = None;
+}
+
+/// The placement a body (by its world name) is in: its component, its name in that component and
+/// the placement's path. One look through the placements.
+fn body_placement(app: &SolveApp, body: &str) -> Option<(u64, String, Vec<u64>)> {
+    let source = crate::open_meshing::session_world(&app.session).body(body).map(|selected| selected.definition_name().to_string())?;
+    let component = app.session.model.state().body(&source).map(|definition| definition.component)?;
+    let path = placement_named(app, &source, component, body)?;
+    Some((component, source, path))
+}
+
+/// The path of the placement of `component` in which its body `source` has the world name
+/// `body`. Every component's first placement keeps the definition's name, so the owner must
+/// match too. The design is indexed once for the look, so a component placed many times costs
+/// its placements, not its placements times the design.
+pub(crate) fn placement_named(app: &SolveApp, source: &str, component: u64, body: &str) -> Option<Vec<u64>> {
+    let state = app.session.model.state();
+    let doc = &app.session.doc;
+    let names = solidcraft_engine::doc::WorldNames::new(doc, &state);
+    doc.placements().into_iter().find(|(owner, path, _)| *owner == component && names.name(source, component, path) == body).map(|(_, path, _)| path)
 }
 
 pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
@@ -92,20 +153,14 @@ use crate::theme::Tokens;
 
 use crate::SolveApp;
 
-thread_local! {
-    /// The rows drawn this frame: (label, row, fold arrow area, open). For automation
-    /// (`ui.at {browser | chevron}`, `ui.browser`).
-    static DRAWN: std::cell::RefCell<Vec<(String, Rect, Option<Rect>, Option<bool>)>> = const { std::cell::RefCell::new(Vec::new()) };
-    static OCCURRENCES: std::cell::RefCell<Vec<(Vec<u64>, String, Rect, bool)>> = const { std::cell::RefCell::new(Vec::new()) };
+/// The Browser's rows on screen: (label, row rect, fold arrow area, open).
+/// Other presentations expose their geometry through `semantic_content::output`.
+pub fn drawn_rows() -> Vec<crate::semantic_content::DrawnRow> {
+    crate::semantic_content::output(crate::semantic_content::ContentOwner::BROWSER).rows
 }
 
-/// The rows on screen: (label, row rect, fold arrow area, open).
-pub fn drawn_rows() -> Vec<(String, Rect, Option<Rect>, Option<bool>)> {
-    DRAWN.with(|d| d.borrow().clone())
-}
-
-pub fn drawn_occurrences() -> Vec<(Vec<u64>, String, Rect, bool)> {
-    OCCURRENCES.with(|d| d.borrow().clone())
+pub fn drawn_occurrences() -> Vec<crate::semantic_content::DrawnOccurrence> {
+    crate::semantic_content::output(crate::semantic_content::ContentOwner::BROWSER).occurrences
 }
 
 /// Browser state kept between frames.
@@ -113,14 +168,24 @@ pub fn drawn_occurrences() -> Vec<(Vec<u64>, String, Rect, bool)> {
 pub struct TreeState {
     /// Geometry and assembly queries, independent of the camera, selection and row visibility.
     model: Option<model::Model>,
-    /// Folders closed by the user (keys like `c0/bodies`).
+    /// Rows closed by the user (keys like `c0/bodies`): read for rows that start open.
     pub collapsed: BTreeSet<String>,
-    /// Folders opened by the user (folders that start closed).
+    /// Rows opened by the user: read for rows that start closed. A row opened or closed by hand
+    /// is written to both sets ([`set_open`]), so it keeps its state whichever way it starts.
     pub expanded: BTreeSet<String>,
     /// Scroll to this body's row (by the name it has in the world, which tells the placements
-    /// of a part apart) and open the components, placements and folders above it: Find in
-    /// Browser, and a body picked in the viewport (#3005).
+    /// of a part apart): Find in Browser, and a body picked in the viewport while the Browser
+    /// follows the 3D view (#3005). [`find_in_tree`] opens the rows above it.
     pub reveal: Option<String>,
+    /// Enough provenance to distinguish temporary rollback/suppression from target removal.
+    reveal_source: Option<BodyRevealSource>,
+    /// Runtime owner of the active pending requests, including requests with numeric IDs.
+    reveal_session: Option<u64>,
+    /// The rows the last Find in Browser opened (key, starts open), for the next one to close
+    /// again. A row opened or closed by hand since leaves the list.
+    found_rows: Vec<(String, bool)>,
+    /// What the last Find in Browser found, until the selection changes.
+    found: Option<Found>,
     /// A native feature to reveal in its placed component's Features folder (Find in Timeline).
     pub(super) reveal_feature: Option<features::Reveal>,
     /// The Move/Copy panel of an occurrence.
@@ -146,21 +211,19 @@ pub struct TreeState {
     /// Show components marked out of the History bar anyway (#10393). Held by the session, like
     /// the bar's Show All toggle; the History controls' menu carries the switch.
     pub history_show_hidden: bool,
+    /// The History bar's Show All toggle: every component's features, not only the active or
+    /// picked one's (#2880).
+    pub history_show_all: bool,
     /// The feature of the face or edge last picked in the view, so a new pick scrolls the
     /// history to it once.
     pub view_pick: Option<u64>,
     /// The Edit Canvas / Calibrate panel.
     pub canvas_panel: Option<CanvasPanel>,
-    /// The bodies a row at the top of the history lights this frame (`history_rows`), for the
-    /// browser, drawn after it, to keep.
-    history_hover: Vec<String>,
     /// The Edit Point Cloud panel.
     pub cloud_panel: Option<CloudPanel>,
-    /// The plane a row at the top of the history lights this frame, kept the same way (#6975).
-    history_plane: Option<String>,
     /// A Section Analysis hidden with its eye in the Analysis folder: its plane (origin,
     /// normal), so the eye can bring it back (#822).
-    pub hidden_section: Option<(solidcraft_engine::geom::Vec3, solidcraft_engine::geom::Vec3)>,
+    pub hidden_section: Option<(solidcore_record::Vec3, solidcore_record::Vec3)>,
     /// What the Section Analysis dialog's OK last made, for Edit to start from.
     pub section_dialog: Option<crate::dialogs::SectionDraft>,
     /// The Analysis folder hidden with its own eye, and the Section Analysis hidden with its
@@ -171,15 +234,8 @@ pub struct TreeState {
     pub capture_prompt: Option<String>,
     /// The design, undo depth and visibility when the button last went down: a drag over the eyes
     /// merges the steps it made into one (`eye_drag_frame`).
-    eye_press: Option<(Arc<Document>, usize, solidcraft_engine::Visibility)>,
-    /// The last row clicked (for Shift ranges).
-    anchor: Option<String>,
-    /// Row keys in drawing order this frame (for Shift ranges).
-    order: Vec<String>,
-    /// The previous frame's complete row order: a Shift click resolves its range here, since
-    /// this frame's `order` does not yet hold the rows below the clicked one (#4991).
-    order_prev: Vec<String>,
-    order_len: usize,
+    eye_press: Option<(u64, Arc<Document>, usize, solidcraft_engine::Visibility)>,
+    pub(crate) content: crate::semantic_content::Frame,
     cache: Option<cache::Cache>,
 }
 
@@ -189,6 +245,71 @@ struct FolderPick {
     doc: Weak<Document>,
 }
 
+struct BodyRevealSource {
+    body: String,
+    session: u64,
+    creator: u64,
+}
+
+/// Pending presentation requests parked alongside their session in a bounded document slot.
+/// Pointer input (`view_pick`) deliberately never travels with the slot.
+#[derive(Default)]
+pub(crate) struct PendingReveals {
+    session: Option<u64>,
+    body: Option<String>,
+    source: Option<BodyRevealSource>,
+    feature: Option<features::Reveal>,
+    timeline: Option<u64>,
+}
+
+pub(crate) fn discard_reveals(app: &mut SolveApp) {
+    app.tree.reveal = None;
+    app.tree.reveal_source = None;
+    app.tree.reveal_feature = None;
+    app.tree.timeline_reveal = None;
+    app.tree.view_pick = None;
+    app.tree.reveal_session = Some(app.session.uid);
+}
+
+/// Guard request creation and presentation even when a session changes after frame begin.
+pub(crate) fn sync_reveals(app: &mut SolveApp) {
+    if app.tree.reveal_session.is_some_and(|session| session != app.session.uid) {
+        discard_reveals(app);
+    }
+    if app.tree.reveal_source.as_ref().is_some_and(|source| source.session != app.session.uid) {
+        app.tree.reveal = None;
+        app.tree.reveal_source = None;
+    }
+    app.tree.reveal_session = Some(app.session.uid);
+}
+
+pub(crate) fn take_reveals(app: &mut SolveApp) -> PendingReveals {
+    sync_reveals(app);
+    app.tree.view_pick = None;
+    PendingReveals {
+        session: Some(app.session.uid),
+        body: app.tree.reveal.take(),
+        source: app.tree.reveal_source.take(),
+        feature: app.tree.reveal_feature.take(),
+        timeline: app.tree.timeline_reveal.take(),
+    }
+}
+
+pub(crate) fn restore_reveals(app: &mut SolveApp, pending: PendingReveals) {
+    discard_reveals(app);
+    if pending.session == Some(app.session.uid) {
+        app.tree.reveal = pending.body;
+        app.tree.reveal_source = pending.source;
+        app.tree.reveal_feature = pending.feature;
+        app.tree.timeline_reveal = pending.timeline;
+    }
+}
+
+pub(crate) fn request_timeline_reveal(app: &mut SolveApp, id: u64) {
+    sync_reveals(app);
+    app.tree.timeline_reveal = Some(id);
+}
+
 impl FolderPick {
     fn current(&self, app: &SolveApp) -> bool {
         self.session == app.session.uid && std::ptr::eq(self.doc.as_ptr(), Arc::as_ptr(&app.session.doc))
@@ -196,20 +317,35 @@ impl FolderPick {
 }
 
 impl TreeState {
+    pub(crate) fn for_session(session: u64) -> Self {
+        Self { reveal_session: Some(session), ..Default::default() }
+    }
+
     pub(crate) fn clear_folder_pick(&mut self) {
         self.picked_folder = None;
     }
 
-    fn remember(&mut self, key: &str) {
-        if let Some(slot) = self.order.get_mut(self.order_len) {
-            if slot != key {
-                slot.clear();
-                slot.push_str(key);
-            }
-        } else {
-            self.order.push(key.to_owned());
+    /// Open a row. A placement's row is noted open in `expanded` as well, because it starts
+    /// closed unless the "Components start open" preference is on (#9274).
+    pub(crate) fn open_row(&mut self, key: &str) {
+        self.collapsed.remove(key);
+        if is_placement_key(key) && !self.expanded.contains(key) {
+            self.expanded.insert(key.to_owned());
         }
-        self.order_len += 1;
+    }
+
+    /// Close a row, whichever way its placement starts.
+    pub(crate) fn close_row(&mut self, key: &str) {
+        if !self.collapsed.contains(key) {
+            self.collapsed.insert(key.to_owned());
+        }
+        if is_placement_key(key) {
+            self.expanded.remove(key);
+        }
+    }
+
+    fn remember(&mut self, key: &str) {
+        self.content.current_mut().remember(key);
     }
 }
 
@@ -226,7 +362,7 @@ pub struct OccMove {
     pub translate: [f64; 3],
     pub angles: [f64; 3],
     /// The occurrence's origin when the move began: what it turns about.
-    pub pivot: Option<solidcraft_engine::geom::Vec3>,
+    pub pivot: Option<solidcore_record::Vec3>,
     /// The values when the current triad drag began.
     drag0: Option<([f64; 3], [f64; 3])>,
 }
@@ -267,7 +403,7 @@ fn find_group(app: &SolveApp, id: u64) -> Option<&solidcraft_engine::doc::Browse
 /// World bodies of a component picked in the tree. The root is the whole design; a nested
 /// component is its own placement, including bodies inside it.
 pub(crate) fn bodies_of_component(app: &SolveApp, id: u64) -> Vec<String> {
-    let present: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let present: Vec<String> = crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).collect();
     let mut names = if id == 0 {
         present.clone()
     } else {
@@ -306,7 +442,7 @@ fn offer_bodies(app: &mut SolveApp, names: &[String], take: Take) -> bool {
     if !dialog_takes_body(app) || app.dialog.as_ref().is_some_and(|d| d.takes_components()) {
         return false;
     }
-    let world = app.session.world_state();
+    let world = crate::open_meshing::session_world(&app.session);
     let picked: Vec<Sel> =
         names.iter().filter(|n| world.body(n).is_some() && !app.session.body_removed_later(n)).map(|n| Sel::Body { name: n.clone() }).collect();
     if picked.is_empty() {
@@ -328,7 +464,7 @@ fn offer_bodies(app: &mut SolveApp, names: &[String], take: Take) -> bool {
 
 /// The bodies in a group (none for sketch and plane groups).
 pub fn group_bodies(app: &SolveApp, id: u64) -> Vec<String> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     find_group(app, id)
         .filter(|g| g.folder == "bodies")
         .map(|_| app.session.doc.group_item_keys(id).into_iter().filter(|b| st.body(b).is_some()).collect())
@@ -342,6 +478,17 @@ pub fn group_name(app: &SolveApp, id: u64) -> Option<String> {
 /// The placement a folder's scope key names: `c0` the design, `o:<ids>` a placement's path.
 fn scope_path(scope: &str) -> Vec<u64> {
     scope.strip_prefix("o:").map(|ids| ids.split('/').filter_map(|id| id.parse().ok()).collect()).unwrap_or_default()
+}
+
+/// Whether a folder or group's scope key is a row the browser draws for `component`: the design's
+/// own (`c0`, the root only), or a placement of it, spelt as the browser keys it (`o:12/3`, not
+/// `o:012/3`: the rows' state is kept by that key).
+pub(crate) fn scope_shows(app: &SolveApp, scope: &str, component: u64) -> bool {
+    if component == 0 && scope == "c0" {
+        return true;
+    }
+    let path = scope_path(scope);
+    is_placement_key(scope) && occurrence_key(&path) == scope && app.session.occurrence_placement(&path).is_ok_and(|p| p.component == component)
 }
 
 /// Paste on a Bodies or Sketches folder or group: copied (or cut) bodies, or copied sketches and
@@ -424,11 +571,18 @@ pub fn folded_folder_items(app: &SolveApp, target: &Target) -> Vec<Item> {
         },
         _ => return Vec::new(),
     };
-    if !bodies_folded(app, comp, &scope, entries(app, comp, "bodies").len()) {
+    let count = entries(app, comp, "bodies").len();
+    if !bodies_folded(app, comp, &scope, count) {
         return Vec::new();
     }
-    let items =
-        folder_items(app, comp, "bodies", &scope).into_iter().filter(|i| matches!(i.id.as_str(), "component.from_bodies" | "ui.groupSelected"));
+    // Components from a component's only body would just nest it one level deeper.
+    let items: Vec<_> = folder_items(app, comp, "bodies", &scope)
+        .into_iter()
+        .filter(|i| i.id == "ui.groupSelected" || (i.id == "component.from_bodies" && count > 1))
+        .collect();
+    if items.is_empty() {
+        return items;
+    }
     std::iter::once(Item::sep()).chain(items).collect()
 }
 
@@ -455,15 +609,29 @@ pub fn toggle_folder(app: &mut SolveApp, key: &str) {
 /// hidden items are noted; when it comes up, the steps the drag made are merged into the first of
 /// them. Runs every frame, whatever else is open, so a release is never missed.
 pub(crate) fn eye_drag_frame(app: &mut SolveApp, ctx: &egui::Context) {
+    crate::semantic_content::ensure_session(app, ctx);
     let (pressed, down) = ctx.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_down()));
-    if pressed {
-        app.tree.eye_press = Some((app.session.doc.clone(), app.session.undo.len(), without_origin(app.session.visibility.clone())));
+    if pressed && app.tree.eye_press.is_none() {
+        app.tree.eye_press = Some((app.session.uid, app.session.doc.clone(), app.session.undo.len(), without_origin(app.session.visibility.clone())));
     }
     if down {
         return;
     }
+    end_eye_drag(app, ctx);
+}
+
+/// Also called when the presentation holding the gesture disappears while the button is down.
+pub(crate) fn end_eye_drag(app: &mut SolveApp, ctx: &egui::Context) {
+    let capture = crate::semantic_content::release_eye(ctx);
     let dragged = ctx.data_mut(|d| d.remove_temp::<bool>(crate::ui_kit::eye_drag_id())).is_some();
-    let Some((doc, depth, visibility)) = app.tree.eye_press.take().filter(|_| dragged) else { return };
+    let Some((_, doc, depth, visibility)) = app
+        .tree
+        .eye_press
+        .take()
+        .filter(|(session, ..)| dragged && *session == app.session.uid && capture.is_none_or(|source| source.session == *session))
+    else {
+        return;
+    };
     // shortcut: once the history is full (200 steps) its length stops growing, so the drag is left as
     // separate steps, like the point-cloud and canvas drags; the visibility test keeps a trimmed front
     // from being merged wrongly.
@@ -471,6 +639,10 @@ pub(crate) fn eye_drag_frame(app: &mut SolveApp, ctx: &egui::Context) {
     if undo.len() > depth + 1 && undo.get(depth).is_some_and(|s| Arc::ptr_eq(&s.doc, &doc) && without_origin(s.visibility.clone()) == visibility) {
         undo.truncate(depth + 1);
     }
+}
+
+pub(crate) fn discard_eye_press(app: &mut SolveApp) {
+    app.tree.eye_press = None;
 }
 
 /// The Origin's own eye is not an undo step (`set_origin_shown`), so the drag's steps do not hold it:
@@ -514,7 +686,7 @@ pub(crate) fn toggle_picked_folder(app: &mut SolveApp) -> bool {
 pub fn selection_group(app: &SolveApp, target: &Target) -> Option<Value> {
     let (comp, folder) = match target {
         Target::Body { name } => {
-            let st = app.session.world_state();
+            let st = crate::open_meshing::session_world(&app.session);
             let b = st.body(name)?;
             (b.component, "bodies")
         }
@@ -524,6 +696,15 @@ pub fn selection_group(app: &SolveApp, target: &Target) -> Option<Value> {
     };
     let sel = selected_keys(app, comp, folder);
     (sel.len() > 1).then(|| json!({ "component": comp, "folder": folder, "items": sel }))
+}
+
+/// The group holding an item in a component's folder, then the groups holding that one, out to the
+/// folder.
+fn group_chain(app: &SolveApp, component: u64, folder: &str, key: &str) -> Vec<u64> {
+    let doc = &app.session.doc;
+    std::iter::successors(doc.group_of_item(component, folder, key).map(|g| g.id), |id| doc.browser_group(*id).and_then(|g| g.parent))
+        .take(solidcraft_engine::doc::MAX_GROUP_NESTING + 1)
+        .collect()
 }
 
 /// Group actions from the menus.
@@ -537,11 +718,13 @@ pub fn group_action(app: &mut SolveApp, action: &str, p: &Value) {
             if let Ok(r) = app.run("browser.group", json!({ "component": comp, "folder": folder, "items": items, "parent": parent }))
                 && let Some(g) = r.get("group").and_then(Value::as_u64)
             {
+                // The new group shows open, in its open folder and group.
+                let start_open = rows_start_open(app);
                 if let Some(parent) = parent {
-                    app.tree.collapsed.remove(&format!("c{comp}/g{parent}"));
+                    set_open(app, &format!("c{comp}/g{parent}"), start_open, true);
                 }
-                app.tree.collapsed.remove(&format!("c{comp}/{folder}"));
-                app.tree.collapsed.remove(&format!("c{comp}/g{g}"));
+                set_open(app, &format!("c{comp}/{folder}"), start_open, true);
+                set_open(app, &format!("c{comp}/g{g}"), start_open, true);
             }
         }
         "ui.ungroup" => {
@@ -575,25 +758,26 @@ fn row_rect(ui: &egui::Ui) -> Rect {
 pub(crate) use crate::ui_kit::{Mark, Row};
 
 fn compact_tree(ui: &egui::Ui) -> bool {
-    ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("sc_compact_tree"))).unwrap_or(false)
+    ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_compact_tree"))).unwrap_or(false)
 }
 
 /// Where tree rows put their eye this frame (Preferences › Interface, #8718).
 pub(crate) fn publish_row_prefs(app: &SolveApp, ctx: &egui::Context) {
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new("sc_tree_eye_left"), app.preferences.browser_eye_left));
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_tree_eye_left"), app.preferences.browser_eye_left));
 }
 
 fn eye_left(ui: &egui::Ui) -> bool {
-    ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("sc_tree_eye_left"))).unwrap_or(false)
+    ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tree_eye_left"))).unwrap_or(false)
 }
 
 pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row<'_>) -> RowResp {
     let compact = compact_tree(ui);
-    let out = crate::ui_kit::tree_row(ui, id, &Row { compact, eye_left: eye_left(ui), ..*row });
+    let mut out = crate::ui_kit::tree_row(ui, id, &Row { compact, eye_left: eye_left(ui), ..*row });
+    crate::semantic_content::route_response(ui, id, &mut out);
     if let Some(r) = out.rect.filter(|r| ui.is_rect_visible(*r)) {
         let x = r.left() + if compact { Tokens::get().space_8 } else { 2.0 } + row.depth as f32 * INDENT;
         let fold = row.fold.map(|_| Rect::from_min_max(pos2(x - 4.0, r.top()), pos2(x + 15.0, r.bottom())));
-        DRAWN.with(|d| d.borrow_mut().push((row.label.to_string(), r, fold, row.fold)));
+        crate::semantic_content::record_row(ui, (row.label.to_string(), r, fold, row.fold), &out);
     }
     out
 }
@@ -601,11 +785,11 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row<'_>) -> RowRes
 /// A Ctrl/Shift-aware click on a selectable row.
 fn click_select(app: &mut SolveApp, ui: &egui::Ui, key: String, sel: Option<Sel>) {
     let mods = ui.input(|i| i.modifiers);
+    let rows = app.tree.content.current_mut();
     if mods.shift
-        && let Some(a) = app.tree.anchor.as_deref()
+        && let Some(a) = rows.anchor.as_deref()
     {
-        let order = app.tree.order.get(..app.tree.order_len).unwrap_or(&[]);
-        let items = shift_range(&app.tree.order_prev, a, &key).or_else(|| shift_range(order, a, &key));
+        let items = shift_range(&rows.previous, a, &key).or_else(|| shift_range(rows.current_order(), a, &key));
         if let Some(items) = items {
             // Move/Copy (and any open command whose active input takes bodies) gets every body
             // in the range. Otherwise the range is an ordinary selection.
@@ -623,7 +807,7 @@ fn click_select(app: &mut SolveApp, ui: &egui::Ui, key: String, sel: Option<Sel>
             return;
         }
     }
-    app.tree.anchor = Some(key);
+    app.tree.content.current_mut().anchor = Some(key);
     let Some(sel) = sel else { return };
     if mods.command || mods.ctrl {
         if app.session.selection.contains(&sel) {
@@ -675,70 +859,101 @@ pub(crate) fn picked_body(sel: &Sel) -> Option<&str> {
     }
 }
 
-/// A pick in the viewport: the Browser, when shown, opens down to the picked body's row and
-/// scrolls to it (#3005). The body of the last item picked.
+/// A pick in the viewport, while the Browser is shown and follows the 3D view ([`follows_view`]):
+/// the Browser finds the body of the last item picked, as Find in Browser does (#3005).
 pub(crate) fn reveal_pick(app: &mut SolveApp) {
-    if app.ui.show_browser
-        && let Some(body) = app.session.selection.last().and_then(picked_body)
+    sync_reveals(app);
+    if follows_view(app)
+        && app.ui.show_browser
+        && let Some(body) = app.session.selection.last().and_then(picked_body).map(str::to_string)
     {
-        app.tree.reveal = Some(body.to_string());
+        find_in_tree(app, &body);
     }
 }
 
-/// The placement path of the body being revealed, resolved once per model: a row opens when
-/// the body's path runs through it, instead of every row expanding its subtree to test
-/// containment (#7502). `None` when nothing is revealed or the body is a top-level design body.
-fn reveal_path(app: &mut SolveApp) -> Option<Vec<u64>> {
-    let body = app.tree.reveal.clone()?;
-    prepare_model(app);
-    app.tree.model.as_mut()?.body_path(&app.session, &body)
+fn remember_reveal_source(app: &mut SolveApp, body: &str) {
+    app.tree.reveal_source = crate::open_meshing::session_world(&app.session).body(body).map(|selected| BodyRevealSource {
+        body: body.to_owned(),
+        session: app.session.uid,
+        creator: selected.feature,
+    });
+}
+
+/// Opens the design row and every placement down to `path` (Find in Timeline).
+pub(crate) fn open_path(app: &mut SolveApp, path: &[u64]) {
+    set_open(app, "c0", true, true);
+    let start_open = rows_start_open(app);
+    for depth in 1..=path.len() {
+        set_open(app, &occurrence_key(&path[..depth]), start_open, true);
+    }
+}
+
+/// A placement's own row (`o:1/2`), not a folder under it (`o:1/2/bodies`).
+pub(crate) fn is_placement_key(key: &str) -> bool {
+    key.strip_prefix("o:").is_some_and(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit() || b == b'/'))
+}
+
+/// Whether a placement's row is open. Placements start closed, so a large assembly opens as a
+/// short list (#9274); the "Components start open" preference keeps them open as before, unless
+/// the Browser's rows start closed ([`rows_start_open`]).
+pub(crate) fn placement_open(app: &SolveApp, key: &str) -> bool {
+    !app.tree.collapsed.contains(key) && ((app.preferences.browser_components_open && rows_start_open(app)) || app.tree.expanded.contains(key))
 }
 
 pub(crate) fn is_open(app: &SolveApp, key: &str, default: bool) -> bool {
+    if is_placement_key(key) {
+        return placement_open(app, key);
+    }
     if default { !app.tree.collapsed.contains(key) } else { app.tree.expanded.contains(key) }
 }
 
-pub(crate) fn toggle(app: &mut SolveApp, key: &str, default: bool) {
-    if default {
-        if !app.tree.collapsed.remove(key) {
-            app.tree.collapsed.insert(key.to_string());
-        }
-    } else if !app.tree.expanded.remove(key) {
+/// Open or close a row, whichever way it starts; whether that changed it.
+fn set_open(app: &mut SolveApp, key: &str, default: bool, open: bool) -> bool {
+    let was = is_open(app, key, default);
+    if open {
+        app.tree.collapsed.remove(key);
         app.tree.expanded.insert(key.to_string());
+    } else {
+        app.tree.collapsed.insert(key.to_string());
+        app.tree.expanded.remove(key);
     }
+    was != open
 }
 
-/// Apply Expand All / Collapse All: open-by-default keys live in `collapsed` when closed;
-/// closed-by-default keys live in `expanded` when open.
+/// A row opened or closed by hand: the next Find in Browser leaves it as it is.
+pub(crate) fn toggle(app: &mut SolveApp, key: &str, default: bool) {
+    app.tree.found_rows.retain(|(row, _)| row != key);
+    let open = is_open(app, key, default);
+    set_open(app, key, default, !open);
+}
+
+/// Apply Expand All / Collapse All to the rows the command listed, whichever way each starts.
+/// They count as folded by hand: the next Find in Browser leaves them as they are.
 pub fn apply_fold(app: &mut SolveApp, open: bool, open_by_default: &[String], closed_by_default: &[String]) {
-    if open {
-        for key in open_by_default {
-            app.tree.collapsed.remove(key);
-        }
-        for key in closed_by_default {
-            app.tree.expanded.insert(key.clone());
-        }
-    } else {
-        for key in open_by_default {
-            app.tree.collapsed.insert(key.clone());
-        }
-        for key in closed_by_default {
-            app.tree.expanded.remove(key);
-        }
+    app.tree.found_rows.retain(|(row, _)| !open_by_default.contains(row) && !closed_by_default.contains(row));
+    for key in open_by_default.iter().chain(closed_by_default) {
+        set_open(app, key, false, open);
     }
 }
 
 /// Everything a frame's rows want done, applied after drawing.
 #[derive(Default)]
-struct Actions {
+pub(crate) struct Actions {
+    pub(crate) session: Option<u64>,
     menu: Option<(Pos2, Target)>,
-    hover_bodies: Vec<String>,
-    hovered: bool,
+    pub(crate) hover_bodies: Vec<String>,
+    pub(crate) hovered: bool,
     /// The plane whose row is under the pointer, lit in the view (#6975).
-    hover_plane: Option<String>,
-    drop: Option<DropAction>,
+    pub(crate) hover_plane: Option<String>,
+    drop: Option<(crate::semantic_content::ContentSource, DropAction)>,
     /// What the selection and the 3D view's pointer light in the tree.
     lit: Lit,
+}
+
+impl Actions {
+    fn drop_from(&mut self, source: crate::semantic_content::ContentSource, action: DropAction) {
+        self.drop = Some((source, action));
+    }
 }
 
 /// Something in the 3D view with a row in the tree.
@@ -810,14 +1025,24 @@ impl Lit {
             Some(Hit::ConstructionPoint { name }) => Some(Thing::Point(name.clone())),
             None => None,
         };
+        // Unless the Browser follows the 3D view, a body's placement is not looked up for the rows
+        // above it (that names every placement again after each edit): only the one Find in
+        // Browser found is known, until the selection changes.
+        let follows = follows_view(app);
+        if app.tree.found.as_ref().is_some_and(|found| found.selection != app.session.selection) {
+            app.tree.found = None;
+        }
         let doc = app.session.doc.clone();
         let (mut paths, mut components) = (Vec::new(), Vec::new());
         for thing in selected.iter().chain(&hovered) {
             match thing {
-                Thing::Body(b) => {
+                Thing::Body(b) if follows => {
                     if let Some(path) = app.tree.model.as_mut().and_then(|model| model.body_path(&app.session, b)) {
                         paths.push(path);
                     }
+                }
+                Thing::Body(b) => {
+                    paths.extend(app.tree.found.as_ref().filter(|found| found.body == *b && !found.path.is_empty()).map(|found| found.path.clone()));
                 }
                 Thing::Sketch(id) => {
                     components.extend(doc.features.iter().find(|f| f.id == *id && matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.component))
@@ -909,7 +1134,7 @@ pub(crate) fn browser_width(remembered: f32) -> f32 {
 pub(crate) fn resize_column(app: &mut SolveApp, ui: &egui::Ui, rect: Rect, width: f32, handle: &'static str) {
     let rail = Rect::from_x_y_ranges(rect.right() - BROWSER_RAIL..=rect.right(), rect.y_range());
     let response =
-        ui.interact(rail, egui::Id::new(("sc_shared_column_rail", handle)), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+        ui.interact(rail, egui::Id::unique(("sc_shared_column_rail", handle)), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
     if response.dragged() {
         let delta = ui.input(|input| input.pointer.delta().x);
         if delta.is_finite() {
@@ -948,7 +1173,7 @@ pub(crate) fn reveals(app: &SolveApp) -> bool {
 /// text edit started while it showed keeps it shown. A drag started elsewhere (orbiting the view)
 /// passes over it without showing it.
 fn reveal_opacity(app: &SolveApp, ctx: &egui::Context, previous: Option<Rect>, edge: Rect) -> f32 {
-    let card = egui::Id::new("sc_browser_card");
+    let card = egui::Id::unique("sc_browser_card");
     let memory = card.with("reveal");
     let was = ctx.data(|d| d.get_temp::<bool>(memory)).unwrap_or(false);
     let over = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| {
@@ -974,16 +1199,11 @@ fn reveal_tab(ui: &egui::Ui, card: Rect, opacity: f32) {
 
 /// One content-hugging browser; the shared container supplies floating or flush compact chrome.
 pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
+    sync_reveals(app);
     let available = ui.available_rect_before_wrap();
     let t = Tokens::get();
-    std::mem::swap(&mut app.tree.order_prev, &mut app.tree.order);
-    app.tree.order_len = 0;
-    DRAWN.with(|d| d.borrow_mut().clear());
-    OCCURRENCES.with(|d| d.borrow_mut().clear());
-    let mut acts = Actions { hover_bodies: std::mem::take(&mut app.viewport.hover_bodies), ..Default::default() };
     if crate::render_workspace::active(app) {
-        render_card(app, ui, &mut acts);
-        finish_browser(app, ui, acts);
+        render_card(app, ui);
         return;
     }
     let stacked = crate::timeline_left::stacked(app);
@@ -1025,7 +1245,7 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
         let frame = container.frame(ui.ctx(), fill, crate::frame::Side::Left).inner_margin(CARD_INSET as i8);
         let inner_width = (bounds.width() - frame.total_margin().sum().x).max(0.0);
         let inner_height = (bounds.height() - frame.total_margin().sum().y).max(0.0);
-        let card = Container::new(ui.ctx(), Surface::Panel).area(egui::Id::new("sc_browser_card")).fixed_pos(bounds.min).show(ui.ctx(), |ui| {
+        let card = Container::new(ui.ctx(), Surface::Panel).area(egui::Id::unique("sc_browser_card")).fixed_pos(bounds.min).show(ui.ctx(), |ui| {
             let limits = Rect::from_min_max(available.min, pos2(available.right(), bounds.bottom()));
             let response = ui
                 .scope(|ui| {
@@ -1040,7 +1260,7 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
                         if collapsed {
                             browser_collapsed_rail(app, ui);
                         } else {
-                            browser_contents(app, ui, &mut acts, true);
+                            browser_contents(app, ui, true);
                         }
                     })
                 })
@@ -1060,10 +1280,9 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_rect("browser:float", rect);
         }
     }
-    finish_browser(app, ui, acts);
 }
 
-fn render_card(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions) {
+fn render_card(app: &mut SolveApp, ui: &mut egui::Ui) {
     let bounds = crate::shell::panel_bounds(app, ui.available_rect_before_wrap());
     let narrow = bounds.width() < 800.0;
     crate::shell::register_panel(app, "render:browser:show", None, None);
@@ -1109,9 +1328,9 @@ fn render_card(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions) {
                     let _ = app.run("view.render_browser", json!({"open":false}));
                 }
             }
-            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_compact_tree"), true));
-            browser_contents(app, ui, acts, true);
-            ui.ctx().data_mut(|d| d.remove::<bool>(egui::Id::new("sc_compact_tree")));
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_compact_tree"), true));
+            browser_contents(app, ui, true);
+            ui.ctx().data_mut(|d| d.remove::<bool>(egui::Id::unique("sc_compact_tree")));
         },
     );
     if (lens == 1) != app.render_workspace.view.by_look {
@@ -1148,8 +1367,9 @@ fn browser_collapsed_rail(app: &mut SolveApp, ui: &mut egui::Ui) {
     let height = title_top + t.space_24 * 4.0 + t.space_8;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     // Include the card margin in the hit target; keep the tint inside that margin.
-    let response =
-        ui.interact(rect.expand(CARD_INSET + 1.0), ui.id().with("browser_header"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+    let response = ui
+        .interact(rect.expand(CARD_INSET + 1.0), ui.scope_id().with("browser_header"), Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
     if response.hovered() || response.has_focus() {
         crate::ui_kit::panel_header_hover(ui.painter(), rect);
     }
@@ -1157,8 +1377,8 @@ fn browser_collapsed_rail(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::ui_kit::disclosure(ui.painter(), disclosure.center(), false, t.text_dim);
     crate::scenario::publish_handle("left-browser-toggle", disclosure.center());
     crate::scenario::publish_target("browser:header", disclosure);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), crate::i18n::tr("ui.browser_title")));
-    if response.on_hover_text(crate::i18n::tr("ui.browser_expand")).clicked() {
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), crate::i18n::tr("ui.browser_title")));
+    if response.backing_on_hover_text(crate::i18n::tr("ui.browser_expand")).clicked() {
         app.preferences.timeline_left_browser_collapsed = false;
     }
     let galley = ui.painter().layout_no_wrap(crate::i18n::tr("ui.browser_title").to_owned(), crate::fonts::semibold(t.font_body), t.text);
@@ -1176,7 +1396,7 @@ pub(crate) fn panel_bounds(available: Rect, history: Option<Rect>, width: f32, g
     Rect::from_min_max(min, pos2((min.x + width).min(right), bottom))
 }
 
-fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, collapsible: bool) {
+fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     let t = Tokens::get();
     // Only the floating card folds; the docked column keeps its full height.
     let render = crate::render_workspace::active(app);
@@ -1204,9 +1424,9 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, c
     }
     crate::edit_in_place::browser_strip(app, ui);
     if collapsible && !stacked {
-        browser_rows_hugging(app, ui, acts);
+        browser_rows_hugging(app, ui);
     } else {
-        browser_rows(app, ui, acts);
+        browser_rows(app, ui);
     }
 }
 
@@ -1217,7 +1437,7 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     let collapsible = collapsible && !reveals(app);
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), HEADER_H), Sense::hover());
-    let response = ui.interact(rect, ui.id().with("browser_header"), if collapsible { Sense::click() } else { Sense::hover() });
+    let response = ui.interact(rect, ui.scope_id().with("browser_header"), if collapsible { Sense::click() } else { Sense::hover() });
     crate::scenario::publish_target("browser:header", rect);
     let vertical = app.ui.show_timeline && app.preferences.timeline_left;
     let stacked = crate::timeline_left::stacked(app);
@@ -1230,7 +1450,7 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
         crate::ui_kit::panel_header_hover(ui.painter(), rect);
     }
     let title = crate::i18n::tr("ui.browser_title").to_string();
-    let kind = if collapsible { egui::WidgetType::Button } else { egui::WidgetType::Label };
+    let kind = if collapsible { egui::Role::Button } else { egui::Role::Label };
     response.widget_info(|| egui::WidgetInfo::labeled(kind, true, &title));
     let galley = ui.painter().layout_no_wrap(title, crate::fonts::semibold(t.font_heading), t.text);
     ui.painter().galley(pos2(rect.left() + t.space_6, rect.center().y - galley.size().y / 2.0), galley, t.text);
@@ -1246,7 +1466,7 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     ui.painter().galley(pos2(right - galley.size().x, rect.center().y - galley.size().y / 2.0), galley, t.text_dim);
     if collapsible {
         let tip = crate::i18n::tr(if collapsed { "ui.browser_expand" } else { "ui.browser_collapse" });
-        if response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip).clicked() {
+        if response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(tip).clicked() {
             if stacked {
                 app.preferences.timeline_left_browser_collapsed = !app.preferences.timeline_left_browser_collapsed;
             } else if vertical {
@@ -1318,19 +1538,28 @@ fn model_feature_indices(app: &SolveApp, component: u64, sketches: bool) -> Vec<
     }
 }
 
-fn browser_rows(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions) {
-    rows_scrolling(app, ui, acts, false);
+fn browser_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
+    crate::semantic_content::show(
+        app,
+        ui,
+        crate::semantic_content::ContentOwner::BROWSER,
+        crate::semantic_content::ContentRequest::Browser { shrink_height: false },
+    );
 }
 
 /// As [browser_rows], but the area hugs the rows it drew (the floating card), up to the height
 /// the caller allowed.
-fn browser_rows_hugging(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions) {
-    rows_scrolling(app, ui, acts, true);
+fn browser_rows_hugging(app: &mut SolveApp, ui: &mut egui::Ui) {
+    crate::semantic_content::show(
+        app,
+        ui,
+        crate::semantic_content::ContentOwner::BROWSER,
+        crate::semantic_content::ContentRequest::Browser { shrink_height: true },
+    );
 }
 
 fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shrink_height: bool) {
     prepare_model(app);
-    acts.lit = Lit::of(app);
     let mut cache = app.tree.cache.take().unwrap_or_default();
     cache.prepare(app);
     egui::ScrollArea::vertical()
@@ -1350,23 +1579,32 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
                 component_rows(app, ui, 0, 0, acts, &mut cache);
             }
         });
-    // The row was reached and scrolled to, or isn't in the tree (a body a later feature removes):
-    // either way the reveal is done.
-    app.tree.reveal = None;
     app.tree.cache = Some(cache);
 }
 
-/// The Bodies folder and the Origin at the top of the vertical History (Preferences › Interface:
-/// Show origin and bodies at the top, #6490): the browser's own rows, with their eyes, selection,
-/// menus and fold state. The bodies are the active component's, in the placement being edited,
-/// as that component's folder in the browser lists them. The rows stay out of the browser's row
-/// order, automation list and reveal, which the browser keeps for its own rows.
+/// Existing semantic rows, reusable by either presentation without a panel host.
+pub(crate) fn render_content(app: &mut SolveApp, ui: &mut egui::Ui, request: crate::semantic_content::ContentRequest) -> Actions {
+    crate::semantic_content::ensure_session(app, ui.ctx());
+    let mut acts = Actions { session: Some(app.session.uid), lit: Lit::of(app), ..Default::default() };
+    match request {
+        crate::semantic_content::ContentRequest::Browser { shrink_height } => rows_scrolling(app, ui, &mut acts, shrink_height),
+        crate::semantic_content::ContentRequest::ActiveBodiesOrigin => active_bodies_origin(app, ui, &mut acts),
+    }
+    acts
+}
+
+/// History's optional prefix shares the Browser's cache, folds, row renderers and commands.
 pub(crate) fn history_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
+    crate::semantic_content::show(
+        app,
+        ui,
+        crate::semantic_content::ContentOwner::HISTORY,
+        crate::semantic_content::ContentRequest::ActiveBodiesOrigin,
+    );
+}
+
+fn active_bodies_origin(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions) {
     prepare_model(app);
-    let mut acts = Actions { lit: Lit::of(app), ..Default::default() };
-    let reveal = app.tree.reveal.take();
-    let order = app.tree.order_len;
-    let drawn = DRAWN.with(|d| d.borrow().len());
     let component = app.session.active_component;
     let path = (component != 0)
         .then(|| app.session.active_occurrence_path.clone().unwrap_or_else(|| app.session.doc.first_path(component)))
@@ -1378,18 +1616,18 @@ pub(crate) fn history_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.tree.cache = Some(cache);
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
-        folder_rows_at(app, ui, component, path.as_deref(), "bodies", 0, &mut acts, &bodies);
-        origin_rows(app, ui, 0, &mut acts);
+        folder_rows_at(app, ui, component, path.as_deref(), "bodies", 0, acts, &bodies);
+        origin_rows(app, ui, 0, acts);
     });
-    app.tree.reveal = reveal;
-    // The browser's own rows reuse these order slots (`TreeState::remember`).
-    app.tree.order_len = order;
-    DRAWN.with(|d| d.borrow_mut().truncate(drawn));
-    app.viewport.hover_bodies = acts.hover_bodies.clone();
-    app.tree.history_hover = acts.hover_bodies;
-    app.viewport.hover_plane = acts.hover_plane.clone();
-    app.tree.history_plane = acts.hover_plane;
-    if let Some(d) = acts.drop {
+}
+
+pub(crate) fn apply_content_actions(app: &mut SolveApp, acts: Actions) {
+    if acts.session != Some(app.session.uid) {
+        return;
+    }
+    if let Some((_, d)) = acts.drop.filter(|(source, _)| crate::semantic_content::source_present(app, *source)) {
+        // The target may have consumed a payload before its source's absence was known.
+        // Commit only after all owners have reported, using the payload's original source.
         apply_drop(app, d);
     }
     if let Some((at, target)) = acts.menu {
@@ -1397,27 +1635,58 @@ pub(crate) fn history_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
-fn finish_browser(app: &mut SolveApp, ui: &mut egui::Ui, mut acts: Actions) {
-    app.tree.order.truncate(app.tree.order_len);
-    if !acts.hovered {
-        acts.hover_bodies.clear();
+pub(crate) fn cancel_content_drag(ctx: &egui::Context, session: u64) {
+    if egui::DragAndDrop::payload::<Drag>(ctx).is_some_and(|payload| payload.source.session == session)
+        || egui::DragAndDrop::payload::<OccurrenceDrag>(ctx).is_some_and(|payload| payload.source.session == session)
+    {
+        egui::DragAndDrop::clear_payload(ctx);
     }
-    // The history's rows, drawn before the browser, light bodies too (`history_rows`).
-    let history = std::mem::take(&mut app.tree.history_hover);
-    app.viewport.hover_bodies = if acts.hover_bodies.is_empty() { history } else { acts.hover_bodies };
-    let history_plane = app.tree.history_plane.take();
-    app.viewport.hover_plane = acts.hover_plane.or(history_plane);
-    if let Some(d) = acts.drop {
-        apply_drop(app, d);
-    }
-    if let Some((at, target)) = acts.menu {
-        crate::context_menu::open_for(app, at, target);
-    }
+}
+
+/// App-owned editor lifecycle; these windows do not depend on any tree being presented.
+pub(crate) fn editors(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::browser_prompts::occurrence_panel(app, ui);
     crate::browser_prompts::capture_prompt(app, ui.ctx());
     crate::browser_canvas::panel(app, ui.ctx());
     point_clouds::panel(app, ui.ctx());
     crate::sketch_attachment_ui::panel(app, ui.ctx());
+}
+
+/// History's prefix must neither open ancestors nor acknowledge a Browser reveal.
+fn body_reveal(app: &SolveApp) -> Option<&str> {
+    app.tree.content.browser_presentation().then_some(app.tree.reveal.as_deref()).flatten()
+}
+
+/// A hidden or collapsed presentation retains its request. Removed targets expire here.
+pub(crate) fn prune_reveals(app: &mut SolveApp) {
+    sync_reveals(app);
+    if let Some(body) = app.tree.reveal.as_ref() {
+        let world = crate::open_meshing::session_world(&app.session);
+        let source = app.tree.reveal_source.as_ref().filter(|source| source.body == *body);
+        let removed = source.is_some_and(|source| source.session != app.session.uid || app.session.doc.feature(source.creator).is_none());
+        let evaluated = match source {
+            Some(source) => app.session.doc.features.iter().enumerate().any(|(index, feature)| {
+                feature.id == source.creator && !feature.suppressed && app.session.doc.marker.is_none_or(|marker| index < marker)
+            }),
+            None => app.session.doc.marker.is_none() && !app.session.doc.features.iter().any(|feature| feature.suppressed),
+        };
+        // A refused feature can temporarily remove a body from evaluation too. Its pending
+        // reveal remains useful when the feature is repaired.
+        let healthy =
+            app.session.model.results.iter().all(|result| result.error.is_none()) && crate::open_meshing::placement_error(&app.session).is_none();
+        if world.body(body).is_none() && (removed || (evaluated && healthy)) {
+            app.tree.reveal = None;
+            app.tree.reveal_source = None;
+        }
+    } else {
+        app.tree.reveal_source = None;
+    }
+    if app.tree.reveal_feature.as_ref().is_some_and(|target| app.session.doc.feature(target.id).is_none()) {
+        app.tree.reveal_feature = None;
+    }
+    if app.tree.timeline_reveal.is_some_and(|id| app.session.doc.feature(id).is_none()) {
+        app.tree.timeline_reveal = None;
+    }
 }
 
 fn component_name(app: &SolveApp, id: u64) -> String {
@@ -1456,14 +1725,6 @@ fn component_rows_inner(
         return;
     }
     let key = &root.key;
-    let reveal = app.tree.reveal.clone();
-    if let Some(body) = reveal.as_ref() {
-        let reveals =
-            cache.root_bodies.contains(body) || reveal_path(app).is_some_and(|rp| root.children.iter().any(|path| rp.starts_with(path.as_slice())));
-        if reveals {
-            app.tree.collapsed.remove(key);
-        }
-    }
     let open = is_open(app, key, true);
     let active = app.session.active_component == id;
     let bodies = &cache.root_bodies;
@@ -1490,7 +1751,7 @@ fn component_rows_inner(
         mark: if id == 0 && acts.lit.any() { Mark::Branch } else { Mark::None },
         ..Default::default()
     };
-    let r = draw_row(ui, ui.id().with(("comp", id)), &row);
+    let r = draw_row(ui, ui.scope_id().with(("comp", id)), &row);
     if r.fold {
         toggle(app, key, true);
     }
@@ -1539,7 +1800,7 @@ fn component_rows_inner(
     if let Some(resp) = &r.resp
         && let Some(d) = drop_target(ui, resp, |d: &Drag| d.comp != id && d.folder != "construction" && d.groups.is_empty(), DropMark::Box)
     {
-        acts.drop = Some(DropAction::Component { to: id, folder: d.folder, keys: d.keys.clone() });
+        acts.drop_from(d.source, DropAction::Component { to: id, folder: d.folder, keys: d.keys.clone() });
     }
 
     // A placement row dropped on the design row moves out to the design.
@@ -1547,7 +1808,7 @@ fn component_rows_inner(
         && let Some(d) = occurrence_drop_target(ui, resp, |d| occurrence_can_land(app, d, id))
     {
         let occurrence = d.path.last().copied().unwrap_or(0);
-        acts.drop = Some(DropAction::Reparent { occurrence, path: d.path.clone(), parent: id, parent_path: None });
+        acts.drop_from(d.source, DropAction::Reparent { occurrence, path: d.path.clone(), parent: id, parent_path: None });
     }
     if !open {
         return;
@@ -1595,7 +1856,7 @@ fn occurrence_key(path: &[u64]) -> String {
 /// Show a placement's row closed: a pasted (or moved) component arrives folded, whatever a row
 /// at that path showed before.
 pub(crate) fn close_placement(app: &mut SolveApp, path: &[u64]) {
-    app.tree.collapsed.insert(occurrence_key(path));
+    app.tree.close_row(&occurrence_key(path));
 }
 
 /// A placement, rather than a component definition: repeated child IDs remain distinct
@@ -1617,9 +1878,6 @@ fn occurrence_rows_inner(
     placement: &mut cache::Node,
 ) {
     let key = &placement.key;
-    if reveal_path(app).is_some_and(|rp| rp.starts_with(path)) {
-        app.tree.collapsed.remove(key);
-    }
     let open = is_open(app, key, true);
     let on_screen = ui.is_rect_visible(row_rect(ui));
     let active = app.session.active_occurrence_path.as_deref() == Some(path)
@@ -1640,7 +1898,7 @@ fn occurrence_rows_inner(
     };
     let r = draw_row(
         ui,
-        ui.id().with(key),
+        ui.scope_id().with(key),
         &Row {
             depth,
             fold: Some(open),
@@ -1661,7 +1919,7 @@ fn occurrence_rows_inner(
         },
     );
     if let Some(rect) = r.rect.filter(|_| r.resp.is_some()) {
-        OCCURRENCES.with(|d| d.borrow_mut().push((path.to_vec(), placement.name.clone(), rect, open)));
+        crate::semantic_content::record_occurrence(ui, (path.to_vec(), placement.name.clone(), rect, open));
         // Near the row's end, clear of an eye there.
         let end = r.eye_at.filter(|e| e.x > rect.center().x).map_or(rect.right() - 12.0, |e| e.x - 24.0);
         crate::scenario::publish_handle(&format!("row:occurrence:{}", key.trim_start_matches("o:")), pos2(end, rect.center().y));
@@ -1673,7 +1931,7 @@ fn occurrence_rows_inner(
     }
     if let Some(resp) = &r.resp {
         let inherited = if own_visible && !visible { "\nHidden by a parent placement. Show the parent to reveal this instance." } else { "" };
-        resp.clone().on_hover_ui(|ui| {
+        resp.clone().backing_on_hover_ui(|ui| {
             ui.label(&placement.tooltip);
             if !inherited.is_empty() {
                 ui.label(inherited.trim_start());
@@ -1681,8 +1939,11 @@ fn occurrence_rows_inner(
         });
         // Dragging the row moves the placement it stands for. A press on its fold arrow, eye or
         // radio is not a drag of the row, so those controls keep their own jobs.
-        if resp.drag_started() && !r.on_control {
-            resp.dnd_set_drag_payload(OccurrenceDrag { path: path.to_vec(), component: placement.component });
+        if resp.drag_started()
+            && !r.on_control
+            && let Some(source) = crate::semantic_content::current_source(app)
+        {
+            resp.dnd_set_drag_payload(OccurrenceDrag { source, path: path.to_vec(), component: placement.component });
         }
     }
     if r.fold {
@@ -1701,7 +1962,7 @@ fn occurrence_rows_inner(
     if r.double && !takes_components && app.session.doc.parts.contains_key(&placement.component) {
         crate::dialogs_part_size::open(app, placement.component);
     }
-    if r.clicked && takes_components {
+    if r.clicked && (takes_components || crate::dialogs_move::picks_components(app)) {
         if let Some(mut d) = app.dialog.take() {
             d.pick(&app.session, Sel::Occurrence { path: path.to_vec() });
             app.dialog = Some(d);
@@ -1726,7 +1987,7 @@ fn occurrence_rows_inner(
         && let Some(d) =
             drop_target(ui, resp, |d: &Drag| d.comp != placement.component && d.folder != "construction" && d.groups.is_empty(), DropMark::Box)
     {
-        acts.drop = Some(DropAction::Component { to: placement.component, folder: d.folder, keys: d.keys.clone() });
+        acts.drop_from(d.source, DropAction::Component { to: placement.component, folder: d.folder, keys: d.keys.clone() });
     }
 
     // The top of a sibling's row puts the dragged placement before it; the rest of the row, and
@@ -1742,8 +2003,7 @@ fn occurrence_rows_inner(
         app.session.doc.sort_placements(parent, &mut order);
         let at = order.iter().position(|o| *o == placement.occurrence).unwrap_or(order.len());
         order.insert(at, dragged);
-        let order: Vec<String> = order.iter().map(u64::to_string).collect();
-        let _ = app.run("browser.order", json!({ "folder": "components", "component": parent, "order": order }));
+        acts.drop_from(d.source, DropAction::OccurrenceOrder { parent, order });
     }
     // A placement row dropped on this one moves into this row's component.
     if let Some(resp) = &r.resp
@@ -1752,7 +2012,10 @@ fn occurrence_rows_inner(
         })
     {
         let occurrence = d.path.last().copied().unwrap_or(0);
-        acts.drop = Some(DropAction::Reparent { occurrence, path: d.path.clone(), parent: placement.component, parent_path: Some(path.to_vec()) });
+        acts.drop_from(
+            d.source,
+            DropAction::Reparent { occurrence, path: d.path.clone(), parent: placement.component, parent_path: Some(path.to_vec()) },
+        );
     }
     if !open {
         return;
@@ -1782,7 +2045,8 @@ fn occurrence_rows_inner(
 fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     let key = "docsettings";
     let open = is_open(app, key, false);
-    let r = draw_row(ui, ui.id().with(key), &Row { depth, fold: Some(open), icon: "settings", label: "Document Settings", ..Default::default() });
+    let r =
+        draw_row(ui, ui.scope_id().with(key), &Row { depth, fold: Some(open), icon: "settings", label: "Document Settings", ..Default::default() });
     if r.fold || r.clicked {
         toggle(app, key, false);
     }
@@ -1790,7 +2054,7 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         return;
     }
     let units = format!("Units: {}", app.session.doc.units);
-    let r = draw_row(ui, ui.id().with("units"), &Row { depth: depth + 1, icon: "settings", label: &units, ..Default::default() });
+    let r = draw_row(ui, ui.scope_id().with("units"), &Row { depth: depth + 1, icon: "settings", label: &units, ..Default::default() });
     if let Some(p) = r.secondary {
         crate::context_menu::open_for(app, p, Target::Units);
     } else if r.clicked
@@ -1804,7 +2068,7 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         crate::prefs::unit_scale(&app.session.doc.units).1,
         format_args!("{:.*}", usize::from(app.preferences.angle_decimals), 0.0)
     );
-    if draw_row(ui, ui.id().with("precision"), &Row { depth: depth + 1, icon: "settings", label: &prec, ..Default::default() }).clicked {
+    if draw_row(ui, ui.scope_id().with("precision"), &Row { depth: depth + 1, icon: "settings", label: &prec, ..Default::default() }).clicked {
         if app.prefs_window.open {
             crate::prefs::close(app, true);
         } else {
@@ -1812,15 +2076,19 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         }
     }
     let params = format!("Parameters ({})", app.session.doc.params.len());
-    if draw_row(ui, ui.id().with("params"), &Row { depth: depth + 1, icon: "params", label: &params, ..Default::default() }).clicked {
+    if draw_row(ui, ui.scope_id().with("params"), &Row { depth: depth + 1, icon: "params", label: &params, ..Default::default() }).clicked {
         if app.params.is_some() {
             app.params = None;
         } else {
             app.start("parameters.change");
         }
     }
-    if draw_row(ui, ui.id().with("design_properties"), &Row { depth: depth + 1, icon: "settings", label: "Design Properties", ..Default::default() })
-        .clicked
+    if draw_row(
+        ui,
+        ui.scope_id().with("design_properties"),
+        &Row { depth: depth + 1, icon: "settings", label: "Design Properties", ..Default::default() },
+    )
+    .clicked
     {
         if app.design_properties.is_some() {
             app.design_properties = None;
@@ -1851,7 +2119,7 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
     let items = origin_things();
     let r = draw_row(
         ui,
-        ui.id().with(key),
+        ui.scope_id().with(key),
         &Row {
             depth,
             fold: Some(open),
@@ -1870,7 +2138,7 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
         app.set_origin_shown(!app.origin_shown());
     }
     if let Some(p) = r.secondary {
-        crate::context_menu::open_for(app, p, Target::Origin);
+        acts.menu = Some((p, Target::Origin));
     }
     if !open {
         return;
@@ -1882,12 +2150,12 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
         let sel = match icon {
             "plane" => Some(Sel::Plane { name: k.into() }),
             "axis" => Some(Sel::Axis { name: k.into() }),
-            _ => Some(Sel::Vertex { body: String::new(), point: solidcraft_engine::geom::Vec3::ZERO }),
+            _ => Some(Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }),
         };
         let (selected, mark) = lit_row(lit(&thing));
         let r = draw_row(
             ui,
-            ui.id().with(("o", k)),
+            ui.scope_id().with(("o", k)),
             // Faded when hidden itself or with the whole Origin. A renamed plane's label is already
             // in the interface's language (`name`).
             &Row {
@@ -1913,7 +2181,7 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
                 _ => None,
             };
             if let Some(target) = target {
-                crate::context_menu::open_for(app, p, target);
+                acts.menu = Some((p, target));
             }
         }
         if r.hovered && icon == "plane" {
@@ -1935,7 +2203,7 @@ pub const STANDARD_VIEWS: [(&str, &str); 4] = [("Top", "top"), ("Front", "front"
 fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
     let key = "namedviews";
     let open = is_open(app, key, false);
-    let r = draw_row(ui, ui.id().with(key), &Row { depth, fold: Some(open), icon: "folder", label: "Named Views", ..Default::default() });
+    let r = draw_row(ui, ui.scope_id().with(key), &Row { depth, fold: Some(open), icon: "folder", label: "Named Views", ..Default::default() });
     if r.fold || r.clicked {
         toggle(app, key, false);
     }
@@ -1946,7 +2214,7 @@ fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
         return;
     }
     for (label, view) in STANDARD_VIEWS {
-        let r = draw_row(ui, ui.id().with(("stdview", view)), &Row { depth: depth + 1, icon: "home", label, ..Default::default() });
+        let r = draw_row(ui, ui.scope_id().with(("stdview", view)), &Row { depth: depth + 1, icon: "home", label, ..Default::default() });
         if r.double {
             app.animate_view(view);
         }
@@ -1958,7 +2226,7 @@ fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
     for name in names {
         let r = draw_row(
             ui,
-            ui.id().with(("view", &name)),
+            ui.scope_id().with(("view", &name)),
             &Row { depth: depth + 1, icon: "perspective", label: &name, name: true, ..Default::default() },
         );
         if r.double {
@@ -2019,14 +2287,15 @@ fn analysis_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut
     // Each eye is its own: the folder's never follows the section's, nor the other way round.
     let (folder_shown, section_shown) = (!app.tree.analysis_hidden, !app.tree.section_hidden);
     let key = "analysis";
-    let open = is_open(app, key, true);
+    let start_open = rows_start_open(app);
+    let open = is_open(app, key, start_open);
     let r = draw_row(
         ui,
-        ui.id().with(key),
+        ui.scope_id().with(key),
         &Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label: "Analysis", dim: !folder_shown, ..Default::default() },
     );
     if r.fold || r.clicked {
-        toggle(app, key, true);
+        toggle(app, key, start_open);
     }
     if r.eye {
         app.tree.analysis_hidden = folder_shown;
@@ -2037,7 +2306,7 @@ fn analysis_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut
     }
     let r = draw_row(
         ui,
-        ui.id().with("section_analysis"),
+        ui.scope_id().with("section_analysis"),
         &Row {
             depth: depth + 1,
             eye: Some(section_shown),
@@ -2109,16 +2378,17 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
         return;
     }
     let key = "canvases";
-    let open = is_open(app, key, true);
+    let start_open = rows_start_open(app);
+    let open = is_open(app, key, start_open);
     // The folder's eye is its own: each canvas keeps its eye while the folder hides them all.
     let shown = !app.session.folder_hidden(CANVASES);
     let r = draw_row(
         ui,
-        ui.id().with(key),
+        ui.scope_id().with(key),
         &Row { depth, fold: Some(open), eye: Some(shown), icon: "folder", label: "Canvases", dim: !shown, ..Default::default() },
     );
     if r.fold || r.clicked {
-        toggle(app, key, true);
+        toggle(app, key, start_open);
     }
     if r.eye {
         toggle_folder(app, CANVASES);
@@ -2130,7 +2400,7 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
         let selected = app.tree.picked_canvases.contains(&id);
         let r = draw_row(
             ui,
-            ui.id().with(("canvas", id)),
+            ui.scope_id().with(("canvas", id)),
             &Row {
                 depth: depth + 1,
                 eye: Some(visible),
@@ -2221,9 +2491,9 @@ impl CanvasPanel {
 }
 
 /// Does the open dialog's active input take bodies (Combine's target and tools, #4452;
-/// Move/Copy's bodies, #4771)? Then a body clicked in the Browser goes there, as a click
-/// on it in the view does, rather than replacing the selection: overlapping bodies are
-/// often only told apart in the Browser.
+/// Move/Copy's bodies, #4771; Shell's Faces/Body for a closed hollow, #794)? Then a body
+/// clicked in the Browser goes there, as a click on it in the view does, rather than
+/// replacing the selection: overlapping bodies are often only told apart in the Browser.
 fn dialog_takes_body(app: &SolveApp) -> bool {
     app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::BODIES != 0)
 }
@@ -2257,7 +2527,7 @@ fn pick_from_browser(app: &mut SolveApp, x: Sel) {
         return;
     }
     let hit = match &x {
-        Sel::Plane { name } => crate::viewport::Hit::Plane { name: name.clone(), point: solidcraft_engine::geom::Vec3::ZERO },
+        Sel::Plane { name } => crate::viewport::Hit::Plane { name: name.clone(), point: solidcore_record::Vec3::ZERO },
         Sel::Axis { name } => crate::viewport::Hit::Axis { name: name.clone() },
         Sel::ConstructionPoint { name } => crate::viewport::Hit::ConstructionPoint { name: name.clone() },
         // The origin point goes only into a dialog input that takes it.
@@ -2315,12 +2585,13 @@ impl Entry {
             key: b.name.clone(),
             row_key: format!("b:{world}"),
             patterns: None,
-            label: b.name.clone(),
+            // A part the modelling kernel refuses says so (Repair Part is in its menu).
+            label: if b.body.smlib_refused().is_some() { crate::i18n::format("browser.needs_repair", &[("name", &b.name)]) } else { b.name.clone() },
             icon,
             tip: Some(tip),
             visible: app.body_visible(&world),
             selected: app.session.selection.iter().any(|s| matches!(s, Sel::Body { name } if name == &world)),
-            color: None,
+            color: b.body.smlib_refused().map(|_| Tokens::get().warning),
             sketch_state: None,
             locked: app.session.visibility.locked_bodies.contains(&world),
             sel: Some(Sel::Body { name: world.clone() }),
@@ -2405,6 +2676,7 @@ impl Entry {
 /// What is being dragged in the tree: items of one component folder.
 #[derive(Clone, Debug)]
 struct Drag {
+    source: crate::semantic_content::ContentSource,
     comp: u64,
     folder: &'static str,
     keys: Vec<String>,
@@ -2422,6 +2694,7 @@ impl Drag {
 /// A placement row dragged in the tree: the exact path it sits at, and the component it places.
 #[derive(Clone, Debug)]
 struct OccurrenceDrag {
+    source: crate::semantic_content::ContentSource,
     /// The placement's path from the design root (its own occurrence id last).
     path: Vec<u64>,
     /// The component the placement is an instance of.
@@ -2577,21 +2850,14 @@ fn folder_rows_at(
     let fstatic = folder_static(folder);
     let key = &data.key;
     let prefix = key.rsplit_once('/').map_or(key.as_str(), |(prefix, _)| prefix);
-    if let Some(r) = app.tree.reveal.as_deref()
-        && folder == "bodies"
-        && let Some(e) = data.entries().find(|e| e.row_key.strip_prefix("b:") == Some(r))
-    {
-        app.tree.collapsed.remove(key);
-        app.tree.collapsed.remove(&format!("c{comp}"));
-        open_group_chain(app, "", comp, "bodies", &e.key);
-    }
     // A folded folder draws no row: its groups and items move up into its place, and their own
     // eyes, hover and drops do its jobs. It is always open, as nothing could open it again.
     let render = crate::render_workspace::active(app);
     let folded = !render && folder == "bodies" && bodies_folded(app, comp, prefix, data.count);
+    let start_open = rows_start_open(app);
     // With the history in the browser the sketches are there too: their folder starts closed.
-    let default_open = !(folder == "sketches" && app.preferences.history_in_browser);
-    let open = folded || is_open(app, key, default_open);
+    let folder_start_open = start_open && !(folder == "sketches" && app.preferences.history_in_browser);
+    let open = folded || is_open(app, key, folder_start_open);
     let inner = if folded { depth } else { depth + 1 };
     // The folder's eye is its own: hiding it hides its items without changing theirs, and its
     // items never change it. It and everything in it fade while it or a placement above is
@@ -2604,7 +2870,7 @@ fn folder_rows_at(
         } else {
             draw_row(
                 ui,
-                ui.id().with(key),
+                ui.scope_id().with(key),
                 &Row {
                     depth,
                     fold: Some(open),
@@ -2618,14 +2884,14 @@ fn folder_rows_at(
             )
         };
         if r.fold {
-            toggle(app, key, default_open);
+            toggle(app, key, folder_start_open);
         } else if r.clicked {
             // The Bodies label is the whole set while a command is asking for bodies. The arrow
             // still folds it. With no such command, the label folds, as it always has.
             let names: Vec<String> = data.entries().flat_map(|e| e.bodies.clone()).collect();
             if !offer_bodies(app, &names, Take::Toggle) {
                 pick_folder(app, key);
-                toggle(app, key, default_open);
+                toggle(app, key, folder_start_open);
             }
         }
         if r.eye {
@@ -2648,17 +2914,20 @@ fn folder_rows_at(
                 DropMark::Box,
             )
         {
-            acts.drop = Some(if d.comp == comp {
-                DropAction::Order {
-                    comp,
-                    folder: fstatic,
-                    keys: d.keys.clone(),
-                    groups: d.groups.clone(),
-                    order: order_before(&data.top_order, &d.entries(), None),
-                }
-            } else {
-                DropAction::Component { to: comp, folder: d.folder, keys: d.keys.clone() }
-            });
+            acts.drop_from(
+                d.source,
+                if d.comp == comp {
+                    DropAction::Order {
+                        comp,
+                        folder: fstatic,
+                        keys: d.keys.clone(),
+                        groups: d.groups.clone(),
+                        order: order_before(&data.top_order, &d.entries(), None),
+                    }
+                } else {
+                    DropAction::Component { to: comp, folder: d.folder, keys: d.keys.clone() }
+                },
+            );
         }
         if !open {
             return;
@@ -2685,6 +2954,7 @@ fn folder_level(
     acts: &mut Actions,
 ) {
     let render = crate::render_workspace::active(app);
+    let start_open = rows_start_open(app);
     // The render workspace has always listed a folder's loose items above its groups.
     let items_first = render && holder.is_none();
     let rows = rows
@@ -2700,7 +2970,7 @@ fn folder_level(
             cache::Row::Group(g) => g,
         };
         let (id, gkey) = (group.id, &group.key);
-        let gopen = is_open(app, gkey, true);
+        let gopen = is_open(app, gkey, start_open);
         let gshown = !app.session.folder_hidden(gkey);
         let group_faded = faded || !gshown;
         let label = if render {
@@ -2711,7 +2981,7 @@ fn folder_level(
         let count = if render && !gopen { crate::i18n::format("render.tree_more", &[("count", &group.count.to_string())]) } else { String::new() };
         let r = draw_row(
             ui,
-            ui.id().with(gkey),
+            ui.scope_id().with(gkey),
             &Row {
                 depth,
                 fold: Some(gopen),
@@ -2726,12 +2996,12 @@ fn folder_level(
             },
         );
         if r.fold {
-            toggle(app, gkey, true);
+            toggle(app, gkey, start_open);
         } else if r.clicked {
             let names: Vec<String> = group.entries().into_iter().flat_map(|e| e.bodies.clone()).collect();
             if !offer_bodies(app, &names, Take::Toggle) {
                 pick_folder(app, gkey);
-                toggle(app, gkey, true);
+                toggle(app, gkey, start_open);
             }
         }
         if r.eye {
@@ -2745,8 +3015,11 @@ fn folder_level(
         }
         if let Some(resp) = &r.resp {
             // Dragging a group row moves the group; a press on its arrow or eye is not a drag.
-            if resp.drag_started() && !r.on_control {
-                resp.dnd_set_drag_payload(Drag { comp, folder: fstatic, keys: Vec::new(), groups: vec![id] });
+            if resp.drag_started()
+                && !r.on_control
+                && let Some(source) = crate::semantic_content::current_source(app)
+            {
+                resp.dnd_set_drag_payload(Drag { source, comp, folder: fstatic, keys: Vec::new(), groups: vec![id] });
             }
             // The top of the row puts the drop before the group; the rest puts it inside.
             let level = app.session.doc.group_level(id);
@@ -2758,26 +3031,29 @@ fn folder_level(
                 d.comp == comp && d.folder == fstatic && fits(d, if zone == DropMark::Above { level - 1 } else { level })
             }) {
                 let before = BrowserEntry::Group(id);
-                acts.drop = Some(match (zone, holder) {
-                    (DropMark::Box, _) => {
-                        DropAction::Move { comp, folder: fstatic, keys: d.keys.clone(), groups: d.groups.clone(), group: Some(id), before: None }
-                    }
-                    (DropMark::Above, Some(h)) => DropAction::Move {
-                        comp,
-                        folder: fstatic,
-                        keys: d.keys.clone(),
-                        groups: d.groups.clone(),
-                        group: Some(h),
-                        before: Some(before),
+                acts.drop_from(
+                    d.source,
+                    match (zone, holder) {
+                        (DropMark::Box, _) => {
+                            DropAction::Move { comp, folder: fstatic, keys: d.keys.clone(), groups: d.groups.clone(), group: Some(id), before: None }
+                        }
+                        (DropMark::Above, Some(h)) => DropAction::Move {
+                            comp,
+                            folder: fstatic,
+                            keys: d.keys.clone(),
+                            groups: d.groups.clone(),
+                            group: Some(h),
+                            before: Some(before),
+                        },
+                        (DropMark::Above, None) => DropAction::Order {
+                            comp,
+                            folder: fstatic,
+                            order: order_before(top, &d.entries(), Some(&before)),
+                            keys: d.keys.clone(),
+                            groups: d.groups.clone(),
+                        },
                     },
-                    (DropMark::Above, None) => DropAction::Order {
-                        comp,
-                        folder: fstatic,
-                        order: order_before(top, &d.entries(), Some(&before)),
-                        keys: d.keys.clone(),
-                        groups: d.groups.clone(),
-                    },
-                });
+                );
             }
         }
         if gopen {
@@ -2806,7 +3082,7 @@ fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, label_left: f
     let Some(mut rename) = app.menu.rename.take() else { return };
     let edit_rect = Rect::from_min_max(pos2(label_left, row.top() + 1.0), pos2(row.right() - 3.0, row.bottom() - 1.0));
     ui.painter().rect_filled(edit_rect, 3.0, Tokens::get().field);
-    let id = ui.id().with(("browser_rename", &e.row_key));
+    let id = ui.scope_id().with(("browser_rename", &e.row_key));
     let response = crate::ui_kit::inline_name(ui, edit_rect, id, &mut rename.text);
     crate::scenario::publish_handle(&format!("rename:{}", e.key), edit_rect.center());
     let was_focused = rename.focused;
@@ -2824,7 +3100,9 @@ fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, label_left: f
     if escape {
         // Dropping the state cancels the edit.
     } else if commit {
-        crate::context_menu::commit_rename(app, &rename);
+        if crate::context_menu::commit_rename(app, &rename).is_err() {
+            app.menu.rename = Some(rename);
+        }
     } else {
         app.menu.rename = Some(rename);
     }
@@ -2852,9 +3130,10 @@ fn entry_row(
     }
     app.tree.remember(&e.row_key);
     let pattern_key = e.patterns.as_deref();
-    let patterns_open = pattern_key.is_some_and(|key| is_open(app, key, true));
+    let start_open = rows_start_open(app);
+    let patterns_open = pattern_key.is_some_and(|key| is_open(app, key, start_open));
     let rect = row_rect(ui);
-    let revealed = folder == "bodies" && app.tree.reveal.as_ref().is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b.as_str()));
+    let revealed = folder == "bodies" && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b));
     if !ui.is_rect_visible(rect) && !patterns_open && !revealed {
         ui.allocate_space(rect.size());
         return;
@@ -2875,7 +3154,7 @@ fn entry_row(
     let state_tip = sketch_state.map(crate::sketch_state::SketchState::text);
     let r = draw_row(
         ui,
-        ui.id().with(("item", &e.row_key)),
+        ui.scope_id().with(("item", &e.row_key)),
         &Row {
             depth,
             fold: pattern_key.map(|_| patterns_open),
@@ -2898,16 +3177,24 @@ fn entry_row(
             ..Default::default()
         },
     );
+    // A part that needs repair, under the pointer: its refused face is ringed in the view.
+    if r.hovered
+        && folder == "bodies"
+        && let Some(Sel::Body { name }) = &e.sel
+        && let Some(face) = app.session.model.state().body(&e.key).and_then(|b| b.body.smlib_refused()).and_then(|r| r.face)
+    {
+        crate::refused_part::ring(app, name, face);
+    }
     if r.fold
         && let Some(key) = pattern_key
     {
-        toggle(app, key, true);
+        toggle(app, key, start_open);
     }
     if folder == "bodies"
-        && app.tree.reveal.as_ref().is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b.as_str()))
+        && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b))
         && let Some(rect) = r.rect
+        && crate::semantic_content::scroll_acknowledged(ui, rect)
     {
-        ui.scroll_to_rect(rect, Some(egui::Align::Center));
         app.tree.reveal = None;
     }
     if r.eye {
@@ -2924,7 +3211,7 @@ fn entry_row(
         if folder == "construction" || (folder == "bodies" && !shift && app.dialog.is_some()) {
             if let Some(s) = e.sel.clone() {
                 if matches!(s, Sel::Body { .. }) {
-                    app.tree.anchor = Some(e.row_key.clone());
+                    app.tree.content.current_mut().anchor = Some(e.row_key.clone());
                 }
                 pick_from_browser(app, s);
             }
@@ -2975,9 +3262,12 @@ fn entry_row(
     }
     let Some(resp) = &r.resp else { return };
     // Drag: the selected items of this folder when this one is selected, else just this one.
-    if resp.drag_started() && !r.on_control {
+    if resp.drag_started()
+        && !r.on_control
+        && let Some(source) = crate::semantic_content::current_source(app)
+    {
         let keys: Vec<String> = if selected { selected_keys(app, comp, folder) } else { vec![e.key.clone()] };
-        resp.dnd_set_drag_payload(Drag { comp, folder, keys, groups: Vec::new() });
+        resp.dnd_set_drag_payload(Drag { source, comp, folder, keys, groups: Vec::new() });
     }
     let fits = |d: &Drag| {
         let doc = &app.session.doc;
@@ -2988,16 +3278,19 @@ fn entry_row(
     };
     if let Some(d) = drop_target(ui, resp, |d: &Drag| d.comp == comp && d.folder == folder && !d.keys.contains(&e.key) && fits(d), DropMark::Above) {
         let before = BrowserEntry::item(&e.key);
-        acts.drop = Some(match group {
-            Some(g) => DropAction::Move { comp, folder, keys: d.keys.clone(), groups: d.groups.clone(), group: Some(g), before: Some(before) },
-            None => DropAction::Order {
-                comp,
-                folder,
-                order: order_before(top, &d.entries(), Some(&before)),
-                keys: d.keys.clone(),
-                groups: d.groups.clone(),
+        acts.drop_from(
+            d.source,
+            match group {
+                Some(g) => DropAction::Move { comp, folder, keys: d.keys.clone(), groups: d.groups.clone(), group: Some(g), before: Some(before) },
+                None => DropAction::Order {
+                    comp,
+                    folder,
+                    order: order_before(top, &d.entries(), Some(&before)),
+                    keys: d.keys.clone(),
+                    groups: d.groups.clone(),
+                },
             },
-        });
+        );
     }
 }
 
@@ -3016,6 +3309,7 @@ enum DropMark {
 
 /// While a matching payload hovers the row, mark where it would land; on release, the payload.
 fn drop_target(ui: &egui::Ui, resp: &egui::Response, accept: impl Fn(&Drag) -> bool, mark: DropMark) -> Option<std::sync::Arc<Drag>> {
+    let accept = |drag: &Drag| crate::semantic_content::same_document(ui, drag.source) && accept(drag);
     let t = Tokens::get();
     let hovering = resp.dnd_hover_payload::<Drag>().filter(|d| accept(d));
     if hovering.is_some() {
@@ -3036,6 +3330,7 @@ fn drop_target(ui: &egui::Ui, resp: &egui::Response, accept: impl Fn(&Drag) -> b
 
 /// Like [`drop_target`] for a row that takes a drop above it (its top part) or inside it.
 fn drop_target_zone(ui: &egui::Ui, resp: &egui::Response, accept: impl Fn(&Drag, DropMark) -> bool) -> Option<(std::sync::Arc<Drag>, DropMark)> {
+    let accept = |drag: &Drag, zone| crate::semantic_content::same_document(ui, drag.source) && accept(drag, zone);
     let t = Tokens::get();
     let r = resp.rect;
     let at = ui.input(|i| i.pointer.hover_pos().or(i.pointer.latest_pos()));
@@ -3088,6 +3383,7 @@ fn occurrence_reorder_target(
     resp: &egui::Response,
     accept: impl Fn(&OccurrenceDrag) -> bool,
 ) -> Option<std::sync::Arc<OccurrenceDrag>> {
+    let accept = |drag: &OccurrenceDrag| crate::semantic_content::same_document(ui, drag.source) && accept(drag);
     if resp.dnd_hover_payload::<OccurrenceDrag>().is_some_and(|d| accept(&d)) {
         ui.painter().hline(resp.rect.x_range(), resp.rect.top(), Stroke::new(2.0, Tokens::get().accent));
     }
@@ -3099,6 +3395,7 @@ fn occurrence_reorder_target(
 
 /// While a matching placement drag hovers the row, mark where it would land; on release, the payload.
 fn occurrence_drop_target(ui: &egui::Ui, resp: &egui::Response, accept: impl Fn(&OccurrenceDrag) -> bool) -> Option<std::sync::Arc<OccurrenceDrag>> {
+    let accept = |drag: &OccurrenceDrag| crate::semantic_content::same_document(ui, drag.source) && accept(drag);
     let t = Tokens::get();
     let hovering = resp.dnd_hover_payload::<OccurrenceDrag>().filter(|d| accept(d));
     if hovering.is_some() {
@@ -3114,14 +3411,40 @@ fn occurrence_drop_target(ui: &egui::Ui, resp: &egui::Response, accept: impl Fn(
 
 /// A drop, applied after the tree is drawn.
 enum DropAction {
+    OccurrenceOrder {
+        parent: u64,
+        order: Vec<u64>,
+    },
     /// Into a group (before an item of it), or out of groups.
-    Move { comp: u64, folder: &'static str, keys: Vec<String>, groups: Vec<u64>, group: Option<u64>, before: Option<BrowserEntry> },
+    Move {
+        comp: u64,
+        folder: &'static str,
+        keys: Vec<String>,
+        groups: Vec<u64>,
+        group: Option<u64>,
+        before: Option<BrowserEntry>,
+    },
     /// Out of groups, in this order of the folder's top level.
-    Order { comp: u64, folder: &'static str, keys: Vec<String>, groups: Vec<u64>, order: Vec<BrowserEntry> },
+    Order {
+        comp: u64,
+        folder: &'static str,
+        keys: Vec<String>,
+        groups: Vec<u64>,
+        order: Vec<BrowserEntry>,
+    },
     /// Into another component (bodies and sketches).
-    Component { to: u64, folder: &'static str, keys: Vec<String> },
+    Component {
+        to: u64,
+        folder: &'static str,
+        keys: Vec<String>,
+    },
     /// A placement moved into another component (or the design, `parent` 0).
-    Reparent { occurrence: u64, path: Vec<u64>, parent: u64, parent_path: Option<Vec<u64>> },
+    Reparent {
+        occurrence: u64,
+        path: Vec<u64>,
+        parent: u64,
+        parent_path: Option<Vec<u64>>,
+    },
 }
 
 fn entry_json(e: &BrowserEntry) -> Value {
@@ -3138,6 +3461,10 @@ fn entries_json(keys: &[String], groups: &[u64]) -> Vec<Value> {
 
 fn apply_drop(app: &mut SolveApp, d: DropAction) {
     match d {
+        DropAction::OccurrenceOrder { parent, order } => {
+            let order: Vec<String> = order.iter().map(u64::to_string).collect();
+            let _ = app.run("browser.order", json!({ "folder": "components", "component": parent, "order": order }));
+        }
         DropAction::Move { comp, folder, keys, groups, group, before } => {
             let items = entries_json(&keys, &groups);
             let before = before.map(|b| entry_json(&b));
@@ -3192,7 +3519,7 @@ pub(crate) fn revert_occurrence_dialog(app: &mut SolveApp, m: &OccMove) {
 /// The pending move: turned about X, then Y, then Z through the starting origin, then moved.
 pub fn apply_occurrence_move(app: &mut SolveApp, m: &OccMove) {
     use crate::gizmo;
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let a = m.angles.map(f64::to_radians);
     let r = gizmo::mul(&gizmo::mul(&gizmo::rotation(Vec3::Z, a[2]), &gizmo::rotation(Vec3::Y, a[1])), &gizmo::rotation(Vec3::X, a[0]));
     let (axis, angle) = gizmo::axis_angle(&r);
@@ -3211,7 +3538,7 @@ pub fn apply_occurrence_move(app: &mut SolveApp, m: &OccMove) {
 /// The shared move triad at the occurrence's origin: arrows and squares move it, rings turn it.
 pub(crate) fn occurrence_triad_model(app: &SolveApp) -> Option<crate::gizmo::Triad> {
     let movement = app.tree.occurrence_move.as_ref()?;
-    let center = movement.pivot? + solidcraft_engine::geom::Vec3::new(movement.translate[0], movement.translate[1], movement.translate[2]);
+    let center = movement.pivot? + solidcore_record::Vec3::new(movement.translate[0], movement.translate[1], movement.translate[2]);
     Some(crate::gizmo::Triad { center, translate: true, rotate: true })
 }
 
@@ -3222,7 +3549,7 @@ pub(crate) fn occurrence_triad(app: &mut SolveApp, ui: &mut egui::Ui, painter: &
     let before = (m.translate, m.angles);
     let Some(t) = occurrence_triad_model(app) else { return };
     let step = crate::canvas::snap_step(app.cam.half_height());
-    let Some(g) = gizmo::show(ui, painter, proj, egui::Id::new("sc_occ_triad"), &t, step) else { return };
+    let Some(g) = gizmo::show(ui, painter, proj, egui::Id::unique("sc_occ_triad"), &t, step) else { return };
     if g.started || m.drag0.is_none() {
         m.drag0 = Some((m.translate, m.angles));
     }
@@ -3248,8 +3575,8 @@ pub(crate) fn occurrence_triad(app: &mut SolveApp, ui: &mut egui::Ui, painter: &
 /// viewport like the sketch being edited draws its own (`crate::dim_view`). A double-click on a
 /// value edits it in place without editing the sketch (`crate::dim_view::model_double_click`).
 pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
-    use solidcraft_engine::geom::Vec2;
-    use solidcraft_engine::sketch::{DimFrame, chain_centres, default_text, dim_frame, dim_layout_reaching, dim_reach};
+    use solidcore_record::Vec2;
+    use solidcraft_engine::sketch::{DimFrame, chain_centres, default_text, dim_layout_reaching, dim_reach};
     crate::dim_view::set_model_drawn(Vec::new());
     let Some(rect) = app.viewport.rect else { return };
     if app.session.visibility.shown_dimensions.is_empty() {
@@ -3259,7 +3586,7 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
     let tk = Tokens::get();
     let proj = crate::viewport::projection(app, rect);
     let painter = ctx.layer_painter(egui::LayerId::background()).with_clip_rect(rect);
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     for id in app
         .session
         .visibility
@@ -3275,10 +3602,10 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
         let n = centres.len().max(1) as f64;
         let middle = centres.iter().fold(Vec2::ZERO, |a, p| a + *p) * (1.0 / n);
         for c in &sk.constraints {
-            let Some(frame) = dim_frame(sk, &c.kind) else { continue };
+            let Some(frame) = crate::dim_view::shown_frame(app.preferences.ellipse_axes, sk, &c.kind) else { continue };
             let anchor = match frame {
                 DimFrame::Linear { p0, p1, .. } => (p0 + p1) * 0.5,
-                DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } => center,
+                DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } | DimFrame::HalfAxis { center, .. } => center,
                 DimFrame::Angular { vertex, .. } => vertex,
             };
             let (Some(a), Some(b)) = (to(anchor), to(anchor + Vec2::X)) else { continue };
@@ -3289,7 +3616,7 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
             let expr = c.param.as_ref().and_then(|p| app.session.doc.param(p)).map(|p| p.expr.as_str());
             let col = if c.driven { tk.dimension_driven } else { tk.dimension };
             let galley = painter.layout_no_wrap(
-                crate::dim_view::label(&c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals),
+                crate::dim_view::frame_label(&frame, &c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals),
                 FontId::proportional(tk.font_caption),
                 col,
             );
@@ -3327,6 +3654,18 @@ pub(crate) fn panel_pos(app: &SolveApp) -> Pos2 {
 /// The Capture Position question stands for saving.
 pub const SAVE: &str = "__save";
 
+/// It stands for Save As (`__save_as:<extension>:<name>`), which needs the question as Save
+/// does: a file can't hold a move not captured yet (#9736).
+const SAVE_AS: &str = "__save_as:";
+
+/// It stands for the browser build's Download design.
+pub const DOWNLOAD: &str = "__download";
+
+/// The question standing for Save As under `name` with `extension`.
+pub fn save_as_question(name: &str, extension: &str) -> String {
+    format!("{SAVE_AS}{extension}:{name}")
+}
+
 /// Does starting `what` (a command id or [`SAVE`]) need the Capture Position question first?
 /// Yes while components were moved without capturing their positions, except for the commands
 /// that capture, revert or keep moving.
@@ -3354,6 +3693,8 @@ pub fn answer_capture(app: &mut SolveApp, action: &str) -> Result<(), String> {
         "revert" => drop(app.run("component.revert_position", json!({}))),
         "cancel" => {
             app.tree.capture_prompt = None;
+            // A tab waiting to close after the save stays open (#9736).
+            crate::documents::saved_for_close(app);
             return Ok(());
         }
         other => return Err(format!("unknown answer `{other}` (capture, revert, cancel)")),
@@ -3362,18 +3703,27 @@ pub fn answer_capture(app: &mut SolveApp, action: &str) -> Result<(), String> {
     app.tree.occurrence_move = None;
     if what == SAVE {
         crate::toolbar::save(app);
+    } else if let Some((extension, name)) = what.strip_prefix(SAVE_AS).and_then(|rest| rest.split_once(':')) {
+        crate::toolbar::save_as_named(app, name, extension);
+    } else if what == DOWNLOAD {
+        crate::toolbar::download_design(app);
     } else {
         app.start(&what);
+    }
+    // A save that finished here (no thread, or nothing to write) answers a tab waiting to close,
+    // as the "save changes?" answer does; one under way answers when it ends.
+    if app.saving.is_none() && !app.file_picker_busy() {
+        crate::documents::saved_for_close(app);
     }
     Ok(())
 }
 
 /// Where an occurrence's origin is now (with its pending move).
-pub(crate) fn occurrence_origin(app: &SolveApp, occurrence: u64) -> Option<solidcraft_engine::geom::Vec3> {
+pub(crate) fn occurrence_origin(app: &SolveApp, occurrence: u64) -> Option<solidcore_record::Vec3> {
     let o = app.session.doc.occurrences.iter().find(|o| o.id == occurrence)?;
     let parent = app.session.doc.component_transform(o.parent);
     let own = app.session.pending_moves.get(&occurrence).copied().unwrap_or(o.transform);
-    Some(solidcraft_engine::doc::apply_point(&solidcraft_engine::doc::mat_mul(&parent, &own), solidcraft_engine::geom::Vec3::ZERO))
+    Some(solidcraft_engine::doc::apply_point(&solidcraft_engine::doc::mat_mul(&parent, &own), solidcore_record::Vec3::ZERO))
 }
 
 /// The names the Bodies folder lists at the top level, for tests.

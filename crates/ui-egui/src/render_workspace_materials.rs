@@ -1,5 +1,6 @@
 //! Transient body-level optical overrides for the captured GPU image request.
 //! The model's appearances, physical material cards and saved setups are not changed.
+use solidcore_record::Vec3;
 use std::sync::{Arc, Weak};
 
 use serde::Deserialize;
@@ -9,7 +10,6 @@ use solidcraft_engine::{
         Document,
         appearance_pack::{self, GlassBoundary, Recipe},
     },
-    geom::Vec3,
     render::{
         clear_coat::ClearCoat,
         job::textures::{BaseColorMode, PlanarFrame},
@@ -18,7 +18,9 @@ use solidcraft_engine::{
     },
 };
 
-use crate::{SolveApp, theme::Tokens, ui_kit};
+#[cfg(test)]
+use crate::theme::Tokens;
+use crate::{SolveApp, ui_kit};
 
 const MAX_BINDINGS: usize = 128;
 
@@ -164,7 +166,9 @@ pub(super) struct View {
     pub enabled: bool,
     pub bindings: Vec<Binding>,
     targets: Vec<Target>,
+    #[cfg(test)]
     target: Option<usize>,
+    #[cfg(test)]
     target_search: String,
     selected: Option<usize>,
     target_revision: Option<u64>,
@@ -206,6 +210,30 @@ pub(super) fn revalidate(app: &mut SolveApp, binding: &mut Binding) -> Result<()
     binding.revision = app.session.revision;
     binding.document = Arc::downgrade(&app.session.doc);
     Ok(())
+}
+
+/// Render settings may change document identity without changing the reviewed source.
+/// A changed model, material, placement or target still needs explicit revalidation.
+pub(super) fn refresh_render_revision(app: &mut SolveApp) {
+    if app.render_workspace.view.materials.bindings.is_empty() {
+        return;
+    }
+    let Ok(targets) = read_targets(app) else { return };
+    let mut sources = super::setups::SourceCache::default();
+    let eligible: Vec<bool> = app
+        .render_workspace
+        .view
+        .materials
+        .bindings
+        .iter()
+        .map(|binding| sources.same_model_source(app, &binding.document) && targets.contains(&binding.target))
+        .collect();
+    for (binding, eligible) in app.render_workspace.view.materials.bindings.iter_mut().zip(eligible) {
+        if eligible {
+            binding.revision = app.session.revision;
+            binding.document = Arc::downgrade(&app.session.doc);
+        }
+    }
 }
 
 /// Called for every Check and Start through the one shared image request builder.
@@ -315,6 +343,7 @@ fn vector(app: &SolveApp, ui: &mut egui::Ui, key: &str, values: &mut [f64; 3], r
     ui_kit::row(ui, app.tr(key), |ui| ui_kit::vector3_field(ui, values, range, suffix))
 }
 
+#[cfg(test)]
 pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let title = app.tr("render.material_title").to_string();
     ui_kit::section(ui, "render_materials", &title, false, |ui| {
@@ -340,7 +369,7 @@ pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !app.session.model.is_stale();
         ui_kit::bounded_cell_editor(
             ui,
-            ui.id().with("render_material_search"),
+            ui.scope_id().with("render_material_search"),
             &mut view.target_search,
             app.tr("render.material_filter"),
             false,
@@ -575,7 +604,14 @@ fn choose_map(app: &mut SolveApp, binding: &Binding, slot: MapSlot) {
 
 /// Prepare through the engine, then install only a request-local binding. No
 /// authored material may silently remove a glass override or switch executor.
-pub(super) fn install_library_surface(app: &mut SolveApp, id: &str, target: Target, plane: &str, scale: f64) -> Result<(), String> {
+pub(super) fn install_library_surface(
+    app: &mut SolveApp,
+    id: &str,
+    target: Target,
+    plane: &str,
+    scale: f64,
+    rotation_rad: f64,
+) -> Result<(), String> {
     if app.render_workspace.view.method != super::ImageMethod::GpuRaytrace {
         return Err(app.tr("render.material_gpu_required").into());
     }
@@ -592,8 +628,10 @@ pub(super) fn install_library_surface(app: &mut SolveApp, id: &str, target: Targ
     } else if app.render_workspace.view.materials.bindings.len() >= MAX_BINDINGS {
         return Err(app.tr("render.material_limits").into());
     }
-    let reply =
-        app.run("render.library.surface.prepare", json!({"id":id,"body_index":target.ordinal,"body_name":target.name,"plane":plane,"scale":scale}))?;
+    let reply = app.run(
+        "render.library.surface.prepare",
+        json!({"id":id,"body_index":target.ordinal,"body_name":target.name,"plane":plane,"scale":scale,"rotation_rad":rotation_rad}),
+    )?;
     let texture = &reply["texture"];
     let frame: PlanarFrame = serde_json::from_value(texture["frame"].clone()).map_err(|e| e.to_string())?;
     let path = |key: &str| texture[key].as_str().map(str::to_string).ok_or_else(|| crate::i18n::tr("render.error_surface_reply").to_string());
@@ -905,7 +943,7 @@ pub(super) fn confirmation(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let title = app.tr("render.appearance_editor.remove_title").to_owned();
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("render_remove_optics"), "delete", &title)
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("render_remove_optics"), "delete", &title)
         .tone(ui_kit::Tone::Danger)
         .actions(app.tr("render.appearance_editor.remove"), app.tr("render.keep_editing"), None)
         .selected(ui_kit::Action::Cancel)

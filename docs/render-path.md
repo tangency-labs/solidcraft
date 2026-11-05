@@ -17,6 +17,11 @@ the pending/ready/failed host, and failures are not retried on each viewport ins
 It opens its independent job device on the viewport's selected adapter,
 so software fallback and safe mode do not rediscover a failing hardware driver.
 An incompatible explicit GPU policy leaves progressive rendering unavailable there.
+A driver that crashes the process while it compiles the path pipeline (#9236) is beyond error
+scopes and unwind guards, so a running setup keeps `gpu-path-setup.json` (its adapter key) in the
+settings folder and removes it when the setup answers or the app closes normally. A launch that
+finds it for the same adapter key leaves the setup failed with that explanation until the user
+chooses **Try again**; a driver update changes the key and so tries again.
 The path tracer runs on Vulkan, or on Metal on macOS (#3217). A viewport on D3D12 is reopened on the
 same GPU through Vulkan. Where there is no Vulkan or Metal driver (Windows over
 Remote Desktop or on the WARP software adapter, older drivers), the path executor reports
@@ -152,9 +157,9 @@ optional `clamp_indirect` job option limits such paths:
   the first bounce, so it is clamped.
 - The limit is linear radiance before exposure, from 0.000001 to 1,000,000. Absent or
   null means off; zero is refused rather than meaning off.
-- The clamp is compiled only into a second version of the path shader, which the first
-  job that sets it builds once per device and later ones reuse. Jobs without it keep the
-  ordinary shader, so their images do not change by a single bit: even an untaken branch
+- The clamp is compiled only into a separate version of the path shader for each kind of
+  scene (opaque or glass, with or without maps), which the first job that sets it builds
+  once per device and later ones reuse. Jobs without it keep the ordinary shaders, so their images do not change by a single bit: even an untaken branch
   at the integrator's adds changes how the shader compiler fuses them.
 - It is biased: it removes light, so it also dims real caustics, glints and bright
   reflections of lights in shiny surfaces. A limit a few times the brightest radiance

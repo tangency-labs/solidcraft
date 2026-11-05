@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "a box's top front edge rounded r3, then the vertical edge meeting it rounded r2: the smaller round runs on round the bigger round's end and along the top side edge",
+ "source": "analytic",
+ "method": "box 40x30x20; the edge y=0, z=20 rounded r3 removes 40 (1-pi/4) 9 = 77.2567. The edge x=40, y=0 (now z 0..17) rounded r2 with its tangent chain: the end arc of the r3 round on x = 40 and the edge x=40, z=20 (y 3..30). Along the arc the r2 ball rolls between the plane x = 40 and the r3 cylinder: its section in each half-plane through that cylinder's axis is the square-corner spandrel with its corner 3 from the axis, the material towards it, turned a quarter turn (Pappus): (pi/2)(3 A2 - M2), A2 = (1-pi/4) 4 = 0.858407, M2 = 8 (5/6-pi/4) = 0.383481. Removed = 40 A3 + 17 A2 + (pi/2)(3 A2 - M2) + 27 A2 = 118.4694. V = 23881.5306. Faces 6 + 3 rounds + the torus piece = 10.",
+ "body_count": 1,
+ "volume_mm3": 23881.530637372005,
+ "faces": 10,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   20
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

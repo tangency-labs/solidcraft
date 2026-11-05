@@ -3,7 +3,9 @@
 mod raster;
 use egui::{ColorImage, Event, PointerButton, Pos2, Rect, TextureId, vec2};
 use serde_json::json;
-use solidcraft_engine::{Sel, geom::Vec3};
+use solidcore_record::Vec3;
+use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_ui_egui::{
     scenario::{self, Harness},
     theme, viewport,
@@ -26,7 +28,7 @@ fn bearing(kind: &str) -> (Harness, u64) {
         h.app.run("joint.create", json!({"type":kind,"a":at("Housing"),"b":at("Bearing"),"flip":true,"angle":0,"name":"Guide"})).unwrap()["joint"]
             .as_u64()
             .unwrap();
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let body = st.bodies.iter().find(|b| h.app.session.doc.model_body_component(b) == part["component"].as_u64().unwrap()).unwrap();
     let mesh = body.mesh();
     let face = mesh
@@ -69,10 +71,7 @@ fn save_frame(h: &mut Harness, textures: &mut HashMap<TextureId, ColorImage>, mu
     }
     out.shapes.insert(
         background,
-        egui::epaint::ClippedShape {
-            clip_rect: rect,
-            shape: egui::Shape::image(id, rect, Rect::from_min_max(Pos2::ZERO, egui::pos2(1., 1.)), egui::Color32::WHITE),
-        },
+        egui::epaint::ClippedShape::new(rect, egui::Shape::image(id, rect, Rect::from_min_max(Pos2::ZERO, egui::pos2(1., 1.)), egui::Color32::WHITE)),
     );
     raster::raster(h, textures, out).save(path).unwrap();
 }

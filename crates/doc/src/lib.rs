@@ -11,6 +11,7 @@ mod assembly;
 mod body_transfer;
 mod body_transfer_sheet;
 mod browser_tree;
+pub mod newer_file;
 pub mod pbr_appearance;
 pub use body_transfer::{valid_transfer_matrix, validate_body_transfer};
 pub mod canvas;
@@ -53,6 +54,7 @@ pub mod persistent_name;
 pub mod physical_material;
 mod piece_names;
 pub mod pipe_thread_catalog;
+pub mod pipe_thread_sizes;
 pub mod point_cloud;
 mod point_cloud_complex;
 pub mod point_cloud_distribution;
@@ -60,7 +62,9 @@ mod points;
 mod profile_refs;
 pub mod progress;
 mod thread_catalog;
-pub use thread_catalog::{TappedThread, TappedThreadFamily, parse_tapped_thread, tapped_thread_sizes};
+pub use thread_catalog::{
+    DRILL_ALLOWANCE, TaperDrill, TappedThread, TappedThreadFamily, metric_tap_drill, parse_tapped_thread, tapped_thread_sizes, untabulated_taper_tap,
+};
 mod walk;
 pub use profile_refs::{capture_profile_selection, profile_fallback_notes, profile_selection_indices, profile_selection_indices_lenient};
 pub mod plastic;
@@ -74,21 +78,23 @@ pub mod render_optics;
 pub mod render_resources;
 pub mod render_settings;
 pub mod render_surface;
-pub use project3d::iso_grid;
+pub mod render_texture_resources;
 pub mod sheet;
 pub mod sketch_equation;
 pub mod text_params;
+pub mod thread_forms;
 
 pub use assembly::{
-    BomType, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence, WorldNames, apply_point, apply_vector, is_identity, map_point_expr,
-    map_vector_expr, mat_inverse, mat_mul, rigid,
+    BomType, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence, WorldNames, apply_point, apply_vector, is_identity, is_placement,
+    map_point_expr, map_vector_expr, mat_inverse, mat_mul, rigid,
 };
 pub use document::*;
 pub use eval::{
-    EdgeRef, FeatureResult, Model, ModelBody, ModelState, PlacedBodies, RevolveExtent, SavedModel, SolvedSketch, ThreadInfo, curve_pick_error,
-    edge_names_for, edge_refs, face_point_names, face_point_state, hole_direction_at, import_body_names, join_pieces_added, map_wire,
-    metric_thread_sizes, object_height, parse_metric_thread, pattern_matrices, revolve_extent, revolve_extent_with_convention, select_profiles,
-    sketch_hole_direction, sketch_line_plane, state_in_frame, state_in_frame_at, suggested_thread, tangent_face_chain, through_all_distance,
+    EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PlacedBodies, RevolveExtent, SavedModel, SolvedSketch, ThreadInfo,
+    blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state, hole_direction_at,
+    hole_on_surface, import_body_names, join_pieces_added, map_wire, metric_thread_sizes, object_height, parse_metric_thread, pattern_matrices,
+    revolve_extent, revolve_extent_for_handle, revolve_extent_with_convention, select_profiles, sketch_hole_direction, sketch_line_plane,
+    state_in_frame, state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance, with_placed_copies,
     world_state, world_state_reusing,
 };
 pub use eval::{EvalCache, KeptResults};
@@ -111,6 +117,41 @@ pub enum DocError {
     Sketch(#[from] solidcraft_sketch::SketchError),
     #[error(transparent)]
     Kernel(#[from] solidcraft_kernel::KernelError),
+    /// A stored reference (a face or edge name, a piece of a split face) no longer finds exactly
+    /// what it named: the feature using it fails, and the user picks it again. `feature` is
+    /// empty until the evaluation of the feature fills it in ([`DocError::in_feature`]).
+    #[error("{}", reselect_message(feature, reference))]
+    Reselect { feature: String, reference: String },
+}
+
+impl DocError {
+    /// A feature's `reference` that no longer finds what it named ([`DocError::Reselect`]), for
+    /// the feature being evaluated.
+    pub fn reselect(reference: impl Into<String>) -> Self {
+        DocError::Reselect { feature: String::new(), reference: reference.into() }
+    }
+
+    /// This error, raised while feature `feature` was evaluated: a [`DocError::Reselect`] names it.
+    pub fn in_feature(self, feature: &str) -> Self {
+        match self {
+            DocError::Reselect { feature: f, reference } if f.is_empty() => DocError::Reselect { feature: feature.into(), reference },
+            other => other,
+        }
+    }
+}
+
+/// What a feature that lost a reference says ([`DocError::Reselect`]).
+fn reselect_message(feature: &str, reference: &str) -> String {
+    let feature = if feature.is_empty() { "this feature" } else { feature };
+    format!("{feature}: the reference `{reference}` no longer exists as it was picked; reselect it")
+}
+
+/// The feature and the reference of a [`DocError::Reselect`] message, read back from its text
+/// (a feature's error is kept as text): `None` for any other message.
+pub fn reselect_parts(text: &str) -> Option<(&str, &str)> {
+    let (feature, rest) = text.split_once(": the reference `")?;
+    let reference = rest.strip_suffix("` no longer exists as it was picked; reselect it")?;
+    Some((feature, reference))
 }
 
 pub type Result<T> = std::result::Result<T, DocError>;
