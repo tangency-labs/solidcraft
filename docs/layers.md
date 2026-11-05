@@ -7,7 +7,7 @@ layer that needs another layer's job calls that layer; it never carries its own 
 
 ## 1. The layers
 
-![One operation through the layers](layers/layers.svg)
+![One operation through the layers: (1) the app sends ops the intent; (2) ops passes the body to convert; (3) convert hands it to the kernel as a B-rep; (4) the kernel returns the new body as a record; ops reads it and (5) returns the result or refusal to the app; (6) the app requests a mesh from tess; (7) tess returns the mesh to draw.](layers/layers.svg)
 
 *Above the dashed line is the app, below it is solidcore. The app crosses the line only through ops (the intent, and its result or refusal) and tess (a mesh request, and the mesh to draw). Inside solidcore, the kernel does every computation and the result comes back as a record.*
 

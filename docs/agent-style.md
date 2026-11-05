@@ -78,8 +78,11 @@ Every ported file starts with:
 ## Figures
 
 Schematics are drawn in VectorCraft, never by hand-writing SVG. Each figure is exported to its
-doc's folder as SVG with outlined text, its `.vectorcraft` source kept next to it, and embedded
-with a Markdown image link and a one-line caption that says what to look at. Captions name
+doc's folder as SVG with live text (`outlineText: false`), so its labels stay readable in the
+file, its `.vectorcraft` source kept next to it, and embedded with a Markdown image link and a
+one-line caption that says what to look at. A figure's alt text says what it shows; when it has
+arrows, the alt text states the flow step by step, since the file records no connection between
+an arrow and its boxes. Captions name
 things, never colours. When several agents share one VectorCraft instance, draw each figure in
 one `command_batch` (new document, drawing, save, export), so nothing interleaves.
 
