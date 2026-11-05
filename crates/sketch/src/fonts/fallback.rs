@@ -7,9 +7,10 @@
 //! each file's character map alone and bounded by `MAX_FONT_FILES`. Its answers, "none has it"
 //! too, are kept for the process. [`answers`] runs it where it's called, or on a thread of its own.
 //!
-//! The browser has no font folders. There, the web covers Japanese for now: the first kana or Han
-//! that lacks a font asks for the font the web app fetches ([`web_font_wanted`]), the text is
-//! pending until it comes ([`provide_web_font`]), and it sets whatever it has a glyph for.
+//! The browser has no font folders. There, the web covers Arabic, Chinese, Japanese and Korean, a
+//! font each ([`WebFont`]): a character that lacks a font asks for its script's ([`web_fonts_wanted`]),
+//! the text is pending until every font it asked for has come or failed ([`provide_web_font`],
+//! [`web_font_failed`]), and it sets whatever they have a glyph for.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -331,9 +332,61 @@ fn state() -> std::sync::MutexGuard<'static, Search> {
     STATE.get_or_init(Default::default).lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Where the font the web app fetches stands.
+/// A font the web app fetches for a script it covers, from its own origin.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum WebFont {
+    Japanese,
+    Korean,
+    SimplifiedChinese,
+    TraditionalChinese,
+    Arabic,
+}
+
+/// How a refusal on the web names what it covers.
+pub const WEB_COVERS: &str = "the web covers Arabic, Chinese, Japanese and Korean";
+
+/// What stands for a fetched font's file among faces, which are named by their files.
+const WEB: &str = "web:";
+
+impl WebFont {
+    pub const ALL: [WebFont; 5] = [WebFont::Japanese, WebFont::Korean, WebFont::SimplifiedChinese, WebFont::TraditionalChinese, WebFont::Arabic];
+
+    /// Its file in the web app's `fonts` folder.
+    pub fn file(self) -> &'static str {
+        match self {
+            WebFont::Japanese => "BIZUDPGothic-Regular.ttf",
+            WebFont::Korean => "noto-sans-kr/NotoSansKR-Regular.otf",
+            WebFont::SimplifiedChinese => "noto-sans-sc/NotoSansSC-Regular.otf",
+            WebFont::TraditionalChinese => "noto-sans-tc/NotoSansTC-Regular.otf",
+            WebFont::Arabic => "noto-sans-arabic/NotoSansArabic-Regular.ttf",
+        }
+    }
+
+    /// The font for `ch` on the web: its script's, and for Han, the font of whose Han the text
+    /// wants. None for a script the web has no font for.
+    fn of(ch: char, han: Han) -> Option<WebFont> {
+        Some(match script(ch)? {
+            Script::Arabic => WebFont::Arabic,
+            Script::Hangul => WebFont::Korean,
+            Script::Kana => WebFont::Japanese,
+            Script::Han => match han {
+                Han::Japanese => WebFont::Japanese,
+                Han::SimplifiedChinese => WebFont::SimplifiedChinese,
+                Han::TraditionalChinese => WebFont::TraditionalChinese,
+                Han::Korean => WebFont::Korean,
+            },
+            Script::Hebrew | Script::Thai => return None,
+        })
+    }
+
+    fn path(self) -> PathBuf {
+        PathBuf::from(format!("{WEB}{}", self.file()))
+    }
+}
+
+/// Where a font the web app fetches stands.
 #[derive(Default)]
-enum WebFont {
+enum Fetch {
     #[default]
     NotAsked,
     Wanted,
@@ -341,56 +394,63 @@ enum WebFont {
     Failed,
 }
 
-/// The path that stands for the fetched font among faces, which are named by their files.
-const WEB_FONT: &str = "web:BIZUDPGothic-Regular.ttf";
-
-fn web_font() -> std::sync::MutexGuard<'static, WebFont> {
-    static FONT: OnceLock<Mutex<WebFont>> = OnceLock::new();
-    FONT.get_or_init(Default::default).lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+/// The fetches, by [`WebFont`] as an index.
+fn web_fonts() -> std::sync::MutexGuard<'static, [Fetch; 5]> {
+    static FONTS: OnceLock<Mutex<[Fetch; 5]>> = OnceLock::new();
+    FONTS.get_or_init(Default::default).lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Whether a text is waiting for the font the web app fetches.
-pub fn web_font_wanted() -> bool {
-    matches!(*web_font(), WebFont::Wanted)
+/// The fonts a text is waiting for, for the web app to fetch.
+pub fn web_fonts_wanted() -> Vec<WebFont> {
+    let fonts = web_fonts();
+    WebFont::ALL.into_iter().filter(|font| matches!(fonts[*font as usize], Fetch::Wanted)).collect()
 }
 
-/// The font the web app fetched: text waiting for it is set on its next try.
-pub fn provide_web_font(bytes: Vec<u8>) {
-    *web_font() = WebFont::Here(Arc::new(bytes));
+/// A font the web app fetched: text waiting for it is set on its next try.
+pub fn provide_web_font(font: WebFont, bytes: Vec<u8>) {
+    web_fonts()[font as usize] = Fetch::Here(Arc::new(bytes));
 }
 
-/// The fetch failed: what waited for it is refused by name.
-pub fn web_font_failed() {
-    *web_font() = WebFont::Failed;
+/// A font's fetch failed: what it would set is refused by name.
+pub fn web_font_failed(font: WebFont) {
+    web_fonts()[font as usize] = Fetch::Failed;
 }
 
-/// The fetched font's bytes, when `path` stands for it.
+/// A fetched font's bytes, when `path` stands for one.
 pub(crate) fn web_font_at(path: &Path) -> Option<Arc<Vec<u8>>> {
-    match &*web_font() {
-        WebFont::Here(bytes) if path == Path::new(WEB_FONT) => Some(bytes.clone()),
+    let file = path.to_str()?.strip_prefix(WEB)?;
+    let font = WebFont::ALL.into_iter().find(|font| font.file() == file)?;
+    match &web_fonts()[font as usize] {
+        Fetch::Here(bytes) => Some(bytes.clone()),
         _ => None,
     }
 }
 
-/// The answers where there are no font folders: the fetched font when it has the character. None
-/// when kana or Han has to wait for it.
+/// The answers where there are no font folders: each character's web font when it has it. None
+/// while a font some character needs isn't here or failed yet: that one is asked for.
 fn web_answers(queries: &[Query]) -> Option<Vec<Answer>> {
-    let mut font = web_font();
-    match &*font {
-        WebFont::Here(bytes) => {
-            let face = ttf_parser::Face::parse(bytes, 0).ok();
-            let has = |query: &Query| face.as_ref().is_some_and(|face| face.glyph_index(query.ch).is_some_and(|glyph| glyph.0 != 0));
-            Some(queries.iter().map(|query| has(query).then(|| (PathBuf::from(WEB_FONT), 0))).collect())
-        }
-        WebFont::Failed => Some(vec![None; queries.len()]),
-        WebFont::NotAsked | WebFont::Wanted => {
-            if !queries.iter().any(|query| matches!(script(query.ch), Some(Script::Kana | Script::Han))) {
-                return Some(vec![None; queries.len()]);
-            }
-            *font = WebFont::Wanted;
-            None
+    let mut fonts = web_fonts();
+    let mut waiting = false;
+    for font in queries.iter().filter_map(|query| WebFont::of(query.ch, query.han)) {
+        let fetch = &mut fonts[font as usize];
+        if matches!(fetch, Fetch::NotAsked | Fetch::Wanted) {
+            *fetch = Fetch::Wanted;
+            waiting = true;
         }
     }
+    if waiting {
+        return None;
+    }
+    // Each font's face read once, for all its characters.
+    let mut faces = HashMap::new();
+    let answers = queries.iter().map(|query| {
+        let font = WebFont::of(query.ch, query.han)?;
+        let Fetch::Here(bytes) = &fonts[font as usize] else { return None };
+        let face = faces.entry(font).or_insert_with(|| ttf_parser::Face::parse(bytes, 0).ok());
+        let has = face.as_ref().is_some_and(|face| face.glyph_index(query.ch).is_some_and(|glyph| glyph.0 != 0));
+        has.then(|| (font.path(), 0))
+    });
+    Some(answers.collect())
 }
 
 /// The answer the search has given to `query`, without searching.
@@ -398,7 +458,8 @@ pub(crate) fn answered(query: &Query) -> Answer {
     if query.dirs.is_empty() {
         // Asks for nothing: only a font already here answers. The lock ends with the check, as
         // `web_answers` takes it again.
-        if !matches!(*web_font(), WebFont::Here(_)) {
+        let here = WebFont::of(query.ch, query.han).is_some_and(|font| matches!(web_fonts()[font as usize], Fetch::Here(_)));
+        if !here {
             return None;
         }
         return web_answers(std::slice::from_ref(query)).into_iter().flatten().next().flatten();

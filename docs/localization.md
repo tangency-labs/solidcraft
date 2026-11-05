@@ -141,9 +141,14 @@ third-party servers:
 
 A CJK interface language fetches the matching face on demand. With any other interface language, the
 first time Japanese text (kana, kanji or full-width forms in a design name, file name, body name or
-typed text) is drawn, the Japanese face is fetched (#720). A drawing's text asks for the Japanese face
-too: the web covers Japanese for now, and refuses other scripts its fonts lack by name. A session that
-never shows such text downloads no script font. If the needed face fails to load, the web interface
+typed text) is drawn, the Japanese face is fetched (#720).
+
+A drawing's text takes whole fonts, not the interface's subsets, each fetched once from the same origin
+the first time a drawing's text needs it: BIZ UDPGothic for kana and Japanese Han, Noto Sans KR for
+Hangul and Korean Han, Noto Sans SC or TC for simplified or traditional Chinese Han (by the drawing's
+language, as on the desktop), and Noto Sans Arabic (`./fonts/noto-sans-*/`, each with its OFL.txt). A
+script none of them has (Thai) is refused by name. A session that never shows such text downloads no
+script font. If the needed face fails to load, the web interface
 shows English for that session only to prevent missing glyphs (tofu); the saved language preference is
 kept, so the next visit tries again. Korean Hangul coverage on the web remains follow-up work.
 
