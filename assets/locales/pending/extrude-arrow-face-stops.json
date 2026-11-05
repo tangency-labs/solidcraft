@@ -1,0 +1,38 @@
+{
+  "en": {
+    "prefs.extrude_arrow_face_stops": "Extrude arrow stops at faces",
+    "prefs.extrude_arrow_face_stops_note": "Dragging Extrude's distance arrow stops at flat faces parallel to the profile, such as the far side of a block being cut, and outlines the face. Off: the arrow moves in round steps only."
+  },
+  "ar": {
+    "prefs.extrude_arrow_face_stops": "يتوقف سهم البثق عند الأوجه",
+    "prefs.extrude_arrow_face_stops_note": "عند سحب سهم مسافة البثق يتوقف عند الأوجه المستوية الموازية للمقطع، مثل الجانب البعيد من كتلة يجري قطعها، ويحدد الوجه. عند الإيقاف: يتحرك السهم بخطوات مستديرة فقط."
+  },
+  "he": {
+    "prefs.extrude_arrow_face_stops": "חץ השליפה נעצר בפאות",
+    "prefs.extrude_arrow_face_stops_note": "גרירת חץ המרחק של השליפה נעצרת בפאות שטוחות המקבילות לפרופיל, כמו הצד הרחוק של גוש שנחתך, ומדגישה את קו המתאר של הפאה. כבוי: החץ זז בצעדים עגולים בלבד."
+  },
+  "ja": {
+    "prefs.extrude_arrow_face_stops": "押し出し矢印を面で止める",
+    "prefs.extrude_arrow_face_stops_note": "押し出しの距離矢印をドラッグすると、プロファイルに平行な平らな面（カットするブロックの反対側など）で止まり、その面の輪郭を表示します。オフ: 矢印はきりのよい刻みでのみ動きます。"
+  },
+  "vi": {
+    "prefs.extrude_arrow_face_stops": "Mũi tên đùn dừng tại các mặt",
+    "prefs.extrude_arrow_face_stops_note": "Khi kéo mũi tên khoảng cách của Đùn, nó dừng tại các mặt phẳng song song với biên dạng, chẳng hạn mặt bên kia của khối đang cắt, và tô viền mặt đó. Tắt: mũi tên chỉ di chuyển theo các bước tròn."
+  },
+  "zh": {
+    "prefs.extrude_arrow_face_stops": "拉伸箭头停在面上",
+    "prefs.extrude_arrow_face_stops_note": "拖动拉伸的距离箭头时，它会停在与轮廓平行的平面上（例如正在切除的块的另一侧），并勾勒出该面。关闭：箭头只按整数步长移动。"
+  },
+  "fr": {
+    "prefs.extrude_arrow_face_stops": "La flèche d'extrusion s'arrête aux faces",
+    "prefs.extrude_arrow_face_stops_note": "En faisant glisser la flèche de distance d'Extrusion, elle s'arrête aux faces planes parallèles au profil, comme l'autre côté d'un bloc qu'on découpe, et souligne la face. Désactivé : la flèche avance seulement par pas ronds."
+  },
+  "de": {
+    "prefs.extrude_arrow_face_stops": "Extrusionspfeil hält an Flächen",
+    "prefs.extrude_arrow_face_stops_note": "Beim Ziehen des Abstandspfeils von Extrusion hält er an ebenen Flächen parallel zum Profil, etwa an der Rückseite eines Blocks, in den geschnitten wird, und hebt die Fläche hervor. Aus: Der Pfeil bewegt sich nur in runden Schritten."
+  },
+  "es": {
+    "prefs.extrude_arrow_face_stops": "La flecha de Extruir se detiene en las caras",
+    "prefs.extrude_arrow_face_stops_note": "Al arrastrar la flecha de distancia de Extruir, se detiene en las caras planas paralelas al perfil, como el lado opuesto de un bloque que se corta, y resalta la cara. Desactivado: la flecha solo avanza en pasos redondos."
+  }
+}
