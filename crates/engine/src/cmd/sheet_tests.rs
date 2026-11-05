@@ -4554,15 +4554,20 @@ fn a_corner_relief_of_an_edge_flange_is_saved_with_it_and_designs_without_one_sa
 }
 
 #[test]
-fn corners_left_open_are_reported_on_the_flange() {
+fn a_design_whose_rule_has_no_gap_says_so_on_its_flanges() {
+    // A rule saved with a gap of zero (as older designs could have it): the flanges it closes
+    // would touch, so the base flange that reads the rule says why it can't (and the walls on it
+    // have no sheet), until the gap is set.
     let mut s = Session::default();
-    alu_tray(&mut s, 72.0, json!({"gap": "0 mm"}));
-    let w = s.model.results.last().and_then(|r| r.warning.clone()).unwrap_or_default();
-    assert_eq!(w.matches("left open").count(), 4, "{w}");
-    // Open corners still fold, unfold and take cuts.
-    run(&mut s, "sheet.unfold", json!({}));
-    run(&mut s, "sheet.refold", json!({}));
-    assert!(volume(&mut s) > 0.0);
+    alu_tray(&mut s, 72.0, json!({}));
+    if let Some(r) = s.doc_mut().sheet.rules.iter_mut().find(|r| r.name == "AL2") {
+        r.gap = "0 mm".into();
+    }
+    s.refresh();
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.first().is_some_and(|e| e.contains("the gap must be at least 0.01 mm")), "{errors:?}");
+    run(&mut s, "sheet.manage_rules", json!({"name": "AL2", "gap": "0.5 mm"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", s.model.results);
 }
 
 /// 2 mm aluminium (R 1, K 0.5, gap 0.5) and a 120 x 90 base flange.
@@ -4925,7 +4930,7 @@ fn a_return_alone_on_a_leaning_wall_keeps_out_of_the_walls_beside_it() {
 }
 
 #[test]
-fn returns_follow_the_rules_gap_and_stay_open_with_a_warning_when_it_is_zero() {
+fn returns_follow_the_rules_gap_and_a_gap_of_zero_is_refused() {
     use std::f64::consts::SQRT_2;
     // The mitre keeps the rule's gap: at 90° the returns' bends are 114 − 2·g/√2 and 84 − 2·g/√2.
     let mut s = tray_with_returns(120.0, 90.0, "0.5 mm", &[0, 1, 2, 3]);
@@ -4938,15 +4943,14 @@ fn returns_follow_the_rules_gap_and_stay_open_with_a_warning_when_it_is_zero() {
             assert!((got - (want - 2.0 * g / SQRT_2)).abs() < 1e-6, "{g}: {lengths:?}");
         }
     }
-    // A gap of zero can't be kept: the walls' corners and the returns' corners are left open,
-    // each feature with its warning, and each return spans its wall's far edge (here the wall's
-    // bend, 120 − 2·3·tan 55°).
-    let mut s = tray_with_returns(120.0, 110.0, "0 mm", &[0, 1, 2, 3]);
-    let warnings: Vec<String> = s.model.results.iter().filter_map(|r| r.warning.clone()).collect();
-    assert!(s.model.results.iter().all(|r| r.error.is_none()) && warnings.len() == 2, "{:?}", s.model.results);
-    assert!(warnings.iter().all(|w| w.matches("left open").count() == 4), "{warnings:?}");
+    // A gap of zero can't be kept: closed with none, two flanges would touch. The rule refuses
+    // it and keeps the gap it had.
+    let e = s.execute("sheet.manage_rules", &json!({"name": "AL2", "gap": "0 mm"})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("the gap must be at least 0.01 mm"), "{e}");
     let lengths = bend_lengths(&mut s);
-    assert!((lengths[4] - lengths[0]).abs() < 1e-9 && (lengths[0] - (120.0 - 6.0 * 55f64.to_radians().tan())).abs() < 1e-6, "{lengths:?}");
+    for (got, want) in lengths[4..].iter().zip([114.0, 84.0, 114.0, 84.0]) {
+        assert!((got - (want - 2.0 * 0.2 / SQRT_2)).abs() < 1e-6, "{lengths:?}");
+    }
 }
 
 #[test]

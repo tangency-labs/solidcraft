@@ -505,6 +505,10 @@ impl Document {
         if !(v.bend_radius >= 0.0) {
             return Err(DocError::Invalid("the bend radius must not be negative".into()));
         }
+        // Flanges closed at a corner with no gap would touch, as no formed part's do.
+        if !(v.gap >= MIN_CORNER_GAP) {
+            return Err(DocError::Invalid(format!("the gap must be at least {MIN_CORNER_GAP} mm: flanges closed at a corner with no gap would touch")));
+        }
         Ok(v)
     }
 }
