@@ -5,9 +5,9 @@
 
 use std::collections::BTreeMap;
 
+use solidcore_record::Vec3;
 use solidcraft_doc::{Dir, Document, FeatureKind, Operation, point_expr};
 use solidcraft_exchange::{Body, Edit, Error, MeshVertex, Options, Point, Snapshot, Tolerance, open};
-use solidcore_record::Vec3;
 
 /// A `length` × 10 × 5 mm box at the origin, its length the user parameter `L`.
 pub fn box_doc(length: &str) -> Document {

@@ -62,7 +62,8 @@ impl Design {
             return Err(Error::Limit(format!("{} bodies, over {MAX_BODIES}", chosen.len())));
         }
         let mut budget = Budget { faces: MAX_FACES, triangles: MAX_TRIANGLES, control_points: MAX_CONTROL_POINTS };
-        let bodies = chosen.into_iter().map(|b| convert::body(&doc, b, tolerance, options.mass, options.record, &mut budget)).collect::<Result<Vec<_>>>()?;
+        let bodies =
+            chosen.into_iter().map(|b| convert::body(&doc, b, tolerance, options.mass, options.record, &mut budget)).collect::<Result<Vec<_>>>()?;
         let used: BTreeSet<&str> = bodies.iter().filter_map(|b| b.material.as_ref().map(|m| m.as_str())).collect();
         let materials = used.into_iter().map(|m| convert::material(&doc, m)).collect();
         let features = convert::features(&doc, &state, &bodies);

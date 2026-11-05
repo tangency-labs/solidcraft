@@ -891,7 +891,11 @@ fn welded_tagged(b: &solidcraft_kernel::Body, m: &Mesh) -> Result<(TaggedMesh, V
 }
 
 /// [`welded_tagged`], and `lines` as welded vertex paths ([`threemf::weld_tagged_lines`]).
-fn welded_tagged_lines(b: &solidcraft_kernel::Body, m: &Mesh, lines: &[Vec<solidcore_record::Vec3>]) -> Result<(TaggedMesh, Vec<u32>, Vec<Vec<u32>>)> {
+fn welded_tagged_lines(
+    b: &solidcraft_kernel::Body,
+    m: &Mesh,
+    lines: &[Vec<solidcore_record::Vec3>],
+) -> Result<(TaggedMesh, Vec<u32>, Vec<Vec<u32>>)> {
     // Weld with each triangle's own index as its tag: the pieces of a split triangle keep it,
     // and its colour and face follow from it.
     let n = u32::try_from(m.triangles.len()).map_err(|_| IoError::Invalid("mesh too large".into()))?;

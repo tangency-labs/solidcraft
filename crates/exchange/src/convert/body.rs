@@ -208,11 +208,9 @@ fn surface(body: &solidcraft_kernel::Body, record: Option<&Brep>, i: usize, budg
         RecordSurface::Spline { u_knots, v_knots, points } => {
             (u_knots, v_knots, points.iter().map(|row| row.iter().map(|p| (Vec3::from(*p), 1.0)).collect()).collect())
         }
-        RecordSurface::RationalSpline { u_knots, v_knots, homogeneous } => (
-            u_knots,
-            v_knots,
-            homogeneous.iter().map(|row| row.iter().map(|&[x, y, z, w]| (Vec3::new(x / w, y / w, z / w), w)).collect()).collect(),
-        ),
+        RecordSurface::RationalSpline { u_knots, v_knots, homogeneous } => {
+            (u_knots, v_knots, homogeneous.iter().map(|row| row.iter().map(|&[x, y, z, w]| (Vec3::new(x / w, y / w, z / w), w)).collect()).collect())
+        }
         _ => return Ok(Surface::Other),
     };
     let rows = net.len();

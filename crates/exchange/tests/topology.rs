@@ -223,5 +223,3 @@ fn free_form_faces_are_nurbs_patches_their_mesh_lies_on() {
     assert_eq!(b.edges.iter().filter(|e| matches!(e.curve, Curve::Other)).count(), 3);
     assert!(b.edges.iter().all(|e| !e.path.is_empty()), "every edge is traced");
 }
-
-

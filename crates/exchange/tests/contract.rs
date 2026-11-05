@@ -7,12 +7,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::f64::consts::PI;
 
 use common::*;
+use solidcore_record::Vec3;
 use solidcraft_doc::{FeatureKind, Model, Operation, UserMaterial, point_expr};
 use solidcraft_exchange::{
     BodyName, Elasticity, Error, FaceName, MaterialAxes, Mm, Options, Override, ParameterValue, Point, Property, Quantity, Snapshot, Surface,
     Tolerance, from_json, open, to_json,
 };
-use solidcore_record::Vec3;
 
 fn face_names(s: &Snapshot) -> BTreeSet<FaceName> {
     s.bodies.iter().flat_map(|b| b.faces.iter().map(|f| f.name.clone())).collect()
@@ -404,7 +404,6 @@ fn mass_size_shells_and_failures_come_when_asked() {
     assert_eq!(partial.bodies.len(), 1);
     assert!(plain.failures.is_empty());
 }
-
 
 /// The exact B-rep comes when asked for, numbered as the body's faces, edges and corners, and is
 /// read back and checked with the snapshot.

@@ -4,9 +4,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use solidcore_record::{Seg2, Vec3};
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::{Document, FeatureKind as DocKind, ModelState, Operation as DocOperation, SolvedSketch, plain};
-use solidcore_record::{Seg2, Vec3};
 use solidcraft_geom::prelude::*;
 
 use crate::schema::{

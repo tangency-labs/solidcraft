@@ -642,7 +642,13 @@ fn cmd_script(args: &[String]) -> Result<(), String> {
 /// exchange snapshot's JSON (solidcraft-exchange).
 fn cmd_export_snapshot(args: &[String]) -> Result<(), String> {
     use solidcraft_exchange::{BodyName, Edit, FeatureId, Options, Override, Tolerance};
-    known_args("export-snapshot", args, &["--out", "--param", "--tolerance", "--relative-tolerance", "--body", "--suppress", "--edits"], &["--record"], true)?;
+    known_args(
+        "export-snapshot",
+        args,
+        &["--out", "--param", "--tolerance", "--relative-tolerance", "--body", "--suppress", "--edits"],
+        &["--record"],
+        true,
+    )?;
     let path = positional(args).ok_or_else(|| command_usage("export-snapshot"))?;
     let out = flag(args, "--out").ok_or("export-snapshot: --out FILE is required")?;
     let bytes = solidcraft_engine::io::vfs::read(path, solidcraft_exchange::MAX_DESIGN_BYTES).map_err(|e| format!("{path}: {e}"))?;
