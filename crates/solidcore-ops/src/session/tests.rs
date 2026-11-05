@@ -38,25 +38,30 @@ fn a_panic_is_an_error_and_the_kernel_is_fresh_after() {
 /// process-lifetime latch of the fillet solver's step survives.
 #[test]
 fn the_kernel_after_a_panic_is_configured_as_before() {
-    all_fixes();
-    let latched = run("latch", |k| Ok(k.latch_fillet_point_step(0.123))).unwrap();
-    let r: Result<()> = run("panics part way", |k| {
-        k.tolerances.zone_tol_3d = 7.0;
-        k.upstream_ub_passed.push("marker");
-        panic!("part way")
-    });
-    assert!(matches!(r, Err(Error::Internal(_))));
-    let default_zone = solidcore::Tolerances::default().zone_tol_3d;
-    let after = run("after", |k| {
-        Ok(Some((
-            k.fillet_point_step.get(),
-            k.tolerances.zone_tol_3d,
-            k.upstream_ub_passed.is_empty(),
-            k.fixes == UpstreamFixes::all(),
-        )))
-    })
-    .unwrap();
-    assert_eq!(after, Some((Some(latched), default_zone, true, true)));
+    in_own_process(
+        "session::tests::the_kernel_after_a_panic_is_configured_as_before",
+        || {
+            all_fixes();
+            let latched = run("latch", |k| Ok(k.latch_fillet_point_step(0.123))).unwrap();
+            let r: Result<()> = run("panics part way", |k| {
+                k.tolerances.zone_tol_3d = 7.0;
+                k.upstream_ub_passed.push("marker");
+                panic!("part way")
+            });
+            assert!(matches!(r, Err(Error::Internal(_))));
+            let default_zone = solidcore::Tolerances::default().zone_tol_3d;
+            let after = run("after", |k| {
+                Ok(Some((
+                    k.fillet_point_step.get(),
+                    k.tolerances.zone_tol_3d,
+                    k.upstream_ub_passed.is_empty(),
+                    k.fixes == UpstreamFixes::all(),
+                )))
+            })
+            .unwrap();
+            assert_eq!(after, Some((Some(latched), default_zone, true, true)));
+        },
+    );
 }
 
 /// A panicking failure callback loses nothing of the call's result.
@@ -119,47 +124,52 @@ fn a_read_only_panic_leaves_the_body_usable() {
 /// body whose edit panicked is put back first, so it is written as it came in, and stays usable.
 #[test]
 fn a_failed_call_reaches_the_hook_with_its_consistent_inputs() {
-    type Seen = Vec<(
-        String,
-        String,
-        Vec<(&'static str, std::result::Result<Vec<u8>, String>)>,
-    )>;
-    let _turn = HOOKED.lock().unwrap_or_else(PoisonError::into_inner);
-    all_fixes();
-    let seen: Arc<Mutex<Seen>> = Arc::default();
-    let s = Arc::clone(&seen);
-    set_failure_hook(Some(Arc::new(move |f: &Failure<'_>| {
-        if f.call.starts_with("on purpose") {
-            s.lock()
-                .unwrap()
-                .push((f.call.to_owned(), f.why.to_owned(), f.inputs.clone()));
-        }
-    })));
-    let b = make_box([0.0; 3], [1.0; 3]).unwrap();
-    let r: Result<()> = with_body("on purpose: refused", &b, |_, _| {
-        Err(SolidError::invalid_input("test", "refused"))
-    });
-    assert_eq!(r, Err(Error::Status(crate::error::INVALID_INPUT)));
-    let edited = make_box([0.0; 3], [1.0; 3]).unwrap();
-    let r: Result<()> = with_body("on purpose: panics editing", &edited, |_, br| {
-        let v = br.vertex_list()[0];
-        br.vertex_mut(v)?.point = solidcore::Vec3::new(9.0, 9.0, 9.0);
-        panic!("half way")
-    });
-    set_failure_hook(None);
-    assert!(matches!(r, Err(Error::Internal(_))));
-    assert_eq!(edited.counts().unwrap(), [6, 12, 8]);
-    let seen = seen.lock().unwrap();
-    assert_eq!(seen.len(), 2);
-    let (call, why, inputs) = &seen[0];
-    assert_eq!(call, "on purpose: refused");
-    assert!(why.contains("1007") || why.contains("rejected"), "{why}");
-    assert_eq!(inputs[0].0, "brep");
-    let back = Body::from_smb(inputs[0].1.clone().unwrap(), false).unwrap();
-    assert_eq!(back.counts().unwrap(), [6, 12, 8]);
-    let unedited = make_box([0.0; 3], [1.0; 3]).unwrap().to_smb(false).unwrap();
-    assert_eq!(seen[1].2[0].1.as_ref().unwrap(), &unedited);
-    assert_eq!(edited.to_smb(false).unwrap(), unedited);
+    in_own_process(
+        "session::tests::a_failed_call_reaches_the_hook_with_its_consistent_inputs",
+        || {
+            type Seen = Vec<(
+                String,
+                String,
+                Vec<(&'static str, std::result::Result<Vec<u8>, String>)>,
+            )>;
+            let _turn = HOOKED.lock().unwrap_or_else(PoisonError::into_inner);
+            all_fixes();
+            let seen: Arc<Mutex<Seen>> = Arc::default();
+            let s = Arc::clone(&seen);
+            set_failure_hook(Some(Arc::new(move |f: &Failure<'_>| {
+                if f.call.starts_with("on purpose") {
+                    s.lock()
+                        .unwrap()
+                        .push((f.call.to_owned(), f.why.to_owned(), f.inputs.clone()));
+                }
+            })));
+            let b = make_box([0.0; 3], [1.0; 3]).unwrap();
+            let r: Result<()> = with_body("on purpose: refused", &b, |_, _| {
+                Err(SolidError::invalid_input("test", "refused"))
+            });
+            assert_eq!(r, Err(Error::Status(crate::error::INVALID_INPUT)));
+            let edited = make_box([0.0; 3], [1.0; 3]).unwrap();
+            let r: Result<()> = with_body("on purpose: panics editing", &edited, |_, br| {
+                let v = br.vertex_list()[0];
+                br.vertex_mut(v)?.point = solidcore::Vec3::new(9.0, 9.0, 9.0);
+                panic!("half way")
+            });
+            set_failure_hook(None);
+            assert!(matches!(r, Err(Error::Internal(_))));
+            assert_eq!(edited.counts().unwrap(), [6, 12, 8]);
+            let seen = seen.lock().unwrap();
+            assert_eq!(seen.len(), 2);
+            let (call, why, inputs) = &seen[0];
+            assert_eq!(call, "on purpose: refused");
+            assert!(why.contains("1007") || why.contains("rejected"), "{why}");
+            assert_eq!(inputs[0].0, "brep");
+            let back = Body::from_smb(inputs[0].1.clone().unwrap(), false).unwrap();
+            assert_eq!(back.counts().unwrap(), [6, 12, 8]);
+            let unedited = make_box([0.0; 3], [1.0; 3]).unwrap().to_smb(false).unwrap();
+            assert_eq!(seen[1].2[0].1.as_ref().unwrap(), &unedited);
+            assert_eq!(edited.to_smb(false).unwrap(), unedited);
+        },
+    );
 }
 
 type Written = Vec<std::result::Result<Vec<u8>, String>>;
@@ -191,26 +201,44 @@ fn a_consuming_call_reports_its_operands_as_they_came() {
     assert_eq!(back.counts().unwrap(), [6, 12, 8]);
 }
 
-/// Runs `f` on its own thread and gives its value, or `None` when it does not finish within ten
-/// seconds (a deadlock: the thread is left blocked).
-fn within_ten_seconds<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(f());
-    });
-    rx.recv_timeout(std::time::Duration::from_secs(10)).ok()
+/// A configuration-sensitive test gets its own process, so corpus tests cannot replace its
+/// process-wide fixes between session calls. Child completion, rather than elapsed time,
+/// determines the result. The child runs the same test body exactly once.
+fn in_own_process(test: &str, f: impl FnOnce()) {
+    const CHILD: &str = "SOLIDCORE_SESSION_TEST_CHILD";
+    if std::env::var(CHILD).as_deref() == Ok(test) {
+        f();
+        return;
+    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", test, "--nocapture", "--test-threads=1"])
+        .env(CHILD, test)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "{test}: {}\n{stdout}\n{stderr}",
+        output.status
+    );
+    assert!(
+        stdout.contains("1 passed"),
+        "child must execute the selected test: {stdout}"
+    );
 }
 
 /// Setting the fixes from inside a kernel call (an application's provenance rule runs in one)
 /// is refused, not a wait on the kernel the call holds.
 #[test]
 fn setting_the_fixes_inside_a_call_is_refused() {
-    let r = within_ten_seconds(|| {
-        all_fixes();
-        run("sets the fixes", |_| Ok(set_fixes([]).err()))
+    all_fixes();
+    let r = run("sets the fixes", |k| {
+        let before = k.fixes;
+        let refusal = set_fixes([]).err();
+        Ok(Some((refusal, k.fixes == before)))
     });
-    assert_eq!(r, Some(Ok(Some(FixesRefused::Reentered))));
-    assert_eq!(fixes().len(), UpstreamFixes::NAMES.len());
+    assert_eq!(r, Ok(Some((Some(FixesRefused::Reentered), true))));
 }
 
 /// The callback a failure reports to is the one installed when the call started: one installed
@@ -239,5 +267,35 @@ fn a_hook_installed_during_a_call_is_not_that_calls() {
     assert!(
         seen.lock().unwrap().is_empty(),
         "the late hook saw the call"
+    );
+}
+
+/// A failure reports a caller-held input as unwritten while the caller still owns the guard.
+/// The report's contents and the call's return decide this test, not a scheduling deadline.
+#[test]
+fn a_held_input_is_reported_not_waited_for() {
+    let _turn = HOOKED.lock().unwrap_or_else(PoisonError::into_inner);
+    all_fixes();
+    let seen: Arc<Mutex<Written>> = Arc::default();
+    let s = Arc::clone(&seen);
+    set_failure_hook(Some(Arc::new(move |f: &Failure<'_>| {
+        if f.call == "on purpose: held" {
+            s.lock()
+                .unwrap()
+                .extend(f.inputs.iter().map(|(_, b)| b.clone()));
+        }
+    })));
+    let b = make_box([0.0; 3], [1.0; 3]).unwrap();
+    let held = b.lock();
+    let r: Result<()> = run_on("on purpose: held", &[("brep", &b)], |_| {
+        Err(SolidError::invalid_input("test", "refused"))
+    });
+    let seen = seen.lock().unwrap().clone();
+    drop(held);
+    set_failure_hook(None);
+    assert_eq!(r, Err(Error::Status(crate::error::INVALID_INPUT)));
+    assert!(
+        matches!(&seen[..], [Err(why)] if why.contains("held")),
+        "{seen:?}"
     );
 }
