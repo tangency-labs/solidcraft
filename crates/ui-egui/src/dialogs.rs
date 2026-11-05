@@ -6529,6 +6529,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             targets,
         } => {
             let mut d = start("solid.coil")?;
+            // The stored axis stays unless the person picks another one: a selection made
+            // before editing must not become the axis.
+            if let Some(input) = d.inputs.get_mut(1) {
+                input.items.clear();
+            }
             d.kind = Kind::Primitive {
                 cmd: "solid.coil",
                 fields: vec![
