@@ -9954,6 +9954,18 @@ mod tests {
         }
     }
 
+    /// `sketch.pattern_limit` from an agent, a script or the palette is the same setting as the
+    /// Preferences field: it reaches every tab and survives the frames after it.
+    #[test]
+    fn pattern_limit_command_sticks_in_the_running_app() {
+        let mut h = crate::scenario::Harness::new();
+        crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        h.app.run("sketch.pattern_limit", json!({"value": 1500})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.preferences.sketch_pattern_limit, 1500);
+        assert!(std::iter::once(&h.app.session).chain(h.app.docs.background()).all(|s| s.pattern_limit == 1500));
+    }
+
     #[test]
     fn single_surface_analysis_preference_checkbox_persists_cancels_and_resets() {
         assert!(Prefs::default().single_surface_analysis);

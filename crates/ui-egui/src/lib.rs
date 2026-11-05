@@ -1501,6 +1501,13 @@ impl SolveApp {
             if id == "view.angle_readout" {
                 self.preferences.show_view_angles = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
             }
+            // The limit the command set is the preference, so the next frame keeps it (#7824).
+            if id == "sketch.pattern_limit"
+                && let Some(limit) = v.get("pattern_limit").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok())
+            {
+                self.preferences.sketch_pattern_limit = limit;
+                prefs::sync_pattern_limit(self);
+            }
             if matches!(id, "view.ambient_occlusion" | "view.graphics_preset") {
                 self.preferences.ambient_occlusion = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
                 if id == "view.graphics_preset" {

@@ -81,9 +81,14 @@ pub fn pattern_limit(app: &SolveApp, extra: &Map<String, Value>) -> usize {
     let existing = extra.get("pattern").and_then(Value::as_str).and_then(|id| {
         let sid = app.session.active_sketch?;
         let state = crate::open_meshing::session_world(&app.session);
-        state.sketch(sid)?.sketch.patterns.iter().find(|p| p.id == id).cloned()
+        state.sketch(sid)?.sketch.patterns.iter().find(|p| p.id == id).map(solidcraft_engine::sketch::SketchPattern::total)
     });
-    app.session.pattern_limit_for(existing.as_ref())
+    app.session.pattern_limit_for(existing)
+}
+
+/// How to raise `limit` when a quantity runs into it; nothing at the fixed ceiling (#7824).
+fn limit_hint(limit: usize) -> &'static str {
+    if limit < solidcraft_engine::sketch::MAX_PATTERN_COPIES { " (raise the limit in Preferences › Sketch)" } else { "" }
 }
 
 /// The engine's own cap on the offsets `sketch.offset` stacks one behind the other.
@@ -833,7 +838,8 @@ fn signed_length(app: &SolveApp, label: &str, text: &str, flip: bool) -> Result<
 fn whole(app: &SolveApp, label: &str, text: &str, limit: usize) -> Result<u64, String> {
     let v = app.session.doc.eval(text.trim(), ValueKind::Unitless).map_err(|e| format!("{label}: {e}"))?;
     if !v.is_finite() || !(1.0..=limit as f64).contains(&v) || (v - v.round()).abs() > 1e-9 {
-        return Err(format!("{label} must be a whole number from 1 to {limit}"));
+        let hint = if v.is_finite() && v > limit as f64 { limit_hint(limit) } else { "" };
+        return Err(format!("{label} must be a whole number from 1 to {limit}{hint}"));
     }
     Ok(v.round() as u64)
 }
@@ -1041,7 +1047,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 return Err("Spacing 2 must be a non-zero number".into());
             }
             if n1.saturating_mul(n2) > limit as u64 {
-                return Err(format!("Quantity and Quantity 2 together must make at most {limit} instances"));
+                return Err(format!("Quantity and Quantity 2 together must make at most {limit} instances{}", limit_hint(limit)));
             }
             let mut p = json!({"entities": entities, "count": count, "spacing": spacing, "count2": count2, "spacing2": spacing2, "alignment": alignment, "alignment2": alignment2, "reversed": reversed, "reversed2": reversed2});
             // A picked direction that has no component in the sketch plane is reported rather

@@ -896,10 +896,11 @@ impl Session {
         self.pattern_limit
     }
 
-    /// The most instances a pattern command may give `existing` (`None`: a new pattern): the
-    /// user's limit, or the pattern's own size when that is larger, so lowering the limit never
-    /// locks a pattern made before. Never above `MAX_PATTERN_COPIES`.
-    pub fn pattern_limit_for(&self, existing: Option<&solidcraft_sketch::SketchPattern>) -> usize {
+    /// The most instances a pattern command may give a pattern that has `existing` instances,
+    /// the original included (`None`: a new pattern): the user's limit, or the pattern's own size
+    /// when that is larger, so lowering the limit never locks a pattern made before. Never above
+    /// `MAX_PATTERN_COPIES`.
+    pub fn pattern_limit_for(&self, existing: Option<usize>) -> usize {
         cmd::pattern_limit_for(self.pattern_limit, existing)
     }
 
@@ -1622,12 +1623,13 @@ impl Session {
         if !updated.is_empty() {
             let (vals, _) = self.doc.param_values();
             for (_, sketch) in &mut updated {
-                let before = sketch.patterns.clone();
+                let before: Vec<(String, usize)> = sketch.patterns.iter().map(|p| (p.id.clone(), p.total())).collect();
                 self.doc.apply_pattern_values(&vals, sketch)?;
                 // A value that drives a count follows the user's pattern limit, as a typed count
                 // does (#7824); a pattern made before under a higher limit may keep its size.
                 for pattern in &sketch.patterns {
-                    let allowed = cmd::pattern_limit_for(self.pattern_limit, before.iter().find(|p| p.id == pattern.id));
+                    let allowed =
+                        cmd::pattern_limit_for(self.pattern_limit, before.iter().find(|(id, _)| *id == pattern.id).map(|(_, total)| *total));
                     if pattern.total() > allowed {
                         return Err(EngineError::Other(format!(
                             "sketch pattern `{}`: its Quantity must be a whole number that makes at most {allowed} instances in total (the pattern limit, sketch.pattern_limit); the values were not changed",

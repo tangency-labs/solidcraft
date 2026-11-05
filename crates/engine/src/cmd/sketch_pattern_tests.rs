@@ -773,7 +773,7 @@ fn the_default_limit_is_still_500() {
     let mut s = seeded();
     assert_eq!(s.pattern_limit, solidcraft_sketch::DEFAULT_PATTERN_COPIES);
     let err = s.execute("sketch.pattern.rectangular", &grid(38, 38)).unwrap_err().to_string();
-    assert!(err.contains("too many copies"), "{err}");
+    assert!(err.contains("too many copies") && err.contains("sketch.pattern_limit"), "{err}");
     let circular = json!({"entities":["seed"],"center":[20,0],"count":501});
     assert!(s.execute("sketch.pattern.circular", &circular).is_err());
     let out = run(&mut s, "sketch.pattern.rectangular", grid(20, 25));

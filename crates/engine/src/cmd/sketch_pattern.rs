@@ -5,10 +5,16 @@ use solidcraft_sketch::{SketchPattern, SketchPatternKind};
 use super::*;
 use crate::cmd::{alignment_param, reversed_param};
 
-/// The most instances, the original included, a pattern command may give `existing` (`None`: a
-/// new pattern) under the user's `limit` (see [`Session::pattern_limit_for`]).
-pub(crate) fn pattern_limit_for(limit: usize, existing: Option<&SketchPattern>) -> usize {
-    existing.map_or(limit, |pattern| limit.max(pattern.total())).clamp(1, solidcraft_sketch::MAX_PATTERN_COPIES)
+/// The most instances, the original included, a pattern command may give a pattern that has
+/// `existing` instances now (`None`: a new pattern) under the user's `limit` (see
+/// [`Session::pattern_limit_for`]).
+pub(crate) fn pattern_limit_for(limit: usize, existing: Option<usize>) -> usize {
+    existing.map_or(limit, |total| limit.max(total)).clamp(1, solidcraft_sketch::MAX_PATTERN_COPIES)
+}
+
+/// How to raise `limit` when a count runs into it; nothing at the fixed ceiling.
+fn limit_hint(limit: usize) -> String {
+    if limit < solidcraft_sketch::MAX_PATTERN_COPIES { " (the pattern limit; raise it with sketch.pattern_limit)".to_string() } else { String::new() }
 }
 
 /// What a pattern limit must be, after the key (`value`), for the handler and the contract.
@@ -138,7 +144,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
         } else {
             None
         };
-        let limit = pattern_limit_for(user_limit, old.as_ref());
+        let limit = pattern_limit_for(user_limit, old.as_ref().map(SketchPattern::total));
         let n = count(&params, "count", cmd, limit)?;
         let (kind, center) = if circular {
             let total = if params.get("angle").is_some() { num(&params, "angle").ok_or_else(|| bad(cmd, "`angle` must be finite"))? } else { 360.0 };
@@ -168,7 +174,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
                 spacing
             };
             if n.saturating_mul(count2) > limit {
-                return Err(bad(cmd, "too many copies"));
+                return Err(bad(cmd, format!("too many copies: `count` × `count2` must be at most {limit}{}", limit_hint(limit))));
             }
             let dir = match params.get("dir") {
                 Some(value) => vec2(value).and_then(Vec2::normalized).ok_or_else(|| bad(cmd, "`dir` must be a finite nonzero vector"))?,
@@ -235,7 +241,8 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
 fn count(p: &Value, k: &str, cmd: &str, limit: usize) -> Result<usize> {
     let n = num(p, k).ok_or_else(|| bad(cmd, format!("`{k}` must be a number or expression")))?;
     if !(1.0..=limit as f64).contains(&n) || n.fract() != 0.0 {
-        return Err(bad(cmd, format!("`{k}` must be a positive integer from 1 to {limit}")));
+        let hint = if n > limit as f64 && n.fract() == 0.0 { limit_hint(limit) } else { String::new() };
+        return Err(bad(cmd, format!("`{k}` must be a positive integer from 1 to {limit}{hint}")));
     }
     Ok(n as usize)
 }

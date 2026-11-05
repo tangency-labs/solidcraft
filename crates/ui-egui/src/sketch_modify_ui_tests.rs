@@ -1100,7 +1100,7 @@ fn dialog_caps_quantities_at_the_session_limit() {
     rect_pattern(&mut h, "38", "38");
     let d = h.app.dialog.clone().unwrap();
     let error = apply_commands(&h.app, &d).unwrap_err();
-    assert_eq!(error, "Quantity and Quantity 2 together must make at most 500 instances");
+    assert_eq!(error, "Quantity and Quantity 2 together must make at most 500 instances (raise the limit in Preferences › Sketch)");
     h.app.dialog = None;
     h.app.run("sketch.pattern_limit", json!({"value": 1500})).unwrap();
     rect_pattern(&mut h, "38", "38");
@@ -1132,5 +1132,8 @@ fn dialog_allows_an_existing_larger_pattern() {
         *count = "21".into();
     }
     let d = h.app.dialog.clone().unwrap();
-    assert_eq!(apply_commands(&h.app, &d).unwrap_err(), "Quantity and Quantity 2 together must make at most 600 instances");
+    assert_eq!(
+        apply_commands(&h.app, &d).unwrap_err(),
+        "Quantity and Quantity 2 together must make at most 600 instances (raise the limit in Preferences › Sketch)"
+    );
 }
