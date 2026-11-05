@@ -186,7 +186,8 @@ an update is an addendum file. Known mismatches live in
 **No new document without the maintainers.** `docs/` holds the reference pages listed in §1 and
 what the maintainers have agreed to. Never add a file to `docs/` that hasn't been discussed with
 them first, on its issue. A pull request's evidence (validation runs, comparisons, measurements)
-goes in its description, or in a `plan/findings/` record when it must outlive the PR.
+goes in its description, or in a `plan/findings/` record when it must outlive the PR. A doc
+points to issues, code, tests and records, never to a pull request.
 
 **Porting and wiring units** (the work that remains of the port: `UNPORTED` stubs, back-edges,
 unit status): [docs/porting.md](docs/porting.md).
