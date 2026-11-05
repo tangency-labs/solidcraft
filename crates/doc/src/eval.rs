@@ -7266,7 +7266,7 @@ fn eval_feature(
         | FeatureKind::Rib { .. }
         | FeatureKind::ReplaceFace { .. }
         | FeatureKind::Align { .. }
-        | FeatureKind::Remove { .. } => more::eval(doc, vals, f, st),
+        | FeatureKind::Remove { .. } => more::eval(doc, vals, f, st, warning),
         FeatureKind::Sketch { plane, sketch } => {
             let anchor = crate::face_anchor::plane_face_anchor(plane);
             let fst = match anchor {
