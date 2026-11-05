@@ -890,8 +890,13 @@ pub(super) fn sheet_eval(
                     ));
                 };
                 let r = doc.sheet_rule(rule.as_deref());
-                let mut rv = doc.rule_values(vals, &r)?;
-                (rv.thickness, rv.bend_radius) = (found.thickness, found.radius);
+                // The sheet is as thick and as tightly bent as it is modelled; the rule gives the rest.
+                let (thickness, radius) = (found.thickness, found.radius);
+                let rv = |t: Option<f64>| -> Result<sheet::RuleValues> {
+                    let mut rv = doc.rule_values_at(vals, &r, Some(t.unwrap_or(thickness)))?;
+                    rv.bend_radius = radius;
+                    Ok(rv)
+                };
                 let placement = doc.component_transform(doc.model_body_component(&mb));
                 let body_to_world = doc.model_body_offset(&mb).map(|offset| crate::mat_mul(&placement, offset)).unwrap_or(placement);
                 let (mut sh, notes) = sheet::convert_body(&mb, &r.name, &rv, face.0, &found.points, &body_to_world)?;
