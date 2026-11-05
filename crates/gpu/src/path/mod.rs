@@ -178,7 +178,8 @@ struct Context {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
-    // The common opaque/no-map program is eager; five immutable variants are lazy.
+    // Plain opaque and non-nested glass are ready before the host is published.
+    // The four map/nested variants are prepared lazily in the remaining slots.
     scene_pipelines: [std::sync::OnceLock<wgpu::ComputePipeline>; SCENE_PIPELINE_CACHE_SLOTS],
     // Built and warmed by the first denoised job, then shared by later ones.
     denoise: std::sync::OnceLock<denoise::Pipelines>,
@@ -309,17 +310,19 @@ impl Executor {
         checked(scopes)?;
         drop(compiling);
         warm_up(&device, &queue, &pipeline, &placeholder_bind(&device, &layout, 7)?, &healthy)?;
-        Ok(Self {
-            context: Arc::new(Context {
-                healthy,
-                device,
-                queue,
-                pipeline,
-                layout,
-                denoise: std::sync::OnceLock::new(),
-                scene_pipelines: std::array::from_fn(|_| std::sync::OnceLock::new()),
-            }),
-        })
+        let context = Arc::new(Context {
+            healthy,
+            device,
+            queue,
+            pipeline,
+            layout,
+            denoise: std::sync::OnceLock::new(),
+            scene_pipelines: std::array::from_fn(|_| std::sync::OnceLock::new()),
+        });
+        // The original host prepared glass before advertising readiness. Keep the
+        // common no-map/non-nested program out of the first image job's work.
+        context.prepare_scene_pipeline(false, false, false)?;
+        Ok(Self { context })
     }
 }
 

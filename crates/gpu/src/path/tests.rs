@@ -1923,6 +1923,29 @@ fn texture_admission_rejects_glass_and_stale_identity_and_honors_cancellation() 
     assert!(admission(&scene, &input, JobOptions::default()).is_err());
 }
 #[test]
+fn host_readiness_includes_unmapped_non_nested_glass() {
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    assert!(context.prepared_scene_pipeline(true, false, false).is_ok());
+    assert!(context.prepared_scene_pipeline(false, false, false).is_ok(), "a ready host must already prepare ordinary unmapped glass");
+    let plain = scene_pipeline_variant(false, false, false).unwrap();
+    assert!(context.scene_pipelines[plain].get().is_some());
+    for (opaque, maps, nested) in [(true, true, false), (false, false, true), (false, true, false), (false, true, true)] {
+        let variant = scene_pipeline_variant(opaque, maps, nested).unwrap();
+        assert!(context.scene_pipelines[variant].get().is_none(), "uncommon map/nesting programs stay lazy");
+    }
+    let mut glass = sphere(white());
+    glass.meshes[0].transmission = Some(clear_glass());
+    let options = JobOptions { samples: 1, max_depth: 3, ..Default::default() };
+    let mut task = Task::new(context.clone(), glass, request(2), options, CancelToken::default()).unwrap();
+    assert!(!task.opaque_scene && !task.has_textures);
+    task.complete_sample().unwrap();
+    let pixels = task.read_linear().unwrap();
+    assert_eq!(pixels.len(), 4);
+    assert!(pixels.iter().flatten().all(|value| value.is_finite()));
+}
+
+#[test]
 fn opaque_scene_specialization_preserves_body_face_and_volume_media() {
     let mut variants = std::collections::BTreeSet::new();
     for opaque in [false, true] {
