@@ -341,6 +341,27 @@ fn metric(size: &str) -> Option<(f64, f64)> {
     METRIC.iter().find(|(s, _, _)| s.eq_ignore_ascii_case(size)).map(|(_, d, p)| (*d, *p))
 }
 
+/// The head a counterbore seats, for `solid.hole`'s `head`: (head diameter dk, head height k)
+/// of a metric cap screw, by its standard (`ISO 4762`, `ISO 7380-1`) or the family name
+/// `parts.insert` takes. The size is written as `clearance` takes it (`M4`, or `M4x0.7` with the
+/// pitch). The error names what is missing: the standard, or the size in it.
+pub(crate) fn cap_screw_head(standard: &str, size: &str) -> std::result::Result<(f64, f64), String> {
+    let (name, table): (&str, &[(&str, f64, f64, f64, f64)]) = match standard.trim() {
+        s if s.eq_ignore_ascii_case("ISO 4762") || s.eq_ignore_ascii_case("socket_head_cap_screw") => ("ISO 4762", &SHCS),
+        s if s.eq_ignore_ascii_case("ISO 7380-1") || s.eq_ignore_ascii_case("button_head_cap_screw") => ("ISO 7380-1", &BHCS),
+        other => {
+            return Err(format!("no head standard `{}`: ISO 4762 (socket head) or ISO 7380-1 (button head)", super::features::brief(other)));
+        }
+    };
+    let size = size.trim().split(['x', 'X']).next().unwrap_or("").trim();
+    let (first, last) = (table.first().map_or("", |r| r.0), table.last().map_or("", |r| r.0));
+    table
+        .iter()
+        .find(|r| r.0.eq_ignore_ascii_case(size))
+        .map(|r| (r.1, r.2))
+        .ok_or_else(|| format!("no {name} head for `{}`: {first} to {last}", super::features::brief(size)))
+}
+
 fn default_length(d: f64) -> f64 {
     LENGTHS.iter().copied().find(|l| *l >= 2.5 * d).unwrap_or(100.0)
 }

@@ -1070,6 +1070,8 @@ fn hostile_params_never_panic() {
         "density",
         "names",
         "references",
+        "head",
+        "head_gap",
     ];
     // Commands are independent; worker threads take them one at a time (their costs vary a lot).
     let ids: Vec<&str> = command_specs()
@@ -3109,6 +3111,48 @@ fn tapped_and_clearance_holes() {
     assert!(rel(v2 - volume(&mut s), PI * 2.15 * 2.15 * 10.0) < 1e-3);
     assert!(s.execute("solid.hole", &json!({"position": [20, 25, 10], "clearance": "M7"})).is_err());
     assert!(s.execute("solid.hole", &json!({"position": [20, 25, 10]})).is_err());
+}
+
+/// A counterbore sized to the screw's head: `head` names the standard and `clearance` the size.
+/// ISO 4762 M4 has dk 7 and k 4; with the default 0.5 mm gap the recess is Ø8, 4.5 deep.
+#[test]
+fn counterbore_for_a_cap_screw_head() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 30, "height": 10}));
+    let v0 = volume(&mut s);
+    // The material a through hole of diameter `hole` with a counterbore `dk` wide and `k` deep removes.
+    let removed = |hole: f64, dk: f64, k: f64| PI * hole * hole / 4.0 * (10.0 - k) + PI * dk * dk / 4.0 * k;
+    let recess = |s: &Session| match s.doc.features.last().map(|f| &f.kind) {
+        Some(solidcraft_doc::FeatureKind::Hole { hole: solidcraft_doc::HoleKind::Counterbore { cb_diameter, cb_depth, .. }, .. }) => {
+            (cb_diameter.as_str().to_string(), cb_depth.as_str().to_string())
+        }
+        other => panic!("not a counterbore: {other:?}"),
+    };
+    run(&mut s, "solid.hole", json!({"position": [10, 15, 10], "clearance": "M4", "head": "ISO 4762"}));
+    let v1 = volume(&mut s);
+    assert!(rel(v0 - v1, removed(4.5, 8.0, 4.5)) < 1e-3, "{}", v0 - v1);
+    assert_eq!(recess(&s), ("8 mm".to_string(), "4.5 mm".to_string()));
+    // A button head (ISO 7380-1 M4: dk 7.6, k 2.2), a closer gap, and the depth given by hand.
+    run(&mut s, "solid.hole", json!({"position": [30, 15, 10], "clearance": "M4", "head": "ISO 7380-1", "head_gap": 0.25, "cb_depth": 3}));
+    let v2 = volume(&mut s);
+    assert!(rel(v1 - v2, removed(4.5, 8.1, 3.0)) < 1e-3, "{}", v1 - v2);
+    assert_eq!(recess(&s), ("8.1 mm".to_string(), "3".to_string()));
+    // The family name parts.insert takes, a close fit, the pitch written out, and no gap at all.
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [50, 15, 10], "clearance": "M5x0.8", "fit": "close", "head": "socket_head_cap_screw", "head_gap": "0 mm"}),
+    );
+    let v3 = volume(&mut s);
+    assert!(rel(v2 - v3, removed(5.3, 8.5, 5.0)) < 1e-3, "{}", v2 - v3);
+    // A gap that names a parameter: the recess follows the parameter.
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "0.5 mm"}));
+    run(&mut s, "solid.hole", json!({"position": [70, 15, 10], "clearance": "M4", "head": "ISO 4762", "head_gap": "gap"}));
+    let v4 = volume(&mut s);
+    assert!(rel(v3 - v4, removed(4.5, 8.0, 4.5)) < 1e-3, "{}", v3 - v4);
+    assert_eq!(recess(&s), ("7 mm + 2 * (gap)".to_string(), "4 mm + (gap)".to_string()));
+    run(&mut s, "parameters.change", json!({"name": "gap", "expression": "1 mm"}));
+    assert!(rel(v3 - volume(&mut s), removed(4.5, 9.0, 5.0)) < 1e-3);
 }
 
 /// In an inch design, a bare length typed into a feature means inches (stored with the unit);
