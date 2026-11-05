@@ -700,6 +700,81 @@ fn tear(
     Ok(Some(out))
 }
 
+/// Where a bend's free end at `end` along its anchors meets each panel's tangent line, `(a, b)`,
+/// for a panel whose outline ends there: the side beside the end of the panel's edge along its
+/// anchor nearest the bend's end, or, for a panel with no edge on its anchor (its sharp drawn
+/// inside its edge), the edge whose line, laid out with the bend in the flat, passes through the
+/// end on the anchor's line and reaches the band between that and the tangent line. The zone then
+/// carries on that side, as the blank does: a flange on a slanted edge continues the plate's
+/// edges beside it. `None` for a panel that runs on past the end, or ends square to it otherwise.
+fn outline_ends(sheet: &Sheet, b: &BendEdge, bend: &Bend, end: f64, tol: f64) -> (Option<f64>, Option<f64>) {
+    let t = sheet.thickness;
+    let (width, setback) = (bend.allowance(t, sheet.k_factor), bend.setback(t));
+    let reach = (width.abs() + setback + t) * 4.0;
+    // Across the joint in the flat, out from the `a` anchor: each panel's points, its anchor's
+    // line (`base`) and its tangent line. The `a` panel's material lies left of its anchor, the
+    // `b` panel's right of its own, which lies `width - 2·setback` out.
+    let side = |an: &Anchor, into: Vec2, base: f64, sign: f64, tangent: f64| -> Option<f64> {
+        let region = &sheet.panels.get(an.panel)?.region;
+        let flat = |p: Vec2| ((p - an.origin).dot(an.dir), base + sign * (p - an.origin).dot(into));
+        let lines: Vec<Vec<((f64, f64), (f64, f64))>> = std::iter::once(&region.outer)
+            .chain(&region.holes)
+            .map(|l| l.segs.iter().filter_map(|g| if let Seg2::Line { a: p, b: q } = *g { Some((flat(p), flat(q))) } else { None }).collect())
+            .collect();
+        // Where a line meets the tangent line, near the end.
+        let meets = |(p, q): ((f64, f64), (f64, f64))| -> Option<f64> {
+            let (ds, dy) = (q.0 - p.0, q.1 - p.1);
+            if dy.abs() <= 1e-9 * (ds.abs() + dy.abs()) {
+                return None;
+            }
+            let s = p.0 + ds * (tangent - p.1) / dy;
+            ((s - end).abs() <= reach).then_some(s)
+        };
+        let on_anchor = |p: (f64, f64)| (p.1 - base).abs() <= tol;
+        let mut beside: Option<(f64, f64)> = None;
+        for segs in &lines {
+            let n = segs.len();
+            for (k, &(p, q)) in segs.iter().enumerate() {
+                if !(on_anchor(p) && on_anchor(q)) {
+                    continue;
+                }
+                for (corner, next) in [(p, segs.get((k + n - 1) % n)), (q, segs.get((k + 1) % n))] {
+                    // At the end: on it, or as far off it as the side's slant carries it from
+                    // the `a` anchor's line to this one (a side laid on in the flat).
+                    let Some(&(g0, g1)) = next else { continue };
+                    let (ds, dy) = (g1.0 - g0.0, g1.1 - g0.1);
+                    let slant = if dy.abs() > 1e-9 * (ds.abs() + dy.abs()) { (ds / dy * base).abs() } else { 0.0 };
+                    let off = (corner.0 - end).abs();
+                    if off <= slant + tol
+                        && beside.is_none_or(|(o, _)| off < o)
+                        && let Some(s) = meets((g0, g1))
+                    {
+                        beside = Some((off, s));
+                    }
+                }
+            }
+        }
+        if let Some((_, s)) = beside {
+            return Some(s);
+        }
+        let mut found = None;
+        for &(p, q) in lines.iter().flatten() {
+            let (ds, dy) = (q.0 - p.0, q.1 - p.1);
+            if dy.abs() <= 1e-9 * (ds.abs() + dy.abs()) {
+                continue;
+            }
+            let through = p.0 + ds * (base - p.1) / dy;
+            let (lo, hi) = (p.1.min(q.1), p.1.max(q.1));
+            if (through - end).abs() > tol || hi < tangent.min(base) - tol || lo > tangent.max(base) + tol {
+                continue;
+            }
+            found = meets((p, q)).or(found);
+        }
+        found
+    };
+    (side(&b.a, b.a.dir.perp(), 0.0, -1.0, -setback), side(&b.b, -b.b.dir.perp(), width - 2.0 * setback, 1.0, width - setback))
+}
+
 /// The plane through `v` with normal `m`, in a bend's frame at its `a` anchor `a` (`x` along the
 /// joint, `y` toward the material, `z` toward the `b` panel): its normal there and its offset.
 fn anchor_plane(places: &[Rigid3], a: Anchor, m: Vec3, v: Vec3) -> Option<(Vec3, f64)> {
@@ -1736,6 +1811,14 @@ pub(crate) fn settle(
                 let a = if e == 0 { s } else { b.len - s };
                 if let Some(slot) = ends.get_mut(i).and_then(|x| x.get_mut(e)) {
                     *slot = (a, a, Relief::Notch);
+                }
+            } else if let Some(Joint { kind: JointKind::Bend(bend), .. }) = sheet.joints.get(b.joint) {
+                // A free end: the zone carries on each panel's edge that runs through it.
+                let end = if e == 0 { 0.0 } else { b.len };
+                let (n, f) = outline_ends(sheet, b, bend, end, tol);
+                if let (Some(slot), true) = (ends.get_mut(i).and_then(|x| x.get_mut(e)), n.is_some() || f.is_some()) {
+                    slot.0 = n.unwrap_or(end);
+                    slot.1 = f.unwrap_or(end);
                 }
             }
         }

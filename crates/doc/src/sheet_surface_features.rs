@@ -278,26 +278,28 @@ impl SurfaceSheet {
     /// moves square to it.
     fn moved_ends(&self, i: usize, (a, b, d): (Vec2, Vec2, Vec2), by: f64) -> (Vec2, Vec2) {
         let out = Vec2::new(d.y, -d.x);
-        let square = (a + out * by, b + out * by);
-        let Some(panel) = self.sheet.panels.get(i) else { return square };
+        let (k0, k1) = self.edge_slants(i, (a, b, d));
+        (a + d * (k0 * by) + out * by, b + d * (k1 * by) + out * by)
+    }
+
+    /// How far along the edge `a`–`b` (way `d`) of panel `i` the lines of the outline beside it
+    /// run for each mm out from it, at its start and its end: 0 where they are square to it,
+    /// round, or run nearly along it.
+    fn edge_slants(&self, i: usize, (a, b, d): (Vec2, Vec2, Vec2)) -> (f64, f64) {
+        let out = Vec2::new(d.y, -d.x);
+        let Some(panel) = self.sheet.panels.get(i) else { return (0.0, 0.0) };
         let segs = &panel.region.outer.segs;
         let n = segs.len();
-        let k = segs.iter().position(|s| matches!(*s, Seg2::Line { a: x, b: y } if x.dist(a) <= 1e-9 && y.dist(b) <= 1e-9));
-        // Along the line of `s` through the corner `at` to the edge's new line.
-        let follow = |s: Option<&Seg2>, at: Vec2| -> Vec2 {
-            let square = at + out * by;
-            let Some(Seg2::Line { a: x, b: y }) = s.copied() else { return square };
-            let Some(w) = (y - x).normalized() else { return square };
-            let across = w.dot(out);
-            if across.abs() < 0.1 {
-                return square;
-            }
-            at + w * (by / across)
+        let Some(k) = segs.iter().position(|s| matches!(*s, Seg2::Line { a: x, b: y } if x.dist(a) <= 1e-9 && y.dist(b) <= 1e-9)) else {
+            return (0.0, 0.0);
         };
-        match k {
-            Some(k) => (follow(segs.get((k + n - 1) % n), a), follow(segs.get((k + 1) % n), b)),
-            None => square,
-        }
+        let slant = |s: Option<&Seg2>| -> f64 {
+            let Some(Seg2::Line { a: x, b: y }) = s.copied() else { return 0.0 };
+            let Some(w) = (y - x).normalized() else { return 0.0 };
+            let across = w.dot(out);
+            if across.abs() < 0.1 { 0.0 } else { w.dot(d) / across }
+        };
+        (slant(segs.get((k + n - 1) % n)), slant(segs.get((k + 1) % n)))
     }
 
     /// A new flat panel `len` along and `depth` deep, joined to a free edge by `bend` with its
@@ -403,7 +405,22 @@ impl SurfaceSheet {
             tails: (Tail::Keep, Tail::Keep),
             relief: (Relief::None, Relief::None),
         };
-        self.add_panel("flange", &edge, from, d, len, leg.max(0.0) + sharp, bend);
+        // Its sides carry on the edges beside it, as laid out in the flat with the bend: through
+        // the anchor's ends on the plate, `slant` along for each mm out (square where those
+        // edges are). The flange's own anchor lies `allowance - 2·setback` out in the flat.
+        let (k0, k1) = self.edge_slants(edge.panel, (a, b, d));
+        let depth = leg.max(0.0) + sharp;
+        let base = bend.allowance(t, self.sheet.k_factor) - 2.0 * bend.setback(t);
+        let at = |y: f64| (k0 * (base - y), len + k1 * (base - y));
+        let ((p0, p1), (q0, q1)) = (at(0.0), at(-depth));
+        if !(p1 - p0 > 1e-9 && q1 - q0 > 1e-9) {
+            return err("the edges beside it close the flange before it reaches its height");
+        }
+        let n = self.add_panel("flange", &edge, from, d, len, depth, bend);
+        if let Some(panel) = self.sheet.panels.get_mut(n) {
+            let corners = [Vec2::new(p0, 0.0), Vec2::new(q0, -depth), Vec2::new(q1, -depth), Vec2::new(p1, 0.0)];
+            panel.region = Region2 { outer: Loop2::polygon(&corners).ccw(), holes: Vec::new() };
+        }
         let joint = self.sheet.joints.len() - 1;
         self.close_corners(joint)?;
         Ok(joint)
@@ -1354,8 +1371,14 @@ fn to_line(region: &Region2, an: &Anchor, side: f64, end: f64, at: f64, m: Vec2)
     let on_anchor = |s: &Seg2| matches!(*s, Seg2::Line { a, b } if into(a).y.abs() <= tol && into(b).y.abs() <= tol);
     let corner = o + d * end;
     // The vertex at the anchor's end, between the anchor's edge and the side: `before` and
-    // `after` the vertex in the loop's order.
-    let Some(k) = (0..count).find(|k| segs.get(*k).is_some_and(|s| s.end().dist(corner) <= tol)) else { return Ok(None) };
+    // `after` the vertex in the loop's order. A panel whose side carries on a slanted edge beside
+    // it in the flat has it where its edge along the anchor ends nearest there.
+    let at_end = (0..count).find(|k| segs.get(*k).is_some_and(|s| s.end().dist(corner) <= tol));
+    let nearest = || {
+        let ends = segs.iter().enumerate().filter(|(_, s)| on_anchor(s)).flat_map(|(k, s)| [((k + count - 1) % count, s.start()), (k, s.end())]);
+        ends.min_by(|x, y| x.1.dist(corner).total_cmp(&y.1.dist(corner))).map(|(k, _)| k)
+    };
+    let Some(k) = at_end.or_else(nearest) else { return Ok(None) };
     let (before, after) = (k, (k + 1) % count);
     let (Some(sb), Some(sa)) = (segs.get(before), segs.get(after)) else { return Ok(None) };
     // Which of the two is the side, and the edge past it.

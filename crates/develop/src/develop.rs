@@ -886,6 +886,13 @@ fn add_zone(
     // that an edge lying on the anchor leaves no sliver.
     let depth = setback + sheet.thickness.max(REACH_TOL);
     let bands = [(joint.a.panel, placed.0, near, near_line, depth, bend.tails.0), (joint.b.panel, placed.1, far, far_line, -depth, bend.tails.1)];
+    // Where each end of the zone lies across the joint: on the line from its end on the `a`
+    // panel's tangent line to its end on the `b` panel's, carried on across both bands (an end
+    // that follows a slanted outline is slanted).
+    let end_at = |e: usize, across: f64| {
+        let (n, f) = if e == 0 { (near.0, far.0) } else { (near.1, far.1) };
+        if far_line - near_line > 1e-12 { n + (f - n) * (across - near_line) / (far_line - near_line) } else { n }
+    };
     let relieved = |r: &Relief| matches!(r, Relief::Notch | Relief::Tear { .. });
     for (panel, place, (u0, u1), line, depth, tail) in bands {
         // The band's ends run on past the panel wherever nothing of the panel lies beyond them
@@ -904,7 +911,14 @@ fn add_zone(
             ),
         };
         if s1 > s0 {
-            let corners = [frame.at(s0, line), frame.at(s1, line), frame.at(s1, line + depth), frame.at(s0, line + depth)];
+            // Past each end by what the tail asks, along the end's own line.
+            let (e0, e1) = (s0 - u0, s1 - u1);
+            let corners = [
+                frame.at(end_at(0, line) + e0, line),
+                frame.at(end_at(1, line) + e1, line),
+                frame.at(end_at(1, line + depth) + e1, line + depth),
+                frame.at(end_at(0, line + depth) + e0, line + depth),
+            ];
             let region = Region2 { outer: Loop2::polygon(&corners).ccw(), holes: Vec::new() };
             out.trims.push(Trim { panel, joint: j, region, line: [corners[0], corners[1]] });
         }
@@ -913,7 +927,13 @@ fn add_zone(
         // panel as far as that panel reaches across the joint, and the slot's width further,
         // so that whatever of this panel lies beside them in the flat lets them go. `out_dir`
         // runs past the end.
-        let Some((lo, hi)) = extent else { continue };
+        if extent.is_none() {
+            continue;
+        }
+        // Only what runs on inside the band takes a relief: an edge lying along the panel's
+        // tangent line runs on beside the zone, not into it.
+        let inner = band_extent(sheet, panel, place, frame, line + depth.signum() * 2.0 * EDGE_TOL, depth - depth.signum() * 2.0 * EDGE_TOL)?;
+        let Some((lo, hi)) = inner else { continue };
         let (other, beyond) = if depth > 0.0 { (joint.b.panel, far_line) } else { (joint.a.panel, near_line) };
         let across = panel_across(sheet, other, if depth > 0.0 { &joint.b } else { &joint.a })?;
         for (relief, u, out_dir) in [(bend.relief.0, u0, -1.0), (bend.relief.1, u1, 1.0)] {
