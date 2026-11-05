@@ -530,13 +530,9 @@ fn cuda_fp64_tensor_core_detection_rules() {
         let (major, minor) = dev.compute_capability;
         let expected_hw_fp64 = (major == 8 && minor == 0) || (major == 9 && minor == 0);
         assert_eq!(
-            dev.supports_fp64_tensor_core,
-            expected_hw_fp64,
+            dev.supports_fp64_tensor_core, expected_hw_fp64,
             "device {} (SM {}.{}) FP64 tensor core flag must be {} (hardware FP64 MMA only exists on sm_80 and sm_90)",
-            dev.name,
-            major,
-            minor,
-            expected_hw_fp64
+            dev.name, major, minor, expected_hw_fp64
         );
         assert_eq!(cuda.has_fp64_tensor_core(), expected_hw_fp64);
     }
