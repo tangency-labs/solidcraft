@@ -3151,12 +3151,8 @@ pub(crate) fn empty_intersection(bodies: &[&str]) -> DocError {
 pub(crate) fn named_target(doc: &Document, state: &ModelState, f: &Feature, name: &str) -> Result<usize> {
     let i = state.bodies.iter().position(|b| b.name == name).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?;
     let Some(found) = state.bodies.get(i).filter(|b| b.component != f.component) else { return Ok(i) };
-    let asked: Vec<&str> = state
-        .bodies
-        .iter()
-        .filter(|b| b.component == f.component && doc.feature(b.feature).is_some_and(|m| m.body_names.iter().any(|n| n == name)))
-        .map(|b| b.name.as_str())
-        .collect();
+    let asked: Vec<&str> =
+        state.bodies.iter().filter(|b| b.component == f.component && asked_name(doc, state, b) == Some(name)).map(|b| b.name.as_str()).collect();
     if asked.is_empty() {
         return Ok(i);
     }
@@ -3168,6 +3164,32 @@ pub(crate) fn named_target(doc: &Document, state: &ModelState, f: &Feature, name
         asked.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", "),
         asked.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(" or "),
     )))
+}
+
+/// The name body `b` was asked to be called: its slot of its feature's stored names. An
+/// Import's skipped solids make no body, so its bodies take the slots left, in order; any
+/// other feature's k-th body takes slot k. Siblings a later feature removed shift the count,
+/// so a body then reads a later slot's name (only ever refusing an ambiguous target).
+fn asked_name<'a>(doc: &'a Document, state: &ModelState, b: &ModelBody) -> Option<&'a str> {
+    let m = doc.feature(b.feature)?;
+    let j = state.bodies.iter().filter(|x| x.feature == m.id).position(|x| x.name == b.name)?;
+    let slot = match &m.kind {
+        FeatureKind::Import { skip, .. } => (0..m.body_names.len()).filter(|k| !skip.contains(&(*k as u64))).nth(j)?,
+        _ => j,
+    };
+    m.body_names.get(slot).map(String::as_str).filter(|n| !n.is_empty())
+}
+
+/// Refuse the target names among `names` that [`named_target`] finds ambiguous, before any
+/// work that does not go through it (a sheet's cut-outs are machined before the boolean). Names
+/// that pick no body are left to the feature, which may allow them.
+fn refuse_ambiguous_targets(doc: &Document, state: &ModelState, f: &Feature, names: &[String]) -> Result<()> {
+    for name in names.iter().filter(|n| *n != "*") {
+        if let Err(e @ DocError::Invalid(_)) = named_target(doc, state, f, name) {
+            return Err(e);
+        }
+    }
+    Ok(())
 }
 
 /// The bodies a feature's boolean takes part in, and whether they were named rather than taken
@@ -7366,6 +7388,7 @@ fn eval_feature(
 ) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
+    refuse_ambiguous_targets(doc, st, f, &f.participants)?;
     match &f.kind {
         FeatureKind::NewerFileFeature { raw } => Err(DocError::Invalid(raw.why())),
         FeatureKind::BodyTransfer { bodies, from, to, transform } => {
@@ -7479,6 +7502,7 @@ fn eval_feature(
         | FeatureKind::Loft { operation, targets, .. }
         | FeatureKind::Coil { operation, targets, .. }
         | FeatureKind::Sweep { operation, targets, .. } => {
+            refuse_ambiguous_targets(doc, st, f, &crate::plain(targets))?;
             let mut constructor = None;
             let mut to_body = None;
             let tools = feature_tools_with_constructor(doc, vals, f, st, &mut constructor, &mut to_body, warning)?;
@@ -9141,6 +9165,22 @@ mod world_placement_cache_tests {
         let mut model = Model::new();
         model.evaluate(&doc);
         assert!(model.result(cut).and_then(|r| r.error.clone()).is_none());
+    }
+
+    /// An Import's skipped solids make no body: its bodies take the stored names left, so one
+    /// built from slot B was asked for B, not for the skipped slot's A (#12141).
+    #[test]
+    fn an_imports_body_is_asked_for_its_own_slots_name() {
+        let mut doc = Document::new("names");
+        let id =
+            doc.add_feature(FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: vec![0] }, None).unwrap();
+        doc.feature_mut(id).unwrap().body_names = vec!["A".into(), "B".into()];
+        let mut state = ModelState::default();
+        state.bodies.push(ModelBody::new("B (2)".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap(), id));
+        let b = state.bodies[0].clone();
+        assert_eq!(asked_name(&doc, &state, &b), Some("B"));
+        doc.feature_mut(id).unwrap().kind = FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: Vec::new() };
+        assert_eq!(asked_name(&doc, &state, &b), Some("A"));
     }
 
     #[test]
