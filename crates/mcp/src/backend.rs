@@ -951,6 +951,10 @@ impl Backend for Auto {
         }
     }
     fn app_options(&mut self) -> Result<Option<Value>, String> {
+        // The app may have started since: bridge to it first, as a tool call would.
+        if self.remote.is_none() {
+            self.look_for_app();
+        }
         match &mut self.remote {
             Some(r) => r.app_options(),
             // Headless for now: the app may yet start, so ask again on a later call.

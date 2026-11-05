@@ -1292,7 +1292,23 @@ fn inspect_design_compact(b: &mut dyn Backend, a: &Map<String, Value>) -> Result
         }
         d["bodies"] = Value::Array(kept);
     }
-    let sketches: Vec<Value> = d["sketches"].as_array().cloned().unwrap_or_default();
+    let mut sketches: Vec<Value> = d["sketches"].as_array().cloned().unwrap_or_default();
+    // An app from before `sketch_counts` leaves out the counts: take them from each sketch.
+    for x in sketches.iter_mut().filter(|x| x.get("points").is_none()) {
+        if let Ok(full) = exec(b, "sketch.inspect", json!({"sketch": x["id"].clone()}))
+            && let Some(o) = x.as_object_mut()
+        {
+            for key in ["points", "constraints"] {
+                if let Some(n) = full[key].as_array().map(Vec::len) {
+                    o.insert(key.into(), json!(n));
+                }
+            }
+            if let Some(plane) = full.get("plane").or_else(|| full["sketch"].get("plane")) {
+                o.insert("plane".into(), plane.clone());
+            }
+        }
+    }
+    d["sketches"] = Value::Array(sketches.clone());
     let full: Vec<Value> = match a.get("sketches") {
         None | Some(Value::Null) | Some(Value::Bool(false)) => Vec::new(),
         Some(Value::String(t)) if t == "summary" => Vec::new(),
