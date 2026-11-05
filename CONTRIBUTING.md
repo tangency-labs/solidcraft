@@ -9,6 +9,13 @@ case, replacing the code they supersede. This page is the short version;
 
 ## Before you start
 
+- **Work on what matters now.** solidcore replaced SMLib as SolidCraft's kernel in 0.40, and the
+  switch came with bugs: not everything works yet. [AGENTS.md §0](AGENTS.md) ranks the work.
+  Main's difftest sweep comes first (#2794), then the layer split, the rig's real failures, the
+  blends and the shell rebuild. Take an item from that list. A defect you find in code no user
+  reaches, an unrequested improvement or a speed trick: file it as an issue with a real
+  reproduction and leave it for triage. A pull request says in its first lines which item it
+  serves.
 - **Put the work in its layer.** [docs/layers.md](docs/layers.md) says where each job lives. Geometry is computed only in the kernel (`solidcore`). The modelling API (`solidcore-ops`) only chooses and sequences kernel calls. Applications compute no geometry. If a workflow needs maths the kernel lacks, add it to the kernel with tests.
 - **Read the docs for the area.**
   - For fillets and chamfers, read [docs/generic-blend.md](docs/generic-blend.md): what the blend

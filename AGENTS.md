@@ -17,19 +17,39 @@ harness/cpp            C++ reference build (build.sh -> bin/cpp) + shim/<unit>.c
 plan/                  units/<id>.toml, findings/<slug>.md, upstream-issues/<slug>.md (one file each), STATUS.md, order.md
 ```
 
-**What to work on first: a stable kernel for v1.1.0.** Work is chosen by priority, not first in,
-first out. The goal is a stable kernel: blends (fillets, chamfers, corners, Ends, setbacks), STEP
-read and write, and the operations a model is built with (booleans and their intersections,
-sweeps, offset and shell, the validity check), each giving the correct result or a named
-refusal, never a crash or a hang. Issues and PRs for that goal carry the `priority: high` label.
-1. Finish what is open before starting anything new: review, fix and land the open
-   `priority: high` PRs, then take an open `priority: high` issue.
-2. Only with no `priority: high` item you can take, work on anything else.
-3. Among them, the item that unblocks the most others goes first (a dependency, a layer others
-   build on); only between equals does the oldest go first.
+## 0. What to work on: read this before choosing anything
 
-A new issue or PR that belongs to the goal gets `priority: high` when it is filed; ask the
-maintainers on it if you are unsure.
+**Where the kernel is.** solidcore replaced SMLib as SolidCraft's kernel in 0.40. The switch came
+with bugs: not everything that worked before works now, and users meet those failures every day.
+The job now is to make what people actually build work again, correctly. It is not to polish code
+paths nobody reaches.
+
+**What matters now, in this order.** Take the highest item you can make progress on; finish what
+is open before starting anything new.
+1. **Main green.** Main's difftest sweep is red, and every pull request's difftest stays red until
+   it is green (#2790). Fixing or recording each red unit comes before any other work (#2794).
+2. **The layer split.** The exact extension (#2797, then the curve side #2738), and the
+   operations the kernel rig still reports unported (stitch, `union_all`, loft, `chamfer_sides`,
+   sweep: `cargo test -p solidcore-ops --test kernel_cases -- --ignored`).
+3. **The rig's real failures** (#2793): the knife-edge chamfers (#851; the owner's ruling is that
+   they build, as the chord between the ball's contact points), the edge counts at tangent holes,
+   the touching cylinders.
+4. **Blends:** the certificate's root cause (#2690) and the G2 setback corner (#2697).
+5. **The shell, offset and thicken rebuild** (#2350).
+
+Issues and pull requests for these carry the `urgent` label. Those open for anyone to take also carry `help wanted`: start there.
+
+**What not to work on.**
+- **Defects you think you found** in code no user reaches: an overflow from an impossible input,
+  a branch only a fuzzer finds, an "improvement" to a solver or an integrator nobody asked for.
+  File an issue with a reproduction from a real use (a rig case, a STEP file, a SolidCraft
+  design), and leave it for triage. Don't open a pull request for it unless a maintainer asks.
+  Crashes and hangs from real inputs are still taken: they belong to the list above.
+- **Speed tricks.** A speed-up is taken only with its root cause, shown as a count (evaluations,
+  subdivisions, enclosures), never a timing, on a case that is slow for users or for CI. Making a
+  slow path a constant factor faster, or making a slow test cheaper, is not taken.
+- **Anything off the list** waits. A pull request names, in its first lines, the item above it
+  serves; one that serves none is reviewed after all the ones that do.
 
 ## 1. Hard rules
 
@@ -190,7 +210,7 @@ Every ported file starts with:
 
 Unit list and states: `plan/units/<unit id>.toml`, one file per unit (format:
 `plan/modules.schema.md`, order: `plan/order.md`). **The [checklist](https://tangency-labs.github.io/solidcore/PROGRESS.md)** is generated
-from `main` by the Pages workflow (`harness/plan/progress.py`; not committed). **Any `todo` unit or unclaimed completion task can be claimed**, after the `priority: high` work above. A claim reserves
+from `main` by the Pages workflow (`harness/plan/progress.py`; not committed). **Any `todo` unit or unclaimed completion task can be claimed**, after the work §0 lists. A claim reserves
 its stated scope, not every future change to the unit. Missing functions, back-edge
 wiring, exact runner imports, fixtures and demonstrated parity bugs remain useful
 work in `partial` and `green` units; inspect source and reports, not status alone.
