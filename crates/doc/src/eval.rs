@@ -5739,8 +5739,19 @@ fn feature_tools_with_constructor(
             };
             Ok(vec![roles.tool(body)])
         }
-        FeatureKind::Sweep { sketch, profiles, path_sketch, path, orientation, twist, scale, rails, rail_fit, .. } => {
+        FeatureKind::Sweep { sketch, profiles, path_sketch, path, path_body, path_edges, orientation, twist, scale, rails, rail_fit, .. } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?;
+            // The path is a chain of a body's edges (#2216) or the curves of a sketch.
+            if let Some(body) = path_body {
+                let regions = solidcraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
+                let start = regions.first().map(|r| ss.plane.to_world(r.centroid())).unwrap_or_default();
+                let tool = |r: &Region2, body: Body| crate::lineage::ProfileRoles::swept(Some(ss), Some(r)).tool(body, None);
+                let segs = edge_path_segments(st, body, path_edges, start)?;
+                let path_start = segs.first().map(kernel::PathSeg::start).unwrap_or(start);
+                let rails = rail_polylines(doc, st, rails, f.component, path_start)?;
+                let ctl = sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
+                return regions.iter().map(|r| Ok(tool(r, kernel::sweep_with(&ss.plane, r, &segs, &ctl)?))).collect();
+            }
             let ps =
                 st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
             let profile;
@@ -6044,6 +6055,35 @@ fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<
 
 fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<kernel::PathSeg>> {
     path_segments_at(ps, ids, start, None)
+}
+
+/// The path segments of a sweep's path on a body's edges (#2216): the chain the picked edges
+/// make, each edge as the curve it is, reversed where the chain runs against it. The path
+/// begins at the end nearest the profile, so the profile is swept from where it stands.
+pub(crate) fn edge_path_segments(st: &ModelState, body: &crate::BodyName, edges: &[crate::Position], start: Vec3) -> Result<Vec<kernel::PathSeg>> {
+    let Some(b) = st.body(&body.0) else { return Err(DocError::Unknown(format!("body `{body}`"))) };
+    let points: Vec<Vec3> = crate::plain(edges);
+    if points.is_empty() {
+        return Err(DocError::Invalid("the path needs at least one edge".into()));
+    }
+    let chain = kernel::chain(&b.body, &points).map_err(|e| DocError::Invalid(format!("the path's edges: {e}")))?;
+    let mut segs: Vec<kernel::PathSeg> = Vec::new();
+    for (edge, forward) in chain {
+        let mut s = kernel::edge_path(&b.body, edge).map_err(|e| DocError::Invalid(format!("the path's edge: {e}")))?;
+        if !forward {
+            s = s.into_iter().rev().map(|seg| seg.reversed()).collect();
+        }
+        segs.extend(s);
+    }
+    if segs.is_empty() {
+        return Err(DocError::Invalid("the path's edges have no curve to follow".into()));
+    }
+    // The path runs from the end nearest the profile.
+    let (Some(first), Some(last)) = (segs.first(), segs.last()) else { return Ok(segs) };
+    if first.start().dist(start) > last.end().dist(start) {
+        segs = segs.into_iter().rev().map(|seg| seg.reversed()).collect();
+    }
+    Ok(segs)
 }
 
 /// [`path_segments`] for a profile in `profile`: a closed path is followed from where the

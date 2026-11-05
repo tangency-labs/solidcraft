@@ -47,7 +47,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.sweep", "Sweep", sweep)
         .at("SOLID", "CREATE")
         .icon("sweep")
-        .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order]; orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); operation?, touching?, targets?, name?, body_name?"),
+        .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order]; path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); operation?, touching?, targets?, name?, body_name?"),
     CommandSpec::new("solid.loft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2…50, in order; matching hole counts, no holes at an apex); rails?: [{sketch, curves: [ids in order]}] (one or two guide rails from the first section to the last, through every section's outline: the loft follows them between the sections; not with sections that have holes); rail_fit?: scale|stretch (default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); operation?, touching?, targets? (Join excludes hidden bodies from automatic targets; explicit targets or participants may include them), name?, body_name?"),
     CommandSpec::new("solid.box", "Box", crate::checked!("solid.box", prim_box))
         .at("SOLID", "CREATE")
@@ -3188,13 +3188,9 @@ pub(crate) fn sketch_key(v: Option<&Value>) -> Option<String> {
 fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.sweep";
     let sketch = feature_sketch(s, p, cmd)?;
-    let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
-    let path = string_list(cmd, p, "path")?;
-    if path.is_empty() {
-        return Err(bad(cmd, "`path` must list curve ids"));
-    }
+    let (path_sketch, path, path_body, path_edges) = sweep_path(s, p, cmd)?;
     let (orientation, twist, scale) = sweep_options(s, p, cmd)?;
-    let (rails, rail_fit) = sweep_rails(s, p, cmd, path_sketch)?;
+    let (rails, rail_fit) = sweep_rails(s, p, cmd, path_body.is_none().then_some(path_sketch))?;
     let operation = operation(p, cmd)?;
     let targets = face_join_targets(s, p, operation, &[sketch], cmd)?;
     add_feature(
@@ -3205,6 +3201,8 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
             profiles: profiles(p, cmd)?,
             path_sketch: SketchId(path_sketch),
             path,
+            path_body,
+            path_edges,
             orientation,
             twist,
             scale,
@@ -3214,6 +3212,35 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
             targets,
         },
     )
+}
+
+/// A sweep's path (#2216): a chain of a body's edges (`path_body` and `path_edges`) or the
+/// curves of a sketch (`path_sketch` and `path`). The body's edges are a point on each edge of
+/// the chain; the path runs from the end nearest the profile.
+pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<String>, Option<BodyName>, Vec<Position>)> {
+    if p.get("path_body").is_some_and(|b| !b.is_null()) {
+        let body = str_(p, "path_body").ok_or_else(|| bad(cmd, "`path_body` must be a body name"))?;
+        if s.model.state().body(body).is_none() {
+            return Err(bad(cmd, format!("no body `{body}`")));
+        }
+        let edges = path_edge_points(p, cmd)?;
+        return Ok((0, Vec::new(), Some(BodyName::from(body)), edges));
+    }
+    let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
+    let path = string_list(cmd, p, "path")?;
+    if path.is_empty() {
+        return Err(bad(cmd, "`path` must list curve ids"));
+    }
+    Ok((path_sketch, path, None, Vec::new()))
+}
+
+/// The points on the edges of a sweep's path (`path_edges`), one on each edge of the chain.
+fn path_edge_points(p: &Value, cmd: &str) -> Result<Vec<Position>> {
+    let a = p.get("path_edges").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`path_edges` must be a list of points"))?;
+    if a.is_empty() || a.len() > 1000 {
+        return Err(bad(cmd, "the path needs 1…1000 edges"));
+    }
+    a.iter().map(|e| vec3(e).map(Position::from).ok_or_else(|| bad(cmd, "each `path_edges` entry must be a point [x,y,z]"))).collect()
 }
 
 /// A sweep's `orientation`, `twist` and `scale` (solid.sweep and surface.sweep), checked: an
@@ -3260,10 +3287,11 @@ pub(super) fn sweep_options(s: &Session, p: &Value, cmd: &str) -> Result<(SweepO
 }
 
 /// A sweep's guide `rails` and `rail_fit` (solid.sweep and surface.sweep), checked: one or two
-/// rails, each a sketch (default: the path's) and 1…1000 of its curves; a fit of scale or
-/// stretch; and no orientation, twist or scale besides, since the rails set those.
-pub(super) fn sweep_rails(s: &Session, p: &Value, cmd: &str, path_sketch: u64) -> Result<(Vec<SweepRail>, RailFit)> {
-    let (rails, rail_fit) = guide_rails(s, p, cmd, "sweep", Some(path_sketch))?;
+/// rails, each a sketch (default: the path's, when the path is a sketch's) and 1…1000 of its
+/// curves; a fit of scale or stretch; and no orientation, twist or scale besides, since the
+/// rails set those.
+pub(super) fn sweep_rails(s: &Session, p: &Value, cmd: &str, path_sketch: Option<u64>) -> Result<(Vec<SweepRail>, RailFit)> {
+    let (rails, rail_fit) = guide_rails(s, p, cmd, "sweep", path_sketch)?;
     if !rails.is_empty() {
         for key in ["orientation", "twist", "scale"] {
             if p.get(key).is_some_and(|v| !v.is_null()) {
