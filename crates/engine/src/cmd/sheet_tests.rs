@@ -6925,3 +6925,68 @@ fn the_spec_segment_example_builds() {
     assert!(rel(volume(&mut s), want) < 1e-6, "{} vs {want}", volume(&mut s));
     assert!((f["flat_size_mm"][1].as_f64().unwrap_or(0.0) - 117.1415926535898).abs() < 1e-6, "{f}");
 }
+
+/// A straight edge a cut-out has taken part of can still be split: the stretch that is left lies
+/// inside one straight line of the base's outline, so its fractions run along a line. A real arc
+/// is still refused (#5927, #5928).
+#[test]
+fn flange_segments_accept_the_stretch_a_cut_out_left_of_a_straight_edge() {
+    let mut s = Session::default();
+    al2_base(&mut s);
+    // A cut-out over x 0…100 of the plate's y = 0 edge leaves that edge from x 100 to 200.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Cut"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, -10], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Cut", "through_all": true, "operation": "cut", "direction": "symmetric"}));
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[150,0,2],"segments":[
+            {"from":0,"to":0.5,"height":"20 mm"},{"from":0.5,"to":1,"height":"15 mm"}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    let f = flat(&mut s);
+    let bends = bends_of(&f);
+    assert_eq!(bends.len(), 2, "the usable stretch x 100…200 splits in two: {f}");
+    assert!((bends[0].3 - 100.0).abs() < 1e-9 && (bends[0].4 - 150.0).abs() < 1e-9, "{bends:?}");
+    assert!((bends[1].3 - 150.0).abs() < 1e-9 && (bends[1].4 - 200.0).abs() < 1e-9, "{bends:?}");
+    // A chord of an arc is no line, whatever it is cut down to: still refused.
+    let mut disc = Session::default();
+    al2_rule(&mut disc);
+    run(&mut disc, "sketch.create", json!({"plane": "XY", "name": "Disc"}));
+    run(&mut disc, "sketch.circle.center", json!({"center": [50, 50], "radius": 50}));
+    run(&mut disc, "sketch.finish", json!({}));
+    run(&mut disc, "sheet.flange", json!({"sketch": "Disc"}));
+    let error = disc
+        .execute(
+            "sheet.flange",
+            &json!({"edges":[{"point":[100,50,2],"segments":[{"from":0,"to":0.5,"height":"20 mm"},{"from":0.5,"to":1,"height":"15 mm"}]}],"height":"20 mm"}),
+        )
+        .unwrap_err();
+    assert_eq!(error.to_string(), "not supported yet: segments on a curved edge (pick a straight edge of the sheet)");
+}
+
+/// A list whose stretches meet within the junction tolerance `sheet.flange` accepts builds exactly
+/// what the whole-edge flange builds: the command's tolerance and the merge that makes one bend of
+/// matching stretches are one number (#5927, #5928).
+#[test]
+fn flange_segments_within_the_junction_tolerance_build_like_a_whole_edge_flange() {
+    let mut s = Session::default();
+    al2_base(&mut s);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+            {"from":0.0,"to":0.5},{"from":0.5000000005,"to":1.0}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    let f = flat(&mut s);
+    assert_eq!(bends_of(&f).len(), 1, "a 5e-10 gap is one bend, as the whole edge is: {f}");
+    let mut whole = Session::default();
+    al2_base(&mut whole);
+    run(&mut whole, "sheet.flange", json!({"edges":[[100,0,2]],"height":"20 mm","angle":"90 deg"}));
+    assert!(rel(volume(&mut s), volume(&mut whole)) < 1e-9, "{} vs {}", volume(&mut s), volume(&mut whole));
+    assert_eq!(f["bends"], flat(&mut whole)["bends"], "{f}");
+}

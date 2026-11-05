@@ -804,6 +804,12 @@ pub struct EdgeFlange {
 /// The whole of a picked edge: the span of an edge flange that isn't split into segments.
 pub const WHOLE_EDGE: (f64, f64) = (0.0, 1.0);
 
+/// The tolerance on a segment list's junctions. `sheet.flange` accepts a list whose stretches meet
+/// within this, and its build merges stretches that match across it into one bend, so every list
+/// the command accepts builds exactly what the whole-edge flange builds (#5927, #5928). Both sides
+/// read this one number: a list can never pass validation and then stay split.
+pub const SEGMENT_JOIN_EPS: f64 = 1e-9;
+
 impl EdgeFlange {
     /// An edge flange over the whole of the picked edge, turning as the feature says.
     pub fn at(pick: Vec3, height: f64, angle: f64, from: HeightFrom) -> Self {
@@ -3748,8 +3754,10 @@ impl SheetBody {
         Ok((made, notes))
     }
 
-    /// Whether the edge a→b the pick found is one straight line of the panel's outline (not a
-    /// chord of a curve): a split edge's fractions run along a straight line.
+    /// Whether the stretch a→b lies on a straight line of the panel's outline (not a chord of a
+    /// curve): a split edge's fractions run along a straight line. Either end may sit inside the
+    /// line, where a cut-out leaves a shorter stretch of it than the outline has; an end that only
+    /// a curve of the outline holds is no straight end, so a chord of an arc is still refused.
     fn edge_is_line(&self, panel: Option<usize>, a: Vec2, b: Vec2) -> bool {
         let region = match panel {
             None => self.base.clone(),
@@ -3758,9 +3766,24 @@ impl SheetBody {
                 None => return false,
             },
         };
-        let same =
-            |p: &Vec2, q: &Vec2, r: Vec2, s: Vec2| ((*p).dist(r) < 1e-9 && (*q).dist(s) < 1e-9) || ((*p).dist(s) < 1e-9 && (*q).dist(r) < 1e-9);
-        region.outer.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if same(p, q, a, b)))
+        let Some(stretch) = (b - a).normalized() else { return false };
+        // Whether r is on the outline's line p→q, inside it, to the same 1e-9 as the edge
+        // arithmetic around here.
+        let on = |p: Vec2, q: Vec2, r: Vec2| {
+            let d = q - p;
+            let l2 = d.len2();
+            if !(l2 > 0.0) {
+                return r.dist(p) < 1e-9;
+            }
+            let t = (r - p).dot(d) / l2;
+            (t > -1e-9 && t < 1.0 + 1e-9) && (r - p - d * t).len() < 1e-9
+        };
+        // Whether an outline line runs along the stretch (either way round).
+        let along = |p: Vec2, q: Vec2| (q - p).normalized().is_some_and(|e| (e - stretch).len() < 1e-9 || (e + stretch).len() < 1e-9);
+        let holds = |r: Vec2| region.outer.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if along(*p, *q) && on(*p, *q, r)));
+        // One line holds both ends, or two that run the same way hold one each (a straight
+        // outline that a vertex splits in two).
+        holds(a) && holds(b)
     }
 
     /// Trim a panel's edge a→b back by `by` over one stretch of it only (`span`, fractions of the

@@ -1393,11 +1393,16 @@ fn an_edge_flange_can_be_split_into_segments() {
     app.session.selection = vec![edge];
     app.start("sheet.flange");
     let mut d = app.dialog.clone().unwrap();
+    let p = edge_point_list(&d.inputs)[0];
     if let Kind::Sheet(Sm::Flange { height, angle, segments, .. }) = &mut d.kind {
         *height = "20 mm".into();
         *angle = "90 deg".into();
-        segments.push((String::new(), "20 mm".into(), false));
-        segments.push((String::new(), "10 mm".into(), false));
+        let slot = segments_slot(segments, p);
+        let list = &mut segments[slot].1;
+        add_segment(list);
+        list[0].height = "20 mm".into();
+        add_segment(list);
+        list[1].height = "10 mm".into();
     }
     let c = apply_commands(&app, &d).unwrap();
     assert_eq!(
@@ -1410,4 +1415,43 @@ fn an_edge_flange_can_be_split_into_segments() {
     let bends = app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"].clone();
     assert_eq!(bends.as_array().map(Vec::len), Some(2), "{bends}");
     assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+}
+
+/// Edit Feature on a flange whose edges carry their own segments comes back as it was: the dialog
+/// holds every edge's list with its own fractions, angle, height and side, and OK emits the same
+/// `sheet.flange` parameters, byte for byte (an explicit `flip: false` under a flipped feature
+/// stays explicit, and neither edge takes the other's list).
+#[test]
+fn editing_a_flange_keeps_every_edges_segments() {
+    let mut app = plate(crate::shell::LayoutMode::Floating);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let params = json!({
+        "type": "edge",
+        "edges": [
+            {"point": [50.0, 0.0, 2.5], "segments": [
+                {"from": 0.0, "to": 0.3, "angle": "90 deg", "height": "20 mm"},
+                {"from": 0.3, "to": 1.0, "angle": "45 deg", "height": "15 mm", "flip": false}
+            ]},
+            {"point": [50.0, 60.0, 2.5], "segments": [
+                {"from": 0.0, "to": 0.6, "height": "25 mm", "flip": true},
+                {"from": 0.6, "to": 1.0, "height": "10 mm"}
+            ]}
+        ],
+        "height": "20 mm",
+        "angle": "90 deg",
+        "position": "inside",
+        "flip": true
+    });
+    app.run("sheet.flange", params.clone()).unwrap();
+    assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+    let f = app.session.doc.features.last().unwrap().clone();
+    let e = edit_dialog(&app, f.id, None).unwrap();
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    assert_eq!(
+        serde_json::to_string(&c[0].1["params"]).unwrap(),
+        serde_json::to_string(&params).unwrap(),
+        "the edit sends the design back as it was: {}",
+        c[0].1["params"]
+    );
 }

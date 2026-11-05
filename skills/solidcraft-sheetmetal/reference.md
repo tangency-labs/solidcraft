@@ -92,6 +92,10 @@ falls back to the edge's own value, then the feature's.
 - **Partition only:** the first `from` is 0, the last `to` is 1, each `from` equals the `to` of the
   one before, and each `from` < `to`. The segments tile the edge; leaving material out is a
   set-back (FR-14), not a segment.
+- **Junction tolerance:** "equals" means within `SEGMENT_JOIN_EPS` = 1e-9 (`crates/doc/src/sheet.rs`),
+  the same number the build merges matching stretches across and the same number it snaps a first
+  `from` or a last `to` inside to the edge's ends. One number on both sides, so every list the
+  command accepts builds exactly what the whole-edge flange builds. A wider gap is refused.
 - **Every segment bends:** each stretch becomes a bend with its own angle, height, setback and
   side, so a bend that changes angle, height or side along one edge is one feature. Consecutive
   stretches that match in angle, height and side merge into one bend. There is no flat stretch
@@ -103,7 +107,8 @@ falls back to the edge's own value, then the feature's.
 - **Junctions:** no bend relief is cut where two segments meet and no corner is closed there; the
   two bends butt along the junction line. Only the outermost segments take part in corner closing
   and end relief.
-- **Refused:** `segments` on a base or contour flange; a split curved edge; `then` with
+- **Refused:** `segments` on a base or contour flange; a split curved edge (a stretch along a
+  straight line of the outline is fine even where a cut-out shortened it); `then` with
   `segments`; more than 64 segments (`MAX_SEGMENTS = 64`). Each bend costs two flat pieces and
   the flat budget is 4096 (`MAX_FLAT_PIECES`), so a design holds at most 2047 bends.
 

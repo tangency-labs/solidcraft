@@ -688,7 +688,7 @@ pub(super) fn sheet_eval(
                     let side = seg.flip.unwrap_or(*flip);
                     match runs.last_mut() {
                         Some(last)
-                            if (last.1 - seg.from).abs() < 1e-12
+                            if (last.1 - seg.from).abs() <= sheet::SEGMENT_JOIN_EPS
                                 && (last.2 - height).abs() < 1e-12
                                 && (last.3 - angle).abs() < 1e-12
                                 && last.4 == side =>
@@ -697,6 +697,19 @@ pub(super) fn sheet_eval(
                         }
                         _ => runs.push((seg.from, seg.to, height, angle, side)),
                     }
+                }
+                // The command accepts a first `from` and a last `to` within the junction tolerance
+                // of the edge's ends; the ends themselves are what builds, so snap them, as a
+                // merged run snaps the junctions it spans away.
+                if let Some(first) = runs.first_mut()
+                    && first.0.abs() <= sheet::SEGMENT_JOIN_EPS
+                {
+                    first.0 = sheet::WHOLE_EDGE.0;
+                }
+                if let Some(last) = runs.last_mut()
+                    && (last.1 - sheet::WHOLE_EDGE.1).abs() <= sheet::SEGMENT_JOIN_EPS
+                {
+                    last.1 = sheet::WHOLE_EDGE.1;
                 }
                 for (span_from, span_to, height, angle, side) in runs {
                     each.push(sheet::EdgeFlange { pick, height, angle, from, span: (span_from, span_to), flip: Some(side) });

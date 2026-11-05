@@ -316,10 +316,10 @@ pub(crate) fn flange_segments(i: usize, v: &Value) -> std::result::Result<Vec<Fl
         if !(to > from) {
             return Err(format!("edges[{i}].segments[{j}].to must be more than its from"));
         }
-        if j == 0 && from.abs() > 1e-9 {
+        if j == 0 && from.abs() > sheet::SEGMENT_JOIN_EPS {
             return Err(format!("edges[{i}].segments[0].from must be 0: the segments cover the whole edge"));
         }
-        if j > 0 && (from - last_to).abs() > 1e-9 {
+        if j > 0 && (from - last_to).abs() > sheet::SEGMENT_JOIN_EPS {
             return Err(format!(
                 "edges[{i}].segments[{j}].from must equal the to of the segment before it (the segments must meet, with no gap or overlap)"
             ));
@@ -339,7 +339,7 @@ pub(crate) fn flange_segments(i: usize, v: &Value) -> std::result::Result<Vec<Fl
         last_to = to;
         out.push(FlangeSegment { from, to, angle, height, flip });
     }
-    if (last_to - 1.0).abs() > 1e-9 {
+    if (last_to - 1.0).abs() > sheet::SEGMENT_JOIN_EPS {
         let n = out.len() - 1;
         return Err(format!("edges[{i}].segments[{n}].to must be 1: the segments cover the whole edge"));
     }

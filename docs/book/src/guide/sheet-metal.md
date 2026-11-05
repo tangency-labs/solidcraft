@@ -202,8 +202,15 @@ thing). Consecutive segments that match in angle, height and side make one bend;
 a bend each, with its own setback, leg and side, so the base's outline steps where their angles
 differ and the flange's far edge steps where their heights differ. No bend relief is cut where
 two segments meet, and `then` is refused on a split edge: bend each segment's far edge in its own
-feature. A segment on a curved edge is refused too. In the Flange dialog, **Segments** has
-**Split Edge** for one more equal stretch, each row with its own angle, height and turns.
+feature. Stretches that meet within 1e-9 (the junction tolerance, `SEGMENT_JOIN_EPS`) are one
+partition, and stretches that match in angle, height and side merge into one bend across a gap
+that small, so every list the command accepts builds exactly what the whole-edge flange builds.
+A stretch along a curve of the outline is refused (its fractions would only follow chords), but a
+straight edge a cut-out has shortened can still be split: the stretch that is left lies along the
+same straight line. In the Flange dialog, each picked edge has its own **Segments** list,
+**Split Edge** adds one more equal stretch (or splits the last one on an edge the design already
+split), and editing a feature keeps every edge's fractions, angle, height and side, an explicit
+`flip: false` included.
 
 ```json
 {"command":"sheet.flange","params":{"type":"edge","edges":[{"point":[100,0,2],"segments":[
