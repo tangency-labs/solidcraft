@@ -395,7 +395,8 @@ fn replace_face(s: &mut Session, p: &Value) -> Result<Value> {
         }
         None => plane_param(s, p.get("target"), cmd)?,
     };
-    let body = str_(p, "body").map(str::to_string);
+    let refs = p.get("faces").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    let body = super::face::faces_body(s, p, refs, &faces, cmd)?;
     add_feature(s, p, FeatureKind::ReplaceFace { faces: faces.into_iter().map(FacePick).collect(), target, body: body.map(BodyName) })
 }
 

@@ -8,7 +8,7 @@ use solidcraft_doc::{EmbossFace, apply_point, mat_inverse, mat_mul};
 use solidcraft_geom::Mesh;
 use solidcraft_geom::prelude::*;
 
-use crate::params::{bad, vec3};
+use crate::params::{bad, str_, vec3};
 use crate::{Result, Session};
 
 fn point_triangle_dist(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
@@ -154,6 +154,58 @@ pub(super) fn face_ref(s: &Session, v: &Value, body: Option<&str>, cmd: &str) ->
             let st = if crate::frames::mapped() { s.model.state() } else { s.world_state()? };
             solidcraft_doc::naming::named_face_point(&st, body, name).map_err(|why| bad(cmd, why))
         }
+    }
+}
+
+/// The body a command that works on one body's faces applies to: `body` when given, or else the
+/// one body every picked point lies on, so the feature keeps it (its evaluation otherwise takes
+/// the body whose box is nearest the first point, and coincident faces tie there).
+/// A point on coincident faces of several bodies (bodies touching flush) says none of them: the
+/// command is refused and names them. With one body, names among the picks or picks on no face,
+/// nothing is chosen here and evaluation decides as before.
+pub(super) fn faces_body(s: &Session, p: &Value, refs: &[Value], points: &[Vec3], cmd: &str) -> Result<Option<String>> {
+    if let Some(n) = str_(p, "body") {
+        return Ok(Some(n.to_string()));
+    }
+    if s.model.state().bodies.len() < 2 || refs.iter().any(Value::is_string) {
+        return Ok(None);
+    }
+    let mut found: Option<String> = None;
+    for &pt in points {
+        let name = match face_at_in(s, pt, None) {
+            Ok(Some((m, _, d, name))) if near_face(&m, d) => name,
+            Ok(_) => return Ok(None),
+            Err(tied) => {
+                let on = tied.first().is_some_and(|b| matches!(face_at_in(s, pt, Some(b)), Ok(Some((m, _, d, _))) if near_face(&m, d)));
+                if !on {
+                    return Ok(None);
+                }
+                let at = [pt.x, pt.y, pt.z].map(short_number).join(", ");
+                return Err(bad(cmd, format!("the face at [{at}] is on {}; pick the face on one body, or name one with `body`", and_list(&tied))));
+            }
+        };
+        match &found {
+            Some(f) if *f != name => return Ok(None),
+            Some(_) => {}
+            None => found = Some(name),
+        }
+    }
+    Ok(found)
+}
+
+/// A coordinate for a message: at most three decimals, without trailing zeros.
+fn short_number(v: f64) -> String {
+    let s = format!("{v:.3}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    if s == "-0" { "0".to_string() } else { s.to_string() }
+}
+
+/// "A", "A and B", "A, B and C".
+fn and_list(names: &[String]) -> String {
+    match names.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        Some((last, _)) => last.clone(),
+        None => String::new(),
     }
 }
 
