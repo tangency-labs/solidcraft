@@ -591,3 +591,17 @@ fn a_face_pick_on_one_body_of_several_saves_that_body_in_the_feature() {
     assert!((body_volume(&mut s, "Small") - 600.0).abs() < 1e-6);
     assert!((body_volume(&mut s, "Big") - 24000.0).abs() < 1e-6);
 }
+
+#[test]
+fn replace_face_moves_the_named_body_of_a_flush_face_and_refuses_an_unnamed_one() {
+    let mut s = Session::default();
+    flush_boxes(&mut s);
+    let target = json!({"origin": [0, -3, 0], "normal": [0, 1, 0]});
+    // Unnamed, the shared face says neither body.
+    let err = s.execute("solid.replace_face", &json!({"faces": [[15, 0, 7.5]], "target": target})).unwrap_err().to_string();
+    assert!(err.contains("Big") && err.contains("Small") && err.contains("`body`"), "{err}");
+    // Named, Small's back face moves to Y=-3: 10 × 7 × 5.
+    run(&mut s, "solid.replace_face", json!({"faces": [[15, 0, 7.5]], "target": target, "body": "Small"}));
+    assert!((body_volume(&mut s, "Small") - 350.0).abs() < 1e-6, "{}", body_volume(&mut s, "Small"));
+    assert!((body_volume(&mut s, "Big") - 24000.0).abs() < 1e-6);
+}
