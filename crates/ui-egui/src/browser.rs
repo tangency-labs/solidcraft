@@ -3539,7 +3539,7 @@ pub fn apply_occurrence_move(app: &mut SolveApp, m: &OccMove) {
 pub(crate) fn occurrence_triad_model(app: &SolveApp) -> Option<crate::gizmo::Triad> {
     let movement = app.tree.occurrence_move.as_ref()?;
     let center = movement.pivot? + solidcore_record::Vec3::new(movement.translate[0], movement.translate[1], movement.translate[2]);
-    Some(crate::gizmo::Triad { center, translate: true, rotate: true })
+    Some(crate::gizmo::Triad::world(center, true, true))
 }
 
 /// Occurrence handles belong to the viewport, not the clipped Move panel's child UI.
