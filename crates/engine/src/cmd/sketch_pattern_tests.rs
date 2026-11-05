@@ -755,3 +755,118 @@ fn circular_pattern_expressions_validate_inputs_and_keep_numeric_compatibility()
         assert!(a.id == b.id && a.pos.dist(b.pos) < 1e-9, "{} moved", a.id);
     }
 }
+
+/// A rectangular grid of the circle `seed`, `count` × `count2` instances in total.
+fn grid(count: usize, count2: usize) -> Value {
+    json!({"entities":["seed"],"count":count,"spacing":5,"count2":count2,"spacing2":5})
+}
+
+fn seeded() -> Session {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":1,"id":"seed"}));
+    s
+}
+
+/// #7824: out of the box the limit is still 500 instances in total, the original included.
+#[test]
+fn the_default_limit_is_still_500() {
+    let mut s = seeded();
+    assert_eq!(s.pattern_limit, solidcraft_sketch::DEFAULT_PATTERN_COPIES);
+    let err = s.execute("sketch.pattern.rectangular", &grid(38, 38)).unwrap_err().to_string();
+    assert!(err.contains("too many copies"), "{err}");
+    let circular = json!({"entities":["seed"],"center":[20,0],"count":501});
+    assert!(s.execute("sketch.pattern.circular", &circular).is_err());
+    let out = run(&mut s, "sketch.pattern.rectangular", grid(20, 25));
+    assert_eq!(ids(&out["curves"]).len(), 499);
+}
+
+#[test]
+fn a_raised_limit_allows_more_instances() {
+    let mut s = seeded();
+    assert_eq!(s.set_pattern_limit(700), 700);
+    let out = run(&mut s, "sketch.pattern.rectangular", grid(20, 30));
+    assert_eq!(ids(&out["curves"]).len(), 599);
+    assert!(sketch(&s).patterns[0].total() == 600);
+    let mut s = seeded();
+    s.set_pattern_limit(700);
+    assert!(s.execute("sketch.pattern.rectangular", &grid(25, 30)).is_err());
+}
+
+/// Lowering the limit below an existing pattern must not lock that pattern: its other settings
+/// stay editable, but it can't grow past its own size.
+#[test]
+fn editing_a_pattern_larger_than_the_limit_keeps_working() {
+    let mut s = seeded();
+    s.set_pattern_limit(700);
+    let out = run(&mut s, "sketch.pattern.rectangular", grid(20, 30));
+    s.set_pattern_limit(500);
+    run(&mut s, "sketch.pattern.rectangular", json!({"pattern":out["pattern"],"spacing":4}));
+    assert_eq!(sketch(&s).patterns[0].total(), 600);
+    assert!(s.execute("sketch.pattern.rectangular", &json!({"pattern":out["pattern"],"count":21})).is_err());
+    assert_eq!(sketch(&s).patterns[0].total(), 600);
+}
+
+#[test]
+fn the_limit_survives_new_and_opened_designs() {
+    let mut s = seeded();
+    s.set_pattern_limit(1500);
+    run(&mut s, "file.new", json!({}));
+    assert_eq!(s.pattern_limit, 1500);
+    assert_eq!(s.set_pattern_limit(0), 2);
+    assert_eq!(s.set_pattern_limit(usize::MAX), solidcraft_sketch::MAX_PATTERN_COPIES);
+}
+
+/// A design saved where the limit was raised opens, evaluates and stays editable under the
+/// default limit: stored designs are checked against the fixed ceiling, not a preference.
+#[test]
+fn a_saved_large_pattern_opens_under_the_default_limit() {
+    let mut s = seeded();
+    s.set_pattern_limit(700);
+    let out = run(&mut s, "sketch.pattern.rectangular", grid(20, 30));
+    let saved = s.doc.to_json();
+    let mut reopened = Session { doc: solidcraft_doc::format::read(&saved).unwrap().into(), active_sketch: s.active_sketch, ..Default::default() };
+    reopened.refresh();
+    assert_eq!(reopened.pattern_limit, solidcraft_sketch::DEFAULT_PATTERN_COPIES);
+    assert_eq!(sketch(&reopened).patterns[0].total(), 600);
+    run(&mut reopened, "sketch.pattern.rectangular", json!({"pattern":out["pattern"],"spacing":6}));
+    assert_eq!(sketch(&reopened).patterns[0].total(), 600);
+}
+
+/// A parameter that drives a pattern's count follows the user's limit too, as a typed count
+/// does: out of the box 501 is still refused, a raised limit allows more, and lowering it never
+/// locks a pattern made before (it may shrink or stay, not grow past its own size).
+#[test]
+fn a_parameter_driven_count_follows_the_limit() {
+    let mut s = seeded();
+    run(&mut s, "parameters.add", json!({"name":"holes","expression":"5","unit":""}));
+    run(&mut s, "sketch.pattern.circular", json!({"entities":["seed"],"center":[20,0],"count":"holes"}));
+    let refused = |s: &mut Session, expression: &str| {
+        let before = s.doc.to_json();
+        let error = s.execute("parameters.change", &json!({"name":"holes","expression":expression})).unwrap_err().to_string();
+        assert!(error.contains("whole number"), "{expression}: {error}");
+        assert_eq!(s.doc.to_json(), before, "{expression} leaves the document unchanged");
+    };
+    refused(&mut s, "600");
+    s.set_pattern_limit(700);
+    run(&mut s, "parameters.change", json!({"name":"holes","expression":"600"}));
+    assert_eq!(sketch(&s).patterns[0].total(), 600);
+    s.set_pattern_limit(500);
+    refused(&mut s, "650");
+    run(&mut s, "parameters.change", json!({"name":"holes","expression":"550"}));
+    assert_eq!(sketch(&s).patterns[0].total(), 550);
+    s.set_pattern_limit(solidcraft_sketch::MAX_PATTERN_COPIES);
+    refused(&mut s, &(solidcraft_sketch::MAX_PATTERN_COPIES + 1).to_string());
+}
+
+/// A rectangular pattern's count expressions are checked against the limit in total, not the
+/// old 500 per direction.
+#[test]
+fn rectangular_count_expressions_follow_the_limit() {
+    let mut s = seeded();
+    run(&mut s, "parameters.add", json!({"name":"n","expression":"10","unit":""}));
+    run(&mut s, "sketch.pattern.rectangular", json!({"entities":["seed"],"count":"n","spacing":5,"count2":2,"spacing2":5}));
+    assert!(s.execute("parameters.change", &json!({"name":"n","expression":"300"})).is_err(), "600 in total under the default limit");
+    s.set_pattern_limit(700);
+    run(&mut s, "parameters.change", json!({"name":"n","expression":"300"}));
+    assert_eq!(sketch(&s).patterns[0].total(), 600);
+}

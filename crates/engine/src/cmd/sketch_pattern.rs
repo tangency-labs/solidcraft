@@ -5,8 +5,15 @@ use solidcraft_sketch::{SketchPattern, SketchPatternKind};
 use super::*;
 use crate::cmd::{alignment_param, reversed_param};
 
+/// The most instances, the original included, a pattern command may give `existing` (`None`: a
+/// new pattern) under the user's `limit` (see [`Session::pattern_limit_for`]).
+pub(crate) fn pattern_limit_for(limit: usize, existing: Option<&SketchPattern>) -> usize {
+    existing.map_or(limit, |pattern| limit.max(pattern.total())).clamp(1, solidcraft_sketch::MAX_PATTERN_COPIES)
+}
+
 pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
     let cmd = if circular { "sketch.pattern.circular" } else { "sketch.pattern.rectangular" };
+    let user_limit = s.pattern_limit;
     let (out, info) = edit(s, p, cmd, true, |sk, doc| {
         if sk.patterns.len() >= solidcraft_sketch::MAX_CONSTRAINTS {
             return Err(bad(cmd, "too many sketch patterns"));
@@ -88,7 +95,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             if entity_ids != old.entities {
                 return Err(bad(cmd, "the seed entities of an existing pattern cannot be changed"));
             }
-            if old.instances.len() >= MAX_COPIES {
+            if old.instances.len() >= solidcraft_sketch::MAX_PATTERN_COPIES {
                 return Err(bad(cmd, "too many stored pattern instances"));
             }
             if old.instances.iter().any(|instance| {
@@ -110,7 +117,8 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
         } else {
             None
         };
-        let n = count(&params, "count", cmd)?;
+        let limit = pattern_limit_for(user_limit, old.as_ref());
+        let n = count(&params, "count", cmd, limit)?;
         let (kind, center) = if circular {
             let total = if params.get("angle").is_some() { num(&params, "angle").ok_or_else(|| bad(cmd, "`angle` must be finite"))? } else { 360.0 };
             if !(total.abs() > 1e-9 && total.abs() <= 360.0) {
@@ -132,13 +140,13 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             (SketchPatternKind::Circular { center: id, count: n, angle: total, alignment, reversed }, Some(center))
         } else {
             let spacing = num(&params, "spacing").ok_or_else(|| bad(cmd, "`spacing` must be finite"))?;
-            let count2 = if params.get("count2").is_some() { count(&params, "count2", cmd)? } else { 1 };
+            let count2 = if params.get("count2").is_some() { count(&params, "count2", cmd, limit)? } else { 1 };
             let spacing2 = if params.get("spacing2").is_some() {
                 num(&params, "spacing2").ok_or_else(|| bad(cmd, "`spacing2` must be finite"))?
             } else {
                 spacing
             };
-            if n * count2 > MAX_COPIES {
+            if n.saturating_mul(count2) > limit {
                 return Err(bad(cmd, "too many copies"));
             }
             let dir = match params.get("dir") {
@@ -203,10 +211,10 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
     Ok(out)
 }
 
-fn count(p: &Value, k: &str, cmd: &str) -> Result<usize> {
+fn count(p: &Value, k: &str, cmd: &str, limit: usize) -> Result<usize> {
     let n = num(p, k).ok_or_else(|| bad(cmd, format!("`{k}` must be a number or expression")))?;
-    if !(1.0..=MAX_COPIES as f64).contains(&n) || n.fract() != 0.0 {
-        return Err(bad(cmd, format!("`{k}` must be a positive integer from 1 to {MAX_COPIES}")));
+    if !(1.0..=limit as f64).contains(&n) || n.fract() != 0.0 {
+        return Err(bad(cmd, format!("`{k}` must be a positive integer from 1 to {limit}")));
     }
     Ok(n as usize)
 }
