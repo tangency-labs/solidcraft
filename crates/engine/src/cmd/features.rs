@@ -279,14 +279,20 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     };
     // The extrude starts at its From Object or start offset, not at the profile: probe from
     // there (#467). To an object it then reaches only from that start.
-    let start = match p.get("from").and_then(vec3) {
-        Some(from) if grouped.is_none() => (from - base).dot(n),
+    let start = match p.get("from") {
+        Some(from) if grouped.is_none() => match vec3(from) {
+            Some(from) => (from - base).dot(n),
+            // A reference starts it where the reference is now, as `extrude_reach` finds `to`.
+            None => solidcore_record::Plane::from_normal(base, n).and_then(|plane| object_end_height(s, from, &plane, base)).unwrap_or(0.0),
+        },
         _ => expr(p, "start_offset").and_then(|e| s.doc.eval(&e, Kind::Length).ok()).unwrap_or(0.0),
     };
     let start = if start.is_finite() { start } else { 0.0 };
     let base = base + n * start;
-    let d = if grouped.is_some() && p.get("to").is_some() {
-        (p.get("to").and_then(vec3)? - base).dot(n)
+    let d = if grouped.is_some()
+        && let Some(to) = p.get("to").and_then(vec3)
+    {
+        (to - base).dot(n)
     } else if let Some(d) = extrude_reach(s, p) {
         if p.get("to").is_some() { d - start } else { d }
     } else {

@@ -324,7 +324,7 @@ fn extrude_to_a_construction_or_origin_plane_follows_it() {
 
 /// To Object a sketch line or arc: one parallel to the profile ends it at its height; one running
 /// along the extrusion where it begins, or, from the profile's plane or across it, at its end on
-/// the side it was picked (#7781's rule for faces).
+/// the side it was picked (#7781's rule for faces), its middle's side when no `at` says.
 #[test]
 fn extrude_to_a_sketch_curve_ends_at_the_right_point() {
     let mut s = Session::default();
@@ -333,6 +333,7 @@ fn extrude_to_a_sketch_curve_ends_at_the_right_point() {
     let flat = curve("sketch.line", json!({"points": [[20, 18], [30, 18]]}));
     let ahead = curve("sketch.line", json!({"points": [[20, 12], [20, 40]]}));
     let across = curve("sketch.line", json!({"points": [[25, -6], [25, 33]]}));
+    let low = curve("sketch.line", json!({"points": [[28, -9], [28, 1]]}));
     let arc = curve("sketch.arc.three_point", json!({"start": [48, 50], "end": [32, 50], "through": [40, 58]}));
     run(&mut s, "sketch.finish", json!({}));
     square_on_xy(&mut s);
@@ -341,6 +342,8 @@ fn extrude_to_a_sketch_curve_ends_at_the_right_point() {
         (json!({"sketch": side, "curve": ahead, "at": [0, 20, 35]}), (0.0, 12.0)),
         (json!({"sketch": side, "curve": across, "at": [0, 25, 20]}), (0.0, 33.0)),
         (json!({"sketch": side, "curve": across, "at": [0, 25, -2]}), (-6.0, 0.0)),
+        // Without `at`, the side its middle is on.
+        (json!({"sketch": side, "curve": low}), (-9.0, 0.0)),
         // An arc bulging up from z = 50: where it begins, its ends' height.
         (json!({"sketch": side, "curve": arc}), (0.0, 50.0)),
     ] {
@@ -365,6 +368,9 @@ fn extrude_to_an_axis_or_construction_point() {
     assert!(err.contains("gives no end"), "{err}");
     run(&mut s, "construct.point.vertex", json!({"point": {"point": [3, 4, 22]}, "name": "Mark"}));
     run(&mut s, "solid.extrude", json!({"sketch": "P", "to": {"construct_point": "Mark"}, "body_name": "Post"}));
+    assert_eq!(z_range(&mut s, "Post"), (10.0, 22.0));
+    // The reference follows the point's name.
+    run(&mut s, "timeline.rename", json!({"feature": "Mark", "name": "Tip"}));
     assert_eq!(z_range(&mut s, "Post"), (10.0, 22.0));
 }
 
@@ -391,6 +397,20 @@ fn extrude_to_a_slanted_plane_ends_along_it() {
     assert!((b["bbox"]["min"][2].as_f64().unwrap() - 5.0).abs() < 1e-6, "{b}");
 }
 
+/// `operation: "auto"` looks for material where the extrude starts: at its From Object
+/// reference, not at the profile, so one that starts inside a block cuts it.
+#[test]
+fn auto_operation_starts_at_a_from_reference() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-10, -10, 10], "length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 12, "name": "Floor"}));
+    square_on_xy(&mut s);
+    let from_floor = json!({"sketch": "P", "from": {"plane": "Floor"}, "distance": 3});
+    assert_eq!(crate::auto_operation(&s, &from_floor).unwrap(), Some("cut"));
+    // From the profile on XY it starts below the block.
+    assert_eq!(crate::auto_operation(&s, &json!({"sketch": "P", "distance": 3})).unwrap(), Some("join"));
+}
+
 /// A construction plane after the extrude in the timeline is refused: moving it would not
 /// recompute the extrude, which would keep the end it was first given.
 #[test]
@@ -405,4 +425,15 @@ fn extrude_to_a_later_construction_plane_is_refused() {
         .to_string();
     assert!(err.contains("must come earlier in the timeline"), "{err}");
     assert_eq!(z_range(&mut s, "Post"), (0.0, 10.0));
+    // A later plane inside a reference, as a file can hold one (a midplane between it and XY),
+    // is refused too: in a model that has evaluated nothing yet, every construction plane is later.
+    use solidcraft_doc::{PlaneRef, construct::GeoRef};
+    let reach = s.doc.find_feature("Reach").unwrap().id;
+    let plane = |plane| Box::new(GeoRef::Plane { plane });
+    let mid = GeoRef::Plane {
+        plane: PlaneRef::Midplane { a: plane(PlaneRef::Construction { feature: reach.into() }), b: plane(PlaneRef::Origin { name: "XY".into() }) },
+    };
+    let (vals, _) = s.doc.param_values();
+    let err = solidcraft_doc::extent_target(&s.doc, &vals, &Default::default(), &mid).unwrap_err().to_string();
+    assert!(err.contains("`Reach` must come earlier in the timeline"), "{err}");
 }

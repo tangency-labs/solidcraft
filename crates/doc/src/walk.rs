@@ -576,6 +576,14 @@ impl Walk for GeoRef {
     fn walk_exprs_mut<'a>(&'a mut self, f: &mut dyn FnMut(ExprItemMut<'a>)) {
         plane_exprs_mut(vec![self], f)
     }
+    // A reference held in a feature's field (an extrude's To / From Object) names the axes,
+    // construction points and planes it uses, so a rename or a copy follows them.
+    fn walk_refs<'a>(&'a self, f: &mut dyn FnMut(RefItem<'a>)) {
+        self.walk_feature_refs(f, 0);
+    }
+    fn walk_refs_mut<'a>(&'a mut self, f: &mut dyn FnMut(RefItemMut<'a>)) {
+        self.walk_feature_refs_mut(f, 0);
+    }
     fn walk_geometry<'a>(&'a self, f: &mut dyn FnMut(GeoItem<'a>)) {
         f(Geo::Construct(self))
     }

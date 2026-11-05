@@ -55,7 +55,8 @@ found again on every recompute, so the extrusion follows it when it moves. A poi
 extrusion at the plane through it, parallel to the profile. A parallel plane, axis or curve ends
 it at its height, and a plane at an angle cuts the end along it. A curve running away from the
 profile is reached where it begins. One that starts at the profile's plane or crosses it is
-reached at its end on the side it was picked. An axis along the extrusion gives no end.
+reached at its end on the side its middle is on (a command's `at` picks the other end). An axis
+along the extrusion gives no end.
 **To Offset** goes that much further in every case.
 
 A positive extrude taper slopes the side walls outward, so the profile grows along the

@@ -435,9 +435,7 @@ pub enum ExtentTarget {
 pub(crate) fn extent_target(ctx: &Ctx, g: &GeoRef) -> Result<ExtentTarget> {
     // A construction plane later in the timeline would be read as it is defined, once: moving it
     // would not recompute this feature. As with a later sketch, axis or point, it is refused.
-    if let GeoRef::Plane { plane } = g
-        && let Some(later) = later_plane(ctx, plane, 0)
-    {
+    if let Some(later) = later_plane(ctx, g) {
         let name = ctx.doc.feature(later).map_or_else(|| later.to_string(), |f| f.name.clone());
         return Err(DocError::Invalid(format!("the plane `{name}` must come earlier in the timeline")));
     }
@@ -455,18 +453,20 @@ pub(crate) fn extent_target(ctx: &Ctx, g: &GeoRef) -> Result<ExtentTarget> {
     })
 }
 
-/// A construction plane `p` is or is built on that the model `ctx.st` has not evaluated yet.
-fn later_plane(ctx: &Ctx, p: &PlaneRef, depth: usize) -> Option<u64> {
-    if depth > 64 {
-        return None;
-    }
-    match p {
-        PlaneRef::Construction { feature } => (!ctx.st.construct.iter().any(|c| c.feature == feature.0)).then_some(feature.0),
-        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::ThroughPoint { base, .. } | PlaneRef::AtAngle { base, .. } => {
-            later_plane(ctx, base, depth + 1)
+/// A construction plane `g` is or is built on, at any depth, that the model `ctx.st` has not
+/// evaluated yet.
+fn later_plane(ctx: &Ctx, g: &GeoRef) -> Option<u64> {
+    use crate::walk::Walk;
+    let mut later = None;
+    g.walk_refs(&mut |r| {
+        if let crate::feature_refs::Ref::Feature(id) = r
+            && later.is_none()
+            && !ctx.st.construct.iter().any(|c| c.feature == id.0)
+        {
+            later = Some(id.0);
         }
-        _ => None,
-    }
+    });
+    later
 }
 
 impl ExtentTarget {
@@ -476,9 +476,22 @@ impl ExtentTarget {
             ExtentTarget::Point(p) => Some(*p),
             ExtentTarget::Plane(p) => Some(p.origin),
             ExtentTarget::Line(o, _) => Some(*o),
-            ExtentTarget::Path(pts) => pts.get(pts.len() / 2).copied(),
+            ExtentTarget::Path(pts) => path_middle(pts),
         }
     }
+}
+
+/// The point halfway along `pts` by length: a straight line's two points give its midpoint.
+fn path_middle(pts: &[Vec3]) -> Option<Vec3> {
+    let mut left = pts.windows(2).map(|w| (w[1] - w[0]).len()).sum::<f64>() / 2.0;
+    for w in pts.windows(2) {
+        let l = (w[1] - w[0]).len();
+        if l > 0.0 && l >= left {
+            return Some(w[0] + (w[1] - w[0]) * (left / l));
+        }
+        left -= l;
+    }
+    pts.first().copied()
 }
 
 /// The centre of a round edge, sketch circle, sphere or torus.
