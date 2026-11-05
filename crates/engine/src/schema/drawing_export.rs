@@ -128,9 +128,9 @@ pub struct ExportResult {
     /// The file written, when a path was given.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-    /// The document when no path was given and it is text (SVG).
+    /// The SVG's text when no path was given.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
+    pub svg: Option<String>,
     /// The document as base64 when no path was given and it is binary (PNG).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<String>,

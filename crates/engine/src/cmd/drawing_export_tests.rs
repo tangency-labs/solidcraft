@@ -46,7 +46,7 @@ fn a_sheet_exports_as_its_scenes_svg() {
     let schema = output_schema_for::<ExportResult>();
     assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
     let svg = scene_svg(&s, sheet);
-    assert_eq!(reply["text"].as_str().map(str::as_bytes), Some(svg.as_slice()));
+    assert_eq!(reply["svg"].as_str().map(str::as_bytes), Some(svg.as_slice()));
     assert_eq!((&reply["format"], reply["bytes"].as_u64(), reply.get("path")), (&json!("svg"), Some(svg.len() as u64), None), "{reply}");
     // Each view on the sheet, in id order, as drawing.scene lists them.
     let views: Vec<_> = reply["views"].as_array().unwrap().iter().map(|v| (v["view"].clone(), v["status"].clone())).collect();
@@ -54,15 +54,15 @@ fn a_sheet_exports_as_its_scenes_svg() {
     in_order.sort_unstable();
     assert_eq!(views, in_order.map(|v| (json!(ids::encode(v)), json!("drawn"))));
     let name = s.drawing("test").unwrap().sheets[0].name.clone();
-    assert_eq!(run(&mut s, CMD, json!({"sheet": name, "format": "svg"}))["text"], reply["text"]);
+    assert_eq!(run(&mut s, CMD, json!({"sheet": name, "format": "svg"}))["svg"], reply["svg"]);
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc) && s.evaluations == evaluations);
     // The sheet named, not the first: a second sheet, with no views, exports as its own scene.
     let added = run(&mut s, "drawing.sheet.add", json!({}));
     let second = ids::decode(added["sheet"].as_str().unwrap()).unwrap();
     let other = run(&mut s, CMD, json!({"sheet": ids::encode(second)}));
     assert_eq!((&other["sheet"], other["views"].as_array().map(Vec::len)), (&json!(ids::encode(second)), Some(0)), "{other}");
-    assert_eq!(other["text"].as_str().map(str::as_bytes), Some(scene_svg(&s, second).as_slice()));
-    assert_ne!(other["text"], reply["text"]);
+    assert_eq!(other["svg"].as_str().map(str::as_bytes), Some(scene_svg(&s, second).as_slice()));
+    assert_ne!(other["svg"], reply["svg"]);
 }
 
 /// With a path the file holds the same SVG and the reply names it instead.
@@ -75,7 +75,7 @@ fn a_path_gets_the_svg_written_to_it() {
     let written = std::fs::read(&path).unwrap();
     assert_eq!(written, scene_svg(&s, sheet));
     assert_eq!(
-        (reply["path"].as_str(), reply.get("text"), reply["bytes"].as_u64()),
+        (reply["path"].as_str(), reply.get("svg"), reply["bytes"].as_u64()),
         (Some(path.as_str()), None, Some(written.len() as u64)),
         "{reply}"
     );
@@ -119,7 +119,7 @@ fn a_failed_view_is_named_and_nothing_is_written() {
     let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
     let statuses: Vec<_> = reply["views"].as_array().unwrap().iter().map(|v| v["status"].clone()).collect();
     assert_eq!(statuses, [json!("placeholder"), json!("placeholder")], "{reply}");
-    assert_eq!(reply["text"].as_str().map(str::as_bytes), Some(scene_svg(&s, sheet).as_slice()));
+    assert_eq!(reply["svg"].as_str().map(str::as_bytes), Some(scene_svg(&s, sheet).as_slice()));
 }
 
 /// A sheet exports as its scene's PNG, byte for byte: in the reply as base64 data, grey at the
@@ -137,7 +137,7 @@ fn a_sheet_exports_as_its_scenes_png() {
     let png = scene_png(&s, sheet, PngOptions::default());
     assert_eq!(reply["data"].as_str().and_then(base64_decode), Some(png.clone()));
     assert_eq!((reply["bytes"].as_u64(), &reply["report"]["pixels"]), (Some(png.len() as u64), &json!([4961, 3508])), "{reply}");
-    assert_eq!((reply.get("text"), reply.get("path"), &reply["format"]), (None, None, &json!("png")));
+    assert_eq!((reply.get("svg"), reply.get("path"), &reply["format"]), (None, None, &json!("png")));
     run(&mut s, "drawing.sheet.set", json!({"sheet": id, "dpi": 50}));
     let reply = run(&mut s, CMD, json!({"sheet": id, "format": "png"}));
     let png = scene_png(&s, sheet, PngOptions { dpi: 50.0, colour: PngColour::Grey });
@@ -167,7 +167,7 @@ fn a_sheet_exports_on_its_paper() {
     let data = |reply: Value| reply["data"].as_str().and_then(base64_decode).unwrap();
     let plain = scene_svg(&s, sheet);
     let reply = run(&mut s, CMD, json!({"sheet": id, "paper": "white"}));
-    assert_eq!(reply["text"].as_str().map(str::as_bytes), Some(plain.as_slice()));
+    assert_eq!(reply["svg"].as_str().map(str::as_bytes), Some(plain.as_slice()));
     for colour in [json!({}), json!({"colour": "rgb"}), json!({"colour": "grey"}), json!({"colour": "black_white"}), json!({"colour": "transparent"})]
     {
         let mut asked = json!({"sheet": id, "format": "png", "dpi": 25});
@@ -178,7 +178,7 @@ fn a_sheet_exports_on_its_paper() {
     }
     for (name, paper, hex) in [("blueprint", PaperColour::Blueprint, "#123A76"), ("prussian_blue", PaperColour::PrussianBlue, "#003153")] {
         let reply = run(&mut s, CMD, json!({"sheet": id, "paper": name}));
-        let text = reply["text"].as_str().unwrap();
+        let text = reply["svg"].as_str().unwrap();
         assert!(text.contains(&format!("fill=\"{hex}\"")) && text.contains("stroke=\"#E2EEFC\"") && !text.contains("#000"), "{name}");
         let png = scene_png(&s, sheet, PngOptions { dpi: 25.0, colour: PngColour::On(paper) });
         assert_eq!(data(run(&mut s, CMD, json!({"sheet": id, "format": "png", "dpi": 25, "paper": name}))), png, "{name}");
@@ -258,13 +258,13 @@ fn a_shaded_view_exports_its_picture() {
     let (mut s, sheet, [front, _]) = front_and_top();
     let png = |s: &mut Session| run(s, CMD, json!({"sheet": ids::encode(sheet), "format": "png", "dpi": 25}))["data"].clone();
     let lines_only = png(&mut s);
-    let plain = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}))["text"].as_str().unwrap().to_owned();
+    let plain = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}))["svg"].as_str().unwrap().to_owned();
     assert!(!plain.contains("<image"), "lines only: {}", plain.len());
     run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"visual_style": "shaded"}}));
     let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
-    let svg = reply["text"].as_str().unwrap();
+    let svg = reply["svg"].as_str().unwrap();
     assert_eq!(svg.matches("<image").count(), 2, "the front view's, and the top view's, which follows it: {reply}");
-    assert_eq!(run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}))["text"], reply["text"], "the same bytes twice");
+    assert_eq!(run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}))["svg"], reply["svg"], "the same bytes twice");
     assert_ne!(png(&mut s), lines_only, "the PNG draws the pictures too");
     let folder = Folder::new("drawing-export-picture");
     let path = folder.path("sheet.svg");
@@ -285,7 +285,7 @@ fn a_shaded_views_picture_follows_the_parts_colour() {
         run(s, "drawing.close", json!({}));
         run(s, "appearance.assign", json!({"bodies": ["Block"], "color": color}));
         run(s, "drawing.open", drawing.clone());
-        run(s, CMD, json!({"sheet": ids::encode(sheet)}))["text"].as_str().unwrap().to_owned()
+        run(s, CMD, json!({"sheet": ids::encode(sheet)}))["svg"].as_str().unwrap().to_owned()
     };
     let red = coloured(&mut s, "#ff0000");
     assert_ne!(red, coloured(&mut s, "#0000ff"), "the colour shows in the picture");
