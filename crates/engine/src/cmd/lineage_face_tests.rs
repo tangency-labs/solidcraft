@@ -120,7 +120,7 @@ fn a_chamfer_face_takes_a_sketch_that_follows_the_chamfer() {
 /// do, on the origin and placed along a slanted axis. The sketch on the top follows the height.
 #[test]
 fn the_flat_faces_of_a_cone_take_a_sketch_that_follows_the_cone() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let slant = Vec3::new(1., 1., 0.).normalized().unwrap();
     for (base, axis, along) in [(Vec3::ZERO, json!("Z"), Vec3::Z), (Vec3::new(5., -3., 2.), json!([1, 1, 0]), slant)] {
         let mut s = Session::default();
@@ -133,7 +133,7 @@ fn the_flat_faces_of_a_cone_take_a_sketch_that_follows_the_cone() {
         sketch_on(&mut s, [top(20.).x, top(20.).y, top(20.).z], "OnTop");
         sketch_on(&mut s, at, "OnBase");
         sketch_on(&mut s, [40., 0., 0.], "OnFullBase");
-        let height = |p: &solidcraft_geom::Plane| (p.origin - base).dot(along);
+        let height = |p: &solidcore_record::Plane| (p.origin - base).dot(along);
         for (name, role) in [("OnTop", ":top"), ("OnBase", ":bottom"), ("OnFullBase", ":bottom")] {
             let FaceAttachmentStatus::Healthy { plane, target, .. } = status(&s, name) else { panic!("{name}: {:?}", status(&s, name)) };
             assert_eq!(target.certificate, Some(FaceCertificate::Lineage), "{name}");
