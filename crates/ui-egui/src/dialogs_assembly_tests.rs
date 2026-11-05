@@ -1503,3 +1503,132 @@ fn joint_dialog_applies_custom_name_or_falls_back_to_type_default() {
         assert_eq!(r["name"], "MyCustomJoint");
     }
 }
+
+#[test]
+fn joint_dialog_picks_origin_plane_and_axis() {
+    let mut app = two_boxes();
+
+    // 1. Pick origin plane XY in the Joint dialog.
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    let plane_sel = Sel::Plane { name: "XY".into() };
+    let snap_plane = snap_of(&app.session, &plane_sel).expect("snap for XY plane");
+    assert_eq!(snap_plane.kind, SnapKind::FaceCenter);
+    assert_eq!(snap_plane.z, Vec3::Z);
+    d.pick(&app.session, plane_sel);
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    let cmds = apply_commands(&app, &d).expect("joint between plane and component B");
+    assert_eq!(cmds[0].0, "joint.create");
+    assert_eq!(cmds[0].1["a"]["plane"], "XY");
+    assert_eq!(cmds[0].1["b"]["occurrence"], occ(&app, "B"));
+    for (cmd, params) in cmds {
+        app.run(&cmd, params).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints.len(), 1);
+    let j1 = app.session.doc.assembly.joints[0].id;
+    app.run("joint.delete", json!({"joint": j1})).unwrap();
+
+    // 2. Pick origin axis Z in the Joint dialog.
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    let axis_sel = Sel::Axis { name: "Z".into() };
+    let snap_axis = snap_of(&app.session, &axis_sel).expect("snap for Z axis");
+    assert_eq!(snap_axis.kind, SnapKind::EdgeMid);
+    assert_eq!(snap_axis.z, Vec3::Z);
+    d.pick(&app.session, axis_sel);
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    let cmds = apply_commands(&app, &d).expect("joint between axis and component B");
+    assert_eq!(cmds[0].0, "joint.create");
+    assert_eq!(cmds[0].1["a"]["axis"], "Z");
+    assert_eq!(cmds[0].1["b"]["occurrence"], occ(&app, "B"));
+    for (cmd, params) in cmds {
+        app.run(&cmd, params).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints.len(), 1);
+}
+
+#[test]
+fn edit_joint_preserves_plane_and_axis_sides() {
+    let mut app = two_boxes();
+
+    // 1. Create a joint using a construction plane and verify Edit Joint pre-fills Sel::Plane.
+    let wp = app.run("construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "WorkPlane"})).unwrap();
+    let feat_id = wp["feature"].as_u64().unwrap();
+    let j_plane = app
+        .run(
+            "joint.create",
+            json!({
+                "type": "planar",
+                "a": {"plane": {"type": "construction", "feature": feat_id}},
+                "b": {"occurrence": occ(&app, "B"), "face": [40, 10, 0]}
+            }),
+        )
+        .unwrap();
+    let plane_joint_id = j_plane["joint"].as_u64().unwrap();
+    let edit_plane = edit_joint(&app, plane_joint_id).unwrap();
+    assert_eq!(edit_plane.inputs[0].items, vec![Sel::Plane { name: "WorkPlane".into() }]);
+    let cmds = apply_commands(&app, &edit_plane).unwrap();
+    assert!(cmds[0].1.get("a").is_none() && cmds[0].1.get("b").is_none(), "unchanged sides are not re-sent");
+    app.run("joint.delete", json!({"joint": plane_joint_id})).unwrap();
+
+    // 2. Create a joint using a construction axis and verify Edit Joint pre-fills Sel::Axis.
+    app.run(
+        "construct.axis.two_points",
+        json!({
+            "a": {"point": [0, 0, 0]},
+            "b": {"point": [0, 0, 50]},
+            "name": "WorkAxis"
+        }),
+    )
+    .unwrap();
+    let j_axis = app
+        .run(
+            "joint.create",
+            json!({
+                "type": "revolute",
+                "a": {"axis": "WorkAxis"},
+                "b": {"occurrence": occ(&app, "B"), "face": [40, 10, 0]}
+            }),
+        )
+        .unwrap();
+    let axis_joint_id = j_axis["joint"].as_u64().unwrap();
+    let edit_axis = edit_joint(&app, axis_joint_id).unwrap();
+    assert_eq!(edit_axis.inputs[0].items, vec![Sel::Axis { name: "WorkAxis".into() }]);
+    let cmds = apply_commands(&app, &edit_axis).unwrap();
+    assert!(cmds[0].1.get("a").is_none() && cmds[0].1.get("b").is_none(), "unchanged sides are not re-sent");
+}
+
+#[test]
+fn joint_dialog_rejects_sketch_curve_picks() {
+    let mut app = two_boxes();
+    app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    app.run("sketch.line", json!({"points": [[0, 0], [10, 0]]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    assert_eq!(d.inputs[0].accept, crate::dialogs_assembly::SNAPS);
+
+    let sketch_sel = Sel::SketchCurve { id: "l1".into(), sketch: None };
+    d.pick(&app.session, sketch_sel);
+    assert!(d.inputs[0].items.is_empty(), "straight sketch curve must be rejected by SNAPS input");
+}
+
+/// Measure's items take more than the joint-origin kinds (sketch curves among them), so the
+/// joint-origin rejection must leave them alone: a sketch curve stays pickable in Measure.
+#[test]
+fn measure_still_takes_sketch_curve_picks() {
+    let mut app = two_boxes();
+    app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    app.run("sketch.line", json!({"points": [[0, 0], [10, 0]]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+
+    app.start("inspect.measure");
+    let mut d = app.dialog.clone().unwrap();
+    assert_ne!(d.inputs[0].accept, crate::dialogs_assembly::SNAPS);
+    assert!(!d.inputs[0].rejects(&Sel::SketchCurve { id: "l1".into(), sketch: None }));
+
+    let sketch_sel = Sel::SketchCurve { id: "l1".into(), sketch: None };
+    d.pick(&app.session, sketch_sel.clone());
+    assert_eq!(d.inputs[0].items, vec![sketch_sel], "Measure takes a sketch curve");
+}

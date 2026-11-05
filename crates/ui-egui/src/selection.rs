@@ -122,6 +122,15 @@ impl SelInput {
         self
     }
 
+    /// Joint-origin inputs (`SNAPS`) have no snap for a sketch curve: `fits`/`accepts` let
+    /// `Sel::SketchCurve` through via its `AXES` bit, but `snap_of` can't resolve it. Reject it
+    /// here so every path into a `SNAPS` input shares one definition. Only an input that takes
+    /// exactly the joint-origin kinds: one that takes more besides them (Measure's items take
+    /// sketch curves too) handles them itself.
+    pub fn rejects(&self, sel: &Sel) -> bool {
+        self.accept == crate::dialogs_assembly::SNAPS && matches!(sel, Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. })
+    }
+
     /// The selection a hit stands for, if this input accepts it. A curve of another sketch than
     /// the `active` one names its sketch: curve ids repeat from one sketch to the next (#3726).
     pub fn accepts(&self, h: &Hit, active: Option<u64>, planar: impl Fn(&str, usize) -> bool) -> Option<Sel> {

@@ -2762,3 +2762,360 @@ fn new_joints_generate_type_prefixed_names_or_keep_custom_name() {
     );
     assert_eq!(r3["name"], "CustomRigid");
 }
+
+#[test]
+fn joint_with_origin_plane_and_axis() {
+    let mut s = Session::default();
+
+    // 1. Planar joint to origin plane XY: bottom face at z=10 drops to z=0, retaining x=60, y=90.
+    run(&mut s, "component.create", json!({"name": "PartA", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [50, 80, 10]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let part_a = occ(&s, "PartA");
+    let r1 = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "planar",
+            "a": {"plane": "XY"},
+            "b": {"occurrence": part_a, "face": [60, 90, 10]}
+        }),
+    );
+    assert_eq!(r1["conflicts"], json!([]));
+    assert!(near(place(&s, "PartA", Vec3::new(60.0, 90.0, 10.0)), Vec3::new(60.0, 90.0, 0.0)));
+
+    // 2. Planar joint to origin plane YZ (normal along X): face at x=50 moves to x=0, retaining y=90, z=15.
+    run(&mut s, "component.create", json!({"name": "PartB", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [50, 80, 10]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let part_b = occ(&s, "PartB");
+    let r2 = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "planar",
+            "a": {"plane": "YZ"},
+            "b": {"occurrence": part_b, "face": [50, 90, 15]}
+        }),
+    );
+    assert_eq!(r2["conflicts"], json!([]));
+    assert!(near(place(&s, "PartB", Vec3::new(50.0, 90.0, 15.0)), Vec3::new(0.0, 90.0, 15.0)));
+
+    // 3. Slider joint along origin axis Z.
+    run(&mut s, "component.create", json!({"name": "PartC", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [50, 80, 10]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let part_c = occ(&s, "PartC");
+    let r3 = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "slider",
+            "a": {"axis": "Z"},
+            "b": {"occurrence": part_c, "face": [60, 90, 10]}
+        }),
+    );
+    assert_eq!(r3["conflicts"], json!([]));
+
+    // 4. Cylindrical joint along origin axis X.
+    run(&mut s, "component.create", json!({"name": "PartD", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [50, 80, 10]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let part_d = occ(&s, "PartD");
+    let r4 = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "cylindrical",
+            "a": {"axis": "X"},
+            "b": {"occurrence": part_d, "face": [50, 90, 15]}
+        }),
+    );
+    assert_eq!(r4["conflicts"], json!([]));
+}
+
+#[test]
+fn joint_with_construction_plane_and_axis() {
+    let mut s = Session::default();
+    let wp = run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 15, "name": "WorkPlane"}));
+    run(
+        &mut s,
+        "construct.axis.two_points",
+        json!({
+            "a": {"point": [0, 0, 0]},
+            "b": {"point": [0, 0, 50]},
+            "name": "WorkAxis"
+        }),
+    );
+    let plane_feat = wp["feature"].as_u64().unwrap();
+
+    // 1. Planar joint to construction plane by name: bottom face at z=0 moves to plane offset z=15.
+    run(&mut s, "component.create", json!({"name": "PartA", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let part_a = occ(&s, "PartA");
+    let r1 = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "planar",
+            "a": {"plane": "WorkPlane"},
+            "b": {"occurrence": part_a, "face": [25, 5, 0]}
+        }),
+    );
+    assert_eq!(r1["conflicts"], json!([]));
+    assert!(near(place(&s, "PartA", Vec3::new(25.0, 5.0, 0.0)), Vec3::new(25.0, 5.0, 15.0)));
+
+    // 2. Structured construction plane reference by feature id.
+    run(&mut s, "component.create", json!({"name": "PartB", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let part_b = occ(&s, "PartB");
+    let r2 = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "planar",
+            "a": {"plane": {"type": "construction", "feature": plane_feat}},
+            "b": {"occurrence": part_b, "face": [25, 5, 0]}
+        }),
+    );
+    assert_eq!(r2["conflicts"], json!([]));
+    assert!(near(place(&s, "PartB", Vec3::new(25.0, 5.0, 0.0)), Vec3::new(25.0, 5.0, 15.0)));
+
+    // 3. Revolute joint around construction axis by name.
+    run(&mut s, "component.create", json!({"name": "PartC", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let part_c = occ(&s, "PartC");
+    let r3 = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "revolute",
+            "a": {"axis": "WorkAxis"},
+            "b": {"occurrence": part_c, "face": [25, 5, 0]}
+        }),
+    );
+    assert_eq!(r3["conflicts"], json!([]));
+
+    // 4. Structured construction axis reference.
+    run(&mut s, "component.create", json!({"name": "PartD", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let part_d = occ(&s, "PartD");
+    let r4 = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "revolute",
+            "a": {"axis": {"type": "construction", "name": "WorkAxis"}},
+            "b": {"occurrence": part_d, "face": [25, 5, 0]}
+        }),
+    );
+    assert_eq!(r4["conflicts"], json!([]));
+}
+
+#[test]
+fn datum_joints_preserve_existing_kinematic_chains() {
+    let mut s = Session::default();
+    leaf(&mut s, "LeafA");
+    leaf(&mut s, "LeafB");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let o = occ(&s, "LeafA");
+    run(&mut s, "occurrence.ground", json!({"occurrence": o, "grounded": true}));
+
+    // Existing revolute joint at knuckle: axis along X at y=33, z=4.
+    run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "revolute",
+            "a": {"occurrence": "LeafA", "circle": [1, 37, 4]},
+            "b": {"occurrence": "LeafB", "circle": [1, 37, 4]},
+            "flip": true,
+            "name": "Hinge"
+        }),
+    );
+    let knuckle_pt = Vec3::new(10.0, 33.0, 4.0);
+
+    // 1. Constrain to origin plane XZ: LeafB swings on its knuckle to meet the plane, knuckle stays put.
+    let r_plane = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "parallel",
+            "a": {"plane": "XZ"},
+            "b": {"occurrence": "LeafB", "face": [20, 15, 3]},
+            "name": "AlignXZ"
+        }),
+    );
+    assert_eq!(r_plane["conflicts"], json!([]));
+    assert!(near(place(&s, "LeafB", knuckle_pt), knuckle_pt));
+    run(&mut s, "joint.delete", json!({"joint": "AlignXZ"}));
+
+    // 2. Constrain to origin axis X (parallel to hinge knuckle): hinge stays intact.
+    let r_axis = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "parallel",
+            "a": {"axis": "X"},
+            "b": {"occurrence": "LeafB", "circle": [1, 37, 4]},
+            "name": "AlignX"
+        }),
+    );
+    assert_eq!(r_axis["conflicts"], json!([]));
+    assert!(near(place(&s, "LeafB", knuckle_pt), knuckle_pt));
+    run(&mut s, "joint.delete", json!({"joint": "AlignX"}));
+
+    // 3. Construction plane constraint: LeafB follows the construction plane, hinge stays intact.
+    run(&mut s, "construct.plane.offset", json!({"base": "XZ", "offset": 10, "name": "StopPlane"}));
+    let r_cplane = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "parallel",
+            "a": {"plane": "StopPlane"},
+            "b": {"occurrence": "LeafB", "face": [20, 15, 3]},
+            "name": "AlignStopPlane"
+        }),
+    );
+    assert_eq!(r_cplane["conflicts"], json!([]));
+    assert!(near(place(&s, "LeafB", knuckle_pt), knuckle_pt));
+    run(&mut s, "joint.delete", json!({"joint": "AlignStopPlane"}));
+
+    // 4. Construction axis constraint along the knuckle line.
+    run(
+        &mut s,
+        "construct.axis.two_points",
+        json!({
+            "a": {"point": [0, 33, 4]},
+            "b": {"point": [40, 33, 4]},
+            "name": "KnuckleAxis"
+        }),
+    );
+    let r_caxis = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "parallel",
+            "a": {"axis": "KnuckleAxis"},
+            "b": {"occurrence": "LeafB", "circle": [1, 37, 4]},
+            "name": "AlignKnuckleAxis"
+        }),
+    );
+    assert_eq!(r_caxis["conflicts"], json!([]));
+    assert!(near(place(&s, "LeafB", knuckle_pt), knuckle_pt));
+    run(&mut s, "joint.delete", json!({"joint": "AlignKnuckleAxis"}));
+
+    // 5. Incompatible rigid joint to YZ: existing Hinge is NOT broken; the new joint is the conflict.
+    let r_bad = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "rigid",
+            "a": {"plane": "YZ"},
+            "b": {"occurrence": "LeafB", "face": [20, 15, 3]},
+            "name": "LockYZ"
+        }),
+    );
+    assert!(near(place(&s, "LeafB", knuckle_pt), knuckle_pt));
+    let conflicts: Vec<&str> = r_bad["conflicts"].as_array().into_iter().flatten().filter_map(|c| c["name"].as_str()).collect();
+    assert_eq!(conflicts, ["LockYZ"]);
+    run(&mut s, "joint.delete", json!({"joint": "LockYZ"}));
+
+    // 6. A datum joint competing with a chain two joints deep (grounded LeafA, hinge, rigid
+    //    mount): the chain keeps its part at any depth, and the datum joint is the loop that
+    //    conflicts, not the chain's joints.
+    part(&mut s, "LeafC", [10.0, 40.0, 0.0]);
+    pin(&mut s, "rigid", "Mount", "LeafB", "LeafC", Vec3::new(11.0, 41.0, 1.0), Vec3::X);
+    let mount_pt = Vec3::new(11.0, 41.0, 1.0);
+    let r_deep = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "rigid",
+            "a": {"plane": "YZ"},
+            "b": {"occurrence": "LeafC", "point": [11, 41, 1], "z": [1, 0, 0]},
+            "name": "LockLeafC"
+        }),
+    );
+    assert!(near(place(&s, "LeafB", knuckle_pt), knuckle_pt), "{:?}", place(&s, "LeafB", knuckle_pt));
+    assert!(near(place(&s, "LeafC", mount_pt), mount_pt), "the chain keeps LeafC: {:?}", place(&s, "LeafC", mount_pt));
+    let conflicts: Vec<&str> = r_deep["conflicts"].as_array().into_iter().flatten().filter_map(|c| c["name"].as_str()).collect();
+    assert_eq!(conflicts, ["LockLeafC"], "{r_deep}");
+}
+
+/// Without a datum joint, the spanning tree keeps its pre-change order: where a root joint and a
+/// grounded occurrence's joint both reach a part at the same depth, the root's places it (the
+/// seeds were the root first) and the grounded joint is the conflict. Datum joints reorder the
+/// seeds; plain point snaps must not.
+#[test]
+fn root_versus_grounded_joint_keeps_the_pre_change_tree() {
+    let mut s = two_cubes();
+    let origin = |occurrence: Value, p: [i64; 3]| json!({"occurrence": occurrence, "point": p, "z": [0, 0, 1], "x": [1, 0, 0]});
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "flip": true, "name": "RootPin", "a": origin(json!(0), [30, 0, 0]), "b": origin("B".into(), [0, 0, 0])}),
+    );
+    let r = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "flip": true, "name": "GroundPin", "a": origin("A".into(), [60, 0, 0]), "b": origin("B".into(), [0, 0, 0])}),
+    );
+    // RootPin is B's parent, as before: B sits at (30, 0, 0), and the grounded joint conflicts.
+    assert!(near(place(&s, "B", Vec3::new(5.0, 5.0, 5.0)), Vec3::new(35.0, 5.0, 5.0)), "{:?}", place(&s, "B", Vec3::new(5.0, 5.0, 5.0)));
+    let conflicts: Vec<&str> = r["conflicts"].as_array().into_iter().flatten().filter_map(|c| c["name"].as_str()).collect();
+    assert_eq!(conflicts, ["GroundPin"], "{r}");
+}
+
+#[test]
+fn edit_joint_side_to_datum_anchors_at_other_side() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "PartA"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "PartB", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [50, 80, 10]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let part_a = occ(&s, "PartA");
+    let part_b = occ(&s, "PartB");
+    run(&mut s, "occurrence.ground", json!({"occurrence": part_a, "grounded": true}));
+    let r = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "planar",
+            "name": "J1",
+            "a": {"occurrence": part_a, "face": [10, 10, 10]},
+            "b": {"occurrence": part_b, "face": [60, 90, 10]}
+        }),
+    );
+    assert_eq!(r["conflicts"], json!([]));
+    // The mate places B's bottom centre on A's top centre: the anchor sits at (10, 10, 10).
+    assert!(
+        near(place(&s, "PartB", Vec3::new(60.0, 90.0, 10.0)), Vec3::new(10.0, 10.0, 10.0)),
+        "{:?}",
+        place(&s, "PartB", Vec3::new(60.0, 90.0, 10.0))
+    );
+
+    // Edit J1: replace side a with origin plane XY without pick point
+    let r_edit = run(
+        &mut s,
+        "joint.edit",
+        json!({
+            "joint": "J1",
+            "a": {"plane": "XY"}
+        }),
+    );
+    assert_eq!(r_edit["conflicts"], json!([]));
+    // The edited side anchors where side b sits now, projected onto the plane: the anchor keeps
+    // x=10, y=10 and the bottom face drops from z=10 to z=0 instead of jumping to the world origin.
+    assert!(
+        near(place(&s, "PartB", Vec3::new(60.0, 90.0, 10.0)), Vec3::new(10.0, 10.0, 0.0)),
+        "{:?}",
+        place(&s, "PartB", Vec3::new(60.0, 90.0, 10.0))
+    );
+}

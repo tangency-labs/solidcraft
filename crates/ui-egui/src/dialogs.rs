@@ -1225,6 +1225,7 @@ impl Dialog {
                     && (i.multi || i.items.is_empty())
                     && (planar_ok || i.accept & FACES != 0 || !matches!(sel, Sel::Face { .. }))
                     && (i.accept != AXIS_PICKS || takes_as_axis(s, sel))
+                    && !i.rejects(sel)
             };
             if let Some(inp) = d.inputs.iter_mut().find(|i| takes(i)) {
                 if matches!(d.kind, Kind::Fillet { .. }) {
@@ -1600,7 +1601,6 @@ impl Dialog {
                 _ => None,
             };
         }
-        // Features are also picked on the canvas: a face stands for the feature that made it.
         if inp.accept == selection::FEATURES {
             return match h {
                 Hit::Face { body, index, point } => feature_of_face(s, body, *index, *point).map(|id| Sel::Feature { id }),
@@ -1616,10 +1616,12 @@ impl Dialog {
         if let Some(sel) = self.circle_centre_pick(s, inp, h, snap) {
             return Some(sel);
         }
-        // The snap looked the face under the cursor up already, planar or not.
         let sel = inp.accepts(h, s.active_sketch, |body, face| {
             snap.and_then(|f| f.planar(body, face)).unwrap_or_else(|| planar_face(s, body, face).is_some())
         })?;
+        if inp.rejects(&sel) {
+            return None;
+        }
         (inp.accept != AXIS_PICKS || takes_as_axis(s, &sel)).then_some(sel)
     }
 
@@ -1761,6 +1763,9 @@ impl Dialog {
     pub fn pick(&mut self, s: &Session, sel: Sel) {
         self.awaiting_pick = false;
         self.pick_refused = None;
+        if self.active_input().is_some_and(|i| i.rejects(&sel)) {
+            return;
+        }
         if self.take_extrude_target(s, &sel) {
             return;
         }
@@ -1775,17 +1780,12 @@ impl Dialog {
             self.profile_selection_changed = true;
         }
         let measure = matches!(self.kind, Kind::Measure { .. });
-        // The chat's picks stay what was clicked: a rim is one edge there, not its pieces. So do
-        // print faces: a click on one takes it out, not the other pieces of its surface in.
         let one = measure || matches!(self.kind, Kind::ChatContext | Kind::SaveMesh(_));
         let sel = if measure { crate::viewport::measurement_selection(s, &sel) } else { sel };
         let chain = matches!(self.kind, Kind::Fillet { chain: true, .. });
         let single =
             if !one && self.active_input().is_some_and(|i| i.multi) { crate::viewport::picked_selection(s, &sel) } else { vec![sel.clone()] };
-        // Tangent chain: an edge brings the edges that continue it smoothly.
         let picked = if chain { fillet_edges(s, &sel, true) } else { single.clone() };
-        // Extrude and revolve take profiles of one sketch; both lofts take sections
-        // from several sketches and must keep their pick order.
         if let Sel::Profile { sketch, .. } = &sel
             && !matches!(self.kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. }))
             && let Some(inp) = self.inputs.get_mut(self.active)
@@ -1808,7 +1808,6 @@ impl Dialog {
         }
         inp.toggle(picked);
         self.focus = true;
-        // A measurement is between two items: a third pick starts over from the last one.
         if matches!(self.kind, Kind::Measure { .. }) && inp.items.len() > 2 {
             let keep = inp.items.split_off(inp.items.len() - 1);
             inp.items = keep;
@@ -1816,9 +1815,6 @@ impl Dialog {
         if !inp.multi && !inp.items.is_empty() && self.active + 1 < self.inputs.len() {
             self.advance();
         }
-        // Move by points or about an axis: once a body is in, go on to the empty From, Point or
-        // Axis (#6170), so the next click picks it instead of another body. Free Move's Pivot is
-        // optional and stays unvisited.
         if let Kind::Move { mode: crate::dialogs_move::ROTATE | crate::dialogs_move::POINT_TO_POINT | crate::dialogs_move::POINT_TO_POSITION, .. } =
             self.kind
             && self.active == 0
@@ -1861,6 +1857,9 @@ impl Dialog {
         }
         let mut accepted = false;
         for x in sels {
+            if inp.rejects(&x) {
+                continue;
+            }
             if takes_components {
                 let occ = match x {
                     Sel::Occurrence { path } if !path.is_empty() => Some(Sel::Occurrence { path }),
