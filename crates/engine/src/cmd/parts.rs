@@ -752,18 +752,29 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     // A pick on a hole's rim also touches its end face: step onto the wall just inside the rim.
     // Each hole's occurrence is found before the part exists, so a pick off every body fails the
     // insert before anything is made.
-    let mut holes = Vec::new();
-    let mut seats: Vec<(u64, Vec3)> = Vec::new();
+    let mut holes: Vec<(Vec3, u64)> = Vec::new();
+    let mut seats: Vec<(u64, HoleWall)> = Vec::new();
     for a in hole_picks(p, cmd)? {
-        let (a, seat) = hole_wall(s, a).unwrap_or((a, a));
-        let host = super::joints::occurrence_at(s, a).ok_or_else(|| bad(cmd, "no body at `at` (pick a hole's rim or wall)"))?;
-        // A rim is drawn as more than one edge, and one click on it picks them all: the picks
-        // of one rim seat one part.
-        if seats.iter().any(|(h, q)| *h == host && (*q - seat).len() < 1e-3) {
-            continue;
+        let wall = hole_wall(s, a).unwrap_or(HoleWall { at: a, seat: a, axis: None, open: true });
+        let host = super::joints::occurrence_at(s, wall.at).ok_or_else(|| bad(cmd, "no body at `at` (pick a hole's rim or wall)"))?;
+        // A rim is drawn as more than one edge, and one click on it picks them all; a hole can
+        // also be picked at both its ends (#12191). The picks of one hole seat one part, at an
+        // open end: seated at a blind hole's floor it would stand on its head in the material.
+        match seats.iter().position(|(h, w)| *h == host && w.same_hole(&wall)) {
+            Some(i) => {
+                if !seats.get(i).is_some_and(|(_, w)| w.open)
+                    && wall.open
+                    && let (Some(seat), Some(hole)) = (seats.get_mut(i), holes.get_mut(i))
+                {
+                    *hole = (wall.at, host);
+                    seat.1 = wall;
+                }
+            }
+            None => {
+                holes.push((wall.at, host));
+                seats.push((host, wall));
+            }
         }
-        seats.push((host, seat));
-        holes.push((a, host));
     }
     let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| part_name(&family, &size, &sh));
     let active = s.active_component;
@@ -850,9 +861,35 @@ fn hole_picks(p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
     }
 }
 
-/// A point on the cylindrical wall of the hole at `a`, a little in from the picked rim, and the
-/// point on the hole's axis level with it (the same for every pick on one rim).
-fn hole_wall(s: &Session, a: Vec3) -> Option<(Vec3, Vec3)> {
+/// Where a pick on a hole's rim seats a part.
+#[derive(Clone, Copy, Debug)]
+struct HoleWall {
+    /// A point on the hole's cylindrical wall, a little in from the picked rim.
+    at: Vec3,
+    /// The point on the hole's axis level with `at` (the same for every pick on one rim).
+    seat: Vec3,
+    /// The hole's axis, when the pick is on a hole.
+    axis: Option<Vec3>,
+    /// The picked rim opens onto air, not onto the floor of a blind hole.
+    open: bool,
+}
+
+impl HoleWall {
+    /// The two picks seat on one hole: at one point, or on one axis line.
+    fn same_hole(&self, other: &HoleWall) -> bool {
+        if (self.seat - other.seat).len() < 1e-3 {
+            return true;
+        }
+        match (self.axis, other.axis) {
+            (Some(a), Some(b)) => a.cross(b).len() < 1e-6 && (other.seat - self.seat).cross(a).len() < 1e-3,
+            _ => false,
+        }
+    }
+}
+
+/// The wall of the hole at `a`, a little in from the picked rim, and whether that rim is an open
+/// end of the hole: just past it along the axis is not the body's material.
+fn hole_wall(s: &Session, a: Vec3) -> Option<HoleWall> {
     // Picks are in world coordinates, including rims on already placed standard parts.
     let st = s.world_state().ok()?;
     let dirs = [Vec3::Z * -1.0, Vec3::Z, Vec3::X, Vec3::X * -1.0, Vec3::Y, Vec3::Y * -1.0];
@@ -865,7 +902,12 @@ fn hole_wall(s: &Session, a: Vec3) -> Option<(Vec3, Vec3)> {
                     let along = v.dot(c.axis);
                     let on_wall = ((v - c.axis * along).len() - c.radius).abs() < 1e-3 && along > c.start && along < c.end;
                     if on_wall {
-                        return Some((q, c.axis_point + c.axis * along));
+                        let axis: Vec3 = c.axis * 1.0;
+                        // The end of the wall nearer the pick, and a point on the axis just past it.
+                        let (end, out) = if along - c.start < c.end - along { (c.start, -1.0) } else { (c.end, 1.0) };
+                        let past = c.axis_point + axis * (end + out * (c.end - c.start).min(1.0) * 0.25);
+                        let open = !matches!(b.body.classify_point(past), Ok(solidcraft_doc::kernel::PointClass::Inside));
+                        return Some(HoleWall { at: q, seat: c.axis_point + axis * along, axis: Some(axis), open });
                     }
                 }
             }
