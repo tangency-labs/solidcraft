@@ -502,6 +502,7 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
             stats: None,
             boundary: None,
             frame: None,
+            owners: None,
         }
     };
     for title_block in [None, Some(solidcraft_geom::title_block::default_block())] {
@@ -579,10 +580,9 @@ fn seeded_edits_and_steps_always_end_at_the_built_scene() {
     }
 }
 
-/// Setting a part as reference evaluates nothing, yet the views of it are out of date: its lines
-/// join the reference parts', so no longer hide what is under them or stop at its own extents.
-#[test]
-fn a_change_of_reference_parts_redraws_the_views() {
+/// Two parts, each a 20 x 20 x 10 box: `Under` at the origin and `Over` moved 10 along X and 10 up, so
+/// they span x 0..30 and z 0..20. The design and `Over`'s occurrence.
+fn under_and_over() -> (Session, u64) {
     let mut design = Session::default();
     let mut part = |name: &str, body: &str| {
         let occurrence = run(&mut design, "component.create", json!({"name": name}))["occurrence"].as_u64().unwrap();
@@ -593,6 +593,14 @@ fn a_change_of_reference_parts_redraws_the_views() {
     part("Under", "BodyUnder");
     let over = part("Over", "BodyOver");
     run(&mut design, "occurrence.move", json!({"occurrence": over, "translate": [10, 0, 10]}));
+    (design, over)
+}
+
+/// Setting a part as reference evaluates nothing, yet the views of it are out of date: its lines
+/// join the reference parts', so no longer hide what is under them or stop at its own extents.
+#[test]
+fn a_change_of_reference_parts_redraws_the_views() {
+    let (design, over) = under_and_over();
     let (mut s, sheet, [front, top]) = front_and_top_of(design);
     let before = settled(&mut s, sheet);
     let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
@@ -655,16 +663,7 @@ fn text_moves_with_its_group() {
 /// part's side, leaves the model's strokes where they were, and goes back with an undo.
 #[test]
 fn a_saved_views_reference_shown_percent_grows_only_what_it_should() {
-    let mut design = Session::default();
-    let mut part = |name: &str, body: &str| {
-        let occurrence = run(&mut design, "component.create", json!({"name": name}))["occurrence"].as_u64().unwrap();
-        run(&mut design, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": body, "operation": "new"}));
-        run(&mut design, "component.activate", json!({"component": 0}));
-        occurrence
-    };
-    part("Under", "BodyUnder");
-    let over = part("Over", "BodyOver");
-    run(&mut design, "occurrence.move", json!({"occurrence": over, "translate": [10, 0, 10]}));
+    let (mut design, over) = under_and_over();
     run(&mut design, "occurrence.bom_type", json!({"occurrence": over, "bom_type": "reference"}));
     let (mut s, sheet, [_, top]) = front_and_top_of(design);
     let strokes = |scene: &Scene, reference: bool| {
@@ -771,6 +770,7 @@ fn a_views_box_is_what_it_draws() {
             stats: None,
             boundary: Some(boundary),
             frame: None,
+            owners: None,
         };
         let (_, _, objects, _) = assemble(&record, Projection::Third, &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
         let object = objects.iter().find(|o| o.object == 7).unwrap();
@@ -958,7 +958,7 @@ fn overfill(s: &mut Session, view: u64) -> Drawn {
     let items = vec![Item::Stroke { path, closed: false, width_mm: 0.5, pattern: None }];
     let group = Group { object: view, kind: ObjectKind::View, items };
     entry.serial = serial;
-    std::mem::replace(&mut entry.drawn, Drawn { group: Some(group), status: Status::Drawn, stats: None, boundary: None, frame: None })
+    std::mem::replace(&mut entry.drawn, Drawn { group: Some(group), status: Status::Drawn, stats: None, boundary: None, frame: None, owners: None })
 }
 
 /// Each dimension's word is the one inspect uses: read, then lost when its body goes, with why. A
@@ -1134,6 +1134,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
         stats: None,
         boundary: None,
         frame: Some(ViewFrame::new(solidcore_record::Plane::XY, "1:1".parse().unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap()),
+        owners: None,
     };
     let mut assembly = assemble(record, Projection::Third, &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
     let stroke = |to: Vec2| Item::Stroke { path: vec![Seg2::Line { a: Vec2::ZERO, b: to }], closed: false, width_mm: 0.25, pattern: None };
@@ -1369,4 +1370,183 @@ fn a_views_dimensions_swap_with_its_lines() {
     assert_eq!(s.drawing_scenes.projections, projections);
     assert_eq!(bytes_of(group_of(&edited.scene, front)), bytes_of(group_of(&end.scene, front)));
     assert_ne!(bytes_of(group_of(&edited.scene, id)), bytes_of(group_of(&end.scene, id)));
+}
+
+/// The nearest stroke to a point: on a line, on a whole circle from outside and inside, none past
+/// the band or a line's end, the one painted last when two are as near, and a picture passed over.
+#[test]
+fn a_point_finds_the_nearest_stroke_within_the_band() {
+    let stroke = |seg: Seg2| Item::Stroke { path: vec![seg], closed: false, width_mm: 0.5, pattern: None };
+    let circle = Seg2::Arc { center: Vec2::new(0.0, 0.0), radius: 5.0, start: 0.0, sweep: std::f64::consts::TAU };
+    let line = Seg2::Line { a: Vec2::new(10.0, 0.0), b: Vec2::new(10.0, 10.0) };
+    let picture = Item::Picture(Picture { source: 0, rect: Aabb2 { min: Vec2::new(-20.0, -20.0), max: Vec2::new(20.0, 20.0) }, opacity: 1.0 });
+    let items = [picture, stroke(circle), stroke(line), stroke(line)];
+    let near = |x: f64, y: f64, band: f64| nearest_stroke(&items, Vec2::new(x, y), band);
+    let close = |got: Option<(usize, f64)>, at: usize, distance: f64| got.is_some_and(|(a, d)| a == at && (d - distance).abs() < 1e-6);
+    assert!(close(near(5.25, 0.0, 0.5), 1, 0.25), "outside the circle");
+    assert!(close(near(0.0, 4.5, 0.5), 1, 0.5), "inside it, at the band");
+    assert_eq!(near(0.0, 0.0, 0.5), None, "its centre is 5 mm from it, and the picture is no line");
+    assert!(close(near(9.5, 5.0, 1.0), 3, 0.5), "the second of two as near");
+    assert_eq!(near(10.0, 10.75, 0.5), None, "past a line's end");
+    assert!(close(near(10.0, 10.0, 0.0), 3, 0.0), "on it, with no band");
+    assert_eq!(near(f64::NAN, 0.0, 1.0), None);
+}
+
+fn line_under(s: &mut Session, sheet: u64, point: [f64; 2], band: f64) -> Value {
+    let reply = run(s, "drawing.scene.line", json!({"sheet": ids::encode(sheet), "point_mm": point, "band_mm": band}));
+    let schema = output_schema_for::<crate::schema::drawing_scene::SheetLineResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    reply["line"].clone()
+}
+
+/// The front view at 1:2 fills 125..175 x 145..155 round (150, 150): a press near its top edge names
+/// the edge, 0.2 mm away; one in its middle is 5 mm from any line; a moved view takes its lines along
+/// and draws nothing; a view that can't be drawn has no lines. Nothing is evaluated, or changed.
+#[test]
+fn a_press_names_the_line_under_it() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    let evaluations = s.evaluations;
+    let doc = s.doc.clone();
+    let line = line_under(&mut s, sheet, [150.0, 155.2], 0.5);
+    assert_eq!(
+        (&line["view"], &line["body"], &line["occurrence"], &line["reference"]),
+        (&json!(ids::encode(front)), &json!("Block"), &json!([]), &json!(false)),
+        "{line}"
+    );
+    assert_eq!(line["source"]["kind"], "edge", "{line}");
+    assert!((line["distance_mm"].as_f64().unwrap() - 0.2).abs() < 1e-6, "{line}");
+    assert_eq!(line_under(&mut s, sheet, [150.0, 150.0], 0.5), Value::Null);
+    let wide = line_under(&mut s, sheet, [150.0, 150.0], 6.0);
+    assert!((wide["distance_mm"].as_f64().unwrap() - 5.0).abs() < 1e-6, "{wide}");
+    assert_eq!(line_under(&mut s, sheet, [10.0, 10.0], 1.0), Value::Null);
+    let default_band = run(&mut s, "drawing.scene.line", json!({"sheet": ids::encode(sheet), "point_mm": [150.0, 155.9]}));
+    assert_eq!(default_band["line"]["view"], json!(ids::encode(front)), "1 mm by default: {default_band}");
+    assert_eq!(s.evaluations, evaluations);
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+
+    let projections = s.drawing_scenes.projections;
+    line_under(&mut s, sheet, [150.0, 155.2], 0.5);
+    assert_eq!(s.drawing_scenes.projections, projections, "a press draws nothing");
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"place": {"at": [160.0, 150.0]}}}));
+    assert_eq!(line_under(&mut s, sheet, [160.0, 155.2], 0.5)["view"], json!(ids::encode(front)));
+    assert_eq!(s.drawing_scenes.projections, projections, "nor does a move");
+
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded_visible"}}));
+    assert_eq!(line_under(&mut s, sheet, [160.0, 220.0], 40.0), Value::Null);
+    for band in [json!(-1.0), json!("wide"), Value::Null] {
+        assert!(s.execute("drawing.scene.line", &json!({"sheet": ids::encode(sheet), "point_mm": [0.0, 0.0], "band_mm": band})).is_err(), "{band}");
+    }
+    assert!(s.execute("drawing.scene.line", &json!({"sheet": "no such", "point_mm": [0.0, 0.0]})).is_err());
+}
+
+/// A press names the part a line is of, and says when that part is reference: part `over`'s top edge
+/// lies at z 20 and x 10..30, drawn with the percent taking it in.
+#[test]
+fn a_press_names_the_part_and_its_role() {
+    let (design, over) = under_and_over();
+    let (mut s, sheet, [front, _]) = front_and_top_of(design);
+    // The two parts span x 0..30 and z 0..20, round (150, 150) at 1:2: the edge at y 155.
+    let line = line_under(&mut s, sheet, [152.0, 155.1], 0.5);
+    assert_eq!((&line["occurrence"], &line["reference"], &line["body"]), (&json!([over]), &json!(false), &json!("BodyOver")), "{line}");
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": over, "bom_type": "reference"}));
+    run(&mut s, "drawing.open", drawing);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"reference_shown_percent": 100}}));
+    // The extents are now the part under it, x 0..20 and z 0..10, so z 20 is at y 157.5.
+    let line = line_under(&mut s, sheet, [155.0, 157.6], 0.5);
+    assert_eq!((&line["occurrence"], &line["reference"]), (&json!([over]), &json!(true)), "{line}");
+}
+
+/// A press names what drew a line, on each placement of a part placed twice: a round bar of radius
+/// 10 and height 20 along Z, the second 40 along X. Its outline is the bar's silhouette, by the face
+/// it lies on, and its top is an edge, each through the occurrence pressed. At 1:2 round (150, 150)
+/// the two span x -10..50 and z 0..20: the far sides at x 135 and 165, the tops at y 155.
+#[test]
+fn a_press_names_what_drew_the_line_on_each_placement() {
+    let mut design = Session::default();
+    let first = run(&mut design, "component.create", json!({"name": "Bar"}))["occurrence"].as_u64().unwrap();
+    run(&mut design, "solid.cylinder", json!({"radius": 10, "height": 20, "base": [0, 0, 0], "axis": "Z", "body_name": "Round", "operation": "new"}));
+    run(&mut design, "component.activate", json!({"component": 0}));
+    let second = run(&mut design, "occurrence.copy", json!({"component": "Bar", "translate": [40, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let (mut s, sheet, _) = front_and_top_of(design);
+    let side = |s: &Session, x: f64| {
+        let state = s.model.state();
+        let body = state.body("Round").unwrap();
+        solidcraft_doc::appearance::face_index_at(body, solidcore_record::Vec3::new(x, 0.0, 10.0)).unwrap()
+    };
+    let (left, right) = (side(&s, -10.0), side(&s, 10.0));
+    for (x, occurrence, face) in [(135.1, first, left), (164.9, second, right)] {
+        let line = line_under(&mut s, sheet, [x, 150.0], 0.5);
+        assert_eq!((&line["body"], &line["occurrence"]), (&json!("Round"), &json!([occurrence])), "{line}");
+        assert_eq!((&line["source"]["kind"], &line["source"]["face"]), (&json!("silhouette"), &json!(face)), "{line}");
+    }
+    let edges = {
+        let state = s.model.state();
+        state.body("Round").unwrap().mesh().edges.clone()
+    };
+    for (x, occurrence) in [(140.0, first), (160.0, second)] {
+        let line = line_under(&mut s, sheet, [x, 155.1], 0.5);
+        assert_eq!((&line["occurrence"], &line["source"]["kind"]), (&json!([occurrence]), &json!("edge")), "{line}");
+        let edge = edges.get(line["source"]["edge"].as_u64().unwrap() as usize).unwrap();
+        assert!(edge.iter().all(|p| (p.z - 20.0).abs() < 1e-9), "the top rim: {line}");
+    }
+}
+
+/// A view's pictures come before its strokes in its group: with `Over` as a shaded reference part over
+/// `Under`'s visible lines, a press on `Under`'s top edge (z 10, at y 152.5) still names `Under`, and
+/// the same edge as with `Over` left out, which has no picture.
+#[test]
+fn a_press_lines_up_with_the_strokes_behind_a_views_pictures() {
+    let (design, over) = under_and_over();
+    let (mut s, sheet, [front, _]) = front_and_top_of(design);
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": over, "bom_type": "reference"}));
+    run(&mut s, "drawing.open", drawing);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"reference_style": "shaded", "reference_shown_percent": 100}}));
+    let scene = built(&s, sheet).scene;
+    let items = &scene.groups.iter().find(|g| g.object == front).unwrap().items;
+    assert!(matches!(items.first(), Some(Item::Picture(_))), "the shaded part's picture comes first");
+    let line = line_under(&mut s, sheet, [148.0, 152.6], 0.5);
+    assert_eq!((&line["body"], &line["reference"]), (&json!("BodyUnder"), &json!(false)), "{line}");
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"hide": [[over]]}}));
+    let alone = line_under(&mut s, sheet, [148.0, 152.6], 0.5);
+    assert_eq!((&alone["body"], &alone["source"]), (&line["body"], &line["source"]), "{line} {alone}");
+}
+
+/// A view the sheet leaves out, its lines past a paper scene's records, has no line to press, though
+/// its own lines run under the point: the page doesn't show them.
+#[test]
+fn a_press_on_a_view_the_sheet_leaves_out_names_no_line() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    assert_eq!(line_under(&mut s, sheet, [150.0, 155.2], 0.5)["view"], json!(ids::encode(front)));
+    // Too many records, with the place, frame and owners the view was drawn with.
+    let real = overfill(&mut s, front);
+    let drawn = &mut s.drawing_scenes.views.get_mut(&front).unwrap().drawn;
+    (drawn.boundary, drawn.frame, drawn.owners) = (real.boundary, real.frame, real.owners);
+    assert_eq!(line_under(&mut s, sheet, [150.0, 150.0], 0.5), Value::Null);
+    let status = extract(&mut s, sheet).unwrap().views.into_iter().find(|v| v.view == front).map(|v| v.status);
+    assert!(matches!(status, Some(Status::Failed(_))), "{status:?}");
+}
+
+/// In every style, a view's boundary among the scene's objects is the one inspect says, reference
+/// parts and percent included, whether or not the view can be drawn yet (E7a).
+#[test]
+fn a_views_boundary_in_the_scene_is_its_boundary_in_every_style() {
+    let (design, over) = under_and_over();
+    let (mut s, sheet, [front, _]) = front_and_top_of(design);
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": over, "bom_type": "reference"}));
+    run(&mut s, "drawing.open", drawing);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"reference_shown_percent": 50}}));
+    for style in ["visible", "visible_hidden", "shaded", "shaded_visible", "shaded_visible_hidden"] {
+        run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"visual_style": style}}));
+        let inspected = run(&mut s, "drawing.view.inspect", json!({"view": ids::encode(front)}));
+        let corner = |at: &str| Vec2::new(inspected["boundary_mm"][at][0].as_f64().unwrap(), inspected["boundary_mm"][at][1].as_f64().unwrap());
+        let objects = built(&s, sheet).objects;
+        let boundary = objects.iter().find(|o| o.object == front).and_then(|o| o.boundary_mm).unwrap();
+        assert!((boundary.min - corner("min")).len() < 1e-9 && (boundary.max - corner("max")).len() < 1e-9, "{style}: {boundary:?} {inspected}");
+    }
 }

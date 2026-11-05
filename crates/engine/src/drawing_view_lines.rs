@@ -192,10 +192,16 @@ fn within(a: Vec2, b: Vec2, area: &Aabb2) -> Option<(Vec2, Vec2)> {
     inside.then(|| (a + (b - a) * lo, a + (b - a) * hi))
 }
 
-/// `lines` as the paper scene group of the view `object`, in line `group`: each piece one stroke,
-/// closed when it ends where it starts. Painted from the bottom: hidden pieces, dashed hidden lines,
-/// then reference parts' visible ones as thin lines, then the model's as visible lines.
+/// `lines` as the paper scene group of the view `object`, in line `group` ([`paper_lines`]).
 pub fn paper_group(lines: &Lines, object: u64, group: LineGroup) -> Group {
+    paper_lines(lines, object, group).0
+}
+
+/// `lines` as the paper scene group of the view `object`, in line `group`, and the index in `lines`
+/// of the line each stroke draws: each piece one stroke, closed when it ends where it starts. Painted
+/// from the bottom: hidden pieces, dashed hidden lines, then reference parts' visible ones as thin
+/// lines, then the model's as visible lines.
+pub fn paper_lines(lines: &Lines, object: u64, group: LineGroup) -> (Group, Vec<usize>) {
     let stroke = |piece: &Piece, width_mm: f64| {
         let path: Vec<Seg2> = piece.path.iter().copied().filter_map(drawable).collect();
         let ends_meet = path.first().zip(path.last()).is_some_and(|(first, last)| last.end().dist(first.start()) <= EPS);
@@ -206,8 +212,9 @@ pub fn paper_group(lines: &Lines, object: u64, group: LineGroup) -> Group {
         (!path.is_empty()).then_some(Item::Stroke { path, closed, width_mm, pattern })
     };
     let strokes = |reference: bool, visibility: Visibility, width_mm: f64| {
-        let pieces = lines.lines.iter().filter(move |l| l.reference == reference).flat_map(|l| &l.pieces);
-        pieces.filter(move |p| p.visibility == visibility).filter_map(move |p| stroke(p, width_mm))
+        let pieces = lines.lines.iter().enumerate().filter(move |(_, l)| l.reference == reference);
+        let pieces = pieces.flat_map(|(at, l)| l.pieces.iter().map(move |p| (at, p)));
+        pieces.filter(move |(_, p)| p.visibility == visibility).filter_map(move |(at, p)| Some((stroke(p, width_mm)?, at)))
     };
     let hidden_mm = LineKind::Hidden.width_mm(group);
     let hidden = strokes(true, Visibility::Hidden, hidden_mm).chain(strokes(false, Visibility::Hidden, hidden_mm));
@@ -216,7 +223,8 @@ pub fn paper_group(lines: &Lines, object: u64, group: LineGroup) -> Group {
         Visibility::Visible,
         LineKind::Visible.width_mm(group),
     ));
-    Group { object, kind: ObjectKind::View, items: hidden.chain(visible).collect() }
+    let (items, drew) = hidden.chain(visible).unzip();
+    (Group { object, kind: ObjectKind::View, items }, drew)
 }
 
 /// `seg`, or nothing where it has no length to draw: a line whose ends are one point. An arc too
@@ -483,6 +491,7 @@ mod tests {
                 LineKind::Visible.width_mm(LineGroup::DEFAULT)
             ]
         );
+        assert_eq!(paper_lines(&lines, 7, LineGroup::DEFAULT).1, [1, 0, 2], "each stroke says which line it draws");
     }
 
     /// Hidden pieces come first, the reference parts' and then the model's, whatever order they were
@@ -523,6 +532,7 @@ mod tests {
             (1, false, LineKind::Visible.width_mm(LineGroup::DEFAULT), None),
         ];
         assert_eq!(strokes, want);
+        assert_eq!(paper_lines(&lines, 7, LineGroup::DEFAULT).1, [1, 0, 0, 1, 0], "each stroke's line, in paint order");
         let scene = solidcraft_geom::paper::Scene::new(Vec2::new(420.0, 297.0), vec![group]);
         assert!(scene.validate().is_ok());
     }

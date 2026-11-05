@@ -9,7 +9,7 @@ use solidcraft_geom::paper::ObjectKind;
 
 use super::Point2;
 use super::drawing_sheet::sheet_ref;
-use super::drawing_view::{BoxResult, LinesStatsResult, paper_scene_schema};
+use super::drawing_view::{BoxResult, LineSourceResult, LinesStatsResult, paper_scene_schema};
 use crate::drawing_scene::{SheetObject, ViewState};
 
 /// Draw one sheet of the open drawing. Read-only.
@@ -122,6 +122,49 @@ pub struct HitResult {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SheetHitResult {
     pub hit: Option<HitResult>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// The line under a point of one sheet of the open drawing. Read-only.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct SheetLineParams {
+    /// The sheet, by id or name.
+    #[serde(deserialize_with = "sheet_ref")]
+    pub sheet: String,
+    /// The point, in paper millimetres from the sheet's lower-left corner.
+    pub point_mm: Point2,
+    /// How far from a line the point may be and still name it, in paper millimetres: 0 or more (1
+    /// when not given).
+    #[serde(default = "one_mm")]
+    pub band_mm: f64,
+}
+
+fn one_mm() -> f64 {
+    1.0
+}
+
+/// The line a point names: its view, what drew it in `drawing.view.snapshot`'s words, and how far
+/// the point is from it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct LineHitResult {
+    pub view: String,
+    /// The occurrences that place its body, from the design's root.
+    pub occurrence: Vec<u64>,
+    /// Its body's name in its definition.
+    pub body: String,
+    /// Whether the body is a reference part.
+    pub reference: bool,
+    pub source: LineSourceResult,
+    pub distance_mm: f64,
+}
+
+/// What `drawing.scene.line` returns: the line, or null when the point names none.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetLineResult {
+    pub line: Option<LineHitResult>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
