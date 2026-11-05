@@ -608,22 +608,25 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     }
     // Two sides: the second distance gets its own arrow, the other way from the first side.
     if let (Kind::Extrude { direction: crate::dialogs::TWO_SIDES | crate::dialogs::TWO_SIDES_REVERSED, distance2, .. }, Some(n)) = (&mut d.kind, dir)
-        && let Some(l2) = crate::length_input::eval(&app.session.doc, distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
-        drag_arrow(
-            &app.session.doc,
+        // Distance 2 stays on the side Direction gives it, whatever the sign of Distance 1. Only
+        // a reach computed from the model (To Object, Through All) sends it the other way.
+        let n2 = if sign < 0.0 { n } else { -n };
+        let before = distance2.clone();
+        // While its text does not evaluate (cleared, or a `-` typed first) there is no arrow,
+        // but the box stays below the base so the typing can be finished there.
+        let ts = crate::length_input::eval(&app.session.doc, distance2, ValueKind::Length).ok().filter(|v| v.is_finite()).and_then(|l2| {
+            drag_arrow(&app.session.doc, ui, painter, proj, base, bs, n2, l2, true, egui::Id::unique("sc_manipulator2"), half_height, 0.0, distance2)
+        });
+        value_box_in(
             ui,
-            painter,
-            proj,
-            base,
-            bs,
-            -(n * sign),
-            l2,
-            true,
-            egui::Id::unique("sc_manipulator2"),
-            half_height,
-            0.0,
+            (egui::Id::unique("sc_canvas_area2"), egui::Id::unique("sc_canvas_value2")),
+            "Distance 2",
             distance2,
+            (ts.unwrap_or(bs + vec2(16.0, 14.0)) + vec2(14.0, 8.0), egui::Align2::LEFT_TOP),
+            *distance2 != before,
+            false,
+            box_place(app, proj),
         );
     }
     // A chamfer of two distances: Distance 2 gets its own arrow along the other face.

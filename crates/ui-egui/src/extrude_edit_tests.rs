@@ -597,6 +597,49 @@ fn two_sides_with_all_shows_distance_2_and_reverse_swaps_the_sides() {
     assert_eq!(extent(&h), e);
 }
 
+/// Two Sides with a negative Distance 1: its side turns over, but Distance 2 stays where Direction
+/// puts it, and has its own value box like Distance 1.
+#[test]
+fn two_sides_second_arrow_stays_put_when_the_first_distance_turns_negative() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Disc"})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[10,10],"radius":2})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"sketch":"Disc","distance":"-5 mm","distance2":"3 mm","name":"Depth"})).unwrap();
+    h.frames(4);
+    open(&mut h);
+    assert!(h.widget("Distance 2").is_some(), "Two Sides shows the second side's distance");
+    let centre = h.at(&json!({"world":[10,10,0]})).unwrap()[1] as f32;
+    let tips = || (crate::scenario::handle_at("arrow").unwrap().y - centre, crate::scenario::handle_at("arrow2").unwrap().y - centre);
+    let (first, second) = tips();
+    assert!(first > 0.0 && second > 0.0, "the first arrow turned below the sketch, the second stayed below it: {first} {second}");
+}
+
+/// Distance 2's box in the view stays while its text does not evaluate, so a cleared box or a
+/// `-` typed first can be finished there.
+#[test]
+fn two_sides_second_value_box_stays_while_its_text_is_incomplete() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Disc"})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[10,10],"radius":2})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"sketch":"Disc","distance":"5 mm","distance2":"3 mm","name":"Depth"})).unwrap();
+    h.frames(4);
+    open(&mut h);
+    let area = || egui::Id::unique("sc_canvas_area2");
+    assert!(h.ctx.memory(|m| m.area_rect(area())).is_some(), "Distance 2's box in the view");
+    for text in ["-", ""] {
+        let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Extrude { distance2, .. }, .. }) = &mut h.app.dialog else {
+            panic!("extrude dialog")
+        };
+        *distance2 = text.into();
+        h.frames(3);
+        assert!(h.ctx.read_response(egui::Id::unique("sc_canvas_value2")).is_some(), "Distance 2's box went away at {text:?}");
+    }
+}
+
 /// Without value boxes in the view (Preferences, #9479), nothing covers the model: the command
 /// window's Distance takes the keyboard instead, its text selected, and the arrow still drags it.
 #[test]
