@@ -2292,7 +2292,7 @@ fn occurrence_sizes(s: &Session) -> std::collections::HashMap<u64, f64> {
         return v;
     }
     let model = s.model.state();
-    let world = s.world_state();
+    let Ok(world) = s.world_state() else { return std::collections::HashMap::new() };
     let mut boxes: std::collections::HashMap<u64, Aabb3> = std::collections::HashMap::new();
     for (name, _, path, _) in s.doc.body_frames(&model) {
         let Some(b) = world.body(&name) else { continue };
