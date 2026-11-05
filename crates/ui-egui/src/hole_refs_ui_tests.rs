@@ -162,6 +162,11 @@ fn a_hole_is_placed_by_its_distance_from_a_plane_or_an_axis() {
     set(&mut h, "Reference 1", Sel::Axis { name: "Y".into() });
     type_into(&mut h, "dialog:Distance 1", "6 mm");
     assert!((place(&h).x - 6.0).abs() < 1e-6, "the hole moved 6 mm from the axis: {:?}", place(&h));
+    // A straight sketch line is not a reference: it would show a distance that moves nothing.
+    let line = crate::viewport::Hit::SketchCurve { sketch: 1, id: "l".into(), straight: true, point: Vec3::ZERO };
+    let d = h.app.dialog.as_mut().unwrap();
+    d.active = d.inputs.iter().position(|i| i.label == "Reference 2").unwrap();
+    assert!(d.candidate_on(&h.app.session, &line, None).is_none(), "a sketch line is offered as a reference");
 }
 
 /// #10693: a measured distance reads at the document's precision, while OK still sends the
