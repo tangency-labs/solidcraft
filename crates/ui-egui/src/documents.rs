@@ -687,15 +687,10 @@ fn dirty(app: &SolveApp, i: usize) -> bool {
 }
 
 /// A tab's name: the file a saved design was opened or saved as (without its extension), so a
-/// Save As shows the new name; an unsaved design keeps its design name (#7267).
+/// Save As shows the new name; an unsaved design, or one renamed since it was saved, shows its
+/// design name. The Browser's top row shows the same name (#7267).
 fn tab_name(session: &Session) -> String {
-    session
-        .path
-        .as_deref()
-        .and_then(|p| std::path::Path::new(p).file_stem())
-        .map(|n| n.to_string_lossy().into_owned())
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| session.doc.name.clone())
+    session.save_as_name()
 }
 
 /// Tab names (with an unsaved-changes flag), in order.

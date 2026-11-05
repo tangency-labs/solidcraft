@@ -1022,3 +1022,25 @@ fn hiding_or_showing_body_or_sketch_updates_row_dimming() {
     h.settle();
     assert!(!body_hidden(&h, "One"));
 }
+
+/// #7267: the design's top row is named after its file, like its tab, even when the file was
+/// renamed away from the name stored in the design; a rename since the last save shows at once.
+#[test]
+fn the_top_row_follows_the_file_name_like_the_tab() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("component.rename", json!({"component": 0, "name": "Plate"})).unwrap();
+    h.app.session.mark_saved();
+    h.settle();
+    assert!(handle_at("row:Plate").is_some(), "an unsaved design shows its own name");
+    // The file was saved as one name and renamed on disk: the document itself is unchanged.
+    h.app.session.path = Some("parts/Plate rev C.solidcraft".into());
+    h.settle();
+    assert!(handle_at("row:Plate rev C").is_some(), "the top row shows the file's name");
+    assert!(handle_at("row:Plate").is_none(), "not the name stored in the design");
+    assert_eq!(crate::documents::tabs_info(&h.app)[0].0, "Plate rev C", "the tab shows the same name");
+    h.app.run("component.rename", json!({"component": 0, "name": "Lid"})).unwrap();
+    h.settle();
+    assert!(handle_at("row:Lid").is_some(), "a rename since the last save shows on the top row");
+    assert_eq!(crate::documents::tabs_info(&h.app)[0].0, "Lid");
+}

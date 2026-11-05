@@ -1422,7 +1422,8 @@ fn finish_browser(app: &mut SolveApp, ui: &mut egui::Ui, mut acts: Actions) {
 
 fn component_name(app: &SolveApp, id: u64) -> String {
     if id == 0 {
-        return app.session.doc.name.clone();
+        // The design's top row names it the way its tab does: after the file (#7267).
+        return app.session.save_as_name();
     }
     let doc = &app.session.doc;
     let name = doc.components.iter().find(|c| c.id == id).map(|c| c.name.clone()).unwrap_or_default();
