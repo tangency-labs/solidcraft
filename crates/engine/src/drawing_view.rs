@@ -280,15 +280,38 @@ pub fn sheet<'a>(drawing: &'a Drawing, id: u64, cmd: &str) -> Result<&'a Sheet> 
     drawing.sheets.iter().find(|s| s.id == id).map(|s| &**s).ok_or_else(|| bad(cmd, format!("no sheet {}", ids::encode(id))))
 }
 
-/// Whether a view `placed` on `sheet` leaves its drawing space ([`Sheet::drawing_space`]), sides
-/// included, or lies over its title block: [`outside`]'s rule.
+/// Where a sheet's views belong: inside `space` and off `block`. One rule for the views [`outside`]
+/// lists and the scale a view is fitted at.
+#[derive(Clone, Copy, Debug)]
+pub struct Room {
+    pub space: Aabb2,
+    pub block: Option<Aabb2>,
+}
+
+impl Room {
+    /// `sheet`'s: its drawing space ([`Sheet::drawing_space`]) and its title block.
+    pub fn on(sheet: &Sheet, cmd: &str) -> Result<Room> {
+        let space = sheet.drawing_space().map_err(|e| bad(cmd, e.to_string()))?;
+        let block = sheet.title_block_outline().map_err(|e| bad(cmd, e.to_string()))?;
+        Ok(Room { space, block })
+    }
+
+    /// Whether `boundary` is off the block: drawn up to it, a side on its outline, it is.
+    pub fn clear_of_block(&self, boundary: &Aabb2) -> bool {
+        self.block.is_none_or(|block| !block.inflated(-EPS).overlaps(boundary))
+    }
+
+    /// Whether `boundary` is where a view belongs. Drawn up to the border, its sides on it, it is
+    /// inside: the margin takes rounding.
+    fn holds(&self, boundary: &Aabb2) -> bool {
+        let space = self.space.inflated(EPS);
+        space.contains(boundary.min) && space.contains(boundary.max) && self.clear_of_block(boundary)
+    }
+}
+
+/// Whether a view `placed` on `sheet` isn't where its [`Room`] says: [`outside`]'s rule.
 pub fn leaves(sheet: &Sheet, placed: &OnSheet, cmd: &str) -> Result<bool> {
-    // A view drawn up to the border, its sides on it, is inside: the margin takes rounding.
-    let space = sheet.drawing_space().map_err(|e| bad(cmd, e.to_string()))?.inflated(EPS);
-    // A view drawn up to the block, a side on its outline, is clear of it.
-    let block = sheet.title_block_outline().map_err(|e| bad(cmd, e.to_string()))?.map(|outline| outline.inflated(-EPS));
-    let over_block = block.is_some_and(|block| block.overlaps(&placed.boundary));
-    Ok(over_block || !(space.contains(placed.boundary.min) && space.contains(placed.boundary.max)))
+    Ok(!Room::on(sheet, cmd)?.holds(&placed.boundary))
 }
 
 #[cfg(test)]
