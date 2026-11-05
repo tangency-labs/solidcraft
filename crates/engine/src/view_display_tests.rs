@@ -322,3 +322,26 @@ fn infinite_line_visibility_modes_control_reference_and_construction_lines() {
     // 4. AlwaysHide: both infinite construction line and reference line are hidden when inactive
     assert_eq!(drawn(&sk, false, InfiniteLineVisibility::AlwaysHide), vec![ordinary]);
 }
+
+#[test]
+fn infinite_construction_points_stay_visible_and_private_datum_points_stay_hidden() {
+    let mut sk = Sketch::new();
+    let construction = line(&mut sk, 3.);
+    sk.curves[construction].construction = true;
+    sk.curves[construction].infinite = true;
+    let (start, end) = sk.curves[construction].kind.ends().unwrap();
+
+    let link =
+        sk.add_link(LinkKind::Project, LinkSource::Axis { name: "X".into() }, &[LinkGeom::Line(Vec2::new(-100., 0.), Vec2::new(100., 0.))]).unwrap();
+    let datum = sk.link_curves(&link)[0];
+    let (private, shared) = sk.curves[datum].kind.ends().unwrap();
+    let reused = sk.add_line(Vec2::new(100., 0.), Vec2::new(100., 10.), Some(shared), None, None).unwrap();
+    sk.curves[reused].construction = true;
+    sk.curves[reused].infinite = true;
+
+    let visibility = SketchPointVisibility::new(&sk);
+    for i in [start, end, shared] {
+        assert!(visibility.takes(&sk.points[i]), "point {} is editable", sk.points[i].id);
+    }
+    assert!(!visibility.takes(&sk.points[private]));
+}

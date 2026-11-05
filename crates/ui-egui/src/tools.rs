@@ -359,7 +359,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                     }
                     Some(id.clone())
                 }
-                Hit::Axis { name } if axis_ok => sketch_axis_of(app, name).map(str::to_string),
+                Hit::Axis { name } if axis_ok && app.session.active_component == 0 => sketch_axis_of(app, name).map(str::to_string),
                 _ => None,
             });
             // With nothing of the sketch there, a body's edge or vertex is picked (kept as its
@@ -373,7 +373,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                             && matches!(h, Hit::Edge { .. } | Hit::Vertex { .. } | Hit::Axis { .. } | Hit::Plane { .. })
                             && usable_reference(app, h, tool.cmd)
                     })
-                    .find_map(|h| crate::sketch_tools::model_ref(app, h))
+                    .find_map(|h| picked_model_ref(app, h))
                     .map(|r| r.to_string())
             };
             if let Some(id) = entity.or_else(model) {
@@ -444,7 +444,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                         Hit::Edge { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), true, false)),
                         Hit::Vertex { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), false, false)),
                         Hit::Axis { .. } | Hit::Plane { .. } if usable_reference(app, h, tool.cmd) => {
-                            crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), false, false))
+                            picked_model_ref(app, h).map(|r| (r.to_string(), false, false))
                         }
                         _ => None,
                     })
@@ -517,6 +517,20 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     }
 }
 
+/// Origin geometry in the viewport is drawn in world coordinates.
+fn picked_model_ref(app: &SolveApp, hit: &Hit) -> Option<Value> {
+    let mut reference = crate::sketch_tools::model_ref(app, hit)?;
+    let world_datum = match hit {
+        Hit::Axis { name } => origin_axis_direction(name).is_some(),
+        Hit::Plane { name, .. } => matches!(name.as_str(), "XY" | "XZ" | "YZ"),
+        _ => false,
+    };
+    if world_datum && app.session.active_component != 0 {
+        reference["frame"] = json!("world");
+    }
+    Some(reference)
+}
+
 /// Planes must cross the sketch at right angles. Constraints between curves need an axis
 /// that projects to a line in the sketch.
 fn usable_reference(app: &SolveApp, hit: &Hit, cmd: &str) -> bool {
@@ -526,7 +540,10 @@ fn usable_reference(app: &SolveApp, hit: &Hit, cmd: &str) -> bool {
     };
     match hit {
         Hit::Plane { name, .. } => sketch_plane()
-            .zip(crate::dialogs::plane_by_name(&app.session, name))
+            .zip(match name.as_str() {
+                "XY" | "XZ" | "YZ" => solidcore_record::Plane::named(name),
+                _ => crate::dialogs::plane_by_name(&app.session, name),
+            })
             .is_some_and(|(sketch, plane)| plane.normal().dot(sketch.normal()).abs() < 1e-6),
         Hit::Axis { name }
             if matches!(

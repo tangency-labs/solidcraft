@@ -294,13 +294,19 @@ fn resolve_uncached(
                 // A construction axis, by name (#9324), where the timeline so far puts it.
                 _ => crate::eval::construction_axis_in(Some(doc), st, name, 0)?,
             };
-            let o = plane.to_local(o);
-            let d2 = Vec2::new(d.dot(plane.x), d.dot(plane.y));
-            match d2.normalized() {
-                Some(u) if d2.len() > 1e-9 => vec![LinkGeom::Line(o - u * AXIS_HALF, o + u * AXIS_HALF)],
-                _ => vec![LinkGeom::Point(o)],
-            }
+            vec![axis_projection(plane, o, d)]
         }
+        LinkSource::WorldAxis { name, path } => {
+            let inv = world_datum_transform(doc, path)?;
+            let direction = match name.as_str() {
+                "X" => Vec3::X,
+                "Y" => Vec3::Y,
+                "Z" => Vec3::Z,
+                _ => return Err(lost("the world axis")),
+            };
+            vec![axis_projection(plane, crate::apply_point(&inv, Vec3::ZERO), crate::apply_vector(&inv, direction))]
+        }
+        LinkSource::WorldPlane { name, path } => plane_trace(plane, &world_datum_plane(doc, name, path)?).into_iter().collect(),
         LinkSource::SketchAxis { name } => {
             vec![solidcraft_sketch::sketch_axis_geom(name).ok_or_else(|| DocError::Unknown(format!("sketch axis `{name}`")))?]
         }
@@ -1371,6 +1377,29 @@ fn as_spline(pts: &[Vec2], tol: f64) -> Option<LinkGeom> {
         }
     }
     None
+}
+
+fn world_datum_transform(doc: &Document, path: &[u64]) -> Result<crate::Mat> {
+    doc.path_placement(path)
+        .and_then(|(_, frame)| crate::mat_inverse(&frame))
+        .ok_or_else(|| DocError::Invalid("the world datum's sketch placement is missing or invalid".into()))
+}
+
+/// A world origin plane in the frame of the occurrence where the sketch link was authored.
+pub fn world_datum_plane(doc: &Document, name: &str, path: &[u64]) -> Result<Plane> {
+    let plane = Plane::named(name).ok_or_else(|| DocError::Unknown(format!("world plane `{name}`")))?;
+    let inv = world_datum_transform(doc, path)?;
+    Plane::new(crate::apply_point(&inv, plane.origin), crate::apply_vector(&inv, plane.x), crate::apply_vector(&inv, plane.y))
+        .ok_or_else(|| DocError::Invalid("invalid world datum plane".into()))
+}
+
+fn axis_projection(plane: &Plane, origin: Vec3, direction: Vec3) -> LinkGeom {
+    let origin = plane.to_local(origin);
+    let projected = Vec2::new(direction.dot(plane.x), direction.dot(plane.y));
+    match projected.normalized() {
+        Some(unit) if projected.len() > 1e-9 => LinkGeom::Line(origin - unit * AXIS_HALF, origin + unit * AXIS_HALF),
+        _ => LinkGeom::Point(origin),
+    }
 }
 
 /// The line where another plane crosses the sketch plane (None when parallel).

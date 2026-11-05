@@ -664,13 +664,20 @@ impl<'a> SketchPointVisibility<'a> {
         let outputs: std::collections::HashSet<&str> = sk.freeform_offsets.iter().map(|o| o.output.as_str()).collect();
         // A repeated link ID names its first link, as Sketch::link does.
         let mut seen = std::collections::HashSet::new();
-        let text: std::collections::HashSet<&str> = sk
-            .links
-            .iter()
-            .filter(|l| seen.insert(l.id.as_str()))
-            .filter(|l| l.kind == solidcraft_sketch::LinkKind::Text)
-            .map(|l| l.id.as_str())
-            .collect();
+        let mut text = std::collections::HashSet::new();
+        let mut datums = std::collections::HashSet::new();
+        for link in &sk.links {
+            let id = link.id.as_str();
+            if !seen.insert(id) {
+                continue;
+            }
+            if link.kind == solidcraft_sketch::LinkKind::Text {
+                text.insert(id);
+            }
+            if link.source.is_datum() {
+                datums.insert(id);
+            }
+        }
         let mut hidden: std::collections::HashSet<&str> =
             sk.points.iter().filter(|p| p.link.as_deref().is_some_and(|l| text.contains(l))).map(|p| p.id.as_str()).collect();
         for curve in sk.curves.iter().filter(|c| outputs.contains(c.id.as_str())) {
@@ -678,14 +685,22 @@ impl<'a> SketchPointVisibility<'a> {
             let interior = curve.kind.point_ids().into_iter().filter(|i| ends.is_none_or(|(a, b)| *i != a && *i != b));
             hidden.extend(interior.filter_map(|i| sk.points.get(i).map(|p| p.id.as_str())));
         }
-        // Hide an infinite line's endpoints unless a finite curve also uses them.
-        let mut infinite_endpoints: std::collections::HashSet<_> =
-            sk.curves.iter().filter(|c| c.infinite).filter_map(|c| c.kind.ends()).flat_map(|(a, b)| [a, b]).collect();
-        if !infinite_endpoints.is_empty() {
-            for i in sk.curves.iter().filter(|c| !c.infinite).flat_map(|c| c.kind.point_ids()) {
-                infinite_endpoints.remove(&i);
+        // A datum line's generated endpoints only define its direction. Keep editable points
+        // and endpoints used by any other kind of curve, including infinite construction lines.
+        let private_datum = |curve: &solidcraft_sketch::Curve| curve.infinite && curve.link.as_deref().is_some_and(|id| datums.contains(id));
+        let mut endpoints: std::collections::HashSet<_> =
+            sk.curves.iter().filter(|c| private_datum(c)).filter_map(|c| c.kind.ends()).flat_map(|(a, b)| [a, b]).collect();
+        if !endpoints.is_empty() {
+            for i in sk.curves.iter().filter(|c| !private_datum(c)).flat_map(|c| c.kind.point_ids()) {
+                endpoints.remove(&i);
             }
-            hidden.extend(infinite_endpoints.into_iter().filter_map(|i| sk.points.get(i).map(|p| p.id.as_str())));
+            hidden.extend(
+                endpoints
+                    .into_iter()
+                    .filter_map(|i| sk.points.get(i))
+                    .filter(|p| p.link.as_deref().is_some_and(|id| datums.contains(id)))
+                    .map(|p| p.id.as_str()),
+            );
         }
         Self { hidden }
     }

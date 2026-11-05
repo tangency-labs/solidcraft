@@ -17,7 +17,7 @@ use crate::{EngineError, Result, Session};
 
 macro_rules! refs_doc {
     () => {
-        "refs: [{edge: [x,y,z], body?} | {face: [x,y,z], body?} (its edge loops) | {body: name} (silhouette) | {vertex: [x,y,z], body?} | {sketch, curve} | {sketch, point} | \"origin\" | {axis: X|Y|Z|name} | {plane: XY|XZ|YZ|name}]"
+        "refs: [{edge: [x,y,z], body?} | {face: [x,y,z], body?} (its edge loops) | {body: name} (silhouette) | {vertex: [x,y,z], body?} | {sketch, curve} | {sketch, point} | \"origin\" | {axis: X|Y|Z|name} | {plane: XY|XZ|YZ|name}]; set frame: world on an origin axis or plane to link to the world datum"
     };
 }
 
@@ -111,15 +111,44 @@ fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
         return Ok(LinkSource::Body { body: b.to_string() });
     }
     if let Some(a) = str_(v, "axis") {
+        if str_(v, "frame") == Some("world") {
+            let name = a.to_ascii_uppercase();
+            if !matches!(name.as_str(), "X" | "Y" | "Z") {
+                return Err(bad(cmd, "a world axis must be X, Y or Z"));
+            }
+            return Ok(LinkSource::WorldAxis { name, path: datum_author_path(s, cmd)? });
+        }
         return axis_source(s, a, cmd);
     }
     if let Some(p) = str_(v, "plane") {
+        if str_(v, "frame") == Some("world") {
+            if Plane::named(p).is_none() {
+                return Err(bad(cmd, "a world plane must name an origin plane"));
+            }
+            return Ok(LinkSource::WorldPlane { name: p.to_string(), path: datum_author_path(s, cmd)? });
+        }
         return Ok(LinkSource::Plane { name: p.to_string() });
     }
     if v.get("origin").is_some() {
         return Ok(LinkSource::Origin);
     }
     Err(bad(cmd, format!("cannot project {v}")))
+}
+
+/// Keep the occurrence where the sketch was edited so the link follows that placement.
+fn datum_author_path(s: &Session, cmd: &str) -> Result<Vec<u64>> {
+    let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
+    let component = s.doc.feature(id).ok_or_else(|| bad(cmd, "the sketch no longer exists"))?.component;
+    let path = s
+        .active_occurrence_path
+        .as_ref()
+        .filter(|path| s.doc.path_transform(component, path).is_some())
+        .cloned()
+        .unwrap_or_else(|| s.doc.first_path(component));
+    if s.doc.path_transform(component, &path).is_none() {
+        return Err(bad(cmd, "the sketch's occurrence no longer exists"));
+    }
+    Ok(path)
 }
 
 /// An origin axis (`X`, `Y` or `Z`, in any case), or a construction axis by its name (#9324).
@@ -497,14 +526,18 @@ fn model_ref(v: &Value) -> bool {
 /// Project one model reference into the sketch and report its curve or point.
 fn project_ref(s: &mut Session, doc: &Document, id: u64, sk: &mut Sketch, v: &Value, cmd: &str) -> Result<String> {
     let src = source(s, v, cmd)?;
-    if let LinkSource::Plane { name } = &src {
+    if let LinkSource::Plane { name } | LinkSource::WorldPlane { name, .. } = &src {
         let placed = placed_candidate(s, doc);
         let st = s.model.state_before(id);
         let st = state_for_sketch(s, &placed, id, &st, &[])?;
         let plane = sketch_plane(&placed, id, &st)?;
-        let reference = super::sketch::plane_ref(s, &json!({"plane": name}), cmd)?;
-        let (vals, _) = placed.param_values();
-        let other = placed.resolve_plane_in(&vals, &reference, 0, Some(&st))?;
+        let other = if let LinkSource::WorldPlane { path, .. } = &src {
+            solidcraft_doc::project::world_datum_plane(&placed, name, path)?
+        } else {
+            let reference = super::sketch::plane_ref(s, &json!({"plane": name}), cmd)?;
+            let (vals, _) = placed.param_values();
+            placed.resolve_plane_in(&vals, &reference, 0, Some(&st))?
+        };
         if plane.normal().dot(other.normal()).abs() >= 1e-6 {
             return Err(bad(cmd, format!("the reference plane `{name}` must be orthogonal to the sketch plane")));
         }

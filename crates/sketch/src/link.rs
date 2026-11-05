@@ -88,6 +88,10 @@ pub enum LinkSource {
     /// An origin plane (`XY`, `XZ`, `YZ`) or a construction plane (by name): its trace on the
     /// sketch plane.
     Plane { name: String },
+    /// A world origin axis projected into the sketch at its author placement.
+    WorldAxis { name: String, path: Vec<u64> },
+    /// A world origin plane intersected with the sketch at its author placement.
+    WorldPlane { name: String, path: Vec<u64> },
     /// A curve of a sketch projected onto a body face (through `at`) along the normal of the
     /// sketch that holds the link: a 3D curve.
     OnSurface { sketch: u64, curve: String, body: String, at: Vec3 },
@@ -171,12 +175,19 @@ impl LinkSource {
             LinkSource::Axis { name } => format!("{name} axis"),
             LinkSource::SketchAxis { name } => format!("sketch {name} axis"),
             LinkSource::Plane { name } => format!("{name} plane"),
+            LinkSource::WorldAxis { name, .. } => format!("world {name} axis"),
+            LinkSource::WorldPlane { name, .. } => format!("world {name} plane"),
             LinkSource::OnSurface { curve, .. } => format!("{curve} on a face"),
             LinkSource::Intersection { a, b } => format!("intersection of {} and {}", a.describe(), b.describe()),
             LinkSource::Spun { body, .. } => of_body("spun profile", body),
             LinkSource::Iso { body, .. } => of_body("isoparametric curve", body),
             LinkSource::Text { text, .. } => format!("text \"{}\"", text.chars().take(20).collect::<String>()),
         }
+    }
+
+    /// Whether this source provides a datum line in the sketch.
+    pub fn is_datum(&self) -> bool {
+        matches!(self, Self::Axis { .. } | Self::Plane { .. } | Self::SketchAxis { .. } | Self::WorldAxis { .. } | Self::WorldPlane { .. })
     }
 
     /// The bodies this source reads geometry from (an intersection reads two).
@@ -200,6 +211,8 @@ impl LinkSource {
             | LinkSource::Axis { .. }
             | LinkSource::SketchAxis { .. }
             | LinkSource::Plane { .. }
+            | LinkSource::WorldAxis { .. }
+            | LinkSource::WorldPlane { .. }
             | LinkSource::Text { .. } => Vec::new(),
         }
     }
@@ -681,10 +694,7 @@ impl Sketch {
     /// Is this curve a datum reference line (linked from a plane, axis, or sketch axis)?
     pub fn is_datum_reference(&self, ci: usize) -> bool {
         let Some(c) = self.curves.get(ci) else { return false };
-        c.link
-            .as_deref()
-            .and_then(|l| self.link(l))
-            .is_some_and(|l| matches!(l.source, LinkSource::Plane { .. } | LinkSource::Axis { .. } | LinkSource::SketchAxis { .. }))
+        c.link.as_deref().and_then(|l| self.link(l)).is_some_and(|l| l.source.is_datum())
     }
 
     /// Is this curve a datum reference line or infinite line?
@@ -818,8 +828,7 @@ impl Sketch {
                 }
             };
             let cid = self.fresh(prefix)?;
-            let is_ref =
-                self.link(id).is_some_and(|l| matches!(l.source, LinkSource::Plane { .. } | LinkSource::Axis { .. } | LinkSource::SketchAxis { .. }));
+            let is_ref = self.link(id).is_some_and(|l| l.source.is_datum());
             let infinite = is_ref && matches!(kind, CurveKind::Line { .. });
             let construction = is_ref;
             self.curves.push(Curve {

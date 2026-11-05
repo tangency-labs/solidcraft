@@ -555,3 +555,27 @@ fn a_combine_tool_stays_where_it_is_placed() {
     assert_eq!(lumps(&s), Some(2), "the boss stays where it is in the world");
     assert!((volume(&mut s) - 17000.0).abs() < 1e-6, "{}", volume(&mut s));
 }
+
+#[test]
+fn world_datum_links_follow_the_author_occurrence_after_rebuild() {
+    for (reference, expected_y) in [(json!({"axis":"X","frame":"world"}), 0.), (json!({"plane":"XZ","frame":"world"}), 15.)] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name":"Part","grounded":false}));
+        run(&mut s, "occurrence.move", json!({"occurrence":"Part:1","axis":[0,0,1],"angle":"90 deg","translate":[0,20,0],"capture":true}));
+        run(&mut s, "sketch.create", json!({"plane":"XY","name":"Part sketch"}));
+        run(&mut s, "sketch.point", json!({"point":[5,10],"id":"test-point"}));
+        if reference.get("axis").is_some() {
+            run(&mut s, "sketch.constraint.coincident", json!({"a":"test-point","b":reference}));
+        } else {
+            run(&mut s, "sketch.dimension", json!({"entities":["test-point",reference],"value":expected_y}));
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        assert!((sketch_point_world(&mut s, "Part sketch", "test-point").y - expected_y).abs() < 1e-6);
+
+        // Move the occurrence again. The sketch must solve against the same world line.
+        run(&mut s, "occurrence.move", json!({"occurrence":"Part:1","translate":[0,10,0],"capture":true}));
+        assert!((sketch_point_world(&mut s, "Part sketch", "test-point").y - expected_y).abs() < 1e-6);
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert!((sketch_point_world(&mut reopened, "Part sketch", "test-point").y - expected_y).abs() < 1e-6);
+    }
+}

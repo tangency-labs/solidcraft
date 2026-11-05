@@ -275,3 +275,25 @@ fn deleting_the_shared_midpoint_glyph_keeps_a_point_another_line_uses() {
     centre_then_delete_glyph(&mut h);
     assert_eq!(point_count(&h), points);
 }
+
+#[test]
+fn coincident_in_a_rotated_component_picks_the_world_axis() {
+    let mut h = Harness::new();
+    h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence":"Part:1","axis":[0,0,1],"angle":"90 deg","translate":[0,20,0],"capture":true})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.point", json!({"point":[5,10],"id":"p"})).unwrap();
+    h.app.set_origin_shown(true);
+    h.call("ui.view", json!({"view":"top"}));
+    h.app.cam.distance = 150.0;
+    h.settle();
+    h.step(&json!({"start":"sketch.constraint.coincident"})).unwrap();
+    for at in [[-10, 25, 0], [8, 0, 0]] {
+        h.step(&json!({"click":{"world":at}})).unwrap();
+    }
+    assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
+    let state = h.app.session.world_state().unwrap();
+    let ss = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    let point = ss.sketch.point(ss.sketch.resolve_point("p").unwrap()).unwrap();
+    assert!(ss.plane.to_world(point).y.abs() < 1e-6, "point lies on world X");
+}
