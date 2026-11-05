@@ -293,7 +293,9 @@ pub struct OpenParams {
     /// elsewhere). Default: false.
     #[serde(default)]
     pub read_only: Option<bool>,
-    /// For a point cloud file only (ignored for other files): its length unit. Default: mm.
+    /// For a point cloud, STL, OBJ or PLY file: the unit its coordinates are in, scaled to
+    /// millimetres as it is read (refused for a 3MF or glTF file, which states its own; ignored
+    /// for other files). Default: mm.
     #[serde(default)]
     pub units: Option<CloudUnits>,
     /// For a point cloud file only (ignored for other files): the most points kept. Default:

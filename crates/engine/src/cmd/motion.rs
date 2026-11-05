@@ -16,7 +16,8 @@ use super::joints::{cannot_move, effective_values, joint_id, occurrence_id, plac
 use crate::params::{bad, bool_, str_, vec3};
 use crate::schema::motion::{
     ContactCheck, ContactCollision, ContactCreateParams, ContactEditParams, ContactEnableParams, ContactNoParams, ContactSetChange,
-    ContactSetCreated, ContactSetEdited, ContactSetInfo, ContactSets, ContactSwitch, FindLimitsParams, FindLimitsResult,
+    ContactSetCreated, ContactSetEdited, ContactSetInfo, ContactSets, ContactSwitch, FindLimitsParams, FindLimitsResult, MotionListParams,
+    MotionStudies, MotionStudyDeleteParams, MotionStudyDeleted, MotionStudyInfo, MotionStudyKeyInfo, MotionStudyParams, MotionStudySaved,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -46,6 +47,9 @@ const CONTACT_ENABLE_CONTRACT: TypedContract<ContactEnableParams> = TypedContrac
 const CONTACT_NONE_CONTRACT: TypedContract<ContactNoParams> = TypedContract::new();
 const CONTACT_CREATE_CONTRACT: TypedContract<ContactCreateParams> = TypedContract::new();
 const CONTACT_EDIT_CONTRACT: TypedContract<ContactEditParams> = TypedContract::new();
+const STUDY_CONTRACT: TypedContract<MotionStudyParams> = TypedContract::new();
+const STUDY_DELETE_CONTRACT: TypedContract<MotionStudyDeleteParams> = TypedContract::new();
+const STUDY_LIST_CONTRACT: TypedContract<MotionListParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("contact.enable_sets", "Enable Contact Sets", crate::checked!("contact.enable_sets", enable_sets))
@@ -92,10 +96,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CONTACT_NONE_CONTRACT)
         .output(output_schema_for::<ContactCheck>)
         .params("→ pairs in contact sets that pass through each other now"),
-    CommandSpec::new("motion.study", "Motion Study", study).at("SOLID", "ASSEMBLE").icon("play").params(
-        "name?; study? (edit an existing one); steps? (timeline length, default 100); keys: [{joint, index?, points: [[step, value], …]}] \
+    CommandSpec::new("motion.study", "Motion Study", crate::checked!("motion.study", study))
+        .at("SOLID", "ASSEMBLE")
+        .icon("play")
+        .contract(&STUDY_CONTRACT)
+        .output(output_schema_for::<MotionStudySaved>)
+        .params(
+            "name?; study? (edit an existing one); steps? (timeline length, default 100); keys: [{joint, index?, points: [[step, value], …]}] \
          (values: degrees for angles, mm for distances, or expressions)",
-    ),
+        ),
     CommandSpec::new("motion.play", "Play Motion Study", play).icon("play").params(
         "study: id|name; step (0…steps) — sets the joints to the study's values there (contact sets stop them); quiet?: bool \
          (positions of only the occurrences that moved) → values: [{joint, values: [{name, value, unit}]}], positions, moved: whether \
@@ -145,8 +154,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&FIND_LIMITS_CONTRACT)
         .output(output_schema_for::<FindLimitsResult>)
         .params(sweep::FIND_LIMITS_DOC),
-    CommandSpec::new("motion.list", "List Motion Studies", list_studies).icon("list").noundo(),
-    CommandSpec::new("motion.delete", "Delete Motion Study", delete_study).icon("delete").params("study"),
+    CommandSpec::new("motion.list", "List Motion Studies", crate::checked!("motion.list", list_studies))
+        .icon("list")
+        .noundo()
+        .contract(&STUDY_LIST_CONTRACT)
+        .output(output_schema_for::<MotionStudies>),
+    CommandSpec::new("motion.delete", "Delete Motion Study", crate::checked!("motion.delete", delete_study))
+        .icon("delete")
+        .contract(&STUDY_DELETE_CONTRACT)
+        .output(output_schema_for::<MotionStudyDeleted>)
+        .params("study"),
     CommandSpec::new("explode.create", "Exploded View", explode_create).at("SOLID", "ASSEMBLE").icon("explode").enabled(has_parts_to_explode).params(
         "name?; scale? (automatic: each occurrence pushed away from the assembly's centre by scale × its offset, default 1); \
          moves?: [{occurrence, translate: [x,y,z]}] (instead of automatic)",
@@ -557,30 +574,30 @@ pub fn drive_joint_index(s: &mut Session, id: u64, q: Vec<f64>, index: usize) ->
     Ok(drive_with_contact(s, &[(id, q)], &[(id, index)].into_iter().collect())?.0)
 }
 
-/// A contact command's reply as JSON: they build their replies from the types their output
-/// schemas describe, so the two can't drift apart.
-fn contact_reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+/// A command's reply as JSON: the contact and motion study commands build their replies from the
+/// types their output schemas describe, so the two can't drift apart.
+fn typed_reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn enable_sets(s: &mut Session, p: &Value) -> Result<Value> {
     let enabled = bool_(p, "enabled").unwrap_or(true);
     s.doc_mut().assembly.contact_enabled = enabled;
-    contact_reply("contact.enable_sets", ContactSwitch { enabled, all: None, param_warnings: Vec::new() })
+    typed_reply("contact.enable_sets", ContactSwitch { enabled, all: None, param_warnings: Vec::new() })
 }
 
 fn enable_all(s: &mut Session, _p: &Value) -> Result<Value> {
     let a = &mut s.doc_mut().assembly;
     a.contact_enabled = true;
     a.contact_all = true;
-    contact_reply("contact.enable_all", ContactSwitch { enabled: true, all: Some(true), param_warnings: Vec::new() })
+    typed_reply("contact.enable_all", ContactSwitch { enabled: true, all: Some(true), param_warnings: Vec::new() })
 }
 
 fn disable_all(s: &mut Session, _p: &Value) -> Result<Value> {
     let a = &mut s.doc_mut().assembly;
     a.contact_enabled = false;
     a.contact_all = false;
-    contact_reply("contact.disable_all", ContactSwitch { enabled: false, all: None, param_warnings: Vec::new() })
+    typed_reply("contact.disable_all", ContactSwitch { enabled: false, all: None, param_warnings: Vec::new() })
 }
 
 fn new_set(s: &mut Session, p: &Value) -> Result<Value> {
@@ -598,7 +615,7 @@ fn new_set(s: &mut Session, p: &Value) -> Result<Value> {
     let a = &mut s.doc_mut().assembly;
     a.contact_sets.push(ContactSet { id, name: name.clone(), occurrences: occ, suppressed: false });
     a.contact_enabled = true;
-    contact_reply(cmd, ContactSetCreated { set: id, name, param_warnings: Vec::new() })
+    typed_reply(cmd, ContactSetCreated { set: id, name, param_warnings: Vec::new() })
 }
 
 fn set_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
@@ -620,7 +637,7 @@ fn edit_set(s: &mut Session, p: &Value) -> Result<Value> {
     let i = set_index(s, p, cmd)?;
     if bool_(p, "delete").unwrap_or(false) {
         s.doc_mut().assembly.contact_sets.remove(i);
-        return contact_reply(cmd, ContactSetEdited { change: ContactSetChange::Deleted { deleted: true }, param_warnings: Vec::new() });
+        return typed_reply(cmd, ContactSetEdited { change: ContactSetChange::Deleted { deleted: true }, param_warnings: Vec::new() });
     }
     let occ = if p.get("occurrences").is_some() { Some(occurrences(s, p, cmd)?) } else { None };
     if occ.as_ref().is_some_and(|o| o.len() < 2) {
@@ -637,18 +654,18 @@ fn edit_set(s: &mut Session, p: &Value) -> Result<Value> {
         c.suppressed = x;
     }
     let set = c.id;
-    contact_reply(cmd, ContactSetEdited { change: ContactSetChange::Changed { set }, param_warnings: Vec::new() })
+    typed_reply(cmd, ContactSetEdited { change: ContactSetChange::Changed { set }, param_warnings: Vec::new() })
 }
 
 fn list_sets(s: &mut Session, _p: &Value) -> Result<Value> {
     let a = &s.doc.assembly;
     let sets = a.contact_sets.iter().map(ContactSetInfo::from).collect();
-    contact_reply("contact.list", ContactSets { enabled: a.contact_enabled, all: a.contact_all, sets, param_warnings: Vec::new() })
+    typed_reply("contact.list", ContactSets { enabled: a.contact_enabled, all: a.contact_all, sets, param_warnings: Vec::new() })
 }
 
 fn check(s: &mut Session, _p: &Value) -> Result<Value> {
     let collisions = collisions(s).into_iter().map(|(a, b, depth_mm)| ContactCollision { a, b, depth_mm }).collect();
-    contact_reply("contact.check", ContactCheck { collisions, param_warnings: Vec::new() })
+    typed_reply("contact.check", ContactCheck { collisions, param_warnings: Vec::new() })
 }
 
 // ---- Motion studies ----
@@ -737,7 +754,7 @@ fn study(s: &mut Session, p: &Value) -> Result<Value> {
             m
         }
     };
-    Ok(json!({"study": out.id, "name": out.name, "steps": out.steps, "keys": out.keys.len()}))
+    typed_reply(cmd, MotionStudySaved { study: out.id, name: out.name, steps: out.steps, keys: out.keys.len(), param_warnings: Vec::new() })
 }
 
 /// Joint values of a study at a step: (joint, full value vector).
@@ -1079,36 +1096,37 @@ fn keep_sampled_trace(
 }
 
 fn list_studies(s: &mut Session, _p: &Value) -> Result<Value> {
-    let studies: Vec<Value> = s.doc.assembly.studies.iter().map(|m| study_json(s, m)).collect();
-    Ok(json!({"studies": studies, "traces": associative::list(s)}))
+    let studies = s.doc.assembly.studies.iter().map(|m| study_info(s, m)).collect();
+    typed_reply("motion.list", MotionStudies { studies, traces: associative::list(s), param_warnings: Vec::new() })
 }
 
 /// A study as `motion.list` gives it: key values in the units `motion.study` takes — degrees
 /// for angles, mm for distances, like `joint.list`'s values — each key with its joint's name,
 /// so a listed study can be fed back to `motion.study` unchanged.
-fn study_json(s: &Session, m: &MotionStudy) -> Value {
-    let keys: Vec<Value> = m
+fn study_info(s: &Session, m: &MotionStudy) -> MotionStudyInfo {
+    let keys = m
         .keys
         .iter()
         .map(|k| {
             let joint = s.doc.assembly.joints.iter().find(|j| j.id == k.joint);
             let angle = joint.is_some_and(|j| j.kind.is_angle(k.index));
-            json!({
-                "joint": k.joint,
-                "joint_name": joint.map(|j| j.name.clone()).unwrap_or_else(|| k.joint.to_string()),
-                "index": k.index,
-                "unit": if angle { "deg" } else { "mm" },
-                "points": k.points.iter().map(|(step, v)| json!([step, if angle { v.to_degrees() } else { *v }])).collect::<Vec<_>>(),
-            })
+            MotionStudyKeyInfo {
+                joint: k.joint,
+                joint_name: joint.map(|j| j.name.clone()).unwrap_or_else(|| k.joint.to_string()),
+                index: k.index,
+                unit: if angle { "deg" } else { "mm" }.into(),
+                points: k.points.iter().map(|(step, v)| [*step, if angle { v.to_degrees() } else { *v }]).collect(),
+            }
         })
         .collect();
-    json!({"id": m.id, "name": m.name, "steps": m.steps, "keys": keys})
+    MotionStudyInfo { id: m.id, name: m.name.clone(), steps: m.steps, keys }
 }
 
 fn delete_study(s: &mut Session, p: &Value) -> Result<Value> {
-    let i = study_index(s, p, "motion.delete")?;
+    let cmd = "motion.delete";
+    let i = study_index(s, p, cmd)?;
     let m = s.doc_mut().assembly.studies.remove(i);
-    Ok(json!({"deleted": m.name}))
+    typed_reply(cmd, MotionStudyDeleted { deleted: m.name, param_warnings: Vec::new() })
 }
 
 // ---- Exploded views ----

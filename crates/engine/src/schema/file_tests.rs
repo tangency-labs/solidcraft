@@ -126,6 +126,10 @@ fn replies_match_the_output_schema() {
         assert!(mesh["component"].is_u64() && mesh.get("system").is_none(), "{name}: {mesh}");
         opened(&mesh);
     }
+    // An STL file in another unit.
+    let scaled = run(&mut s, "doc.open", json!({"path": at("part.stl"), "units": "cm"}));
+    assert!(scaled["component"].is_u64(), "{scaled}");
+    opened(&scaled);
     // A drawing, as DXF and as SVG.
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 20]}));

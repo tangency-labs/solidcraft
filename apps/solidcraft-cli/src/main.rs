@@ -64,7 +64,7 @@ struct Command {
 /// `run`'s lines in the usage.
 const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--validation each_step|each_feature|off]\n                     [--param-check off|warn|strict]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
 /// `eval`'s lines in the usage.
-const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--profile] [--profile-out trace.json]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile and --profile-out as for run)\n";
+const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--profile] [--profile-out trace.json] [--validation each_step|each_feature|off]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile, --profile-out and --validation as for run)\n";
 /// `script`'s lines in the usage.
 const USAGE_SCRIPT: &str = "  solidcraft-cli script <design.sc|script.json> [--out script.json]\n      (the design's history as a command script that eval and run replay)\n";
 /// `bench-open`'s lines in the usage.
@@ -592,10 +592,12 @@ fn timeline_ok(s: &Session, skip_newer_features: bool) -> Result<(), String> {
     ))
 }
 
+/// Runs `solidcraft-cli eval` (and its `inspect` alias), opening the input design or script with the requested `--validation` mode and reporting both `inspect.measure` and `document.inspect`.
 fn cmd_eval(args: &[String]) -> Result<(), String> {
     let json_out = json_out(args)?;
-    known_args("eval", args, &["--in", "--json-out", "--profile-out"], &["--profile"], true)?;
-    let mut s = open(flag(args, "--in"), positional(args), solidcraft_engine::schema::ParamCheck::Off)?;
+    known_args("eval", args, &["--in", "--json-out", "--profile-out", "--validation"], &["--profile"], true)?;
+    let validation = validation_flag("eval", args)?;
+    let mut s = open_validating(flag(args, "--in"), positional(args), solidcraft_engine::schema::ParamCheck::Off, validation)?;
     let m = s.execute("inspect.measure", &json!({})).map_err(|e| e.to_string())?;
     let d = s.execute("document.inspect", &json!({})).map_err(|e| e.to_string())?;
     let mut out = json!({
