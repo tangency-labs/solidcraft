@@ -1691,7 +1691,7 @@ pub(crate) fn prune_reveals(app: &mut SolveApp) {
 fn component_name(app: &SolveApp, id: u64) -> String {
     if id == 0 {
         // The design's top row names it the way its tab does: after the file (#7267).
-        return app.session.save_as_name();
+        return crate::documents::tab_name(app, &app.session);
     }
     let doc = &app.session.doc;
     let name = doc.components.iter().find(|c| c.id == id).map(|c| c.name.clone()).unwrap_or_default();

@@ -1073,6 +1073,17 @@ fn the_top_row_follows_the_file_name_like_the_tab() {
     h.settle();
     assert!(handle_at("row:Lid").is_some(), "a rename since the last save shows on the top row");
     assert_eq!(crate::documents::tabs_info(&h.app)[0].0, "Lid");
+    // With the preference off, a saved design's tab and top row show its own name, as before.
+    h.app.session.mark_saved();
+    h.app.session.path = Some("parts/Plate rev D.solidcraft".into());
+    h.app.preferences.names_from_file = false;
+    h.settle();
+    assert!(handle_at("row:Lid").is_some(), "the design's own name, not the file's");
+    assert!(handle_at("row:Plate rev D").is_none());
+    assert_eq!(crate::documents::tabs_info(&h.app)[0].0, "Lid");
+    h.app.preferences.names_from_file = true;
+    h.settle();
+    assert!(handle_at("row:Plate rev D").is_some(), "on again: the file's name");
 }
 
 /// Draw content without either panel host. Changing submission order does not change IDs,

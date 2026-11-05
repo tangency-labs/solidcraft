@@ -771,21 +771,23 @@ fn dirty(app: &SolveApp, i: usize) -> bool {
 /// A tab's name: the file a saved design was opened or saved as (without its extension), so a
 /// Save As shows the new name; an unsaved design, or one renamed since it was saved, shows its
 /// design name. The Browser's top row shows the same name (#7267).
-fn tab_name(session: &Session) -> String {
-    session.save_as_name()
+///
+/// With the `names_from_file` preference off, every tab shows the design's own name, as before.
+pub(crate) fn tab_name(app: &SolveApp, session: &Session) -> String {
+    if app.preferences.names_from_file { session.save_as_name() } else { session.doc.name.clone() }
 }
 
 /// Tab names (with an unsaved-changes flag), in order.
 pub fn tabs_info(app: &SolveApp) -> Vec<(String, bool)> {
     if app.docs.slots.is_empty() {
-        return vec![(tab_name(&app.session), app.session.is_dirty())];
+        return vec![(tab_name(app, &app.session), app.session.is_dirty())];
     }
     app.docs
         .slots
         .iter()
         .map(|s| match s {
-            Some(d) => (tab_name(&d.session), d.session.is_dirty()),
-            None => (tab_name(&app.session), app.session.is_dirty()),
+            Some(d) => (tab_name(app, &d.session), d.session.is_dirty()),
+            None => (tab_name(app, &app.session), app.session.is_dirty()),
         })
         .collect()
 }
