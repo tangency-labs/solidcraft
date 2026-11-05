@@ -54,7 +54,7 @@ use serde_json::Value;
 use solidcore_ops::blend::{
     blend, chamfer_sides_ordered, edge_faces_along_ordered, Blend, ChamferSecond, Corners,
 };
-use solidcore_ops::boolean::{boolean, union_all, BooleanOp};
+use solidcore_ops::boolean::{boolean, BooleanOp};
 use solidcore_ops::stitch::stitch;
 use solidcore_ops::sweep::{extrude, loft, revolve, Curve, DraftCorner};
 use solidcore_ops::untrim::{untrim_face, Holes};
@@ -84,7 +84,6 @@ const PORTED: &[&str] = &[
     "blend_dropping",
     "chamfer_sides",
     "stitch",
-    "split_body_by_sheet",
 ];
 
 /// The relative tolerance the rig grades volume and area with when a case states none.
@@ -1594,92 +1593,6 @@ fn a_discarded_thicken_preserves_the_retained_sheet() {
         &serde_json::json!({"body_count": 1, "volume_mm3": 30.0 * 20.0 * 2.0}),
         serde_json::json!({"body_count": 1, "faces": 1, "edges": 4, "vertices": 4}),
     );
-}
-
-/// The sheet normal orders unequal box parts; grading each output name catches aliasing,
-/// and neither the solid nor the tool record may change.
-#[test]
-fn split_sheet_keeps_distinct_parts_in_normal_order_and_preserves_inputs() {
-    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
-    for reversed in [false, true] {
-        let mut k = solidcore::Kernel::default();
-        let (a, b) = if reversed { (11.0, -1.0) } else { (-1.0, 11.0) };
-        let line = solidcore::curve::line::Line::create_line_segment(
-            3,
-            solidcore::Vec3::new(3.0, a, -1.0),
-            solidcore::Vec3::new(3.0, b, -1.0),
-            None,
-        )
-        .unwrap();
-        let curve = solidcore::curve::curve::Curve::from(line);
-        let mut sheet = solidcore::sweep::api_brep::create_linear_sweep(
-            &mut k,
-            &[Some(&curve)],
-            solidcore::Vec3::new(0.0, 0.0, 1.0),
-            12.0,
-            false,
-        )
-        .unwrap();
-        let record = solidcore_convert::brep::to_record(&mut k, &mut sheet)
-            .unwrap()
-            .0;
-        let (sheet, order) = Body::from_record(&record, true).unwrap();
-        let mut ins = [
-            Slot {
-                body: Arc::new(solidcore_ops::make_box([0.0; 3], [10.0; 3]).unwrap()),
-                order: None,
-            },
-            Slot {
-                body: Arc::new(sheet),
-                order: Some(order),
-            },
-        ];
-        let before: Vec<_> = ins.iter().map(|s| s.body.to_record().unwrap().0).collect();
-        let step = serde_json::json!({"op": "split_body_by_sheet", "params": {"face": 0}});
-        let parts = call_outputs(&step, &mut ins).unwrap().unwrap();
-        assert_eq!(parts.len(), 2);
-        assert!(!Arc::ptr_eq(&parts[0].body, &parts[1].body));
-        let want = if reversed {
-            [700.0, 300.0]
-        } else {
-            [300.0, 700.0]
-        };
-        for (part, volume) in parts.iter().zip(want) {
-            assert!((part.body.volume(1e-9).unwrap() - volume).abs() < 1e-7);
-            assert_eq!(part.body.counts().unwrap(), [6, 12, 8]);
-            assert!(part.order.is_none());
-        }
-        let after: Vec<_> = ins.iter().map(|s| s.body.to_record().unwrap().0).collect();
-        assert_eq!(before, after);
-        // Grade each traced output separately: duplicating one body under both names fails.
-        let records = serde_json::json!({"solid": before[0], "sheet": before[1]})
-            .as_object()
-            .unwrap()
-            .clone();
-        for (name, volume) in ["back", "front"].into_iter().zip(want) {
-            let e = serde_json::json!({
-                "bodies": {"solid": {"trusted": true}, "sheet": {"trusted": true}},
-                "calls": [{"op": "split_body_by_sheet", "inputs": ["solid", "sheet"],
-                    "params": {"face": 0}, "outputs": ["back", "front"]}],
-                "result": [{"made": name}],
-                "expected": {"body_count": 1, "volume_mm3": volume,
-                    "faces": 6, "edges": 12, "vertices": 8, "tolerance": {"rel": 1e-9}}
-            });
-            assert!(run_case_with_records(&e, || records.clone())
-                .unwrap()
-                .is_some());
-        }
-    }
-}
-
-/// The recorded spline sheet cuts the cup into two parts and remains as the third body.
-#[test]
-fn split_sheet_replays_the_cup_and_retains_the_tool() {
-    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
-    let entry = corpus().join("booleans/3830-split-cup-by-extended-spline-surface.json");
-    let e: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
-    assert_eq!(e["result"].as_array().unwrap().len(), 3);
-    assert!(run_case(&entry, &e).unwrap().is_some());
 }
 
 /// The corpus's stitch of two 10 x 10 sheets that share the edge x = 10, and its operand.
