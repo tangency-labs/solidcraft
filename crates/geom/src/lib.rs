@@ -51,6 +51,7 @@ pub mod title_block;
 pub mod tspline;
 mod unit_vec3;
 mod vec;
+pub mod weld;
 
 pub use aabb2::Aabb2;
 pub use arcfit::{Loop2ArcFit, MAX_FIT_PIECES, Region2ArcFit, Seg2ArcFit};
