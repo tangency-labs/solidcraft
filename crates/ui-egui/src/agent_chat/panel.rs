@@ -153,9 +153,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let width = app.preferences.agent_chat_width.clamp(MIN_WIDTH, MAX_WIDTH);
     if std::mem::take(&mut app.agent_chat.forget_width) {
-        // A panel's state is keyed by the Ui it is shown in and its salt.
-        let id = ui.scope_id().with(panel_salt(left));
-        ctx.data_mut(|d| d.remove::<egui::containers::panel::PanelState>(id));
+        // A panel's state is keyed by the Ui it is shown in and its salt; either side's would
+        // override the preference once the panel moves there.
+        let scope = ui.scope_id();
+        ctx.data_mut(|d| {
+            for side in [true, false] {
+                d.remove::<egui::containers::panel::PanelState>(scope.with(panel_salt(side)));
+            }
+        });
     }
     let r = host.show_edge(
         ui,
@@ -1434,11 +1439,13 @@ mod config_ui_tests {
     fn draw_switcher(app: &mut SolveApp, ctx: &egui::Context, width: f32) {
         crate::scenario::clear_handles();
         let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 700.0));
-        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+        ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
             ui.allocate_ui(vec2(width - 16.0, 600.0), |ui| {
                 ui_kit::scope(ui, |ui| switcher(app, ui));
             });
-        });
+        })
+        .textures_delta
+        .clear();
     }
 
     #[test]

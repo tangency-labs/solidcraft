@@ -305,7 +305,7 @@ fn search_picker_keeps_every_row_reachable_as_its_contents_change() {
         scenario::clear_handles();
         let raw =
             egui::RawInput { events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0))), ..Default::default() };
-        let _ = ctx.run_ui(raw, |ui| {
+        ctx.run_ui(raw, |ui| {
             ui.allocate_ui(egui::vec2(160.0, 40.0), |ui| {
                 crate::ui_kit::scope(ui, |ui| {
                     let values = values.borrow();
@@ -331,7 +331,9 @@ fn search_picker_keeps_every_row_reachable_as_its_contents_change() {
                     }
                 });
             });
-        });
+        })
+        .textures_delta
+        .clear();
     };
     let pointer = |at: egui::Pos2, pressed: bool| {
         vec![

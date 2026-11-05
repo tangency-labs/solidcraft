@@ -640,6 +640,8 @@ fn section_with_badge<R>(
         t.secondary_hline(ui.painter(), rule_left..=rule_right, rect.center().y, t.dialog_rule);
     }
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::DisclosureTriangle, ui.is_enabled(), open, crate::i18n::tr_label(title)));
+    // A disclosure says whether it is open as expanded, as egui's own collapsing header does.
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(open));
     scenario::publish_handle(&format!("dialog:section:{title}"), response.rect.center());
     scenario::publish_rect(&format!("dialog:section:{title}"), rect);
     if response.clicked() && !pending && !searching {
@@ -713,6 +715,8 @@ pub(crate) fn search_fold<R>(ui: &mut Ui, title: &str, count: usize, add: impl F
     }
     let accessible = format!("{title} ({count})");
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::DisclosureTriangle, ui.is_enabled(), open, &accessible));
+    // A disclosure says whether it is open as expanded, as egui's own collapsing header does.
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(open));
     scenario::publish_rect("prefs:search:shortcuts", rect);
     scenario::publish_handle("prefs:search:shortcuts", response.rect.center());
     if response.clicked() {

@@ -1794,9 +1794,12 @@ mod tests {
         // Model a rebuild that held the window thread for ten seconds. Its first visible
         // frame must still show the first feature; elapsed compute time is not playback.
         let time = h.ctx.input(|i| i.time) + 10.0;
-        let _ = h.ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
-            super::tick_playback(&mut h.app, ui.ctx());
-        });
+        h.ctx
+            .run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
+                super::tick_playback(&mut h.app, ui.ctx());
+            })
+            .textures_delta
+            .clear();
         assert_eq!(h.app.session.doc.marker, Some(1));
         assert_eq!(h.app.session.model.state().bodies.len(), 1);
     }

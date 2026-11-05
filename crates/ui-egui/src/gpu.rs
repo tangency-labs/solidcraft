@@ -829,7 +829,7 @@ mod tests {
                 time += 0.023;
                 let mut raw = egui::RawInput { time: Some(time), ..Default::default() };
                 raw.viewports.entry(egui::ViewportId::ROOT).or_default().occluded = Some(!visible);
-                let _ = ctx.run_ui(raw, |ui| {
+                ctx.run_ui(raw, |ui| {
                     ui.ctx().request_repaint(); // Deterministic harness only; product never does this for sampling.
                     let paint = rendered.then(|| crate::blur::PaintedFrame {
                         frame: ui.ctx().cumulative_frame_nr().saturating_sub(1),
@@ -838,7 +838,9 @@ mod tests {
                     });
                     session.sample(ui.ctx(), revision, radius, available, paint);
                     session.sample(ui.ctx(), revision, radius, available, paint); // egui re-pass duplicate
-                });
+                })
+                .textures_delta
+                .clear();
             };
         feed(&mut session, false, true, true, true, 1, 40.0);
         feed(&mut session, false, true, true, true, 1, 40.0);

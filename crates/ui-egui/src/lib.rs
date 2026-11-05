@@ -3478,10 +3478,12 @@ impl SolveApp {
                 true
             }
         });
+        // Drained every frame: a shot that comes after its request was cancelled or timed out
+        // is dropped here instead of waiting in the channel.
+        let shots: Vec<_> = self.shot_rx.try_iter().collect();
         if self.pending_shots.is_empty() && !issue_report::pending(self) {
             return;
         }
-        let shots: Vec<_> = self.shot_rx.try_iter().collect();
         for (token, image) in shots {
             issue_report::receive(self, token, image.clone());
             if let Some(i) = self.pending_shots.iter().position(|(t, ..)| *t == token) {

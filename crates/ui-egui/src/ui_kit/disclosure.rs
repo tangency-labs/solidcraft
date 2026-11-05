@@ -37,6 +37,8 @@ fn disclosure_button_with_hover(ui: &mut Ui, rect: Rect, open: bool, label: &str
     }
     disclosure(ui.painter(), rect.center(), open, if response.hovered() || response.has_focus() { t.form_ink } else { t.form_dim });
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::DisclosureTriangle, ui.is_enabled(), open, label));
+    // A disclosure says whether it is open as expanded, as egui's own collapsing header does.
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(open));
     response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(label)
 }
 
