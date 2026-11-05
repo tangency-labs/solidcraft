@@ -49,10 +49,26 @@ request that names it. Check all three, and build on the existing work rather th
 
 ## 1. Hard rules
 
-**Read first.** Before changing an area, read its design doc and records: `docs/generic-blend.md`
-for fillets and chamfers, the unit's `plan/units/<id>.toml`, and its `plan/findings/` and
-`plan/upstream-issues/` entries. If the docs and the code don't answer your question, ask the
-maintainers on the area's hub issue before you build.
+**Read first.** Before changing an area, read its reference doc, then its records (the unit's
+`plan/units/<id>.toml`, its `plan/findings/` and `plan/upstream-issues/` entries):
+- [docs/definitions-and-certificates.md](docs/definitions-and-certificates.md): a surface is its
+  definition and its B-spline a certified approximation; the certificate; the exactness classes;
+  the exact extension; the invariants every construction keeps. Read this one whatever the area.
+- [docs/generic-blend.md](docs/generic-blend.md): fillets, chamfers, corners, setbacks.
+- [docs/procedural-sweep.md](docs/procedural-sweep.md): swept surfaces, their frames, threads.
+- [docs/ssi.md](docs/ssi.md): surface-surface intersection, and what the boolean takes from it.
+- [docs/layers.md](docs/layers.md): which layer each job lives in.
+
+Each reference ends with "If you're stuck". If the docs and the code don't answer your question,
+ask the maintainers on the area's hub issue before you build.
+
+**Show the problem first, then research it.** Before you build a fix, show the person you work
+for what you are solving: a schematic of the problem drawn in VectorCraft (house style:
+[docs/agent-style.md](docs/agent-style.md#figures)), or a rendition of the failing case, next to
+what the correct result is. Then find how the problem is solved in the literature: search for
+the papers, read the ones that apply, and design from them. Say in the issue what you read and
+how the design follows it. A fix nobody has seen the problem of, or built without that research,
+is not ready for review.
 
 **Licence.** Read only `upstream/source/SMLib`, `upstream/source/SM_API`,
 `upstream/tests/SM_API_test`, `upstream/tests/prog_test`, `upstream/TestFiles/pt_TestFiles`,

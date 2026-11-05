@@ -74,3 +74,27 @@ Every ported file starts with:
 //!
 //! Deviations: <anything not 1:1, e.g. out-param -> return value, rand() -> kernel.rng>.
 ```
+
+## Figures
+
+Schematics are drawn in VectorCraft, never by hand-writing SVG. Each figure is exported to its
+doc's folder as SVG with outlined text, its `.vectorcraft` source kept next to it, and embedded
+with a Markdown image link and a one-line caption that says what to look at. Captions name
+things, never colours. When several agents share one VectorCraft instance, draw each figure in
+one `command_batch` (new document, drawing, save, export), so nothing interleaves.
+
+The palette is the one `docs/generic-blend.md`'s figures use:
+
+| What | Colour |
+|---|---|
+| the subject (the definition S, the true curve or surface) | accent blue `#1f6fb2`, 3 pt |
+| nets, control points, marched points, text | black `#000000` |
+| tolerance bands, enclosures | pale blue `#dce9f5` |
+| construction (frames, normals, radii, axes) | dashed grey `#999999`, 1.5 pt |
+| secondary lines, a proved or start point | dark grey `#555555` |
+| surfaces, faces | pale grey `#f0f0f0` |
+
+A white background over the whole artboard; one font, Helvetica (titles 20 pt bold, labels 14
+pt, notes 12 pt); every label beside what it names, with a thin leader line when it's farther
+away, and no text over a line or other text. Check each figure with a render before exporting.
+
