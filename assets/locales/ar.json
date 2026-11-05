@@ -5290,7 +5290,7 @@
   "ui.material_review.yield_strength": "مقاومة الخضوع",
   "ui.mcp_agents": "الوكلاء عبر MCP",
   "ui.mcp_compact": "مخرجات مضغوطة",
-  "ui.mcp_compact_note": "للوكلاء المتصلين عبر خادم MCP ‏(solidcraft-cli mcp): يلخّص inspect_design الرسومات، ولا تُنسَّق نتائج الأدوات، فتستهلك رموزًا أقل. يسري على جلسات الوكلاء التي تبدأ بعد التغيير؛ ويفعّله أيضًا ‎--compact أو SOLIDCRAFT_MCP_COMPACT=1.",
+  "ui.mcp_compact_note": "للوكلاء المتصلين عبر خادم MCP (solidcraft-cli mcp): يلخّص inspect_design الرسومات، ولا تُنسَّق نتائج الأدوات، فتستهلك رموزًا أقل. يسري على جلسات الوكلاء التي تبدأ بعد التغيير؛ ويفعّله أيضًا --compact أو SOLIDCRAFT_MCP_COMPACT=1.",
   "ui.measure": "قياس",
   "ui.mesh_format_3mf": "3MF",
   "ui.mesh_format_3mf_tagged": "3MF مع وسوم الأوجه",
