@@ -400,6 +400,40 @@ fn an_untouched_revolve_axis_keeps_its_origin_expressions_through_redefine() {
     }
 }
 
+/// A revolve axis written `{x, y, z}` maps into a moved or turned component like `[x, y, z]`:
+/// an origin of numbers or expressions, and a direction.
+#[test]
+fn an_object_form_axis_maps_into_a_moved_component() {
+    let made = |turned: bool, origin: Value, dir: Value| {
+        let mut s = moved_part();
+        run(&mut s, "parameters.add", json!({"name": "W", "expression": "50 mm"}));
+        if turned {
+            run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "90 deg", "origin": [50, 0, 0]}));
+        }
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Ring"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let axis = json!({"origin": origin, "dir": dir});
+        run(&mut s, "solid.revolve", json!({"sketch": "Ring", "axis": axis, "operation": "new", "body_name": "Ring"}));
+        world_bbox(&s, "Ring")
+    };
+    for turned in [false, true] {
+        // Origins, about the component's own Z axis (world x = 50, which a turn about Z keeps).
+        let array = made(turned, json!([50, 0, 0]), json!([0, 0, 1]));
+        for origin in [json!({"x": 50, "y": 0, "z": 0}), json!({"x": "W", "y": 0, "z": "0 mm"})] {
+            let object = made(turned, origin.clone(), json!([0, 0, 1]));
+            assert!(near(array.0, object.0) && near(array.1, object.1), "turned {turned}, {origin}: {array:?} against {object:?}");
+        }
+        // A direction, along the sketch's own X axis 8 mm below it: the world's X, or its Y once
+        // turned.
+        let (dir, dir_xyz) =
+            if turned { (json!([0, 1, 0]), json!({"x": 0, "y": 1, "z": 0})) } else { (json!([1, 0, 0]), json!({"x": 1, "y": 0, "z": 0})) };
+        let array = made(turned, json!([50, 0, -8]), dir);
+        let object = made(turned, json!([50, 0, -8]), dir_xyz);
+        assert!(near(array.0, object.0) && near(array.1, object.1), "turned {turned}, direction: {array:?} against {object:?}");
+    }
+}
+
 /// A new placement given to `timeline.redefine` is still a world point.
 #[test]
 fn a_new_primitive_placement_is_still_mapped_from_the_world() {
