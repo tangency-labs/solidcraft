@@ -58,6 +58,7 @@ impl Catalog {
 static ENGLISH: Catalog = Catalog::new("en", "English", include_str!(concat!(env!("OUT_DIR"), "/locales/en.json")));
 static ARABIC: Catalog = Catalog::new("ar", "العربية", include_str!(concat!(env!("OUT_DIR"), "/locales/ar.json")));
 static BOSNIAN: Catalog = Catalog::new("bs", "Bosanski", include_str!(concat!(env!("OUT_DIR"), "/locales/bs.json")));
+static CATALAN: Catalog = Catalog::new("ca", "Català", include_str!(concat!(env!("OUT_DIR"), "/locales/ca.json")));
 static CZECH: Catalog = Catalog::new("cs", "Čeština", include_str!(concat!(env!("OUT_DIR"), "/locales/cs.json")));
 static DANISH: Catalog = Catalog::new("da", "Dansk", include_str!(concat!(env!("OUT_DIR"), "/locales/da.json")));
 static GERMAN: Catalog = Catalog::new("de", "Deutsch", include_str!(concat!(env!("OUT_DIR"), "/locales/de.json")));
@@ -96,6 +97,7 @@ pub const LOCALES: &[&Catalog] = &[
     &ENGLISH,
     &ARABIC,
     &BOSNIAN,
+    &CATALAN,
     &CZECH,
     &DANISH,
     &GERMAN,
