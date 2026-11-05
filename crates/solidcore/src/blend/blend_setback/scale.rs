@@ -43,6 +43,12 @@ pub struct CertifiedScale {
     pub solves: usize,
     /// `*plAttempts`: fills built by the search, at most 12.
     pub attempts: usize,
+    /// Exact sector-row materialization attempts across every fill in the search.
+    pub qp_rows_built: usize,
+    /// Maximum constraint working-set size across the search's quadratic programmes.
+    pub qp_peak_rows_held: usize,
+    /// Dual active-set iterations across every fill in the search.
+    pub qp_steps: usize,
     /// `*ppReason`: why none certifies, with a scale of 0.
     pub reason: Option<&'static str>,
 }
@@ -162,7 +168,7 @@ impl Model<'_> {
         &self,
         k: f64,
         probe: Option<&mut Probe>,
-        solves: &mut usize,
+        work: &mut FillStats,
     ) -> core::result::Result<bool, Refusal> {
         let ks = self.at(k)?;
         let surfaces: Vec<Surface> = model_rounds(self.faces, self.edges, &ks)?
@@ -193,7 +199,10 @@ impl Model<'_> {
             probe.unwrap_or(&mut as_fill),
             &mut stats,
         );
-        *solves += stats.solves;
+        work.solves = work.solves.saturating_add(stats.solves);
+        work.qp_rows_built = work.qp_rows_built.saturating_add(stats.qp_rows_built);
+        work.qp_peak_rows_held = work.qp_peak_rows_held.max(stats.qp_peak_rows_held);
+        work.qp_steps = work.qp_steps.saturating_add(stats.qp_steps);
         match result {
             Err(_) if !is_probe && stats.uncertified => Ok(false),
             Err(refusal) => Err(refusal),
@@ -221,7 +230,7 @@ pub fn certified_scale(
     setbacks: &[f64],
     most: Option<&[f64]>,
 ) -> core::result::Result<CertifiedScale, Refusal> {
-    let mut solves = 0;
+    let mut work = FillStats::default();
     let mut size = 0.0;
     for &x in setbacks {
         size = smax(size, x.abs());
@@ -242,21 +251,27 @@ pub fn certified_scale(
     let mut attempts = 0;
     let mut certified = |i: i32| {
         attempts += 1;
-        ctx.run(f64::from(i) / 1000.0, None, &mut solves)
+        ctx.run(f64::from(i) / 1000.0, None, &mut work)
     };
     if certified(1000)? {
         return Ok(CertifiedScale {
             scale: 1.0,
-            solves,
+            solves: work.solves,
             attempts,
+            qp_rows_built: work.qp_rows_built,
+            qp_peak_rows_held: work.qp_peak_rows_held,
+            qp_steps: work.qp_steps,
             reason: None,
         });
     }
     if !certified(2000)? {
         return Ok(CertifiedScale {
             scale: 0.0,
-            solves,
+            solves: work.solves,
             attempts,
+            qp_rows_built: work.qp_rows_built,
+            qp_peak_rows_held: work.qp_peak_rows_held,
+            qp_steps: work.qp_steps,
             reason: Some(
                 "SmBlendSetback: no G1 fill is certified convex at the corner's setbacks up to twice them",
             ),
@@ -267,8 +282,11 @@ pub fn certified_scale(
     let hi = bisect_thousandths(1000, 2000, &mut certified)?;
     Ok(CertifiedScale {
         scale: f64::from(hi) / 1000.0,
-        solves,
+        solves: work.solves,
         attempts,
+        qp_rows_built: work.qp_rows_built,
+        qp_peak_rows_held: work.qp_peak_rows_held,
+        qp_steps: work.qp_steps,
         reason: None,
     })
 }
@@ -357,12 +375,32 @@ mod tests {
             )
             .unwrap();
             println!(
-                "scale {} attempts {} solves {}",
-                result.scale, result.attempts, result.solves
+                "scale {} attempts {} solves {} rows {} held {} steps {}",
+                result.scale,
+                result.attempts,
+                result.solves,
+                result.qp_rows_built,
+                result.qp_peak_rows_held,
+                result.qp_steps
             );
             assert_eq!(result.scale, want);
             assert!(result.attempts <= 12);
             assert_eq!(result.solves, want_solves, "SMLib 20b1c01 QP count");
+            assert!(result.qp_rows_built > 0);
+            assert!(result.qp_peak_rows_held <= result.qp_rows_built);
+            assert!(result.qp_steps >= result.solves);
+            // Work budgets leave room for floating-point branch differences while
+            // rejecting the former full matrices (up to 693,051 retained rows).
+            assert!(result.qp_rows_built <= 12_000_000);
+            assert!(result.qp_peak_rows_held <= 16_000);
+            assert!(result.qp_steps <= 25_000);
+            if want == 1.0 {
+                // The r=5, setback=8 corner needs no scale search. Its dense
+                // programme built 430,962 rows and retained 254,037 at peak.
+                assert!(result.qp_rows_built <= 10_000);
+                assert!(result.qp_peak_rows_held <= 2_000);
+                assert!(result.qp_steps <= 16);
+            }
             assert_eq!(
                 result.attempts,
                 if want == 1.0 {
@@ -422,7 +460,7 @@ mod tests {
                 grid.sort_unstable();
                 grid.dedup();
                 for i in grid {
-                    let mut solves = 0;
+                    let mut solves = FillStats::default();
                     assert_eq!(
                         model.run(f64::from(i) / 1000.0, None, &mut solves).unwrap(),
                         i >= want,

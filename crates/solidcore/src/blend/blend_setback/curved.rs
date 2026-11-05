@@ -73,9 +73,9 @@ use super::certify::{
     affine_fundamentals, affine_net, fundamentals, minor_without, t_axpy, t_det3, t_du, t_dv,
     t_make, t_mul_fast, t_nonneg, t_pieces, t_scale, AffinePatch,
 };
-use super::convexity::{GRAPH_DIRECTIONS, GRAPH_LEVELS};
+use super::convexity::{SectorRows, GRAPH_DIRECTIONS, GRAPH_LEVELS};
 use super::graph::{fill_from, GRAPH_DEPTH, P2};
-use super::qp::{dual_qp_rows, QpOutcome};
+use super::qp::{dual_qp_source, QpOutcome, QpStats};
 use super::spring::spring_curve;
 use super::{
     affine_solutions, along_line, axpy, bern_elevate, bern_mul, binomial, el, el_mut, el_ref,
@@ -2008,8 +2008,7 @@ pub(super) fn graph_g1_curved(
             }
             *el_mut(&mut kernel, n + q)? = th;
         }
-        let mut cm: Vec<f64> = Vec::new();
-        let mut bv: Vec<f64> = Vec::new();
+        let mut rows = SectorRows::new(free);
         for (p, patch) in patches.iter().enumerate() {
             let mut theta: Vec<f64> = (0..GRAPH_DIRECTIONS)
                 .map(|k| PI * k as f64 / GRAPH_DIRECTIONS as f64)
@@ -2059,52 +2058,15 @@ pub(super) fn graph_g1_curved(
                 }
             }
             let sp = el(&signs, p)?;
-            let mut row_t = vec![0.0; free];
-            let pc00 = el_ref(&pc0, 0)?;
-            for pc in 0..pc00.len() {
-                for i in 0..el_ref(pc00, pc)?.c.len() {
-                    for a in 0..theta.len() - 1 {
-                        for pair in 0..2 {
-                            let ta = el(&theta, a)?;
-                            let (c0, s0) = (ta.cos(), ta.sin());
-                            let (c1, s1) = if pair == 0 {
-                                (c0, s0)
-                            } else {
-                                let tb = el(&theta, a + 1)?;
-                                (tb.cos(), tb.sin())
-                            };
-                            let w = [c0 * c1, c0 * s1 + s0 * c1, s0 * s1];
-                            let mut cst = 0.0;
-                            let mut dmax = 0.0;
-                            for (k, &wk) in w.iter().enumerate() {
-                                cst += sp * wk * el(&el_ref(el_ref(&pc0, k)?, pc)?.c, i)?;
-                            }
-                            for (f, rf) in row_t.iter_mut().enumerate() {
-                                let mut s = 0.0;
-                                for (k, &wk) in w.iter().enumerate() {
-                                    s += sp
-                                        * wk
-                                        * el(&el_ref(el_ref(&pcf, k * free + f)?, pc)?.c, i)?;
-                                }
-                                *rf = s;
-                                dmax = smax(dmax, s.abs());
-                            }
-                            if !(dmax > 1.0e-11 * scale) {
-                                continue;
-                            }
-                            for &rf in &row_t {
-                                cm.push(rf / dmax);
-                            }
-                            bv.push((-cst + 1.0e-12 * strict.factor * scale) / dmax);
-                        }
-                    }
-                }
-            }
+            rows.add_patch(&theta, sp, scale, 1.0e-12 * strict.factor * scale, pc0, pcf)?;
         }
         stats.solves += 1;
         stats.curved_degrees += 1;
-        stats.curved_rows += bv.len();
-        let outcome = dual_qp_rows(&gm, &gv, &cm, &bv, free, bv.len(), 1.0e-13, true)?;
+        let mut work = QpStats::default();
+        let outcome = dual_qp_source(&gm, &gv, &rows, free, 1.0e-13, true, &mut work);
+        stats.curved_rows = stats.curved_rows.saturating_add(work.rows_built);
+        stats.record_qp_work(work);
+        let outcome = outcome?;
         let t = match outcome {
             QpOutcome::Solved(t) => t,
             QpOutcome::Infeasible { proven: true } if d == 9 => break 'degrees,

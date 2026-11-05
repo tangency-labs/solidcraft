@@ -69,8 +69,8 @@ then link the overlay before the existing static libraries:
 
 ```sh
 bash harness/cpp/tests/build_setback_executive.sh \
-  bin/reference-2344 /home/karlvonrichter/github/smlib-fork \
-  /home/karlvonrichter/github/fork-cpp/lib bin/reference-2344/executive
+  bin/reference-2344 "$SMLIB_FORK" \
+  "$SMLIB_FORK_LIB" bin/reference-2344/executive
 nice -n 10 bash harness/cpp/tests/run_setback_executive.sh \
   bin/reference-2344/executive > /tmp/native-executive.log
 CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 nice -n 10 cargo test \
@@ -239,7 +239,72 @@ not evidence for the merge resolutions above.
 
 Full `cargo test -p solidcore`, runner self-tests and `--green` were not run
 for this slice; there is no unit promotion or CI-green claim. Production Rust
-streaming remains unimplemented; the native preparation is documented separately.
+streaming was unimplemented at that historical head; the native preparation is documented separately.
+
+### Production streaming implementation (#2344(b), PR #2783)
+
+The planar and curved fill solvers now consume affine sector-row generators.
+Stable slots preserve patch/piece/coefficient/direction/pair order, including
+slots skipped for having no free unknown. Each violation scan uses a conservative
+bound to avoid constructing comfortably satisfied rows; uncertain or exceptional
+arithmetic falls back to the original normalized row and slack calculation.
+Only selected working-set rows are retained. Degree order, certification and
+the curved solver's rounding allowance and continued dual state are unchanged.
+The optional margin probe still uses its dense augmented programme.
+
+`FillStats` records exact materialization attempts (including skipped slots and
+rebuilds), maximum selected rows held, and dual iterations including the empty
+programme's feasibility scan. `CertifiedScale` aggregates these over all attempts.
+The existing `curved_rows` field now counts materialization attempts rather than
+the former dense programme's row count. Native WIP count snapshots are not direct
+expectations: that WIP also changed the degree order.
+
+Tests compare generated rows bitwise with the dense construction, compare lazy
+and exact violation scans including normalization underflow, and exercise solver
+ties, skipped slots, rounding, infeasibility and multiple 2,000-row batches.
+This implementation was verified separately from the historical results above,
+at code head `07cb09ff1` after merging main `f06f897ea`.
+
+The final Linux run passed all 24 focused setback unit tests, including the
+17-corner monotonicity grid. The integration suites passed 7 setback tests,
+7 executive tests and 11 curved-setback tests. Their five ignored tests comprise
+three diagnostic dump helpers and two expensive curved-growth cases; the executive
+dump was run separately below. The unchanged dense baseline passed seven setback
+integration tests and the thirteen-case executive dump. The six streamed search
+cases retained their existing scales, attempt counts and solve counts:
+
+| Scale case | Rows materialized | Peak selected rows | Dual steps |
+|---|---:|---:|---:|
+| 2/3/4 rounds | 6,937,323 | 10,000 | 9,347 |
+| 1/1.5/2 rounds | 7,389,075 | 10,000 | 10,137 |
+| Upright held at room | 9,483,881 | 10,679 | 12,635 |
+| Asked setback 4.25 | 4,006,627 | 11,422 | 8,025 |
+| r5, setback 8 | 2,250 | 678 | 4 |
+| All edges held, refused | 584,794 | 6,000 | 2,590 |
+
+The scale regression gates bound materializations, retained rows and steps with
+headroom for floating-point branch differences. In particular the r5 case allows
+10,000 materializations and 2,000 retained rows, far below its old dense matrix.
+These budgets do not change geometric tolerances or expected scales.
+
+A clean allowed-source native reference at `5e8c9c1`, baseline overlay `20b1c01`
+and streamed overlay `3843ddb` passed the row-order gate, all six native count
+gates, and their thirteen-case executive comparison (seven bodies, 167 vertices,
+`1e-9` relative with no floor). The dense Rust baseline also passed against that
+native baseline. The final refreshed Rust executive passed all thirteen cases:
+its recorded geometry and outcomes are exactly identical to the dense Rust
+baseline, and match the native baseline at `1e-9` relative with no floor (seven
+bodies, 167 vertices, empty Level2 checks). Before the main refresh, the streamed
+Rust executive also passed against both native overlays at the same tolerance.
+
+Workspace formatting, workspace/all-target clippy with `-D warnings`, and
+`wasm32-unknown-unknown` checking pass after the refresh. The earlier focused
+Windows run passed 21 tests. Full-workspace kernel tests, the full diagnostic
+`--green` sweep and the two ignored curved-growth cases were not run. No unit is
+promoted and no CI-green result is claimed. Raw logs and native source manifests
+are retained as local validation artifacts. The final Rust comparisons are
+`rust-refreshed-exact-comparison.log` and
+`rust-refreshed-native-comparison.log`.
 
 ### CI permission boundary
 

@@ -2103,8 +2103,26 @@ pub struct FillStats {
     pub curved_fills: usize,
     /// `CurvedCounts[1]`: their degrees tried, one quadratic programme each.
     pub curved_degrees: usize,
-    /// `CurvedCounts[2]`: the sector rows built for them.
+    /// Exact sector-row construction attempts for curved fills, including skipped rows.
+    /// Counts violation scans and selection; a row rebuilt later is counted again,
+    /// unlike the former stored-row count. Work is retained on refusal or error.
     pub curved_rows: usize,
+    /// Exact row construction attempts in planar, curved and margin-probe solvers.
+    /// Includes skipped rows and repeated construction during scans and selection;
+    /// cheap-bound rejections do not count. Work is retained on refusal or error.
+    pub qp_rows_built: usize,
+    /// Maximum number of constraint rows retained in a solver's working set.
+    pub qp_peak_rows_held: usize,
+    /// Dual active-set iterations across the fill's quadratic programmes.
+    pub qp_steps: usize,
+}
+
+impl FillStats {
+    fn record_qp_work(&mut self, work: qp::QpStats) {
+        self.qp_rows_built = self.qp_rows_built.saturating_add(work.rows_built);
+        self.qp_peak_rows_held = self.qp_peak_rows_held.max(work.peak_rows_held);
+        self.qp_steps = self.qp_steps.saturating_add(work.steps);
+    }
 }
 
 /// `SmBlendSetback::FillHoleProbe`: the G1 fill (order 1) probed as `probe` asks, or built
@@ -3041,6 +3059,26 @@ mod tests {
             let a = fill_hole(&k, &faces, &input, order, 1e-9).unwrap();
             let b = fill_hole_to(&k, &faces, &input, both, 1e-9).unwrap();
             same_fill(&a, &b);
+            if order == 1 {
+                let mut stats = FillStats::default();
+                let mut probe = Probe {
+                    fill: true,
+                    ..Probe::default()
+                };
+                let measured =
+                    fill_hole_probe(&k, &faces, &input, 1e-9, &mut probe, &mut stats).unwrap();
+                same_fill(&a, &measured);
+                assert!(stats.qp_rows_built > 0);
+                assert!(stats.qp_peak_rows_held <= stats.qp_rows_built);
+                let first = stats;
+                let repeated =
+                    fill_hole_probe(&k, &faces, &input, 1e-9, &mut probe, &mut stats).unwrap();
+                same_fill(&measured, &repeated);
+                assert_eq!(
+                    first, stats,
+                    "work counters reset and repeat deterministically"
+                );
+            }
         }
         // a face order above the rounds' is refused
         let rounds: Vec<Surface> = (0..3)

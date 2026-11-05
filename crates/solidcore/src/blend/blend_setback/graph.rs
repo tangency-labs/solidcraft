@@ -31,8 +31,8 @@
 use super::certify::{
     affine_net, certified_convex, net_surface, sides_on_planes, t_make, AffinePatch,
 };
-use super::convexity::{patch_curvatures, sector_conditions, SectorConditions};
-use super::qp::{dual_qp_rows, QpOutcome};
+use super::convexity::{patch_curvatures, sector_conditions, sector_rows, SectorConditions};
+use super::qp::{dual_qp_rows_with_stats, dual_qp_source, QpOutcome, QpStats};
 use super::{
     affine_solutions, along_line, axpy, bern_elevate, bern_mul, binomial, el, el_mut, el_ref,
     monomials, over_patch, second, sm_err, smax, tensor_elevate, Face, Fill, FillOrders, FillStats,
@@ -902,10 +902,10 @@ pub(super) fn graph_gk(
         }
 
         // the sector conditions on every piece's coefficient matrices, in t: C t >= b
-        let SectorConditions { c: cm, b: bv } =
-            sector_conditions(&patches, &curvatures, &kernel, &yp, &zn, free)?;
-        stats.solves += 1;
         if let Some(pr) = probe.as_deref_mut().filter(|p| !p.fill && p.margin) {
+            let SectorConditions { c: cm, b: bv } =
+                sector_conditions(&patches, &curvatures, &kernel, &yp, &zn, free)?;
+            stats.solves += 1;
             // the least tau with C t + tau >= b (tau >= -1): min tau + eps (|t|^2 + tau^2)
             let ln = free + 1;
             let lm = bv.len();
@@ -927,7 +927,20 @@ pub(super) fn graph_gk(
                 *el_mut(&mut cmm, lm * ln + f)? = if f == free { 1.0 } else { 0.0 };
             }
             bvm.push(-1.0);
-            return match dual_qp_rows(&gmm, &gvm, &cmm, &bvm, ln, lm + 1, 1.0e-13, false)? {
+            let mut work = QpStats::default();
+            let outcome = dual_qp_rows_with_stats(
+                &gmm,
+                &gvm,
+                &cmm,
+                &bvm,
+                ln,
+                lm + 1,
+                1.0e-13,
+                false,
+                &mut work,
+            );
+            stats.record_qp_work(work);
+            return match outcome? {
                 QpOutcome::Solved(tm) => {
                     pr.margin_value = el(&tm, free)?;
                     Ok(Fill::default())
@@ -941,7 +954,12 @@ pub(super) fn graph_gk(
                 QpOutcome::Infeasible { .. } => Err(sm_err().into()),
             };
         }
-        let outcome = dual_qp_rows(&gm, &gv, &cm, &bv, free, bv.len(), 1.0e-13, false)?;
+        let rows = sector_rows(&patches, &curvatures, &kernel, &yp, &zn, free)?;
+        stats.solves += 1;
+        let mut work = QpStats::default();
+        let outcome = dual_qp_source(&gm, &gv, &rows, free, 1.0e-13, false, &mut work);
+        stats.record_qp_work(work);
+        let outcome = outcome?;
         if let Some(pr) = probe.as_deref_mut().filter(|p| !p.fill) {
             pr.feasible = matches!(outcome, QpOutcome::Solved(_));
             return Ok(Fill::default());
