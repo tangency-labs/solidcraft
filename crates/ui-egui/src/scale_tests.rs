@@ -277,6 +277,7 @@ pub(crate) fn view_frame(
         pv_key: 0,
         pv_slot: none(),
         pv_hide: false,
+        preview_bounds: None,
         view_proj: proj.vp.to_f32(),
         back: proj.cam.back().to_f32(),
         size_px: [size as f32; 2],
@@ -296,6 +297,7 @@ pub(crate) fn view_frame(
         hover_tint: [f32::from(t.hover_face_lift) / 255.0; 3],
         selection_tint: [0.4, 0.6, 0.9],
         hatch: Default::default(),
+        moving: None,
     }
 }
 

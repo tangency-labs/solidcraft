@@ -86,7 +86,7 @@ fn every_axis_is_drawn_in_one_set_of_colours() {
 
         let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
             let painter = ui.painter().clone();
-            crate::gizmo::show(ui, &painter, &proj, egui::Id::new("one_set_gizmo"), &triad, 1.0);
+            crate::gizmo::show(ui, &painter, &proj, egui::Id::unique("one_set_gizmo"), &triad, 1.0);
         });
         out.textures_delta.clear();
         let mut gizmo = stroke_colours(&out.shapes);
@@ -143,8 +143,14 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 /// raise the file's count here and give the reason. Fewer is always fine. The icon sources may
 /// hold none at all.
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
+    ("gpu.rs", 1, "the white tint that shows the background picture as it is"),
     ("navigation.rs", 1, "the navigation cube's face shading, made from a token"),
     ("canvas.rs", 3, "white rings around manipulator handles"),
+    (
+        "body_gizmo.rs",
+        3,
+        "the custom view navigator's raster: the design's appearance and tokens, shaded, as pixels, drawn with the white image tint",
+    ),
     ("context_menu.rs", 1, "the radial menu's shadow"),
     ("dialogs_appearance.rs", 1, "a design appearance: the colour is the fact"),
     ("dialogs_save_mesh.rs", 1, "an installed slicer's own icon, drawn untinted"),

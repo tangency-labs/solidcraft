@@ -115,6 +115,7 @@ motion.delete                     removes a motion study
 motion.export                     writes a study's results to a file
 motion.export_animation           writes an animation
 motion.list                       a listing of motion studies
+panel.action                      controller actions; no geometry (crates/engine/src/panels/tests.rs and crates/ui-egui/src/panel_runtime/tests.rs)
 panel.activate                    application panel layout; no geometry (engine/UI/MCP tests)
 panel.close                       application panel layout; no geometry (engine/UI/MCP tests)
 panel.collapse                    application panel layout; no geometry (engine/UI/MCP tests)
@@ -206,6 +207,9 @@ render.stage.clear                rendering: images, cameras, stages
 render.stage.ground               rendering: images, cameras, stages
 render.start                      rendering: images, cameras, stages
 render.status                     rendering: images, cameras, stages
+render.surface.import             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
+render.texture.list               rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
+render.texture.remove             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 select.clear                      the selection
 select.filter                     the selection
 select.same_look                  the selection
@@ -282,6 +286,7 @@ sketch.loose_ends.tie             2D sketch only (the sketch solver and engine t
 sketch.mirror                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.move                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.move3d                     2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.move_points                2D sketch only; crates/engine/src/cmd/sketch_ux_tests.rs: move_points_moves_each_point_to_its_own_target and move_points_refuses_a_near_that_two_points_answer
 sketch.offset                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.offset.break               2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.paste                      2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -330,6 +335,7 @@ view.left                         the view: camera, layout, display
 view.list                         the view: camera, layout, display
 view.navigate                     the view: camera, layout, display
 view.navigation_bar               the view: camera, layout, display
+view.navigator                    the view: navigator type; crates/engine/src/schema/view_navigation_tests.rs
 view.next_tab                     the view: camera, layout, display
 view.normal_to                    the view: camera, layout, display
 view.perspective                  the view: camera, layout, display
@@ -342,6 +348,7 @@ view.render_frame                 the view: camera, layout, display
 view.render_inspector             the view: camera, layout, display
 view.render_select                the view: camera, layout, display
 view.render_stage                 the view: camera, layout, display
+view.ribbon_tabs_only             the view: camera, layout, display
 view.right                        the view: camera, layout, display
 view.save                         the view: camera, layout, display
 view.shots_strip                  the view: camera, layout, display

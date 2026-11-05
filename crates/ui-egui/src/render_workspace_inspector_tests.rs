@@ -466,7 +466,7 @@ fn complete_native_studio_can_be_reviewed_and_applied_from_real_ui_controls() {
 }
 
 #[test]
-fn surface_stage_contains_preview_target_plane_repeat_and_method_reason_in_order() {
+fn surface_stage_contains_preview_target_plane_repeat_angle_and_method_reason_in_order() {
     let mut h = fixture();
     h.call("ui.resize", json!({"width":1600,"height":1800}));
     h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Body { name:"Subject".into() }]})).unwrap();
@@ -479,11 +479,13 @@ fn surface_stage_contains_preview_target_plane_repeat_and_method_reason_in_order
     let target = crate::scenario::rect_of("render:surface:target").unwrap();
     let plane = crate::scenario::rect_of("render:surface:xy").unwrap();
     let repeat = crate::scenario::rect_of("render:surface:repeat").unwrap();
+    let angle = crate::scenario::rect_of("render:surface:grain-angle").unwrap();
     let reason = crate::scenario::rect_of("dialog:note:surface:gpu:reason").unwrap();
     assert!(note.bottom() < target.top());
     assert!(target.bottom() <= plane.top());
     assert!(plane.bottom() <= repeat.top());
-    assert!(repeat.bottom() < reason.top());
+    assert!(repeat.bottom() <= angle.top());
+    assert!(angle.bottom() < reason.top());
     assert_eq!(h.app.render_workspace.view.method, ImageMethod::Raster);
     assert_eq!(h.app.session.doc.to_json(), before);
 }
@@ -685,13 +687,13 @@ fn saved_optics_removal_requires_confirmation_and_keeps_geometry() {
 }
 
 #[test]
-fn temporary_maps_review_keeps_plane_scale_and_requires_acknowledgement() {
+fn temporary_maps_review_keeps_plane_scale_angle_and_requires_acknowledgement() {
     let mut h = fixture();
     super::super::select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
     let target: materials::Target = serde_json::from_value(h.app.run("render.scene", json!({})).unwrap()["bodies"][0].clone()).unwrap();
     let plan = h
         .app
-        .run("render.library.surface.prepare", json!({"id":"SURF-001","body_index":target.ordinal,"body_name":target.name,"plane":"yz","scale":2.5}))
+        .run("render.library.surface.prepare", json!({"id":"SURF-001","body_index":target.ordinal,"body_name":target.name,"plane":"yz","scale":2.5,"rotation_rad":std::f64::consts::FRAC_PI_2}))
         .unwrap();
     let before = h.app.session.doc.to_json();
     library::review::open(
@@ -699,7 +701,7 @@ fn temporary_maps_review_keeps_plane_scale_and_requires_acknowledgement() {
         "maps",
         "Brushed stainless".into(),
         plan,
-        library::review::Apply::Maps { id: "SURF-001".into(), target, plane: "yz".into(), scale: 2.5 },
+        library::review::Apply::Maps { id: "SURF-001".into(), target, plane: "yz".into(), scale: 2.5, rotation_rad: std::f64::consts::FRAC_PI_2 },
     )
     .unwrap();
     h.frames(3);
@@ -707,8 +709,9 @@ fn temporary_maps_review_keeps_plane_scale_and_requires_acknowledgement() {
     h.step(&json!({"click":{"handle":"render:review:acknowledge"}})).unwrap();
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     let binding = &h.app.render_workspace.view.materials.bindings[0];
-    assert_eq!(binding.maps.frame.u, [0.0, 250.0, 0.0]);
-    assert_eq!(binding.maps.frame.v, [0.0, 0.0, 250.0]);
+    assert!((binding.maps.frame.u[2] - 250.0).abs() < 1e-10);
+    assert!((binding.maps.frame.v[1] + 250.0).abs() < 1e-10);
+    assert!(binding.maps.frame.u[1].abs() < 1e-10 && binding.maps.frame.v[2].abs() < 1e-10);
     assert_eq!(h.app.session.doc.to_json(), before);
 }
 
@@ -885,21 +888,21 @@ fn temporary_library_maps_preserve_the_reviewed_plane_scale_and_optical_exclusiv
     let targets = h.app.run("render.scene", json!({})).unwrap();
     let target: materials::Target = serde_json::from_value(targets["bodies"][0].clone()).unwrap();
     let before = h.app.session.doc.to_json();
-    materials::install_library_surface(&mut h.app, "SURF-001", target.clone(), "yz", 2.5).unwrap();
+    materials::install_library_surface(&mut h.app, "SURF-001", target.clone(), "yz", 2.5, 0.0).unwrap();
     let binding = &h.app.render_workspace.view.materials.bindings[0];
     assert_eq!(binding.maps.frame.u, [0.0, 250.0, 0.0]);
     assert_eq!(binding.maps.frame.v, [0.0, 0.0, 250.0]);
     assert_eq!(h.app.session.doc.to_json(), before, "temporary maps must not change the native model");
     let original = binding.maps.frame;
-    assert!(materials::install_library_surface(&mut h.app, "SURF-001", target.clone(), "unknown", 1.0).is_err());
-    assert!(materials::install_library_surface(&mut h.app, "SURF-001", target.clone(), "xy", 0.0).is_err());
+    assert!(materials::install_library_surface(&mut h.app, "SURF-001", target.clone(), "unknown", 1.0, 0.0).is_err());
+    assert!(materials::install_library_surface(&mut h.app, "SURF-001", target.clone(), "xy", 0.0, 0.0).is_err());
     for scale in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, f64::MAX] {
-        assert!(materials::install_library_surface(&mut h.app, "SURF-001", target.clone(), "xy", scale).is_err());
+        assert!(materials::install_library_surface(&mut h.app, "SURF-001", target.clone(), "xy", scale, 0.0).is_err());
         assert_eq!(h.app.render_workspace.view.materials.bindings[0].maps.frame, original);
     }
     assert_eq!(h.app.render_workspace.view.materials.bindings[0].maps.frame, original);
     h.app.render_workspace.view.materials.bindings[0].glass_enabled = true;
-    assert!(materials::install_library_surface(&mut h.app, "SURF-001", target, "xy", 1.0).is_err());
+    assert!(materials::install_library_surface(&mut h.app, "SURF-001", target, "xy", 1.0, 0.0).is_err());
     assert!(h.app.render_workspace.view.materials.bindings[0].glass_enabled);
     assert_eq!(h.app.session.doc.to_json(), before);
 }
@@ -981,6 +984,7 @@ fn ribbon_navigation_reuses_inspector_and_preserves_exact_unsaved_intent() {
         ("render.settings.get", Editor::Camera),
         ("render.library.appearance.apply", Editor::Appearance),
         ("render.library.surface.bind", Editor::Appearance),
+        ("render.surface.import", Editor::Appearance),
         ("render.library.studio.prepare", Editor::Lighting),
         ("render.library.studio.apply", Editor::Lighting),
         ("render.library.environment.apply", Editor::Environment),

@@ -21,7 +21,9 @@ use solidcraft_engine::geom::{Aabb3, Mesh};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, combo, field, form_row};
 use crate::preview::{Built, Colors};
-use crate::selection::{BODIES, EDGES, FACES, SelInput, SelectionExt as _, VERTICES, items as sel_items, point_value as pt, polyline_mid};
+use crate::selection::{
+    BODIES, EDGES, FACES, ORIGIN, POINTS, SelInput, SelectionExt as _, VERTICES, items as sel_items, point_value as pt, polyline_mid,
+};
 use crate::theme::Tokens;
 
 use crate::viewport::Proj;
@@ -72,8 +74,9 @@ pub(crate) fn joint_choice(name: &str, kind: JointKind) -> String {
     format!("{name} ({})", crate::i18n::tr_label(kind_label(kind)))
 }
 
-/// What a joint origin input accepts (snaps on faces, edges and vertices).
-pub const SNAPS: u16 = FACES | EDGES | VERTICES;
+/// What a joint origin input accepts: snaps on faces, edges and vertices, the world origin, and
+/// a sketch point (so a joint can be placed on the design origin or a hole centre, like Fusion's).
+pub const SNAPS: u16 = FACES | EDGES | VERTICES | ORIGIN | POINTS;
 /// Commands whose effect is where occurrences sit (previewed on the placed model).
 const MOVES: &[&str] = &[
     "joint.create",
@@ -175,6 +178,7 @@ impl Searched {
 /// The Joint and As-built Joint dialogs.
 #[derive(Clone, Debug)]
 pub struct JointForm {
+    pub name: String,
     pub as_built: bool,
     /// Editing this joint (its origins stay; type, alignment and limits change).
     pub editing: Option<u64>,
@@ -199,6 +203,8 @@ pub struct JointForm {
     pub found_note: Option<String>,
     /// The design and the joint (as the dialog had it) the found limits are for.
     pub searched: Option<Searched>,
+    /// Edit Joint Limits: open the Limits section when the dialog first draws.
+    pub show_limits: bool,
     pub animate: bool,
     /// Animation phase, 0…1.
     pub phase: f64,
@@ -208,6 +214,7 @@ pub struct JointForm {
 impl JointForm {
     fn new(as_built: bool, doc: &solidcraft_engine::doc::Document) -> JointForm {
         JointForm {
+            name: String::new(),
             as_built,
             editing: None,
             kind: 0,
@@ -221,6 +228,7 @@ impl JointForm {
             found: Vec::new(),
             found_note: None,
             searched: None,
+            show_limits: false,
             animate: false,
             phase: 0.0,
             hover: None,
@@ -491,11 +499,20 @@ fn nearest_pick(own: &[&solidcraft_engine::doc::ModelBody], p: Vec3, edges: bool
     best.map(|(_, sel)| sel)
 }
 
+/// Default name for a new joint based on its type (e.g. "Planar Joint1", "Revolute Joint1").
+pub(crate) fn default_joint_name(doc: &solidcraft_engine::doc::Document, kind: JointKind) -> String {
+    let prefix = format!("{} Joint", kind_label(kind));
+    let names: std::collections::BTreeSet<_> = doc.assembly.joints.iter().map(|j| j.name.as_str()).collect();
+    let number = (1..=doc.assembly.joints.len().saturating_add(1)).find(|n| !names.contains(format!("{prefix}{n}").as_str())).unwrap_or(1);
+    format!("{prefix}{number}")
+}
+
 /// The Edit Joint dialog for a joint (by id). Its two sides show as the Joint dialog's do, each
 /// pre-filled with the pick it sits on.
 pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let j = app.session.doc.assembly.joints.iter().find(|j| j.id == id)?;
     let mut f = JointForm::new(false, &app.session.doc);
+    f.name = j.name.clone();
     f.editing = Some(id);
     f.sides = [side_pick(app, &j.a), side_pick(app, &j.b)];
     let mut inputs = side_inputs();
@@ -519,7 +536,15 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     Some(Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f))), inputs))
 }
 
-/// The Drive Joints dialog on a joint (by id).
+/// Edit Joint with its Limits section open (the browser's Edit Joint Limits).
+pub fn edit_joint_limits(app: &SolveApp, id: u64) -> Option<Dialog> {
+    let mut d = edit_joint(app, id)?;
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.show_limits = true;
+    }
+    Some(d)
+}
+
 /// Edit Joint with its motion playing (the browser's Animate Joint).
 pub fn animate_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let mut d = edit_joint(app, id)?;
@@ -557,6 +582,7 @@ pub fn occurrence_bounds(s: &Session, occs: &[u64]) -> Aabb3 {
     bb
 }
 
+/// The Drive Joints dialog on a joint (by id).
 pub fn drive_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let joint = app.session.doc.assembly.joints.iter().position(|j| j.id == id)?;
     Some(Dialog::new(Kind::Assembly(Asm::Drive { joint, values: current_values(&app.session, joint), focus: true }), vec![]))
@@ -650,13 +676,13 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
             let tol = (b.body.size() * 2e-3).max(1e-3);
             let f = b.body.faces(tol).ok()?.into_iter().find(|f| f.index == *index)?;
             match f.plane_normal {
-                Some(n) => (body, SnapPt { at: f.centroid, z: n, kind: SnapKind::FaceCenter, param: json!({"face": pt(*point)}) }),
+                Some(n) => (body.as_str(), SnapPt { at: f.centroid, z: n, kind: SnapKind::FaceCenter, param: json!({"face": pt(*point)}) }),
                 None => {
                     let c = solidcraft_engine::kernel::cylinder_face_at(&b.body, *point)?;
                     let sv = (*point - c.axis_point).dot(c.axis);
                     let (at, dir) = if (sv - c.start).abs() <= (c.end - sv).abs() { (c.start, -1.0) } else { (c.end, 1.0) };
                     (
-                        body,
+                        body.as_str(),
                         SnapPt {
                             at: c.axis_point + c.axis * at,
                             z: c.axis * dir,
@@ -679,7 +705,7 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
                     let z = if out.dot(n) < 0.0 { -n } else { n };
                     // Its round end, kept by name so it follows the hole or boss as the part
                     // changes (a point where it has none).
-                    (body, SnapPt { at: c, z, kind: SnapKind::CircleCenter, param: json!({"circle": pt(c), "z": pt(z)}) })
+                    (body.as_str(), SnapPt { at: c, z, kind: SnapKind::CircleCenter, param: json!({"circle": pt(c), "z": pt(z)}) })
                 }
                 None => {
                     let mid = polyline_mid(e);
@@ -687,7 +713,7 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
                         .or_else(|| m.edge_faces.get(*index).and_then(|fs| fs.first()).and_then(|f| face_normal_near(&m, *f, mid)))
                         .unwrap_or(Vec3::Z);
                     // Its middle, kept by the edge's name.
-                    (body, SnapPt { at: mid, z, kind: SnapKind::EdgeMid, param: json!({"edge": pt(mid), "z": pt(z)}) })
+                    (body.as_str(), SnapPt { at: mid, z, kind: SnapKind::EdgeMid, param: json!({"edge": pt(mid), "z": pt(z)}) })
                 }
             }
         }
@@ -696,7 +722,23 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
             // as a point's is.
             let z = occurrence_of_body(s, body)
                 .map_or(Vec3::Z, |o| solidcraft_engine::doc::apply_vector(&solidcraft_engine::doc::joints::occurrence_world(&s.doc, o), Vec3::Z));
-            (body, SnapPt { at: *point, z: Vec3::Z, kind: SnapKind::Vertex, param: json!({"edge": pt(*point), "corner": pt(*point), "z": pt(z)}) })
+            (
+                body.as_str(),
+                SnapPt { at: *point, z: Vec3::Z, kind: SnapKind::Vertex, param: json!({"edge": pt(*point), "corner": pt(*point), "z": pt(z)}) },
+            )
+        }
+        Sel::SketchPoint { id } => {
+            // A sketch point's world position, its plane's normal as the joint's z, kept by its
+            // sketch and id so it follows the sketch as the part changes. No body names it, so the
+            // engine finds the occurrence from the world point (its own body).
+            let (sketch, point) = match id.split_once(':') {
+                Some((sketch, point)) => (sketch.parse().ok()?, point),
+                None => (s.active_sketch?, id.as_str()),
+            };
+            let ss = st.sketch(sketch)?;
+            let at = ss.plane.to_world(ss.sketch.point(ss.sketch.resolve_point(point)?)?);
+            let z = ss.plane.normal();
+            ("", SnapPt { at, z, kind: SnapKind::Vertex, param: json!({"point": pt(at), "z": pt(z)}) })
         }
         _ => return None,
     };
@@ -768,6 +810,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 (f.search, f.found_note, f.searched) = (None, None, None);
                 f.found.clear();
             }
+            let hint = default_joint_name(&app.session.doc, f.joint_kind());
+            enter |= text_row(ui, "Name", &mut f.name, &hint).0;
             f.fit_limits(&app.session.doc);
             if !f.as_built {
                 enter |= expr_row(ui, "Angle", &mut f.angle);
@@ -792,6 +836,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                         f.animate = !f.animate;
                     }
                 });
+                if std::mem::take(&mut f.show_limits) {
+                    let id = ui.make_persistent_id("joint_limits");
+                    ui.ctx().data_mut(|d| d.insert_persisted(id, true));
+                }
                 crate::ui_kit::section(ui, "joint_limits", "Limits", false, |ui| {
                     let found = f.found.clone();
                     for (i, (on, lo, hi)) in f.limits.iter_mut().enumerate() {
@@ -876,7 +924,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 form_row(ui, &capital(name), |ui| {
                     if i == 0 {
                         // Typing replaces the value at once, as in the other dialogs' value boxes.
-                        let id = egui::Id::new("sc_drive_value");
+                        let id = egui::Id::unique("sc_drive_value");
                         let r = crate::ui_kit::cell_editor(ui, id, v, "", false);
                         crate::params_dialog::complete(ui, &r, v);
                         if std::mem::take(focus) {
@@ -1439,10 +1487,14 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         Asm::Joint(f) => {
             let kind = TYPES.get(f.kind).copied().unwrap_or("rigid");
             let jk = f.joint_kind();
+            let custom_name = f.name.trim();
             let limits: Vec<Value> =
                 f.limits.iter().take(jk.dofs().len()).map(|(on, lo, hi)| if *on { json!([lo, hi]) } else { Value::Null }).collect();
             if let Some(id) = f.editing {
                 let mut p = json!({"joint": id, "type": kind, "flip": f.flip, "offset": f.offset[2]});
+                if !custom_name.is_empty() {
+                    p["name"] = json!(custom_name);
+                }
                 // The angle only when the user changed it: a side moved without it turns B as joint.create would.
                 if f.angle != f.angle_shown {
                     p["angle"] = json!(f.angle);
@@ -1471,6 +1523,9 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                     return Err("select two components".into());
                 }
                 let mut p = json!({"type": kind, "a": occs.first(), "b": occs.get(1), "limits": limits});
+                if !custom_name.is_empty() {
+                    p["name"] = json!(custom_name);
+                }
                 if let Some(x) = sel_items(inputs, 1).first().and_then(|x| snap_of(s, x)) {
                     p["at"] = x.param;
                 }
@@ -1485,7 +1540,10 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             // Picked origins mate by default (the engine's default: B's z opposite A's, faces
             // meet face to face, a pin goes into its hole); the dialog's Flip is the command's
             // `flip`, which turns B the other way.
-            let p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip, "offset": f.offset[2], "angle": f.angle, "limits": limits});
+            let mut p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip, "offset": f.offset[2], "angle": f.angle, "limits": limits});
+            if !custom_name.is_empty() {
+                p["name"] = json!(custom_name);
+            }
             cmd("joint.create", p)
         }
         Asm::JointOrigin { name, .. } => {
@@ -1802,7 +1860,7 @@ pub(crate) fn timeline_joint_tiles(app: &mut SolveApp, ui: &mut egui::Ui, p: &eg
     for (id, name, kind, suppressed) in joints {
         let br = egui::Rect::from_min_size(egui::pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
         crate::scenario::publish_handle(&format!("timeline-joint:{name}"), br.center());
-        let resp = ui.interact(br, ui.id().with(("joint", id)), egui::Sense::click());
+        let resp = ui.interact(br, ui.scope_id().with(("joint", id)), egui::Sense::click());
         let bg = if app.tree.picked_joints.contains(&id) {
             t.accent_soft
         } else if resp.hovered() {
@@ -1861,6 +1919,11 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
     for (id, name, kind, suppressed) in joints {
         let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), egui::Sense::click());
         crate::scenario::publish_handle(&format!("timeline-joint:{name}"), rect.center());
+        // Keep the scroll extent and row IDs, but only lay out icons, text and menus for
+        // joints in the clipped viewport (an imported assembly can have thousands).
+        if !ui.is_rect_visible(rect) {
+            continue;
+        }
         if app.tree.picked_joints.contains(&id) {
             ui.painter().rect_filled(rect, t.radius_sm.saturating_sub(1), t.accent_soft);
         } else if response.hovered() {
@@ -1916,17 +1979,18 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     // `eye:Joints`, `row:<name>`). The folder's eye is its own: hiding it hides every joint's
     // glyph without changing each joint's eye.
     let key = "c0/joints";
-    let open = is_open(app, key, true);
+    let start_open = crate::browser::rows_start_open(app);
+    let open = is_open(app, key, start_open);
     let folder_shown = !app.session.folder_hidden(key);
     let r = draw_row(
         ui,
-        ui.id().with(key),
+        ui.scope_id().with(key),
         &Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label: "Joints", dim: !folder_shown, ..Default::default() },
     );
     if r.eye {
         crate::browser::toggle_folder(app, key);
     } else if r.fold || r.clicked {
-        toggle(app, key, true);
+        toggle(app, key, start_open);
     }
     if !open {
         return;
@@ -1937,7 +2001,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         let selected = app.tree.picked_joints.contains(&id);
         let r = draw_row(
             ui,
-            ui.id().with(("joint", id)),
+            ui.scope_id().with(("joint", id)),
             &Row {
                 depth: depth + 1,
                 eye: Some(visible),
@@ -2009,7 +2073,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
     }
     let key = format!("{key}/joints");
     let open = is_open(app, &key, false);
-    let r = draw_row(ui, ui.id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label: "Joints", ..Default::default() });
+    let r = draw_row(ui, ui.scope_id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label: "Joints", ..Default::default() });
     if r.fold || r.clicked {
         toggle(app, &key, false);
     }
@@ -2025,7 +2089,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
         let selected = app.tree.picked_joints.contains(&id);
         let r = draw_row(
             ui,
-            ui.id().with((&key, "joint", id)),
+            ui.scope_id().with((&key, "joint", id)),
             &Row {
                 depth: depth + 1,
                 eye: Some(visible),

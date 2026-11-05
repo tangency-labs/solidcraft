@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn jobs_hand_back_what_they_built() {
         let Ok((_, device, _)) = crate::open_headless() else {
-            eprintln!("skipped: no GPU adapter");
+            solidcraft_geom::note!("skipped: no GPU adapter");
             return;
         };
         let runs = AtomicUsize::new(0);
@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn an_error_on_a_job_reaches_the_callers_error_scope() {
         let Ok((_, device, _)) = crate::open_headless() else {
-            eprintln!("skipped: no GPU adapter");
+            solidcraft_geom::note!("skipped: no GPU adapter");
             return;
         };
         let runs = AtomicUsize::new(0);
@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn a_job_dropped_unjoined_whose_thread_panicked_does_not_panic_the_scope() {
         let Ok((_, device, _)) = crate::open_headless() else {
-            eprintln!("skipped: no GPU adapter");
+            solidcraft_geom::note!("skipped: no GPU adapter");
             return;
         };
         let finished = scope(&device, |jobs| {
@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn a_job_whose_thread_panicked_runs_again_on_the_calling_thread() {
         let Ok((_, device, _)) = crate::open_headless() else {
-            eprintln!("skipped: no GPU adapter");
+            solidcraft_geom::note!("skipped: no GPU adapter");
             return;
         };
         let built = scope(&device, |jobs| {

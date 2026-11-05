@@ -226,7 +226,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let title = crate::i18n::tr_label("Parameters");
     let panel = ui_kit::Panel::new(
         title,
-        egui::Id::new("sc_params_dialog"),
+        egui::Id::unique("sc_params_dialog"),
         anchor,
         drag_bounds,
         side,
@@ -363,7 +363,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Where the chosen order is kept: egui's persisted memory, like a section's open state.
 fn sort_id() -> egui::Id {
-    egui::Id::new("sc_params_sort")
+    egui::Id::unique("sc_params_sort")
 }
 
 /// The dialog's sections, each in the chosen order.
@@ -862,7 +862,7 @@ struct Cache {
 }
 
 fn cache_id() -> egui::Id {
-    egui::Id::new("sc_param_completions")
+    egui::Id::unique("sc_param_completions")
 }
 
 /// Keep the completion list (parameters, functions, constants, units) for this revision of the
@@ -1828,8 +1828,9 @@ mod tests {
         assert!(wide.width() > cell.width() * 1.5, "the edited formula opens wide: {wide:?} vs {cell:?}");
         assert!((wide.left() - cell.left()).abs() < 1.0, "it opens from its own cell: {wide:?} vs {cell:?}");
 
-        // The open field wraps, so the end of the text is Ctrl+End.
-        h.run(&json!([{"key":"End","cmd":true}, {"text":" * 2"}, {"key":"Enter"}])).unwrap();
+        // The open field wraps, so the end of the text is Command+Down. Not Ctrl+End:
+        // egui ignores that on macOS, and the typed tail would land where the click put the cursor.
+        h.run(&json!([{"key":"ArrowDown","cmd":true,"ctrl":false}, {"text":" * 2"}, {"key":"Enter"}])).unwrap();
         h.frames(2);
         assert_eq!(h.app.session.doc.param("length").unwrap().expr, format!("{long} * 2"));
         let after = crate::scenario::rect_of("param:length").unwrap();

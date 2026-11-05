@@ -90,6 +90,8 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.line_hover_tangent_arc",
             "prefs.sketch.center_arc",
             "prefs.sketch_construction_lines",
+            "prefs.sketch_mirror_auto_line",
+            "prefs.sketch.ellipse_axes",
             "prefs.sketch.auto_dimensions",
             "prefs.sketch.auto_locate",
         ];
@@ -127,6 +129,8 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.center_arc_follows_cursor,
                 );
                 check(ui, "sketch_construction_lines", "prefs.sketch_construction_lines", None, &mut app.preferences.sketch_construction_lines);
+                check(ui, "sketch_mirror_auto_line", "prefs.sketch_mirror_auto_line", None, &mut app.preferences.sketch_mirror_auto_line);
+                check(ui, "ellipse_axes", "prefs.sketch.ellipse_axes", Some("prefs.sketch.ellipse_axes_note"), &mut app.preferences.ellipse_axes);
                 check(
                     ui,
                     "sketch_auto_dimensions",
@@ -389,6 +393,13 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
             ],
         );
         check(ui, "prefer_free_sketch_points", "prefs.sketch.prefer_free_points", None, &mut app.preferences.prefer_free_sketch_points);
+        check(
+            ui,
+            "select_hidden_edges",
+            "prefs.select_hidden_edges",
+            Some("prefs.select_hidden_edges_help"),
+            &mut app.preferences.select_hidden_edges,
+        );
         check(
             ui,
             "select_other_hidden",

@@ -12,6 +12,7 @@
 //! linked design being read and its rebuild's progress.
 
 use crate::ui_kit::{Container, Surface};
+#[cfg(not(target_arch = "wasm32"))]
 use solidcraft_engine::geom::prelude::*;
 use std::collections::VecDeque;
 use std::sync::{
@@ -61,6 +62,9 @@ pub struct Request {
     pub design: Option<String>,
     /// The chat turn that requested the load. It must still be current when the file lands.
     pub(crate) chat_turn: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// Insert the file as a mesh whatever its extension says: a PLY goes to `pointcloud.insert`
+    /// unless the person chose Insert Mesh for it (then it needs its faces).
+    pub mesh: bool,
 }
 
 impl Request {
@@ -74,6 +78,7 @@ impl Request {
             allow_hosts: Vec::new(),
             design: None,
             chat_turn: None,
+            mesh: false,
         }
     }
     fn insert(&self) -> bool {
@@ -88,7 +93,7 @@ impl Request {
     fn command(&self) -> (&'static str, Value) {
         match &self.kind {
             Kind::Open => ("doc.open", self.params()),
-            Kind::Insert if solidcraft_engine::io::is_mesh_path(&self.path) => ("file.insert_mesh", self.params()),
+            Kind::Insert if self.mesh || solidcraft_engine::io::is_mesh_path(&self.path) => ("file.insert_mesh", self.params()),
             Kind::Insert if solidcraft_engine::io::is_point_cloud_path(&self.path) => ("pointcloud.insert", self.params()),
             Kind::Insert => (insert_command(&self.path), self.params()),
             Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir})),
@@ -265,6 +270,10 @@ impl FileLoad {
 }
 
 pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
+    // An STL or OBJ file states no unit: ask which, then import (see `crate::mesh_units`).
+    if crate::mesh_units::ask(app, path, insert) {
+        return;
+    }
     let _ = begin_request(app, Request::new(path, if insert { Kind::Insert } else { Kind::Open }));
 }
 
@@ -286,11 +295,11 @@ pub fn begin_request(app: &mut SolveApp, request: Request) -> Result<(), String>
         }
         let r = match &request.kind {
             Kind::Insert => {
-                app.insert_path(&request.path);
+                app.insert_path_with(&request.path, &request.options, request.mesh);
                 Ok(Value::Null)
             }
             Kind::Open => {
-                app.open_path(&request.path);
+                app.open_path_with(&request.path, &request.options);
                 // Opened in place of the blank tab it made, with no switch to it.
                 crate::edit_in_place::attach(app);
                 Ok(Value::Null)
@@ -413,6 +422,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         allow_hosts: Vec::new(),
         design: None,
         chat_turn: req.chat_turn,
+        mesh: false,
     };
     let _ = begin_request(app, request);
     None
@@ -439,6 +449,7 @@ fn recovered(app: &mut SolveApp, request: &Request) {
         let _ = app.session.execute("doc.recovery_discard", &json!({"id": id, "dir": dir}));
     }
     app.set_status(format!("recovered {}: save it to keep it", request.path), false);
+    app.say_newer_file();
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -464,6 +475,9 @@ fn start(app: &mut SolveApp) {
     {
         let e = "too many open designs; close a tab before opening another";
         app.set_status(e, true);
+        if let Kind::Recover { id, dir } = &request.kind {
+            reoffer(app, id, dir.as_deref());
+        }
         request.answer(Err(e.into()));
         return;
     }
@@ -1066,15 +1080,25 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 request.answer(r);
             }
             Ok(_) if reuse_open(app, request) => {}
-            Ok(made) if running.matches(&app.session) => {
+            Ok(made) if running.matches(&app.session) => 'open: {
                 // Not meshed yet: framing it while it goes in must not mesh it here.
                 app.open_meshing_next = true;
                 crate::frame_watch::step(app, "before the open");
+                let tabs = app.docs.count();
                 if request.insert() {
                     app.session.accept_computed(made.session);
                     app.big_operation = true;
                 } else {
-                    crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| crate::documents::adopt(app, made.session));
+                    // No tab left for it: `adopt` said why, and nothing else of the open happens.
+                    if !crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| crate::documents::adopt(app, made.session)) {
+                        app.open_meshing_next = false;
+                        // A design to recover stays offered, as when its read fails.
+                        if let Kind::Recover { id, dir } = &request.kind {
+                            reoffer(app, id, dir.as_deref());
+                        }
+                        request.answer(Err(app.status.as_ref().map_or_else(String::new, |s| s.0.clone())));
+                        break 'open;
+                    }
                     if request.kind == Kind::Open {
                         app.home.add_recent(&request.path);
                     }
@@ -1102,10 +1126,35 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                         } else if let Some(w) = warnings.filter(|w| !w.is_empty()) {
                             format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or(""))
                         } else {
-                            format!("{} done", if request.insert() { "Insert" } else { "Open" })
+                            // Built here, outside the window's language scope: in the language
+                            // chosen, as the other statuses of this file are.
+                            let language = crate::i18n::Locale::for_language(&app.preferences.language);
+                            // An opened design is named as its tab names it, an inserted one as
+                            // its component is named.
+                            let name = if request.insert() {
+                                made.result.get("component_name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| {
+                                    std::path::Path::new(&request.path)
+                                        .file_stem()
+                                        .map_or_else(|| request.path.clone(), |n| n.to_string_lossy().into_owned())
+                                })
+                            } else {
+                                language.given_name(&app.session.doc.name)
+                            };
+                            // A blank design is replaced in place; anything else gets a tab of its own.
+                            let key = if request.insert() {
+                                "file_load.inserted"
+                            } else if app.docs.count() > tabs {
+                                "file_load.opened_in_tab"
+                            } else {
+                                "file_load.opened"
+                            };
+                            language.format(key, &[("name", &name)])
                         },
                         false,
                     );
+                    if !request.insert() {
+                        app.say_newer_file();
+                    }
                 }
                 request.answer(Ok(made.result));
             }
@@ -1126,6 +1175,13 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                     app.set_status(e, true);
                 }
             }
+        }
+        // #5064: opened or not, this design is no longer a reopen the session could die on;
+        // it comes off the marker the launch wrote before reopening anything.
+        if request.kind == Kind::Open
+            && let Some(dir) = &app.reopen_guard_dir
+        {
+            solidcraft_engine::recovery::reopen_finished(dir, &request.path);
         }
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -1219,14 +1275,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             m.surrender_focus(id);
         }
     });
-    let id = egui::Id::new("file_loading");
+    let id = egui::Id::unique("file_loading");
     let card_id = id.with("card");
     // Above the dialogs over the design; menus, tooltips and the resize edges stay above it.
-    ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, id));
-    ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, card_id));
+    Container::bring_to_front(ctx, egui::LayerId::new(egui::Order::Middle, id));
+    Container::bring_to_front(ctx, egui::LayerId::new(egui::Order::Middle, card_id));
     Container::new(ctx, Surface::InputShield).area(id).order(egui::Order::Middle).fixed_pos(cover.min).interactable(true).show(ctx, |ui| {
         ui.set_min_size(cover.size());
-        ui.interact(cover, egui::Id::new("file_loading_block"), egui::Sense::click_and_drag());
+        ui.interact(cover, egui::Id::unique("file_loading_block"), egui::Sense::click_and_drag());
         let shield = Container::new(ctx, Surface::InputShield);
         shield.paint_background(ui.painter(), shield.frame(ctx, egui::Color32::from_black_alpha(70), crate::frame::Side::Left), cover);
     });
@@ -1371,6 +1427,54 @@ mod tests {
             built: None,
             staged: None,
         });
+    }
+
+    /// An Open says which design it brought in, by the name its tab shows, and whether it took
+    /// a tab of its own or replaced the blank design.
+    #[test]
+    fn an_open_names_the_design_and_says_when_it_got_a_new_tab() {
+        let ctx = egui::Context::default();
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let open = |app: &mut SolveApp, name: &str| {
+            let mut part = Session::default();
+            part.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+            Arc::make_mut(&mut part.doc).name = name.into();
+            part.path = Some(format!("{name}.solidcraft"));
+            completed_open(app, Request::new(&format!("{name}.solidcraft"), Kind::Open), part);
+            tick(app, &ctx);
+            app.status.clone().map(|s| (s.0, s.2)).unwrap_or_default()
+        };
+        assert_eq!(open(&mut app, "plate"), ("Opened plate".into(), false), "the blank design is replaced in its tab");
+        assert_eq!(app.docs.count(), 1);
+        assert_eq!(open(&mut app, "post"), ("Opened post in a new tab".into(), false));
+        assert_eq!(app.docs.count(), 2);
+        // In the language chosen, though the status is set outside the window's language scope
+        app.preferences.language = "de".into();
+        assert_eq!(open(&mut app, "knob"), ("knob in neuem Tab geöffnet".into(), false));
+        // No tab left (and no blank design to take): the open says so, and names nothing it did not open
+        while app.docs.count() < crate::documents::MAX_OPEN {
+            let mut saved = Session::default();
+            saved.path = Some(format!("tab{}.solidcraft", app.docs.count()));
+            crate::documents::open_tab(&mut app, saved).unwrap();
+        }
+        let mut request = Request::new("full.solidcraft", Kind::Open);
+        let (tx, reply) = std::sync::mpsc::channel();
+        request.reply = Some(tx);
+        completed_open(&mut app, request, Session::default());
+        tick(&mut app, &ctx);
+        let (status, _, error) = app.status.clone().unwrap_or_default();
+        assert!(error && status.contains(&crate::documents::MAX_OPEN.to_string()), "{status}");
+        assert_eq!(app.docs.count(), crate::documents::MAX_OPEN);
+        assert!(reply.try_recv().is_ok_and(|r| r["ok"] == json!(false)), "the caller hears it failed");
+    }
+
+    #[test]
+    fn a_ply_is_a_point_cloud_unless_inserted_as_a_mesh() {
+        let mut request = Request::new("scan.ply", Kind::Insert);
+        assert_eq!(request.command().0, "pointcloud.insert");
+        assert_eq!(Request::new("scan.ply", Kind::Open).command().0, "doc.open");
+        request.mesh = true;
+        assert_eq!(request.command().0, "file.insert_mesh");
     }
 
     #[test]
@@ -1768,7 +1872,7 @@ mod tests {
             frames += 1;
         }
         assert_eq!(bodies(&app), 6, "{:?}", app.status);
-        assert!(app.status.as_ref().is_some_and(|s| s.0.contains("Insert done")), "{:?}", app.status);
+        assert_eq!(app.status.as_ref().map(|s| s.0.as_str()), Some("Inserted boxes"), "named as its component is");
         // Cancelled after the parse: nothing is inserted, and nothing waits.
         let before = app.session.doc.clone();
         app.file_load.queued.push_back(Request::new(&path, Kind::Insert));
@@ -1831,7 +1935,7 @@ mod tests {
             tick(&mut app, &ctx);
             frames += 1;
         }
-        assert!(app.status.as_ref().is_some_and(|s| s.0.contains("Open done")), "{:?}", app.status);
+        assert_eq!(app.status.as_ref().map(|s| s.0.as_str()), Some("Opened staged"), "named as its tab is");
         assert_eq!(app.session.path.as_deref(), Some(path.as_str()));
         assert_eq!(app.session.doc, whole.doc);
         assert_eq!(names(&app.session), names(&whole));

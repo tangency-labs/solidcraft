@@ -1446,6 +1446,48 @@ mod tests {
         assert!(shades(&hatched) > shades(&plain), "the hatch adds its stripes' shades");
     }
 
+    /// A post standing on a plate, cut through: the post's cut is its own (blue) cap down to the
+    /// plate, whichever body came first; the plate's top (the same plane as the post's bottom,
+    /// seen through the cut) does not show through it (the viewport: `solidcraft-gpu`'s depth tests).
+    #[test]
+    fn cpu_picture_a_body_standing_on_another_keeps_its_own_cap() {
+        let plate = ("solid.box", json!({"length": 80, "width": 50, "height": 10, "body_name": "Plate"}));
+        let post = ("solid.cylinder", json!({"radius": 12, "height": 40, "base": [20, 25, 10], "body_name": "Post"}));
+        for post_first in [false, true] {
+            let mut s = Session::default();
+            for (c, p) in if post_first { [&post, &plate] } else { [&plate, &post] } {
+                s.execute(c, p).unwrap();
+            }
+            s.execute("appearance.assign", &json!({"bodies": ["Plate"], "appearance": "ABS - Red"})).unwrap();
+            s.execute("appearance.assign", &json!({"bodies": ["Post"], "appearance": "ABS - Blue"})).unwrap();
+            s.execute("inspect.section", &json!({"plane": {"origin": [0, 25, 0], "normal": [0, -1, 0]}})).unwrap();
+            // The home view, and one looking into the cut at an angle (#4622 review).
+            let oblique = |c: &mut Camera| (c.target, c.yaw, c.pitch, c.distance) = (Vec3::new(30.0, 25.0, 12.0), 0.25, 0.4, 90.0);
+            for (fov, angled) in [(0.0, false), (0.6, false), (0.0, true), (0.6, true)] {
+                let mut cam = home_camera(&s).unwrap();
+                cam.fov = fov;
+                if angled {
+                    oblique(&mut cam);
+                }
+                let sc = scene(&s, &cam).unwrap();
+                let img = solidcraft_render::render(&sc, &cam, 400, 400);
+                let vp = cam.view_proj(1.0, sc.radius);
+                let mut wrong = Vec::new();
+                for x in (10..=30).map(f64::from) {
+                    for z in [11.0, 12.0, 13.0, 14.0] {
+                        let q = vp.apply(Vec3::new(x, 25.0, z));
+                        let (px, py) = (((q[0] / q[3] + 1.0) * 200.0) as usize, ((1.0 - q[1] / q[3]) * 200.0) as usize);
+                        let p = &img.rgba[(py * 400 + px) * 4..][..3];
+                        if i16::from(p[2]) <= i16::from(p[0]) + 25 {
+                            wrong.push(((x, z), p.to_vec()));
+                        }
+                    }
+                }
+                assert!(wrong.is_empty(), "fov {fov}, angled {angled}, post first {post_first}: not the post's cap at {wrong:?}");
+            }
+        }
+    }
+
     /// The viewport asks whether each sketch is used several times a frame: the features are
     /// walked once per design, not once per sketch asked about, and the answers follow every
     /// change of the design, a direct edit of it included.

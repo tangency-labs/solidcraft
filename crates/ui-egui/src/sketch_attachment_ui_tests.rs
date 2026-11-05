@@ -376,6 +376,80 @@ fn picked_top_face_of_a_stacked_join_extrude_takes_a_sketch() {
 }
 
 #[test]
+fn live_redefine_editor_survives_host_toggles_and_reserves_only_its_current_visible_footprint() {
+    fn assert_live(h: &Harness, sketch: u64, commands: &[(String, Value)]) -> egui::Rect {
+        assert_eq!(h.app.tree.redefine, Some(sketch));
+        assert_eq!(crate::sketch_attachment_ui::commands(&h.app).as_deref(), Some(commands));
+        let rect = h.app.viewport.dialog_rect.expect("the live redefine editor must actually paint");
+        assert!(rect.is_positive() && rect.is_finite());
+        assert_eq!(crate::scenario::rect_of("dialog:outer"), Some(rect));
+        if h.app.universal_panel_host_enabled() {
+            let usable = crate::shell::host_usable(&h.app).unwrap();
+            assert!(usable.obstacles.contains(&crate::panel_runtime::logical_rect(rect)));
+            assert!(usable.free.iter().all(|piece| !crate::panel_runtime::egui_rect(*piece).intersect(rect).is_positive()));
+        }
+        rect
+    }
+    for scale in [1.0, 2.0] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1400,"height":1000}));
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[10,10],"p1":[30,20]})).unwrap();
+        h.app.finish_sketch();
+        h.settle();
+        h.ctx.set_pixels_per_point(scale);
+        crate::panel_runtime::enable_host_specimen(&mut h.app, "docks").unwrap();
+        h.frames(3);
+        h.ctx.options_mut(|options| options.max_passes = 1.try_into().unwrap());
+        let document = h.app.session.doc.clone();
+        let revision = h.app.session.revision;
+        let undo = h.app.session.undo.len();
+        let before = crate::shell::host_usable(&h.app).unwrap();
+        crate::browser::redefine_sketch(&mut h.app, sketch);
+        h.frame();
+        assert_eq!(h.app.tree.redefine, Some(sketch));
+        assert!(h.app.tree.redefine_draft.is_some());
+        assert!(h.app.viewport.dialog_rect.is_none(), "the first invisible sizing pass cannot reserve a dialog footprint");
+        assert!(crate::scenario::rect_of("dialog:outer").is_none());
+        assert_eq!(crate::shell::host_usable(&h.app).unwrap(), before);
+        h.frame();
+        let initial = h.app.viewport.dialog_rect.expect("the next pass paints the actual editor");
+        assert_eq!(crate::scenario::rect_of("dialog:outer"), Some(initial));
+        h.step(&json!({"widget":"Use XZ plane"})).unwrap();
+        let commands = crate::sketch_attachment_ui::commands(&h.app).unwrap();
+        assert_eq!(commands, vec![("sketch.redefine".into(), json!({"sketch":sketch,"plane":"XZ"}))]);
+        assert_live(&h, sketch, &commands);
+
+        h.app.disable_universal_panel_host().unwrap();
+        h.frames(3);
+        assert_live(&h, sketch, &commands);
+        h.app.enable_universal_panel_host(crate::panel_runtime::HostOptions::default()).unwrap();
+        h.frame();
+        assert_live(&h, sketch, &commands);
+        h.frames(3);
+        let mounted = assert_live(&h, sketch, &commands);
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &document));
+        assert_eq!(h.app.session.revision, revision);
+        assert_eq!(h.app.session.undo.len(), undo, "host toggles cannot apply or cancel the pending redefine command");
+        let cancel = crate::scenario::handle_at("dialog:cancel").unwrap();
+        assert!(mounted.contains(cancel));
+        h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.tree.redefine.is_none() && h.app.tree.redefine_draft.is_none());
+        assert!(h.app.viewport.dialog_rect.is_none());
+        assert!(crate::scenario::rect_of("dialog:outer").is_none());
+        assert!(
+            !crate::shell::host_usable(&h.app).unwrap().obstacles.contains(&crate::panel_runtime::logical_rect(mounted)),
+            "a producer that no longer paints cannot leave a phantom dialog reservation"
+        );
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &document));
+        assert_eq!(h.app.session.revision, revision);
+        assert_eq!(h.app.session.undo.len(), undo);
+    }
+}
+
+#[test]
 fn plane_redefinition_uses_dense_card_and_keeps_command_preview_cancel_and_ok() {
     use crate::scenario;
     let mut h = Harness::new();

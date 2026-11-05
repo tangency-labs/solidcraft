@@ -26,10 +26,26 @@ mod shots;
 mod staging;
 mod studio_presets;
 mod surface_bindings;
+mod surface_resources;
 mod textures;
 mod transmission;
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("render.surface.import", "Import Surface Maps", crate::checked!("render.surface.import", surface_resources::import))
+        .icon("appearance")
+        .contract(&surface_resources::IMPORT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::render_surface_resources::ImportResult>)
+        .params("name; set?: typed CPU raytrace or GPU path setup patch; body_index and body_name from render.scene; frame: world-mm origin/u/v physical repeat vectors; maps: explicit base_color_srgb/normal_opengl/roughness_linear/metallic_linear {path,expected_sha256?}; provenance:{author,source,license}; normal_strength?:1; flip_v?:false; replace?:false. Captures exact PNG/JPEG bytes and saves definition-local binding in one undo. CPU maps require noninterlaced 8-bit PNG. Saved designs reopen without the source files."),
+    CommandSpec::new("render.texture.list", "List Embedded Surface Images", crate::checked!("render.texture.list", surface_resources::list))
+        .icon("list").noundo().doc_only()
+        .contract(&surface_resources::LIST_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::render_surface_resources::ListResult>)
+        .params("No parameters. Lists bounded design-owned texture digests, byte counts, dimensions, declared provenance and referencing setups; never returns image bytes or source filesystem paths."),
+    CommandSpec::new("render.texture.remove", "Remove Embedded Surface Image", crate::checked!("render.texture.remove", surface_resources::remove))
+        .icon("delete").doc_only()
+        .contract(&surface_resources::REMOVE_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::render_surface_resources::RemoveResult>)
+        .params("sha256: exact embedded image digest. Refuses while any saved setup uses the image, listing its users. Removing an unused image is one undo step."),
     CommandSpec::new("render.environment.set", "Set Render Environment", crate::checked!("render.environment.set", environment::set)).icon("settings").doc_only()
         .contract(&environment::CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::render::EnvironmentResult>)
@@ -75,19 +91,33 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("No parameters. Returns the explicitly defined current view camera, or null if the session has no camera override. No camera is fitted, no job is started and no saved setup or engineering document is changed."),
 CommandSpec::new("render.camera.fit", "Frame Render Subject", fit_camera).icon("camera").noundo()
     .params("aspect?: the picture's width over its height, 0.000001 to 1000000 (default 1). Fits the current camera to the visible product bounds through the shared Camera::fit contract, moving back for a picture taller than wide so its sides hold the product too; changes only view state, not a saved setup, rendering job, stage or engineering geometry."),
-CommandSpec::new("render.preset.resolve", "Review Native Studio", studio_presets::resolve).icon("render_scene").noundo()
+CommandSpec::new("render.preset.resolve", "Review Native Studio", crate::checked!("render.preset.resolve", studio_presets::resolve)).icon("render_scene").noundo()
+    .contract(&studio_presets::PRESET_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_presets::StudioComposition>)
     .params("id: NATIVE-STUDIO-001..025; name; set?: typed GPU setup patch; expected_revision?:u64. Resolves original built-in HDR/rig/passive ground with conservative geometry clearance, returns all replacements and preserved fields without mutation. Unbound SCENE-* concepts are not accepted."),
-CommandSpec::new("render.preset.apply", "Apply Native Studio", studio_presets::apply).icon("render_scene")
+CommandSpec::new("render.preset.apply", "Apply Native Studio", crate::checked!("render.preset.apply", studio_presets::apply)).icon("render_scene")
+    .contract(&studio_presets::PRESET_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_presets::StudioComposition>)
     .params("Same reviewed input as render.preset.resolve, expected_revision required, replace_lighting_and_environment:true and replace_stage:true when an existing stage would change. Re-resolves the complete candidate and publishes one undo or no mutation; camera, optical bindings, geometry and engineering materials are preserved."),
-CommandSpec::new("render.quality.prepare", "Review Fixed Sampling Budget", studio_presets::quality).icon("settings").noundo().doc_only()
+CommandSpec::new("render.quality.prepare", "Review Fixed Sampling Budget", crate::checked!("render.quality.prepare", studio_presets::quality)).icon("settings").noundo().doc_only()
+    .contract(&studio_presets::QUALITY_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_presets::QualityPlan>)
     .params("id: Q-*; variant:fixed_samples_png; acknowledge_omissions:true. Read-only bounded GPU still-budget projection, not full adaptive/convergence/linear-master quality acceptance. Returns dimensions/samples/depth/seed/denoise and explicit omissions. Never switches executor or mutates a shot."),
-CommandSpec::new("render.shot.duplicate", "Duplicate Render Shot", shots::duplicate).icon("copy").doc_only()
+CommandSpec::new("render.shot.duplicate", "Duplicate Render Shot", crate::checked!("render.shot.duplicate", shots::duplicate)).icon("copy").doc_only()
+    .contract(&shots::CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_shots::ShotChange>)
     .params("name, new_name, expected_revision:u64. Copies exact saved setup and resource references in one undo. Existing destinations refuse; captured jobs and camera navigation are unchanged."),
-CommandSpec::new("render.shot.rename", "Rename Render Shot", shots::rename).icon("settings").doc_only()
+CommandSpec::new("render.shot.rename", "Rename Render Shot", crate::checked!("render.shot.rename", shots::rename)).icon("settings").doc_only()
+    .contract(&shots::CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_shots::ShotChange>)
     .params("name, new_name, expected_revision:u64. Renames exact saved setup in one undo; an existing destination or stale review refuses."),
-CommandSpec::new("render.shot.remove", "Remove Render Shot", shots::remove).icon("delete").doc_only()
+CommandSpec::new("render.shot.remove", "Remove Render Shot", crate::checked!("render.shot.remove", shots::remove)).icon("delete").doc_only()
+    .contract(&shots::CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_shots::ShotChange>)
     .params("name, expected_revision:u64. Removes only that saved setup in one undo; retains resources, geometry and captured results."),
-CommandSpec::new("render.library.preview", "Inspect Original Surface Map", library::preview).icon("appearance").noundo().doc_only()
+CommandSpec::new("render.library.preview", "Inspect Original Surface Map", crate::checked!("render.library.preview", library::preview)).icon("appearance").noundo().doc_only()
+    .contract(&library::PREVIEW_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::LibraryPreview>)
     .params("id: SURF-*. Returns bounded hash-verified original base-color PNG bytes and source-map fidelity label, not a rendered material thumbnail. No external paths, rendering or document edits."),
 CommandSpec::new("render.library.physical.prepare", "Prepare Physical Reference", physical_library::prepare).icon("inspect").noundo().doc_only()
     .params("id: named built-in physical profile, name: proposed new material label, acknowledge_reference:true. Read-only loss-aware creation plan using native ValidatedCard admission and one point density; returns source receipts, extended fields and omissions. Does not execute material.create, assign bodies or infer effective-part physics."),
@@ -109,25 +139,35 @@ CommandSpec::new("render.library.surface.unbind", "Remove Surface Binding", surf
     .params("name: setup, target: saved definition/feature/component/occurrence_path, set?: setup patch. Removes only that explicit binding in one undo; no device or current geometry required."),
     CommandSpec::new("render.result.pin", "Retain Displayed Render Result", jobs::pin).icon("inspect").noundo().doc_only()
         .params("job?: completed JobId (default selected result), or null to clear selection. Selects within the eight retained completed results; oldest is evicted first. Preserves exact export bytes and original host memory accounting. No design/undo change; preview or foreign jobs refuse."),
-CommandSpec::new("render.library.targets", "Find Render Library Targets", library::targets).icon("list").noundo()
+CommandSpec::new("render.library.targets", "Find Render Library Targets", crate::checked!("render.library.targets", library::targets)).icon("list").noundo()
+    .contract(&library::TARGETS_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::LibraryTargets>)
     .params("query?: exact-name substring; offset?:0; limit?:128 (1..128). Returns a bounded page of captured body ordinals/names, revision and scene bounds. Settles the model through ordinary command handling; never returns a large mesh payload."),
-CommandSpec::new("render.library.list", "Browse Render Library", library::list).icon("list").noundo().doc_only()
+CommandSpec::new("render.library.list", "Browse Render Library", crate::checked!("render.library.list", library::list)).icon("list").noundo().doc_only()
+    .contract(&library::LIST_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::LibraryPage>)
     .params("kind?: surfaces, selene_appearances, hdr, rigs, scenes, materials, lighting, environments, quality, native_scenes, selene_shots or capabilities; query?: bounded search; availability?: all/usable/specification/blocked; offset?:0; limit?:48 (1..128). Returns source status and explicit implemented projections separately. No device, file IO or design change."),
-CommandSpec::new("render.library.describe", "Inspect Render Library Resource", library::describe).icon("inspect").noundo().doc_only()
+CommandSpec::new("render.library.describe", "Inspect Render Library Resource", crate::checked!("render.library.describe", library::describe)).icon("inspect").noundo().doc_only()
+    .contract(&library::DESCRIBE_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::LibraryDescription>)
     .params("kind, id: exact authored resource. Returns original specification, runtime projection variants and explicit omissions. A concept is not an executable preset."),
 CommandSpec::new("render.library.appearance.apply", "Apply Library Opaque Appearance", library::apply_appearance).icon("appearance")
     .params("id: SURF-* or SELENE-AP-*; variant: uniform_opaque (required); bodies: 1..256 exact body names. Applies the original scalar baseline through ordinary appearance assignment in one undo, preserving physical properties. Spatial maps and advanced target effects are explicitly excluded."),
 CommandSpec::new("render.library.environment.apply", "Apply Built-in HDR Environment", library::apply_environment).icon("settings").doc_only()
     .params("id: HDR-*; name: saved setup; set?: typed CPU/GPU setup patch; rotation_rad?: authored rotation (native origin offset is explicit in the reply); intensity?:1; samples?:16 for CPU; replace_environment?:false. Hash-verifies and embeds original bytes, saves one atomic undo without external files or a render device. An HDR-owned sun cannot duplicate an analytic sun."),
 CommandSpec::new("render.library.surface.prepare", "Prepare Authored Surface Maps", library::prepare_surface).icon("appearance").noundo()
-    .params("id: SURF-*; body_index and body_name from render.scene; origin?:[0,0,0]; plane?:xy/yz/zx; scale?:1. Returns an explicit GPU planar map binding with source hashes, original millimetre scale, image-up normal orientation and absolute base-color semantics. No document change; height/displacement and true anisotropy are not included."),
+    .params("id: SURF-*; body_index and body_name from render.scene; origin?:[0,0,0]; plane?:xy/yz/zx; scale?:1; rotation_rad?:0 (positive around the plane normal). Returns an explicit GPU planar map binding with source hashes, original millimetre scale, image-up normal orientation and absolute base-color semantics. No document change; height/displacement and true anisotropy are not included."),
 CommandSpec::new("render.library.studio.prepare", "Prepare Authored Studio Lights", library::prepare_studio).icon("inspect").noundo().doc_only()
     .params("id: RIG-*; variant: complete for emitter-only rigs, emitters_only for rigs with passive cards; center_mm and subject_extent_mm required. Converts exact rectangular half-edges and solar direction/radius to GPU lighting. Blocked calibration and external-sun rigs refuse. Returns a geometry-clearance review requirement; does not create cards or modify the scene."),
 CommandSpec::new("render.library.studio.apply", "Apply Authored Studio Lights", library::apply_studio).icon("settings")
     .params("rig: render.library.studio.prepare parameters; name; set?: typed GPU setup patch; replace_lighting_and_environment:true required. Saves the explicit rig projection in one undo, removing prior lighting/environment only with that confirmation. Subject clearance still needs review; passive cards are never silently omitted."),
-CommandSpec::new("render.hdr.inspect", "Inspect HDR Source", resources::inspect).icon("inspect").noundo().doc_only()
+CommandSpec::new("render.hdr.inspect", "Inspect HDR Source", crate::checked!("render.hdr.inspect", resources::inspect)).icon("inspect").noundo().doc_only()
+    .contract(&resources::INSPECT_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_hdr::HdrInspected>)
     .params("path: scoped Radiance HDR file; validates the complete bounded source and returns sha256, width, height, encoded_bytes and primaries without saving or rendering"),
-CommandSpec::new("render.settings.capture_hdr", "Save Render Settings with HDR", resources::capture_settings).icon("settings").doc_only()
+CommandSpec::new("render.settings.capture_hdr", "Save Render Settings with HDR", crate::checked!("render.settings.capture_hdr", resources::capture_settings)).icon("settings").doc_only()
+    .contract(&resources::CAPTURE_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_hdr::HdrCaptured>)
     .params("name, set: typed CPU/GPU setup patch with hdr/environment unset; path: scoped HDR; expected_sha256?: digest returned by render.hdr.inspect (changed sources refuse); rotation_rad?:0, intensity?:1; samples?:1/4/16/64 for CPU only (default16); assume_linear_srgb?:false for GPU only. Captures immutable bytes and saves resource plus setup atomically in one undo, without a host; returns name/setup/resource metadata, never source bytes"),
 CommandSpec::new("render.preflight", "Check Render Request", jobs::preflight).icon("inspect").noundo().doc_only()
     .params("setup?: saved name OR settings?: full RenderSetup. A typed job selects raster/cpu_raytrace/gpu_path and its numerical options plus embedded HDR before dispatch; only replace and transient studio_weights may accompany it. Without job, the legacy runtime controls below remain available. See docs/render-settings.md. studio_weights?: three finite 0..1 visibility weights for raster or implicit GPU studio sources only; never saved. integrator?: raster (default) or raytrace; progressive?: false (registered GPU path, CPU integrator/LED options are mutually exclusive); samples?: 1..4096; max_depth?: 1..16; seed?: u32 for progressive; raytrace?: bounded runtime progressive/primary_samples/lights/punctual_lights/area_lights/area_samples/seed/exposure_ev/shadows/reflections/anisotropic_faces/emissions/surface_effects/dielectrics/environment options, only with raytrace. CPU raytrace.budget?: compact (legacy default), studio or workstation; see docs/render-cpu-resource-profiles.md for explicit image/geometry/memory/work limits. CPU raytrace.progressive?: {samples_per_pixel:1..profile limit, seed:u32}; requires primary_samples:1 and selected reflections.samples:1; no area/LED, anisotropy or dielectrics in this initial mode. See docs/render-cpu-progressive.md; environment?: {path: scoped HDR, expected_sha256?: inspected digest, rotation_radians: 0, intensity: 1, samples: 16} OR {resource: saved HDR digest, rotation_radians, intensity, samples}; embedded resources cannot combine with path/hash; explicit sRGB/D65 HDR primaries required. Opaque CPU preview with selected mirror/rough-specular reflections and certified planar anisotropy. HDR with rough reflections or anisotropy requires fully metallic selected bodies and all effective faces; unsupported combinations refuse. No MIS or GI. CPU runtime dielectrics support only certified thin_sheet/closed_box boundaries with explicit IOR and Beer absorption; see docs/render-raytrace-dielectrics.md. CPU emissions are visible radiance only; surface_effects change roughness/shading normals without geometry changes. led_strip?: continuous world-mm LED rectangle recipe; led_samples?: 1/4/16/64 for the whole strip, default16. At most8directional+8punctual+4rectangle/LED sources; shared area N. See docs/render-light-union.md. transparent_background?: false; replace?: false. With progressive:true, raytrace instead accepts GPU dielectrics/clear_coats/textures; environment instead accepts tagged hdr/embedded_hdr/sky with rotation_rad/intensity; file hdr supports expected_sha256, embedded_hdr uses a document resource digest. See docs/render-hdr-resources.md. GPU lens, studio lighting, tone_map, denoise, bounded finishing/backdrop and linear_exr retention are also available. GPU adaptive?: {pilot_samples:16..256,min_samples:16..samples,relative_error:0..1,absolute_error:0.000001..1000000,coverage_error:0.001..0.25} allocates independent production budgets; pilots are discarded, not a certified error guarantee. transmission_samples?:1|2|4 stratifies the first Fresnel branch with extra path cost. volume?:{min_mm:[x,y,z],max_mm:[x,y,z],extinction_per_mm:0..1000,scattering_albedo:[r,g,b],anisotropy:-0.95..0.95} is one finite homogeneous world-mm medium; active media require explicit lighting/environment and refuse glass, denoise and multiple transmission strata. These fields also persist in GPU job.options. See docs/render-materials/TRANSPORT-MASTER-BATCH-2026-10-23.md; see docs/render-transmission.md, render-environment.md, render-runtime-textures.md, render-thin-lens.md, render-studio-lighting.md and render-denoise.md. Optional CPU raytracing requires a raytrace-cpu build and native host, checked before scene capture. Stale geometry is rejected. See docs/render-jobs.md"),

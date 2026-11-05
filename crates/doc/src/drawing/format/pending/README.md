@@ -8,7 +8,7 @@ whole format bump: never edit the `DRAWING` family in `format.rs`, another chang
 
 - Name it after the change, lowercase with dashes: `sheet-views.rs`.
 - Start it with a `//!` note: what is saved, what an older drawing gets without it, and what
-  the last release does with a drawing that has it (it refuses the newer format number).
+  the last release does with a drawing that has it (it warns about the newer format number, opens what it can read and keeps the rest).
 - If older drawings must be rewritten as they open, add the step to the same file:
 
   ```rust

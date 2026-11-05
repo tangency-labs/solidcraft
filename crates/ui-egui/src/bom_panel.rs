@@ -131,7 +131,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let rows: Vec<Value> = bom["rows"].as_array().cloned().unwrap_or_default();
     let (mut export, mut apply_row) = (None, None);
     let closed =
-        crate::ui_kit::Window::new(egui::Id::new("sc_bom"), "bom", crate::i18n::tr_label("Bill of Materials")).cards(3.0).show_body(ctx, |ui| {
+        crate::ui_kit::Window::new(egui::Id::unique("sc_bom"), "bom", crate::i18n::tr_label("Bill of Materials")).cards(3.0).show_body(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 let was = (d.top, d.by_definition, d.group_children);
                 let mut levels = usize::from(d.top);

@@ -740,8 +740,13 @@ mod tests {
         assert!(options(&["--route", "boolean=solidcore"], "x").is_err());
         assert!(options(&["--kernel", "smlib"], "x").is_err());
         assert!(options(&["--kernel", "solidcore", "--known-failing", "/k"], "x").is_err());
-        let o = options(&["--known-failing", "/k", "--out", "/r"], "x").unwrap();
-        assert_eq!((o.known_failing, o.out), (Some(PathBuf::from("/k")), PathBuf::from("/r")));
+        let dir = std::env::current_dir().unwrap();
+        let known = dir.join("known.txt");
+        let out = dir.join("result");
+        let o = options(&["--known-failing", known.to_str().unwrap(), "--out", out.to_str().unwrap()], "x").unwrap();
+        assert_eq!((o.known_failing, o.out), (Some(known), out));
+        let o = options(&["--known-failing", "known.txt", "--out", "result"], "x").unwrap();
+        assert_eq!((o.known_failing, o.out), (Some(root().join("known.txt")), PathBuf::from("result")));
     }
 
     fn gate_on(text: &str, cases: &[(&str, &str)]) -> Result<String, String> {

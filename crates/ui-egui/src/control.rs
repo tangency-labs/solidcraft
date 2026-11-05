@@ -10,6 +10,8 @@
 //!   of it first
 //! - `engine.commands`: every command with tab, panel, params and enablement
 //! - `document.inspect {measure?}`: the design (parameters, timeline, bodies, sketches)
+//! - `document.export`, `document.import {text, name?}`, `document.saved {revision}`: the design
+//!   for a host that keeps the files itself (#8517)
 //! - `ui.inspect`: UI state, viewport rect, camera, tool and dialog
 //! - `ui.drag {x0, y0, x1, y1, button?, shift?, ctrl?, steps?, hold?}` (box selection, navigation;
 //!   `hold` keeps the button down that many frames before moving);
@@ -25,6 +27,8 @@
 //!   section the viewport shows (no window needed); the ground grid and the origin's axes as the
 //!   window shows them, unless `grid` or `axes` says
 //! - `ui.icon_audit {reset?, stop?}`: collect/drain requested icon names, resolved masters and placeholder flags;
+//! - `ui.panel_fixture {enabled?, preset?}`: opt-in synthetic content in the real panel host;
+//!   `{}` observes the current host, probe and Session without ticking or model commands
 //! - `ui.menu {x?, y?, target?, close?}`: open a context menu at a point (the viewport's marking
 //!   menu, or a browser menu with `target: {type: body|sketch|component, …}`); without a point,
 //!   the open menu and its items. `ui.menuPick {item}` runs an item by id or label;
@@ -310,6 +314,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
                 | "view.grid"
                 | "view.ground_shadow"
                 | "view.navigation_bar"
+                | "view.ribbon_tabs_only"
                 | "view.next_tab"
                 | "view.previous_tab"
                 | "view.layout"
@@ -325,8 +330,10 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
         )
         && !id.starts_with("settings.")
         && app.session.active_sketch.is_none()
-        && crate::open_meshing::session_world(&app.session).bodies.len() == 1
+        // Cheap test first: placing the world (`world_state`) after every step of a batch in a
+        // design with components placed every component's bodies again once per step.
         && app.session.undo.len() <= 2
+        && crate::open_meshing::session_world(&app.session).bodies.len() == 1
     {
         app.fit_view();
     }
@@ -739,6 +746,13 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                         "notice": app.blur_session.guard.notice, "opted_out": app.blur_session.guard.opted_out}}),
             )
         }
+        "ui.panel_fixture" => {
+            let result = crate::panel_runtime::control_specimen(app, p);
+            if result.is_ok() && (p.get("enabled").is_some() || p.get("preset").is_some()) {
+                ctx.request_repaint();
+            }
+            wrap(result)
+        }
         "ui.status_fixture" => wrap(crate::viewport_status_fixture::control(app, p)),
         "ui.workspace" => {
             if let Some(workspace) = s("workspace") {
@@ -821,6 +835,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "engine.commands" => wrap(execute(app, "engine.commands", json!({}))),
         "document.inspect" => wrap(app.session.execute("document.inspect", p).map_err(|e| e.to_string())),
         "document.revision" => wrap(app.session.execute("document.revision", p).map_err(|e| e.to_string())),
+        // A host that keeps the files itself (an editing embed, #8517).
+        "document.export" => wrap(crate::documents::export(app)),
+        "document.import" => wrap(crate::documents::import(app, p)),
+        "document.saved" => wrap(crate::documents::saved(app, p)),
         // The connection already counts as subscribed (`DesignWatch::join`), and its events start
         // from this answer: published first, so no event repeats it and none older follows.
         "control.subscribe" => {
@@ -828,6 +846,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             DESIGN_WATCH.publish(&app.session.document_id, revision);
             ok(json!({"document_id": app.session.document_id, "revision": revision}))
         }
+        // What the MCP server bridged to this app shapes its output with (Preferences › AI).
+        "mcp.options" => ok(json!({"compact": app.preferences.mcp_compact})),
         "ui.messages" => ok(crate::messages::control(app, p)),
         "ui.inspect" => ok(json!({
             "render": crate::render_workspace::inspect_state(app),
@@ -861,11 +881,15 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         })),
         "ui.file" => {
             let Some(path) = s("path") else { return err("path is required") };
-            if p.get("insert").and_then(Value::as_bool).unwrap_or(false) {
-                app.insert_path_async(path);
-            } else {
-                app.open_path_async(path);
+            // A control call never meets the unit dialog an STL or OBJ file asks a person: it names
+            // `units` itself, or the file is in millimetres.
+            let kind =
+                if p.get("insert").and_then(Value::as_bool).unwrap_or(false) { crate::file_load::Kind::Insert } else { crate::file_load::Kind::Open };
+            let mut request = crate::file_load::Request::new(path, kind);
+            if let Some(units) = p.get("units").filter(|u| !u.is_null()) {
+                request.options.insert("units".into(), units.clone());
             }
+            let _ = crate::file_load::begin_request(app, request);
             ok(json!({"busy": app.file_load.busy()}))
         }
         "ui.documents" => ok(crate::documents::control(app, p)),
@@ -874,6 +898,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 Some(true) => {
                     let rev = app.session.revision;
                     app.home.show(rev);
+                    crate::panel_runtime::hide_app_host(app);
                 }
                 Some(false) => app.home.open = false,
                 None => {}
@@ -1271,7 +1296,13 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             if explicit {
                 app.synthetic.push(egui::Event::ModifiersChanged(modifiers));
             }
-            app.synthetic.push(egui::Event::MouseWheel { unit, delta: egui::vec2(0.0, delta), modifiers, phase: egui::TouchPhase::Move });
+            app.synthetic.push(egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
+                unit,
+                delta: egui::vec2(0.0, delta),
+                modifiers,
+                phase: egui::TouchPhase::Move,
+            });
             if explicit {
                 app.synthetic.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
             }
@@ -1328,6 +1359,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                     },
                     None => crate::context_menu::Target::Viewport,
                 };
+                // A right-click opens a menu only on something that is there.
+                if let Err(e) = crate::context_menu::check_target(app, &target) {
+                    return err(e);
+                }
                 crate::context_menu::request_open(app, egui::pos2(x as f32, y as f32), target);
                 return ok(json!({"pending": true}));
             }
@@ -1590,7 +1625,14 @@ mod tests {
         let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         app.enable_panel_runtime(h.runtime, Box::<FakeAppPanelServices>::default()).unwrap();
         app.panel_runtime_mut().unwrap().set_command_adapters(Box::new(catalogue), Box::new(FakeNativeAdapter::new(false))).unwrap();
+        app.enable_universal_panel_host(HostOptions::default()).unwrap();
+        prepare_panel_commands(&mut app);
         app
+    }
+    fn prepare_panel_commands(app: &mut crate::SolveApp) {
+        use solidcraft_engine::panels::{LogicalRect, Point, Size};
+        let capacity = LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width: 1400.0, height: 1000.0 } };
+        app.panel_runtime.as_mut().unwrap().prepare_host(&app.session, capacity).unwrap();
     }
     fn panel_control(app: &mut crate::SolveApp, method: &str, params: serde_json::Value) -> serde_json::Value {
         let (request, _) = super::ControlRequest::new(method, params);
@@ -1660,7 +1702,7 @@ mod tests {
             assert_eq!(reply["panel_error"]["rule"], "schema");
             assert_eq!(reply["param_check"], check);
         }
-        panel_control(&mut app, "engine.execute", panel_steps()[0].clone());
+        assert_eq!(panel_control(&mut app, "engine.execute", panel_steps()[0].clone())["ok"], true);
         let before = app.panel_runtime().unwrap().layout().inspect();
         let reply = panel_control(
             &mut app,
@@ -1676,7 +1718,7 @@ mod tests {
     #[test]
     fn panel_control_catalogue_batches_and_scripts_retain_memory_and_refuse_unsupported_atomic_domains() {
         let mut app = panel_command_app();
-        panel_control(&mut app, "engine.execute", panel_steps()[0].clone());
+        assert_eq!(panel_control(&mut app, "engine.execute", panel_steps()[0].clone())["ok"], true);
         let reply = panel_control(
             &mut app,
             "engine.batch",
@@ -1802,10 +1844,171 @@ mod tests {
     }
 
     use serde_json::json;
+    use solidcraft_engine::panels::ActionSink;
     use solidcraft_engine::{Sel, Session};
 
     use super::*;
     use crate::Services;
+
+    #[test]
+    fn panel_fixture_validates_whole_request_before_activation() {
+        let mut app = SolveApp::new(Session::default(), Services::default());
+        let doc = app.session.doc.clone();
+        let model = app.session.model.state();
+        let camera = app.cam;
+        for params in [
+            Value::Null,
+            json!([]),
+            json!({"enabled":null}),
+            json!({"enabled":"true"}),
+            json!({"preset":false}),
+            json!({"preset":"unknown"}),
+            json!({"preset":"x".repeat(4096)}),
+            json!({"enabled":false,"preset":"docks"}),
+            json!({"enabled":true,"unknown":0}),
+        ] {
+            assert!(crate::panel_runtime::control_specimen(&mut app, &params).is_err(), "{params}");
+            assert!(app.panel_runtime().is_none());
+            assert!(!app.universal_panel_host_enabled());
+            assert!(std::sync::Arc::ptr_eq(&doc, &app.session.doc));
+            assert!(std::sync::Arc::ptr_eq(&model, &app.session.model.state()));
+            assert_eq!(app.cam, camera);
+        }
+        let reply = crate::panel_runtime::control_specimen(&mut app, &json!({})).unwrap();
+        assert_eq!(reply["enabled"], false);
+        assert!(reply["host"].is_null());
+    }
+
+    #[test]
+    fn panel_fixture_presets_mount_retained_content_and_inspection_does_not_tick() {
+        let mut h = crate::scenario::Harness::new();
+        for (name, count) in [
+            ("docks", 4),
+            ("tabs", 4),
+            ("collapsed", 4),
+            ("floating", 4),
+            ("overflow", 24),
+            ("pinned", 4),
+            ("columns", 3),
+            ("stack_tabs", 4),
+            ("content_fill", 2),
+            ("inline", 1),
+        ] {
+            let before = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap()["session"].clone();
+            h.step(&json!({"panel_fixture":{"enabled":true,"preset":name}})).unwrap();
+            h.frames(2);
+            assert!(h.app.universal_panel_host_enabled());
+            assert!(h.app.universal_panel_frame().is_some());
+            let first = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+            let second = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+            assert_eq!(first, second, "inspection itself must not tick or dispatch");
+            assert_eq!(first["runtime"]["probe"]["preset"], name);
+            assert_eq!(first["runtime"]["controller_count"], count);
+            assert_eq!(first["session"], before, "host-only work changed Session for {name}");
+            assert_eq!(first["runtime"]["probe"]["content_command_calls"], 0);
+            let takeover = crate::panel_runtime::control_specimen(&mut h.app, &json!({"enabled":true,"preset":"tabs"}));
+            assert!(takeover.is_err());
+            assert_eq!(crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap(), second);
+            h.step(&json!({"panel_fixture":{"enabled":false}})).unwrap();
+            assert!(h.app.panel_runtime().is_none());
+            assert!(!h.app.universal_panel_host_enabled());
+        }
+    }
+
+    #[test]
+    fn panel_fixture_teardown_honors_live_editor_guard_atomically() {
+        fn click_visible_guard(h: &mut crate::scenario::Harness, guard: &str) {
+            for _ in 0..16 {
+                let body =
+                    h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|section| section.instance.0 == "specimen-0").unwrap().body;
+                let body = crate::panel_runtime::egui_rect(body.expect("expanded specimen body"));
+                let checkbox = h
+                    .output
+                    .accesskit_update
+                    .as_ref()
+                    .unwrap()
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.role() == egui::accesskit::Role::CheckBox && node.label() == Some(guard))
+                    .and_then(|(_, node)| node.bounds())
+                    .map(|bounds| {
+                        egui::Rect::from_min_max(egui::pos2(bounds.x0 as f32, bounds.y0 as f32), egui::pos2(bounds.x1 as f32, bounds.y1 as f32))
+                    });
+                if let Some(checkbox) = checkbox.filter(|bounds| body.contains(bounds.center())) {
+                    assert!(checkbox.intersect(body).is_positive(), "the real checkbox must be visible inside its actual Body clip");
+                    let at = checkbox.center();
+                    h.frame_with(vec![egui::Event::PointerMoved(at)]);
+                    for pressed in [true, false] {
+                        h.frame_with(vec![
+                            egui::Event::PointerMoved(at),
+                            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+                        ]);
+                    }
+                    return;
+                }
+                // The specimen owns this ScrollArea. Accessibility also lists
+                // clipped content, so reveal the real checkbox before clicking.
+                let at = egui::pos2(body.center().x, body.top() + 4.0);
+                h.frame_with(vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::MouseWheel {
+                        source: egui::MouseWheelSource::Unknown,
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0.0, -120.0),
+                        modifiers: egui::Modifiers::NONE,
+                        phase: egui::TouchPhase::Move,
+                    },
+                ]);
+                for _ in 0..120 {
+                    if !h.ctx.input(|input| input.is_scrolling()) {
+                        break;
+                    }
+                    h.frame();
+                }
+                assert!(!h.ctx.input(|input| input.is_scrolling()), "the checkbox click requires a settled Body scroll");
+            }
+            panic!("the actual specimen guard checkbox was never revealed in its Body");
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.step(&json!({"panel_fixture":{"preset":"docks"}})).unwrap();
+        let guard = h.app.tr("ui.panel_fixture.guard").to_string();
+        click_visible_guard(&mut h, &guard);
+        let before = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+        let editor = &before["runtime"]["probe"]["controllers"][0];
+        assert_eq!(editor["reject_cancel"], true);
+        assert_eq!(editor["transaction_live"], true);
+        assert!(crate::panel_runtime::control_specimen(&mut h.app, &json!({"enabled":false})).is_err());
+        assert_eq!(crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap(), before);
+        click_visible_guard(&mut h, &guard);
+        h.step(&json!({"panel_fixture":{"enabled":false}})).unwrap();
+        assert!(h.app.panel_runtime().is_none());
+    }
+
+    #[test]
+    fn panel_fixture_rejects_takeover_and_teardown_of_unrelated_runtime() {
+        let harness = crate::panel_runtime::PanelMountHarness::new(false).unwrap();
+        #[derive(Default)]
+        struct Provider {
+            models: crate::panel_runtime::FakeModels,
+            commands: crate::panel_runtime::FakeContentCommands,
+            local: crate::panel_runtime::FakeLocalServices,
+        }
+        impl crate::panel_runtime::AppPanelServices for Provider {
+            fn refresh_read_only(&mut self, _: &Session) -> solidcraft_engine::panels::PanelResult<()> {
+                Ok(())
+            }
+            fn services(&mut self) -> crate::panel_runtime::ContentServices<'_> {
+                crate::panel_runtime::ContentServices { models: &self.models, commands: &mut self.commands, local: &mut self.local }
+            }
+        }
+        let mut app = SolveApp::new(Session::default(), Services::default());
+        app.panel_runtime = Some(crate::panel_runtime::AppPanelRuntime::new(harness.runtime, Box::<Provider>::default()).unwrap());
+        let before = app.panel_runtime().unwrap().layout().inspect();
+        for params in [json!({"enabled":true}), json!({"enabled":false})] {
+            assert!(crate::panel_runtime::control_specimen(&mut app, &params).is_err());
+            assert_eq!(app.panel_runtime().unwrap().layout().inspect(), before);
+        }
+    }
 
     #[test]
     fn viewport_status_fixture_rejects_hostile_presets_without_mutating_the_session() {
@@ -2279,6 +2482,29 @@ mod tests {
             serde_json::Value::Array(a) => a.iter().map(without_timings).collect(),
             v => v.clone(),
         }
+    }
+
+    /// A step of a long design leaves its components unplaced: the first-body fit's check
+    /// (`execute`) looks at the undo history before placing the world, which used to place
+    /// every component's bodies after every step of a batch.
+    #[test]
+    fn a_step_does_not_place_the_world_for_the_first_body_fit() {
+        let mut h = crate::scenario::Harness::new();
+        let v = batch(
+            &mut h,
+            json!({"commands": [
+                {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "body_name": "Cube"}},
+                {"command": "component.from_bodies", "params": {"bodies": ["Cube"]}},
+                {"command": "occurrence.copy", "params": {"component": "Cube", "translate": [0, 40, 0]}},
+            ]}),
+        );
+        assert!(v["result"].get("failed").is_none(), "{v}");
+        assert!(h.app.session.undo.len() > 2, "past the first-body fit");
+        // Straight to `execute`, with no frame: drawing places the world too.
+        let r = super::execute(&mut h.app, "solid.sphere", json!({"radius": 3, "center": [80, 0, 0], "operation": "new"}));
+        assert!(r.is_ok(), "{r:?}");
+        assert!(h.app.session.cached_world_state().is_none(), "the step placed the components again");
+        assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 3);
     }
 
     /// #743: a batch is one request through the app's queue, answered within a frame, however

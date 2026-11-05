@@ -11,6 +11,7 @@ mod assembly;
 mod body_transfer;
 mod body_transfer_sheet;
 mod browser_tree;
+pub mod newer_file;
 pub mod pbr_appearance;
 pub use body_transfer::{valid_transfer_matrix, validate_body_transfer};
 pub mod canvas;
@@ -48,6 +49,7 @@ pub mod motion;
 mod name_lookup;
 mod names;
 pub mod naming;
+mod occurrence_tree;
 mod params;
 pub mod persistent_name;
 pub mod physical_material;
@@ -77,6 +79,7 @@ pub mod render_optics;
 pub mod render_resources;
 pub mod render_settings;
 pub mod render_surface;
+pub mod render_texture_resources;
 pub mod sheet;
 pub mod sketch_equation;
 pub mod text_params;
@@ -92,8 +95,8 @@ pub use eval::{
     blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state, hole_direction_at,
     hole_on_surface, import_body_names, join_pieces_added, map_wire, metric_thread_sizes, object_height, parse_metric_thread, pattern_matrices,
     revolve_extent, revolve_extent_for_handle, revolve_extent_with_convention, select_profiles, sketch_hole_direction, sketch_line_plane,
-    state_in_frame, state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance, world_state,
-    world_state_reusing,
+    state_in_frame, state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance, with_placed_copies,
+    world_state, world_state_reusing,
 };
 pub use eval::{EvalCache, KeptResults};
 pub use expr::Expr;
