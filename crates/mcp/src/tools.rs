@@ -412,8 +412,9 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "Cancel",
             "Bridged: cancel the request that was still running in the app when its call returned (an error starting \
              \"still running:\"), without waiting for it. One still waiting its turn will not run; a design change or \
-             export computing off the app's window thread is stopped (Preferences > AI), and nothing of it is applied. One \
-             already applying on the window thread can't be cancelled: the error says so, and it will still finish. Only \
+             export computing off the app's window thread is stopped (Preferences > AI): the design stays as it was, \
+             though a stopped export may still write its file. One already applying on the window thread can't be \
+             cancelled: the error says so, and it will still finish. Only \
              this server's own request can be cancelled. Headless calls always run to their end, so there is nothing to \
              cancel.",
             obj(json!({}), &[]),
