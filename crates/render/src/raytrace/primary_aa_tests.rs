@@ -1627,6 +1627,12 @@ fn cpu_path_overlapping_coplanar_emitters_refuse_without_mutating_authored_rows(
         color: [1.0; 3],
         intensity: 1.0,
     };
+    let rows: Vec<_> = (0..5).map(|index| job::RectangleLightOptions { center_mm: [f64::from(index) * 3.0, 0.0, 2.0], ..first.clone() }).collect();
+    let options = RaytraceOptions { area_lights: Some(rows.clone()), ..original.options.clone() };
+    let error = options.validate().unwrap_err();
+    assert_eq!(error.code, job::ErrorCode::InvalidRequest);
+    assert!(error.message.contains("at most four rectangle lights"), "{}", error.message);
+    assert_eq!(options.area_lights, Some(rows), "count refusal retains every authored source");
     for center in [[0.0, 0.0, 2.0], [1.0, 0.0, 2.0]] {
         let second = job::RectangleLightOptions { center_mm: center, ..first.clone() };
         let rows = vec![first.clone(), second];

@@ -15,9 +15,9 @@ heterogeneous medium, spectral solver or emissive volume.
 The portable field is `CpuJob.volume`; the runtime field is
 `raytrace.volume`. Both preserve `min_mm`, `max_mm`, `extinction_per_mm`,
 `scattering_albedo` and `anisotropy`. Coordinates stay within ±1e9 mm, each extent
-is at least1e-6 mm, extinction is0–1000/mm, each albedo component is0–1 and phase
-bias is−0.95–0.95. Existing image, geometry, cumulative work, memory, ray-distance,
-codec,4096-byte host task and1024-byte completion metadata caps remain unchanged.
+is at least 1e-6 mm, extinction is 0–1000/mm, each albedo component is 0–1 and phase
+bias is −0.95–0.95. Existing image, geometry, cumulative work, memory, ray-distance,
+codec, 4096-byte host task and 1024-byte completion metadata caps remain unchanged.
 Those layout assertions compiled in the published CI7 source; the passing scoped
 renderer suite does not establish native Atmosphere image quality or performance.
 
@@ -87,7 +87,7 @@ uses the existing cooperative cursors. Cancellation or work exhaustion cannot
 publish a late sample, checkpoint or master.
 
 Prepared regressions use independent exponential CDF, analytic slab/box lengths,
-HG formula/direction and light-sampling loops for depths1/2/16. They cover pure
+HG formula/direction and light-sampling loops for depths 1/2/16. They cover pure
 absorption, a real perspective near prefix and pupil, orthographic foreground and
 background union, empty-scene coverage, single/multiple scattering, white-furnace
 energy, opaque blockers, finite rectangle and real nonconstant HDR sources with

@@ -74,8 +74,8 @@ imports require normalized sRGB declarations for base color and validate static
 metadata before publication. The native CPU metadata worker also rejects conflicting
 base-color declarations. Normal and scalar roles retain their raw numerical channels.
 The cooperative native CPU map worker accepts static noninterlaced 8-bit PNG
-layouts and refuses JPEG, interlace, APNG and other depths. Imported portable
-images follow the saved-resource normalization workflow before that worker.
+layouts and refuses JPEG, interlace, APNG and other depths. For CPU execution, normalize JPEG or interlaced images to this PNG contract before
+import. Import stores exact supplied bytes and performs no conversion.
 No implicit color-profile conversion is performed. The sRGB
 base/data normal distinction follows the public
 [Khronos glTF material semantics](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#materials),

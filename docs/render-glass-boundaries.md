@@ -120,7 +120,7 @@ prove a nonconvex leaf free from every self-intersection.
 
 The additional query runs only with explicit nested-media mode. It has a fixed
 32-entry node stack and 32-entry depth array (256 bytes of shader private array
-state), under the existing depth30 host-built BVH. There is no new owned host
+state), under the existing depth 30 host-built BVH. There is no new owned host
 allocation, uniform/storage buffer, retained plane or snapshot. One extra BVH
 query per sampled primary is bounded by the existing scene and sample caps.
 GPU work is scheduled by the existing measured dispatch controller, not a

@@ -157,11 +157,13 @@ fn adaptive_preview_divides_only_unfinished_production_and_rejects_invalid_budge
         }
     }
     for count in [f32::NAN, f32::INFINITY, 0.0, 15.0, 16.5, 65.0] {
-        assert!(adaptive::preview_divisor(&options, 17, Some(&count.to_le_bytes())).is_err());
+        assert_eq!(adaptive::preview_divisor(&options, 17, Some(&count.to_le_bytes())).unwrap_err().code, ErrorCode::Internal);
     }
-    assert!(adaptive::preview_divisor(&options, 17, None).is_err());
-    assert!(adaptive::preview_divisor(&options, 0, None).is_err());
-    assert!(adaptive::preview_divisor(&options, 81, Some(&16.0f32.to_le_bytes())).is_err());
+    assert_eq!(adaptive::preview_divisor(&options, 17, None).unwrap_err().code, ErrorCode::Internal);
+    assert_eq!(adaptive::preview_divisor(&options, 17, Some(&[0; 3])).unwrap_err().code, ErrorCode::Internal);
+    assert_eq!(adaptive::preview_divisor(&options, 0, None).unwrap_err().code, ErrorCode::Internal);
+    assert_eq!(adaptive::preview_divisor(&options, 81, Some(&16.0f32.to_le_bytes())).unwrap_err().code, ErrorCode::Internal);
+    assert_eq!(adaptive::preview_divisor(&JobOptions::default(), 1, None).unwrap_err().code, ErrorCode::Internal);
     let shader = include_str!("adaptive_preview.wgsl");
     let module = naga::front::wgsl::parse_str(shader).unwrap_or_else(|error| panic!("{}", error.emit_to_string(shader)));
     naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();

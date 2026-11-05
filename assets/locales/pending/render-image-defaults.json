@@ -1,24 +1,36 @@
 {
-  "en": {
-    "prefs.render_legacy_image_defaults": "Use previous Render image defaults",
-    "prefs.render_legacy_image_defaults_help": "Keep the previous manual image workflow: start new setups with CPU raster, keep fixed sampling when choosing CPU ray tracing, and open rendered images explicitly. Saved setups are unchanged."
+  "ar": {
+    "prefs.render_legacy_image_defaults": "استخدام الإعدادات الافتراضية السابقة لصور التصيير",
+    "prefs.render_legacy_image_defaults_help": "الاحتفاظ بسير العمل اليدوي السابق: إعدادات جديدة بالتصيير النقطي على CPU، وأخذ العينات الثابت لتتبع الأشعة على CPU، وفتح النتائج يدويًا. إعادة ملاءمة العرض عند دخول التصيير، وتبديل اللقطات دون استعادة كاميراتها، واستخدام التأطير والتنقل السابقين. تعطيل التحديث التلقائي للصورة المباشرة. لا تتغير الإعدادات المحفوظة."
   },
   "de": {
     "prefs.render_legacy_image_defaults": "Bisherige Render-Bildvorgaben verwenden",
-    "prefs.render_legacy_image_defaults_help": "Den bisherigen manuellen Bildablauf beibehalten: neue Setups mit CPU-Raster beginnen, bei CPU-Raytracing feste Abtastung verwenden und gerenderte Bilder ausdrücklich öffnen. Gespeicherte Setups bleiben unverändert."
+    "prefs.render_legacy_image_defaults_help": "Den bisherigen manuellen Ablauf beibehalten: neue Setups mit CPU-Raster, feste Abtastung beim CPU-Raytracing und manuell geöffnete Ergebnisse. Beim Wechsel zu Render die Ansicht neu einpassen, Aufnahmen ohne Wiederherstellung ihrer Kamera wechseln und die bisherige Bildausrichtung und Navigation verwenden. Automatische Live-Bildrückmeldungen deaktivieren. Gespeicherte Setups bleiben unverändert."
+  },
+  "en": {
+    "prefs.render_legacy_image_defaults": "Use previous Render image defaults",
+    "prefs.render_legacy_image_defaults_help": "Keep the previous manual workflow: new setups use CPU raster, CPU ray tracing keeps fixed sampling, and you open rendered results manually. Refit on Render entry, switch shots without restoring their cameras, and use the previous framing and navigation. Disable automatic live image feedback. Saved setups are unchanged."
+  },
+  "he": {
+    "prefs.render_legacy_image_defaults": "שימוש בברירות המחדל הקודמות לתמונות הדמיה",
+    "prefs.render_legacy_image_defaults_help": "שמירה על תהליך העבודה הידני הקודם: הגדרות חדשות ברסטר CPU, דגימה קבועה בעקיבת קרניים ב־CPU ופתיחת התוצאות ידנית. התאמת התצוגה מחדש בכניסה להדמיה, מעבר בין צילומים בלי לשחזר את המצלמות שלהם ושימוש במסגור ובניווט הקודמים. עדכון אוטומטי של התמונה החיה מושבת. הגדרות שמורות אינן משתנות."
   },
   "ja": {
     "prefs.render_legacy_image_defaults": "以前のレンダー画像の既定値を使用",
-    "prefs.render_legacy_image_defaults_help": "以前の手動の画像ワークフローを使用します。新しいセットアップはCPUラスタで開始し、CPUレイトレーシングでは固定サンプリングを維持し、レンダリング画像は明示的に開きます。保存済みのセットアップは変更しません。"
+    "prefs.render_legacy_image_defaults_help": "以前の手動の画像ワークフローを使用します。新しいセットアップはCPUラスタ、CPUレイトレーシングは固定サンプリングとし、結果は手動で開きます。レンダーに入るたびにビューをフィットし、ショットを切り替えても保存カメラを復元せず、以前のフレーミングとナビゲーションを使用します。自動のライブ画像更新は無効にします。保存済みのセットアップは変更しません。"
   },
   "ko": {
     "prefs.render_legacy_image_defaults": "이전 렌더 이미지 기본값 사용",
-    "prefs.render_legacy_image_defaults_help": "이전의 수동 이미지 작업 방식을 유지합니다. 새 설정은 CPU 래스터로 시작하고 CPU 광선 추적에서는 고정 샘플링을 유지하며 렌더링 이미지는 직접 엽니다. 저장된 설정은 변경하지 않습니다.",
+    "prefs.render_legacy_image_defaults_help": "이전의 수동 이미지 작업 방식을 유지합니다. 새 설정은 CPU 래스터를 사용하고 CPU 광선 추적은 고정 샘플링을 사용하며 결과는 직접 엽니다. 렌더에 들어갈 때 뷰를 다시 맞추고, 샷을 전환해도 저장된 카메라를 복원하지 않으며, 이전의 프레이밍과 탐색 방식을 사용합니다. 자동 실시간 이미지 피드백을 끕니다. 저장된 설정은 변경하지 않습니다.",
     "render.method_raster": "CPU 래스터 (도식)",
     "render.result_provisional": "임시 이미지"
   },
+  "vi": {
+    "prefs.render_legacy_image_defaults": "Dùng mặc định ảnh Kết xuất trước đây",
+    "prefs.render_legacy_image_defaults_help": "Giữ quy trình hình ảnh thủ công trước đây: thiết lập mới dùng raster CPU, dò tia CPU dùng lấy mẫu cố định và mở kết quả thủ công. Căn vừa lại khung nhìn khi vào Kết xuất, chuyển góc chụp mà không khôi phục camera đã lưu, đồng thời dùng cách lấy khung hình và điều hướng trước đây. Tắt phản hồi ảnh trực tiếp tự động. Các thiết lập đã lưu không thay đổi."
+  },
   "zh": {
     "prefs.render_legacy_image_defaults": "使用以前的渲染图像默认值",
-    "prefs.render_legacy_image_defaults_help": "保留以前的手动图像流程：新设置使用 CPU 光栅渲染，CPU 光线追踪保留固定采样，并手动打开渲染图像。已保存的设置保持不变。"
+    "prefs.render_legacy_image_defaults_help": "保留以前的手动图像流程：新设置使用 CPU 光栅渲染，CPU 光线追踪使用固定采样，并手动打开结果。进入渲染时重新适配视图，切换镜头时不恢复其保存的相机，并使用以前的取景和导航方式。禁用自动实时图像反馈。已保存的设置保持不变。"
   }
 }

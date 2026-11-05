@@ -384,7 +384,15 @@ pub(super) fn set_lens(app: &mut SolveApp, shot: &str, lens: Option<solidcraft_e
         }
         patch
     } else {
-        json!({"job":&candidate.job})
+        // Validate the visible draft above, but save only lens intent on the saved job.
+        // Independent method and sampling edits keep their own dirty state.
+        let mut job = saved.job.clone();
+        match &mut job {
+            Some(RenderJob::CpuRaytrace { options, .. }) => options.lens = lens,
+            Some(RenderJob::GpuPath { options, .. }) => options.lens = lens,
+            _ => return Err(app.tr("render.shot_lens_raytrace_reason").into()),
+        }
+        json!({"job":job})
     };
     edit_settings(app, shot, patch)?;
     if active {

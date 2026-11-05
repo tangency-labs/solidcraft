@@ -3310,7 +3310,7 @@
   "render.cpu_point_help": "最多可在所选平行光照明基础上添加8个点光源。距离单位为mm，最小距离不得大于参考距离。",
   "render.cpu_primary_samples": "每像素边缘采样",
   "render.cpu_progressive": "CPU渐进渲染",
-  "render.cpu_progressive_help": "累积新的CPU相机样本并显示每个完整通道。选定反射在每个相机样本中尝试一次；经认证的玻璃和平面各向异性保留原有限制。自适应先导样本和正式样本共享CPU配置预算。",
+  "render.cpu_progressive_help": "累积新的CPU相机样本并显示每个完整的渲染轮次。选定反射在每个相机样本中尝试一次；经认证的玻璃和平面各向异性保留原有限制。自适应先导样本和正式样本共享CPU配置预算。",
   "render.cpu_progressive_limits": "最多1,048,576像素，像素×采样总数不超过16,777,216。更改采样数不会自动调整图像尺寸。",
   "render.cpu_progressive_seed": "CPU采样种子",
   "render.cpu_progressive_spp": "每像素采样数",

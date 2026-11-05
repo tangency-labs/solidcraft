@@ -15,7 +15,7 @@ results above remain separate.
 
 CPU **Indirect lighting** (`options.path`) can consume up to eight stable saved or
 exact captured optical assignments. It requires explicit progressive camera
-sampling, one primary attempt and traced shadows. Path depth remains1–16 and counts
+sampling, one primary attempt and traced shadows. Path depth remains 1–16 and counts
 shaded opaque surfaces, optical boundaries and active scattering events. An endpoint beyond this finite
 limit contributes no further radiance; the limit is not a convergence guarantee.
 There is no default, size, camera, profile or method change. Fixed saved choices
@@ -36,10 +36,10 @@ two oppositely wound faces per edge, one connected shell and one connected circu
 link at every exact coordinate vertex. A pinched vertex fails the link check even
 when edge incidence and global connectivity pass. Adaptive exact predicates reject
 intersection, non-topological contact, coplanar overlap and self-intersection.
-Coordinates must be zero or have magnitude at least2^-128mm within the existing
-1e12mm world bound; this conservative predicate domain prevents underflow rather
+Coordinates must be zero or have magnitude at least 2^-128 mm within the existing
+1e12 mm world bound; this conservative predicate domain prevents underflow rather
 than snapping small coordinates. An exact signed dyadic volume proves outward
-orientation using a fixed12-limb integer accumulator, not rounded volume or an
+orientation using a fixed 12-limb integer accumulator, not rounded volume or an
 approximate ray-crossing witness. Imported or computed seams that are not exactly
 closed refuse with their authored data intact.
 
@@ -97,9 +97,9 @@ GPU Glass consumer is smooth delta transport.
 
 Certification is cooperative: exact edge merge sorting, connectivity, vertex links,
 one face-pair contact check, determinant term or containment predicate run under
-the existing cumulative work and cancel token. ForN selected closed triangles its
+the existing cumulative work and cancel token. For N selected closed triangles its
 prepaid peak is `sizeof(Task)+N*(sizeof(Face)+6*sizeof(Edge)+3*sizeof(usize)+3)`;
-all vectors fallibly reserve exact capacity. The12-limb volume state is in
+all vectors fallibly reserve exact capacity. The 12-limb volume state is in
 `sizeof(Task)`. This change additionally bills one shared
 proof slot by `sizeof(CertifiedOptics)`, including its Vec header; its outer Vec
 header remains in the existing fixed metadata allowance. The ready cursor's
@@ -108,7 +108,7 @@ source-specific qualification is recorded in
 [PR #11087](https://github.com/tangency-labs/solidcraft/pull/11087). Source-plane
 cursor state is billed by the actual existing pixel and path slot sizes. No cap or static guard is raised. Contact and containment can
 require quadratic work, so a valid large mesh can exhaust its selected profile
-without producing a partial certificate or image. The fixed4096-byte host slot and
+without producing a partial certificate or image. The fixed 4096-byte host slot and
 all frame/metadata bounds remain compilation gates. The inside-origin increment
 adds one conditional exact-capacity state slot, prepaid by its actual size; its
 fixed BVH stack visits one node or primitive per charged step and is reused across
@@ -117,7 +117,7 @@ camera samples. It adds no image plane, additional ray, random draw or new cap.
 Renderer regressions cover exact contacts, pinched vertices, rotated and arbitrary
 closed meshes, outward sign under large-coordinate cancellation, nested physical
 Beer lengths, independent per-ordinal Fresnel paths, real HDR and area endpoints,
-opaque contact material, thin-shadow/BSDF MIS with1/4/16/64 source samples, every
+opaque contact material, thin-shadow/BSDF MIS with 1/4/16/64 source samples, every
 PNG prefix, worker quanta, raw EXR identity, adaptive pilot discard, cancellation,
 work exhaustion, physical inside-eye and per-pupil nested Beer, first opaque and
 analytic emission, exact boundary/near-clip refusal, initial-medium TIR, saved/runtime capture and the real pointer preset→Render→Save→
@@ -160,11 +160,11 @@ at the physical surface: a charged one-primitive-at-a-time range walk reuses the
 existing exact source-plane cursor. This avoids consuming collision/absorption
 distance through a normal offset; inactive options keep the old launch path. Nonrepresentable event positions or collapsed source/endpoint-plane
 positions refuse instead of being moved by an epsilon. All existing profile,
-4096-byte host-task and1024-byte frame-metadata limits remain unchanged gates.
+4096-byte host-task and 1024-byte frame-metadata limits remain unchanged gates.
 
 Regressions cover independent exponential survival, HG CDF/density mass
 and first moment, per-ordinal first-hit eye/lens/nested Beer and slab walks,
-contained light/BSDF survival MIS at1/4/16/64 source samples, inactive identity,
+contained light/BSDF survival MIS at 1/4/16/64 source samples, inactive identity,
 white furnace, every complete prefix, quanta, raw/alpha/finishing/adaptive pilot
 separation, cancellation/work exhaustion and saved/runtime/pointer save/reopen.
 Their execution is covered by the published renderer suite, not by the opaque

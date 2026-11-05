@@ -78,19 +78,19 @@ Native studio reviews accept the explicitly selected CPU or GPU method. The CPU
 projection preserves sampling, adaptive allocation, profile, camera, lens, optical
 bindings, maps, aging, volume and output choices. It installs the same embedded
 HDR identity/rotation/intensity, passive stage and explicit exposure. Existing CPU
-HDR sample count is retained, or starts at16 when none was authored. Native
-three-light compositions keep their existing1/16 radiance gain; it is not added to
+HDR sample count is retained, or starts at 16 when none was authored. Native
+three-light compositions keep their existing 1/16 radiance gain; it is not added to
 direct rig imports.
 
 Direct CPU rigs keep exact authored achromatic area radiance and world-mm full
 edges. They never retain the implicit three studio lights. The unchanged CPU area
-intensity ceiling64 means16 of the19 currently executable direct rigs refuse;
+intensity ceiling 64 means 16 of the 19 currently executable direct rigs refuse;
 RIG-007, RIG-020 (Sun) and RIG-022 (black) fit this numerical projection. World,
 clearance, feature and resource checks still apply. A refusal never clamps a light,
 splits it, changes method or removes authored settings.
 
 A CPU Sun review without indirect lighting offers an explicit adoption action.
-It adds path depth8, progressive16/seed0 only if absent, one camera sample per
+It adds path depth 8, progressive 16/seed 0 only if absent, one camera sample per
 pass and traced shadows. Existing progressive/adaptive/profile intent is kept;
 the complete prospective setup must validate before adoption plus rig replacement
 publishes as one undo. Preparing, cancelling or painting a review does not save,

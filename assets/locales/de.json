@@ -3637,7 +3637,7 @@
   "render.output_exr_unavailable": "EXR-Ausgabeeinstellungen sind hier nicht verfügbar. Linearer EXR-Export erfordert ein fertiges GPU-Bild mit gespeichertem linearem Original.",
   "render.output_fit": "Einpassen",
   "render.output_format": "Format",
-  "render.output_format_status": "PNG enthält das exakte fertige Anzeigebild. Optionales CPU/GPU-EXR bewahrt rohe lineare FLOAT32-Strahldichte vor Filtern. Export ersetzt nie durch Vorschaucache oder anderen Auftrag.",
+  "render.output_format_status": "PNG enthält das exakte fertige Anzeigebild. Optionales CPU/GPU-EXR bewahrt rohe lineare FLOAT32-Strahldichte vor Anzeigefiltern. Der Export verwendet nie den Vorschaucache oder einen anderen Auftrag.",
   "render.output_grading": "Farbkorrektur",
   "render.output_image": "Bild",
   "render.output_largest": "{width} × {height} max.",
