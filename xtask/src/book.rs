@@ -408,6 +408,19 @@ mod tests {
     }
 
     #[test]
+    fn a_description_with_inline_markdown_stays_literal_in_the_table() {
+        // crates/engine/src/cmd/sketch.rs: a description may carry backticks and emphasis.
+        let md = reference(&[json!({"id":"solid.box","label":"Box","params":"size: expr (a parameter with `backticks` and *bold* text)"})]);
+        let row = md.lines().find(|line| line.starts_with("| size |")).expect("a row for the size parameter");
+        assert!(
+            row.contains(r"| size | expr | Yes | a parameter with \`backticks\` and \*bold\* text |"),
+            "the description shows its Markdown literally: {row}"
+        );
+        assert!(!row.contains("`backticks`"), "the backticks must not open a code span: {row}");
+        assert!(!row.contains("*bold*"), "the emphasis markers must not start emphasis: {row}");
+    }
+
+    #[test]
     fn a_pipe_in_the_name_position_lists_alternative_names_and_one_after_the_colon_is_a_type() {
         // crates/engine/src/cmd/features.rs: `radius | diameter: expr` and `direction?: positive|negative|symmetric`.
         let md = reference(&[

@@ -412,6 +412,20 @@ mod tests {
     }
 
     #[test]
+    fn a_type_stops_at_the_end_of_the_sentence_that_follows_it() {
+        // crates/engine/src/cmd/sketch.rs: `construction?: bool. Returns sides {bottom, right, top, left} (line ids)`.
+        let notation = concat!(
+            "center, corner: [x,y] (a coordinate may be an expression over the design's parameters: the point follows them); ",
+            "construction?: bool. Returns sides {bottom, right, top, left} (line ids) ",
+            "and corners {bottom_left, bottom_right, top_right, top_left} (point ids)"
+        );
+        let rows = rows(notation);
+        let construction = rows.iter().find(|(name, ..)| name == "construction").expect("the construction parameter");
+        assert_eq!(construction.1, "bool", "the type is the parameter's own type");
+        assert!(!construction.1.contains("Returns sides"), "the type does not run into the sentence that follows it: {}", construction.1);
+    }
+
+    #[test]
     fn a_connector_word_introduces_the_next_parameter() {
         assert_eq!(
             rows("thin?: true (a wall along the sketch) with curves?: [curve ids]"),
