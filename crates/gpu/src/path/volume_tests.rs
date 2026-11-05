@@ -646,7 +646,6 @@ fn gpu_orthographic_volume_cancel_releases_work_before_exact_retained_metadata()
 
 #[test]
 fn gpu_volume_signed_primary_preserves_old_perspective_lens_none_and_zero_bytes() {
-    use solidcraft_engine::doc::render_resources::HdrId;
     let Some(executor) = executor() else { return };
     let context = &executor.context;
     let old_hook = r#"            let segment=volume_segment(o+o_low,d,min(hit.distance,emitter_distance));"#;
@@ -679,42 +678,48 @@ fn volume_orthographic_segment(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec2<f
     return vec2<f32>(enter,leave);
 }
 "#;
-    assert_eq!(SHADER.matches(new_hook).count(), 1);
-    assert_eq!(SHADER.matches(helper).count(), 1);
-    let helper_block = format!("\n{helper}");
-    let helper_offset = SHADER.find(&helper_block).unwrap();
-    let original = SHADER.replacen(new_hook, old_hook, 1).replacen(&helper_block, "", 1);
-    assert_eq!(original.matches(old_hook).count(), 1);
-    let mut restored = original.replacen(old_hook, new_hook, 1);
-    restored.insert_str(helper_offset, &helper_block);
-    assert_eq!(restored, SHADER, "the whole-source inverse restores only the signed primary hook/helper");
-    // Historical a4f69bd8 is the archived pre-GPU12 source. This current control
-    // is independently reconstructed from 96190d, the 35af rename and the early wrapper.
-    assert_eq!(
-        HdrId::of(original.as_bytes()).to_string(),
-        "f373400816e40e803691ceb847d8c9d7983fd4744c3874a322363810c14b6d6c",
-        "exact composed pre-fog shader independently reconstructed; no unrelated producer math edited"
-    );
-    let creating = scopes(&context.device);
-    let module = context.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("exact old signed-line control"),
-        source: wgpu::ShaderSource::Wgsl(original.into()),
-    });
-    let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: None,
-        bind_group_layouts: &[Some(&context.layout)],
-        immediate_size: 0,
-    });
-    let pipeline = context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: None,
-        layout: Some(&layout),
-        module: &module,
-        entry_point: Some("main"),
-        compilation_options: Default::default(),
-        cache: None,
-    });
-    checked(creating).unwrap();
-    warm_up(&context.device, &context.queue, &pipeline, &placeholder_bind(&context.device, &context.layout, 7).unwrap(), &context.healthy).unwrap();
+    // The archived pre-GPU12 control fingerprint remains historical evidence:
+    // f373400816e40e803691ceb847d8c9d7983fd4744c3874a322363810c14b6d6c.
+    // Upstream changed map filtering and producer specialization. Reconstruct
+    // each current producer, changing only this signed primary hook/helper.
+    let old_pipeline = |opaque: bool| {
+        let shader = if opaque { SHADER } else { SINGLE_MEDIUM_SHADER };
+        assert_eq!(shader.matches(new_hook).count(), 1);
+        assert_eq!(shader.matches(helper).count(), 1);
+        let helper_block = format!("\n{helper}");
+        let helper_offset = shader.find(&helper_block).unwrap();
+        let original = shader.replacen(new_hook, old_hook, 1).replacen(&helper_block, "", 1);
+        assert_eq!(original.matches(old_hook).count(), 1);
+        let mut restored = original.replacen(old_hook, new_hook, 1);
+        restored.insert_str(helper_offset, &helper_block);
+        assert_eq!(restored, shader, "the whole-source inverse restores only the signed primary hook/helper");
+        let creating = scopes(&context.device);
+        let module = context.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("exact old signed-line control"),
+            source: wgpu::ShaderSource::Wgsl(original.into()),
+        });
+        let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[Some(&context.layout)],
+            immediate_size: 0,
+        });
+        let pipeline = context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: None,
+            layout: Some(&layout),
+            module: &module,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &[("OPAQUE_SCENE", f64::from(u8::from(opaque))), ("HAS_TEXTURES", 0.0)],
+                ..Default::default()
+            },
+            cache: None,
+        });
+        checked(creating).unwrap();
+        warm_up(&context.device, &context.queue, &pipeline, &placeholder_bind(&context.device, &context.layout, 7).unwrap(), &context.healthy)
+            .unwrap();
+        pipeline
+    };
+    let pipelines = [old_pipeline(true), old_pipeline(false)];
     let mut inactive_baseline = None;
     for mode in 0..8 {
         let case = OpticalLineCase {
@@ -759,8 +764,15 @@ fn volume_orthographic_segment(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec2<f
             }
             _ => panic!("unexpected unchanged-volume fixture mode"),
         }
+        // None and zero extinction use the opaque producer. The active fog
+        // routes use the one-medium producer, with no maps or nested glass.
+        let opaque = mode < 2;
+        assert_eq!(use_opaque_pipeline(&source, options), opaque);
+        assert!(image.textures.is_none() && !options.nested_media);
+        let pipeline = &pipelines[usize::from(!opaque)];
         let run = |old: bool| {
             let mut task = Task::new(context.clone(), source.clone(), image.clone(), options, CancelToken::default()).unwrap();
+            assert_eq!((task.opaque_scene, task.has_textures, task.options.nested_media), (opaque, false, false));
             let (mut uniforms, mut prefixes) = (Vec::new(), Vec::new());
             for sample in 0..options.samples {
                 assert_eq!((task.sample, task.offset, task.lane), (sample, 0, 0));
@@ -772,7 +784,7 @@ fn volume_orthographic_segment(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec2<f
                     let mut encoder = context.device.create_command_encoder(&Default::default());
                     {
                         let mut pass = encoder.begin_compute_pass(&Default::default());
-                        pass.set_pipeline(&pipeline);
+                        pass.set_pipeline(pipeline);
                         pass.set_bind_group(0, &task.bind, &[]);
                         pass.dispatch_workgroups(16u32.div_ceil(PATH_WORKGROUP_SIZE), 1, 1);
                     }

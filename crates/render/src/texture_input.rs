@@ -163,12 +163,12 @@ impl TextureSource {
         }
         Ok(self.bytes.clone())
     }
-    /// Bounded whole-image codec work, intended for a caller-owned worker. Cancellation is
-    /// checked at the codec boundary, not during PNG/JPEG decoding. No partial image escapes.
     #[cfg(all(test, feature = "raytrace-cpu"))]
     pub(crate) fn encoded_weak(&self) -> std::sync::Weak<Vec<u8>> {
         Arc::downgrade(&self.bytes)
     }
+    /// Bounded whole-image codec work, intended for a caller-owned worker. Cancellation is
+    /// checked at the codec boundary, not during PNG/JPEG decoding. No partial image escapes.
     pub fn decode(&self, cancelled: impl Fn() -> bool) -> Result<DecodedTexture> {
         if cancelled() {
             return Err(invalid("texture decoding cancelled"));

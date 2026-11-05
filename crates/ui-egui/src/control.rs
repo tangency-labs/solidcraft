@@ -298,42 +298,47 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
     if id == "view.pick" {
         return crate::view_pick::pick_command(app, &params);
     }
+    // Eligibility follows the same case-insensitive IDs as the engine.
+    let fit_id = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
+    let fit_command = !matches!(
+        fit_id,
+        "view.fit"
+            | "view.home"
+            | "view.tool"
+            | "view.tool.zoom"
+            | "view.spin"
+            | "view.visual_style"
+            | "view.grid"
+            | "view.ground_shadow"
+            | "view.navigation_bar"
+            | "view.ribbon_tabs_only"
+            | "view.next_tab"
+            | "view.previous_tab"
+            | "view.layout"
+            | "view.navigate"
+            | "view.ambient_occlusion"
+            | "view.perspective"
+            | "view.angle_readout"
+            | "view.graphics_preset"
+            | "view.history_layout"
+            | "timeline.play"
+            | "browser.expand_all"
+            | "browser.collapse_all"
+    ) && !fit_id.starts_with("settings.");
+    // History changes and session swaps can return to the first-body fitting window.
+    let history_may_fit = app.session.undo.len() <= 2
+        || SWITCHES_DESIGN.contains(&fit_id)
+        || matches!(fit_id, "edit.undo" | "edit.restore_checkpoint" | "doc.open" | "doc.recover" | "sketch.finish");
     // Placement failure does not establish an empty model. Keep its camera and
     // let the existing placement diagnostic explain the unavailable world.
-    let had_bodies = app.session.world_state().map_or(true, |world| !world.bodies.is_empty());
+    let was_empty = fit_command && history_may_fit && app.session.world_state().is_ok_and(|world| world.bodies.is_empty());
     let r = app.run(id, params);
     // Update Links in a part edited in place reads the assembly around it too, as its button does.
     if r.is_ok() && is_command(Some(id), "component.update_links") && app.edit_in_place.active.is_some() {
         crate::edit_in_place::refresh(app);
     }
     if r.is_ok()
-        && !had_bodies
-        && !matches!(
-            id,
-            "view.fit"
-                | "view.home"
-                | "view.tool"
-                | "view.tool.zoom"
-                | "view.spin"
-                | "view.visual_style"
-                | "view.grid"
-                | "view.ground_shadow"
-                | "view.navigation_bar"
-                | "view.ribbon_tabs_only"
-                | "view.next_tab"
-                | "view.previous_tab"
-                | "view.layout"
-                | "view.navigate"
-                | "view.ambient_occlusion"
-                | "view.perspective"
-                | "view.angle_readout"
-                | "view.graphics_preset"
-                | "view.history_layout"
-                | "timeline.play"
-                | "browser.expand_all"
-                | "browser.collapse_all"
-        )
-        && !id.starts_with("settings.")
+        && was_empty
         && app.session.active_sketch.is_none()
         // Cheap test first: placing the world (`world_state`) after every step of a batch in a
         // design with components placed every component's bodies again once per step.
@@ -2495,21 +2500,60 @@ mod tests {
     #[test]
     fn a_step_does_not_place_the_world_for_the_first_body_fit() {
         let mut h = crate::scenario::Harness::new();
-        let v = batch(
-            &mut h,
-            json!({"commands": [
+        // The harness call settles frames, which legitimately place the world for drawing.
+        let Outcome::Done(v) = super::batch(
+            &mut h.app,
+            &json!({"commands": [
                 {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "body_name": "Cube"}},
                 {"command": "component.from_bodies", "params": {"bodies": ["Cube"]}},
                 {"command": "occurrence.copy", "params": {"component": "Cube", "translate": [0, 40, 0]}},
             ]}),
-        );
+        ) else {
+            panic!("a command batch cannot be a screenshot");
+        };
         assert!(v["result"].get("failed").is_none(), "{v}");
         assert!(h.app.session.undo.len() > 2, "past the first-body fit");
         // Straight to `execute`, with no frame: drawing places the world too.
+        assert!(h.app.session.cached_world_state().is_none());
+        let camera = h.app.cam;
+        let document = h.app.session.doc.clone();
+        let history = (h.app.session.undo.len(), h.app.session.redo.len());
+        let r = super::execute(&mut h.app, "select.clear", json!({}));
+        assert!(r.is_ok(), "{r:?}");
+        assert!(h.app.session.cached_world_state().is_none(), "clearing selection placed the components before the command");
+        assert_eq!(h.app.cam, camera);
+        assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
         let r = super::execute(&mut h.app, "solid.sphere", json!({"radius": 3, "center": [80, 0, 0], "operation": "new"}));
         assert!(r.is_ok(), "{r:?}");
         assert!(h.app.session.cached_world_state().is_none(), "the step placed the components again");
         assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 3);
+    }
+
+    #[test]
+    fn excluded_control_view_commands_leave_a_cold_component_world_unplaced() {
+        for id in ["view.grid", "VIEW.GRID", "view.tool.zoom", "VIEW.TOOL.ZOOM"] {
+            let mut saved = Session::default();
+            saved.execute("solid.box", &json!({"length":10,"width":10,"height":10,"body_name":"Cube"})).unwrap();
+            saved.execute("component.from_bodies", &json!({"bodies":["Cube"]})).unwrap();
+            let mut h = crate::scenario::Harness::new();
+            h.app.session = Session::opened((*saved.doc).clone(), None);
+            assert_eq!(h.app.session.undo.len(), 0, "history permits fitting, so only the command exclusion can prevent placement");
+            assert!(!h.app.session.doc.occurrences.is_empty());
+            assert!(h.app.session.cached_world_state().is_none());
+            let camera = h.app.cam;
+            let document = h.app.session.doc.clone();
+            let r = super::execute(&mut h.app, id, json!({"on":false}));
+            assert!(r.is_ok(), "{r:?}");
+            assert_eq!(r.unwrap()["on"], false, "the engine accepted {id}");
+            if id == "view.grid" {
+                assert!(!h.app.ui.show_grid);
+            }
+            assert!(h.app.session.cached_world_state().is_none(), "{id} placed a world it cannot fit");
+            assert_eq!(h.app.cam, camera);
+            assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+            assert!(h.app.session.undo.is_empty() && h.app.session.redo.is_empty());
+        }
     }
 
     /// #743: a batch is one request through the app's queue, answered within a frame, however
@@ -2876,6 +2920,90 @@ mod tests {
         assert_eq!(h.app.cam, camera);
         assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
         assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+    }
+
+    #[test]
+    fn control_undo_from_three_steps_to_two_still_fits_the_first_body() {
+        for id in ["edit.undo", "EDIT.UNDO"] {
+            let mut h = crate::scenario::Harness::new();
+            h.frames(4);
+            h.app.run("solid.box", json!({"length":80,"width":50,"height":12,"body_name":"Subject"})).unwrap();
+            h.app.run("appearance.assign", json!({"bodies":["Subject"],"color":"#204080"})).unwrap();
+            let feature = h.app.session.doc.features[0].id;
+            h.app.run("timeline.delete", json!({"feature":feature})).unwrap();
+            assert_eq!(h.app.session.undo.len(), 3);
+            assert!(h.app.session.world_state().unwrap().bodies.is_empty());
+            h.app.cancel_view_animation();
+            h.app.cam.distance = 10_000.0;
+            assert!(h.app.pending_fit.is_none());
+            let r = super::execute(&mut h.app, id, json!({}));
+            assert!(r.is_ok(), "{r:?}");
+            assert_eq!(h.app.session.undo.len(), 2);
+            assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
+            assert!(h.app.pending_fit.is_some(), "Undo crossing the early-history boundary must retain the measured first-body fit");
+            h.frames(4);
+            assert!(h.app.pending_fit.is_none());
+            assert!(h.app.cam.distance < 1000.0);
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn control_finish_edit_from_a_long_empty_part_still_fits_the_returned_assembly() {
+        for id in ["component.finish_edit", "COMPONENT.FINISH_EDIT"] {
+            let mut h = crate::scenario::Harness::new();
+            h.frames(4);
+            let part_path = h.dir.join("part.sc");
+            let assembly_path = h.dir.join("assembly.sc");
+            let mut part = Session::default();
+            part.execute("solid.box", &json!({"length":80,"width":50,"height":12,"body_name":"Subject"})).unwrap();
+            part.execute("file.save", &json!({"path":part_path})).unwrap();
+            let component = h.app.run("component.insert_design", json!({"path":part_path})).unwrap()["component"].as_u64().unwrap();
+            h.app.run("file.save", json!({"path":assembly_path})).unwrap();
+            h.settle();
+            h.app.cancel_view_animation();
+            h.app.cam.distance = 10_000.0;
+            let assembly_camera = h.app.cam;
+            let assembly = h.app.session.doc.clone();
+            let assembly_history = (h.app.session.undo.len(), h.app.session.redo.len());
+            assert_eq!(assembly_history, (1, 0));
+            assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
+
+            h.app.run("component.edit_in_place", json!({"component":component})).unwrap();
+            h.settle();
+            assert!(h.app.edit_in_place.active.is_some());
+            assert_eq!(h.app.session.path.as_deref(), part_path.to_str());
+            assert!(h.app.session.undo.is_empty());
+            h.app.run("appearance.assign", json!({"bodies":["Subject"],"color":"#204080"})).unwrap();
+            h.app.run("parameters.add", json!({"name":"clearance","expression":"1 mm"})).unwrap();
+            let feature = h.app.session.doc.features[0].id;
+            h.app.run("timeline.delete", json!({"feature":feature})).unwrap();
+            h.app.run("file.save", json!({})).unwrap();
+            assert_eq!(h.app.session.undo.len(), 3);
+            assert!(!h.app.session.is_dirty());
+            assert!(h.app.session.world_state().unwrap().bodies.is_empty());
+            assert!(h.app.pending_fit.is_none());
+
+            // Finish switches synchronously to the assembly's own saved history and
+            // last loaded one-body model, before any background link refresh lands.
+            let r = super::execute(&mut h.app, id, json!({}));
+            assert!(r.is_ok(), "{id}: {r:?}");
+            assert!(h.app.edit_in_place.active.is_none());
+            assert_eq!(h.app.session.path.as_deref(), assembly_path.to_str());
+            assert!(std::sync::Arc::ptr_eq(&assembly, &h.app.session.doc));
+            assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), assembly_history);
+            assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
+            assert_eq!(
+                (h.app.cam.yaw, h.app.cam.pitch, h.app.cam.roll, h.app.cam.fov, h.app.cam.up),
+                (assembly_camera.yaw, assembly_camera.pitch, assembly_camera.roll, assembly_camera.fov, assembly_camera.up),
+                "returning to the tab restores its orientation and projection while fitting its body"
+            );
+            assert!(h.app.pending_fit.is_some(), "{id}: a session swap must retain the measured first-body fit");
+            h.settle();
+            assert!(h.app.pending_fit.is_none());
+            assert!(h.app.cam.distance < 1000.0);
+            assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), assembly_history);
+        }
     }
 
     #[test]

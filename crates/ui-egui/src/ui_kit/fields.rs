@@ -940,18 +940,23 @@ pub(crate) fn bounded_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, curren
     let response = ui
         .allocate_ui_with_layout(vec2(width, row_height()), egui::Layout::left_to_right(egui::Align::Center), |ui| {
             ui.set_width(width);
-            egui::ComboBox::from_id_salt(id)
+            let widget = ui.make_persistent_id(egui::IdSalt::new(&id));
+            let combo = egui::ComboBox::from_id_salt(id)
                 .width(width)
                 .height(Tokens::get().space_24 * 14.0)
                 .selected_text(current)
                 .truncate()
-                .icon(dropdown_arrow)
-                .show_ui(ui, |ui| {
-                    ui.set_max_width(width);
-                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-                    add(ui);
-                })
-                .response
+                .icon(dropdown_arrow);
+            let popup = super::container::show_combo(ui, widget, combo, |ui| {
+                ui.set_max_width(width);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                add(ui);
+            });
+            let response = popup.response;
+            if popup.inner.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                response.request_focus();
+            }
+            response
         })
         .inner;
     publish(ui, &response, egui::Role::ComboBox);

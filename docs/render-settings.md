@@ -303,8 +303,8 @@ The optional CPU sampling field adds `render-cpu-progressive`. CPU presentation
 and physical lens intent share the `cpu-output-presentation` pending descriptor.
 No historical format number or migration step is rewritten. Older designs need no
 job transformation: an absent job keeps their common settings and runtime API.
-Pending builds without the descriptor refuse the newer design instead of silently
-losing its saved options. Plain JSON, design containers and document autosave
+Builds without the descriptor open the newer design with a warning and preserve
+its saved options they cannot read. Plain JSON, design containers and document autosave
 snapshots carry all HDR bytes. A command-only crash replay before a new checkpoint
 still needs the source path recorded by `capture_hdr`; it must match the recorded
 digest. This unit does not make that journal self-contained.

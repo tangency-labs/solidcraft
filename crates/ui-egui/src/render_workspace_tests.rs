@@ -8755,6 +8755,244 @@ fn live_image_target_outlines_keep_new_material_and_lighting_visible_without_cle
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn live_image_imported_mesh_keeps_selected_and_hovered_face_and_body_feedback() {
+    use solidcore_record::Vec3;
+    use solidcraft_engine::{
+        Sel,
+        doc::{Document, FeatureKind, MeshData},
+        render::job::{CpuHost, CpuProgressiveOptions},
+    };
+
+    // Original synthetic triangle geometry follows the real reference-mesh path;
+    // its display outlines must never become selectable modeling edges.
+    let mut doc = Document::default();
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "feedback-plane.stl".into(),
+            meshes: vec![MeshData {
+                name: "Reference".into(),
+                positions: vec![-2., -2., 0., 2., -2., 0., 2., 2., 0., -2., 2., 0.].into(),
+                triangles: vec![0, 1, 2, 0, 2, 3].into(),
+                color: None,
+            }],
+        },
+        Some("Reference"),
+    )
+    .unwrap();
+    let mut h = Harness::new();
+    h.app = SolveApp::new(Session::new(doc), crate::Services::default());
+    // This context's texture deltas must reach the real GPU renderer, rather than
+    // being discarded by the scenario harness's renderer-free frames.
+    h.ctx = crate::fonts::test_context();
+    h.app.run("solid.box", json!({"length":2,"width":2,"height":2,"corner":[9,-1,0],"operation":"new","body_name":"Solid"})).unwrap();
+    h.app.run("solid.box", json!({"length":2,"width":4,"height":1,"corner":[0,-2,0],"operation":"new","body_name":"Occluder"})).unwrap();
+    h.app.ui.show_grid = false;
+    h.app.ui.ground_shadow = false;
+    h.app.set_origin_shown(false);
+    h.app.cam.set_view(solidcraft_engine::render::StandardView::Top);
+    h.app.fit_view();
+    // The real workflow draws Design before entering Render. Keep its shared
+    // reference triangles so whole-body feedback uses the actual instance path.
+    let design_scene = crate::viewport::build_scene(&h.app);
+    let reference_shared = design_scene.instanced.iter().find(|draw| draw.tris.bounds == [[-2.0, -2.0, 0.0], [2.0, 2.0, 0.0]]).unwrap();
+    assert_eq!(reference_shared.look, crate::gpu::InstanceLook::Opaque);
+    assert_eq!(reference_shared.count(), 1, "Design must draw the reference as a real shared-mesh placement");
+    let reference_shared = reference_shared.tris.clone();
+    let host = CpuHost::for_platform().unwrap();
+    h.app.session.set_render_job_host(Some(host.clone())).unwrap();
+    h.app.render_workspace.image_host = Some(host);
+    enter(&mut h.app, true).unwrap();
+    h.app.render_workspace.view.raytrace.progressive = Some(CpuProgressiveOptions { samples_per_pixel: 3, seed: 81 });
+    h.app.viewport.rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(256., 256.)));
+    live::advance(&mut h.app, &h.ctx, 1.0);
+    let picture = wait_live_complete(&mut h, 1.3);
+    assert_eq!(picture["complete"], true);
+    assert!(live::has_picture(&h.app) && live::picking_current(&h.app));
+
+    let world = h.app.session.world_state().unwrap();
+    let reference = world.body("Reference").unwrap();
+    let mesh = reference.mesh();
+    assert!(mesh.display_only_edges && !mesh.edges.is_empty());
+    assert!((0..mesh.edges.len()).all(|edge| !mesh.edge_pickable(edge)));
+    assert_eq!(reference.body.face_count(), 1);
+    let expected_vertices = mesh.triangles.len() * 3;
+    let solid = world.body("Solid").unwrap();
+    assert!((0..solid.mesh().edges.len()).any(|edge| solid.mesh().edge_pickable(edge)));
+    let solid_face = (0..solid.body.face_count()).find(|face| solid.body.planar_face(*face).is_some_and(|plane| plane.normal() == Vec3::Z)).unwrap();
+    let document = h.app.session.doc.clone();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+    let tokens = crate::theme::Tokens::get();
+    let hover_color = [
+        tokens.body.r().saturating_add(tokens.hover_face_lift),
+        tokens.body.g().saturating_add(tokens.hover_face_lift),
+        tokens.body.b().saturating_add(tokens.hover_face_lift),
+        255,
+    ];
+
+    // Expand actual highlighted placements too: an empty CPU triangle list alone
+    // does not mean that a whole-body GPU highlight is missing.
+    let filled_vertices = |app: &SolveApp, expected_color: [u8; 4]| {
+        let feedback = crate::viewport::build_highlight(app).merged();
+        assert!(feedback.overlay.is_empty() && feedback.xray.is_empty(), "feedback must remain depth-tested");
+        assert!(feedback.selected_planned.is_empty() && feedback.hover_planned.is_empty());
+        assert!(feedback.selected_blocks.is_empty() && feedback.hover_blocks.is_empty() && feedback.recoloured.is_empty());
+        let mut tris = feedback.tris.clone();
+        for mesh in feedback.selected_instanced.iter().chain(&feedback.hover_instanced) {
+            mesh.expand_into(&mut tris);
+        }
+        let vertices = tris.as_chunks::<{ crate::gpu::TRI_SIZE }>().0;
+        for vertex in vertices {
+            let color = crate::gpu::PaletteIndex(u32::from_le_bytes(vertex[24..28].try_into().unwrap()));
+            assert_eq!(feedback.palette.get(color), Some(expected_color), "target fill keeps its existing theme color");
+        }
+        vertices.len()
+    };
+    let target = |app: &mut SolveApp, body: &str, face: usize, case: usize| {
+        app.session.selection.clear();
+        app.viewport.hover = None;
+        app.viewport.hover_bodies.clear();
+        app.ui.pick_bodies = case == 3;
+        let point = Vec3::ZERO;
+        match case {
+            0 => app.session.selection = vec![Sel::Face { body: body.into(), index: face, point }],
+            1 => app.session.selection = vec![Sel::Body { name: body.into() }],
+            _ => {
+                let hit = crate::viewport::Hit::Face { body: body.into(), index: face, point };
+                let picked = crate::viewport::candidate(app, std::slice::from_ref(&hit)).unwrap().1;
+                assert_eq!(picked, if case == 3 { Sel::Body { name: body.into() } } else { Sel::Face { body: body.into(), index: face, point } });
+                app.viewport.hover = Some(hit);
+            }
+        }
+    };
+    let mut missing = Vec::new();
+    for (case, label) in ["selected face", "selected body", "hovered face", "hovered body"].into_iter().enumerate() {
+        let color = match case {
+            0 => crate::viewport::c4(tokens.sel_face),
+            1 => crate::viewport::c4(tokens.body_selected),
+            _ => hover_color,
+        };
+        target(&mut h.app, "Reference", 0, case);
+        let selected = h.app.session.selection.clone();
+        h.app.preferences.render_legacy_image_defaults = true;
+        assert_eq!(filled_vertices(&h.app, color), expected_vertices, "legacy {label} fixture must show every triangle once");
+        h.app.preferences.render_legacy_image_defaults = false;
+        assert!(live::has_picture(&h.app));
+        if filled_vertices(&h.app, color) != expected_vertices {
+            missing.push(label);
+        }
+        assert_eq!(h.app.session.selection, selected, "painting cannot replace the selected target");
+
+        // B-rep targets retain outline-only feedback over the same live picture.
+        target(&mut h.app, "Solid", solid_face, case);
+        let outlines = crate::viewport::build_highlight(&h.app).merged();
+        assert!(outlines.tris.is_empty() && outlines.selected_instanced.is_empty() && outlines.hover_instanced.is_empty());
+        assert!(!outlines.lines.is_empty(), "{label}: real B-rep edges retain live-image outlines");
+    }
+    let mut missing_pixels = Vec::new();
+    if let Some(mut gpu) = crate::gpu::EguiFixture::new(&mut h.app, [256, 256]) {
+        let draw = |gpu: &mut crate::gpu::EguiFixture, h: &mut Harness, pointer| {
+            let pixels = gpu.frame(&h.ctx, vec![pointer], |ui| show(&mut h.app, ui));
+            assert_eq!(
+                (gpu.product_highlight_callbacks, gpu.viewport_callbacks),
+                (1, 0),
+                "every measured live-image frame must emit its feedback callback without a shaded-product redraw"
+            );
+            pixels
+        };
+        h.app.session.selection.clear();
+        h.app.viewport.hover = None;
+        h.app.viewport.hover_bodies.clear();
+        draw(&mut gpu, &mut h, egui::Event::PointerGone);
+        let clean = draw(&mut gpu, &mut h, egui::Event::PointerGone);
+        assert!(live::has_picture(&h.app) && live::picking_current(&h.app), "pixel fixture must paint the actual current live image");
+        let projection = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        let visible = projection.to_screen(Vec3::new(-1.0, 0.0, 0.0)).unwrap();
+        let covered = projection.to_screen(Vec3::new(1.0, 0.0, 0.0)).unwrap();
+        let solid_inside = projection.to_screen(Vec3::new(10.0, 0.0, 2.0)).unwrap();
+        let solid_bounds = egui::Rect::from_two_pos(
+            projection.to_screen(Vec3::new(9.0, -1.0, 2.0)).unwrap(),
+            projection.to_screen(Vec3::new(11.0, 1.0, 2.0)).unwrap(),
+        );
+        let patch = |pixels: &[u8], at: egui::Pos2| {
+            let (x, y) = (at.x.round() as usize, at.y.round() as usize);
+            assert!((3..253).contains(&x) && (3..253).contains(&y), "interior patch must stay inside the image: {at:?}");
+            (y - 2..=y + 2)
+                .flat_map(|row| {
+                    (x - 2..=x + 2).flat_map(move |column| pixels[(row * 256 + column) * 4..(row * 256 + column) * 4 + 4].iter().copied())
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(clean, draw(&mut gpu, &mut h, egui::Event::PointerGone), "the unselected photo must be stable before pixel comparisons");
+        for (case, label) in ["selected face", "selected body", "hovered face", "hovered body"].into_iter().enumerate() {
+            target(&mut h.app, "Reference", 0, case);
+            let pointer = if case < 2 { egui::Event::PointerGone } else { egui::Event::PointerMoved(visible) };
+            draw(&mut gpu, &mut h, pointer.clone());
+            if case == 1 || case == 3 {
+                let feedback = crate::viewport::build_highlight(&h.app);
+                let instances = if case == 1 { &feedback.selected_instanced } else { &feedback.hover_instanced };
+                assert!(
+                    instances.iter().any(|draw| Arc::ptr_eq(&draw.tris, &reference_shared) && draw.count() == 1),
+                    "{label}: the actual callback must receive the Reference's shared-triangle instance stream"
+                );
+                assert!(feedback.tris.is_empty(), "{label}: a CPU triangle fallback would miss the native regression");
+            }
+            let pixels = draw(&mut gpu, &mut h, pointer);
+            if case >= 2 {
+                let hit = h.app.viewport.hover.as_ref().unwrap();
+                assert!(
+                    matches!(hit, crate::viewport::Hit::Face { body, .. } if body == "Reference"),
+                    "{label}: actual pointer must hit the reference face"
+                );
+                let picked = crate::viewport::candidate(&h.app, std::slice::from_ref(hit)).unwrap().1;
+                assert!(
+                    matches!(&picked, Sel::Body { name } if case == 3 && name == "Reference")
+                        || matches!(&picked, Sel::Face { body, index: 0, .. } if case == 2 && body == "Reference"),
+                    "the real pointer must use the requested face/body filter: {picked:?}"
+                );
+            }
+            if patch(&pixels, visible) == patch(&clean, visible) {
+                missing_pixels.push(label);
+            }
+            assert_eq!(patch(&pixels, covered), patch(&clean, covered), "{label}: the front body must occlude reference feedback");
+            assert_eq!(patch(&pixels, solid_inside), patch(&clean, solid_inside), "{label}: unrelated product pixels must retain the live photo");
+
+            target(&mut h.app, "Solid", solid_face, case);
+            let pointer = if case < 2 { egui::Event::PointerGone } else { egui::Event::PointerMoved(solid_inside) };
+            draw(&mut gpu, &mut h, pointer.clone());
+            let outlines = draw(&mut gpu, &mut h, pointer);
+            assert_eq!(
+                patch(&outlines, solid_inside),
+                patch(&clean, solid_inside),
+                "{label}: ordinary B-rep feedback must not fill its photo interior"
+            );
+            assert_eq!(patch(&outlines, visible), patch(&clean, visible), "{label}: B-rep feedback must leave the reference photo unchanged");
+            let changed_edges = clean
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(outlines.as_chunks::<4>().0)
+                .enumerate()
+                .filter(|(index, (before, after))| {
+                    let point = egui::pos2((index % 256) as f32 + 0.5, (index / 256) as f32 + 0.5);
+                    before != after && solid_bounds.expand(3.0).contains(point) && !solid_bounds.shrink(4.0).contains(point)
+                })
+                .count();
+            assert!(changed_edges > 0, "{label}: normal B-rep outlines must reach actual displayed pixels");
+        }
+    }
+    target(&mut h.app, "Reference", 0, 0);
+    enter(&mut h.app, false).unwrap();
+    assert_eq!(filled_vertices(&h.app, crate::viewport::c4(tokens.sel_face)), expected_vertices, "Design retains its selected reference face fill");
+    assert!((0..mesh.edges.len()).all(|edge| !mesh.edge_pickable(edge)), "feedback must not promote display-only edges to modeling picks");
+    assert!(Arc::ptr_eq(&document, &h.app.session.doc));
+    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision), history);
+    assert!(h.app.session.render_retained_results().unwrap().is_empty());
+    assert!(missing.is_empty(), "live-image reference mesh lost target feedback: {missing:?}");
+    assert!(missing_pixels.is_empty(), "live-image reference mesh feedback never reached displayed pixels: {missing_pixels:?}");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn live_capture_aspect_matches_product_navigation_and_frame_without_changing_output_size() {
     let Some(mut h) = live_cpu_fixture() else { return };
     let output = [h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height];
@@ -11343,9 +11581,12 @@ fn light_stage_describes_world_coordinates_without_inert_frame_settings_or_edits
     fn draw(h: &mut Harness, width: f32, events: Vec<egui::Event>) -> egui::FullOutput {
         crate::scenario::clear_handles();
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, crate::ui_kit::StageBar::HEIGHT));
-        h.ctx.run_ui(egui::RawInput { screen_rect: Some(rect.expand(20.0)), events, ..Default::default() }, |ui| {
+        let mut output = h.ctx.run_ui(egui::RawInput { screen_rect: Some(rect.expand(20.0)), events, ..Default::default() }, |ui| {
             crate::render_ui::stage_bar(&mut h.app, ui, rect)
-        })
+        });
+        // This fixture inspects shapes and handles without a texture backend.
+        output.textures_delta.clear();
+        output
     }
     for method in [ImageMethod::Raster, ImageMethod::CpuRaytrace, ImageMethod::GpuRaytrace] {
         for custom in [false, true] {

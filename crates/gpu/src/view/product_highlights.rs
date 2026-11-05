@@ -23,6 +23,8 @@ pub(super) struct DepthPipelines {
     pbr: wgpu::RenderPipeline,
     planned: wgpu::RenderPipeline,
     instanced: wgpu::RenderPipeline,
+    feedback_smooth: wgpu::RenderPipeline,
+    feedback_flat: wgpu::RenderPipeline,
 }
 impl DepthPipelines {
     fn new(device: &wgpu::Device, uniform: &wgpu::BindGroupLayout, target: GpuTarget) -> Self {
@@ -64,11 +66,47 @@ impl DepthPipelines {
                 cache: None,
             })
         };
+        // Whole-body feedback keeps its shared mesh and placements on the GPU.
+        // Its palette may be translucent, unlike ordinary opaque model instances.
+        let feedback_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("sc_product_highlight_instanced"),
+            source: wgpu::ShaderSource::Wgsl(format!("{SHADER}\n{}", pbr::SOURCE).into()),
+        });
+        let feedback = |source: TriSource| {
+            let fragment = source.fragment("fs_tri");
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("sc_product_highlight_instanced"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &feedback_module,
+                    entry_point: Some(source.entry()),
+                    buffers: &[Some(shared_layout()), Some(instance_layout())],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: highlight_depth(target.depth),
+                multisample: wgpu::MultisampleState { count: target.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
+                fragment: Some(wgpu::FragmentState {
+                    module: &feedback_module,
+                    entry_point: Some(&fragment),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: target.format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
         Self {
             built: pipeline(&[Some(tri_layout())], false),
             pbr: pipeline(&[Some(pbr_layout())], false),
             planned: pipeline(&[Some(planned_layout()), Some(color_layout())], false),
             instanced: pipeline(&[Some(shared_layout()), Some(instance_layout())], true),
+            feedback_smooth: feedback(TriSource::Instanced),
+            feedback_flat: feedback(TriSource::InstancedFlat),
         }
     }
 }
@@ -189,6 +227,9 @@ impl Renderer {
         // whole bodies; it intentionally does not reference the Design model's GPU plans.
         let highlight = &self.highlight;
         pass.set_bind_group(0, scene_bind(highlight, &self.bind), &[]);
+        for draw in highlight.hover_instanced.iter().chain(&highlight.selected_instanced).filter(|draw| draw.look == InstanceLook::Opaque) {
+            draw.draw(pass, &depth.feedback_smooth, &depth.feedback_flat, tally);
+        }
         for key in &highlight.block_order {
             if let Some(block) = highlight.blocks.get(key).filter(|block| block.class(TriClass::Opaque).is_some()) {
                 pass.set_pipeline(&self.tri_hl);

@@ -4022,6 +4022,12 @@ fn image_target_outlines(app: &SolveApp) -> bool {
     crate::render_workspace::active(app) && !app.preferences.render_legacy_image_defaults && crate::render_workspace::live::has_picture(app)
 }
 
+/// Display-only triangle-mesh polylines are not modeling edges. Targets without
+/// drawable pickable boundaries keep their existing face/body fill feedback.
+fn has_pickable_outline(mesh: &solidcraft_engine::geom::Mesh) -> bool {
+    mesh.edges.iter().enumerate().any(|(index, edge)| edge.len() >= 2 && mesh.edge_pickable(index))
+}
+
 pub(crate) fn highlight_key(app: &SolveApp) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     highlight_geometry_key(app).hash(&mut h);
@@ -4466,15 +4472,15 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 // Lit, not flat: an imported mesh (STL, OBJ) is one face, and a flat fill would
                 // paint the whole part as a single silhouette.
                 if let Some(b) = by_name.get(body).filter(|_| app.body_visible(body) && !replaced(body)) {
-                    if outlines {
-                        let m = shown(b);
+                    let m = shown(b);
+                    if outlines && has_pickable_outline(&m) {
                         for (ei, e) in m.edges.iter().enumerate() {
                             if m.edge_pickable(ei) && m.edge_faces.get(ei).is_some_and(|faces| faces.iter().any(|f| *f as usize == *index)) {
                                 edge_lines(&mut feedback, e, selected_edge, 2.0, &[]);
                             }
                         }
                     } else {
-                        face_tris(&mut feedback, &shown(b), *index, c4(t.sel_face), true);
+                        face_tris(&mut feedback, &m, *index, c4(t.sel_face), true);
                         hidden_face_outline(&mut feedback, &drawn(b), *index, t.sel_edge);
                     }
                 }
@@ -4483,8 +4489,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 if let Some(b) = by_name.get(name)
                     && app.body_visible(name)
                 {
-                    if outlines {
-                        let m = shown(b);
+                    if let Some(m) = outlines.then(|| shown(b)).filter(|mesh| has_pickable_outline(mesh)) {
                         for (_, e) in m.edges.iter().enumerate().filter(|(ei, _)| m.edge_pickable(*ei)) {
                             edge_lines(&mut feedback, e, selected_edge, 2.0, &[]);
                         }
@@ -4615,11 +4620,12 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             continue;
         }
         let m = if outlines { shown(b) } else { drawn_mesh(app, b) };
+        let use_outlines = outlines && has_pickable_outline(&m);
         let base = body_color(&s.doc, b).unwrap_or(t.body);
         let k = t.hover_face_lift;
         let hover_col = [base.r().saturating_add(k), base.g().saturating_add(k), base.b().saturating_add(k), 255];
         let selected_body = selected_whole.contains(b.name.as_str());
-        if !selected_body && !outlines {
+        if !selected_body && !use_outlines {
             // A whole body the model draws from a plan is lit by redrawing the plan's own
             // evaluated triangles, not by building every triangle again (see `highlight_plan`).
             let lit = WholeBody { selected: false, colour: hover_col };
@@ -4654,7 +4660,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 let c = body_rgb(app, body);
                 let m = if outlines { shown(b) } else { drawn(b) };
                 let patch = m.surface_patch(*index);
-                if !outlines {
+                if !(outlines && has_pickable_outline(&m)) {
                     let lit = shown(b);
                     for &f in &patch {
                         face_tris(&mut feedback, &lit, f, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);

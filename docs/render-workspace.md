@@ -218,7 +218,7 @@ soften detail; glass and sharp specular first hits bypass its spatial filter.
 
 The Environment Browser row opens the Environment editor. The legacy Environment
 and Background pages use that same editor, with five sections in order: Source,
-Orientation and strength, Backdrop, Ground and stage, and Atmosphere (GPU).
+Orientation and strength, Backdrop, Ground and stage, and Atmosphere (CPU/GPU).
 Source offers None, Artistic sky, HDR file and embedded HDR for GPU, or None,
 Constant and HDR for CPU. Change opens the Environments scope of Studios and
 environments. Embedded HDR shows its name, kind and saved-in-design status; sky
@@ -244,9 +244,13 @@ shared **Remove the saved stage?** confirmation. The fields expose extent margin
 clearance gap and linear reflectance, followed by the saved panel count.
 Atmosphere edits the bounded participating medium: enable, world bounds in mm,
 extinction, scattering albedo and phase. The transitional Aging page's airborne
-section calls this same function. CPU and raster show the controls faded with
-the GPU requirement. These controls use existing render state and commands;
-opening the editor never changes the design or renderer.
+section calls this same function. CPU supports Atmosphere with explicit
+progressive Indirect lighting. Positive extinction cannot combine with Glass,
+selected-medium subsurface scattering or surface Denoise; unsupported combinations
+keep their authored values and explain the refusal. Raster shows the controls
+faded with the raytrace requirement. These controls use existing render state and
+commands; opening the editor never changes the design or renderer. See
+[CPU Atmosphere](render-cpu-volume.md) for its bounds and compatibility conditions.
 
 The panel distinguishes a pending file, a checked file and **HDR saved inside this
 design**. It shows dimensions, declared colour primaries and intensity; the source

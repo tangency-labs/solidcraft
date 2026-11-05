@@ -1,7 +1,7 @@
 //! CPU render jobs can save optional `options.output` presentation: tone map, finishing,
 //! backdrop and raw linear EXR retention. Older designs omit it and retain the exact previous
-//! f64 PNG output; exposure remains owned by RenderSetup. The last released format refuses a
-//! design containing these values instead of dropping authored output effects or master intent.
+//! f64 PNG output; exposure remains owned by RenderSetup. Readers missing these changes open
+//! the newer design with a warning and preserve saved values they cannot read.
 //! CPU jobs also save optional `options.lens` using the shared physical thin-lens
 //! aperture radius and axial focus distance. Positive aperture requires perspective
 //! plus explicit progressive camera sampling; absent/zero aperture keeps old pixels.
@@ -28,8 +28,8 @@
 //!
 //! Saves up to eight hard GPU directional sources alongside the existing optional
 //! finite Sun (eight combined). Older designs omit the new list and retain their
-//! exact implicit studio or finite-Sun lighting. The last released reader asks for
-//! an update rather than silently discarding these sources.
+//! exact implicit studio or finite-Sun lighting. Readers missing the new list warn
+//! about the newer design and preserve these unread sources.
 //! Also saves up to eight GPU point/spot sources with exact world-mm positions,
 //! reference/minimum distances and optional world-axis/radian half cones. Missing
 //! punctual lists stay empty. CPU cone intent retains its wider f64 domain; GPU

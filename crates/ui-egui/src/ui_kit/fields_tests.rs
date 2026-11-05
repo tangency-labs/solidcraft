@@ -940,7 +940,7 @@ fn navigation_dropdown_popups_own_escape_and_return_focus_without_canceling_the_
     let previous = crate::theme::is_dark();
     for dark in [false, true] {
         crate::theme::set_dark(dark);
-        for kind in ["plain", "compact", "editable"] {
+        for kind in ["plain", "compact", "bounded", "editable"] {
             let ctx = crate::fonts::test_context();
             let action = Cell::new(Action::None);
             let trigger = Cell::new(None);
@@ -972,6 +972,7 @@ fn navigation_dropdown_popups_own_escape_and_return_focus_without_canceling_the_
                                 let response = match kind {
                                     "plain" => dropdown(ui, "styles", &mut choice, &options),
                                     "compact" => compact_dropdown_menu(ui, "styles", options[selected.get()], choices),
+                                    "bounded" => bounded_dropdown_menu(ui, "styles", options[selected.get()], 120.0, choices),
                                     _ => dropdown_menu_with_close_behavior(
                                         ui,
                                         "styles",
@@ -1356,7 +1357,7 @@ fn bounded_dropdown_focus_announces_full_selected_source_with_a_nonempty_accessi
             let event = output.platform_output.events.last().expect("focusing the actual picker must announce its value");
             assert!(matches!(event, egui::output::OutputEvent::FocusGained(_)), "the final announcement must describe actual focus: {event:?}");
             let info = event.widget_info();
-            assert_eq!(info.typ, egui::WidgetType::ComboBox);
+            assert_eq!(info.role, egui::Role::ComboBox);
             assert!(info.enabled);
             let expected = if labelled { crate::i18n::tr_label("Retained source") } else { current };
             assert_eq!(info.label.as_deref(), Some(expected));

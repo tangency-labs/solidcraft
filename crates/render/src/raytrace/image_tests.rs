@@ -2334,6 +2334,52 @@ fn cpu_wood_footprint_uses_unwrapped_physical_spacing_and_applies_supersampling_
     }
 }
 #[test]
+fn thin_lens_map_footprint_holds_the_sampled_pupil_on_off_focus_planes() {
+    let (scene, mut request, mut options) = mapped_wood_fixture();
+    request.width = 64;
+    request.height = 32;
+    request.camera.distance = 10.0;
+    request.camera.fov = std::f64::consts::FRAC_PI_2;
+    options.progressive = Some(job::CpuProgressiveOptions { samples_per_pixel: 2, seed: 81 });
+    for focus_distance_mm in [5.0, 20.0] {
+        let lens = job::ThinLens { aperture_radius_mm: 0.8, focus_distance_mm };
+        options.lens = Some(lens);
+        request.raytrace = Some(options.clone());
+        let task = ImageTask::new(scene.clone(), request.clone(), CancelToken::default(), options.clone()).unwrap();
+        let progressive = task.progressive.as_ref().unwrap();
+        let (right, up, back) = request.camera.basis();
+        let plane = request.camera.target;
+        let depth = request.camera.distance;
+        // On a frontoparallel plane a fixed pupil translates every hit equally.
+        // One output-pixel differential is 2*depth*tan(fov/2)/height, regardless
+        // of focus distance or pupil position. This is an analytic scale oracle.
+        let expected = 2.0 * depth * (request.camera.fov * 0.5).tan() / f64::from(request.height);
+        for pixel in [0, 37, 1024, 2047] {
+            let [dx, dy] = progressive.variates(pixel, 0).unwrap();
+            let pupil = progressive.variates(pixel, 0x4c454e53).unwrap();
+            let x = (pixel % request.width as usize) as f64 + dx;
+            let y = (pixel / request.width as usize) as f64 + dy;
+            let hit = |ray: Ray| ray.origin() + ray.direction() * ((plane - ray.origin()).dot(back) / ray.direction().dot(back));
+            let point = hit(lens_primary_ray(&request, x, y, task.clip, lens, pupil).unwrap());
+            let pinhole = hit(primary_ray(&request, x, y, task.clip).unwrap());
+            assert!((point - pinhole).len() > 1e-6, "the fixture must expose off-focus pupil parallax");
+            let footprint = primary_footprint(&request, &options, Some(progressive), pixel, 0, task.clip, point, back).unwrap().unwrap();
+            assert!((footprint[0] - right * expected).len() < 1e-10, "horizontal footprint must hold the sampled pupil");
+            assert!((footprint[1] + up * expected).len() < 1e-10, "vertical footprint must hold the sampled pupil");
+            assert_eq!(progressive.variates(pixel, 0).unwrap(), [dx, dy]);
+            assert_eq!(progressive.variates(pixel, 0x4c454e53).unwrap(), pupil);
+            let mut zero = options.clone();
+            zero.lens = Some(job::ThinLens { aperture_radius_mm: 0.0, focus_distance_mm });
+            assert_eq!(
+                primary_footprint(&request, &zero, Some(progressive), pixel, 0, task.clip, pinhole, back).unwrap(),
+                camera_footprint(&request, x, y, 1.0, task.clip, pinhole, back).unwrap(),
+                "zero aperture keeps the existing pinhole footprint exactly"
+            );
+        }
+    }
+}
+
+#[test]
 fn cpu_wood_preparation_cancel_and_role_work_limit_never_publish_partial_pixels() {
     let (scene, request, options) = mapped_wood_fixture();
     let cancel = CancelToken::default();

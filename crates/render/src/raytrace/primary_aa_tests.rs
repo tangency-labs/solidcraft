@@ -2639,7 +2639,11 @@ fn cpu_map_spatial_pixels_use_actual_world_coordinates_for_every_jittered_prefix
             output: Some(Box::new(job::OutputOptions { linear_exr: true, ..Default::default() })),
             ..original.options
         };
+        // Keep this coordinate/jitter oracle magnified under the native mip
+        // policy; minification has its own independent physical-wood regressions.
+        let camera = crate::Camera { distance: 0.5, ..original.request.camera };
         let request = ImageRequest {
+            camera,
             textures: Some(Arc::new(job::textures::RuntimeTextures::new(vec![binding]).unwrap())),
             raytrace: Some(options.clone()),
             ..original.request
@@ -2647,6 +2651,21 @@ fn cpu_map_spatial_pixels_use_actual_world_coordinates_for_every_jittered_prefix
         ImageTask::new(scene, request, original.cancel, options).unwrap()
     };
     let camera = make(1).request.camera;
+    // Independent ray/plane witness: unit planar U/V and a 2x1 texture turn
+    // these axis-aligned world-pixel spans into a diagonal texel differential.
+    // Its largest scale is 0.8 texel, strictly below the magnification boundary.
+    assert_eq!(camera.fov, 0.0);
+    let plane_hit = |x, y| {
+        let (origin, direction) = camera.ray(x, y, 1.0, 1.0);
+        origin + direction * (-origin.z / direction.z)
+    };
+    let centre = plane_hit(0.5, 0.5);
+    let du = plane_hit(1.5, 0.5) - centre;
+    let dv = plane_hit(0.5, 1.5) - centre;
+    assert!((du - Vec3::X * 0.4).len() < 1e-12);
+    assert!((dv + Vec3::Y * 0.4).len() < 1e-12);
+    let largest_texel_span = (du.x.abs() * 2.0).max(dv.y.abs());
+    assert!(largest_texel_span < 1.0, "the independent LOD0 oracle must remain physically magnified");
     let expected = |count: u32| {
         let mut mean = 0.0;
         for ordinal in 0..count {
@@ -2662,6 +2681,10 @@ fn cpu_map_spatial_pixels_use_actual_world_coordinates_for_every_jittered_prefix
         mean /= f64::from(count);
         [encode8(mean / (1.0 + mean)), 0, 0, 255]
     };
+    let prefixes: Vec<_> = (1..=8).map(expected).collect();
+    assert!(prefixes.windows(2).any(|pair| pair[0] != pair[1]), "actual jittered world coordinates must change the prefix mean");
+    let fixed_centre = [encode8(0.5 / 1.5), 0, 0, 255];
+    assert!(prefixes.iter().any(|pixel| *pixel != fixed_centre), "a constant-centre lookup must not satisfy the coordinate oracle");
     let result = complete_presentation(make(8), 1);
     assert_eq!(result, complete_presentation(make(8), 16384));
     for (samples, png) in result.0.iter().chain(std::iter::once(&(8, result.1.clone()))) {

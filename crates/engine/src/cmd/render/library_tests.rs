@@ -674,7 +674,8 @@ fn cpu_saved_surface_binding_is_offline_undoable_portable_and_preserves_geometry
     }
     let mut stale = setup.clone();
     let mut binding = stale.surfaces.iter().next().unwrap().clone();
-    binding.source.normal_sha256 = HdrId::of(b"changed");
+    let solidcraft_doc::render_surface::SurfaceSource::Builtin(source) = &mut binding.source else { panic!("built-in fixture") };
+    source.normal_sha256 = HdrId::of(b"changed");
     stale.surfaces.set(binding, true).unwrap();
     assert!(super::super::surface_bindings::resolve(&s, &crate::product_scene::extract(&s).unwrap(), &stale.surfaces, "test").is_err());
     s.execute("edit.undo", &json!({})).unwrap();

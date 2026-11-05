@@ -150,7 +150,7 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let note = ui_kit::StageBar::note_bounded(ui, &label, available).backing_on_hover_text(format!("{label}\n\n{}", app.tr(help)));
                 crate::scenario::publish_rect("render:preview_note", note.rect);
             }
-            if ui_kit::StageBar::icon_action(ui, "settings", app.tr("render.preview_image_settings_help")).clicked() {
+            if ui_kit::StageBar::icon_action(ui, "camera", app.tr("render.preview_image_settings_help")).clicked() {
                 app.start("render.settings.get");
             }
         }

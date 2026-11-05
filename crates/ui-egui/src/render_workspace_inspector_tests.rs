@@ -3973,7 +3973,7 @@ mod saved_clear_coat_contract {
     fn actual_coat_save_discard_remove_and_undo_preserve_an_independent_local_map_draft() {
         let mut h = body_editor(true, false);
         let target = materials::read_targets(&mut h.app).unwrap().into_iter().find(|target| target.name == "Subject").unwrap();
-        materials::install_library_surface(&mut h.app, "SURF-001", target, "yz", 2.5).unwrap();
+        materials::install_library_surface(&mut h.app, "SURF-001", target, "yz", 2.5, 0.0).unwrap();
         let maps = h.app.render_workspace.view.materials.bindings[0].maps.clone();
         reveal_coat(&mut h);
         click(&mut h, "render:coat:enable");
@@ -4022,7 +4022,7 @@ mod saved_clear_coat_contract {
         let target = materials::read_targets(&mut h.app).unwrap().into_iter().find(|target| target.name == "Survivor").unwrap();
         assert_eq!(target.ordinal, 1);
         let stable = target.stable_target.clone().unwrap();
-        materials::install_library_surface(&mut h.app, "SURF-001", target, "yz", 2.5).unwrap();
+        materials::install_library_surface(&mut h.app, "SURF-001", target, "yz", 2.5, 0.0).unwrap();
         h.app.session.selection = vec![Sel::Body { name: "Survivor".into() }];
         let selection = super::super::super::object_selection(&h.app);
         super::super::super::selection_editor(&mut h.app, &selection);
@@ -4082,7 +4082,7 @@ mod saved_clear_coat_contract {
             let selected = super::super::super::object_selection(&h.app);
             super::super::super::selection_editor(&mut h.app, &selected);
             let target = materials::read_targets(&mut h.app).unwrap().into_iter().find(|target| target.name == "Subject").unwrap();
-            materials::install_library_surface(&mut h.app, "SURF-001", target, "yz", 2.5).unwrap();
+            materials::install_library_surface(&mut h.app, "SURF-001", target, "yz", 2.5, 0.0).unwrap();
             h.app.render_workspace.view.materials.bindings[0].maps.frame.origin = origin;
             let maps = h.app.render_workspace.view.materials.bindings[0].maps.clone();
             maps.frame.validate().unwrap();

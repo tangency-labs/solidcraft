@@ -5577,6 +5577,95 @@ mod glass_tests {
                     );
                     assert_ne!(normal, overlay);
                 }
+                // Real imported-body feedback uses shared triangles and placements,
+                // not the loose triangle lists above. Compare both streams with a
+                // separately submitted face control over the same product depth.
+                for selected in [false, true] {
+                    for flat in [false, true] {
+                        let mut scene = GpuScene::default();
+                        let product_color = scene.color([255, 0, 0, 255]);
+                        for p in
+                            [[-10.0, -10.0, 0.0], [10.0, -10.0, 0.0], [10.0, 10.0, 0.0], [-10.0, -10.0, 0.0], [10.0, 10.0, 0.0], [-10.0, 10.0, 0.0]]
+                        {
+                            scene.tri(p, [0.0; 3], product_color);
+                        }
+                        let mesh = solidcraft_geom::Mesh {
+                            positions: vec![Vec3::new(-3.5, -4.0, 0.0), Vec3::new(3.5, -4.0, 0.0), Vec3::new(0.0, 4.0, 0.0)],
+                            normals: if flat { vec![Vec3::Z; 3] } else { vec![Vec3::Z, Vec3::new(0.6, 0.0, 0.8), Vec3::new(-0.6, 0.0, 0.8)] },
+                            triangles: vec![[0, 1, 2]],
+                            ..Default::default()
+                        };
+                        let shared = Arc::new(SharedTris::new(&mesh));
+                        assert_eq!(shared.flat, flat, "exercise both actual shared-triangle vertex layouts");
+                        let mut control = GpuScene::default();
+                        let front = control.color([0, 255, 0, 128]);
+                        let rear = control.color([255, 0, 0, 255]);
+                        let ignored_color = control.color([0, 0, 255, 255]);
+                        let mut instances = InstancedMesh {
+                            key: 1,
+                            tris: shared,
+                            instances: Vec::new(),
+                            look: InstanceLook::Opaque,
+                            levels: Vec::new(),
+                            closed: false,
+                        };
+                        for (x, z, color) in [(-4.5, 1.0, front), (4.5, -1.0, rear)] {
+                            let rows = [[1.0, 0.0, 0.0, x], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, z]];
+                            instances.place(rows, color);
+                            for (p, n) in mesh.positions.iter().zip(&mesh.normals) {
+                                control.tri((*p + Vec3::new(f64::from(x), 0.0, f64::from(z))).to_f32(), n.to_f32(), color);
+                            }
+                        }
+                        assert_eq!(instances.instances.len(), 2 * INSTANCE_SIZE, "front and occluded rear targets are actual placements");
+                        let mut ignored = instances.clone();
+                        ignored.look = InstanceLook::Faded;
+                        ignored.instances.clear();
+                        ignored.place([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 2.0]], ignored_color);
+                        let mut highlight = GpuScene { palette: control.palette.clone(), ..Default::default() };
+                        if selected {
+                            highlight.selected_instanced = vec![instances, ignored];
+                        } else {
+                            highlight.hover_instanced = vec![instances, ignored];
+                        }
+                        let mut frame = test_frame(scene, 1.0);
+                        frame.product = true;
+                        frame.key = 100 + 2 * u64::from(selected) + u64::from(flat);
+                        frame.hl_key = frame.key;
+                        frame.hl_slot = Arc::new(Mutex::new(Some(control)));
+                        let reference = render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background);
+                        frame.hl_key += 1000;
+                        frame.hl_slot = Arc::new(Mutex::new(Some(highlight)));
+                        let overlay = render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background);
+                        let pixel =
+                            |bytes: &[u8], x: usize, y: usize| -> [u8; 4] { bytes[((y * 64 + x) * 4)..((y * 64 + x) * 4 + 4)].try_into().unwrap() };
+                        let unchanged = [17, 33, 65, 255];
+                        assert_eq!(pixel(&overlay, 3, 3), unchanged, "instanced feedback must not repaint the live image");
+                        assert_eq!(pixel(&overlay, 46, 32), unchanged, "product depth must hide the rear placement");
+                        assert_eq!(pixel(&overlay, 32, 32), unchanged, "non-opaque feedback placements are not part of this pass");
+                        let expected = pixel(&reference, 18, 32);
+                        assert_ne!(expected, unchanged, "the independent face control must visibly composite its translucent front target");
+                        let actual = pixel(&overlay, 18, 32);
+                        // Derivative flat normals and interpolated face normals can
+                        // straddle one RGBA8 rounding step; alpha compositing must
+                        // otherwise match the independently submitted face control.
+                        assert!(
+                            actual.iter().zip(expected).all(|(a, b)| a.abs_diff(b) <= 1),
+                            "instanced feedback must draw and alpha-blend its visible target: selected={selected}, flat={flat}, {depth:?}, {samples}x: {actual:?} vs {expected:?}"
+                        );
+                        assert_eq!(
+                            overlay,
+                            render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background),
+                            "cached instanced feedback must retain identical pixels"
+                        );
+                        frame.hl_key += 1;
+                        frame.hl_slot = Arc::new(Mutex::new(Some(GpuScene::default())));
+                        let cleared = render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background);
+                        assert!(
+                            cleared.as_chunks::<4>().0.iter().all(|pixel| *pixel == unchanged),
+                            "clearing the target restores every original live-image pixel"
+                        );
+                    }
+                }
             }
         }
     }

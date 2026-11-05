@@ -2198,15 +2198,20 @@ fn primary_footprint(
     normal: Vec3,
 ) -> job::Result<Option<[Vec3; 2]>> {
     let width = request.width as usize;
-    let offset = if let Some(progressive) = progressive {
-        progressive::variates(progressive.options.seed, pixel as u64, progressive.film.samples(), 0)
-    } else {
-        primary_offset(options.primary_samples, spatial)?
-    };
+    let offset =
+        if let Some(progressive) = progressive { progressive.variates(pixel, 0)? } else { primary_offset(options.primary_samples, spatial)? };
     let x = (pixel % width) as f64 + offset[0];
     let y = (pixel / width) as f64 + offset[1];
     let spacing = if progressive.is_some() { 1.0 } else { 1.0 / f64::from(options.primary_samples).sqrt() };
-    camera_footprint(request, x, y, spacing, clip, position, normal)
+    if let Some(lens) = options.lens.filter(|lens| lens.aperture_radius_mm > 0.0) {
+        // Counter-based lookup reproduces the primary ray's pupil without advancing
+        // its sampler or adding a dimension. Hold that pupil for both neighbours.
+        let progressive = progressive.ok_or_else(|| invalid("physical pupil requires progressive camera sampling"))?;
+        let pupil = progressive.variates(pixel, 0x4c454e53)?;
+        plane_footprint(position, normal, spacing, |dx, dy| lens_primary_ray(request, x + dx, y + dy, clip, lens, pupil).map_err(error))
+    } else {
+        camera_footprint(request, x, y, spacing, clip, position, normal)
+    }
 }
 
 /// Same geometric-plane footprint for deterministic guide rays, without changing
@@ -2221,9 +2226,18 @@ pub(super) fn camera_footprint(
     position: Vec3,
     normal: Vec3,
 ) -> job::Result<Option<[Vec3; 2]>> {
+    plane_footprint(position, normal, spacing, |dx, dy| primary_ray(request, x + dx, y + dy, clip).map_err(error))
+}
+
+fn plane_footprint(
+    position: Vec3,
+    normal: Vec3,
+    spacing: f64,
+    mut neighbour: impl FnMut(f64, f64) -> job::Result<Ray>,
+) -> job::Result<Option<[Vec3; 2]>> {
     let mut result = [Vec3::ZERO; 2];
     for (output, [dx, dy]) in result.iter_mut().zip([[spacing, 0.0], [0.0, spacing]]) {
-        let ray = primary_ray(request, x + dx, y + dy, clip).map_err(error)?;
+        let ray = neighbour(dx, dy)?;
         let denominator = ray.direction().dot(normal);
         if !denominator.is_finite() || denominator.abs() < 1e-12 {
             return Ok(None);
