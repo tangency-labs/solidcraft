@@ -504,6 +504,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     app.session.set_command_check(out.session.command_check());
     app.session.set_single_surface_analysis(app.preferences.single_surface_analysis);
     crate::print_face_ui::sync(&mut app.session, &app.preferences);
+    app.session.set_pattern_limit(app.preferences.sketch_pattern_limit as usize);
     // Views cache by revision: the incoming design must not look unchanged.
     let before = app.session.revision;
     app.session.invalidate_view(out_rev);
