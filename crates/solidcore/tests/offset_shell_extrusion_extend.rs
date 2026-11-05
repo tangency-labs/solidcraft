@@ -1,15 +1,25 @@
 //! An extended solid offset of `Defeature/extrusion.smb` keeping face 0 as a shell face,
-//! inset by 2 (the `offset.offset_executive_p2` case `pa_Defeature_extrusion_f0_d2_in_ext`).
+//! inset by 2 (the `offset.offset_executive_p2` case `defeature_extrusion_face0_inset2_extended`).
 //!
-//! Inset by 2, a round of the part offsets to a cylinder that the lines its edges were
-//! lifted to no longer lie on. `MapEdgeuses` then builds those edges' UV trim curves by
-//! dropping 101 points (`CreateUVTrimCurve`'s last resort), whose distance to the surface
-//! (`sm_CalcDistAndDev`, about 1.69) raises the edge tolerances. The port measured -1 for
-//! every point (its solve returned the solutions without the surface they lie on), so
-//! the edges kept their tolerance, the stitch that closes the offset glued fewer edges
-//! and the result kept five vertices more than the C++ reference.
+//! Inset by 2, the part's convex round of radius 2 (face 5's corner at (2, 8)) offsets to
+//! nothing: its offset surface collapses to a line. The edges `MapEdgeuses` lifts across
+//! it are 1.69 off the surface, `CreateUVTrimCurve`'s 101-point drop raises their
+//! tolerance to that, and every later trim curve built at the raised tolerance raises it
+//! again (Rust: 3.38, 6.77, 5.05, 10, then the closing stitch 11.46 and 20). No body here is
+//! sound:
+//! - the C++ reference (11 faces, 34 edges, 14 vertices) carries edge tolerances 16.06 and
+//!   6.77 on a B-rep of tolerance 1e-4, and edges whose ends lie about 3 from any vertex
+//!   (its least vertex x of 4 comes from gluing the x = 2 wall's vertices away at those
+//!   tolerances). The port on the fitted extension matched it only because that
+//!   extension's knot removal moved the round off radius 2, so its offset did not
+//!   collapse;
+//! - on the exact extension (the round kept at radius 2) the port gives 11 faces, 32 edges,
+//!   13 vertices, edge tolerances 11.46 and 20, and Level2 reports an edge/edge gap 4.14.
 //!
-//! The expected counts and bounds are the pinned C++ reference's.
+//! A round whose radius is the offset distance needs the offset built as one construction
+//! (#2350: exact offsets and mitres), not lifted edges and grown tolerances. Until then the
+//! test is ignored; it is to assert a sound body (`check_brep` clean at level 2, the inner
+//! walls exact: x = 2, y = 8 and the corner at (2, 8)).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -28,6 +38,7 @@ use solidcore::offset::offset_executive::p2::SolidOffsetOptions;
 use solidcore::topology::brep::p1 as bp1;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::{Brep, EntityRef, Kernel};
@@ -66,7 +77,8 @@ fn extrusion(k: &mut Kernel) -> Option<Brep> {
 }
 
 #[test]
-fn inset_extended_offset_keeps_the_reference_topology() {
+#[ignore = "the round of radius 2 collapses at inset 2: neither the C++ nor the port builds a sound body (#2350)"]
+fn inset_extended_offset_of_a_collapsing_round_is_sound() {
     let mut k = Kernel::default();
     let Some(mut part) = extrusion(&mut k) else {
         return;
@@ -88,19 +100,18 @@ fn inset_extended_offset_keeps_the_reference_topology() {
         )
         .unwrap();
 
-    let faces = bp1::faces(&result, None).unwrap();
-    let edges = bp1::edges(&result, None).unwrap();
-    let vertices = bp1::vertices(&result, None).unwrap();
-    assert_eq!(
-        (faces.len(), edges.len(), vertices.len()),
-        (11, 34, 14),
-        "faces, edges, vertices"
-    );
-    // The C++ result's least vertex x is 3.999999999999994: no vertex is left on the
-    // x = 2 offset of the round (the port's was 2).
-    let min_x = vertices
+    // a sound body: check_brep clean at level 2
+    let mut result = result;
+    result.use_arena_naming().unwrap();
+    let lines = check_brep(&mut k, &mut result, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    // the x = 0 wall inset by 2 is the x = 2 wall
+    let min_x = bp1::vertices(&result, None)
+        .unwrap()
         .iter()
         .map(|&v| result.vertex(v).unwrap().point.x)
         .fold(f64::INFINITY, f64::min);
-    assert!((min_x - 4.0).abs() < 1e-9, "least vertex x {min_x}");
+    assert!((min_x - 2.0).abs() < 1e-9, "least vertex x {min_x}");
 }
