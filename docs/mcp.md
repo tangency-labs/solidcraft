@@ -151,6 +151,37 @@ folder of the design open in it, under the same rules, so give absolute paths: a
 resolves against the app's working folder, not the server's. The app's own
 file dialogs are never limited.
 
+### Compact output
+
+Compact output is for agents that pay for every byte. It is off by default, and then every tool
+behaves as described below. Any one of these turns it on:
+
+- **Preferences › AI › Agents through MCP › Compact output** in the app, for every server bridged
+  to it (`--connect`, and the agents its chat starts). The server asks the app (`mcp.options` on
+  the [control channel](control-protocol.md)) when the agent first lists or calls a tool, and
+  keeps the answer for the session, so the tools it listed keep their shape: a change applies to
+  agent sessions started after it. An app that is not running yet is asked again on the next call.
+- `solidcraft-cli mcp --compact`.
+- The environment variable `SOLIDCRAFT_MCP_COMPACT=1` (`true`, `yes` and `on` work too; `0`,
+  `false`, `no`, `off` or empty leave it off; any other value is an error at start-up).
+
+The command line can only turn it on: with the preference on, a server started without
+`--compact` is compact too. With it on:
+
+- `inspect_design` summarises each sketch (`id`, `name`, `plane`, the number of `points`,
+  `curves`, `constraints` and `profiles`, `dof`, `status`, `visible`) instead of returning its
+  contents: a sketch of 720 points is some 4 KB in the summary and over 80 KB in full. `sketches`
+  takes a list of sketch names or ids to return in full (as `execute` `sketch.inspect` gives
+  them), `true` for all of them, or `false` / `"summary"` (the default). `bodies` (a list of
+  names) keeps only those bodies and measures only them. An unknown sketch or body name is an
+  error that lists the names there are.
+- Tool results that are JSON are compact, not pretty-printed.
+
+```sh
+solidcraft-cli mcp --connect 127.0.0.1:7878 --compact
+SOLIDCRAFT_MCP_COMPACT=1 solidcraft-cli mcp --connect 127.0.0.1:7878
+```
+
 ### Tool annotations
 
 Each tool says what it may do, for clients that ask before running tools (or auto-approve on
@@ -315,7 +346,7 @@ refused before anything runs. `expect` is an argument of the tool, not a key of 
 carrying one is treated as any step with a key the batch does not know. Volume and body count
 say nothing about which kernel built the design, which is the point: the check holds whatever
 builds it.
-| `inspect_design` | `measure?` (default true), `sketches?` (default true), `joints?` (default true) | Design properties (`metadata`: project, author… and other tools' keys; set them with `execute` `document.metadata.set`), parameters, timeline (type, suppressed, rolled back, error, warning, timing), bodies (volume, area, centre of mass, bbox, face/edge/vertex counts, visible; `removed_later: true` while a sketch is being edited on a rolled-back timeline and a later feature deletes the body, which is then not shown), sketches (curves, points, constraints, profiles, DOF, solve status, visible), joints when the design has any (as `joint.inspect` gives them: each origin's occurrence, component and path, the snap as saved, the feature, face, edge or sketch curve (`sketch: {id, name, curve}`) its persistent names refer to, `resolves` and the `error` when it is lost; kind, offset, angle, flip, values, limits, expressions, motion links; `execute` `joint.inspect {joint}` gives one joint), selection, undo depth. Hide helper sketches, bodies or construction planes with `execute` `browser.visibility` (`{items, visible}` or `{folder, visible}`), and joint glyphs with `{joints: [id or name], visible}` or `{folder: "joints", visible}` (a hidden joint still constrains and drives; `joint.list` reports each joint's `visible`). |
+| `inspect_design` | `measure?` (default true), `sketches?` (default true), `joints?` (default true); with [compact output](#compact-output) `sketches?` (names or ids, `true`, or `false` / `"summary"`: the default) and `bodies?` | Design properties (`metadata`: project, author… and other tools' keys; set them with `execute` `document.metadata.set`), parameters, timeline (type, suppressed, rolled back, error, warning, timing), bodies (volume, area, centre of mass, bbox, face/edge/vertex counts, visible; `removed_later: true` while a sketch is being edited on a rolled-back timeline and a later feature deletes the body, which is then not shown), sketches (curves, points, constraints, profiles, DOF, solve status, visible), joints when the design has any (as `joint.inspect` gives them: each origin's occurrence, component and path, the snap as saved, the feature, face, edge or sketch curve (`sketch: {id, name, curve}`) its persistent names refer to, `resolves` and the `error` when it is lost; kind, offset, angle, flip, values, limits, expressions, motion links; `execute` `joint.inspect {joint}` gives one joint), selection, undo depth. Hide helper sketches, bodies or construction planes with `execute` `browser.visibility` (`{items, visible}` or `{folder, visible}`), and joint glyphs with `{joints: [id or name], visible}` or `{folder: "joints", visible}` (a hidden joint still constrains and drives; `joint.list` reports each joint's `visible`). |
 | `measure` | `body?` or `items?`, `summary?` (default false) | Area (mm²), bbox, topology counts and `closed` per body. Volume (mm³), volume centre of mass, density and mass are reported only for closed, consistently oriented bodies (null or omitted for open surfaces). Volume/mass totals skip open bodies; `total.open_bodies_skipped` gives their count. Area and topology totals include all bodies. With `items` (one or two selections as `execute` takes them: `face`, `edge`, `vertex`, `sketch_curve`, `profile`), the picked geometry instead: faces and edges need only `type`, `body` and `point`; `index` is optional. See below. `summary: true` keeps one short object per body (`name`, `volume_mm3`, `bbox: {min, max}`, `faces`, `closed`; a body that could not be measured keeps its `error`), `body_count` and `total.volume_mm3`, nothing else: what a stage check against computed numbers needs, at a fraction of the size. It applies to the bodies reply, not to `items`. |
 | `body_topology` | `body`, `faces?` (`all`, `cylinders`; default `all`) | Edges (index, midpoint, length, ends) and faces (index, name, area, centroid, normal, `point`, and for a cylindrical face its `cylinder`: `origin`, `axis`, `radius`). An edge midpoint is the `[x,y,z]` that picks that edge for fillet and chamfer. A face's `point` lies on it and picks it (its centroid may not: that of a face with a hole is in the hole); a face's `name` picks it for the commands that take faces (`face.delete`, `solid.shell`, `solid.draft`, `solid.offset_face`, `solid.split_face`, `solid.replace_face`, and `face` of `sheet.convert`). `faces: "cylinders"` replies `cylinders` instead of `edges` and `faces`: one entry per cylinder, `{radius, origin, axis, extent, names}`, the halves the kernel splits a cylinder into merged (same radius, same axis line; `origin` and `axis` as the first half's `cylinder` gives them), `extent` the `[min, max]` distance along `axis` from `origin` that the body's points on the cylinder span (the faces' `point`s and the ends of the edges lying on it; left out when none were found), and `names` the merged faces' names, any of which picks the face. Enough to check where every hole and boss is, in a few lines instead of the whole topology. |
 | `set_parameter` | `name`, `value` or `expression` (number or expression), `unit?`, `comment?` | Create or change a user parameter and recompute. `expression` is another name for `value` (the one `parameters.change` uses): give one of them, or both only when they agree; neither, or two that differ, is an error. Reports `recomputed` (features rebuilt), `restored` (features whose earlier result for the same inputs was reused, e.g. a value set back) and features that now fail. An expression `new_name = expression` renames the parameter as it sets it; in any other tool's expression parameter it adds the user parameter `new_name` and the input uses it (`defined`, `definitions` in the reply). |

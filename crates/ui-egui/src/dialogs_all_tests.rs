@@ -153,6 +153,8 @@ fn representative(h: &Harness, command: &str) -> Dialog {
             vec![Sel::Axis { name: axis.into() }]
         } else if input.accept & (FACES | PLANAR_FACES) != 0 {
             vec![face_sel(s, point).unwrap()]
+        } else if command == "surface.match" && index == 2 {
+            vec![edge_sel(s, Vec3::new(40.0, 0.0, 5.0)).unwrap()]
         } else if input.accept & EDGES != 0 {
             vec![edge_sel(s, Vec3::new(10.0, 0.0, 5.0)).unwrap()]
         } else {
@@ -233,6 +235,7 @@ fn check_form(command: &str, labels: &[&str]) {
         "solid.thread" => &["Modeled", "Automatic size"],
         "solid.boundary_fill" => &["Remove Tools"],
         "surface.offset" => &["Tangent chain"],
+        "surface.fair" => &["Keep edges"],
         "surface.trim" => &["Extend to meet", "Stitch the kept pieces"],
         "surface.ruled" => &["Flip"],
         "surface.untrim" => &["Restore outer boundary", "In place (surfaces)"],
@@ -279,8 +282,9 @@ fn check_form(command: &str, labels: &[&str]) {
 fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
     use egui::accesskit::Role;
     Some(match label {
-        "Type" if matches!(command, "sheet.flange" | "sheet.hem" | "solid.revolve" | "solid.emboss") => return None,
+        "Type" if matches!(command, "sheet.flange" | "sheet.hem" | "solid.revolve" | "solid.emboss" | "solid.scale") => return None,
         "Direction" => return None, // segmented buttons, labelled by each choice
+        "ui.fair_strength" | "ui.fair_iterations" => return None,
         "Continuity" | "Corners" | "Cells" | "Profile" => return None,
         "Operation" if command == "solid.mirror" => return None,
         "Operation" | "Type" | "Orientation" | "Move Type" | "Object Type" | "Rule" | "Rim Edge" | "Catch Direction" | "Shape" | "Holes" | "Size"
@@ -436,7 +440,50 @@ form_case!(point_along_path, "construct.point.along_path", ["Position (0 to 1)"]
 form_case!(angle_plane, "construct.plane.at_angle", ["Angle"]);
 form_case!(path_plane, "construct.plane.along_path", ["Position (0 to 1)"]);
 form_case!(split, "solid.split_body", []);
-form_case!(scale, "solid.scale", ["Scale factor"]);
+form_case!(scale, "solid.scale", ["Type", "Scale factor"]);
+
+/// Scale per axis (#10782): the dialog's X, Y and Z rows build `factors`; a Scale made with
+/// `factors` opens per axis with its three values and keeps them on OK, and switching it back to
+/// Uniform scales the same in every direction again.
+#[test]
+fn scale_takes_a_factor_per_axis() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0]})).unwrap();
+    let body = h.app.session.model.state().bodies[0].name.clone();
+    let mut d = Dialog::for_command(&h.app, "solid.scale").unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: body.clone() }];
+    let Kind::Scale { factor, per_axis, factor_y, factor_z } = &mut d.kind else { panic!("not the Scale dialog") };
+    assert!(!*per_axis, "Scale opens uniform");
+    *per_axis = true;
+    (*factor, *factor_y, *factor_z) = ("2".into(), "1".into(), "0.5".into());
+    for (command, params) in apply_commands(&h.app, &d).unwrap() {
+        assert!(params.get("factor").is_none(), "{params}");
+        h.app.run(&command, params).unwrap();
+    }
+    let scale = h.app.session.doc.features.last().unwrap().id;
+    let kind = |h: &Harness| serde_json::to_value(&h.app.session.doc.feature(scale).unwrap().kind).unwrap();
+    assert_eq!(kind(&h)["factors"], json!(["2", "1", "0.5"]));
+    let size = |h: &Harness| h.app.session.model.state().bodies[0].mesh().bounds().size();
+    assert!((size(&h) - Vec3::new(20.0, 10.0, 5.0)).len() < 1e-6, "{:?}", size(&h));
+    let mut d = crate::dialogs::for_feature(&h.app, scale, None).unwrap();
+    assert!(
+        matches!(&d.kind, Kind::Scale { factor, per_axis: true, factor_y, factor_z } if [factor, factor_y, factor_z] == ["2", "1", "0.5"]),
+        "{:?}",
+        d.kind
+    );
+    for (command, params) in apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    assert_eq!(kind(&h)["factors"], json!(["2", "1", "0.5"]), "OK keeps the three factors");
+    if let Kind::Scale { per_axis, factor, .. } = &mut d.kind {
+        (*per_axis, *factor) = (false, "3".into());
+    }
+    for (command, params) in apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    assert!(kind(&h).get("factors").is_none(), "{}", kind(&h));
+    assert!((size(&h) - Vec3::new(30.0, 30.0, 30.0)).len() < 1e-6, "{:?}", size(&h));
+}
 form_case!(offset_faces, "solid.offset_face", ["Distance"]);
 form_case!(section, "inspect.section", ["Distance"]);
 form_case!(move_copy, "solid.move", ["Move Type", "X Distance", "Y Distance", "Z Distance", "X Angle", "Y Angle", "Z Angle"]);
@@ -515,6 +562,8 @@ form_case!(surface_reverse, "surface.reverse_normal", []);
 form_case!(surface_offset, "surface.offset", ["Distance"]);
 form_case!(surface_ruled, "surface.ruled", ["Distance", "Type", "Corners"]);
 form_case!(surface_stitch, "surface.stitch", ["Tolerance"]);
+form_case!(surface_fair, "surface.fair", ["ui.fair_strength", "ui.fair_iterations", "Tolerance"]);
+form_case!(surface_match, "surface.match", ["Continuity"]);
 form_case!(thicken, "surface.thicken", ["Thickness", "Direction", "Operation"]);
 form_case!(surface_extend, "surface.extend", ["Distance"]);
 form_case!(surface_trim, "surface.trim", []);

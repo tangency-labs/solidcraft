@@ -1,0 +1,42 @@
+{
+  "ar": {
+    "ui.mcp_agents": "الوكلاء عبر MCP",
+    "ui.mcp_compact": "مخرجات مضغوطة",
+    "ui.mcp_compact_note": "للوكلاء المتصلين عبر خادم MCP ‏(solidcraft-cli mcp): يلخّص inspect_design الرسومات، ولا تُنسَّق نتائج الأدوات، فتستهلك رموزًا أقل. يسري على جلسات الوكلاء التي تبدأ بعد التغيير؛ ويفعّله أيضًا ‎--compact أو SOLIDCRAFT_MCP_COMPACT=1."
+  },
+  "de": {
+    "ui.mcp_agents": "Agenten über MCP",
+    "ui.mcp_compact": "Kompakte Ausgabe",
+    "ui.mcp_compact_note": "Für Agenten, die über den MCP-Server (solidcraft-cli mcp) verbunden sind: inspect_design fasst Skizzen zusammen und Werkzeugergebnisse werden nicht formatiert, sodass sie weniger Tokens verbrauchen. Gilt für Agentensitzungen, die nach der Änderung beginnen; --compact oder SOLIDCRAFT_MCP_COMPACT=1 schalten es ebenfalls ein."
+  },
+  "en": {
+    "ui.mcp_agents": "Agents through MCP",
+    "ui.mcp_compact": "Compact output",
+    "ui.mcp_compact_note": "For agents connected through the MCP server (solidcraft-cli mcp): inspect_design summarises sketches and tool results are not pretty-printed, so they use fewer tokens. Applies to agent sessions started after the change; --compact or SOLIDCRAFT_MCP_COMPACT=1 also turn it on."
+  },
+  "he": {
+    "ui.mcp_agents": "סוכנים דרך MCP",
+    "ui.mcp_compact": "פלט מקוצר",
+    "ui.mcp_compact_note": "לסוכנים שמחוברים דרך שרת ה-MCP ‏(solidcraft-cli mcp): ‏inspect_design מסכם סקיצות ותוצאות הכלים אינן מעוצבות, כך שהן צורכות פחות טוקנים. חל על הפעלות סוכן שמתחילות אחרי השינוי; גם ‎--compact או SOLIDCRAFT_MCP_COMPACT=1 מפעילים אותו."
+  },
+  "ja": {
+    "ui.mcp_agents": "MCP 経由のエージェント",
+    "ui.mcp_compact": "コンパクトな出力",
+    "ui.mcp_compact_note": "MCP サーバー (solidcraft-cli mcp) 経由で接続したエージェント向け: inspect_design はスケッチを要約し、ツールの結果は整形されないため、トークンが少なくて済みます。変更後に開始したエージェントのセッションから適用されます。--compact または SOLIDCRAFT_MCP_COMPACT=1 でも有効になります。"
+  },
+  "ko": {
+    "ui.mcp_agents": "MCP를 통한 에이전트",
+    "ui.mcp_compact": "간결한 출력",
+    "ui.mcp_compact_note": "MCP 서버(solidcraft-cli mcp)로 연결된 에이전트용: inspect_design이 스케치를 요약하고 도구 결과를 보기 좋게 정렬하지 않아 토큰을 덜 사용합니다. 변경 후 시작한 에이전트 세션부터 적용됩니다. --compact 또는 SOLIDCRAFT_MCP_COMPACT=1로도 켤 수 있습니다."
+  },
+  "vi": {
+    "ui.mcp_agents": "Tác tử qua MCP",
+    "ui.mcp_compact": "Đầu ra gọn",
+    "ui.mcp_compact_note": "Dành cho các tác tử kết nối qua máy chủ MCP (solidcraft-cli mcp): inspect_design tóm tắt các bản phác thảo và kết quả công cụ không được định dạng đẹp, nên tốn ít token hơn. Áp dụng cho các phiên tác tử bắt đầu sau khi thay đổi; --compact hoặc SOLIDCRAFT_MCP_COMPACT=1 cũng bật nó."
+  },
+  "zh": {
+    "ui.mcp_agents": "通过 MCP 连接的代理",
+    "ui.mcp_compact": "紧凑输出",
+    "ui.mcp_compact_note": "适用于通过 MCP 服务器 (solidcraft-cli mcp) 连接的代理：inspect_design 汇总草图，工具结果不做美化排版，从而占用更少的 token。更改后新开始的代理会话生效；--compact 或 SOLIDCRAFT_MCP_COMPACT=1 也会开启它。"
+  }
+}

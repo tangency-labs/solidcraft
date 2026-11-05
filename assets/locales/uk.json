@@ -4074,6 +4074,8 @@
   "sample.plate.name": "Зразкова пластина",
   "sample.vents.about": "Пази в прямокутному масиві: рядки, стовпці та крок є параметрами",
   "sample.vents.name": "Вентиляційна пластина",
+  "scale.per_axis": "По осях",
+  "scale.uniform": "Рівномірно",
   "search.command_keys": "Enter виконати     Shift+Enter виконати й залишити відкритим     Esc закрити",
   "search.commands": "Команди",
   "search.design": "У цьому проєкті",

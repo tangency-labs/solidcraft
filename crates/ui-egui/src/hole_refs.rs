@@ -74,12 +74,12 @@ struct Framed {
 
 /// The reference edge inputs a Single hole's dialog has after its face input.
 pub(crate) fn inputs() -> [SelInput; 2] {
-    REFERENCES.map(|label| SelInput::new(label, EDGES, false))
+    REFERENCES.map(|label| SelInput::new(label, EDGES, false).tip("dialog.reference_edge_tip"))
 }
 
 /// The Cylinder window's inputs: where it stands (a face, or a vertex), then the reference edges.
 pub(crate) fn cylinder_inputs() -> Vec<SelInput> {
-    let mut v = vec![SelInput::new("Face", PLANAR_FACES | FACES | VERTICES, false)];
+    let mut v = vec![SelInput::new("Face", PLANAR_FACES | FACES | VERTICES, false).tip("dialog.cylinder_face_tip")];
     v.extend(inputs());
     v
 }
@@ -169,7 +169,7 @@ fn direction(s: &Session, d: &Dialog, at: Vec3) -> Option<Vec3> {
     if let Kind::Primitive { at: Some((_, normal)), .. } = &d.kind {
         return normal.map(|n| -n);
     }
-    d.extra.get("direction").and_then(vec3).or_else(|| solidcraft_engine::doc::hole_direction_at(&crate::open_meshing::session_world(s), at))
+    d.extra.get("direction").and_then(vec3).or_else(|| solidcraft_engine::doc::hole_direction_at(&crate::open_meshing::session_world(s), at, &[]))
 }
 
 /// The face's frame at the place for the picked edges (and which reference inputs they are), found

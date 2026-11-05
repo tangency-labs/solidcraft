@@ -3807,6 +3807,8 @@
   "sample.plate.name": "Örnek plaka",
   "sample.vents.about": "Dikdörtgen desende yuvalar: satırlar, sütunlar ve aralık parametredir",
   "sample.vents.name": "Havalandırma plakası",
+  "scale.per_axis": "Eksen başına",
+  "scale.uniform": "Tekdüze",
   "search.command_keys": "Enter çalıştır     Shift+Enter çalıştır ve açık tut     Esc kapat",
   "search.commands": "Komutlar",
   "search.design": "Bu tasarımda",

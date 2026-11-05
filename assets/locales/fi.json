@@ -4077,6 +4077,8 @@
   "sample.plate.name": "Esimerkkilevy",
   "sample.vents.about": "Urat suorakulmaisessa kuviossa: rivit, sarakkeet ja jako ovat parametreja",
   "sample.vents.name": "Tuuletuslevy",
+  "scale.per_axis": "Akseleittain",
+  "scale.uniform": "Tasainen",
   "search.command_keys": "Enter suorita     Shift+Enter suorita ja pidä auki     Esc sulje",
   "search.commands": "Komennot",
   "search.design": "Tässä mallissa",

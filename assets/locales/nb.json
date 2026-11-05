@@ -3807,6 +3807,8 @@
   "sample.plate.name": "Eksempelplate",
   "sample.vents.about": "Spor i et rektangulært mønster: rader, kolonner og stigning er parametere",
   "sample.vents.name": "Ventilasjonsplate",
+  "scale.per_axis": "Per akse",
+  "scale.uniform": "Jevn",
   "search.command_keys": "Enter kjør     Shift+Enter kjør og behold åpen     Esc lukk",
   "search.commands": "Kommandoer",
   "search.design": "I dette designet",

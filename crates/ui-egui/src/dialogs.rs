@@ -135,10 +135,14 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::ConstructionPlane { plane: PlaneRef::Tangent { angle, .. } }) {
             angle: String = "0 deg".into() => angle.as_ref().map_or_else(|| "0 deg".to_string(), ToString::to_string),
         } => json!({"angle": angle});
+        // Uniform, or per axis (#10782): then `factor` is X's, beside Y's and Z's.
         Scale("solid.scale", "SCALE", [("Bodies", BODIES, true)],
-            FeatureKind::Scale { factor, .. }) {
-            factor: String = "2".into() => factor.to_string(),
-        } => json!({"factor": factor});
+            FeatureKind::Scale { factor, factors, .. }) {
+            factor: String = "2".into() => factors.as_ref().map_or_else(|| factor.to_string(), |f| f[0].to_string()),
+            per_axis: bool = false => factors.is_some(),
+            factor_y: String = "2".into() => factors.as_ref().map_or_else(|| factor.to_string(), |f| f[1].to_string()),
+            factor_z: String = "2".into() => factors.as_ref().map_or_else(|| factor.to_string(), |f| f[2].to_string()),
+        } => if *per_axis { json!({"factors": [factor, factor_y, factor_z]}) } else { json!({"factor": factor}) };
         OffsetFaces("solid.offset_face", "OFFSET FACE", [("Faces", FACES, true)],
             FeatureKind::OffsetFace { distance, .. }) {
             distance: String = "2 mm".into() => shown_expr(distance, ValueKind::Length),
@@ -514,6 +518,12 @@ pub struct Dialog {
     value_focus: Option<egui::Id>,
     /// A viewport press or click returns the keyboard after selection and canvas updates.
     pub(crate) restore_value_focus: bool,
+    /// A pick field was clicked into and waits for its pick: a click in the view that picks
+    /// nothing leaves the keyboard with it instead of giving it to the first value (#10428).
+    pub(crate) awaiting_pick: bool,
+    /// The note (a message id) a click that the waiting pick field does not take leaves under
+    /// the form: what that field is for (#10428).
+    pub(crate) pick_refused: Option<&'static str>,
     /// Folded to its header (the shared disclosure chevron).
     pub collapsed: bool,
     reset_scroll: bool,
@@ -795,6 +805,8 @@ impl Dialog {
             focus: true,
             value_focus: None,
             restore_value_focus: false,
+            awaiting_pick: false,
+            pick_refused: None,
             collapsed: false,
             reset_scroll: true,
             preview_enabled: true,
@@ -1432,7 +1444,8 @@ impl Dialog {
             Kind::Pipe { diameter, .. } => ("Diameter", ValueKind::Length, diameter),
             Kind::Stock { margin } => ("Margin", ValueKind::Length, margin),
             Kind::AnglePlane { angle } => ("Angle", ValueKind::Angle, angle),
-            Kind::Scale { factor } => ("Scale", ValueKind::Unitless, factor),
+            Kind::Scale { per_axis: true, .. } => return None,
+            Kind::Scale { factor, .. } => ("Scale", ValueKind::Unitless, factor),
             Kind::OffsetFaces { distance } => ("Distance", ValueKind::Length, distance),
             Kind::Sheet(k) => return k.primary(&self.inputs),
             Kind::Surface(k) => return k.primary(),
@@ -1725,6 +1738,8 @@ impl Dialog {
 
     /// A pick in the viewport (already accepted by the active input).
     pub fn pick(&mut self, s: &Session, sel: Sel) {
+        self.awaiting_pick = false;
+        self.pick_refused = None;
         if self.take_extrude_target(s, &sel) {
             return;
         }
@@ -1823,6 +1838,7 @@ impl Dialog {
         if !add {
             inp.items.clear();
         }
+        let mut accepted = false;
         for x in sels {
             if takes_components {
                 let occ = match x {
@@ -1830,10 +1846,11 @@ impl Dialog {
                     Sel::Body { name } => occurrence_path_of_body(s, &name).map(|path| Sel::Occurrence { path }),
                     _ => None,
                 };
-                if let Some(occ) = occ
-                    && !inp.items.contains(&occ)
-                {
-                    inp.items.push(occ);
+                if let Some(occ) = occ {
+                    accepted = true;
+                    if !inp.items.contains(&occ) {
+                        inp.items.push(occ);
+                    }
                 }
                 continue;
             }
@@ -1841,6 +1858,7 @@ impl Dialog {
             if !fits(inp.accept, &x) {
                 continue;
             }
+            accepted = true;
             if !inp.multi {
                 inp.items.clear();
                 inp.items.push(x);
@@ -1858,6 +1876,11 @@ impl Dialog {
             } else if !inp.items.iter().any(|y| selection::same_item(y, &x)) {
                 inp.items.push(x);
             }
+        }
+        // A marquee that took something is the pick a waiting pick field waited for (#10428).
+        if accepted {
+            self.awaiting_pick = false;
+            self.pick_refused = None;
         }
         self.sync_thread(s);
         self.sync_material(s);
@@ -2931,6 +2954,17 @@ fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> 
     }
 }
 
+/// An explicit revolve axis as its dialog holds it, in the world: the origin evaluated with the
+/// parameters (an untouched axis is restored as saved, expressions included:
+/// `solidcraft_engine::frames::to_local`). An origin that cannot be evaluated is kept as saved.
+pub(crate) fn line_axis_value(s: &Session, frame: &solidcraft_engine::doc::Mat, origin: &solidcraft_engine::doc::PointExpr, dir: Vec3) -> Value {
+    let dir_world = pt(solidcraft_engine::doc::apply_vector(frame, dir));
+    match s.doc.eval_point(origin) {
+        Ok(at) => json!({"origin": pt(solidcraft_engine::doc::apply_point(frame, at)), "dir": dir_world}),
+        Err(_) => json!({"origin": origin, "dir": dir_world}),
+    }
+}
+
 fn stored_revolve_axis(kind: &Kind) -> Option<&Value> {
     match kind {
         Kind::Revolve { axis, .. } | Kind::Surface(crate::dialogs_surface::Surf::Revolve { axis, .. }) => axis.as_ref(),
@@ -3011,6 +3045,8 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                     } else {
                         hint(inp).to_string()
                     }
+                } else if let Some(id) = inp.tip {
+                    crate::i18n::tr(id).to_string()
                 } else {
                     format!("{} (click to pick into this input)", hint(inp))
                 };
@@ -3081,6 +3117,8 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
         if let Kind::Extrude { smart, .. } = &mut d.kind {
             smart.profiles_chosen = i == 0;
         }
+        d.awaiting_pick = true;
+        d.pick_refused = None;
     }
     if let Some(i) = clear {
         if let Some(key) = stored_input_reference_key(d, i) {
@@ -3097,6 +3135,8 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
             d.picked_edges.clear();
         }
         d.active = i;
+        d.awaiting_pick = true;
+        d.pick_refused = None;
     }
     d.sync_thread(s);
 }
@@ -3158,6 +3198,19 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
     let shown_id = egui::Id::new("sc_dialog_refusal_shown");
     if d.error.is_none() && app.preview.error.is_none() {
         ui.data_mut(|m| m.remove::<String>(shown_id));
+    }
+    // A click the waiting pick field does not take: what that field is for, plainly (#10428).
+    // Under the fold in a short window, a new note scrolls into view once, as a refusal does.
+    let note_shown_id = egui::Id::new("sc_dialog_pick_refused_shown");
+    if let Some(id) = d.pick_refused.filter(|_| d.error.is_none() && app.preview.error.is_none()) {
+        let note = crate::ui_kit::text(ui, crate::i18n::tr(id), crate::ui_kit::Text::Hint("pick_refused"));
+        crate::scenario::publish_rect("dialog:pick_refused", note.rect);
+        if ui.data(|m| m.get_temp::<&'static str>(note_shown_id)) != Some(id) {
+            ui.scroll_to_rect(note.rect, None);
+            ui.data_mut(|m| m.insert_temp(note_shown_id, id));
+        }
+    } else {
+        ui.data_mut(|m| m.remove::<&'static str>(note_shown_id));
     }
     if let Some(error) = d.error.as_ref().or(app.preview.error.as_ref()).cloned() {
         // "Select the curves to offset first" is not a failure: nothing is picked yet. The header hint
@@ -3926,6 +3979,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ctx.request_repaint();
     } else {
         d.value_focus = ctx.memory(|memory| memory.focused()).filter(|id| value_fields.iter().any(|(field, _)| field == id));
+        // A value field clicked into: the pick field no longer waits.
+        if d.value_focus.is_some() {
+            d.awaiting_pick = false;
+            d.pick_refused = None;
+        }
     }
     // Each prompt draws only for its own dialog, so both run (`|`, not `||`).
     let preset_prompt = crate::hole_presets::name_prompt(ctx, &mut d, &mut app.preferences.hole_presets, &app.session.doc)
@@ -5993,10 +6051,15 @@ fn stored_frames(s: &Session) -> Option<Vec<(String, solidcraft_engine::doc::Mat
 
 /// The edge of a visible body through (or nearest) a point.
 pub(crate) fn edge_sel(s: &Session, p0: Vec3) -> Option<Sel> {
+    edge_sel_on(s, None, p0)
+}
+
+/// [`edge_sel`], searching only the body called `only` when given (a pick saved on that body).
+pub(crate) fn edge_sel_on(s: &Session, only: Option<&str>, p0: Vec3) -> Option<Sel> {
     let st = crate::open_meshing::session_world(s);
     let frames = stored_frames(s);
     let mut best: Option<(f64, Sel)> = None;
-    for b in &st.bodies {
+    for b in st.bodies.iter().filter(|b| only.is_none_or(|n| b.name == n)) {
         let p = stored_on(&frames, &b.name, p0);
         let m = b.mesh();
         for (i, e) in m.edges.iter().enumerate() {
@@ -6011,6 +6074,11 @@ pub(crate) fn edge_sel(s: &Session, p0: Vec3) -> Option<Sel> {
 
 /// The body face containing a point (nearest triangle).
 pub(crate) fn face_sel(s: &Session, p0: Vec3) -> Option<Sel> {
+    face_sel_on(s, None, p0)
+}
+
+/// [`face_sel`], searching only the body called `only` when given (a pick saved on that body).
+pub(crate) fn face_sel_on(s: &Session, only: Option<&str>, p0: Vec3) -> Option<Sel> {
     use solidcraft_engine::kernel::{self, FaceSurface};
 
     if !p0.is_finite() {
@@ -6019,7 +6087,7 @@ pub(crate) fn face_sel(s: &Session, p0: Vec3) -> Option<Sel> {
     let st = crate::open_meshing::session_world(s);
     let frames = stored_frames(s);
     let mut best: Option<(f64, &solidcraft_engine::doc::ModelBody, usize, Vec3)> = None;
-    for b in &st.bodies {
+    for b in st.bodies.iter().filter(|b| only.is_none_or(|n| b.name == n)) {
         let p = stored_on(&frames, &b.name, p0);
         let m = b.mesh();
         for (t, f) in m.triangles.iter().zip(&m.tri_face) {
@@ -6328,10 +6396,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let mut d = start("solid.revolve")?;
             let frame = feature_frame(s, f.component);
             let stored_axis = match axis {
-                AxisRef::Line { origin, dir } => Some(json!({
-                    "origin": pt(solidcraft_engine::doc::apply_point(&frame, origin.0)),
-                    "dir": pt(solidcraft_engine::doc::apply_vector(&frame, dir.0))
-                })),
+                AxisRef::Line { origin, dir } => Some(line_axis_value(s, &frame, origin, dir.0)),
                 // An edge or face that is gone stays the reference until another is picked.
                 AxisRef::Model { geo } if model_axis_sel(s, geo).is_none() => serde_json::to_value(geo).ok(),
                 _ => None,
@@ -7120,16 +7185,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Scale { bodies, origin, factors, .. } => {
+        FeatureKind::Scale { bodies, origin, .. } => {
             let mut d = start("solid.scale")?;
             d.kind = Kind::simple_restore(&f.kind)?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
             }
             d.extra.insert("origin".into(), pt3(origin.0));
-            if let Some(f) = factors {
-                d.extra.insert("factors".into(), json!(f));
-            }
             d
         }
         FeatureKind::OffsetFace { faces, body, .. } => {

@@ -3818,6 +3818,8 @@
   "sample.plate.name": "Voorbeeldplaat",
   "sample.vents.about": "Sleuven in een rechthoekig patroon: rijen, kolommen en spoed zijn parameters",
   "sample.vents.name": "Ventilatieplaat",
+  "scale.per_axis": "Per as",
+  "scale.uniform": "Uniform",
   "search.command_keys": "Enter uitvoeren     Shift+Enter uitvoeren en open houden     Esc sluiten",
   "search.commands": "Opdrachten",
   "search.design": "In dit ontwerp",

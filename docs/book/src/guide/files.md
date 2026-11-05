@@ -22,7 +22,7 @@ Every imported file (STEP, IGES, 3MF, STL, OBJ or glTF) comes in as a new compon
 file, so its bodies never mix with yours. A STEP assembly keeps its structure: its parts and
 sub-assemblies become nested components, and a part used several times is one component with an
 occurrence for each place. The imported assembly is rigid: moving its component moves everything,
-and its parts don't move on their own. Right-click the component and choose **Unlock Contents** to
+and its parts don't move on their own. Right-click the component and choose **Placement → Unlock Contents** to
 joint the parts one by one. Undo removes a whole import in one step.
 
 A glTF file (`.glb`, or `.gltf` with the `.bin` files it names in the same folder) comes in the
@@ -209,7 +209,7 @@ The control channel sets the same preference with `ui.prefs {"max_step_file_mb":
 ## Design properties
 
 **File → Design Properties…** (also under **Document Settings** in the Browser, and on the
-top component's right-click menu) records who made a design and what it is: project, part
+top component's right-click menu, under **Design**) records who made a design and what it is: project, part
 number, revision, author, organization, description and licence. **OK** applies the changes as
 one undo step. Scripts and agents use the same commands: `document.metadata` reads them,
 `document.metadata.set` (`key` and `value`, or `values: {key: value, …}`) and
@@ -305,3 +305,16 @@ browser can write to a folder it saves back to that file, otherwise it works on 
 in the browser. Use **Rename** beside a stored file to change its name. Autosave and recovery
 stay in the browser's private storage in every browser. Exports such as STEP and STL are
 downloaded.
+
+By default, closing or reloading the tab while a design has unsaved changes shows your browser's
+own "Leave site?" box. To keep your work instead, turn on **Preferences → General → Saving →
+Keep unsaved work in this browser**. SolidCraft then keeps a copy of each open design's unsaved
+changes in this browser's private storage, updated about a second after each change and again
+when the tab is hidden. Turning it on alone doesn't skip the box: it is skipped only when **Still
+ask when the tab closes** is also off and every kept copy is current. A change made in the last
+moment before closing can still bring the box up while its copy is written. On your next visit,
+SolidCraft asks **Restore unsaved design: <name>, changed <time>?** (one window lists them all when
+there are several). **Restore** opens the design with its changes, still unsaved, **Open saved
+version** opens its file as last saved, and **Discard** drops the copy. A copy older than the
+design's last save isn't offered. Closing a design inside SolidCraft (its tab's ×, **File → Close**
+or Ctrl+W) still asks **Save changes to <name>?**, and **Don't Save** drops its copy.

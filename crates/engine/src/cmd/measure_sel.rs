@@ -350,7 +350,10 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             let m = b.mesh();
             let patch = m.surface_patch(*index);
             let tris = patch.iter().flat_map(|f| face_tris(&m, *f)).collect::<Vec<_>>();
-            let area: f64 = tris.iter().map(|[a, b, c]| (*b - *a).cross(*c - *a).len() * 0.5).sum();
+            let on_mesh: f64 = tris.iter().map(|[a, b, c]| (*b - *a).cross(*c - *a).len() * 0.5).sum();
+            // A curved face is measured on the surface it lies on, not on the triangles of
+            // the display mesh, which run inside the curve.
+            let area = super::measure_exact::patch_area(&b.body, &m, &patch).unwrap_or(on_mesh);
             let normals: Vec<UnitVec3> = tris.iter().filter_map(|[a, b, c]| (*b - *a).cross(*c - *a).unit()).collect();
             let planar = normals.first().copied().filter(|n0| normals.iter().all(|n| n.dot(*n0) > 1.0 - 1e-6));
             let mut json = json!({"type": "face", "area_mm2": area, "planar": planar.is_some()});

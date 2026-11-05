@@ -3807,6 +3807,8 @@
   "sample.plate.name": "Ukázková deska",
   "sample.vents.about": "Drážky v obdélníkovém poli: řádky, sloupce a rozteč jsou parametry",
   "sample.vents.name": "Větrací deska",
+  "scale.per_axis": "Podle os",
+  "scale.uniform": "Rovnoměrně",
   "search.command_keys": "Enter spustit     Shift+Enter spustit a ponechat otevřené     Esc zavřít",
   "search.commands": "Příkazy",
   "search.design": "V tomto návrhu",

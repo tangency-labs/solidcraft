@@ -524,6 +524,11 @@ pub struct SolveApp {
     pub(crate) viewport_status_fixture: viewport_status_fixture::Fixture,
     /// Compact browser embed: retain model panels and joint controls without application chrome.
     pub embedded: bool,
+    /// Editing embed (#8517): the host page owns the files and the window's chrome. No
+    /// application bar, no start page, no New/Open/Save/Close or Preferences shortcuts; the
+    /// ribbon, browser, timeline and properties stay, and the host reads and replaces the
+    /// design through `document.export` / `document.import`.
+    pub embed_editor: bool,
     pub session: Session,
     pub ui: UiState,
     pub(crate) shell: shell::State,
@@ -930,6 +935,7 @@ impl SolveApp {
             fit_waits: 0,
             flat_view: Default::default(),
             embedded: false,
+            embed_editor: false,
             home: home::HomeState::default(),
             space_mouse: Default::default(),
             file_load: file_load::FileLoad::default(),
@@ -1030,6 +1036,9 @@ impl SolveApp {
         {
             let adapter = rs.adapter.clone();
             let key = render_workspace::adapter_key(&adapter.get_info());
+            // Next to the graphics settings: a setup that stops the app is not run again by itself.
+            let marker = self.services.graphics_path.as_deref().map(|p| std::path::Path::new(p).with_file_name(render_workspace::SETUP_MARKER));
+            self.render_workspace.watch_setup(marker);
             self.render_workspace.defer_path_host(key, move || solidcraft_gpu::path::host_on_adapter(&adapter).map_err(|e| e.to_string()));
         }
         render_workspace::sync_backend(self);
@@ -1731,11 +1740,12 @@ impl SolveApp {
             return;
         }
         // A display choice opens its choices, as the navigation bar's menus do: run with no
-        // parameters it could only fail (#8868). The choices menu is not the command's ribbon
+        // parameters it could only fail (#8868); so does the selection filter's mode (#11505). The choices menu is not the command's ribbon
         // place, so the ribbon keeps its tab however the menu was opened (#10540).
         let choice = match id {
             "view.visual_style" => Some(context_menu::Target::VisualStyle),
             "view.tool" => Some(context_menu::Target::ViewTool),
+            "select.filter" => Some(context_menu::Target::SelectionFilter),
             _ => None,
         };
         if let Some(target) = choice {
@@ -3104,6 +3114,11 @@ impl SolveApp {
             self.ui.show_browser = true;
             self.ui.show_timeline = true;
         }
+        if self.embed_editor {
+            // The host shows one design and has its own way to start one.
+            self.ui.layout = shell::LayoutMode::Docked;
+            self.home.open = false;
+        }
         self.ui.layout.publish(ui.ctx());
         self.preferences.dialog_buttons.publish(ui.ctx());
         self.preferences.toast_place.publish(ui.ctx());
@@ -3112,7 +3127,7 @@ impl SolveApp {
         self.poll_deferred(ui.ctx());
         self.poll_delete_check(ui.ctx());
         timeline::tick_playback(self, ui.ctx());
-        if !self.embedded {
+        if !self.embedded && !self.embed_editor {
             toolbar::app_bar(self, ui);
         }
         issue_report::CadInput::block(self, ui, report_input);

@@ -279,6 +279,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         pending.view_changed(before, app.session.revision);
     }
     app.jobs_view_changed(before, app.session.revision);
+    crate::browser::forget_found(app);
     put_work(app, slot.work, before);
     out
 }
@@ -486,6 +487,49 @@ pub fn adopt(app: &mut SolveApp, session: Session) {
     }
 }
 
+/// The active design as its file holds it (`document.export`): what a host that keeps the files
+/// itself writes (#8517). `text` is the design's JSON, the same a `.json` design file holds, and
+/// `revision` is the one `document.revision` names this state by.
+pub fn export(app: &mut SolveApp) -> Result<Value, String> {
+    let revision = app.session.design_revision();
+    let design = app.session.design();
+    let text = String::from_utf8(solidcraft_engine::io::write_design(&design)).map_err(|e| e.to_string())?;
+    Ok(json!({"name": design.name, "revision": revision, "dirty": app.session.is_dirty(), "format": "json", "text": text}))
+}
+
+/// Replace the active design with one a host kept (`document.import {text, name?}`): the text of
+/// a design file (its JSON, as `document.export` gives it). It opens saved, with nothing to undo,
+/// in the active design's place: as a design opened in a tab of its own, with that tab closed
+/// without asking. A text that does not read changes nothing.
+pub fn import(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
+    if app.file_picker_busy() || app.file_load.busy() || app.docs.closing.is_some() || app.docs.quitting.is_some() || app.docs.batch.is_some() {
+        return Err("a file is being opened or saved, or designs are being closed: try again".into());
+    }
+    let text = p.get("text").and_then(Value::as_str).ok_or("missing `text` (the design's JSON)")?;
+    let mut doc = solidcraft_engine::io::read_design(text.as_bytes()).map_err(|e| e.to_string())?;
+    if let Some(name) = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()) {
+        doc.name = name.to_string();
+    }
+    let replaced = app.docs.active;
+    open_tab(app, Session::opened(doc, None))?;
+    close(app, replaced, true);
+    let errors = app.session.model.results.iter().filter(|r| r.error.is_some()).count();
+    let revision = app.session.design_revision();
+    Ok(json!({"name": app.session.doc.name, "features": app.session.doc.features.len(), "errors": errors, "revision": revision}))
+}
+
+/// The host saved the design at `revision` (`document.saved`): it counts as saved from there.
+/// Refused when the design has changed since.
+pub fn saved(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
+    let revision = p.get("revision").and_then(Value::as_u64).ok_or("missing `revision`")?;
+    let now = app.session.design_revision();
+    if revision != now {
+        return Err(format!("the design changed since revision {revision} (now {now})"));
+    }
+    app.session.mark_saved();
+    Ok(json!({"revision": revision, "dirty": app.session.is_dirty()}))
+}
+
 /// A new, empty design in its own tab. One that is already empty keeps its tab and still
 /// takes Units of new designs (#1205): a launch starts on that empty design, so returning
 /// here used to leave it in millimetres.
@@ -618,6 +662,13 @@ pub(crate) fn disconnect_background_chats(app: &mut SolveApp, wait: bool) {
     }
 }
 
+/// Stop only the hidden conversations whose endpoint permission was revoked.
+pub(crate) fn disconnect_background_endpoint(app: &mut SolveApp, id: &str) {
+    for slot in app.docs.background_mut() {
+        slot.agent_chat.disconnect_endpoint(&mut slot.session, id);
+    }
+}
+
 /// Close several tabs (Close Other Tabs, Close All Tabs; #3055): each with unsaved changes asks
 /// "save changes?" in turn, the others close; Cancel keeps the tabs not closed yet.
 pub fn close_many(app: &mut SolveApp, mut tabs: Vec<usize>) {
@@ -699,6 +750,15 @@ fn quit_step(app: &mut SolveApp) {
 /// Is any open design unsaved (the web page asks before it is left)?
 pub fn any_dirty(app: &SolveApp) -> bool {
     (0..app.docs.count()).any(|i| dirty(app, i))
+}
+
+/// Every open design, in tab order (the shown one in its place): what the web app keeps a copy
+/// of in the browser when "keep unsaved work in this browser" is on (#10220).
+pub fn open_sessions(app: &SolveApp) -> Vec<&Session> {
+    if app.docs.slots.is_empty() {
+        return vec![&app.session];
+    }
+    app.docs.slots.iter().map(|s| s.as_ref().map_or(&app.session, |d| &d.session)).collect()
 }
 
 fn dirty(app: &SolveApp, i: usize) -> bool {
@@ -1163,6 +1223,11 @@ pub enum Answer {
 pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
     let _language = crate::i18n::scope(&app.preferences.language);
     quit_step(app);
+    // Saved, it asks the Capture Position question first (#9736): that question is the one to
+    // answer meanwhile, not this one again.
+    if app.tree.capture_prompt.is_some() {
+        return;
+    }
     let Some(i) = app.docs.closing else { return };
     let name = tabs_info(app).get(i).map(|x| x.0.clone()).unwrap_or_default();
     let name_display = crate::i18n::tr_name(&name);
@@ -1221,7 +1286,7 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Act on the "save changes?" answer (also the control channel's `ui.documents {answer}`).
 pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
-    if app.file_picker_busy() {
+    if app.file_picker_busy() || app.tree.capture_prompt.is_some() {
         return;
     }
     let Some(i) = app.docs.closing else { return };
@@ -1257,6 +1322,11 @@ pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
 
 /// Resume Close/Quit only after Save As has answered and the write succeeded.
 pub(crate) fn saved_for_close(app: &mut SolveApp) {
+    // Save asks the Capture Position question first while a move isn't captured (#9736): the
+    // close waits for its answer.
+    if app.tree.capture_prompt.is_some() {
+        return;
+    }
     if !std::mem::take(&mut app.docs.saving) || app.docs.closing.is_none() {
         return;
     }
@@ -1467,6 +1537,22 @@ mod tests {
         open_tab(&mut a, Session::default()).unwrap();
         assert_eq!(a.docs.count(), 4);
         a
+    }
+
+    /// #10220: every open design in tab order, the shown one in its place.
+    #[test]
+    fn open_sessions_lists_every_tab_in_order() {
+        let mut a = app();
+        assert_eq!(open_sessions(&a).len(), 1);
+        let mut a4 = four_tabs();
+        switch(&mut a4, 1);
+        let uids: Vec<u64> = open_sessions(&a4).iter().map(|s| s.uid).collect();
+        assert_eq!(uids.len(), 4);
+        assert_eq!(uids.get(1), Some(&a4.session.uid));
+        let dirty: Vec<bool> = open_sessions(&a4).iter().map(|s| s.is_dirty()).collect();
+        assert_eq!(dirty, [true, false, true, false]);
+        a.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        assert!(open_sessions(&a).iter().all(|s| s.is_dirty()));
     }
 
     /// #3055: Close Other Tabs on the first tab closes the blank fourth, asks about the third

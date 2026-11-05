@@ -3807,6 +3807,8 @@
   "sample.plate.name": "Mintalemez",
   "sample.vents.about": "Hornyok téglalap mintában: a sorok, oszlopok és osztás paraméterek",
   "sample.vents.name": "Szellőzőlemez",
+  "scale.per_axis": "Tengelyenként",
+  "scale.uniform": "Egyenletes",
   "search.command_keys": "Enter futtatás     Shift+Enter futtatás és nyitva tartás     Esc bezárás",
   "search.commands": "Parancsok",
   "search.design": "Ebben a tervben",

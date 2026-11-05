@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use solidcore_record::{Seg2, Vec2, Vec3};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::prelude::*;
 
@@ -344,6 +344,21 @@ pub enum ConstraintKind {
     Fix {
         p: usize,
     },
+    /// A pierce (#3599): the point `p` of this sketch is held where the curve `curve` of the
+    /// sketch `sketch` crosses the plane of this sketch.
+    Pierce {
+        /// The point of this sketch the pierce holds.
+        p: usize,
+        /// The sketch the pierced curve belongs to.
+        sketch: u64,
+        /// The id of the pierced curve in that sketch.
+        curve: String,
+        /// The plane of this sketch, in world coordinates: the curve is cut against it.
+        plane: Plane,
+        /// The pierced curve, in world coordinates: it crosses the plane where it changes
+        /// side.
+        world: Vec<Vec3>,
+    },
     // Dimensions (driving).
     Distance {
         p: usize,
@@ -534,6 +549,7 @@ impl ConstraintKind {
             Midpoint { .. } => "MidPoint",
             Symmetric { .. } => "Symmetry",
             Fix { .. } => "Fix",
+            Pierce { .. } => "Pierce",
             Distance { .. }
             | DistanceX { .. }
             | DistanceY { .. }
@@ -579,6 +595,8 @@ impl ConstraintKind {
             CircleCircleDistance { a, b, .. } => (vec![], vec![a, b]),
             Symmetric { p, q, l } => (vec![p, q], vec![l]),
             Fix { p } => (vec![p], vec![]),
+            // The pierced curve belongs to another sketch: it has no index here.
+            Pierce { p, .. } => (vec![p], vec![]),
             Smooth { a, b } => (vec![], vec![a, b]),
             ArcLength { c, .. } => (vec![], vec![c]),
             LinearDiameter { p, l, .. } => (vec![p], vec![l]),
@@ -658,6 +676,9 @@ impl ConstraintKind {
                 fc(l);
             }
             Fix { p } => fp(p),
+            // Only the point of this sketch is renumbered; the pierced curve is another
+            // sketch's, named by id.
+            Pierce { p, .. } => fp(p),
             Smooth { a, b } => {
                 fc(a);
                 fc(b);
@@ -1000,6 +1021,15 @@ impl Sketch {
     /// same kind on the same entities, in either order where the order doesn't matter.
     pub fn same_constraint(&self, kind: &ConstraintKind) -> Option<&str> {
         use ConstraintKind::*;
+        // A pierce names a curve of another sketch by id, so its identity is not a pair of
+        // indices: the same point pierced by the same curve of the same sketch.
+        if let Pierce { p, sketch, curve, .. } = kind {
+            return self
+                .constraints
+                .iter()
+                .find(|c| matches!(&c.kind, Pierce { p: q, sketch: s, curve: k, .. } if q == p && s == sketch && k == curve))
+                .map(|c| c.id.as_str());
+        }
         let pair = |x: usize, y: usize| if x <= y { (x, y) } else { (y, x) };
         let key = |k: &ConstraintKind| -> Option<(u8, usize, usize, usize)> {
             Some(match *k {
@@ -1172,6 +1202,11 @@ impl Sketch {
         {
             return Err(SketchError::Invalid("arc sweep must be nonzero and less than a full turn".into()));
         }
+        if let Pierce { plane, world, .. } = k
+            && crate::pierce::pierce_point_world(plane, world).is_none()
+        {
+            return Err(SketchError::Invalid("the pierced curve does not cross this sketch's plane".into()));
+        }
         Ok(())
     }
 
@@ -1189,6 +1224,9 @@ impl Sketch {
         }
         let sizes = self.constraints.iter().any(|c| match c.kind {
             ConstraintKind::Fix { .. } | ConstraintKind::PatternPoint { .. } | ConstraintKind::PatternRadius { .. } => true,
+            // A pierce holds its point where another sketch's curve crosses this plane:
+            // scaling the sketch would move it off the crossing.
+            ConstraintKind::Pierce { .. } => true,
             ref k => k.is_dimension() && !k.is_angle() && !c.driven,
         });
         if sizes
@@ -1250,10 +1288,11 @@ impl Sketch {
     }
 
     /// Is point `i` held in place: fixed, projected (linked), fixed by a Fix constraint or a
-    /// point of a fixed curve.
+    /// point of a fixed curve, or held there by a pierce.
     pub fn point_locked(&self, i: usize) -> bool {
         self.points.get(i).is_some_and(|p| p.fixed || p.link.is_some())
             || self.constraints.iter().any(|c| c.kind == ConstraintKind::Fix { p: i })
+            || self.constraints.iter().any(|c| matches!(&c.kind, ConstraintKind::Pierce { p, .. } if *p == i))
             || self.curves.iter().any(|c| c.fixed && c.kind.uses(i))
     }
 
@@ -1267,6 +1306,9 @@ impl Sketch {
         };
         for c in &self.constraints {
             if let ConstraintKind::Fix { p } = c.kind {
+                set(p);
+            }
+            if let ConstraintKind::Pierce { p, .. } = c.kind {
                 set(p);
             }
         }

@@ -55,6 +55,7 @@ pub use cmd::{
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
 pub use solidcraft_geom as geom;
+pub use solidcraft_geom::note;
 pub use solidcraft_io as io;
 pub use solidcraft_kernel as kernel;
 pub use solidcraft_profile as profile;
@@ -959,9 +960,16 @@ impl Session {
         }
     }
 
-    /// The design has changes not in its file: in the document, or in what is hidden.
+    /// The design has changes not in its file: in the document, in what is hidden, or a
+    /// component moved and not captured yet (#9736).
     pub fn is_dirty(&self) -> bool {
-        self.document_differs() || self.visibility != self.saved_visibility
+        self.document_differs() || self.visibility != self.saved_visibility || self.moved_uncaptured()
+    }
+
+    /// A component was moved and its position not captured yet (#9736). The placements of an
+    /// exploded view shown are not such a move: they last only while it is shown.
+    pub fn moved_uncaptured(&self) -> bool {
+        !self.pending_moves.is_empty() && !cmd::motion::shows_exploded_view(self)
     }
 
     /// The document is not the one its file holds: compared once per pair of documents and
@@ -1133,8 +1141,9 @@ impl Session {
         self.model.forget_fingerprints();
     }
 
-    /// Prepared placements only: optional save caches must not compute a cold world.
-    pub(crate) fn cached_world_state(&self) -> Option<Arc<solidcraft_doc::ModelState>> {
+    /// Prepared placements only: optional save caches must not compute a cold world. `None`
+    /// when the design has components and nothing has placed them since it last changed.
+    pub fn cached_world_state(&self) -> Option<Arc<solidcraft_doc::ModelState>> {
         let state = self.model.state();
         if self.doc.occurrences.is_empty() {
             return Some(state);
@@ -2365,6 +2374,8 @@ mod hole_reference_tests;
 mod large_assembly_tests;
 #[cfg(test)]
 mod measure_centre_tests;
+#[cfg(test)]
+mod measure_surface_tests;
 #[cfg(test)]
 mod naming_history_tests;
 #[cfg(test)]

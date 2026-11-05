@@ -113,6 +113,12 @@ pub fn close(app: &mut SolveApp) {
 
 pub(crate) fn ago(secs: u64) -> String {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(secs);
+    ago_between(now, secs)
+}
+
+/// How long before `now` the moment `secs` was (both in seconds since 1970), as "just now",
+/// "5 min ago"…: for hosts whose clock isn't `SystemTime` (the browser, #10220).
+pub fn ago_between(now: u64, secs: u64) -> String {
     let d = now.saturating_sub(secs);
     match d {
         0..=59 => crate::i18n::tr("recovery.just_now").to_string(),
@@ -179,6 +185,60 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if later {
         app.recoverable.clear();
     }
+}
+
+/// A design copy the web app kept in the browser (#10220), as its "Restore unsaved design?"
+/// window lists it.
+pub struct BrowserCopy<'a> {
+    pub name: &'a str,
+    /// When it last changed, as "5 min ago" ([`ago_between`]).
+    pub when: String,
+    /// Its file can be opened as last saved (Open saved version).
+    pub open_saved: bool,
+}
+
+/// An answer in that window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyAnswer {
+    Restore,
+    OpenSaved,
+    Discard,
+}
+
+/// The web app's "Restore unsaved design: <name>, changed <time>?" window (#10220): one window
+/// for every copy, each with Restore, Open saved version (when it has a file) and Discard, in the
+/// same words as the desktop's recovery window. Answers which copy and what was chosen.
+pub fn browser_copies_window(ctx: &egui::Context, language: &str, copies: &[BrowserCopy]) -> Option<(usize, CopyAnswer)> {
+    let _language = crate::i18n::scope(language);
+    copies.first()?;
+    let title = match copies {
+        [one] => crate::i18n::format("recovery.restore_title_one", &[("name", &crate::i18n::tr_name(one.name)), ("when", &one.when)]),
+        _ => crate::i18n::tr("recovery.restore_title").to_string(),
+    };
+    let mut act = None;
+    let _ = ui_kit::Window::new(egui::Id::new("sc_browser_keep_restore"), "restore", &title).required().show_body(ctx, |ui| {
+        ui_kit::text(ui, crate::i18n::tr("recovery.restore_intro"), ui_kit::Text::Report("intro", false));
+        for (index, c) in copies.iter().enumerate() {
+            if copies.len() > 1 {
+                ui_kit::divider(ui, &format!("entry:{index}"));
+                let row = crate::i18n::format("recovery.restore_row", &[("name", &crate::i18n::tr_name(c.name)), ("when", &c.when)]);
+                ui_kit::text(ui, &row, ui_kit::Text::Report(&format!("row:{index}"), false));
+            }
+            ui.horizontal(|ui| {
+                let mut answers = vec![(CopyAnswer::Restore, crate::i18n::tr("recovery.restore"))];
+                if c.open_saved {
+                    answers.push((CopyAnswer::OpenSaved, crate::i18n::tr("recovery.open_saved")));
+                }
+                answers.push((CopyAnswer::Discard, crate::i18n::tr_label("Discard")));
+                for (answer, text) in answers {
+                    if ui_kit::button(ui, text, ui_kit::Button::Normal).clicked() {
+                        act = Some((index, answer));
+                    }
+                }
+            });
+        }
+    });
+    act
 }
 
 /// Discard all asks first; Cancel (or the close button) goes back to the list unchanged.

@@ -10,6 +10,8 @@
 //!   of it first
 //! - `engine.commands`: every command with tab, panel, params and enablement
 //! - `document.inspect {measure?}`: the design (parameters, timeline, bodies, sketches)
+//! - `document.export`, `document.import {text, name?}`, `document.saved {revision}`: the design
+//!   for a host that keeps the files itself (#8517)
 //! - `ui.inspect`: UI state, viewport rect, camera, tool and dialog
 //! - `ui.drag {x0, y0, x1, y1, button?, shift?, ctrl?, steps?, hold?}` (box selection, navigation;
 //!   `hold` keeps the button down that many frames before moving);
@@ -325,8 +327,10 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
         )
         && !id.starts_with("settings.")
         && app.session.active_sketch.is_none()
-        && crate::open_meshing::session_world(&app.session).bodies.len() == 1
+        // Cheap test first: placing the world (`world_state`) after every step of a batch in a
+        // design with components placed every component's bodies again once per step.
         && app.session.undo.len() <= 2
+        && crate::open_meshing::session_world(&app.session).bodies.len() == 1
     {
         app.fit_view();
     }
@@ -821,6 +825,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "engine.commands" => wrap(execute(app, "engine.commands", json!({}))),
         "document.inspect" => wrap(app.session.execute("document.inspect", p).map_err(|e| e.to_string())),
         "document.revision" => wrap(app.session.execute("document.revision", p).map_err(|e| e.to_string())),
+        // A host that keeps the files itself (an editing embed, #8517).
+        "document.export" => wrap(crate::documents::export(app)),
+        "document.import" => wrap(crate::documents::import(app, p)),
+        "document.saved" => wrap(crate::documents::saved(app, p)),
         // The connection already counts as subscribed (`DesignWatch::join`), and its events start
         // from this answer: published first, so no event repeats it and none older follows.
         "control.subscribe" => {
@@ -828,6 +836,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             DESIGN_WATCH.publish(&app.session.document_id, revision);
             ok(json!({"document_id": app.session.document_id, "revision": revision}))
         }
+        // What the MCP server bridged to this app shapes its output with (Preferences › AI).
+        "mcp.options" => ok(json!({"compact": app.preferences.mcp_compact})),
         "ui.messages" => ok(crate::messages::control(app, p)),
         "ui.inspect" => ok(json!({
             "render": crate::render_workspace::inspect_state(app),
@@ -1328,6 +1338,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                     },
                     None => crate::context_menu::Target::Viewport,
                 };
+                // A right-click opens a menu only on something that is there.
+                if let Err(e) = crate::context_menu::check_target(app, &target) {
+                    return err(e);
+                }
                 crate::context_menu::request_open(app, egui::pos2(x as f32, y as f32), target);
                 return ok(json!({"pending": true}));
             }
@@ -2279,6 +2293,29 @@ mod tests {
             serde_json::Value::Array(a) => a.iter().map(without_timings).collect(),
             v => v.clone(),
         }
+    }
+
+    /// A step of a long design leaves its components unplaced: the first-body fit's check
+    /// (`execute`) looks at the undo history before placing the world, which used to place
+    /// every component's bodies after every step of a batch.
+    #[test]
+    fn a_step_does_not_place_the_world_for_the_first_body_fit() {
+        let mut h = crate::scenario::Harness::new();
+        let v = batch(
+            &mut h,
+            json!({"commands": [
+                {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "body_name": "Cube"}},
+                {"command": "component.from_bodies", "params": {"bodies": ["Cube"]}},
+                {"command": "occurrence.copy", "params": {"component": "Cube", "translate": [0, 40, 0]}},
+            ]}),
+        );
+        assert!(v["result"].get("failed").is_none(), "{v}");
+        assert!(h.app.session.undo.len() > 2, "past the first-body fit");
+        // Straight to `execute`, with no frame: drawing places the world too.
+        let r = super::execute(&mut h.app, "solid.sphere", json!({"radius": 3, "center": [80, 0, 0], "operation": "new"}));
+        assert!(r.is_ok(), "{r:?}");
+        assert!(h.app.session.cached_world_state().is_none(), "the step placed the components again");
+        assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 3);
     }
 
     /// #743: a batch is one request through the app's queue, answered within a frame, however

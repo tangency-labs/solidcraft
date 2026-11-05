@@ -549,6 +549,55 @@ fn a_refused_rule_names_the_value_at_fault() {
     run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": 2, "bend_radius": 0}));
 }
 
+/// #9623: `Thickness` in a rule's expressions is the rule's thickness, also when the design has a
+/// parameter of that name; the rule's own `thickness` may still use that parameter.
+#[test]
+fn thickness_in_a_rule_is_the_rules_even_beside_a_parameter_of_that_name() {
+    fn build(param: Option<&str>, rule: Value) -> (Value, f64) {
+        let mut s = Session::default();
+        if let Some(e) = param {
+            run(&mut s, "parameters.add", json!({"name": "Thickness", "expression": e}));
+        }
+        run(&mut s, "sheet.manage_rules", rule);
+        base(&mut s, 100.0, 50.0);
+        let t = s.model.state().surface_sheets[0].thickness;
+        run(&mut s, "sheet.flange", json!({"edges": [[50, 0, t], [100, 25, t]], "height": 20}));
+        let failing: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+        assert!(failing.is_empty(), "{failing:?}");
+        let l = run(&mut s, "sheet.rules", json!({}));
+        let values = l["rules"].as_array().and_then(|r| r.iter().find(|r| r["rule"]["name"] == "R")).map(|r| r["values"].clone()).unwrap_or_default();
+        (values, volume(&mut s))
+    }
+    let rule = json!({"name": "R", "thickness": 2, "k_factor": 0.5, "bend_radius": 2, "corner_relief_shape": "round", "active": true});
+    let (want, v) = build(None, rule.clone());
+    for (k, x) in [("thickness", 2.0), ("gap", 2.0), ("relief_width", 2.0), ("relief_depth", 1.0), ("corner_relief", 8.0), ("bend_radius", 2.0)] {
+        assert_eq!(want[k].as_f64(), Some(x), "{k}: {want}");
+    }
+    // By hand (T 2, R 2, K 0.5, the gap Thickness = 2): the base past both bends' tangent lines,
+    // 96 x 46; the bends' zones, BA = 3π/2 wide, 96 and 46 long to the corner's notch; the
+    // flanges, 16 past their zones, each closed to T + g/√2 short of the corner; less the round
+    // relief 8 across at the corner (see corner_relief_takes_with), 2 thick (K 0.5).
+    let ba = 1.5 * PI;
+    let short = 2.0 + 2.0 / std::f64::consts::SQRT_2;
+    let area = 96.0 * 46.0 + ba * (96.0 + 46.0) + 16.0 * ((100.0 - short) + (50.0 - short))
+        - corner_relief_takes_with((2.0, 2.0, 0.5, 2.0), 90.0, true, 8.0);
+    assert!(rel(v, area * 2.0) < 1e-4, "{v} vs {}", area * 2.0);
+    let (got, w) = build(Some("10 mm"), rule);
+    assert_eq!(got, want);
+    assert!(rel(w, v) < 1e-9, "{w} against {v}");
+    // A bend radius of `Thickness` is the rule's 2 mm, not the parameter's 10.
+    let rule = json!({"name": "R", "thickness": 2, "k_factor": 0.5, "bend_radius": "Thickness", "corner_relief_shape": "round", "active": true});
+    let (got, w) = build(Some("10 mm"), rule);
+    assert_eq!(got, want);
+    assert!(rel(w, v) < 1e-9, "{w} against {v}");
+    // The rule's thickness itself reads the design's `Thickness`, and the rest follow it.
+    let rule =
+        json!({"name": "R", "thickness": "Thickness", "k_factor": 0.5, "bend_radius": "Thickness", "corner_relief_shape": "round", "active": true});
+    let (got, w) = build(Some("2 mm"), rule);
+    assert_eq!(got, want);
+    assert!(rel(w, v) < 1e-9, "{w} against {v}");
+}
+
 #[test]
 fn contour_flange_hem_and_tray() {
     // Oracle 72.
@@ -4374,20 +4423,28 @@ fn relief_drawing(s: &mut Session) -> (Vec<(solidcore_record::Vec2, f64)>, Vec<s
 }
 
 /// What a corner relief `d` across takes from the flat at a corner of a 120 x 90 base whose two
-/// flanges stand at `deg` (2 mm, R 1, K 0.5, gap g 0.5; taller than the relief reaches), by hand.
+/// flanges stand at `deg` (2 mm, R 1, K 0.5, gap g 0.5; taller than the relief reaches), by hand
+/// (see [`corner_relief_takes_with`]).
+fn corner_relief_takes(deg: f64, round: bool, d: f64) -> f64 {
+    corner_relief_takes_with((2.0, 1.0, 0.5, 0.5), deg, round, d)
+}
+
+/// What a corner relief `d` across takes from the flat at a square corner of a base whose two
+/// flanges stand at `deg`, inside, under a rule of thickness T, inside radius R, K-factor K and
+/// gap g, taller than the relief reaches, by hand.
 /// In the flat there the base lies past both bends' tangent lines, s0 = (R + T)·tan(θ/2) in from
 /// the sheet's edges; each bend's zone, BA = θ·(R + K·T) wide, lies beside it and ends where the
 /// other's tangent line crosses it (the notch); each flange lies past its zone, its side the line
 /// through its ends x(w) (see [`hand_panels`], with φ = θ). The relief is centered where the zones'
 /// center lines cross, s0 − BA/2 in from the edges: a disc of radius d/2, or a square of side d
 /// along the bends. Its area over that material, summed in strips across it.
-fn corner_relief_takes(deg: f64, round: bool, d: f64) -> f64 {
+fn corner_relief_takes_with((t, r, k, g): (f64, f64, f64, f64), deg: f64, round: bool, d: f64) -> f64 {
     let th = deg.to_radians();
-    let (s0, ba) = (3.0 * (th / 2.0).tan(), th * 2.0);
+    let (s0, ba) = ((r + t) * (th / 2.0).tan(), th * (r + k * t));
     let cc = th.cos() * th.cos();
     // A flange's side: x = a + b·y in the flat, from x(w) at y = s0 − BA − (w − s0).
     let b = th.cos();
-    let a = (0.25 * (2.0 - 2.0 * cc).sqrt() + 2.0 * (1.0 - cc)) / th.sin() - b * (2.0 * s0 - ba);
+    let a = (g / 2.0 * (2.0 - 2.0 * cc).sqrt() + t * (1.0 - cc)) / th.sin() - b * (2.0 * s0 - ba);
     let (zone, center, r) = (s0 - ba, s0 - ba / 2.0, d / 2.0);
     let n = 200_000;
     let h = d / n as f64;
