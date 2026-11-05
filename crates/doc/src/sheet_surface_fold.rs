@@ -4,8 +4,9 @@
 //!
 //! Each piece gives a face on either side of the sheet (its surface, and the face its thickness
 //! away) and a wall along each of its edges that no other piece shares. A flat edge folds to a
-//! line or a circular arc where it lies along or across a bend or a roll, and to a chain of cubic
-//! pieces elsewhere, such as a slanted edge across a bend, which folds to a helix.
+//! line or a circular arc where it lies along or across a bend or a roll, and to a chain of
+//! Bézier pieces of degree 7 elsewhere, such as a slanted edge across a bend, which folds to a
+//! helix.
 
 use solidcraft_geom::prelude::*;
 use std::sync::Arc;
@@ -30,10 +31,17 @@ const ON_CURVE: f64 = 1e-9;
 /// leaves its points about 1e-9 off where they would be exactly; a wall taken for a cone that near
 /// its plane would be a cone with no height (a half angle of 90°), which no kernel takes.
 const IN_PLANE: f64 = 1e-7;
-/// How far (mm) a chain of cubic pieces may lie from the folded edge it stands in for.
+/// How far (mm) a chain of pieces may lie from the folded edge it stands in for.
 const CHAIN_TOL: f64 = 1e-7;
-/// The most cubic pieces the kernel takes in one chain.
-const MAX_CHAIN_PIECES: usize = 1024;
+/// The degree of a chain's pieces. Fitted pieces of degree 7 follow a helix round a whole bend
+/// in one or two pieces, where cubic ones took 32 (the distance falls as the eighth power of a
+/// piece's length, not the fourth).
+const CHAIN_DEGREE: usize = 7;
+/// The most pieces of one chain, within the kernel's limit on a chain's control points.
+const MAX_CHAIN_PIECES: usize = 256;
+/// How many points along each piece it is fitted to; it is checked at the points halfway
+/// between them.
+const FIT_POINTS: usize = 32;
 /// The step (a fraction of a chain's piece) a folded edge's direction is measured over.
 const STEP: f64 = 1e-4;
 
@@ -263,50 +271,78 @@ impl Folded<'_> {
     }
 
     /// A run of a piece's flat edges folded to the surface and to a thickness into the material: a
-    /// line or an arc at both where it folds to one, else chains of cubic pieces split alike.
+    /// line or an arc at both where it folds to one, else chains of pieces of [`CHAIN_DEGREE`]
+    /// split alike, so that a ruled wall joins them piece by piece.
     fn edges(&self, piece: Piece, run: &[Seg2]) -> Result<[EdgeSpec; 2]> {
         let sampled = |depth: f64| (0..=SAMPLES).map(|k| self.at(piece, run_at(run, k as f64 / SAMPLES as f64), depth)).collect::<Result<Vec<_>>>();
         if let (Some(surface), Some(deep)) = (simple(&sampled(0.0)?), simple(&sampled(self.t)?)) {
             return Ok([surface, deep]);
         }
-        // Halve any piece that strays at either depth; the run's own joints start pieces.
-        let n = run.len().max(1);
-        let mut breaks: Vec<f64> = (0..=n).map(|i| i as f64 / n as f64).collect();
-        let mut k = 0;
-        while let (Some(&s0), Some(&s1)) = (breaks.get(k), breaks.get(k + 1)) {
-            let mut close = true;
-            for depth in [0.0, self.t] {
-                let c = self.cubic(piece, run, depth, s0, s1)?;
-                for u in [0.25, 0.5, 0.75] {
-                    close &= bezier(&c, u).dist(self.at(piece, run_at(run, s0 + (s1 - s0) * u), depth)?) <= CHAIN_TOL;
-                }
-            }
-            if close {
-                k += 1;
-            } else if breaks.len() > MAX_CHAIN_PIECES {
+        // Equal pieces of each of the run's segments, as few as keep within the tolerance at
+        // both depths; each joint of the run starts a piece.
+        let segs = run.len().max(1);
+        let mut each = 1;
+        loop {
+            let n = segs * each;
+            let off = match (self.chain(piece, run, 0.0, n)?, self.chain(piece, run, self.t, n)?) {
+                (Some((surface, a)), Some((deep, b))) if a.max(b) <= CHAIN_TOL => return Ok([surface, deep]),
+                (Some((_, a)), Some((_, b))) => a.max(b),
+                _ => f64::INFINITY,
+            };
+            if n >= MAX_CHAIN_PIECES {
                 return Err(DocError::Invalid("an edge of the folded sheet bends too much to follow".into()));
-            } else {
-                breaks.insert(k + 1, (s0 + s1) / 2.0);
             }
+            // The distance falls as the eighth power of the pieces' length.
+            let guess = if off.is_finite() { (each as f64 * (off / CHAIN_TOL).powf(1.0 / 8.0)).ceil() as usize } else { each * 2 };
+            each = guess.clamp(each + 1, (MAX_CHAIN_PIECES / segs).max(each + 1));
         }
-        let chain = |depth: f64| -> Result<EdgeSpec> {
-            let mut ctrl = Vec::with_capacity(3 * breaks.len());
-            for (k, w) in breaks.windows(2).enumerate() {
-                let c = self.cubic(piece, run, depth, w[0], w[1])?;
-                ctrl.extend_from_slice(if k == 0 { &c } else { &c[1..] });
-            }
-            Ok(EdgeSpec::Chain { degree: 3, ctrl: Arc::from(ctrl) })
-        };
-        Ok([chain(0.0)?, chain(self.t)?])
     }
 
-    /// The cubic Hermite piece of a folded run from `s0` to `s1` along it: its ends and its
-    /// direction there, taken from inside the piece, so that none is measured across a corner.
-    fn cubic(&self, piece: Piece, run: &[Seg2], depth: f64, s0: f64, s1: f64) -> Result<[Vec3; 4]> {
+    /// A folded run `depth` into the material as a chain of `n` equal pieces of [`CHAIN_DEGREE`],
+    /// and the farthest it lies from the run between the points it was fitted to; `None` where a
+    /// piece could not be fitted. Each piece passes through the run's points at its ends, leaves
+    /// and meets them the way the run does there, and lies as near the run as it can (least
+    /// squares) at [`FIT_POINTS`] points along it. Neighbours share the way at their joint, so the
+    /// chain turns no corner.
+    fn chain(&self, piece: Piece, run: &[Seg2], depth: f64, n: usize) -> Result<Option<(EdgeSpec, f64)>> {
         let at = |s: f64| self.at(piece, run_at(run, s), depth);
-        let rate = |s: f64, h: f64| -> Result<Vec3> { Ok((at(s)? * -3.0 + at(s + h)? * 4.0 - at(s + 2.0 * h)?) * ((s1 - s0) / (2.0 * h))) };
-        let (p0, p3, h) = (at(s0)?, at(s1)?, (s1 - s0) * STEP);
-        Ok([p0, p0 + rate(s0, h)? * (1.0 / 3.0), p3 - rate(s1, -h)? * (1.0 / 3.0), p3])
+        let h = STEP / n as f64;
+        // The way the run goes at `s` measured from one side (`h` > 0 ahead, < 0 behind), so that
+        // none is measured across a corner of the run.
+        let rate = |s: f64, h: f64| -> Result<Vec3> { Ok((at(s)? * -3.0 + at(s + h)? * 4.0 - at(s + 2.0 * h)?) * (1.0 / (2.0 * h))) };
+        let mut ways = Vec::with_capacity(n + 1);
+        for i in 0..=n {
+            let s = i as f64 / n as f64;
+            let way = match i {
+                0 => rate(s, h)?.normalized(),
+                _ if i == n => rate(s, -h)?.normalized(),
+                // Inside the run it is smooth: both sides agree, but for the run's own speed.
+                _ => rate(s, h)?.normalized().zip(rate(s, -h)?.normalized()).and_then(|(a, b)| (a + b).normalized()),
+            };
+            ways.push(way);
+        }
+        let d = CHAIN_DEGREE;
+        let mut ctrl = Vec::with_capacity(d * n + 1);
+        let mut worst = 0.0f64;
+        for k in 0..n {
+            let (s0, s1) = (k as f64 / n as f64, (k + 1) as f64 / n as f64);
+            let (p0, p1) = (at(s0)?, at(s1)?);
+            let (Some(Some(w0)), Some(Some(w1))) = (ways.get(k).copied(), ways.get(k + 1).copied()) else {
+                return Err(DocError::Invalid("an edge of the folded sheet has no direction".into()));
+            };
+            let mut fitted = Vec::with_capacity(FIT_POINTS);
+            for j in 1..FIT_POINTS {
+                let u = j as f64 / FIT_POINTS as f64;
+                fitted.push((u, at(s0 + (s1 - s0) * u)?));
+            }
+            let Some(c) = fit_piece((p0, w0), (p1, w1), &fitted) else { return Ok(None) };
+            for j in 0..FIT_POINTS {
+                let u = (j as f64 + 0.5) / FIT_POINTS as f64;
+                worst = worst.max(bezier(&c, u).dist(at(s0 + (s1 - s0) * u)?));
+            }
+            ctrl.extend_from_slice(if k == 0 { &c[..] } else { &c[1..] });
+        }
+        Ok(Some((EdgeSpec::Chain { degree: d, ctrl: Arc::from(ctrl) }, worst)))
     }
 
     /// The surface of a piece's face `depth` into the material, holding the flat points
@@ -364,9 +400,88 @@ fn circle(a: Vec3, m: Vec3, b: Vec3) -> Option<(Vec3, Vec3)> {
     Some((a + (v.cross(w) * u.len2() + w.cross(u) * v.len2()) * (1.0 / (2.0 * w2)), w.normalized()?))
 }
 
-fn bezier(c: &[Vec3; 4], u: f64) -> Vec3 {
-    let w = 1.0 - u;
-    c[0] * (w * w * w) + c[1] * (3.0 * w * w * u) + c[2] * (3.0 * w * u * u) + c[3] * (u * u * u)
+/// The point at `u` of the Bézier over `c` (de Casteljau).
+fn bezier(c: &[Vec3], u: f64) -> Vec3 {
+    let mut w = c.to_vec();
+    while w.len() > 1 {
+        w = w.windows(2).map(|p| p[0] * (1.0 - u) + p[1] * u).collect();
+    }
+    w.first().copied().unwrap_or(Vec3::ZERO)
+}
+
+/// The Bézier piece of [`CHAIN_DEGREE`] from `p0` to `p1` that leaves `p0` along `w0` and meets
+/// `p1` along `w1` (unit ways, its speed there free) and lies nearest the `points` (each with its
+/// parameter along the piece) by least squares. `None` where none does, or where the best runs
+/// back against either way.
+fn fit_piece((p0, w0): (Vec3, Vec3), (p1, w1): (Vec3, Vec3), points: &[(f64, Vec3)]) -> Option<[Vec3; CHAIN_DEGREE + 1]> {
+    const D: usize = CHAIN_DEGREE;
+    // The unknowns: the speeds at both ends, then the inner control points 2 ..= D - 2, each
+    // measured from `p0` so that the sums stay small beside the piece's own size.
+    const N: usize = 2 + 3 * (D - 3);
+    let axis = |v: Vec3, c: usize| [v.x, v.y, v.z].get(c).copied().unwrap_or(0.0);
+    let binomial = |k: usize| (0..k).fold(1.0, |b, i| b * (D - i) as f64 / (i + 1) as f64);
+    let (mut m, mut rhs) = ([[0.0f64; N]; N], [0.0f64; N]);
+    let end = p1 - p0;
+    for &(u, q) in points {
+        let b: Vec<f64> = (0..=D).map(|k| binomial(k) * u.powi(k as i32) * (1.0 - u).powi((D - k) as i32)).collect();
+        let (b1, b6, b7) = (b.get(1).copied()?, b.get(D - 1).copied()?, b.get(D).copied()?);
+        let target = (q - p0) - end * (b6 + b7);
+        for c in 0..3 {
+            let mut row = [0.0f64; N];
+            row[0] = b1 * axis(w0, c);
+            row[1] = -b6 * axis(w1, c);
+            for i in 2..=D - 2 {
+                row[2 + 3 * (i - 2) + c] = b.get(i).copied()?;
+            }
+            let r = axis(target, c);
+            for (x, rx) in row.iter().enumerate() {
+                rhs[x] += rx * r;
+                for (y, ry) in row.iter().enumerate() {
+                    m[x][y] += rx * ry;
+                }
+            }
+        }
+    }
+    let x = solve(m, rhs)?;
+    let (a, b) = (x[0], x[1]);
+    if !(a > 0.0 && b > 0.0) {
+        return None;
+    }
+    let mut c = [p0; D + 1];
+    c[1] = p0 + w0 * a;
+    for (i, ci) in c.iter_mut().enumerate().take(D - 1).skip(2) {
+        let k = 2 + 3 * (i - 2);
+        *ci = p0 + Vec3::new(x[k], x[k + 1], x[k + 2]);
+    }
+    c[D - 1] = p1 - w1 * b;
+    c[D] = p1;
+    Some(c)
+}
+
+/// The solution of `m x = rhs` (Gaussian elimination with partial pivoting); `None` where `m` is
+/// singular.
+fn solve<const N: usize>(mut m: [[f64; N]; N], mut rhs: [f64; N]) -> Option<[f64; N]> {
+    for col in 0..N {
+        let pivot = (col..N).max_by(|&i, &j| m[i][col].abs().total_cmp(&m[j][col].abs()))?;
+        if !(m[pivot][col].abs() > 1e-300) {
+            return None;
+        }
+        m.swap(col, pivot);
+        rhs.swap(col, pivot);
+        for row in col + 1..N {
+            let f = m[row][col] / m[col][col];
+            for k in col..N {
+                m[row][k] -= f * m[col][k];
+            }
+            rhs[row] -= f * rhs[col];
+        }
+    }
+    let mut x = [0.0f64; N];
+    for row in (0..N).rev() {
+        let tail: f64 = (row + 1..N).map(|k| m[row][k] * x[k]).sum();
+        x[row] = (rhs[row] - tail) / m[row][row];
+    }
+    x.iter().all(|v| v.is_finite()).then_some(x)
 }
 
 /// The surface of the wall between an edge's folds on the surface (`bottom`) and a thickness in
@@ -392,5 +507,76 @@ fn wall(bottom: &EdgeSpec, top: &EdgeSpec) -> Result<SurfSpec> {
         }
         (EdgeSpec::Chain { .. }, EdgeSpec::Chain { .. }) => Ok(SurfSpec::Ruled { a: bottom.clone(), b: top.clone() }),
         _ => Err(DocError::Invalid("not supported yet: an edge that folds to a line on one side of the sheet and a curve on the other".into())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcraft_develop::{Anchor, Bend, Datum, Joint, JointKind, Panel, Relief, Rigid3, Sheet, Tail, ZoneEnds, develop, fold};
+
+    fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Region2 {
+        let pts = [Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)];
+        Region2 { outer: Loop2::polygon(&pts).ccw(), holes: Vec::new() }
+    }
+
+    /// A flat line slanted across the whole zone of a 90° bend (2 mm sheet, inside radius 2,
+    /// K 0.5) folds to a helix on either face of the sheet: round the bend's axis at 4 mm on its
+    /// surface and 2 mm a thickness in. Two pieces of degree 7 follow each within the tolerance
+    /// (cubic ones took 32), and they join without a turn.
+    #[test]
+    fn a_slanted_edge_across_a_bend_folds_to_two_pieces_of_its_helix() {
+        let bend = Bend {
+            angle: std::f64::consts::FRAC_PI_2,
+            radius: 2.0,
+            toward_material: true,
+            datum: Datum::Sharp,
+            length: 100.0,
+            ends: ZoneEnds { near: (0.0, 100.0), far: (0.0, 100.0) },
+            tails: (Tail::Keep, Tail::Trim),
+            relief: (Relief::None, Relief::None),
+        };
+        let sheet = Sheet {
+            thickness: 2.0,
+            k_factor: 0.5,
+            panels: vec![
+                Panel { name: "base".into(), region: rect(0.0, 0.0, 100.0, 60.0), ..Panel::default() },
+                Panel { name: "flange".into(), region: rect(0.0, -20.0, 100.0, 0.0), ..Panel::default() },
+            ],
+            joints: vec![Joint {
+                a: Anchor { panel: 0, origin: Vec2::ZERO, dir: Vec2::X },
+                b: Anchor { panel: 1, origin: Vec2::ZERO, dir: Vec2::X },
+                kind: JointKind::Bend(bend),
+            }],
+            corners: Vec::new(),
+            cuts: Vec::new(),
+        };
+        let dev = develop(&sheet, 0).expect("the bracket develops");
+        let folded = fold(&sheet, &dev, &[Rigid3::IDENTITY]).expect("the bracket folds");
+        let [zone] = dev.zones.as_slice() else { panic!("one zone: {:?}", dev.zones) };
+        let line = Seg2::Line { a: zone.near[0] + (zone.near[1] - zone.near[0]) * 0.2, b: zone.far[0] + (zone.far[1] - zone.far[0]) * 0.35 };
+        let f = Folded { dev: &dev, fold: &folded, t: 2.0 };
+        let (o, w) = f.bent(0).expect("the zone is bent").axis();
+        let edges = f.edges(Piece::Zone(0), &[line]).expect("the line folds");
+        for (edge, (depth, radius)) in edges.iter().zip([(0.0, 4.0), (2.0, 2.0)]) {
+            let EdgeSpec::Chain { degree: 7, ctrl } = edge else { panic!("a slanted edge folds to a chain of degree 7: {edge:?}") };
+            let n = (ctrl.len() - 1) / 7;
+            assert!(n <= 2, "depth {depth}: {n} pieces");
+            for k in 0..n {
+                for i in 0..=40 {
+                    let x = i as f64 / 40.0;
+                    let p = bezier(&ctrl[7 * k..=7 * k + 7], x);
+                    let exact = f.at(Piece::Zone(0), line.point_at((k as f64 + x) / n as f64), depth).expect("on the bend");
+                    assert!(p.dist(exact) < CHAIN_TOL, "depth {depth}, piece {k}, {x}: {}", p.dist(exact));
+                    let off_axis = (p - o) - w * (p - o).dot(w);
+                    assert!((off_axis.len() - radius).abs() < CHAIN_TOL, "depth {depth}: radius {}", off_axis.len());
+                }
+            }
+            for k in 1..n {
+                let (before, after) = ((ctrl[7 * k] - ctrl[7 * k - 1]).normalized(), (ctrl[7 * k + 1] - ctrl[7 * k]).normalized());
+                let turn = before.zip(after).map_or(0.0, |(b, a)| b.dot(a));
+                assert!(turn > 1.0 - 1e-12, "depth {depth}: the pieces turn at joint {k}: {turn}");
+            }
+        }
     }
 }
