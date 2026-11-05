@@ -183,9 +183,15 @@ pub struct McpBridge {
     pub port: u16,
 }
 
+fn absolute_path(path: std::path::PathBuf) -> Option<std::path::PathBuf> {
+    if path.is_absolute() { Some(path) } else { std::env::current_dir().ok().map(|cwd| cwd.join(path)) }
+}
+
 impl McpBridge {
     pub fn to_json(&self) -> Value {
-        let control_dir = solidcraft_engine::control_auth::token_path(self.port).and_then(|path| path.parent().map(std::path::Path::to_path_buf));
+        let control_dir = solidcraft_engine::control_auth::token_path(self.port)
+            .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
+            .and_then(absolute_path);
         json!({
             "name": BRIDGE_NAME,
             "command": self.cli.to_string_lossy(),
@@ -193,7 +199,6 @@ impl McpBridge {
             "env": bridge_env(std::env::var_os("XDG_DATA_HOME"), control_dir),
         })
     }
-
     /// The same bridge for an agent inside WSL: the CLI as WSL sees it. It still runs on the
     /// Windows side (WSL starts Windows programs itself), so the port is the same.
     pub fn in_wsl(&self) -> McpBridge {
@@ -790,8 +795,9 @@ mod tests {
         let s = &p["mcpServers"][0];
         assert_eq!(s["name"], BRIDGE_NAME);
         assert_eq!(s["args"], json!(["mcp", "--connect", "127.0.0.1:41234"]));
-        let text = p.to_string();
-        assert!(!text.contains("allow-any-path") && !text.contains("TOKEN") && !text.contains("token"), "{text}");
+        assert!(s.get("token").is_none(), "{s}");
+        assert!(s.get("path").is_none(), "{s}");
+        assert!(s.get("allow-any-path").is_none(), "{s}");
         assert!(p["_meta"]["claudeCode"]["options"]["disallowedTools"].as_array().is_some_and(|t| t.iter().any(|x| x == "Bash")));
         assert_eq!(session_new_params(std::path::Path::new("/tmp"), None, &json!({}))["mcpServers"], json!([]));
     }
@@ -853,6 +859,21 @@ mod tests {
         assert_eq!(p["cwd"], "/mnt/c/Users/u/work");
         assert_eq!(p["mcpServers"][0]["command"], "/mnt/c/Program Files/SolidCraft/solidcraft-cli.exe");
         assert_eq!(p["mcpServers"][0]["args"], json!(["mcp", "--connect", "127.0.0.1:41234"]));
+    }
+
+    #[test]
+    fn absolute_path_preserves_absolute_paths() {
+        let path = std::path::PathBuf::from("/tmp/solidcraft/control");
+        assert_eq!(absolute_path(path.clone()), Some(path));
+    }
+
+    #[test]
+    fn absolute_path_resolves_relative_paths() {
+        let path = std::path::PathBuf::from("solidcraft/control");
+        let result = absolute_path(path).unwrap();
+
+        assert!(result.is_absolute());
+        assert!(result.ends_with("solidcraft/control"));
     }
 
     #[test]
