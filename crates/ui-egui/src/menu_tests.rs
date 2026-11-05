@@ -298,10 +298,23 @@ fn browser_body_menu_acts_on_the_selected_bodies_it_was_opened_on() {
         let params = find(&menu, label).params.unwrap_or_default();
         assert_eq!(params["bodies"], json!(chosen), "{label}: {params}");
     }
-    // Save As Mesh starts with the three bodies picked.
+    // Save As Mesh opens with the three bodies picked.
     context_menu::run_item(&mut app, &find(&menu, "Save As Mesh"), pos2(0.0, 0.0));
-    let picked: Vec<solidcraft_engine::Sel> = chosen.iter().map(|n| solidcraft_engine::Sel::Body { name: n.clone() }).collect();
-    assert_eq!(app.session.selection, picked);
+    let picked: Vec<String> = app
+        .dialog
+        .as_ref()
+        .map(|d| {
+            d.inputs
+                .iter()
+                .flat_map(|i| &i.items)
+                .filter_map(|s| match s {
+                    solidcraft_engine::Sel::Body { name } => Some(name.clone()),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(picked, chosen);
     // A body outside the selection keeps its own menu.
     app.dialog = None;
     let items: Vec<serde_json::Value> = chosen.iter().map(|n| json!({"type": "body", "name": n})).collect();

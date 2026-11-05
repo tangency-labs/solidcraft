@@ -400,7 +400,11 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             act(if app.session.visibility.hidden_bodies.contains(name) { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye")
                 .with(json!({"bodies":[name]})),
         ],
-        Target::Body { name } => body_items(app, std::slice::from_ref(name), true),
+        // The selected bodies when the clicked one is among them, as in the viewport (#12334).
+        Target::Body { name } => {
+            let selected = sel_bodies(app);
+            if selected.contains(name) { body_items(app, &selected, true) } else { body_items(app, std::slice::from_ref(name), true) }
+        }
         Target::Sketch { id } => sketch_items(app, *id),
         Target::Feature { id } => feature_items(app, *id),
         Target::Plane { id } => plane_items(app, *id),
