@@ -4471,7 +4471,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 if let Some(ss) = st.sketch(*sketch)
                     && let Some(ci) = ss.sketch.curve_index(id)
                 {
-                    if !ss.sketch.is_curve_visible_with(ci, false, app.preferences.infinite_line_visibility) {
+                    if !ss.sketch.is_curve_visible_with(ci, app.session.active_sketch == Some(*sketch), app.preferences.infinite_line_visibility) {
                         continue;
                     }
                     for pts in &crate::sketch_display::curve_sample(app, *sketch, ci, &ss.plane, &display_proj(app)).parts {
