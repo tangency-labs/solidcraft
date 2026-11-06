@@ -1511,7 +1511,7 @@ impl egui::TextBuffer for SingleLineBuffer<'_> {
     }
 
     fn insert_text(&mut self, text: &str, at: egui::text::CharIndex) -> usize {
-        self.0.insert_text(&text.replace(['\r', '\n'], " "), at)
+        self.0.insert_text(&text.replace("\r\n", " ").replace(['\r', '\n'], " "), at)
     }
 
     fn delete_char_range(&mut self, range: std::ops::Range<egui::text::CharIndex>) {
@@ -1521,6 +1521,7 @@ impl egui::TextBuffer for SingleLineBuffer<'_> {
 
 /// A compact single-line cell with an explicit, wrapped 30-character/five-row editor.
 /// The returned editor response retains the caller's change and focus-loss commit handling.
+/// Its rectangle includes the overlay frame and scrollbar while expanded.
 /// Tokens: cell_editor, form_close_size, popup frame and font_label.
 pub(crate) fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, handle: &str) -> Response {
     let t = Tokens::get();
@@ -1607,7 +1608,7 @@ pub(crate) fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut Stri
                     })
                     .inner
             });
-        response = shown.inner;
+        response = shown.inner.with_new_rect(shown.response.rect);
         if egui::Popup::is_id_open(&ctx, egui::Popup::default_response_id(&response))
             || (response.lost_focus() && shown.response.contains_pointer() && ui.input(|i| i.pointer.any_down()))
         {
