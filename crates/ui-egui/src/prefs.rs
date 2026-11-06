@@ -1463,6 +1463,10 @@ preference_settings! {
     /// Dragging Extrude's distance arrow stops at flat faces parallel to the profile over it and
     /// outlines them (`extrude_face_snap`, #2398). Off: the drag moves in round steps only.
     extrude_arrow_face_stops: bool = true, PAGE_TOOLS => check_id("prefs.extrude_arrow_face_stops");
+    /// Section Analysis keeps one cut, as before a design kept several (#3977): running it again
+    /// changes the section shown, and Remove Section deletes it. Off: each run adds a section and
+    /// Remove Section hides it. It steers only what the command does; designs keep their sections.
+    section_replaces_cut: bool = false, PAGE_TOOLS => check_id("prefs.section_replaces_cut");
     /// Extrude: with a profile picked, a face, vertex or parallel plane picked off its plane
     /// switches the extent to To Object (off: picks only add profiles, as before). A click into the
     /// Profiles box makes the next picks profiles again.
@@ -6302,6 +6306,7 @@ mod tests {
             ("hole_snaps", json!(true), PAGE_TOOLS),
             ("hole_moves", json!(true), PAGE_TOOLS),
             ("extrude_arrow_face_stops", json!(false), PAGE_TOOLS),
+            ("section_replaces_cut", json!(true), PAGE_TOOLS),
             ("extrude_auto_to_object", json!(false), PAGE_TOOLS),
             ("extrude_view_isometric", json!(true), PAGE_TOOLS),
             ("extrude_view_return", json!(true), PAGE_TOOLS),

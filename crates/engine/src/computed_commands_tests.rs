@@ -178,6 +178,36 @@ fn editor_display_changes_allow_apply_and_cancel() {
     }
 }
 
+/// A Section Analysis made while an editor is open is kept in the design (#3977): OK and Cancel
+/// keep it, undoing the edit keeps it, and undoing once more takes it away again on the whole
+/// design, not on the editor's rollback.
+#[test]
+fn editor_ok_and_cancel_keep_a_section_made_meanwhile() {
+    let sections = |s: &Session| s.doc.section_analyses.items.len();
+    let (mut session, source, original, commands) = extrusion_editor();
+    session.execute("inspect.section", &json!({"plane":"XZ","offset":1})).unwrap();
+    let prepared = session.scratch().compute_editor_commands(&commands, &source, original).unwrap();
+    session.accept_commands(prepared).unwrap();
+    assert_eq!(sections(&session), 1, "OK keeps the section");
+    assert!(session.section.is_some(), "and it is shown");
+    assert_editor_volume(&mut session, 12024.0);
+    session.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(sections(&session), 1, "undoing the edit keeps the section");
+    assert_editor_volume(&mut session, 6024.0);
+    session.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(sections(&session), 0, "undoing the section takes it away");
+    assert_editor_volume(&mut session, 6024.0);
+
+    let (mut session, source, original, _) = extrusion_editor();
+    session.execute("inspect.section", &json!({"plane":"XZ","offset":1})).unwrap();
+    session.restore_editor(&source, original).unwrap();
+    assert_eq!(sections(&session), 1, "Cancel keeps the section");
+    assert_editor_volume(&mut session, 6024.0);
+    session.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(sections(&session), 0);
+    assert_editor_volume(&mut session, 6024.0);
+}
+
 #[test]
 fn editor_visibility_changes_allow_cancel_and_keep_undo_and_redo_at_the_original_marker() {
     for undo_hide in [false, true] {

@@ -154,6 +154,17 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             });
         });
+        // Under Inspect, the menu Section Analysis is in: a heading starting "Section" would be a
+        // second home for the viewport's "Section" status setting.
+        ui_kit::settings_section(ui, "section_analysis", app.tr("ui.inspect"), |ui| {
+            ui.horizontal_wrapped(|ui| {
+                let response = setting::section_replaces_cut(app, ui).on_hover_text(app.tr("prefs.section_replaces_cut_help"));
+                crate::scenario::publish_target("prefs:section_replaces_cut", response.rect);
+                if !crate::prefs_search::suppress_chrome(ui) {
+                    ui_kit::help_icon(ui, app.tr("prefs.section_replaces_cut_help"));
+                }
+            });
+        });
     });
 }
 
