@@ -95,7 +95,9 @@ falls back to the edge's own value, then the feature's.
 - **Junction tolerance:** "equals" means within `SEGMENT_JOIN_EPS` = 1e-9 (`crates/doc/src/sheet.rs`),
   the same number the build merges matching stretches across and the same number it snaps a first
   `from` or a last `to` inside to the edge's ends. One number on both sides, so every list the
-  command accepts builds exactly what the whole-edge flange builds. A wider gap is refused.
+  command accepts tiles the edge with no gap and no overlap: stretches that match in angle, height
+  and side build the bend a whole-edge flange builds, and stretches that differ build one bend
+  each. A wider gap is refused.
 - **Every segment bends:** each stretch becomes a bend with its own angle, height, setback and
   side, so a bend that changes angle, height or side along one edge is one feature. Consecutive
   stretches that match in angle, height and side merge into one bend. There is no flat stretch
