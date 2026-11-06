@@ -14,6 +14,7 @@ trust-unknown-source = []
 
 [dependencies]
 solidcore-record = { workspace = true }
+solidcraft-cloud = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }
@@ -42,9 +43,18 @@ sha2 = { workspace = true }
 [target.'cfg(target_vendor = "apple")'.dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 
-# The computer's name for a design's lock file (src/design_lock.rs; the browser keeps no lock files).
+# Native design-lock host names, Git subprocesses and connection-specific SSH command quoting.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+futures-lite = "2"
 gethostname = { workspace = true }
+process-wrap = { version = "10.0.1", default-features = false, features = ["std", "process-group", "job-object"] }
+shlex = "2.0.1"
+ssh-key = { version = "0.6.7", default-features = false, features = ["std", "ed25519", "encryption", "getrandom"] }
+rand_chacha = "0.3"
+zeroize = { version = "1", features = ["alloc"] }
+tempfile = "3"
+url = "2"
+percent-encoding = "2"
 
 [dev-dependencies]
 solidcraft-testkit = { workspace = true }

@@ -1,0 +1,1 @@
+| docs/book/src/guide/images/cloud-saves-settings.png | SolidCraft contributors | actual SolidCraft 0.23 desktop screenshot of the repository table; isolated profile and example repositories | MIT OR Apache-2.0 |

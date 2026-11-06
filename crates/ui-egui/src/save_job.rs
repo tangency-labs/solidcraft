@@ -24,6 +24,12 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
         app.set_status(crate::i18n::format("ui.edit_in_place_save_waits", &[("name", &name)]), true);
         return false;
     }
+    if command == "file.save" && params.get("path").is_none() && app.session.cloud_binding().is_some() {
+        // Cloud jobs already run asynchronously. Their capture must belong to the live
+        // session so only durable local acknowledgement can advance its saved baseline.
+        let _ = app.run(command, params);
+        return false;
+    }
     #[cfg(not(target_arch = "wasm32"))]
     if app.saving.is_none() && app.file_picker.is_none() && !app.file_load.busy() {
         let mut copy = app.session.scratch();

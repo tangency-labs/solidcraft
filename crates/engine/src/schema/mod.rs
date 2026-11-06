@@ -59,6 +59,7 @@ pub mod bom;
 pub mod browser;
 pub mod canvas;
 pub mod clearance;
+pub mod cloud;
 pub mod compare;
 pub mod component;
 pub mod component_link;

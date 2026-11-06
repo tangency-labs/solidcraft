@@ -1,7 +1,6 @@
 //! Documents and files: new, open designs, CAD files and drawings, insert STEP, save, export.
 
-#[path = "file_thumbnail.rs"]
-mod thumbnail;
+use crate::thumbnail;
 
 #[path = "file_easyprint.rs"]
 mod easyprint;
@@ -535,7 +534,7 @@ fn saved_name(name: &str, old_path: Option<&str>, path: &str, user_named: bool) 
 
 /// Rename the design, and the undo and redo states that still carry the old name, so undo
 /// does not bring the default name back and leave the design looking changed.
-fn rename_design(s: &mut Session, from: &str, to: &str) {
+pub(crate) fn rename_design(s: &mut Session, from: &str, to: &str) {
     // A prepared world is keyed by the document's Arc. Changing only its name
     // must not make an opted-in save lose warm geometry and display caches.
     // Retag only a cache that already matches: cold or stale placements stay so.
@@ -587,16 +586,7 @@ fn write(s: &mut Session, cmd: &str, path: &str, format: &str, compression: &str
     // A path outside the agent's folders says so first, whatever its name.
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
     check_design_name(cmd, path)?;
-    // A move not captured yet isn't in the document a file holds: refuse, rather than write the
-    // file without it and say nothing (#9736). The app asks the Capture Position question first.
-    // An exploded view shown saves as before: its placements aren't the design's.
-    if s.moved_uncaptured() {
-        let moved: Vec<&str> = s.doc.occurrences.iter().filter(|o| s.pending_moves.contains_key(&o.id)).map(|o| o.name.as_str()).collect();
-        return Err(EngineError::Other(format!(
-            "{path}: {} moved and not captured yet; component.capture_position keeps the move and component.revert_position puts it back, then save",
-            moved.join(", ")
-        )));
-    }
+    check_captured_positions(s, path)?;
     if s.path.as_deref() == Some(path) {
         if s.read_only {
             return Err(EngineError::Other(format!("{path}: the design was opened read-only; save it to another file with file.save_as")));
@@ -620,6 +610,19 @@ fn write(s: &mut Session, cmd: &str, path: &str, format: &str, compression: &str
         rename_design(s, to, from);
     }
     r
+}
+
+/// A move not captured yet isn't in a saved document (#9736). The app asks the Capture
+/// Position question first. An exploded view shown keeps the design's saved placements.
+pub(super) fn check_captured_positions(s: &Session, destination: &str) -> Result<()> {
+    if s.moved_uncaptured() {
+        let moved: Vec<&str> = s.doc.occurrences.iter().filter(|o| s.pending_moves.contains_key(&o.id)).map(|o| o.name.as_str()).collect();
+        return Err(EngineError::Other(format!(
+            "{destination}: {} moved and not captured yet; component.capture_position keeps the move and component.revert_position puts it back, then save",
+            moved.join(", ")
+        )));
+    }
+    Ok(())
 }
 
 fn write_file(s: &mut Session, path: &str, format: &str, compression: &str, preview: bool, cache: bool) -> Result<Value> {
@@ -649,6 +652,8 @@ fn write_bytes(
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
+    s.cloud.binding = None;
+    s.cloud.clear_captures();
     s.mark_saved();
     let mut out = json!({"path": path, "bytes": bytes.len(), "name": s.doc.name});
     // A newer SolidCraft's file keeps what this version can't read, and its format number. What
@@ -729,6 +734,8 @@ impl Session {
         self.path.clone_from(&done.path);
         self.disk = done.disk;
         self.read_only = done.read_only;
+        self.cloud.binding.clone_from(&done.cloud.binding);
+        self.cloud.clear_captures();
         self.saved = done.saved.clone();
         self.saved_visibility = done.saved_visibility.clone();
     }
@@ -818,8 +825,12 @@ fn saved_preview(s: &Session) -> Option<solidcraft_io::DesignPreview> {
 }
 
 fn save(s: &mut Session, p: &Value) -> Result<Value> {
-    let path = match str_(p, "path") {
-        Some(x) if !x.trim().is_empty() => x.to_string(),
+    let path = str_(p, "path").filter(|path| !path.trim().is_empty());
+    if s.cloud_binding().is_some() && path.is_none() {
+        return super::cloud::save(s, &json!({}));
+    }
+    let path = match path {
+        Some(x) => x.to_string(),
         _ => s.path.clone().ok_or_else(|| bad("file.save", "the design has no file yet: give a `path`"))?,
     };
     write(

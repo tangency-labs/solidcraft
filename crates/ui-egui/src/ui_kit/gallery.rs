@@ -1119,6 +1119,38 @@ const ELEMENTS: &[Element] = &[
             },
         );
     }),
+    element!("file_status", |ui, _| {
+        FileView::recent_list(ui, |ui| {
+            for (index, (label, tone)) in
+                [("Pushing", FileStatusTone::Pending), ("Outdated", FileStatusTone::Attention), ("Synced", FileStatusTone::Current)]
+                    .into_iter()
+                    .enumerate()
+            {
+                FileView::recent_row_with_status(
+                    ui,
+                    &format!("gallery:file:status:{index}"),
+                    RecentRow {
+                        title: "Cloud bracket",
+                        path: "Workshop/parts/bracket",
+                        when: "",
+                        workspace: "Design",
+                        thumbnail: None,
+                        thumbnail_failed: false,
+                    },
+                    FileStatus { label, tone, pulse: tone != FileStatusTone::Current },
+                );
+            }
+        });
+    }),
+    element!("file_control_row", |ui, state| {
+        FileView::control_row(ui, |ui| {
+            button(ui, "Save", Button::Normal);
+            settings_control_width(ui, Tokens::get().form_label_width, |ui| {
+                dropdown(ui, "gallery_file_repository", &mut state.selected, &["Designs"])
+            });
+            button(ui, "Refresh", Button::Normal);
+        });
+    }),
     element!("file_sample", |ui, _| {
         FileView::sample_grid(
             ui,
@@ -1454,6 +1486,9 @@ const ELEMENTS: &[Element] = &[
     element!("password_field", |ui, s| {
         password_field(ui, ui.scope_id().with("secret"), &mut s.value, "API key");
     }),
+    element!("bounded_password_field", |ui, s| {
+        bounded_password_field(ui, ui.scope_id().with("bounded_secret"), &mut s.value, "Access token", 8192);
+    }),
     element!("number_field", |ui, _| {
         number_field(ui, &mut 3_u32, 1..=200, 1.0, "");
     }),
@@ -1565,6 +1600,9 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("cell_editor", |ui, s| {
         cell_editor(ui, ui.scope_id().with("cell"), &mut s.value, "Expression", true);
+    }),
+    element!("checked_cell_editor", |ui, s| {
+        checked_cell_editor(ui, ui.scope_id().with("checked_cell"), &mut s.value, "Repository", 128, Some(InputStatus::Checking("Testing…")));
     }),
     element!("color_field", |ui, _| {
         color_field(ui, &mut [120, 150, 180]);
@@ -1915,6 +1953,21 @@ const ELEMENTS: &[Element] = &[
     element!("button", "dialog:row:Gallery", Some("dialog:button:Gallery:Add"), |ui, _| {
         row(ui, "Gallery", |ui| {
             button(ui, "Add", Button::Normal);
+        });
+    }),
+    element!("busy_button", "dialog:row:Gallery", Some("dialog:button:Gallery:Synchronize"), |ui, _| {
+        row(ui, "Gallery", |ui| {
+            busy_button(ui, "Synchronize", "send", true, false);
+        });
+    }),
+    element!("busy_button_loading", "dialog:row:Gallery", Some("dialog:button:Gallery:Synchronize"), |ui, _| {
+        row(ui, "Gallery", |ui| {
+            busy_button(ui, "Synchronize", "send", true, true);
+        });
+    }),
+    element!("busy_button_disabled", "dialog:row:Gallery", Some("dialog:button:Gallery:Synchronize"), |ui, _| {
+        row(ui, "Gallery", |ui| {
+            busy_button(ui, "Synchronize", "send", false, false);
         });
     }),
     element!("button_at", |ui, _| {
@@ -3205,6 +3258,125 @@ fn preference_widgets_and_figures_board_in_both_themes() {
                         .unwrap();
                 }
             }
+        }
+    }
+    crate::theme::set_dark(previous);
+}
+
+#[test]
+fn file_status_dots_fade_without_moving_rows_or_labels() {
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        for (tone, pulse) in [(FileStatusTone::Pending, true), (FileStatusTone::Attention, true), (FileStatusTone::Current, false)] {
+            let ctx = crate::fonts::test_context();
+            crate::theme::apply(&ctx);
+            let mut colors = Vec::new();
+            let mut positions = Vec::new();
+            for time in [0.0, 1.0, 2.0] {
+                let mut output = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
+                    ui.add_enabled_ui(tone != FileStatusTone::Attention, |ui| {
+                        FileView::recent_row_with_status(
+                            ui,
+                            "pulse",
+                            RecentRow {
+                                title: "Bracket",
+                                path: "Workshop/parts/bracket",
+                                when: "",
+                                workspace: "Design",
+                                thumbnail: None,
+                                thumbnail_failed: false,
+                            },
+                            FileStatus { label: "Status", tone, pulse },
+                        );
+                    });
+                });
+                output.textures_delta.clear();
+                let dot = crate::scenario::rect_of("pulse:status-dot").unwrap();
+                let color = output
+                    .shapes
+                    .iter()
+                    .find_map(|s| match &s.shape {
+                        egui::Shape::Circle(c) if c.center == dot.center() => Some(c.fill),
+                        _ => None,
+                    })
+                    .unwrap();
+                colors.push(color);
+                positions.push(crate::scenario::rect_of("pulse:status").unwrap());
+            }
+            assert_eq!(positions[0], positions[1]);
+            assert_eq!(positions[1], positions[2]);
+            assert_eq!(colors[0], colors[2], "the fade repeats smoothly");
+            if pulse {
+                assert!(colors[1].a() < colors[0].a() / 2, "pending and disabled outdated dots fade");
+            } else {
+                assert_eq!(colors[0], colors[1], "synced stays steady");
+            }
+            ctx.global_style_mut(|style| style.animation_time = 0.0);
+            let mut output = ctx.run_ui(egui::RawInput { time: Some(3.0), ..Default::default() }, |ui| {
+                FileView::recent_row_with_status(
+                    ui,
+                    "still",
+                    RecentRow {
+                        title: "Bracket",
+                        path: "Workshop/parts/bracket",
+                        when: "",
+                        workspace: "Design",
+                        thumbnail: None,
+                        thumbnail_failed: false,
+                    },
+                    FileStatus { label: "Status", tone, pulse },
+                );
+            });
+            output.textures_delta.clear();
+            let dot = crate::scenario::rect_of("still:status-dot").unwrap();
+            assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Circle(c) if c.center == dot.center() && c.fill == tone.color())));
+            ctx.global_style_mut(|style| style.animation_time = 0.15);
+        }
+    }
+}
+
+#[test]
+fn translated_file_actions_fit_the_reserved_column_in_both_themes() {
+    use super::checks::tests::{raster, textures_update};
+    let _language = crate::i18n::scope("fr");
+    let previous = crate::theme::is_dark();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        let ctx = crate::fonts::test_context();
+        crate::theme::apply(&ctx);
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(700.0, 150.0));
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
+            ui.set_width(680.0);
+            let right = ui.max_rect().right();
+            let label = "Resolve conflict";
+            assert_ne!(crate::i18n::tr_label(label), label);
+            let (row, action) = FileView::recent_row_with_action(
+                ui,
+                "translated-action",
+                RecentRow {
+                    title: "Bracket",
+                    path: "Workshop/parts/bracket",
+                    when: "",
+                    workspace: "Design",
+                    thumbnail: None,
+                    thumbnail_failed: false,
+                },
+                FileStatus { label: "Conflict", tone: FileStatusTone::Conflict, pulse: false },
+                true,
+                Some((label, true)),
+            );
+            let action = action.unwrap();
+            assert!(row.rect.right() <= action.rect.left());
+            assert!(action.rect.right() <= right + 0.1, "translated button must stay inside the available row");
+        });
+        if let Some(directory) = std::env::var_os("SOLIDCRAFT_CLOUD_EVIDENCE") {
+            std::fs::create_dir_all(&directory).unwrap();
+            let mut textures = std::collections::HashMap::new();
+            textures_update(&mut textures, &output.textures_delta);
+            output.textures_delta.clear();
+            raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures)
+                .save(std::path::Path::new(&directory).join(format!("translated-cloud-action-{}.png", if dark { "dark" } else { "light" })))
+                .unwrap();
         }
     }
     crate::theme::set_dark(previous);

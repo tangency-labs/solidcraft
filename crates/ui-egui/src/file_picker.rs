@@ -87,6 +87,15 @@ impl SolveApp {
         self.file_picker = Some(Pending { future, complete });
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn pick_folder(&mut self, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
+        if self.file_picker_busy() {
+            return;
+        }
+        let future = self.services.pick_folder.as_ref().map(|pick| pick());
+        self.begin_picker(future, Box::new(complete));
+    }
+
     pub(crate) fn pick_open_command(&mut self, command: &str, params: Value, extensions: &[&str]) {
         let command = command.to_string();
         self.pick_open_for(extensions, move |app, path| {

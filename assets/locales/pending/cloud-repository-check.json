@@ -1,0 +1,184 @@
+{
+  "en": {
+    "cloud.repository_available": "Repository exists and is accessible.",
+    "cloud.repository_unavailable": "Repository not found or this token cannot access it.",
+    "cloud.repository_connected": "This repository is already connected.",
+    "cloud.repository_invalid": "Enter a GitHub repository as owner/name.",
+    "cloud.repository_check_failed": "Unable to check. Connect to try again."
+  },
+  "en-GB": {
+    "cloud.repository_available": "Repository exists and is accessible.",
+    "cloud.repository_unavailable": "Repository not found or this token cannot access it.",
+    "cloud.repository_connected": "This repository is already connected.",
+    "cloud.repository_invalid": "Enter a GitHub repository as owner/name.",
+    "cloud.repository_check_failed": "Unable to check. Connect to try again."
+  },
+  "cs": {
+    "cloud.repository_available": "Repozitář existuje a je přístupný.",
+    "cloud.repository_unavailable": "Repozitář nebyl nalezen nebo k němu tento token nemá přístup.",
+    "cloud.repository_connected": "Tento repozitář je již připojen.",
+    "cloud.repository_invalid": "Zadejte repozitář GitHub ve tvaru vlastník/název.",
+    "cloud.repository_check_failed": "Kontrola se nezdařila. Zkuste znovu připojením."
+  },
+  "da": {
+    "cloud.repository_available": "Repositoryet findes og er tilgængeligt.",
+    "cloud.repository_unavailable": "Repositoryet blev ikke fundet, eller tokenet har ikke adgang.",
+    "cloud.repository_connected": "Dette repository er allerede tilsluttet.",
+    "cloud.repository_invalid": "Angiv et GitHub-repository som ejer/navn.",
+    "cloud.repository_check_failed": "Kontrol mislykkedes. Opret forbindelse for at prøve igen."
+  },
+  "de": {
+    "cloud.repository_available": "Das Repository existiert und ist zugänglich.",
+    "cloud.repository_unavailable": "Repository nicht gefunden oder dieses Token hat keinen Zugriff.",
+    "cloud.repository_connected": "Dieses Repository ist bereits verbunden.",
+    "cloud.repository_invalid": "GitHub-Repository als Eigentümer/Name eingeben.",
+    "cloud.repository_check_failed": "Prüfung fehlgeschlagen. Zum erneuten Versuch verbinden."
+  },
+  "es": {
+    "cloud.repository_available": "El repositorio existe y es accesible.",
+    "cloud.repository_unavailable": "No se encontró el repositorio o este token no tiene acceso.",
+    "cloud.repository_connected": "Este repositorio ya está conectado.",
+    "cloud.repository_invalid": "Introduce el repositorio de GitHub como propietario/nombre.",
+    "cloud.repository_check_failed": "No se pudo comprobar. Conecta para reintentar."
+  },
+  "fr": {
+    "cloud.repository_available": "Le dépôt existe et est accessible.",
+    "cloud.repository_unavailable": "Dépôt introuvable ou inaccessible avec ce jeton.",
+    "cloud.repository_connected": "Ce dépôt est déjà connecté.",
+    "cloud.repository_invalid": "Saisissez le dépôt GitHub sous la forme propriétaire/nom.",
+    "cloud.repository_check_failed": "Vérification impossible. Connectez-vous pour réessayer."
+  },
+  "gl": {
+    "cloud.repository_available": "O repositorio existe e é accesible.",
+    "cloud.repository_unavailable": "Non se atopou o repositorio ou este token non ten acceso.",
+    "cloud.repository_connected": "Este repositorio xa está conectado.",
+    "cloud.repository_invalid": "Introduce o repositorio de GitHub como propietario/nome.",
+    "cloud.repository_check_failed": "Non se puido comprobar. Conecta para tentalo de novo."
+  },
+  "hu": {
+    "cloud.repository_available": "A tároló létezik és elérhető.",
+    "cloud.repository_unavailable": "A tároló nem található, vagy a token nem fér hozzá.",
+    "cloud.repository_connected": "Ez a tároló már csatlakoztatva van.",
+    "cloud.repository_invalid": "A GitHub-tárolót tulajdonos/név alakban adja meg.",
+    "cloud.repository_check_failed": "Az ellenőrzés sikertelen. Csatlakozzon az újrapróbálkozáshoz."
+  },
+  "id": {
+    "cloud.repository_available": "Repositori ada dan dapat diakses.",
+    "cloud.repository_unavailable": "Repositori tidak ditemukan atau token ini tidak memiliki akses.",
+    "cloud.repository_connected": "Repositori ini sudah terhubung.",
+    "cloud.repository_invalid": "Masukkan repositori GitHub dalam format pemilik/nama.",
+    "cloud.repository_check_failed": "Tidak dapat memeriksa. Hubungkan untuk mencoba lagi."
+  },
+  "it": {
+    "cloud.repository_available": "Il repository esiste ed è accessibile.",
+    "cloud.repository_unavailable": "Repository non trovato o non accessibile con questo token.",
+    "cloud.repository_connected": "Questo repository è già collegato.",
+    "cloud.repository_invalid": "Inserisci il repository GitHub come proprietario/nome.",
+    "cloud.repository_check_failed": "Verifica non riuscita. Collegati per riprovare."
+  },
+  "ja": {
+    "cloud.repository_available": "リポジトリが存在し、アクセスできます。",
+    "cloud.repository_unavailable": "リポジトリが見つからないか、このトークンではアクセスできません。",
+    "cloud.repository_connected": "このリポジトリはすでに接続されています。",
+    "cloud.repository_invalid": "GitHubリポジトリを「所有者/名前」の形式で入力してください。",
+    "cloud.repository_check_failed": "確認できませんでした。接続して再試行してください。"
+  },
+  "ko": {
+    "cloud.repository_available": "저장소가 존재하며 접근할 수 있습니다.",
+    "cloud.repository_unavailable": "저장소를 찾을 수 없거나 이 토큰으로 접근할 수 없습니다.",
+    "cloud.repository_connected": "이미 연결된 저장소입니다.",
+    "cloud.repository_invalid": "GitHub 저장소를 소유자/이름 형식으로 입력하세요.",
+    "cloud.repository_check_failed": "확인하지 못했습니다. 연결하여 다시 시도하세요."
+  },
+  "ms": {
+    "cloud.repository_available": "Repositori wujud dan boleh dicapai.",
+    "cloud.repository_unavailable": "Repositori tidak ditemui atau token ini tiada akses.",
+    "cloud.repository_connected": "Repositori ini sudah disambungkan.",
+    "cloud.repository_invalid": "Masukkan repositori GitHub sebagai pemilik/nama.",
+    "cloud.repository_check_failed": "Tidak dapat menyemak. Sambungkan untuk mencuba lagi."
+  },
+  "nb": {
+    "cloud.repository_available": "Lageret finnes og er tilgjengelig.",
+    "cloud.repository_unavailable": "Lageret ble ikke funnet, eller tokenet har ikke tilgang.",
+    "cloud.repository_connected": "Dette lageret er allerede tilkoblet.",
+    "cloud.repository_invalid": "Angi GitHub-lageret som eier/navn.",
+    "cloud.repository_check_failed": "Kunne ikke kontrollere. Koble til for å prøve igjen."
+  },
+  "nl": {
+    "cloud.repository_available": "De repository bestaat en is toegankelijk.",
+    "cloud.repository_unavailable": "Repository niet gevonden of dit token heeft geen toegang.",
+    "cloud.repository_connected": "Deze repository is al verbonden.",
+    "cloud.repository_invalid": "Voer de GitHub-repository in als eigenaar/naam.",
+    "cloud.repository_check_failed": "Controle mislukt. Verbind om opnieuw te proberen."
+  },
+  "pl": {
+    "cloud.repository_available": "Repozytorium istnieje i jest dostępne.",
+    "cloud.repository_unavailable": "Nie znaleziono repozytorium lub ten token nie ma dostępu.",
+    "cloud.repository_connected": "To repozytorium jest już połączone.",
+    "cloud.repository_invalid": "Wpisz repozytorium GitHub jako właściciel/nazwa.",
+    "cloud.repository_check_failed": "Nie można sprawdzić. Połącz, aby spróbować ponownie."
+  },
+  "pt-BR": {
+    "cloud.repository_available": "O repositório existe e está acessível.",
+    "cloud.repository_unavailable": "Repositório não encontrado ou este token não tem acesso.",
+    "cloud.repository_connected": "Este repositório já está conectado.",
+    "cloud.repository_invalid": "Digite o repositório do GitHub como proprietário/nome.",
+    "cloud.repository_check_failed": "Não foi possível verificar. Conecte para tentar novamente."
+  },
+  "ro": {
+    "cloud.repository_available": "Depozitul există și este accesibil.",
+    "cloud.repository_unavailable": "Depozitul nu a fost găsit sau acest token nu are acces.",
+    "cloud.repository_connected": "Acest depozit este deja conectat.",
+    "cloud.repository_invalid": "Introduceți depozitul GitHub ca proprietar/nume.",
+    "cloud.repository_check_failed": "Verificarea a eșuat. Conectați-vă pentru a reîncerca."
+  },
+  "ru": {
+    "cloud.repository_available": "Репозиторий существует и доступен.",
+    "cloud.repository_unavailable": "Репозиторий не найден или этот токен не имеет доступа.",
+    "cloud.repository_connected": "Этот репозиторий уже подключён.",
+    "cloud.repository_invalid": "Введите репозиторий GitHub в формате владелец/имя.",
+    "cloud.repository_check_failed": "Не удалось проверить. Подключитесь для повторной попытки."
+  },
+  "sv": {
+    "cloud.repository_available": "Arkivet finns och är tillgängligt.",
+    "cloud.repository_unavailable": "Arkivet hittades inte eller denna token saknar åtkomst.",
+    "cloud.repository_connected": "Detta arkiv är redan anslutet.",
+    "cloud.repository_invalid": "Ange GitHub-arkivet som ägare/namn.",
+    "cloud.repository_check_failed": "Kunde inte kontrollera. Anslut för att försöka igen."
+  },
+  "tr": {
+    "cloud.repository_available": "Depo mevcut ve erişilebilir.",
+    "cloud.repository_unavailable": "Depo bulunamadı veya bu belirtecin erişimi yok.",
+    "cloud.repository_connected": "Bu depo zaten bağlı.",
+    "cloud.repository_invalid": "GitHub deposunu sahip/ad biçiminde girin.",
+    "cloud.repository_check_failed": "Kontrol edilemedi. Yeniden denemek için bağlanın."
+  },
+  "uk": {
+    "cloud.repository_available": "Репозиторій існує та доступний.",
+    "cloud.repository_unavailable": "Репозиторій не знайдено або цей токен не має доступу.",
+    "cloud.repository_connected": "Цей репозиторій уже підключено.",
+    "cloud.repository_invalid": "Введіть репозиторій GitHub у форматі власник/назва.",
+    "cloud.repository_check_failed": "Не вдалося перевірити. Підключіться, щоб повторити спробу."
+  },
+  "vi": {
+    "cloud.repository_available": "Kho tồn tại và có thể truy cập.",
+    "cloud.repository_unavailable": "Không tìm thấy kho hoặc mã truy cập này không có quyền.",
+    "cloud.repository_connected": "Kho này đã được kết nối.",
+    "cloud.repository_invalid": "Nhập kho GitHub theo dạng chủ_sở_hữu/tên.",
+    "cloud.repository_check_failed": "Không thể kiểm tra. Kết nối để thử lại."
+  },
+  "zh": {
+    "cloud.repository_available": "仓库存在且可访问。",
+    "cloud.repository_unavailable": "找不到仓库，或此令牌无权访问。",
+    "cloud.repository_connected": "此仓库已连接。",
+    "cloud.repository_invalid": "请输入 GitHub 仓库，格式为所有者/名称。",
+    "cloud.repository_check_failed": "无法检查。请连接以重试。"
+  },
+  "zh-TW": {
+    "cloud.repository_available": "儲存庫存在且可存取。",
+    "cloud.repository_unavailable": "找不到儲存庫，或此權杖無權存取。",
+    "cloud.repository_connected": "此儲存庫已連線。",
+    "cloud.repository_invalid": "請輸入 GitHub 儲存庫，格式為擁有者/名稱。",
+    "cloud.repository_check_failed": "無法檢查。請連線以重試。"
+  }
+}

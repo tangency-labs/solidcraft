@@ -1,0 +1,262 @@
+{
+  "en": {
+    "cmd.cloud.resolve": "Resolve conflict",
+    "cloud.conflict_keep_local": "Keep local",
+    "cloud.conflict_keep_remote": "Keep remote",
+    "cloud.conflict_keep_both": "Keep both",
+    "cloud.conflict_rename": "New path for this copy",
+    "cloud.conflict_hint": "Keep local replaces the repository version. Keep remote moves this copy to Trash. Rename keeps both versions.",
+    "cloud.conflict_sync_first": "Synchronize to load both versions before choosing which to keep.",
+    "cloud.conflict_queued": "Choice saved on this device. Synchronize to finish."
+  },
+  "en-GB": {
+    "cmd.cloud.resolve": "Resolve conflict",
+    "cloud.conflict_keep_local": "Keep local",
+    "cloud.conflict_keep_remote": "Keep remote",
+    "cloud.conflict_keep_both": "Keep both",
+    "cloud.conflict_rename": "New path for this copy",
+    "cloud.conflict_hint": "Keep local replaces the repository version. Keep remote moves this copy to Trash. Rename keeps both versions.",
+    "cloud.conflict_sync_first": "Synchronize to load both versions before choosing which to keep.",
+    "cloud.conflict_queued": "Choice saved on this device. Synchronize to finish."
+  },
+  "cs": {
+    "cmd.cloud.resolve": "Vyřešit konflikt",
+    "cloud.conflict_keep_local": "Ponechat místní",
+    "cloud.conflict_keep_remote": "Ponechat vzdálenou",
+    "cloud.conflict_keep_both": "Ponechat obě",
+    "cloud.conflict_rename": "Nová cesta této kopie",
+    "cloud.conflict_hint": "Místní verze nahradí verzi v repozitáři. Vzdálená verze přesune tuto kopii do koše. Přejmenování zachová obě verze.",
+    "cloud.conflict_sync_first": "Před výběrem načtěte obě verze synchronizací.",
+    "cloud.conflict_queued": "Volba uložena v tomto zařízení. Dokončete synchronizací."
+  },
+  "da": {
+    "cmd.cloud.resolve": "Løs konflikt",
+    "cloud.conflict_keep_local": "Behold lokal",
+    "cloud.conflict_keep_remote": "Behold ekstern",
+    "cloud.conflict_keep_both": "Behold begge",
+    "cloud.conflict_rename": "Ny sti til denne kopi",
+    "cloud.conflict_hint": "Behold lokal erstatter versionen i repositoriet. Behold ekstern flytter denne kopi til papirkurven. Omdøbning bevarer begge versioner.",
+    "cloud.conflict_sync_first": "Synkroniser for at indlæse begge versioner, før du vælger.",
+    "cloud.conflict_queued": "Valget er gemt på denne enhed. Synkroniser for at afslutte."
+  },
+  "de": {
+    "cmd.cloud.resolve": "Konflikt lösen",
+    "cloud.conflict_keep_local": "Lokal behalten",
+    "cloud.conflict_keep_remote": "Remote behalten",
+    "cloud.conflict_keep_both": "Beide behalten",
+    "cloud.conflict_rename": "Neuer Pfad dieser Kopie",
+    "cloud.conflict_hint": "Lokal behalten ersetzt die Version im Repository. Remote behalten verschiebt diese Kopie in den Papierkorb. Umbenennen behält beide Versionen.",
+    "cloud.conflict_sync_first": "Synchronisieren Sie beide Versionen vor der Auswahl.",
+    "cloud.conflict_queued": "Auswahl auf diesem Gerät gespeichert. Zum Abschließen synchronisieren."
+  },
+  "es": {
+    "cmd.cloud.resolve": "Resolver conflicto",
+    "cloud.conflict_keep_local": "Conservar local",
+    "cloud.conflict_keep_remote": "Conservar remota",
+    "cloud.conflict_keep_both": "Conservar ambas",
+    "cloud.conflict_rename": "Nueva ruta de esta copia",
+    "cloud.conflict_hint": "Conservar local reemplaza la versión del repositorio. Conservar remota mueve esta copia a la papelera. Cambiar el nombre conserva ambas versiones.",
+    "cloud.conflict_sync_first": "Sincroniza para cargar ambas versiones antes de elegir.",
+    "cloud.conflict_queued": "Decisión guardada en este dispositivo. Sincroniza para finalizar."
+  },
+  "fr": {
+    "cmd.cloud.resolve": "Résoudre le conflit",
+    "cloud.conflict_keep_local": "Garder la version locale",
+    "cloud.conflict_keep_remote": "Garder la version distante",
+    "cloud.conflict_keep_both": "Garder les deux",
+    "cloud.conflict_rename": "Nouveau chemin de cette copie",
+    "cloud.conflict_hint": "Garder la version locale remplace celle du dépôt. Garder la version distante met cette copie à la corbeille. Renommer conserve les deux versions.",
+    "cloud.conflict_sync_first": "Synchronisez pour charger les deux versions avant de choisir.",
+    "cloud.conflict_queued": "Choix enregistré sur cet appareil. Synchronisez pour terminer."
+  },
+  "gl": {
+    "cmd.cloud.resolve": "Resolver conflito",
+    "cloud.conflict_keep_local": "Conservar local",
+    "cloud.conflict_keep_remote": "Conservar remota",
+    "cloud.conflict_keep_both": "Conservar ambas",
+    "cloud.conflict_rename": "Nova ruta desta copia",
+    "cloud.conflict_hint": "Conservar local substitúe a versión do repositorio. Conservar remota move esta copia ao lixo. Cambiar o nome conserva ambas as versións.",
+    "cloud.conflict_sync_first": "Sincroniza para cargar ambas as versións antes de elixir.",
+    "cloud.conflict_queued": "Escolla gardada neste dispositivo. Sincroniza para rematar."
+  },
+  "hu": {
+    "cmd.cloud.resolve": "Ütközés feloldása",
+    "cloud.conflict_keep_local": "Helyi megtartása",
+    "cloud.conflict_keep_remote": "Távoli megtartása",
+    "cloud.conflict_keep_both": "Mindkettő megtartása",
+    "cloud.conflict_rename": "A másolat új útvonala",
+    "cloud.conflict_hint": "A helyi verzió lecseréli a tároló verzióját. A távoli verzió megtartása ezt a másolatot a kukába helyezi. Az átnevezés mindkettőt megőrzi.",
+    "cloud.conflict_sync_first": "A választás előtt szinkronizálja mindkét verziót.",
+    "cloud.conflict_queued": "A választás mentve ezen az eszközön. A befejezéshez szinkronizáljon."
+  },
+  "id": {
+    "cmd.cloud.resolve": "Selesaikan konflik",
+    "cloud.conflict_keep_local": "Simpan lokal",
+    "cloud.conflict_keep_remote": "Simpan jarak jauh",
+    "cloud.conflict_keep_both": "Simpan keduanya",
+    "cloud.conflict_rename": "Jalur baru salinan ini",
+    "cloud.conflict_hint": "Simpan lokal mengganti versi repositori. Simpan jarak jauh memindahkan salinan ini ke Sampah. Ubah nama menyimpan kedua versi.",
+    "cloud.conflict_sync_first": "Sinkronkan untuk memuat kedua versi sebelum memilih.",
+    "cloud.conflict_queued": "Pilihan disimpan di perangkat ini. Sinkronkan untuk menyelesaikan."
+  },
+  "it": {
+    "cmd.cloud.resolve": "Risolvi conflitto",
+    "cloud.conflict_keep_local": "Mantieni locale",
+    "cloud.conflict_keep_remote": "Mantieni remota",
+    "cloud.conflict_keep_both": "Mantieni entrambe",
+    "cloud.conflict_rename": "Nuovo percorso della copia",
+    "cloud.conflict_hint": "Mantieni locale sostituisce la versione nel repository. Mantieni remota sposta questa copia nel cestino. Rinominare conserva entrambe le versioni.",
+    "cloud.conflict_sync_first": "Sincronizza per caricare entrambe le versioni prima di scegliere.",
+    "cloud.conflict_queued": "Scelta salvata su questo dispositivo. Sincronizza per completare."
+  },
+  "ja": {
+    "cmd.cloud.resolve": "競合を解決",
+    "cloud.conflict_keep_local": "ローカルを保持",
+    "cloud.conflict_keep_remote": "リモートを保持",
+    "cloud.conflict_keep_both": "両方を保持",
+    "cloud.conflict_rename": "このコピーの新しいパス",
+    "cloud.conflict_hint": "ローカルを保持するとリポジトリの版を置き換えます。リモートを保持するとこのコピーをゴミ箱へ移動します。名前を変更すると両方を保持します。",
+    "cloud.conflict_sync_first": "選択する前に同期して両方の版を読み込んでください。",
+    "cloud.conflict_queued": "選択はこの端末に保存されました。同期して完了してください。"
+  },
+  "ko": {
+    "cmd.cloud.resolve": "충돌 해결",
+    "cloud.conflict_keep_local": "로컬 유지",
+    "cloud.conflict_keep_remote": "원격 유지",
+    "cloud.conflict_keep_both": "둘 다 유지",
+    "cloud.conflict_rename": "이 사본의 새 경로",
+    "cloud.conflict_hint": "로컬 유지는 저장소 버전을 바꿉니다. 원격 유지는 이 사본을 휴지통으로 옮깁니다. 이름을 바꾸면 두 버전이 모두 유지됩니다.",
+    "cloud.conflict_sync_first": "선택하기 전에 동기화하여 두 버전을 불러오세요.",
+    "cloud.conflict_queued": "선택이 이 기기에 저장되었습니다. 동기화하여 완료하세요."
+  },
+  "ms": {
+    "cmd.cloud.resolve": "Selesaikan konflik",
+    "cloud.conflict_keep_local": "Kekalkan setempat",
+    "cloud.conflict_keep_remote": "Kekalkan jauh",
+    "cloud.conflict_keep_both": "Kekalkan kedua-dua",
+    "cloud.conflict_rename": "Laluan baharu salinan ini",
+    "cloud.conflict_hint": "Kekalkan setempat menggantikan versi repositori. Kekalkan jauh memindahkan salinan ini ke Sampah. Penamaan semula mengekalkan kedua-dua versi.",
+    "cloud.conflict_sync_first": "Segerakkan untuk memuatkan kedua-dua versi sebelum memilih.",
+    "cloud.conflict_queued": "Pilihan disimpan pada peranti ini. Segerakkan untuk selesai."
+  },
+  "nb": {
+    "cmd.cloud.resolve": "Løs konflikt",
+    "cloud.conflict_keep_local": "Behold lokal",
+    "cloud.conflict_keep_remote": "Behold ekstern",
+    "cloud.conflict_keep_both": "Behold begge",
+    "cloud.conflict_rename": "Ny sti for denne kopien",
+    "cloud.conflict_hint": "Behold lokal erstatter versjonen i repositoriet. Behold ekstern flytter denne kopien til papirkurven. Gi nytt navn beholder begge versjonene.",
+    "cloud.conflict_sync_first": "Synkroniser for å laste begge versjonene før du velger.",
+    "cloud.conflict_queued": "Valget er lagret på denne enheten. Synkroniser for å fullføre."
+  },
+  "nl": {
+    "cmd.cloud.resolve": "Conflict oplossen",
+    "cloud.conflict_keep_local": "Lokaal behouden",
+    "cloud.conflict_keep_remote": "Extern behouden",
+    "cloud.conflict_keep_both": "Beide behouden",
+    "cloud.conflict_rename": "Nieuw pad voor deze kopie",
+    "cloud.conflict_hint": "Lokaal behouden vervangt de versie in de repository. Extern behouden verplaatst deze kopie naar de prullenbak. Hernoemen bewaart beide versies.",
+    "cloud.conflict_sync_first": "Synchroniseer beide versies voordat u kiest.",
+    "cloud.conflict_queued": "Keuze op dit apparaat opgeslagen. Synchroniseer om af te ronden."
+  },
+  "pl": {
+    "cmd.cloud.resolve": "Rozwiąż konflikt",
+    "cloud.conflict_keep_local": "Zachowaj lokalną",
+    "cloud.conflict_keep_remote": "Zachowaj zdalną",
+    "cloud.conflict_keep_both": "Zachowaj obie",
+    "cloud.conflict_rename": "Nowa ścieżka tej kopii",
+    "cloud.conflict_hint": "Zachowanie lokalnej zastępuje wersję w repozytorium. Zachowanie zdalnej przenosi tę kopię do kosza. Zmiana nazwy zachowuje obie wersje.",
+    "cloud.conflict_sync_first": "Zsynchronizuj, aby wczytać obie wersje przed wyborem.",
+    "cloud.conflict_queued": "Wybór zapisano na tym urządzeniu. Zsynchronizuj, aby zakończyć."
+  },
+  "pt-BR": {
+    "cmd.cloud.resolve": "Resolver conflito",
+    "cloud.conflict_keep_local": "Manter local",
+    "cloud.conflict_keep_remote": "Manter remota",
+    "cloud.conflict_keep_both": "Manter ambas",
+    "cloud.conflict_rename": "Novo caminho desta cópia",
+    "cloud.conflict_hint": "Manter local substitui a versão no repositório. Manter remota move esta cópia para a lixeira. Renomear mantém ambas as versões.",
+    "cloud.conflict_sync_first": "Sincronize para carregar ambas as versões antes de escolher.",
+    "cloud.conflict_queued": "Escolha salva neste dispositivo. Sincronize para concluir."
+  },
+  "ro": {
+    "cmd.cloud.resolve": "Rezolvă conflictul",
+    "cloud.conflict_keep_local": "Păstrează locală",
+    "cloud.conflict_keep_remote": "Păstrează la distanță",
+    "cloud.conflict_keep_both": "Păstrează ambele",
+    "cloud.conflict_rename": "Calea nouă a acestei copii",
+    "cloud.conflict_hint": "Versiunea locală o înlocuiește pe cea din depozit. Versiunea la distanță mută această copie în coș. Redenumirea păstrează ambele versiuni.",
+    "cloud.conflict_sync_first": "Sincronizează pentru a încărca ambele versiuni înainte de alegere.",
+    "cloud.conflict_queued": "Alegerea este salvată pe acest dispozitiv. Sincronizează pentru a finaliza."
+  },
+  "ru": {
+    "cmd.cloud.resolve": "Разрешить конфликт",
+    "cloud.conflict_keep_local": "Оставить локальную",
+    "cloud.conflict_keep_remote": "Оставить удалённую",
+    "cloud.conflict_keep_both": "Оставить обе",
+    "cloud.conflict_rename": "Новый путь этой копии",
+    "cloud.conflict_hint": "Локальная версия заменяет версию в репозитории. Удалённая версия перемещает эту копию в корзину. Переименование сохраняет обе версии.",
+    "cloud.conflict_sync_first": "Синхронизируйте обе версии перед выбором.",
+    "cloud.conflict_queued": "Выбор сохранён на устройстве. Синхронизируйте для завершения."
+  },
+  "sv": {
+    "cmd.cloud.resolve": "Lös konflikt",
+    "cloud.conflict_keep_local": "Behåll lokal",
+    "cloud.conflict_keep_remote": "Behåll fjärrversion",
+    "cloud.conflict_keep_both": "Behåll båda",
+    "cloud.conflict_rename": "Ny sökväg för kopian",
+    "cloud.conflict_hint": "Behåll lokal ersätter versionen i förrådet. Behåll fjärrversion flyttar denna kopia till papperskorgen. Byt namn behåller båda versionerna.",
+    "cloud.conflict_sync_first": "Synkronisera båda versionerna innan du väljer.",
+    "cloud.conflict_queued": "Valet har sparats på enheten. Synkronisera för att slutföra."
+  },
+  "tr": {
+    "cmd.cloud.resolve": "Çakışmayı çöz",
+    "cloud.conflict_keep_local": "Yereli tut",
+    "cloud.conflict_keep_remote": "Uzağı tut",
+    "cloud.conflict_keep_both": "İkisini de tut",
+    "cloud.conflict_rename": "Bu kopyanın yeni yolu",
+    "cloud.conflict_hint": "Yereli tut depodaki sürümü değiştirir. Uzağı tut bu kopyayı çöp kutusuna taşır. Yeniden adlandırma iki sürümü de korur.",
+    "cloud.conflict_sync_first": "Seçmeden önce iki sürümü yüklemek için eşitleyin.",
+    "cloud.conflict_queued": "Seçim bu aygıta kaydedildi. Tamamlamak için eşitleyin."
+  },
+  "uk": {
+    "cmd.cloud.resolve": "Вирішити конфлікт",
+    "cloud.conflict_keep_local": "Зберегти локальну",
+    "cloud.conflict_keep_remote": "Зберегти віддалену",
+    "cloud.conflict_keep_both": "Зберегти обидві",
+    "cloud.conflict_rename": "Новий шлях цієї копії",
+    "cloud.conflict_hint": "Локальна версія замінює версію в репозиторії. Віддалена версія переміщує цю копію до кошика. Перейменування зберігає обидві версії.",
+    "cloud.conflict_sync_first": "Синхронізуйте обидві версії перед вибором.",
+    "cloud.conflict_queued": "Вибір збережено на пристрої. Синхронізуйте для завершення."
+  },
+  "vi": {
+    "cmd.cloud.resolve": "Giải quyết xung đột",
+    "cloud.conflict_keep_local": "Giữ bản cục bộ",
+    "cloud.conflict_keep_remote": "Giữ bản từ xa",
+    "cloud.conflict_keep_both": "Giữ cả hai",
+    "cloud.conflict_rename": "Đường dẫn mới cho bản sao",
+    "cloud.conflict_hint": "Giữ bản cục bộ thay thế phiên bản trong kho. Giữ bản từ xa chuyển bản sao này vào Thùng rác. Đổi tên giữ cả hai phiên bản.",
+    "cloud.conflict_sync_first": "Đồng bộ để tải cả hai phiên bản trước khi chọn.",
+    "cloud.conflict_queued": "Lựa chọn đã lưu trên thiết bị này. Đồng bộ để hoàn tất."
+  },
+  "zh": {
+    "cmd.cloud.resolve": "解决冲突",
+    "cloud.conflict_keep_local": "保留本地版本",
+    "cloud.conflict_keep_remote": "保留远程版本",
+    "cloud.conflict_keep_both": "保留两者",
+    "cloud.conflict_rename": "此副本的新路径",
+    "cloud.conflict_hint": "保留本地版本会替换仓库中的版本。保留远程版本会将此副本移入回收站。重命名可保留两个版本。",
+    "cloud.conflict_sync_first": "选择前请同步以加载两个版本。",
+    "cloud.conflict_queued": "选择已保存在此设备上。同步以完成操作。"
+  },
+  "zh-TW": {
+    "cmd.cloud.resolve": "解決衝突",
+    "cloud.conflict_keep_local": "保留本機版本",
+    "cloud.conflict_keep_remote": "保留遠端版本",
+    "cloud.conflict_keep_both": "保留兩者",
+    "cloud.conflict_rename": "此副本的新路徑",
+    "cloud.conflict_hint": "保留本機版本會取代儲存庫中的版本。保留遠端版本會將此副本移至垃圾桶。重新命名可保留兩個版本。",
+    "cloud.conflict_sync_first": "選擇前請同步以載入兩個版本。",
+    "cloud.conflict_queued": "選擇已儲存在此裝置上。同步以完成操作。"
+  }
+}
