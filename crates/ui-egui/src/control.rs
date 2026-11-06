@@ -357,6 +357,11 @@ fn command(step: &Value) -> Option<&str> {
     step.get("command").or_else(|| step.get("id")).and_then(Value::as_str)
 }
 
+/// A batch step's parameters: missing or null is no parameters.
+fn step_params(step: &Value) -> Value {
+    step.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({}))
+}
+
 /// Most steps in one `engine.batch` (as in the MCP `batch` tool).
 const MAX_BATCH: usize = 10_000;
 
@@ -427,9 +432,7 @@ fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
         // checkpoint; previous application changes are truthfully retained.
         let mut results = Vec::new();
         for (i, step) in steps.iter().enumerate() {
-            let result = command(step)
-                .ok_or_else(|| "missing command".to_string())
-                .and_then(|id| execute(app, id, step.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({}))));
+            let result = command(step).ok_or_else(|| "missing command".to_string()).and_then(|id| execute(app, id, step_params(step)));
             match result {
                 Ok(result) => results.push(result),
                 Err(error) => return ok(solidcraft_engine::panels::commands::sequential_failure(i, command(step), error, results)),
@@ -476,7 +479,7 @@ fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
         for i in singles {
             let Some(step) = steps.get(i) else { continue };
             let (r, took) = timing::time(profile, || match command(step) {
-                Some(id) => execute(app, id, step.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}))),
+                Some(id) => execute(app, id, step_params(step)),
                 None => Err("missing `command`".to_string()),
             });
             if timed {
@@ -498,6 +501,43 @@ fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
         let _ = app.run("edit.restore_checkpoint", json!({"checkpoint": id, "forget": true}));
     }
     ok(with_timings(json!({"completed": results.len(), "results": results, "undone": 0}), timed, rows, clock.ms()))
+}
+
+/// `engine.script {commands}` (or the bare array): each step runs as `engine.execute` runs it, so
+/// the window follows it as it follows a batch step (#12629). The first failure stops the script,
+/// and the steps before it stay. Its words are the engine script's, or the panel error when a step
+/// is a panel command.
+fn script(app: &mut SolveApp, p: &Value) -> Outcome {
+    let steps = match solidcraft_engine::script_steps(p) {
+        Ok(steps) => steps,
+        Err(e) => return err(e),
+    };
+    if let Some(c) = steps.iter().find_map(switches_design) {
+        return err(format!("engine.script unavailable: {c} switches to another design (send it on its own)"));
+    }
+    let panels = steps.iter().any(|step| command(step).is_some_and(solidcraft_engine::panels::commands::is_command));
+    let mut results = Vec::with_capacity(steps.len());
+    for (i, step) in steps.iter().enumerate() {
+        let Some(id) = command(step) else {
+            return if panels {
+                Outcome::Done(json!({"ok": false, "error": "missing command", "step": i + 1}))
+            } else {
+                err(format!("script step {}: missing `command`", i + 1))
+            };
+        };
+        match execute(app, id, step_params(step)) {
+            Ok(result) => results.push(result),
+            Err(error) if panels => {
+                let mut reply = json!({"ok": false, "error": error, "step": i + 1});
+                if let Some(reason) = solidcraft_engine::panels::commands::structured_error(&error) {
+                    reply["panel_error"] = reason;
+                }
+                return Outcome::Done(reply);
+            }
+            Err(error) => return err(format!("step {} ({id}): {error}", i + 1)),
+        }
+    }
+    ok(json!(results))
 }
 
 /// A batch reply with `timings` and `total_ms` when they were asked for.
@@ -791,7 +831,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "engine.execute" | "command" => {
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
-            wrap(execute(app, id, p.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}))))
+            wrap(execute(app, id, step_params(p)))
         }
         "engine.batch" => batch(app, p),
         "ui.agent_cursor" => {
@@ -810,52 +850,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             }
             ok(json!(app.ui.agent_cursor))
         }
-        "engine.script" => {
-            let steps = p.as_array().or_else(|| p.get("commands").and_then(Value::as_array));
-            if let Some(c) = steps.and_then(|steps| steps.iter().find_map(switches_design)) {
-                return err(format!("engine.script unavailable: {c} switches to another design (send it on its own)"));
-            }
-            if let Some(steps) =
-                steps.filter(|steps| steps.iter().any(|step| command(step).is_some_and(solidcraft_engine::panels::commands::is_command)))
-            {
-                if steps.len() > 100_000 {
-                    return err("script too long");
-                }
-                let mut results = Vec::new();
-                for (i, step) in steps.iter().enumerate() {
-                    let result = command(step)
-                        .ok_or_else(|| "missing command".to_string())
-                        .and_then(|id| execute(app, id, step.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({}))));
-                    match result {
-                        Ok(result) => results.push(result),
-                        Err(error) => {
-                            let mut reply = json!({"ok":false,"error":error,"step":i + 1});
-                            if let Some(reason) = solidcraft_engine::panels::commands::structured_error(&error) {
-                                reply["panel_error"] = reason;
-                            }
-                            return Outcome::Done(reply);
-                        }
-                    }
-                }
-                return ok(json!(results));
-            }
-            let mut replaced = false;
-            let r = app
-                .session
-                .run_script_each(p, &mut |i, _| {
-                    let id = steps.and_then(|steps| steps.get(i)).and_then(command).and_then(solidcraft_engine::find_command).map(|spec| spec.id);
-                    replaced |= matches!(id, Some("file.new" | "doc.open" | "doc.recover"));
-                })
-                .map(|v| json!(v))
-                .map_err(|e| e.to_string());
-            // A successful replacement still happened if a later script step failed.
-            if replaced {
-                crate::documents::reset_chat(app);
-                app.edit_in_place.active = None;
-            }
-            app.follow_view_request(false);
-            wrap(r)
-        }
+        "engine.script" => script(app, p),
         "engine.commands" => wrap(execute(app, "engine.commands", json!({}))),
         "document.inspect" => wrap(app.session.execute("document.inspect", p).map_err(|e| e.to_string())),
         "document.revision" => wrap(app.session.execute("document.revision", p).map_err(|e| e.to_string())),
@@ -2683,6 +2678,82 @@ mod tests {
         assert!(v["result"].get("failed").is_none(), "{v}");
         assert!(frames <= 2, "a batch of 80 steps took {frames} frames");
         assert_eq!(inspect(&mut h)["sketches"].as_array().map(Vec::len), Some(40));
+    }
+
+    /// #12629: each step of `engine.script` gets what the window does after the command, as the
+    /// same step of `engine.batch` gets it: the grid, the tool, the spin, a preference, the echo.
+    #[test]
+    fn a_script_step_gets_the_windows_follow_up_like_a_batch_step() {
+        let steps = json!([
+            {"command": "view.grid", "params": {"on": false}},
+            {"command": "view.tool", "params": {"tool": "pan"}},
+            {"command": "view.spin", "params": {"on": true}},
+            {"command": "view.angle_readout", "params": {"enabled": true}},
+            {"command": "sketch.create", "params": {"plane": "XY"}},
+            {"command": "sketch.finish", "params": {}},
+        ]);
+        let window = |method: &str| {
+            let mut h = crate::scenario::Harness::new();
+            // No checkpoint, so the batch runs exactly the script's steps.
+            let v = h.call(method, json!({"commands": steps, "rollback": false}));
+            assert_eq!(v["ok"], true, "{method}: {v}");
+            let app = &h.app;
+            (app.ui.show_grid, app.viewport.nav, app.viewport.spin, app.preferences.show_view_angles, app.session.log.clone())
+        };
+        let batch = window("engine.batch");
+        assert_eq!((batch.0, batch.1, batch.2, batch.3), (false, Some(crate::viewport::NavMode::Pan), true, true));
+        assert_eq!(window("engine.script"), batch);
+    }
+
+    /// The first failing step stops a script, and the steps before it stay with what the window
+    /// did after them: a preference set by step 1 is kept when step 3 fails.
+    #[test]
+    fn a_script_stops_at_its_failing_step_and_keeps_the_ones_before() {
+        let mut h = crate::scenario::Harness::new();
+        assert!(!h.app.preferences.show_view_angles && h.app.ui.show_grid);
+        let v = h.call(
+            "engine.script",
+            json!({"commands": [
+                {"command": "view.angle_readout", "params": {"enabled": true}},
+                {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}},
+                {"command": "no.such_command"},
+                {"command": "view.grid", "params": {"on": false}},
+            ]}),
+        );
+        assert_eq!(v["ok"], false, "{v}");
+        assert!(v["error"].as_str().is_some_and(|e| e.starts_with("step 3 (no.such_command): ")), "{v}");
+        assert!(h.app.preferences.show_view_angles, "step 1's preference stays");
+        assert_eq!(inspect(&mut h)["bodies"].as_array().map(Vec::len), Some(1), "step 2's box stays");
+        assert!(h.app.ui.show_grid, "nothing after the failing step ran");
+        let v = h.call("engine.script", json!([{"params": {}}]));
+        assert_eq!(v["error"], "script step 1: missing `command`", "{v}");
+    }
+
+    /// A panel command among a script's steps no longer changes how the other steps run.
+    #[test]
+    fn a_script_with_and_without_a_panel_step_leaves_the_window_alike() {
+        let window = |panel: bool| {
+            let mut app = panel_command_app();
+            let mut steps = vec![
+                json!({"command": "view.grid", "params": {"on": false}}),
+                json!({"command": "view.tool", "params": {"tool": "pan"}}),
+                json!({"command": "view.angle_readout", "params": {"enabled": true}}),
+            ];
+            if panel {
+                steps.push(json!({"command": "layout.get"}));
+            }
+            let v = panel_control(&mut app, "engine.script", json!({"commands": steps}));
+            assert_eq!(v["ok"], true, "{v}");
+            (app.ui.show_grid, app.viewport.nav, app.preferences.show_view_angles)
+        };
+        assert_eq!(window(false), window(true));
+        assert_eq!(window(false), (false, Some(crate::viewport::NavMode::Pan), true));
+        // A failing step of such a script is named by its number, with the panel's own reason.
+        let mut app = panel_command_app();
+        let steps = json!([{"command": "view.grid", "params": {"on": false}}, {"command": "panel.list", "params": {"unknown": true}}]);
+        let v = panel_control(&mut app, "engine.script", json!({"commands": steps}));
+        assert_eq!((&v["ok"], &v["step"], &v["panel_error"]["rule"]), (&json!(false), &json!(2), &json!("schema")), "{v}");
+        assert!(!app.ui.show_grid, "the step before it stays");
     }
 
     /// #5822: `engine.batch {coalesce_parameters}` sets a run of parameter edits together, one
