@@ -2511,6 +2511,34 @@ mod tests {
         assert!(crate::view::sketch_shown(&s, sketch), "shown on its own, it stays shown");
     }
 
+    /// #12125: a sketch on a body face, right before the History marker, stayed drawn after its
+    /// eye hid it, and hiding it again changed nothing. The user's hide wins over the marker; a
+    /// sketch hidden only because a feature uses it is still shown at the marker (#5202).
+    #[test]
+    fn a_sketch_hidden_with_its_eye_stays_hidden_right_before_the_history_marker() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Block"}));
+        let sketch = run(&mut s, "sketch.create", json!({"plane": {"face": [10, 10, 20]}, "name": "OnTop"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [6, 6]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "Later"}));
+        run(&mut s, "timeline.roll_to", json!({"position": 2}));
+        assert_eq!(s.doc.marker, Some(2), "the sketch is the last step before the marker");
+        assert!(crate::view::sketch_shown(&s, sketch));
+        run(&mut s, "browser.visibility", json!({"items": [sketch], "visible": false}));
+        assert!(!crate::view::sketch_shown(&s, sketch), "hidden with its eye, it is not drawn at the marker");
+        let d = run(&mut s, "document.inspect", json!({}));
+        assert!(d["sketches"].as_array().unwrap().iter().all(|x| x["visible"] == false), "{d}");
+        run(&mut s, "browser.visibility", json!({"items": [sketch], "visible": true}));
+        assert!(crate::view::sketch_shown(&s, sketch));
+        // Used by an Extrude placed at the marker, it hides itself; stepping back onto it shows it.
+        run(&mut s, "solid.extrude", json!({"sketch": sketch, "distance": 2}));
+        run(&mut s, "timeline.roll_to", json!({"position": "end"}));
+        assert!(!crate::view::sketch_shown(&s, sketch), "the Extrude uses it");
+        run(&mut s, "timeline.roll_to", json!({"position": 2}));
+        assert!(crate::view::sketch_shown(&s, sketch), "a used sketch shows while it is the current step");
+    }
+
     #[test]
     fn a_sheet_metal_flange_hides_its_sketch_as_an_extrude_does() {
         // #6804: the base flange's sketch stayed shown; its line on the plate's bottom edge then
