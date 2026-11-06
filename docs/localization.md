@@ -1,7 +1,7 @@
 # UI localization
 
 SolidCraft embeds its translations and works offline. English, Arabic, Bosnian, Czech, Danish, German, English (UK), Spanish, Finnish, French, Galician, Hebrew, Croatian, Italian,
-Japanese, Georgian, Korean, Malay, Norwegian Bokmål, Dutch, Polish, Brazilian Portuguese, Russian, Serbian, Turkish, Ukrainian and Chinese are currently registered in `crates/ui-egui/src/i18n.rs`. Adding a language requires an
+Japanese, Georgian, Korean, Lao, Malay, Norwegian Bokmål, Dutch, Polish, Brazilian Portuguese, Russian, Serbian, Turkish, Ukrainian and Chinese are currently registered in `crates/ui-egui/src/i18n.rs`. Adding a language requires an
 embedded catalog and one registration there; the preferences selector and validation use the same
 registry.
 
@@ -62,7 +62,7 @@ that looks untranslated. Two guards catch that in the build:
 - `every_complete_catalog_carries_every_english_message` — adding a key to `en.json`
   without giving it to a complete catalog fails the tests. English is the source catalog,
   Arabic, Hebrew, Japanese and Chinese are delivered complete; Bosnian, Croatian, Serbian and Georgian carry
-  every English message today but are not held to it, so a new label may follow later in them; Danish, German, Spanish, Finnish, Galician, Italian, Korean, Malay, Norwegian Bokmål, Polish, Brazilian Portuguese, Russian, French, Ukrainian and
+  every English message today but are not held to it, so a new label may follow later in them; Danish, German, Spanish, Finnish, Galician, Italian, Korean, Lao, Malay, Norwegian Bokmål, Polish, Brazilian Portuguese, Russian, French, Ukrainian and
   Turkish are partial — their gaps fall back to English and are reported by `cargo xtask i18n` without
   failing the build. A new label needs en, ar, he, ja, zh, de and ko; Russian, French, Ukrainian and Malay may
   follow later.
@@ -114,6 +114,8 @@ are not translated.
 The Georgian catalog (`ka`, shown as ქართული) uses ესკიზი (Sketch), სხეული (Body), ოპერაცია (timeline Feature), შეზღუდვა (Constraint), ზომა (Dimension), ამოწევა (Extrude), ბრუნვით აგება (Revolve), მომრგვალება (Fillet), ფასკა (Chamfer), მასივი (Pattern), შეერთება (Joint), წახნაგი (Face), წიბო (Edge) and წვერო (Vertex); a design is a პროექტი. The Browser panel is მოდელის ხე (model tree) and the timeline ქრონოლოგია, apart from the undo history (ისტორია). Georgian has no letter case, so capitalised English labels are written in ordinary Mkhedruli, never in Mtavruli; a count stays singular after its number, so counted labels are written as `კომპონენტი: {count}`. The catalog is written in Mkhedruli; where no Georgian system font is found, egui's built-in Hack draws it in its monospace design. Command IDs, shortcuts, file formats, units and user-provided names stay unchanged. Written with Claude Code from the meaning of each English string; terminology and doubtful strings decided by a native Georgian speaker (@devius).
 
 The Finnish catalog (`fi`, shown as Suomi) uses Luonnos (Sketch), Kappale (Body), Piirre (timeline Feature), Rajoite (Constraint), Mitta (Dimension), Pyöristys (Fillet), Viiste (Chamfer), Pursotus (Extrude) and Pyöräytys (Revolve); a design is a malli and an AI model a tekoälymalli. Draft is Päästö, Flat Pattern is Levityskuva, Hem is Huulos, and Counterbore/Countersink are Upotus/Kartioupotus. Camera and view angles are Nyökkäys (pitch), Kääntö (yaw) and Kallistus (roll); a saved render shot is a Kuvakulma. Finnish puts a space before % (50 %). Command IDs, shortcuts, file formats, units and user-provided names stay unchanged.
+
+The Lao catalog (lo, shown as ພາສາລາວ) uses ຣ່າງແບບ (Sketch), ໂຄງຮ່າງ/ເນື້ອວັດຖຸ (Body), ເສັ້ນເວລາ/ປະຫວັດການສ້າງ (Timeline Feature), ເງື່ອນໄຂກຳນົດ (Constraint), ຂະໜາດ (Dimension), ມົນຂອບ (Fillet), ປັ່ນມຸມ/ລຶບມຸມ (Chamfer), ຍືດໂຄງສ້າງ (Extrude) and ໝຸນຂຶ້ນຮູບ (Revolve); a design is a ແບບແຕ້ມ (Design) and an AI model a ແບບຈຳລອງ AI (AI model). Draft is ຮ່າງແບບ (Draft), Flat Pattern is ແຜ່ນຄ່ຳແປນ (Flat Pattern), Hem is ພັບຂອບ (Hem), and Counterbore/Countersink are ເຈາະຝັງຫົວ/ເຈາະຜາຍປາກ (Counterbore/Countersink). Camera and view angles are ງ່ຽງຫົວ (Pitch), ຫັນຂ້າງ (Yaw) and ອຽງຂ້າງ (Roll); a saved render shot is a ມຸມມອງພາບ (Render Shot). Lao grammar and spacing rules are applied strictly. Command IDs, shortcuts, file formats, units and user-provided names stay unchanged.
 
 The Norwegian Bokmål catalog (`nb`, shown as Norsk bokmål) uses Skisse (Sketch),
 Kropp (Body), Funksjon (timeline Feature), Binding (Constraint), Avrunding (Fillet)
