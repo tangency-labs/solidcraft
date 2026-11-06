@@ -209,8 +209,8 @@ fn gusset_with_picked_supports() -> SolveApp {
     for (name, point, normal) in [("Post", [20., 0., 100.], [1., 0., 0.]), ("Rail", [100., 0., 40.], [0., 0., 1.])] {
         let st = app.session.model.state();
         let body = st.body(name).unwrap();
-        let point = solidcraft_engine::geom::Vec3::new(point[0], point[1], point[2]);
-        let normal = solidcraft_engine::geom::Vec3::new(normal[0], normal[1], normal[2]);
+        let point = solidcore_record::Vec3::new(point[0], point[1], point[2]);
+        let normal = solidcore_record::Vec3::new(normal[0], normal[1], normal[2]);
         let index = (0..body.body.face_count())
             .find(|i| body.body.planar_face(*i).is_some_and(|p| p.normal().dot(normal) > 0.999 && (p.origin - point).dot(normal).abs() < 1e-6))
             .unwrap();

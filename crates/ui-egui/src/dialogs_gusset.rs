@@ -116,14 +116,14 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         profile: usize::from(clip.as_str() != "0 mm"),
     };
     let state = app.session.model.state();
-    let world = app.session.world_state();
+    let world = app.session.world_state().ok();
     for (support, input) in supports.iter().zip(&mut inputs) {
         if let Some(anchor) = solidcraft_engine::doc::face_anchor::plane_face_anchor(&support.plane)
             && let Some(body) = state.body(&anchor.target.body)
         {
             let name = app.session.doc.world_body_name(&state, &body.name, anchor.component, &anchor.path);
             let indices = app.session.doc.configuration_face_indices(body, &anchor.target).ok();
-            if let Some(body) = world.body(&name) {
+            if let Some(body) = world.as_ref().and_then(|w| w.body(&name)) {
                 let mesh = body.mesh();
                 if let Some((tri, index)) =
                     mesh.triangles.iter().zip(&mesh.tri_face).find(|(_, i)| indices.as_ref().is_some_and(|is| is.contains(&(**i as usize))))

@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 use crate::expr::{Kind, Value};
 use crate::{DocError, Document, Expr, Feature, FeatureKind, ModelState, PlaneRef, Result};
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(deny_unknown_fields)]
@@ -63,7 +64,7 @@ fn face(doc: &Document, st: &ModelState, f: &Feature, support: &Support) -> Resu
     }
     let (indices, _) = doc.anchored_face_indices(st, body, &anchor.target)?;
     let transform = anchor.source_to_author(doc, f.component, body)?;
-    let mesh = body.body.tessellate((body.body.size() * 1e-5).clamp(1e-5, 0.05))?;
+    let mesh = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord((body.body.size() * 1e-5).clamp(1e-5, 0.05)))?;
     if mesh.triangles.len() > 131072 {
         return Err(invalid("gusset support exceeds the 131072-triangle limit"));
     }

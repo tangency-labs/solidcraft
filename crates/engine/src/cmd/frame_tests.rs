@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use std::f64::consts::PI;
 
 use crate::Session;
+use solidcraft_geom::prelude::*;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     match s.execute(id, &p) {
@@ -648,8 +649,8 @@ fn gusset_joint() -> Session {
 fn gusset_pick(s: &Session, body: &str, point: [f64; 3], normal: [f64; 3]) -> Value {
     let st = s.model.state();
     let b = st.body(body).unwrap();
-    let at = solidcraft_geom::Vec3::new(point[0], point[1], point[2]);
-    let n = solidcraft_geom::Vec3::new(normal[0], normal[1], normal[2]);
+    let at = solidcore_record::Vec3::new(point[0], point[1], point[2]);
+    let n = solidcore_record::Vec3::new(normal[0], normal[1], normal[2]);
     let i = (0..b.body.face_count())
         .find(|i| b.body.planar_face(*i).is_some_and(|pl| pl.normal().dot(n) > 0.999 && (pl.origin - at).dot(n).abs() < 1e-6))
         .unwrap();
@@ -798,7 +799,7 @@ fn gusset_component_motion_and_independent_copy_keep_attachments() {
     let fid = run(&mut s, "frame.gusset", p)["feature"].as_u64().unwrap();
     let occurrence = s.doc.occurrence_of(part).unwrap().id;
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[50,20,0],"axis":[0,0,1],"angle":"90 deg","capture":true}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let b = world.bodies.iter().find(|b| b.feature == fid).unwrap().mesh().bounds();
     assert!(near3([b.min.x, b.min.y, b.min.z], [47., 40., 40.]), "{b:?}");
     let copied = run(&mut s, "component.paste_new", json!({"component":part,"translate":[500,0,0]}))["component"].as_u64().unwrap();

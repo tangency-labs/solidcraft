@@ -414,7 +414,7 @@ fn a_line_a_hair_off_vertical_is_vertical() {
 
 #[test]
 fn gusset_contact_clipping_accounts_for_material_between_endpoints() {
-    use solidcraft_geom::Vec2 as V;
+    use solidcore_record::Vec2 as V;
     // Unit square in two triangles, clipped to a 0.5 by 0.6 contact rectangle.
     let a = crate::gusset::clipped_area([V::new(0., 0.), V::new(1., 0.), V::new(1., 1.)], 0.2, 0.7, 0.1, 0.7);
     let b = crate::gusset::clipped_area([V::new(0., 0.), V::new(1., 1.), V::new(0., 1.)], 0.2, 0.7, 0.1, 0.7);
