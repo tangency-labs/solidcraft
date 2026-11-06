@@ -40,11 +40,13 @@
       }
     },
     {
-      "error": "SMLib failed (status 1001)",
       "inputs": [
         "b15"
       ],
       "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
       "params": {
         "edges": {
           "kind": "edge",
@@ -108,27 +110,21 @@
     "continuity": {
       "order": "g1"
     },
+    "faces": 12,
     "method": "the peg (a bar 40 x 16 whose far end is a half disc R8 about (40, 8)) extruded 10 with a 5 deg inward taper, then the top's end circle (R 8 - 10 tan 5 deg about (40, 8)) extruded 10 up with the same taper and joined: the bar's drafted front face runs tangent into the cone along its generator through x = 40, and the top's concave arc meets the front top edge where the two are tangent, as on the straight peg; the front top edge and the concave arc rounded r2 in one fillet, tangent chain on; no closed form: one valid body, every seam a round or the corner patch makes G1",
     "source": "invariants",
     "what": "as report-peg-front-and-concave-rounds-together-r2 on the drafted peg, whose front face runs tangent into a cone"
   },
   "expressible": false,
-  "gallery_note": "the corner refused is where the drafted front top edge runs tangent into the concave arc, on the cone",
+  "gallery_note": "the Mixed corner, where the seam's line runs on past the vertex as an edge of the cone, split along its generator through x = 40",
   "operation_expressible": true,
-  "outcome": {
-    "engine_error": "step 13 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001)",
-    "kernel_error": "SMLib failed (status 1001)",
-    "ran": false
-  },
   "records": "report-drafted-peg-front-and-concave-rounds-together-r2.bodies.json.gz",
-  "result": [],
-  "rig": {
-    "error": "step 13 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001)",
-    "known_failing": "[unsupported] step 13 (solid.fillet): invalid input: not supported yet: the fillet meets a corner of this kind, which SMLib's blends do not handle yet (where its ed",
-    "measured": null,
-    "refused_with": null,
-    "status": "fail"
-  },
+  "result": [
+    {
+      "body": "Peg",
+      "made": "b16"
+    }
+  ],
   "sources": null,
   "traced_ops": [
     "extrude",

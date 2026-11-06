@@ -2,7 +2,10 @@
 //! continue each other G1 at the vertex V, on a common face T (a plane), the third edge
 //! at V, not blended, a straight tangent seam between their other faces F1 and F2 (the
 //! tangent peg's front top edge and its concave arc, where the front face runs tangent
-//! into the cylinder).
+//! into the cylinder). A fourth edge at V, not the fork's (#2953): the seam's line runs on
+//! past V as an edge between F2 and the face beyond the seam, tangent to F2 there (the
+//! drafted peg's cone, split along its generator through the seam). V-Q then lies on that
+//! edge, as P-V lies on the seam.
 //!
 //! Upstream: none (pinned SMLib builds this corner with `SmFillet3x2MixedConvexityCorner`).
 //! The fork's `source/SMLib/src/SmBlendCornerMixed.cpp`, `source/SMLib/inc/SmBlendCorner.h`
@@ -120,6 +123,9 @@ pub struct MixedRing {
     pub concave: EdgeuseId,
     /// `pSeam`.
     pub seam: EdgeuseId,
+    /// Not the fork's (#2953): the fourth edge at V, the seam's line run on past V as an
+    /// edge between F2 and the seam's other face; `None` at a vertex of three edges.
+    pub beyond: Option<EdgeuseId>,
     /// `pT`.
     pub t: FaceId,
     /// `pF1`.
@@ -180,10 +186,12 @@ impl MixedCorner {
 }
 
 /// `sm_MixedRing`: the ring's parts, `None` where the vertex is not a Mixed one's shape
-/// (not two solver edge uses of opposite convexity among three, no common face, no
-/// other face of each blend at the seam, or a blend without a solver). `solver_of` is
+/// (not two solver edge uses of opposite convexity among three or four, no common face,
+/// no other face of each blend at the seam, or a blend without a solver). `solver_of` is
 /// `GetFilletSolverOfEdgeuse` (`None`: `NULL`); the blends' solvers are returned with
-/// the ring (B1, B2), each of its edge use or else of its mate.
+/// the ring (B1, B2), each of its edge use or else of its mate. Of four edges (not the
+/// fork's, #2953) the two not blended are the seam, on B1's other face, and the edge
+/// beyond it, on B2's, with one face between them.
 pub(crate) fn mixed_ring<S: Copy>(
     k: &Kernel,
     b: &mut Brep,
@@ -192,7 +200,7 @@ pub(crate) fn mixed_ring<S: Copy>(
     solver_of: &dyn Fn(EdgeuseId) -> Option<S>,
 ) -> Result<Option<(MixedRing, [S; 2])>> {
     let nul = || SolidError::null_pointer(OP_CLASSIFY);
-    let (&[eu0, eu1_], 3) = (solver_eus, all_eus.len()) else {
+    let &[eu0, eu1_] = solver_eus else {
         return Ok(None);
     };
     let e0 = eu1::edge(b, eu0)?.ok_or_else(nul)?;
@@ -203,32 +211,69 @@ pub(crate) fn mixed_ring<S: Copy>(
     }
     let convex_eu = if concave[0] { eu1_ } else { eu0 };
     let concave_eu = if concave[0] { eu0 } else { eu1_ };
-    let mut seam = None;
-    for &eu in all_eus {
-        if eu != eu0 && eu != eu1_ {
-            seam = Some(eu);
+    let rest: Vec<EdgeuseId> = all_eus
+        .iter()
+        .copied()
+        .filter(|&eu| eu != eu0 && eu != eu1_)
+        .collect();
+    let orders = match rest.as_slice() {
+        [seam] if all_eus.len() == 3 => vec![(*seam, None)],
+        [x, y] if all_eus.len() == 4 => vec![(*x, Some(*y)), (*y, Some(*x))],
+        _ => return Ok(None),
+    };
+    for (seam, beyond) in orders {
+        let found = ring_of(b, [convex_eu, concave_eu], seam, beyond, solver_of)?;
+        if found.is_some() {
+            return Ok(found);
         }
     }
-    let seam = seam.ok_or_else(nul)?;
+    Ok(None)
+}
+
+/// The face of `eu`'s sector other than `not`, where the sector holds `not`.
+fn other_face(b: &Brep, eu: EdgeuseId, not: FaceId) -> Result<Option<FaceId>> {
+    let radial = eu1::radial(b, eu)?.ok_or_else(|| SolidError::null_pointer(OP_CLASSIFY))?;
+    let faces = [eu1::face(b, eu)?, eu1::face(b, radial)?];
+    Ok(match faces {
+        [Some(f), Some(g)] if f == not => Some(g),
+        [Some(f), Some(g)] if g == not => Some(f),
+        _ => None,
+    })
+}
+
+/// [`mixed_ring`]'s parts for one choice of the seam and the edge beyond it.
+fn ring_of<S: Copy>(
+    b: &Brep,
+    [convex_eu, concave_eu]: [EdgeuseId; 2],
+    seam: EdgeuseId,
+    beyond: Option<EdgeuseId>,
+    solver_of: &dyn Fn(EdgeuseId) -> Option<S>,
+) -> Result<Option<(MixedRing, [S; 2])>> {
     let Some(t) = face_by_two_edgeuses(b, Some(convex_eu), Some(concave_eu), Some(seam))? else {
         return Ok(None);
     };
-    let radial = eu1::radial(b, seam)?;
-    let seam_faces = [
-        eu1::face(b, seam)?,
-        match radial {
-            Some(r) => eu1::face(b, r)?,
-            None => None,
-        },
-    ];
     let mut others = [None, None];
     let mut solvers = [None, None];
     for (ii, blend) in [convex_eu, concave_eu].into_iter().enumerate() {
+        // B2's other face is at the edge beyond the seam, where there is one
+        let side = if ii == 1 {
+            beyond.unwrap_or(seam)
+        } else {
+            seam
+        };
+        let radial = eu1::radial(b, side)?;
+        let side_faces = [
+            eu1::face(b, side)?,
+            match radial {
+                Some(r) => eu1::face(b, r)?,
+                None => None,
+            },
+        ];
         let mut other = None;
-        for &sf in &seam_faces {
+        for &sf in &side_faces {
             if sf.is_some()
                 && sf != Some(t)
-                && face_by_two_edgeuses(b, Some(blend), Some(seam), None)? == sf
+                && face_by_two_edgeuses(b, Some(blend), Some(side), None)? == sf
             {
                 other = sf;
             }
@@ -254,11 +299,19 @@ pub(crate) fn mixed_ring<S: Copy>(
     if f1 == f2 {
         return Ok(None);
     }
+    if let Some(beyond) = beyond {
+        // one face between the seam and the edge beyond it, and it is not T
+        let between = other_face(b, seam, f1)?;
+        if between.is_none() || between == Some(t) || between != other_face(b, beyond, f2)? {
+            return Ok(None);
+        }
+    }
     Ok(Some((
         MixedRing {
             convex: convex_eu,
             concave: concave_eu,
             seam,
+            beyond,
             t,
             f1,
             f2,
@@ -270,7 +323,8 @@ pub(crate) fn mixed_ring<S: Copy>(
 /// `SmBlendCorner::ClassifyMixed`: whether the filleted `vertex` is a Mixed corner: three
 /// edges, two blended of opposite convexity continuing each other G1 there (within
 /// `tangency_tol_deg`), the third a straight tangent seam between their other faces, the
-/// blends' common face a plane (each to the smaller of the blends' tolerances).
+/// blends' common face a plane (each to the smaller of the blends' tolerances). A fourth
+/// edge (not the fork's, #2953) is the seam's line run on past `vertex`, tangent there too.
 ///
 /// # Errors
 ///
@@ -316,7 +370,23 @@ pub fn classify_mixed<'s>(
         Some(c) => c.is_line(k, 10, tol)?.is_some(),
         None => false,
     };
-    Ok(line)
+    if !line {
+        return Ok(false);
+    }
+    let Some(beyond) = ring.beyond else {
+        return Ok(true);
+    };
+    if !check_tangential_edgeuse_at_vertex(k, b, beyond, vertex, tangency_tol_deg)? {
+        return Ok(false);
+    }
+    let beyond_e = eu1::edge(b, beyond)?.ok_or_else(nul)?;
+    let straight = match edge::curve(b, beyond_e)? {
+        Some(c) => c.is_line(k, 10, tol)?.is_some(),
+        None => false,
+    };
+    let down = leaving(k, b, seam_e, vertex, OP_CLASSIFY)?;
+    let up = leaving(k, b, beyond_e, vertex, OP_CLASSIFY)?;
+    Ok(straight && down.dot(up) < 0.0 && down.is_parallel_to(up, tangency_tol_deg))
 }
 
 /// `smos_Min`.

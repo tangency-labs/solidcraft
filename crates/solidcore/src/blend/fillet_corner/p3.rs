@@ -992,17 +992,19 @@ impl FilletCorner {
                             }
                         }
                         3 | 4 => {
-                            if total_eus == 3
+                            let opposite = total_eus == 3
                                 && eu2::is_convex_radial_sector(k, b, eu0, 4, false, 0.0)?
-                                    != eu2::is_convex_radial_sector(k, b, eu1_, 4, false, 0.0)?
-                            {
-                                // The fork's (WR-697, 6fd0411; smlib#82): a convex and a
-                                // concave blend continuing each other across a tangent
-                                // seam are the blend corner's Mixed
-                                // (SmBlendCorner::ClassifyMixed); a failed classification
-                                // builds no corner.
+                                    != eu2::is_convex_radial_sector(k, b, eu1_, 4, false, 0.0)?;
+                            // The fork's (WR-697, 6fd0411; smlib#82): a convex and a
+                            // concave blend continuing each other across a tangent
+                            // seam are the blend corner's Mixed
+                            // (SmBlendCorner::ClassifyMixed); of three edges a failed
+                            // classification builds no corner. Four edges (not the
+                            // fork's, #2953): the seam's line run on past the vertex as
+                            // an edge; any other vertex of four goes on below.
+                            let mixed = if opposite || total_eus == 4 {
                                 let lookup = |eu: EdgeuseId| solver_of(eu).ok();
-                                let mixed = match crate::blend::blend_corner::mixed::classify_mixed(
+                                match crate::blend::blend_corner::mixed::classify_mixed(
                                     k,
                                     b,
                                     vertex,
@@ -1014,16 +1016,20 @@ impl FilletCorner {
                                     Ok(found) => Some(found),
                                     Err(e) if e.is_unported_or_cancelled() => return Err(e),
                                     Err(_) => None,
-                                };
-                                if mixed == Some(true) {
-                                    let mut c = make(FilletCornerKind::NByTwo);
-                                    c.blend = Some(crate::blend::blend_corner::BlendCorner {
-                                        event: BlendCornerEvent::Mixed,
-                                        turn: crate::blend::blend_corner::BlendTurn::Mitre,
-                                        end: BlendEnd::OnEndFace,
-                                    });
-                                    return Ok(Some(c));
                                 }
+                            } else {
+                                Some(false)
+                            };
+                            if mixed == Some(true) {
+                                let mut c = make(FilletCornerKind::NByTwo);
+                                c.blend = Some(crate::blend::blend_corner::BlendCorner {
+                                    event: BlendCornerEvent::Mixed,
+                                    turn: crate::blend::blend_corner::BlendTurn::Mitre,
+                                    end: BlendEnd::OnEndFace,
+                                });
+                                return Ok(Some(c));
+                            }
+                            if opposite {
                                 if mixed.is_none() {
                                     return Ok(None); // MSG: Corner Case Not Implemented
                                 }

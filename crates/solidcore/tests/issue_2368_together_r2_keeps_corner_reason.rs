@@ -11,8 +11,10 @@
 //! it noted) where `CreateFilletBrep` and `GetPreviewFilletSurfaces` call `MakeCornerTopology`
 //! (`SmFilletExecutive.cpp` 3755-3759 and 1216-1219 at smlib#124, 63c7962), as it does after
 //! `CalculateCornerEdges`. The port kept it only there, and returned
-//! `SM_FILERR_VERTEX_PROBLEM` (3), "Unable to Make Topology". It now returns the fork's
+//! `SM_FILERR_VERTEX_PROBLEM` (3), "Unable to Make Topology". It then returned the fork's
 //! refusal: `SM_FILERR_NO_ROOM` (8), fit 0.
+//!
+//! Since #2953 the Mixed corner takes this vertex's four edges, so the round builds.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -21,7 +23,6 @@
 )] // test helpers
 
 use solidcore::blend::fillet_executive::session::FilletSession;
-use solidcore::blend::fillet_geom::p1::FilletErrorType;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::kernel::{Kernel, UpstreamFixes};
@@ -107,9 +108,6 @@ fn round() -> Result<(), (i32, String, Option<f64>)> {
 }
 
 #[test]
-fn the_corner_s_no_room_is_kept() {
-    let (code, comment, fit) = round().unwrap_err();
-    assert_eq!(code, FilletErrorType::NoRoom as i32, "{comment}");
-    assert!(comment.contains("have no section both reach"), "{comment}");
-    assert_eq!(fit, Some(0.0));
+fn the_mixed_corner_builds_the_round() {
+    round().unwrap();
 }
