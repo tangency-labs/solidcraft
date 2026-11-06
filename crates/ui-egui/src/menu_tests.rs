@@ -254,6 +254,35 @@ fn face_menu_hides_and_finds_the_body() {
     assert_eq!(app.session.visibility.hidden_bodies, vec![b]);
 }
 
+/// A right-click on one of several selected browser bodies keeps the whole selection for
+/// Move/Copy and Create Components (#12746). A body outside that selection stays on its own.
+#[test]
+fn a_browser_body_menu_keeps_every_selected_body() {
+    let mut app = sample_app();
+    let original = body(&app);
+    app.run("solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [40, 0, 0], "body_name": "Left"})).unwrap();
+    app.run("solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [80, 0, 0], "body_name": "Right"})).unwrap();
+    let names = ["Left".to_string(), "Right".to_string(), original];
+    app.run("select.set", json!({"items": names.iter().map(|name| json!({"type": "body", "name": name})).collect::<Vec<_>>()})).unwrap();
+    let clicked = names[1].clone();
+    let items = context_menu::items(&app, &Target::Body { name: clicked });
+    let listed = |item: &Item| item.params.as_ref().and_then(|p| p["bodies"].as_array()).cloned().unwrap_or_default();
+    let expect: Vec<_> = names.iter().map(|name| json!(name)).collect();
+    assert_eq!(listed(&find(&items, "Move/Copy")), expect);
+    assert_eq!(listed(&find(&items, "Create Components from Bodies")), expect);
+    context_menu::run_item(&mut app, &find(&items, "Move/Copy"), pos2(0.0, 0.0));
+    let dialog = app.dialog.as_ref().expect("Move/Copy opens");
+    let moved = crate::dialogs_move::params(&app, dialog).expect("the dialog lists bodies");
+    assert_eq!(moved["bodies"], json!(names));
+    // A body that is not part of the selection is the only one the menu offers.
+    app.dialog = None;
+    let alone = names[2].clone();
+    app.run("select.set", json!({"items": [{"type": "body", "name": "Left"}]})).unwrap();
+    let items = context_menu::items(&app, &Target::Body { name: alone.clone() });
+    assert_eq!(listed(&find(&items, "Move/Copy")), vec![json!(alone.clone())]);
+    assert_eq!(listed(&find(&items, "Create Components from Bodies")), vec![json!(alone)]);
+}
+
 #[test]
 fn body_menu_isolates_renames_locks_and_deletes() {
     let mut app = sample_app();
