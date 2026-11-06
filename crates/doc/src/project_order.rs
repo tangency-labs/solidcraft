@@ -376,7 +376,7 @@ mod tests {
         // A 10 x 10 square with an R2 round at its top right corner, fitted from mesh crossings:
         // the arc misses the round's circle (centre (8, 8)) by 5e-4 but meets the sides exactly.
         // The exact crossings lie on the circle, and the refit puts the arc on it. The outline has
-        // to stay closed: the sketch joins ends only within 1e-7, so a gap leaves no profile (the
+        // to stay closed: a profile joins ends only within 1e-4, so a wider gap leaves none (the
         // R2 rounds of a section at y = 20 through grooved walls, tangency-labs/solidcore#2908).
         let c = v(7.9995, 7.9995);
         let (p, q) = (v(10., c.y), v(c.x, 10.));
