@@ -250,7 +250,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "plane_reparameterize_moves_origin",
     "point_class_gap_3d_propagates_no_drop_error",
     "point_on_start_point_squared_tolerance",
-    "point_set_centroid_all_blocks",
     "point_set_tight_pbox_projects_points",
     "point_solve_keeps_triangle_guess",
     "polar_box_region_to_arc_transposes_domain",

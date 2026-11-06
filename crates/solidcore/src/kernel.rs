@@ -805,15 +805,6 @@ pub struct UpstreamFixes {
     /// `plan/upstream-issues/WR-84--addendum-2026-11-01-propagate-step-off-failure.md`).
     /// Off by default for pinned C++ parity.
     pub edgeuse_convexity_propagates_step_off_failure: bool,
-    /// `SmPointSet3d::SetUpCentroid` sums every full 50-point block when the point count
-    /// is a positive multiple of 50 (`extras == 0`) instead of starting with a 0-point
-    /// block that drops the last 50 points (returning `(0, 0, 0)` for 50 points), and
-    /// marks `Cache::CENTROID` (`m_bCentroidSet = TRUE`) after computing it so repeated
-    /// centroid queries reuse the cached value and do not depend on whether `GetNormal`
-    /// ran first (WR-15, #2134; see
-    /// `plan/upstream-issues/WR-15--addendum-2026-10-31-centroid-multiples-of-50.md`).
-    /// Off by default for pinned C++ parity.
-    pub point_set_centroid_all_blocks: bool,
     /// `SmLocalSolve1d::SolveIt` clamps the Newton step `delta_t` to
     /// `0.08 * m_vInterval.GetLength() + SM_EFF_ZERO` (scaled by `0.99`) only when
     /// `m_bUseInterval` is `true`, instead of evaluating `m_vInterval.GetLength()` on the

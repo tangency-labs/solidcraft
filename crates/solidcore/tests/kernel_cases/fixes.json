@@ -122,7 +122,6 @@
   "offset_updates_result_tolerances",
   "offset_resolve_crossing_loops",
   "edgeuse_convexity_propagates_step_off_failure",
-  "point_set_centroid_all_blocks",
   "local_solve1d_unbounded_newton_step",
   "local_operation_box_holds_new_surfaces",
   "offset_walls_touch_refused",

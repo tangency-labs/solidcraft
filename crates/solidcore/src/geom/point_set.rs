@@ -14,8 +14,6 @@
 //! | [`PointSet3d::clear_cache`]            | `SmPointSet3d::ClearCache`                       |
 //! | [`PointSet3d::points`]                 | `SmPointSet3d::GetPoints`                        |
 //! | [`PointSet3d::centroid`]               | `SmPointSet3d::GetCentroid`                      |
-//! | [`PointSet3d::centroid_opt_in`]        | `SmPointSet3d::GetCentroid` (WR-15 opt-in)       |
-//! | [`PointSet3d::centroid_with_kernel`]   | `SmPointSet3d::GetCentroid` (WR-15 kernel flag)  |
 //! | [`PointSet3d::normal`]                 | `SmPointSet3d::GetNormal()`                      |
 //! | [`PointSet3d::bbox`]                   | `SmPointSet3d::GetBBox`                          |
 //! | [`PointSet3d::tight_pbox`]             | `SmPointSet3d::GetTightPBox`                     |
@@ -56,12 +54,8 @@
 //! - The point-set type of a set built without a normal is
 //!   [`PointSetType::Unknown`] until classified (uninitialised upstream; it is never
 //!   read before then).
-//! - `SetUpCentroid` never marks the centroid cached and, when the point count is a
-//!   positive multiple of 50, sums one empty block and drops the last 50 points
-//!   (WR-15, `plan/findings/`): [`PointSet3d::centroid`] keeps both by default;
-//!   [`PointSet3d::centroid_opt_in`] / [`PointSet3d::centroid_with_kernel`]
-//!   ([`Kernel::fixes.point_set_centroid_all_blocks`](UpstreamFixes::point_set_centroid_all_blocks))
-//!   sums every full 50-point block and marks `Cache::CENTROID`.
+//! - `SetUpCentroid` sums all blocks and caches the result (WR-15), unlike
+//!   upstream which drops the last block at positive multiples of 50.
 //! - `SetUpAxes` calls `smgu_BestFitPlaneToPoints`, whose best-fit line step
 //!   misclassifies collinear sets as `Scattered` / `Planar` (WR-10): [`PointSet3d::new`]
 //!   and [`PointSequence::new`] keep pinned C++ parity;
@@ -310,28 +304,11 @@ impl PointSet3d {
         &self.points
     }
 
-    /// The geometric centre of the points (`GetCentroid`): the best-fit centroid when
-    /// the axes were computed from the points, else the block-wise average (preserving
-    /// upstream's WR-15 behaviour by default).
+    /// The geometric centre: the cached best-fit centroid if axes were computed,
+    /// otherwise the block-wise average, with every point included (WR-15).
     pub fn centroid(&mut self) -> Point3 {
-        self.centroid_opt_in(false)
-    }
-
-    /// The geometric centre of the points (`GetCentroid`), optionally enabling the
-    /// WR-15 fix (`all_blocks = true`): when the point count is a positive multiple of
-    /// 50, sums every full 50-point block instead of starting with a 0-point block and
-    /// dropping the last 50 points, and marks `Cache::CENTROID` (`m_bCentroidSet = TRUE`)
-    /// after computing it.
-    pub fn centroid_opt_in(&mut self, all_blocks: bool) -> Point3 {
-        self.set_up_centroid(all_blocks);
+        self.set_up_centroid();
         self.centroid
-    }
-
-    /// The geometric centre of the points (`GetCentroid`), honouring
-    /// [`Kernel::fixes.point_set_centroid_all_blocks`](UpstreamFixes::point_set_centroid_all_blocks)
-    /// (WR-15).
-    pub fn centroid_with_kernel(&mut self, k: &Kernel) -> Point3 {
-        self.centroid_opt_in(k.fixes.point_set_centroid_all_blocks)
     }
 
     /// The unit normal of the set's coordinate system (`GetNormal()`): the given
@@ -497,7 +474,7 @@ impl PointSet3d {
     }
 
     /// `SetUpCentroid`: the average of the points, summed in blocks of 50.
-    fn set_up_centroid(&mut self, all_blocks: bool) {
+    fn set_up_centroid(&mut self) {
         const BLOCK_SIZE: usize = 50;
 
         // no work - requested data already computed
@@ -513,16 +490,9 @@ impl PointSet3d {
         // init centroid
         self.centroid = Vec3::ZERO;
 
-        // for every block - first the extras, then blocks of BLOCK_SIZE.
-        // Upstream starts `jCnt` at `lExtras` unconditionally, so when `extras == 0`
-        // and `size > 0` iteration 0 sums 0 points and the last 50 points are dropped
-        // (WR-15); with `all_blocks`, every iteration sums a full block of 50.
+        // First the partial block, if any, then full blocks of 50.
         let mut idx = 0;
-        let mut count = if all_blocks && extras == 0 {
-            BLOCK_SIZE
-        } else {
-            extras
-        };
+        let mut count = if extras == 0 { BLOCK_SIZE } else { extras };
         for _ in 0..iters {
             let mut block_sum = Vec3::ZERO;
             for p in self.points.iter().skip(idx).take(count) {
@@ -534,9 +504,7 @@ impl PointSet3d {
             count = BLOCK_SIZE;
         }
 
-        if all_blocks {
-            self.cache.set(Cache::CENTROID);
-        }
+        self.cache.set(Cache::CENTROID);
     }
 
     /// `SetUpBBoxes`: builds the boxes when needed and, for
@@ -1080,16 +1048,12 @@ mod tests {
         assert!(pb.xy_area() <= 4.0 + 1e-9);
     }
 
+    /// A constant 100-point set has that same point as its mean (WR-15).
     #[test]
-    fn centroid_drops_last_block_at_multiples_of_50() {
-        let pts: Vec<Point3> = (0..50).map(|i| Vec3::new(f64::from(i), 1.0, 0.0)).collect();
-        let mut set = PointSet3d::new(pts, 1e-9, None);
-        // upstream quirk: one empty block, the 50 points are never summed
-        assert_eq!(set.centroid(), Vec3::ZERO);
-        let pts: Vec<Point3> = (0..51).map(|_| Vec3::new(1.0, 2.0, 3.0)).collect();
-        let mut set = PointSet3d::new(pts, 1e-9, None);
-        let c = set.centroid();
-        assert!((c.x - 1.0).abs() < 1e-12 && (c.z - 3.0).abs() < 1e-12);
+    fn wr15_default_centroid_includes_every_full_block() {
+        let point = Vec3::new(2.0, 4.0, 6.0);
+        let mut set = PointSet3d::new(vec![point; 100], 1e-9, None);
+        assert_eq!(set.centroid(), point);
     }
 
     #[test]
@@ -1112,6 +1076,7 @@ mod tests {
         assert_eq!(z, Vec3::Z);
     }
 
+    /// Constructs symmetric planar pairs about a known centre.
     fn planar_paired_points(half_count: u32, center: Point3) -> Vec<Point3> {
         let mut pts = Vec::with_capacity((half_count * 2) as usize);
         for i in 0..half_count {
@@ -1135,169 +1100,84 @@ mod tests {
         pts
     }
 
+    /// Empty and partial blocks preserve their closed-form means and cache state.
     #[test]
     fn wr15_empty_and_non_multiple_block_sizes() {
-        let k_default = Kernel::default();
-        let mut k_opt = Kernel::default();
-        k_opt.fixes.point_set_centroid_all_blocks = true;
-
-        // 0 points: both modes return (0, 0, 0); only opt-in sets Cache::CENTROID.
-        let mut empty_def = PointSet3d::new(Vec::new(), 1e-9, None);
-        assert_eq!(empty_def.centroid_with_kernel(&k_default), Vec3::ZERO);
-        assert!(!empty_def.cache.has(Cache::CENTROID));
-
-        let mut empty_opt = PointSet3d::new(Vec::new(), 1e-9, None);
-        assert_eq!(empty_opt.centroid_with_kernel(&k_opt), Vec3::ZERO);
-        assert!(empty_opt.cache.has(Cache::CENTROID));
-
-        // 49 points: extras = 49, single block; arithmetic matches, opt-in caches.
-        let pts49: Vec<Point3> = (0..49_u32)
-            .map(|i| Vec3::new(f64::from(i), 2.0 * f64::from(i) - 5.0, 3.5))
-            .collect();
-        let mut set49_def = PointSet3d::new(pts49.clone(), 1e-9, None);
-        let c49_def = set49_def.centroid_opt_in(false);
-        assert!(!set49_def.cache.has(Cache::CENTROID));
-        assert!((c49_def - Vec3::new(24.0, 43.0, 3.5)).length() < 1e-12);
-
-        let mut set49_opt = PointSet3d::new(pts49, 1e-9, None);
-        let c49_opt = set49_opt.centroid_opt_in(true);
-        assert!(set49_opt.cache.has(Cache::CENTROID));
-        assert_eq!(c49_opt, c49_def);
-        set49_opt.clear_cache();
-        assert!(!set49_opt.cache.has(Cache::CENTROID));
-
-        // 51 points: extras = 1 + one block of 50; arithmetic matches, opt-in caches.
-        let pts51: Vec<Point3> = (0..51_u32)
-            .map(|i| Vec3::new(f64::from(i), 2.0 * f64::from(i) - 5.0, 3.5))
-            .collect();
-        let mut set51_def = PointSet3d::new(pts51.clone(), 1e-9, None);
-        let c51_def = set51_def.centroid_opt_in(false);
-        assert!(!set51_def.cache.has(Cache::CENTROID));
-        assert!((c51_def - Vec3::new(25.0, 45.0, 3.5)).length() < 1e-12);
-
-        let mut set51_opt = PointSet3d::new(pts51, 1e-9, None);
-        let c51_opt = set51_opt.centroid_opt_in(true);
-        assert!(set51_opt.cache.has(Cache::CENTROID));
-        assert_eq!(c51_opt, c51_def);
+        let mut empty = PointSet3d::new(Vec::new(), 1e-9, None);
+        assert_eq!(empty.centroid(), Vec3::ZERO);
+        assert!(empty.cache.has(Cache::CENTROID));
+        for (count, expected) in [
+            (49_u32, Vec3::new(24.0, 43.0, 3.5)),
+            (51, Vec3::new(25.0, 45.0, 3.5)),
+        ] {
+            let pts = (0..count)
+                .map(|i| Vec3::new(f64::from(i), 2.0 * f64::from(i) - 5.0, 3.5))
+                .collect();
+            let mut set = PointSet3d::new(pts, 1e-9, None);
+            let first = set.centroid();
+            assert!((first - expected).length() < 1e-12);
+            assert!(set.cache.has(Cache::CENTROID));
+            assert_eq!(set.centroid(), first);
+            set.clear_cache();
+            assert!(!set.cache.has(Cache::CENTROID));
+            assert_eq!(set.centroid(), first);
+        }
     }
 
+    /// Full blocks and inherited sequence queries use analytic arithmetic means.
     #[test]
-    fn wr15_multiples_of_50_points_50_and_100() {
-        let k_default = Kernel::default();
-        let mut k_opt = Kernel::default();
-        k_opt.fixes.point_set_centroid_all_blocks = true;
-
-        // 50 points: x in 1..=50 (mean 25.5), y in -2..=-100 (mean -51.0), z = 4.0.
-        let pts50: Vec<Point3> = (1..=50_u32)
-            .map(|i| Vec3::new(f64::from(i), -2.0 * f64::from(i), 4.0))
-            .collect();
-        let expected50 = Vec3::new(25.5, -51.0, 4.0);
-
-        let mut set50 = PointSet3d::new(pts50.clone(), 1e-9, None);
-        assert_eq!(set50.centroid(), Vec3::ZERO);
-        assert_eq!(set50.centroid_opt_in(false), Vec3::ZERO);
-        assert_eq!(set50.centroid_with_kernel(&k_default), Vec3::ZERO);
-        assert!(!set50.cache.has(Cache::CENTROID));
-
-        // Because default left Cache::CENTROID unset, calling opt-in next computes and caches it.
-        let c50_opt = set50.centroid_with_kernel(&k_opt);
-        assert!(set50.cache.has(Cache::CENTROID));
-        assert!((c50_opt - expected50).length() < 1e-12);
-
-        let mut seq50 = PointSequence::new(pts50, 1e-9, true, None);
-        assert!((seq50.centroid_opt_in(true) - expected50).length() < 1e-12);
-        assert!(seq50.cache.has(Cache::CENTROID));
-
-        // 100 points: x in 1..=100 (mean 50.5, first-50 sum / 100 = 12.75), y = 10, z = -3.
-        let pts100: Vec<Point3> = (1..=100_u32)
-            .map(|i| Vec3::new(f64::from(i), 10.0, -3.0))
-            .collect();
-        let mut set100_def = PointSet3d::new(pts100.clone(), 1e-9, None);
-        let c100_def = set100_def.centroid_with_kernel(&k_default);
-        assert!(!set100_def.cache.has(Cache::CENTROID));
-        assert!((c100_def - Vec3::new(12.75, 5.0, -1.5)).length() < 1e-12);
-
-        let mut set100_opt = PointSet3d::new(pts100, 1e-9, None);
-        let c100_opt = set100_opt.centroid_with_kernel(&k_opt);
-        assert!(set100_opt.cache.has(Cache::CENTROID));
-        assert!((c100_opt - Vec3::new(50.5, 10.0, -3.0)).length() < 1e-12);
+    fn wr15_multiples_of_50_points_50_100_150() {
+        for count in [50_u32, 100, 150] {
+            let pts: Vec<_> = (1..=count)
+                .map(|i| Vec3::new(f64::from(i), -2.0 * f64::from(i), 4.0))
+                .collect();
+            let mean = (f64::from(count) + 1.0) / 2.0;
+            let expected = Vec3::new(mean, -2.0 * mean, 4.0);
+            let mut set = PointSet3d::new(pts.clone(), 1e-9, None);
+            assert!((set.centroid() - expected).length() < 1e-12);
+            assert!(set.cache.has(Cache::CENTROID));
+            let mut seq = PointSequence::new(pts, 1e-9, true, None);
+            assert!((seq.centroid() - expected).length() < 1e-12);
+            assert!(seq.cache.has(Cache::CENTROID));
+        }
     }
 
+    /// Normal and box queries preserve the known centre on symmetric planar inputs.
     #[test]
-    fn wr15_call_order_independence_before_and_after_normal() {
-        let mut k_opt = Kernel::default();
-        k_opt.fixes.point_set_centroid_all_blocks = true;
+    fn wr15_call_order_before_and_after_normal_and_bbox() {
         let center = Vec3::new(7.0, -2.0, 1.5);
+        for half_count in [25, 50] {
+            let pts = planar_paired_points(half_count, center);
+            for given in [false, true] {
+                for bbox_first in [false, true] {
+                    let mut normal = Vec3::Z;
+                    let mut set = PointSet3d::new(pts.clone(), 1e-9, given.then_some(&mut normal));
+                    if !bbox_first {
+                        assert!((set.centroid() - center).length() < 1e-12);
+                    }
+                    let n = set.normal().unwrap();
+                    assert!((n.z.abs() - 1.0).abs() < 1e-12);
+                    set.bbox(None).unwrap();
+                    assert!((set.centroid() - center).length() < 1e-12);
+                    set.clear_cache();
+                    assert!((set.centroid() - center).length() < 1e-12);
+                }
+                let mut normal = Vec3::Z;
+                let mut set = PointSet3d::new(pts.clone(), 1e-9, given.then_some(&mut normal));
+                set.bbox(None).unwrap();
+                assert!((set.centroid() - center).length() < 1e-12);
+            }
+        }
+    }
 
-        // 50 planar points around (7, -2, 1.5), without a user-given normal.
-        let pts50 = planar_paired_points(25, center);
-
-        // Default mode depends on call order: (0, 0, 0) before normal(), center after normal().
-        let mut def_before = PointSet3d::new(pts50.clone(), 1e-9, None);
-        assert_eq!(def_before.centroid(), Vec3::ZERO);
-        let n = def_before.normal().unwrap();
-        assert!((n.z.abs() - 1.0).abs() < 1e-12);
-        assert!((def_before.centroid() - center).length() < 1e-12);
-
-        // Opt-in mode is call-order independent: centroid -> normal == normal -> centroid.
-        let mut opt_c_first = PointSet3d::new(pts50.clone(), 1e-9, None);
-        let c50_before = opt_c_first.centroid_with_kernel(&k_opt);
-        assert!(opt_c_first.cache.has(Cache::CENTROID));
-        let _ = opt_c_first.normal().unwrap();
-        let c50_after = opt_c_first.centroid_with_kernel(&k_opt);
-
-        let mut opt_n_first = PointSet3d::new(pts50.clone(), 1e-9, None);
-        let _ = opt_n_first.normal().unwrap();
-        let c50_n_first = opt_n_first.centroid_with_kernel(&k_opt);
-
-        assert!((c50_before - center).length() < 1e-12);
-        assert!((c50_after - center).length() < 1e-12);
-        assert!((c50_n_first - center).length() < 1e-12);
-        assert!((c50_before - c50_n_first).length() < 1e-12);
-
-        // With a user-given normal, SetUpAxes does not run BestFitPlaneToPoints: default
-        // stays (0, 0, 0) even after normal(), while opt-in gives center in both orders.
-        let mut z1 = Vec3::Z;
-        let mut def_given = PointSet3d::new(pts50.clone(), 1e-9, Some(&mut z1));
-        let _ = def_given.normal().unwrap();
-        assert_eq!(def_given.centroid(), Vec3::ZERO);
-
-        let mut z2 = Vec3::Z;
-        let mut opt_given_c_first = PointSet3d::new(pts50.clone(), 1e-9, Some(&mut z2));
-        let cg_before = opt_given_c_first.centroid_with_kernel(&k_opt);
-        let _ = opt_given_c_first.normal().unwrap();
-        let cg_after = opt_given_c_first.centroid_with_kernel(&k_opt);
-
-        let mut z3 = Vec3::Z;
-        let mut opt_given_n_first = PointSet3d::new(pts50, 1e-9, Some(&mut z3));
-        let _ = opt_given_n_first.normal().unwrap();
-        let cg_n_first = opt_given_n_first.centroid_with_kernel(&k_opt);
-
-        assert_eq!(cg_before, center);
-        assert_eq!(cg_after, center);
-        assert_eq!(cg_n_first, center);
-
-        // 100 planar points: first 50 offset positively, second 50 negatively around center.
-        let pts100 = planar_paired_points(50, center);
-
-        let mut def100 = PointSet3d::new(pts100.clone(), 1e-9, None);
-        assert_eq!(def100.centroid(), Vec3::new(9.75, 5.5, 0.75));
-        let _ = def100.normal().unwrap();
-        assert_eq!(def100.centroid(), center);
-
-        let mut opt100_c_first = PointSet3d::new(pts100.clone(), 1e-9, None);
-        let c100_before = opt100_c_first.centroid_with_kernel(&k_opt);
-        assert!(opt100_c_first.cache.has(Cache::CENTROID));
-        let _ = opt100_c_first.normal().unwrap();
-        let c100_after = opt100_c_first.centroid_with_kernel(&k_opt);
-
-        let mut opt100_n_first = PointSet3d::new(pts100, 1e-9, None);
-        let _ = opt100_n_first.normal().unwrap();
-        let c100_n_first = opt100_n_first.centroid_with_kernel(&k_opt);
-
-        assert_eq!(c100_before, center);
-        assert_eq!(c100_after, center);
-        assert_eq!(c100_n_first, center);
+    /// Non-finite coordinates continue through the existing IEEE arithmetic path.
+    #[test]
+    fn wr15_nonfinite_coordinates_follow_existing_arithmetic() {
+        let mut set = PointSet3d::new(vec![Vec3::new(f64::INFINITY, 2.0, 4.0)], 1e-9, None);
+        let c = set.centroid();
+        assert_eq!(c.x, f64::INFINITY);
+        assert_eq!(c.y, 2.0);
+        assert_eq!(c.z, 4.0);
     }
 
     #[test]
