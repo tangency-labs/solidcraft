@@ -1507,20 +1507,30 @@ pub fn classify_exact_blend(
         } else {
             SrfIndex::Second
         });
-        let (face, p, n) = {
+        let face = {
+            let off = ops
+                .solver()
+                .surface(i)?
+                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            BlendQuadric::from_surface(k, off.surface.base_surface(), uv, tol)?
+        };
+        if face.kind == QuadricKind::None && !any_faces {
+            return Ok(blend);
+        }
+        let q = crate::blend::fillet_solver::p2::eval_offset(k, ops.solver_mut(), i, uv)?;
+        // A station past the face's edge is read where its offset was: on the extension
+        // `eval_offset` made, which a base surface does not reach (its point there clamps
+        // to the edge, and `q - p` is no offset).
+        let (p, n) = {
             let off = ops
                 .solver()
                 .surface(i)?
                 .ok_or_else(|| SolidError::null_pointer(OP))?;
             let base = off.surface.base_surface();
-            let face = BlendQuadric::from_surface(k, base, uv, tol)?;
-            if face.kind == QuadricKind::None && !any_faces {
-                return Ok(blend);
-            }
-            let (p, n) = point_and_normal(k, base, uv)?;
-            (face, p, n)
+            off.surface
+                .surface
+                .with_extended_base_surface(|ext| point_and_normal(k, ext.unwrap_or(base), uv))?
         };
-        let q = crate::blend::fillet_solver::p2::eval_offset(k, ops.solver_mut(), i, uv)?;
         if let (Some(f), Some(u), Some(o)) = (faces.get_mut(i), uvs.get_mut(i), offs.get_mut(i)) {
             *f = face;
             *u = uv;
