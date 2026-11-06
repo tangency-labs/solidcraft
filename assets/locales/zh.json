@@ -2920,6 +2920,8 @@
   "prefs.structure.work": "工作",
   "prefs.supersampling_brief": "以更高分辨率绘制后滤波缩小：更清晰，但负载更高。",
   "prefs.tab_accent_note": "强调色跟随当前选项卡",
+  "prefs.tab_double_click_renames": "双击设计选项卡以重命名",
+  "prefs.tab_double_click_renames_note": "输入新名称，然后按 Enter 或点击别处即可保留，按 Esc 取消。关闭时：双击选项卡会最大化窗口，与栏的空白处相同。",
   "prefs.theme_file": "主题文件",
   "prefs.theme_file_or_paste": "文件或粘贴",
   "prefs.theme_follow": "跟随主题文件",

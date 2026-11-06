@@ -2218,6 +2218,8 @@
   "prefs.structure.work": "작업",
   "prefs.supersampling_brief": "뷰를 더 크게 그린 뒤 줄여서 필터링합니다. 매우 선명하지만 더 무겁습니다.",
   "prefs.tab_accent_note": "강조 색상이 활성 탭을 따라갑니다",
+  "prefs.tab_double_click_renames": "디자인 탭을 두 번 클릭하여 이름 바꾸기",
+  "prefs.tab_double_click_renames_note": "새 이름을 입력한 뒤 Enter 키를 누르거나 다른 곳을 클릭하면 적용되고, Esc 키를 누르면 취소됩니다. 끄면: 탭을 두 번 클릭할 때 막대의 빈 부분처럼 창이 최대화됩니다.",
   "prefs.theme_file": "테마 파일",
   "prefs.theme_follow": "테마 파일 따르기",
   "prefs.theme_follow_error": "적용되지 않음: {error}. 마지막으로 적용된 정상 테마를 유지합니다.",

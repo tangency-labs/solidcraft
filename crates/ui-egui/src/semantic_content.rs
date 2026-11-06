@@ -392,7 +392,12 @@ pub(crate) fn release_eye(ctx: &egui::Context) -> Option<ContentSource> {
 /// A reveal is acknowledged only after its row is presented in the scroll viewport. An
 /// offscreen target requests scrolling again on the next frame until that happens.
 pub(crate) fn scroll_acknowledged(ui: &Ui, rect: Rect) -> bool {
-    ui.scroll_to_rect(rect, Some(egui::Align::Center));
+    scroll_acknowledged_at(ui, rect, egui::Align::Center)
+}
+
+/// [`scroll_acknowledged`] placing `rect` at `align` in the viewport.
+pub(crate) fn scroll_acknowledged_at(ui: &Ui, rect: Rect, align: egui::Align) -> bool {
+    ui.scroll_to_rect(rect, Some(align));
     presented(ui) && ui.is_rect_visible(rect) && ui.clip_rect().contains(rect.center())
 }
 

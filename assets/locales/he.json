@@ -2920,6 +2920,8 @@
   "prefs.structure.work": "עבודה",
   "prefs.supersampling_brief": "מצייר את המבט גדול יותר ומקטין אותו: חד מאוד, וכבד יותר.",
   "prefs.tab_accent_note": "צבע ההדגשה עוקב אחר הלשונית הפעילה",
+  "prefs.tab_double_click_renames": "לחיצה כפולה על לשונית עיצוב משנה את שמו",
+  "prefs.tab_double_click_renames_note": "הקלידו את השם החדש ואז הקישו Enter או לחצו במקום אחר כדי לשמור אותו, או Esc כדי לבטל. כבוי: לחיצה כפולה על לשונית מגדילה את החלון, כמו בחלק הריק של הסרגל.",
   "prefs.theme_file": "קובץ ערכת נושא",
   "prefs.theme_file_or_paste": "קובץ או הדבקה",
   "prefs.theme_follow": "מעקב אחר קובץ ערכת נושא",

@@ -1321,6 +1321,9 @@ preference_settings! {
     /// click shows its panels over the view until a command starts or the pointer leaves them.
     /// Off by default: the whole ribbon shows. `view.ribbon_tabs_only` switches it.
     ribbon_tabs_only: bool = false, PAGE_LAYOUT;
+    /// A double-click on a design tab renames the design in the tab; off, it maximizes the window
+    /// as the rest of the title bar does, as before.
+    tab_double_click_renames: bool = true, PAGE_LAYOUT;
     /// Where a dialog's OK and Cancel sit: under its inputs (the default) or in its title row (#6708).
     dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_LAYOUT;
     /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom
@@ -1374,6 +1377,14 @@ preference_settings! {
     /// A History folder whose features are all of one kind (Holes, say) shows their icon instead of
     /// the folder icon, in both Histories. Off by default: every folder shows the folder icon.
     history_folder_kind_icon: bool = false, PAGE_LAYOUT;
+    /// On, two or more joints show as one button with their count in the History, and a click
+    /// shows each one (#8884). Off, the default, shows each joint as the History always has.
+    history_group_joints: bool = false, PAGE_LAYOUT;
+    /// On, the History bar folds long runs of one component's features into chips and starts
+    /// feature folders folded, and a STEP insert that brings more than one item goes into a
+    /// `Group #N` folder (#8885). Off, the default, shows each feature, starts folders open and
+    /// makes no folder, as the bar always has.
+    history_bar_groups: bool = false, PAGE_LAYOUT;
     /// The vertical history (left, or under the browser) starts with the active component's Bodies
     /// folder and the Origin, as the browser shows them (#6490). The bottom strip is unchanged.
     timeline_origin_bodies: bool = false, PAGE_LAYOUT;
@@ -6258,6 +6269,7 @@ mod tests {
             ("sketch_tab_always", json!(true), PAGE_LAYOUT),
             ("keep_work_on_tab_switch", json!(true), PAGE_LAYOUT),
             ("ribbon_reveal", json!(true), PAGE_LAYOUT),
+            ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
             ("dialog_buttons", json!("top"), PAGE_LAYOUT),
             ("toast_place", json!("centre"), PAGE_LAYOUT),
             ("ribbon_icon_grid", json!(true), PAGE_LAYOUT),
@@ -6268,6 +6280,8 @@ mod tests {
             ("history_sketches", json!("under_feature"), PAGE_LAYOUT),
             ("history_play_button", json!(false), PAGE_LAYOUT),
             ("history_folder_kind_icon", json!(true), PAGE_LAYOUT),
+            ("history_group_joints", json!(true), PAGE_LAYOUT),
+            ("history_bar_groups", json!(true), PAGE_LAYOUT),
             ("browser_float", json!(true), PAGE_LAYOUT),
             ("browser_collapsed", json!(true), PAGE_LAYOUT),
             ("browser_show", json!("hover"), PAGE_LAYOUT),

@@ -277,14 +277,26 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
     let _ = begin_request(app, Request::new(path, if insert { Kind::Insert } else { Kind::Open }));
 }
 
+/// A STEP, IGES, FreeCAD or Rhino file the app opens or inserts gets a `Group #N` history folder
+/// while "Fold the History bar into groups" is on, and none while it is off (#8885), unless the
+/// caller chose (`folder`).
+pub(crate) fn step_folder_option(app: &SolveApp, path: &str, options: &mut serde_json::Map<String, Value>) {
+    if solidcraft_engine::io::is_step_path(path) {
+        options.entry("folder").or_insert(Value::Bool(app.preferences.history_bar_groups));
+    }
+}
+
 /// Queue a file operation; on the web (no threads) it runs now.
-pub fn begin_request(app: &mut SolveApp, request: Request) -> Result<(), String> {
+pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
     if crate::control::chat_turn_cancelled(request.chat_turn.as_deref()) {
         request.answer(Err("the agent chat turn ended".into()));
         return Ok(());
     }
     if app.file_load.idle() && reuse_open(app, &request) {
         return Ok(());
+    }
+    if matches!(request.kind, Kind::Open | Kind::Insert) {
+        step_folder_option(app, &request.path, &mut request.options);
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -2008,5 +2020,27 @@ mod tests {
             }
         }
         assert!(read && after_read, "the import's progress showed while its file was read, then the open went on");
+    }
+
+    /// The app asks a STEP-family open or insert for a `Group #N` history folder only while "Fold
+    /// the History bar into groups" is on (#8885); a caller's own `folder` stays, and other files
+    /// are left alone.
+    #[test]
+    fn a_step_open_asks_for_a_history_folder_as_the_bar_groups() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let asked = |app: &SolveApp, path: &str, folder: Option<bool>| {
+            let mut options = serde_json::Map::new();
+            if let Some(folder) = folder {
+                options.insert("folder".into(), Value::Bool(folder));
+            }
+            step_folder_option(app, path, &mut options);
+            options.get("folder").cloned()
+        };
+        assert!(!app.preferences.history_bar_groups, "off by default");
+        assert_eq!(asked(&app, "a.step", None), Some(Value::Bool(false)), "no folder while the bar's groups are off");
+        app.preferences.history_bar_groups = true;
+        assert_eq!(asked(&app, "a.stp", None), Some(Value::Bool(true)), "a folder while they are on");
+        assert_eq!(asked(&app, "a.step", Some(false)), Some(Value::Bool(false)), "the caller's choice stays");
+        assert_eq!(asked(&app, "a.stl", None), None, "a mesh has no folders");
     }
 }
