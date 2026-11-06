@@ -2413,7 +2413,7 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         && let Some(id) = joint_glyph_at(&plan, p)
         && let Some(tip) = joint_glyph_tip(app, id)
     {
-        egui::containers::Tooltip::always_open(ctx.clone(), painter.layer_id(), egui::Id::new(("joint_glyph_tip", id)), egui::PopupAnchor::Pointer)
+        egui::containers::Tooltip::always_open(ctx.clone(), painter.layer_id(), egui::Id::unique(("joint_glyph_tip", id)), egui::PopupAnchor::Pointer)
             .show(|ui| ui.label(tip));
     }
     let t = Tokens::get();
