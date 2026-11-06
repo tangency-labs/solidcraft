@@ -827,18 +827,13 @@ impl Dialog {
         }
     }
 
-    /// The picker for the agent chat's context, holding what is already picked.
-    pub fn chat_context(picked: &[Sel]) -> Dialog {
-        let mut inputs = vec![
+    /// The picker for a pill in the agent chat's message: elements, features and bodies.
+    pub fn chat_context() -> Dialog {
+        let inputs = vec![
             SelInput::new("Elements", FACES | EDGES | selection::VERTICES, true),
             SelInput::new("Features", selection::FEATURES, true),
             SelInput::new("Bodies", BODIES, true),
         ];
-        for sel in picked {
-            if let Some(input) = inputs.iter_mut().find(|i| fits(i.accept, sel)) {
-                input.items.push(sel.clone());
-            }
-        }
         Dialog::new(Kind::ChatContext, inputs)
     }
 
@@ -1483,6 +1478,18 @@ impl Dialog {
 
     pub fn active_input(&self) -> Option<&SelInput> {
         self.inputs.get(self.active)
+    }
+
+    /// The chat's picker takes a step or a body clicked in the History or the Browser into the
+    /// list that takes it, whichever list is active (#11318): make that list the active one.
+    /// Other dialogs keep their active input.
+    pub(crate) fn activate_input_taking(&mut self, accept: Accept) {
+        if !matches!(self.kind, Kind::ChatContext) || self.active_input().is_some_and(|i| i.accept & accept != 0) {
+            return;
+        }
+        if let Some(i) = self.inputs.iter().position(|i| i.accept & accept != 0) {
+            self.active = i;
+        }
     }
 
     /// Whether a round edge kept in `inp` stands for its centre: a construction point's input,
@@ -2629,7 +2636,7 @@ fn title(k: &Kind) -> &'static str {
     }
 }
 
-fn hint(inp: &SelInput) -> &'static str {
+pub(crate) fn hint(inp: &SelInput) -> &'static str {
     let a = inp.accept;
     if a & PROFILES != 0 {
         "click profiles in the view"
@@ -2652,6 +2659,8 @@ fn hint(inp: &SelInput) -> &'static str {
     } else if inp.label == "Faces/Body" {
         // Shell (#794): faces open the hollow; a body alone seals a closed void inside.
         "click faces to remove, or a body in the Browser for a closed hollow"
+    } else if a & selection::FEATURES != 0 {
+        "click steps in the History or the Browser"
     } else if a & BODIES != 0 {
         "click bodies"
     } else {
@@ -3832,7 +3841,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let has_ok = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. });
     let valid = match &d.kind {
         Kind::Sketch => false,
-        // Nothing picked is an answer too: OK empties the chat's tray.
+        // Nothing picked is an answer too: OK adds no pill.
         Kind::ChatContext => true,
         Kind::Material { editor, .. } => !editor.editing() && apply_commands(app, &d).is_ok(),
         Kind::SaveMesh(_) => crate::dialogs_save_mesh::ready(&d.inputs),
