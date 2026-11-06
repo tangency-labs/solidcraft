@@ -512,7 +512,8 @@ fn a_change_that_shows_the_same_draws_no_view() {
     run(&mut s, "drawing.open", drawing);
     assert_eq!(extract(&mut s, sheet).unwrap().stale.len(), 2, "40 tall shows otherwise");
     run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": checkpoint}));
-    // A step straight after the change, with no extract between, finds nothing to draw either.
+    // A step or a job straight after the change, with no extract between, finds nothing to draw either.
+    assert!(begin(&mut s).is_none());
     assert!(!step(&mut s));
     let back = extract(&mut s, sheet).unwrap();
     assert!(back.stale.is_empty(), "{:?}", back.stale);
@@ -559,6 +560,7 @@ fn a_deferred_drawing_keeps_its_lines_until_it_is_updated() {
     let checkpoint = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].clone();
     extract(&mut s, sheet).unwrap();
     assert!(!step(&mut s), "nothing is drawn before an update");
+    assert!(begin(&mut s).is_none(), "nor asked for beside the window");
     assert_eq!(run(&mut s, "drawing.update", json!({}))["waiting"], 2);
     let before = settled(&mut s, sheet);
     assert!(before.stale.is_empty());
@@ -1765,5 +1767,207 @@ fn a_views_boundary_in_the_scene_is_its_boundary_in_every_style() {
         let objects = built(&s, sheet).objects;
         let boundary = objects.iter().find(|o| o.object == front).and_then(|o| o.boundary_mm).unwrap();
         assert!((boundary.min - corner("min")).len() < 1e-9 && (boundary.max - corner("max")).len() < 1e-9, "{style}: {boundary:?} {inspected}");
+    }
+}
+
+/// What a dropped result must leave as it was: the provider's scene and its number, the design,
+/// its undo and redo steps, the session's revision and whether it needs saving.
+fn untouched(s: &mut Session, sheet: u64) -> (String, u64, String, [usize; 2], u64, bool) {
+    let shown = extract(s, sheet).unwrap();
+    (bytes(&shown.scene), shown.generation, s.doc.to_json(), [s.undo.len(), s.redo.len()], s.revision, s.is_dirty())
+}
+
+/// The block with a 10 mm cube on it, in a component of its own, and [`front_and_top`]'s drawing of
+/// them, open: the session, the sheet and the cube's occurrence.
+fn cube_on_block() -> (Session, u64, Value) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"}));
+    let cube = run(&mut s, "component.create", json!({"name": "Cube", "grounded": false}))["occurrence"].clone();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 20]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let (s, sheet, _) = front_and_top_of(s);
+    (s, sheet, cube)
+}
+
+/// Runs model command `id` with the drawing closed, as the model can only be changed then, and
+/// opens the drawing again.
+fn in_the_model(s: &mut Session, id: &str, p: Value) {
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(s, "drawing.close", json!({}));
+    run(s, id, p);
+    run(s, "drawing.open", json!({"drawing": drawing}));
+}
+
+/// Lines worked out beside the window (#4892 B7) on another thread are taken once they come back,
+/// a view at a time, until the provider's scene is the built one, byte for byte; then nothing is
+/// asked for. Taking them changes nothing authored and adds no undo step.
+#[test]
+fn a_job_beside_the_window_draws_as_a_step_does() {
+    let (mut s, sheet, _) = front_and_top();
+    extract(&mut s, sheet).unwrap();
+    let (doc, undo, revision) = (s.doc.to_json(), s.undo.len(), s.revision);
+    while let Some(job) = begin(&mut s) {
+        let done = std::thread::spawn(move || job.run()).join().unwrap();
+        assert!(finish(&mut s, done));
+    }
+    let end = extract(&mut s, sheet).unwrap();
+    assert_eq!((end.stale.len(), bytes(&end.scene), s.drawing_scenes.projections), (0, bytes(&built(&s, sheet).scene), 2));
+    assert_eq!((s.doc.to_json(), s.undo.len(), s.revision), (doc, undo, revision));
+}
+
+/// Only the latest request's lines are taken: asking again leaves the earlier result to be
+/// dropped, whichever comes back first.
+#[test]
+fn only_the_latest_request_is_taken() {
+    for latest_first in [false, true] {
+        let (mut s, sheet, _) = front_and_top();
+        extract(&mut s, sheet).unwrap();
+        let earlier = begin(&mut s).unwrap().run();
+        let latest = begin(&mut s).unwrap().run();
+        let was = untouched(&mut s, sheet);
+        if latest_first {
+            assert!(finish(&mut s, latest));
+            assert!(!finish(&mut s, earlier));
+        } else {
+            assert!(!finish(&mut s, earlier));
+            assert_eq!(untouched(&mut s, sheet), was);
+            assert!(finish(&mut s, latest));
+        }
+        assert_eq!((extract(&mut s, sheet).unwrap().stale.len(), s.drawing_scenes.projections), (1, 1));
+    }
+}
+
+/// @0xlillith's four orders at the point a job's lines come back (#4892 W14): after an edit of the
+/// drawing or of the model, after an edit and its undo (the view as it was, the design not), after
+/// the drawing is closed and opened again, and after a cancel, they are dropped. Dropped, they
+/// change nothing on the sheet or in the design, and the next request draws the view as it is now.
+#[test]
+fn a_job_is_dropped_after_an_edit_an_undo_a_reopen_or_a_cancel() {
+    let scale = |s: &mut Session, set: &str| {
+        let front = s.drawing("test").unwrap().views[0].id;
+        drop(run(s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": set}})));
+    };
+    let reopen = |s: &mut Session| {
+        let drawing = ids::encode(s.open_drawing.unwrap());
+        run(s, "drawing.close", json!({}));
+        drop(run(s, "drawing.open", json!({"drawing": drawing})));
+    };
+    // Each starts from the block with a tower added since `checkpoint`.
+    let orders: [(&str, &dyn Fn(&mut Session, &Value)); 5] = [
+        ("an edit of the drawing", &|s, _| scale(s, "1:5")),
+        ("an edit of the model", &|s, checkpoint| drop(run(s, "edit.restore_checkpoint", json!({"checkpoint": checkpoint})))),
+        ("an edit and its undo", &|s, _| {
+            scale(s, "1:5");
+            drop(run(s, "edit.undo", json!({})));
+        }),
+        ("closing and opening the drawing", &|s, _| reopen(s)),
+        ("a cancel", &|s, _| cancel(s)),
+    ];
+    for (order, after) in orders {
+        let (mut s, sheet, _) = front_and_top();
+        let checkpoint = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].clone();
+        let drawing = ids::encode(s.open_drawing.unwrap());
+        run(&mut s, "drawing.close", json!({}));
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [40, 60, 0], "body_name": "Tower", "operation": "new"}));
+        run(&mut s, "drawing.open", json!({"drawing": drawing}));
+        settled(&mut s, sheet);
+        scale(&mut s, "1:1");
+        let done = begin(&mut s).unwrap().run();
+        after(&mut s, &checkpoint);
+        let was = untouched(&mut s, sheet);
+        assert!(!finish(&mut s, done), "{order}");
+        assert_eq!(untouched(&mut s, sheet), was, "{order}");
+        assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built(&s, sheet).scene), "{order}");
+    }
+}
+
+/// A result is dropped too when what it was asked from changes without the session's revision
+/// moving: the view as it resolves now (a drawing put in place whole), or the model's world state
+/// (a move not captured yet, cleared directly).
+#[test]
+fn a_job_is_dropped_when_its_view_or_the_model_changed_unannounced() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    extract(&mut s, sheet).unwrap();
+    let done = begin(&mut s).unwrap().run();
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let at = d.views.iter().position(|v| v.id == front).unwrap();
+    let mut view = (*d.views[at]).clone();
+    view.settings.scale = Some("1:5".parse().unwrap());
+    d.views[at] = Arc::new(view);
+    s.doc_mut().put_drawing(Arc::new(d));
+    let revision = s.revision;
+    assert!(!finish(&mut s, done));
+    assert_eq!((s.revision, s.drawing_scenes.projections), (revision, 0), "the view");
+
+    let (mut s, sheet, cube) = cube_on_block();
+    in_the_model(&mut s, "occurrence.move", json!({"occurrence": cube, "translate": [30, 0, 0], "capture": false}));
+    extract(&mut s, sheet).unwrap();
+    let done = begin(&mut s).unwrap().run();
+    s.pending_moves.clear();
+    let revision = s.revision;
+    assert!(!finish(&mut s, done));
+    assert_eq!((s.revision, s.drawing_scenes.projections), (revision, 0), "the model");
+}
+
+/// An occurrence move not captured yet is left out, as dimensions leave it out: a sheet built for
+/// an export and the provider's scene both draw the cube on the block where the design places it,
+/// as before the move. Once the move is captured, both draw it.
+#[test]
+fn an_uncaptured_move_is_drawn_where_the_design_places_the_part() {
+    let (mut s, sheet, cube) = cube_on_block();
+    let placed = settled(&mut s, sheet);
+    in_the_model(&mut s, "occurrence.move", json!({"occurrence": cube, "translate": [30, 0, 0], "capture": false}));
+    assert_eq!(s.pending_moves.len(), 1);
+    assert_eq!(bytes(&built(&s, sheet).scene), bytes(&placed.scene));
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&placed.scene));
+    in_the_model(&mut s, "component.capture_position", json!({}));
+    let captured = settled(&mut s, sheet);
+    assert_ne!(bytes(&captured.scene), bytes(&placed.scene));
+    assert_eq!(bytes(&captured.scene), bytes(&built(&s, sheet).scene));
+}
+
+/// Seeded mixes of edits, undos, redos, steps and jobs begun, run, cancelled and taken in any
+/// order: once nothing is waiting, the provider's scene is always the built one, byte for byte.
+#[test]
+fn seeded_edits_steps_and_jobs_always_end_at_the_built_scene() {
+    let pick = |seed: u64, salt: u64, n: u64| ((seed ^ salt).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 33) % n;
+    for seed in 1..=24u64 {
+        let (mut s, sheet, [front, top]) = front_and_top();
+        let edit =
+            |s: &mut Session, view: u64, set: Value| s.execute("drawing.view.edit", &json!({"view": ids::encode(view), "set": set})).map(|_| ());
+        let mut running = Vec::new();
+        for i in 0..16u64 {
+            let scale = ["1:1", "1:2", "1:5"][pick(seed, 200 + i, 3) as usize];
+            let _ = match pick(seed, i, 9) {
+                0 => edit(&mut s, front, json!({"scale": scale})),
+                1 => edit(&mut s, top, json!({"place": {"aligned": 200.0 + 10.0 * pick(seed, 100 + i, 5) as f64}})),
+                2 => s.execute("edit.undo", &json!({})).map(|_| ()),
+                3 => s.execute("edit.redo", &json!({})).map(|_| ()),
+                4 => {
+                    step(&mut s);
+                    Ok(())
+                }
+                5 => extract(&mut s, sheet).map(drop),
+                6 => {
+                    running.extend(begin(&mut s).map(Job::run));
+                    Ok(())
+                }
+                7 if !running.is_empty() => {
+                    let done = running.remove(pick(seed, 300 + i, running.len() as u64) as usize);
+                    finish(&mut s, done);
+                    Ok(())
+                }
+                _ => {
+                    cancel(&mut s);
+                    Ok(())
+                }
+            };
+        }
+        for done in running {
+            finish(&mut s, done);
+        }
+        let end = settled(&mut s, sheet);
+        assert!(end.stale.is_empty(), "seed {seed}");
+        assert_eq!(bytes(&end.scene), bytes(&built(&s, sheet).scene), "seed {seed}");
     }
 }

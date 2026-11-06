@@ -183,6 +183,7 @@ mod blend_dialog_tests;
 #[cfg(test)]
 mod boundary_dialog_tests;
 pub(crate) mod display_lod;
+pub mod drawing_jobs;
 pub mod drawing_workspace;
 #[cfg(test)]
 mod file_load_ui_tests;
@@ -552,6 +553,8 @@ pub struct SolveApp {
     pub(crate) easyprint: easyprint_ui::State,
     /// A Save or Save As being written on a worker (see [`save_job`]).
     saving: Option<save_job::Saving>,
+    /// A drawing view being drawn on a worker (see [`drawing_jobs`]).
+    drawing_job: Option<drawing_jobs::Drawing>,
     pub viewport: viewport::ViewportState,
     pub render_workspace: render_workspace::State,
     pub drawing_workspace: drawing_workspace::State,
@@ -817,6 +820,7 @@ impl SolveApp {
             slicer_wait: None,
             easyprint: Default::default(),
             saving: None,
+            drawing_job: None,
             viewport: viewport::ViewportState::default(),
             render_workspace,
             drawing_workspace: Default::default(),
