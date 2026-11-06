@@ -5954,8 +5954,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
         }
     }
     if let Some(since) = app.computing_since() {
-        let seconds = ((crate::now_ms() - since) / 1000.0).floor().max(0.0);
-        let text = crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))]);
+        let text = computing_text(app, since);
         // A history command or a delete's check can be given up on (#8266); a feature edit
         // applying has the dialog's Cancel instead.
         let cancel = app.tr_label("Cancel").to_string();
@@ -6047,6 +6046,18 @@ pub(crate) fn corner_free(view: Rect, obstacles: &[Rect]) -> Rect {
         }
     }
     best
+}
+
+/// What the computing toast says: the feature the evaluation has reached, as opening a design
+/// shows it, or, until it knows, how long it has computed since `since` (ms).
+pub(crate) fn computing_text(app: &SolveApp, since: f64) -> String {
+    match app.computing_feature() {
+        Some((at, total)) => crate::i18n::format("file_load.rebuilding", &[("done", &at.to_string()), ("total", &total.to_string())]),
+        None => {
+            let seconds = ((crate::now_ms() - since) / 1000.0).floor().max(0.0);
+            crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))])
+        }
+    }
 }
 
 /// What a toast's button is for, which sets its look and where it goes: the main action first

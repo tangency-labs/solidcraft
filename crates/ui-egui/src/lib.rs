@@ -652,6 +652,10 @@ pub struct SolveApp {
     /// measurement) waits for this before it reports done.
     #[cfg(test)]
     pub(crate) apply_gate: Option<std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<()>>>>,
+    /// Tests: the next command computed off the window thread waits before this feature until
+    /// its progress is told to hold elsewhere.
+    #[cfg(test)]
+    pub(crate) deferred_hold_at: Option<usize>,
     /// The last command started interactively (id, label), for Repeat.
     pub last_command: Option<(String, String)>,
     /// Bodies copied with Copy (by name), pasted into the active component by Paste.
@@ -899,6 +903,8 @@ impl SolveApp {
             render_preparation: Default::default(),
             #[cfg(test)]
             apply_gate: None,
+            #[cfg(test)]
+            deferred_hold_at: None,
             last_command: None,
             copied_bodies: Vec::new(),
             clipboard_text: None,
