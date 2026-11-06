@@ -1525,7 +1525,12 @@ fn replayed_sources<'a>(doc: &'a Document, features: &[crate::FeatureId]) -> Vec
         if out.iter().any(|x| x.id == g.id) {
             continue;
         }
-        if let FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } = &g.kind
+        if let FeatureKind::Pattern { features, bodies, components, .. } = &g.kind
+            && bodies.is_empty()
+            && components.is_empty()
+        {
+            todo.extend(features.iter().copied());
+        } else if let FeatureKind::Mirror { features, bodies, .. } = &g.kind
             && bodies.is_empty()
         {
             todo.extend(features.iter().copied());
@@ -2408,7 +2413,10 @@ impl Model {
                     };
                     // Copies made through a pattern or mirror among the sources come after (#395).
                     let mats = match &f.kind {
-                        FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => {
+                        FeatureKind::Pattern { features, bodies, components, .. } if bodies.is_empty() && components.is_empty() => {
+                            copy_instances(doc, &vals, &state, features, &mats).unwrap_or(mats)
+                        }
+                        FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => {
                             copy_instances(doc, &vals, &state, features, &mats).unwrap_or(mats)
                         }
                         _ => mats,
@@ -6278,6 +6286,98 @@ pub fn pattern_matrices(doc: &Document, st: &ModelState, p: &crate::PatternKind)
     pattern_transforms(doc, &vals, st, 0, p)
 }
 
+/// Keep each Pattern of components' occurrences in step with its count and spacing (#12116):
+/// add or remove copies when the count changes, update transforms when the source or spacing
+/// moves, and drop copies of a suppressed or rolled-back Pattern. Surviving copies keep their
+/// occurrence ids.
+pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Result<()> {
+    let marker = doc.marker.unwrap_or(doc.features.len());
+    let (vals, _) = doc.param_values();
+    // Snapshot what each Pattern of components wants, then mutate. Features after the marker
+    // are rolled back: their copies go, like bodies of a rolled-back Pattern.
+    let plans: Vec<(u64, bool, Vec<u64>, crate::PatternKind, u64)> = doc
+        .features
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| match &f.kind {
+            FeatureKind::Pattern { pattern, components, .. } if !components.is_empty() => {
+                Some((f.id, f.suppressed || i >= marker, components.clone(), pattern.clone(), f.component))
+            }
+            _ => None,
+        })
+        .collect();
+    for (feature_id, inactive, components, pattern, feature_component) in plans {
+        if inactive {
+            clear_pattern_occurrences(doc, feature_id)?;
+            continue;
+        }
+        let mats = pattern_transforms(doc, &vals, st, feature_component, &pattern)?;
+        let mut made = Vec::with_capacity(components.len().saturating_mul(mats.len()));
+        let previous = match &doc.feature(feature_id).map(|f| &f.kind) {
+            Some(FeatureKind::Pattern { occurrences, .. }) => occurrences.clone(),
+            _ => Vec::new(),
+        };
+        // Occurrences are stored per component, then per matrix. Shrink/grow each component's
+        // block on its own so survivors keep their ids when the count changes.
+        let old_per = match components.len() {
+            0 => 0,
+            n => previous.len() / n,
+        };
+        let mut leftover = std::collections::BTreeSet::new();
+        for (ci, component) in components.into_iter().enumerate() {
+            let src = doc.occurrence_of(component).cloned().ok_or_else(|| DocError::Unknown(format!("component {component}")))?;
+            // The first placement is the pattern's seed; keep it by id so later adds of this
+            // reconcile do not change which occurrence we read as the source.
+            let seed = src.id;
+            let src = doc.occurrences.iter().find(|o| o.id == seed).cloned().unwrap_or(src);
+            let start = ci.saturating_mul(old_per);
+            let block = previous.get(start..start.saturating_add(old_per)).unwrap_or(&[]);
+            let mut old = block.iter().copied();
+            for m in &mats {
+                let transform = crate::mat_mul(m, &src.transform);
+                match old.next() {
+                    Some(id) if doc.occurrences.iter().any(|o| o.id == id && o.component == component) => {
+                        if let Some(o) = doc.occurrences.iter_mut().find(|o| o.id == id) {
+                            o.parent = src.parent;
+                            o.transform = transform;
+                        }
+                        made.push(id);
+                    }
+                    Some(id) => {
+                        leftover.insert(id);
+                        made.push(doc.add_occurrence(component, src.parent, transform)?);
+                    }
+                    None => {
+                        made.push(doc.add_occurrence(component, src.parent, transform)?);
+                    }
+                }
+            }
+            leftover.extend(old);
+        }
+        if !leftover.is_empty() {
+            doc.remove_occurrences(&leftover);
+        }
+        if let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature_mut(feature_id).map(|f| &mut f.kind) {
+            *occurrences = made;
+        }
+    }
+    Ok(())
+}
+
+fn clear_pattern_occurrences(doc: &mut Document, feature_id: u64) -> Result<()> {
+    let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature(feature_id).map(|f| &f.kind) else {
+        return Ok(());
+    };
+    let gone: std::collections::BTreeSet<u64> = occurrences.iter().copied().collect();
+    if !gone.is_empty() {
+        doc.remove_occurrences(&gone);
+    }
+    if let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature_mut(feature_id).map(|f| &mut f.kind) {
+        occurrences.clear();
+    }
+    Ok(())
+}
+
 fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, component: u64, p: &crate::PatternKind) -> Result<Vec<Mat>> {
     let count = |e: &str| -> Result<usize> {
         let n = expr::eval_count(e, vals)?;
@@ -6594,7 +6694,7 @@ fn source_label(doc: &Document, id: FeatureId) -> String {
 /// or mirror of bodies (its copies are bodies, which a pattern or mirror of features can't take).
 fn copied_features(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, src: &Feature) -> Result<Option<(Vec<FeatureId>, Vec<Mat>)>> {
     match &src.kind {
-        FeatureKind::Pattern { features, pattern, bodies } if bodies.is_empty() => {
+        FeatureKind::Pattern { features, pattern, bodies, components, .. } if bodies.is_empty() && components.is_empty() => {
             Ok(Some((features.clone(), pattern_transforms(doc, vals, st, src.component, pattern)?)))
         }
         FeatureKind::Mirror { features, plane, bodies, .. } if bodies.is_empty() => {
@@ -7766,7 +7866,12 @@ fn eval_feature(
             }
             Ok(())
         }
-        FeatureKind::Pattern { features, pattern, bodies } => {
+        FeatureKind::Pattern { features, pattern, bodies, components, .. } => {
+            // Component placements are reconciled on the document after evaluation (#12116).
+            if !components.is_empty() {
+                let _ = pattern_transforms(doc, vals, st, f.component, pattern)?;
+                return Ok(());
+            }
             let mats = pattern_transforms(doc, vals, st, f.component, pattern)?;
             if bodies.is_empty() {
                 return replay(doc, vals, f, st, features, &mats, warning);
