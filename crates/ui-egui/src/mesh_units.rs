@@ -3,7 +3,9 @@
 //! dialog asks for the unit first: OK imports with it (`units` of `file.insert_mesh` and
 //! `doc.open`, which scale the coordinates to millimetres as the file is read), Cancel imports
 //! nothing. The design keeps the millimetre mesh and not the unit, so a different unit is tried by
-//! importing the file again.
+//! importing the file again. The same dialog offers Move to origin (`origin` of the same
+//! commands, off unless ticked, #12543): the import is moved so its box is centred on X and Y
+//! with its base on Z = 0.
 //!
 //! Only interactive entry points ask ([`file_load::begin`]): a script, the control channel or MCP
 //! calls the commands with their own `units`, or none for millimetres, and never meets a dialog.
@@ -24,6 +26,8 @@ pub struct Ask {
     pub choice: usize,
     /// Insert it as a mesh whatever its extension says (a PLY chosen with Insert Mesh).
     pub mesh: bool,
+    /// Move it to the origin as it comes in (`origin`); off until ticked.
+    pub origin: bool,
 }
 
 /// Files that state no unit of their own and take one when imported.
@@ -39,7 +43,7 @@ pub fn ask(app: &mut SolveApp, path: &str, insert: bool) -> bool {
     if !needs_unit(path) {
         return false;
     }
-    app.mesh_units = Some(Ask { path: path.into(), insert, choice: default_choice(), mesh: false });
+    app.mesh_units = Some(Ask { path: path.into(), insert, choice: default_choice(), mesh: false, origin: false });
     true
 }
 
@@ -50,7 +54,7 @@ pub fn ask_ply_as_mesh(app: &mut SolveApp, path: &str) -> bool {
     if !solidcraft_engine::io::is_ply_path(path) {
         return false;
     }
-    app.mesh_units = Some(Ask { path: path.into(), insert: true, choice: default_choice(), mesh: true });
+    app.mesh_units = Some(Ask { path: path.into(), insert: true, choice: default_choice(), mesh: true, origin: false });
     true
 }
 
@@ -74,6 +78,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ui_kit::Window::new(egui::Id::unique("sc_mesh_units"), "import", crate::i18n::tr("ui.point_cloud_units")).show(ctx, true, |ui| {
             ui_kit::text(ui, &file, ui_kit::Text::Report("file", false));
             ui_kit::choice_row(ui, crate::i18n::tr("ui.units"), "mesh_units", &mut ask.choice, &names);
+            ui_kit::checkbox(ui, crate::i18n::tr("ui.mesh_import_origin"), &mut ask.origin)
+                .on_hover_text(crate::i18n::tr("ui.mesh_import_origin_tip"));
         });
     for (handle, key) in [("mesh_units:ok", "dialog:ok"), ("mesh_units:cancel", "dialog:cancel")] {
         if let Some(at) = crate::scenario::handle_at(key) {
@@ -83,16 +89,25 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     match action {
         ui_kit::Action::Ok => {
             app.mesh_units = None;
-            let kind = if ask.insert { file_load::Kind::Insert } else { file_load::Kind::Open };
-            let mut request = file_load::Request::new(&ask.path, kind);
-            request.mesh = ask.mesh;
-            request.options.insert("units".into(), json!(unit_at(ask.choice)));
-            let _ = file_load::begin_request(app, request);
+            let _ = file_load::begin_request(app, request(&ask));
         }
         ui_kit::Action::Cancel => app.mesh_units = None,
         ui_kit::Action::None if closed => app.mesh_units = None,
         _ => app.mesh_units = Some(ask),
     }
+}
+
+/// The import the dialog's answer starts: the file with its unit, and `origin` when ticked (left
+/// out otherwise, so the command's default stands).
+fn request(ask: &Ask) -> file_load::Request {
+    let kind = if ask.insert { file_load::Kind::Insert } else { file_load::Kind::Open };
+    let mut request = file_load::Request::new(&ask.path, kind);
+    request.mesh = ask.mesh;
+    request.options.insert("units".into(), json!(unit_at(ask.choice)));
+    if ask.origin {
+        request.options.insert("origin".into(), json!(true));
+    }
+    request
 }
 
 #[cfg(test)]
@@ -136,5 +151,18 @@ mod tests {
         let ask = app.mesh_units.clone().expect("asked");
         assert_eq!((ask.path.as_str(), ask.insert, unit_at(ask.choice)), ("part.stl", true, "mm"));
         assert!(app.file_load.idle(), "nothing is imported until OK");
+    }
+
+    #[test]
+    fn move_to_origin_is_off_until_ticked_and_then_sent() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert!(ask(&mut app, "part.stl", true));
+        let mut held = app.mesh_units.clone().expect("asked");
+        assert!(!held.origin, "off by default");
+        assert!(!request(&held).options.contains_key("origin"), "unticked: the command's default");
+        held.origin = true;
+        held.choice = 3;
+        let sent = request(&held);
+        assert_eq!((sent.options.get("origin"), sent.options.get("units")), (Some(&json!(true)), Some(&json!("in"))));
     }
 }
