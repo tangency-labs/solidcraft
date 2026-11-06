@@ -1491,14 +1491,15 @@ fn sketch_contents_head(app: &SolveApp, sketch: u64, editable: bool) -> Vec<Item
 }
 
 /// Entity commands of a sketch that is not being edited would run on the active sketch, because
-/// `sketch.*` commands only ask for *a* sketch and ids repeat from one sketch to the next. Project
-/// is the one that means the active sketch, so it stays on.
+/// `sketch.*` commands and the `ui.*` constraint actions only ask for *a* sketch and ids repeat
+/// from one sketch to the next. Project is the one that means the active sketch, so it stays on.
 fn sketch_contents_gate(items: &mut [Item], editable: bool) {
     if editable {
         return;
     }
     for item in items {
-        if item.id.starts_with("sketch.") && item.id != "sketch.project" {
+        let edits = item.id.starts_with("sketch.") || matches!(item.id.as_str(), "ui.horizontalConstraint" | "ui.verticalConstraint");
+        if edits && item.id != "sketch.project" {
             item.enabled = false;
         }
     }

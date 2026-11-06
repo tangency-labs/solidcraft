@@ -2354,6 +2354,12 @@ fn sketch_contents_rows_get_the_entity_menu_of_their_sketch() {
     assert!(!find(&menu, "Fix/Unfix").enabled);
     assert!(!find(&menu, "Normal / Construction").enabled, "sketch.* commands of another sketch stay off");
     assert!(!find(&menu, "Delete").enabled, "a finished sketch's rows cannot be deleted");
+    // A point and a line of the finished sketch: the two constraint actions name only *a* sketch,
+    // so they would constrain the sketch being edited; they stay off with the rest.
+    let point = h.app.session.doc.sketch(first).unwrap().points[0].id.clone();
+    let menu = context_menu::items(&h.app, &contents(vec![point, line.clone()], false));
+    assert!(!find(&menu, "Horizontal Constraint").enabled);
+    assert!(!find(&menu, "Vertical Constraint").enabled);
     act(&mut h.app, &contents(vec![line], false), "Properties");
     assert_eq!(h.app.sketch_report.as_ref().and_then(|r| r.sketch), Some(first), "Properties reads the row's sketch");
 
