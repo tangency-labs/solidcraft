@@ -1228,7 +1228,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::text(ui, tr(if has_keychain { "ui.ai_key_note" } else { "ui.ai_no_keychain" }), ui_kit::Text::Note("keychain"));
                     if let Some(url) = s.insecure_http_endpoint() {
                         let mut allow = s.allow_insecure_http();
-                        let r = ui_kit::checkbox(ui, tr("ai.http.allow"), &mut allow).on_hover_text(tr("ai.http.warning"));
+                        let r = ui_kit::checkbox(ui, tr("ai.http.allow"), &mut allow).backing_on_hover_text(tr("ai.http.warning"));
                         crate::scenario::publish_target("ai_add:allow_insecure_http", r.rect);
                         if r.changed() {
                             if allow {

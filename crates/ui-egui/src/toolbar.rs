@@ -2487,7 +2487,7 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32
             _ => label.clone(),
         };
         let tip = if shown { tip } else { crate::i18n::format("ui.needs_design", &[("command", &label)]) };
-        if resp.on_hover_text(tip).clicked() && enabled {
+        if resp.backing_on_hover_text(tip).clicked() && enabled {
             start = Some((c.id, br));
         }
         buttons.push((c.id, br));

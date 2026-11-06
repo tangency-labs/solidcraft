@@ -282,7 +282,7 @@ fn fillet_fit_rows(app: &SolveApp, ui: &mut egui::Ui, extra: &mut serde_json::Ma
 fn fillet_turn_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, setback: &mut Option<String>) {
     let before = extra.get("turn").cloned();
     let row = ui.scope(|ui| form_row(ui, "ui.fillet_turn", |ui| extra_choice(ui, extra, "fi_turn", "turn", &FILLET_TURNS)));
-    row.response.on_hover_text(tr("ui.fillet_turn_tip"));
+    row.response.backing_on_hover_text(tr("ui.fillet_turn_tip"));
     if extra.get("turn") != before.as_ref() {
         settle_fillet_options(extra, "turn", setback);
     }
