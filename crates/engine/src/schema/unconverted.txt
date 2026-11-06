@@ -62,16 +62,9 @@ solid.thread
 surface.blend
 surface.extend
 surface.extrude
-surface.fair
 surface.loft
-surface.offset
 surface.patch
-surface.reverse_normal
 surface.revolve
 surface.ruled
-surface.stitch
 surface.sweep
-surface.thicken
 surface.trim
-surface.unstitch
-surface.untrim
