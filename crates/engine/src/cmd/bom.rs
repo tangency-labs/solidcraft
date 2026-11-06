@@ -398,13 +398,10 @@ fn rows(s: &Session, ix: &Index, counts: &BTreeMap<u64, u64>, group: Group, kits
     out
 }
 
-/// A CSV field, always quoted.
-fn quote(s: &str) -> String {
-    format!("\"{}\"", s.replace('"', "\"\""))
-}
-
-/// The bill of materials as CSV: fixed columns, every field quoted.
+/// The bill of materials as CSV: fixed columns, every field quoted, and a field a spreadsheet
+/// would run as a formula written as text.
 fn csv(rows: &[Value]) -> String {
+    let quote = solidcraft_doc::csv::quoted;
     let mut out = ["item", "part_number", "description", "revision", "count", "definition"].map(quote).join(",");
     out.push('\n');
     let lines = rows.iter().flat_map(|r| std::iter::once(r).chain(r["children"].as_array().into_iter().flatten()));

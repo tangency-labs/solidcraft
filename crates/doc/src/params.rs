@@ -483,9 +483,10 @@ impl Document {
     }
 
     /// User parameters as CSV (`name,unit,expression,value,comment`). The `value` column is the
-    /// number in the `unit` column, rounded for reading (#10747); import reads `expression`.
+    /// number in the `unit` column, rounded for reading (#10747); import reads `expression`. A text
+    /// field a spreadsheet would run as a formula is written as text ([`crate::csv`]).
     pub fn params_csv(&self) -> String {
-        let q = |s: &str| if s.contains([',', '"', '\r', '\n']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s.to_string() };
+        let q = crate::csv::field;
         let mut out = String::from("name,unit,expression,value,comment,favorite\n");
         for r in self.param_rows().into_iter().filter(|r| r.source == "user") {
             out += &format!(
@@ -1137,13 +1138,14 @@ fn split_csv(text: &str, separator: char) -> impl Iterator<Item = &str> {
 fn csv_fields(record: &str) -> Result<Vec<String>> {
     split_csv(record, ',')
         .map(|raw| {
+            // `unguard` takes off the `'` an export put before a value a spreadsheet would run.
             let field = raw.trim();
             if !field.contains('"') {
-                return Ok(field.to_string());
+                return Ok(crate::csv::unguard(field).to_string());
             }
             let inner = field.strip_prefix('"').and_then(|s| s.strip_suffix('"'));
             match inner {
-                Some(s) if s.split("\"\"").all(|part| !part.contains('"')) => Ok(s.replace("\"\"", "\"")),
+                Some(s) if s.split("\"\"").all(|part| !part.contains('"')) => Ok(crate::csv::unguard(&s.replace("\"\"", "\"")).to_string()),
                 _ => Err(DocError::Invalid("invalid quoting in parameter CSV".into())),
             }
         })
