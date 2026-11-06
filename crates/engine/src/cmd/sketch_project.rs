@@ -23,7 +23,7 @@ use crate::{EngineError, Result, Session};
 
 macro_rules! refs_doc {
     () => {
-        "refs: [{edge: [x,y,z], body?} | {face: [x,y,z], body?} (its edge loops) | {body: name} (silhouette) | {vertex: [x,y,z], body?} | {sketch, curve} | {sketch, point} | \"origin\" | {axis: X|Y|Z|name} | {plane: XY|XZ|YZ|name}]"
+        "refs: [{edge: [x,y,z], body?} | {face: [x,y,z], body?} (its edge loops) | {body: name} (silhouette) | {vertex: [x,y,z], body?} | {sketch, curve} | {sketch, point} | {point: name} (a construction point) | \"origin\" | {axis: X|Y|Z|name} | {plane: XY|XZ|YZ|name}]"
     };
 }
 
@@ -133,6 +133,9 @@ pub(crate) fn ref_form(v: &Value) -> std::result::Result<RefForm<'_>, String> {
         };
         return Ok(RefForm::Sketch { key, curve: str_(v, "curve"), point: str_(v, "point") });
     }
+    if let Some(p) = str_(v, "point") {
+        return point_source(s, p, cmd);
+    }
     if let Some(b) = str_(v, "body") {
         return Ok(RefForm::Body(b));
     }
@@ -180,6 +183,14 @@ fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
         RefForm::Axis(a) => axis_source(s, a, cmd),
         RefForm::Plane(p) => Ok(LinkSource::Plane { name: p.to_string() }),
         RefForm::Origin => Ok(LinkSource::Origin),
+    }
+}
+
+/// A construction point by its name (#12075).
+fn point_source(s: &Session, name: &str, cmd: &str) -> Result<LinkSource> {
+    match s.doc.find_feature(name) {
+        Some(f) if matches!(f.kind, FeatureKind::ConstructionPoint { .. }) => Ok(LinkSource::ConstructionPoint { name: f.name.clone() }),
+        _ => Err(bad(cmd, format!("unknown point `{name}`: the name of a construction point"))),
     }
 }
 
