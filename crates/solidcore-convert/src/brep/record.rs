@@ -148,8 +148,8 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
             index(v)
         };
         edges.push(Edge {
-            curve: crate::record_curve(made.curve),
-            nurbs: made.nurbs.map(crate::record_curve),
+            curve: crate::record_curve(made.curve)?,
+            nurbs: made.nurbs.map(crate::record_curve).transpose()?,
             interval: made.interval,
             vertices: [vertex(ed.start_vertex)?, vertex(ed.end_vertex)?],
         });
@@ -167,8 +167,8 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
             .ok_or(Unsupported::Invalid("a face without a surface"))?;
         let made = record_face(k, surface, &fd.uv_domain)?;
         let mut face = Face {
-            surface: crate::record_surface(made.surface),
-            nurbs: made.nurbs.map(crate::record_surface),
+            surface: crate::record_surface(made.surface)?,
+            nurbs: made.nurbs.map(crate::record_surface).transpose()?,
             domain: made.domain,
             agrees: made.agrees,
             loops: Vec::new(),

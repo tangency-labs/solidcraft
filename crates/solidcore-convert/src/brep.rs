@@ -66,6 +66,12 @@ impl std::fmt::Display for Unsupported {
 
 impl std::error::Error for Unsupported {}
 
+impl From<solidcore_record::brep::Invalid> for Unsupported {
+    fn from(e: solidcore_record::brep::Invalid) -> Self {
+        Unsupported::Invalid(e.0)
+    }
+}
+
 impl From<SolidError> for Unsupported {
     fn from(e: SolidError) -> Self {
         Unsupported::Kernel(e)
@@ -325,16 +331,16 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
             (r::Curve::Circle { .. } | r::Curve::Ellipse { .. }, Some(n)) => {
                 let [lo, hi] = e.interval;
                 (
-                    curves::conic_on_form(k, &crate::curve(&e.curve), &crate::curve(n))?,
+                    curves::conic_on_form(k, &crate::curve(&e.curve)?, &crate::curve(n)?)?,
                     Extent1d::from_raw(lo, hi),
                 )
             }
             (_, Some(n)) => {
-                let c = curves::from_parameters(k, &crate::curve(n), e.interval)?;
+                let c = curves::from_parameters(k, &crate::curve(n)?, e.interval)?;
                 (c.curve, c.interval)
             }
             (c, None) => {
-                let c = curves::from_parameters(k, &crate::curve(c), e.interval)?;
+                let c = curves::from_parameters(k, &crate::curve(c)?, e.interval)?;
                 (c.curve, c.interval)
             }
         };
@@ -397,8 +403,8 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
     for (fi, f) in rec.faces.iter().enumerate() {
         let made = face_surface(
             k,
-            &crate::surface(&f.surface),
-            f.nurbs.as_ref().map(crate::surface).as_ref(),
+            &crate::surface(&f.surface)?,
+            f.nurbs.as_ref().map(crate::surface).transpose()?.as_ref(),
             f.domain,
             &boundary(rec, f)?,
         )?;
@@ -523,7 +529,7 @@ fn boundary(rec: &r::Brep, f: &r::Face) -> R<Vec<solidcore::eval::Curve>> {
         if let r::Loop::Edges { edges } = l {
             for u in edges {
                 let e = at(&rec.edges, u.edge)?;
-                curves.push(crate::curve(e.nurbs.as_ref().unwrap_or(&e.curve)));
+                curves.push(crate::curve(e.nurbs.as_ref().unwrap_or(&e.curve))?);
             }
         }
     }
@@ -547,7 +553,7 @@ pub fn recognised(
     domain: [[f64; 2]; 2],
 ) -> R<Option<&'static str>> {
     use solidcore::surface::surface::SurfaceKind;
-    let made = face_surface(k, &crate::surface(label), None, domain, &[])?;
+    let made = face_surface(k, &crate::surface(label)?, None, domain, &[])?;
     Ok(match made.surface.kind() {
         SurfaceKind::Plane(_) => Some("plane"),
         SurfaceKind::Cone(c) if c.is_cylinder_class() => Some("cylinder"),

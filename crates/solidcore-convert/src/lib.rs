@@ -37,8 +37,9 @@
 pub mod brep;
 
 use solidcore::eval as k;
+use solidcore::prism::profile as kp;
 use solidcore_record::brep::{Curve, Curve2, Frame, Invalid, Surface, MAX_DEPTH};
-use solidcore_record::{Plane, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 /// The record's vector as the kernel's.
 #[must_use]

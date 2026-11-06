@@ -643,3 +643,92 @@ fn geometry_depth_is_bounded() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// Every planar profile segment kind goes to the kernel's of the same fields (checked against
+/// literals) and back unchanged; loops and regions keep their segments in order.
+#[test]
+fn planar_profiles_become_the_kernel_kinds_and_come_back() {
+    let (a, b, c, d) = (
+        Vec2::new(1.0, 2.0),
+        Vec2::new(-3.5, 0.25),
+        Vec2::new(0.0, -0.0),
+        Vec2::new(7.0, 1e-300),
+    );
+    let ka = |v: Vec2| solidcore::math::Vec2::new(v.x, v.y);
+    let mut p = [Vec2::new(0.0, 0.0); MAX_BEZIER_CTRL];
+    p[0] = a;
+    p[1] = b;
+    p[2] = c;
+    let segs = [
+        (Seg2::Line { a, b }, kp::Seg2::Line { a: ka(a), b: ka(b) }),
+        (
+            Seg2::Arc {
+                center: c,
+                radius: 2.5,
+                start: -0.5,
+                sweep: -3.0,
+            },
+            kp::Seg2::Arc {
+                center: ka(c),
+                radius: 2.5,
+                start: -0.5,
+                sweep: -3.0,
+            },
+        ),
+        (
+            Seg2::Cubic {
+                p0: a,
+                p1: b,
+                p2: c,
+                p3: d,
+            },
+            kp::Seg2::Cubic {
+                p0: ka(a),
+                p1: ka(b),
+                p2: ka(c),
+                p3: ka(d),
+            },
+        ),
+        (
+            Seg2::Conic {
+                a,
+                apex: b,
+                b: c,
+                w: 0.75,
+            },
+            kp::Seg2::Conic {
+                a: ka(a),
+                apex: ka(b),
+                b: ka(c),
+                w: 0.75,
+            },
+        ),
+        (
+            Seg2::Bezier { n: 2, p },
+            kp::Seg2::Bezier { n: 2, p: p.map(ka) },
+        ),
+    ];
+    for (r, want) in &segs {
+        assert_eq!(&seg2(r), want);
+        assert_eq!(&record_seg2(&seg2(r)), r);
+    }
+    assert_eq!(record_vec2(vec2(d)), d);
+    let outer = Loop2 {
+        segs: segs.iter().map(|(r, _)| *r).collect(),
+    };
+    let hole = Loop2 {
+        segs: vec![segs[0].0, segs[1].0],
+    };
+    assert_eq!(
+        loop2(&outer).segs,
+        segs.iter().map(|(_, k)| *k).collect::<Vec<_>>()
+    );
+    assert_eq!(record_loop2(&loop2(&outer)), outer);
+    let region = Region2 {
+        outer,
+        holes: vec![hole.clone(), hole],
+    };
+    let k = region2(&region);
+    assert_eq!(k.holes.len(), 2);
+    assert_eq!(record_region2(&k), region);
+}

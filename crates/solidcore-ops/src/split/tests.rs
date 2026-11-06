@@ -341,7 +341,7 @@ fn a_spline_sheet_is_cut_by_strips_inside_it() {
     let sheet = crate::session::run("sheet", |k| {
         let (s, _) = from_parameters(
             k,
-            &solidcore_convert::surface(&spline),
+            &solidcore_convert::surface(&spline).unwrap(),
             [[0.0, 1.0], [0.0, 40.0]],
         )?;
         Ok(sheet_on(k, s, 1e-6)?.0)

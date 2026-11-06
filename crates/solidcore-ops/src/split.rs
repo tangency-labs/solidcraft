@@ -42,6 +42,7 @@ use solidcore::topology::face::p2 as face_p2;
 use solidcore::topology::proto_topology::p1::CopyBrepMap;
 use solidcore::topology::{Brep, EdgeId, FaceId, NamingScheme};
 use solidcore::EntityRef;
+use solidcore::SolidError;
 use solidcore_convert::brep::Order;
 use solidcore_record::brep::Surface as RecordSurface;
 
@@ -75,8 +76,9 @@ struct Made {
 
 /// The kernel's surface of `tool`.
 fn made(k: &Kernel, tool: &Tool) -> solidcore::Result<Made> {
-    let (surface, domain) =
-        from_parameters(k, &solidcore_convert::surface(&tool.surface), tool.domain)?;
+    let kernel_surface = solidcore_convert::surface(&tool.surface)
+        .map_err(|e| SolidError::invalid_input("ops::split::made", e.0))?;
+    let (surface, domain) = from_parameters(k, &kernel_surface, tool.domain)?;
     let plane = match surface.kind() {
         SurfaceKind::Plane(p) => Some(p.clone()),
         _ => None,
