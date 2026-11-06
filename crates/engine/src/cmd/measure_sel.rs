@@ -384,11 +384,9 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             let m = body.mesh();
             let tris: Vec<[Vec3; 3]> = m.triangles.iter().filter_map(|t| m.tri(t)).collect();
             let definitions = s.model.state();
-            let v = if definitions.sheets.iter().any(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty()) {
-                super::inspect::measure_body(body, Some(&definitions)).ok()?.volume
-            } else {
-                m.measure().volume
-            };
+            let perforated = definitions.sheets.iter().any(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty())
+                || definitions.surface_sheets.iter().any(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty());
+            let v = if perforated { super::inspect::measure_body(body, Some(&definitions)).ok()?.volume } else { m.measure().volume };
             plain(Geo::Tris(tris), None, json!({"type": "body", "name": name, "closed": closed, "volume_mm3": closed.then_some(v)}))
         }
         Sel::SketchCurve { id, sketch } => sketch_curve(sketch_of(s, st, *sketch, |sk| sk.curve_index(id).is_some())?, id),

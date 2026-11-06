@@ -1114,6 +1114,9 @@ pub(super) fn sheet_eval(
             };
             let sh = st.surface_sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
             sh.perforations.push(crate::sheet::SheetPerforation { feature: f.id, diameter: d, pitch, margin, square, from_right: false, outline });
+            // It keeps clear of the bends the sheet has now; a bend made later runs through it.
+            let joints = sh.sheet.joints.len();
+            sh.perforation_joints.push((f.id, joints));
             Ok(())
         }
         FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body, sketch, profiles } => {

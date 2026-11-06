@@ -205,8 +205,8 @@ fn perforated_sheet_centroid_follows_a_folded_panel_and_unfolds() {
     );
     let before = run(&mut s, "component.properties", json!({"component": "root"}));
     run(&mut s, "sheet.perforate", json!({"diameter": "2", "pitch": "10", "margin": "0", "pattern": "square"}));
-    let sheet = &s.model.state().sheets[0];
-    let holes = sheet.perforation_holes(&sheet.perforations[0]).unwrap();
+    let sheet = s.model.state().surface_sheets[0].shown();
+    let holes = sheet.perforation_holes(&sheet.perforations[0]);
     assert_eq!(holes.len(), 2);
     // Fold boundaries carry kernel roundoff; keep the analytic centres and the
     // same sub-micrometre tolerance used by the property checks below.
@@ -243,7 +243,7 @@ fn perforated_sheet_correction_rejects_invalid_metadata_without_partial_changes(
     let state = s.model.state();
     let measured = solidcraft_kernel::measure(&state.bodies[0].body).unwrap();
     for pitch in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-        let mut sheet = state.sheets[0].clone();
+        let mut sheet = state.surface_sheets[0].clone();
         sheet.perforations[0].pitch = pitch;
         let mut actual = measured.clone();
         assert!(sheet.correct_perforation_properties(&mut actual, &solidcraft_doc::IDENTITY).is_err());
@@ -257,7 +257,7 @@ fn perforated_sheet_correction_rejects_invalid_metadata_without_partial_changes(
     sheared[0][1] = 0.5;
     for placement in [scaled, sheared] {
         let mut actual = measured.clone();
-        assert!(state.sheets[0].correct_perforation_properties(&mut actual, &placement).is_err());
+        assert!(state.surface_sheets[0].correct_perforation_properties(&mut actual, &placement).is_err());
         assert_eq!((actual.volume, actual.area, actual.centroid), (measured.volume, measured.area, measured.centroid));
     }
 }
@@ -353,6 +353,45 @@ fn properties_reject_hostile_identifiers_and_options() {
 
 fn tensor(v: &Value) -> [[f64; 3]; 3] {
     [0, 1, 2].map(|r| [0, 1, 2].map(|c| v[r][c].as_f64().unwrap_or_else(|| panic!("no [{r}][{c}] in {v}"))))
+}
+
+/// A perforation hole that a fold made after its field runs through is bent with the sheet, as a
+/// press brake bends perforated stock: what it takes off is the bend's own map of it. The sheet
+/// weighs as with the same hole cut into its flat and folded with it, which the kernel measures
+/// exactly: a hole wholly in the bend's zone, and one across its tangent line. (The inertia of a
+/// body is a tessellation's, so that agrees to 2e-4.)
+#[test]
+fn perforated_sheet_hole_a_later_fold_runs_through_weighs_as_the_same_hole_cut_and_folded() {
+    // A 60 x 40 x 0.8 plate folded 90° at R 8 about x = 30 (its zone about 13 wide), and a hole
+    // of radius 2: one field of a single hole, its outline a square round it.
+    let (r, m, x0, yc) = (2.0, 0.5, 30.0, 20.0);
+    let fold = json!({"points": [[x0, 0, 0], [x0, 40, 0]], "angle": "90 deg", "radius": "8", "position": "centerline", "fixed": [5, 20, 0]});
+    for (what, xc) in [("in the zone", x0), ("across the tangent line", x0 + 6.0)] {
+        let mut perforated = Session::default();
+        panel_blank(&mut perforated, 60.0, 40.0);
+        run(&mut perforated, "sketch.create", json!({"plane": "XY", "name": "Spot"}));
+        run(&mut perforated, "sketch.rectangle.two_point", json!({"p0": [xc - r - m, yc - r - m], "p1": [xc + r + m, yc + r + m]}));
+        run(&mut perforated, "sketch.finish", json!({}));
+        run(&mut perforated, "sheet.perforate", json!({"diameter": 2.0 * r, "pitch": 30, "margin": m, "pattern": "square", "sketch": "Spot"}));
+        run(&mut perforated, "sheet.fold", fold.clone());
+        assert_eq!(run(&mut perforated, "sheet.flat_pattern", json!({}))["perforations"][0]["count"], 1, "{what}");
+        let mut cut = Session::default();
+        panel_blank(&mut cut, 60.0, 40.0);
+        run(&mut cut, "sheet.fold", fold.clone());
+        run(&mut cut, "sheet.unfold", json!({}));
+        run(&mut cut, "solid.cylinder", json!({"radius": r, "height": 20, "base": [xc, yc, -10], "axis": "Z", "operation": "cut"}));
+        run(&mut cut, "sheet.refold", json!({}));
+        let (a, b) = (run(&mut perforated, "component.properties", json!({})), run(&mut cut, "component.properties", json!({})));
+        for key in ["volume_mm3", "area_mm2"] {
+            let (x, y) = (a["total"][key].as_f64().unwrap(), b["total"][key].as_f64().unwrap());
+            assert!((x - y).abs() < 1e-9 * y, "{what}: {key} {x} vs {y}");
+        }
+        for k in 0..3 {
+            let (x, y) = (a["total"]["center_of_mass"][k].as_f64().unwrap(), b["total"]["center_of_mass"][k].as_f64().unwrap());
+            assert!((x - y).abs() < 1e-8, "{what}: centre of mass {k}: {x} vs {y}");
+        }
+        tensor_close(&a["total"]["inertia_g_mm2"], tensor(&b["total"]["inertia_g_mm2"]), 2e-4);
+    }
 }
 
 fn tensor_close(actual: &Value, want: [[f64; 3]; 3], rel: f64) {

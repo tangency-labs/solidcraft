@@ -88,6 +88,7 @@ mod sheet_surface_convert;
 mod sheet_surface_cuts;
 mod sheet_surface_features;
 mod sheet_surface_fold;
+mod sheet_surface_perforation;
 mod sheet_surface_shadow;
 pub mod sketch_equation;
 pub use sheet_surface_convert::{
