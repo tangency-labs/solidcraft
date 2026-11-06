@@ -723,19 +723,18 @@ fn relink_of_one_placement_moves_its_joints_to_the_same_faces() {
     let component = inserted["component"].as_u64().unwrap();
     let first = inserted["occurrence"].as_u64().unwrap();
     let second = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [50, 0, 0]}))["occurrence"].as_u64().unwrap();
+    // Not the first face, so a mapping that always answers the first face fails.
+    let (index, face) = {
+        let state = s.model.state();
+        let body = state.bodies.iter().find(|b| b.component == component).unwrap();
+        let names = solidcraft_doc::naming::face_names(body);
+        (names.len() - 1, names[names.len() - 1].clone())
+    };
     run(
         &mut s,
         "joint.create",
-        json!({"name": "Seat", "type": "rigid", "a": {"occurrence": first, "point": [0,0,0]}, "b": {"occurrence": second, "point": [0,0,0]}}),
+        json!({"name": "Seat", "type": "rigid", "a": {"occurrence": first, "point": [0,0,0]}, "b": {"occurrence": second, "face": face}}),
     );
-    let face = {
-        let state = s.model.state();
-        let body = state.bodies.iter().find(|b| b.component == component).unwrap();
-        solidcraft_doc::naming::face_names(body)[0].clone()
-    };
-    let joint = s.doc_mut().assembly.joints.first_mut().unwrap();
-    joint.b.snap = solidcraft_doc::joints::Snap::FaceCenter { pick: solidcore_record::Vec3::ZERO, face: Some(face.clone()), x: None };
-    s.refresh();
 
     let result = run(&mut s, "component.relink", json!({"component": component, "occurrence": second, "path": copy}));
     assert_eq!(result["geometry_changed"], false);
@@ -748,6 +747,7 @@ fn relink_of_one_placement_moves_its_joints_to_the_same_faces() {
     };
     let moved = s.doc.assembly.joints[0].b.snap.face_names().into_iter().next().cloned().unwrap();
     assert_ne!(moved, face);
-    assert!(names.contains(&moved), "{moved} is not a face of the new bodies: {names:?}");
+    // The copy is the same design, so the same face comes at the same place in the new body.
+    assert_eq!(moved, names[index], "{moved} is not the face that was {face}: {names:?}");
     let _ = std::fs::remove_dir_all(dir);
 }
