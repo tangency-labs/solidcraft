@@ -216,7 +216,6 @@
   "fillet_point_step_per_point",
   "fillet_trace_from_tangent_point_toward_next",
   "analytic_copy_keeps_parameterization",
-  "fillet_point_bigger_step_retry",
   "fillet_tangent_point_one_sided_step",
   "precise_properties_body_length_scale",
   "integrator_propagates_failure",
