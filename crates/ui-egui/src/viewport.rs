@@ -218,6 +218,8 @@ pub struct ViewportState {
     /// The model point a trackpad twist turns around (Orbit around: the cursor), kept while the
     /// twist goes on (see [`crate::navigation::twist_turn`]).
     pub twist_pivot: Option<Vec3>,
+    /// When the twist under way last turned the view (input time, seconds).
+    pub twist_last: Option<f64>,
     /// The orbit drag under way, summed from where it began (see [`crate::navigation::orbit`]).
     pub orbit_from: Option<crate::navigation::OrbitFrom>,
     /// An orbit drag moved the cursor to the view's other side: the jump, until the pointer
@@ -11959,12 +11961,18 @@ mod tests {
 
     /// A two-finger twist turns the view about the up axis (#6286): counter-clockwise turns the
     /// model counter-clockwise as seen from above, pitch and roll stay, the Orbit around point
-    /// keeps its place, and noise or the preference off leave the camera still.
+    /// keeps its place, and noise or the preference off (the default) leave the camera still.
     #[test]
     fn trackpad_twist_turns_the_view_about_the_up_axis() {
         let mut h = crate::scenario::Harness::new();
+        assert!(!h.app.preferences.trackpad_twist_turns, "the twist is opt-in");
         h.call("ui.move", json!({"x":800,"y":500}));
         h.frame();
+        let untouched = h.app.cam;
+        h.app.synthetic.push(egui::Event::Rotate(-0.3));
+        h.frame();
+        assert_eq!(h.app.cam, untouched, "by default the twist does nothing, as before");
+        h.app.preferences.trackpad_twist_turns = true;
         let before = h.app.cam;
         // egui counts clockwise: -0.3 is a counter-clockwise twist of 0.3 rad.
         h.app.synthetic.push(egui::Event::Rotate(-0.3));
@@ -11984,6 +11992,26 @@ mod tests {
         assert!((h.app.cam.frame_coords(Vec3::ZERO) - origin).len() < 1e-6, "the origin keeps its place on screen");
         assert!((h.app.cam.target.z - before.target.z).abs() < 1e-9, "a turn about Z keeps the target's height");
 
+        // Under the cursor: the pivot is picked once and kept through the gaps of a slow twist,
+        // then let go when the twist pauses.
+        h.app.preferences.orbit_around = crate::prefs::OrbitAround::Cursor;
+        h.frames(30);
+        assert!(h.app.viewport.twist_pivot.is_none());
+        h.app.synthetic.push(egui::Event::Rotate(-0.1));
+        h.frame();
+        let pivot = h.app.viewport.twist_pivot.expect("the twist picks a pivot under the cursor");
+        for gap in 1..=3 {
+            h.frames(gap * 3);
+            assert_eq!(h.app.viewport.twist_pivot, Some(pivot), "a {gap}-step gap keeps the pivot");
+            let coords = h.app.cam.frame_coords(pivot);
+            h.app.synthetic.push(egui::Event::Rotate(-0.1));
+            h.frame();
+            assert_eq!(h.app.viewport.twist_pivot, Some(pivot), "the twist goes on about the same point");
+            assert!((h.app.cam.frame_coords(pivot) - coords).len() < 1e-6, "the pivot keeps its place on screen");
+        }
+        h.frames(30);
+        assert!(h.app.viewport.twist_pivot.is_none(), "a paused twist lets its pivot go");
+
         let still = h.app.cam;
         h.app.synthetic.push(egui::Event::Rotate(f32::NAN));
         h.frame();
@@ -11991,7 +12019,7 @@ mod tests {
         h.app.preferences.trackpad_twist_turns = false;
         h.app.synthetic.push(egui::Event::Rotate(0.5));
         h.frame();
-        assert_eq!(h.app.cam, still, "with the preference off the twist does nothing, as before");
+        assert_eq!(h.app.cam, still, "with the preference turned off again the twist does nothing");
     }
 
     /// A two-finger pan, a pinch and the wheel over a value box anchored to the model (Extrude's

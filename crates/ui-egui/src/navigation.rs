@@ -311,8 +311,9 @@ pub(crate) fn claims_scroll(modifiers: egui::Modifiers, zoom_modifier: Option<eg
     zoom_modifier.is_some_and(|chosen| modifiers.matches_exact(chosen) && !(modifiers.mac_cmd && modifiers.ctrl))
 }
 
-/// Combined pinch-to-zoom factor for one frame (1 = no pinch input).
-///
+/// How long a twist may pause, in seconds, before it has ended and its cursor pivot is let go.
+const TWIST_PAUSE: f64 = 0.25;
+
 /// The trackpad's two-finger rotation this frame in radians, counter-clockwise positive (egui's
 /// `Event::Rotate` counts clockwise). Events that carry a non-finite angle are ignored.
 pub(crate) fn twist_radians(input: &egui::InputState) -> f64 {
@@ -354,6 +355,8 @@ pub(crate) fn twist_turn(app: &mut SolveApp, rect: Rect, radians: f64, hover: Op
     }
 }
 
+/// Combined pinch-to-zoom factor for one frame (1 = no pinch input).
+///
 /// Some input paths deliver pinch as a zoom-modified wheel instead of `Event::Zoom`.
 /// Read the raw movement that [`immediate_wheel`] leaves to the zoom modifier, without
 /// replaying egui's smoothed zoom delta on later frames. Gesture boundaries carry no movement.
@@ -773,14 +776,18 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         orbit(app, rect, sign * f64::from(raw.shift_pan.x), sign * f64::from(raw.shift_pan.y), hover);
     }
     // A two-finger twist on the trackpad turns the view about the world's up axis (#6286).
-    let twist = ui.input(twist_radians);
+    // The OS does not send a rotation on every frame of a slow twist, so the twist's cursor pivot
+    // is kept through short gaps and let go only once the twist has paused or a button is pressed.
+    let (twist, now, pressed) = ui.input(|i| (twist_radians(i), i.time, i.pointer.any_pressed()));
     if wheel_inside && caps.orbit && app.preferences.trackpad_twist_turns && twist != 0.0 {
         app.cancel_view_animation();
         app.viewport.orbit_free = None;
         app.viewport.spin = false;
         twist_turn(app, rect, twist, hover);
-    } else if twist == 0.0 {
+        app.viewport.twist_last = Some(now);
+    } else if pressed || app.viewport.twist_last.is_none_or(|last| now - last > TWIST_PAUSE) {
         app.viewport.twist_pivot = None;
+        app.viewport.twist_last = None;
     }
     let zoom_held = (inside || app.viewport.zoom_shortcut_drag)
         && ui.input(|input| crate::keymap::drag_zoom_held(app, input))
