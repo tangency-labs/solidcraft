@@ -1321,6 +1321,9 @@ preference_settings! {
     /// click shows its panels over the view until a command starts or the pointer leaves them.
     /// Off by default: the whole ribbon shows. `view.ribbon_tabs_only` switches it.
     ribbon_tabs_only: bool = false, PAGE_LAYOUT;
+    /// A double-click on a design tab renames the design in the tab; off, it maximizes the window
+    /// as the rest of the title bar does, as before.
+    tab_double_click_renames: bool = true, PAGE_LAYOUT;
     /// Where a dialog's OK and Cancel sit: under its inputs (the default) or in its title row (#6708).
     dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_LAYOUT;
     /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom
@@ -6255,6 +6258,7 @@ mod tests {
             ("sketch_tab_always", json!(true), PAGE_LAYOUT),
             ("keep_work_on_tab_switch", json!(true), PAGE_LAYOUT),
             ("ribbon_reveal", json!(true), PAGE_LAYOUT),
+            ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
             ("dialog_buttons", json!("top"), PAGE_LAYOUT),
             ("toast_place", json!("centre"), PAGE_LAYOUT),
             ("ribbon_icon_grid", json!(true), PAGE_LAYOUT),
