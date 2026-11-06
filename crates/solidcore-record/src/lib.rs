@@ -1,7 +1,8 @@
 //! Geometry as data (docs/layers.md, "Record"): the portable B-rep record with its serde form
 //! and structural validation ([`brep`]), its history and metadata records, the native body
 //! file ([`native`]), and the plain data of vectors ([`Vec2`], [`Vec3`]), sketch planes
-//! ([`Plane`]) and planar profiles ([`Seg2`], [`Loop2`], [`Region2`]).
+//! ([`Plane`]) and planar profiles ([`Seg2`], [`Loop2`], [`Region2`]), and STEP's Part 21
+//! exchange structure as parsed from a file ([`step`]).
 //!
 //! The record computes no geometric quantity: no square roots, trigonometry, dot or cross
 //! products, normalising or solves (clippy `disallowed-methods`, this crate's `clippy.toml`). It
@@ -22,6 +23,7 @@ pub mod plane;
 // is and its fields are the names in its formula.
 #[allow(missing_docs)]
 pub mod profile;
+pub mod step;
 pub mod vec;
 
 pub use plane::Plane;
