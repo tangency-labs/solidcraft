@@ -898,9 +898,16 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 enter |= expr_row(ui, "Distance", offset);
             }
         }
-        Kind::AnglePlane { angle, direction_only } => {
+        Kind::AnglePlane { angle, direction_only, through_axis } => {
             enter |= expr_row(ui, "Angle", angle);
-            ui_kit::options(ui, "plane_angle_options", &mut [("Use axis direction only", direction_only)]);
+            let was = (*through_axis, *direction_only);
+            ui_kit::options(ui, "plane_angle_options", &mut [("Through the axis", through_axis), ("Use axis direction only", direction_only)]);
+            // The two exclude each other (#6180): the one just turned on wins.
+            if *through_axis && !was.0 {
+                *direction_only = false;
+            } else if *direction_only && !was.1 {
+                *through_axis = false;
+            }
             const PIVOT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
             set_object_accepting(&mut d.inputs, &mut d.active, "Pivot", PIVOT, *direction_only);
         }

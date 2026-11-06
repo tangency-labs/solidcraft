@@ -296,6 +296,7 @@ fn nested_anchor_saved_fixed_conversion_preserves_rotated_second_author_plane() 
         line: None,
         direction_only: false,
         pivot: None,
+        through_axis: false,
     };
     h.app.session = solidcraft_engine::Session::new(document);
     let raw = h.app.session.doc.sketch(id).unwrap().clone();

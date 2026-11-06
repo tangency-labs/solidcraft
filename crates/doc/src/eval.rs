@@ -7232,7 +7232,7 @@ pub(crate) fn sheet_face_plane_in_frame(doc: &Document, st: &ModelState, comp: u
         PlaneRef::Offset { base, distance } => {
             PlaneRef::Offset { base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?), distance: distance.clone() }
         }
-        PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line, direction_only, pivot } => PlaneRef::AtAngle {
+        PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line, direction_only, pivot, through_axis } => PlaneRef::AtAngle {
             base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?),
             axis_origin: *axis_origin,
             axis_dir: *axis_dir,
@@ -7240,6 +7240,7 @@ pub(crate) fn sheet_face_plane_in_frame(doc: &Document, st: &ModelState, comp: u
             line: line.clone(),
             direction_only: *direction_only,
             pivot: pivot.clone(),
+            through_axis: *through_axis,
         },
         PlaneRef::Flipped { base, about_y } => {
             PlaneRef::Flipped { base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?), about_y: *about_y }

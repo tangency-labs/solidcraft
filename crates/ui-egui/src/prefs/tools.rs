@@ -54,6 +54,16 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::scenario::publish_target("prefs:extrude_view_return", response.rect);
                     });
                 });
+                create_row(ui, app.tr("ui.plane_at_angle"), &["plane_angle"], false, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        let help = "prefs.plane_at_angle_through_axis_note";
+                        let response = setting::plane_at_angle_through_axis(app, ui).backing_on_hover_text(app.tr(help));
+                        crate::scenario::publish_target("prefs:plane_at_angle_through_axis", response.rect);
+                        if !crate::prefs_search::suppress_chrome(ui) {
+                            ui_kit::help_icon(ui, app.tr(help));
+                        }
+                    });
+                });
                 create_row(ui, app.tr("prefs.design_tools.placement_group"), &["rest", "boss", "snap_fit"], false, |ui| {
                     ui.horizontal_wrapped(|ui| {
                         let response = setting::placement_handles(app, ui).backing_on_hover_text(app.tr("ui.placement_handles_tip"));

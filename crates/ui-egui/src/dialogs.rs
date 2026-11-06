@@ -127,9 +127,11 @@ crate::dialog_descriptor::dialog_descriptors! {
             offset: String = "0 mm".into() => shown_expr(distance, ValueKind::Length),
         } => json!({"offset": offset});
         AnglePlane("construct.plane.at_angle", "PLANE AT ANGLE", [("Plane", PLANES | PLANAR_FACES, false), ("Axis", AXIS_PICKS, false)],
-            FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, direction_only, .. } }) {
+            FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, direction_only, through_axis, .. } }) {
             angle: String = "45 deg".into() => shown_expr(angle, ValueKind::Angle),
             direction_only: bool = false => *direction_only,
+            // A new plane takes `plane_at_angle_through_axis` instead (#6180), see `start`.
+            through_axis: bool = false => *through_axis,
         } => json!({"angle": angle, "direction_only": direction_only});
         // With a reference plane, the plane touches where the face turns towards it (#8822).
         TangentPlane("construct.plane.tangent", "TANGENT PLANE", [("Face", FACES, false), ("Reference plane", PLANES | PLANAR_FACES, false)],
@@ -1132,6 +1134,10 @@ impl Dialog {
                 Dialog::new(kind, inputs)
             }
         };
+        // A new Plane at Angle goes through its axis unless the preference keeps the old turn (#6180).
+        if let Kind::AnglePlane { through_axis, .. } = &mut d.kind {
+            *through_axis = app.preferences.plane_at_angle_through_axis;
+        }
         recall(app, &mut d);
         // Patterns of features picked in the timeline: the objects are features.
         if is_pattern(&d.kind)
@@ -5559,7 +5565,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 None => ("construct.plane.tangent", json!({"face": face, "angle": null})),
             }
         }
-        Kind::AnglePlane { direction_only, .. } => {
+        Kind::AnglePlane { direction_only, through_axis, .. } => {
             need(0, "a plane")?;
             let base = plane_arg(app, sels(d, 0).first())?;
             let axis = match sels(d, 1).first() {
@@ -5567,6 +5573,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 None => d.extra.get("axis").cloned().ok_or("pick an axis")?,
             };
             let mut p = json!({"base": base, "axis": axis, "direction_only": direction_only});
+            // Sent only when it applies: direction only wins, as in the dense form (#6180).
+            if *through_axis && !*direction_only {
+                p["through_axis"] = json!(true);
+            }
             if *direction_only && let Some(pivot) = angle_pivot(d) {
                 p["pivot"] = construct_ref(app, pivot)?;
             }

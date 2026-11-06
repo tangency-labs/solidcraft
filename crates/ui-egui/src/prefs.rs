@@ -1473,6 +1473,10 @@ preference_settings! {
     /// With `extrude_view_isometric`: when Extrude closes (OK or Cancel) the view goes back to
     /// where it was before it turned (#9176). Off (the default): it stays isometric.
     extrude_view_return: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_return");
+    /// A new Plane at Angle goes through its axis also when the axis is off the base plane
+    /// (`through_axis`, #6180). Off: it starts turning the base about the axis where it is, as
+    /// before. Planes already made keep how they were made.
+    plane_at_angle_through_axis: bool = true, PAGE_TOOLS => check_id("prefs.plane_at_angle_through_axis");
     /// Feature windows choose Join, New Body or Cut from what their material touches (`op_auto`,
     /// #6901). Off: they keep the operation they open with (Extrude its own Join or Cut), as before.
     auto_operation: bool = true, PAGE_TOOLS => check_id("prefs.auto_operation");
@@ -6305,6 +6309,7 @@ mod tests {
             ("extrude_auto_to_object", json!(false), PAGE_TOOLS),
             ("extrude_view_isometric", json!(true), PAGE_TOOLS),
             ("extrude_view_return", json!(true), PAGE_TOOLS),
+            ("plane_at_angle_through_axis", json!(false), PAGE_TOOLS),
             ("auto_operation", json!(false), PAGE_TOOLS),
             ("placement_handles", json!(true), PAGE_TOOLS),
             ("assembly_move_handles", json!(false), PAGE_TOOLS),
