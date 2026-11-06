@@ -83,10 +83,13 @@
 //!   or past the end of the caller's array (undefined; [`SolidError::InvalidInput`]
 //!   here). Never-assigned locals that upstream reads in those cases (`Cv`, `Nv`, ...)
 //!   are [`Vec3::UNDEF`], as the default `SmVector3d`.
-//! - **Upstream bugs kept** (`plan/upstream-issues.md`): the third derivatives `Cuuv` and
-//!   `Cuvv` of the normal's numerator use the coefficient `3.0` for `Buuv x Buv` and
-//!   `Buvv x Buv` (the derivative of `Cuu` / `Cvv` gives `1` and `-1`); the outputs
-//!   `Duvv` and `Dvvv` add `Buuv` instead of `Buvv` / `Bvvv`; `SplitAt` with an extended
+//! - **Third-derivative corrections.** `Cuuv` and `Cuvv` use coefficients `1` and `-1`
+//!   for `Buuv x Buv` and `Buvv x Buv`, not upstream's `3.0`; `Duvv` and `Dvvv`
+//!   add `Buvv` and `Bvvv`, not `Buuv` (WR-160, WR-161; PR #1914). These corrections
+//!   are unconditional. The arithmetic for orders 0..2 and `Duuu` is unchanged;
+//!   regression tests retain pre-fix bits at four samples.
+//! - **Other upstream bugs kept.** `WR-162` (the upper-half, unequal-order second-
+//!   derivative slot write) is still unfixed. `SplitAt` with an extended
 //!   surface splits the base surface a second time for the extended halves; `SwapUV`
 //!   with an extended surface negates the offset distance twice (kept unless
 //!   `fixes.offset_swap_uv_extended_distance`, WR-164); `STEPInversion`
@@ -1685,10 +1688,9 @@ impl OffsetSurface {
             put(out, 3 * (hv + 1), d(3, 0)? + offset_distance * nuuu)?;
         }
         if cond_uuv {
-            // (upstream's 3.0 for Buuv x Buv; the derivative of Cuu gives 1)
             let cuuv = d(3, 1)?.cross(bv)
                 + d(3, 0)?.cross(d(0, 2)?)
-                + (3.0 * d(2, 1)?).cross(d(1, 1)?)
+                + d(2, 1)?.cross(d(1, 1)?)
                 + (2.0 * d(2, 0)?).cross(d(1, 2)?)
                 + bu.cross(d(2, 2)?);
             let muuv =
@@ -1698,28 +1700,25 @@ impl OffsetSurface {
             put(out, 2 * (hv + 1) + 1, d(2, 1)? + offset_distance * nuuv)?;
         }
         if cond_uvv {
-            // (upstream's 3.0 for Buvv x Buv, -1 by the derivative of Cvv; and Buuv in
-            // the output where Buvv belongs)
             let cuvv = d(2, 2)?.cross(bv)
                 + (2.0 * d(2, 1)?).cross(d(0, 2)?)
-                + (3.0 * d(1, 2)?).cross(d(1, 1)?)
+                + (-1.0 * d(1, 2)?).cross(d(1, 1)?)
                 + d(2, 0)?.cross(d(0, 3)?)
                 + bu.cross(d(1, 3)?);
             let muvv =
                 (cvv.dot(cu) + 2.0 * cv.dot(cuv) + c.dot(cuvv) - mvv * mu - 2.0 * mv * muv) / m_len;
             let nuvv =
                 (cuvv - mu * nvv - 2.0 * muv * nv - 2.0 * mv * nuv - mvv * nu - muvv * n) / m_len;
-            put(out, (hv + 1) + 2, d(2, 1)? + offset_distance * nuvv)?;
+            put(out, (hv + 1) + 2, d(1, 2)? + offset_distance * nuvv)?;
         }
         if hv >= 3 {
-            // (upstream adds Buuv where Bvvv belongs)
             let cvvv = d(1, 3)?.cross(bv)
                 + (3.0 * d(1, 2)?).cross(d(0, 2)?)
                 + (3.0 * d(1, 1)?).cross(d(0, 3)?)
                 + bu.cross(d(0, 4)?);
             let mvvv = (3.0 * cv.dot(cvv) + c.dot(cvvv) - 3.0 * mv * mvv) / m_len;
             let nvvv = (cvvv - 3.0 * mv * nvv - 3.0 * mvv * nv - mvvv * n) / m_len;
-            put(out, 3, d(2, 1)? + offset_distance * nvvv)?;
+            put(out, 3, d(0, 3)? + offset_distance * nvvv)?;
         }
 
         if !do_eval_simple {
@@ -3719,6 +3718,349 @@ mod tests {
         assert!(upstream > 1e-6, "upstream copies agree: {upstream}");
         let fixed = offset_extension_gap(true);
         assert!(fixed < 1e-9, "fixed copies disagree by {fixed}");
+    }
+
+    // ---- WR-160 / WR-161: corrected third-derivative terms --------------------------------
+
+    /// The biquadratic Bezier base `B(u, v) = (u + u^2 v, v + u v^2, u v)` over
+    /// `[0, 1]^2`. Its `Bu x Bv = (1 + uv) * q` with `q = (-v, -u, 1 + 3uv)`, so on the
+    /// positive domain the unit normal is `q / sqrt(L)` and both `Buuv x Buv` and
+    /// `Buvv x Buv` are non-zero (a torus alone cannot reach the `Cuvv` coefficient).
+    fn biquadratic_base() -> Surface {
+        use crate::nurbs::math::{CPoint, NOW};
+        let mut net = Vec::new();
+        for i in 0..3 {
+            let mut row = Vec::new();
+            for j in 0..3 {
+                let fi = f64::from(i) / 2.0;
+                let fj = f64::from(j) / 2.0;
+                let x = fi + if i == 2 { fj } else { 0.0 };
+                let y = fj + if j == 2 { fi } else { 0.0 };
+                row.push(CPoint::new(x, y, fi * fj, NOW));
+            }
+            net.push(row);
+        }
+        let knots = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        Surface::from(BSplineSurface::from_data(2, 2, 2, 2, 5, 5, &net, &knots, &knots).unwrap())
+    }
+
+    /// The closed-form derivatives of `B + d * (q / sqrt(L))`, derived independently of
+    /// the kernel's cross-product/quotient recurrence.
+    #[derive(Clone, Copy)]
+    struct ClosedForm {
+        s: Vec3,
+        su: Vec3,
+        sv: Vec3,
+        suu: Vec3,
+        suv: Vec3,
+        svv: Vec3,
+        suuu: Vec3,
+        suuv: Vec3,
+        suvv: Vec3,
+        svvv: Vec3,
+    }
+
+    fn closed_form(u: f64, v: f64, d: f64) -> ClosedForm {
+        let q = Vec3::new(-v, -u, 1.0 + 3.0 * u * v);
+        let qu = Vec3::new(0.0, -1.0, 3.0 * v);
+        let qv = Vec3::new(-1.0, 0.0, 3.0 * u);
+        let quv = Vec3::new(0.0, 0.0, 3.0);
+        let l = 1.0 + u * u + v * v + 6.0 * u * v + 9.0 * u * u * v * v;
+        let lu = 2.0 * u + 6.0 * v + 18.0 * u * v * v;
+        let lv = 2.0 * v + 6.0 * u + 18.0 * u * u * v;
+        let luu = 2.0 + 18.0 * v * v;
+        let lvv = 2.0 + 18.0 * u * u;
+        let luv = 6.0 + 36.0 * u * v;
+        let luuv = 36.0 * v;
+        let luvv = 36.0 * u;
+        let w = l.powf(-0.5);
+        let a = -0.5 * l.powf(-1.5);
+        let b = 0.75 * l.powf(-2.5);
+        let c = -1.875 * l.powf(-3.5);
+        let w_u = a * lu;
+        let w_v = a * lv;
+        let w_uu = b * lu * lu + a * luu;
+        let w_uv = b * lu * lv + a * luv;
+        let w_vv = b * lv * lv + a * lvv;
+        let w_uuu = c * lu * lu * lu + 3.0 * b * lu * luu;
+        let w_uuv = c * lu * lu * lv + b * (2.0 * lu * luv + lv * luu) + a * luuv;
+        let w_uvv = c * lu * lv * lv + b * (lu * lvv + 2.0 * lv * luv) + a * luvv;
+        let w_vvv = c * lv * lv * lv + 3.0 * b * lv * lvv;
+
+        let n = q * w;
+        let n_u = qu * w + q * w_u;
+        let n_v = qv * w + q * w_v;
+        let n_uu = 2.0 * (qu * w_u) + q * w_uu;
+        let n_uv = quv * w + qu * w_v + qv * w_u + q * w_uv;
+        let n_vv = 2.0 * (qv * w_v) + q * w_vv;
+        let n_uuu = q * w_uuu + 3.0 * (qu * w_uu);
+        let n_uuv = q * w_uuv + 2.0 * (qu * w_uv) + qv * w_uu + 2.0 * (quv * w_u);
+        let n_uvv = q * w_uvv + qu * w_vv + 2.0 * (qv * w_uv) + 2.0 * (quv * w_v);
+        let n_vvv = q * w_vvv + 3.0 * (qv * w_vv);
+
+        let b0 = Vec3::new(u + u * u * v, v + u * v * v, u * v);
+        let bu = Vec3::new(1.0 + 2.0 * u * v, v * v, v);
+        let bv = Vec3::new(u * u, 1.0 + 2.0 * u * v, u);
+        let buu = Vec3::new(2.0 * v, 0.0, 0.0);
+        let buv = Vec3::new(2.0 * u, 2.0 * v, 1.0);
+        let buvv = Vec3::new(0.0, 2.0, 0.0);
+        let bvv = Vec3::new(0.0, 2.0 * u, 0.0);
+        let buuv = Vec3::new(2.0, 0.0, 0.0);
+        let buuu = Vec3::ZERO;
+        let bvvv = Vec3::ZERO;
+
+        ClosedForm {
+            s: b0 + d * n,
+            su: bu + d * n_u,
+            sv: bv + d * n_v,
+            suu: buu + d * n_uu,
+            suv: buv + d * n_uv,
+            svv: bvv + d * n_vv,
+            suuu: buuu + d * n_uuu,
+            suuv: buuv + d * n_uuv,
+            suvv: buvv + d * n_uvv,
+            svvv: bvvv + d * n_vvv,
+        }
+    }
+
+    fn assert_component_close(got: Vec3, want: Vec3, tol: f64, what: &str) {
+        for (axis, g, w) in [
+            ("x", got.x, want.x),
+            ("y", got.y, want.y),
+            ("z", got.z, want.z),
+        ] {
+            let scale = g.abs().max(w.abs());
+            assert!(
+                (g - w).abs() <= tol * scale,
+                "{what}.{axis}: got {g:?}, want {w:?}"
+            );
+        }
+    }
+
+    fn offset_evaluates(d: f64) -> (Kernel, OffsetSurface) {
+        let k = Kernel::default();
+        let off = OffsetSurface::new(&k, d, biquadratic_base(), true, SS_UNKNOWN).unwrap();
+        (k, off)
+    }
+
+    #[test]
+    fn biquadratic_base_matches_its_closed_form() {
+        let k = &Kernel::default();
+        let base = biquadratic_base();
+        for (u, v) in [(0.25, 0.5), (0.5, 0.25)] {
+            let m = base
+                .evaluate(k, Point2::new(u, v), 2, 2, flags(true, false))
+                .unwrap();
+            let cf = closed_form(u, v, 0.0);
+            assert_component_close(m[0][0], cf.s, 1e-12, "B");
+            assert_component_close(m[1][0], cf.su, 1e-12, "Bu");
+            assert_component_close(m[0][1], cf.sv, 1e-12, "Bv");
+            assert_component_close(m[2][0], cf.suu, 1e-12, "Buu");
+            assert_component_close(m[1][1], cf.suv, 1e-12, "Buv");
+            assert_component_close(m[0][2], cf.svv, 1e-12, "Bvv");
+        }
+    }
+
+    #[test]
+    fn offset_third_derivatives_match_closed_form_by_default() {
+        // The public bound permits total order 3: equal highest orders with
+        // `only_upper_half = true` fill the i + j <= 3 entries of the 4x4 matrix.
+        // A full rectangular (3, 3) request exceeds MAX_DERIVS and is not this test.
+        for d in [0.125, -0.125] {
+            for (u, v) in [(0.25, 0.5), (0.5, 0.25)] {
+                let (k, off) = offset_evaluates(d);
+                let m = off
+                    .evaluate(&k, Point2::new(u, v), 3, 3, flags(true, true))
+                    .unwrap();
+                let cf = closed_form(u, v, d);
+                assert_component_close(m[0][0], cf.s, 1e-10, "S");
+                assert_component_close(m[1][0], cf.su, 1e-10, "Su");
+                assert_component_close(m[0][1], cf.sv, 1e-10, "Sv");
+                assert_component_close(m[2][0], cf.suu, 1e-10, "Suu");
+                assert_component_close(m[1][1], cf.suv, 1e-10, "Suv");
+                assert_component_close(m[0][2], cf.svv, 1e-10, "Svv");
+                assert_component_close(m[3][0], cf.suuu, 1e-10, "Suuu");
+                assert_component_close(m[2][1], cf.suuv, 1e-10, "Suuv");
+                assert_component_close(m[1][2], cf.suvv, 1e-10, "Suvv");
+                assert_component_close(m[0][3], cf.svvv, 1e-10, "Svvv");
+            }
+        }
+    }
+
+    #[test]
+    fn offset_unchanged_partials_default_bits() {
+        // Sampled pre-fix bits, not a universal bit-identity proof.
+        let expected: [[[u64; 3]; 7]; 4] = [
+            [
+                [
+                    4597784033420957231,
+                    4603052133372172998,
+                    4597843606503600894,
+                ],
+                [
+                    4608507369001728780,
+                    4595937248662427790,
+                    4602721857074240154,
+                ],
+                [
+                    4575355825046357480,
+                    4608374220493674685,
+                    4597551169972174395,
+                ],
+                [
+                    4606488318174322130,
+                    4594149428474944805,
+                    13811210086974777617,
+                ],
+                [
+                    4603548734204850756,
+                    4607464454410458233,
+                    4607524890612695553,
+                ],
+                [
+                    4590854552892320701,
+                    4602398157112256935,
+                    13790382657961158572,
+                ],
+                [
+                    4594342907449483204,
+                    13824079142491288122,
+                    4599049961336867727,
+                ],
+            ],
+            [
+                [
+                    4603052133372172998,
+                    4597784033420957231,
+                    4597843606503600894,
+                ],
+                [
+                    4608374220493674685,
+                    4575355825046357480,
+                    4597551169972174395,
+                ],
+                [
+                    4595937248662427790,
+                    4608507369001728780,
+                    4602721857074240154,
+                ],
+                [
+                    4602398157112256935,
+                    4590854552892320701,
+                    13790382657961158572,
+                ],
+                [
+                    4607464454410458233,
+                    4603548734204850756,
+                    4607524890612695553,
+                ],
+                [
+                    4594149428474944805,
+                    4606488318174322130,
+                    13811210086974777617,
+                ],
+                [
+                    4578434541086050647,
+                    13818365831681546033,
+                    4589762622815018533,
+                ],
+            ],
+            [
+                [
+                    4599496712514278632,
+                    4603431404879963450,
+                    4576459430447861784,
+                ],
+                [
+                    4608109268411991284,
+                    4599294204986700729,
+                    4602592743369460427,
+                ],
+                [
+                    4593127507237113762,
+                    4608242416920045379,
+                    4598487244331827426,
+                ],
+                [
+                    4607529469112865047,
+                    13817521465329720613,
+                    4587838050120001809,
+                ],
+                [
+                    4600938989108239225,
+                    4606618347579135758,
+                    4606497475174661117,
+                ],
+                [
+                    13814226589747096509,
+                    4602819150202841901,
+                    4567010621106382764,
+                ],
+                [
+                    13817714944304259012,
+                    4600707105636512314,
+                    13822421998191643535,
+                ],
+            ],
+            [
+                [
+                    4603431404879963450,
+                    4599496712514278632,
+                    4576459430447861784,
+                ],
+                [
+                    4608242416920045379,
+                    4593127507237113762,
+                    4598487244331827426,
+                ],
+                [
+                    4599294204986700729,
+                    4608109268411991284,
+                    4602592743369460427,
+                ],
+                [
+                    4602819150202841901,
+                    13814226589747096509,
+                    4567010621106382764,
+                ],
+                [
+                    4606618347579135758,
+                    4600938989108239224,
+                    4606497475174661117,
+                ],
+                [
+                    13817521465329720613,
+                    4607529469112865047,
+                    4587838050120001809,
+                ],
+                [
+                    13801806577940826455,
+                    4594993794826770225,
+                    13813134659669794341,
+                ],
+            ],
+        ];
+        let mut sample = 0;
+        for d in [0.125, -0.125] {
+            for (u, v) in [(0.25, 0.5), (0.5, 0.25)] {
+                let (k, off) = offset_evaluates(d);
+                let m = off
+                    .evaluate(&k, Point2::new(u, v), 3, 3, flags(true, true))
+                    .unwrap();
+                for (n, (i, j)) in [(0, 0), (1, 0), (0, 1), (2, 0), (1, 1), (0, 2), (3, 0)]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let p = m[i][j];
+                    assert_eq!(
+                        [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()],
+                        expected[sample][n],
+                        "sample {sample}, D[{i}][{j}]"
+                    );
+                }
+                sample += 1;
+            }
+        }
     }
 
     /// The B-spline base of the `extension_sequence` fixture (WR-164): degree 3 x 3,
