@@ -901,7 +901,10 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::AnglePlane { angle, direction_only, through_axis } => {
             enter |= expr_row(ui, "Angle", angle);
             let was = (*through_axis, *direction_only);
-            ui_kit::options(ui, "plane_angle_options", &mut [("Through the axis", through_axis), ("Use axis direction only", direction_only)]);
+            // One column: both labels are long and would be cut short side by side.
+            ui_kit::section(ui, "plane_angle_options", "Options", true, |ui| {
+                ui_kit::checkbox_grid(ui, &mut [("Through the axis", through_axis), ("Use axis direction only", direction_only)], 1)
+            });
             // The two exclude each other (#6180): the one just turned on wins.
             if *through_axis && !was.0 {
                 *direction_only = false;
