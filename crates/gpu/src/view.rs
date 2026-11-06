@@ -2176,7 +2176,7 @@ pub struct Renderer {
     /// published when `paint` copies it into the view.
     ss_stats: DrawStats,
     shadow: Option<ground_shadow::Resources>,
-    shadow_key: Option<(u64, u64, bool, [u32; 4], usize)>,
+    shadow_key: Option<(u64, u64, bool, [u32; 4], usize, Option<(u64, [[u32; 4]; 4])>)>,
     /// The AO depth prepass resources (a 1 × 1 stand-in while ambient occlusion is off).
     ao: ao::Resources,
     ground_ao: wgpu::RenderPipeline,
@@ -3796,7 +3796,8 @@ impl Renderer {
             self.shadow_key = None;
             return;
         };
-        let key = (cb.key, cb.pv_key, cb.pv_hide, cb.clip.map(f32::to_bits), Arc::as_ptr(&original) as usize);
+        let motion = cb.moving.as_ref().map(|moving| (moving.key, moving.transform.map(|column| column.map(f32::to_bits))));
+        let key = (cb.key, cb.pv_key, cb.pv_hide, cb.clip.map(f32::to_bits), Arc::as_ptr(&original) as usize, motion);
         if self.shadow_key == Some(key) {
             return;
         }
@@ -3807,7 +3808,8 @@ impl Renderer {
         let projection = projection.as_ref().unwrap_or(&original);
         let preview = if cb.pv_hide { &self.empty } else { &self.preview };
         if let Some(shadow) = &mut self.shadow {
-            shadow.prepare(device, queue, encoder, projection, cb.clip, [&self.model, preview], &self.bind);
+            let moving = cb.moving.as_ref().map(|moving| (&self.moving, moving.transform));
+            shadow.prepare(device, queue, encoder, projection, cb.clip, [&self.model, preview], moving, &self.bind);
         }
         self.shadow_key = Some(key);
     }

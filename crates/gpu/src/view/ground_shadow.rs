@@ -92,6 +92,8 @@ pub(super) struct Resources {
     pub bind: wgpu::BindGroup,
     mask_uniform: wgpu::Buffer,
     mask_uniform_bind: wgpu::BindGroup,
+    moving_uniform: wgpu::Buffer,
+    moving_uniform_bind: wgpu::BindGroup,
     directions: [wgpu::BindGroup; 2],
     mask_pipeline: wgpu::RenderPipeline,
     planned_pipeline: wgpu::RenderPipeline,
@@ -128,7 +130,8 @@ impl Resources {
             });
             (buffer, bind)
         };
-        let (mask_uniform, mask_uniform_bind) = uniform(&[0; 48]);
+        let (mask_uniform, mask_uniform_bind) = uniform(&[0; 112]);
+        let (moving_uniform, moving_uniform_bind) = uniform(&[0; 112]);
         let directions = [[1.0f32 / SIZE as f32, 0.0, 0.0, 0.0], [0.0, 1.0 / SIZE as f32, 0.0, 0.0]]
             .map(|direction| uniform(&direction.into_iter().flat_map(f32::to_le_bytes).collect::<Vec<_>>()).1);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -145,7 +148,9 @@ impl Resources {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba8Unorm,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | if cfg!(test) { wgpu::TextureUsages::COPY_SRC } else { wgpu::TextureUsages::empty() },
                 view_formats: &[],
             });
             let view = texture.create_view(&Default::default());
@@ -227,6 +232,8 @@ impl Resources {
             bind,
             mask_uniform,
             mask_uniform_bind,
+            moving_uniform,
+            moving_uniform_bind,
             directions,
             mask_pipeline,
             planned_pipeline,
@@ -244,19 +251,31 @@ impl Resources {
         projection: &Projection,
         clip: [f32; 4],
         batches: [&Batches; 2],
+        moving: Option<(&Batches, [[f32; 4]; 4])>,
         fallback_bind: &wgpu::BindGroup,
     ) {
         #[cfg(test)]
         {
             self.generation = self.generation.saturating_add(1);
         }
-        let bytes = projection.axes.iter().flatten().chain(&clip).flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>();
-        queue.write_buffer(&self.mask_uniform, 0, &bytes);
+        let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        let bytes = |transform: &[[f32; 4]; 4]| {
+            projection.axes.iter().flatten().chain(&clip).chain(transform.iter().flatten()).flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>()
+        };
+        queue.write_buffer(&self.mask_uniform, 0, &bytes(&identity));
+        if let Some((_, transform)) = &moving {
+            queue.write_buffer(&self.moving_uniform, 0, &bytes(transform));
+        }
+        let batches: Vec<_> = batches
+            .into_iter()
+            .map(|batch| (batch, &self.mask_uniform_bind))
+            .chain(moving.map(|(batch, _)| (batch, &self.moving_uniform_bind)))
+            .collect();
         // Shadow coverage uses every placement, independent of the viewing camera's culling
         // and LOD. Only the small placement records are copied; triangle buffers stay shared.
         let placements: Vec<Vec<LevelDraw>> = batches
             .iter()
-            .map(|batch| {
+            .map(|(batch, _)| {
                 batch
                     .instanced
                     .iter()
@@ -276,8 +295,8 @@ impl Resources {
             .collect();
         {
             let mut pass = pass(encoder, &self.mask);
-            pass.set_bind_group(0, &self.mask_uniform_bind, &[]);
-            for (batch, placements) in batches.into_iter().zip(&placements) {
+            for ((batch, mask_bind), placements) in batches.into_iter().zip(&placements) {
+                pass.set_bind_group(0, mask_bind, &[]);
                 pass.set_bind_group(1, scene_bind(batch, fallback_bind), &[]);
                 pass.set_pipeline(&self.mask_pipeline);
                 for triangles in [&batch.tris, &batch.open_tris, &batch.glass, &batch.trans, &batch.ghost].into_iter().flatten() {
@@ -346,15 +365,15 @@ fn pass<'a>(encoder: &'a mut wgpu::CommandEncoder, view: &'a wgpu::TextureView) 
 // Gaussian sigma=5, support ±16 texels. Each adjacent pair uses one bilinear fetch at its
 // weighted centre, exactly reproducing the dense discrete convolution (17 texture fetches).
 const MASK_SHADER: &str = r#"
-struct Mask { u: vec4<f32>, v: vec4<f32>, clip: vec4<f32> };
+struct Mask { u: vec4<f32>, v: vec4<f32>, clip: vec4<f32>, model: mat4x4<f32> };
 @group(0) @binding(0) var<uniform> mask: Mask;
 @group(1) @binding(1) var pal: texture_2d<u32>;
 struct M { @builtin(position) pos: vec4<f32>, @location(0) wp: vec3<f32>, @location(1) a:f32 };
 fn projected(p: vec3<f32>, c: u32) -> M {
-    let q = vec4<f32>(p,1.0); var o: M;
+    let q = mask.model * vec4<f32>(p,1.0); var o: M;
     let color = textureLoad(pal, vec2<i32>(i32(c & 2047u), i32(c >> 11u)), 0).x;
     o.pos = vec4<f32>(dot(mask.u,q)*2.0-1.0, dot(mask.v,q)*2.0-1.0, 0.0, 1.0);
-    o.wp=p; o.a=f32((color >> 24u) & 255u) / 255.0; return o;
+    o.wp=q.xyz; o.a=f32((color >> 24u) & 255u) / 255.0; return o;
 }
 @vertex fn vs_mask(@location(0) p: vec3<f32>, @location(2) c:u32) -> M {
     return projected(p, c);
@@ -450,12 +469,49 @@ mod tests {
             hatch: Default::default(),
             sky: [0.0; 4],
             ssaa: 1.0,
+            moving: None,
         };
+        let centre = std::cell::Cell::new(0.0);
         let mut prepare = |frame: &Frame| -> Result<Option<u64>, Box<dyn std::error::Error>> {
             let mut encoder = device.create_command_encoder(&Default::default());
             renderer.prepare(&device, &queue, &mut encoder, frame);
+            let readback = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("shadow mask regression"),
+                size: u64::from(SIZE * SIZE * 4),
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            if let Some(shadow) = &renderer.shadow {
+                encoder.copy_texture_to_buffer(
+                    shadow.mask.texture().as_image_copy(),
+                    wgpu::TexelCopyBufferInfo {
+                        buffer: &readback,
+                        layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(SIZE * 4), rows_per_image: None },
+                    },
+                    wgpu::Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 },
+                );
+            }
             let submitted = queue.submit([encoder.finish()]);
             device.poll(wgpu::PollType::Wait { submission_index: Some(submitted), timeout: Some(std::time::Duration::from_secs(30)) })?;
+            if renderer.shadow.is_some() {
+                let (send, receive) = std::sync::mpsc::channel();
+                readback.slice(..).map_async(wgpu::MapMode::Read, move |result| {
+                    let _ = send.send(result);
+                });
+                device.poll(wgpu::PollType::Wait { submission_index: None, timeout: Some(std::time::Duration::from_secs(30)) })?;
+                receive.recv()??;
+                let bytes = readback.slice(..).get_mapped_range()?;
+                let (sum, count) = bytes
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, pixel)| pixel[3] > 0)
+                    .fold((0_u64, 0_u64), |(sum, count), (i, _)| (sum + i as u64 % u64::from(SIZE), count + 1));
+                centre.set(sum as f64 / count.max(1) as f64);
+                drop(bytes);
+                readback.unmap();
+            }
             Ok(renderer.shadow.as_ref().map(|s| s.generation))
         };
         assert_eq!(prepare(&frame)?, Some(1));
@@ -466,11 +522,30 @@ mod tests {
         frame.view_proj = Camera { yaw: 1.0, ..Default::default() }.view_proj(1.0, 10.0).to_f32();
         frame.size_px = [512.0; 2];
         assert_eq!(prepare(&frame)?, Some(1));
-        frame.clip = [1.0, 0.0, 0.0, 0.0];
+        let original_centre = centre.get();
+        let mut moving = GpuScene::default();
+        let color = moving.color([150, 150, 150, 255]);
+        for point in [[-1.0, -1.0, 1.0], [1.0, -1.0, 1.0], [0.0, 1.0, 1.0]] {
+            moving.tri(point, [0.0, 0.0, 1.0], color);
+        }
+        frame.moving = Some(super::super::MovingLayer {
+            key: 17,
+            slot: Arc::new(Mutex::new(Some(moving))),
+            transform: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+        });
         assert_eq!(prepare(&frame)?, Some(2));
+        frame.moving.as_mut().ok_or("moving layer missing")?.transform[3][0] = 0.4;
+        assert_eq!(prepare(&frame)?, Some(3), "the same moving geometry at a new position refreshes the mask");
+        assert!(centre.get() > original_centre + 5.0, "the moving caster must change actual mask pixels");
+        assert_eq!(prepare(&frame)?, Some(3), "a still moving layer reuses its mask");
+        frame.moving = None;
+        assert_eq!(prepare(&frame)?, Some(4));
+        assert!((centre.get() - original_centre).abs() < 1e-6, "ending the drag removes its caster");
+        frame.clip = [1.0, 0.0, 0.0, 0.0];
+        assert_eq!(prepare(&frame)?, Some(5));
         frame.pv_key += 1;
         frame.preview_bounds = Some(Aabb3 { min: Vec3::new(100.0, 0.0, -20.0), max: Vec3::new(103.0, 4.0, -8.0) });
-        assert_eq!(prepare(&frame)?, Some(3));
+        assert_eq!(prepare(&frame)?, Some(6));
         frame.key += 1;
         frame.slot = Arc::new(Mutex::new(Some(GpuScene::default())));
         assert_eq!(prepare(&frame)?, None);

@@ -3,9 +3,11 @@
 Choose **Ground shadow: Off, Ellipse or Projected** in **Preferences → Graphics**
 or the viewport's **View settings**. Ellipse remains the default and the inexpensive
 option. Projected follows the silhouette and spaces between visible bodies.
-Both use the existing virtual plane slightly below the visible bodies' lowest point,
-in the selected Z-up or Y-up frame. The plane does not clamp to the origin grid,
-create selectable geometry or change the saved design.
+Both use the existing ground-plane preference in the selected Z-up or Y-up frame.
+Raised bodies cast onto the origin plane by default; lower bodies use a plane below them.
+The option to make shadows follow the model keeps the plane below the visible bodies.
+The plane does not create selectable geometry or change the saved design.
+Ellipse retains one shadow per connected group of body bounds.
 
 The engine command is shared by UI and control-channel callers:
 
