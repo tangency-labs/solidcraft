@@ -349,3 +349,65 @@ fn a_twisted_sweep_builds_circles_about_its_path_as_exact_cylinders() {
     assert!((0..b.face_count()).all(|f| !matches!(crate::face_surface(&b, f), Some(crate::FaceSurface::Cylinder { .. }))));
     close(volume(&b), PI * 1.25, 1e-6, "twisted circle off the axis");
 }
+
+#[test]
+fn a_sweep_follows_the_whole_path_from_a_profile_drawn_part_way_along_it() {
+    // A line up the left side of a rounded rectangle, then its corner arc (radius 5), with a
+    // triangle 2 mm off the line drawn at the start, half way up the line and half way round the
+    // arc: each sweeps the whole path, the same body.
+    let path = [
+        crate::PathSeg::Line { a: Vec3::new(-20.0, -15.0, 0.0), b: Vec3::new(-20.0, 15.0, 0.0) },
+        crate::PathSeg::Arc { a: Vec3::new(-20.0, 15.0, 0.0), center: Vec3::new(-15.0, 15.0, 0.0), axis: -Vec3::Z, angle: PI / 2.0 },
+    ];
+    let tri = pieces_of(&region(Loop2::polygon(&[Vec2::new(-22.0, 0.0), Vec2::new(-18.0, 0.0), Vec2::new(-22.0, 4.0)])));
+    let at = |y: f64| Plane { origin: Vec3::new(0.0, y, 0.0), x: Vec3::X, y: Vec3::Z };
+    let mid_arc = {
+        let (c, k, a) = (Vec3::new(-15.0, 15.0, 0.0), -Vec3::Z, PI / 4.0);
+        let pl = at(15.0);
+        let turn = |v: Vec3| v * a.cos() + k.cross(v) * a.sin() + k * (k.dot(v) * (1.0 - a.cos()));
+        Plane { origin: c + turn(pl.origin - c), x: turn(pl.x), y: turn(pl.y) }
+    };
+    let want = smlib_sweeps::sweep(&at(-15.0), &tri, &path, false).unwrap();
+    let want_box = want.exact_bounds().unwrap();
+    for (what, plane) in [("half way up the line", at(0.0)), ("half way round the arc", mid_arc)] {
+        let got = smlib_sweeps::sweep(&plane, &tri, &path, false).unwrap();
+        close(volume(&got), volume(&want), 1e-6, what);
+        let b = got.exact_bounds().unwrap();
+        assert!(b.min.dist(want_box.min) < 1e-6 && b.max.dist(want_box.max) < 1e-6, "{what}: {b:?} vs {want_box:?}");
+    }
+    // Moving without turning (along the line: the arc ends along the profile's plane), the
+    // profile half way up is carried straight back to the start.
+    let want = smlib_sweeps::sweep(&at(-15.0), &tri, &path[..1], true).unwrap().exact_bounds().unwrap();
+    let b = smlib_sweeps::sweep(&at(0.0), &tri, &path[..1], true).unwrap().exact_bounds().unwrap();
+    assert!(b.min.dist(want.min) < 1e-6 && b.max.dist(want.max) < 1e-6, "moved only: {b:?} vs {want:?}");
+    // A profile whose plane never meets the path, 5 mm past the arc's end (on the plane x = -10)
+    // and turned as the path is there: tied to the path's end, its nearest point, it travels 5 mm
+    // ahead of the path all along, from y = -10 (5 past the start) to where it lies. Round the
+    // arc a point (a, 5) from its centre (a from -7 to -3) turns to (a cos t + 5 sin t, 5 cos t -
+    // a sin t): x reaches -15 + 5, y at most 15 + sqrt(7^2 + 5^2).
+    let beside = Plane { origin: Vec3::new(-10.0, 0.0, 0.0), x: -Vec3::Y, y: Vec3::Z };
+    let b = smlib_sweeps::sweep(&beside, &tri, &path, false).unwrap().exact_bounds().unwrap();
+    let (min, max) = (Vec3::new(-22.0, -10.0, 0.0), Vec3::new(-10.0, 15.0 + 74f64.sqrt(), 4.0));
+    assert!(b.min.dist(min) < 1e-3 && b.max.dist(max) < 1e-3, "beside the path: {b:?} vs {min:?}..{max:?}");
+}
+
+#[test]
+fn a_controlled_sweep_takes_a_profile_drawn_part_way_along_its_path_as_its_start() {
+    // Twisted, and scaled, along a line and an arc (smooth), and scaled along two lines meeting
+    // square (a corner): a triangle drawn half way up the first line is carried back unchanged and
+    // is the start section, the same body as the triangle drawn at the start.
+    let tri = numbered(&region(Loop2::polygon(&[Vec2::new(-22.0, 0.0), Vec2::new(-18.0, 0.0), Vec2::new(-22.0, 4.0)])));
+    let at = |y: f64| Plane { origin: Vec3::new(0.0, y, 0.0), x: Vec3::X, y: Vec3::Z };
+    let line = crate::PathSeg::Line { a: Vec3::new(-20.0, -15.0, 0.0), b: Vec3::new(-20.0, 15.0, 0.0) };
+    let smooth = [line, crate::PathSeg::Arc { a: Vec3::new(-20.0, 15.0, 0.0), center: Vec3::new(-15.0, 15.0, 0.0), axis: -Vec3::Z, angle: PI / 2.0 }];
+    let cornered = [line, crate::PathSeg::Line { a: Vec3::new(-20.0, 15.0, 0.0), b: Vec3::new(10.0, 15.0, 0.0) }];
+    let twist = crate::SweepControl { twist: PI / 3.0, ..Default::default() };
+    let scale = crate::SweepControl { scale: 1.5, ..Default::default() };
+    for (what, path, ctl) in [("twisted", &smooth[..], &twist), ("scaled", &smooth[..], &scale), ("scaled round a corner", &cornered[..], &scale)] {
+        let want = smlib_sweeps::sweep_controlled(&at(-15.0), &tri, path, ctl).unwrap();
+        let got = smlib_sweeps::sweep_controlled(&at(0.0), &tri, path, ctl).unwrap();
+        close(volume(&got), volume(&want), 1e-6, what);
+        let (b, w) = (got.exact_bounds().unwrap(), want.exact_bounds().unwrap());
+        assert!(b.min.dist(w.min) < 1e-6 && b.max.dist(w.max) < 1e-6, "{what}: {b:?} vs {w:?}");
+    }
+}
