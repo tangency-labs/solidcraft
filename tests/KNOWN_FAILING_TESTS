@@ -29,7 +29,6 @@ solidcraft-engine::tests::mirror_placed::dragging_a_mirrored_part_meshes_its_cop
 solidcraft-engine::tests::pleat_join::the_pleats_join_at_every_wall_from_2_4_to_2_6_mm at 2.5 mm FilletRearOuter and FilletRearInner fail status 1001 since solidcore#2480 (819a5ad3a, the procedural blend record); passes at 7906d0d0c
 solidcraft-engine::tests::rim_cut::rim_cut_after_the_round_on_the_other_end the window cut after the far-end round adds 4 faces, not 3 (16, want 15), since solidcore between 5d2635d36 (passes) and 9856ffee5
 solidcraft-engine::tests::robustness::a_boundary_found_across_a_seam_is_not_used seed 20's fillet fails status 1001 since solidcore#2480 (819a5ad3a, the procedural blend record); passes at 7906d0d0c
-solidcraft-engine::tests::robustness::fillet_into_an_earlier_round the r3 round into the r2 round measures 35923.387 against the closed form 35919.524 (within 2 wanted) since solidcore#2364 (845bdb4e0, the smooth-vertex End); passes at fb937dd8d
 solidcraft-kernel::blend::corner_tests::a_round_ending_in_an_earlier_round_matches_both_together fillet status 1001 on the round that ends in the earlier one, as on C++
 solidcraft-kernel::blend::corner_tests::corner_blends_hold_at_any_scale at 0.01x the arc case's rounds remove 72.783 (scaled back) against 72.713 at 1x, as on C++
 solidcraft-kernel::blend_corner::tests::issue2422_vertical_after_separate_bottom_rounds the vertical edge after the separate bottom rounds is refused as smooth ("its faces meet tangentially, so there is nothing to round"): the rounds leave it tangent at solidcore 8ddce9016
