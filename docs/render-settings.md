@@ -218,8 +218,8 @@ pixels, independently of a larger CPU resource profile. See
 GPU `lighting` retains the complete RGB ambient radiance, optional sun, at most
 four rectangular lights and a bounded `directional_lights` array of
 `{direction:[x,y,z], color:[r,g,b], intensity}`. Hard directions share the CPU
-contract: finite nonzero vectors with components within +/-1e9, linear RGB0..1,
-relative intensity0..64. The hard list and optional Sun total at most eight sources.
+contract: finite nonzero vectors with components within +/-1e9, linear RGB 0..1,
+relative intensity 0..64. The hard list and optional Sun total at most eight sources.
 Empty hard lists are omitted when saving; existing designs preserve their meaning. Omitted/null lighting keeps the renderer's legacy studio;
 an explicit all-zero lighting object means a black studio. Those values are not
 interchangeable. `lens` retains aperture radius and axial focus distance; nonzero
@@ -375,15 +375,15 @@ GPU `lighting.punctual_lights` preserves each existing `PunctualLightOptions` fi
 Intensity is the relative on-axis incident value at `reference_distance_mm` and
 falls by inverse square distance, multiplied by the cosine-space Spot smoothstep.
 This does not imply lumen/lux/IES calibration. Nearer-than-minimum or excessive
-(above1e12 linear RGB) samples contribute zero and increment typed diagnostics;
+(above 1e12 linear RGB) samples contribute zero and increment typed diagnostics;
 no inverse-square clamp is applied. Re-aimed finite shadow connections exclude
 the source, and offset crossings increment a separate omission count.
 
 The registered worker publishes `punctual_diagnostics` through the existing job
 status. GPU counters are cumulative through the most recent complete image
 readback, including adaptive pilots and production Fresnel strata; an interrupted
-partial dispatch need not appear in that last snapshot. Each counter is64-bit
-via two carry words, separate from unchanged medium-failure words0..7. The
+partial dispatch need not appear in that last snapshot. Each counter is 64-bit
+via two carry words, separate from unchanged medium-failure words 0..7. The
 existing host metadata/work-release lifetimes and retained-options lease apply.
 
 CPU canonical quality chips use a separate `render.quality.prepare` projection,

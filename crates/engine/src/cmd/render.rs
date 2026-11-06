@@ -15,10 +15,7 @@ mod coat_bindings;
 mod effects;
 mod environment;
 mod jobs;
-pub(crate) use jobs::{
-    Prepared as PreparedCapture, cancel_params as render_cancel_params,
-    prepare_with_metadata as prepare_capture_with_metadata,
-};
+pub(crate) use jobs::{Prepared as PreparedCapture, cancel_params as render_cancel_params, prepare_with_metadata as prepare_capture_with_metadata};
 mod library;
 mod library_data;
 #[cfg(test)]
@@ -210,15 +207,11 @@ CommandSpec::new("render.settings.apply", "Apply Render Camera", apply_settings)
 
 fn set_camera(s: &mut Session, params: &Value) -> Result<Value> {
     let cmd = "render.camera.set";
-    if !params
-        .as_object()
-        .is_some_and(|p| p.len() == 1 && p.contains_key("camera"))
-    {
+    if !params.as_object().is_some_and(|p| p.len() == 1 && p.contains_key("camera")) {
         return Err(bad(cmd, "expected exactly one camera snapshot"));
     }
     // Reuse strict saved-camera decoding and its numeric limits, without saving a setup.
-    let setup: RenderSetup =
-        serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    let setup: RenderSetup = serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
     setup.validate().map_err(|e| bad(cmd, e.to_string()))?;
     s.camera = Some(setup.camera);
     Ok(json!({"camera":setup.camera,"document_changed":false}))
@@ -226,10 +219,7 @@ fn set_camera(s: &mut Session, params: &Value) -> Result<Value> {
 
 fn get_camera(s: &mut Session, params: &Value) -> Result<Value> {
     if !params.as_object().is_some_and(|p| p.is_empty()) {
-        return Err(bad(
-            "render.camera.get",
-            "expected an empty parameter object",
-        ));
+        return Err(bad("render.camera.get", "expected an empty parameter object"));
     }
     Ok(json!({"camera":s.camera,"explicit_view":s.camera.is_some(),"document_changed":false}))
 }
@@ -241,27 +231,18 @@ fn fit_camera(s: &mut Session, params: &Value) -> Result<Value> {
             // The range a preview frame can show (`frame_rect` in the Render workspace).
             Some(a) if (1e-6..=1e6).contains(&a) => a,
             _ => {
-                return Err(bad(
-                    "render.camera.fit",
-                    "aspect must be a number from 0.000001 to 1000000: the picture's width over its height",
-                ));
+                return Err(bad("render.camera.fit", "aspect must be a number from 0.000001 to 1000000: the picture's width over its height"));
             }
         },
         _ => {
-            return Err(bad(
-                "render.camera.fit",
-                "expected an empty parameter object or {aspect}",
-            ));
+            return Err(bad("render.camera.fit", "expected an empty parameter object or {aspect}"));
         }
     };
     let scene = crate::product_scene::extract(s)?;
     let mut camera = s.camera.unwrap_or_default();
     // Publish only a valid fitted camera; the previous one stays otherwise.
     if !camera.fit_aspect(&scene.bounds, aspect) && !scene.bounds.is_empty() {
-        return Err(bad(
-            "render.camera.fit",
-            "the product cannot be framed at this aspect: the fitted camera is out of range",
-        ));
+        return Err(bad("render.camera.fit", "the product cannot be framed at this aspect: the fitted camera is out of range"));
     }
     s.camera = Some(camera);
     Ok(json!({"camera":camera,"empty":scene.bounds.is_empty(),"document_changed":false}))
@@ -290,22 +271,11 @@ fn scene(s: &mut Session, params: &Value) -> Result<Value> {
 }
 
 fn apply_settings(s: &mut Session, params: &Value) -> Result<Value> {
-    let request: GetSettings = serde_json::from_value(params.clone())
-        .map_err(|e| bad("render.settings.apply", e.to_string()))?;
-    let name = request
-        .name
-        .ok_or_else(|| bad("render.settings.apply", "`name` is required"))?;
-    RenderSettings::validate_name(&name)
-        .map_err(|e| bad("render.settings.apply", e.to_string()))?;
-    let setup = s.doc.render.setups.get(&name).ok_or_else(|| {
-        bad(
-            "render.settings.apply",
-            "no saved render setup with that name",
-        )
-    })?;
-    setup
-        .validate()
-        .map_err(|e| bad("render.settings.apply", e.to_string()))?;
+    let request: GetSettings = serde_json::from_value(params.clone()).map_err(|e| bad("render.settings.apply", e.to_string()))?;
+    let name = request.name.ok_or_else(|| bad("render.settings.apply", "`name` is required"))?;
+    RenderSettings::validate_name(&name).map_err(|e| bad("render.settings.apply", e.to_string()))?;
+    let setup = s.doc.render.setups.get(&name).ok_or_else(|| bad("render.settings.apply", "no saved render setup with that name"))?;
+    setup.validate().map_err(|e| bad("render.settings.apply", e.to_string()))?;
     s.camera = Some(setup.camera);
     Ok(json!({"name":name,"camera":setup.camera}))
 }
@@ -318,18 +288,12 @@ struct GetSettings {
 
 fn get_settings(s: &mut Session, params: &Value) -> Result<Value> {
     let cmd = "render.settings.get";
-    let request: GetSettings =
-        serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    let request: GetSettings = serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
     match request.name {
         None => Ok(json!({"setups": s.doc.render.setups, "defaults": RenderSetup::default()})),
         Some(name) => {
             RenderSettings::validate_name(&name).map_err(|e| bad(cmd, e.to_string()))?;
-            let setup = s
-                .doc
-                .render
-                .setups
-                .get(&name)
-                .ok_or_else(|| bad(cmd, "no saved render setup with that name"))?;
+            let setup = s.doc.render.setups.get(&name).ok_or_else(|| bad(cmd, "no saved render setup with that name"))?;
             Ok(json!({"name": name, "setup": setup}))
         }
     }
@@ -344,8 +308,7 @@ struct SetSettings {
 
 fn set_settings(s: &mut Session, params: &Value) -> Result<Value> {
     let cmd = "render.settings.set";
-    let request: SetSettings =
-        serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    let request: SetSettings = serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
     let setup = patched_settings(s, &request.name, &request.set, cmd)?;
     let reply = json!({"name": request.name, "setup": setup});
     if s.doc.render.setups.get(&request.name) == Some(&setup) {
@@ -363,15 +326,10 @@ fn patched_settings(s: &Session, name: &str, set: &Value, cmd: &str) -> Result<R
     // A full RenderSetup has 15 known fields, including maps, optics, coats and
     // stage. Bound the patch by that schema; decoding below still rejects any
     // unknown field instead of silently dropping saved intent.
-    let patch = set
-        .as_object()
-        .filter(|p| p.len() <= 15)
-        .ok_or_else(|| bad(cmd, "`set` must be an object with at most 15 fields"))?;
+    let patch = set.as_object().filter(|p| p.len() <= 15).ok_or_else(|| bad(cmd, "`set` must be an object with at most 15 fields"))?;
     let current = s.doc.render.setups.get(name).cloned().unwrap_or_default();
     let mut value = serde_json::to_value(&current).map_err(|e| bad(cmd, e.to_string()))?;
-    let object = value
-        .as_object_mut()
-        .ok_or_else(|| bad(cmd, "invalid render setup"))?;
+    let object = value.as_object_mut().ok_or_else(|| bad(cmd, "invalid render setup"))?;
     for (key, value) in patch {
         object.insert(key.clone(), value.clone());
     }
@@ -384,10 +342,8 @@ fn backends(s: &mut Session, params: &Value) -> Result<Value> {
     if !params.as_object().is_some_and(|p| p.is_empty()) {
         return Err(bad("render.backends", "expected an empty parameter object"));
     }
-    Ok(
-        json!({"schema_version": 1, "default_backend": "builtin", "backends": [s.render_backend()],
-        "cpu_resource_profiles": solidcraft_render::job::CpuBudget::ALL.map(|budget| json!({"id":budget,"limits":budget.limits()}))}),
-    )
+    Ok(json!({"schema_version": 1, "default_backend": "builtin", "backends": [s.render_backend()],
+        "cpu_resource_profiles": solidcraft_render::job::CpuBudget::ALL.map(|budget| json!({"id":budget,"limits":budget.limits()}))}))
 }
 
 #[cfg(test)]
@@ -404,19 +360,13 @@ mod tests {
         let redo = s.redo.clone();
         let result = s.execute("render.backends", &params);
         assert!(Arc::ptr_eq(&doc, &s.doc));
-        assert_eq!(
-            before,
-            (s.is_dirty(), s.revision, s.evaluations, s.model.is_stale())
-        );
+        assert_eq!(before, (s.is_dirty(), s.revision, s.evaluations, s.model.is_stale()));
         assert_eq!(camera, s.camera);
         for (before, after) in [(&undo, &s.undo), (&redo, &s.redo)] {
             assert_eq!(before.len(), after.len());
             for (a, b) in before.iter().zip(after.iter()) {
                 assert!(Arc::ptr_eq(&a.doc, &b.doc));
-                assert_eq!(
-                    (&a.label, a.active_sketch, &a.pending_moves),
-                    (&b.label, b.active_sketch, &b.pending_moves)
-                );
+                assert_eq!((&a.label, a.active_sketch, &a.pending_moves), (&b.label, b.active_sketch, &b.pending_moves));
             }
         }
         result
@@ -429,26 +379,16 @@ mod tests {
         assert_eq!(r["schema_version"], 1);
         assert_eq!(r["default_backend"], "builtin");
         assert_eq!(r["backends"].as_array().unwrap().len(), 1);
-        let descriptor: crate::render::BackendDescriptor =
-            serde_json::from_value(r["backends"][0].clone()).unwrap();
+        let descriptor: crate::render::BackendDescriptor = serde_json::from_value(r["backends"][0].clone()).unwrap();
         assert_eq!(descriptor, crate::render::builtin_backend());
-        s.execute(
-            "solid.box",
-            &json!({"length": 10, "width": 20, "height": 5}),
-        )
-        .unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 5})).unwrap();
         s.execute("view.apply", &json!({"view": "top"})).unwrap();
         assert!(s.is_dirty());
         assert_unchanged(&mut s, json!({})).unwrap();
         s.execute("edit.undo", &json!({})).unwrap();
         assert!(!s.redo.is_empty());
         assert_unchanged(&mut s, json!({})).unwrap();
-        for p in [
-            json!([]),
-            json!(3),
-            json!({"backend": "missing"}),
-            json!({"width": "bad"}),
-        ] {
+        for p in [json!([]), json!(3), json!({"backend": "missing"}), json!({"width": "bad"})] {
             assert!(assert_unchanged(&mut s, p).is_err());
         }
     }
@@ -459,30 +399,14 @@ mod tests {
         let mut s = Session::default();
         s.set_render_job_host(Some(CpuHost::cooperative())).unwrap();
         let reply = assert_unchanged(&mut s, json!({})).unwrap();
-        let backend: solidcraft_render::BackendDescriptor =
-            serde_json::from_value(reply["backends"][0].clone()).unwrap();
-        assert!(
-            backend
-                .executors
-                .iter()
-                .any(|d| d.id.as_str() == "cpu-product")
-        );
-        assert!(
-            !backend
-                .executors
-                .iter()
-                .any(|d| d.id.as_str() == "cpu-raytrace")
-        );
+        let backend: solidcraft_render::BackendDescriptor = serde_json::from_value(reply["backends"][0].clone()).unwrap();
+        assert!(backend.executors.iter().any(|d| d.id.as_str() == "cpu-product"));
+        assert!(!backend.executors.iter().any(|d| d.id.as_str() == "cpu-raytrace"));
         let mut viewport = CpuHost::cooperative().descriptor().unwrap();
         viewport.id = solidcraft_render::ExecutorId::new("cpu-raytrace").unwrap();
         viewport.profiles[0].operation = solidcraft_render::RenderOperation::Viewport;
         viewport.profiles[0].formats.clear();
-        assert!(
-            s.set_render_viewport(Some(viewport))
-                .unwrap_err()
-                .to_string()
-                .contains("reserved")
-        );
+        assert!(s.set_render_viewport(Some(viewport)).unwrap_err().to_string().contains("reserved"));
         assert_eq!(s.render_backend(), backend);
     }
 
@@ -490,9 +414,7 @@ mod tests {
     #[test]
     fn native_cpu_discovery_matches_installed_features_and_preserves_raster_default() {
         use solidcraft_render::job::{CpuHost, Integrator};
-        use solidcraft_render::{
-            RenderFeature, RenderFormat, RenderMode, RenderOperation, RenderRequest,
-        };
+        use solidcraft_render::{RenderFeature, RenderFormat, RenderMode, RenderOperation, RenderRequest};
         let host = CpuHost::for_platform().unwrap();
         // Query the host so the same test covers feature-off builds and workspace
         // feature unification without assuming the engine's own cfg is sufficient.
@@ -504,29 +426,13 @@ mod tests {
         assert!(Arc::ptr_eq(&doc, &s.doc));
         assert!(!s.is_dirty());
         assert!(s.undo.is_empty());
-        let backend: solidcraft_render::BackendDescriptor =
-            serde_json::from_value(reply["backends"][0].clone()).unwrap();
-        let descriptors: Vec<_> = backend
-            .executors
-            .iter()
-            .filter(|d| d.id.as_str() == "cpu-raytrace")
-            .collect();
+        let backend: solidcraft_render::BackendDescriptor = serde_json::from_value(reply["backends"][0].clone()).unwrap();
+        let descriptors: Vec<_> = backend.executors.iter().filter(|d| d.id.as_str() == "cpu-raytrace").collect();
         assert_eq!(descriptors.len(), usize::from(raytrace));
         if let Some(descriptor) = descriptors.first() {
-            assert_eq!(
-                descriptor.availability,
-                solidcraft_render::Availability::Available
-            );
-            assert_eq!(
-                *descriptor,
-                &host.descriptor_for(Integrator::Raytrace).unwrap()
-            );
-            assert!(
-                !descriptor
-                    .profiles
-                    .iter()
-                    .any(|p| p.features.contains(&RenderFeature::Progressive))
-            );
+            assert_eq!(descriptor.availability, solidcraft_render::Availability::Available);
+            assert_eq!(*descriptor, &host.descriptor_for(Integrator::Raytrace).unwrap());
+            assert!(!descriptor.profiles.iter().any(|p| p.features.contains(&RenderFeature::Progressive)));
         }
         let request = RenderRequest {
             backend: None,
@@ -538,27 +444,12 @@ mod tests {
             features: vec![RenderFeature::Pbr],
             policy: Default::default(),
         };
-        assert_eq!(
-            solidcraft_render::resolve_request(std::slice::from_ref(&backend), &request)
-                .unwrap()
-                .executor
-                .as_str(),
-            "cpu-product"
-        );
+        assert_eq!(solidcraft_render::resolve_request(std::slice::from_ref(&backend), &request).unwrap().executor.as_str(), "cpu-product");
         assert_eq!(s.scratch().render_backend(), backend);
         s.set_render_job_host(Some(host)).unwrap();
-        assert_eq!(
-            s.render_backend(),
-            backend,
-            "reinstalling the same host cannot duplicate method descriptors"
-        );
+        assert_eq!(s.render_backend(), backend, "reinstalling the same host cannot duplicate method descriptors");
         s.set_render_job_host(Some(CpuHost::cooperative())).unwrap();
-        assert!(
-            !s.render_backend()
-                .executors
-                .iter()
-                .any(|d| d.id.as_str() == "cpu-raytrace")
-        );
+        assert!(!s.render_backend().executors.iter().any(|d| d.id.as_str() == "cpu-raytrace"));
         s.set_render_job_host(None).unwrap();
         assert_eq!(s.render_backend(), solidcraft_render::builtin_backend());
         assert_unchanged(&mut s, json!({})).unwrap();
@@ -572,19 +463,13 @@ mod tests {
         let mut s = Session::default();
         for (id, p) in [
             ("sketch.create", json!({"plane": "XY"})),
-            (
-                "sketch.rectangle.two_point",
-                json!({"p0": [5, 5], "p1": [25, 20]}),
-            ),
+            ("sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [25, 20]})),
             ("sketch.dimension", json!({"entities": ["l1"], "value": 20})),
             ("sketch.dimension", json!({"entities": ["l2"], "value": 15})),
             ("sketch.finish", json!({})),
             ("solid.extrude", json!({"distance": 5})),
             ("sketch.edit", json!({"sketch": "Sketch1"})),
-            (
-                "sketch.drag",
-                json!({"entity": "l1.start", "from": [5, 5], "to": [4, 5], "live": true}),
-            ),
+            ("sketch.drag", json!({"entity": "l1.start", "from": [5, 5], "to": [4, 5], "live": true})),
         ] {
             s.execute(id, &p).unwrap();
         }

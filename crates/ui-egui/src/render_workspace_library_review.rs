@@ -73,7 +73,10 @@ pub(in crate::render_workspace) fn light(app: &mut SolveApp, view: &View, id: &s
         return Err(reason);
     }
     let mut set = patch(app)?;
-    if app.render_workspace.view.method == ImageMethod::CpuRaytrace && matches!(view.kind.as_str(), "native_scenes" | "rigs") {
+    if matches!(view.kind.as_str(), "native_scenes" | "rigs" | "hdr")
+        && (app.session.doc.render.setups.contains_key(&app.render_workspace.view.name)
+            || (app.render_workspace.view.method == ImageMethod::CpuRaytrace && view.kind != "hdr"))
+    {
         // A lighting transaction preserves the saved shot camera; viewport
         // navigation is not an implicit camera-save action.
         if let Some(fields) = set.as_object_mut() {

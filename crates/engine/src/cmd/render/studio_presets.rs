@@ -2,8 +2,8 @@
 //! Resolution is read-only; publication validates a complete candidate before one undo.
 use crate::schema::TypedContract;
 use crate::schema::render_presets::{
-    CpuProgressive, CpuQualityContext, CpuQualityOptions, CpuQualityPlan, PresetParams,
-    QualityOptions, QualityParams, QualityPlan, QualityResult, QualitySize, StudioComposition,
+    CpuProgressive, CpuQualityContext, CpuQualityOptions, CpuQualityPlan, PresetParams, QualityOptions, QualityParams, QualityPlan, QualityResult,
+    QualitySize, StudioComposition,
 };
 use crate::{Result, Session, params::bad};
 use serde_json::{Value, json};
@@ -62,49 +62,28 @@ struct Candidate {
     report: StudioComposition,
 }
 fn candidate(s: &Session, input: &PresetParams, command: &str) -> Result<Candidate> {
-    if input
-        .expected_revision
-        .is_some_and(|revision| revision != s.revision)
-    {
-        return Err(bad(
-            command,
-            "scene or saved settings changed after review; resolve the composition again",
-        ));
+    if input.expected_revision.is_some_and(|revision| revision != s.revision) {
+        return Err(bad(command, "scene or saved settings changed after review; resolve the composition again"));
     }
     let source = recipe(&input.id, command)?;
     let mut setup = super::patched_settings(s, &input.name, &input.set, command)?;
-    if !matches!(
-        &setup.job,
-        Some(RenderJob::CpuRaytrace { .. } | RenderJob::GpuPath { .. })
-    ) {
-        return Err(bad(
-            command,
-            "native studio compositions require an explicitly selected CPU or GPU raytrace setup; no executor is substituted",
-        ));
+    if !matches!(&setup.job, Some(RenderJob::CpuRaytrace { .. } | RenderJob::GpuPath { .. })) {
+        return Err(bad(command, "native studio compositions require an explicitly selected CPU or GPU raytrace setup; no executor is substituted"));
     }
     let old = s.doc.render.setups.get(&input.name);
-    let stage_replacement =
-        !setup.stage.is_empty() || old.is_some_and(|saved| !saved.stage.is_empty());
+    let stage_replacement = !setup.stage.is_empty() || old.is_some_and(|saved| !saved.stage.is_empty());
     let mut product = crate::product_scene::extract(s)?;
     if product.bounds.is_empty() {
-        return Err(bad(
-            command,
-            "a native studio requires a nonempty visible subject",
-        ));
+        return Err(bad(command, "a native studio requires a nonempty visible subject"));
     }
     let bounds = product.bounds;
     let size = bounds.max - bounds.min;
     let center = bounds.center();
     let extent = size.x.max(size.y).max(size.z);
     if !extent.is_finite() || !(0.001..=1e6).contains(&extent) {
-        return Err(bad(
-            command,
-            "subject extent is outside the bounded millimeter studio range",
-        ));
+        return Err(bad(command, "subject extent is outside the bounded millimeter studio range"));
     }
-    let hdr = source["hdr"]
-        .as_str()
-        .ok_or_else(|| bad(command, "native composition has no HDR identity"))?;
+    let hdr = source["hdr"].as_str().ok_or_else(|| bad(command, "native composition has no HDR identity"))?;
     let resource = super::library::hdr_resource(hdr, command)?;
     let resource_id = resource.id();
     let mut lighting = StudioLighting {
@@ -135,17 +114,13 @@ fn candidate(s: &Session, input: &PresetParams, command: &str) -> Result<Candida
             .collect();
         prepared.area_lights = AreaLights::new(&areas).map_err(|e| bad(command, e.to_string()))?;
         if prepared.sun.is_some() {
-            return Err(bad(
-                command,
-                "this studio projection cannot introduce a solar emitter",
-            ));
+            return Err(bad(command, "this studio projection cannot introduce a solar emitter"));
         }
         panels.extend(super::library::rig_stage(&input, command)?.iter().cloned());
         lighting = prepared;
         projection = details;
     }
-    let reflectance: [f64; 3] = serde_json::from_value(source["ground"].clone())
-        .map_err(|e| bad(command, e.to_string()))?;
+    let reflectance: [f64; 3] = serde_json::from_value(source["ground"].clone()).map_err(|e| bad(command, e.to_string()))?;
     panels.push(StagePanel {
         id: "studio_ground".into(),
         center_mm: [center.x, center.y, bounds.min.z - 0.1],
@@ -154,9 +129,7 @@ fn candidate(s: &Session, input: &PresetParams, command: &str) -> Result<Candida
         reflectance_linear: reflectance,
     });
     setup.stage = Stage::new(panels).map_err(|e| bad(command, e.to_string()))?;
-    setup.exposure_ev = source["exposure_ev"]
-        .as_f64()
-        .ok_or_else(|| bad(command, "native composition exposure missing"))?;
+    setup.exposure_ev = source["exposure_ev"].as_f64().ok_or_else(|| bad(command, "native composition exposure missing"))?;
     let executor = match &mut setup.job {
         Some(RenderJob::CpuRaytrace { options, .. }) => {
             let hdr_samples = options.hdr.map_or(16, |hdr| hdr.samples);
@@ -164,9 +137,7 @@ fn candidate(s: &Session, input: &PresetParams, command: &str) -> Result<Candida
             options.hdr = Some(CpuHdrEnvironment {
                 resource: resource_id,
                 rotation_rad: super::library::hdr_rotation(0.35, command)?,
-                intensity: source["intensity"]
-                    .as_f64()
-                    .ok_or_else(|| bad(command, "native composition intensity missing"))?,
+                intensity: source["intensity"].as_f64().ok_or_else(|| bad(command, "native composition intensity missing"))?,
                 samples: hdr_samples,
             });
             "cpu-raytrace"
@@ -176,12 +147,10 @@ fn candidate(s: &Session, input: &PresetParams, command: &str) -> Result<Candida
             options.hdr = Some(GpuHdrEnvironment {
                 resource: resource_id,
                 rotation_rad: super::library::hdr_rotation(0.35, command)?,
-                intensity: source["intensity"]
-                    .as_f64()
-                    .ok_or_else(|| bad(command, "native composition intensity missing"))?,
+                intensity: source["intensity"].as_f64().ok_or_else(|| bad(command, "native composition intensity missing"))?,
                 assume_linear_srgb: false,
             });
-            options.lighting = Some(lighting.clone());
+            options.lighting = Some(lighting);
             "gpu-path"
         }
         _ => return Err(bad(command, "choose CPU or GPU ray tracing")),
@@ -190,14 +159,9 @@ fn candidate(s: &Session, input: &PresetParams, command: &str) -> Result<Candida
     super::staging::apply(&mut product, &setup, command)?;
     super::library::rig_clearance(&product, &lighting, command)?;
     let mut settings = (*s.doc.render).clone();
-    settings
-        .resources
-        .insert(resource)
-        .map_err(|e| bad(command, e.to_string()))?;
+    settings.resources.insert(resource).map_err(|e| bad(command, e.to_string()))?;
     settings.setups.insert(input.name.clone(), setup.clone());
-    settings
-        .validate()
-        .map_err(|e| bad(command, e.to_string()))?;
+    settings.validate().map_err(|e| bad(command, e.to_string()))?;
     let report = StudioComposition {
         id: input.id.clone(),
         name: input.name.clone(),
@@ -222,9 +186,7 @@ fn candidate(s: &Session, input: &PresetParams, command: &str) -> Result<Candida
             "pose",
             "visibility",
         ]),
-        clearance:
-            "conservative subject/stage/emitter AABB separation; not exact contact certification"
-                .into(),
+        clearance: "conservative subject/stage/emitter AABB separation; not exact contact certification".into(),
         limitations: strings(&[
             "Authored relative RGB radiance, not measured photometric calibration.",
             "No automatic material or semantic-role assignment.",
@@ -243,26 +205,18 @@ fn reply(command: &str, reply: impl serde::Serialize) -> Result<Value> {
 }
 pub(super) fn resolve(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.preset.resolve";
-    let input: PresetParams =
-        serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    let input: PresetParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     reply(command, candidate(s, &input, command)?.report)
 }
 pub(super) fn apply(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.preset.apply";
-    let input: PresetParams =
-        serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    let input: PresetParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     if input.expected_revision.is_none() || !input.replace_lighting_and_environment {
-        return Err(bad(
-            command,
-            "resolve first, then supply expected_revision and explicit lighting/environment/exposure replacement consent",
-        ));
+        return Err(bad(command, "resolve first, then supply expected_revision and explicit lighting/environment/exposure replacement consent"));
     }
     let mut ready = candidate(s, &input, command)?;
     if ready.report.requires_stage_consent && !input.replace_stage {
-        return Err(bad(
-            command,
-            "existing stage requires explicit replace_stage consent",
-        ));
+        return Err(bad(command, "existing stage requires explicit replace_stage consent"));
     }
     let changed = ready.settings != *s.doc.render;
     if changed {
@@ -274,45 +228,27 @@ pub(super) fn apply(s: &mut Session, params: &Value) -> Result<Value> {
 
 pub(super) fn quality(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.quality.prepare";
-    let input: QualityParams =
-        serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
-    if !matches!(
-        input.variant.as_str(),
-        "fixed_samples_png" | "cpu_progressive_png"
-    ) || !input.acknowledge_omissions
-    {
+    let input: QualityParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    if !matches!(input.variant.as_str(), "fixed_samples_png" | "cpu_progressive_png") || !input.acknowledge_omissions {
         return Err(bad(
             command,
             "an explicit fixed_samples_png or cpu_progressive_png projection and omission acknowledgement are required; full Q-* requirements remain unbound",
         ));
     }
     if input.variant == "fixed_samples_png" && input.cpu.is_some() {
-        return Err(bad(
-            command,
-            "CPU budget context requires the cpu_progressive_png projection",
-        ));
+        return Err(bad(command, "CPU budget context requires the cpu_progressive_png projection"));
     }
     let source = super::library::item("quality", &input.id, command)?;
     let number = |path: &[&str]| -> Result<u32> {
         let mut field = source;
         for key in path {
-            field = field
-                .get(*key)
-                .ok_or_else(|| bad(command, "quality field missing"))?;
+            field = field.get(*key).ok_or_else(|| bad(command, "quality field missing"))?;
         }
-        field
-            .as_u64()
-            .and_then(|n| u32::try_from(n).ok())
-            .ok_or_else(|| bad(command, "quality field is not a bounded unsigned integer"))
+        field.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| bad(command, "quality field is not a bounded unsigned integer"))
     };
-    let (width, height) = (
-        number(&["resolution", "width"])?,
-        number(&["resolution", "height"])?,
-    );
+    let (width, height) = (number(&["resolution", "width"])?, number(&["resolution", "height"])?);
     if input.variant == "cpu_progressive_png" {
-        if !matches!(input.id.as_str(), "Q-001" | "Q-002" | "Q-003")
-            || source["motion"]["enabled"] != false
-        {
+        if !matches!(input.id.as_str(), "Q-001" | "Q-002" | "Q-003") || source["motion"]["enabled"] != false {
             return Err(bad(
                 command,
                 "only the three canonical still-image CPU cost budgets are bound; optical/convergence concepts are not CPU presets",
@@ -321,10 +257,7 @@ pub(super) fn quality(s: &mut Session, params: &Value) -> Result<Value> {
         let samples = number(&["sampling", "minimum_samples"])?.max(16);
         let seed = number(&["seed"])?;
         let context = input.cpu.unwrap_or_default();
-        let production = Some(solidcraft_render::job::CpuProgressiveOptions {
-            samples_per_pixel: samples,
-            seed,
-        });
+        let production = Some(solidcraft_render::job::CpuProgressiveOptions { samples_per_pixel: samples, seed });
         let mut eligible = false;
         let mut selected = None;
         let mut refusal = None;
@@ -333,9 +266,8 @@ pub(super) fn quality(s: &mut Session, params: &Value) -> Result<Value> {
             if !eligible {
                 continue;
             }
-            let admitted =
-                solidcraft_render::job::cpu_camera_sampling(production, context.adaptive, budget)
-                    .and_then(|sampling| budget.validate_image(width, height, sampling));
+            let admitted = solidcraft_render::job::cpu_camera_sampling(production, context.adaptive, budget)
+                .and_then(|sampling| budget.validate_image(width, height, sampling));
             match admitted {
                 Ok(()) => {
                     selected = Some(budget);
@@ -344,15 +276,8 @@ pub(super) fn quality(s: &mut Session, params: &Value) -> Result<Value> {
                 Err(error) => refusal = Some(error),
             }
         }
-        let budget = selected.ok_or_else(|| {
-            bad(
-                command,
-                refusal.map_or_else(
-                    || "no existing CPU profile admits this budget".to_string(),
-                    |e| e.to_string(),
-                ),
-            )
-        })?;
+        let budget = selected
+            .ok_or_else(|| bad(command, refusal.map_or_else(|| "no existing CPU profile admits this budget".to_string(), |e| e.to_string())))?;
         let plan = CpuQualityPlan {
             id: input.id,
             name: source["name"].as_str().map(str::to_owned),
@@ -362,25 +287,10 @@ pub(super) fn quality(s: &mut Session, params: &Value) -> Result<Value> {
             document_changed: false,
             source_unchanged: true,
             settings: QualitySize { width, height },
-            cpu_options: CpuQualityOptions {
-                progressive: CpuProgressive {
-                    samples_per_pixel: samples,
-                    seed,
-                },
-                budget,
-            },
-            cpu_context: CpuQualityContext {
-                minimum_budget: context.minimum_budget,
-                adaptive: context.adaptive,
-            },
+            cpu_options: CpuQualityOptions { progressive: CpuProgressive { samples_per_pixel: samples, seed }, budget },
+            cpu_context: CpuQualityContext { minimum_budget: context.minimum_budget, adaptive: context.adaptive },
             requires_progressive: true,
-            changed_fields: strings(&[
-                "width",
-                "height",
-                "progressive.samples_per_pixel",
-                "progressive.seed",
-                "budget",
-            ]),
+            changed_fields: strings(&["width", "height", "progressive.samples_per_pixel", "progressive.seed", "budget"]),
             preserves: strings(&[
                 "executor",
                 "camera",
@@ -412,13 +322,9 @@ pub(super) fn quality(s: &mut Session, params: &Value) -> Result<Value> {
         };
         return reply(command, QualityResult::Cpu(plan));
     }
-    let (samples, depth) = (
-        number(&["sampling", "maximum_samples"])?,
-        number(&["transport", "maximum_depth"])?,
-    );
+    let (samples, depth) = (number(&["sampling", "maximum_samples"])?, number(&["transport", "maximum_depth"])?);
     let seed = number(&["seed"])?;
-    if solidcraft_render::job::GPU_PATH_LIMITS.fit(u64::from(width), u64::from(height), None)
-        != Some((u64::from(width), u64::from(height)))
+    if solidcraft_render::job::GPU_PATH_LIMITS.fit(u64::from(width), u64::from(height), None) != Some((u64::from(width), u64::from(height)))
         || samples == 0
         || samples > 4096
         || depth == 0
@@ -439,22 +345,8 @@ pub(super) fn quality(s: &mut Session, params: &Value) -> Result<Value> {
         document_changed: false,
         source_unchanged: true,
         settings: QualitySize { width, height },
-        gpu_options: QualityOptions {
-            samples,
-            max_depth: depth,
-            seed,
-            denoise: source["denoising"]["enabled"].as_bool(),
-        },
-        preserves: strings(&[
-            "executor",
-            "camera",
-            "lighting",
-            "environment",
-            "stage",
-            "optical_bindings",
-            "exposure",
-            "tone_map",
-        ]),
+        gpu_options: QualityOptions { samples, max_depth: depth, seed, denoise: source["denoising"]["enabled"].as_bool() },
+        preserves: strings(&["executor", "camera", "lighting", "environment", "stage", "optical_bindings", "exposure", "tone_map"]),
         omitted: strings(&[
             "adaptive_stopping_and_error_target",
             "independent_transmission_depth",

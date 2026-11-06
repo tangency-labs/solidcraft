@@ -2962,11 +2962,15 @@ pub fn image_aspect(setup: &RenderSetup) -> f64 {
 /// Contextual guide visibility is independent; the compatibility preference keeps
 /// its previous Frame-only projection policy.
 pub(crate) fn camera_rect(app: &SolveApp, supplied: egui::Rect) -> egui::Rect {
-    if !active(app)
-        || app.preferences.render_legacy_image_defaults
-        || app.render_workspace.view.result
-        || app.render_workspace.view.compare.is_some()
-        || app.viewport.rect != Some(supplied)
+    if app.viewport.rect != Some(supplied) {
+        return supplied;
+    }
+    authored_camera_rect(app, supplied)
+}
+
+/// Resolve the painted projection from an authoritative outer product canvas.
+fn authored_camera_rect(app: &SolveApp, supplied: egui::Rect) -> egui::Rect {
+    if !active(app) || app.preferences.render_legacy_image_defaults || app.render_workspace.view.result || app.render_workspace.view.compare.is_some()
     {
         return supplied;
     }
@@ -2991,14 +2995,17 @@ pub(crate) fn picture_layout(app: &SolveApp, layout: &crate::viewport_layout::La
     }
 }
 
-/// The exact projection used by Frame/selected-Shot paint and picking, with
-/// current real host obstacles clipped to that picture rather than the window.
+/// Clip the current host obstacles to the painted product projection.
 pub(crate) fn host_picture_layout(
     app: &SolveApp,
     layout: &crate::viewport_layout::Layout,
     usable: &crate::panel_runtime::HostUsableRegion,
 ) -> Option<crate::viewport_layout::Layout> {
-    let picture = shot::preview_rect(app, layout.viewport).unwrap_or(layout.viewport);
+    let picture = if app.preferences.render_legacy_image_defaults {
+        shot::preview_rect(app, layout.viewport).unwrap_or(layout.viewport)
+    } else {
+        authored_camera_rect(app, layout.viewport)
+    };
     crate::viewport_layout::host_projection_layout(layout, usable, picture)
 }
 

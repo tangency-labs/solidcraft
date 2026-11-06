@@ -920,7 +920,9 @@ fn surface_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id: 
                 let plan = app.run("render.library.surface.prepare", surface.clone())?;
                 let action = if mode == 2 {
                     let mut set = patch(app)?;
-                    if cpu && let Some(fields) = set.as_object_mut() {
+                    if (cpu || app.session.doc.render.setups.contains_key(&app.render_workspace.view.name))
+                        && let Some(fields) = set.as_object_mut()
+                    {
                         // Binding maps saves full visible numerical/job intent, but
                         // camera navigation remains an explicit shot-camera action.
                         fields.remove("camera");
@@ -1964,6 +1966,168 @@ mod studio_browser_tests {
         h.app.run("edit.redo", json!({})).unwrap();
         assert_eq!(h.app.session.doc, saved);
     }
+    fn library_camera_fixture(method: ImageMethod, saved: bool) -> Harness {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1440,"height":3000}));
+        h.app.run("solid.box", json!({"length":20,"width":15,"height":10,"body_name":"Sample"})).unwrap();
+        h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Body{name:"Sample".into()}]})).unwrap();
+        let camera = solidcraft_engine::render::Camera {
+            distance: 73.0,
+            target: solidcore_record::Vec3::new(10.0, 7.5, 5.0),
+            yaw: 0.3,
+            pitch: -0.2,
+            ..Default::default()
+        };
+        if saved {
+            let job = match method {
+                ImageMethod::CpuRaytrace => {
+                    Some(json!({"method":"cpu_raytrace","options":{"progressive":{"samples_per_pixel":2,"seed":47},"area_samples":4,"seed":731}}))
+                }
+                ImageMethod::GpuRaytrace => Some(json!({"method":"gpu_path","options":{"samples":17,"seed":731}})),
+                ImageMethod::Raster => None,
+            }
+            .unwrap();
+            h.app
+                .run(
+                    "render.settings.set",
+                    json!({"name":"Studio","set":{"width":16,"height":12,"background":[17,31,47],"exposure_ev":0.375,"camera":camera,"job":job}}),
+                )
+                .unwrap();
+        }
+        super::super::enter(&mut h.app, true).unwrap();
+        h.app.render_workspace.view.live_paused = true;
+        super::super::select_image_method(&mut h.app, method);
+        h.app.render_workspace.view.draft.width = 16;
+        h.app.render_workspace.view.draft.height = 12;
+        h.frames(4);
+        let navigation = solidcraft_engine::render::Camera { distance: 92.0, yaw: 0.75, ..camera };
+        h.app.cam = navigation;
+        h.frames(2);
+        assert_eq!(h.app.cam, navigation);
+        assert_eq!(h.app.session.doc.render.setups.contains_key("Studio"), saved);
+        assert_eq!(h.app.render_workspace.view.method, method);
+        assert_eq!(h.app.render_workspace.view.name, "Studio");
+        assert!(super::super::setups::snapshot(&h.app).is_ok());
+        h
+    }
+
+    fn library_nonlighting_intent(setup: &solidcraft_engine::doc::render_settings::RenderSetup) -> Value {
+        let mut value = serde_json::to_value(setup).unwrap();
+        for field in ["camera", "stage", "exposure_ev"] {
+            value.as_object_mut().unwrap().remove(field);
+        }
+        for field in ["lighting", "hdr", "environment", "sky", "preset", "lights", "punctual_lights", "area_lights", "sun"] {
+            value["job"]["options"].as_object_mut().unwrap().remove(field);
+        }
+        value
+    }
+
+    fn assert_library_camera_transaction(mut h: Harness, kind: &str, id: &str, saved: bool) {
+        let before = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+        let navigation = h.app.cam;
+        let expected_camera = if saved { before.render.setups["Studio"].camera } else { navigation };
+        if saved {
+            assert_ne!(navigation, expected_camera, "the fixture must navigate away from the saved shot");
+        }
+        let prospective = super::super::setups::snapshot(&h.app).unwrap();
+        if kind == "surfaces" {
+            h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
+            h.frames(3);
+            h.step(&json!({"click":{"handle":"render:library-panel"}})).unwrap();
+            let mut view = std::mem::take(&mut h.app.render_workspace.view.library);
+            choose(&mut h.app, &mut view, kind, id).unwrap();
+            refresh_targets(&mut h.app, &mut view).unwrap();
+            view.target = view.targets.iter().find(|target| target.name == "Sample").cloned();
+            assert!(current_target(&h.app, &view));
+            h.app.render_workspace.view.library = view;
+            h.frames(4);
+            h.step(&json!({"click":{"handle":"render:surface:save-maps"}})).unwrap();
+        } else {
+            let mut view = View::default();
+            choose(&mut h.app, &mut view, kind, id).unwrap();
+            refresh_targets(&mut h.app, &mut view).unwrap();
+            review::light(&mut h.app, &view, id).unwrap();
+            h.frames(2);
+        }
+        assert!(h.app.render_workspace.view.library.review.is_some(), "{kind}/{id}");
+        assert!(Arc::ptr_eq(&before, &h.app.session.doc));
+        assert_eq!(h.app.session.undo.len(), undo);
+        h.step(&json!({"click":{"handle":"render:review:acknowledge"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        assert!(h.app.render_workspace.view.library.review.is_none(), "{kind}/{id}");
+        let after = h.app.session.doc.clone();
+        let setup = &after.render.setups["Studio"];
+        assert_eq!(setup.camera, expected_camera, "{kind}/{id}: a review must not implicitly save navigation over an existing shot");
+        assert_eq!(h.app.cam, navigation, "{kind}/{id}: applying must leave the live camera alone");
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        if kind == "surfaces" {
+            let mut expected = prospective.clone();
+            expected.camera = expected_camera;
+            expected.surfaces = setup.surfaces.clone();
+            assert_eq!(*setup, expected, "only the reviewed maps and the existing camera policy may differ");
+            assert_eq!(setup.surfaces.len(), 1);
+        } else {
+            assert_eq!(library_nonlighting_intent(setup), library_nonlighting_intent(&prospective));
+            if kind == "hdr" {
+                assert_eq!(setup.stage, prospective.stage);
+            } else {
+                assert!(!setup.stage.is_empty());
+            }
+            if kind != "native_scenes" {
+                assert_eq!(setup.exposure_ev, prospective.exposure_ev);
+            }
+        }
+        assert_eq!(after.features, before.features);
+        assert_eq!(after.materials, before.materials);
+        assert_eq!(after.appearances, before.appearances);
+        assert!(h.app.render_workspace.view.job.is_none());
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc, before);
+        assert_eq!(h.app.cam, navigation);
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc, after);
+        assert_eq!(h.app.cam, navigation);
+    }
+
+    #[test]
+    fn cpu_hdr_library_review_keeps_saved_and_live_cameras_independent() {
+        assert_library_camera_transaction(library_camera_fixture(ImageMethod::CpuRaytrace, true), "hdr", "HDR-001", true);
+    }
+
+    #[test]
+    fn gpu_native_studio_review_keeps_saved_and_live_cameras_independent() {
+        assert_library_camera_transaction(library_camera_fixture(ImageMethod::GpuRaytrace, true), "native_scenes", "NATIVE-STUDIO-001", true);
+    }
+
+    #[test]
+    fn gpu_rig_review_keeps_saved_and_live_cameras_independent() {
+        assert_library_camera_transaction(library_camera_fixture(ImageMethod::GpuRaytrace, true), "rigs", "RIG-001", true);
+    }
+
+    #[test]
+    fn gpu_hdr_library_review_keeps_saved_and_live_cameras_independent() {
+        assert_library_camera_transaction(library_camera_fixture(ImageMethod::GpuRaytrace, true), "hdr", "HDR-001", true);
+    }
+
+    #[test]
+    fn gpu_saved_maps_review_keeps_saved_and_live_cameras_independent() {
+        assert_library_camera_transaction(library_camera_fixture(ImageMethod::GpuRaytrace, true), "surfaces", "SURF-001", true);
+    }
+
+    #[test]
+    fn library_reviews_keep_new_setup_camera_creation_policy() {
+        for (method, kind, id) in [
+            (ImageMethod::CpuRaytrace, "hdr", "HDR-001"),
+            (ImageMethod::GpuRaytrace, "native_scenes", "NATIVE-STUDIO-001"),
+            (ImageMethod::GpuRaytrace, "rigs", "RIG-001"),
+            (ImageMethod::GpuRaytrace, "hdr", "HDR-001"),
+            (ImageMethod::GpuRaytrace, "surfaces", "SURF-001"),
+        ] {
+            assert_library_camera_transaction(library_camera_fixture(method, false), kind, id, false);
+        }
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn cpu_saved_builtin_maps_use_real_review_pointer_save_undo_reopen_and_native_render() {

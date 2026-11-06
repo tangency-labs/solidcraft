@@ -37,10 +37,7 @@ const SETUP_FIELDS: &[&str] = &[
 
 /// Each setup field, without its own schema: `patched_settings` checks the values.
 fn setup_properties() -> serde_json::Map<String, Value> {
-    SETUP_FIELDS
-        .iter()
-        .map(|field| (field.to_string(), Value::Object(serde_json::Map::new())))
-        .collect()
+    SETUP_FIELDS.iter().map(|field| (field.to_string(), Value::Object(serde_json::Map::new()))).collect()
 }
 
 fn set_schema(_: &mut SchemaGenerator) -> Schema {
