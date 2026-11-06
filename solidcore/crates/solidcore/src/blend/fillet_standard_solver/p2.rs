@@ -2477,9 +2477,8 @@ impl CircularCrossSectionFsg {
     /// pRail1Curve, pRail2Curve, crFilletPoints, pSurf1, pUV1, pSurf2, pUV2,
     /// rpFilletSurface)`: [`CircularCrossSectionFsg::create_surface_from_curves`] at the
     /// solver's tolerance, without `G1` continuity (upstream keeps it off for every
-    /// solver type). The fillet points and surfaces are not used. With
-    /// `fixes.fillet_gn_section_generator` a variable-radius or constant-distance
-    /// solver's sections are the balls' touch circles
+    /// solver type). The fillet points and surfaces are not used. A variable-radius or
+    /// constant-distance solver's sections are the balls' touch circles
     /// ([`CircularCrossSectionFsg::create_surface_from_curves_of_balls`]; WR-685).
     ///
     /// # Errors
@@ -2501,11 +2500,10 @@ impl CircularCrossSectionFsg {
         // ball changes its radius along the round (a radius law, or a constant chord
         // between faces whose angle changes); the others' balls touch the round along
         // their great circles.
-        let ball_radius_varies = k.fixes.fillet_gn_section_generator
-            && matches!(
-                solver_type,
-                FilletSolverType::VariableRadius | FilletSolverType::ConstDist
-            );
+        let ball_radius_varies = matches!(
+            solver_type,
+            FilletSolverType::VariableRadius | FilletSolverType::ConstDist
+        );
         // the centre line is a plain SmBSplineCurve here, so its virtuals are the
         // B-spline ones
         let mut cl = Curve::from(core::mem::take(center_line));
@@ -2970,8 +2968,7 @@ fn rolled_on<'a>(
 
 impl CircularCrossSectionFsg {
     /// The fork's `SmGnSectionFSG::CircleSurface` gate (cc08236, 308cc40, c596548; with
-    /// `fixes.fillet_gn_section_generator` and `fixes.fillet_round_as_definition`,
-    /// WR-698): a ball of one radius between faces that are NURBS surfaces is the round by
+    /// `fixes.fillet_round_as_definition`, WR-698): a ball of one radius between faces that are NURBS surfaces is the round by
     /// its definition, the order-1 section's `Build` with the rails and uv curves
     /// replaced ([`GnSectionFsg::build_given_ball`]), unless the rails or the centre line
     /// turn at a knot (`sm_FilletCurveCorners`: the pieces are built as before), a face is
@@ -3015,7 +3012,7 @@ impl CircularCrossSectionFsg {
             corner_angle, fillet_curve_corners,
         };
         use crate::surface::surface::SurfaceKind;
-        if !(k.fixes.fillet_gn_section_generator && k.fixes.fillet_round_as_definition) {
+        if !k.fixes.fillet_round_as_definition {
             return Ok(None);
         }
         let [rail1, rail2] = rails;
@@ -3275,7 +3272,7 @@ impl CircularCrossSectionFsg {
 
 impl super::p1::LinearCrossSectionFsg {
     /// A chamfer by its definition (solidcore's, #2486; with
-    /// `fixes.fillet_gn_section_generator` and `fixes.fillet_round_as_definition`): the
+    /// `fixes.fillet_round_as_definition`): the
     /// section generator's chord, order 0, between the feet of the point at the solver's
     /// offsets off the two faces ([`GnSectionFsg::build_chord`]), keeping the chamfer's
     /// sizes: those the solver was made for, else its two offsets' setbacks at the wedge
@@ -3307,7 +3304,7 @@ impl super::p1::LinearCrossSectionFsg {
         };
         use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
         use crate::surface::surface::SurfaceKind;
-        if !(k.fixes.fillet_gn_section_generator && k.fixes.fillet_round_as_definition) {
+        if !k.fixes.fillet_round_as_definition {
             return Ok(None);
         }
         let [rail1, rail2] = rails;

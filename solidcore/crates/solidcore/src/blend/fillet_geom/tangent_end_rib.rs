@@ -74,8 +74,8 @@ pub fn section_contact_order(solver: &FilletSolver) -> Result<u32> {
     }
 }
 
-/// The fork's `sm_SectionContactOrder` for a G^n section (`SM_FSG_BLEND_CURVE` with
-/// `fixes.fillet_gn_section_generator`, WR-685; tangency-labs/smlib@11ea2d9): the order of
+/// The fork's `sm_SectionContactOrder` for a G^n section (`SM_FSG_BLEND_CURVE`, WR-685;
+/// tangency-labs/smlib@11ea2d9): the order of
 /// contact k of the section with the face it meets at `at`, a point of one of its rails:
 /// `n + 1`, or `n + 2` where its jets make the `t^(n+1)` term vanish (two planes), found at
 /// that rail's station (`SmGnSectionFSG::ContactOrderAt`). The rail through `at` is the one

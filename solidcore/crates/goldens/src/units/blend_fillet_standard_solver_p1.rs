@@ -601,7 +601,6 @@ fn rust_generator(i: &Inputs) -> Result<Rec, HarnessError> {
             let fsg = BlendCurveCrossSectionFsg {
                 continuity: *cont as u32,
                 blend_scale: *scale,
-                at_thirds: false,
             };
             let mut c = bcurve_of(center)?;
             let mut r1 = bcurve_of(rail1)?;

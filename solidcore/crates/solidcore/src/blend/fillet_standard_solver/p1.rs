@@ -64,12 +64,6 @@
 //!   tangency-labs/smlib `b7ec55b`, not in SMLib at the pin) the edge-use constructors
 //!   orient their offsets by `sector_sides` (`sm_SectorSides`), which also sides a
 //!   cusp's faces; off, they keep upstream's tangency refusal.
-//! - **Sections at thirds.** [`BlendCurveCrossSectionFsg::at_thirds`] is the fork's
-//!   `m_bAtThirds` (tangency-labs/smlib `fd3b6a7`, not in SMLib at the pin; off unless
-//!   the executive's `SetBlendCurveAtThirds` is set, so the default is the pinned C++).
-//! - **Shared section.** The body of `CreateSurfaceFromCurves`' section loop is
-//!   `BlendCurveCrossSectionFsg::cross_section_through`, which (not upstream, WR-581)
-//!   `blend::fillet_solver::p2`'s revolved blend-curve section also builds from.
 //! - **Object model.** `SmConstantRadiusFS` is the co-ported [`ConstantRadiusAssistedFs`]
 //!   of `blend.fillet_custom_solver` (the members of `SmFilletSolver`,
 //!   `SmConstantRadiusFS` and `SmConstantRadiusAssistedFS` are the same), aliased as
@@ -2084,17 +2078,12 @@ impl VariableRadiusFs {
 
     /// `GetRadiusCornerParameters` (the fork's 6eecf04, not upstream): the edge parameters
     /// where the radius law has a corner, ascending ([`FilletLaw::corner_parameters`] over
-    /// the law's interval and orientation). Under `fixes.fillet_gn_section_generator` (the
-    /// law corners of WR-685); none without it, so that the trace, its flush and the
-    /// executive see no corner and are as before.
+    /// the law's interval and orientation): the law corners of WR-685.
     ///
     /// # Errors
     ///
     /// Those of [`FilletLaw::corner_parameters`].
-    pub fn radius_corner_parameters(&self, k: &Kernel) -> Result<Vec<f64>> {
-        if !k.fixes.fillet_gn_section_generator {
-            return Ok(Vec::new());
-        }
+    pub fn radius_corner_parameters(&self) -> Result<Vec<f64>> {
         self.law
             .corner_parameters(&self.law_interval, self.law_orientation)
     }
@@ -2104,8 +2093,8 @@ impl VariableRadiusFs {
     /// [`Self::radius_corner_parameters`], within `1e-9` of the law interval's size;
     /// `false` where those fail.
     #[must_use]
-    pub fn is_at_radius_corner(&self, k: &Kernel, point: &TsectPnt) -> bool {
-        let Ok(corners) = self.radius_corner_parameters(k) else {
+    pub fn is_at_radius_corner(&self, point: &TsectPnt) -> bool {
+        let Ok(corners) = self.radius_corner_parameters() else {
             return false;
         };
         let tol = 1.0e-9 * (1.0 + self.law_interval.min().abs() + self.law_interval.max().abs());
@@ -2117,8 +2106,8 @@ impl VariableRadiusFs {
     /// parameter, `m_adUserDoubles[0]`) where the law has corners; `None` where it has none
     /// or they fail.
     #[must_use]
-    pub fn radius_parameter(&self, k: &Kernel, point: &TsectPnt) -> Option<f64> {
-        match self.radius_corner_parameters(k) {
+    pub fn radius_parameter(&self, point: &TsectPnt) -> Option<f64> {
+        match self.radius_corner_parameters() {
             Ok(corners) if !corners.is_empty() => {
                 Some(point.user_doubles.first().copied().unwrap_or(f64::NAN))
             }
@@ -2883,9 +2872,9 @@ impl CircularCrossSectionFsg {
 
     /// [`CircularCrossSectionFsg::create_surface_from_curves`] as the fork's
     /// `SmGnSectionFSG::CircleSurfaceFromCurves` (tangency-labs/smlib d2a6125, f2ec002,
-    /// e9560e3; `fixes.fillet_gn_section_generator`, WR-685): `ball_radius_varies`, the
-    /// solver's ball changes its radius along the centre line (a radius law, or a constant
-    /// chord between faces whose angle changes). With the flag each section is the circle
+    /// e9560e3; WR-685): `ball_radius_varies`, the solver's ball changes its radius along
+    /// the centre line (a radius law, or a constant chord between faces whose angle
+    /// changes). Each section is the circle
     /// along which the balls' envelope touches the ball, square to the centre line: where
     /// the ball's radius varies, its centre is the ball's centre moved along the centre
     /// line by `-r r'/|c'|` (the envelope's condition `<p - c, c'> = -r r'` on the ball
@@ -3193,41 +3182,32 @@ impl CircularCrossSectionFsg {
                 .first()
                 .copied()
                 .ok_or_else(|| SolidError::sm_err(OP))?;
-            let (p1, p2, v1, v2) = if k.fixes.fillet_gn_section_generator {
-                // the fork's `CircleSurfaceFromCurves` (WR-685): the rails' points and
-                // tangents, and the section the circle along which the balls' envelope
-                // touches the ball, square to the centre line
-                let tangent = |pv: &[Vec3]| match *pv {
-                    [p, d, ..] => Ok((p, d)),
-                    _ => Err(SolidError::sm_err(OP)),
-                };
-                let (_, cent_d) = tangent(&cent_pv)?;
-                let (p1, d1) = tangent(&rail1.evaluate(t, 1, true, false)?)?;
-                let (p2, d2) = tangent(&rail2.evaluate(t, 1, true, false)?)?;
-                let mut v1 = p1 - cent;
-                let mut v2 = p2 - cent;
-                let speed = cent_d.length();
-                if ball_radius_varies
-                    && speed > EFF_ZERO
-                    && v1.length() > EFF_ZERO
-                    && v2.length() > EFF_ZERO
-                {
-                    let r1 = v1.length();
-                    let r2 = v2.length();
-                    let rate = 0.5 * (v1.dot(d1 - cent_d) / r1 + v2.dot(d2 - cent_d) / r2);
-                    let along = cent_d / speed;
-                    cent += along * (-0.5 * (r1 + r2) * rate / speed);
-                    v1 = p1 - cent;
-                    v2 = p2 - cent;
-                }
-                (p1, p2, v1, v2)
-            } else {
-                let p1 = rail1.evaluate_point(t)?;
-                let p2 = rail2.evaluate_point(t)?;
-
-                // get sample Point gaps
-                (p1, p2, p1 - cent, p2 - cent)
+            // the fork's `CircleSurfaceFromCurves` (WR-685): the rails' points and tangents,
+            // and the section the circle along which the balls' envelope touches the ball,
+            // square to the centre line
+            let tangent = |pv: &[Vec3]| match *pv {
+                [p, d, ..] => Ok((p, d)),
+                _ => Err(SolidError::sm_err(OP)),
             };
+            let (_, cent_d) = tangent(&cent_pv)?;
+            let (p1, d1) = tangent(&rail1.evaluate(t, 1, true, false)?)?;
+            let (p2, d2) = tangent(&rail2.evaluate(t, 1, true, false)?)?;
+            let mut v1 = p1 - cent;
+            let mut v2 = p2 - cent;
+            let speed = cent_d.length();
+            if ball_radius_varies
+                && speed > EFF_ZERO
+                && v1.length() > EFF_ZERO
+                && v2.length() > EFF_ZERO
+            {
+                let r1 = v1.length();
+                let r2 = v2.length();
+                let rate = 0.5 * (v1.dot(d1 - cent_d) / r1 + v2.dot(d2 - cent_d) / r2);
+                let along = cent_d / speed;
+                cent += along * (-0.5 * (r1 + r2) * rate / speed);
+                v1 = p1 - cent;
+                v2 = p2 - cent;
+            }
 
             // when railCurve samplePoints are close together - make a degenerate cross section curve
             if p1.distance(p2) < approx_tol_3d {
@@ -3475,20 +3455,14 @@ pub struct BlendCurveCrossSectionFsg {
     pub continuity: u32,
     /// `m_dBlendScale`: the scale of the end derivatives.
     pub blend_scale: f64,
-    /// `m_bAtThirds` (the fork's, tangency-labs/smlib `fd3b6a7`): the sections' inner
-    /// control points sit a third and two thirds of the way from each contact to
-    /// where the contacts' tangent lines meet, instead of the faired Hermite scaled
-    /// by the blend scale.
-    pub at_thirds: bool,
 }
 
 impl Default for BlendCurveCrossSectionFsg {
-    /// `SmBlendCurveCrossSectionFSG()`: blend scale `1.5`, `G1`, not at thirds.
+    /// `SmBlendCurveCrossSectionFSG()`: blend scale `1.5`, `G1`.
     fn default() -> Self {
         Self {
             continuity: 1,
             blend_scale: 1.5,
-            at_thirds: false,
         }
     }
 }
@@ -3508,8 +3482,6 @@ pub(crate) enum SectionUv<'a> {
         /// The second rail's UV curve.
         uv2: &'a BSplineCurve,
     },
-    /// The rail points' UV positions themselves (not upstream, WR-581).
-    Points(Point2, Point2),
 }
 
 /// A surface and its UV curve along a rail (`pSurf1`, `pUV1` of
@@ -3769,9 +3741,7 @@ impl BlendCurveCrossSectionFsg {
     /// surfaces `surfaces`): the end tangents of the arc about `cent`, faired and scaled
     /// by the blend scale, for continuity 2 or 3 with `uv` points also the second (and
     /// third) directional derivatives of the surfaces along the dropped tangents; a
-    /// point curve where the points meet within `approx_tol_3d`. Shared by
-    /// `CreateSurfaceFromCurves` and (not upstream, WR-581) the revolved section of
-    /// `CalcTorusFilletGeom` (`blend::fillet_solver::p2`).
+    /// point curve where the points meet within `approx_tol_3d`.
     ///
     /// # Errors
     ///
@@ -3869,7 +3839,6 @@ impl BlendCurveCrossSectionFsg {
                         Point2::new(uv_pnt2.x, uv_pnt2.y),
                     )
                 }
-                SectionUv::Points(uv1, uv2) => (uv1, uv2),
                 SectionUv::None => return Err(SolidError::invalid_input(OP, "no UV points")),
             };
             let drop1 = |s: &Surface, uv: Point2, v: Vec3| -> Result<Vec2> {
@@ -3930,49 +3899,6 @@ impl BlendCurveCrossSectionFsg {
                     *v = if n < 2 { *v * s * s } else { *v * s * s * s };
                 }
                 degree = 7;
-            }
-        }
-        // At thirds (fork fd3b6a7): the Hermite's inner control points (P0 + D0/n,
-        // P1 - D1/n for degree n) a third of the way from each contact to where the two
-        // contact tangent lines meet, so D_i is n/3 of that distance; the higher
-        // derivatives keep their curvature with it.
-        if self.at_thirds {
-            let [d0, d1] = vectors;
-            let l0 = d0.length();
-            let l1 = d1.length();
-            let w = p1 - p2;
-            if l0 > EFF_ZERO && l1 > EFF_ZERO {
-                let d0 = d0 / l0;
-                let d1 = d1 / l1;
-                // Lines P0 + u d0 and P1 - v d1 (u, v > 0 run towards the corner).
-                let b = -d0.dot(d1);
-                let den = 1.0 - b * b;
-                if den > 1.0e-10 {
-                    let dd = d0.dot(w);
-                    let e = -d1.dot(w);
-                    let u = (b * e - dd) / den;
-                    let v = (e - b * dd) / den;
-                    if u > EFF_ZERO && v > EFF_ZERO {
-                        let n = degree as f64;
-                        let k0 = (n / 3.0) * u / l0;
-                        let k1 = (n / 3.0) * v / l1;
-                        let [v0, v1] = &mut vectors;
-                        *v0 *= k0;
-                        *v1 *= k1;
-                        if let Some(h) = higher_order_vecs.as_mut() {
-                            let len = h.len();
-                            for (index, vec) in h.iter_mut().enumerate() {
-                                *vec = match index {
-                                    0 => *vec * (k0 * k0),
-                                    1 => *vec * (k1 * k1),
-                                    2 if len == 4 => *vec * (k0 * k0 * k0),
-                                    3 if len == 4 => *vec * (k1 * k1 * k1),
-                                    _ => *vec,
-                                };
-                            }
-                        }
-                    }
-                }
             }
         }
         BSplineCurve::create_interpolating_curve(

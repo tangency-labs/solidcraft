@@ -352,8 +352,8 @@ pub enum SolidError {
         operation: &'static str,
     },
 
-    /// A fillet refused as too large, with the largest size that builds it (opt-in
-    /// `fixes.fillet_gn_section_generator`; the fork's `GetFitRadius`, `GetFitEdge` and
+    /// A fillet refused as too large, with the largest size that builds it (the fork's
+    /// `GetFitRadius`, `GetFitEdge` and
     /// `GetFitKind`, which its capi's `smlib_blend_fit_size` reads, tangency-labs/smlib#79,
     /// WR-696). Returned in place of [`SolidError::Upstream`] with the same `code` (so
     /// [`SolidError::sm_status`] is unchanged) only when the refusal's cause has a size; a

@@ -1244,7 +1244,7 @@ impl FilletCorner {
         let mut fsg_type = FilletSurfaceGeneratorType::Unknown;
         let mut blend_scale = 1.0; // For use in SmBlendCurveCrossSectionFSG cases only
         let mut max_continuity = 0u32;
-        // the fork's SmGnSectionFSG (WR-685, fixes.fillet_gn_section_generator): its
+        // the fork's SmGnSectionFSG (WR-685): its
         // thumbweight, and its order as the continuity
         let mut gn = false;
         let mut thumbweight = GN_DEFAULT_THUMBWEIGHT;

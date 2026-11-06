@@ -2,8 +2,7 @@
 //! plane's equation.
 //!
 //! Upstream: the SolidCraft fork's `source/SMLib/src/SmFilletGeom.cpp`
-//! (tangency-labs/smlib@5bdcddf, with @14a6daa's quarter points and start direction), under
-//! WR-682's `fillet_surface_plane_curve_on_plane_equation`.
+//! (tangency-labs/smlib@5bdcddf, with @14a6daa's quarter points and start direction; WR-682).
 //!
 //! | Rust                  | Upstream               |
 //! |-----------------------|------------------------|

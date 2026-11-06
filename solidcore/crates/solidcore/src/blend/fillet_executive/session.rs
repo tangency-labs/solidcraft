@@ -1977,8 +1977,8 @@ impl<'target> FilletSession<'target> {
     /// overload with `SM_FS_VARIABLE_RADIUS`, as `SmApiVariableRadiusFillet` does:
     /// one cross-section type for every edge, `radius` as the (unused) solver
     /// distance, `law` shared by every edge's solver and default tolerances. The
-    /// thumbweight is `SetFilletParameters`' default: upstream's `1.0`, or with
-    /// `fixes.fillet_gn_section_generator` the fork's `SM_GN_DEFAULT_THUMBWEIGHT`.
+    /// thumbweight is `SetFilletParameters`' default with the G^n section, the fork's
+    /// `SM_GN_DEFAULT_THUMBWEIGHT` (upstream's `1.0`, which the G^n section refuses).
     ///
     /// Zero selects linear, two blend-curve, every other cross-section code circular.
     ///
@@ -2029,13 +2029,10 @@ impl<'target> FilletSession<'target> {
                 tan_tol_deg: -1.0,
                 xsect_tol: -1.0,
                 continuity,
-                // SetFilletParameters' default thumbweight: upstream's 1.0, the fork's
-                // SM_GN_DEFAULT_THUMBWEIGHT with its G^n section (WR-685), which refuses 1.0
-                thumbweight: if k.fixes.fillet_gn_section_generator {
-                    crate::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT
-                } else {
-                    1.0
-                },
+                // SetFilletParameters' default thumbweight: the fork's
+                // SM_GN_DEFAULT_THUMBWEIGHT with its G^n section (WR-685), which refuses
+                // upstream's 1.0
+                thumbweight: crate::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT,
                 second_radii: None,
             },
         );
@@ -2813,8 +2810,7 @@ impl<'target> FilletSession<'target> {
     /// `GetFitRadius`, `GetFitEdge`, `GetFitKind` (the fork's, tangency-labs/smlib#79
     /// a3d6d81): with a refusal as too large ([`ErrorInfo::no_room_reason`]), the largest
     /// size that builds the refused blend and its edge, computed from the refusal's cause;
-    /// `None` when its cause has no size (a radius law) or no refusal noted one. Only with
-    /// `fixes.fillet_gn_section_generator`.
+    /// `None` when its cause has no size (a radius law) or no refusal noted one.
     #[must_use]
     pub fn fit_size(&self) -> Option<crate::blend::fillet_executive::FitSize<EdgeId>> {
         let fit = self.executive.fit_size()?;
@@ -3614,23 +3610,6 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         executive: &mut FilletExecutive<FilletObject>,
     ) -> Result<()> {
         executive.process_smooth_edge_sequences_narrow(k, self)
-    }
-
-    fn creation_ball_fits(&mut self, k: &mut Kernel, solver: FilletObject) -> Result<bool> {
-        let FilletObject::Solver(id) = solver else {
-            return Err(invalid("object is not a solver"));
-        };
-        let index = id.0 as usize;
-        let current = self
-            .solvers
-            .get_mut(index)
-            .and_then(Option::as_mut)
-            .ok_or_else(|| invalid("solver is not live in this session"))?;
-        crate::blend::fillet_solver::ball_fit::ball_fits_its_faces(
-            live_solver_ops(current),
-            k,
-            self.target,
-        )
     }
 
     fn creation_extend_trace_to_its_rails(

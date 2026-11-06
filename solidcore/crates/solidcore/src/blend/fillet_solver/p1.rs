@@ -246,8 +246,8 @@ pub enum FilletSurfaceGenerator {
     /// [`BlendCurveCrossSectionFsg`] of `blend.fillet_standard_solver_p1`).
     BlendCurve(BlendCurveCrossSectionFsg),
     /// The fork's `SmGnSectionFSG` (tangency-labs/smlib@11ea2d9; [`GnSectionFsg`]), of
-    /// type `SM_FSG_BLEND_CURVE`: built in place of the blend curve with
-    /// `fixes.fillet_gn_section_generator` (WR-685).
+    /// type `SM_FSG_BLEND_CURVE`: the executive builds it in place of the blend curve
+    /// (WR-685).
     GnSection(GnSectionFsg),
 }
 
@@ -279,19 +279,9 @@ impl FilletSurfaceGenerator {
     /// `SmBlendCurveCrossSectionFSG(dBlendScale, lContinuity)`.
     #[must_use]
     pub const fn blend_curve(blend_scale: f64, continuity: u32) -> Self {
-        Self::blend_curve_at_thirds(blend_scale, continuity, false)
-    }
-
-    /// `SmBlendCurveCrossSectionFSG(dBlendScale, lContinuity, bAtThirds)` (the fork's,
-    /// tangency-labs/smlib `fd3b6a7`): with `at_thirds`, each section's inner control
-    /// points sit a third and two thirds of the way from each contact to where the
-    /// contacts' tangent lines meet.
-    #[must_use]
-    pub const fn blend_curve_at_thirds(blend_scale: f64, continuity: u32, at_thirds: bool) -> Self {
         Self::BlendCurve(BlendCurveCrossSectionFsg {
             continuity,
             blend_scale,
-            at_thirds,
         })
     }
 
@@ -452,7 +442,7 @@ impl FilletSurfaceGenerator {
     /// has no such solver); with it and `fixes.fillet_round_as_definition` a constant
     /// round between NURBS faces is its definition, the rails and uv curves rebuilt on its
     /// stations ([`CircularCrossSectionFsg::definition_surface`], the fork's cc08236).
-    /// With it and `fixes.fillet_gn_section_generator`, a round whose centre line or a
+    /// With it, a round whose centre line or a
     /// rail turns at a knot (a corner of its radius law) is skinned piece by piece between
     /// the turns and the pieces joined there
     /// ([`CircularCrossSectionFsg::piecewise_surface`], the fork's 6eecf04); for a ball
@@ -500,33 +490,30 @@ impl FilletSurfaceGenerator {
             }
             // the fork's `SmGnSectionFSG::CircleSurface` (6eecf04, 5fbffc9): where the
             // centre line or a rail turns, the round skinned piece by piece and joined
-            if k.fixes.fillet_gn_section_generator {
-                use crate::blend::fillet_standard_solver::touch_circle::{
-                    corner_angle, fillet_curve_corners,
+            use crate::blend::fillet_standard_solver::touch_circle::{
+                corner_angle, fillet_curve_corners,
+            };
+            let corners =
+                fillet_curve_corners(center, rail1, rail2, corner_angle(ball.ang_tol_rad))?;
+            if !corners.is_empty() {
+                // (each piece by its definition where it is one, #430)
+                let definition = crate::blend::fillet_standard_solver::p2::PieceDefinitionInputs {
+                    points,
+                    surfaces,
+                    uv: [&mut *uv1, &mut *uv2],
+                    ball,
                 };
-                let corners =
-                    fillet_curve_corners(center, rail1, rail2, corner_angle(ball.ang_tol_rad))?;
-                if !corners.is_empty() {
-                    // (each piece by its definition where it is one, #430)
-                    let definition =
-                        crate::blend::fillet_standard_solver::p2::PieceDefinitionInputs {
-                            points,
-                            surfaces,
-                            uv: [&mut *uv1, &mut *uv2],
-                            ball,
-                        };
-                    let (s, kept) = g.piecewise_surface(
-                        k,
-                        approx_tol_3d,
-                        solver_type,
-                        center,
-                        rail1,
-                        rail2,
-                        &corners,
-                        Some(definition),
-                    )?;
-                    return Ok((Surface::from(s), kept));
-                }
+                let (s, kept) = g.piecewise_surface(
+                    k,
+                    approx_tol_3d,
+                    solver_type,
+                    center,
+                    rail1,
+                    rail2,
+                    &corners,
+                    Some(definition),
+                )?;
+                return Ok((Surface::from(s), kept));
             }
         }
         // (a chamfer between NURBS faces is its definition, the chord: #2486)
@@ -2237,26 +2224,26 @@ pub trait FilletSolverOps: AsFilletSolverOps {
     /// # Errors
     ///
     /// Those of the variable radius solver's law.
-    fn radius_corner_parameters(&mut self, k: &Kernel) -> Result<Vec<f64>> {
+    fn radius_corner_parameters(&mut self) -> Result<Vec<f64>> {
         match self.variable_radius_mut() {
             // (the inherent methods: a method call on `vr` would resolve to this trait's)
-            Some(vr) => VariableRadiusFs::radius_corner_parameters(vr, k),
+            Some(vr) => VariableRadiusFs::radius_corner_parameters(vr),
             None => Ok(Vec::new()),
         }
     }
 
     /// `IsAtRadiusCorner` (virtual, the fork's 6eecf04): whether `point` lies where the
     /// radius has a corner. `false` for the base.
-    fn is_at_radius_corner(&mut self, k: &Kernel, point: &TsectPnt) -> bool {
+    fn is_at_radius_corner(&mut self, point: &TsectPnt) -> bool {
         self.variable_radius_mut()
-            .is_some_and(|vr| VariableRadiusFs::is_at_radius_corner(vr, k, point))
+            .is_some_and(|vr| VariableRadiusFs::is_at_radius_corner(vr, point))
     }
 
     /// `GetRadiusParameter` (virtual, the fork's 6eecf04): the edge parameter of `point`,
     /// `None` where the solver has no radius corners (and for the base).
-    fn radius_parameter(&mut self, k: &Kernel, point: &TsectPnt) -> Option<f64> {
+    fn radius_parameter(&mut self, point: &TsectPnt) -> Option<f64> {
         self.variable_radius_mut()
-            .and_then(|vr| VariableRadiusFs::radius_parameter(vr, k, point))
+            .and_then(|vr| VariableRadiusFs::radius_parameter(vr, point))
     }
 
     /// `((SmConstantDistanceFS*)this)->GetDistance()`: the rail distance of a

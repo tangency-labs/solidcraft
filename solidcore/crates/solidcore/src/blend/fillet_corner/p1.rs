@@ -2443,9 +2443,9 @@ impl FilletCorner {
 
         // arrive here when building an N-sided patch
 
-        // Not upstream (WR-659, opt-in `fillet_corner_face_curve_halves`; the fork's
-        // tangency-labs/smlib 4702889): at a corner whose rounds ease
-        let face_curve_halves = env.k.fixes.fillet_corner_face_curve_halves && self.ease_dist > 0.0;
+        // Not upstream (WR-659; the fork's tangency-labs/smlib 4702889): at a corner whose
+        // rounds ease
+        let face_curve_halves = self.ease_dist > 0.0;
 
         // for every m_Surfaces->Surface - build 1 face with natural edge boundaries
         for surface in self.surfaces.clone() {
@@ -2757,7 +2757,7 @@ impl FilletCorner {
         let fsg_type = fsg0.fillet_surface_generator_type();
         let mut blend_scale = 1.5; // For use in SmBlendCurveCrossSectionFSG cases only
         let mut max_continuity = 0u32;
-        // the fork's SmGnSectionFSG (WR-685, fixes.fillet_gn_section_generator): its
+        // the fork's SmGnSectionFSG (WR-685): its
         // thumbweight, and its order as the continuity
         let gn = matches!(fsg0, FilletSurfaceGenerator::GnSection(_));
         let mut thumbweight = GN_DEFAULT_THUMBWEIGHT;

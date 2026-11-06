@@ -537,8 +537,8 @@ impl FilletSession<'_> {
                 self.executive.error = note;
             }
         }
-        // Opt-in (`fixes.fillet_gn_section_generator`, WR-696): a refusal with a size that
-        // builds carries it on the error, its status unchanged.
+        // Not upstream (WR-696): a refusal with a size that builds carries it on the error,
+        // its status unchanged.
         if let Err(SolidError::Upstream {
             operation,
             code,
@@ -1050,7 +1050,8 @@ mod stitch_identity_tests {
     }
 }
 
-/// `fixes.fillet_refuse_ball_not_fitting` (WR-462, tangency-labs/solidcore#1172): a
+/// A ball that does not fit a face it rolls on (WR-462, tangency-labs/solidcore#1172; since the
+/// retirement of `fillet_refuse_ball_not_fitting`, judged by `BallIsRegular`, WR-696): a
 /// 60 x 40 x 20 box, its top edge at x = 60 rounded r3, then the round's end arc on the face
 /// y = 40 with the two edges tangent to it (the top edge at y = 40, the vertical edge at
 /// x = 60, y = 40): the ball rolls on the r3 round, so one of radius over 3 does not fit it.
@@ -1094,9 +1095,9 @@ mod ball_fit_tests {
         nearest.1.unwrap()
     }
 
-    /// The executive's error code after the round of `radius` on the r3 round's end with the
-    /// fix on or off, and its result.
-    fn end_round(radius: f64, fix: bool) -> (i32, Result<()>) {
+    /// The executive's error code after the round of `radius` on the r3 round's end, and its
+    /// result.
+    fn end_round(radius: f64) -> (i32, Result<()>) {
         let mut k = Kernel::default();
         let mut body =
             crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 60.0, 40.0, 20.0)
@@ -1114,7 +1115,6 @@ mod ball_fit_tests {
         .into_iter()
         .map(|p| edge_near(&k, &body, p))
         .collect();
-        k.fixes.fillet_refuse_ball_not_fitting = fix;
         let mut session = FilletSession::new(&mut k, &mut body).unwrap();
         session
             .prepare_constant_radius_edges(&mut k, &edges, radius, 1, 1, 1.0)
@@ -1125,34 +1125,25 @@ mod ball_fit_tests {
 
     #[test]
     fn a_ball_that_does_not_fit_is_no_room_before_the_corners() {
-        // without the ball-fit rule: a ball of 3.1 beside the R3 round's end arc fails (the
-        // blend corner refuses it); one of 7 is refused before the corners (#2546, WR-739),
-        // its rail past the R3 round's axis (radius 3 - 7 < 0), naming 3
-        let (_, result) = end_round(3.1, false);
-        assert!(result.is_err(), "r3.1");
-        let (code, result) = end_round(7.0, false);
-        let Err(SolidError::FilletRefused { reason, fit, .. }) = result else {
-            panic!("r7: {result:?}");
-        };
-        assert_eq!(
-            reason,
-            Some(crate::blend::fillet_executive::NoRoomReason::RailPastAxis)
-        );
-        assert!((fit.size - 3.0).abs() < 1e-12, "r7: {}", fit.size);
-        assert_eq!(code, NO_ROOM);
         for radius in [3.1, 7.0] {
-            let (code, result) = end_round(radius, true);
-            assert!(matches!(
-                result,
-                Err(SolidError::Upstream { code: 1001, .. })
-            ));
+            let (code, result) = end_round(radius);
+            eprintln!("r{radius}: code {code} {result:?}");
+            let Err(SolidError::FilletRefused { reason, fit, .. }) = result else {
+                panic!("r{radius}: {result:?}");
+            };
+            assert_eq!(
+                reason,
+                Some(crate::blend::fillet_executive::NoRoomReason::BallDoesNotFit),
+                "r{radius}"
+            );
+            assert!(fit.size > 0.0 && fit.size <= 3.0, "r{radius}: {}", fit.size);
             assert_eq!(code, NO_ROOM, "r{radius}: NoRoom");
         }
     }
 
     #[test]
     fn a_ball_that_fits_is_not_refused() {
-        let (code, result) = end_round(2.0, true);
+        let (code, result) = end_round(2.0);
         result.unwrap();
         assert_ne!(code, NO_ROOM);
     }
