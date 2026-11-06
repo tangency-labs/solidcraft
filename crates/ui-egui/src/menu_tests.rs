@@ -327,6 +327,47 @@ fn sketch_menu_hides_and_moves_to_another_plane() {
     assert_eq!(app.tree.redefine, Some(id));
 }
 
+/// Replace Sketch (#11125): a sketch row's flyout lists the design's other sketches, one of which
+/// gives this sketch its contents, then a design file to take one from; that file's sketches are
+/// listed the same way.
+#[test]
+fn sketch_menu_replaces_a_sketch_with_another_sketchs_contents() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("sketch.create", json!({"plane": "XY", "name": "Small"})).unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]})).unwrap();
+    app.finish_sketch();
+    app.run("sketch.create", json!({"plane": "XY", "name": "Round"})).unwrap();
+    app.run("sketch.circle.center", json!({"center": [0, 0], "diameter": 6})).unwrap();
+    app.finish_sketch();
+    let small = app.session.doc.find_feature("Small").unwrap().id;
+    let t = Target::Sketch { id: small };
+    let replace = find(&context_menu::items(&app, &t), "Replace Sketch");
+    assert!(replace.enabled);
+    let labels: Vec<&str> = replace.children.iter().map(|i| i.label.as_str()).collect();
+    assert_eq!(labels, ["Round", "", "From a Design File…"]);
+    act(&mut app, &t, "Round");
+    assert_eq!(app.session.doc.sketch(small).unwrap().curves.len(), 1, "the circle took the square's place");
+    assert_eq!(app.session.doc.find_feature("Small").map(|f| f.id), Some(small));
+
+    let dir = std::env::temp_dir().join(format!("solidcraft-menu-replace-sketch-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Other.sc").to_string_lossy().to_string();
+    let mut other = Session::default();
+    other.execute("sketch.create", &json!({"plane": "XY", "name": "Lines"})).unwrap();
+    other.execute("sketch.line", &json!({"points": [[0, 0], [10, 0]]})).unwrap();
+    other.execute("sketch.finish", &json!({})).unwrap();
+    other.execute("sketch.create", &json!({"plane": "XY", "name": "Slot"})).unwrap();
+    other.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [4, 2]})).unwrap();
+    other.execute("sketch.finish", &json!({})).unwrap();
+    other.execute("file.save_as", &json!({"path": path})).unwrap();
+    let sketches: Vec<(u64, String)> = other.doc.features.iter().map(|f| (f.id, f.name.clone())).collect();
+    let file = Target::ReplaceSketchFile { sketch: small, path: path.clone(), sketches };
+    assert!(context_menu::check_target(&app, &file).is_ok());
+    act(&mut app, &file, "Slot");
+    assert_eq!(app.session.doc.sketch(small).unwrap().curves.len(), 4, "the file's rectangle took the circle's place");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_selected_arc_offers_an_arc_length_dimension() {
     // #6039: the arc length dimension existed as a command, but nothing in the UI led to it.

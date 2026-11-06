@@ -379,8 +379,7 @@ fn sketch_in(doc: &Document, key: &Value, cmd: &str) -> Result<u64> {
 /// A copy of every curve, point, constraint, dimension and text of sketch `id` in `doc`.
 fn whole_clip(doc: &Document, id: u64, cmd: &str) -> Result<SketchClip> {
     let sk = sketch_store::read(doc, id)?;
-    let ids: Vec<String> =
-        sk.curves.iter().map(|c| c.id.clone()).chain(sk.points.iter().filter(|q| q.id != ORIGIN).map(|q| q.id.clone())).collect();
+    let ids: Vec<String> = sk.curves.iter().map(|c| c.id.clone()).chain(sk.points.iter().filter(|q| q.id != ORIGIN).map(|q| q.id.clone())).collect();
     Ok(clip_of(doc, sk, id, &ids, true, cmd)?.0)
 }
 
@@ -403,8 +402,8 @@ fn replace(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let clip = match &file {
         Some(path) => {
-            let (other, _) = solidcraft_io::read_design_file(path, None::<fn(solidcraft_io::DesignPreview)>)
-                .map_err(|e| bad(cmd, format!("{path}: {e}")))?;
+            let (other, _) =
+                solidcraft_io::read_design_file(path, None::<fn(solidcraft_io::DesignPreview)>).map_err(|e| bad(cmd, format!("{path}: {e}")))?;
             let source = sketch_in(&other, from, cmd)?;
             whole_clip(&other, source, cmd)?.for_another_design()
         }
