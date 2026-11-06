@@ -465,7 +465,10 @@ Every face of a folded sheet has a name of that kind, which `model.faces` lists 
 `<panel>:top` and `<panel>:bottom`, `<panel>:rim.<edge>` for a rim (a base sketch line's id, or a
 flange's `far`, `side0`, `side1`; `rim.bend0`/`rim.bend1` for a bend's flat ends and
 `rim.ext0`/`rim.ext1` where a flange runs on past its bend toward a neighbour), and
-`<flange>:bend.inner` / `<flange>:bend.outer` for a bend's curved faces. A command that takes a
-face name takes it too (`sheet:Body1:F3.1:top`), and finds the face from the sheet itself, so the
-name stays with that face while the sheet's sizes change and other flanges come and go. Faces the
-sheet does not describe (a hole's wall) have none.
+`<flange>:bend.inner` / `<flange>:bend.outer` for a bend's curved faces. A panel is `base`, or is
+named after the feature that made it and the edge it was made on: `F3.base.l2` is feature 3's
+flange on the base's sketch line `l2`, and `F5.F3.base.l2.far` a return on that flange's far edge,
+so reordering a feature's picked edges renames nothing. A command that takes a face name takes it
+too (`sheet:Body1:F3.base.l2:top`), and finds the face from the sheet itself, so the name stays
+with that face while the sheet's sizes change and other flanges come and go. Faces the sheet does
+not describe (a hole's wall) have none.

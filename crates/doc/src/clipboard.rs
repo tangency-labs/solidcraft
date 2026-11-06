@@ -35,9 +35,10 @@ pub fn remap_topology(name: &str, ids: &BTreeMap<u64, u64>, bodies: &BTreeMap<St
     let mut at = 0;
     while at < name.len() {
         let rest = &name[at..];
-        // A feature token starts a name, or one inside it: after `@`, `:` or `|`, or in a
-        // piece's list of the faces around it (`[`, `,`).
-        if rest.starts_with('F') && (at == 0 || matches!(name.as_bytes().get(at - 1), Some(b'@' | b':' | b'|' | b'[' | b','))) {
+        // A feature token starts a name, or one inside it: after `@`, `:` or `|`, in a piece's
+        // list of the faces around it (`[`, `,`), or in a sheet panel's name after the panel it
+        // was made on (`.`: `F15.F12.base.l2.far`).
+        if rest.starts_with('F') && (at == 0 || matches!(name.as_bytes().get(at - 1), Some(b'@' | b':' | b'|' | b'[' | b',' | b'.'))) {
             let end = rest.as_bytes().iter().skip(1).take_while(|b| b.is_ascii_digit()).count() + 1;
             if end > 1
                 && matches!(rest.as_bytes().get(end), Some(b':') | Some(b'.'))

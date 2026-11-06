@@ -80,6 +80,50 @@ impl SurfaceSheet {
         Ok(best.map(|(_, e)| e))
     }
 
+    /// The free edge a saved edge name finds (`<panel>:rim.<rim>:<top|bottom>`, as
+    /// [`crate::sheet::sheet_edge_names`] names a pick on a sheet made from surfaces): the edge of
+    /// the named panel's outline along the rim of that name, as it lies now. Where a cut parted
+    /// the rim into several, the one nearest `near` (the body's coordinates). None where no panel
+    /// or rim has the name, or the rim lies along no line of the outline.
+    pub fn free_edge_by_name(&self, name: &str, near: Vec3) -> Option<FreeEdge> {
+        let (rest, side) = name.rsplit_once(':')?;
+        let (panel, rim) = rest.rsplit_once(':')?;
+        let rim = rim.strip_prefix("rim.")?;
+        let far_face = match side {
+            "top" => false,
+            "bottom" => true,
+            _ => return None,
+        };
+        let i = self.sheet.panels.iter().position(|p| p.name == panel)?;
+        let region = &self.sheet.panels.get(i)?.region;
+        let dev = develop(&self.sheet, 0).ok()?;
+        let place = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places).ok()?.places.get(i).copied().flatten()?;
+        let q = place.inverse().point(near);
+        let at = Vec2::new(q.x, q.y);
+        let small = (self.sheet.thickness * 1e-3).max(1e-6);
+        let on = |s: &Seg2, p: Vec2| s.point_at(s.closest_param(p).clamp(0.0, 1.0)).dist(p) <= small;
+        let mut best: Option<(f64, FreeEdge)> = None;
+        for (k, a, b, n) in self.rims() {
+            if k != i || n != rim {
+                continue;
+            }
+            // The outline's own line the rim lies along: what is made on the edge reads it there.
+            for l in std::iter::once(&region.outer).chain(&region.holes) {
+                for s in &l.segs {
+                    let Seg2::Line { a: x, b: y } = *s else { continue };
+                    if !(on(s, a) && on(s, b)) {
+                        continue;
+                    }
+                    let d = s.point_at(s.closest_param(at).clamp(0.0, 1.0)).dist(at);
+                    if best.as_ref().is_none_or(|(v, _)| d < *v) {
+                        best = Some((d, FreeEdge { panel: i, a: x, b: y, far_face }));
+                    }
+                }
+            }
+        }
+        best.map(|(_, e)| e)
+    }
+
     /// Keeps the flanges of the bends `made` (a feature's, its corners closed) clear of the panel
     /// beside their own at each end no other flange closed: where a rip parts their panel from
     /// another at that end, and the flange lies on that panel's side of its own. A wall leaning in

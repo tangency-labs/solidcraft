@@ -518,7 +518,9 @@ impl Document {
         }
         // Flanges closed at a corner with no gap would touch, as no formed part's do.
         if !(v.gap >= MIN_CORNER_GAP) {
-            return Err(DocError::Invalid(format!("the gap must be at least {MIN_CORNER_GAP} mm: flanges closed at a corner with no gap would touch")));
+            return Err(DocError::Invalid(format!(
+                "the gap must be at least {MIN_CORNER_GAP} mm: flanges closed at a corner with no gap would touch"
+            )));
         }
         Ok(v)
     }
@@ -5522,12 +5524,24 @@ pub fn sheet_face_plane(st: &crate::ModelState, name: &str) -> Option<(String, P
 pub fn sheet_edge_names(st: &crate::ModelState, pts: &[Vec3]) -> Vec<String> {
     pts.iter()
         .map(|p| {
-            st.sheets
+            let flat = st
+                .sheets
                 .iter()
                 .filter_map(|sh| sh.edge_at(*p).map(|e| (e.4, sh)))
                 .min_by(|a, b| a.0.total_cmp(&b.0))
-                .and_then(|(_, sh)| sh.edge_name(*p))
-                .unwrap_or_default()
+                .and_then(|(_, sh)| sh.edge_name(*p));
+            // On a sheet made from surfaces (#6748): the rim along the free edge, and the face
+            // of the sheet the pick was nearer, `<panel>:rim.<rim>:<top|bottom>`.
+            flat.or_else(|| {
+                st.surface_sheets.iter().filter(|s| !s.unfolded).find_map(|s| {
+                    let e = s.free_edge_at(*p).ok().flatten()?;
+                    let d = (e.b - e.a).normalized()?;
+                    let rim = s.rim_along(e.panel, e.a, d, (0.0, e.a.dist(e.b)), 0.0)?;
+                    let panel = s.sheet.panels.get(e.panel)?;
+                    Some(format!("{}:rim.{rim}:{}", panel.name, if e.far_face { "bottom" } else { "top" }))
+                })
+            })
+            .unwrap_or_default()
         })
         .collect()
 }

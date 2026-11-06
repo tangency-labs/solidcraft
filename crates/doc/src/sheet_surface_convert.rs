@@ -2030,7 +2030,7 @@ impl SurfaceConversion {
         let places: Vec<Option<Rigid3>> = self.places.iter().copied().map(Some).collect();
         let folded = fold_onto(&self.sheet, &self.development, &places)?;
         let pieces = self.pieces()?;
-        let namer = crate::sheet::FaceNamer::new(&self.sheet, &self.development, pieces);
+        let namer = crate::sheet::FaceNamer::new(&self.sheet, &self.development, pieces, &[]);
         crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, pieces, &mut FlatWork::new(), &|p, r| namer.name(p, r))
     }
 }
@@ -2127,6 +2127,12 @@ pub struct SurfaceSheet {
     /// Perforation fields (#732): holes on a grid over the flat, not cut into the body.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub perforations: Vec<crate::sheet::SheetPerforation>,
+    /// The sketch lines that made the base panel's edges: each line's id and its ends in the
+    /// panel's chart, so that the base's rims are named after them (`base:rim.l2`, see
+    /// [`crate::sheet::FaceNamer`]) and a flange on one after it. Empty on a sheet made from no
+    /// sketch (a contour flange, a converted body).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub base_curves: Vec<(String, Vec2, Vec2)>,
 }
 
 /// `r` through `map`, a rigid map of the plane (mirrored or not): lines and arcs stay lines and
@@ -2236,6 +2242,7 @@ impl SurfaceSheet {
             altered_by: None,
             face_names: Vec::new(),
             perforations: Vec::new(),
+            base_curves: Vec::new(),
         };
         sheet.laid_out(&c.development, c.pieces()?, c.flat()?)?;
         let (solid, names) = c.named_solid()?;
@@ -2247,7 +2254,14 @@ impl SurfaceSheet {
     /// plane's normal (a base flange), and its folded body. The sheet's surface is its top, the
     /// face a thickness along the normal, its material below it, as a plate thickened from its top
     /// has it: flanges rise from it.
-    pub fn base(body: &str, rule_name: &str, rule: &ConvertRule, plane: Plane, region: Region2) -> Result<(SurfaceSheet, Body)> {
+    pub fn base(
+        body: &str,
+        rule_name: &str,
+        rule: &ConvertRule,
+        plane: Plane,
+        region: Region2,
+        curves: &[(String, Vec2, Vec2)],
+    ) -> Result<(SurfaceSheet, Body)> {
         let top = plane.origin + plane.normal() * rule.thickness;
         let place = Rigid3::frame(top, plane.x, plane.y * -1.0).ok_or_else(|| DocError::Invalid("the sketch's plane has no frame".into()))?;
         // The top's chart runs y the other way: the same outline, mirrored in it (exactly; free-form
@@ -2266,7 +2280,8 @@ impl SurfaceSheet {
         };
         let region = Region2 { outer: mirror(&region.outer).ccw(), holes: region.holes.iter().map(|h| mirror(h).ccw().reversed()).collect() };
         let panel = Panel { name: "base".into(), surface: Surface::Plane, region };
-        Self::made(body, rule_name, rule, vec![panel], vec![Some(place)], Vec::new())
+        let curves = curves.iter().map(|(id, a, b)| (id.clone(), f(*a), f(*b))).collect();
+        Self::made(body, rule_name, rule, vec![panel], vec![Some(place)], Vec::new(), curves)
     }
 
     /// A sheet from an open chain of lines (a contour flange): `pts` in `plane`, the face of the
@@ -2335,7 +2350,7 @@ impl SurfaceSheet {
             let (a, b) = (Anchor { panel: i, origin: a0, dir: dir_a }, Anchor { panel: i + 1, origin: b0, dir: dir_b });
             joints.push(Joint { a, b, kind: JointKind::Bend(bend) });
         }
-        Self::made(body, rule_name, rule, panels, places, joints)
+        Self::made(body, rule_name, rule, panels, places, joints, Vec::new())
     }
 
     /// A sheet of `panels`, each where `places` puts it, joined by `joints`, under the rule, and
@@ -2347,6 +2362,7 @@ impl SurfaceSheet {
         panels: Vec<Panel>,
         places: Vec<Option<Rigid3>>,
         joints: Vec<Joint>,
+        base_curves: Vec<(String, Vec2, Vec2)>,
     ) -> Result<(SurfaceSheet, Body)> {
         let mut sheet = SurfaceSheet {
             body: body.into(),
@@ -2372,6 +2388,7 @@ impl SurfaceSheet {
             altered_by: None,
             face_names: Vec::new(),
             perforations: Vec::new(),
+            base_curves,
         };
         let solid = sheet.build()?;
         Ok((sheet, solid))
@@ -2558,7 +2575,7 @@ impl SurfaceSheet {
             return self.bored(body, &frames);
         }
         let folded = fold_onto(&self.sheet, &dev, &self.places)?;
-        let namer = crate::sheet::FaceNamer::new(&self.sheet, &dev, &pieces);
+        let namer = crate::sheet::FaceNamer::new(&self.sheet, &dev, &pieces, &self.base_curves);
         let (mut body, mut names) = crate::sheet_surface_fold::solid(&dev, &folded, self.thickness, &pieces, &mut work, &|p, r| namer.name(p, r))?;
         // Each loose piece where its panel is folded to.
         for l in &self.loose {

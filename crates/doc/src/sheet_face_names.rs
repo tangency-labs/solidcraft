@@ -2,8 +2,12 @@
 //! `<panel>:bottom` and `<panel>:rim.<edge>` (the names sketches on sheet faces keep, see
 //! [`SheetBody::panel_face_at`]); a bend's curved faces, `<flange>:bend.inner` and
 //! `<flange>:bend.outer`; and where a flange's panel runs on past its bend's ends (toward a
-//! neighbouring flange), the rim along the bend there, `<flange>:rim.ext0` and `rim.ext1`. A panel is `base` or a flange's tag (`F<feature>.<k>`), so the names
-//! say what each face is and stay with it when sizes change or other flanges come and go.
+//! neighbouring flange), the rim along the bend there, `<flange>:rim.ext0` and `rim.ext1`. A panel
+//! is `base`, or is named after the feature that made it and the edge it was made on
+//! (`F12.base.l2`, a flange on the base's sketch line `l2`; `F15.F12.base.l2.far`, a return on
+//! that flange's far edge; see `tag_panels` in `eval_more`), so the names say what each face is
+//! and stay with it when sizes change, other flanges come and go, or a feature's picks are
+//! reordered.
 
 use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
@@ -204,7 +208,7 @@ pub(crate) struct FaceNamer<'a> {
 }
 
 impl<'a> FaceNamer<'a> {
-    pub(crate) fn new(sheet: &'a Sheet, dev: &'a Development, pieces: &[(Piece, Region2)]) -> FaceNamer<'a> {
+    pub(crate) fn new(sheet: &'a Sheet, dev: &'a Development, pieces: &[(Piece, Region2)], base_curves: &[(String, Vec2, Vec2)]) -> FaceNamer<'a> {
         let rims = (0..sheet.panels.len())
             .map(|i| {
                 let (Some(panel), Some(Some(at))) = (sheet.panels.get(i), dev.placements.get(i)) else { return Vec::new() };
@@ -214,7 +218,7 @@ impl<'a> FaceNamer<'a> {
                 let back = at.inverse();
                 let own: Vec<Region2> = pieces.iter().filter(|(p, _)| matches!(p, Piece::Panel(k) if *k == i)).map(|(_, r)| back.region(r)).collect();
                 let zones: Vec<Region2> = dev.zones.iter().map(|z| back.region(&z.region)).collect();
-                rim_names(sheet, i, &own, &zones).into_iter().map(|(a, b, name)| (at.point(a), at.point(b), name)).collect()
+                rim_names(sheet, i, &own, &zones, base_curves).into_iter().map(|(a, b, name)| (at.point(a), at.point(b), name)).collect()
             })
             .collect();
         FaceNamer { sheet, dev, rims }
@@ -287,9 +291,31 @@ impl SurfaceSheet {
             let own: Vec<Region2> =
                 pieces.iter().filter(|(p, _)| matches!(p, crate::sheet_surface::Piece::Panel(k) if *k == i)).map(|(_, r)| back.region(r)).collect();
             let zones: Vec<Region2> = dev.zones.iter().map(|z| back.region(&z.region)).collect();
-            out.extend(rim_names(&self.sheet, i, &own, &zones).into_iter().map(|(a, b, name)| (i, a, b, name)));
+            out.extend(rim_names(&self.sheet, i, &own, &zones, &self.base_curves).into_iter().map(|(a, b, name)| (i, a, b, name)));
         }
         out
+    }
+
+    /// The name of the rim of panel `panel` along the line through `origin` along the unit `dir`
+    /// (the panel's chart), as [`Self::rims`] names it, or beside it: a rim parallel to the line
+    /// and no more than `band` off it (a bend's anchor lies inside the edge its flange was drawn
+    /// on, by its position's setback). The nearest such rim; where a cut or an earlier bend parted
+    /// the edge into several rims on one line, the one covering most of `span` along it. None
+    /// where no rim runs beside the line over any of `span` (a line across the panel).
+    pub fn rim_along(&self, panel: usize, origin: Vec2, dir: Vec2, span: (f64, f64), band: f64) -> Option<String> {
+        let small = (self.thickness * 1e-3).max(1e-6);
+        let off = |p: Vec2| (p - origin).cross(dir);
+        let along = |p: Vec2| (p - origin).dot(dir);
+        self.rims()
+            .into_iter()
+            .filter(|(i, a, b, _)| *i == panel && (off(*a) - off(*b)).abs() <= small && off(*a).abs() <= band + small)
+            .filter_map(|(_, a, b, name)| {
+                let (s0, s1) = (along(a).min(along(b)), along(a).max(along(b)));
+                let overlap = s1.min(span.1) - s0.max(span.0);
+                (overlap > small).then_some((off(a).abs(), overlap, name))
+            })
+            .min_by(|x, y| if (x.0 - y.0).abs() <= small { y.1.total_cmp(&x.1) } else { x.0.total_cmp(&y.0) })
+            .map(|(_, _, name)| name)
     }
 }
 
@@ -297,7 +323,9 @@ impl SurfaceSheet {
 /// names of their rims (see [`FaceNamer`]); a name two edges would share takes the edge's
 /// place too. On a panel a bend makes, an edge along the bend farthest from it is `far`, one
 /// nearer it past the bend's ends `ext0` or `ext1` (none within them: the bend runs on there).
-fn rim_names(sheet: &Sheet, i: usize, own: &[Region2], zones: &[Region2]) -> Vec<(Vec2, Vec2, String)> {
+/// On the base panel, an edge lying on one of the sketch lines `base_curves` that made it takes
+/// that line's id (`l2`); any other edge is its place in the outline (`edge3`).
+fn rim_names(sheet: &Sheet, i: usize, own: &[Region2], zones: &[Region2], base_curves: &[(String, Vec2, Vec2)]) -> Vec<(Vec2, Vec2, String)> {
     let made = sheet.joints.iter().find_map(|j| match &j.kind {
         JointKind::Bend(b) if j.b.panel == i => Some((j.b, b.ends.far)),
         _ => None,
@@ -330,7 +358,14 @@ fn rim_names(sheet: &Sheet, i: usize, own: &[Region2], zones: &[Region2]) -> Vec
     let mut out: Vec<(Vec2, Vec2, String)> = Vec::new();
     for &(k, a, b) in &lines {
         let Some((an, (lo, hi))) = made else {
-            out.push((a, b, format!("edge{k}")));
+            // On the line, within its ends.
+            let on = |p: Vec2, s: Vec2, e: Vec2| {
+                let t = e - s;
+                let l = t.len();
+                l > 1e-9 && ((p - s).cross(t) / l).abs() <= small && (p - s).dot(t) >= -small * l && (p - e).dot(t) <= small * l
+            };
+            let line = (i == 0).then(|| base_curves.iter().find(|(_, s, e)| on(a, *s, *e) && on(b, *s, *e))).flatten();
+            out.push((a, b, line.map_or_else(|| format!("edge{k}"), |(id, _, _)| id.clone())));
             continue;
         };
         let along = |p: Vec2| (p - an.origin).dot(an.dir);

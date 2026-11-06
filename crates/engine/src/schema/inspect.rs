@@ -114,9 +114,10 @@ pub struct ModelFace {
     /// For a cylindrical face: its axis and radius.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cylinder: Option<FaceCylinder>,
-    /// For a folded sheet's face: `sheet:<body>:<panel>:<side>`, where the panel is `base` or a
-    /// flange's tag `F<feature>.<k>` and the side is `top`, `bottom`, `rim.<edge>`, `bend.inner`
-    /// or `bend.outer`. It is taken wherever a face name is, and holds while sizes change and
+    /// For a folded sheet's face: `sheet:<body>:<panel>:<side>`, where the panel is `base` or
+    /// `F<feature>.<panel>.<rim>` (the feature that made it and the edge it was made on,
+    /// `F3.base.l2`) and the side is `top`, `bottom`, `rim.<edge>`, `bend.inner` or
+    /// `bend.outer`. It is taken wherever a face name is, and holds while sizes change and
     /// flanges come and go.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sheet_face: Option<String>,

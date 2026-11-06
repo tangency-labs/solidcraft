@@ -72,33 +72,33 @@ fn a_trays_faces_have_readable_sheet_names_that_follow_its_size() {
     for (name, at) in [
         ("sheet:Body1:base:top".to_string(), Vec3::new(160.0, 100.0, 1.0)),
         ("sheet:Body1:base:bottom".to_string(), Vec3::new(160.0, 100.0, 0.0)),
-        (format!("sheet:Body1:F{sd}.1:top"), Vec3::new(319.0, 100.0, 16.0)),
-        (format!("sheet:Body1:F{sd}.1:bottom"), Vec3::new(320.0, 100.0, 16.0)),
-        (format!("sheet:Body1:F{sd}.1:rim.far"), Vec3::new(319.5, 100.0, 30.0)),
-        (format!("sheet:Body1:F{fb}.0:bottom"), Vec3::new(160.0, 0.0, 16.0)),
+        (format!("sheet:Body1:F{sd}.base.l2:top"), Vec3::new(319.0, 100.0, 16.0)),
+        (format!("sheet:Body1:F{sd}.base.l2:bottom"), Vec3::new(320.0, 100.0, 16.0)),
+        (format!("sheet:Body1:F{sd}.base.l2:rim.far"), Vec3::new(319.5, 100.0, 30.0)),
+        (format!("sheet:Body1:F{fb}.base.l1:bottom"), Vec3::new(160.0, 0.0, 16.0)),
         // The front flange runs on past its bend to the right one, under its corner.
-        (format!("sheet:Body1:F{fb}.0:rim.ext1"), Vec3::new(319.0, 0.5, 2.0)),
+        (format!("sheet:Body1:F{fb}.base.l1:rim.ext1"), Vec3::new(319.0, 0.5, 2.0)),
     ] {
         let f = named(&all, &name);
         assert!(f.len() == 1 && f[0].1.dist(at) < 2.5, "{name}: {f:?}");
     }
     // A bend's two curved faces: its radius and the radius plus the thickness.
     let radius = |name: &str| named(&all, name).first().and_then(|f| f.2);
-    assert_eq!(radius(&format!("sheet:Body1:F{fb}.0:bend.inner")).map(|r| (r * 1e6).round() / 1e6), Some(1.0));
-    assert_eq!(radius(&format!("sheet:Body1:F{fb}.0:bend.outer")).map(|r| (r * 1e6).round() / 1e6), Some(2.0));
+    assert_eq!(radius(&format!("sheet:Body1:F{fb}.base.l1:bend.inner")).map(|r| (r * 1e6).round() / 1e6), Some(1.0));
+    assert_eq!(radius(&format!("sheet:Body1:F{fb}.base.l1:bend.outer")).map(|r| (r * 1e6).round() / 1e6), Some(2.0));
     // 80 mm wider: the same names, each on the same face where it now is. A name's point is
     // somewhere on its face: the right flange's top is the plane x = w − 1, the back flange's
     // far rim the strip z = 30, 199 <= y <= 200 (the flange 1 thick, its outside at y = 200).
-    let right = point(&s, &format!("sheet:Body1:F{sd}.1:top"));
+    let right = point(&s, &format!("sheet:Body1:F{sd}.base.l2:top"));
     assert!((right.x - 319.0).abs() < 1e-3, "{right:?}");
     run(&mut s, "parameters.change", json!({"name": width, "expression": "400"}));
     let wider = faces(&mut s);
     let mut again: Vec<&str> = wider.iter().filter_map(|f| f.0.as_deref()).collect();
     again.sort_unstable();
     assert_eq!(again, names);
-    let right = point(&s, &format!("sheet:Body1:F{sd}.1:top"));
+    let right = point(&s, &format!("sheet:Body1:F{sd}.base.l2:top"));
     assert!((right.x - 399.0).abs() < 1e-3, "{right:?}");
-    let rim = format!("sheet:Body1:F{fb}.1:rim.far");
+    let rim = format!("sheet:Body1:F{fb}.base.l3:rim.far");
     let far = point(&s, &rim);
     let st = s.model.state();
     let hit = solidcraft_doc::naming::locate_one(&st, None, &rim).unwrap();
@@ -151,13 +151,13 @@ fn on_planar_face(body: &solidcraft_kernel::Body, face: usize, p: Vec3) {
 fn a_flanges_sheet_names_hold_when_another_flange_goes() {
     let mut s = Session::default();
     let (_, fb, sd) = tray(&mut s, 320.0);
-    let right = format!("sheet:Body1:F{sd}.1:top");
+    let right = format!("sheet:Body1:F{sd}.base.l2:top");
     let before = point(&s, &right);
     run(&mut s, "timeline.suppress", json!({"feature": fb, "suppressed": true}));
     let after = point(&s, &right);
     assert!((after.x - 319.0).abs() < 1e-3 && (after.z - before.z).abs() < 16.0, "{before:?} {after:?}");
     // The names of the flanges that went are gone; asking for one says so.
-    let gone = format!("sheet:Body1:F{fb}.0:top");
+    let gone = format!("sheet:Body1:F{fb}.base.l1:top");
     assert!(solidcraft_doc::naming::named_face_point(&s.model.state(), None, &gone).is_err());
     assert!(solidcraft_doc::naming::named_face_point(&s.model.state(), Some("Body2"), &right).is_err());
 }

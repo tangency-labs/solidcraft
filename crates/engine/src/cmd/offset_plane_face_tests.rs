@@ -116,7 +116,7 @@ fn offset_plane_from_a_sheet_flange_face_follows_the_flange() {
     run(&mut s, "sheet.flange", json!({"edges": [[320, 100, 1]], "height": 30}));
     let flange = s.doc.features.last().map_or(0, |f| f.id);
     // The flange's inner face, picked as model.faces lists it (body and index), 5 mm out along its normal.
-    let name = format!("sheet:Body1:F{flange}.0:top");
+    let name = format!("sheet:Body1:F{flange}.base.l2:top");
     let faces = run(&mut s, "model.faces", json!({"body": "Body1"}));
     let face = faces["faces"].as_array().unwrap().iter().find(|f| f["sheet_face"].as_str() == Some(name.as_str())).unwrap().clone();
     run(

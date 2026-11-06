@@ -1365,7 +1365,7 @@ fn flange_edges_are_named_and_follow_the_base_sketch() {
     run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
     run(&mut s, "sheet.flange", json!({"edges": [[100, 30, 2.5]], "height": 20, "name": "Side"}));
     let side = s.doc.find_feature("Side").cloned().unwrap();
-    assert_eq!(side.edge_names, vec!["base:l2:top".to_string()]);
+    assert_eq!(side.edge_names, vec!["base:rim.l2:top".to_string()]);
     let v0 = volume(&mut s);
     // Narrower base: the flange stays on the right edge (now at x = 40).
     let name = d["param"].as_str().or_else(|| d["name"].as_str()).map(str::to_string).unwrap_or_else(|| "d1".into());
@@ -1381,7 +1381,7 @@ fn flange_edges_are_named_and_follow_the_base_sketch() {
     let x = b["max"][0].as_f64().unwrap_or(0.0);
     run(&mut s, "sheet.hem", json!({"edges": [[x, 30, top]], "length": 6, "name": "H"}));
     let h = s.doc.find_feature("H").cloned().unwrap();
-    assert!(h.edge_names[0].starts_with(&format!("F{id}.0:far")), "{:?}", h.edge_names);
+    assert!(h.edge_names[0].starts_with(&format!("F{id}.base.l2:rim.far")), "{:?}", h.edge_names);
 }
 
 /// With no fixed side, the larger side stays whichever side of the line it is on (QA s22).
