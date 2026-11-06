@@ -858,3 +858,236 @@ fn orbit_frame_cost() {
     }
     println!("{line}");
 }
+
+/// The STEP text of a cylinder (radius 20, height 40) whose round wall is `pieces` faces of one
+/// cylindrical surface, as files from other programs and older exports carry a wall split into
+/// faces. A sketch of arcs about one centre no longer gives such a wall (the modeller joins the
+/// arcs of one circle into one face); an imported file keeps its faces as they are.
+pub(crate) fn split_cylinder_step(pieces: usize) -> String {
+    /// The entities written so far; each new one is numbered after them.
+    struct Data(Vec<String>);
+    impl Data {
+        fn add(&mut self, text: String) -> usize {
+            self.0.push(format!("#{}={text};", self.0.len() + 1));
+            self.0.len()
+        }
+        fn point(&mut self, [x, y, z]: [f64; 3]) -> usize {
+            self.add(format!("CARTESIAN_POINT('',({x:?},{y:?},{z:?}))"))
+        }
+        /// The axes at height `z`, upright.
+        fn placed(&mut self, z: f64) -> usize {
+            let o = self.point([0.0, 0.0, z]);
+            let up = self.add("DIRECTION('',(0.0,0.0,1.0))".into());
+            let x = self.add("DIRECTION('',(1.0,0.0,0.0))".into());
+            self.add(format!("AXIS2_PLACEMENT_3D('',#{o},#{up},#{x})"))
+        }
+        fn face(&mut self, edges: &[(usize, bool)], surface: usize, sense: bool) -> usize {
+            let dot = |b: bool| if b { ".T." } else { ".F." };
+            let oriented: Vec<usize> = edges.iter().map(|&(e, along)| self.add(format!("ORIENTED_EDGE('',*,*,#{e},{})", dot(along)))).collect();
+            let edge_loop = self.add(format!("EDGE_LOOP('',({}))", list(&oriented)));
+            let bound = self.add(format!("FACE_OUTER_BOUND('',#{edge_loop},.T.)"));
+            self.add(format!("ADVANCED_FACE('',(#{bound}),#{surface},{})", dot(sense)))
+        }
+    }
+    fn list(ids: &[usize]) -> String {
+        ids.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",")
+    }
+    let (r, height) = (20.0f64, 40.0f64);
+    let mut d = Data(Vec::new());
+    let mm = d.add("( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) )".into());
+    let rad = d.add("( NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.) )".into());
+    let sr = d.add("( NAMED_UNIT(*) SI_UNIT($,.STERADIAN.) SOLID_ANGLE_UNIT() )".into());
+    let unc = d.add(format!("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-7),#{mm},'distance_accuracy_value','confusion accuracy')"));
+    let ctx = d.add(format!(
+        "( GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#{unc})) GLOBAL_UNIT_ASSIGNED_CONTEXT((#{mm},#{rad},#{sr})) REPRESENTATION_CONTEXT('','3D') )"
+    ));
+    let app = d.add("APPLICATION_CONTEXT('automotive design')".into());
+    d.add(format!("APPLICATION_PROTOCOL_DEFINITION('international standard','automotive_design',2000,#{app})"));
+    let pc = d.add(format!("PRODUCT_CONTEXT('',#{app},'mechanical')"));
+    let pdc = d.add(format!("PRODUCT_DEFINITION_CONTEXT('part definition',#{app},'design')"));
+    let product = d.add(format!("PRODUCT('split_cylinder','split_cylinder','',(#{pc}))"));
+    let formation = d.add(format!("PRODUCT_DEFINITION_FORMATION('','',#{product})"));
+    let definition = d.add(format!("PRODUCT_DEFINITION('design','',#{formation},#{pdc})"));
+    let shape = d.add(format!("PRODUCT_DEFINITION_SHAPE('','',#{definition})"));
+    let world = d.placed(0.0);
+    let at = |i: usize, z: f64| {
+        let a = std::f64::consts::TAU * (i % pieces) as f64 / pieces as f64;
+        [r * a.cos(), r * a.sin(), z]
+    };
+    // The two rims: `pieces` arcs of one circle each, between vertices round it.
+    let rim = |d: &mut Data, z: f64| -> Vec<usize> {
+        let axis = d.placed(z);
+        let circle = d.add(format!("CIRCLE('',#{axis},{r:?})"));
+        let v: Vec<usize> = (0..pieces)
+            .map(|i| {
+                let p = d.point(at(i, z));
+                d.add(format!("VERTEX_POINT('',#{p})"))
+            })
+            .collect();
+        let arcs: Vec<usize> = (0..pieces).map(|i| d.add(format!("EDGE_CURVE('',#{},#{},#{circle},.T.)", v[i], v[(i + 1) % pieces]))).collect();
+        [v, arcs].concat()
+    };
+    let (bottom, top) = (rim(&mut d, 0.0), rim(&mut d, height));
+    let (vb, arc_b) = bottom.split_at(pieces);
+    let (vt, arc_t) = top.split_at(pieces);
+    let rises: Vec<usize> = (0..pieces)
+        .map(|i| {
+            let up = d.add("DIRECTION('',(0.0,0.0,1.0))".into());
+            let v = d.add(format!("VECTOR('',#{up},{height:?})"));
+            let p = d.point(at(i, 0.0));
+            let line = d.add(format!("LINE('',#{p},#{v})"));
+            d.add(format!("EDGE_CURVE('',#{},#{},#{line},.T.)", vb[i], vt[i]))
+        })
+        .collect();
+    let wall_axis = d.placed(0.0);
+    let wall = d.add(format!("CYLINDRICAL_SURFACE('',#{wall_axis},{r:?})"));
+    let mut faces: Vec<usize> =
+        (0..pieces).map(|i| d.face(&[(arc_b[i], true), (rises[(i + 1) % pieces], true), (arc_t[i], false), (rises[i], false)], wall, true)).collect();
+    let bottom_axis = d.placed(0.0);
+    let bottom_plane = d.add(format!("PLANE('',#{bottom_axis})"));
+    let under: Vec<(usize, bool)> = arc_b.iter().rev().map(|&e| (e, false)).collect();
+    faces.push(d.face(&under, bottom_plane, false));
+    let top_axis = d.placed(height);
+    let top_plane = d.add(format!("PLANE('',#{top_axis})"));
+    let over: Vec<(usize, bool)> = arc_t.iter().map(|&e| (e, true)).collect();
+    faces.push(d.face(&over, top_plane, true));
+    let shell = d.add(format!("CLOSED_SHELL('',({}))", list(&faces)));
+    let solid = d.add(format!("MANIFOLD_SOLID_BREP('',#{shell})"));
+    let rep = d.add(format!("ADVANCED_BREP_SHAPE_REPRESENTATION('',(#{world},#{solid}),#{ctx})"));
+    d.add(format!("SHAPE_DEFINITION_REPRESENTATION(#{shape},#{rep})"));
+    format!(
+        "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('split cylinder'),'2;1');\nFILE_NAME('split_cylinder.step','',(''),(''),'','','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN {{ 1 0 10303 214 1 1 1 1 }}'));\nENDSEC;\nDATA;\n{}\nENDSEC;\nEND-ISO-10303-21;\n",
+        d.0.join("\n")
+    )
+}
+
+/// [`split_cylinder_step`] written to a file of its own (tests run side by side), its path.
+pub(crate) fn split_cylinder_step_file(pieces: usize) -> String {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("solidcraft-split-cylinder-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("wall-{pieces}-{n}.step"));
+    std::fs::write(&path, split_cylinder_step(pieces)).unwrap();
+    path.to_string_lossy().into_owned()
+}
+
+/// A cylinder whose round wall is `pieces` faces of one surface ([`split_cylinder_step`],
+/// imported), so hovering one face lights the whole wall; or a saved STEP file or design of such a
+/// cylinder. The wall's faces, ascending.
+fn split_cylinder(pieces: usize, saved: Option<&str>) -> (Harness, Vec<usize>) {
+    let mut h = Harness::new();
+    match saved {
+        Some(path) if !path.ends_with(".step") => drop(h.app.run("doc.open", json!({"path": path})).unwrap()),
+        _ => {
+            let path = saved.map_or_else(|| split_cylinder_step_file(pieces), str::to_string);
+            h.app.run("file.insert_step", json!({"path": path})).unwrap();
+        }
+    }
+    h.app.set_origin_shown(false);
+    h.frames(2);
+    let st = h.app.session.world_state().unwrap();
+    let m = st.bodies[0].mesh();
+    let wall = m.edge_faces.iter().zip(&m.seams).find(|(_, s)| **s).map(|(fs, _)| fs[0] as usize).unwrap();
+    let patch = m.surface_patch(wall);
+    drop(st);
+    (h, patch)
+}
+
+fn median_ms(mut t: Vec<f64>) -> f64 {
+    t.sort_by(f64::total_cmp);
+    t[t.len() / 2]
+}
+
+/// Hovering faces of one smooth surface of many pieces (`split_cylinder`; 32 pieces built here, the
+/// saved STEP files or designs `SOLIDCRAFT_SPLIT_CYLINDERS=<a.step>:<b.solidcraft>`): the highlight built at
+/// each hover change, from one piece of the wall to another and to a cap, at display qualities
+/// Normal and Fine, with nothing and with the whole wall selected; and the per-frame highlight
+/// key. With `SOLIDCRAFT_ROVER=<design>`, also the rover's per-frame key and a face hover there.
+/// Run with `--ignored --nocapture` (not a pass/fail check).
+#[test]
+#[ignore = "manual hover measurement"]
+fn smooth_surface_face_hover_cost() {
+    use solidcore_record::Vec3;
+    use solidcraft_engine::doc::display_quality::{DisplayQuality, set_current};
+    let saved = solidcraft_engine::geom::env::var("SPLIT_CYLINDERS").unwrap_or_default();
+    let designs: Vec<Option<&str>> = if saved.is_empty() { vec![None] } else { saved.split(':').map(Some).collect() };
+    for design in designs {
+        let (mut h, wall) = split_cylinder(32, design);
+        let pieces = wall.len();
+        let body = h.app.session.world_state().unwrap().bodies[0].clone();
+        let cap = (0..body.body.face_count()).find(|f| !wall.contains(f)).unwrap();
+        for quality in [DisplayQuality::Normal, DisplayQuality::Fine] {
+            set_current(quality);
+            let tris = h.app.session.world_state().unwrap().bodies[0].plan_mesh().map_or(0, |m| m.triangles.len());
+            for selected in [false, true] {
+                h.app.session.selection = if selected {
+                    wall.iter().map(|&index| solidcraft_engine::Sel::Face { body: body.name.clone(), index, point: Vec3::ZERO }).collect()
+                } else {
+                    Vec::new()
+                };
+                let targets = [wall[0], wall[wall.len() / 2], cap];
+                let hover = |h: &mut Harness, i: usize| {
+                    h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: body.name.clone(), index: targets[i % 3], point: Vec3::ZERO })
+                };
+                hover(&mut h, 0);
+                let _ = crate::viewport::build_highlight(&h.app);
+                let changes: Vec<f64> = (1..31)
+                    .map(|i| {
+                        hover(&mut h, i);
+                        ms(|| drop(crate::viewport::build_highlight(&h.app)))
+                    })
+                    .collect();
+                let key: Vec<f64> = (0..31)
+                    .map(|_| {
+                        ms(|| {
+                            std::hint::black_box(crate::viewport::highlight_key(&h.app));
+                        })
+                    })
+                    .collect();
+                println!(
+                    "HOVER pieces={pieces} quality={quality:?} plan_triangles={tris} wall_selected={selected} hover_change_median_ms={:.3} hover_change_max_ms={:.3} highlight_key_median_ms={:.4}",
+                    median_ms(changes.clone()),
+                    changes.iter().copied().fold(0.0, f64::max),
+                    median_ms(key)
+                );
+            }
+        }
+        set_current(DisplayQuality::Normal);
+    }
+    let Some(path) = solidcraft_engine::geom::env::var("ROVER") else { return };
+    let mut h = Harness::new();
+    let t = std::time::Instant::now();
+    let open = if path.ends_with(".step") { "file.insert_step" } else { "doc.open" };
+    h.app.run(open, json!({"path": path})).unwrap();
+    h.frames(3);
+    let st = h.app.session.world_state().unwrap();
+    println!("ROVER bodies={} open_s={:.1}", st.bodies.len(), t.elapsed().as_secs_f64());
+    let names: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
+    // The body with the most faces, hovered face by face.
+    let big = st.bodies.iter().max_by_key(|b| b.body.face_count()).unwrap().clone();
+    drop(st);
+    for selected in [false, true] {
+        h.app.session.selection =
+            if selected { names.iter().map(|name| solidcraft_engine::Sel::Body { name: name.clone() }).collect() } else { Vec::new() };
+        let key: Vec<f64> = (0..31)
+            .map(|_| {
+                ms(|| {
+                    std::hint::black_box(crate::viewport::highlight_key(&h.app));
+                })
+            })
+            .collect();
+        let faces = big.body.face_count();
+        let changes: Vec<f64> = (0..31)
+            .map(|i| {
+                h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: big.name.clone(), index: (i * 7) % faces, point: Vec3::ZERO });
+                ms(|| drop(crate::viewport::build_highlight(&h.app)))
+            })
+            .collect();
+        println!(
+            "ROVER all_selected={selected} biggest_body_faces={faces} highlight_key_median_ms={:.4} hover_change_median_ms={:.3}",
+            median_ms(key),
+            median_ms(changes)
+        );
+    }
+}
