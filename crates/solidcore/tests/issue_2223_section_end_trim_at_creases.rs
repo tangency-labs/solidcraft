@@ -220,10 +220,12 @@ fn without_the_fix_the_blend_corner_builds_both() {
         (both - RIM_MEASURED - pappus()).abs() <= 1.1e-9,
         "removed {both}"
     );
-    // pinned at the value measured here: 8.7e-11 more than the fork's 8.117808766409325,
-    // of which the rim's round alone is 4.5e-11, the solidcore-native exact spine
+    // pinned at the value measured here: 8.3e-11 more than the fork's 8.117808766409325,
+    // of which the rim's round alone is 4.5e-11, the solidcore-native exact spine. Since
+    // #2890 (precise properties integrate from the trims' base) 1.065e-10 below the rim plus
+    // the Pappus wedge; it was 8.117808766496637, 1.025e-10 below
     assert!(
-        (both - 8.117_808_766_496_637).abs() <= 1e-12,
+        (both - 8.117_808_766_492_544).abs() <= 1e-12,
         "removed {both}"
     );
     assert_eq!(faces, 12);

@@ -249,7 +249,10 @@ fn wr_578_issue_1528_plate_shells_on_a_clean_operand() {
         &k,
         "wr_578 #1528 plate opt-in",
         Ok(fixed),
-        Some(10400.21299138017),
+        // since #2890 (precise properties integrate from the trims' base): +4.8e-4 from the
+        // closed form 10400.212373846494 (issue_1950's), within the volume's accuracy
+        // (1e-6); it was 10400.21299138017, +6.2e-4
+        Some(10400.212852557255),
         1e-9
     ));
 }

@@ -26,6 +26,7 @@ use solidcore::topology::brep::p1;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::edge;
 use solidcore::{Brep, EntityRef, Kernel, SolidError};
+use std::f64::consts::PI;
 
 fn p(x: f64, y: f64, z: f64) -> Point3 {
     Point3::new(x, y, z)
@@ -147,8 +148,14 @@ fn wr_656_fix_leaves_patched_defeatures_alone() {
         (plate_hole, 6, 6000.0),
         // a corner ball of the rounded box
         (box_fillet3, 6, 5574.29843),
-        // a rim round of the cylinder
-        (cyl_rim_fillet2, 3, 6231.65916),
+        // a rim round of the cylinder: 2000 pi less the other rim's round, the corner's
+        // 4 - pi turned at 10 less its centroid (20/3 - 2 pi) / (4 - pi); since #2890 the
+        // volume is 3.1e-6 from it (it was 3.1e-4, at the old 6231.65916)
+        (
+            cyl_rim_fillet2,
+            3,
+            2000.0 * PI - 2.0 * PI * (10.0 - (20.0 / 3.0 - 2.0 * PI) / (4.0 - PI)) * (4.0 - PI),
+        ),
     ];
     for (make, face, want) in cases {
         let (_, off_r, off) = defeature(false, make, face);

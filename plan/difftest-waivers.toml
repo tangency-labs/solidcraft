@@ -178,3 +178,21 @@ reason = "a curve's length evaluates each span's end in its own knot span and ac
 unit = "curve.curve_p3"
 check = "ratchet"
 reason = "a curve's length evaluates each span's end in its own knot span and accepts its steps on the quadrature estimate; 1 pass(es) move within their accuracy, each a known mismatch with both sides' errors against a Gauss-Legendre reference (plan/findings/curve.curve_p5--curve-length-honest-acceptance-moves-cases-2026-11-05.md). Remove once this branch has merged."
+
+[[waiver]]
+unit = "sweep.api_brep"
+check = "ratchet"
+case = "box_face1_curve_path_cap"
+reason = "#2890 follow-on: precise properties integrate from the trims' base, split at the surface's knots and step on the fifth-order estimate; 3 passes whose volumes move are known mismatches, each with both sides' errors against an independent reference (plan/findings/sweep.api_brep--precise-properties-2890-moves-cases-2026-11-05.md). Remove once this branch has merged."
+
+[[waiver]]
+unit = "sweep.api_brep"
+check = "ratchet"
+case = "wr471_rot_half_circle_whole_sphere_off_3e-7"
+reason = "#2890 follow-on: precise properties integrate from the trims' base, split at the surface's knots and step on the fifth-order estimate; 3 passes whose volumes move are known mismatches, each with both sides' errors against an independent reference (plan/findings/sweep.api_brep--precise-properties-2890-moves-cases-2026-11-05.md). Remove once this branch has merged."
+
+[[waiver]]
+unit = "sweep.api_brep"
+check = "ratchet"
+case = "wr471_rot_half_circle_whole_sphere_off_0"
+reason = "#2890 follow-on: precise properties integrate from the trims' base, split at the surface's knots and step on the fifth-order estimate; 3 passes whose volumes move are known mismatches, each with both sides' errors against an independent reference (plan/findings/sweep.api_brep--precise-properties-2890-moves-cases-2026-11-05.md). Remove once this branch has merged."

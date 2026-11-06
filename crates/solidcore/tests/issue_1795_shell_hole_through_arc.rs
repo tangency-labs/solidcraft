@@ -92,7 +92,11 @@ fn options(create_offset_solid: bool) -> ShellOptions {
 
 /// The default fixes shell the plate through the API as pinned SMLib 1.0.1 does (the
 /// difftest case agrees to 0): a closed manifold solid of 16 faces, 37 edges and 24
-/// vertices, volume 9655.150582612916.
+/// vertices. Volume 9655.150697869625 since #2890 (precise properties integrate from the
+/// trims' base; it was 9655.150582612916): against the closed form 9655.150444016748
+/// (the plate less the blind hole less the cavity inset 2, open at z = 27.5, with the hole's
+/// offset r 7 to x = 9.5 in it) +2.5e-4 (2.6e-8 relative; it was +1.4e-4), within the
+/// volume's accuracy (1e-6).
 #[test]
 fn shell_open_at_the_top_shells_as_upstream() {
     let mut k = Kernel::default();
@@ -109,7 +113,7 @@ fn shell_open_at_the_top_shells_as_upstream() {
         (16, 37, 24)
     );
     let label = "1795 shell 2 open at z 27.5";
-    assert!(report(&k, label, Ok(r), Some(9655.150582612916), 1e-9));
+    assert!(report(&k, label, Ok(r), Some(9655.150697869625), 1e-9));
 }
 
 /// Open at y = 20 the default fixes fail the shell with `SM_ERR` (1001, in

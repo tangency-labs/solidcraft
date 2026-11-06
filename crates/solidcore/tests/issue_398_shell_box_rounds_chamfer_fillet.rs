@@ -256,11 +256,12 @@ fn issue_398_open_top_shell_with_edges_on_analytics_exact() {
     assert_eq!(got.face_list().len(), 51);
     let want = closed_form(Some(30.0));
     assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}");
-    // 2.8e-9 above the closed form: the offset's face extensions are exact (the source bit
-    // for bit, no least squares fit or knot removal moving a face's own part); it was
-    // 13701.73449509504 (2.3e-8 above) on the fitted extensions, 13701.735330849975 (8.4e-8
-    // above) with the flag off
-    let pinned = 13701.73421803366;
+    // 1.9e-10 above the closed form since #2890 (precise properties integrate from the
+    // trims' base; 13701.73421803366, 2.4e-9 above, before): the offset's face extensions
+    // are exact (the source bit for bit, no least squares fit or knot removal moving a
+    // face's own part); it was 13701.73449509504 (2.3e-8 above) on the fitted extensions,
+    // 13701.735330849975 (8.4e-8 above) with the flag off
+    let pinned = 13701.734187900483;
     assert!((v - pinned).abs() <= 1e-9 * pinned, "{v} vs {pinned}");
 }
 
