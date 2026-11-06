@@ -172,6 +172,21 @@ pub enum DimensionKind {
     Faces { a: ModelFace, b: ModelFace, direction: LinearDirection },
 }
 
+impl DimensionKind {
+    /// The occurrence path of each model reference it measures, in its order.
+    pub fn paths(&self) -> Vec<&[u64]> {
+        match self {
+            DimensionKind::Linear { a, b, .. } => vec![&a.path, &b.path],
+            DimensionKind::Length { edge, .. } | DimensionKind::Radial { edge, .. } => vec![&edge.path],
+            DimensionKind::Angle { a, b, .. } => vec![&a.path, &b.path],
+            DimensionKind::Chain { points, .. } => points.iter().map(|point| point.path.as_slice()).collect(),
+            DimensionKind::Cylinder { face } => vec![&face.path],
+            DimensionKind::Silhouettes { a, b, .. } => vec![&a.face.path, &b.face.path],
+            DimensionKind::Faces { a, b, .. } => vec![&a.path, &b.path],
+        }
+    }
+}
+
 /// One of a cylinder's two silhouettes on a view: the cylinder by a face of it, and the side by
 /// where the other cylinder of its dimension is.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

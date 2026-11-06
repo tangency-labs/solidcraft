@@ -158,6 +158,9 @@ pub struct NoteResult {
     pub exact: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<CandidateResult>,
+    /// What to know about it: a view edited since to leave out what its leader points at.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

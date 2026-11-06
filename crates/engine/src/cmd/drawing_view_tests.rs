@@ -2151,3 +2151,14 @@ fn a_change_of_paper_lists_the_views_it_leaves_outside_and_moves_none() {
     assert_eq!((views, listed[0]["unmeasured"].as_str()), (vec![right], Some("past_walk_limit")));
     assert_box(&listed[0], [290.0, 140.0], [310.0, 160.0]);
 }
+
+/// A refusal for a part the view leaves out says where the setting was set, for each kind of setter
+/// a resolved setting can name (#4896): a parent names its view, a sheet and a drawing say so, and a
+/// view's own setting and the default add nothing.
+#[test]
+fn a_left_out_part_says_where_each_kind_of_setter_set_it() {
+    assert_eq!(set_on(SetBy::Parent(7)), format!(" (set on view {})", ids::encode(7)));
+    assert_eq!(set_on(SetBy::Sheet), " (set on its sheet)");
+    assert_eq!(set_on(SetBy::Drawing), " (set on the drawing)");
+    assert_eq!((set_on(SetBy::This), set_on(SetBy::Default)), (String::new(), String::new()));
+}

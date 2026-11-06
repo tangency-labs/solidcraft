@@ -800,6 +800,40 @@ fn a_dimension_can_measure_a_reference_parts_edge() {
     assert_eq!((&read["status"], &read["value"]), (&json!("ok"), &added["value"]), "{read}");
 }
 
+/// A dimension attaches only to parts its view draws. One with a corner on a part the view's hide
+/// leaves out is refused, and so is a chain whose last point is there, with the drawing left as it
+/// was. With the part drawn again it is added; a later hide keeps it, and inspect warns until the
+/// edit is undone.
+#[test]
+fn a_dimension_is_refused_on_a_part_its_view_leaves_out() {
+    let mut s = Session::default();
+    let block = run(&mut s, "component.create", json!({"name": "Block"}))["occurrence"].clone();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 30, "height": 10, "body_name": "Block", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "operation": "new", "body_name": "Base"}));
+    let (mut s, view) = drawn_from_the_front(s);
+    let v = ids::encode(view);
+    let on_block = |p: [f64; 3]| json!({"point": p, "path": [block]});
+    let linear = json!({"view": v, "kind": {"linear": {"a": [100, 0, 0], "b": on_block([20.0, 0.0, 0.0])}}});
+    let chain = json!({"view": v, "kind": {"chain": {"points": [[100, 0, 0], [110, 0, 0], on_block([20.0, 0.0, 10.0])]}}});
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide": [[block]]}}));
+    let words = format!("its hide leaves out occurrence path [{block}]");
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    for p in [linear.clone(), chain] {
+        let e = refused(&mut s, p.clone());
+        assert!(e.contains(&format!("view {v} doesn't draw that part: {words}")), "{p}: {e}");
+    }
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide": null}}));
+    let added = run(&mut s, ADD, linear);
+    assert!(added["warnings"].is_null(), "{added}");
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide": [[block]]}}));
+    let warned = run(&mut s, INSPECT, json!({"dimension": added["dimension"]}));
+    assert_eq!(warned["warnings"], json!([format!("view {v} doesn't draw this part now: {words}")]), "{warned}");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(run(&mut s, INSPECT, json!({"dimension": added["dimension"]}))["warnings"].is_null());
+}
+
 /// A box with an 80 mm dimension on its top front edge, read once, and the drawing closed: the
 /// session, the drawing's id and the dimension's.
 fn read_once() -> (Session, u64, u64) {

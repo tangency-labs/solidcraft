@@ -13,7 +13,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use solidcore_record::{Plane, Vec2};
-use solidcraft_doc::drawing::view::ResolvedView;
+use solidcraft_doc::drawing::view::{ResolvedView, SetBy};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
 use solidcraft_geom::drawing_view::{Scale, ViewFrame};
@@ -156,6 +156,30 @@ fn chosen(path: &[u64], source: Option<&HashSet<&[u64]>>, hide: &HashSet<&[u64]>
     let heads = || (1..=path.len()).filter_map(|n| path.get(..n));
     let wanted = source.is_none_or(|set| if path.is_empty() { set.contains(path) } else { heads().any(|h| set.contains(h)) });
     wanted && !heads().any(|h| hide.contains(h))
+}
+
+/// Why a saved view doesn't draw what an occurrence path places ([`left_out`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LeftOut {
+    /// A `hide` path covers it: that path, and the view that set it.
+    Hidden { by: Vec<u64>, set_by: SetBy },
+    /// No `source` path takes it: the view that set the source.
+    NotChosen { set_by: SetBy },
+}
+
+/// Why saved view `view` doesn't draw the body that occurrence path `path` places, if it doesn't:
+/// [`chosen`] asked about one path, with the `hide` path that covers it. No model is read.
+pub fn left_out(view: &ResolvedView, path: &[u64]) -> Option<LeftOut> {
+    let source: Option<HashSet<&[u64]>> = view.occurrences.value.as_deref().map(|paths| paths.iter().map(Vec::as_slice).collect());
+    let hide: HashSet<&[u64]> = view.hide.value.as_deref().unwrap_or_default().iter().map(Vec::as_slice).collect();
+    if chosen(path, source.as_ref(), &hide) {
+        return None;
+    }
+    let by = (1..=path.len()).filter_map(|n| path.get(..n)).find(|head| hide.contains(head));
+    Some(match by {
+        Some(by) => LeftOut::Hidden { by: by.to_vec(), set_by: view.hide.set_by },
+        None => LeftOut::NotChosen { set_by: view.occurrences.set_by },
+    })
 }
 
 /// Every body the design places, or why there's nothing to show: the assembly places more than a
