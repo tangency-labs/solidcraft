@@ -2562,14 +2562,14 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
 fn split_face(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.split_face";
     let faces = face_points(s, p, cmd)?;
-    let body = str_(p, "body").map(str::to_string);
+    let picked = faces_body(s, p, &faces);
     let xy = || solidcraft_doc::PlaneRef::Origin { name: "XY".into() };
     let kind = if let Some(t) = p.get("tool").filter(|t| !t.is_null()) {
         let tb = t.get("body").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`tool.body` must name a body"))?.to_string();
         let point = t.get("point").and_then(crate::params::vec3).ok_or_else(|| bad(cmd, "`tool.point` must be [x, y, z] on the tool face"))?;
         FeatureKind::SplitFace {
             faces: faces.into_iter().map(FacePick).collect(),
-            body: body.map(BodyName),
+            body: picked.body.clone().map(BodyName),
             plane: xy(),
             tool: Some(solidcraft_doc::FaceAt { body: BodyName(tb), point: Position(point) }),
             sketch: None,
@@ -2578,16 +2578,22 @@ fn split_face(s: &mut Session, p: &Value) -> Result<Value> {
         let sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
         FeatureKind::SplitFace {
             faces: faces.into_iter().map(FacePick).collect(),
-            body: body.map(BodyName),
+            body: picked.body.clone().map(BodyName),
             plane: xy(),
             tool: None,
             sketch: Some(SketchId(sketch)),
         }
     } else {
         let plane = plane_param(s, p.get("plane"), cmd)?;
-        FeatureKind::SplitFace { faces: faces.into_iter().map(FacePick).collect(), body: body.map(BodyName), plane, tool: None, sketch: None }
+        FeatureKind::SplitFace {
+            faces: faces.into_iter().map(FacePick).collect(),
+            body: picked.body.clone().map(BodyName),
+            plane,
+            tool: None,
+            sketch: None,
+        }
     };
-    add_feature(s, p, kind)
+    add_face_feature(&picked, s, p, kind)
 }
 
 fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3120,6 +3126,18 @@ fn face_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
     a.iter().map(|v| super::face::face_ref(s, v, str_(p, "body"), cmd)).collect()
 }
 
+/// The body the `faces` picks of `p` apply to: see [`super::face::faces_body`].
+fn faces_body(s: &Session, p: &Value, faces: &[Vec3]) -> super::face::FacesBody {
+    let refs = p.get("faces").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    super::face::faces_body(s, p, refs, faces)
+}
+
+/// [`add_feature`] for a feature on picked faces: its result warns when a pick was shared by
+/// bodies touching flush ([`super::face::FacesBody::warn`]).
+pub(super) fn add_face_feature(picked: &super::face::FacesBody, s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
+    add_feature(s, p, kind).map(|out| picked.warn(out))
+}
+
 fn shell(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.shell";
     // No face opened: a closed hollow body, its void sealed inside.
@@ -3127,19 +3145,21 @@ fn shell(s: &mut Session, p: &Value) -> Result<Value> {
         Some(a) if a.is_empty() => Vec::new(),
         _ => face_points(s, p, cmd)?,
     };
+    let picked = faces_body(s, p, &faces);
     let thickness = req_expr(cmd, p, "thickness")?;
     check_expr(s, &thickness, Kind::Length, cmd, "thickness")?;
     let direction = str_(p, "direction").map(str::to_ascii_lowercase).unwrap_or_default();
     if !matches!(direction.as_str(), "" | "inside" | "outside" | "both") {
         return Err(bad(cmd, "`direction` must be inside, outside or both"));
     }
-    add_feature(
+    add_face_feature(
+        &picked,
         s,
         p,
         FeatureKind::Shell {
             faces: faces.into_iter().map(FacePick).collect(),
             thickness,
-            body: str_(p, "body").map(BodyName::from),
+            body: picked.body.clone().map(BodyName),
             direction: if direction == "inside" { String::new() } else { direction },
             tangent_chain: bool_(p, "tangent_chain").unwrap_or(false),
         },
@@ -3149,13 +3169,15 @@ fn shell(s: &mut Session, p: &Value) -> Result<Value> {
 fn draft(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.draft";
     let faces = face_points(s, p, cmd)?;
+    let picked = faces_body(s, p, &faces);
     let angle = req_expr(cmd, p, "angle")?;
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let neutral = plane_param(s, p.get("neutral"), cmd)?;
     let (vals, _) = s.doc.param_values();
     let pl = s.doc.resolve_plane_in(&vals, &neutral, 0, Some(&s.model.state()))?;
     let pull = p.get("pull").and_then(vec3).unwrap_or_else(|| pl.normal());
-    add_feature(
+    add_face_feature(
+        &picked,
         s,
         p,
         FeatureKind::Draft {
@@ -3163,7 +3185,7 @@ fn draft(s: &mut Session, p: &Value) -> Result<Value> {
             angle,
             neutral,
             pull: Dir(pull),
-            body: str_(p, "body").map(BodyName::from),
+            body: picked.body.clone().map(BodyName),
         },
     )
 }
@@ -3544,19 +3566,27 @@ fn scale(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn delete_face(s: &mut Session, p: &Value) -> Result<Value> {
     let faces = face_points(s, p, "face.delete")?;
+    let picked = faces_body(s, p, &faces);
     let heal = bool_(p, "heal").unwrap_or(true);
-    add_feature(s, p, FeatureKind::DeleteFace { faces: faces.into_iter().map(FacePick).collect(), body: str_(p, "body").map(BodyName::from), heal })
+    add_face_feature(
+        &picked,
+        s,
+        p,
+        FeatureKind::DeleteFace { faces: faces.into_iter().map(FacePick).collect(), body: picked.body.clone().map(BodyName), heal },
+    )
 }
 
 fn offset_face(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.offset_face";
     let faces = face_points(s, p, cmd)?;
+    let picked = faces_body(s, p, &faces);
     let distance = req_expr(cmd, p, "distance")?;
     check_expr(s, &distance, Kind::Length, cmd, "distance")?;
-    add_feature(
+    add_face_feature(
+        &picked,
         s,
         p,
-        FeatureKind::OffsetFace { faces: faces.into_iter().map(FacePick).collect(), distance, body: str_(p, "body").map(BodyName::from) },
+        FeatureKind::OffsetFace { faces: faces.into_iter().map(FacePick).collect(), distance, body: picked.body.clone().map(BodyName) },
     )
 }
 
