@@ -2066,7 +2066,7 @@ pub(super) fn lit<'a>(
         (&e.label, &e.detail, e.group, &e.names, format!("{:?}", e.sels)).hash(&mut hasher);
     }
     let key = hasher.finish();
-    let id = Id::new("sc_agent_chat_lit");
+    let id = Id::unique("sc_agent_chat_lit");
     if let Some((cached, sels)) = ctx.data(|d| d.get_temp::<(u64, Vec<solidcraft_engine::Sel>)>(id))
         && cached == key
     {
@@ -2135,7 +2135,7 @@ fn user_text(
 
 /// The id of the message box.
 fn input_id() -> Id {
-    Id::new("sc_agent_chat_input")
+    Id::unique("sc_agent_chat_input")
 }
 
 /// Where the caret is in the message box (a character), if it has been in it.
