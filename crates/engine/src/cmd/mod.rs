@@ -55,7 +55,6 @@ mod join_pieces;
 pub(crate) use bom::{SAME_AS_COMPONENT, occurrence_bom_type, record_item_numbers};
 pub(crate) use component::{path_ids, refuse_filled_virtual};
 pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis, plane_axis_point_kind};
-pub(crate) use drawing::line_group_of;
 pub use drawing_ui::pending_icon as drawing_pending_icon;
 pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::profiles as feature_profiles;
