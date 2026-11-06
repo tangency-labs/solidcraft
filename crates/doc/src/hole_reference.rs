@@ -101,20 +101,33 @@ pub fn reference_frame(st: &ModelState, at: Vec3, dir: Vec3, edges: &[(Vec3, Opt
 }
 
 /// One reference of a hole: a straight edge (a point on it and its persistent name, when it has
-/// one), or a plane or an axis, which measures from the line it makes in the face's plane.
+/// one), or a plane or an axis, which measures from the line it makes in the face's plane. A
+/// plane's or an axis' `opposite` is the side of that line the hole is on (see
+/// [`crate::HoleReference::opposite`]); none takes the side the hole is on.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RefInput<'a> {
     Edge(Vec3, Option<&'a str>),
-    Plane { point: Vec3, normal: Vec3 },
-    Axis { point: Vec3, dir: Vec3 },
+    Plane { point: Vec3, normal: Vec3, opposite: Option<bool> },
+    Axis { point: Vec3, dir: Vec3, opposite: Option<bool> },
+}
+
+impl RefInput<'_> {
+    /// This reference with the side of its line set, for a plane or an axis.
+    fn on_side(self, side: Option<bool>) -> Self {
+        match self {
+            RefInput::Plane { point, normal, .. } => RefInput::Plane { point, normal, opposite: side },
+            RefInput::Axis { point, dir, .. } => RefInput::Axis { point, dir, opposite: side },
+            edge => edge,
+        }
+    }
 }
 
 /// The `edges` slot of a [`ReferenceFrame`] for a reference that is a plane or an axis.
 pub const NO_EDGE: usize = usize::MAX;
 
 /// [`reference_frame`] for edges, planes and axes. A plane's line is where it cuts the face's
-/// plane; an axis' line is its projection onto it. Either side of such a line is the one the hole
-/// is on.
+/// plane; an axis' line is its projection onto it. The side of such a line is its `opposite`, else
+/// the one the hole is on.
 pub fn reference_frame_of(st: &ModelState, at: Vec3, dir: Vec3, refs: &[RefInput], exact: bool) -> Result<ReferenceFrame> {
     if refs.len() > MAX_HOLE_REFERENCES {
         return Err(DocError::Invalid(format!("a hole takes at most {MAX_HOLE_REFERENCES} references")));
@@ -122,8 +135,8 @@ pub fn reference_frame_of(st: &ModelState, at: Vec3, dir: Vec3, refs: &[RefInput
     let dir = dir.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
     let finite = |r: &RefInput| match r {
         RefInput::Edge(p, _) => p.is_finite(),
-        RefInput::Plane { point, normal } => point.is_finite() && normal.is_finite(),
-        RefInput::Axis { point, dir } => point.is_finite() && dir.is_finite(),
+        RefInput::Plane { point, normal, .. } => point.is_finite() && normal.is_finite(),
+        RefInput::Axis { point, dir, .. } => point.is_finite() && dir.is_finite(),
     };
     if !at.is_finite() || !refs.iter().all(finite) {
         return Err(DocError::Invalid("references need finite points".into()));
@@ -171,12 +184,13 @@ pub fn reference_frame_of(st: &ModelState, at: Vec3, dir: Vec3, refs: &[RefInput
 }
 
 /// The line a plane or an axis makes in the face's plane (through `origin`, square to `normal`),
-/// with the hole at `at` on its positive side.
+/// on the side its `opposite` says, else on the side of the hole at `at`.
 fn datum_line(r: &RefInput, k: usize, at: Vec3, origin: Vec3, normal: Vec3) -> Result<ReferenceLine> {
-    let (point, along) = match r {
-        RefInput::Plane { point, normal: n } => {
+    let (point, along, opposite) = match r {
+        RefInput::Plane { point, normal: n, opposite } => {
             let n = n.normalized().ok_or_else(|| DocError::Invalid(format!("reference {} has no direction", k + 1)))?;
-            let u = normal.cross(n);
+            // Running so that the plane's normal is on its positive side (`normal × along`).
+            let u = n.cross(normal);
             let along = u.normalized().ok_or_else(|| DocError::Invalid(format!("reference {} is a plane parallel to the face", k + 1)))?;
             // The point where the face's plane, the plane and the plane square to the line through
             // the hole meet.
@@ -185,18 +199,18 @@ fn datum_line(r: &RefInput, k: usize, at: Vec3, origin: Vec3, normal: Vec3) -> R
             if det.abs() < 1e-9 {
                 return Err(DocError::Invalid(format!("reference {} is a plane parallel to the face", k + 1)));
             }
-            ((n.cross(along) * d1 + along.cross(normal) * d2 + normal.cross(n) * d3) * (1.0 / det), along)
+            ((n.cross(along) * d1 + along.cross(normal) * d2 + normal.cross(n) * d3) * (1.0 / det), along, opposite)
         }
-        RefInput::Axis { point, dir } => {
+        RefInput::Axis { point, dir, opposite } => {
             let d = *dir - normal * dir.dot(normal);
             let along = d.normalized().ok_or_else(|| DocError::Invalid(format!("reference {} is an axis square to the face", k + 1)))?;
-            (*point - normal * (*point - origin).dot(normal), along)
+            (*point - normal * (*point - origin).dot(normal), along, opposite)
         }
         RefInput::Edge(..) => return Err(DocError::Invalid("an edge is not a datum".into())),
     };
     let across = normal.cross(along).normalized().ok_or_else(|| DocError::Invalid(format!("reference {} is square to the face", k + 1)))?;
-    let side = if (at - point).dot(across) < 0.0 { -1.0 } else { 1.0 };
-    Ok(ReferenceLine { point, along, toward: across * side })
+    let opposite = opposite.unwrap_or((at - point).dot(across) < 0.0);
+    Ok(ReferenceLine { point, along, toward: if opposite { -across } else { across } })
 }
 
 /// The geometry of the plane or axis a reference is made from, by name: the origin planes `XY`,
@@ -206,21 +220,21 @@ pub fn datum_input(st: &ModelState, datum: &crate::HoleDatum) -> Result<RefInput
     let find = |name: &str| st.construct.iter().find(|c| c.name == name).map(|c| c.geom.clone());
     match datum {
         crate::HoleDatum::Plane(name) => match name.to_ascii_uppercase().as_str() {
-            "XY" => Ok(RefInput::Plane { point: Vec3::ZERO, normal: Vec3::Z }),
-            "XZ" => Ok(RefInput::Plane { point: Vec3::ZERO, normal: Vec3::Y }),
-            "YZ" => Ok(RefInput::Plane { point: Vec3::ZERO, normal: Vec3::X }),
+            "XY" => Ok(RefInput::Plane { point: Vec3::ZERO, normal: Vec3::Z, opposite: None }),
+            "XZ" => Ok(RefInput::Plane { point: Vec3::ZERO, normal: Vec3::Y, opposite: None }),
+            "YZ" => Ok(RefInput::Plane { point: Vec3::ZERO, normal: Vec3::X, opposite: None }),
             _ => match find(name) {
-                Some(ConstructGeom::Plane(p)) => Ok(RefInput::Plane { point: p.origin, normal: p.normal() }),
+                Some(ConstructGeom::Plane(p)) => Ok(RefInput::Plane { point: p.origin, normal: p.normal(), opposite: None }),
                 Some(_) => Err(DocError::Invalid(format!("`{name}` is not a plane"))),
                 None => Err(DocError::Unknown(format!("plane `{name}` (it must come earlier in the timeline)"))),
             },
         },
         crate::HoleDatum::Axis(name) => match name.to_ascii_uppercase().as_str() {
-            "X" => Ok(RefInput::Axis { point: Vec3::ZERO, dir: Vec3::X }),
-            "Y" => Ok(RefInput::Axis { point: Vec3::ZERO, dir: Vec3::Y }),
-            "Z" => Ok(RefInput::Axis { point: Vec3::ZERO, dir: Vec3::Z }),
+            "X" => Ok(RefInput::Axis { point: Vec3::ZERO, dir: Vec3::X, opposite: None }),
+            "Y" => Ok(RefInput::Axis { point: Vec3::ZERO, dir: Vec3::Y, opposite: None }),
+            "Z" => Ok(RefInput::Axis { point: Vec3::ZERO, dir: Vec3::Z, opposite: None }),
             _ => match find(name) {
-                Some(ConstructGeom::Axis { origin, dir }) => Ok(RefInput::Axis { point: origin, dir }),
+                Some(ConstructGeom::Axis { origin, dir }) => Ok(RefInput::Axis { point: origin, dir, opposite: None }),
                 Some(_) => Err(DocError::Invalid(format!("`{name}` is not an axis"))),
                 None => Err(DocError::Unknown(format!("axis `{name}` (it must come earlier in the timeline)"))),
             },
@@ -235,10 +249,27 @@ pub fn inputs_of<'a>(st: &ModelState, references: &'a [crate::HoleReference], na
         .iter()
         .enumerate()
         .map(|(i, r)| match &r.datum {
-            Some(d) => datum_input(st, d),
+            Some(d) => datum_input(st, d).map(|input| input.on_side(Some(r.opposite))),
             None => Ok(RefInput::Edge(r.edge.0, names.get(i).map(String::as_str))),
         })
         .collect()
+}
+
+/// Sets each plane or axis reference's `opposite` to the side of its line the hole at `at`,
+/// drilled along `dir`, is on, so the hole keeps that side when the plane or axis moves past it.
+pub fn keep_datum_sides(st: &ModelState, at: Vec3, dir: Vec3, references: &mut [crate::HoleReference], exact: bool) -> Result<()> {
+    if references.iter().all(|r| r.datum.is_none()) {
+        return Ok(());
+    }
+    // Every line on its positive side: the hole is opposite where it is on the negative one.
+    let positive: Vec<RefInput> = inputs_of(st, references, &[])?.into_iter().map(|r| r.on_side(Some(false))).collect();
+    let frame = reference_frame_of(st, at, dir, &positive, exact)?;
+    for (r, line) in references.iter_mut().zip(&frame.lines) {
+        if r.datum.is_some() {
+            r.opposite = (at - line.point).dot(line.toward) < 0.0;
+        }
+    }
+    Ok(())
 }
 
 /// Whether `p` lies on the flat face a reference frame was made for.
