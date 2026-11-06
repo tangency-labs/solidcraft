@@ -2920,6 +2920,8 @@
   "prefs.structure.work": "Công việc",
   "prefs.supersampling_brief": "Vẽ khung nhìn ở độ phân giải lớn hơn rồi lọc giảm tỷ lệ: rất sắc nét, nhưng tốn tài nguyên hơn.",
   "prefs.tab_accent_note": "Màu nhấn theo tab đang kích hoạt",
+  "prefs.tab_double_click_renames": "Nhấp đúp vào thẻ thiết kế để đổi tên",
+  "prefs.tab_double_click_renames_note": "Nhập tên mới, rồi nhấn Enter hoặc nhấp ra chỗ khác để giữ, hoặc Esc để hủy. Khi tắt: nhấp đúp vào thẻ sẽ phóng to cửa sổ, như ở phần trống của thanh.",
   "prefs.theme_file": "tệp chủ đề",
   "prefs.theme_file_or_paste": "tệp hoặc dán",
   "prefs.theme_follow": "Theo dõi tệp chủ đề",

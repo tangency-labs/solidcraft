@@ -2920,6 +2920,8 @@
   "prefs.structure.work": "العمل",
   "prefs.supersampling_brief": "يرسم العرض بحجم أكبر ثم يصغّره: حاد جدًا لكنه أثقل.",
   "prefs.tab_accent_note": "لون التمييز يتبع التبويب النشط",
+  "prefs.tab_double_click_renames": "انقر نقرًا مزدوجًا على تبويب التصميم لإعادة تسميته",
+  "prefs.tab_double_click_renames_note": "اكتب الاسم الجديد، ثم اضغط Enter أو انقر في مكان آخر للاحتفاظ به، أو Esc للإلغاء. عند الإيقاف: يؤدي النقر المزدوج على التبويب إلى تكبير النافذة، كما في الجزء الفارغ من الشريط.",
   "prefs.theme_file": "ملف السمة",
   "prefs.theme_file_or_paste": "ملف أو لصق",
   "prefs.theme_follow": "اتباع ملف سمة",

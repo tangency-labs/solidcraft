@@ -2920,6 +2920,8 @@
   "prefs.structure.work": "作業",
   "prefs.supersampling_brief": "大きく描画して縮小するため、非常に鮮明になりますが負荷も増えます。",
   "prefs.tab_accent_note": "アクセント色はアクティブなタブに従います",
+  "prefs.tab_double_click_renames": "デザインのタブをダブルクリックして名前を変更",
+  "prefs.tab_double_click_renames_note": "新しい名前を入力し、Enter キーを押すか別の場所をクリックすると確定し、Esc でキャンセルします。オフ: タブをダブルクリックすると、バーの空いている部分と同じようにウィンドウを最大化します。",
   "prefs.theme_file": "テーマファイル",
   "prefs.theme_file_or_paste": "ファイルまたは貼り付け",
   "prefs.theme_follow": "テーマファイルに従う",

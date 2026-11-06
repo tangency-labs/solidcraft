@@ -2686,6 +2686,8 @@
   "prefs.structure.work": "Arbeit",
   "prefs.supersampling_brief": "Rendert die Ansicht größer und verkleinert sie dann: sehr scharf, aber rechenintensiver.",
   "prefs.tab_accent_note": "Die Akzentfarbe richtet sich nach dem aktiven Tab.",
+  "prefs.tab_double_click_renames": "Entwurfsregisterkarte per Doppelklick umbenennen",
+  "prefs.tab_double_click_renames_note": "Geben Sie den neuen Namen ein und drücken Sie Enter oder klicken Sie woanders hin, um ihn zu übernehmen, oder Esc zum Abbrechen. Aus: Ein Doppelklick auf eine Registerkarte maximiert das Fenster, wie auf dem leeren Teil der Leiste.",
   "prefs.theme_file": "Designdatei",
   "prefs.theme_file_or_paste": "Datei oder Einfügen",
   "prefs.theme_follow": "Einer Designdatei folgen",
