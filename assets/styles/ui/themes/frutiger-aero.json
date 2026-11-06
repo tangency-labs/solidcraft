@@ -1,0 +1,366 @@
+{
+  "order": 255,
+  "provenance": "Original SolidCraft theme",
+  "format": "solidcraft-theme/1",
+  "name": "Frutiger Aero",
+  "base": "light",
+  "colors": {
+    "accent": "#0a78c2",
+    "accent_soft": "#cae6fb",
+    "agent_busy": "#2a9ad8",
+    "agent_ok": "#2b9b45",
+    "app_bar": "#a7d8f5",
+    "app_bar_hover": "#ffffff66",
+    "app_bar_hover_button": "#ffffff99",
+    "app_bar_hover_strong": "#0a78c22e",
+    "app_bar_hover_subtle": "#ffffff40",
+    "app_bar_separator": "#6fb3dc",
+    "app_bar_tab_active": "#f2fbff",
+    "app_bar_text": "#0a3050",
+    "axis_x": "#e5483f",
+    "axis_y": "#38a845",
+    "axis_z": "#1f7fd8",
+    "bend_down": "#c0843f",
+    "bend_up": "#2e9e3e",
+    "body": "#cfd9e3",
+    "body_edge": "#2a3e52",
+    "body_selected": "#6cc0f4",
+    "border": "#9fc6e6",
+    "box_crossing": "#2e9e3e",
+    "box_window": "#0a78c2",
+    "chip": "#0a78c2",
+    "construction_geom": "#b4701e",
+    "construction_plane": "#f3d39c46",
+    "continuity": [
+      "#009e73",
+      "#0072b2",
+      "#f0c800",
+      "#cc008c"
+    ],
+    "control_border": "#8aa9c4",
+    "control_fill": "#eef6fc",
+    "cube_border": "#6fb3dc",
+    "cube_face": "#f4fbff",
+    "cube_hover": "#c4e6fb",
+    "cube_text": "#0e2a40",
+    "dialog_bg": "#eef8fe",
+    "dialog_body": "#f7fcff",
+    "dialog_border": "#7aa7cf",
+    "dialog_footer": "#e3f4fd",
+    "dialog_label": "#0e2a40",
+    "dialog_rule": "#c3e0f2",
+    "dimension": "#00474f",
+    "dimension_driven": "#3e6e5e",
+    "error": "#cc2d34",
+    "field": "#ffffff",
+    "file_rail": "#eef8fe",
+    "file_rail_hover": "#e3f2fc",
+    "file_rail_ink": "#0e2a40",
+    "form_accent": "#7f55c9",
+    "form_dim": "#45647a",
+    "form_error": "#c0282f",
+    "form_error_fill": "#fde6e6",
+    "form_fill": "#b48cf0",
+    "form_ink": "#0e2a40",
+    "form_primary": "#0a78c2",
+    "form_soft": "#ece4fa",
+    "form_success": "#1f7a32",
+    "form_success_fill": "#e2f5e4",
+    "form_tab_ink": "#5e3d9c",
+    "glyph_bg": "#ffffff",
+    "glyph_edge": "#d33a3f",
+    "glyph_text": "#d33a3f",
+    "grid": "#a9d6ea",
+    "grid_major": "#78b6d4",
+    "hover": "#e3f2fc",
+    "hover_edge": "#0b2236",
+    "hover_edge_halo": "#ffffff",
+    "hover_profile": "#0a78c226",
+    "hover_profile_edge": "#0a78c2",
+    "icon": "#2f5a7a",
+    "icons.agent": "#9b5fd6",
+    "icons.highlight": "#ffffff",
+    "icons.marker_halo": "#00000080",
+    "interference": "#ed443b",
+    "logo": [
+      "#8fd3f7",
+      "#2ea3e6",
+      "#0f6fb5"
+    ],
+    "manipulator": "#0a78c2",
+    "mesh_accent": "#8a7a0c",
+    "mesh_fill": "#d6c22c",
+    "mesh_ink": "#6a5c0e",
+    "mesh_soft": "#f6f1d2",
+    "nav_dim": "#6f93ad",
+    "nav_field": "#ffffff",
+    "nav_hover": "#dcf0fc",
+    "nav_press": "#c6e5f9",
+    "nav_tip": "#0e2a40",
+    "nav_tip_ink": "#ffffff",
+    "nav_tip_key_border": "#7fa6c499",
+    "nav_viewport": "#eef8fe",
+    "on_accent": "#ffffff",
+    "origin_plane": "#f2c37f55",
+    "origin_plane_edge": "#c08f52c8",
+    "origin_plane_hover": "#6cc0f480",
+    "origin_point": "#e2eef6",
+    "overlay": "#f4fbfff0",
+    "panel": "#eef8fe",
+    "panel_header": "#d2ecfb",
+    "preview_add": "#6fb8ea",
+    "preview_cut": "#eb634d66",
+    "preview_new": "#e9d875",
+    "preview_sketch": "#3ab86b",
+    "profile_fill": "#7ccf8a40",
+    "render_accent": "#b8437f",
+    "render_fill": "#f27fb8",
+    "render_ink": "#943766",
+    "render_soft": "#fae1ee",
+    "rubber_band": "#0a78c2",
+    "section_cap": "#c79769",
+    "sel_edge": "#0a78c2",
+    "sel_edge_rim": "#c8ecff",
+    "sel_face": "#4fa8e6",
+    "sel_profile": "#1c5ea0",
+    "sel_profile_edge": "#0a78c2",
+    "sel_vertex": "#075c99",
+    "selected_bg": "#cae6fb",
+    "selected_ink": "#064f86",
+    "sheet_fill": "#3cc6d8",
+    "sheet_ink": "#0f6a77",
+    "sheet_soft": "#d8f3f6",
+    "sketch": "#0f63b8",
+    "sketch_accent": "#2e9e3e",
+    "sketch_centerline": "#b4783e",
+    "sketch_construction": "#c97a1e",
+    "sketch_fixed": "#0e2a40",
+    "sketch_halo": "#ffffff",
+    "sketch_ink": "#1c6a29",
+    "sketch_locked": "#2b8a3e",
+    "sketch_lost": "#c94f68",
+    "sketch_point": "#0e2a40",
+    "sketch_point_free": "#0f63b8",
+    "sketch_projected": "#8a4fc0",
+    "sketch_soft": "#dcf2dc",
+    "surface_accent": "#b0681a",
+    "surface_fill": "#f0a640",
+    "surface_ink": "#86500f",
+    "surface_soft": "#fbecd8",
+    "tab_on_fill_dark": "#0e2a40",
+    "text": "#0e2a40",
+    "text_dim": "#45647a",
+    "timeline": "#dff2fc",
+    "timeline_item": "#ffffff",
+    "timeline_item_error": "#fde0dc",
+    "timeline_marker": "#3f6a88",
+    "toolbar": "#e6f5fd",
+    "viewport_bottom": "#e8fbef",
+    "viewport_top": "#7ccaf4",
+    "warning": "#a06a00"
+  },
+  "radii": {
+    "radius_sm": 4,
+    "radius_md": 6,
+    "radius_lg": 8,
+    "radius_xl": 10,
+    "control_radius": 4,
+    "sketch_mode_radius": 6
+  },
+  "borders": {
+    "primary": {
+      "width": 1,
+      "color": "#7aa7cf"
+    },
+    "secondary": {
+      "width": 1,
+      "color": "#c3e0f2"
+    },
+    "tertiary": {
+      "width": 1,
+      "color": "#d3e9f6"
+    },
+    "container": {
+      "width": 1,
+      "color": "#9fc6e6"
+    },
+    "control": {
+      "width": 1,
+      "color": "#8aa9c4"
+    },
+    "primary_inset": {
+      "width": 1,
+      "color": "#ffffffcc",
+      "gap": 0
+    },
+    "glass": {
+      "sheen": "#ffffffa6",
+      "sheen_height": 40,
+      "bubbles": "square"
+    }
+  },
+  "icon_palette": {
+    "ink": "#0b3556",
+    "line": "#1f5c8a",
+    "passive-1": "#f7fbfe",
+    "passive-2": "#c9d6e2",
+    "passive-3": "#93a8bc",
+    "guide": "#4f86ad",
+    "solid": [
+      "#cdeeff",
+      "#3aa6ee",
+      "#0a78c2"
+    ],
+    "surface": [
+      "#ffe6c2",
+      "#ffa53a",
+      "#b0681a"
+    ],
+    "mesh": [
+      "#fff5b0",
+      "#f0d424",
+      "#8a7a0c"
+    ],
+    "form": [
+      "#f0e2ff",
+      "#bb88f7",
+      "#7f55c9"
+    ],
+    "sketch": [
+      "#cff9c8",
+      "#52c95a",
+      "#2e9e3e"
+    ],
+    "constraint": [
+      "#ffe0dd",
+      "#ff7a72",
+      "#d33a3f"
+    ],
+    "construction": [
+      "#ffe6c2",
+      "#ffa53a",
+      "#b0681a"
+    ]
+  },
+  "options": [
+    {
+      "id": "opacity",
+      "type": "range",
+      "default": 70,
+      "min": 50,
+      "max": 100
+    },
+    {
+      "id": "blur",
+      "type": "range",
+      "default": 12,
+      "max": 40
+    },
+    {
+      "id": "tab_colours",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "id": "tab_fade_ms",
+      "type": "range",
+      "default": 240
+    }
+  ],
+  "tabs": {
+    "MODEL": {
+      "panel": "#dceef9",
+      "viewport_top": "#54ade2",
+      "viewport_bottom": "#cdebea"
+    },
+    "SKETCH": {
+      "panel": "#dff1ef",
+      "viewport_top": "#61bbb4",
+      "viewport_bottom": "#d2f0da"
+    },
+    "SURFACE": {
+      "panel": "#eef1ef",
+      "viewport_top": "#a5bdb5",
+      "viewport_bottom": "#e9f1da"
+    },
+    "MESH": {
+      "panel": "#ecf4ed",
+      "viewport_top": "#9cc7ae",
+      "viewport_bottom": "#e6f4d8"
+    },
+    "FORM": {
+      "panel": "#e9effd",
+      "viewport_top": "#90b4f3",
+      "viewport_bottom": "#e2eeef"
+    },
+    "SHEET METAL": {
+      "panel": "#e0f4fb",
+      "viewport_top": "#66c9ea",
+      "viewport_bottom": "#d3f5ec"
+    },
+    "WELDMENTS": {
+      "panel": "#e8ebed",
+      "viewport_top": "#89a0ae",
+      "viewport_bottom": "#dfe7d8"
+    },
+    "ASSEMBLE": {
+      "panel": "#e5ecfb",
+      "viewport_top": "#7ba4ea",
+      "viewport_bottom": "#dbe8ec"
+    },
+    "INSERT": {
+      "panel": "#dff1f6",
+      "viewport_top": "#61bcd4",
+      "viewport_bottom": "#d2f0e5"
+    },
+    "INSPECT": {
+      "panel": "#edecee",
+      "viewport_top": "#9fa5b3",
+      "viewport_bottom": "#e7e9d9"
+    },
+    "MANAGE": {
+      "panel": "#e4efed",
+      "viewport_top": "#76b4af",
+      "viewport_bottom": "#d9edd8"
+    },
+    "VIEW": {
+      "panel": "#e0f1fa",
+      "viewport_top": "#67bbe5",
+      "viewport_bottom": "#d4f0ea"
+    },
+    "RENDER": {
+      "panel": "#eeeef8",
+      "viewport_top": "#a5b0df",
+      "viewport_bottom": "#e9ece8"
+    },
+    "RENDER APPEARANCE": {
+      "panel": "#eeeef8",
+      "viewport_top": "#a5b0df",
+      "viewport_bottom": "#e9ece8"
+    },
+    "RENDER SCENE": {
+      "panel": "#eeeef8",
+      "viewport_top": "#a5b0df",
+      "viewport_bottom": "#e9ece8"
+    },
+    "RENDER CAMERA": {
+      "panel": "#eeeef8",
+      "viewport_top": "#a5b0df",
+      "viewport_bottom": "#e9ece8"
+    }
+  },
+  "layout": {
+    "preferences": {
+      "background_pattern": "aurora",
+      "layout": "floating",
+      "ribbon_labels": true,
+      "dialog_place": "edge",
+      "navigation_bar": {
+        "idle": "always"
+      },
+      "text_glow": 0.5,
+      "background_motion": true,
+      "tab_colours_individual": true
+    }
+  }
+}
