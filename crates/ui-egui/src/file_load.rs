@@ -306,6 +306,9 @@ pub(crate) fn step_folder_option(app: &SolveApp, path: &str, options: &mut serde
 
 /// Queue a file operation; on the web (no threads) it runs now.
 pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
+    if request.kind == Kind::Insert && insert_command(&request.path) == "file.insert_step" {
+        request.options.entry("link").or_insert_with(|| json!(app.preferences.link_step_inserts));
+    }
     if crate::control::chat_turn_cancelled(request.chat_turn.as_deref()) {
         request.answer(Err("the agent chat turn ended".into()));
         return Ok(());
