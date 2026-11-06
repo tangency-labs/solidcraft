@@ -34,6 +34,10 @@ hidden behind bodies like body edges (dashed on `HIDDEN` when hidden edges are e
 sketch being edited is drawn on top, as in the viewport. The export is refused only when
 there is neither a shown body nor a shown sketch curve.
 
+For real DXF circles, arcs, and lines, right-click a sketch in the **Browser** and choose
+**Export DXF…** (`sketch.export_dxf`), as described in the
+[import and export guide](book/src/guide/files.md).
+
 Coordinates are 2D, Z=0, in millimetres. Orthographic views retain 1:1 dimensions in the
 view plane. Perspective views retain foreshortening, projected onto the plane through the
 camera target; they are intended for illustrations rather than dimensioned fabrication.
