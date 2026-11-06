@@ -355,7 +355,7 @@ mod web {
         let _ = Reflect::set(&options, &"multiple".into(), &JsValue::FALSE);
         let extensions = Array::new();
         let designs = solidcraft_engine::io::DESIGN_EXTS.iter().map(|e| format!(".{e}"));
-        let others = [".json", ".step", ".stp", ".3mf", ".stl", ".obj", ".glb", ".gltf", ".fcstd", ".3dm", ".dxf", ".svg"].map(String::from);
+        let others = [".json", ".zip", ".step", ".stp", ".3mf", ".stl", ".obj", ".glb", ".gltf", ".fcstd", ".3dm", ".dxf", ".svg"].map(String::from);
         for e in designs.chain(others) {
             extensions.push(&e.into());
         }
