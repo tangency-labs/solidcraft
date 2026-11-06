@@ -5338,8 +5338,15 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                 continue;
                             }
                             chord *= 1.0 / width;
+                            // in the band: between rail and edge along the chord, and no
+                            // further from the edge than the band is wide (the chord's
+                            // direction alone also takes a point far off across a curved
+                            // face, whose offset happens to fall inside it: #2907)
                             let from_rail = (p - r).dot(chord);
-                            if from_rail > apart && from_rail < width - apart {
+                            if from_rail > apart
+                                && from_rail < width - apart
+                                && (p - e).length() < width
+                            {
                                 return Ok(false);
                             }
                         }
