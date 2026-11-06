@@ -1383,7 +1383,7 @@ fn arc_end_held(sk: &Sketch, ci: usize, end: usize) -> bool {
         use solidcraft_sketch::ConstraintKind::*;
         match c.kind {
             Coincident { p, q } => p == end || q == end,
-            Fix { p } | PointOnCurve { p, .. } | Midpoint { p, .. } => p == end,
+            Fix { p } | PointOnCurve { p, .. } | PointAlong { p, .. } | Midpoint { p, .. } => p == end,
             HorizontalPoints { p, q } | VerticalPoints { p, q } | Symmetric { p, q, .. } => p == end || q == end,
             _ => false,
         }
@@ -1501,7 +1501,7 @@ fn grow_line(sk: &mut Sketch, ci: usize, aim: LineAim) -> Result<String> {
         match c.kind {
             Coincident { p, q } => p == end || q == end,
             Fix { p } => p == end,
-            PointOnCurve { p, .. } => p == end,
+            PointOnCurve { p, .. } | PointAlong { p, .. } => p == end,
             Midpoint { p, .. } => p == end,
             HorizontalPoints { p, q } | VerticalPoints { p, q } => p == end || q == end,
             Symmetric { p, q, .. } => p == end || q == end,
