@@ -276,7 +276,7 @@ mod tests {
         // Saved locked; a design without the field opens unlocked.
         let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
         assert!(back.canvases[0].locked && !back.canvases[1].locked);
-        assert!(!s.doc.to_json().contains("\"locked\":false"), "an unlocked canvas saves as before");
+        assert!(serde_json::to_value(&s.doc.canvases[1]).unwrap().get("locked").is_none(), "an unlocked canvas saves as before");
         // Delete of both deletes the unlocked one and names the locked one.
         let r = s.execute("selection.delete", &json!({"canvases": [id, other]})).unwrap();
         assert_eq!(r["skipped"], json!(["Blueprint is locked; unlock it first"]));

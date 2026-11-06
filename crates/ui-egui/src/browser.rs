@@ -2405,6 +2405,7 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
     }
     for (id, name, visible, locked) in canvases {
         let selected = app.tree.picked_canvases.contains(&id);
+        let badges: &[&str] = if locked { &["lock"] } else { &[] };
         let r = draw_row(
             ui,
             ui.scope_id().with(("canvas", id)),
@@ -2416,7 +2417,7 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
                 name: true,
                 selected,
                 dim: !visible || !shown,
-                badges: if locked { &["lock"] } else { &[] },
+                badges,
                 ..Default::default()
             },
         );
