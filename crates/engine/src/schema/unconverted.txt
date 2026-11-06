@@ -27,7 +27,6 @@ explode.create
 explode.delete
 explode.list
 explode.show
-expr.evaluate
 face.delete
 file.export
 file.export_view_dxf
@@ -78,13 +77,6 @@ occurrence.drag
 occurrence.ground
 occurrence.move
 occurrence.properties
-parameters.change
-parameters.complete
-parameters.export
-parameters.graph
-parameters.import
-parameters.list
-parameters.users
 plastic.boss
 plastic.lip
 plastic.rest
