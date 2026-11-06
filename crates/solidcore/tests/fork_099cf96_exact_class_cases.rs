@@ -32,22 +32,23 @@
 //! alone while the default was the pinned corner; the blend corner, always built since #2400,
 //! builds `sphere_plane` (its End at a smooth vertex, as the fork since smlib#124) and, on
 //! the default kernel with the exact classes but no other fix, builds the pipes (traced, and
-//! failing a validity test), so neither profile has these marks now. With SolidCraft's
+//! failing a validity test), so neither profile has these marks now. Since #2864 the ball's
+//! half rim is refused again, its round ending at the sphere's seam. With SolidCraft's
 //! current section fixes, the fitted tee meets its original tolerance even with procedural rounds off.
 //! With `fillet_round_as_definition` enabled (#2274), a fitted round is instead a
 //! `ProceduralBlend`: check its definition's ball contact to 1e-9, and its stored net
 //! against the unchanged fitted tolerance. The historical 1.47e-3 mark describes the
 //! earlier fitted surface, not this definition.
 //!
-//! `sphere_plane` with every fix: the fork at b785227 (before smlib#124) still returns 1001;
-//! at 63c7962 and 18e96f1 (smlib#124) the same round (`SmApiFilletEdges`, r 2, section 1,
-//! continuity 1, thumbweight 1) returns success with 5 faces and volume 3272.764885312161
-//! (`SmApiBrepComputeVolume` at 1e-7), which the port matches (its round revolved, on the
-//! ball to 1e-14, valid at level 2). That is not the closed form: the ball R 10 below z = 4
-//! is 4000 pi / 3 - 288 pi = 3284.011520552530, and the round r 2 (the ball's centre ring
-//! at z = 2, radius sqrt 60) takes away pi (40.5 - 2 sqrt 60 (pi - sqrt 3.75 / 4 - 2 asin
-//! 1 / 4)) = 22.492758031488, which leaves 3261.518762521043 (the case's `want`, the fork's
-//! capi figure). The fork's round and the port's take away 11.246635240 only.
+//! `sphere_plane` with every fix: the fork at b785227 (before smlib#124) still returns 1001; at
+//! 63c7962 and 18e96f1 (smlib#124) the same round (`SmApiFilletEdges`, r 2, section 1, continuity
+//! 1, thumbweight 1) returns success with 5 faces and volume 3272.764885312161
+//! (`SmApiBrepComputeVolume` at 1e-7), which the port matched until #2864 (its round revolved, on
+//! the ball to 1e-14, valid at level 2). That is not the closed form: the ball R 10 below z = 4 is
+//! 4000 pi / 3 - 288 pi = 3284.011520552530, and the round r 2 (the ball's centre ring at z = 2,
+//! radius sqrt 60) takes away pi (40.5 - 2 sqrt 60 (pi - sqrt 3.75 / 4 - 2 asin 1 / 4)) =
+//! 22.492758031488, which leaves 3261.518762521043 (the case's `want`, the fork's capi figure). The
+//! fork's round and the port's take away 11.246635240 only.
 //! Tracked in tangency-labs/solidcore#2441.
 //! One difference from the fork: the two pipes' union itself fails 1001 here without
 //! `ssi_split_curves_at_singular_points` (WR-77), so the pipes get that flag wherever the
@@ -436,12 +437,8 @@ enum Graded {
     Body(String),
     /// The round returned an error.
     Round(String),
-    /// The round built: what's wrong with it, how far it lies off the ball, and its volume.
-    Built {
-        problems: Vec<String>,
-        off: f64,
-        volume: f64,
-    },
+    /// The round built: what's wrong with it and how far it lies off the ball.
+    Built { problems: Vec<String>, off: f64 },
 }
 
 fn grade(case: &Case, k: &mut Kernel) -> Graded {
@@ -531,11 +528,7 @@ fn grade(case: &Case, k: &mut Kernel) -> Graded {
     if off > allowed {
         problems.push(format!("{off:.3e} off the ball (allowed {allowed:.3e})"));
     }
-    Graded::Built {
-        problems,
-        off,
-        volume: v,
-    }
+    Graded::Built { problems, off }
 }
 
 /// A mark of the fork's.
@@ -546,8 +539,6 @@ enum Mark {
     Status1001,
     /// The kind is right, but it lies this far off the ball, over the tolerance.
     OverTolerance(f64),
-    /// Built, valid and on the ball, but of this volume, not the case's (rel 1e-9).
-    WrongVolume(f64),
 }
 
 /// The fork's figures have three digits.
@@ -562,16 +553,6 @@ fn holds(mark: Mark, got: &Graded) -> bool {
         (Mark::OverTolerance(m), Graded::Built { problems, off, .. }) => {
             about(*off, m) && problems.len() == 1 && problems[0].contains("off the ball")
         }
-        (
-            Mark::WrongVolume(m),
-            Graded::Built {
-                problems, volume, ..
-            },
-        ) => {
-            (volume - m).abs() <= 1e-9 * m
-                && problems.len() == 1
-                && problems[0].starts_with("volume")
-        }
         _ => false,
     }
 }
@@ -585,13 +566,13 @@ fn mark_after(name: &str) -> Mark {
     }
 }
 
-/// The current section construction fixes the fitted tee; the ball cut flat builds as the
-/// fork's does since smlib#124 (63c7962, 18e96f1), to the fork's volume, not the closed
-/// form (#2441). The other marks are unchanged.
+/// The current section construction fixes the fitted tee. The ball cut flat, its rim's one
+/// edge picked, built as the fork's does since smlib#124 (63c7962, 18e96f1), the half rim
+/// ending at the sphere's seam (#2441, #2660); a round does not end at a seam (#2864), so
+/// it is refused, code 1001 as before smlib#124. The other marks are unchanged.
 fn mark_with_section_fixes(name: &str) -> Mark {
     match name {
         "tee_is_fitted" => Mark::Passes,
-        "sphere_plane" => Mark::WrongVolume(3_272.764_885_312_161),
         _ => mark_after(name),
     }
 }

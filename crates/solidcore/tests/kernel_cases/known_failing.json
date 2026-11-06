@@ -107,7 +107,7 @@
   {
     "case": "fillets/every-block-cylinder-tangent-concave-arc-r2-partial-chain",
     "issue": "tangency-labs/solidcore#2864",
-    "reason": "the picked edge ends at the cylinder's seam, and the round ends there with a step 54.9 degrees short of the half circle (19085.7707 against 19091.9620); it should run on into the same curve, or refuse"
+    "reason": "refused: the picked edge runs on across the cylinder's seam into the rest of the same half circle, and a round does not end there; it passes as written (19091.9620) once the round runs on across the seam"
   },
   {
     "case": "fillets/report-drafted-peg-front-and-concave-rounds-together-r2",
