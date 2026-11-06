@@ -17,7 +17,7 @@ fn drawing(command: &str) -> Harness {
 }
 
 fn assert_focus(h: &Harness, index: usize) {
-    let expected = egui::Id::new(("sc_dim", index));
+    let expected = egui::Id::unique(("sc_dim", index));
     assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(expected), "focus must stay in inline dimension {index}");
 }
 
@@ -630,7 +630,7 @@ fn polygon_inputs_clear_each_other_and_the_preview() {
             let boxes: Vec<_> = (0..2usize)
                 .map(|i| {
                     h.ctx
-                        .memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", i))))
+                        .memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i))))
                         .unwrap_or_else(|| panic!("{command}, {view}, {corner:?}: input {i} missing"))
                 })
                 .collect();
@@ -742,7 +742,7 @@ fn a_second_circle_on_the_same_centre_keeps_its_diameter_box_after_release() {
             h.app.status
         );
         assert!(
-            h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", 0usize)))).is_some(),
+            h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", 0usize)))).is_some(),
             "{label}: Diameter field missing; focused={:?} hover={:?}",
             h.ctx.memory(|m| m.focused()),
             tool.hover
@@ -772,7 +772,7 @@ fn a_typed_first_circle_then_same_centre_keeps_the_diameter_box() {
     assert_eq!(tool.pts.len(), 1, "pts={:?} status={:?}", tool.pts, h.app.status);
     assert_eq!(tool.dims.iter().map(|d| d.label).collect::<Vec<_>>(), ["Diameter"]);
     assert!(
-        h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", 0usize)))).is_some(),
+        h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", 0usize)))).is_some(),
         "Diameter field gone; focused={:?} hover={:?} dims={:?}",
         h.ctx.memory(|m| m.focused()),
         tool.hover,

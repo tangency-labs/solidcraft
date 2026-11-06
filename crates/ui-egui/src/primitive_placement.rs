@@ -40,7 +40,7 @@ const BOX_PLACEMENTS: [&str; 2] = ["Corner", "Center"];
 pub(crate) fn inputs(cmd: &str) -> Vec<SelInput> {
     match cmd {
         "solid.box" | "solid.sphere" | "solid.torus" => {
-            vec![SelInput::new("Point", VERTICES | EDGES | FACES | ORIGIN | POINTS | EXTERNAL_POINTS, false)]
+            vec![SelInput::new("Point", VERTICES | EDGES | FACES | ORIGIN | POINTS | EXTERNAL_POINTS, false).tip("dialog.primitive_point_tip")]
         }
         _ => Vec::new(),
     }
@@ -101,12 +101,14 @@ pub(crate) fn rows(ui: &mut egui::Ui, s: &Session, cmd: &str, extra: &mut Map<St
     enter
 }
 
-/// A coordinate of a picked point as a field shows it, in millimetres.
-fn mm(v: f64) -> String {
+/// A coordinate of a picked point (mm) as a field shows it and OK sends it: in the design's
+/// length unit, kept to the micrometre in every unit, so a vertex at 38.1 mm reads "1.5 in", not
+/// "1.5000000000000002 in", and one in a metre design does not move by a rounded millimetre.
+fn coord(s: &Session, v: f64) -> String {
     let v = (v * 1e6).round() / 1e6;
     // No "-0 mm".
     let v = if v == 0.0 { 0.0 } else { v };
-    format!("{v} mm")
+    s.doc.design_length(v).1
 }
 
 /// Where a pick is in the world: a vertex, or a point on an edge or face, where it was picked; a
@@ -132,7 +134,7 @@ pub(crate) fn picked(s: &Session, cmd: &str, at: &mut Option<(Vec3, Option<Vec3>
         return;
     }
     let Some((index, _)) = current(s, cmd, extra) else { return };
-    store(cmd, extra, index, &[mm(point.x), mm(point.y), mm(point.z)]);
+    store(cmd, extra, index, &[coord(s, point.x), coord(s, point.y), coord(s, point.z)]);
     *at = None;
 }
 

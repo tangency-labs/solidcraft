@@ -79,17 +79,6 @@ pub(crate) fn snap_hint(painter: &egui::Painter, c: Pos2, kind: SnapKind, col: C
     painter.circle_filled(c, 1.3, col);
 }
 
-/// A placed hole's drag handle: a ring round the hole's centre with a cross through it, filled
-/// while it is hovered or dragged.
-pub(crate) fn hole_handle(painter: &egui::Painter, c: Pos2, col: Color32, hot: bool) {
-    let ic = Tokens::get().icons;
-    let r = 6.0;
-    painter.circle_filled(c, r + 3.5, ic.marker_halo);
-    painter.circle(c, r, if hot { col } else { col.gamma_multiply(0.35) }, Stroke::new(1.6, col));
-    let ink = Stroke::new(1.3, if hot { ic.highlight } else { col });
-    painter.line_segment([c - vec2(r + 3.0, 0.0), c + vec2(r + 3.0, 0.0)], ink);
-    painter.line_segment([c - vec2(0.0, r + 3.0), c + vec2(0.0, r + 3.0)], ink);
-}
 pub(crate) fn glyph_icon(name: &str) -> Option<&'static str> {
     Some(match name {
         "Coincident" => "c_coincident",

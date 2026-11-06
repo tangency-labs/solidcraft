@@ -5,16 +5,21 @@ Tag: In profile (hover "Saved in settings profiles"). Reference boards: `Theme_O
 `Settings_Interface` for Scale and text and Colour vision. Source today: Interface page
 (`prefs/interface.rs`).
 
-## Theme (6 themes)
+## Theme
 
 | Label | Control | Edits | Default | Hover | Figure | Notes |
 |---|---|---|---|---|---|---|
-| Theme cards: Light (Built in), Dark (Built in), System (Follows the OS), Gruvbox (Built in), Studio glass (Imported file) | Carousel of picture cards (88 wide) with previous and next arrows ("Previous themes", "Next themes") | `Prefs.theme` (id string); "System" follows the OS (`app.window_theme`) | `"dark"` | "Has options" on the disc of cards that have theme options | `theme-light`, `theme-dark`, `theme-system-light-half` + `theme-system-dark-half`, `theme-gruvbox`, `theme-imported` | The count "6 themes" is the number of cards. Gruvbox and Studio glass carry the "has options" disc. Build the cards from the theme list in `theme_files` (built-ins in `assets/styles/ui/themes`, imported in `Prefs.custom_themes`); only the first five are drawn on the board, the carousel scrolls to the rest. |
-| Import... / theme file | Dashed card at the end of the carousel | theme import (`Prefs.custom_themes`) | n/a | none | none | "Import..." with the sub-label "theme file". |
+| One theme / Follow system | Segmented mode control, monitor / half-filled circle icons | `Prefs.theme` | One theme, `"dark"` | none | Painter glyphs | Follow system is `"system"`; System is no longer a theme card. Entering One theme selects the theme currently in effect. Entering Follow system assigns the previous theme to the slot matching its tone. |
+| Import theme file… | Small import button, always at the right of the mode row | `Prefs.custom_themes` | n/a | Existing import help | Painter glyph | Keeps the file picker, drop target and desktop clipboard context menu. |
+| Day theme / Night theme | Two slot cards with thumbnails, sun/moon icons, names and Pick from below / Change | `Prefs.theme_day`, `Prefs.theme_night` | `"light"`, `"dark"` | none | Existing thumbnail painter | Only shown in Follow system. Exactly one is aimed, initially Day. Clicking a slot presets Light/Dark; choosing a card fills only that slot. Unknown ids resolve to the slot's default. Both settings are persistent, command accessible, in Appearance profiles and restored by the page's defaults. |
+| Light / Dark; Standard / High contrast; Imported | Independent toggle segments and an Imported chip, with counts | UI state | All clear | Count with the other filters applied | Painter glyphs | Clicking a selected filter clears it. A count ignores its own group. Interim classification in `theme_traits`: tone uses resolved thumbnail background luminance below 0.5; high contrast uses primary text/background contrast at least 20:1. The four maximal-contrast shipped themes measure 21:1; the others are at most 16.006:1. A later change will let themes declare these traits; this picker adds no theme-file fields. |
+| Carousel / Grid | Icon-only view switch at the right of the filter row | UI state | Carousel | Accessible names | Painter glyphs | The browser reuses the theme-options panel's fill and stroke. Carousel content has equal 10 pt padding on all four sides at its resting ends; mid-scroll cards clip at the box edges, with 84 pt fades and round 28 pt arrows where there are more cards. Arrows move three cards. Horizontal wheel/trackpad input and dragging scroll and snap; predominantly vertical input passes through to the Preferences page. Grid has five equal columns, a vertical scroller and a height of about 2.5 rows. |
+| Theme cards | Existing thumbnails, names, Built in / Imported file and optional · High contrast | `Prefs.theme` or the aimed slot | As above | Has options; context menu Export… and Remove for imported themes | Existing thumbnail painter | The section shows the real theme count excluding System. Tone/contrast badges sit at top left; check or Day/Night marks at top right. Selected and slot-holding cards use accent borders and selected backgrounds. Options keep their badge and panel. No search field or footer within the picker. |
+| No theme matches these filters. / Clear filters | Empty well with reset link | All three filters | n/a | none | none | Clear filters leaves mode, aimed slot and view unchanged. |
 
 ### Theme options panel ("Studio glass", "6 options", Reset)
 
-Follows `Theme_Options.dc.html`. Shown under the carousel for a theme that has options. "Reset"
+Follows `Theme_Options.dc.html`. Shown under the picker for the active theme when it has options. "Reset"
 restores the theme's own option values (`Prefs.theme_options[<theme>]`). Two columns.
 
 | Label | Control | Edits | Default | Hover | Notes |
@@ -64,4 +69,7 @@ Source: `Settings_Interface.dc.html` (section "Scale and text").
 * The dark board's accent `#8CBEF5` has no token (see `tokens.md`).
 * Only `opacity` has a provider on main (`theme_options.rs`); blur, tab colours and the fade are standard ids
   without one yet, so the board shows them ahead of the code.
-* Only 5 of the 6 theme cards are drawn on the board.
+The updated theme states are in `plan/theme-picker/Prefs2_Appearance_Theme.dc.html`; the interactive
+behaviour and icon coordinates are in that folder's `SPEC.md` and `ICONS.md`. Filters, view and aimed
+slot are window UI state, never saved preferences. Changes a default: no (default Day/Night retain the
+previous operating-system Light/Dark resolution). Ctrl F still indexes theme names and picker labels.

@@ -1614,7 +1614,7 @@ done
 }
 
 /// #9811: an agent that offers the standard `systemPrompt` field gets the note in it, on the first
-/// session and on the one New chat opens.
+/// session and on the one New chat opens, with the custom instructions set before it (#8220).
 #[cfg(unix)]
 #[test]
 fn an_acp_agent_offering_the_standard_field_gets_the_system_note_in_every_session() {
@@ -1647,6 +1647,7 @@ done
         }
     };
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
+    app.preferences.agent_instructions = "Print flat side down.".into();
     new_chat(&mut app);
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
     let sessions: Vec<Value> = std::fs::read_to_string(&log)
@@ -1656,11 +1657,86 @@ done
         .filter(|v| v["method"] == "session/new")
         .collect();
     assert_eq!(sessions.len(), 2);
-    for session in &sessions {
-        assert_eq!(session.pointer("/params/systemPrompt/content/0/text").and_then(Value::as_str), Some(acp::SYSTEM_NOTE));
+    let notes = [acp::SYSTEM_NOTE.to_string(), acp::system_note("Print flat side down.")];
+    for (session, note) in sessions.iter().zip(&notes) {
+        assert_eq!(session.pointer("/params/systemPrompt/content/0/text").and_then(Value::as_str), Some(note.as_str()));
     }
     disconnect(&mut app);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #8220: Preferences → AI shows the Custom instructions field; `ui.agent_chat` sets them (cut at
+/// the limit) and reports them; Connect sends them in the endpoint's system note, and an edit
+/// reaches the conversation New chat opens.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn custom_instructions_reach_the_system_note_of_each_new_session() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let log = seen.clone();
+    let http: backend::HttpFn = Arc::new(move |r: &backend::HttpRequest| {
+        if r.url.ends_with("/chat/completions") {
+            log.lock().unwrap().push(serde_json::from_slice(r.body.as_deref().unwrap_or(b"null")).unwrap());
+            return Ok((200, json!({"choices": [{"message": {"role": "assistant", "content": "ok"}}]}).to_string().into_bytes()));
+        }
+        Ok((200, b"{\"data\":[]}".to_vec()))
+    });
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.services.agent_http = Some(http);
+    crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_ASSISTANT);
+    h.frames(4);
+    assert!(crate::scenario::rect_of("prefs:agent_instructions").is_some(), "the field is on the AI page");
+    h.app.preferences.ai_features = true;
+    h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("prefs_agent_instructions")));
+    h.frames(2);
+    h.step(&json!({"text": "M3"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.preferences.agent_instructions, "M3", "typed text lands in the field");
+    assert!(h.app.prefs_window.filter.is_empty(), "Preferences search does not take the typing");
+    let long = "x".repeat(acp::INSTRUCTIONS_LIMIT + 5);
+    assert_eq!(
+        h.call("ui.agent_chat", json!({"instructions": long}))["result"]["instructions"].as_str().map(str::len),
+        Some(acp::INSTRUCTIONS_LIMIT)
+    );
+    assert!(!h.call("ui.agent_chat", json!({"instructions": 3}))["error"].is_null());
+    assert_eq!(h.call("ui.agent_chat", json!({"instructions": "Use M3 screws."}))["result"]["instructions"], "Use M3 screws.");
+
+    h.app.preferences.agents.push(agents::AgentConfig {
+        id: "api-1".into(),
+        kind: agents::Kind::Api,
+        base_url: "http://localhost:11434/v1".into(),
+        model: "m".into(),
+        ..Default::default()
+    });
+    h.app.agent_chat.agent_id = Some("api-1".into());
+    let ctx = crate::fonts::test_context();
+    let until = |app: &mut SolveApp, done: &dyn Fn(&SolveApp) -> bool| {
+        let t = std::time::Instant::now();
+        while !done(app) {
+            assert!(t.elapsed() < std::time::Duration::from_secs(20), "timed out");
+            poll(app, &ctx);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    };
+    let sent = |n: usize| {
+        let seen = seen.clone();
+        move |a: &SolveApp| a.agent_chat.state() == State::Ready && seen.lock().unwrap().len() == n
+    };
+    connect(&mut h.app, &ctx);
+    until(&mut h.app, &|a| a.agent_chat.state() == State::Ready);
+    send(&mut h.app, &ctx, "one".into());
+    until(&mut h.app, &sent(1));
+    // Editing the field leaves the running conversation's note alone.
+    h.app.preferences.agent_instructions = "Print flat side down.".into();
+    send(&mut h.app, &ctx, "two".into());
+    until(&mut h.app, &sent(2));
+    new_chat(&mut h.app);
+    until(&mut h.app, &|a| a.agent_chat.state() == State::Ready);
+    send(&mut h.app, &ctx, "three".into());
+    until(&mut h.app, &sent(3));
+    let notes: Vec<Value> = seen.lock().unwrap().iter().map(|body| body["messages"][0]["content"].clone()).collect();
+    assert_eq!(notes, [acp::system_note("Use M3 screws."), acp::system_note("Use M3 screws."), acp::system_note("Print flat side down.")]);
+    disconnect(&mut h.app);
 }
 
 fn models_reply(current: &str) -> Event {

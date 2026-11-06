@@ -110,6 +110,10 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             let response = setting::right_drag_orbits(app, ui).backing_on_hover_text(crate::i18n::tr("nav.right_drag_orbits.help"));
             crate::scenario::publish_target("prefs:right_drag_orbits", response.rect);
         }
+        let keeps = setting::nav_drag_keeps_mode(app, ui).backing_on_hover_text(crate::i18n::tr("nav.drag_keeps_mode.help"));
+        crate::scenario::publish_target("prefs:nav_drag_keeps_mode", keeps.rect);
+        let wrap = setting::orbit_cursor_wrap(app, ui).backing_on_hover_text(crate::i18n::tr("nav.orbit_cursor_wrap.help"));
+        crate::scenario::publish_target("prefs:orbit_cursor_wrap", wrap.rect);
         setting::radial_context_menu(app, ui).backing_on_hover_text(crate::i18n::tr("prefs.navigation.radial_help"));
         let label = app.tr("Middle double-click");
         let width = ui_kit::ContentWidth::label(ui, label);

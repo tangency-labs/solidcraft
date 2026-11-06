@@ -1,9 +1,10 @@
 //! Settings profiles (#6237): the input and interface settings kept together under a name, such
 //! as "Laptop" and "Large monitor", and switched at once. A profile holds the original Interface,
-//! Navigation and Sketch preference keys and the language, keyboard shortcuts, toolbar,
-//! S box favourites, imported theme it uses, and the custom view navigator's texture, arrows and
-//! Home, and its body (when one is chosen; a profile without one leaves the current body alone). Page moves preserve that stored
-//! key set; device-specific 3D mouse keys, graphics, recent files and Assistant settings stay out.
+//! Navigation and Sketch preference keys and the language, keyboard shortcuts, toolbar (with its
+//! quick-access bar), S box favourites, imported theme it uses, and the custom view navigator's
+//! texture, arrows and Home, and its body (when one is chosen; a profile without one leaves the
+//! current body alone). Page moves preserve that stored key set; device-specific 3D mouse keys,
+//! graphics, recent files and Assistant settings stay out.
 //!
 //! A profile is kept, exported and imported as one `solidcraft-profile/1` document. Every
 //! document is checked by [`sanitize`] first: unknown keys are dropped, sizes are capped, and a
@@ -37,9 +38,9 @@ const MAX_THEMES: usize = 4;
 /// Most characters in a command id or a key name.
 const MAX_ID: usize = 200;
 
-/// The 98 stored keys selected dynamically before the split: Interface, Navigation and Sketch, plus
-/// language, excluding space_mouse_* and orbit_cursor. Page moves and title tags must never
-/// change profile contents (including the bridge, origin names and direct interaction).
+/// The original 98 Interface, Navigation, Sketch and language keys, plus explicitly added
+/// settings. Device-specific space_mouse_* and orbit_cursor stay outside profiles. Page moves
+/// and title tags never remove stored keys such as the bridge, origin names and direct interaction.
 const PROFILE_KEYS: &[&str] = &[
     "browser_bodies_folders",
     "browser_collapsed",
@@ -92,8 +93,10 @@ const PROFILE_KEYS: &[&str] = &[
     "ribbon_click_ends_tool",
     "ribbon_icon_grid",
     "ribbon_labels",
+    "ribbon_menus_follow_hover",
     "ribbon_menus_skip_pinned",
     "ribbon_reveal",
+    "ribbon_tabs_only",
     "right_drag_orbits",
     "select_other_hidden",
     "selection_shift_add_only",
@@ -115,7 +118,9 @@ const PROFILE_KEYS: &[&str] = &[
     "status_bar",
     "suppress_sketch_snap",
     "theme",
+    "theme_day",
     "theme_follow",
+    "theme_night",
     "theme_options",
     "timeline_collapsed",
     "timeline_left",
@@ -739,7 +744,7 @@ pub(crate) fn rename_popup(app: &mut SolveApp, ctx: &egui::Context) {
     crate::prefs_search::note_key_sink(ctx);
     let mut done = None;
     let popup = ui_kit::Container::new(ctx, ui_kit::Surface::Popup)
-        .area(egui::Id::new("sc_profile_rename"))
+        .area(egui::Id::unique("sc_profile_rename"))
         .fixed_pos(rename.at)
         .constrain(true)
         .order(egui::Order::Foreground)

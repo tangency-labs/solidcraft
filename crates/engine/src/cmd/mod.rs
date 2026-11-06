@@ -21,7 +21,7 @@ macro_rules! planned {
 }
 
 mod bom;
-mod browser;
+pub(crate) mod browser;
 pub(crate) mod clearance;
 mod clipboard;
 mod clipboard_foreign;
@@ -57,7 +57,7 @@ pub use sketch_construction::{
 };
 pub use sketch_create::{tangent_arc_preview, tangent_arc_starts_at};
 pub use sketch_import::drawing_import_command;
-pub use sketch_modify::{extend_arc_preview, extend_preview, trim_piece};
+pub use sketch_modify::{TrimHover, extend_arc_preview, extend_end_at, extend_preview, trim_hover, trim_piece};
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
 pub(crate) use view_navigation::camera_form;
 pub use view_navigation::standard_view;
@@ -74,6 +74,7 @@ mod libraries;
 pub mod mass_properties;
 mod material_properties;
 mod materials;
+mod measure_exact;
 mod measure_sel;
 mod measure_shape;
 mod mesh;
@@ -94,6 +95,8 @@ mod parameters;
 mod plastic;
 mod print_face;
 mod render;
+pub(crate) use render::{PreparedCapture, prepare_capture_with_metadata, render_cancel_params};
+pub(crate) use render_ui::batch_request;
 mod render_ui;
 #[cfg(test)]
 mod script_tests;
@@ -107,6 +110,7 @@ mod sketch;
 pub(crate) use sketch::author_path_for_rebind;
 pub(crate) use sketch::collapse_reason;
 pub(crate) use sketch::created as sketch_created;
+pub(crate) use sketch::{PLANE_REF_FORMS, custom_plane_form};
 mod canvas_sketch;
 mod sketch_3d;
 mod sketch_canvas;
@@ -261,16 +265,12 @@ impl CommandSpec {
     }
     pub fn info(&self, s: &Session) -> CommandInfo {
         let e = (self.enabled)(s);
-        let (label, icon) = match self.id {
-            "inspect.colored_components" if s.colored_components.is_some() => ("Disable Component Colors", "colored_components_off"),
-            _ => (self.label, self.icon),
-        };
         CommandInfo {
             id: self.id,
-            label,
+            label: self.label,
             tab: self.tab,
             panel: self.panel,
-            icon,
+            icon: self.icon,
             shortcut: self.shortcut,
             params: self.params,
             enabled: e.is_ok(),

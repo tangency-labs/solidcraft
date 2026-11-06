@@ -88,6 +88,20 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         }
                     }
                 });
+                // A picture of the user's behind the model.
+                let label = app.tr("prefs.background_image");
+                ui_kit::row(ui, label, |ui| {
+                    if ui_kit::button(ui, app.tr("prefs.background_choose"), ui_kit::Button::Normal).clicked() {
+                        app.pick_open_for(&["png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff"], |app, path| {
+                            if let Some(path) = path {
+                                app.preferences.background_image = path;
+                            }
+                        });
+                    }
+                    if !app.preferences.background_image.is_empty() && ui_kit::button(ui, app.tr_label("Reset"), ui_kit::Button::Ghost).clicked() {
+                        app.preferences.background_image.clear();
+                    }
+                });
                 // The logo in the theme's own logo colours or in its accent.
                 let label = app.tr("prefs.logo");
                 ui_kit::row(ui, label, |ui| {
@@ -284,6 +298,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 &mut app.preferences.keep_work_on_tab_switch,
                 "keep_work_on_tab_switch",
             );
+            layout_check(
+                ui,
+                app.tr("prefs.tab_double_click_renames"),
+                app.tr("prefs.tab_double_click_renames_note"),
+                &mut app.preferences.tab_double_click_renames,
+                "tab_double_click_renames",
+            );
         });
         if let Some(rect) = crate::scenario::rect_of(&format!("dialog:section:{}", app.tr("prefs.layout_page.window"))) {
             crate::scenario::publish_target(&format!("dialog:section:{}", app.tr("prefs.layout")), rect);
@@ -389,6 +410,22 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.history_play_button,
                     "history_play_button",
                 );
+                // A design's joints as one button in the History, from the second joint (#8884).
+                layout_check(
+                    ui,
+                    app.tr("prefs.history_group_joints"),
+                    app.tr("prefs.history_group_joints_note"),
+                    &mut app.preferences.history_group_joints,
+                    "history_group_joints",
+                );
+                // Folds in the History bar, and a folder for a STEP insert's items (#8885).
+                layout_check(
+                    ui,
+                    app.tr("prefs.history_bar_groups"),
+                    app.tr("prefs.history_bar_groups_note"),
+                    &mut app.preferences.history_bar_groups,
+                    "history_bar_groups",
+                );
                 ui.add_enabled_ui(app.preferences.timeline_left, |ui| {
                     layout_check(
                         ui,
@@ -404,6 +441,14 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.tr("prefs.browser_components_open_note"),
                     &mut app.preferences.browser_components_open,
                     "browser_components_open",
+                );
+                // Folders and placements start closed and open only on request (#8768).
+                layout_check(
+                    ui,
+                    app.tr("prefs.browser_rows_start_closed"),
+                    app.tr("prefs.browser_rows_start_closed_note"),
+                    &mut app.preferences.browser_rows_start_closed,
+                    "browser_rows_start_closed",
                 );
                 layout_check(
                     ui,
@@ -476,7 +521,9 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.tr("prefs.sketch_tab_always"),
                 app.tr("prefs.layout_page.active_commands"),
                 app.tr("prefs.ribbon_reveal"),
+                app.tr("prefs.ribbon_tabs_only"),
                 app.tr("prefs.layout_page.pinned_menus"),
+                app.tr("prefs.layout_page.hover_panel_menus"),
             ];
             let widest =
                 labels.iter().map(|label| ui_kit::ContentWidth::label(ui, label)).fold(0.0, f32::max) + t.space_14 + t.space_6 * 2.0 + t.space_16;
@@ -484,10 +531,10 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             let width = (ui.available_width() - t.space_16 * (columns - 1) as f32) / columns as f32;
             ui.scope(|ui| {
                 ui.spacing_mut().item_spacing.y = t.space_6;
-                for row in (0..4).step_by(columns) {
+                for row in (0..labels.len()).step_by(columns) {
                     ui.horizontal_top(|ui| {
                         ui.spacing_mut().item_spacing.x = t.space_16;
-                        for index in row..(row + columns).min(4) {
+                        for index in row..(row + columns).min(labels.len()) {
                             ui.allocate_ui_with_layout(
                                 egui::vec2(width.max(0.0), t.control_height),
                                 egui::Layout::top_down(egui::Align::Min),
@@ -522,10 +569,28 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     3 => {
                                         layout_check(
                                             ui,
+                                            app.tr("prefs.ribbon_tabs_only"),
+                                            app.tr("prefs.ribbon_tabs_only_note"),
+                                            &mut app.preferences.ribbon_tabs_only,
+                                            "ribbon_tabs_only",
+                                        );
+                                    }
+                                    4 => {
+                                        layout_check(
+                                            ui,
                                             app.tr("prefs.layout_page.pinned_menus"),
                                             app.tr("ui.ribbon_menus_skip_pinned"),
                                             &mut app.preferences.ribbon_menus_skip_pinned,
                                             "ribbon_menus_skip_pinned",
+                                        );
+                                    }
+                                    5 => {
+                                        layout_check(
+                                            ui,
+                                            app.tr("prefs.layout_page.hover_panel_menus"),
+                                            app.tr("prefs.layout_page.hover_panel_menus_help"),
+                                            &mut app.preferences.ribbon_menus_follow_hover,
+                                            "ribbon_menus_follow_hover",
                                         );
                                     }
                                     _ => {}

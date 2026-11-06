@@ -291,7 +291,9 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
 - **OpenAI-compatible API:** a preset (Ollama `http://localhost:11434/v1`, LM Studio
   `http://localhost:1234/v1`, OpenClaw `http://localhost:18789/v1`, OpenAI, Mistral AI
   `https://api.mistral.ai/v1`, Mammouth AI `https://api.mammouth.ai/v1`,
-  OpenCode Go `https://opencode.ai/zen/go/v1`, OpenRouter
+  OpenCode Go `https://opencode.ai/zen/go/v1`, DeepSeek `https://api.deepseek.com`,
+  Qwen `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, Cheaper Inference
+  `https://api.cheaperinference.com/v1`, OpenRouter
   `https://openrouter.ai/api/v1`) or a custom URL, the model name, and an optional key.
   OpenCode Go models are routed to their endpoint by themselves (`/responses`,
   `/messages` or Gemini for those families, `/chat/completions` for the rest),
@@ -301,7 +303,8 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   the mismatch.
   For OpenClaw, turn on its chat endpoint (`gateway.http.endpoints.chatCompletions.enabled` in its
   config) and use its gateway token as the key; the models it lists are its agents, such as `openclaw/default`.
-- **Anthropic-compatible API:** a preset (Anthropic) or a custom URL, for an endpoint that
+- **Anthropic-compatible API:** a preset (Anthropic, DeepSeek `https://api.deepseek.com/anthropic`,
+  Qwen `https://dashscope-intl.aliyuncs.com/apps/anthropic`) or a custom URL, for an endpoint that
   speaks the Anthropic Messages API (`{base}/v1/messages`). This covers Anthropic itself and
   providers that offer an Anthropic-compatible endpoint, such as DeepSeek and Qwen.
 - The **Model** picker lists the endpoint's models, without a key where the endpoint allows that
@@ -312,7 +315,7 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   and a pick becomes the model for its next connection. While it runs, a pick changes the chat's
   model at once.
 - The key goes into the system keychain (Keychain on macOS, Credential Manager on Windows, the
-  Secret Service on Linux) and is only ever sent over HTTPS or to this computer. **Test** asks an
+  Secret Service on Linux). By default it is only sent over HTTPS or to this computer. **Test** asks an
   OpenAI-compatible endpoint for its models; an Anthropic-compatible one gets a short message,
   because not every such endpoint lists models (Qwen's has no model list). For these agents
   SolidCraft runs the conversation itself, with the same tools, limits and questions as for a
@@ -330,10 +333,19 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
 **Edit** on an agent you added opens the same dialog filled with its name and command, or its
 protocol, endpoint, model and request timeout, and **Save** changes it in place: it keeps its id,
 its permission setting and the tools you always allow for it. A stored key is never shown: leave
-the key field empty to keep it, or type a new one to replace it. A saved key still only goes to
-HTTPS or this computer, so moving an endpoint with a key to a plain `http://` address elsewhere is
-refused. The running conversation takes a new request timeout at once; a new command, endpoint
+the key field empty to keep it, or type a new one to replace it. Moving an endpoint with a key to
+a plain `http://` address elsewhere requires the confirmation described below. The running
+conversation takes a new request timeout at once; a new command, endpoint
 or model applies the next time the agent connects.
+
+For a private or on-premises OpenAI-compatible endpoint that requires a key over HTTP, enable
+**Allow insecure HTTP** in its Add/Edit dialog and confirm the displayed endpoint. This option is
+off by default and applies only to that endpoint. The API key and conversation travel unencrypted:
+anyone with access to the network may read or change them. Use it only on a network you trust.
+The key remains in the system keychain. **Test**, model discovery and chat all use the same
+permission; redirects are not followed. Changing the URL or preset clears consent and requires
+confirmation again. Turning the option off keeps the stored key and disconnects that endpoint's
+conversations, including those in other document tabs.
 
 For Ollama, choosing a model checks its reported capabilities in the background. If its
 capabilities list lacks `tools`, a warning below the model picker explains that the model can
@@ -427,6 +439,19 @@ The agent reaches the open design only through SolidCraft's own tools (the
   puts them as chips above the message box, each with a **×**; they go with the next message like
   an attached selection (and are shown the same way), and the box is empty again afterwards.
   **Cancel** keeps what was picked before.
+
+## Custom instructions
+
+Preferences → AI → **Custom instructions** holds your own text for the agent: how you like to
+work, rules to keep to ("don't start a new design from the chat", "sketch on XZ with explicit
+plane vectors"). Every chat starts with it, after SolidCraft's own note about where the agent
+is, by the same route that note takes: the system prompt of an endpoint's requests, or the
+session an ACP agent opens. An agent that reads neither doesn't get it. A change applies from
+the next chat (**Connect** or **New chat**), not to the one running. Blank text adds nothing;
+at most 4000 characters are kept.
+
+They are for this chat only: an MCP client you run yourself keeps its own instruction files,
+and one text applies to every design.
 
 ## Permissions
 

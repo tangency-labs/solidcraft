@@ -33,6 +33,7 @@ impl Effect {
 const READ_METHODS: &[&str] = &[
     "control.pending",
     "control.subscribe",
+    "document.export",
     "document.inspect",
     "document.revision",
     "engine.commands",
@@ -119,6 +120,7 @@ mod tests {
         for (m, p) in [
             ("ui.inspect", json!({})),
             ("ui.screenshot", json!({})),
+            ("document.export", json!({})),
             ("document.inspect", json!({"measure": true})),
             ("engine.execute", json!({"command": "sketch.inspect"})),
             ("engine.execute", json!({"command": "view.status_items", "params": {}})),
@@ -135,6 +137,8 @@ mod tests {
             ("engine.batch", json!({"commands": []})),
             ("ui.click", json!({"x": 1, "y": 2})),
             ("app.quit", json!({})),
+            ("document.import", json!({"text": "{}"})),
+            ("document.saved", json!({"revision": 1})),
         ] {
             assert!(!reads_only(m, &p), "{m} {p}");
             assert_eq!(effect(m, &p), Effect::Changes, "{m} {p}");

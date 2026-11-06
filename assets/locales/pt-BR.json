@@ -1408,6 +1408,8 @@
   "sample.plate.name": "Placa de exemplo",
   "sample.vents.about": "Rasgos em padrão retangular: linhas, colunas e passo são parâmetros",
   "sample.vents.name": "Placa de ventilação",
+  "scale.per_axis": "Por eixo",
+  "scale.uniform": "Uniforme",
   "search.command_keys": "Enter executar     Shift+Enter executar e manter aberto     Esc fechar",
   "search.commands": "Comandos",
   "search.design": "Neste projeto",
