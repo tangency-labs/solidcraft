@@ -289,6 +289,11 @@ pub struct OpenParams {
     /// named after. Default: auto.
     #[serde(default)]
     pub names: Option<NamesParam>,
+    /// For a STEP, IGES, FreeCAD or Rhino file (ignored for other files): true puts an import that
+    /// brings more than one item into the history (its Import feature and the rigid joints holding
+    /// its parts) into a new history folder named `Group #N`. Default: false.
+    #[serde(default)]
+    pub folder: Option<bool>,
     /// For a design: saving to its own file is refused (`file.save_as` keeps the changes
     /// elsewhere). Default: false.
     #[serde(default)]

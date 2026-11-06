@@ -8,6 +8,7 @@ struct Triangle {
     base: vec4<f32>, parameters: vec4<f32>, optics: vec4<f32>,
     coat: vec4<f32>, // weight, perceptual roughness, IOR, shadow transmission flag
     interior: vec4<f32>, // scattering/mm, HG g, flags (stage=1, scalar face=2), immediate parent triangle+1
+    glass: vec4<f32>, // optional roughness, Abbe number, film thickness/nm, film IOR
 };
 struct Node { lo: vec3<f32>, first: u32, hi: vec3<f32>, count: u32 };
 struct AreaLight { center: vec4<f32>, u: vec4<f32>, v: vec4<f32>, radiance: vec4<f32> };
@@ -31,7 +32,7 @@ struct Params {
     adaptive_error: vec4<f32>, // relative RGB, absolute RGB, absolute coverage, current production stratum
     volume_min: vec4<f32>, // camera-relative bounds minimum, extinction/mm
     volume_max: vec4<f32>, // camera-relative bounds maximum, HG mean cosine
-    volume_albedo: vec4<f32>, // RGB single-scattering albedo, reserved
+    volume_albedo: vec4<f32>, // RGB single-scattering albedo, active glass model flag
     aging: array<AgingLayer,8>,
     directional_lights: array<DirectionalLight,8>,
     punctual_lights: array<PunctualLight,8>,
@@ -74,8 +75,11 @@ fn triangle(index: u32) -> Triangle {
     let a = geometry[1]+geometry[word]*8u;
     let b = geometry[1]+geometry[word+1u]*8u;
     let c = geometry[1]+geometry[word+2u]*8u;
-    let material = geometry[2]+geometry[word+3u]*20u;
-    return Triangle(vector_at(a),vector_at(b),vector_at(c),vector_at(a+4u),vector_at(b+4u),vector_at(c+4u),vector_at(material),vector_at(material+4u),vector_at(material+8u),vector_at(material+12u),vector_at(material+16u));
+    let has_model=(geometry[2]&0x80000000u)!=0u;
+    let material = (geometry[2]&0x3fffffffu)+geometry[word+3u]*select(20u,24u,has_model);
+    var glass=vec4<f32>(0.0);
+    if has_model {glass=vector_at(material+20u);}
+    return Triangle(vector_at(a),vector_at(b),vector_at(c),vector_at(a+4u),vector_at(b+4u),vector_at(c+4u),vector_at(material),vector_at(material+4u),vector_at(material+8u),vector_at(material+12u),vector_at(material+16u),glass);
 }
 
 // Exact s/p power reflectance and transmitted cosine; -1 denotes TIR.
@@ -97,8 +101,19 @@ fn sheet_polarization(r: f32, a: vec3<f32>) -> Sheet {
     return Sheet(vec3<f32>(r)+(1.0-r)*(1.0-r)*r*a*a/denominator,(1.0-r)*(1.0-r)*a/denominator);
 }
 fn sheet(t: Triangle, f: vec3<f32>) -> Sheet {
-    if f.z <= 0.0 { return Sheet(vec3<f32>(1.0),vec3<f32>(0.0)); }
-    let attenuation = exp(-t.optics.xyz*(t.parameters.w/f.z));
+    if f.z < 0.0 { return Sheet(vec3<f32>(1.0),vec3<f32>(0.0)); }
+    // An index-matched zero-thickness sheet has no optical path or interface,
+    // including exact grazing. Avoid both 0/0 and an invented opaque boundary.
+    var attenuation = vec3<f32>(1.0);
+    if t.parameters.w > 0.0 {
+        if f.z == 0.0 {
+            // No finite path exists for a positive-thickness tangent sheet.
+            // Share the retained diagnostic word without changing buffer layout.
+            atomicOr(&failures[7],2u);
+            return Sheet(vec3<f32>(0.0),vec3<f32>(0.0));
+        }
+        attenuation = exp(-t.optics.xyz*(t.parameters.w/f.z));
+    }
     let s = sheet_polarization(f.x,attenuation);
     let p = sheet_polarization(f.y,attenuation);
     return Sheet((s.reflection+p.reflection)*0.5,(s.transmission+p.transmission)*0.5);
@@ -108,6 +123,9 @@ struct Medium { id: f32, ior: f32, sigma: vec3<f32>, scatter: vec2<f32> };
 // inside a liquid or a ray starts on an opaque object inside a container. Parent
 // references are immutable CPU-certified material references, never AABB guesses.
 fn initialize_media(hit_index:u32,d:vec3<f32>,stack:ptr<function,array<Medium,MEDIUM_CAPACITY>>,count:ptr<function,u32>) -> bool {
+    return initialize_media_spectral(hit_index,d,stack,count,0.0);
+}
+fn initialize_media_spectral(hit_index:u32,d:vec3<f32>,stack:ptr<function,array<Medium,MEDIUM_CAPACITY>>,count:ptr<function,u32>,wavelength:f32) -> bool {
     let first=triangle(hit_index);
     if first.base.w<=0.0 || first.parameters.w>=0.0 {return true;}
     let outward=unit(cross(first.p1.xyz-first.p0.xyz,first.p2.xyz-first.p0.xyz));
@@ -117,7 +135,7 @@ fn initialize_media(hit_index:u32,d:vec3<f32>,stack:ptr<function,array<Medium,ME
     while reference>0u {
         if length>=MEDIUM_CAPACITY {return false;}
         let t=triangle(reference-1u);
-        (*stack)[length]=Medium(t.optics.w,t.parameters.z,t.optics.xyz,t.interior.xy);
+        (*stack)[length]=Medium(t.optics.w,glass_ior(t.parameters.z,t.glass.y,wavelength),t.optics.xyz,t.interior.xy);
         reference=u32(t.interior.w);
         length+=1u;
     }
@@ -722,6 +740,10 @@ fn origin_boundary(o: vec3<f32>, d: vec3<f32>) -> OriginBoundary {
     if nodes[0].first==0xffffffffu { return OriginBoundary(hit,true); }
     entry[0]=box_entry_padded(nodes[0],o,d,FAR,u.lighting.x);
     if entry[0]<0.0 { return OriginBoundary(hit,true); }
+    // Reuse this already-computed bound: an outside origin is vacuum, and
+    // entering even the padded root after the primary minimum proves its
+    // launch interval clear. Near-boundary origins still take the full query.
+    if entry[0]>u.lighting.x && (any(o<nodes[0].lo) || any(o>nodes[0].hi)) {return OriginBoundary(hit,true);}
     stack[0]=0u;var size=1u;
     loop {
         if size==0u { break; }
@@ -961,6 +983,7 @@ const FIXED_LIGHTS = array<vec4<f32>,3>(vec4<f32>(0.6,0.0,0.8,3.0),vec4<f32>(-0.
 // directions follow without consuming random numbers. Without explicit lighting
 // the three fixed lights are used.
 fn direct_light(t: Triangle, position: vec3<f32>, physical: PrecisePoint, o: vec3<f32>, n: vec3<f32>, geometric: vec3<f32>, v: vec3<f32>, remaining: u32, rng: ptr<function,u32>) -> vec3<f32> {
+    transport_connection_origin=physical.hi;transport_connection_origin_low=physical.lo;
     var result = vec3<f32>(0.0);
     let opaque = 1.0-t.base.w;
     let studio = u.environment.w > 0.0;
@@ -973,6 +996,7 @@ fn direct_light(t: Triangle, position: vec3<f32>, physical: PrecisePoint, o: vec
         var shadow_distance = FAR;
         var shadow_origin = o;
         var shadow_origin_low = vec3<f32>(0.0);
+        if transport_medium_id!=0.0 {shadow_origin=physical.hi;shadow_origin_low=physical.lo;}
         var punctual = false;
         var physical_distance = FAR;
         if !studio {
@@ -986,7 +1010,7 @@ fn direct_light(t: Triangle, position: vec3<f32>, physical: PrecisePoint, o: vec
                 let point = light.center.xyz + light.u.xyz*(2.0*random(rng)-1.0) + light.v.xyz*(2.0*random(rng)-1.0);
                 let delta = point-position;
                 sample = EnvironmentSample(unit(delta),light.radiance.xyz,area_pdf(light,delta));
-                let shadow = point-o;
+                let shadow = precise_point_delta(point,vec3<f32>(0.0),shadow_origin,shadow_origin_low);
                 shadow_direction = unit(shadow);
                 shadow_distance = length(shadow);
             } else if source==area_count {
@@ -1016,7 +1040,7 @@ fn direct_light(t: Triangle, position: vec3<f32>, physical: PrecisePoint, o: vec
                 if !punctual_radiance_valid(contribution) { punctual_count(1u); continue; }
                 // Irradiance uses the physical point; the robust connection is
                 // separately re-aimed from an offset of that same precise point.
-                let shifted=punctual_offset(physical,geometric*(u.lighting.x*2.0));
+                let shifted=punctual_offset(physical,select(geometric*(u.lighting.x*2.0),vec3<f32>(0.0),transport_medium_id!=0.0));
                 shadow_origin=shifted.hi;
                 shadow_origin_low=shifted.lo;
                 let connection=precise_point_delta(light.position.xyz,light.position_low.xyz,shadow_origin,shadow_origin_low);
@@ -1031,7 +1055,7 @@ fn direct_light(t: Triangle, position: vec3<f32>, physical: PrecisePoint, o: vec
         }
         // Studio emitters block a connection that passes them; studio volumes attenuate it.
         var visibility = blocked_shadow();
-        let shadow_minimum=select(u.lighting.x,0.0,punctual);
+        let shadow_minimum=select(u.lighting.x,0.0,punctual || transport_medium_id!=0.0);
         let emitter_limit=shadow_distance-select(u.lighting.x*2.0,0.0,punctual);
         if !studio || emitter_hit_precise(shadow_origin,shadow_origin_low,shadow_direction,shadow_minimum).distance>=emitter_limit {
             visibility = shadow_transmittance(shadow_origin,shadow_origin_low,shadow_direction,shadow_distance,shadow_minimum);
@@ -1075,6 +1099,10 @@ fn primary_ray(uv: vec2<f32>, lens_sample: vec2<f32>) -> CameraRay {
     return CameraRay(o,d);
 }
 fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
+    if GLASS_DELTA_LIGHTS {transport_boundary_connection=false;}
+    transport_wavelength=0.0;transport_medium_id=0.0;transport_medium_ior=1.0;
+    transport_medium_sigma=vec3<f32>(0.0);transport_medium_scatter=0.0;transport_source_triangle=0xffffffffu;
+    transport_connection_origin=vec3<f32>(0.0);transport_connection_origin_low=vec3<f32>(0.0);
     var ordinal = u.image.z;
     var salt = 0u;
     if u.adaptive_budget.x > 0u {
@@ -1102,10 +1130,20 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
     // paths from an opaque bounce. Camera and reflected paths stay physical.
     var suppress_direct = false;
     var throughput = vec3<f32>(1.0);
+    var wavelength=0.0;
+    if (geometry[2]&0x40000000u)!=0u {
+        let channel=min(2u,u32(random(&rng)*3.0));
+        wavelength=glass_wavelength(channel);
+        throughput=vec3<f32>(0.0);throughput[channel]=3.0;
+    }
+    transport_wavelength=wavelength;
     var radiance = vec3<f32>(0.0);
     var coverage = 0.0;
     var previous_pdf = 0.0;
     var previous_delta = true;
+    var continuous_prefix=false;
+    var optical_lights:array<vec4<u32>,6>;var optical_light_count=0u;
+    var optical_light_rng=pixel*0x68bc21ebu ^ ordinal*0x02e5be93u ^ u.sampling.x ^ salt ^ lane*0x967a889bu ^ 0x5bd1e995u;
     var media: array<Medium,MEDIUM_CAPACITY>;
     var medium_count = 0u;
     var texture_path_length = 0.0;
@@ -1123,7 +1161,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 // initializer would only write the existing zero count again.
                 let vacuum=first.interior.w==0.0 && dot(unit(cross(first.p1.xyz-first.p0.xyz,first.p2.xyz-first.p0.xyz)),d)<0.0;
                 if !vacuum {
-                    if !initialize_media(boundary.hit.triangle,d,&media,&medium_count) { return medium_failure(radiance,coverage,pixel,0u,4u); }
+                    if !initialize_media_spectral(boundary.hit.triangle,d,&media,&medium_count,wavelength) { return medium_failure(radiance,coverage,pixel,0u,4u); }
                 }
             }
         }
@@ -1134,7 +1172,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         // The complete origin query exclusively owns primary classification.
         // Retain the established fallback for later opaque/thin surface launches.
         if !OPAQUE_SCENE && u.lighting.w>0.0 && bounce>0u && medium_count==0u && hit.triangle!=0xffffffffu {
-            if !initialize_media(hit.triangle,d,&media,&medium_count) {return medium_failure(radiance,coverage,pixel,bounce,4u);}
+            if !initialize_media_spectral(hit.triangle,d,&media,&medium_count,wavelength) {return medium_failure(radiance,coverage,pixel,bounce,4u);}
         }
         if medium_count>0u && media[medium_count-1u].scatter.x>0.0 {
             let current=media[medium_count-1u];
@@ -1147,9 +1185,16 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 throughput*=exp(-current.sigma*length(traversed));
                 coverage=1.0;
                 if !any(throughput>vec3<f32>(0.0)) {break;}
-                // Homogeneous random walk without a competing next-event light
-                // connection through a refracting boundary. Do not invent a
-                // straight-shadow approximation or apply a mismatched MIS weight.
+                if GLASS_DELTA_LIGHTS {
+                    if !photon_enabled() || !continuous_prefix {
+                        glass_offer_light(&optical_lights,&optical_light_count,&optical_light_rng,PrecisePoint(position,vec3<f32>(0.0)),d,throughput,current.ior,current.ior,0xffffffffu,1u,current);
+                        radiance+=throughput*photon_gather_volume(position,d,current);
+                    }
+                    continuous_prefix=true;
+                }
+                // HG delta-source NEE above covers contained straight connections;
+                // refracting-boundary suffixes use photons when enabled. Finite
+                // source endpoints retain the random walk's complete weight.
                 d=sample_hg(d,current.scatter.y,&rng);
                 previous_delta=true;previous_pdf=0.0;suppress_direct=false;
                 previous_position=position;previous_position_low=vec3<f32>(0.0);
@@ -1157,6 +1202,10 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 o=position;o_low=vec3<f32>(0.0);ray_excluded=0xffffffffu;ray_minimum=0.0;
                 continue;
             }
+            // The competing BSDF endpoint density includes the probability of
+            // traversing this physical segment without an HG event, as does NEE.
+            let segment=ray_segment_precise(o,o_low,previous_position,previous_position_low,d,boundary);
+            previous_pdf*=exp(-current.scatter.x*length(segment));
         }
         if u.volume_min.w>0.0 {
             let emitter_distance=emitter_hit_precise(o,o_low,d,ray_minimum).distance;
@@ -1245,7 +1294,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         if medium_count > 0u {ni = media[medium_count-1u].ior;}
         var position = surface_point(captured,hit.bary);
         var position_low = vec3<f32>(0.0);
-        if captured.base.w>0.0 && captured.parameters.w<0.0 {
+        if (captured.base.w>0.0 && (captured.parameters.w<0.0 || GLASS_DELTA_LIGHTS)) || medium_count>0u {
             let point=surface_point_precise(captured,hit.bary);
             position=point.hi;position_low=point.lo;
         }
@@ -1257,18 +1306,23 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         }
         previous_position = position; previous_position_low=position_low;
         o = position + geometric*(u.lighting.x*2.0); o_low=vec3<f32>(0.0);
-        // Captured dielectric flags are exactly one, and opaque flags zero.
-        // Maps are admitted only on opaque bodies; aging also leaves glass
-        // unchanged. Resolve glass before any sampler temporaries become live.
+        var physical=PrecisePoint(position,position_low);
+        if u.light_count.y>0.0 { physical=punctual_offset(surface_point_precise(captured,hit.bary),vec3<f32>(0.0)); }
+        transport_medium_id=0.0;transport_medium_ior=1.0;transport_medium_sigma=vec3<f32>(0.0);transport_medium_scatter=0.0;
+        transport_source_triangle=hit.triangle;
+        if medium_count>0u {
+            let current=media[medium_count-1u];transport_medium_id=current.id;transport_medium_ior=current.ior;
+            transport_medium_sigma=current.sigma;transport_medium_scatter=current.scatter.x;
+        }
+        // Glass has no opaque closure. Finish the dielectric event before
+        // making the texture sampling temporaries live.
         if !OPAQUE_SCENE && captured.base.w > 0.0 && random(&rng) < captured.base.w {
             let t=captured;
-            let interpolated=unit(captured.n0.xyz*hit.bary.x+captured.n1.xyz*hit.bary.y+captured.n2.xyz*hit.bary.z);
+            let interpolated=unit(t.n0.xyz*hit.bary.x+t.n1.xyz*hit.bary.y+t.n2.xyz*hit.bary.z);
             let winding_normal=select(interpolated,-interpolated,dot(interpolated,geometric)<0.0);
-            let n=select(geometric,winding_normal,dot(winding_normal,v)>0.0);
-            // The dielectric flag makes every direct-light closure weight zero;
-            // direct_light consumes no random values on this zero-weight branch.
-            var optical_normal=n;
-            var nt = t.parameters.z;
+            var n=select(geometric,winding_normal,dot(winding_normal,v)>0.0);
+            if glass_geometric_normals() {n=geometric;}
+            var nt = glass_ior(t.parameters.z,t.glass.y,wavelength);
             if t.parameters.w < 0.0 && entering && medium_count > 0u && u.lighting.w==0.0 {
                 return medium_failure(radiance,coverage,pixel,bounce,4u);
             }
@@ -1286,24 +1340,55 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                     // inside that body: the surface touches or lies within the glass,
                     // like a tumbler resting on a table. Start the path in its medium.
                     if continued || bounce == 0u { return medium_failure(radiance,coverage,pixel,bounce,2u); }
-                    media[0] = Medium(t.optics.w,t.parameters.z,t.optics.xyz,t.interior.xy);
+                    media[0] = Medium(t.optics.w,nt,t.optics.xyz,t.interior.xy);
                     medium_count = 1u;
-                    ni = t.parameters.z;
+                    ni = nt;
                     throughput *= exp(-t.optics.xyz*hit.distance);
                 }
                 if media[medium_count-1u].id != t.optics.w { return medium_failure(radiance,coverage,pixel,bounce,3u); }
                 nt = 1.0;
                 if medium_count > 1u { nt = media[medium_count-2u].ior; }
             }
-            var f = dielectric(clamp(dot(optical_normal,v),0.0,1.0),ni,nt);
-            var transmitted = refract(d,optical_normal,ni/nt);
+            let rough=glass_rough_active(t,ni,nt);
+            if rough {n=glass_macro_normal(d,n,geometric,ni,nt);}
+            if t.parameters.w>=0.0 && rough {
+                var strata=1u;
+                if !stratified && u.adaptive_budget.z>1u && u.image.z>=u.adaptive_budget.x {strata=u.adaptive_budget.z;stratified=true;}
+                var walk:GlassSheetWalk;
+                if GLASS_DELTA_LIGHTS {
+                    let sampled=glass_camera_sheet(t,physical,hit.triangle,d,n,geometric,ni,nt,wavelength,u.sampling.y-bounce,lane,strata,continuous_prefix,throughput,&optical_lights,&optical_light_count,&optical_light_rng,&rng);
+                    radiance+=throughput*sampled.direct;continuous_prefix=sampled.continuous;walk=sampled.walk;
+                } else {walk=glass_rough_sheet(t,d,n,ni,nt,wavelength,true,u.sampling.y-bounce,lane,strata,&rng);}
+                if !walk.valid || dot(walk.direction,n)*dot(walk.direction,geometric)<=0.0 {break;}
+                throughput*=walk.weight;d=walk.direction;
+                bounce+=walk.consumed-1u;
+                previous_delta=true;previous_pdf=0.0;suppress_direct=false;
+                previous_scatter_position=position;previous_scatter_position_low=position_low;
+                // The virtual slab exits at the same physical sheet point.
+                // Keep its barycentric displacement and the launch offset.
+                o=position; o_low=position_low+d*(u.lighting.x*2.0);
+                continue;
+            }
+            if GLASS_DELTA_LIGHTS && rough && t.parameters.w<0.0 && (!photon_enabled() || !continuous_prefix) {
+                // Enabled opaque straight-shadow connections already replace this
+                // prefix's transmitted family. Reflection remains a distinct path.
+                let light_mode=select(0u,4u,t.coat.w>0.0 && (suppress_direct || !previous_delta));
+                glass_offer_light(&optical_lights,&optical_light_count,&optical_light_rng,physical,d,throughput,ni,nt,hit.triangle,light_mode,glass_vacuum());
+                radiance+=throughput*photon_gather_glass(t,shading_position,n,geometric,d,ni,nt,wavelength,0);
+            }
+            let macro_normal=n;
+            if rough {n=glass_visible_normal(n,v,t.glass.x*t.glass.x,vec2<f32>(random(&rng),random(&rng)));}
+            var f = dielectric(clamp(dot(n,v),0.0,1.0),ni,nt);
+            var transmitted = refract(d,n,ni/nt);
             // A bent shading normal must not send a transmitted ray into the wrong
             // geometric hemisphere. Fall back to the geometric interface there.
-            if (f.z >= 0.0 && dot(transmitted,geometric) >= 0.0) || dot(reflect(d,optical_normal),geometric) <= 0.0 {
-                optical_normal = geometric;
-                f = dielectric(clamp(dot(optical_normal,v),0.0,1.0),ni,nt);
-                transmitted = refract(d,optical_normal,ni/nt);
+            if !rough && ((f.z >= 0.0 && dot(transmitted,geometric) >= 0.0) || dot(reflect(d,n),geometric) <= 0.0) {
+                n = geometric;
+                f = dielectric(clamp(dot(n,v),0.0,1.0),ni,nt);
+                transmitted = refract(d,n,ni/nt);
             }
+            let reflected_weight=glass_reflection(t,clamp(dot(n,v),0.0,1.0),ni,nt,wavelength);
+            let reflection_probability=dot(reflected_weight,vec3<f32>(1.0/3.0));
             // The first Fresnel choice is stratified conditionally on the same
             // primary/prefix path. Each stratum is weighted equally; later random
             // dimensions use decorrelated streams, never clamped radiance.
@@ -1314,7 +1399,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 stratified = true;
             }
             if t.parameters.w >= 0.0 {
-                let weights = sheet(t,f);
+                let weights = glass_sheet(t,f,clamp(dot(n,v),0.0,1.0),ni,nt,wavelength);
                 let mean_r = dot(weights.reflection,vec3<f32>(1.0/3.0));
                 let mean_t = dot(weights.transmission,vec3<f32>(1.0/3.0));
                 if mean_r+mean_t <= 0.0 { break; }
@@ -1322,7 +1407,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 if branch < probability {
                     previous_delta=true; previous_scatter_position=position; previous_scatter_position_low=position_low; suppress_direct=false;
                     throughput *= weights.reflection/probability;
-                    d = reflect(d,optical_normal);
+                    d = reflect(d,n);
                 } else {
                     throughput *= weights.transmission/(1.0-probability);
                     if t.coat.w>0.0 { previous_pdf*=1.0-probability; }
@@ -1332,13 +1417,17 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                     o = position+d*(u.lighting.x*2.0);
                     // Parallel thin sheet: unchanged direction, no optical displacement.
                 }
-            } else if branch < (f.x+f.y)*0.5 {
+            } else if branch < reflection_probability {
                 previous_delta=true; previous_scatter_position=position; previous_scatter_position_low=position_low; suppress_direct=false;
-                d = reflect(d,optical_normal);
+                if t.glass.z>0.0 {throughput*=reflected_weight/reflection_probability;}
+                d = reflect(d,n);
+                if rough && dot(d,geometric)<=0.0 {break;}
             } else {
                 if t.coat.w>0.0 { suppress_direct=suppress_direct || !previous_delta; }
                 else { suppress_direct=false; }
                 previous_delta=true; previous_scatter_position=position; previous_scatter_position_low=position_low;
+                if rough && (f.z<0.0 || dot(transmitted,geometric)>=0.0) {break;}
+                if t.glass.z>0.0 {throughput*=(vec3<f32>(1.0)-reflected_weight)/(1.0-reflection_probability);}
                 if entering {
                     if medium_count >= MEDIUM_CAPACITY { return medium_failure(radiance,coverage,pixel,bounce,4u); }
                     media[medium_count] = Medium(t.optics.w,nt,t.optics.xyz,t.interior.xy);
@@ -1348,6 +1437,8 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 d = unit(transmitted);
                 o = position-geometric*(u.lighting.x*2.0);
             }
+            if t.parameters.w<0.0 && rough {throughput*=glass_smith_weight(dot(macro_normal,v),dot(macro_normal,d),t.glass.x*t.glass.x);}
+            if GLASS_DELTA_LIGHTS && rough && !(ni==nt && dot(d,geometric)<0.0) {continuous_prefix=true;}
             if dot(d,geometric) > 0.0 { o = position+geometric*(u.lighting.x*2.0); }
             if t.parameters.w<0.0 {
                 // A finite normal offset can cross the next face near a closed
@@ -1361,6 +1452,11 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 // classified. Such directions carry negligible energy; end the path.
                 if abs(dot(d,geometric))<1e-6 { break; }
                 o=position; o_low=position_low; ray_excluded=hit.triangle; ray_minimum=0.0;
+            } else if GLASS_DELTA_LIGHTS {
+                // Even an index-matched or smooth sheet can share the active
+                // optical producer and acquire a split physical hit point.
+                let offset_direction=select(d,geometric,dot(d,geometric)>0.0);
+                o=position; o_low=position_low+offset_direction*(u.lighting.x*2.0);
             }
             continue;
         }
@@ -1368,38 +1464,42 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         let gradients=texture_gradients(map_record,geometric,d,hit.distance,texture_path_length,bounce);
         let mapped_surface=texture_surface(map_record,captured.base.xyz,captured.parameters.x,captured.parameters.y,shading_position,gradients,(u32(captured.interior.z)&2u)!=0u);
         // Retain immutable geometry and medium data across optical map evaluation.
-        let textured=Triangle(captured.p0,captured.p1,captured.p2,captured.n0,captured.n1,captured.n2,vec4<f32>(mapped_surface.color,captured.base.w),vec4<f32>(mapped_surface.metallic,mapped_surface.roughness,captured.parameters.zw),captured.optics,captured.coat,captured.interior);
+        let textured=Triangle(captured.p0,captured.p1,captured.p2,captured.n0,captured.n1,captured.n2,vec4<f32>(mapped_surface.color,captured.base.w),vec4<f32>(mapped_surface.metallic,mapped_surface.roughness,captured.parameters.zw),captured.optics,captured.coat,captured.interior,captured.glass);
         let t=aged_surface(textured,shading_position,outward);
         let interpolated=unit(captured.n0.xyz*hit.bary.x+captured.n1.xyz*hit.bary.y+captured.n2.xyz*hit.bary.z);
         let winding_normal=select(interpolated,-interpolated,dot(interpolated,geometric)<0.0);
         let original_normal=select(geometric,winding_normal,dot(winding_normal,v)>0.0);
         let mapped_normal=texture_normal(map_record,mapped_surface.normal,original_normal,geometric);
         let n=select(original_normal,mapped_normal,dot(mapped_normal,v)>0.0);
-        var physical=PrecisePoint(position,position_low);
-        if u.light_count.y>0.0 { physical=punctual_offset(surface_point_precise(captured,hit.bary),vec3<f32>(0.0)); }
-        radiance += throughput*direct_light(t,position,physical,o,n,geometric,v,u.sampling.y-bounce-1u,&rng);
+        radiance += throughput*direct_light(t,shading_position,physical,o,n,geometric,v,u.sampling.y-bounce-1u,&rng);
+        radiance += throughput*photon_gather(t,shading_position,n,geometric,v);
         d = sample_surface(t,n,v,&rng);
         let nl = dot(n,d);
         if nl<=0.0 || dot(geometric,d)<=0.0 { break; }
         let pdf = surface_pdf(t,n,v,d);
+        if GLASS_DELTA_LIGHTS {continuous_prefix=true;}
         previous_pdf = (1.0-t.base.w)*pdf;
         previous_scatter_position=position; previous_scatter_position_low=position_low;
         previous_delta = false;
         suppress_direct=false;
         throughput *= brdf(t,n,v,d) * (nl/pdf);
+        if medium_count>0u {
+            o=position;o_low=position_low;ray_excluded=hit.triangle;ray_minimum=0.0;
+        }
         if bounce>=3u {
             let survive = clamp(max(max(throughput.x,throughput.y),throughput.z),0.05,0.95);
             if random(&rng)>survive { break; }
             throughput /= survive;
         }
     }
+    if GLASS_DELTA_LIGHTS {glass_capture_light(&optical_lights,optical_light_count,wavelength,pixel);}
     return vec4<f32>(radiance,coverage);
 }
 
 fn checked_sample(pixel: u32, lane: u32) -> vec4<f32> {
     let value = sample_path_lane(pixel, lane);
     if !all(value >= vec4<f32>(0.0)) || !all(value <= vec4<f32>(3.4e38)) {
-        atomicStore(&failures[7], 1u);
+        atomicOr(&failures[7], 1u);
     }
     return value;
 }
@@ -1421,23 +1521,14 @@ fn adaptive_target(mean: vec4<f32>, m2: vec4<f32>) -> u32 {
     return clamp(u32(max(max(need.x,need.y),max(need.z,need.w))),u.adaptive_budget.y,maximum);
 }
 
-@compute @workgroup_size(32)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let pixel = u.image.w + gid.x;
-    let pixels = u.image.x*u.image.y;
-    if gid.x >= u.sampling.z || pixel >= pixels { return; }
-    let pilots = u.adaptive_budget.x;
-    let strata = max(1u,u.adaptive_budget.z);
-    let lane = u32(u.adaptive_error.w);
-    // Settle first whether this invocation samples at all, then take the path sample at one call
-    // site: every call is inlined, and three copies of the integrator were more than NVIDIA's
-    // Vulkan compiler could build (#6705).
-    var budget_count = 0u;
-    if pilots > 0u && u.image.z >= pilots {
-        budget_count = u32(accumulation[2u*pixels+pixel].x);
-        if u.image.z-pilots >= budget_count { return; }
-    }
-    let value = sample_path(pixel);
+// Both phases finish through the same film update. Optical camera invocations
+// publish one bounded request per tile; a separate native program resolves its
+// visibility before entering this update, including final adaptive normalization.
+fn accumulate_path(pixel:u32,value:vec4<f32>) {
+    let pixels=u.image.x*u.image.y;let pilots=u.adaptive_budget.x;
+    let strata=max(1u,u.adaptive_budget.z);let lane=u32(u.adaptive_error.w);
+    var budget_count=0u;
+    if pilots>0u && u.image.z>=pilots {budget_count=u32(accumulation[2u*pixels+pixel].x);}
     if pilots == 0u {
         let sample = value/f32(strata);
         if u.image.z == 0u && lane == 0u { accumulation[pixel] = sample; }
@@ -1463,6 +1554,37 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     accumulation[pixel] += value/f32(strata);
     // Per-pixel production means enter both raw EXR and denoising. Pilots do not.
     if ordinal+1u == budget_count && lane+1u == strata { accumulation[pixel] /= f32(budget_count); }
+}
+@compute @workgroup_size(32)
+fn main(@builtin(global_invocation_id) gid:vec3<u32>) {
+    let pixel=u.image.w+gid.x;let pixels=u.image.x*u.image.y;
+    if gid.x>=u.sampling.z || pixel>=pixels {return;}
+    let pilots=u.adaptive_budget.x;
+    if pilots>0u && u.image.z>=pilots && u.image.z-pilots>=u32(accumulation[2u*pixels+pixel].x) {return;}
+    if GLASS_DELTA_LIGHTS {accumulation[glass_tile_address(pixel)+6u]=vec4<f32>(0.0);}
+    let value=sample_path(pixel);
+    if GLASS_DELTA_LIGHTS {accumulation[glass_tile_address(pixel)+7u]=value;return;}
+    accumulate_path(pixel,value);
+}
+
+@compute @workgroup_size(32)
+fn optical_resolve(@builtin(global_invocation_id) gid:vec3<u32>) {
+    if !GLASS_DELTA_LIGHTS {return;}
+    let pixel=u.image.w+gid.x;let pixels=u.image.x*u.image.y;
+    if gid.x>=u.sampling.z || pixel>=pixels {return;}
+    let pilots=u.adaptive_budget.x;
+    if pilots>0u && u.image.z>=pilots && u.image.z-pilots>=u32(accumulation[2u*pixels+pixel].x) {return;}
+    let address=glass_tile_address(pixel);let header=accumulation[address+6u];
+    var packet:array<vec4<u32>,6>;
+    if header.x>0.0 {
+        for(var lane=0u;lane<6u;lane+=1u) {packet[lane]=bitcast<vec4<u32>>(accumulation[address+lane]);}
+        packet[0].w=u32(accumulation[address].w);packet[1].w=u32(accumulation[address+1u].w);
+    }
+    transport_wavelength=header.y;
+    var value=accumulation[address+7u];
+    value=vec4<f32>(value.xyz+glass_resolve_light(&packet,u32(header.x),header.y),value.w);
+    if !all(value>=vec4<f32>(0.0)) || !all(value<=vec4<f32>(3.4e38)) {atomicOr(&failures[7],1u);}
+    accumulate_path(pixel,value);
 }
 
 // Validation entry point: exact same BRDF used by production paths, read back in tests.
