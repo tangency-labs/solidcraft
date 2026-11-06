@@ -531,6 +531,8 @@ pub fn world_curve_parts(sk: &Sketch, i: usize, plane: &Plane) -> Vec<Vec<Vec3>>
     sk.segs(i).into_iter().map(|seg| seg.polyline(0.02).iter().map(|p| plane.to_world(*p)).collect()).collect()
 }
 
+pub use solidcraft_sketch::InfiniteLineVisibility;
+
 /// Sketch display paths with the same visibility and styling as [`sketch_lines`].
 ///
 /// The sampler receives each visible 2D curve once and returns world-coordinate
@@ -544,21 +546,56 @@ pub fn sketch_lines_with_sampler(
     determined: &[bool],
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
-    sketch_lines_in(sk, plane, active, determined, sampler, &Palette::DEFAULT)
+    sketch_lines_in_mode(sk, plane, active, determined, sampler, &Palette::DEFAULT, InfiniteLineVisibility::default())
 }
 
-/// [`sketch_lines_with_sampler`] in the colours of `p`.
+/// Sample sketch display paths using the caller's infinite-line visibility preference.
+/// Active sketches keep their datum references available for editing in every mode.
+pub fn sketch_lines_with_sampler_mode(
+    sk: &Sketch,
+    plane: &Plane,
+    active: bool,
+    determined: &[bool],
+    sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
+    mode: InfiniteLineVisibility,
+) -> Vec<(Vec<Vec3>, Rgb, bool)> {
+    sketch_lines_in_mode(sk, plane, active, determined, sampler, &Palette::DEFAULT, mode)
+}
+
+/// Headless sketch lines in the colours of `p`, retaining datum references outside sketch editing.
 fn sketch_lines_in(
+    sk: &Sketch,
+    plane: &Plane,
+    active: bool,
+    determined: &[bool],
+    sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
+    p: &Palette,
+) -> Vec<(Vec<Vec3>, Rgb, bool)> {
+    sketch_lines_in_mode(sk, plane, active, determined, sampler, p, InfiniteLineVisibility::AlwaysVisible)
+}
+
+/// Apply curve visibility and palette styling before sampling each visible sketch curve.
+fn sketch_lines_in_mode(
     sk: &Sketch,
     plane: &Plane,
     active: bool,
     determined: &[bool],
     mut sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
+    mode: InfiniteLineVisibility,
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
+    let profiles = if !active
+        && mode != InfiniteLineVisibility::AlwaysVisible
+        && sk.curves.iter().enumerate().any(|(i, c)| !c.infinite && !c.construction && !c.centerline && sk.is_datum_reference(i))
+    {
+        solidcraft_sketch::find_profiles(sk)
+    } else {
+        Vec::new()
+    };
+    let visible = sk.curve_visibility_with_profiles(active, mode, &profiles);
     for (i, c) in sk.curves.iter().enumerate() {
-        if !sketch_curve_visible(sk, i) {
+        if !visible.get(i).copied().unwrap_or(false) {
             continue;
         }
         let col = if c.link.is_some() && !sk.is_text_curve(i) {
@@ -602,6 +639,17 @@ fn sketch_lines_in(
     out
 }
 
+/// Should sketch curve `i` be drawn and picked in the given sketch activity state and visibility mode?
+pub fn sketch_curve_visible_with(sk: &Sketch, i: usize, active: bool, mode: InfiniteLineVisibility) -> bool {
+    sk.is_curve_visible_with(i, active, mode)
+}
+
+/// Should sketch curve `i` be drawn and picked in the given sketch activity state?
+/// Reference lines (infinite lines or traces of datum planes/axes) follow the default visibility setting.
+pub fn sketch_curve_visible_in(sk: &Sketch, i: usize, active: bool) -> bool {
+    sk.is_curve_visible_with(i, active, InfiniteLineVisibility::default())
+}
+
 /// Should sketch curve `i` be drawn and picked? The Sketch Palette's two geometry toggles each
 /// hide one category, and a curve belongs to the category its colour already names in
 /// [`sketch_lines_with_sampler`]: a linked curve is projected reference geometry (Projected
@@ -613,11 +661,7 @@ fn sketch_lines_in(
 /// Drawing and picking share this one answer so they cannot drift: geometry that is not on
 /// screen is never clickable, and geometry on screen always is.
 pub fn sketch_curve_visible(sk: &Sketch, i: usize) -> bool {
-    let Some(c) = sk.curves.get(i) else { return false };
-    if c.link.is_some() && !sk.is_text_curve(i) {
-        return !sk.view.hide_projected;
-    }
-    !(c.construction && sk.view.hide_construction)
+    sketch_curve_visible_in(sk, i, true)
 }
 
 /// Point roles shown and picked individually. Associated offsets keep their generated
@@ -628,23 +672,48 @@ pub struct SketchPointVisibility<'a> {
 }
 
 impl<'a> SketchPointVisibility<'a> {
+    /// Hide generated interior points and private datum endpoints while retaining editable points.
     pub fn new(sk: &'a Sketch) -> Self {
         let outputs: std::collections::HashSet<&str> = sk.freeform_offsets.iter().map(|o| o.output.as_str()).collect();
         // A repeated link ID names its first link, as Sketch::link does.
         let mut seen = std::collections::HashSet::new();
-        let text: std::collections::HashSet<&str> = sk
-            .links
-            .iter()
-            .filter(|l| seen.insert(l.id.as_str()))
-            .filter(|l| l.kind == solidcraft_sketch::LinkKind::Text)
-            .map(|l| l.id.as_str())
-            .collect();
+        let mut text = std::collections::HashSet::new();
+        let mut datums = std::collections::HashSet::new();
+        for link in &sk.links {
+            let id = link.id.as_str();
+            if !seen.insert(id) {
+                continue;
+            }
+            if link.kind == solidcraft_sketch::LinkKind::Text {
+                text.insert(id);
+            }
+            if link.source.is_datum() {
+                datums.insert(id);
+            }
+        }
         let mut hidden: std::collections::HashSet<&str> =
             sk.points.iter().filter(|p| p.link.as_deref().is_some_and(|l| text.contains(l))).map(|p| p.id.as_str()).collect();
         for curve in sk.curves.iter().filter(|c| outputs.contains(c.id.as_str())) {
             let ends = curve.kind.ends();
             let interior = curve.kind.point_ids().into_iter().filter(|i| ends.is_none_or(|(a, b)| *i != a && *i != b));
             hidden.extend(interior.filter_map(|i| sk.points.get(i).map(|p| p.id.as_str())));
+        }
+        // A datum line's generated endpoints only define its direction. Keep editable points
+        // and endpoints used by any other kind of curve, including infinite construction lines.
+        let private_datum = |curve: &solidcraft_sketch::Curve| curve.infinite && curve.link.as_deref().is_some_and(|id| datums.contains(id));
+        let mut endpoints: std::collections::HashSet<_> =
+            sk.curves.iter().filter(|c| private_datum(c)).filter_map(|c| c.kind.ends()).flat_map(|(a, b)| [a, b]).collect();
+        if !endpoints.is_empty() {
+            for i in sk.curves.iter().filter(|c| !private_datum(c)).flat_map(|c| c.kind.point_ids()) {
+                endpoints.remove(&i);
+            }
+            hidden.extend(
+                endpoints
+                    .into_iter()
+                    .filter_map(|i| sk.points.get(i))
+                    .filter(|p| p.link.as_deref().is_some_and(|id| datums.contains(id)))
+                    .map(|p| p.id.as_str()),
+            );
         }
         Self { hidden }
     }

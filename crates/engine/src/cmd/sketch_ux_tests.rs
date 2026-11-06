@@ -2455,6 +2455,52 @@ fn a_dimension_measures_a_model_edge() {
     assert_eq!(sk.links.len(), 1, "{:?}", sk.links);
 }
 
+#[test]
+fn sketch_constraints_and_dimensions_accept_axes_and_planes() {
+    for reference in [json!({"axis":"Y"}), json!({"plane":"YZ"})] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane":"XY"}));
+        run(&mut s, "sketch.point", json!({"point":[20,10],"id":"p"}));
+        let out = run(&mut s, "sketch.dimension", json!({"entities":["p", reference], "value": 15}));
+        assert!((out["measured"].as_f64().unwrap() - 15.0).abs() < 1e-6, "{out}");
+        assert!((pt(&s, "p").x - 15.0).abs() < 1e-6);
+        let sk = sketch(&s);
+        assert_eq!(sk.links.len(), 1);
+        let link_id = &sk.links[0].id;
+        for ci in sk.link_curves(link_id) {
+            let cu = &sk.curves[ci];
+            assert!(cu.infinite, "reference curves should be infinite");
+            assert!(cu.construction, "reference curves should be construction (dotted)");
+        }
+
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane":"XY"}));
+        run(&mut s, "sketch.point", json!({"point":[20,10],"id":"p"}));
+        run(&mut s, "sketch.constraint.coincident", json!({"a":"p", "b": reference}));
+        assert!(pt(&s, "p").x.abs() < 1e-6);
+        assert_eq!(sketch(&s).links.len(), 1);
+    }
+
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.point", json!({"point":[20,10],"id":"p"}));
+    let before = s.doc.to_json();
+    assert!(s.execute("sketch.dimension", &json!({"entities":["p", {"plane":"XY"}]})).is_err());
+    assert_eq!(s.doc.to_json(), before, "a plane with no intersection leaves no link behind");
+
+    // An axis or plane cannot be set equal, because it has no length.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.line", json!({"points":[[0, 0], [10, 0]], "ids": ["l1"]}));
+    assert!(s.execute("sketch.constraint.equal", &json!({"a": "l1", "b": {"axis": "Y"}})).is_err());
+    assert!(s.execute("sketch.constraint.equal", &json!({"a": "l1", "b": {"plane": "YZ"}})).is_err());
+
+    // An infinite reference curve cannot be measured alone as a length dimension.
+    run(&mut s, "sketch.constraint.coincident", json!({"a":"l1.start", "b": {"axis": "Y"}}));
+    let ref_curve = sketch(&s).curves.iter().find(|c| c.infinite).unwrap().id.clone();
+    assert!(s.execute("sketch.dimension", &json!({"entities":[ref_curve]})).is_err());
+}
+
 /// #7912: a dimension refuses a long list of entities before projecting any of them, so one
 /// request cannot make the engine resolve thousands of model edges.
 #[test]

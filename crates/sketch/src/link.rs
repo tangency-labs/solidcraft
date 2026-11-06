@@ -21,6 +21,32 @@ mod loops;
 /// Most entities a single link may produce.
 pub const MAX_LINK_ENTITIES: usize = 20_000;
 
+/// Visibility of infinite reference and construction lines outside active sketch editing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InfiniteLineVisibility {
+    /// Follows sketch visibility: visible whenever the sketch is visible (both infinite construction lines and reference lines).
+    AlwaysVisible,
+    /// Show construction lines and finite profile boundaries, hiding auxiliary datum references in inactive sketches.
+    #[default]
+    ConstructionOnly,
+    /// Hide auxiliary datum references and infinite construction lines in inactive sketches.
+    AlwaysHide,
+}
+
+impl InfiniteLineVisibility {
+    pub const ALL: [Self; 3] = [Self::AlwaysVisible, Self::ConstructionOnly, Self::AlwaysHide];
+
+    /// Stable identifier used to save the preference and identify its UI selection.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::AlwaysVisible => "always_visible",
+            Self::ConstructionOnly => "construction_only",
+            Self::AlwaysHide => "always_hide",
+        }
+    }
+}
+
 /// How the geometry was brought in.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -63,6 +89,10 @@ pub enum LinkSource {
     /// An origin plane (`XY`, `XZ`, `YZ`) or a construction plane (by name): its trace on the
     /// sketch plane.
     Plane { name: String },
+    /// A world origin axis projected into the sketch at its author placement.
+    WorldAxis { name: String, path: Vec<u64> },
+    /// A world origin plane intersected with the sketch at its author placement.
+    WorldPlane { name: String, path: Vec<u64> },
     /// A curve of a sketch projected onto a body face (through `at`) along the normal of the
     /// sketch that holds the link: a 3D curve.
     OnSurface { sketch: u64, curve: String, body: String, at: Vec3 },
@@ -146,12 +176,19 @@ impl LinkSource {
             LinkSource::Axis { name } => format!("{name} axis"),
             LinkSource::SketchAxis { name } => format!("sketch {name} axis"),
             LinkSource::Plane { name } => format!("{name} plane"),
+            LinkSource::WorldAxis { name, .. } => format!("world {name} axis"),
+            LinkSource::WorldPlane { name, .. } => format!("world {name} plane"),
             LinkSource::OnSurface { curve, .. } => format!("{curve} on a face"),
             LinkSource::Intersection { a, b } => format!("intersection of {} and {}", a.describe(), b.describe()),
             LinkSource::Spun { body, .. } => of_body("spun profile", body),
             LinkSource::Iso { body, .. } => of_body("isoparametric curve", body),
             LinkSource::Text { text, .. } => format!("text \"{}\"", text.chars().take(20).collect::<String>()),
         }
+    }
+
+    /// Whether this source provides a datum line in the sketch.
+    pub fn is_datum(&self) -> bool {
+        matches!(self, Self::Axis { .. } | Self::Plane { .. } | Self::SketchAxis { .. } | Self::WorldAxis { .. } | Self::WorldPlane { .. })
     }
 
     /// The bodies this source reads geometry from (an intersection reads two).
@@ -175,6 +212,8 @@ impl LinkSource {
             | LinkSource::Axis { .. }
             | LinkSource::SketchAxis { .. }
             | LinkSource::Plane { .. }
+            | LinkSource::WorldAxis { .. }
+            | LinkSource::WorldPlane { .. }
             | LinkSource::Text { .. } => Vec::new(),
         }
     }
@@ -653,6 +692,69 @@ impl Sketch {
         self.curves.get(ci).and_then(|c| c.link.as_deref()).and_then(|l| self.link(l)).is_some_and(|l| l.lost)
     }
 
+    /// Is this curve a datum reference line (linked from a plane, axis, or sketch axis)?
+    pub fn is_datum_reference(&self, ci: usize) -> bool {
+        let Some(c) = self.curves.get(ci) else { return false };
+        c.link.as_deref().and_then(|l| self.link(l)).is_some_and(|l| l.source.is_datum())
+    }
+
+    /// Is this curve a datum reference line or infinite line?
+    pub fn is_reference_line(&self, ci: usize) -> bool {
+        self.is_datum_reference(ci) || self.curves.get(ci).is_some_and(|c| c.infinite)
+    }
+
+    /// Whether a curve is visible, preserving finite datum lines that bound a real profile.
+    /// Batch callers can reuse solved profiles through [`Sketch::curve_visibility_with_profiles`].
+    pub fn is_curve_visible_with(&self, ci: usize, active: bool, mode: InfiniteLineVisibility) -> bool {
+        let Some(c) = self.curves.get(ci) else { return false };
+        let in_profile = !active
+            && mode != InfiniteLineVisibility::AlwaysVisible
+            && !c.infinite
+            && !c.construction
+            && !c.centerline
+            && self.is_datum_reference(ci)
+            && crate::find_profiles(self)
+                .iter()
+                .any(|profile| profile.outer_curves.contains(&c.id) || profile.hole_curves.iter().any(|hole| hole.contains(&c.id)));
+        self.curve_visible(ci, active, mode, in_profile)
+    }
+
+    /// Build one visibility mask from already solved profiles, retaining their finite boundary curves.
+    /// Rendering and picking can share this policy without searching for profiles per curve.
+    pub fn curve_visibility_with_profiles(&self, active: bool, mode: InfiniteLineVisibility, profiles: &[crate::Profile]) -> Vec<bool> {
+        let boundaries: std::collections::HashSet<&str> = if !active && mode != InfiniteLineVisibility::AlwaysVisible {
+            profiles.iter().flat_map(|profile| profile.outer_curves.iter().chain(profile.hole_curves.iter().flatten())).map(String::as_str).collect()
+        } else {
+            std::collections::HashSet::new()
+        };
+        self.curves.iter().enumerate().map(|(i, c)| self.curve_visible(i, active, mode, boundaries.contains(c.id.as_str()))).collect()
+    }
+
+    /// Apply visibility settings after identifying any finite geometry used by a profile.
+    fn curve_visible(&self, ci: usize, active: bool, mode: InfiniteLineVisibility, in_profile: bool) -> bool {
+        let Some(c) = self.curves.get(ci) else { return false };
+        let profile_geometry = in_profile && !c.infinite && !c.construction && !c.centerline;
+        if !active {
+            match mode {
+                InfiniteLineVisibility::AlwaysVisible => {}
+                InfiniteLineVisibility::ConstructionOnly => {
+                    if self.is_datum_reference(ci) && !profile_geometry {
+                        return false;
+                    }
+                }
+                InfiniteLineVisibility::AlwaysHide => {
+                    if (c.infinite || self.is_datum_reference(ci)) && !profile_geometry {
+                        return false;
+                    }
+                }
+            }
+        }
+        if c.link.is_some() && !self.is_text_curve(ci) {
+            return !self.view.hide_projected;
+        }
+        !(c.construction && self.view.hide_construction)
+    }
+
     /// The line of sketch axis `name` (`x` or `y`) when the sketch already has one (see
     /// [`Sketch::sketch_axis_line`]).
     pub fn sketch_axis_curve(&self, name: &str) -> Option<usize> {
@@ -676,6 +778,7 @@ impl Sketch {
         for c in &curves {
             if let Some(cu) = self.curves.get_mut(*c) {
                 cu.construction = true;
+                cu.infinite = true;
             }
         }
         curves.first().copied().map(Some).ok_or_else(|| SketchError::Invalid(format!("sketch {name} axis")))
@@ -720,6 +823,8 @@ impl Sketch {
         Ok(id)
     }
 
+    /// Materialize linked geometry, marking newly created datum lines as infinite construction.
+    /// Refreshes that retain existing entities preserve their stored curve flags.
     fn build_link(&mut self, id: &str, lay: &Layout) -> Result<()> {
         let mut idx: Vec<Option<usize>> = vec![None; lay.pts.len()];
         let mut point = |sk: &mut Sketch, li: usize| -> Result<usize> {
@@ -754,15 +859,18 @@ impl Sketch {
                 }
             };
             let cid = self.fresh(prefix)?;
+            let is_ref = self.link(id).is_some_and(|l| l.source.is_datum());
+            let infinite = is_ref && matches!(kind, CurveKind::Line { .. });
+            let construction = is_ref;
             self.curves.push(Curve {
                 id: cid,
                 kind,
-                construction: false,
+                construction,
                 reversed: false,
                 link: Some(id.to_string()),
                 centerline: false,
                 fixed: false,
-                infinite: false,
+                infinite,
             });
         }
         for li in &lay.lone {

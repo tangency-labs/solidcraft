@@ -35,6 +35,35 @@ fn type_value(h: &mut Harness, text: &str) {
 }
 
 #[test]
+fn dimension_picks_an_origin_axis_without_projecting_it_first() {
+    crate::dim_view::cancel();
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.point", json!({"point":[20,10],"id":"p"})).unwrap();
+    h.app.set_origin_shown(true);
+    h.call("ui.view", json!({"view":"top"}));
+    // Keep the axis long enough to reach the click at y = 10 mm.
+    h.app.cam.distance = 150.0;
+    h.settle();
+    let before = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"start":"sketch.dimension"})).unwrap();
+    h.step(&json!({"click":{"world":[20,10,0]}})).unwrap();
+    h.step(&json!({"click":{"world":[0,10,0]}})).unwrap();
+    assert!(crate::dim_view::editing());
+    type_value(&mut h, "15");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    assert!((sk.point(sk.resolve_point("p").unwrap()).unwrap().x - 15.0).abs() < 1e-6);
+    assert_eq!(sk.links.len(), 1);
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.to_json(), before);
+    crate::dim_view::cancel();
+}
+
+#[test]
 fn dimension_editor_names_and_reference_picks_drive_new_and_existing_dimensions() {
     let mut h = line([20., 0.]);
     let source =

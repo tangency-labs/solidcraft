@@ -215,7 +215,7 @@ fn bad_line_references_are_errors_and_change_nothing() {
     run(&mut s, "sketch.line", json!({"points": [[0, 3], [9, 4]], "ids": ["b"]}));
     let before = s.doc.to_json();
     let hostile =
-        [json!("Y"), json!("X"), json!("z"), json!(""), json!("x.start"), json!(" y"), json!(5), json!(null), json!(["y"]), json!({"axis": "y"})];
+        [json!("Y"), json!("X"), json!("z"), json!(""), json!("x.start"), json!(" y"), json!(5), json!(null), json!(["y"]), json!({"axis": "?"})];
     for line in &hostile {
         assert!(s.execute("sketch.constraint.symmetry", &json!({"a": "a.start", "b": "a.end", "line": line})).is_err(), "symmetry line {line}");
         for cmd in ["sketch.constraint.parallel", "sketch.constraint.perpendicular", "sketch.constraint.collinear", "sketch.constraint.tangent"] {

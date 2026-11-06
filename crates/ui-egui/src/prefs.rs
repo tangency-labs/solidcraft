@@ -11,6 +11,7 @@ use serde_json::json;
 use solidcore_record::Vec3;
 pub use solidcraft_engine::doc::display_units::{format_length, length_number, length_precision, unit_scale};
 use solidcraft_engine::render::Camera;
+pub use solidcraft_engine::view::InfiniteLineVisibility;
 
 /// The key the apps keep the preferences under in eframe's storage.
 pub const STORAGE_KEY: &str = "solidcraft.prefs";
@@ -1632,6 +1633,8 @@ preference_settings! {
     sketch_keys_only: bool = false, PAGE_SHORTCUTS;
     /// Where the view goes when a sketch ends (#7038). Keep (the default) leaves it as it is.
     sketch_exit_view: SketchExitView = SketchExitView::default(), PAGE_SKETCH;
+    /// Visibility of infinite reference and construction lines outside active sketch editing.
+    infinite_line_visibility: InfiniteLineVisibility = InfiniteLineVisibility::default(), PAGE_SKETCH;
     /// A shape drawn in a sketch gets all its dimensions at once: the typed values, and every
     /// other size the shape has at its size as drawn (`sketch.draw.dimensioned` with `as_drawn`).
     /// Shapes `solidcraft_engine::dimension_roles` doesn't list are drawn as before.
@@ -6307,6 +6310,7 @@ mod tests {
             ("sketch_recent_snap", json!(true), PAGE_SKETCH),
             ("line_hover_tangent_arc", json!(true), PAGE_SKETCH),
             ("ribbon_click_ends_tool", json!(false), PAGE_SKETCH),
+            ("infinite_line_visibility", json!("always_hide"), PAGE_SKETCH),
             ("msaa", json!(8), PAGE_GRAPHICS),
             ("single_surface_analysis", json!(false), PAGE_GRAPHICS),
         ];

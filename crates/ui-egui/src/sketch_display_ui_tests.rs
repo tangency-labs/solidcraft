@@ -21,6 +21,27 @@ fn circle(h: &mut Harness) -> u64 {
     h.app.session.active_sketch.unwrap()
 }
 
+/// Qualified selections keep an active sketch's datum references highlighted in every hiding mode.
+#[test]
+fn active_datum_references_highlight_with_qualified_selections() {
+    use solidcraft_engine::{Sel, sketch::InfiniteLineVisibility};
+    crate::dim_view::cancel();
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let projected = h.app.run("sketch.project", json!({"refs":[{"axis":"X"}]})).unwrap();
+    let id = projected["links"][0]["curves"][0].as_str().unwrap().to_string();
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.app.set_origin_shown(false);
+    h.settle();
+    for mode in [InfiniteLineVisibility::ConstructionOnly, InfiniteLineVisibility::AlwaysHide] {
+        h.app.preferences.infinite_line_visibility = mode;
+        for selection in [Sel::SketchCurve { id: id.clone(), sketch: Some(sketch) }, Sel::ExternalSketchCurve { sketch, id: id.clone() }] {
+            h.app.session.selection = vec![selection.clone()];
+            assert!(!crate::viewport::build_highlight(&h.app).overlay.is_empty(), "{selection:?} remains highlighted in {mode:?}");
+        }
+    }
+}
+
 fn segment_distance(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f64 {
     let dx = f64::from(b.x - a.x);
     let dy = f64::from(b.y - a.y);

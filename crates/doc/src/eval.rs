@@ -1629,12 +1629,14 @@ struct PlacementReads {
     unlisted: bool,
     components: std::collections::BTreeSet<u64>,
     paths: Vec<Vec<u64>>,
+    world_datum_paths: std::collections::BTreeSet<Vec<u64>>,
     bodies: std::collections::BTreeSet<String>,
 }
 
 impl PlacementReads {
+    /// Whether evaluation can reuse this feature without checking any occurrence placements.
     fn is_empty(&self) -> bool {
-        !self.all && self.components.is_empty() && self.paths.is_empty() && self.bodies.is_empty()
+        !self.all && self.components.is_empty() && self.paths.is_empty() && self.world_datum_paths.is_empty() && self.bodies.is_empty()
     }
 
     /// A body's complete placement in the feature's input state, including its offset. Later
@@ -1688,6 +1690,7 @@ impl PlacementReads {
         }
     }
 
+    /// Record the body, component, and author-occurrence placements read by a sketch link.
     fn link(&mut self, doc: &Document, st: Option<&ModelState>, source: &solidcraft_sketch::LinkSource) {
         use solidcraft_sketch::LinkSource as L;
         match source {
@@ -1702,6 +1705,9 @@ impl PlacementReads {
             L::Intersection { a, b } => {
                 self.link(doc, st, a);
                 self.link(doc, st, b);
+            }
+            L::WorldAxis { path, .. } | L::WorldPlane { path, .. } => {
+                self.world_datum_paths.insert(path.clone());
             }
             // In the sketch's own frame: the component's origin, axes and planes, its own axes, text.
             L::Origin | L::Axis { .. } | L::SketchAxis { .. } | L::Plane { .. } | L::Text { .. } => {}
@@ -1766,6 +1772,8 @@ fn mirror_placements_digest(doc: &Document, f: &Feature, placements: &[Vec<u64>]
     h.finish()
 }
 
+/// Hash the placements a feature reads so cached geometry is invalidated when they change.
+/// World datum links include their author's absolute placement, even within the same component.
 fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64 {
     // No shortcut for a design without placements: its first component (placed where the
     // design is) must not change what its features read, or creating it evaluates them all.
@@ -1901,6 +1909,15 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         // Its own component is read in its own frame.
         if *c != f.component {
             hash_placement(&crate::mat_mul(&inverse, &doc.component_transform(*c)), &mut h);
+        }
+    }
+    // A world datum is fixed while its author occurrence moves.
+    for path in &reads.world_datum_paths {
+        path.hash(&mut h);
+        let placement = doc.path_placement(path);
+        placement.is_some().hash(&mut h);
+        if let Some((_, world)) = placement {
+            hash_placement(&world, &mut h);
         }
     }
     for path in &reads.paths {
