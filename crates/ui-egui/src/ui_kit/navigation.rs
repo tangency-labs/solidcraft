@@ -137,7 +137,16 @@ pub(crate) fn navigation_button_editable(ui: &mut Ui, rect: Rect, button: Naviga
         response.surrender_focus();
     }
     let (fill, focus) = navigation_visual(button.kind, button.selected, response.hovered(), pressed, response.has_focus());
-    if let Some(fill) = navigation_fill(&t, fill) {
+    // A plated theme's buttons are plates; others keep their rounded fill.
+    let state = match fill {
+        _ if !ui.is_enabled() => crate::plate::Lit::Disabled,
+        NavigationFill::None => crate::plate::Lit::Rest,
+        NavigationFill::Hover => crate::plate::Lit::Hover,
+        NavigationFill::Press | NavigationFill::Active => crate::plate::Lit::On,
+    };
+    if !t.plate_button(ui.painter(), rect, t.accent, state)
+        && let Some(fill) = navigation_fill(&t, fill)
+    {
         ui.painter().rect_filled(rect, metrics.button_radius, fill);
     }
     if focus {
