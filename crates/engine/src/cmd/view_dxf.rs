@@ -98,7 +98,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let stats = ViewDxfStats {
         bodies: meshes.placements.len(),
         shared_meshes: meshes.meshes.len(),
-        triangles: meshes.triangles,
+        triangles: meshes.triangle_count(),
         mesh_bytes: meshes.bytes,
         worker_limit: meshes::WORKERS,
         segments: drawing.segments,
