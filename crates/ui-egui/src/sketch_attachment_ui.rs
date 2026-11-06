@@ -20,6 +20,9 @@ pub struct Draft {
     pub label: String,
     pub error: Option<String>,
     pub author_path: Option<Vec<u64>>,
+    /// The plane or face picked in the view that the Plane field last took (#12540): a new pick
+    /// fills the field, one that was already selected when the panel opened does not.
+    taken: Option<Sel>,
 }
 
 impl Draft {
@@ -31,7 +34,7 @@ impl Draft {
             _ if feature.component == app.session.active_component => app.session.active_occurrence_path.clone(),
             _ => None,
         });
-        Self { sketch, candidate: None, label: String::new(), error: None, author_path }
+        Self { sketch, candidate: None, label: String::new(), error: None, author_path, taken: picked_plane(app) }
     }
 
     fn choose(&mut self, plane: Value, label: String) {
@@ -89,6 +92,25 @@ fn attachment(app: &SolveApp, sketch: u64) -> FaceAttachmentStatus {
 
 fn fixed_plane(plane: Plane) -> Value {
     json!({"origin":plane.origin,"x_dir":plane.x,"y_dir":plane.y})
+}
+
+/// The first selected item the Plane field can take: a planar face, an origin plane or a
+/// construction plane.
+fn picked_plane(app: &SolveApp) -> Option<Sel> {
+    app.session.selection.iter().find(|selection| matches!(selection, Sel::Face { .. } | Sel::Plane { .. })).cloned()
+}
+
+/// What `sketch.redefine` gets for a picked face or plane, with the field's label.
+fn pick(app: &SolveApp, selection: &Sel) -> Option<(Value, String)> {
+    match selection {
+        Sel::Face { .. } => Some((face_plane(app, selection)?, face_label(app, selection))),
+        Sel::Plane { name } => {
+            let known = Plane::named(name).is_some()
+                || app.session.doc.find_feature(name).is_some_and(|feature| matches!(feature.kind, FeatureKind::ConstructionPlane { .. }));
+            known.then(|| (json!(name), name.clone()))
+        }
+        _ => None,
+    }
 }
 
 pub fn face_plane(app: &SolveApp, selection: &Sel) -> Option<Value> {
@@ -156,6 +178,14 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let status = attachment(app, sketch);
     let name = app.session.doc.feature(sketch).map(|feature| feature.name.as_str()).unwrap_or("Sketch");
     let selected = app.session.selection.iter().find(|selection| matches!(selection, Sel::Face { .. })).cloned();
+    // A face or plane picked in the view while the panel is open fills the Plane field (#12540).
+    let picked = picked_plane(app);
+    if picked != draft.taken {
+        draft.taken.clone_from(&picked);
+        if let Some((plane, label)) = picked.as_ref().and_then(|selection| pick(app, selection)) {
+            draft.choose(plane, label);
+        }
+    }
     let mut apply = false;
     let mut cancel = false;
     let t = Tokens::get();
@@ -266,10 +296,9 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                             "Choose a new plane. Sketch geometry and dimensions stay unchanged in its two-dimensional coordinates.",
                         ))
                         .clicked()
-                        && let Some(selection) = &selected
-                        && let Some(plane) = face_plane(app, selection)
+                        && let Some((plane, label)) = picked.as_ref().and_then(|selection| pick(app, selection))
                     {
-                        draft.choose(plane, face_label(app, selection));
+                        draft.choose(plane, label);
                     }
                 });
                 ui.horizontal_wrapped(|ui| {
