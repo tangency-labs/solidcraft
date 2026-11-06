@@ -724,7 +724,7 @@ fn multi_backend_collision_lbvh_morton_and_ssi_residuals_parity() {
 /// Verifies batched point-to-mesh squared distance and divergence-theorem mass properties across CPU, Vulkan, and CUDA backends.
 #[test]
 fn multi_backend_point_mesh_distance_and_mass_properties_parity() {
-    use crate::cuda::CudaBackend;
+    use crate::cuda::{CudaBackend, GpuTri};
     use crate::dispatch::{
         VulkanAccel, build_gpu_bvh_from_mesh, cpu_mass_properties_rayon, cpu_mass_properties_scalar, cpu_point_mesh_distance_rayon,
         cpu_point_mesh_distance_scalar,
@@ -792,29 +792,61 @@ fn multi_backend_point_mesh_distance_and_mass_properties_parity() {
         }
     }
 
-    // 3. Translated mesh cancellation invariance (e.g. translated by (1024, -1024, 256))
+    // 3. Translated and refined mesh cancellation invariance (e.g. translated by (1024, -1024, 256), 768 triangles)
     let c0 = Vec3::new(1024.0, -1024.0, 256.0);
-    let c1 = c0 + Vec3::new(2.0, 3.0, 4.0);
-    let trans_bx = ok(solidcraft_kernel::box_solid(c0, c1));
-    let trans_mesh = ok(trans_bx.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)));
-    let (trans_tris, _) = build_gpu_bvh_from_mesh(&trans_mesh);
-    let trans_measure = trans_mesh.measure();
-    let expected_centroid = c0 + Vec3::new(1.0, 1.5, 2.0);
-    assert!((trans_measure.volume - 24.0).abs() < 1e-4);
-    assert!(trans_measure.centroid.dist(expected_centroid) < 1e-4);
+    let verts = [
+        c0 + Vec3::new(0.0, 0.0, 0.0),
+        c0 + Vec3::new(2.0, 0.0, 0.0),
+        c0 + Vec3::new(2.0, 3.0, 0.0),
+        c0 + Vec3::new(0.0, 3.0, 0.0),
+        c0 + Vec3::new(0.0, 0.0, 4.0),
+        c0 + Vec3::new(2.0, 0.0, 4.0),
+        c0 + Vec3::new(2.0, 3.0, 4.0),
+        c0 + Vec3::new(0.0, 3.0, 4.0),
+    ];
+    let initial_indices =
+        [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]];
+    let mut current_tris: Vec<[Vec3; 3]> = initial_indices.iter().map(|&[i, j, k]| [verts[i], verts[j], verts[k]]).collect();
+    for _ in 0..3 {
+        let mut next = Vec::with_capacity(current_tris.len() * 4);
+        for &[a, b, c] in &current_tris {
+            let ab = (a + b) * 0.5;
+            let bc = (b + c) * 0.5;
+            let ca = (c + a) * 0.5;
+            next.push([a, ab, ca]);
+            next.push([ab, b, bc]);
+            next.push([ca, bc, c]);
+            next.push([ab, bc, ca]);
+        }
+        current_tris = next;
+    }
+    assert_eq!(current_tris.len(), 768);
+    let trans_tris: Vec<GpuTri> = current_tris
+        .iter()
+        .enumerate()
+        .map(|(idx, &[v0, v1, v2])| GpuTri {
+            v0: [v0.x as f32, v0.y as f32, v0.z as f32, f32::from_bits(idx as u32)],
+            v1: [v1.x as f32, v1.y as f32, v1.z as f32, 0.0],
+            v2: [v2.x as f32, v2.y as f32, v2.z as f32, 0.0],
+        })
+        .collect();
 
+    let expected_centroid = c0 + Vec3::new(1.0, 1.5, 2.0);
     let trans_cpu = cpu_mass_properties_scalar(&trans_tris);
     assert!((trans_cpu.volume - 24.0).abs() < 1e-4);
+    assert!((trans_cpu.area - 52.0).abs() < 1e-4);
     assert!(trans_cpu.centroid.dist(expected_centroid) < 1e-4);
 
     if let Some(vk) = VulkanAccel::global() {
-        let vk_trans = vk.mass_properties(&trans_tris).expect("vk mass_properties translated");
+        let vk_trans = vk.mass_properties(&trans_tris).expect("vk mass_properties translated 768 tris");
         assert!((vk_trans.volume - 24.0).abs() < 1e-2, "vk translated volume: {}", vk_trans.volume);
+        assert!((vk_trans.area - 52.0).abs() < 1e-2, "vk translated area: {}", vk_trans.area);
         assert!(vk_trans.centroid.dist(expected_centroid) < 1e-2, "vk translated centroid: {:?}", vk_trans.centroid);
     }
     if let Some(cuda) = CudaBackend::global() {
-        let cu_trans = cuda.mass_properties(&trans_tris, false).expect("cuda translated mass_properties");
+        let cu_trans = cuda.mass_properties(&trans_tris, false).expect("cuda translated mass_properties 768 tris");
         assert!((cu_trans.volume - 24.0).abs() < 1e-4);
+        assert!((cu_trans.area - 52.0).abs() < 1e-4);
         assert!(cu_trans.centroid.dist(expected_centroid) < 1e-4);
     }
 }
