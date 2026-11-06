@@ -847,7 +847,9 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `angle_decimals`
 - `assembly_move_handles` (default true): explicit Assembly Move uses the permitted joint-motion handles; false keeps the previous Move panel.
 - `auto_operation` (default true: feature windows choose Join, New Body or Cut from what their material touches until one is picked; false: each keeps the operation it opens with, Extrude its own Join or Cut)
+- `background_even` (default true: the day's or the tab's background colour takes the theme's own lightness, so strong colours come out as gentle as the theme's)
 - `background_image` (string, default empty: a picture's file, shown behind the model and covering the window from its centre).
+- `background_strength` (number 0–1, default 1: how far the background goes from the theme's own toward the day's or the tab's colour)
 - `browser_bodies_folders` (`several` (default): a component with one body and no groups lists it straight under the component in the browser, without a Bodies folder; `always`; `never`: components list their bodies and groups straight under them, and the folder's menu items are on the component's menu; the design's own Bodies folder, and one hidden with its eye, always show; #4217)
 - `browser_components_open` (default false: each component placement in the browser starts closed until it is opened, by its fold arrow, Expand All or Find in Browser; true: every placement starts open, as before #9274)
 - `browser_eye_left` (default false: each browser and History tree row's eye, handle `eye:<name>`, sits in a column at the rows' right end, clear of the fold arrow and the radio; true: between them, as before #8718)
@@ -928,16 +930,20 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `status_bar` (default false: a thin bar along the window's bottom edge, below History, handle `status:bar`: what is being edited (`status:editing`), the open sketch's state in its colour (`status:sketch`) and the design's units (`status:units`, a click opens the Units menu, whose rows run `document.units`); the sketch's state then leaves the view's top-left corner, #7243)
 - `step_values` (default false: Up/Down and the wheel step a plain number in a focused value field)
 - `tab_double_click_renames` (default true: a double-click on the selected design's tab edits its name in the tab, handle `tab:rename`; Enter or a click elsewhere keeps the name through `component.rename` with `component: 0`, Esc cancels, and a name left as it was or blank changes nothing; false: a double-click on a tab maximizes the window, as the bar's empty space does, as before)
+- `tab_tint` (default false: the background behind the model follows the active ribbon tab's colour, shifting gently between tabs)
 - `theme` (`dark`, `light`, `system` or a theme file's id: a built-in one such as `gruvbox-dark`, or an imported one; the reply's `theme_ids` lists them)
 - `theme_export: true` (the reply's `theme_file` is the active theme, including a followed file; themes with options retain their authored definitions, defaults and overlays, while older themes keep the complete snapshot shape; saved option values are excluded; see [colour themes](book/src/guide/ui-tour.md#colour-themes))
 - `theme_follow` (desktop only, default `""`: a `solidcraft-theme/1` file's path to follow as the theme, reloaded within about a second whenever it changes and when the window gains the focus; the file is read at once, and a file that doesn't read keeps the last good theme; `""` stops following, as does setting `theme`; in the browser it is an error; the launch flag `--theme-file PATH` follows a file for one run without saving it; the reply's `theme_followed` is the path followed now or null, and `theme_follow_error` why its last read was not applied, or null)
 - `theme_import` (a `solidcraft-theme/1` file's JSON or text: adds the theme and turns it on; the reply's `theme_imported` is its id)
 - `theme_options` (default `{}`): a map of theme id to option-id/value map, merged per theme; `{"theme_options":{"my-theme":{"enabled":true,"amount":5}}}` changes those options, `null` resets one option, and an empty map resets that theme. Unknown themes or option ids, wrong types, unknown choices and out-of-range numbers refuse the entire call and name the key, before imports, removals, dialogs or other preference effects occur.
 - `theme_remove` (an imported theme's id; also removes its saved option values)
+- `time_of_day` (default false: the base colour and the background follow the local time of day, from midnight's indigo through dawn's rose, the day's blues and dusk's gold and coral; the window is drawn again each minute)
 - `timeline_origin_bodies` (default false: the History on the left or under the browser starts with the active component's Bodies folder and the Origin, the browser's rows with their eyes, folds and menus; the bottom History is unchanged)
 - `toast_place` (`corner` (default: notices and offers stack in one column in the view's bottom-right corner, each 360 points wide, buttons right-aligned with the main action right-most, #7893), `centre` (at the bottom centre above the view toolbar, each as wide as its text, as before))
 - `trackpad_pan` (default true: two-finger scroll pans, except Touchpad always zooms; pinch zooms)
 - `trackpad_zoom_modifier` (`off` default, `cmd`, `alt`, or `ctrl`: hold this key alone for vertical scroll to zoom)
+- `ui_color` (string, default empty: the theme's own; a `#rrggbb` base colour that tints the title bar, ribbon, panels and dialogs, keeping their text readable)
+- `ui_color_intensity` (number 0–1, default 0.5: how strongly the base colour tints)
 - `ui_font` (an installed font family or a font file for the interface; empty for the built-in font)
 - `ui_scale`
 - `up_axis` (`z`, `y`)

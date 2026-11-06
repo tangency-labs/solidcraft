@@ -1272,6 +1272,21 @@ preference_settings! {
     theme: String = "dark".into(), PAGE_APPEARANCE;
     /// A picture behind the model in place of the view's background; empty for none.
     background_image: String = String::new(), PAGE_APPEARANCE;
+    /// The interface's base colour (`#rrggbb`) over the theme's own: it tints the title bar,
+    /// ribbon, panels and dialogs, keeping their text readable (`personal`). Empty: none.
+    ui_color: String = String::new(), PAGE_APPEARANCE;
+    /// How strongly the base colour tints, 0 to 1.
+    ui_color_intensity: f32 = 0.5, PAGE_APPEARANCE;
+    /// The base colour follows the local time of day, from midnight's indigo through dawn's rose,
+    /// the day's blues and dusk's gold and coral; the 3D view's background follows too.
+    time_of_day: bool = false, PAGE_APPEARANCE;
+    /// How far the background goes from the theme's own toward the day's or the tab's colour,
+    /// 0 to 1.
+    background_strength: f32 = 1.0, PAGE_APPEARANCE;
+    /// Strong background colours are evened out to the theme's own lightness.
+    background_even: bool = true, PAGE_APPEARANCE;
+    /// The 3D view's background follows the active ribbon tab's colour, shifting gently.
+    tab_tint: bool = false, PAGE_APPEARANCE;
     /// Theme used when the operating system is light; unknown ids resolve to Light.
     theme_day: String = "light".into(), PAGE_APPEARANCE;
     /// Theme used when the operating system is dark; unknown ids resolve to Dark.
@@ -2322,6 +2337,19 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(custom) = &custom {
         app.ui.dark = custom.dark;
     }
+    // The user's own colours over the theme: worked out from the theme's own colours, then put
+    // over its palette here and where each tab's colours are made (`theme`).
+    let theme_tokens = custom.map_or_else(|| if app.ui.dark { Tokens::dark() } else { Tokens::light() }, |c| c.tokens);
+    let personal = personal_colours(app, ctx, &theme_tokens);
+    if crate::personal::set(personal) {
+        app.styled = false;
+    }
+    let custom = if personal.is_empty() {
+        custom
+    } else {
+        let dark = custom.map_or(app.ui.dark, |c| c.dark);
+        Some(crate::theme::Custom { dark, tokens: theme_tokens.personalised(personal) })
+    };
     // Custom Day/Night palettes still need native OS appearance notifications. Fixing
     // the native window to the slot's tone can stop those notifications on macOS.
     let follows_system = app.preferences.theme == "system" && followed_theme(&app.preferences, &app.prefs_window.follow).is_none();
@@ -3339,6 +3367,46 @@ fn theme_choices(app: &SolveApp) -> Vec<(String, String)> {
     choices
 }
 
+/// How long the base colour takes to shift to the time of day's, and the background to a newly
+/// active tab's colour, in seconds.
+const DAYLIGHT_SECONDS: f32 = 1.5;
+const TAB_TINT_SECONDS: f32 = 0.4;
+
+/// A `#rrggbb` preference's colour.
+fn hex_color(value: &str) -> Option<egui::Color32> {
+    crate::dialogs_appearance::parse_color(&json!(value)).map(|[r, g, b]| egui::Color32::from_rgb(r, g, b))
+}
+
+/// The user's own colours over a theme whose own are `theme` (`personal`): the base colour (the
+/// user's, or the time of day's), and the 3D view's background tinted by the time of day and the
+/// active tab, as strong as the background strength says and, evened out, as light as the
+/// theme's own. While colours follow the time of day the window is drawn again each
+/// minute.
+fn personal_colours(app: &SolveApp, ctx: &egui::Context, theme: &Tokens) -> crate::personal::Personal {
+    let p = &app.preferences;
+    let mut personal = crate::personal::Personal { color: hex_color(&p.ui_color), intensity: p.ui_color_intensity, sky: None };
+    if p.time_of_day {
+        let day = crate::personal::shifting(ctx, "sc_daylight", crate::personal::daylight(crate::personal::local_hours()), DAYLIGHT_SECONDS);
+        personal.color = Some(day);
+        let [top, bottom] = personal.sky.unwrap_or([theme.viewport_top, theme.viewport_bottom]);
+        personal.sky = Some([top.lerp_to_gamma(day, 0.6), bottom.lerp_to_gamma(day, 0.25)]);
+        ctx.request_repaint_after(std::time::Duration::from_secs(60));
+    }
+    if p.tab_tint {
+        let tab = crate::personal::shifting(ctx, "sc_tab_tint", crate::theme::TabAccent::for_tab(theme, &app.ui.tab).color, TAB_TINT_SECONDS);
+        let [top, bottom] = personal.sky.unwrap_or([theme.viewport_top, theme.viewport_bottom]);
+        personal.sky = Some([top.lerp_to_gamma(tab, 0.5), bottom.lerp_to_gamma(tab, 0.18)]);
+    }
+    if let Some(sky) = personal.sky.as_mut() {
+        let strength = p.background_strength.clamp(0.0, 1.0);
+        for (color, own) in sky.iter_mut().zip([theme.viewport_top, theme.viewport_bottom]) {
+            let target = if p.background_even { crate::personal::with_lightness_of(*color, own) } else { *color };
+            *color = own.lerp_to_gamma(target, strength);
+        }
+    }
+    personal
+}
+
 /// Turn a theme on (a mode or a theme file's id); dark follows it.
 fn select_theme(app: &mut SolveApp, id: &str) {
     app.preferences.theme = id.to_string();
@@ -4093,6 +4161,12 @@ fn prepare_preferences(
     }
     if !accepted::dimension_step_mm(&new) || !accepted::dimension_step_deg(&new) {
         return Err("`dimension_step_mm` must be 0.001…1000 and `dimension_step_deg` 0.001…180".into());
+    }
+    if !new.ui_color.is_empty() && hex_color(&new.ui_color).is_none() {
+        return Err("`ui_color` must be empty (the theme's own) or #rrggbb".into());
+    }
+    if !(0.0..=1.0).contains(&new.ui_color_intensity) || !(0.0..=1.0).contains(&new.background_strength) {
+        return Err("`ui_color_intensity` and `background_strength` must be 0 to 1".into());
     }
     if solidcraft_engine::doc::display_quality::DisplayQuality::parse(&new.display_quality).is_none() {
         return Err("`display_quality` must be coarse, normal, fine or ultra".into());

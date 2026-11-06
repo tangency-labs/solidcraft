@@ -29,6 +29,9 @@ unicode-bidi = "0.3"
 # The system's preferred languages on a first start (MIT OR Apache-2.0, maintained by
 # 1Password): the OS locale on desktop and, with `js`, `navigator.languages` in the browser (#10138).
 sys-locale = { version = "0.3.2", features = ["js"] }
+# The local time of day, for interface colours that follow it (MIT OR Apache-2.0); `wasmbind`
+# reads the browser's clock in the web app.
+chrono = { version = "0.4", default-features = false, features = ["clock", "wasmbind"] }
 semver = { workspace = true }
 # Updates: the downloaded package's SHA-256 (against the release's SHA256SUMS.txt), its optional
 # minisign signature (MIT), and the portable .zip's executables.
