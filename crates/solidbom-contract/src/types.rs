@@ -500,6 +500,91 @@ pub struct CalculationSnapshot {
     pub issues: Vec<Issue>,
 }
 
+/// A server-owned material version. The development service seeds explicit test values only; they
+/// are not company defaults.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MaterialVersion {
+    pub material_version_id: Uuid,
+    pub name: String,
+    pub density_g_cm3: Decimal,
+    pub price_per_kg: Decimal,
+    pub currency: String,
+}
+
+/// A server-owned hourly rate version for production or setup.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RateVersion {
+    pub rate_version_id: Uuid,
+    pub name: String,
+    pub rate_per_hour: Decimal,
+    pub currency: String,
+}
+
+/// The immutable reference data a project may select from.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReferenceData {
+    pub materials: Vec<MaterialVersion>,
+    pub rates: Vec<RateVersion>,
+}
+
+impl ReferenceData {
+    pub fn validate(&self) -> Result<()> {
+        let mut material_ids = BTreeSet::new();
+        for material in &self.materials {
+            if !material_ids.insert(material.material_version_id) {
+                return Err(ContractError::invalid("reference.materials", "two materials share one id"));
+            }
+            check_text(&material.name, "reference.materials.name")?;
+            if material.density_g_cm3 <= Decimal::ZERO {
+                return Err(ContractError::invalid("reference.materials.density_g_cm3", "density must be positive"));
+            }
+            if material.price_per_kg.is_sign_negative() {
+                return Err(ContractError::invalid("reference.materials.price_per_kg", "a price cannot be negative"));
+            }
+            if material.currency != "CNY" {
+                return Err(ContractError::invalid("reference.materials.currency", "this prototype records costs in CNY"));
+            }
+        }
+        let mut rate_ids = BTreeSet::new();
+        for rate in &self.rates {
+            if !rate_ids.insert(rate.rate_version_id) {
+                return Err(ContractError::invalid("reference.rates", "two rates share one id"));
+            }
+            check_text(&rate.name, "reference.rates.name")?;
+            if rate.rate_per_hour <= Decimal::ZERO {
+                return Err(ContractError::invalid("reference.rates.rate_per_hour", "a rate must be positive"));
+            }
+            if rate.currency != "CNY" {
+                return Err(ContractError::invalid("reference.rates.currency", "this prototype records costs in CNY"));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn material(&self, id: Uuid) -> Option<&MaterialVersion> {
+        self.materials.iter().find(|material| material.material_version_id == id)
+    }
+
+    pub fn rate(&self, id: Uuid) -> Option<&RateVersion> {
+        self.rates.iter().find(|rate| rate.rate_version_id == id)
+    }
+}
+
+/// The compact reference a project view lists for each saved calculation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CalculationSummary {
+    pub calculation_id: Uuid,
+    pub saved_version: u64,
+    pub calculator_version: String,
+}
+
+/// What reopening a project returns: the current draft and the immutable results saved for it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProjectView {
+    pub draft: DraftProject,
+    pub calculations: Vec<CalculationSummary>,
+}
+
 /// A named problem with the field it affects. A missing value is an issue, not a zero.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Issue {
