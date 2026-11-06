@@ -151,7 +151,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&RECT_ROUNDED_CONTRACT)
         .output(output_schema_for::<RoundedRectResult>)
-        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters: the corner follows them, as in `sketch.rectangle.two_point`); radius: expr (the corner radius, less than half the shorter side); construction?. A 2-point rectangle whose four corners are filleted alike: one radius dimension (`param`), the other arcs equal to it. Returns sides {bottom, right, top, left} (line ids) and arcs (the corner arcs: bottom-left, bottom-right, top-right, top-left)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters: the corner follows them, as in `sketch.rectangle.two_point`); radius: expr (the corner radius, less than half the shorter side); construction?. A 2-point rectangle whose four corners are filleted alike: one radius dimension (`param`), the other arcs equal to it. Returns sides {bottom, right, top, left} (line ids) and arcs (the corner arcs: bottom-left, bottom-right, top-right, top-left), diagonal (construction, between the bottom-left and top-right arc centres) and centre (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.center", "Center Rectangle", crate::checked!("sketch.rectangle.center", rect_center))
         .at("SKETCH", "CREATE")
         .icon("rect_center")
@@ -219,14 +219,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("slot")
         .enabled(in_sketch)
         .contract(&SLOT_CENTER_TO_CENTER_CONTRACT)
-        .output(output_schema_for::<DrawResult>)
+        .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
         .params(concat!("p0, p1: arc centres, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.slot.overall", "Overall Slot", crate::checked!("sketch.slot.overall", slot_overall))
         .at("SKETCH", "CREATE")
         .icon("slot_overall")
         .enabled(in_sketch)
         .contract(&SLOT_OVERALL_CONTRACT)
-        .output(output_schema_for::<DrawResult>)
+        .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
         .params(concat!("p0, p1: overall ends, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.point", "Point", crate::checked!("sketch.point", draw_point)).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).contract(&POINT_CONTRACT).output(output_schema_for::<PointResult>).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", crate::checked!("sketch.dimension", dimension))
@@ -1682,6 +1682,25 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
         fillet["sketch"] = sketch.clone();
     }
     let rounded = scratch.execute("sketch.fillet", &fillet)?;
+    let arcs = rounded.get("curves").cloned().unwrap_or_else(|| json!([]));
+    // Its centre (#7908): a point held at the midpoint of a construction diagonal between the
+    // bottom-left and top-right arc centres, so it stays in the middle however the rectangle is
+    // edited or dragged. Two coordinates, two equations: the centre adds no freedom.
+    let corner = |k: usize| arcs.get(k).and_then(Value::as_str).map(str::to_string);
+    let (bl, tr) = corner(0).zip(corner(2)).ok_or_else(|| bad(cmd, "the corner arcs are missing"))?;
+    let ((diagonal, centre, centre_con), info) = edit(&mut scratch, p, cmd, false, |sk, _| {
+        let k0 = sk.curve_index(&bl).and_then(|a| arc_centre(sk, a));
+        let k1 = sk.curve_index(&tr).and_then(|a| arc_centre(sk, a));
+        let (k0, k1) = k0.zip(k1).ok_or_else(|| bad(cmd, "the corner arcs lost their centres"))?;
+        let at = sk.point(k0).zip(sk.point(k1)).map(|(a, b)| (a + b) * 0.5).ok_or_else(|| bad(cmd, "the corner arcs lost their centres"))?;
+        let diagonal = sk.add_line_pts(k0, k1, None)?;
+        if let Some(c) = sk.curves.get_mut(diagonal) {
+            c.construction = true;
+        }
+        let centre = sk.add_point(at, None)?;
+        let con = add_c(sk, ConstraintKind::Midpoint { p: centre, l: diagonal })?;
+        Ok((sk.curves.get(diagonal).map(|c| c.id.clone()), sk.points.get(centre).map(|q| q.id.clone()), con))
+    })?;
     // Session::execute records the wrapper's before snapshot. Nested history must not leak.
     scratch.undo.clear();
     s.accept_computed(scratch);
@@ -1693,10 +1712,12 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
     // The sharp corners are gone (the lines end at the arcs now): the reply names no corners.
     let reply = RoundedRectResult {
         curves: ids(&out, "curves").into_iter().chain(arcs.iter().cloned()).collect(),
-        constraints: ids(&out, "constraints").into_iter().chain(ids(&rounded, "constraints")).collect(),
-        sketch: rounded.get("sketch").or_else(|| out.get("sketch")).cloned().unwrap_or(Value::Null),
+        constraints: ids(&out, "constraints").into_iter().chain(ids(&rounded, "constraints")).chain([centre_con]).collect(),
+        sketch: if info.is_null() { rounded.get("sketch").or_else(|| out.get("sketch")).cloned().unwrap_or(Value::Null) } else { info },
         sides: RectSides { bottom: side("bottom"), right: side("right"), top: side("top"), left: side("left") },
         arcs,
+        diagonal,
+        centre,
         param: rounded.get("param").and_then(Value::as_str).unwrap_or_default().to_string(),
         created: None,
         param_warnings: Vec::new(),
@@ -2083,12 +2104,11 @@ fn arc_centre(sk: &Sketch, a: usize) -> Option<usize> {
 /// (#7908): a point held at the midpoint of a construction line between the arc centres, so it
 /// stays in the middle however the slot is edited or dragged. The middle adds no freedom.
 pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<Value> {
-    let (out, info) = slot_parts(s, p, cmd, c0, c1, w)?;
-    draw_reply(out, info)
+    crate::schema::reply(slot_parts(s, p, cmd, c0, c1, w)?)
 }
 
 /// What [`slot`] adds: the curve and constraint ids, and the sketch's solve.
-pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<((Vec<String>, Vec<String>), Value)> {
+pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<crate::schema::sketch_shapes::SlotResult> {
     let h = w / 2.0;
     let d = (c1 - c0).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
     let n = d.perp();
@@ -2116,7 +2136,10 @@ pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Ve
         extra = (sk.curves.get(axis).map(|c| c.id.clone()), sk.points.get(mid).map(|q| q.id.clone()));
         Ok((ids_of(sk, &[l1, a1, l2, a0]), cons))
     })?;
-    Ok((out, info))
+    Ok(crate::schema::sketch_shapes::SlotResult {
+        drawn: DrawResult { curves: out.0, constraints: out.1, sketch: info, created: None, param_warnings: Vec::new() },
+        centre_line: extra.0, middle: extra.1,
+    })
 }
 
 fn slot_c2c(s: &mut Session, p: &Value) -> Result<Value> {

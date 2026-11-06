@@ -215,7 +215,7 @@ fn arc_slot_dimensions_survive_parameter_edits_and_reopening() {
 }
 
 /// Where point `id` of the active sketch is.
-fn point_at(s: &Session, id: &Value) -> solidcraft_geom::Vec2 {
+fn point_at(s: &Session, id: &Value) -> solidcore_record::Vec2 {
     let sk = sketch(s);
     sk.point(sk.resolve_point(id.as_str().unwrap()).unwrap()).unwrap()
 }
@@ -238,7 +238,7 @@ fn halfway(s: &Session, out: &Value, r: f64, sweep: f64) {
     close(o.dist(a), r);
     close(o.dist(m), r);
     // Equal turns from each end, the two together the whole sweep.
-    let turn = |p: solidcraft_geom::Vec2, q: solidcraft_geom::Vec2| ((q - o).angle() - (p - o).angle()).rem_euclid(std::f64::consts::TAU);
+    let turn = |p: solidcore_record::Vec2, q: solidcore_record::Vec2| ((q - o).angle() - (p - o).angle()).rem_euclid(std::f64::consts::TAU);
     close(turn(a, b), sweep);
     close(turn(a, m), sweep / 2.0);
     close(turn(m, b), sweep / 2.0);
@@ -248,7 +248,7 @@ fn halfway(s: &Session, out: &Value, r: f64, sweep: f64) {
 /// middle takes no freedom away nor adds any (#7908).
 #[test]
 fn every_slot_keeps_a_middle_point_in_the_middle() {
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
     for command in ["sketch.slot.center_to_center", "sketch.slot.overall", "sketch.slot.center_point"] {
         let mut s = session();
         let out = draw(

@@ -90,7 +90,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("slot_center")
         .enabled(in_sketch)
         .contract(&SLOT_CENTER_POINT_CONTRACT)
-        .output(output_schema_for::<DrawResult>)
+        .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
         .params(concat!("center: slot centre, end: one arc centre, width; returns centre_line and middle", created_doc!())),
     CommandSpec::new("sketch.slot.arc_three_point", "Three Point Arc Slot", crate::checked!("sketch.slot.arc_three_point", arc_slot_three))
         .at("SKETCH", "CREATE")
@@ -1160,8 +1160,7 @@ fn slot_center_point(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.center_point";
     let (c, e) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "end")?);
     let w = width(p, cmd)?;
-    let (out, info) = slot_parts(s, p, cmd, c * 2.0 - e, e, w)?;
-    drawn(out, info)
+    reply(slot_parts(s, p, cmd, c * 2.0 - e, e, w)?)
 }
 
 /// Arc slot around `o` (centre-line radius `r`) from angle `t0` sweeping `sweep` (> 0).
