@@ -80,7 +80,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CREATE")
         .icon("spline_cv")
         .enabled(in_sketch)
-        .params(concat!("points: control points (2…500), cubic", created_doc!())),
+        .params(concat!(
+            "points: control points (2…500), degree?: integer 1…9 (default 3: a cubic; a spline with fewer than degree + 1 points takes the highest degree they allow)",
+            created_doc!()
+        )),
     CommandSpec::new("sketch.spline.control_point_5", "Control Point Spline (Degree 5)", spline_cv5)
         .at("SKETCH", "CREATE")
         .icon("spline_cv")
@@ -711,7 +714,23 @@ fn spline_fit(s: &mut Session, p: &Value) -> Result<Value> {
     spline(s, p, "sketch.spline.fit_point", false, 3)
 }
 fn spline_cv3(s: &mut Session, p: &Value) -> Result<Value> {
-    spline(s, p, "sketch.spline.control_point", true, 3)
+    let cmd = "sketch.spline.control_point";
+    spline(s, p, cmd, true, control_spline_degree(cmd, p)?)
+}
+
+/// The degree a control point spline is drawn at: `degree`, or the cubic when it is left out
+/// (#12323). A spline with fewer control points than `degree + 1` is drawn at the highest degree
+/// its points allow, as for the fixed-degree tools.
+fn control_spline_degree(cmd: &str, p: &Value) -> Result<u8> {
+    let max = solidcore_record::MAX_BEZIER_DEGREE;
+    match p.get("degree") {
+        None | Some(Value::Null) => Ok(3),
+        Some(Value::Number(n)) => match n.as_u64() {
+            Some(d) if (1..=max as u64).contains(&d) => u8::try_from(d).map_err(|_| bad(cmd, format!("degree must be an integer from 1 to {max}"))),
+            _ => Err(bad(cmd, format!("degree must be an integer from 1 to {max}"))),
+        },
+        Some(_) => Err(bad(cmd, format!("degree must be an integer from 1 to {max}"))),
+    }
 }
 fn spline_cv5(s: &mut Session, p: &Value) -> Result<Value> {
     spline(s, p, "sketch.spline.control_point_5", true, 5)
@@ -1563,5 +1582,50 @@ mod blend_tests {
         let volume = m["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN);
         assert!((volume - area * 5.0).abs() / (area * 5.0) < 2e-4, "volume {volume} vs {}", area * 5.0);
         assert!(m["bodies"][0]["faces"].as_u64().unwrap_or(0) >= 3, "a solid with the blend as a side: {m}");
+    }
+
+    #[test]
+    fn control_point_spline_takes_the_degree_it_is_drawn_at() {
+        // Seven control points at x = 0, 10, …, 60 make one degree-6 Bézier whose x runs linearly
+        // with t (x(t) = 60 t), so the area between it and the x axis is 60 times the mean of the
+        // control points' heights: 60 · 90 / 7 (#12323).
+        let mut s = new_sketch();
+        let heights = [0.0, 10.0, 20.0, 30.0, 20.0, 10.0, 0.0];
+        let points: Vec<_> = heights.iter().enumerate().map(|(i, y)| json!([10.0 * i as f64, y])).collect();
+        let sp = ids(&run(&mut s, "sketch.spline.control_point", json!({"points": points, "degree": 6}))["curves"])[0].clone();
+        let (ctrl, degree, _) = blend_of(&s, &sp);
+        assert_eq!((ctrl.len(), degree), (7, 6), "seven control points drawn at degree 6 are one degree-6 piece");
+        run(&mut s, "sketch.line", json!({"points": [[60, 0], [0, 0]]}));
+        let id = s.active_sketch.unwrap();
+        let state = s.model.state();
+        let profiles = &state.sketch(id).unwrap().profiles;
+        assert_eq!(profiles.len(), 1, "the spline and the line close one region");
+        let want = 60.0 * heights.iter().sum::<f64>() / heights.len() as f64;
+        assert!((profiles[0].area - want).abs() < 1e-4, "area {} vs {want}", profiles[0].area);
+        run(&mut s, "solid.extrude", json!({"distance": 5}));
+        let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN);
+        // The kernel integrates a free-form body's volume numerically, as in the blend test above.
+        assert!((volume - want * 5.0).abs() / (want * 5.0) < 2e-4, "volume {volume} vs {}", want * 5.0);
+
+        // Left out, the degree is the cubic the tool always drew; the highest degree is 9.
+        let mut s = new_sketch();
+        let four = json!([[0, 0], [5, 5], [10, 0], [15, 5]]);
+        let cubic = ids(&run(&mut s, "sketch.spline.control_point", json!({"points": four}))["curves"])[0].clone();
+        let ten: Vec<_> = (0..10).map(|i| json!([10 * i, (i % 2) * 5])).collect();
+        let nine = ids(&run(&mut s, "sketch.spline.control_point", json!({"points": ten, "degree": 9}))["curves"])[0].clone();
+        let sk = sketch(&s);
+        let degree_of = |id: &str| match sk.curves[sk.curve_index(id).unwrap()].kind {
+            CurveKind::Spline { degree, control: true, .. } => degree,
+            ref other => panic!("{other:?}"),
+        };
+        assert_eq!((degree_of(&cubic), degree_of(&nine)), (3, 9));
+
+        // Hostile degrees are refused with a message that names the parameter, and leave nothing.
+        let before = sketch(&s).curves.len();
+        for bad in [json!(0), json!(10), json!(-1), json!(2.5), json!(6.0), json!("6"), json!(true), json!(1e300)] {
+            let e = s.execute("sketch.spline.control_point", &json!({"points": four, "degree": bad})).unwrap_err().to_string();
+            assert!(e.contains("degree must be an integer from 1 to 9"), "degree {bad}: {e}");
+        }
+        assert_eq!(sketch(&s).curves.len(), before, "a refused spline adds no curve");
     }
 }

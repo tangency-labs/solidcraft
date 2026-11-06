@@ -937,7 +937,10 @@ pub fn hint(id: &str) -> Option<String> {
             "sketch.slot.arc_three_point" => "Arc slot: click start, a point on the arc, the end, then the width",
             "sketch.slot.arc_center" => "Arc slot: click the centre, the start, the end, then the width",
             "sketch.spline.fit_point" => "Spline: click fit points; click the start to close smoothly, or right-click to finish",
-            "sketch.spline.control_point" | "sketch.spline.control_point_5" => "Control point spline: click control points; right-click to finish",
+            "sketch.spline.control_point" => {
+                "Control point spline: click control points; right-click to finish. Click the Degree box by the first point to type a degree from 1 to 9"
+            }
+            "sketch.spline.control_point_5" => "Control point spline: click control points; right-click to finish",
             "sketch.text" => "Text: click where the text starts",
             "sketch.edit_text" => "Edit Text: click a letter interior or outline",
             "sketch.blend_curve" => "Blend curve: click the ends of two curves",
@@ -1427,7 +1430,11 @@ fn run_points(app: &mut SolveApp, t: &Tool) -> bool {
             let r = c.0.dist(a.0);
             json!({"center": xy(c.0), "start": xy(a.0), "end": xy(b.0), "width": slot_width(2.0 * (w.0.dist(c.0) - r).abs())})
         }
-        ("sketch.spline.fit_point" | "sketch.spline.control_point" | "sketch.spline.control_point_5", pts) if pts.len() >= 2 => {
+        (crate::sketch_dims::SPLINE_WITH_DEGREE, pts) if pts.len() >= 2 => match crate::sketch_dims::spline_degree(t) {
+            Some(degree) => json!({"points": pts.iter().map(arg).collect::<Vec<_>>(), "degree": degree}),
+            None => json!({"points": pts.iter().map(arg).collect::<Vec<_>>()}),
+        },
+        ("sketch.spline.fit_point" | "sketch.spline.control_point_5", pts) if pts.len() >= 2 => {
             json!({"points": pts.iter().map(arg).collect::<Vec<_>>()})
         }
         ("sketch.blend_curve", [a, b]) => match (&a.1, &b.1) {
