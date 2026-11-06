@@ -617,7 +617,7 @@ mod tests {
         // the slanted line, unless the text sits above right, past the base.
         let mut sk = Sketch::new();
         let a = sk.add_line(Vec2::new(-100.0, 0.0), Vec2::new(0.0, 0.0), None, None, None).unwrap_or(0);
-        let b = sk.add_line(Vec2::new(0.0, 0.0), Vec2::new(30.0, 30.0), Some(1), None, None).unwrap_or(0);
+        let b = sk.add_line(Vec2::new(0.0, 0.0), Vec2::new(30.0, 30.0), Some(2), None, None).unwrap_or(0);
         let k = ConstraintKind::Angle { a, b, value: std::f64::consts::FRAC_PI_4, flip: false };
         let d0 = |text: Option<Vec2>| match dim_frame_at(&sk, &k, text) {
             Some(DimFrame::Angular { d0, sweep, .. }) if (sweep - std::f64::consts::FRAC_PI_4).abs() < 1e-12 => d0,
