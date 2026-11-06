@@ -3403,6 +3403,38 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
     Ok(())
 }
 
+/// GPU setup has no driver progress fraction. Keep its temporary window separate
+/// from the render progress row and retire it as soon as preparation ends.
+pub(crate) fn show_shader_preparation(app: &mut SolveApp, ctx: &egui::Context) -> bool {
+    use solidcraft_engine::render::job::Phase;
+
+    let Some(handle) = app.render_workspace.view.job.and_then(|job| app.session.render_job_handle(job).ok()) else {
+        return false;
+    };
+    let Ok(status) = handle.status() else { return false };
+    if status.progress.phase != Phase::Preparing || status.resolved.executor.as_str() != "gpu-path" {
+        return false;
+    }
+    let mut cancel = false;
+    crate::ui_kit::Window::new(egui::Id::new("render_shader_preparation"), "", app.tr("render.image_preparing")).required().show_body(ctx, |ui| {
+        let warning = ui.label(app.tr("render.gpu_job_shader_wait"));
+        crate::scenario::publish_rect("render:shader-preparation:warning", warning.rect);
+        ui.horizontal(|ui| {
+            let spinner = ui.spinner();
+            crate::scenario::publish_rect("render:shader-preparation:spinner", spinner.rect);
+            ui.label(mmss(handle.elapsed()));
+        });
+        let button = crate::ui_kit::button(ui, app.tr("cmd.render_cancel"), crate::ui_kit::Button::Normal);
+        crate::scenario::publish_target("render:shader-preparation:cancel", button.rect);
+        cancel = button.clicked();
+    });
+    if cancel {
+        app.start("render.cancel");
+    }
+    ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    true
+}
+
 /// `key` names the row's scenario handles (`ui_kit::progress_action`).
 pub(crate) fn progress_pill(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
     if prepare::progress(app, ui) {
@@ -3430,20 +3462,16 @@ pub(crate) fn progress_pill(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) ->
     if !matches!(phase, "queued" | "preparing" | "running" | "encoding" | "cancelling") {
         return false;
     }
+    if phase == "preparing" && status["resolved"]["executor"] == "gpu-path" {
+        return false;
+    }
     let done = status["progress"]["done"].as_u64().unwrap_or(0);
     let total = status["progress"]["total"].as_u64().unwrap_or(1).max(1);
     let fraction = (done as f64 / total as f64).clamp(0.0, 1.0) as f32;
     let phase_key = format!("render.image_{phase}");
     let name = app.render_workspace.view.job_shot.as_ref().unwrap_or(&app.render_workspace.view.name).clone();
-    let (message, meter) = if phase == "preparing" && status["resolved"]["executor"] == "gpu-path" {
-        let warning = app.tr("render.gpu_job_shader_wait");
-        let message =
-            app.session.render_job_handle(job).map_or_else(|_| format!("· {warning}"), |handle| format!("· {warning} · {}", mmss(handle.elapsed())));
-        (message, None)
-    } else {
-        (format!("· {} · {:.0}%", app.tr(&phase_key), fraction * 100.0), Some(fraction))
-    };
-    let cancel = crate::ui_kit::progress_action(ui, key, &name, &message, meter, app.tr_label("Cancel"));
+    let message = format!("· {} · {:.0}%", app.tr(&phase_key), fraction * 100.0);
+    let cancel = crate::ui_kit::progress_action(ui, key, &name, &message, fraction, app.tr_label("Cancel"));
     crate::scenario::publish_target("render:progress-cancel", cancel.rect);
     if cancel.clicked() {
         app.start("render.cancel");

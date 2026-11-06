@@ -7009,21 +7009,16 @@ fn gpu_preparation_shows_shader_warning_then_reports_job_failure() {
     let handle = h.app.session.render_job_handle(job).unwrap();
     preparing.recv_timeout(Duration::from_secs(10)).unwrap();
     assert_eq!(handle.status().unwrap().progress.phase, job::Phase::Preparing);
-    let before = handle.elapsed();
     let _ = h.ctx.run_ui(Default::default(), |ui| {
-        assert!(progress_pill(&mut h.app, ui, "render:progress"));
+        assert!(show_shader_preparation(&mut h.app, ui.ctx()));
+        assert!(!progress_pill(&mut h.app, ui, "render:progress"));
     });
-    let warning = h.app.tr("render.gpu_job_shader_wait");
-    assert!(
-        [before, handle.elapsed()]
-            .into_iter()
-            .any(|elapsed| { crate::scenario::rect_of(&format!("dialog:inline:· {warning} · {}", mmss(elapsed))).is_some() })
-    );
-    assert!(crate::scenario::rect_of("render:progress:spinner").is_some());
-    assert!(crate::scenario::rect_of("dialog:progress:render:progress").is_none());
-    assert!(crate::scenario::rect_of("render:progress:cancel").is_some());
+    for control in ["warning", "spinner", "cancel"] {
+        assert!(crate::scenario::rect_of(&format!("render:shader-preparation:{control}")).is_some());
+    }
     release.send(()).unwrap();
     assert_eq!(handle.wait_timeout(Duration::from_secs(10)).unwrap().progress.phase, job::Phase::Failed);
+    assert!(!show_shader_preparation(&mut h.app, &h.ctx));
     cache_render_images(&mut h.app, &h.ctx);
     assert!(!h.app.render_workspace.view.result);
     assert!(h.app.render_workspace.view.auto_result_job.is_none());

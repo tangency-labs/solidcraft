@@ -219,7 +219,7 @@ pub(crate) fn check_status_line(ui: &mut egui::Ui, key: &str, label: &str, statu
 /// gives way first (cut with an ellipsis, its full text on hover), then the meter narrows
 /// (#11222). Publishes `dialog:progress:KEY`, `KEY:name` with `KEY:name:cut`, and `KEY:cancel`.
 /// The caller dispatches Cancel. Tokens: `font_label, form_ink, space_24, control_height`.
-pub(crate) fn progress_action(ui: &mut egui::Ui, key: &str, name: &str, status: &str, fraction: Option<f32>, cancel: &str) -> egui::Response {
+pub(crate) fn progress_action(ui: &mut egui::Ui, key: &str, name: &str, status: &str, fraction: f32, cancel: &str) -> egui::Response {
     let t = Tokens::get();
     ui.horizontal(|ui| {
         let font = egui::FontId::proportional(t.font_label);
@@ -227,8 +227,7 @@ pub(crate) fn progress_action(ui: &mut egui::Ui, key: &str, name: &str, status: 
         let gap = ui.spacing().item_spacing.x;
         let status_width = measure(ui, status);
         let cancel_width = measure(ui, cancel) + 2.0 * ui.spacing().button_padding.x;
-        let (meter_full, meter_min) = if fraction.is_some() { (t.space_24 * 6.0, t.space_24 * 2.0) } else { (t.space_24, t.space_24) };
-        let name_min = t.space_24;
+        let (meter_full, meter_min, name_min) = (t.space_24 * 6.0, t.space_24 * 2.0, t.space_24);
         // What the name and the meter share once the status, Cancel and the gaps have their room.
         let shared = (ui.available_width() - status_width - cancel_width - 3.0 * gap).max(0.0);
         let name_natural = measure(ui, name);
@@ -244,14 +243,7 @@ pub(crate) fn progress_action(ui: &mut egui::Ui, key: &str, name: &str, status: 
         crate::scenario::publish_rect(&format!("{key}:name"), shown.rect);
         crate::scenario::publish_count(&format!("{key}:name:cut"), f64::from(u8::from(cut)));
         fixed(ui, status_width, &|ui| super::text(ui, status, super::Text::Inline));
-        fixed(ui, meter, &|ui| match fraction {
-            Some(fraction) => progress(ui, key, fraction),
-            None => {
-                let spinner = ui.spinner();
-                crate::scenario::publish_rect(&format!("{key}:spinner"), spinner.rect);
-                spinner
-            }
-        });
+        fixed(ui, meter, &|ui| progress(ui, key, fraction));
         // Cancel keeps its whole label whatever room the row has left.
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
         let response = super::button(ui, cancel, super::Button::Normal);

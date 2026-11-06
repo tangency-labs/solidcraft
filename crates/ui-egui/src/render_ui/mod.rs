@@ -189,6 +189,7 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let preparing_shader = crate::render_workspace::show_shader_preparation(app, ui.ctx());
     crate::shell::register_panel(app, "render:focus:exit", None, None);
     if focused(app) {
         dock_chip(app, ui, "render:focus:exit", "render.exit_focus", "view.render_focus", serde_json::json!({"on":false}));
@@ -198,7 +199,7 @@ pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !free.is_positive() {
         return;
     }
-    if crate::render_workspace::job_busy(app) {
+    if !preparing_shader && crate::render_workspace::job_busy(app) {
         let pill = Container::navigation_card(ui.ctx(), egui::Id::unique("sc_render_progress"), free.center_top(), egui::Align2::CENTER_TOP, |ui| {
             // Bound the row by the canvas, not by the card's size last frame: a longer status or
             // name would otherwise squeeze Cancel or cut a name that has room (#11222).
