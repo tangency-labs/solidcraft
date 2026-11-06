@@ -195,9 +195,9 @@ pub(crate) fn history_marker(p: &Painter, rect: Rect, vertical: bool, accent: Ta
 }
 
 /// History while it changes (a move, reorder or rollback computing): a veil with stripes that
-/// drift across it, unlike the plain fade of the features after the marker, and a spinner with
-/// `text` at the end. The pointer over it shows the busy cursor.
-pub(crate) fn history_busy_veil(ui: &egui::Ui, rect: Rect, vertical: bool, accent: TabAccent, text: &str) {
+/// drift across it, unlike the plain fade of the features after the marker. The pointer over it
+/// shows the busy cursor; the viewport's Computing notice shows the progress.
+pub(crate) fn history_busy_veil(ui: &egui::Ui, rect: Rect, accent: TabAccent) {
     let t = Tokens::get();
     if !rect.is_finite() || rect.width() < 1.0 || rect.height() < 1.0 {
         return;
@@ -215,18 +215,6 @@ pub(crate) fn history_busy_veil(ui: &egui::Ui, rect: Rect, vertical: bool, accen
         p.line_segment([pos2(x, rect.bottom()), pos2(x + rise, rect.top())], stroke);
         x += spacing;
     }
-    let galley = p.layout_no_wrap(text.to_string(), egui::FontId::proportional(t.font_label), t.text);
-    let spin = t.space_12;
-    let size = vec2(t.space_8 + spin + t.space_6 + galley.size().x + t.space_10, (galley.size().y + t.space_8).max(spin + t.space_8));
-    let pill = if vertical {
-        Rect::from_min_size(pos2(rect.center().x - size.x / 2.0, rect.top() + t.space_8), size)
-    } else {
-        Rect::from_min_size(pos2(rect.right() - size.x - t.space_6, rect.center().y - size.y / 2.0), size)
-    };
-    p.rect(pill, size.y / 2.0, t.timeline_item, Stroke::new(1.0, accent.color.gamma_multiply(0.6)), egui::StrokeKind::Inside);
-    let spinner = Rect::from_center_size(pos2(pill.left() + t.space_8 + spin / 2.0, pill.center().y), vec2(spin, spin));
-    egui::Spinner::new().size(spin).color(accent.color).paint_at(ui, spinner);
-    p.galley(pos2(spinner.right() + t.space_6, pill.center().y - galley.size().y / 2.0), galley, t.text);
     if ui.rect_contains_pointer(rect) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Progress);
     }
