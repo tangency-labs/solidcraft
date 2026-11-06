@@ -1077,6 +1077,23 @@ fn join_along_seam(a: &Loop2, b: &Loop2) -> Option<Loop2> {
     None
 }
 
+/// The control points of the Bézier of degree 7 with the given point and first three derivatives
+/// at both ends of a parameter span `h` long (see `SheetBody::zone_piece`). It is the curve itself
+/// for any polynomial of degree 7 or less, a cubic spline's pieces among them.
+fn hermite_piece([p0, a1, a2, a3]: [Vec3; 4], [p1, b1, b2, b3]: [Vec3; 4], h: f64) -> [Vec3; BEND_CHAIN_DEGREE + 1] {
+    let (k1, k2, k3) = (h / 7.0, h * h / 42.0, h * h * h / 210.0);
+    [
+        p0,
+        p0 + a1 * k1,
+        p0 + a1 * (2.0 * k1) + a2 * k2,
+        p0 + a1 * (3.0 * k1) + a2 * (3.0 * k2) + a3 * k3,
+        p1 - b1 * (3.0 * k1) + b2 * (3.0 * k2) - b3 * k3,
+        p1 - b1 * (2.0 * k1) + b2 * k2,
+        p1 - b1 * k1,
+        p1,
+    ]
+}
+
 /// Round to a 1e-9 mm grid (keeps trimmed edges exactly where the kernel expects them).
 fn snap(v: Vec2) -> Vec2 {
     let r = |x: f64| (x * 1e9).round() / 1e9;
@@ -1618,19 +1635,7 @@ impl SheetBody {
     /// difference of its first control points, and the edge's k-th derivative scales by
     /// (t1 − t0)^k to the piece's parameter; at its end the same, backwards.)
     fn zone_piece(&self, f: &SheetFlange, e: &Seg2, z: f64, t0: f64, t1: f64) -> [Vec3; BEND_CHAIN_DEGREE + 1] {
-        let h = t1 - t0;
-        let ([p0, a1, a2, a3], [p1, b1, b2, b3]) = (self.zone_edge_at(f, e, z, t0), self.zone_edge_at(f, e, z, t1));
-        let (k1, k2, k3) = (h / 7.0, h * h / 42.0, h * h * h / 210.0);
-        [
-            p0,
-            p0 + a1 * k1,
-            p0 + a1 * (2.0 * k1) + a2 * k2,
-            p0 + a1 * (3.0 * k1) + a2 * (3.0 * k2) + a3 * k3,
-            p1 - b1 * (3.0 * k1) + b2 * (3.0 * k2) - b3 * k3,
-            p1 - b1 * (2.0 * k1) + b2 * k2,
-            p1 - b1 * k1,
-            p1,
-        ]
+        hermite_piece(self.zone_edge_at(f, e, z, t0), self.zone_edge_at(f, e, z, t1), t1 - t0)
     }
 
     /// Into how many equal pieces (of its parameter) a bend zone's flat edge is folded, so that
@@ -1677,6 +1682,59 @@ impl SheetBody {
         EdgeSpec::Chain { degree: BEND_CHAIN_DEGREE, ctrl: ctrl.into() }
     }
 
+    /// A free-form flat edge of panel `pi` at height `z`: a chain of Hermite pieces of degree 7,
+    /// as many as its flat shape needs to be within [`BEND_CHAIN_TOL`], so the top and bottom
+    /// edges of a wall always have the same number.
+    fn panel_chain(&self, pi: Option<usize>, e: &Seg2, z: f64) -> EdgeSpec {
+        let derivatives = |t: f64| match e.derivatives(t, 3).as_deref() {
+            Some(&[q1, q2, q3]) => [q1, q2, q3],
+            _ => [e.derivative(t), Vec2::ZERO, Vec2::ZERO],
+        };
+        let flat_at = |t: f64| {
+            let [q1, q2, q3] = derivatives(t);
+            [v3(e.point_at(t)), v3(q1), v3(q2), v3(q3)]
+        };
+        let worst = |n: usize| {
+            let mut worst = 0.0f64;
+            for k in 0..n {
+                let (t0, t1) = (k as f64 / n as f64, (k + 1) as f64 / n as f64);
+                let c = hermite_piece(flat_at(t0), flat_at(t1), t1 - t0);
+                for j in 1..8 {
+                    let x = j as f64 / 8.0;
+                    worst = worst.max(bezier_at(&c, x).dist(v3(e.point_at(t0 + (t1 - t0) * x))));
+                }
+            }
+            worst
+        };
+        let mut n = 1;
+        loop {
+            let off = worst(n);
+            if off <= BEND_CHAIN_TOL || !off.is_finite() || n >= BEND_CHAIN_PIECES {
+                break;
+            }
+            // The distance falls as the eighth power of the pieces' length.
+            let guess = (n as f64 * (off / BEND_CHAIN_TOL).powf(1.0 / 8.0)).ceil();
+            n = (guess as usize).clamp(n + 1, BEND_CHAIN_PIECES);
+        }
+        let world = self.world(pi);
+        let at = |t: f64| {
+            let [q1, q2, q3] = derivatives(t);
+            [
+                apply_point(&world, v3(e.point_at(t)) + Vec3::Z * z),
+                apply_vector(&world, v3(q1)),
+                apply_vector(&world, v3(q2)),
+                apply_vector(&world, v3(q3)),
+            ]
+        };
+        let mut ctrl = Vec::with_capacity(BEND_CHAIN_DEGREE * n + 1);
+        for k in 0..n {
+            let (t0, t1) = (k as f64 / n as f64, (k + 1) as f64 / n as f64);
+            let c = hermite_piece(at(t0), at(t1), t1 - t0);
+            ctrl.extend_from_slice(if k == 0 { &c } else { &c[1..] });
+        }
+        EdgeSpec::Chain { degree: BEND_CHAIN_DEGREE, ctrl: ctrl.into() }
+    }
+
     /// A flat edge of a piece as a 3D edge at height `z`.
     fn edge3(&self, piece: Piece, e: &Seg2, z: f64) -> Result<EdgeSpec> {
         let (a, b) = (e.start(), e.end());
@@ -1684,6 +1742,7 @@ impl SheetBody {
         match (piece, e) {
             (Piece::Panel(_), Seg2::Line { .. }) => Ok(EdgeSpec::Line { a: pa, b: pb }),
             (Piece::Panel(_), Seg2::Arc { .. }) => Ok(EdgeSpec::Arc { a: pa, b: pb, mid: self.map3(piece, e.point_at(0.5), z) }),
+            (Piece::Panel(pi), _) => Ok(self.panel_chain(pi, e, z)),
             (Piece::Zone(i), _) => {
                 let f = self.flanges.get(i).ok_or_else(|| DocError::Invalid("bend".into()))?;
                 match zone_edge_kind(f, e) {
@@ -1694,7 +1753,6 @@ impl SheetBody {
                     ZoneEdge::Curved => Ok(self.zone_chain(f, e, z)),
                 }
             }
-            (_, _) => Err(DocError::Invalid("not supported yet: spline or conic cut-outs in sheet metal".into())),
         }
     }
 
@@ -1716,12 +1774,19 @@ impl SheetBody {
         for (i, f) in self.flanges.iter().enumerate() {
             pieces.push((Piece::Zone(i), self.zone(f)));
         }
-        // The folded solid is sewn from lines and arcs: free-form outlines and cut-outs follow
-        // their fitted arcs there (the flat pattern keeps them exact).
+        // Free-form outlines and cut-outs stay as drawn, each one wall, also where a cut-out runs
+        // through them (the planar booleans keep their curves). Pockets are machined by the prism
+        // booleans, which read walls of planes and cylinders, so with pockets they follow their
+        // fitted arcs, as in `flat_solid`. The flat pattern keeps them exact either way.
+        let machined = !self.pockets.is_empty();
+        let drawn = |region: &Region2| -> Result<Region2> {
+            let region = planar_region(region)?;
+            if machined { fitted_region(&region) } else { Ok(region) }
+        };
         let mut cuts = Vec::new();
         let mut cut_points = 0usize;
         for hole in &self.holes {
-            let region = fitted_region(&planar_region(hole)?)?;
+            let region = drawn(hole)?;
             cut_points = cut_points.saturating_add(region_complexity(std::slice::from_ref(&region))?.1);
             if cut_points > MAX_FLAT_POINTS {
                 return Err(flat_budget_error());
@@ -1736,7 +1801,7 @@ impl SheetBody {
         let mut out = Vec::new();
         let mut points = 0usize;
         for (piece, region) in pieces {
-            let panel = fitted_region(&planar_region(&region)?)?;
+            let panel = drawn(&region)?;
             // Each piece meets only the cut-outs near it: arranging every cut-out of the sheet (a
             // label's letters on its base) against each flange and bend zone too would charge the
             // budget for all of them once per piece.
@@ -1926,7 +1991,7 @@ impl SheetBody {
                     }
                     // A cut-out wall across a bend at an angle: square to the sheet, so its
                     // straight lines run radially from the bottom face's edge to the top's.
-                    (Piece::Zone(_), _) if matches!(bottom, EdgeSpec::Chain { .. }) => SurfSpec::Ruled { a: bottom.clone(), b: top_ab.clone() },
+                    (_, _) if matches!(bottom, EdgeSpec::Chain { .. }) => SurfSpec::Ruled { a: bottom.clone(), b: top_ab.clone() },
                     _ => SurfSpec::Plane,
                 };
                 let top = rev_edge(top_ab);
@@ -6241,10 +6306,10 @@ mod tests {
     }
 
     #[test]
-    fn free_form_cut_outs_stay_exact_in_the_flat_pattern_and_follow_arcs_in_the_folded_solid() {
+    fn free_form_cut_outs_stay_exact_in_the_flat_pattern_and_the_folded_solid() {
         let mut s = plate(100.0, 60.0);
         s.add_flange(Vec3::new(50.0, 0.0, 2.5), 20.0, std::f64::consts::FRAC_PI_2, 2.5, "inside", false).unwrap();
-        let (blank, folded) = (s.flat_regions().unwrap()[0].area(), vol(&s.solid().unwrap()));
+        let (blank, folded, faces) = (s.flat_regions().unwrap()[0].area(), vol(&s.solid().unwrap()), s.solid().unwrap().face_count());
         let hole = ellipse(Vec2::new(40.0, 30.0), 15.0, 8.0);
         let cut = std::f64::consts::PI * 15.0 * 8.0;
         s.holes.push(hole.clone());
@@ -6255,13 +6320,30 @@ mod tests {
         let h = &regions[0].holes[0];
         assert!(h.segs.len() == 4 && h.segs.iter().all(|x| hole.outer.segs.contains(&x.reversed())), "{h:?}");
         assert!((regions[0].area() - (blank - cut)).abs() < 1e-9, "{} vs {}", regions[0].area(), blank - cut);
-        // The folded solid is sewn from lines and arcs within the fit tolerance (times the
-        // perimeter, 74 mm): fewer than half the 264 chords of 0.001 mm.
+        // The folded solid has the ellipse as drawn too: its wall is four faces.
         let cells = s.cells_with_work(&mut FlatWork::new()).unwrap();
+        let base = cells.iter().find(|c| c.piece == Piece::Panel(None)).unwrap();
+        assert!(
+            base.holes.len() == 1 && base.holes[0].len() == 4 && base.holes[0].iter().all(|x| hole.outer.segs.contains(&x.reversed())),
+            "{:?}",
+            base.holes
+        );
+        let solid = s.solid().unwrap();
+        assert!((folded - vol(&solid) - cut * 2.5).abs() < 0.5);
+        assert_eq!(solid.face_count(), faces + 4);
+        // Pockets are machined by booleans that read planes and cylinders: with one, the solid
+        // follows lines and arcs within the fit tolerance (times the perimeter, 74 mm), fewer than
+        // half the 264 chords of 0.001 mm.
+        let mut pocketed = s.clone();
+        pocketed.pockets.push(SheetPocket {
+            region: rect(Vec2::new(70.0, 20.0), Vec2::new(80.0, 20.0), Vec2::new(80.0, 30.0), Vec2::new(70.0, 30.0)),
+            z0: 1.5,
+            z1: 2.5,
+        });
+        let cells = pocketed.cells_with_work(&mut FlatWork::new()).unwrap();
         let base = cells.iter().find(|c| c.piece == Piece::Panel(None)).unwrap();
         assert!(base.holes.len() == 1 && base.holes[0].len() < 132 && base.holes[0].iter().all(Seg2::is_line_or_arc), "{}", base.holes[0].len());
         assert!((Loop2 { segs: base.holes[0].clone() }.signed_area().abs() - cut).abs() < kernel::PLANAR_FIT_TOL * 74.0);
-        assert!((folded - vol(&s.solid().unwrap()) - cut * 2.5).abs() < 0.5);
         // The flat solid has the ellipse's wall as four faces.
         let flat = s.flat_solid().unwrap();
         assert!((vol(&flat) - (blank - cut) * 2.5).abs() < 0.5);
@@ -6597,6 +6679,36 @@ mod tests {
                 assert!(flat - folded(t) > 0.05, "{name}: {} on the inside vs {flat} flat", folded(t));
             }
             assert!(edges >= 2, "{name}: {zone:?}");
+        }
+    }
+
+    /// A free-form edge of a panel, as a chain of Hermite pieces, is the edge: exactly, for the
+    /// polynomials among them, and within the chains' tolerance for a conic. Its top and bottom
+    /// have as many pieces, so one ruled wall joins them.
+    #[test]
+    fn a_free_form_panel_edge_is_a_chain_on_the_curve() {
+        let mut s = plate(10.0, 10.0);
+        for (name, lp) in curved_outlines() {
+            s.base = Region2 { outer: lp, holes: Vec::new() };
+            for e in s.base.outer.segs.iter().filter(|e| !e.is_line_or_arc()) {
+                let chain = |z: f64| s.panel_chain(None, e, z);
+                let (EdgeSpec::Chain { degree: 7, ctrl: low }, EdgeSpec::Chain { degree: 7, ctrl: high }) = (chain(0.0), chain(s.t)) else {
+                    panic!("{name}")
+                };
+                assert_eq!(low.len(), high.len(), "{name}");
+                let pieces = (low.len() - 1) / 7;
+                if matches!(e, Seg2::Cubic { .. }) {
+                    assert_eq!(pieces, 1, "{name}: a cubic is one piece");
+                }
+                for (k, piece) in low.windows(8).step_by(7).enumerate() {
+                    for j in 0..=16 {
+                        let x = j as f64 / 16.0;
+                        let t = (k as f64 + x) / pieces as f64;
+                        let off = bezier_at(piece, x).dist(v3(e.point_at(t)));
+                        assert!(off < 1e-6, "{name}: piece {k} is {off} off at {x}");
+                    }
+                }
+            }
         }
     }
 
