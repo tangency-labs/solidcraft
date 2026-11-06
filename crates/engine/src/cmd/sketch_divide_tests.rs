@@ -2,7 +2,8 @@
 //! shares of the length as the curves change.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::Vec2Geom as _;
 use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
 use crate::Session;

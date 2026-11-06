@@ -19,8 +19,8 @@ const ALONG_SAMPLES: usize = 64;
 /// the first one's start. Lines and arcs are measured exactly; other pieces over
 /// [`ALONG_SAMPLES`] chords each. The point is evaluated on its piece, so it lies on the curve.
 /// `None` without pieces or for a share that is not a number.
-pub fn point_along(segs: &[solidcraft_geom::Seg2], at: f64) -> Option<Vec2> {
-    use solidcraft_geom::Seg2;
+pub fn point_along(segs: &[solidcore_record::Seg2], at: f64) -> Option<Vec2> {
+    use solidcore_record::Seg2;
     let first = segs.first()?;
     if !at.is_finite() {
         return None;
