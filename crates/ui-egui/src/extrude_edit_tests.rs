@@ -812,3 +812,26 @@ fn without_face_stops_the_extrude_arrow_moves_in_round_steps() {
     assert!(((d / step).round() * step - d).abs() < 1e-9, "{d} is not a multiple of the {step} mm step");
     let_go(&mut h);
 }
+
+/// A Two Sides extrude that reads the older way (saved before Direction fixed both sides) keeps
+/// that through Edit Extrude and OK, so its shape does not change; the preference makes new
+/// extrudes read that way too.
+#[test]
+fn two_sides_read_the_older_way_keeps_it_through_the_editor_and_by_preference() {
+    let mut h = make(json!({"distance":"-20 mm","distance2":"10 mm","second_follows_first":true}));
+    assert!(extent(&h).second_follows_first);
+    open(&mut h);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    h.frames(2);
+    let e = extent(&h);
+    assert!(e.second_follows_first, "the editor kept how it reads Two Sides");
+    assert_eq!((e.distance.as_str(), e.distance2.as_deref()), ("-20 mm", Some("10 mm")));
+    for pref in [false, true] {
+        let mut h = Harness::new();
+        h.app.preferences.extrude_second_follows_first = pref;
+        h.app.start("solid.extrude");
+        h.frames(2);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.extra.get("second_follows_first").and_then(Value::as_bool).unwrap_or(false), pref);
+    }
+}

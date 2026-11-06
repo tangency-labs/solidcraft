@@ -35,6 +35,7 @@ fn schemas_and_the_key_check_agree() {
             "operation",
             "participants",
             "profiles",
+            "second_follows_first",
             "side",
             "sketch",
             "start_offset",

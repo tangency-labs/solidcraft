@@ -204,6 +204,9 @@ fn a_second_distance_goes_the_other_way_from_the_first_side() {
         // negative Distance 1 leaves the span between the two ends.
         (json!({"direction":"positive","distance":"-10 mm","distance2":"4 mm"}), -10.0, -4.0),
         (json!({"direction":"negative","distance":"-10 mm","distance2":"4 mm"}), 4.0, 10.0),
+        // Read the older way, Distance 2 goes the other way from wherever the first side went.
+        (json!({"direction":"positive","distance":"-10 mm","distance2":"4 mm","second_follows_first":true}), -10.0, 4.0),
+        (json!({"direction":"negative","distance":"-10 mm","distance2":"4 mm","second_follows_first":true}), -4.0, 10.0),
     ] {
         let s = fixture(settings.clone());
         check(&s, lo, hi);

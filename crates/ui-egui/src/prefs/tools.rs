@@ -53,6 +53,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let response = setting::extrude_view_return(app, ui);
                         crate::scenario::publish_target("prefs:extrude_view_return", response.rect);
                     });
+                    let response = setting::extrude_second_follows_first(app, ui);
+                    crate::scenario::publish_target("prefs:extrude_second_follows_first", response.rect);
                 });
                 create_row(ui, app.tr("prefs.design_tools.placement_group"), &["rest", "boss", "snap_fit"], false, |ui| {
                     ui.horizontal_wrapped(|ui| {
