@@ -2,6 +2,7 @@
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
+use solidcraft_doc::construct::DatumItem;
 use solidcraft_doc::{
     AxisRef, Direction, Expr, Extent, FeatureKind, Operation, PointExpr, ProfileSel, RailFit, SweepOrientation, SweepRail, ThinSide, ThinWall,
     Touching, expr::Kind, point_expr,
@@ -1336,7 +1337,8 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// A revolve axis of `sketch` from its parameter: a sketch line id, the sketch's x or y axis, a
 /// world axis (also as saved: {type: world, axis: X|Y|Z}), a construction axis by name
-/// (followed when it is edited), {origin, dir} (each origin coordinate a number or an expression over
+/// (followed when it is edited), a component origin axis (saved as its datum, so it follows the
+/// placement), {origin, dir} (each origin coordinate a number or an expression over
 /// the parameters, which the axis follows), or an edge
 /// or round face of the model ({edge|face: [x,y,z]}), which the revolve follows as the model
 /// changes. A line of the sketch wins over a construction axis of the same name.
@@ -1361,6 +1363,13 @@ pub(super) fn axis_param(s: &Session, sketch: u64, p: &Value, cmd: &str) -> Resu
         Some(a @ ("X" | "Y" | "Z")) => Ok(AxisRef::World { axis: a.into() }),
         Some(a @ ("x" | "y")) => Ok(AxisRef::SketchAxis { axis: a.into() }),
         Some(name) if !is_sketch_line(s, sketch, name) && is_construction_axis(s, name) => Ok(AxisRef::Construction { name: name.into() }),
+        // A component origin axis: saved as its datum, so the revolve follows the placement.
+        Some(name) if !is_sketch_line(s, sketch, name) => {
+            match crate::origins::datum(name).filter(|d| matches!(d.item, DatumItem::X | DatumItem::Y | DatumItem::Z)) {
+                Some(datum) => Ok(AxisRef::Model { geo: solidcraft_doc::construct::GeoRef::Datum { datum } }),
+                None => Ok(AxisRef::SketchLine { curve: name.into() }),
+            }
+        }
         Some(id) => Ok(AxisRef::SketchLine { curve: id.into() }),
         None => {
             Err(bad(cmd, "`axis` must be a sketch line id, x, y (sketch axes), X, Y, Z, a construction axis, {origin, dir} or {edge|face: [x,y,z]}"))
@@ -2179,32 +2188,34 @@ fn axis_line(s: &Session, p: &Value, cmd: &str) -> Result<(Vec3, Vec3, Option<so
     if let Some((geo, o, d)) = super::construct::model_axis_param(s, p.get("axis"), cmd)? {
         return Ok((o, d, Some(geo), None));
     }
-    let (o, d, name) = named_axis_line(s, p, cmd)?;
-    Ok((o, d, None, name))
+    named_axis_line(s, p, cmd)
 }
 
-/// An axis line from `axis`: X, Y, Z, a construction axis by name or {origin, dir}. A construction
-/// axis comes back where it is now, with its name.
-fn named_axis_line(s: &Session, p: &Value, cmd: &str) -> Result<(Vec3, Vec3, Option<FeatureName>)> {
-    match p.get("axis") {
-        Some(Value::String(a)) => match a.to_ascii_uppercase().as_str() {
-            "X" => Ok((Vec3::ZERO, Vec3::X, None)),
-            "Y" => Ok((Vec3::ZERO, Vec3::Y, None)),
-            "Z" => Ok((Vec3::ZERO, Vec3::Z, None)),
-            _ if is_construction_axis(s, a) => {
-                let (_, _, origin, dir) = crate::view::construction_axes(s)
-                    .into_iter()
-                    .find(|(_, name, _, _)| name == a)
-                    .ok_or_else(|| bad(cmd, format!("construction axis `{a}` has no geometry: fix its definition first")))?;
-                Ok((origin, dir, Some(a.as_str().into())))
-            }
-            _ => Err(bad(cmd, "axis must be X, Y, Z, a construction axis, {origin, dir} or {edge|face: [x,y,z]}")),
-        },
-        Some(o @ Value::Object(_)) => {
-            let (origin, dir) = axis_line_object(o).map_err(|why| bad(cmd, why))?;
-            Ok((origin, dir, None))
-        }
-        _ => Err(bad(cmd, "`axis` is required")),
+/// An axis line from `axis`: X, Y, Z, a construction axis by name, a component origin axis (its
+/// datum, followed) or {origin, dir}. A construction axis comes back where it is now, with its
+/// name; a component origin axis with the datum that finds it again on each evaluation.
+fn named_axis_line(s: &Session, p: &Value, cmd: &str) -> Result<(Vec3, Vec3, Option<solidcraft_doc::construct::GeoRef>, Option<FeatureName>)> {
+    if let Some(o @ Value::Object(_)) = p.get("axis") {
+        let (origin, dir) = axis_line_object(o).map_err(|why| bad(cmd, why))?;
+        return Ok((origin, dir, None, None));
+    }
+    let Some(a) = str_(p, "axis") else { return Err(bad(cmd, "`axis` is required")) };
+    if is_construction_axis(s, a) {
+        let (_, _, origin, dir) = crate::view::construction_axes(s)
+            .into_iter()
+            .find(|(_, name, _, _)| name == a)
+            .ok_or_else(|| bad(cmd, format!("construction axis `{a}` has no geometry: fix its definition first")))?;
+        return Ok((origin, dir, None, Some(a.into())));
+    }
+    if let Some(datum) = crate::origins::datum(a).filter(|d| matches!(d.item, DatumItem::X | DatumItem::Y | DatumItem::Z)) {
+        let (origin, dir) = s.origin_axis(a).ok_or_else(|| bad(cmd, format!("no axis `{a}`")))?;
+        return Ok((origin, dir, Some(solidcraft_doc::construct::GeoRef::Datum { datum }), None));
+    }
+    match a.to_ascii_uppercase().as_str() {
+        "X" => Ok((Vec3::ZERO, Vec3::X, None, None)),
+        "Y" => Ok((Vec3::ZERO, Vec3::Y, None, None)),
+        "Z" => Ok((Vec3::ZERO, Vec3::Z, None, None)),
+        _ => Err(bad(cmd, "axis must be X, Y, Z, a construction axis, {origin, dir} or {edge|face: [x,y,z]}")),
     }
 }
 
@@ -2470,7 +2481,18 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
             }
             Ok(PlaneRef::Origin { name: n.trim().to_ascii_uppercase() })
         }
-        Some(Value::String(n)) => construction(n.trim()),
+        Some(Value::String(n)) => {
+            // A construction plane feature by name first, so a name that looks like a datum key
+            // still reaches it; a component origin plane is saved as its datum, so it follows
+            // the placement instead of staying where it was picked.
+            if s.doc.find_feature(n.trim()).is_some() {
+                return construction(n.trim());
+            }
+            match crate::origins::datum(n).filter(|d| matches!(d.item, DatumItem::XY | DatumItem::XZ | DatumItem::YZ)) {
+                Some(datum) => Ok(PlaneRef::Datum { datum }),
+                None => construction(n.trim()),
+            }
+        }
         Some(Value::Number(id)) => match id.as_u64() {
             Some(id) => construction(&id.to_string()),
             None => Err(bad(cmd, format!("`plane` must be {WANT}"))),
@@ -3140,7 +3162,7 @@ fn draft(s: &mut Session, p: &Value) -> Result<Value> {
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let neutral = plane_param(s, p.get("neutral"), cmd)?;
     let (vals, _) = s.doc.param_values();
-    let pl = s.doc.resolve_plane_in(&vals, &neutral, 0, Some(&s.model.state()))?;
+    let pl = s.doc.resolve_plane_in(&vals, &neutral, 0, s.active_component, Some(&s.model.state()))?;
     let pull = p.get("pull").and_then(vec3).unwrap_or_else(|| pl.normal());
     add_feature(
         s,

@@ -79,7 +79,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             apply_op(doc, st, f, tools, Operation::Join, &[])
         }
         FeatureKind::ReplaceFace { faces, target, body } => {
-            let tp = doc.resolve_plane_in(vals, target, 0, Some(st))?;
+            let tp = doc.resolve_plane_in(vals, target, 0, 0, Some(st))?;
             let tn = tp.normal();
             let i = body_at(st, body, &crate::plain(faces))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
@@ -106,7 +106,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             // A plane on either side is worked out now, so the bodies follow it when it moves.
             let (mut from, mut from_normal) = (from.0, from_normal.and_then(|n| n.normalized()));
             if let Some(p) = from_plane {
-                let pl = doc.resolve_plane_in(vals, p, 0, Some(&*st))?;
+                let pl = doc.resolve_plane_in(vals, p, 0, 0, Some(&*st))?;
                 (from, from_normal) = (pl.origin, Some(pl.normal()));
             }
             // So is a frame (#6257): its origin and z, found again from the geometry.
@@ -116,7 +116,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             let target = match to_frame {
                 Some(_) => None,
-                None => to_plane.as_ref().map(|p| doc.resolve_plane_in(vals, p, 0, Some(&*st))).transpose()?,
+                None => to_plane.as_ref().map(|p| doc.resolve_plane_in(vals, p, 0, 0, Some(&*st))).transpose()?,
             };
             let (to, to_normal) = match (to_frame, &target) {
                 (Some(fr), _) => fr.resolve(doc, st).map(|(o, z)| (o, Some(z)))?,

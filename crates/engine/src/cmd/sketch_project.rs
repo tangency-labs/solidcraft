@@ -139,7 +139,10 @@ fn axis_source(s: &Session, name: &str, cmd: &str) -> Result<LinkSource> {
 fn sketch_plane(doc: &Document, id: u64, st: &solidcraft_doc::ModelState) -> Result<Plane> {
     let (vals, _) = doc.param_values();
     match doc.feature(id).map(|f| &f.kind) {
-        Some(FeatureKind::Sketch { plane, .. }) => Ok(doc.resolve_plane_in(&vals, plane, 0, Some(st))?),
+        Some(FeatureKind::Sketch { plane, .. }) => {
+            let component = doc.feature(id).map(|f| f.component).unwrap_or(0);
+            Ok(doc.resolve_plane_in(&vals, plane, 0, component, Some(st))?)
+        }
         _ => Err(EngineError::Other(format!("feature {id} is not a sketch"))),
     }
 }

@@ -317,6 +317,18 @@ impl Mapper<'_> {
         if v.is_array() {
             return self.pick(v, None);
         }
+        let origin = if v.as_str().is_some_and(|name| self.s.doc.find_feature(name).is_none() && crate::origins::datum(name).is_some()) {
+            // A component origin plane with no feature of the same name: left as its name, so the
+            // command's resolver saves the datum and the pick follows the placement (#7313)
+            // instead of staying where it was picked.
+            None
+        } else {
+            v.as_str().and_then(|name| self.s.origin_plane(name)).map(|p| {
+                self.changed = true;
+                serde_json::json!({"origin":pt(p.origin),"x_dir":pt(p.x),"y_dir":pt(p.y)})
+            })
+        };
+        let v = origin.as_ref().unwrap_or(v);
         let o = v.as_object()?;
         let mut m = o.clone();
         if let Some(x) = o.get("face").and_then(|x| self.pick(x, None)) {
@@ -677,6 +689,18 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
                     vec3(v).and_then(|p| m.local_point(&frame, p))
                 }
                 Axis => {
+                    let origin = if v.as_str().is_some_and(|name| s.doc.find_feature(name).is_none() && crate::origins::datum(name).is_some()) {
+                        // A component origin axis with no feature of the same name: left as its
+                        // name, so the command's resolver saves the datum and the revolve
+                        // follows the placement (#7313).
+                        None
+                    } else {
+                        v.as_str().and_then(|name| s.origin_axis(name)).map(|(o, d)| {
+                            m.changed = true;
+                            serde_json::json!({"origin":pt(o),"dir":pt(d)})
+                        })
+                    };
+                    let v = origin.as_ref().unwrap_or(v);
                     if let Some(axis) = v.as_object() {
                         let mut axis = axis.clone();
                         if let Some(origin) = axis.get("origin").and_then(|o| m.make(o)) {

@@ -159,7 +159,7 @@ impl Document {
         }
         let mut resolved = plane.clone();
         let note = replace(self, &mut resolved, author, state, 0)?;
-        Ok((self.resolve_plane_in(vals, &resolved, 0, Some(framed))?, note))
+        Ok((self.resolve_plane_in(vals, &resolved, 0, author, Some(framed))?, note))
     }
 }
 

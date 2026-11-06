@@ -218,8 +218,8 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
                 map_geo_ref(m, g);
             }
         }
-        // Named origin planes and construction planes are the component's own.
-        PlaneRef::Origin { .. } | PlaneRef::Construction { .. } => {}
+        // Named origin planes, construction planes and placement datums are the component's own.
+        PlaneRef::Origin { .. } | PlaneRef::Datum { .. } | PlaneRef::Construction { .. } => {}
         PlaneRef::Tangent { face, at, reference, .. } => {
             *at = apply_point(m, *at);
             map_geo_ref(m, face);

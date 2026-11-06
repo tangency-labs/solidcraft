@@ -23,6 +23,9 @@ use crate::{DocError, Document, PlaneRef, Result};
 pub enum GeoRef {
     /// A fixed point.
     Point { p: Vec3 },
+    /// An origin datum of an exact placement (its O point, an axis or a plane), found again on
+    /// each evaluation, so it follows the component the way a named reference does.
+    Datum { datum: DatumRef },
     /// The design origin.
     Origin,
     /// A body vertex: where the edges named `edges` meet (the end they share), else the one
@@ -112,6 +115,127 @@ impl ConstructGeom {
     }
 }
 
+/// One of the seven named items of a placement's Origin folder: the O point, the X, Y and Z
+/// axes, and the XY, XZ and YZ planes. Case-insensitive to parse; the `Plane::named` aliases
+/// (TOP/FRONT/RIGHT) stay root-only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DatumItem {
+    O,
+    X,
+    Y,
+    Z,
+    XY,
+    XZ,
+    YZ,
+}
+
+impl DatumItem {
+    /// The item's name as a key spells it.
+    pub fn name(self) -> &'static str {
+        match self {
+            DatumItem::O => "O",
+            DatumItem::X => "X",
+            DatumItem::Y => "Y",
+            DatumItem::Z => "Z",
+            DatumItem::XY => "XY",
+            DatumItem::XZ => "XZ",
+            DatumItem::YZ => "YZ",
+        }
+    }
+
+    /// Case-insensitive; the Plane::named aliases (TOP/FRONT/RIGHT) stay root-only.
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name.to_ascii_uppercase().as_str() {
+            "O" => DatumItem::O,
+            "X" => DatumItem::X,
+            "Y" => DatumItem::Y,
+            "Z" => DatumItem::Z,
+            "XY" => DatumItem::XY,
+            "XZ" => DatumItem::XZ,
+            "YZ" => DatumItem::YZ,
+            _ => return None,
+        })
+    }
+
+    /// The item in its component's own frame: O the point, X/Y/Z the axes, XY/XZ/YZ the planes.
+    pub fn geom(self) -> ConstructGeom {
+        match self {
+            DatumItem::O => ConstructGeom::Point(Vec3::ZERO),
+            DatumItem::X => ConstructGeom::Axis { origin: Vec3::ZERO, dir: Vec3::X },
+            DatumItem::Y => ConstructGeom::Axis { origin: Vec3::ZERO, dir: Vec3::Y },
+            DatumItem::Z => ConstructGeom::Axis { origin: Vec3::ZERO, dir: Vec3::Z },
+            DatumItem::XY => ConstructGeom::Plane(Plane::XY),
+            DatumItem::XZ => ConstructGeom::Plane(Plane::XZ),
+            DatumItem::YZ => ConstructGeom::Plane(Plane::YZ),
+        }
+    }
+}
+
+/// An origin datum of an exact placement. The empty path is never a `DatumRef`: the root keeps
+/// `PlaneRef::Origin` and `GeoRef::Origin` as they are.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DatumRef {
+    /// The occurrence ids of the placement, root first.
+    pub path: Vec<u64>,
+    pub item: DatumItem,
+}
+
+impl DatumRef {
+    /// The datum's Browser key: `o:2/3/origin/XY`.
+    pub fn key(&self) -> String {
+        format!("o:{}/origin/{}", self.path.iter().map(|id| id.to_string()).collect::<Vec<_>>().join("/"), self.item.name())
+    }
+
+    /// Strict: canonical non-zero decimal ids, depth at most 64, length at most 2048. Rejects
+    /// `c0/origin`, `o:01/origin/X` and `o:0/origin/X`.
+    pub fn parse_key(key: &str) -> Option<Self> {
+        if key.len() > 2048 {
+            return None;
+        }
+        let rest = key.strip_prefix("o:")?;
+        let (ids, item) = rest.rsplit_once("/origin/")?;
+        if ids.is_empty() || ids.split('/').count() > 64 {
+            return None;
+        }
+        let path = ids.split('/').map(|id| id.parse::<u64>().ok().filter(|n| *n != 0 && n.to_string() == id)).collect::<Option<Vec<_>>>()?;
+        Some(DatumRef { path, item: DatumItem::parse(item)? })
+    }
+}
+
+impl Serialize for DatumRef {
+    /// Saved as its Browser key: `o:2/3/origin/XY`.
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        s.serialize_str(&self.key())
+    }
+}
+
+impl<'de> Deserialize<'de> for DatumRef {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let key = String::deserialize(d)?;
+        DatumRef::parse_key(&key).ok_or_else(|| serde::de::Error::custom(format!("not a datum key: `{key}`")))
+    }
+}
+
+/// An origin datum of an exact placement, resolved at evaluation time: the item in its own
+/// component's frame, placed by the placement's world frame. It follows the component on every
+/// evaluation, the way `PlaneRef::Face` re-finds its face.
+pub fn resolve_datum(doc: &Document, d: &DatumRef) -> Result<ConstructGeom> {
+    Ok(d.item.geom().placed(&doc.placement_frame(&d.path)?))
+}
+
+/// [`resolve_datum`] as the component `component` sees it: placed by the placements, then
+/// mapped back through that component's frame, since a feature evaluated in its own frame
+/// places what it reads into the world again through that frame (the world pass). The root
+/// (0) reads the world as it is.
+pub fn resolve_datum_in(doc: &Document, d: &DatumRef, component: u64) -> Result<ConstructGeom> {
+    if component == 0 {
+        return resolve_datum(doc, d);
+    }
+    let inverse =
+        crate::mat_inverse(&doc.component_transform(component)).ok_or_else(|| DocError::Invalid("the component's placement is singular".into()))?;
+    Ok(resolve_datum(doc, d)?.placed(&inverse))
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Construct {
     pub feature: u64,
@@ -133,6 +257,10 @@ pub(crate) struct Ctx<'a> {
     /// geometry resolves its sides through the document again, so the count has to continue
     /// across that hop; restarting it lets a plane that refers to itself recurse forever.
     pub depth: usize,
+    /// The component the reading feature lives in: a datum it reads is found through the
+    /// placements and mapped back into this frame ([`resolve_datum_in`]). The root (0) is
+    /// the world.
+    pub component: u64,
 }
 
 fn bad(m: impl Into<String>) -> DocError {
@@ -326,6 +454,10 @@ pub(crate) fn point(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
         }
         // A round edge or face: its centre.
         GeoRef::Edge { .. } | GeoRef::Face { .. } | GeoRef::SketchCurve { .. } => centre(ctx, g),
+        GeoRef::Datum { datum } => match resolve_datum_in(ctx.doc, datum, ctx.component)? {
+            ConstructGeom::Point(p) => Ok(p),
+            _ => Err(bad("the datum is not a point (pick the O of a component)")),
+        },
         _ => Err(bad("pick a point, vertex or sketch point")),
     }
 }
@@ -364,6 +496,23 @@ pub fn model_axis(st: &ModelState, g: &GeoRef) -> Result<(Vec3, Vec3)> {
     Ok((o, canonical_dir(d)))
 }
 
+/// [`model_axis`] for references that may name a component's origin datum: the datum is placed
+/// through the document's placements ([`resolve_datum_in`], as the component `component` sees
+/// it), the rest as [`model_axis`] finds it in the model state. `None` for a datum asks for an
+/// evaluation.
+pub fn model_axis_in(doc: Option<&Document>, st: &ModelState, g: &GeoRef, component: u64) -> Result<(Vec3, Vec3)> {
+    match g {
+        GeoRef::Datum { datum } => {
+            let doc = doc.ok_or_else(|| bad("this axis is built from a component's origin: evaluate first"))?;
+            match resolve_datum_in(doc, datum, component)? {
+                ConstructGeom::Axis { origin, dir } => Ok((origin, dir)),
+                _ => Err(bad("the datum is not an axis (pick the X, Y or Z of a component)")),
+            }
+        }
+        _ => model_axis(st, g),
+    }
+}
+
 /// `d` or `-d`, whichever has its largest component (the first of equal ones) positive: how
 /// [`model_axis`] orients an axis, for a preview of one to point the same way.
 pub fn canonical_dir(d: Vec3) -> Vec3 {
@@ -378,6 +527,10 @@ pub fn canonical_dir(d: Vec3) -> Vec3 {
 /// A reference as a line (origin, unit direction).
 pub(crate) fn line(ctx: &Ctx, g: &GeoRef) -> Result<(Vec3, Vec3)> {
     match g {
+        GeoRef::Datum { datum } => match resolve_datum_in(ctx.doc, datum, ctx.component)? {
+            ConstructGeom::Axis { origin, dir } => Ok((origin, dir)),
+            _ => Err(bad("the datum is not an axis (pick the X, Y or Z of a component)")),
+        },
         GeoRef::Edge { .. } | GeoRef::Face { .. } => model_line(ctx.st, g),
         GeoRef::SketchCurve { sketch, curve } => {
             let pts = sketch_curve_points(ctx, *sketch, curve)?;
@@ -403,7 +556,7 @@ pub(crate) fn line(ctx: &Ctx, g: &GeoRef) -> Result<(Vec3, Vec3)> {
 /// A reference as a plane.
 pub(crate) fn plane(ctx: &Ctx, g: &GeoRef) -> Result<Plane> {
     match g {
-        GeoRef::Plane { plane } => ctx.doc.resolve_plane_in(ctx.vals, plane, ctx.depth + 1, Some(ctx.st)),
+        GeoRef::Plane { plane } => ctx.doc.resolve_plane_in(ctx.vals, plane, ctx.depth + 1, ctx.component, Some(ctx.st)),
         GeoRef::Face { at, name } => {
             let (b, fi, q) = face_of(ctx.st, *at, name)?;
             match kernel::face_surface(&b.body, fi) {
@@ -414,6 +567,10 @@ pub(crate) fn plane(ctx: &Ctx, g: &GeoRef) -> Result<Plane> {
                 _ => Err(bad("the face is not planar")),
             }
         }
+        GeoRef::Datum { datum } => match resolve_datum_in(ctx.doc, datum, ctx.component)? {
+            ConstructGeom::Plane(p) => Ok(p),
+            _ => Err(bad("the datum is not a plane (pick the XY, XZ or YZ of a component)")),
+        },
         _ => Err(bad("pick a plane or planar face")),
     }
 }
@@ -785,11 +942,11 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
             Plane::from_normal(p, tan).ok_or_else(degenerate)
         }
         PlaneRef::ThroughPoint { base, point: at } => {
-            let b = ctx.doc.resolve_plane_in(ctx.vals, base, ctx.depth + 1, Some(ctx.st))?;
+            let b = ctx.doc.resolve_plane_in(ctx.vals, base, ctx.depth + 1, ctx.component, Some(ctx.st))?;
             let n = b.normal().normalized().ok_or_else(degenerate)?;
             Ok(Plane { origin: b.origin + n * (point(ctx, at)? - b.origin).dot(n), ..b })
         }
-        _ => ctx.doc.resolve_plane_in(ctx.vals, p, ctx.depth + 1, Some(ctx.st)),
+        _ => ctx.doc.resolve_plane_in(ctx.vals, p, ctx.depth + 1, ctx.component, Some(ctx.st)),
     }
 }
 

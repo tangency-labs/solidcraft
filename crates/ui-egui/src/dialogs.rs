@@ -2903,10 +2903,23 @@ fn occurrence_paths(s: &Session, items: &[Sel]) -> Vec<Vec<u64>> {
     out
 }
 
+/// Distinguish a component's reference geometry without exposing its internal placement key.
+pub(crate) fn component_origin_label(s: &Session, names: crate::prefs::OriginPlaneNames, name: &str) -> Option<String> {
+    let (path, item) = solidcraft_engine::origins::item(name)?;
+    let placement =
+        path.iter().filter_map(|id| s.doc.occurrences.iter().find(|o| o.id == *id).map(|o| o.name.as_str())).collect::<Vec<_>>().join(" / ");
+    Some(format!("{placement} · {}", names.label(item)))
+}
+
 /// A picked item as its chip shows it. A round edge or face says what it stands for in `inp`:
 /// its axis in an axis input, a circle's centre in a point input. An origin plane goes by
 /// the name the preferences give it.
 pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames, d: &Dialog, inp: &SelInput, item: &Sel) -> String {
+    if let Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } = item
+        && let Some(label) = component_origin_label(s, names, name)
+    {
+        return label;
+    }
     let axis = inp.accept == selection::AXIS_PICKS && round_axis(s, item).is_some();
     let sketch_name =
         |id| s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_else(|| crate::i18n::format("browser.sketch_name", &[("number", &id.to_string())]));
@@ -4707,6 +4720,12 @@ fn flip_toward_viewer(app: &SolveApp, name: &str) -> Option<&'static str> {
 /// the sketch, the view turning to it and the extrude all went the wrong way. `None` while the
 /// active component sits at the origin (the name says the same) or for a construction plane.
 fn shown_origin_plane(app: &SolveApp, name: &str) -> Option<Value> {
+    if let Some((path, item)) = solidcraft_engine::origins::item(name) {
+        let active = app.session.active_occurrence_path.clone().unwrap_or_else(|| app.session.doc.first_path(app.session.active_component));
+        if path == active {
+            return Some(json!(item));
+        }
+    }
     let p = solidcore_record::Plane::named(name)?;
     if app.session.doc.find_feature(name).is_some() || solidcraft_engine::doc::is_identity(&app.session.active_component_frame()) {
         return None;
@@ -4730,6 +4749,8 @@ pub(crate) fn plane_by_name(s: &Session, name: &str) -> Option<solidcore_record:
         // With occurrences the world state leaves construction geometry out; the viewport's
         // planes are evaluated in place.
         .or_else(|| solidcraft_engine::view::construction_planes(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, pl)| pl))
+        // A component origin item key (`o:2/origin/XY`) last: a feature of the same name wins.
+        .or_else(|| s.origin_plane(name))
 }
 
 /// Animate the camera to look straight at the active sketch plane.
@@ -5751,11 +5772,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     json!({"origin": pt(*point), "normal": pt(n)})
                 }
                 Some(Sel::Plane { name }) => {
-                    let pl = solidcraft_engine::view::construction_planes(s)
-                        .into_iter()
-                        .find(|(_, n, _)| n == name)
-                        .map(|(_, _, pl)| pl)
-                        .ok_or("unknown plane")?;
+                    let pl = plane_by_name(s, name).ok_or("unknown plane")?;
                     json!({"origin": pt(pl.origin), "normal": pt(pl.normal())})
                 }
                 _ => return Err("pick a plane or a planar face".into()),
@@ -6126,8 +6143,13 @@ pub fn axis_of(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
             "X" => Some((Vec3::ZERO, Vec3::X)),
             "Y" => Some((Vec3::ZERO, Vec3::Y)),
             "Z" => Some((Vec3::ZERO, Vec3::Z)),
-            // A construction axis.
-            n => solidcraft_engine::view::construction_axes(&app.session).into_iter().find(|(_, an, _, _)| an == n).map(|(_, _, o, d)| (o, d)),
+            // A construction axis by name first, so a name that looks like an origin item key
+            // still reaches it; then a component origin axis by its key.
+            n => solidcraft_engine::view::construction_axes(&app.session)
+                .into_iter()
+                .find(|(_, an, _, _)| an == n)
+                .map(|(_, _, o, d)| (o, d))
+                .or_else(|| app.session.origin_axis(n)),
         },
         Sel::SketchCurve { id, .. } => {
             let st = crate::open_meshing::session_world(&app.session);

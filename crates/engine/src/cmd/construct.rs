@@ -8,7 +8,7 @@
 
 use serde_json::Value;
 use solidcore_record::Vec3;
-use solidcraft_doc::construct::{AxisDef, GeoRef, PointDef};
+use solidcraft_doc::construct::{AxisDef, DatumItem, GeoRef, PointDef};
 use solidcraft_doc::{FeatureKind, PlaneRef};
 
 use super::CommandSpec;
@@ -171,7 +171,7 @@ pub(crate) fn is_model_axis(v: &Value) -> bool {
 pub(super) fn model_axis_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<Option<(GeoRef, Vec3, Vec3)>> {
     let Some(v) = v.filter(|v| is_model_axis(v)) else { return Ok(None) };
     let g = geo(s, Some(v), cmd, "axis")?;
-    let (o, d) = solidcraft_doc::construct::model_axis(&*s.world_state()?, &g).map_err(|e| bad(cmd, format!("`axis`: {e}")))?;
+    let (o, d) = solidcraft_doc::construct::model_axis_in(Some(&s.doc), &*s.world_state()?, &g, 0).map_err(|e| bad(cmd, format!("`axis`: {e}")))?;
     Ok(Some((g, o, d)))
 }
 
@@ -272,14 +272,24 @@ pub(super) fn geo(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Resu
             } else {
                 match s.doc.find_feature(a).map(|f| &f.kind) {
                     Some(FeatureKind::ConstructionAxis { .. }) => GeoRef::Axis { name: a.into() },
-                    _ => return Err(bad(cmd, format!("no axis `{a}`"))),
+                    // A component origin axis: saved as its datum, so it follows the placement.
+                    _ => match crate::origins::datum(a).filter(|d| matches!(d.item, DatumItem::X | DatumItem::Y | DatumItem::Z)) {
+                        Some(datum) => GeoRef::Datum { datum },
+                        None => return Err(bad(cmd, format!("no axis `{a}`"))),
+                    },
                 }
             }
         }
-        Ok(GeoForm::ConstructPoint(n)) => match s.doc.find_feature(n).map(|f| &f.kind) {
-            Some(FeatureKind::ConstructionPoint { .. }) => GeoRef::ConstructPoint { name: n.into() },
-            _ => return Err(bad(cmd, format!("no construction point `{n}`"))),
-        },
+        Ok(GeoForm::ConstructPoint(n)) => {
+            match s.doc.find_feature(n).map(|f| &f.kind) {
+                Some(FeatureKind::ConstructionPoint { .. }) => GeoRef::ConstructPoint { name: n.into() },
+                // A component origin's O point: its datum, so it follows the placement.
+                _ => match crate::origins::datum(n).filter(|d| d.item == DatumItem::O) {
+                    Some(datum) => GeoRef::Datum { datum },
+                    None => return Err(bad(cmd, format!("no construction point `{n}`"))),
+                },
+            }
+        }
         Err(GeoFormError::Saved(e)) => return Err(bad(cmd, format!("`{what}`: {e}"))),
         Err(GeoFormError::Unknown) => return Err(bad(cmd, format!("`{what}` must be {REF}"))),
     };

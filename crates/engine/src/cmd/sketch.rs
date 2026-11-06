@@ -903,7 +903,7 @@ fn flip_param(s: &Session, p: &Value, plane: &PlaneRef, cmd: &str) -> Result<Opt
         Some(Value::String(a)) if a.eq_ignore_ascii_case("y") => true,
         Some(Value::Bool(true)) => {
             let (vals, _) = s.doc.param_values();
-            let resolved = s.doc.resolve_plane_in(&vals, plane, 0, Some(&s.model.state()))?;
+            let resolved = s.doc.resolve_plane_in(&vals, plane, 0, s.active_component, Some(&s.model.state()))?;
             resolved.y.z > 1e-9
         }
         Some(_) => return Err(bad(cmd, "`flip` must be true, false, \"x\" or \"y\"")),
@@ -928,7 +928,7 @@ pub(super) fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneR
     }
     // Validate the plane resolves.
     let (vals, _) = s.doc.param_values();
-    s.doc.resolve_plane_in(&vals, &plane, 0, Some(&s.model.state()))?;
+    s.doc.resolve_plane_in(&vals, &plane, 0, s.active_component, Some(&s.model.state()))?;
     let name = str_(p, "name");
     let mut kind = FeatureKind::Sketch { plane, sketch: Sketch::new() };
     if !face::is_face(p) {

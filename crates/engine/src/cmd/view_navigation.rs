@@ -229,7 +229,14 @@ fn normal_target(s: &Session) -> Option<(solidcore_record::Vec3, solidcore_recor
             let plane = state.body(body)?.body.planar_face(*index)?;
             Some((*point, plane.normal()))
         }
-        Sel::Plane { name } => solidcore_record::Plane::named(name).map(|plane| (plane.origin, plane.normal())),
+        Sel::Plane { name } => {
+            // A construction plane feature wins over a name that looks like an origin item key.
+            crate::view::construction_planes(s)
+                .into_iter()
+                .find(|(_, n, _)| n == name)
+                .map(|(_, _, plane)| (plane.origin, plane.normal()))
+                .or_else(|| s.origin_plane(name).or_else(|| solidcore_record::Plane::named(name)).map(|plane| (plane.origin, plane.normal())))
+        }
         _ => None,
     })
 }
