@@ -260,3 +260,99 @@ fn a_view_that_cant_be_numbered_still_places_its_list() {
     assert!(s.doc.assembly.item_numbers.is_empty());
     assert_eq!(s.drawing("test").unwrap().tables.len(), 1);
 }
+
+/// Recipes 3, 5 and 6 of #11773 on the W23 assembly sheet, from its command script. An assembly's
+/// drawing starts on A2. The first-level parts list, placed at (330, 60), keeps items 1, 2 and 3 for
+/// BP-100 1, HL-300 2 and SC-M6 4; with the second holder deleted only HL-300 drops to 1, and undo
+/// brings it back. Revision rows 1, 2 and 3 with row 2 deleted leave 1 and 3, next 4, and a tag on 3
+/// at (200, 120) shows 3. Moving the second holder changes none of it, nor the drawing's record. The
+/// sheet exports the same SVG after save and reopen. Every model edit is made with the drawing closed.
+#[test]
+fn the_assembly_sheet_keeps_its_parts_list_revisions_and_tag_through_the_model() {
+    let script: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/w23-assembly-sheet/assembly.json")).unwrap();
+    let mut s = Session::default();
+    let made = s.run_script(&script).unwrap();
+    let step = script["commands"].as_array().unwrap().iter().position(|c| c["as"] == "second_holder").unwrap();
+    let second = made[step]["occurrence"].as_u64().unwrap();
+    let exec = |s: &mut Session, id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+
+    exec(&mut s, "assembly.bom.renumber", json!({"levels": "top"}));
+    let created = exec(&mut s, "drawing.create", json!({}));
+    assert_eq!(created["sheets"][0]["size_mm"], json!([594.0, 420.0]), "an assembly's drawing starts on A2: {created}");
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+    let sheet = sheet_of(&s);
+    exec(&mut s, "drawing.view.base", json!({"sheet": "Sheet 1", "view": "top", "scale": "1:2", "position_mm": [150, 150]}));
+    let list =
+        run(&mut s, ADD, json!({"sheet": "Sheet 1", "kind": "parts_list", "set": {"list": {"levels": "top"}, "place": {"at": [330.0, 60.0]}}}));
+    let list = list["table"].clone();
+    run(&mut s, ADD, json!({"sheet": "Sheet 1", "kind": "revision"}));
+    let mut rows = Vec::new();
+    for (description, date) in [("First issue", "2026-11-03"), ("Withdrawn", "2026-11-04"), ("Holder moved", "2026-11-05")] {
+        rows.push(exec(&mut s, "drawing.revision.add", json!({"set": {"description": description, "designer": "BS", "date": date}}))["row"].clone());
+    }
+    let three = exec(&mut s, "drawing.inspect", json!({}))["revisions"].clone();
+    let numbers = |r: &Value| r["rows"].as_array().unwrap().iter().map(|r| r["revision"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    assert_eq!((numbers(&three), three["next"].as_str()), (vec!["1".to_string(), "2".into(), "3".into()], Some("4")), "{three}");
+    exec(&mut s, "drawing.revision.delete", json!({"row": rows[1]}));
+    let tag = exec(&mut s, "drawing.revision.tag.add", json!({"row": rows[2], "sheet": sheet, "at": [200.0, 120.0]}))["tag"].clone();
+
+    let text = |v: &Value| v.as_str().map_or_else(|| v.to_string(), str::to_string);
+    // The list's items as the drawing has them, its revisions, and the drawing's record.
+    let printed = |s: &mut Session| {
+        let inspect = exec(s, "drawing.inspect", json!({}));
+        let on_list = inspect["parts_lists"].as_array().unwrap().iter().find(|l| l["table"] == list).cloned().unwrap_or_else(|| panic!("{inspect}"));
+        let items: Vec<String> = on_list["ballooned"].as_array().unwrap_or_else(|| panic!("{on_list}")).iter().map(|r| text(&r["item"])).collect();
+        (items, inspect["revisions"].clone(), s.drawing("test").unwrap().to_json().unwrap())
+    };
+    // The first level as the model counts it: item, part number, count. A model read, so with the drawing closed.
+    let counted = |s: &mut Session| {
+        exec(s, "drawing.close", json!({}));
+        let top = exec(s, "assembly.bom", json!({"levels": "top"}));
+        exec(s, "drawing.open", json!({"drawing": drawing}));
+        let rows = top["rows"].as_array().unwrap().iter();
+        rows.map(|r| (text(&r["item"]), r["part_number"].as_str().unwrap().to_string(), r["count"].as_u64().unwrap())).collect::<Vec<_>>()
+    };
+    let on_the_model = |s: &mut Session, id: &str, p: Value| {
+        exec(s, "drawing.close", json!({}));
+        exec(s, id, p);
+        exec(s, "drawing.open", json!({"drawing": drawing}));
+    };
+    let first_level =
+        |holders: u64| vec![("1".to_string(), "BP-100".to_string(), 1), ("2".into(), "HL-300".into(), holders), ("3".into(), "SC-M6".into(), 4)];
+
+    let (items, revisions, record) = printed(&mut s);
+    assert_eq!(items, ["1", "2", "3"], "the list's items on the sheet");
+    assert_eq!(counted(&mut s), first_level(2), "the hand counts");
+    assert_eq!((numbers(&revisions), revisions["next"].as_str()), (vec!["1".to_string(), "3".into()], Some("4")), "{revisions}");
+    let tags = &revisions["tags"];
+    assert_eq!(
+        (&tags[0]["tag"], &tags[0]["shows"], &tags[0]["lost"], &tags[0]["at"]),
+        (&tag, &json!("3"), &json!(false), &json!([200.0, 120.0])),
+        "{tags}"
+    );
+
+    // The second holder deleted: only HL-300 drops to 1, every item stays; undone, back to 2.
+    on_the_model(&mut s, "selection.delete", json!({"occurrences": [second]}));
+    assert_eq!(counted(&mut s), first_level(1), "the second holder deleted");
+    assert_eq!(printed(&mut s), (items.clone(), revisions.clone(), record.clone()), "the drawing as it was");
+    on_the_model(&mut s, "edit.undo", json!({}));
+    assert_eq!(counted(&mut s), first_level(2), "undone");
+
+    // The second holder moved 30 mm along Y: the list, the revisions, the tag and the record stay.
+    on_the_model(&mut s, "occurrence.move", json!({"occurrence": second, "space": "world", "translate": [0, 30, 0]}));
+    assert_eq!(counted(&mut s), first_level(2));
+    assert_eq!(printed(&mut s), (items.clone(), revisions.clone(), record.clone()), "a model edit leaves the drawing alone");
+
+    // Saved and opened again: the same SVG, list, revisions, tag and record.
+    let svg = |s: &mut Session| exec(s, "drawing.export", json!({"sheet": "Sheet 1"}))["svg"].as_str().unwrap().to_string();
+    let before = svg(&mut s);
+    let folder = crate::tests::Folder::new("assembly-sheet-tables");
+    let path = folder.path("assembly.solidcraft");
+    exec(&mut s, "file.save", json!({"path": path}));
+    let mut opened = Session::default();
+    exec(&mut opened, "doc.open", json!({"path": path}));
+    exec(&mut opened, "drawing.open", json!({"drawing": drawing}));
+    assert_eq!(svg(&mut opened), before, "the same SVG after save and reopen");
+    assert_eq!(printed(&mut opened), (items, revisions, record), "opened again");
+    assert_eq!(counted(&mut opened), first_level(2));
+}
