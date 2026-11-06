@@ -89,3 +89,12 @@ These are fetched at run time (never committed) and used only by the goldens cra
 - Use: the unmodified `dist/*.min.js` files, concatenated into
   `site/assets/vendor/d3-force.bundle.min.js`, lay out the dependency graph on the
   progress site (`graph.html`). They are served with the site and not loaded from a CDN.
+
+### Sprint emblems
+
+- Files: `site/assets/sprints/blends.png` and `site/assets/sprints/kernel-rig.png`
+- Origin: original images made for this project with Google's Gemini image model
+  (`gemini-3.1-flash-lite-image`), then cut out to a transparent background; no third-party
+  artwork or marks
+- Use: each sprint's emblem on its page, and on its social card
+  (`site/assets/sprints/<slug>-card.png`, made by `site/gen-sprint-cards.py`)

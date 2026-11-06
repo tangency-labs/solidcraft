@@ -1,0 +1,20 @@
+# The sprints the site lists (site/build.py: sprints/index.html and sprints/<slug>/index.html).
+# Each is a quest in one campaign: a GitHub project with a goal, its emblem and its milestone.
+# A sprint's page carries its own social card (`<slug>-card.png`, made by
+# site/gen-sprint-cards.py from the emblem) and sends visitors on to the project's README.
+
+[[sprint]]
+slug = "blends"
+title = "Blends Sprint"
+summary = "The new blend construction as solidcore's only blend path: flags retired, old fillet paths deleted, the open corner and End steps built, known-failing cases fixed or correctly refused."
+project = 1
+milestone = 1
+emblem = "blends.png"
+
+[[sprint]]
+slug = "kernel-rig"
+title = "Kernel Rig Sprint"
+summary = "solidcore's kernel rig: every corpus case replayed through solidcore-ops and graded, and main's kernel-rig gate green."
+project = 2
+milestone = 2
+emblem = "kernel-rig.png"

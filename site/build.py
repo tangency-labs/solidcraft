@@ -9,7 +9,7 @@ plan/units/*.toml, plan/PROGRESS.md (claims; generated, not committed), harness/
 line counts at the pin), scripts/upstream-pin.env (upstream version and commit),
 reports/difftest/*.json (not committed: CI's artifact, see scripts/fetch-reports.sh),
 reports/solids/solids.json (not committed: CI's artifact, see scripts/fetch-solids.sh),
-reports/ssi-corpus.json, plan/upstream-issues/*.md, the
+reports/ssi-corpus.json, plan/upstream-issues/*.md, site/sprints.toml, the
 module file headers under crates/solidcore/src and git history (timeline). Output is
 deterministic: sorted, and the only date is the commit date of HEAD.
 
@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import sys
 import time
+import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True  # keep harness/plan clean
@@ -607,13 +608,47 @@ def parse_issue_files():
     return entries
 
 
+# ---------------------------------------------------------------- sprints
+
+def load_sprints():
+    """site/sprints.toml: the campaign's sprints, each a GitHub project with its emblem."""
+    path = ROOT / "site/sprints.toml"
+    return tomllib.loads(path.read_text())["sprint"] if path.exists() else []
+
+
+def project_url(s):
+    return f"https://github.com/orgs/{REPO.split('/')[0]}/projects/{int(s['project'])}?pane=info"
+
+
+def sprints_body(sprints):
+    cards = "".join(
+        f'<a class="sprint" href="{esc(s["slug"])}/index.html">'
+        f'<img src="../assets/sprints/{esc(s["emblem"])}" alt="" width="160">'
+        f'<h2>{esc(s["title"])}</h2><p>{esc(s["summary"])}</p></a>'
+        for s in sprints)
+    return ('<h1>Sprints</h1>\n<p class="muted">Each sprint is a GitHub project with one goal, its issues '
+            'grouped and claimed in the open. Its README says what to read first and how to pick up '
+            f'work.</p>\n<div class="sprints">{cards}</div>\n')
+
+
+def sprint_body(s):
+    url = project_url(s)
+    milestone = f'{REPO_URL}/milestone/{int(s["milestone"])}' if s.get("milestone") else ""
+    links = f'<a href="{esc(url)}">Open the project and its README</a>'
+    if milestone:
+        links += f' · <a href="{esc(milestone)}">Milestone</a>'
+    return (f'<div class="sprint-page"><img src="../../assets/sprints/{esc(s["emblem"])}" alt="" width="220">'
+            f'<div><h1>{esc(s["title"])}</h1><p>{esc(s["summary"])}</p><p>{links}</p></div></div>\n')
+
+
 # ---------------------------------------------------------------- page shell
 
-def page(title, body, depth, nav, head_sha, head_date, description="", path="", scripts=()):
+def page(title, body, depth, nav, head_sha, head_date, description="", path="", scripts=(),
+         og_image="assets/og-image.png", head_extra=""):
     up = "../" * depth
     links = [("index.html", "Overview", "overview"), ("units/index.html", "Units", "units"),
              ("graph.html", "Graph", "graph"), ("solids.html", "Solids", "solids"),
-             ("cases.html", "Cases", "cases"),
+             ("cases.html", "Cases", "cases"), ("sprints/index.html", "Sprints", "sprints"),
              ("issues.html", "Upstream issues", "issues"), ("ssi.html", "SSI corpus", "ssi")]
     extra_js = "".join(f'\n<script src="{up}assets/{js}"></script>' for js in scripts)
     navhtml = "".join(
@@ -635,14 +670,14 @@ def page(title, body, depth, nav, head_sha, head_date, description="", path="", 
 <meta property="og:url" content="{canon_url}">
 <meta property="og:title" content="{esc(title)}">
 <meta property="og:description" content="{esc(description or title)}">
-<meta property="og:image" content="{site_url}assets/og-image.png">
+<meta property="og:image" content="{site_url}{og_image}">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:type" content="image/png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="{esc(title)}">
 <meta name="twitter:description" content="{esc(description or title)}">
-<meta name="twitter:image" content="{site_url}assets/og-image.png">
+<meta name="twitter:image" content="{site_url}{og_image}">{head_extra}
 <link rel="stylesheet" href="{up}assets/style.css">
 <link rel="icon" href="{up}assets/logo.svg" type="image/svg+xml">
 </head>
@@ -1275,6 +1310,22 @@ counts). Click a column heading to sort.</p>
                 shutil.copy(c["image"], dst)
     write("cases.html", P("Kernel cases · solidcore", gallery_body(gallery), 0, "cases", path="cases.html",
                           description="Every kernel case with a render, and whether it passes, is refused as expected or is known failing."))
+
+    # ---- sprints: the campaign page, and one page per sprint with its own social card that
+    # sends visitors on to the project
+    sprints = load_sprints()
+    (out / "sprints").mkdir()
+    shutil.copytree(ROOT / "site/assets/sprints", out / "assets/sprints")
+    write("sprints/index.html", P("Sprints · solidcore", sprints_body(sprints), 1, "sprints",
+                                  path="sprints/index.html",
+                                  description="The sprints solidcore runs in the open, each a project with one goal."))
+    for s in sprints:
+        (out / "sprints" / s["slug"]).mkdir()
+        refresh = f'\n<meta http-equiv="refresh" content="0; url={esc(project_url(s))}">'
+        write(f'sprints/{s["slug"]}/index.html',
+              P(f'{s["title"]} · solidcore', sprint_body(s), 2, "sprints", path=f'sprints/{s["slug"]}/',
+                description=s["summary"], og_image=f'assets/sprints/{s["slug"]}-card.png',
+                head_extra=refresh))
 
     # ---- issues
     sc = collections.Counter(e["series"] for e in issues)
