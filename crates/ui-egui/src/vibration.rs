@@ -431,7 +431,7 @@ pub(crate) fn draw(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             .unwrap_or((Vec3::ZERO, Vec3::ZERO));
         let peak_phase = (2.0 * real.dot(imag)).atan2(real.dot(real) - imag.dot(imag)) * 0.5;
         let phase = if study.playing {
-            painter.ctx().request_repaint();
+            painter.ctx().request_repaint_after(std::time::Duration::from_millis(30));
             painter.ctx().input(|i| i.time).rem_euclid(1.25) * std::f64::consts::TAU / 1.25
         } else {
             peak_phase
