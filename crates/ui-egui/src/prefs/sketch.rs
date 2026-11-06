@@ -95,6 +95,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.sketch.auto_dimensions",
             "prefs.sketch.auto_locate",
             "ui.first_dimension_scales",
+            "ui.first_dimension_scales_about_origin",
         ];
         let right_labels =
             ["prefs.sketch.shortcut_cycles_modes", "prefs.ribbon_click_ends_tool", "ui.project_face_edges_sketch", "prefs.sketch.project_options"];
@@ -155,6 +156,15 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some("ui.first_dimension_scales_tip"),
                     &mut app.preferences.first_dimension_scales,
                 );
+                ui.add_enabled_ui(app.preferences.first_dimension_scales, |ui| {
+                    check(
+                        ui,
+                        "first_dimension_scales_about_origin",
+                        "ui.first_dimension_scales_about_origin",
+                        Some("ui.first_dimension_scales_about_origin_tip"),
+                        &mut app.preferences.first_dimension_scales_about_origin,
+                    );
+                });
             });
             ui.allocate_ui_with_layout(egui::vec2(right, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                 check(
