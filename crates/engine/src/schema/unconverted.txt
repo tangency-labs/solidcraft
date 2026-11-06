@@ -215,7 +215,6 @@ sketch.toggle_driven
 sketch.trim
 sketch.trim.path
 solid.align
-solid.boundary_fill
 solid.chamfer
 solid.coil
 solid.combine
@@ -230,16 +229,13 @@ solid.pattern.circular
 solid.pattern.path
 solid.pattern.rectangular
 solid.press_pull
-solid.remove
 solid.replace_face
 solid.revolve
-solid.rib
 solid.shell
 solid.split_body
 solid.split_face
 solid.sweep
 solid.thread
-solid.web
 surface.blend
 surface.extend
 surface.extrude
