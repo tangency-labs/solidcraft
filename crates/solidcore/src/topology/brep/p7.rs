@@ -169,6 +169,11 @@ use crate::topology::{
 
 const OP: &str = "topology::brep::p7";
 
+/// How many zone tolerances a gap between a loop's curves may be for
+/// [`make_face_with_curves`] to close it (growing the search to reach the vertex); a wider
+/// gap is refused, "loop gap larger than tolerance".
+pub(crate) const LOOP_GAP_ZONES: f64 = 100.0;
+
 fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
@@ -1539,7 +1544,7 @@ fn make_face_with_curves_transfer_impl(
             let start_pt = curve.evaluate_point(k, start_param)?;
             let mut m = find_first_vertex_within_tol_to_pnt(b, &vertices, start_pt, zone_tol)?;
             if !vertices.is_empty() && !m.found {
-                if m.distance < zone_tol * 100.0 {
+                if m.distance < zone_tol * LOOP_GAP_ZONES {
                     m = find_first_vertex_within_tol_to_pnt(
                         b,
                         &vertices,

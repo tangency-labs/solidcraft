@@ -6087,7 +6087,7 @@ impl SessionObjects<'_> {
         executive: &mut FilletExecutive<FilletObject>,
     ) -> Result<()> {
         use crate::blend::fillet_corner::topology::join::{
-            JoinTopology, JoinTopologyEnv, JOIN_ACROSS_EDGES,
+            JoinTopology, JoinTopologyEnv, JOIN_ACROSS_EDGES, JOIN_UNEQUAL_OFFSETS,
         };
         let corner = self
             .corners
@@ -6143,6 +6143,34 @@ impl SessionObjects<'_> {
             let edge = crate::topology::edgeuse::p1::edge(target, first)?;
             executive.note_fit_radius(
                 0.0,
+                edge.map(|e| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e))),
+                crate::blend::fillet_executive::p3::FitKind::Radius,
+            );
+            return Err(SolidError::sm_err("SmBlendCorner::MakeJoinTopology"));
+        }
+        // (#2905) the size that builds: the other blend's offset, on the wider one's edge
+        if let JoinTopology::RefusedUnequalOffsets { blend, builds } = built {
+            let location = match vertex {
+                Some(v) => crate::topology::vertex::point(target, v).ok(),
+                None => None,
+            };
+            executive.error.note_vertex_error(
+                vertex.map(|v| FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(v))),
+                location,
+                crate::blend::fillet_geom::p1::FilStatus::Failure,
+                crate::blend::fillet_geom::p1::FilletErrorType::NoRoom,
+                Some(JOIN_UNEQUAL_OFFSETS),
+            );
+            executive.error.no_room =
+                Some(crate::blend::fillet_executive::NoRoomReason::JoinOffsetsDiffer);
+            let wider = corners
+                .get(id.0 as usize)
+                .and_then(|c| c.solver_eus.as_deref())
+                .and_then(|eus| eus.get(blend).copied())
+                .ok_or_else(|| SolidError::null_pointer("SmBlendCorner::MakeJoinTopology"))?;
+            let edge = crate::topology::edgeuse::p1::edge(target, wider)?;
+            executive.note_fit_radius(
+                builds,
                 edge.map(|e| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e))),
                 crate::blend::fillet_executive::p3::FitKind::Radius,
             );
