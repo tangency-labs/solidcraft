@@ -1745,24 +1745,6 @@ impl BSplineCurve {
                 5.0
             };
 
-            // Not upstream (tangency-labs/solidcore#2785): a radius of curvature is a
-            // length, so tests 13/14 compare it with a length at part scale and not with
-            // `tol`, which is the average speed `size_xyz / size_t / 10000` that tests
-            // 11/12 need. On `tol` the two sides of the comparison had different units,
-            // and the verdict moved when the curve was reparametrised although no
-            // geometry changed: a bend of radius r was reported on a domain of length T
-            // while `sqrt(2) / T / 10000 > r` and silently accepted once T grew past it.
-            // `size_xyz / 10000` is upstream's own 1/10000 fraction, applied to the right
-            // quantity; for the 3D curve, and for a UV trim measured on its surface
-            // (`uv_trim_checks_on_surface`, WR-560), that is a length with no
-            // parametrisation in it. A trim measured in its own (u, v) -- the flag off --
-            // is in the surface's parameters, which is the gap WR-560's mapping exists to
-            // close, not this one. The corpus's expectations hold the fraction to a wide
-            // window (the finding record). `radius_tol` is also the length
-            // `zero_speed_radius_stretch` divides by the radius' growth rate to get a
-            // stretch in parameter units (WR-668), which the speed made dimensionless.
-            let radius_scale = if bounded { size_xyz / 10000.0 } else { 1e-03 };
-
             // Not upstream (#2568): where the curve's speed is bounded above the tolerance
             // the search cannot report, and is not run (`analysis`; off without
             // `Kernel::memoize_curve_caches`, and with `query_statuses_pass_on`, which
@@ -1847,7 +1829,7 @@ impl BSplineCurve {
             // at its middle, with the mapped trim's tolerance and solution spacing; a
             // mapped trim that cannot be sized fails test 13 and is not analysed.
             let mut mapped: Option<BSplineCurve> = None;
-            let (mut radius_sized, mut radius_tol, mut radius_sep) = (sized, radius_scale, min_sep);
+            let (mut radius_sized, mut radius_tol, mut radius_sep) = (sized, tol, min_sep);
             if sized && k.fixes.uv_trim_checks_on_surface {
                 if let Some(l) = trim_metric(k, self, bounded, ovr.trim_surface, &domain)? {
                     mapped = mapped_trim(self, l);
@@ -1867,8 +1849,7 @@ impl BSplineCurve {
                     rtn &= bool_report(&mut list, key, 13, radius_sized)?;
                     if let Some(mapped_box) = mapped_box {
                         let mapped_size = mapped_box.size().length();
-                        // a length, as above: the mapped trim's own box at part scale
-                        radius_tol = mapped_size / 10000.0;
+                        radius_tol = (mapped_size / size_t) / 10000.0;
                         radius_sep = mapped_size / max2(20., size_t);
                     }
                 }
@@ -1945,38 +1926,10 @@ impl BSplineCurve {
                     }
                 }
             }
-            // Not upstream (tangency-labs/solidcore#2785): a radius minimum on a natural
-            // boundary end of a curve with topology context belongs to the joint there,
-            // not to this curve, as the first-derivative loop above already takes it
-            // ("skip solutions on the natural boundary ends - they are not a problem"): the
-            // end is where the curve meets a neighbour or a vertex, and that joint's own
-            // checks (G1 across the knot, the vertex's, WR-668's waiver) judge it. Without
-            // this a blend's tangent end, whose radius grows as `|t - t_end|` from 0
-            // (WR-668), reports a cusp: #2343's countersink corner trim had its minimum at
-            // parameter 0 of [0, 1.677], a spike (1.5e-4 there, 0.85 one twentieth of the
-            // way along, 37 mid-curve). A bare curve -- `assert_valid` with no edge and no
-            // trim surface, a direct caller -- has no such joint, so its boundary solutions
-            // are kept and its end is reported.
-            let candidates: Vec<&SolutionEnd> =
-                if ovr.edge_ends.is_some() || ovr.trim_surface.is_some() {
-                    let mut interior = Vec::with_capacity(solutions.len());
-                    for s in &solutions {
-                        let p = s.param(0)?;
-                        if !domain
-                            .is_value_on_boundary(p, EFF_ZERO * (1.0 + domain.length()))
-                            .0
-                        {
-                            interior.push(s);
-                        }
-                    }
-                    interior
-                } else {
-                    solutions.iter().collect()
-                };
-            let mut first = candidates.first().copied();
+            let mut first = solutions.first();
             if stretch.iter().any(|&s| s >= 0.0) {
                 first = None;
-                for &s in &candidates {
+                for s in &solutions {
                     let p = s.param(0)?;
                     let growth = (p - domain.min()).abs() <= stretch[0]
                         || (p - domain.max()).abs() <= stretch[1];
@@ -2459,193 +2412,6 @@ mod tests {
         k.fixes.bspline_check_min_radius = true;
         let (ok, idx) = tests(&k);
         assert!(!ok && idx.contains(&14), "{idx:?}");
-    }
-
-    /// tangency-labs/solidcore#2785: tests 13/14 compare a radius of curvature, a length,
-    /// with `tol`, which is the curve's average speed (`size_xyz / size_t / 10000`). The
-    /// two sides then have different units, so the verdict moves when the curve is
-    /// reparametrised although no geometry changes.
-    ///
-    /// The curve is the cubic Bezier `(0,0) (h,0) (h,h) (1,1)` with `h = 1e-4`: one sharp
-    /// bend near its start, of radius 5.815568702310391e-6 everywhere (the search's own
-    /// first solution is 5.8155015634573e-6, #2637). Its knot vector is stretched to
-    /// `[0,0,0,0,T,T,T,T]`, so the curve in space is the same for every `T` and only the
-    /// parametrisation differs. The old speed tolerance is `sqrt(2) / T / 10000`, which
-    /// passes below the true radius between `T = 20` and `T = 50`: the bend was reported at
-    /// `T` up to 20 and silently accepted from 50 on.
-    #[test]
-    fn issue_2785_radius_tolerance_is_a_length_not_a_speed() {
-        let mut k = Kernel::default();
-        k.fixes.bspline_check_min_radius = true;
-        let h = 1e-4;
-        // the search's first solution, the same at every T (#2637, #2785)
-        let radius = 5.8155015634573e-6;
-        let mut tol: Option<f64> = None;
-        let mut value: Option<f64> = None;
-        for t in [1.0, 10.0, 20.0, 50.0, 1e2, 1e3, 1e4] {
-            let c = curve(
-                3,
-                &[[0.0, 0.0, 0.0], [h, 0.0, 0.0], [h, h, 0.0], [1.0, 1.0, 0.0]],
-                &[0.0, 0.0, 0.0, 0.0, t, t, t, t],
-            );
-            let mut list = AssertArray::new();
-            let ok = c
-                .assert_valid(&k, Some(&mut list), true, ObjectKey(9))
-                .unwrap();
-            let reports: Vec<_> = list
-                .reports()
-                .iter()
-                .filter(|r| r.test_index == 14)
-                .collect();
-            assert_eq!(reports.len(), 1, "T = {t}: {list:?}");
-            assert!(!ok, "T = {t}");
-            let report = reports[0];
-            // the same bend, at the same radius, for every parametrisation
-            assert!(
-                (report.value - radius).abs() <= 1e-9 * radius,
-                "T = {t}: {} against {radius}",
-                report.value
-            );
-            match value {
-                None => value = Some(report.value),
-                // the search's own value moves by a rounding or two, not with T
-                Some(first) => {
-                    assert!((first - report.value).abs() <= 1e-12 * first, "T = {t}");
-                }
-            }
-            // and the same tolerance, which is a length at part scale
-            match tol {
-                None => tol = Some(report.tol3d),
-                Some(first) => assert_eq!(first, report.tol3d, "T = {t}"),
-            }
-        }
-        // the box diagonal is sqrt 2 whatever the parametrisation, so the length
-        // tolerance is size_xyz / 10000 rather than the old speed sqrt(2) / T / 10000
-        let expected = 2f64.sqrt() / 10000.0;
-        assert!((tol.unwrap() - expected).abs() <= 1e-12, "{tol:?}");
-
-        // With the default fixes the radius is never read (WR-382), so no test 13/14
-        // report depends on the tolerance at all: the difftest, which runs the default,
-        // sees the same reports before and after this fix.
-        for t in [1.0, 20.0, 1e2, 1e4] {
-            let c = curve(
-                3,
-                &[[0.0, 0.0, 0.0], [h, 0.0, 0.0], [h, h, 0.0], [1.0, 1.0, 0.0]],
-                &[0.0, 0.0, 0.0, 0.0, t, t, t, t],
-            );
-            let mut list = AssertArray::new();
-            assert!(
-                c.assert_valid(&Kernel::default(), Some(&mut list), true, ObjectKey(9))
-                    .unwrap(),
-                "T = {t}: {list:?}"
-            );
-            assert!(list.is_empty(), "T = {t}: {list:?}");
-        }
-    }
-
-    /// The other side of #2785: a bend that is not a kink is accepted at every
-    /// parametrisation. The same cubic with `h = 0.25` has a radius of about 0.13, far
-    /// above the length tolerance `sqrt(2) / 10000 = 1.4e-4`, so no `T` may report it.
-    #[test]
-    fn issue_2785_a_regular_bend_is_accepted_at_every_parametrisation() {
-        let mut k = Kernel::default();
-        k.fixes.bspline_check_min_radius = true;
-        for t in [1.0, 20.0, 1e2, 1e4] {
-            let c = curve(
-                3,
-                &[
-                    [0.0, 0.0, 0.0],
-                    [0.25, 0.0, 0.0],
-                    [0.25, 0.25, 0.0],
-                    [1.0, 1.0, 0.0],
-                ],
-                &[0.0, 0.0, 0.0, 0.0, t, t, t, t],
-            );
-            let mut list = AssertArray::new();
-            assert!(
-                c.assert_valid(&k, Some(&mut list), true, ObjectKey(9))
-                    .unwrap(),
-                "T = {t}: {list:?}"
-            );
-            assert!(list.is_empty(), "T = {t}: {list:?}");
-        }
-    }
-
-    /// With `UpstreamFixes::default()` the radius is never read (WR-382), so no test 13/14
-    /// report depends on the tolerance or on the boundary-end skip at all: the difftest,
-    /// which runs the default, sees the same reports before and after this fix. The bend
-    /// curve of `issue_2785_radius_tolerance_is_a_length_not_a_speed`, at four `T`.
-    #[test]
-    fn issue_2785_the_default_fixes_see_no_report_at_any_parametrisation() {
-        let h = 1e-4;
-        for t in [1.0, 20.0, 1e2, 1e4] {
-            let c = curve(
-                3,
-                &[[0.0, 0.0, 0.0], [h, 0.0, 0.0], [h, h, 0.0], [1.0, 1.0, 0.0]],
-                &[0.0, 0.0, 0.0, 0.0, t, t, t, t],
-            );
-            let mut list = AssertArray::new();
-            assert!(
-                c.assert_valid(&Kernel::default(), Some(&mut list), true, ObjectKey(9))
-                    .unwrap(),
-                "T = {t}: {list:?}"
-            );
-            assert!(list.is_empty(), "T = {t}: {list:?}");
-        }
-    }
-
-    /// The direct-call side of the boundary-end rule (#2785): `assert_valid` with no edge
-    /// and no trim surface has no joint at the curve's ends, so a radius minimum on the
-    /// boundary is retained and reported; the same curve with an edge's context is the
-    /// other side -- the end is the joint's, the skip takes it, and the curve is accepted.
-    ///
-    /// The curve is a cubic Bezier whose first control span is 1e-7 of its size and
-    /// whose remaining spans run flat: its radius of curvature at `t = 0` is `1.5e-14`
-    /// (the WR-668 tangent-end shape: the radius grows as `|t - t_end|` from the end), and
-    /// it is above the length tolerance `sqrt(2)/1e4 = 1.4e-4` past `t = 4.9e-5` -- inside
-    /// the search's first interior sample -- so the search's only sub-tolerance solution
-    /// is the boundary one.
-    #[test]
-    fn issue_2785_a_bare_curve_reports_a_boundary_radius_minimum() {
-        let mut k = Kernel::default();
-        k.fixes.bspline_check_min_radius = true;
-        let c = curve(
-            3,
-            &[
-                [0.0, 0.0, 0.0],
-                [1e-7, 0.0, 0.0],
-                [2e-7, 1.0, 0.0],
-                [1.0, 1.0, 0.0],
-            ],
-            &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
-        );
-        // bare: the boundary solution is kept and reported
-        let mut list = AssertArray::new();
-        assert!(!c
-            .assert_valid(&k, Some(&mut list), true, ObjectKey(9))
-            .unwrap());
-        let reports: Vec<_> = list
-            .reports()
-            .iter()
-            .filter(|r| r.test_index == 14)
-            .collect();
-        assert_eq!(reports.len(), 1, "{list:?}");
-        assert_eq!(reports[0].owner_param.x, 0.0, "{:?}", reports[0]);
-
-        // with an edge's context: the end is the joint's, and the skip takes it
-        let tangent = ends((0.0, 1.0), true);
-        let mut list = AssertArray::new();
-        let ok = c
-            .assert_valid_on_edge(
-                &k,
-                Some(&mut list),
-                true,
-                ObjectKey(9),
-                None,
-                Some(&tangent),
-            )
-            .unwrap();
-        assert!(ok && list.is_empty(), "{list:?}");
     }
 
     #[test]
