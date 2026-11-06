@@ -20,7 +20,7 @@
 //!
 //! | Rust                                              | Upstream                                         |
 //! |---------------------------------------------------|--------------------------------------------------|
-//! | [`StepSurface`]                                   | `SmSTEPSurface` (constructors, destructor, `GetNaturalUVDomain`, `operator==`, `EvaluatePoint`, `Evaluate`, `GetDomainWithContinuity`, `GetKnots`, `ReadFromDB`, `IsKindOf`, `SetContext`, `GetType`, `GetTypeString`, `GetClassString`) |
+//! | [`StepSurface`]                                   | `SmSTEPSurface` (constructors, destructor, `GetNaturalUVDomain`, `operator==`, `EvaluatePoint`, `Evaluate`, `GetDomainWithContinuity`, `GetKnots`, `ReadFromDB`, `WriteToDB`, `IsKindOf`, `SetContext`, `GetType`, `GetTypeString`, `GetClassString`) |
 //! | [`Surface::new`] (part 2), `Clone`                | `SmSurface::SmSurface` (both)                    |
 //! | [`Surface::approx_eq`], [`Surface::base_eq`]      | `operator==` (virtual), `SmSurface::operator==`  |
 //! | [`Surface::set_owner`], [`Surface::face`]         | `SetOwner`, `GetFace`                            |
@@ -64,8 +64,8 @@
 //! - **STEP surfaces.** `m_pSurface` is an owned copy ([`Box<Surface>`]) whether or not
 //!   upstream owns it (`m_bOwnsSurface` is kept as a flag); `None` is the empty
 //!   constructor's null pointer, where upstream would crash the methods return
-//!   [`SolidError::InvalidInput`] (or an uninitialised domain). `GetMemoryUsed` and
-//!   `WriteToDB` have no counterpart. Nested STEP surfaces read from a database are
+//!   [`SolidError::InvalidInput`] (or an uninitialised domain). `GetMemoryUsed` has
+//!   no counterpart. Nested STEP surfaces read from a database are
 //!   bounded by the reader's nesting limit. Temporary evaluation copies retain
 //!   exact nested geometry and share `Surface`'s `MAX_GEOMETRY_NESTING` owned-geometry bound.
 //! - **Caches.** Upstream keeps a surface's cache on the surface and reuses it until it
@@ -168,7 +168,8 @@ use crate::surface::plane::Plane;
 use crate::surface::surface_cache::face_context::FaceQueries;
 use crate::surface::surface_cache::p1::{SurfaceCache, SurfaceCacheOptions};
 use crate::surface::trim_srf_cache::{CacheFace, TrimSrfCache};
-use crate::topology::database_io::{DatabaseReader, FileType};
+use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType};
+use crate::topology::geometry_write::write_surface_at;
 
 use super::p2::{
     check_geometry_nesting, cs_are_perpen_disjoint, evaluate_geometric, intersect_curve_and_split,
@@ -683,6 +684,26 @@ impl StepSurface {
 
         // load object
         Self::new(base, true)
+    }
+
+    /// `WriteToDB`, the record [`StepSurface::read_from_db`] reads: the base surface's
+    /// type header and record, as a surface nested `depth` levels deep.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for the empty surface (upstream dereferences its
+    /// null base); those of [`write_surface_at`] for the base.
+    pub fn write_to_db(&self, db: &mut DatabaseWriter, version: u64, depth: usize) -> Result<()> {
+        let base = self.surface.as_deref().ok_or_else(|| {
+            SolidError::invalid_input(OP_STEP, "STEP surface without a base surface")
+        })?;
+
+        // base surface
+        if db.file_type() == FileType::Ascii {
+            db.out_str(" SmSTEPSurface->baseSurface \n");
+        }
+        db.write_type(base.type_code(), None);
+        write_surface_at(base, db, version, depth + 1)
     }
 }
 

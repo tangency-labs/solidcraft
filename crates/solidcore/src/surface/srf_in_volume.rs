@@ -35,6 +35,7 @@
 //! | `make_exact_b_spline_1st_out_surface` (private) | `SmVolume`/`SmBSplineVolume`/`SmTransform::MakeExactBSpline1stOutSurface` |
 //! | `transform_axis2_placement` (private) | `SmTransform::LoadAxis2Placement`, `IsUnitOrthonormal` |
 //! | [`SrfInVolume::read_from_db`]                  | `ReadFromDB`                                      |
+//! | [`SrfInVolume::write_to_db`]                   | `WriteToDB`                                       |
 //!
 //! Deviations:
 //! - **Nesting.** `new`, `set_base_surface` and `set_volume` return `InvalidInput` when the surface or the volume would nest
@@ -120,7 +121,8 @@ use crate::surface::volume::p1::{
     lift_first_derivative_srf, lift_second_derivative_srf, lift_third_derivative_srf_opt_in,
 };
 use crate::surface::volume::{EvalOptions, Volume, VolumeKind};
-use crate::topology::database_io::{DatabaseReader, FileType};
+use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType};
+use crate::topology::geometry_write::write_surface_at;
 
 const OP: &str = "surface::srf_in_volume::SrfInVolume";
 const OP_EVAL: &str = "surface::srf_in_volume::SrfInVolume::evaluate";
@@ -1265,6 +1267,37 @@ impl SrfInVolume {
             volume,
             owner_flag: 3,
         })
+    }
+
+    /// `WriteToDB`, the record [`SrfInVolume::read_from_db`] reads: the base
+    /// surface's type header and record, the parameter space flag (as text in either
+    /// file type, as upstream writes and reads it), then the volume's type header and
+    /// record, as a surface nested `depth` levels deep.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`write_surface_at`] for the base surface and of
+    /// [`Volume::write_to_db`].
+    pub fn write_to_db(&self, db: &mut DatabaseWriter, version: u64, depth: usize) -> Result<()> {
+        let ascii = db.file_type() == FileType::Ascii;
+
+        // base surface
+        if ascii {
+            db.out_str(" SrfInVolume->BaseSurface \n");
+        }
+        db.write_type(self.surface.type_code(), None);
+        write_surface_at(&self.surface, db, version, depth + 1)?;
+
+        // bInParamSpace value
+        db.out_i64(i32::from(self.in_param_space).into());
+        db.out_str(" InParamSpace: 0=Curve in Volume's ParamSpace, 1=Curve in InSpace\n");
+
+        // compounding volume
+        if ascii {
+            db.out_str(" SrfInVolume->Volume \n");
+        }
+        db.write_type(self.volume.type_code(), None);
+        self.volume.write_to_db(db, depth + 1)
     }
 }
 

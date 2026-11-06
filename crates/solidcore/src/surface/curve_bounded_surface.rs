@@ -530,8 +530,18 @@ impl CurveBoundedSurface {
         self.write_to_db_at(db, version, 0)
     }
 
-    /// [`Self::write_to_db`] for a surface nested `depth` levels deep.
-    fn write_to_db_at(&self, db: &mut DatabaseWriter, version: u64, depth: usize) -> Result<()> {
+    /// [`Self::write_to_db`] for a surface nested `depth` levels deep (the call of
+    /// [`write_surface_at`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::write_to_db`].
+    pub(crate) fn write_to_db_at(
+        &self,
+        db: &mut DatabaseWriter,
+        version: u64,
+        depth: usize,
+    ) -> Result<()> {
         if depth > surface_p2::MAX_GEOMETRY_NESTING {
             return Err(SolidError::invalid_input(
                 OP_WRITE,
@@ -558,11 +568,7 @@ impl CurveBoundedSurface {
             db.out_str(" SmCurveBoundedSurface->BasisSurface \n");
         }
         db.write_type(self.basis.type_code(), None);
-        if let SurfaceKind::CurveBounded(inner) = self.basis.kind() {
-            inner.write_to_db_at(db, version, depth + 1)?;
-        } else {
-            write_surface_at(&self.basis, db, version, depth + 1)?;
-        }
+        write_surface_at(&self.basis, db, version, depth + 1)?;
 
         // every 3DBoundary curve
         for c in &self.boundaries_3d {

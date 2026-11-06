@@ -35,6 +35,7 @@
 //! | [`UnbendVolume::is_line_in_param_domain_simple`]  | `IsLineInParamDomainSimple`                    |
 //! | [`UnbendVolume::is_curve_in_param_domain_simple`] | `IsCurveInParamDomainSimple`                   |
 //! | [`UnbendVolume::read_from_db`]                    | `ReadFromDB`                                   |
+//! | [`UnbendVolume::write_to_db`]                     | `WriteToDB` (the members, before the base data) |
 //! | [`UnbendVolume::make_exact_b_spline_1st_out_surface`] | `MakeExactBSpline1stOutSurface` (in no unit in units.json; called by `SrfInVolume::make_exact_b_spline_if_possible_with`) |
 //! | [`UnbendVolume::make_exact_b_spline_1st_out_curve`] | `MakeExactBSpline1stOutCurve` (in no unit in units.json; called by `CrvInVolume::make_exact_b_spline_if_possible_with`) |
 //! | [`UNBEND_VOLUME_TYPE`], [`is_kind_of`], [`Volume::type_code`] and friends | `GetType`, `GetTypeString`, `GetClassString` (`SM_COMMON`), `IsKindOf` |
@@ -135,7 +136,7 @@ use crate::surface::volume::p1::{
     concat_evals_opt_in, is_kind_of as volume_is_kind_of, EvalOptions, Volume, VolumeKind,
 };
 use crate::surface::volume::p2::ignore_read;
-use crate::topology::database_io::{DatabaseReader, FileType};
+use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType};
 
 /// `lSmpSize` of `MakeExactBSpline1stOutSurface`: the sample grid is
 /// `(SMP_SIZE + 1) x (SMP_SIZE + 1)`.
@@ -1400,6 +1401,23 @@ impl UnbendVolume {
         // read base class data (status ignored)
         ignore_read(volume.read_base_from_db(db, version))?;
         Ok(volume)
+    }
+
+    /// The part of `WriteToDB` before the volume base data, the members
+    /// [`UnbendVolume::read_from_db`] reads: `unbend_neutral_dist` and `singularity_tol` (ASCII: each value
+    /// followed directly by its label, as upstream).
+    pub fn write_to_db(&self, db: &mut DatabaseWriter) {
+        if db.file_type() == FileType::Ascii {
+            db.out_f64(self.unbend_neutral_dist);
+            db.out_str("UnbendVolume Unbend NeutralDistance \n");
+            db.out_f64(self.singularity_tol);
+            db.out_str(
+                "UnbendVolume SingularityTol: min legal distance from singularity at U = 0\n",
+            );
+        } else {
+            db.write_double(self.unbend_neutral_dist);
+            db.write_double(self.singularity_tol);
+        }
     }
 }
 

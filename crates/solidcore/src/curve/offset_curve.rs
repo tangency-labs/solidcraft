@@ -21,6 +21,7 @@
 //! | [`OffsetCurve::reverse_parameterization`]    | `ReverseParameterization`                        |
 //! | [`OffsetCurve::trim`]                        | `Trim`                                           |
 //! | [`OffsetCurve::read_from_db`]                | `ReadFromDB`                                     |
+//! | [`OffsetCurve::write_to_db`]                 | `WriteToDB`                                      |
 //! | [`OffsetCurve::TYPE`], [`OffsetCurve::type_code`], [`OffsetCurve::type_string`], [`OffsetCurve::class_string`] | `GetType`, `GetTypeString`, `GetClassString` (`SM_COMMON`) |
 //! | [`OffsetCurve::is_kind_of`]                  | `IsKindOf`                                       |
 //!
@@ -67,7 +68,7 @@
 //!   in" branch has no counterpart; its type and dimension arguments are unused
 //!   upstream and dropped). The base curve is read through
 //!   [`Curve::read_from_db`].
-//! - **Not ported here.** `WriteToDB`, `SetOffsetDistance`, `AssertValid`
+//! - **Not ported here.** `SetOffsetDistance`, `AssertValid`
 //!   (ported with the other B-rep checks in `topology::brep::validation`), `GetMemoryUsed`, `Dump`, `GetBaseCurve`, `GetRootCurve`,
 //!   `GetOffsetDistance`, `GetOffsetNormal` and `GetMaxAnalyticDomain` are not part
 //!   of this unit; plain getters are provided for the data.
@@ -85,12 +86,14 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, UNDEF_DOUBLE};
 use crate::surface::surface::p2::{check_geometry_nesting, NestedGeometry};
-use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
+use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
+use crate::topology::geometry_write::write_curve_at;
 
 const OP_EVAL: &str = "curve::offset_curve::OffsetCurve::evaluate";
 const OP_EVAL_POINT: &str = "curve::offset_curve::OffsetCurve::evaluate_point";
 const OP_TRIM: &str = "curve::offset_curve::OffsetCurve::trim";
 const OP_BASE: &str = "curve::offset_curve::OffsetCurve";
+const OP_WRITE: &str = "curve::offset_curve::OffsetCurve::write_to_db";
 
 /// Derivatives [`OffsetCurve::evaluate`] computes (`clMaxDerivs`).
 const MAX_DERIVS: usize = 3;
@@ -786,6 +789,44 @@ impl OffsetCurve {
         c.owns_curve = 1;
         c.base_linked = true;
         Ok(c)
+    }
+
+    /// `WriteToDB`, the record [`OffsetCurve::read_from_db`] reads: normal, distance,
+    /// interval, reversal flag, then the base curve's type header and record, as a
+    /// curve nested `depth` levels deep.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_NULL_POINTER` for the empty curve (upstream dereferences its null
+    /// base); those of [`write_curve_at`] for the base.
+    pub fn write_to_db(&self, db: &mut DatabaseWriter, version: u64, depth: usize) -> Result<()> {
+        let base = self
+            .base
+            .as_deref()
+            .ok_or_else(|| SolidError::null_pointer(OP_WRITE))?;
+        let n = self.normal;
+        let (lo, hi) = (self.interval.min(), self.interval.max());
+        let ascii = db.file_type() == FileType::Ascii;
+        if ascii {
+            db.out_reals(&[n.x, n.y, n.z]);
+            db.out_str(" SmOffsetCurve Offset Plane Normal \n");
+            db.out_f64(self.distance);
+            db.out_str(" SmOffsetCurve Offset Distance \n");
+            db.out_reals(&[lo, hi]);
+            db.out_str(" SmOffsetCurve Offset Curve Interval \n");
+            db.out_i64(self.reversed.into());
+            db.out_str(" SmOffsetCurve IsReversed \n");
+        } else {
+            db.write_doubles(&[n.x, n.y, n.z, self.distance, lo, hi]);
+            db.write_boolean(self.reversed);
+        }
+
+        // base curve
+        if ascii {
+            db.out_str(" OffsetCurve->BaseCurve \n");
+        }
+        db.write_type(base.type_code(), Some(base.dim()));
+        write_curve_at(base, db, version, depth + 1)
     }
 
     /// `SmOffsetCurve_TYPE` (`GetType`).

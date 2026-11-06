@@ -22,7 +22,7 @@
 //! | [`Hyperbola::make_nurb`]                     | `MakeNurb`                                     |
 //! | [`Hyperbola::reverse_parameterization`]      | `ReverseParameterization`                      |
 //! | [`Hyperbola::transform`]                     | `Transform`                                    |
-//! | [`Hyperbola::read_from_db`]                  | `ReadFromDB`                                   |
+//! | [`Hyperbola::read_from_db`], [`Hyperbola::write_to_db`] | `ReadFromDB`, `WriteToDB`           |
 //! | [`Hyperbola::is_kind_of`]                    | `IsKindOf`                                     |
 //! | [`Hyperbola::TYPE`], [`Hyperbola::type_code`], [`Hyperbola::type_string`], [`Hyperbola::class_string`] | `GetType`, `GetTypeString`, `GetClassString` (`SM_COMMON`) |
 //!
@@ -81,7 +81,7 @@ use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
-use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
+use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
 
 const OP_MAKE_NURB: &str = "curve::hyperbola::Hyperbola::make_nurb";
 const OP_EVAL_STEP: &str = "curve::hyperbola::Hyperbola::evaluate_step";
@@ -752,6 +752,40 @@ impl Hyperbola {
 
         // all done
         Ok(h)
+    }
+
+    /// `WriteToDB`, the record [`Hyperbola::read_from_db`] reads: center, X axis, Y
+    /// axis, domain ends, semi axis, semi imaginary axis, then the B-spline base record.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the B-spline part has no NURB (upstream ignores the part's
+    /// status; its virtual `GetOrCreateGwNurbPointer` always has one to write).
+    pub fn write_to_db(&self, db: &mut DatabaseWriter, version: u64) -> Result<()> {
+        let o = self.position.origin();
+        let x = self.position.x_axis();
+        let y = self.position.y_axis();
+        let (lo, hi) = (self.anal_domain.min(), self.anal_domain.max());
+        if db.file_type() == FileType::Ascii {
+            db.out_reals(&[o.x, o.y, o.z]);
+            db.out_str(" SmHyperbola Axis Origin \n");
+            db.out_reals(&[x.x, x.y, x.z]);
+            db.out_str(" SmHyperbola X Axis\n");
+            db.out_reals(&[y.x, y.y, y.z]);
+            db.out_str(" SmHyperbola Y Axis\n");
+            db.out_reals(&[lo, hi]);
+            db.out_str(" SmHyperbola anular arc domain in degrees \n");
+            db.out_f64(self.semi_axis);
+            db.out_str(" SmHyperbola Length of semi axis           \n");
+            db.out_f64(self.semi_image_axis);
+            db.out_str(" SmHyperbola Length of semi imaginary axis \n");
+        } else {
+            db.write_doubles(&[o.x, o.y, o.z, x.x, x.y, x.z, y.x, y.y, y.z]);
+            db.write_doubles(&[lo, hi, self.semi_axis, self.semi_image_axis]);
+        }
+
+        // Write the base object
+        self.base.write_to_db(db, version)
     }
 }
 

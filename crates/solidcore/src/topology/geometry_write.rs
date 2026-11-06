@@ -23,12 +23,13 @@
 //!
 //! Deviations:
 //! - **Kinds without a writer.** The write side is not in the plan (see
-//!   `plan/findings.md`); only the kinds B-rep files hold are ported: B-spline curves,
-//!   lines, ellipses and circles, Hermite curves (the UV curves of tangent fields),
-//!   curves on surfaces and tangent fields; B-spline
-//!   surfaces, planes, cones and cylinders, spheres, tori, surfaces of revolution and
-//!   extrusion, offset surfaces. Another
-//!   kind is [`SolidError::Unported`] with its `WriteToDB` symbol and unit
+//!   `plan/findings.md`); the kinds B-rep files hold and the kinds a read body can hold
+//!   are ported: B-spline curves, lines, ellipses and circles, hyperbolas, composite
+//!   and offset curves, Hermite curves (the UV curves of tangent fields), curves on
+//!   surfaces and tangent fields; B-spline surfaces, planes, cones and cylinders,
+//!   spheres, tori, surfaces of revolution and extrusion, offset, curve-bounded and
+//!   STEP surfaces, surfaces in volumes. Each kind's writer is beside its reader.
+//!   Another kind is [`SolidError::Unported`] with its `WriteToDB` symbol and unit
 //!   `(not in plan)`.
 //! - **Missing NURB.** Upstream's analytic writers ignore the status of the B-spline
 //!   part they end with; it cannot fail there, as the virtual
@@ -88,16 +89,16 @@ pub fn write_curve_at(
         CurveKind::Line(l) => l.write_to_db(db, version),
         CurveKind::Ellipse(e) => e.write_to_db(db, version),
         CurveKind::Hermite(h) => h.write_to_db(db, version),
-        CurveKind::Hyperbola(_) => Err(unported("SmHyperbola::WriteToDB")),
+        CurveKind::Hyperbola(h) => h.write_to_db(db, version),
         CurveKind::Projected(_) => Err(unported("SmProjectedCurve::WriteToDB")),
         CurveKind::Iso(_) => Err(unported("SmIsoCurve::WriteToDB")),
-        CurveKind::Offset(_) => Err(unported("SmOffsetCurve::WriteToDB")),
+        CurveKind::Offset(o) => o.write_to_db(db, version, depth),
         CurveKind::Conic(_) => Err(unported("SmConic::WriteToDB")),
         CurveKind::CrvInVolume(_) => Err(unported("SmCrvInVolume::WriteToDB")),
         CurveKind::CrvOnSurf(c) => write_crv_on_surf(c, db, version, depth),
         CurveKind::TangentField(t) => write_tangent_field(t, db, version, depth),
         CurveKind::Parabola(_) => Err(unported("SmParabola::WriteToDB")),
-        CurveKind::Composite(_) => Err(unported("SmCompositeCurve::WriteToDB")),
+        CurveKind::Composite(c) => c.write_to_db(db, version, depth),
     }
 }
 
@@ -138,9 +139,9 @@ pub fn write_surface_at(
         SurfaceKind::SurfOfRevolution(r) => write_surf_of_revolution(r, db, version, depth),
         SurfaceKind::SurfOfExtrusion(e) => write_surf_of_extrusion(e, db, version, depth),
         SurfaceKind::OffsetSurface(o) => o.write_to_db(db, version, depth),
-        SurfaceKind::CurveBounded(_) => Err(unported("SmCurveBoundedSurface::WriteToDB")),
-        SurfaceKind::Step(_) => Err(unported("SmSTEPSurface::WriteToDB")),
-        SurfaceKind::SrfInVolume(_) => Err(unported("SmSrfInVolume::WriteToDB")),
+        SurfaceKind::CurveBounded(c) => c.write_to_db_at(db, version, depth),
+        SurfaceKind::Step(st) => st.write_to_db(db, version, depth),
+        SurfaceKind::SrfInVolume(siv) => siv.write_to_db(db, version, depth),
     }
 }
 

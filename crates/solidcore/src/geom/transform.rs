@@ -38,6 +38,7 @@
 //! | [`Transform::is_curve_in_param_domain_simple`]    | `IsCurveInParamDomainSimple`                          |
 //! | [`Transform::has_discontinuities_simple`]         | `HasDiscontinuitiesSimple`                            |
 //! | [`Transform::read_from_db`]                       | `ReadFromDB`                                          |
+//! | [`Transform::write_rows_to_db`]                   | `WriteToDB` (the matrix rows, before the base data)   |
 //! | [`Transform::TYPE`], [`Transform::type_code`], [`Transform::type_string`], [`Transform::class_string`] | `GetType`, `GetTypeString`, `GetClassString` (`SM_COMMON`) |
 //! | [`Transform::is_kind_of`]                         | `IsKindOf`                                            |
 //!
@@ -96,7 +97,7 @@ use crate::surface::volume::p1::{
     is_kind_of as volume_is_kind_of, Discontinuities3d, Volume, VolumeKind,
 };
 use crate::surface::volume::p2::ignore_read;
-use crate::topology::database_io::{DatabaseReader, FileType};
+use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType};
 
 /// `GW_MAX_DERIV`: the highest derivative `EvaluateSimple` accepts.
 pub const MAX_DERIV: usize = 5;
@@ -831,6 +832,28 @@ impl Transform {
         // read base class data (status ignored)
         ignore_read(volume.read_base_from_db(db, version))?;
         Ok(volume)
+    }
+
+    /// The part of `WriteToDB` before the volume base data, the rows
+    /// [`Transform::read_from_db`] reads: the X, Y, Z and displacement rows of the
+    /// matrix, four values each.
+    pub fn write_rows_to_db(&self, db: &mut DatabaseWriter) {
+        let names = [
+            " Transform X row \n",
+            " Transform Y row \n",
+            " Transform Z row \n",
+            " Transform Disp row \n",
+        ];
+        if db.file_type() == FileType::Ascii {
+            for (row, name) in self.m.iter().zip(names) {
+                db.out_reals(row);
+                db.out_str(name);
+            }
+        } else {
+            for row in &self.m {
+                db.write_doubles(row);
+            }
+        }
     }
 
     /// `SmTransform_TYPE` (`GetType`).

@@ -25,6 +25,7 @@
 //! | [`Volume::local_point_solve_simple`]         | `LocalPointSolveSimple` (virtual)         |
 //! | [`Volume::read_from_db`]                     | `ReadFromDB` (static, by type)            |
 //! | [`Volume::read_base_from_db`]                | `ReadFromDB(SmVolume_TYPE, ..)` (base data of an existing volume) |
+//! | [`Volume::write_to_db`]                      | `WriteToDB` of the volume kinds and `SmVolume::WriteToDB` (the base data) |
 //!
 //! Deviations:
 //! - **Out-params** become return values ([`InvPoints`], tuples) or `Option<&mut _>`
@@ -53,7 +54,14 @@
 //!   per map; chains are built by the caller). `ReadFromDB` recursion is input
 //!   driven and bounded by [`DatabaseReader::enter_nested`] (32 levels); past the
 //!   bound the read fails with [`SolidError::InvalidInput`], which the nested reads
-//!   whose statuses upstream ignores propagate rather than drop.
+//!   whose statuses upstream ignores propagate rather than drop. `WriteToDB` counts
+//!   the same levels: a volume or an orient map the reader would read past
+//!   [`MAX_READ_NESTING`] is refused with [`SolidError::InvalidInput`].
+//! - **Writing what cannot be read.** `ReadFromDB` refuses a plain `SmVolume` and a
+//!   B-spline volume, so their records are refused when written, with the reader's
+//!   errors: a plain volume is [`SolidError::Unsupported`], a B-spline volume `SM_ERR`.
+//!   An orient map is read back as its transform alone, so it is written as a
+//!   transform without maps of its own.
 //! - **Contexts** and `bCalcGeometric` (unused by the ported simple maps) are dropped.
 
 use crate::error::{ignore_status, ignored, Result, SolidError};
@@ -73,7 +81,9 @@ use crate::surface::b_spline_volume::BSplineVolume;
 use crate::surface::bend_volume::BendVolume;
 use crate::surface::twist_volume::TwistVolume;
 use crate::surface::unbend_volume::UnbendVolume;
-use crate::topology::database_io::{DatabaseReader, FileType, InputStream, NESTING_LIMIT_REASON};
+use crate::topology::database_io::{
+    DatabaseReader, DatabaseWriter, FileType, InputStream, MAX_READ_NESTING, NESTING_LIMIT_REASON,
+};
 
 use super::p1::{
     Discontinuities3d, EvalOptions, FindPvIntersect, Volume, VolumeKind, BEND_VOLUME_TYPE,
@@ -85,6 +95,12 @@ const OP_MAP_BOX: &str = "surface::volume::p2::Volume::map_pseudo_box";
 const OP_INV: &str = "surface::volume::p2::Volume::inv_evaluate_point";
 const OP_SOLVE: &str = "surface::volume::p2::Volume::global_point_solve";
 const OP_READ: &str = "surface::volume::p2::Volume::read_from_db";
+const OP_WRITE: &str = "surface::volume::p2::Volume::write_to_db";
+
+/// The ASCII label after the next-map flag (`SmVolume::WriteToDB`).
+const NEXT_MAP_LABEL: &str = " : 1 = with NextMap, 0 = without \n";
+/// The ASCII label after the orient-map flag (`SmVolume::WriteToDB`).
+const ORIENT_MAP_LABEL: &str = " : 1 = with OrientMap, 0 = without \n";
 
 /// Samples per box edge and per face iso line of the box samplers (`lSmpCnt`).
 const SAMPLE_COUNT: usize = 5;
@@ -1518,6 +1534,73 @@ impl Volume {
         }
         Ok(())
     }
+
+    /// `WriteToDB` of this volume's kind, the record [`Volume::read_from_db`] reads:
+    /// the kind's own data, then the base data (the next-map flag and next map, the
+    /// orient-map flag and orient map, each map with its type header), as a volume
+    /// nested `depth` levels deep. No volume record depends on the database version.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unsupported`] for a plain volume and `SM_ERR` for a B-spline
+    /// volume (the module docs); [`SolidError::InvalidInput`] for a volume or an
+    /// orient map the reader would read past [`MAX_READ_NESTING`].
+    pub fn write_to_db(&self, db: &mut DatabaseWriter, depth: usize) -> Result<()> {
+        // the reader enters a level per surface, volume and map from 1 at the top, so
+        // it reads this volume at level `depth + 1` and its orient map one deeper
+        let level = u32::try_from(depth + 1).unwrap_or(u32::MAX);
+        let deepest = if self.orient_map.is_some() {
+            level.saturating_add(1)
+        } else {
+            level
+        };
+        if deepest > MAX_READ_NESTING {
+            return Err(SolidError::invalid_input(
+                OP_WRITE,
+                "geometry nested too deeply",
+            ));
+        }
+        match &self.kind {
+            VolumeKind::Base => {
+                return Err(SolidError::Unsupported {
+                    operation: OP_WRITE,
+                    reason: "SmVolume_TYPE, which ReadFromDB cannot fill",
+                })
+            }
+            VolumeKind::BSpline(_) => return Err(SolidError::sm_err(OP_WRITE)),
+            VolumeKind::Transform(t) => t.write_rows_to_db(db),
+            VolumeKind::Bend(b) => b.write_to_db(db),
+            VolumeKind::Unbend(u) => u.write_to_db(db),
+            VolumeKind::Twist(t) => t.write_to_db(db),
+        }
+
+        // write base class data
+        // NextMap Header
+        let has_next = i32::from(self.next_map.is_some());
+        write_flag(db, has_next, NEXT_MAP_LABEL);
+
+        // when needed - output m_pNextMap
+        if let Some(next) = &self.next_map {
+            // recursion gets all NextMaps in the NextMap linked list
+            db.write_type(next.type_code(), None);
+            next.write_to_db(db, depth + 1)?;
+        }
+
+        // OrientMap Header
+        let has_orient = i32::from(self.orient_map.is_some());
+        write_flag(db, has_orient, ORIENT_MAP_LABEL);
+
+        // when needed - output m_pOrientMap, a transform without maps of its own
+        if let Some(orient) = &self.orient_map {
+            db.write_type(TRANSFORM_TYPE, None);
+            orient.write_rows_to_db(db);
+            write_flag(db, 0, NEXT_MAP_LABEL);
+            write_flag(db, 0, ORIENT_MAP_LABEL);
+        }
+
+        // don't write InvOrientMap - it's derived from OrientMap
+        Ok(())
+    }
 }
 
 /// [`SolidError::Unsupported`] marking undefined behaviour upstream in the reader.
@@ -1575,6 +1658,17 @@ fn read_flag(db: &mut DatabaseReader) -> Result<i32> {
         Ok(v)
     } else {
         db.read_boolean()
+    }
+}
+
+/// A `SmBoolean` flag with its ASCII label (`<< flag << label`), `WriteBoolean` in
+/// binary: the write side of [`read_flag`].
+fn write_flag(db: &mut DatabaseWriter, flag: i32, label: &str) {
+    if db.file_type() == FileType::Ascii {
+        db.out_i64(flag.into());
+        db.out_str(label);
+    } else {
+        db.write_boolean(flag);
     }
 }
 
@@ -1905,7 +1999,7 @@ mod tests {
         // MAX_READ_NESTING + 1 (33) twists chained by next maps, one past the bound;
         // the twist data and base flags are zeros, so a swallowed bound error would
         // leave a stream that still reads as a shorter (32-map) chain
-        let max = crate::topology::database_io::MAX_READ_NESTING as usize;
+        let max = MAX_READ_NESTING as usize;
         assert_eq!(max, 32);
         let twist = format!("0\n0\n1\nObject Type {TWIST_VOLUME_TYPE}\n");
         let mut text = twist.repeat(max);

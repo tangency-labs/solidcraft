@@ -9,6 +9,7 @@
 //! |--------------------------------------------------------|-------------------------------------------------------|
 //! | [`CompositeCurveSegment::new`]                         | `SmCompositeCurveSegment(pParentCurve, bSameSense, dGapStart, dGapEnd)` |
 //! | [`CompositeCurveSegment::read_from_db`]                | `SmCompositeCurveSegment::ReadFromDB` (static)        |
+//! | [`CompositeCurveSegment::write_to_db`]                 | `SmCompositeCurveSegment::WriteToDB`                  |
 //! | [`OffsetMapAttribute::make_copy`]                      | `SmOffsetMapAttribute::MakeCopy`                      |
 //! | [`check_bow_ties`]                                     | `sm_CheckBowTies` (static)                            |
 //! | [`fix_bow_tie`]                                        | `sm_FixBowTie`                                        |
@@ -17,6 +18,7 @@
 //! | [`CompositeCurve::create_trimmed_offsets`], [`OffsetDirection`] | `CreateTrimmedOffsets`, `SmOffsetDirectionType` |
 //! | [`CompositeCurve::make_composite_nurb`]                | `MakeCompositeNurb`                                   |
 //! | [`CompositeCurve::read_from_db`]                       | `SmCompositeCurve::ReadFromDB` (static)               |
+//! | [`CompositeCurve::write_to_db`]                        | `SmCompositeCurve::WriteToDB`                         |
 //!
 //! Deviations:
 //! - **Attributes.** A [`Curve`] carries no attribute list, so the offsetters pass each
@@ -50,7 +52,8 @@
 //!   statuses of `SmCompositeCurve::ReadFromDB` are ignored upstream, leaving a
 //!   segment with a `NULL` curve that every later use dereferences; the port returns
 //!   [`SolidError::InvalidInput`] for a segment without a curve (no curve stored, or a
-//!   curve that fails to read).
+//!   curve that fails to read). `SmCompositeCurve::WriteToDB` ignores its segments'
+//!   statuses, leaving a short record; the port passes a segment's error on.
 //! - **Undefined behaviour upstream.** These return [`SolidError::InvalidInput`]:
 //!   `sm_CheckBowTies` without original curves (`crOrigCurves[0]`) or with fewer
 //!   offsets than original curves (it reads `crOffsets[lNumOrig - 1]`; its caller
@@ -67,7 +70,7 @@
 //!   so a `const` method changes them); segments that are analytic curves derived from
 //!   `SmBSplineCurve` (lines, ellipses, ...) join through a copy of their B-spline part
 //!   and are left unchanged.
-//! - `CreateOffsetsOfCurve`, `AddCurve`, `WriteToDB`, `Dump`, `Draw` and the region
+//! - `CreateOffsetsOfCurve`, `AddCurve`, `Dump`, `Draw` and the region
 //!   constructor belong to other units or are unused.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
@@ -89,7 +92,8 @@ use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
-use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
+use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
+use crate::topology::geometry_write::write_curve_at;
 
 use super::p1::{
     convert_to_bspline_curves_indexed, create_corner, curve_classify_cached, insert_sorted_breaks,
@@ -225,6 +229,46 @@ impl CompositeCurveSegment {
             gap_end,
             owns_curve: true,
         })
+    }
+
+    /// `SmCompositeCurveSegment::WriteToDB`, the record
+    /// [`CompositeCurveSegment::read_from_db`] reads: transition, sense, gaps, the
+    /// has-curve flag (always set: a segment holds its curve), then the curve's type
+    /// header and record, as a curve nested `depth` levels deep.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`write_curve_at`] for the curve.
+    pub fn write_to_db(&self, db: &mut DatabaseWriter, version: u64, depth: usize) -> Result<()> {
+        let ascii = db.file_type() == FileType::Ascii;
+        let transition = self.transition as u64;
+        let same_sense = i32::from(self.same_sense);
+        let has_curve: i32 = 1;
+        if ascii {
+            db.out_u64(transition);
+            db.out_str(" SmCompositeCurveSegment Continuity Transition Type \n");
+            db.out_i64(same_sense.into());
+            db.out_str(" SmCompositeCurveSegment Same Sense \n");
+            db.out_f64(self.gap_start);
+            db.out_str(" SmCompositeCurveSegment Gap Start \n");
+            db.out_f64(self.gap_end);
+            db.out_str(" SmCompositeCurveSegment Gap End \n");
+            db.out_i64(has_curve.into());
+            db.out_str(" SmCompositeCurveSegment bHasCurve \n");
+        } else {
+            db.write_long(transition as i64);
+            db.write_boolean(same_sense);
+            db.write_double(self.gap_start);
+            db.write_double(self.gap_end);
+            db.write_boolean(has_curve);
+        }
+
+        // has curve
+        if ascii {
+            db.out_str(" SmCompositeCurve->CurveBeingConverted \n");
+        }
+        db.write_type(self.curve.type_code(), Some(self.curve.dim()));
+        write_curve_at(&self.curve, db, version, depth + 1)
     }
 }
 
@@ -774,6 +818,35 @@ impl CompositeCurve {
             segments,
             closed: closed != 0,
         })
+    }
+
+    /// `SmCompositeCurve::WriteToDB`, the record [`CompositeCurve::read_from_db`]
+    /// reads: the segment count and the closed flag, then every segment
+    /// ([`CompositeCurveSegment::write_to_db`]), as a curve nested `depth` levels deep.
+    ///
+    /// # Errors
+    ///
+    /// Those of the segments' writers (upstream ignores them; see the module docs).
+    pub fn write_to_db(&self, db: &mut DatabaseWriter, version: u64, depth: usize) -> Result<()> {
+        let num_segments = self.segments.len() as u64;
+        let closed = i32::from(self.closed);
+        if db.file_type() == FileType::Ascii {
+            db.out_u64(num_segments);
+            db.out_str(" SmCompositeCurve Segment Count \n");
+            db.out_i64(closed.into());
+            db.out_str(" SmCompositeCurve Closed Flag \n");
+        } else {
+            db.write_long(num_segments as i64);
+            db.write_boolean(closed);
+        }
+
+        // for every CompositeCurveSegment
+        for s in &self.segments {
+            s.write_to_db(db, version, depth)?;
+        }
+
+        // all done
+        Ok(())
     }
 
     /// `MakeCompositeNurb`: one B-spline joining the segments in order with their
