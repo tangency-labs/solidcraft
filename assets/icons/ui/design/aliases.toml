@@ -48,6 +48,8 @@ component_properties = { master = "measure", accent = "form" }
 canvas_edit = { master = "canvas", accent = "form" }
 contact_check = { master = "interference", accent = "form" }
 view_save = { master = "camera", accent = "form" }
+# MODEL / SKETCH: New Sketch vs Edit Sketch shared the sketch master (#11482 / #12134).
+sketch_edit = { master = "edit", accent = "sketch" }
 
 # Legacy feature-history id for the same Split Body operation.
 split = "split_body"
