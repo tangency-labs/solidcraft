@@ -146,6 +146,7 @@ pointcloud.delete                 point clouds: points drawn, never a body
 pointcloud.edit                   point clouds: points drawn, never a body
 pointcloud.insert                 point clouds: points drawn, never a body
 pointcloud.list                   point clouds: points drawn, never a body
+pointcloud.reload                 point clouds: points drawn, never a body; tested in crates/engine/src/cmd/point_cloud.rs
 render.aging.describe             rendering: images, cameras, stages
 render.backends                   rendering: images, cameras, stages
 render.batch                      rendering: images, cameras, stages

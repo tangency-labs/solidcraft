@@ -36,6 +36,11 @@ Boundary is one of:
   uses thickness divided by the refracted cosine. Incoherent internal reflections
   are summed separately for s/p polarization, then averaged. Zero thickness is
   admitted and has no absorption, but retains the two-interface optical response.
+  The exact index-matched, zero-thickness grazing limit has unit transmission.
+  Positive thickness at an exactly tangent, index-matched interface has no finite
+  traversal distance and refuses through the existing transport diagnostic.
+  CPU Path sheets use a charged exact planar/manifold tessellation certificate;
+  the legacy CPU route keeps its one/two-triangle domain.
 - `"closed_box"` with `"thickness_mm":0`: strict axis-aligned bounding-plane check (1e-6 mm tolerance),
   followed by the GPU's closed, outward two-manifold topology validation.
 - `"closed_mesh"` with `"thickness_mm":0`: general closed meshes under the selected
@@ -82,8 +87,13 @@ out-of-range values are errors.
 
 GPU transport uses geometric winding for entering/leaving media, exact s/p Fresnel
 including total internal reflection, Snell refraction and Beer attenuation. It
-includes the squared IOR ratio for radiance transport. Glass is smooth; rough
-transmission and fractional mixtures are absent. Runtime [glass shadow connections](render-glass-shadows.md)
+includes the squared IOR ratio for radiance transport. Glass without an optional
+material model remains smooth. An explicit `model` adds isotropic GGX rough
+reflection/transmission, bounded Abbe/Cauchy dispersion and one lossless coherent
+thin-film coating. These use three representative RGB wavelengths, not dense
+spectral integration. Fractional opaque/transmitting mixtures remain absent.
+See [Glass material models](render-glass-material-models.md) for the wire fields,
+models and finite-radius photon caustics. Runtime [glass shadow connections](render-glass-shadows.md)
 are enabled by default for thin sheets and opt-in for solids; the latter are explicitly
 straight-through NEE-only approximations, not caustics. The maximum path depth remains 16.
 The existing bounded per-path stack is retained. Default mode rejects nested

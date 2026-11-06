@@ -782,6 +782,34 @@ fn probe_host(estimated: u64) -> (CpuHost, Arc<AtomicU64>) {
 }
 
 #[test]
+fn unqualified_executors_refuse_glass_models_and_caustics_before_acquiring_a_lease() {
+    let (host, _) = probe_host(1024);
+    let options = JobOptions { caustics: Some(Default::default()), ..Default::default() };
+    let error = host.admit(&empty(), &request(), options).unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidRequest);
+    assert!(error.message.contains("caustic photons"));
+    assert_eq!(host.admitted_bytes(), 0);
+    let mut scene = empty();
+    scene.meshes.push(crate::ProductMesh {
+        name: "Original unsupported-model fixture".into(),
+        mesh: Arc::new(Mesh::default()),
+        color: [255; 3],
+        opacity: 1.0,
+        surface: None,
+        transmission: Some(
+            crate::transmission::Transmission::new(solidcore_record::Vec3::ZERO, None)
+                .unwrap()
+                .with_model(crate::glass_model::GlassModel { roughness: 0.3, ..Default::default() })
+                .unwrap(),
+        ),
+        faces: Vec::new(),
+    });
+    let error = host.admit(&scene, &request(), JobOptions::default()).unwrap_err();
+    assert!(error.message.contains("advanced Glass models"));
+    assert_eq!(host.admitted_bytes(), 0);
+}
+
+#[test]
 fn a_completed_task_is_dropped_while_its_full_reservation_still_pays_for_it() {
     let estimated = 1 << 20;
     let (host, admitted_at_drop) = probe_host(estimated);
@@ -1682,7 +1710,8 @@ fn celestial_cancelled_capture_retains_only_exact_boxes_and_fixed_header_until_l
     let fixed = ImageRequest::fixed_cpu_metadata_bytes();
     assert_eq!(
         fixed,
-        (std::mem::size_of::<Option<Box<Sun>>>()
+        (std::mem::size_of::<Option<super::super::CausticOptions>>()
+            + std::mem::size_of::<Option<Box<Sun>>>()
             + std::mem::size_of::<Option<Box<CpuSky>>>()
             + std::mem::size_of::<Option<super::super::volume::HomogeneousVolume>>()) as u64
     );
@@ -1765,6 +1794,7 @@ mod prepared_optical_submission {
             lights: Some(Vec::new()),
             environment: Some(crate::job::RaytraceEnvironmentOptions { color: [1.0; 3], intensity: 1.0 }),
             dielectrics: vec![DielectricOptions {
+                model: None,
                 body_index: 0,
                 body_name: "captured box".into(),
                 boundary: DielectricBoundary::ClosedBox,

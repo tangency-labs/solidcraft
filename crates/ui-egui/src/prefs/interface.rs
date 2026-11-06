@@ -298,6 +298,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 &mut app.preferences.keep_work_on_tab_switch,
                 "keep_work_on_tab_switch",
             );
+            layout_check(
+                ui,
+                app.tr("prefs.tab_double_click_renames"),
+                app.tr("prefs.tab_double_click_renames_note"),
+                &mut app.preferences.tab_double_click_renames,
+                "tab_double_click_renames",
+            );
         });
         if let Some(rect) = crate::scenario::rect_of(&format!("dialog:section:{}", app.tr("prefs.layout_page.window"))) {
             crate::scenario::publish_target(&format!("dialog:section:{}", app.tr("prefs.layout")), rect);
@@ -402,6 +409,22 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.tr("prefs.history_play_button_note"),
                     &mut app.preferences.history_play_button,
                     "history_play_button",
+                );
+                // A design's joints as one button in the History, from the second joint (#8884).
+                layout_check(
+                    ui,
+                    app.tr("prefs.history_group_joints"),
+                    app.tr("prefs.history_group_joints_note"),
+                    &mut app.preferences.history_group_joints,
+                    "history_group_joints",
+                );
+                // Folds in the History bar, and a folder for a STEP insert's items (#8885).
+                layout_check(
+                    ui,
+                    app.tr("prefs.history_bar_groups"),
+                    app.tr("prefs.history_bar_groups_note"),
+                    &mut app.preferences.history_bar_groups,
+                    "history_bar_groups",
                 );
                 ui.add_enabled_ui(app.preferences.timeline_left, |ui| {
                     layout_check(

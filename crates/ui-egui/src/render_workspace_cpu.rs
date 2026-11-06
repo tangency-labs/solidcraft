@@ -491,6 +491,7 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
     options.sun = app.render_workspace.view.studio.sun_enabled.then(|| Box::new(app.render_workspace.view.studio.sun));
     options.sky = None;
     options.volume = app.render_workspace.view.studio.volume;
+    options.caustics = app.render_workspace.view.studio.caustics;
     options.output = super::studio::cpu_output(&app.render_workspace.view);
     options.adaptive = app.render_workspace.view.studio.adaptive.map(Box::new);
     options.denoise = app.render_workspace.view.studio.denoise;

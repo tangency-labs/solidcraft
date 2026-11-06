@@ -11,7 +11,7 @@
 //! state; [`items`] lists them and [`run_item`] runs one, so the control channel (`ui.menu`,
 //! `ui.menuPick`) and tests reach everything a click does.
 
-use crate::ui_kit::{Container, Surface};
+use crate::ui_kit::{BackingTooltipExt as _, Container, Surface};
 use egui::{Color32, Pos2, Rect, Sense, Vec2, pos2, vec2};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -135,6 +135,9 @@ pub struct Item {
     pub children: Vec<Item>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub swatch: Option<[u8; 3]>,
+    /// Why the entry is off: shown on hover, and in the control channel's report.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tip: Option<String>,
 }
 
 impl Item {
@@ -152,6 +155,7 @@ impl Item {
             params: None,
             children: Vec::new(),
             swatch: None,
+            tip: None,
         }
     }
     pub(crate) fn heading(label: &str) -> Item {
@@ -164,6 +168,7 @@ impl Item {
             params: None,
             children: Vec::new(),
             swatch: None,
+            tip: None,
         }
     }
     fn is_sep(&self) -> bool {
@@ -181,6 +186,14 @@ impl Item {
     }
     pub(crate) fn on(mut self, enabled: bool) -> Item {
         self.enabled &= enabled;
+        self
+    }
+    /// Off, saying why, when there is a reason.
+    pub(crate) fn off_because(mut self, why: Option<String>) -> Item {
+        if let Some(why) = why {
+            self.enabled = false;
+            self.tip = Some(why);
+        }
         self
     }
     pub fn key(mut self, k: &str) -> Item {
@@ -206,6 +219,7 @@ pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
         params: None,
         children: Vec::new(),
         swatch: None,
+        tip: None,
     }
 }
 
@@ -220,6 +234,7 @@ pub(crate) fn act(id: &str, label: &str, icon: &str) -> Item {
         params: None,
         children: Vec::new(),
         swatch: None,
+        tip: None,
     }
 }
 
@@ -1662,6 +1677,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 crate::edit_clipboard::leave_text(app, text);
             }
         }
+        "ui.groupFeatures" => {
+            let ids: Vec<u64> = p.get("features").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
+            if !ids.is_empty() {
+                crate::timeline_folders::group(app, &ids, p.get("parent").and_then(Value::as_u64), at);
+            }
+        }
         "ui.deleteFeatures" | "ui.deleteAfterMarker" => {
             let ids: Vec<u64> = p.get("features").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
             if !ids.is_empty() {
@@ -2777,6 +2798,10 @@ fn level_rows(
             kit.id = &handle;
         }
         let row = kit.show(ui);
+        let row = match &item.tip {
+            Some(tip) => row.backing_on_hover_text(tip.as_str()),
+            None => row,
+        };
         if item.children.is_empty() {
             if row.clicked() && item.enabled {
                 *picked = Some(item.clone());

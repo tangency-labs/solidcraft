@@ -1,12 +1,12 @@
 //! Stable, render-only optical assignments. Raw request overrides remain a
 //! separate mode; saved optics cannot silently disappear into another target.
+use crate::schema::TypedContract;
+use crate::schema::render_bindings::{OpticsBindParams, OpticsBindingSaved, OpticsUnbindParams, OpticsUnbound};
 use crate::{Result, Session, params::bad};
-use serde::Deserialize;
 use serde_json::{Value, json};
 use solidcraft_doc::{
     render_optics::{OpticalBindings, OpticalMaterial, SavedOptics},
     render_settings::RenderJob,
-    render_surface::RenderBodyTarget,
 };
 use solidcraft_render::ProductScene;
 use std::{collections::BTreeMap, sync::Arc};
@@ -62,25 +62,12 @@ pub(super) fn resolve_cpu_path(
     })
 }
 
-fn empty() -> Value {
-    json!({})
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Bind {
-    name: String,
-    #[serde(default = "empty")]
-    set: Value,
-    body_index: usize,
-    body_name: String,
-    optics: OpticalMaterial,
-    expected_revision: u64,
-    #[serde(default)]
-    replace: bool,
-}
+pub(super) const BIND_CONTRACT: TypedContract<OpticsBindParams> = TypedContract::new();
+pub(super) const UNBIND_CONTRACT: TypedContract<OpticsUnbindParams> = TypedContract::new();
+
 pub(super) fn bind(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.optics.bind";
-    let input: Bind = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    let input: OpticsBindParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     input.optics.validate().map_err(|e| bad(command, e.to_string()))?;
     if input.expected_revision != s.revision {
         return Err(bad(command, "optical binding review is stale"));
@@ -119,23 +106,23 @@ pub(super) fn bind(s: &mut Session, params: &Value) -> Result<Value> {
     let mut settings = (*s.doc.render).clone();
     settings.setups.insert(input.name.clone(), setup.clone());
     settings.validate().map_err(|e| bad(command, e.to_string()))?;
+    // Serialized before the document changes, so a setup that can't be written leaves it as it was.
+    let setup = serde_json::to_value(&setup).map_err(|e| bad(command, e.to_string()))?;
     if settings != *s.doc.render {
         s.doc_mut().render = Arc::new(settings);
     }
-    Ok(
-        json!({"name":input.name,"setup":setup,"geometry_and_engineering_unchanged":true,"certification":"closed topology and nested containment are checked by the selected image producer before transport"}),
-    )
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Unbind {
-    name: String,
-    target: RenderBodyTarget,
-    expected_revision: u64,
+    let reply = OpticsBindingSaved {
+        name: input.name,
+        setup,
+        geometry_and_engineering_unchanged: true,
+        certification: "closed topology and nested containment are checked by the selected image producer before transport".into(),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(command, e.to_string()))
 }
 pub(super) fn unbind(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.optics.unbind";
-    let input: Unbind = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    let input: OpticsUnbindParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     input.target.validate().map_err(|e| bad(command, e.to_string()))?;
     if input.expected_revision != s.revision {
         return Err(bad(command, "optical removal review is stale"));
@@ -147,7 +134,8 @@ pub(super) fn unbind(s: &mut Session, params: &Value) -> Result<Value> {
     if settings != *s.doc.render {
         s.doc_mut().render = Arc::new(settings);
     }
-    Ok(json!({"name":input.name,"removed":removed}))
+    let reply = OpticsUnbound { name: input.name, removed, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| bad(command, e.to_string()))
 }
 
 #[cfg(test)]

@@ -371,6 +371,14 @@ impl Document {
                 users.entry(x.as_str()).or_default().push(k.clone());
             }
         }
+        // A feature that reads a parameter itself (a sketch point at `a`) is one of its users
+        // too, named as `parameters.graph` names it (#12293).
+        let reads: Vec<(String, BTreeSet<String>)> = self.features.iter().map(|f| (format!("Feature:{}", f.name), self.feature_reads(f))).collect();
+        for (feature, names) in &reads {
+            for n in names {
+                users.entry(n.as_str()).or_default().push(feature.clone());
+            }
+        }
         let used_by = |n: &str| -> Vec<String> { users.get(n).cloned().unwrap_or_default() };
         let value = |n: &str, k: Kind| {
             vals.get(n).and_then(|v| v.to_kind(k).ok()).map(|x| if k == Kind::Angle { x.to_degrees() } else { x }).map(expr::round_reported)
@@ -1036,21 +1044,32 @@ impl Document {
             let mut names: BTreeSet<String> = f.param_names.iter().filter(|n| !n.is_empty()).cloned().collect();
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
                 names.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
-                names.extend(sketch.patterns.iter().flat_map(|p| p.expressions.values()).flat_map(|e| expr::references(e)));
-                names.extend(sketch.text_exprs().into_iter().flat_map(|(_, e)| expr::references(e)));
-                names.extend(sketch.patterns.iter().filter_map(|p| p.count_expression.as_deref()).flat_map(expr::references));
-                names.extend(sketch.text_word_exprs().into_iter().flat_map(|e| crate::text_params::references(e)));
             }
-            // Sheet metal and plastic features rebuild when their rules' parameters change (#4420).
-            if f.kind.is_sheet() {
-                names.extend(self.sheet.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)));
-            }
-            if f.kind.is_plastic() {
-                names.extend(self.plastic.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)));
-            }
+            names.extend(self.feature_reads(f));
             out.extend(names.into_iter().map(|n| (format!("Feature:{}", f.name), n)));
         }
         out
+    }
+
+    /// The parameters a feature reads through expressions it holds itself, not through a named
+    /// input or dimension of its own: a sketch's point coordinates, texts, equations and pattern
+    /// expressions, and the rules a sheet metal or plastic feature is built with.
+    fn feature_reads(&self, f: &crate::Feature) -> BTreeSet<String> {
+        let mut names = BTreeSet::new();
+        if let FeatureKind::Sketch { sketch, .. } = &f.kind {
+            names.extend(sketch.patterns.iter().flat_map(|p| p.expressions.values()).flat_map(|e| expr::references(e)));
+            names.extend(sketch.text_exprs().into_iter().flat_map(|(_, e)| expr::references(e)));
+            names.extend(sketch.patterns.iter().filter_map(|p| p.count_expression.as_deref()).flat_map(expr::references));
+            names.extend(sketch.text_word_exprs().into_iter().flat_map(|e| crate::text_params::references(e)));
+        }
+        // Sheet metal and plastic features rebuild when their rules' parameters change (#4420).
+        if f.kind.is_sheet() {
+            names.extend(self.sheet.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)));
+        }
+        if f.kind.is_plastic() {
+            names.extend(self.plastic.rules.iter().flat_map(|r| r.fields()).flat_map(|(f, e, _)| rule_references(f, e)));
+        }
+        names
     }
 
     /// Features whose result depends on a parameter (directly or through other parameters).
