@@ -1042,13 +1042,13 @@ fn a_full_override_replaces_all_three() {
     run(&mut s, "component.physical_override", json!({"component": "B", "mass": 3.0, "com": [21, 2, 3], "inertia": [1.0, 2.0, 3.0, 0.1, 0.2, 0.3]}));
     let i = inertial_of(&package(&s), "B");
     assert_eq!(i.mass, 3.0);
-    let off = i.com - solidcraft_geom::Vec3::new(21.0, 2.0, 3.0);
+    let off = i.com - solidcore_record::Vec3::new(21.0, 2.0, 3.0);
     assert!(off.dot(off) < 1e-18, "{:?}", i.com);
     assert_eq!(i.inertia, [[1.0, 0.1, 0.2], [0.1, 2.0, 0.3], [0.2, 0.3, 3.0]]);
 }
 
 /// A link's centre of mass (mm) and inertia, in world axes.
-fn world_inertial(p: &UrdfPackage, s: &Session, link: &str) -> (solidcraft_geom::Vec3, [[f64; 3]; 3]) {
+fn world_inertial(p: &UrdfPackage, s: &Session, link: &str) -> (solidcore_record::Vec3, [[f64; 3]; 3]) {
     let i = inertial_of(p, link);
     let f = frame_of(p, s, link);
     let com = solidcraft_doc::apply_point(&f, i.com);
@@ -1068,7 +1068,7 @@ fn world_inertial(p: &UrdfPackage, s: &Session, link: &str) -> (solidcraft_geom:
 
 fn assert_world_inertial(p: &UrdfPackage, s: &Session, link: &str, com: [f64; 3], diagonal: [f64; 3]) {
     let (c, i) = world_inertial(p, s, link);
-    let off = c - solidcraft_geom::Vec3::new(com[0], com[1], com[2]);
+    let off = c - solidcore_record::Vec3::new(com[0], com[1], com[2]);
     assert!(off.dot(off) < 1e-16, "{link}: centre {c:?}, expected {com:?}");
     for k in 0..3 {
         assert!((i[k][k] - diagonal[k]).abs() < 1e-9, "{link}: {i:?}, expected {diagonal:?}");
@@ -1526,5 +1526,20 @@ fn a_web_prefix_keeps_the_meshes_beside_the_urdf_and_says_so() {
     let r = run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "mesh_prefix": "https://example.com/m/"}));
     assert!(dir.join("r-B.stl").exists());
     assert!(r["warnings"].to_string().contains("mesh_prefix"), "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn file_export_urdf_takes_the_mimic_and_collision_choices() {
+    let mut s = fan(&["revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    let dir = temp("export-urdf-cmd");
+    let path = dir.join("r.urdf");
+    // Strict: a parameter the command's schema doesn't list is refused.
+    s.param_check = crate::schema::ParamCheck::Strict;
+    run(&mut s, "file.export_urdf", json!({"path": path.to_string_lossy(), "mimic": false, "collision": "convex_hull"}));
+    let xml = std::fs::read_to_string(&path).unwrap_or_default();
+    assert!(!xml.contains("<mimic"), "{xml}");
+    assert!(xml.contains("-collision.stl"), "{xml}");
     let _ = std::fs::remove_dir_all(&dir);
 }

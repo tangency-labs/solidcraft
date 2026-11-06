@@ -80,17 +80,26 @@ pub struct Export3mfParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ExportUrdfParams {
-    /// The `.urdf` file to write; the meshes go in its folder.
+    /// The `.urdf` file to write; the meshes go in its folder unless `mesh_prefix` names another.
     pub path: String,
-    /// Put before each mesh file name in the URDF, such as `package://robot/meshes/`. Default: none.
+    /// Put before each mesh file name in the URDF, such as `meshes/` or
+    /// `package://robot/meshes/`; a folder in it is where the meshes are written, made if missing.
+    /// Default: none.
     #[serde(default)]
     pub mesh_prefix: Option<String>,
-    /// Each joint's effort limit, a positive number. Default: 1000.
+    /// The effort limit of joints with none saved (`joint.dynamics`), a positive number. Default: 1000.
     #[serde(default)]
     pub effort: Option<f64>,
-    /// Each joint's velocity limit, a positive number. Default: 10.
+    /// The velocity limit of joints with none saved (`joint.dynamics`), a positive number. Default: 10.
     #[serde(default)]
     pub velocity: Option<f64>,
+    /// Write motion links as `<mimic>`. Default: true.
+    #[serde(default)]
+    pub mimic: Option<bool>,
+    /// What a body with no collision shape of its own (`body.collision`) becomes: `mesh` or
+    /// `convex_hull`. Default: mesh.
+    #[serde(default)]
+    pub collision: Option<String>,
 }
 
 /// What `file.export_step`, `file.export_stl`, `file.export_3mf` and `file.export_obj` return.
