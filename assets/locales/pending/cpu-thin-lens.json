@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "render.shot_lens_cpu_progressive_reason": "فعّل أخذ العينات التدريجي في قسم «أخذ العينات» قبل تمكين عمق المجال على CPU.",
+    "render.shot_lens_raytrace_reason": "يتوفر عمق المجال مع تتبع الأشعة على CPU وتتبع المسارات على GPU."
+  },
+  "de": {
+    "render.shot_lens_cpu_progressive_reason": "Vor der CPU-Schärfentiefe unter Sampling die progressive Abtastung übernehmen.",
+    "render.shot_lens_raytrace_reason": "Schärfentiefe ist für CPU-Raytracing und GPU-Pathtracing verfügbar."
+  },
+  "en": {
+    "render.shot_lens_cpu_progressive_reason": "Adopt progressive sampling in Sampling before enabling CPU depth of field.",
+    "render.shot_lens_raytrace_reason": "Depth of field is available for CPU ray tracing and GPU path tracing."
+  },
+  "he": {
+    "render.shot_lens_cpu_progressive_reason": "יש להפעיל דגימה הדרגתית בחלונית הדגימה לפני הפעלת עומק שדה ב־CPU.",
+    "render.shot_lens_raytrace_reason": "עומק שדה זמין בעקיבת קרניים ב־CPU ובעקיבת נתיבים ב־GPU."
+  },
+  "ja": {
+    "render.shot_lens_cpu_progressive_reason": "CPUの被写界深度を有効にするには、サンプリングでプログレッシブ方式を適用してください。",
+    "render.shot_lens_raytrace_reason": "被写界深度はCPUレイトレーシングとGPUパストレーシングで利用できます。"
+  },
+  "ko": {
+    "render.shot_lens_cpu_progressive_reason": "CPU 피사계 심도를 켜기 전에 샘플링에서 점진적 샘플링을 적용하세요.",
+    "render.shot_lens_raytrace_reason": "피사계 심도는 CPU 레이 트레이싱과 GPU 패스 트레이싱에서 사용할 수 있습니다."
+  },
+  "vi": {
+    "render.shot_lens_cpu_progressive_reason": "Bật lấy mẫu lũy tiến trong mục Lấy mẫu trước khi bật độ sâu trường ảnh trên CPU.",
+    "render.shot_lens_raytrace_reason": "Độ sâu trường ảnh khả dụng với dò tia trên CPU và dò đường đi trên GPU."
+  },
+  "zh": {
+    "render.shot_lens_cpu_progressive_reason": "启用CPU景深前，请在采样中应用渐进式采样。",
+    "render.shot_lens_raytrace_reason": "CPU光线追踪和GPU路径追踪均支持景深。"
+  }
+}

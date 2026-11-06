@@ -1,0 +1,64 @@
+{
+  "ar": {
+    "render.check_glass_cpu": "يدعم CPU صفائح زجاج مستوية وصناديق محاذية للمحاور بعد التحقق منها. تتطلب الشبكات المغلقة العامة والتعشيق والتشتت الداخلي إضاءة غير مباشرة. لا تزال الظلال النافذة عبر الزجاج المغلق غير مدعومة.",
+    "render.check_glass_gpu": "يدعم GPU أوساط زجاج منفصلة متحققًا منها، أو تعشيقًا متحققًا منه عند تفعيله صراحةً. يتطلب التعشيق أغلفة خارجية محدبة وأجسامًا داخلية محتواة بالكامل وحدودًا غير متلامسة.",
+    "render.check_media_remaining": "لا تزال تأثيرات الزجاج الخشن وشبكات الكثافة والإزاحة والنقل الطيفي غير متاحة.",
+    "render.check_media_scope": "يتطلب التشتت الداخلي النشط وسطًا زجاجيًا مغلقًا مع إيقاف نفاذ أشعة الظل المستقيمة وإزالة الضجيج. ويتطلب GPU أيضًا طبقة عينات فرينل واحدة. لا يمكن جمع الغلاف الجوي الخارجي النشط مع الزجاج أو إزالة ضجيج الأسطح.",
+    "render.cpu_material_certification": "يتحقق فحص CPU من هندسة الزجاج المدعومة قبل التصيير. يستخدم الزجاج المغلق المسافة الهندسية."
+  },
+  "de": {
+    "render.check_glass_cpu": "Die CPU unterstützt geprüfte ebene Glasscheiben und achsenparallele Boxen. Allgemeine geschlossene Netze, Verschachtelung und innere Streuung erfordern indirekte Beleuchtung. Durch geschlossenes Glas übertragene Schatten bleiben nicht unterstützt.",
+    "render.check_glass_gpu": "Die GPU unterstützt geprüfte getrennte Glasmedien oder ausdrücklich aktivierte geprüfte Verschachtelung. Dafür müssen die äußeren Körper konvex und die inneren streng enthalten sein; Grenzen dürfen sich nicht berühren.",
+    "render.check_media_remaining": "Raues Glas, Dichtegitter, Displacement und spektraler Lichttransport bleiben nicht verfügbar.",
+    "render.check_media_scope": "Aktive innere Streuung benötigt ein geschlossenes Glasmedium ohne gerade Schattenübertragung und ohne Rauschreduzierung. Die GPU benötigt außerdem eine Fresnel-Schicht. Aktive äußere Atmosphäre kann nicht mit Glas oder Oberflächen-Rauschreduzierung kombiniert werden.",
+    "render.cpu_material_certification": "Die CPU-Prüfung validiert unterstützte Glasgeometrie vor dem Rendern. Geschlossenes Glas verwendet geometrische Abstände."
+  },
+  "en": {
+    "render.check_glass_cpu": "CPU supports certified planar Glass sheets and axis-aligned boxes. General closed meshes, nesting and interior scattering require Indirect lighting. Closed transmitted shadows remain unsupported.",
+    "render.check_glass_gpu": "GPU supports certified disjoint Glass or explicit certified nesting. Nesting requires convex parents, strictly contained children and no touching boundaries.",
+    "render.check_media_remaining": "Rough Glass, density grids, displacement and spectral transport remain unavailable.",
+    "render.check_media_scope": "Active interior scattering needs a closed Glass medium, straight shadow transmission off and Denoise off. GPU also needs one Fresnel stratum. Active exterior Atmosphere cannot combine with Glass or surface Denoise.",
+    "render.cpu_material_certification": "CPU Check validates supported Glass geometry before rendering. Closed Glass uses geometric distance."
+  },
+  "es": {
+    "render.cpu_material_certification": "La comprobación de CPU valida la geometría de vidrio admitida antes de renderizar. El vidrio cerrado usa la distancia geométrica."
+  },
+  "fr": {
+    "render.cpu_material_certification": "La vérification CPU valide la géométrie de verre prise en charge avant le rendu. Le verre fermé utilise la distance géométrique."
+  },
+  "he": {
+    "render.check_glass_cpu": "ה־CPU תומך בלוחות זכוכית מישוריים ובתיבות מקבילות לצירים שעברו אימות. רשתות סגורות כלליות, קינון ופיזור פנימי דורשים תאורה עקיפה. העברת צל דרך זכוכית סגורה עדיין אינה נתמכת.",
+    "render.check_glass_gpu": "ה־GPU תומך בנפחי זכוכית נפרדים שעברו אימות או בקינון מאומת שמופעל במפורש. קינון דורש גופים חיצוניים קמורים, גופים פנימיים המוכלים בתוכם ממש וגבולות שאינם נוגעים זה בזה.",
+    "render.check_media_remaining": "זכוכית מחוספסת, רשתות צפיפות, הסטת משטח והעברת אור ספקטרלית עדיין אינן זמינות.",
+    "render.check_media_scope": "פיזור פנימי פעיל דורש נפח זכוכית סגור, העברת קרני צל ישרות כבויה והסרת רעש כבויה. ה־GPU דורש גם שכבת פרנל אחת. אי אפשר לשלב אטמוספירה חיצונית פעילה עם זכוכית או עם הסרת רעש משטחית.",
+    "render.cpu_material_certification": "בדיקת CPU מאמתת את גאומטריית הזכוכית הנתמכת לפני הרינדור. זכוכית סגורה משתמשת במרחק גאומטרי."
+  },
+  "ja": {
+    "render.check_glass_cpu": "CPUは検証済みの平面ガラス薄板と軸に平行な箱に対応します。一般の閉じたメッシュ、入れ子、内部散乱には間接照明が必要です。閉じたガラスを通る透過影には未対応です。",
+    "render.check_glass_gpu": "GPUは検証済みの分離したガラス、または明示的に有効にした検証済みの入れ子に対応します。入れ子には凸形状の親、厳密に内包された子、接触しない境界が必要です。",
+    "render.check_media_remaining": "粗いガラス、密度グリッド、ディスプレイスメント、分光輸送には未対応です。",
+    "render.check_media_scope": "有効な内部散乱には閉じたガラス媒質を使い、直線の影透過とノイズ除去をオフにします。GPUではフレネル層を1つにします。有効な外部の大気はガラスや表面ノイズ除去と併用できません。",
+    "render.cpu_material_certification": "CPUの確認では、レンダリング前に対応するガラス形状を検証します。閉じたガラスには形状から得られる距離を使います。"
+  },
+  "ko": {
+    "render.check_glass_cpu": "CPU는 검증된 평면 유리판과 축 정렬 상자를 지원합니다. 일반적인 닫힌 메시, 중첩 및 내부 산란에는 간접광이 필요합니다. 닫힌 유리를 통과하는 투과 그림자는 아직 지원하지 않습니다.",
+    "render.check_glass_gpu": "GPU는 검증된 분리 유리 또는 명시적으로 활성화한 검증된 중첩을 지원합니다. 중첩에는 볼록한 바깥 형상, 완전히 내부에 포함된 안쪽 형상 및 서로 닿지 않는 경계가 필요합니다.",
+    "render.check_media_remaining": "거친 유리, 밀도 격자, 디스플레이스먼트 및 분광 광전달은 아직 지원하지 않습니다.",
+    "render.check_media_scope": "활성 내부 산란에는 닫힌 유리 매질이 필요하며 직선 그림자 투과와 노이즈 제거를 꺼야 합니다. GPU에는 프레넬 계층도 하나만 필요합니다. 활성 외부 대기는 유리 또는 표면 노이즈 제거와 함께 사용할 수 없습니다.",
+    "render.cpu_material_certification": "CPU 검사는 렌더링 전에 지원되는 유리 형상을 검증합니다. 닫힌 유리는 기하학적 거리를 사용합니다."
+  },
+  "vi": {
+    "render.check_glass_cpu": "CPU hỗ trợ các tấm kính phẳng và hộp thẳng theo trục đã được kiểm chứng. Lưới kín tổng quát, cấu trúc lồng nhau và tán xạ bên trong cần Chiếu sáng gián tiếp. Chưa hỗ trợ bóng truyền qua kính kín.",
+    "render.check_glass_gpu": "GPU hỗ trợ các khối kính tách rời đã được kiểm chứng hoặc cấu trúc lồng nhau được kiểm chứng và bật rõ ràng. Cấu trúc lồng nhau cần lớp bao lồi, vật thể con nằm hoàn toàn bên trong và các ranh giới không chạm nhau.",
+    "render.check_media_remaining": "Chưa hỗ trợ kính nhám, lưới mật độ, dịch chuyển bề mặt và truyền sáng quang phổ.",
+    "render.check_media_scope": "Tán xạ bên trong đang hoạt động cần môi trường kính kín, tắt truyền tia bóng thẳng và tắt Khử nhiễu. GPU cũng cần một tầng Fresnel. Không thể kết hợp Khí quyển bên ngoài đang hoạt động với kính hoặc Khử nhiễu bề mặt.",
+    "render.cpu_material_certification": "Kiểm tra trên CPU xác thực hình học thủy tinh được hỗ trợ trước khi kết xuất. Thủy tinh kín sử dụng khoảng cách hình học."
+  },
+  "zh": {
+    "render.check_glass_cpu": "CPU 支持经验证的平面玻璃薄片和轴对齐盒体。一般闭合网格、嵌套和内部散射需要间接光照。仍不支持穿过闭合玻璃的透射阴影。",
+    "render.check_glass_gpu": "GPU 支持经验证的互不相交玻璃介质，或明确启用的经验证嵌套。嵌套要求外层物体为凸体、内层物体严格包含于其中，且边界互不接触。",
+    "render.check_media_remaining": "仍不支持粗糙玻璃、密度网格、位移和光谱传输。",
+    "render.check_media_scope": "启用内部散射需要闭合玻璃介质，并关闭直线阴影透射和降噪。GPU 还需要只使用一个菲涅耳分层。启用的外部大气不能与玻璃或表面降噪同时使用。",
+    "render.cpu_material_certification": "CPU 检查会在渲染前验证所支持的玻璃几何体。封闭玻璃使用几何距离。"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "en": {
+    "render.cpu_quality_budget_help": "Changes size, production sample cap, seed and CPU resource profile. Camera, lens, lighting, GI depth and effects are kept.",
+    "render.cpu_quality_progressive_required": "Enable progressive sampling below before choosing a CPU budget.",
+    "render.cpu_quality_summary": "{width} × {height} · {samples} sample cap · seed {seed} · {profile}"
+  },
+  "ar": {
+    "render.cpu_quality_budget_help": "يغير الحجم وحد عينات الإنتاج والبذرة وملف موارد CPU. تُحفظ الكاميرا والعدسة والإضاءة وعمق GI والتأثيرات.",
+    "render.cpu_quality_progressive_required": "فعّل أخذ العينات التدريجي أدناه قبل اختيار ميزانية CPU.",
+    "render.cpu_quality_summary": "{width} × {height} · حد العينات {samples} · البذرة {seed} · {profile}"
+  },
+  "de": {
+    "render.cpu_quality_budget_help": "Ändert Größe, Obergrenze der Produktionssamples, Startwert und CPU-Ressourcenprofil. Kamera, Objektiv, Beleuchtung, GI-Tiefe und Effekte bleiben erhalten.",
+    "render.cpu_quality_progressive_required": "Aktiviere unten progressive Samples, bevor du ein CPU-Budget auswählst.",
+    "render.cpu_quality_summary": "{width} × {height} · Sample-Grenze {samples} · Startwert {seed} · {profile}"
+  },
+  "he": {
+    "render.cpu_quality_budget_help": "משנה גודל, תקרת דגימות הפקה, זרע ופרופיל משאבי CPU. המצלמה, העדשה, התאורה, עומק GI והאפקטים נשמרים.",
+    "render.cpu_quality_progressive_required": "יש להפעיל דגימה מתקדמת למטה לפני בחירת תקציב CPU.",
+    "render.cpu_quality_summary": "{width} × {height} · תקרת דגימות {samples} · זרע {seed} · {profile}"
+  },
+  "ja": {
+    "render.cpu_quality_budget_help": "サイズ、本番サンプル数の上限、シード、CPUリソースプロファイルを変更します。カメラ、レンズ、照明、GI深度、エフェクトは維持されます。",
+    "render.cpu_quality_progressive_required": "CPU予算を選ぶ前に、下でプログレッシブサンプリングを有効にしてください。",
+    "render.cpu_quality_summary": "{width} × {height} · サンプル上限 {samples} · シード {seed} · {profile}"
+  },
+  "ko": {
+    "render.cpu_quality_budget_help": "크기, 제작 샘플 상한, 시드와 CPU 리소스 프로필을 변경합니다. 카메라, 렌즈, 조명, GI 깊이와 효과는 유지됩니다.",
+    "render.cpu_quality_progressive_required": "CPU 예산을 선택하기 전에 아래에서 점진적 샘플링을 활성화하세요.",
+    "render.cpu_quality_summary": "{width} × {height} · 샘플 상한 {samples} · 시드 {seed} · {profile}"
+  },
+  "vi": {
+    "render.cpu_quality_budget_help": "Thay đổi kích thước, trần mẫu sản xuất, hạt giống và cấu hình tài nguyên CPU. Giữ nguyên máy ảnh, ống kính, ánh sáng, độ sâu GI và hiệu ứng.",
+    "render.cpu_quality_progressive_required": "Bật lấy mẫu tiến dần bên dưới trước khi chọn ngân sách CPU.",
+    "render.cpu_quality_summary": "{width} × {height} · trần mẫu {samples} · hạt giống {seed} · {profile}"
+  },
+  "zh": {
+    "render.cpu_quality_budget_help": "更改尺寸、正式样本上限、种子和CPU资源配置。保留相机、镜头、照明、GI深度和效果。",
+    "render.cpu_quality_progressive_required": "选择CPU预算前，请先在下方启用渐进采样。",
+    "render.cpu_quality_summary": "{width} × {height} · 样本上限 {samples} · 种子 {seed} · {profile}"
+  }
+}

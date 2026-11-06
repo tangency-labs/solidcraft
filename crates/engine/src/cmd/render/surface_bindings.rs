@@ -166,6 +166,14 @@ pub(super) fn bind(s: &mut Session, params: &Value) -> Result<Value> {
     if !matches!(setup.job, Some(RenderJob::CpuRaytrace { .. } | RenderJob::GpuPath { .. })) {
         return Err(bad(command, "persistent authored maps require an explicit CPU raytrace or GPU path setup"));
     }
+    if let Some(RenderJob::CpuRaytrace { options, .. }) = &setup.job {
+        if !setup.optics.is_empty() && options.path.is_none() {
+            return Err(bad(command, "CPU maps with Glass require Indirect lighting and separate targets"));
+        }
+        // Saving validates portable intent; capture later resolves stable aging
+        // targets. The final setup validator still forbids maps on a Glass target.
+        options.validate_surface_maps(setup.exposure_ev).map_err(|e| bad(command, e.to_string()))?;
+    }
     let prepared = super::library::prepare_surface(s, &input.surface)?;
     let id = prepared["id"].as_str().ok_or_else(|| bad(command, "missing prepared surface identifier"))?;
     let name = prepared["texture"]["body_name"].as_str().ok_or_else(|| bad(command, "missing prepared body identity"))?;

@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "render.quality_summary": "{width} × {height} · {samples} عينة · العمق {depth} · البذرة {seed} · {denoise}"
+  },
+  "de": {
+    "render.quality_summary": "{width} × {height} · {samples} Samples · Tiefe {depth} · Startwert {seed} · {denoise}"
+  },
+  "en": {
+    "render.quality_summary": "{width} × {height} · {samples} samples · depth {depth} · seed {seed} · {denoise}"
+  },
+  "he": {
+    "render.quality_summary": "{width} × {height} · {samples} דגימות · עומק {depth} · זרע {seed} · {denoise}"
+  },
+  "ja": {
+    "render.quality_summary": "{width} × {height} · {samples} サンプル · 深度 {depth} · シード {seed} · {denoise}"
+  },
+  "ko": {
+    "render.quality_summary": "{width} × {height} · 샘플 {samples}개 · 깊이 {depth} · 시드 {seed} · {denoise}"
+  },
+  "vi": {
+    "render.quality_summary": "{width} × {height} · {samples} mẫu · độ sâu {depth} · hạt giống {seed} · {denoise}"
+  },
+  "zh": {
+    "render.quality_summary": "{width} × {height} · {samples} 次采样 · 深度 {depth} · 种子 {seed} · {denoise}"
+  }
+}

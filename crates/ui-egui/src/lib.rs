@@ -642,6 +642,8 @@ pub struct SolveApp {
     /// How long OK waits for a feature before computing it off the window thread, saying so;
     /// `None`: it waits as long as it takes (headless use, tests). The desktop app sets it.
     pub apply_off_thread: Option<std::time::Duration>,
+    /// One bounded native render proof/retirement owner, independent of tab state.
+    pub(crate) render_preparation: render_workspace::prepare::State,
     /// Tests: work started off the window thread (a feature's evaluation, a Properties
     /// measurement) waits for this before it reports done.
     #[cfg(test)]
@@ -888,6 +890,7 @@ impl SolveApp {
             timeline_playback: None,
             delete_check: None,
             apply_off_thread: None,
+            render_preparation: Default::default(),
             #[cfg(test)]
             apply_gate: None,
             last_command: None,
@@ -1250,6 +1253,34 @@ impl SolveApp {
             Ok(reply)
         });
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
+        self.after_command(id, &params, revision, selected_before, r)
+    }
+
+    /// Commit already prepared rendering through the same window post-hooks,
+    /// without executing capture or admission again on the window.
+    pub(crate) fn finish_render_preparation(
+        &mut self,
+        id: &str,
+        params: &Value,
+        finish: impl FnOnce(&mut Session) -> Result<Value, String>,
+    ) -> Result<Value, String> {
+        let revision = self.session.revision;
+        let selected_before = self.session.selection.clone();
+        let result = finish(&mut self.session).and_then(|reply| {
+            render_workspace::apply_command(self, id, &reply)?;
+            Ok(reply)
+        });
+        self.after_command(id, params, revision, selected_before, result)
+    }
+
+    fn after_command(
+        &mut self,
+        id: &str,
+        params: &Value,
+        revision: u64,
+        selected_before: Vec<solidcraft_engine::Sel>,
+        r: Result<Value, String>,
+    ) -> Result<Value, String> {
         // An Undo offered by the last toast is stale once another command changed the design.
         if self.status_undo && revision != self.session.revision {
             self.status_undo = false;
@@ -1278,7 +1309,7 @@ impl SolveApp {
                 render_workspace::light::apply_visibility(self, id, v);
             }
             if matches!(id, "render.lights.set" | "render.lights.add" | "render.lights.duplicate" | "render.lights.remove") {
-                render_workspace::light::edited(self, &params, v);
+                render_workspace::light::edited(self, id, params, v);
             }
         }
         done
@@ -1346,6 +1377,11 @@ impl SolveApp {
             }
             if id == "view.render_inspector" {
                 render_workspace::set_inspector_visible(self, v.get("visible").and_then(Value::as_bool).unwrap_or(true));
+            }
+            if id == "view.render_live"
+                && let Some(paused) = v.get("paused").and_then(Value::as_bool)
+            {
+                render_workspace::live::set_paused(self, paused);
             }
             if id == "view.render_browser" {
                 render_workspace::apply_browser_controls(self, v);
@@ -2825,6 +2861,11 @@ impl SolveApp {
 
     fn resolve_fit(&mut self, ctx: &egui::Context) {
         viewport::refresh_layout(self, ctx);
+        if self.fit_waits < Self::FIT_WAITS && render_workspace::wait_entry_fit_layout(self) {
+            self.fit_waits += 1;
+            ctx.request_repaint();
+            return;
+        }
         if self.viewport.layout.is_some()
             && let Some((cam, bounds, animate, shared)) = self.pending_fit.take()
         {
@@ -2848,7 +2889,9 @@ impl SolveApp {
                     self.pending_fit = Some((cam, bounds, animate, shared));
                 } else {
                     self.fit_waits = 0;
+                    let previous = self.cam;
                     self.cam = self.fitted_bounds(cam, &want);
+                    render_workspace::settle_entry_fit(self, cam, bounds, previous);
                 }
                 ctx.request_repaint();
                 return;
@@ -2857,8 +2900,10 @@ impl SolveApp {
             if animate {
                 self.animate_to(to);
             } else {
+                let previous = self.cam;
                 self.cam = to;
                 self.cam_anim = None;
+                render_workspace::settle_entry_fit(self, cam, bounds, previous);
                 // An open's framing settles here, once the layout is known. An open still meshing
                 // takes this as the camera it framed from the outlines, so the framing it does
                 // when the last body is ready isn't mistaken for the user having moved the view.
@@ -3014,6 +3059,7 @@ impl SolveApp {
 
     /// Stop any view animation where it is (the user took over the camera).
     pub fn cancel_view_animation(&mut self) {
+        render_workspace::cancel_entry_fit(self);
         self.pending_fit = None;
         self.cam_anim = None;
     }
@@ -3219,6 +3265,7 @@ impl SolveApp {
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         prefs::prepare_blur(self, ui.ctx());
+        render_workspace::displayed::begin(self);
         let blur_source = !self.home.open && !render_workspace::result_active(self);
         let _blur_scope = self.blur.begin(ui.ctx(), blur_source);
         value_step::set_enabled(ui.ctx(), self.preferences.step_values);
@@ -3266,6 +3313,7 @@ impl SolveApp {
         control::publish_design(self, &control::DESIGN_WATCH);
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
+        render_workspace::displayed::finish(self, ui.ctx());
     }
 
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {
@@ -3566,6 +3614,10 @@ impl SolveApp {
         if req.refuse_cancelled_chat() {
             return;
         }
+        let Some(req) = render_workspace::prepare::control(self, req) else {
+            ctx.request_repaint();
+            return;
+        };
         let reply = req.reply.clone();
         match control::handle(self, ctx, &req) {
             control::Outcome::Done(v) => {

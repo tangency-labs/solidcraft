@@ -1,0 +1,42 @@
+{
+  "ar": {
+    "render.cpu_constant_direct_help": "بدون الإضاءة غير المباشرة، يمكن أن يظهر هذا المصدر الثابت في الانعكاسات وعبر الزجاج. لكنه لا يضيء الأسطح المعتمة. فعّل الإضاءة غير المباشرة لاستخدامه في إضاءة المشهد.",
+    "render.cpu_constant_enable_indirect_plan": "عمق المسار {depth}؛ أخذ عينات تدريجي بمعدل {spp} عينة/بكسل (البذرة {seed})؛ شعاع أولي واحد لكل عينة؛ ظلال متتبعة. يحتفظ بحجم الصورة وميزانية CPU والإعدادات الأخرى.",
+    "render.cpu_indirect_method_required": "اختر تتبع أشعة CPU لتفعيل وضع الإضاءة غير المباشرة هذا."
+  },
+  "de": {
+    "render.cpu_constant_direct_help": "Ohne indirekte Beleuchtung kann diese konstante Quelle in Reflexionen und durch Glas sichtbar sein. Sie beleuchtet keine undurchsichtigen Flächen. Schalte indirekte Beleuchtung ein, um sie als Szenenlicht zu nutzen.",
+    "render.cpu_constant_enable_indirect_plan": "Pfadtiefe {depth}; progressives Sampling mit {spp} Samples/Pixel (Seed {seed}); ein Primärstrahl pro Sample; Raytracing-Schatten. Bildgröße, CPU-Budget und andere Einstellungen bleiben erhalten.",
+    "render.cpu_indirect_method_required": "Wähle CPU-Raytracing, um diesen Modus für indirekte Beleuchtung einzuschalten."
+  },
+  "en": {
+    "render.cpu_constant_direct_help": "Without Indirect lighting, this constant source can appear in reflections and through Glass. It does not light opaque surfaces. Enable Indirect lighting to use it for scene lighting.",
+    "render.cpu_constant_enable_indirect_plan": "Path depth {depth}; progressive sampling at {spp} samples/pixel (seed {seed}); one primary ray per sample; traced shadows. Keeps your image size, CPU budget and other settings.",
+    "render.cpu_indirect_method_required": "Choose CPU ray tracing to enable this Indirect lighting mode."
+  },
+  "he": {
+    "render.cpu_constant_direct_help": "ללא תאורה עקיפה, מקור קבוע זה עשוי להופיע בהשתקפויות ודרך זכוכית. הוא אינו מאיר משטחים אטומים. יש להפעיל תאורה עקיפה כדי להשתמש בו לתאורת הסצנה.",
+    "render.cpu_constant_enable_indirect_plan": "עומק מסלול {depth}; דגימה הדרגתית עם {spp} דגימות לפיקסל (זרע {seed}); קרן ראשית אחת לכל דגימה; צללים במעקב קרניים. גודל התמונה, תקציב ה־CPU וההגדרות האחרות נשמרים.",
+    "render.cpu_indirect_method_required": "יש לבחור מעקב קרניים ב־CPU כדי להפעיל מצב זה של תאורה עקיפה."
+  },
+  "ja": {
+    "render.cpu_constant_direct_help": "間接照明を使わない場合、この一定の光源は反射やガラス越しに見えることがありますが、不透明な面は照らしません。シーンの照明に使うには、間接照明を有効にしてください。",
+    "render.cpu_constant_enable_indirect_plan": "パスの深さ {depth}、ピクセルあたり {spp} サンプルのプログレッシブサンプリング（シード {seed}）、各サンプルに一次レイ1本、レイトレーシングの影を使用します。画像サイズ、CPU予算、その他の設定は保持します。",
+    "render.cpu_indirect_method_required": "この間接照明モードを有効にするには、CPUレイトレーシングを選択してください。"
+  },
+  "ko": {
+    "render.cpu_constant_direct_help": "간접 조명이 꺼져 있으면 이 일정한 광원은 반사나 유리를 통해 보일 수 있지만 불투명한 표면을 밝히지는 않습니다. 장면 조명으로 사용하려면 간접 조명을 켜세요.",
+    "render.cpu_constant_enable_indirect_plan": "경로 깊이 {depth}, 픽셀당 {spp}개 샘플의 점진적 샘플링(시드 {seed}), 샘플당 기본 광선 1개, 추적된 그림자를 사용합니다. 이미지 크기, CPU 예산 및 다른 설정을 유지합니다.",
+    "render.cpu_indirect_method_required": "이 간접 조명 모드를 켜려면 CPU 레이 트레이싱을 선택하세요."
+  },
+  "vi": {
+    "render.cpu_constant_direct_help": "Khi tắt Chiếu sáng gián tiếp, nguồn sáng đồng nhất này có thể xuất hiện trong phản xạ và qua Kính nhưng không chiếu sáng các bề mặt đục. Bật Chiếu sáng gián tiếp để dùng nguồn này chiếu sáng cảnh.",
+    "render.cpu_constant_enable_indirect_plan": "Độ sâu đường đi {depth}; lấy mẫu tăng dần với {spp} mẫu/pixel (hạt giống {seed}); một tia sơ cấp cho mỗi mẫu; bóng đổ dò tia. Giữ kích thước ảnh, ngân sách CPU và các cài đặt khác.",
+    "render.cpu_indirect_method_required": "Chọn dò tia CPU để bật chế độ Chiếu sáng gián tiếp này."
+  },
+  "zh": {
+    "render.cpu_constant_direct_help": "未启用间接照明时，此恒定光源可能出现在反射中或透过玻璃可见，但不会照亮不透明表面。要用它照亮场景，请启用间接照明。",
+    "render.cpu_constant_enable_indirect_plan": "路径深度 {depth}；每像素 {spp} 个样本的渐进采样（种子 {seed}）；每个样本一条主光线；光线追踪阴影。保留图像尺寸、CPU预算和其他设置。",
+    "render.cpu_indirect_method_required": "请选择CPU光线追踪以启用此间接照明模式。"
+  }
+}

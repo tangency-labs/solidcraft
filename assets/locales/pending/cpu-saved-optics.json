@@ -1,0 +1,82 @@
+{
+  "ar": {
+    "render.appearance_editor.discard_saved_edit": "تجاهل التعديلات البصرية غير المحفوظة",
+    "render.cpu_subsurface_denoise_reason": "يتطلب التشتت داخل الزجاج على CPU إيقاف إزالة الضجيج. تبقى إعداداتك محفوظة.",
+    "render.cpu_subsurface_help": "يغيّر التشتت اتجاه الضوء داخل الزجاج المغلق. تتطلب المعدلات الموجبة إضاءة غير مباشرة مع إيقاف إزالة الضجيج. المعدل هو عدد التصادمات لكل مم؛ لا يضيف الصفر أي تشتت. يفضّل انحياز الاتجاه الموجب الأمام، والسالب الخلف.",
+    "render.material_cpu_glass_only": "تتطلب خرائط ملفات الصور المؤقتة GPU. يمكن لـCPU استخدام خرائط الأسطح المضمنة المحفوظة.",
+    "render.material_cpu_optics_limits": "شغّل الإضاءة غير المباشرة لأشكال الزجاج المغلقة المدعومة والتداخل المتحقق منه والتشتت داخل الزجاج. يمكن للصفائح الرقيقة تمرير الضوء للظلال. وإلا فاستخدم صفيحة مستوية أو صندوقًا محاذيًا للمحاور. تظل الأشكال المتلامسة والظلال النافذة عبر الزجاج المغلق غير مدعومة. تبقى قيمك محفوظة.",
+    "render.material_cpu_saved_runtime_conflict": "لا يمكن الجمع بين البصريات المحفوظة على CPU والارتباطات البصرية المؤقتة السابقة. احفظ البصريات التي راجعتها أو أزل الارتباط المؤقت المتعارض.",
+    "render.material_raytrace_required": "يتطلب الزجاج الفيزيائي تتبع الأشعة على CPU أو تتبع المسارات على GPU.",
+    "render.material_saved_edit_pending": "هذه التعديلات البصرية غير محفوظة. احفظ القيم التي راجعتها، أو أزل التعيين المحفوظ، أو تجاهل التعديلات. لا يمكن للارتباطات المؤقتة السابقة والمؤثرات غير المدعومة تجاوز الهدف المحفوظ."
+  },
+  "de": {
+    "render.appearance_editor.discard_saved_edit": "Ungespeicherte Optikänderungen verwerfen",
+    "render.cpu_subsurface_denoise_reason": "Streuung im Glas auf der CPU benötigt ausgeschaltete Rauschreduzierung. Die Einstellungen bleiben erhalten.",
+    "render.cpu_subsurface_help": "Streuung lenkt Licht im Inneren geschlossenen Glases um. Positive Raten benötigen indirekte Beleuchtung ohne Rauschreduzierung. Die Rate zählt Kollisionen pro mm; 0 fügt keine Streuung hinzu. Positive Richtungswerte bevorzugen vorwärts, negative rückwärts.",
+    "render.material_cpu_glass_only": "Temporäre Bilddatei-Karten benötigen die GPU. Die CPU kann gespeicherte integrierte Oberflächenkarten verwenden.",
+    "render.material_cpu_optics_limits": "Indirekte Beleuchtung für unterstützte geschlossene Glasformen, geprüfte Verschachtelung und Streuung im Inneren einschalten. Dünne Scheiben können Licht für Schatten durchlassen. Sonst eine ebene Scheibe oder achsenparallele Box verwenden. Berührende Formen und durch geschlossenes Glas übertragene Schatten werden weiterhin nicht unterstützt. Die Werte bleiben erhalten.",
+    "render.material_cpu_saved_runtime_conflict": "Gespeicherte CPU-Optik kann nicht mit temporären optischen Bindungen kombiniert werden. Geprüfte Optik speichern oder die temporäre Bindung entfernen.",
+    "render.material_raytrace_required": "Physikalisches Glas benötigt CPU-Raytracing oder GPU-Pathtracing.",
+    "render.material_saved_edit_pending": "Diese Optikänderungen sind ungespeichert. Geprüfte Werte speichern, die gespeicherte Zuordnung entfernen oder Änderungen verwerfen. Temporäre Bindungen und nicht unterstützte Effekte können das gespeicherte Ziel nicht überschreiben."
+  },
+  "en": {
+    "render.appearance_editor.discard_saved_edit": "Discard unsaved optical edits",
+    "render.cpu_subsurface_denoise_reason": "CPU subsurface scattering needs Denoise off. Your settings are kept.",
+    "render.cpu_subsurface_help": "Scattering redirects light inside closed Glass. Positive rates need Indirect lighting with Denoise off. The rate is collisions per mm; 0 adds no scattering. Positive phase bias favors forward directions; negative favors backward.",
+    "render.material_cpu_glass_only": "Temporary image-file maps require GPU. CPU can use saved built-in surface maps.",
+    "render.material_cpu_optics_limits": "Turn on Indirect lighting for supported closed Glass shapes, certified nesting and subsurface scattering. Thin sheets can pass shadows. Otherwise use a planar sheet or axis-aligned box. Touching shapes and transmitted shadows through closed Glass remain unsupported. Your values are kept.",
+    "render.material_cpu_saved_runtime_conflict": "Saved CPU optics cannot combine with legacy temporary optical bindings. Save the reviewed optics or remove the conflicting temporary binding.",
+    "render.material_raytrace_required": "Physical Glass requires CPU ray tracing or GPU path tracing.",
+    "render.material_saved_edit_pending": "These optical edits are unsaved. Save reviewed values, remove the saved assignment, or discard the edits. Legacy temporary bindings and unsupported effects cannot override the saved target."
+  },
+  "he": {
+    "render.appearance_editor.discard_saved_edit": "ביטול שינויים אופטיים שלא נשמרו",
+    "render.cpu_subsurface_denoise_reason": "פיזור בתוך זכוכית ב־CPU דורש הסרת רעש כבויה. ההגדרות נשמרות.",
+    "render.cpu_subsurface_help": "פיזור משנה את כיוון האור בתוך זכוכית סגורה. קצב חיובי דורש תאורה עקיפה והסרת רעש כבויה. הקצב הוא מספר התנגשויות למ״מ; 0 אינו מוסיף פיזור. הטיית כיוון חיובית מעדיפה קדימה, ושלילית אחורה.",
+    "render.material_cpu_glass_only": "מפות זמניות מקובצי תמונה דורשות GPU. ב־CPU אפשר להשתמש במפות משטח מובנות שנשמרו.",
+    "render.material_cpu_optics_limits": "יש להפעיל תאורה עקיפה לצורות זכוכית סגורות נתמכות, לקינון שנבדק ולפיזור בתוך הזכוכית. יריעות דקות יכולות להעביר אור לצללים. אחרת יש להשתמש ביריעה מישורית או בתיבה מקבילה לצירים. צורות נוגעות וצללים העוברים בזכוכית סגורה עדיין אינם נתמכים. הערכים נשמרים.",
+    "render.material_cpu_saved_runtime_conflict": "אי אפשר לשלב הגדרות אופטיות שמורות ב־CPU עם הקישורים האופטיים הזמניים הישנים. יש לשמור את ההגדרות שנבדקו או להסיר את הקישור הזמני המתנגש.",
+    "render.material_raytrace_required": "זכוכית פיזיקלית דורשת עקיבת קרניים ב־CPU או עקיבת נתיבים ב־GPU.",
+    "render.material_saved_edit_pending": "השינויים האופטיים האלה לא נשמרו. יש לשמור את הערכים שנבדקו, להסיר את ההקצאה השמורה או לבטל את השינויים. קישורים זמניים ישנים ואפקטים שאינם נתמכים אינם יכולים לעקוף את היעד השמור."
+  },
+  "ja": {
+    "render.appearance_editor.discard_saved_edit": "未保存の光学設定の変更を破棄",
+    "render.cpu_subsurface_denoise_reason": "CPUの内部散乱ではノイズ除去をオフにしてください。設定値は保持されます。",
+    "render.cpu_subsurface_help": "散乱は閉じたガラスの内部で光の方向を変えます。正の値には間接照明を使い、ノイズ除去をオフにします。率は1mmあたりの衝突回数です。0では散乱を加えません。方向の偏りが正なら前方、負なら後方を優先します。",
+    "render.material_cpu_glass_only": "一時画像ファイルのマップにはGPUが必要です。CPUでは保存済みの組み込み表面マップを使用できます。",
+    "render.material_cpu_optics_limits": "対応する閉じたガラス形状、検証済みの入れ子形状、内部散乱には間接照明をオンにしてください。薄いシートは影に光を透過できます。それ以外は平面シートか軸平行の箱を使います。接触する形状と閉じたガラスを通る透過影には未対応です。値は保持されます。",
+    "render.material_cpu_saved_runtime_conflict": "保存済みCPU光学設定と一時的な光学割り当ては併用できません。確認した設定を保存するか、競合する一時割り当てを削除してください。",
+    "render.material_raytrace_required": "物理ガラスにはCPUレイトレーシングまたはGPUパストレーシングが必要です。",
+    "render.material_saved_edit_pending": "光学設定の変更は未保存です。確認した値を保存するか、保存済み割り当てを削除するか、変更を破棄してください。一時割り当てや未対応の効果で保存済み対象を上書きできません。"
+  },
+  "ko": {
+    "render.appearance_editor.discard_saved_edit": "저장하지 않은 광학 편집 버리기",
+    "render.cpu_subsurface_denoise_reason": "CPU 내부 산란을 사용하려면 노이즈 제거를 끄세요. 설정은 유지됩니다.",
+    "render.cpu_subsurface_help": "산란은 닫힌 유리 내부에서 빛의 방향을 바꿉니다. 양수 비율에는 간접광을 사용하고 노이즈 제거를 끄세요. 비율은 mm당 충돌 횟수이며, 0은 산란을 추가하지 않습니다. 방향 편향이 양수이면 전방, 음수이면 후방을 선호합니다.",
+    "render.material_cpu_glass_only": "임시 이미지 파일 맵에는 GPU가 필요합니다. CPU는 저장된 내장 표면 맵을 사용할 수 있습니다.",
+    "render.material_cpu_optics_limits": "지원되는 닫힌 유리 형상, 검증된 중첩 및 내부 산란에는 간접 조명을 켜세요. 얇은 시트는 그림자에 빛을 통과시킬 수 있습니다. 그 외에는 평면 시트나 축 정렬 상자를 사용하세요. 서로 닿는 형상과 닫힌 유리를 통과하는 투과 그림자는 아직 지원하지 않습니다. 값은 유지됩니다.",
+    "render.material_cpu_saved_runtime_conflict": "저장된 CPU 광학 설정은 임시 광학 바인딩과 함께 사용할 수 없습니다. 검토한 설정을 저장하거나 충돌하는 임시 바인딩을 제거하세요.",
+    "render.material_raytrace_required": "물리 유리에는 CPU 레이 트레이싱이나 GPU 패스 트레이싱이 필요합니다.",
+    "render.material_saved_edit_pending": "광학 편집을 아직 저장하지 않았습니다. 검토한 값을 저장하거나 저장된 할당을 제거하거나 편집을 버리세요. 임시 바인딩과 지원하지 않는 효과는 저장된 대상을 덮어쓸 수 없습니다."
+  },
+  "vi": {
+    "render.appearance_editor.discard_saved_edit": "Hủy chỉnh sửa quang học chưa lưu",
+    "render.cpu_subsurface_denoise_reason": "Tán xạ bên trong kính trên CPU cần tắt Khử nhiễu. Các cài đặt được giữ nguyên.",
+    "render.cpu_subsurface_help": "Tán xạ đổi hướng ánh sáng bên trong kính kín. Tốc độ dương cần Chiếu sáng gián tiếp và tắt Khử nhiễu. Tốc độ là số va chạm mỗi mm; 0 không thêm tán xạ. Độ lệch hướng dương ưu tiên phía trước, âm ưu tiên phía sau.",
+    "render.material_cpu_glass_only": "Bản đồ từ tệp ảnh tạm thời yêu cầu GPU. CPU có thể dùng bản đồ bề mặt tích hợp đã lưu.",
+    "render.material_cpu_optics_limits": "Bật Chiếu sáng gián tiếp cho hình kính kín được hỗ trợ, cấu trúc lồng nhau đã kiểm chứng và tán xạ bên trong kính. Tấm mỏng có thể truyền ánh sáng cho bóng. Nếu không, dùng tấm phẳng hoặc hộp thẳng theo trục. Chưa hỗ trợ hình chạm nhau và bóng truyền qua kính kín. Các giá trị được giữ nguyên.",
+    "render.material_cpu_saved_runtime_conflict": "Không thể kết hợp quang học CPU đã lưu với các liên kết quang học tạm thời kiểu cũ. Hãy lưu quang học đã xem xét hoặc xóa liên kết tạm thời xung đột.",
+    "render.material_raytrace_required": "Kính vật lý yêu cầu dò tia trên CPU hoặc dò đường đi trên GPU.",
+    "render.material_saved_edit_pending": "Các chỉnh sửa quang học này chưa được lưu. Hãy lưu các giá trị đã xem xét, xóa phép gán đã lưu hoặc hủy chỉnh sửa. Liên kết tạm thời kiểu cũ và hiệu ứng chưa được hỗ trợ không thể ghi đè đích đã lưu."
+  },
+  "zh": {
+    "render.appearance_editor.discard_saved_edit": "放弃未保存的光学编辑",
+    "render.cpu_subsurface_denoise_reason": "CPU 内部散射需要关闭降噪。设置会保留。",
+    "render.cpu_subsurface_help": "散射会改变闭合玻璃内部的光线方向。正散射率需要开启间接光照并关闭降噪。散射率表示每毫米的碰撞次数；0 不增加散射。方向偏置为正时偏向前方，为负时偏向后方。",
+    "render.material_cpu_glass_only": "临时图像文件贴图需要GPU。CPU可以使用已保存的内置表面贴图。",
+    "render.material_cpu_optics_limits": "启用间接光照可使用受支持的闭合玻璃形状、经验证的嵌套结构及内部散射。薄片可以透射阴影。否则请使用平面薄片或轴对齐盒体。仍不支持相互接触的形状及穿过闭合玻璃的透射阴影。设置值会保留。",
+    "render.material_cpu_saved_runtime_conflict": "已保存的CPU光学设置不能与临时光学绑定组合。请保存已审阅的设置或移除冲突的临时绑定。",
+    "render.material_raytrace_required": "物理玻璃需要CPU光线追踪或GPU路径追踪。",
+    "render.material_saved_edit_pending": "这些光学编辑尚未保存。请保存已审阅的值、移除已保存的分配或放弃编辑。临时绑定和不支持的效果不能覆盖已保存的目标。"
+  }
+}

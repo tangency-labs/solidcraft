@@ -1,0 +1,42 @@
+{
+  "ar": {
+    "render.quality_budget_help": "يضبط الحجم والعينات والعمق والبذرة وتقليل التشويش. تُحفظ إعدادات الصورة الأخرى.",
+    "render.quality_denoise_off": "تقليل التشويش: متوقف",
+    "render.quality_denoise_on": "تقليل التشويش: مفعّل"
+  },
+  "de": {
+    "render.quality_budget_help": "Legt Größe, Samples, Tiefe, Startwert und Rauschreduzierung fest. Andere Bildeinstellungen bleiben erhalten.",
+    "render.quality_denoise_off": "Rauschreduzierung: Aus",
+    "render.quality_denoise_on": "Rauschreduzierung: Ein"
+  },
+  "en": {
+    "render.quality_budget_help": "Sets size, samples, depth, seed and noise reduction. Other image settings are kept.",
+    "render.quality_denoise_off": "Noise reduction: Off",
+    "render.quality_denoise_on": "Noise reduction: On"
+  },
+  "he": {
+    "render.quality_budget_help": "קובע גודל, דגימות, עומק, זרע והפחתת רעש. הגדרות התמונה האחרות נשמרות.",
+    "render.quality_denoise_off": "הפחתת רעש: כבויה",
+    "render.quality_denoise_on": "הפחתת רעש: פעילה"
+  },
+  "ja": {
+    "render.quality_budget_help": "サイズ、サンプル数、深度、シード、ノイズ低減を設定します。他の画像設定は維持されます。",
+    "render.quality_denoise_off": "ノイズ低減：オフ",
+    "render.quality_denoise_on": "ノイズ低減：オン"
+  },
+  "ko": {
+    "render.quality_budget_help": "크기, 샘플 수, 깊이, 시드 및 노이즈 제거를 설정합니다. 다른 이미지 설정은 유지됩니다.",
+    "render.quality_denoise_off": "노이즈 제거: 꺼짐",
+    "render.quality_denoise_on": "노이즈 제거: 켜짐"
+  },
+  "vi": {
+    "render.quality_budget_help": "Đặt kích thước, số mẫu, độ sâu, hạt giống và giảm nhiễu. Giữ nguyên các thiết lập ảnh khác.",
+    "render.quality_denoise_off": "Giảm nhiễu: Tắt",
+    "render.quality_denoise_on": "Giảm nhiễu: Bật"
+  },
+  "zh": {
+    "render.quality_budget_help": "设置尺寸、采样数、深度、种子和降噪。其他图像设置保持不变。",
+    "render.quality_denoise_off": "降噪：关闭",
+    "render.quality_denoise_on": "降噪：开启"
+  }
+}

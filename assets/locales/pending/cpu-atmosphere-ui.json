@@ -1,0 +1,98 @@
+{
+  "ar": {
+    "render.cpu_volume_enable_path": "تفعيل الإضاءة غير المباشرة",
+    "render.cpu_volume_enable_path_plan": "تتبع أشعة CPU · عمق المسار {depth} · {spp} عينة/بكسل · بذرة {seed} · ظلال متتبعة. يحتفظ بالغلاف الجوي وميزانية الصورة المحددين.",
+    "render.cpu_volume_help": "يستخدم الغلاف الجوي على CPU الإضاءة غير المباشرة. يحافظ الانطفاء الصفري على الصندوق المحفوظ دون ضباب.",
+    "render.cpu_volume_method_adopt": "تتبع أشعة CPU مع إضاءة غير مباشرة",
+    "render.cpu_volume_method_incompatible": "لا يمكن نقل إعدادات الإضاءة أو أخذ العينات أو الغلاف الجوي هذه إلى هذه الطريقة. تبقى إعداداتك محفوظة.",
+    "render.cpu_volume_path_required": "فعّل الإضاءة غير المباشرة لاستخدام الغلاف الجوي على CPU.",
+    "render.volume_denoise_required": "أوقف تقليل الضوضاء لاستخدام الغلاف الجوي.",
+    "render.volume_glass_required": "لا يمكن الجمع بين الغلاف الجوي والزجاج في هذا الإعداد.",
+    "render.volume_lighting_required": "اختر بيئة أو مجموعة إضاءة محددة لتصيير الغلاف الجوي.",
+    "render.volume_single_stratum_required": "استخدم عينة نفاذ واحدة لتصيير الغلاف الجوي."
+  },
+  "de": {
+    "render.cpu_volume_enable_path": "Indirekte Beleuchtung einschalten",
+    "render.cpu_volume_enable_path_plan": "CPU-Raytracing · Pfadtiefe {depth} · {spp} Samples/Pixel · Seed {seed} · Raytracing-Schatten. Atmosphäre und Bildbudget bleiben erhalten.",
+    "render.cpu_volume_help": "CPU-Atmosphäre nutzt indirekte Beleuchtung. Bei Extinktion null bleibt die gespeicherte Box ohne Nebel erhalten.",
+    "render.cpu_volume_method_adopt": "CPU-Raytracing mit indirekter Beleuchtung",
+    "render.cpu_volume_method_incompatible": "Diese Licht-, Sampling- oder Atmosphäreinstellungen lassen sich nicht auf diese Methode übertragen. Die Einstellungen bleiben erhalten.",
+    "render.cpu_volume_path_required": "Indirekte Beleuchtung einschalten, um CPU-Atmosphäre zu nutzen.",
+    "render.volume_denoise_required": "Für Atmosphäre die Rauschreduzierung ausschalten.",
+    "render.volume_glass_required": "Atmosphäre und Glas können in dieser Einstellung nicht kombiniert werden.",
+    "render.volume_lighting_required": "Für Atmosphäre eine Umgebung oder ein eigenes Lichtrig wählen.",
+    "render.volume_single_stratum_required": "Für Atmosphäre ein Transmissionssample verwenden."
+  },
+  "en": {
+    "render.cpu_volume_enable_path": "Enable Indirect lighting",
+    "render.cpu_volume_enable_path_plan": "CPU ray tracing · path depth {depth} · {spp} samples/pixel · seed {seed} · traced shadows. Keeps the authored atmosphere and image budget.",
+    "render.cpu_volume_help": "CPU Atmosphere uses Indirect lighting. Zero extinction keeps the saved box without fog.",
+    "render.cpu_volume_method_adopt": "CPU ray tracing with indirect lighting",
+    "render.cpu_volume_method_incompatible": "These light, sampling or atmosphere settings cannot be transferred to this method. Your settings are kept.",
+    "render.cpu_volume_path_required": "Enable Indirect lighting to use CPU Atmosphere.",
+    "render.volume_denoise_required": "Turn off noise reduction to use Atmosphere.",
+    "render.volume_glass_required": "Atmosphere cannot be combined with Glass in this setup.",
+    "render.volume_lighting_required": "Choose an environment or an explicit light rig to render Atmosphere.",
+    "render.volume_single_stratum_required": "Use one transmission sample to render Atmosphere."
+  },
+  "he": {
+    "render.cpu_volume_enable_path": "הפעלת תאורה עקיפה",
+    "render.cpu_volume_enable_path_plan": "מעקב קרניים ב־CPU · עומק מסלול {depth} · {spp} דגימות לפיקסל · זרע {seed} · צללים במעקב קרניים. האטמוספרה ותקציב התמונה שנקבעו נשמרים.",
+    "render.cpu_volume_help": "אטמוספרה ב־CPU משתמשת בתאורה עקיפה. הכחדה אפסית שומרת את התיבה ללא ערפל.",
+    "render.cpu_volume_method_adopt": "מעקב קרניים ב־CPU עם תאורה עקיפה",
+    "render.cpu_volume_method_incompatible": "לא ניתן להעביר הגדרות תאורה, דגימה או אטמוספרה אלה לשיטה זו. ההגדרות שלך נשמרות.",
+    "render.cpu_volume_path_required": "יש להפעיל תאורה עקיפה כדי להשתמש באטמוספרה ב־CPU.",
+    "render.volume_denoise_required": "יש לכבות הפחתת רעש כדי להשתמש באטמוספרה.",
+    "render.volume_glass_required": "לא ניתן לשלב אטמוספרה וזכוכית בהגדרה זו.",
+    "render.volume_lighting_required": "יש לבחור סביבה או מערך תאורה מפורש כדי לרנדר אטמוספרה.",
+    "render.volume_single_stratum_required": "יש להשתמש בדגימת מעבר אחת כדי לרנדר אטמוספרה."
+  },
+  "ja": {
+    "render.cpu_volume_enable_path": "間接照明を有効にする",
+    "render.cpu_volume_enable_path_plan": "CPUレイトレーシング · パス深度{depth} · {spp}サンプル/ピクセル · シード{seed} · レイトレースシャドウ。大気と画像予算の設定を保持します。",
+    "render.cpu_volume_help": "CPUの大気は間接照明を使用します。消散係数がゼロでも、霧のないボックスとして設定は保存されます。",
+    "render.cpu_volume_method_adopt": "間接照明を使うCPUレイトレーシング",
+    "render.cpu_volume_method_incompatible": "この照明、サンプリング、大気の設定はこの方式に引き継げません。設定は保持されます。",
+    "render.cpu_volume_path_required": "CPUの大気を使うには間接照明を有効にしてください。",
+    "render.volume_denoise_required": "大気を使うにはノイズ低減をオフにしてください。",
+    "render.volume_glass_required": "この設定では大気とガラスを併用できません。",
+    "render.volume_lighting_required": "大気を描画するには環境または明示的なライト構成を選んでください。",
+    "render.volume_single_stratum_required": "大気を描画するには透過サンプル数を1にしてください。"
+  },
+  "ko": {
+    "render.cpu_volume_enable_path": "간접 조명 켜기",
+    "render.cpu_volume_enable_path_plan": "CPU 레이 트레이싱 · 경로 깊이 {depth} · 픽셀당 {spp}샘플 · 시드 {seed} · 레이 트레이싱 그림자. 작성한 대기와 이미지 예산을 유지합니다.",
+    "render.cpu_volume_help": "CPU 대기는 간접 조명을 사용합니다. 소광 계수가 0이면 저장된 상자는 안개 없이 유지됩니다.",
+    "render.cpu_volume_method_adopt": "간접 조명을 사용하는 CPU 레이 트레이싱",
+    "render.cpu_volume_method_incompatible": "이 조명, 샘플링 또는 대기 설정을 이 방식으로 옮길 수 없습니다. 설정은 유지됩니다.",
+    "render.cpu_volume_path_required": "CPU 대기를 사용하려면 간접 조명을 켜세요.",
+    "render.volume_denoise_required": "대기를 사용하려면 노이즈 감소를 끄세요.",
+    "render.volume_glass_required": "이 설정에서는 대기와 유리를 함께 사용할 수 없습니다.",
+    "render.volume_lighting_required": "대기를 렌더링하려면 환경 또는 명시적인 조명 구성을 선택하세요.",
+    "render.volume_single_stratum_required": "대기를 렌더링하려면 투과 샘플을 1로 설정하세요."
+  },
+  "vi": {
+    "render.cpu_volume_enable_path": "Bật chiếu sáng gián tiếp",
+    "render.cpu_volume_enable_path_plan": "Dò tia CPU · độ sâu đường đi {depth} · {spp} mẫu/pixel · hạt giống {seed} · bóng dò tia. Giữ nguyên khí quyển và ngân sách ảnh đã đặt.",
+    "render.cpu_volume_help": "Khí quyển trên CPU dùng chiếu sáng gián tiếp. Hệ số suy giảm bằng không vẫn giữ hộp đã lưu mà không tạo sương.",
+    "render.cpu_volume_method_adopt": "Dò tia CPU với chiếu sáng gián tiếp",
+    "render.cpu_volume_method_incompatible": "Không thể chuyển các thiết lập đèn, lấy mẫu hoặc khí quyển này sang phương pháp này. Thiết lập của bạn được giữ nguyên.",
+    "render.cpu_volume_path_required": "Bật chiếu sáng gián tiếp để dùng Khí quyển trên CPU.",
+    "render.volume_denoise_required": "Tắt giảm nhiễu để dùng Khí quyển.",
+    "render.volume_glass_required": "Không thể kết hợp Khí quyển và Kính trong thiết lập này.",
+    "render.volume_lighting_required": "Chọn môi trường hoặc bộ đèn tường minh để kết xuất Khí quyển.",
+    "render.volume_single_stratum_required": "Dùng một mẫu truyền sáng để kết xuất Khí quyển."
+  },
+  "zh": {
+    "render.cpu_volume_enable_path": "启用间接照明",
+    "render.cpu_volume_enable_path_plan": "CPU 光线追踪 · 路径深度 {depth} · 每像素 {spp} 个采样 · 种子 {seed} · 追踪阴影。保留已编写的大气和图像预算。",
+    "render.cpu_volume_help": "CPU 大气使用间接照明。消光系数为零时，已保存的包围盒仍会保留，但不会产生雾。",
+    "render.cpu_volume_method_adopt": "使用间接照明的 CPU 光线追踪",
+    "render.cpu_volume_method_incompatible": "这些灯光、采样或大气设置无法转移到此方式。您的设置会保留。",
+    "render.cpu_volume_path_required": "启用间接照明以使用 CPU 大气。",
+    "render.volume_denoise_required": "关闭降噪以使用大气。",
+    "render.volume_glass_required": "此设置无法同时使用大气和玻璃。",
+    "render.volume_lighting_required": "选择环境或显式灯光配置以渲染大气。",
+    "render.volume_single_stratum_required": "将透射采样数设为 1 以渲染大气。"
+  }
+}

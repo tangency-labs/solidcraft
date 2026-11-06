@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "render.batch_current_settings_help": "يستخدم إعدادات الصورة الحالية مع كاميرا كل لقطة محفوظة، لقطة واحدة في كل مرة."
+  },
+  "de": {
+    "render.batch_current_settings_help": "Verwendet die aktuellen Bildeinstellungen mit jeder gespeicherten Aufnahmekamera, eine Aufnahme nach der anderen."
+  },
+  "en": {
+    "render.batch_current_settings_help": "Uses the current image settings with each saved shot camera, one shot at a time."
+  },
+  "he": {
+    "render.batch_current_settings_help": "משתמש בהגדרות התמונה הנוכחיות עם המצלמה של כל שוט שמור, שוט אחד בכל פעם."
+  },
+  "ja": {
+    "render.batch_current_settings_help": "現在の画像設定と各保存済みショットのカメラで、1ショットずつレンダリングします。"
+  },
+  "ko": {
+    "render.batch_current_settings_help": "현재 이미지 설정과 저장된 각 샷의 카메라를 사용해 한 번에 한 샷씩 렌더링합니다."
+  },
+  "vi": {
+    "render.batch_current_settings_help": "Dùng thiết lập ảnh hiện tại với máy ảnh của từng góc chụp đã lưu, lần lượt từng góc chụp."
+  },
+  "zh": {
+    "render.batch_current_settings_help": "使用当前图像设置和各个已保存镜头的相机，逐个渲染镜头。"
+  }
+}

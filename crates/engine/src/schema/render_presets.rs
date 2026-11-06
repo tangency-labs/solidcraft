@@ -13,9 +13,9 @@ fn no_change() -> Value {
 }
 
 /// `set`: changes to the setup, as `render.settings.set` takes them. `patched_settings` in
-/// `cmd/render.rs` refuses anything but an object of at most 13 fields, with its own message.
+/// `cmd/render.rs` refuses anything but an object of at most 15 fields, with its own message.
 /// The fields of a render setup, as `render.settings.get` gives them. A `set` patch may give up
-/// to 13 of them; `patched_settings` reads the patched setup as a `RenderSetup`, which refuses any
+/// to 15 of them; `patched_settings` reads the patched setup as a `RenderSetup`, which refuses any
 /// other key.
 const SETUP_FIELDS: &[&str] = &[
     "backend",
@@ -31,6 +31,7 @@ const SETUP_FIELDS: &[&str] = &[
     "job",
     "surfaces",
     "optics",
+    "coats",
     "stage",
 ];
 
@@ -41,11 +42,11 @@ fn setup_properties() -> serde_json::Map<String, Value> {
 
 fn set_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
-        "description": "Changes to the setup before the studio is fitted, as `render.settings.set` takes them: at most 13 of the setup's fields. The setup they make must render with the GPU path tracer. Default: none.",
+        "description": "Changes to the setup before the studio is fitted, as `render.settings.set` takes them: at most 15 of the setup's fields. The setup they make must render with the CPU or GPU path tracer. Default: none.",
         "type": "object",
         "properties": setup_properties(),
         "additionalProperties": false,
-        "maxProperties": 13,
+        "maxProperties": 15,
         "default": {}
     })
 }
@@ -90,16 +91,84 @@ pub struct QualityParams {
     /// The quality profile: `Q-` and its number, as `render.library.list` with `kind: quality`
     /// gives it.
     pub id: String,
-    /// How to use it: only `fixed_samples_png`, a fixed budget for a PNG still.
+    /// `fixed_samples_png` for GPU or `cpu_progressive_png` for CPU cost budgets.
     #[schemars(schema_with = "variant_schema")]
     pub variant: String,
     /// Agree that the budget leaves out what the profile asks for beyond a fixed budget (see
     /// `omitted` in the reply). Required as true.
     pub acknowledge_omissions: bool,
+    /// Optional CPU budget/adaptive context; refused for the GPU variant.
+    #[serde(default)]
+    pub cpu: Option<CpuQuality>,
 }
 
 fn variant_schema(_: &mut SchemaGenerator) -> Schema {
-    json_schema!({"type": "string", "enum": ["fixed_samples_png"]})
+    json_schema!({"type": "string", "enum": ["fixed_samples_png", "cpu_progressive_png"]})
+}
+
+/// CPU quality context, deserialized with the renderer's original field types.
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct CpuQuality {
+    #[schemars(schema_with = "budget_schema")]
+    pub minimum_budget: solidcraft_render::job::CpuBudget,
+    #[schemars(schema_with = "adaptive_schema")]
+    pub adaptive: Option<solidcraft_render::job::adaptive::AdaptiveSampling>,
+}
+fn budget_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type":"string","enum":["compact","studio","workstation"]})
+}
+fn adaptive_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"anyOf":[{"type":"null"},{"type":"object","additionalProperties":false,
+        "properties":{"pilot_samples":{"type":"integer","minimum":0,"maximum":4294967295u64},
+        "min_samples":{"type":"integer","minimum":0,"maximum":4294967295u64},
+        "relative_error":{"type":"number"},"absolute_error":{"type":"number"},"coverage_error":{"type":"number"}}}]})
+}
+
+/// Both quality command projections; each serialized branch retains its existing fields.
+#[derive(Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum QualityResult {
+    Gpu(QualityPlan),
+    Cpu(CpuQualityPlan),
+}
+#[derive(Serialize, JsonSchema)]
+pub struct CpuQualityPlan {
+    pub id: String,
+    pub name: Option<String>,
+    pub variant: String,
+    pub status: String,
+    pub revision: u64,
+    pub document_changed: bool,
+    pub source_unchanged: bool,
+    pub settings: QualitySize,
+    pub cpu_options: CpuQualityOptions,
+    pub cpu_context: CpuQualityContext,
+    pub requires_progressive: bool,
+    pub changed_fields: Vec<String>,
+    pub preserves: Vec<String>,
+    pub omitted: Vec<String>,
+    pub source: Map<String, Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+#[derive(Serialize, JsonSchema)]
+pub struct CpuQualityOptions {
+    pub progressive: CpuProgressive,
+    #[schemars(schema_with = "budget_schema")]
+    pub budget: solidcraft_render::job::CpuBudget,
+}
+#[derive(Serialize, JsonSchema)]
+pub struct CpuProgressive {
+    pub samples_per_pixel: u32,
+    pub seed: u32,
+}
+#[derive(Serialize, JsonSchema)]
+pub struct CpuQualityContext {
+    #[schemars(schema_with = "budget_schema")]
+    pub minimum_budget: solidcraft_render::job::CpuBudget,
+    #[schemars(schema_with = "adaptive_schema")]
+    pub adaptive: Option<solidcraft_render::job::adaptive::AdaptiveSampling>,
 }
 
 /// What `render.preset.resolve` and `render.preset.apply` return: the fitted studio.
@@ -126,7 +195,7 @@ pub struct StudioComposition {
     /// Whether the design changed: always false for resolve; for apply, false when the setup
     /// already was the studio.
     pub document_changed: bool,
-    /// Always `gpu-path`: the studio renders with the GPU path tracer.
+    /// `cpu-raytrace` or `gpu-path`, matching the selected setup executor.
     pub executor: String,
     /// Always true: applying needs `replace_lighting_and_environment`.
     pub requires_lighting_consent: bool,

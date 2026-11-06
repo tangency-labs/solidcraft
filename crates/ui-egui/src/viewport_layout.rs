@@ -5,7 +5,7 @@ use solidcraft_engine::geom::Aabb3;
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::Camera;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Layout {
     pub viewport: Rect,
     pub drawable: Rect,
