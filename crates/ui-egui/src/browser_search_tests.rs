@@ -466,6 +466,43 @@ fn the_history_rows_stay_out_of_the_search() {
     assert!(handle_at("row:Base plate").is_some(), "the history's Bodies are all there");
 }
 
+/// The vertical history's folds are its own: a search neither opens an extrusion's sketch there
+/// nor keeps a fold clicked there to itself, so the fold is still open when the search ends.
+#[test]
+fn the_history_folds_stay_out_of_the_search() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Profile"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 15]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"distance": 10, "name": "Pad", "body_name": "Plate"})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Ring"})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center": [60, 0], "diameter": 10})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"distance": 5, "name": "Boss", "body_name": "Lug"})).unwrap();
+    h.app.run("view.history_layout", json!({"dock": "left"})).unwrap();
+    h.app.preferences.history_sketches = crate::prefs::HistorySketches::UnderFeature;
+    h.frames(3);
+    let listed = || crate::scenario::rect_of("history:feature:Profile").is_some();
+    assert!(!listed(), "the extrusion's sketch starts folded under it");
+    search(&mut h, "plate");
+    assert!(!listed(), "a search leaves the history's folds as they are");
+    // A range picked in the history takes the rows it shows: the folded sketch isn't one of them.
+    click(&mut h, "timeline:Pad");
+    h.step(&json!({"click": {"handle": "timeline:Boss"}, "shift": true})).unwrap();
+    h.frames(1);
+    let picked: Vec<String> = crate::timeline::selected_feature_ids(&h.app)
+        .into_iter()
+        .filter_map(|id| h.app.session.doc.feature(id).map(|feature| feature.name.clone()))
+        .collect();
+    assert_eq!(picked, ["Pad", "Boss"], "a shift-click range skips the sketch folded under Pad");
+    click(&mut h, "timeline-sketches-fold:Pad");
+    assert!(listed(), "a fold clicked in the history opens there");
+    h.app.tree.search.clear();
+    h.frames(2);
+    assert!(listed(), "and stays open when the search ends");
+}
+
 /// A group is listed when something inside it matches, at any depth, and only then.
 #[test]
 fn groups_list_only_what_holds_a_match() {
