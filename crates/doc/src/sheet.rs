@@ -3754,10 +3754,13 @@ impl SheetBody {
         Ok((made, notes))
     }
 
-    /// Whether the stretch a→b lies on a straight line of the panel's outline (not a chord of a
-    /// curve): a split edge's fractions run along a straight line. Either end may sit inside the
-    /// line, where a cut-out leaves a shorter stretch of it than the outline has; an end that only
-    /// a curve of the outline holds is no straight end, so a chord of an arc is still refused.
+    /// Whether the stretch a→b runs along one straight line of the panel's outline, with nothing
+    /// else of the outline crossing it: a split edge's fractions run along a straight line, so the
+    /// whole stretch must lie on one. The outline's lines that lie on the stretch's own line cover
+    /// it where their parameter ranges, taken together, reach from a to b with no gap: a straight
+    /// outline a vertex splits in two covers it, a notch or a step between two such lines leaves a
+    /// gap and is refused, and a chord of a curve has no line along it at all. Either end may sit
+    /// inside a line, where a cut-out leaves a shorter stretch of it than the outline has.
     fn edge_is_line(&self, panel: Option<usize>, a: Vec2, b: Vec2) -> bool {
         let region = match panel {
             None => self.base.clone(),
@@ -3767,23 +3770,40 @@ impl SheetBody {
             },
         };
         let Some(stretch) = (b - a).normalized() else { return false };
-        // Whether r is on the outline's line p→q, inside it, to the same 1e-9 as the edge
-        // arithmetic around here.
-        let on = |p: Vec2, q: Vec2, r: Vec2| {
-            let d = q - p;
-            let l2 = d.len2();
-            if !(l2 > 0.0) {
-                return r.dist(p) < 1e-9;
+        let len = a.dist(b);
+        if !(len > 0.0) {
+            return false;
+        }
+        // The outline's lines that run along the stretch on its own line, as ranges of distance
+        // from a, to the same 1e-9 as the edge arithmetic around here.
+        let mut spans: Vec<(f64, f64)> = Vec::new();
+        for s in &region.outer.segs {
+            let Seg2::Line { a: p, b: q } = s else { continue };
+            let Some(e) = (*q - *p).normalized() else { continue };
+            if (e - stretch).len() > 1e-9 && (e + stretch).len() > 1e-9 {
+                continue;
             }
-            let t = (r - p).dot(d) / l2;
-            (t > -1e-9 && t < 1.0 + 1e-9) && (r - p - d * t).len() < 1e-9
-        };
-        // Whether an outline line runs along the stretch (either way round).
-        let along = |p: Vec2, q: Vec2| (q - p).normalized().is_some_and(|e| (e - stretch).len() < 1e-9 || (e + stretch).len() < 1e-9);
-        let holds = |r: Vec2| region.outer.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if along(*p, *q) && on(*p, *q, r)));
-        // One line holds both ends, or two that run the same way hold one each (a straight
-        // outline that a vertex splits in two).
-        holds(a) && holds(b)
+            // On the stretch's own line: both of the outline line's ends are on it.
+            let off = |r: Vec2| (r - a - stretch * (r - a).dot(stretch)).len();
+            if off(*p) > 1e-9 || off(*q) > 1e-9 {
+                continue;
+            }
+            let (u0, u1) = ((*p - a).dot(stretch), (*q - a).dot(stretch));
+            spans.push((u0.min(u1), u0.max(u1)));
+        }
+        spans.sort_by(|x, y| x.0.total_cmp(&y.0));
+        let mut reach = 0.0;
+        for (lo, hi) in spans {
+            // A line that starts past where the covered part ends leaves a gap.
+            if lo > reach + 1e-9 {
+                return false;
+            }
+            reach = reach.max(hi);
+            if reach >= len - 1e-9 {
+                return true;
+            }
+        }
+        false
     }
 
     /// Trim a panel's edge a→b back by `by` over one stretch of it only (`span`, fractions of the
@@ -10511,5 +10531,51 @@ mod tests {
         let material = after.flat_material().unwrap();
         assert_eq!(material.len(), 2);
         assert!(after.parted_from_base(&material, &two).unwrap().is_empty());
+    }
+
+    /// A 2.5 mm sheet whose base outline is the closed polygon `pts` (counter-clockwise).
+    fn outline_body(pts: &[Vec2]) -> SheetBody {
+        let plane = Plane::new(Vec3::ZERO, Vec3::X, Vec3::Y).unwrap_or(Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y });
+        base_flange("Body1", "Steel (mm)", &steel(), plane, Region2 { outer: Loop2::polygon(pts), holes: Vec::new() })
+    }
+
+    /// A split edge's fractions run along one straight line of the outline, and the whole stretch
+    /// must lie on it: a stretch across a notch is refused even where two collinear pieces hold one
+    /// end each, while a stretch inside one piece, or a straight outline a vertex splits in two, is
+    /// accepted (#5927, #5928).
+    #[test]
+    fn a_split_edge_covers_one_straight_line_of_the_outline() {
+        let notched = outline_body(&[
+            Vec2::new(0.0, 0.0),
+            Vec2::new(80.0, 0.0),
+            Vec2::new(80.0, 10.0),
+            Vec2::new(120.0, 10.0),
+            Vec2::new(120.0, 0.0),
+            Vec2::new(200.0, 0.0),
+            Vec2::new(200.0, 100.0),
+            Vec2::new(0.0, 100.0),
+        ]);
+        // Two collinear pieces hold one end each, with the notch's walls between them: no one line
+        // covers the stretch, so a flange over it would fold material the edge does not have.
+        assert!(!notched.edge_is_line(None, Vec2::new(0.0, 0.0), Vec2::new(200.0, 0.0)), "the notch is a gap in the line");
+        // Each piece is one straight line of the outline: accepted, ends inside it too.
+        assert!(notched.edge_is_line(None, Vec2::new(120.0, 0.0), Vec2::new(200.0, 0.0)));
+        assert!(notched.edge_is_line(None, Vec2::new(0.0, 0.0), Vec2::new(80.0, 0.0)));
+        assert!(notched.edge_is_line(None, Vec2::new(130.0, 0.0), Vec2::new(170.0, 0.0)), "an end inside a piece is on its line");
+        // A straight outline a vertex splits in two is still one line: its pieces meet, no gap.
+        let split =
+            outline_body(&[Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(200.0, 0.0), Vec2::new(200.0, 100.0), Vec2::new(0.0, 100.0)]);
+        assert!(split.edge_is_line(None, Vec2::new(0.0, 0.0), Vec2::new(200.0, 0.0)), "the pieces meet at the vertex");
+        // A step between two parallel lines is no one line either: the stretch reaches past it.
+        let stepped = outline_body(&[
+            Vec2::new(0.0, 0.0),
+            Vec2::new(100.0, 0.0),
+            Vec2::new(100.0, 5.0),
+            Vec2::new(200.0, 5.0),
+            Vec2::new(200.0, 100.0),
+            Vec2::new(0.0, 100.0),
+        ]);
+        assert!(!stepped.edge_is_line(None, Vec2::new(50.0, 0.0), Vec2::new(150.0, 0.0)));
+        assert!(stepped.edge_is_line(None, Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0)));
     }
 }

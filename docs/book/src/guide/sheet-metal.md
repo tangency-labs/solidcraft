@@ -203,14 +203,17 @@ a bend each, with its own setback, leg and side, so the base's outline steps whe
 differ and the flange's far edge steps where their heights differ. No bend relief is cut where
 two segments meet, and `then` is refused on a split edge: bend each segment's far edge in its own
 feature. Stretches that meet within 1e-9 (the junction tolerance, `SEGMENT_JOIN_EPS`) are one
-partition, and stretches that match in angle, height and side merge into one bend across a gap
-that small, so every list the command accepts builds exactly what the whole-edge flange builds.
-A stretch along a curve of the outline is refused (its fractions would only follow chords), but a
-straight edge a cut-out has shortened can still be split: the stretch that is left lies along the
-same straight line. In the Flange dialog, each picked edge has its own **Segments** list,
-**Split Edge** adds one more equal stretch (or splits the last one on an edge the design already
-split), and editing a feature keeps every edge's fractions, angle, height and side, an explicit
-`flip: false` included.
+partition: the junction is snapped shut whatever the two stretches' angle, height or side are, so
+no gap survives into trimming or the flat pattern, and only stretches that match make one bend.
+The whole stretch must lie on one straight line of the outline, with no gap in it: a stretch
+along a curve is refused (its fractions would only follow chords), a stretch across a notch or a
+step is refused too, and a straight edge a cut-out has shortened can still be split because the
+stretch that is left lies along the same straight line. In the Flange dialog, each picked edge has
+its own **Segments** list, **Split Edge** adds one more equal stretch (or splits the last one on an
+edge the design already split), removing a stretch keeps the edge whole (the stretch beside it
+takes its place, or the whole edge when it was the only one), and editing a feature keeps every
+edge's fractions, angle, height and side, an explicit `flip: false` included. The dialog refuses
+`then` on a split edge by name, rather than dropping the chain.
 
 ```json
 {"command":"sheet.flange","params":{"type":"edge","edges":[{"point":[100,0,2],"segments":[

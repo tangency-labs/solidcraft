@@ -8,7 +8,7 @@ description: Use when building or changing a sheet metal part in SolidCraft thro
 ## Overview
 A sheet metal part is a flat sheet plus bends: base first, then flanges. Work the numbers first (rule, flat size, stock, angles, heights, segment boundaries), build in `batch` calls, then check with `measure`, `sheet.flat_pattern` and `sheet.export_bend_table`. Shapes, the segment contract, bend arithmetic, recipes: `reference.md`.
 
-`segments` needs the build on `feat/sheet-flange-segments`; `unfold_method` needs the build from PR #9911.
+`segments` needs `feat/sheet-flange-segments`; `unfold_method` needs #9911.
 
 ## Before the first call
 1. `skill_reference {"skill":"solidcraft-sheetmetal"}`; elsewhere read `reference.md`.
@@ -21,7 +21,7 @@ A sheet metal part is a flat sheet plus bends: base first, then flanges. Work th
 - **Base:** a closed sketch profile, then `sheet.flange {"sketch":"Base"}`.
 - **Edge:** `sheet.flange {"type":"edge","edges":[...],"height":...,"angle":...}`; `{point, angle, height, segments}` gives one edge its own values.
 - **Segments:** stretches `{from, to}` tiling the stretch the sheet still has, each a bend with its own angle, height and side.
-- **Chains:** `then` bends the far edge again; refused with `segments`.
+- **Chains:** `then` bends the far edge again; refused with `segments`, naming the edge.
 - **Other:** `sheet.path_flange`, `sheet.hem`, `sheet.fold`, `sheet.convert`.
 - Parameters, not numbers; edge picks are plain numbers.
 
@@ -32,9 +32,9 @@ A sheet metal part is a flat sheet plus bends: base first, then flanges. Work th
 
 ## The AI workflow (FR-17 to FR-20)
 1. **Segments:** derive count and boundaries from the intent (stiffeners, clearances, mating faces), state the assumption and confidence, offer an alternative, compute the fractions.
-2. **Angles:** one angle labelled high (geometry fixes it), medium (shop standard) or low (inferred), plus an alternative; refuse when the geometry contradicts the words.
+2. **Angles:** one angle labelled high (geometry), medium (shop standard) or low (inferred), plus an alternative; refuse when the geometry contradicts the words.
 3. **Words to parameters:** map the phrase, read the numbers back when ambiguous. "90 degree flange 20 mm high on the long edge" is `sheet.flange {"type":"edge","edges":[[100,0,2]],"angle":"90 deg","height":"20 mm"}`.
-4. **Optimisation:** at most 8 candidates over fractions, angles, heights and sides, scored by `inspect.interference` volume 0, `inspect.clearance` at least the rule's gap, flat within stock, radii at or above the rule's. Stop at the stated objective; report the winner, its margin and each iteration.
+4. **Optimisation:** at most 8 candidates over fractions, angles, heights and sides, scored by `inspect.interference` volume 0, `inspect.clearance` at least the gap, flat within stock, radii at or above the rule's. Stop at the objective; report the winner, its margin and each iteration.
 
 ## Red flags
 

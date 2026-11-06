@@ -100,6 +100,13 @@ falls back to the edge's own value, then the feature's.
   side, so a bend that changes angle, height or side along one edge is one feature. Consecutive
   stretches that match in angle, height and side merge into one bend. There is no flat stretch
   between segments.
+- **Junctions are snapped shut:** a junction within `SEGMENT_JOIN_EPS` is snapped to the stretch
+  before it whatever the two stretches' angle, height or side are, so no interior gap survives into
+  trimming or the flat pattern; only the 1e-12 attribute comparison decides whether they are one
+  bend. A list 5e-10 apart with different heights builds the same part as the exact partition.
+- **One straight line, whole:** a split edge's fractions run along a straight line of the outline
+  and the whole stretch must lie on it. A cut-out that shortened the line is fine (the stretch left
+  is still one line); a notch or a step between two collinear pieces is not, and is refused.
 - **Direction:** fractions run from the end of the edge where the sheet's outline enters it, along
   the outline's own direction (counter-clockwise in the flat pattern's coordinates). An
   asymmetric partition therefore depends on it: check `sheet.export_bend_table`'s flat centre
@@ -107,10 +114,11 @@ falls back to the edge's own value, then the feature's.
 - **Junctions:** no bend relief is cut where two segments meet and no corner is closed there; the
   two bends butt along the junction line. Only the outermost segments take part in corner closing
   and end relief.
-- **Refused:** `segments` on a base or contour flange; a split curved edge (a stretch along a
-  straight line of the outline is fine even where a cut-out shortened it); `then` with
-  `segments`; more than 64 segments (`MAX_SEGMENTS = 64`). Each bend costs two flat pieces and
-  the flat budget is 4096 (`MAX_FLAT_PIECES`), so a design holds at most 2047 bends.
+- **Refused:** `segments` on a base or contour flange; a split edge whose stretch leaves one
+  straight line of the outline (a cut-out that shortened the line is fine, a notch or a step across
+  it is not); `then` with `segments` (the Flange dialog refuses it and names the edge, rather than
+  dropping the chain); more than 64 segments (`MAX_SEGMENTS = 64`). Each bend costs two flat pieces
+  and the flat budget is 4096 (`MAX_FLAT_PIECES`), so a design holds at most 2047 bends.
 
 The refusals are the contract; quote them when a call fails:
 
@@ -129,6 +137,7 @@ The refusals are the contract; quote them when a call fails:
 | angle outside 0…180° | `edges[i].segments[j]: the flange angle must be between 0 and 180°` |
 | height below the bend's minimum | `edges[i].segments[j]: the flange height must be at least X mm for this bend` |
 | `then` with `segments` | `not supported yet: then on a segmented edge (bend each segment's far edge in its own feature)` |
+| the Flange dialog's `then` with a split edge | `edge N is split into segments: a split edge takes no `then`; bend each segment's far edge in its own feature` |
 | a split curved edge | `not supported yet: segments on a curved edge (pick a straight edge of the sheet)` |
 
 ## Bend arithmetic
@@ -233,10 +242,16 @@ which edge is "the long edge" on a near-square part) before building.
 - **Fractions need the direction:** an asymmetric partition can land mirrored. Check the bend
   table's centre lines against the plan, or keep the partition symmetric.
 - **Segments are not set-backs:** they tile the edge; a gap is refused.
+- **Deleting a stretch in the Flange dialog keeps the edge whole:** the stretch before the one
+  removed reaches to its end (the one after it, when the removed one was first, starts at its
+  start), and removing the only stretch left makes the whole edge. The dialog never submits a
+  list with a gap.
 - **Per-edge versus per-segment:** `angle` and `height` at the edge entry are that edge's values; a
   segment's own values override them; the feature's values are the last fallback.
 - **`flip` is per segment:** it sets each bend's side.
-- **`then` is refused with `segments`:** bend each segment's far edge in its own feature.
+- **`then` is refused with `segments`:** bend each segment's far edge in its own feature. The
+  Flange dialog says the same, naming the edge: `edge N is split into segments: a split edge takes
+  no `then`; bend each segment's far edge in its own feature`.
 - **Edge picks** are plain numbers on a top or bottom face at the sheet's thickness; a pick on the
   bottom face flips `top`. The pick snaps to the nearest edge.
 - **`segments` on a base or contour flange** is refused: there is no edge to divide.

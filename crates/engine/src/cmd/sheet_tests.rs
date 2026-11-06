@@ -6990,3 +6990,69 @@ fn flange_segments_within_the_junction_tolerance_build_like_a_whole_edge_flange(
     assert!(rel(volume(&mut s), volume(&mut whole)) < 1e-9, "{} vs {}", volume(&mut s), volume(&mut whole));
     assert_eq!(f["bends"], flat(&mut whole)["bends"], "{f}");
 }
+
+/// A junction within the tolerance is snapped shut whatever the two stretches' angle, height or
+/// side are: a list whose stretches meet 5e-10 apart with different heights builds the same part as
+/// the exact partition, with no gap between the bends (#5927, #5928).
+#[test]
+fn flange_segments_snap_a_tolerated_junction_even_when_the_stretches_differ() {
+    let mut s = Session::default();
+    al2_base(&mut s);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+            {"from":0.0,"to":0.5,"height":"20 mm"},{"from":0.5000000005,"to":1.0,"height":"15 mm"}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    let f = flat(&mut s);
+    let bends = bends_of(&f);
+    assert_eq!(bends.len(), 2, "two different heights stay two bends: {f}");
+    assert!((bends[0].4 - bends[1].3).abs() < 1e-12, "no interior gap survives: {bends:?}");
+    // The same part as the exact partition, flat pattern and all.
+    let mut exact = Session::default();
+    al2_base(&mut exact);
+    run(
+        &mut exact,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+            {"from":0.0,"to":0.5,"height":"20 mm"},{"from":0.5,"to":1.0,"height":"15 mm"}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    assert!(no_errors_or_warnings(&exact), "{:?}", exact.model.results);
+    assert!(rel(volume(&mut s), volume(&mut exact)) < 1e-12, "{} vs {}", volume(&mut s), volume(&mut exact));
+    assert_eq!(f["bends"], flat(&mut exact)["bends"], "{f}");
+}
+
+/// A notch cut into the plate's bottom edge leaves two straight pieces of it, and either piece
+/// splits into stretches: the stretch the pick lands on lies along one line of the outline. The
+/// span-level check that refuses a stretch across the notch leaves the pieces themselves splittable
+/// (#5927, #5928).
+#[test]
+fn flange_segments_split_the_piece_a_notch_leaves() {
+    let mut s = Session::default();
+    al2_base(&mut s);
+    // A notch x 80…120, 10 deep, cut into the bottom edge.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Notch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [80, -10], "p1": [120, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Notch", "through_all": true, "operation": "cut", "direction": "symmetric"}));
+    for pick in [[150.0, 0.0, 2.0], [50.0, 0.0, 2.0]] {
+        let f = run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":pick,"segments":[
+                {"from":0,"to":0.5,"height":"20 mm"},{"from":0.5,"to":1,"height":"15 mm"}]}],
+                "height":"20 mm","angle":"90 deg"}),
+        );
+        assert!(no_errors_or_warnings(&s), "{pick:?}: {:?}", s.model.results);
+        let _ = f;
+    }
+    let f = flat(&mut s);
+    let bends = bends_of(&f);
+    assert_eq!(bends.len(), 4, "each 80 mm piece splits in two: {f}");
+    // The pieces are x 0…80 and x 120…200: no bend crosses the notch.
+    assert!((bends[0].3 - 0.0).abs() < 1e-9 && (bends[1].4 - 80.0).abs() < 1e-9, "{bends:?}");
+    assert!((bends[2].3 - 120.0).abs() < 1e-9 && (bends[3].4 - 200.0).abs() < 1e-9, "{bends:?}");
+}

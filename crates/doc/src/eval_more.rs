@@ -686,16 +686,20 @@ pub(super) fn sheet_eval(
                         )));
                     }
                     let side = seg.flip.unwrap_or(*flip);
-                    match runs.last_mut() {
-                        Some(last)
-                            if (last.1 - seg.from).abs() <= sheet::SEGMENT_JOIN_EPS
-                                && (last.2 - height).abs() < 1e-12
-                                && (last.3 - angle).abs() < 1e-12
-                                && last.4 == side =>
-                        {
-                            last.1 = seg.to
+                    // A junction the command accepts is one the build snaps shut, whether the two
+                    // stretches match or not: a run that carries on takes the next stretch's end,
+                    // and a run with another angle, height or side starts where the last one ends,
+                    // so no interior gap of the junction tolerance reaches trimming or the flat
+                    // pattern. The 1e-12 comparison only says whether they are the same bend.
+                    let joined = runs.last().copied().filter(|last| (last.1 - seg.from).abs() <= sheet::SEGMENT_JOIN_EPS);
+                    match joined {
+                        Some(last) if (last.2 - height).abs() < 1e-12 && (last.3 - angle).abs() < 1e-12 && last.4 == side => {
+                            if let Some(last) = runs.last_mut() {
+                                last.1 = seg.to;
+                            }
                         }
-                        _ => runs.push((seg.from, seg.to, height, angle, side)),
+                        Some(last) => runs.push((last.1, seg.to, height, angle, side)),
+                        None => runs.push((seg.from, seg.to, height, angle, side)),
                     }
                 }
                 // The command accepts a first `from` and a last `to` within the junction tolerance

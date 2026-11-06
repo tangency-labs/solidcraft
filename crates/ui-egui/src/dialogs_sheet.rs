@@ -353,7 +353,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                             }
                         }
                         if let Some(m) = drop {
-                            list.remove(m);
+                            remove_segment(list, m);
                         }
                     }
                     crate::ui_kit::section(ui, "flange_advanced", "Advanced", false, |ui| {
@@ -769,6 +769,47 @@ fn add_segment(list: &mut Vec<SegmentRow>) {
     list[i].equal = false;
 }
 
+/// Take one stretch out of an edge's list and keep the list a partition of the edge: the stretch
+/// before the one removed reaches to its end (the one after it, where it was the first, starts at
+/// its start), the list's first stretch starts at the edge's start and its last ends at the edge's
+/// end, and removing the only stretch leaves the whole edge. A list whose fractions don't parse
+/// falls back to equal stretches. Deleting never leaves a list the command would refuse.
+fn remove_segment(list: &mut Vec<SegmentRow>, m: usize) {
+    if m >= list.len() {
+        return;
+    }
+    if list.len() == 1 {
+        list.clear();
+        return;
+    }
+    let fraction = |text: &str| text.trim().parse::<f64>().ok().filter(|x| x.is_finite());
+    let (from, to) = (fraction(&list[m].from), fraction(&list[m].to));
+    list.remove(m);
+    for row in list.iter_mut() {
+        row.equal = false;
+    }
+    // The neighbour takes the removed stretch's place.
+    let repaired = match (m.checked_sub(1), from, to) {
+        (Some(i), _, Some(to)) => list.get_mut(i).map(|r| r.to = format!("{to}")).is_some(),
+        (None, Some(from), _) => list.first_mut().map(|r| r.from = format!("{from}")).is_some(),
+        _ => false,
+    };
+    if !repaired {
+        let n = list.len();
+        for (i, row) in list.iter_mut().enumerate() {
+            row.from = format!("{}", i as f64 / n as f64);
+            row.to = format!("{}", (i + 1) as f64 / n as f64);
+        }
+    }
+    // The stretches cover the whole edge, ends included.
+    if let Some(first) = list.first_mut() {
+        first.from = "0".into();
+    }
+    if let Some(last) = list.last_mut() {
+        last.to = "1".into();
+    }
+}
+
 /// The commands the dialog's OK runs (`extra`: parameters kept from the feature being edited).
 pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
@@ -788,8 +829,17 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                         p["corner_relief_shape"] = json!(shape);
                     }
                     put(&mut p, &[("corner_relief", relief_size)]);
-                    // A split edge takes no `then` in v1: a chain needs one far edge to stand on.
-                    if !then.is_empty() && !segments.iter().any(|(_, list)| !list.is_empty()) {
+                    // A split edge takes no `then` in v1: a chain needs one far edge to stand on,
+                    // and the refusal names the edge whose segments took it away.
+                    if !then.is_empty() {
+                        let split =
+                            edge_point_list(inputs).iter().position(|p| segments.iter().any(|(q, list)| q.dist(*p) < 1e-9 && !list.is_empty()));
+                        if let Some(n) = split {
+                            return Err(format!(
+                                "edge {} is split into segments: a split edge takes no `then`; bend each segment's far edge in its own feature",
+                                n + 1
+                            ));
+                        }
                         let mut bends = Vec::with_capacity(then.len());
                         for (n, (a, h, other)) in then.iter().enumerate() {
                             if h.trim().is_empty() {
