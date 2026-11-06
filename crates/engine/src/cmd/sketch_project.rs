@@ -17,7 +17,7 @@ use crate::{EngineError, Result, Session};
 
 macro_rules! refs_doc {
     () => {
-        "refs: [{edge: [x,y,z], body?} | {face: [x,y,z], body?} (its edge loops) | {body: name} (silhouette) | {vertex: [x,y,z], body?} | {sketch, curve} | {sketch, point} | \"origin\" | {axis: X|Y|Z|name} | {plane: XY|XZ|YZ|name}]"
+        "refs: [{edge: [x,y,z], body?} | {face: [x,y,z], body?} (its edge loops) | {body: name} (silhouette) | {vertex: [x,y,z], body?} | {sketch, curve} | {sketch, point} | {point: name} (a construction point) | \"origin\" | {axis: X|Y|Z|name} | {plane: XY|XZ|YZ|name}]"
     };
 }
 
@@ -107,6 +107,9 @@ fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
         }
         return Err(bad(cmd, "a sketch reference needs `curve` or `point`"));
     }
+    if let Some(p) = str_(v, "point") {
+        return point_source(s, p, cmd);
+    }
     if let Some(b) = str_(v, "body") {
         return Ok(LinkSource::Body { body: b.to_string() });
     }
@@ -120,6 +123,14 @@ fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
         return Ok(LinkSource::Origin);
     }
     Err(bad(cmd, format!("cannot project {v}")))
+}
+
+/// A construction point by its name (#12075).
+fn point_source(s: &Session, name: &str, cmd: &str) -> Result<LinkSource> {
+    match s.doc.find_feature(name) {
+        Some(f) if matches!(f.kind, FeatureKind::ConstructionPoint { .. }) => Ok(LinkSource::ConstructionPoint { name: f.name.clone() }),
+        _ => Err(bad(cmd, format!("unknown point `{name}`: the name of a construction point"))),
+    }
 }
 
 /// An origin axis (`X`, `Y` or `Z`, in any case), or a construction axis by its name (#9324).

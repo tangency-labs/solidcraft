@@ -286,6 +286,11 @@ fn resolve_uncached(
             vec![LinkGeom::Point(plane.to_local(ss.plane.to_world(p)))]
         }
         LinkSource::Origin => vec![LinkGeom::Point(plane.to_local(Vec3::ZERO))],
+        // A construction point, by name (#12075), where the timeline so far puts it.
+        LinkSource::ConstructionPoint { name } => {
+            let p = crate::eval::construction_point_in(Some(doc), st, name, 0).map_err(|_| lost(&format!("point {name}")))?;
+            vec![LinkGeom::Point(plane.to_local(p))]
+        }
         LinkSource::Axis { name } => {
             let (o, d) = match name.to_ascii_uppercase().as_str() {
                 "X" => (Vec3::ZERO, Vec3::X),

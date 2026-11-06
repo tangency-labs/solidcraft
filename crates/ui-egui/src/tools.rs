@@ -817,6 +817,7 @@ pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> O
                 Sel::Face { body, point, .. } => json!({"body":body,"face":[point.x,point.y,point.z]}),
                 Sel::Axis { name } => json!({"axis":name}),
                 Sel::Plane { name } => json!({"plane":name}),
+                Sel::ConstructionPoint { name } => json!({"point":name}),
                 _ => return None,
             })
         })
