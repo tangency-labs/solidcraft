@@ -1,0 +1,910 @@
+diff --git a/crates/cadmpeg-codec-f3d/src/design/decode/presentation.rs b/crates/cadmpeg-codec-f3d/src/design/decode/presentation.rs
+index c3c5562845..a24f1c3307 100644
+--- a/crates/cadmpeg-codec-f3d/src/design/decode/presentation.rs
++++ b/crates/cadmpeg-codec-f3d/src/design/decode/presentation.rs
+@@ -338,10 +338,12 @@ fn presentation_material(
+         let Some(brep_container_entity) = local_reference(bytes, &mut reference_at) else {
+             continue;
+         };
+-        if local_reference_value(bytes, &mut reference_at) != Some(LocalReference::Null) {
+-            continue;
+-        }
+-        let Some(scene_node_entity) = local_reference(bytes, &mut reference_at) else {
++        let scene_node_entity = match local_reference_value(bytes, &mut reference_at) {
++            Some(LocalReference::Null) => local_reference(bytes, &mut reference_at),
++            Some(LocalReference::Target(target)) if target != 0 => Some(target),
++            _ => None,
++        };
++        let Some(scene_node_entity) = scene_node_entity else {
+             continue;
+         };
+         if entity_types
+@@ -381,6 +383,11 @@ fn presentation_material(
+             == Some(legacy_marker.as_slice())
+         {
+             (visual_marker_at + legacy_marker.len(), true)
++        } else if bytes
++            .get(visual_marker_at..visual_marker_at + physical_marker.len())
++            == Some(physical_marker.as_slice())
++        {
++            (visual_marker_at + physical_marker.len(), true)
+         } else if bytes.get(visual_marker_at..visual_marker_at + modern_marker.len())
+             == Some(modern_marker.as_slice())
+         {
+@@ -400,7 +407,7 @@ fn presentation_material(
+         let visual_preset = if legacy {
+             if let Some(at) = skip_zeros(bytes, after_visual_marker, end) {
+                 lp_utf16_bounded(bytes, at, 1..=256)
+-                    .and_then(|(value, _)| value.starts_with("Prism-").then_some((at, value)))
++                    .and_then(|(value, _)| value.starts_with("Prism").then_some((at, value)))
+             } else {
+                 None
+             }
+diff --git a/crates/cadmpeg-codec-f3d/src/design/decode/scopes/direct_face.rs b/crates/cadmpeg-codec-f3d/src/design/decode/scopes/direct_face.rs
+index 045f18692b..9f0bf34ec2 100644
+--- a/crates/cadmpeg-codec-f3d/src/design/decode/scopes/direct_face.rs
++++ b/crates/cadmpeg-codec-f3d/src/design/decode/scopes/direct_face.rs
+@@ -179,7 +179,7 @@ pub(super) fn exact_direct_face_operation(
+                         (
+                             View::u32_le_at(bytes, start + 29)?,
+                             true,
+-                            bytes[start + 21] != 0,
++                            bytes[start + 20] == 1 || bytes[start + 21] != 0,
+                             start + 21,
+                         )
+                     }
+diff --git a/crates/cadmpeg-codec-f3d/src/design/profile_select.rs b/crates/cadmpeg-codec-f3d/src/design/profile_select.rs
+index 5977f47bd7..f402ba41ea 100644
+--- a/crates/cadmpeg-codec-f3d/src/design/profile_select.rs
++++ b/crates/cadmpeg-codec-f3d/src/design/profile_select.rs
+@@ -675,28 +675,25 @@ pub(crate) fn bind_extrude_profile_selections(
+                                 curve_resolution.sketch_entities,
+                             )
+                         });
++                    let mut region_selection_unmatched = false;
+                     if explicit_profiles.is_none() {
+                         if let Some((operand, stream)) = scope
+                             .extrude_profile()
+                             .zip(native_stream(&scope.id))
+                             .filter(|(operand, _)| operand.region_selection.is_some())
+                         {
+-                            let selected = region_members::resolve(
++                            if let Some(selected) = region_members::resolve(
+                                 stream,
+                                 operand,
+                                 sketch,
+                                 curve_resolution.curve_identities,
+                                 curve_resolution.sketch_entities,
+                                 scoped_resolution,
+-                            )?;
+-                            *profile = ProfileRef::Planar(selected.unwrap_or_else(|| {
+-                                PlanarProfileRef::sketch_selection(
+-                                    sketch_id.clone(),
+-                                    vec![scope.id.clone()],
+-                                )
+-                                .unwrap_or_else(|_| PlanarProfileRef::Native(scope.id.clone()))
+-                            }));
+-                            break 'feature_edit;
++                            )? {
++                                *profile = ProfileRef::Planar(selected);
++                                break 'feature_edit;
++                            }
++                            region_selection_unmatched = true;
+                         }
+                     }
+                     if !matching_groups.is_empty() {
+@@ -751,6 +748,48 @@ pub(crate) fn bind_extrude_profile_selections(
+                         break 'feature_edit;
+                     }
+                     if matching_groups.is_empty() {
++                        if region_selection_unmatched {
++                            if let (Some(state_id), Some(prev_state_id)) = (
++                                scope.history_state_id(),
++                                effective_previous_history_state_id,
++                            ) {
++                                if let Some(sel) = transition_profile_selection(
++                                    sketch,
++                                    scoped_resolution,
++                                    state_id,
++                                    prev_state_id,
++                                )? {
++                                    *profile = ProfileRef::Planar(match sel {
++                                        ResolvedProfileSelection::Loops(profiles) => {
++                                            PlanarProfileRef::sketch_profiles(
++                                                sketch_id.clone(),
++                                                profiles,
++                                            )
++                                            .unwrap_or_else(|_| {
++                                                PlanarProfileRef::Native(scope.id.clone())
++                                            })
++                                        }
++                                        ResolvedProfileSelection::Regions(regions) => {
++                                            PlanarProfileRef::sketch_regions(
++                                                sketch_id.clone(),
++                                                regions,
++                                            )
++                                            .unwrap_or_else(|_| {
++                                                PlanarProfileRef::Native(scope.id.clone())
++                                            })
++                                        }
++                                    });
++                                    break 'feature_edit;
++                                }
++                            }
++                            *profile = ProfileRef::Planar(
++                                PlanarProfileRef::sketch_selection(
++                                    sketch_id.clone(),
++                                    vec![scope.id.clone()],
++                                )
++                                .unwrap_or_else(|_| PlanarProfileRef::Native(scope.id.clone())),
++                            );
++                        }
+                         break 'feature_edit;
+                     }
+                     let group_ids: Vec<_> = matching_groups
+@@ -1919,7 +1958,7 @@ pub(in crate::design) fn transition_profile_selection(
+     if chain.last().map(|(_, p)| *p) != Some(previous_state_id) {
+         return Ok(None);
+     }
+-    for (i, (step_state, step_prev_id)) in chain.iter().enumerate() {
++    for (step_state, step_prev_id) in &chain {
+         if let Some(sel) = transition_profile_selection_step(
+             sketch,
+             resolution,
+@@ -1927,19 +1966,7 @@ pub(in crate::design) fn transition_profile_selection(
+             step_state,
+             *step_prev_id,
+         )? {
+-            let intermediates_empty = chain.iter().enumerate().all(|(j, (s, _))| {
+-                if j == i {
+-                    true
+-                } else if let Some(t) = s.transition.as_ref() {
+-                    t.rows == crate::history_records::AsmHistoricalRowsDelta::default()
+-                        && topology_delta_keeps_entities(&t.topology)
+-                } else {
+-                    false
+-                }
+-            });
+-            if intermediates_empty {
+-                return Ok(Some(sel));
+-            }
++            return Ok(Some(sel));
+         }
+     }
+     Ok(None)
+@@ -2740,28 +2767,7 @@ pub(in crate::design) fn transition_inserted_profile_selection(
+             )? {
+                 return Ok(Some(ResolvedProfileSelection::Loops(loops)));
+             }
+-            let multi_face_loops: Vec<u32> = loops
+-                .iter()
+-                .copied()
+-                .filter(|p| loop_counts.get(p).copied().unwrap_or(0) >= 2)
+-                .collect();
+-            if !multi_face_loops.is_empty()
+-                && multi_face_loops.len() < loops.len()
+-                && profile_loops_are_independent(
+-                    sketch,
+-                    entities,
+-                    &multi_face_loops,
+-                    tolerance,
+-                    profile_work,
+-                    ctx,
+-                )?
+-            {
+-                return Ok(Some(ResolvedProfileSelection::Loops(multi_face_loops)));
+-            }
+-            if loops.len() == sketch.profiles.len() {
+-                loops.sort_unstable();
+-                return Ok(Some(ResolvedProfileSelection::Loops(loops)));
+-            }
++            return Ok(None);
+         }
+     }
+     let mut regions = selections
+@@ -2782,7 +2788,8 @@ pub(in crate::design) fn transition_inserted_profile_selection(
+     if regions.any(|candidate| candidate != (outer, holes)) {
+         return Ok(None);
+     }
+-    let mut has_boundary_support = false;
++    let mut has_outer_support = false;
++    let mut supported_holes = Vec::new();
+     for selection in selections.iter().flatten() {
+         match selection {
+             ResolvedProfileSelection::Regions(regions)
+@@ -2796,12 +2803,21 @@ pub(in crate::design) fn transition_inserted_profile_selection(
+                         .iter()
+                         .all(|profile| *profile == outer || holes.contains(profile)) =>
+             {
+-                has_boundary_support = true;
++                for &profile in loops {
++                    if profile == outer {
++                        has_outer_support = true;
++                    } else if holes.contains(&profile) && !supported_holes.contains(&profile) {
++                        supported_holes.push(profile);
++                    }
++                }
+             }
+             _ => return Ok(None),
+         }
+     }
+-    if !has_boundary_support {
++    if !has_outer_support {
++        if !supported_holes.is_empty() {
++            return Ok(Some(ResolvedProfileSelection::Loops(supported_holes)));
++        }
+         return Ok(None);
+     }
+     let mut owned_holes = Vec::new();
+diff --git a/crates/cadmpeg-codec-f3d/src/history.rs b/crates/cadmpeg-codec-f3d/src/history.rs
+index 1039f8b79a..a0e0d9efe1 100644
+--- a/crates/cadmpeg-codec-f3d/src/history.rs
++++ b/crates/cadmpeg-codec-f3d/src/history.rs
+@@ -75,6 +75,10 @@ const EPS_HISTORY_HISTORICAL_LOOP_PLANE_E9: f64 = 1.0e-9;
+ const EPS_HISTORY_BODY_BBOX_GROWTH_E3: f64 = 1.0e-3;
+ const EPS_HISTORY_BODY_BBOX_UNCHANGED_E4: f64 = 1.0e-4;
+ const EPS_HISTORY_BODY_BBOX_CONTAINMENT_E2: f64 = 1.0e-2;
++const EPS_HISTORY_EDGE_SEGMENT_LEN_SQ_E12: f64 = 1.0e-12;
++const EPS_HISTORY_EDGE_COLLINEAR_DIST_SQ_E6: f64 = 1.0e-6;
++const EPS_HISTORY_LINE_AXIS_DIR_NORM_SQ_E12: f64 = 1.0e-12;
++const EPS_HISTORY_LINE_AXIS_CROSS_SQ_E5: f64 = 1.0e-5;
+ 
+ const DELTA: &[u8] = b"\x11\x0d\x0bdelta_state";
+ const PREAMBLE: &[u8] = b"\x0d\x0ehistory_stream";
+@@ -973,10 +977,7 @@ impl<'a> HistoricalBodyIndex<'a> {
+         self.solid_edges(body).is_some()
+     }
+ 
+-    fn edge_bounds(
+-        &self,
+-        edges: &[i64],
+-    ) -> Option<(cadmpeg_ir::math::Point3, cadmpeg_ir::math::Point3)> {
++    fn edge_vertex_positions(&self, edges: &[i64]) -> Vec<cadmpeg_ir::math::Point3> {
+         let mut vertices = edges
+             .iter()
+             .filter_map(|&edge| self.edges.get(edge))
+@@ -984,42 +985,51 @@ impl<'a> HistoricalBodyIndex<'a> {
+             .collect::<Vec<_>>();
+         vertices.sort_unstable();
+         vertices.dedup();
++        vertices
++            .into_iter()
++            .filter_map(|vertex| {
++                self.vertex_points
++                    .get(vertex)
++                    .and_then(|binding| self.point_positions.get(binding.carrier))
++                    .map(|p| p.position)
++            })
++            .collect()
++    }
++
++    fn edge_bounds(
++        &self,
++        edges: &[i64],
++    ) -> Option<(cadmpeg_ir::math::Point3, cadmpeg_ir::math::Point3)> {
++        let positions = self.edge_vertex_positions(edges);
++        if positions.is_empty() {
++            return None;
++        }
+         let mut min_x = f64::INFINITY;
+         let mut min_y = f64::INFINITY;
+         let mut min_z = f64::INFINITY;
+         let mut max_x = f64::NEG_INFINITY;
+         let mut max_y = f64::NEG_INFINITY;
+         let mut max_z = f64::NEG_INFINITY;
+-        let mut found = false;
+-        for vertex in vertices {
+-            let Some(point) = self
+-                .vertex_points
+-                .get(vertex)
+-                .and_then(|binding| self.point_positions.get(binding.carrier))
+-            else {
+-                continue;
+-            };
+-            let pos = point.position;
++        for pos in positions {
+             min_x = min_x.min(pos.x);
+             min_y = min_y.min(pos.y);
+             min_z = min_z.min(pos.z);
+             max_x = max_x.max(pos.x);
+             max_y = max_y.max(pos.y);
+             max_z = max_z.max(pos.z);
+-            found = true;
+         }
+-        found.then(|| {
+-            (
+-                cadmpeg_ir::math::Point3::new(min_x, min_y, min_z),
+-                cadmpeg_ir::math::Point3::new(max_x, max_y, max_z),
+-            )
+-        })
++        Some((
++            cadmpeg_ir::math::Point3::new(min_x, min_y, min_z),
++            cadmpeg_ir::math::Point3::new(max_x, max_y, max_z),
++        ))
+     }
+ }
+ 
+ struct EdgeMidpointRequest {
+     feature_index: usize,
++    output_state_id: i64,
+     slots: Vec<i64>,
++    has_unresolved: bool,
+ }
+ 
+ pub(crate) fn bind_feature_outputs(
+@@ -1147,37 +1157,37 @@ pub(crate) fn bind_feature_outputs(
+                 )),
+             );
+         }
+-        if !slots.is_empty() {
+-            let source = feature.native_ref.as_deref().and_then(|scope| {
+-                let (history, _, previous) = if scope_histories.contains_key(scope) {
+-                    bound_history_state_pair(
+-                        scope,
+-                        state_id,
+-                        previous_state_id,
+-                        scope_histories,
+-                        histories,
+-                    )
+-                } else {
+-                    unique_history_state_pair(histories, state_id, previous_state_id)
+-                }?;
+-                history_state_indexes(histories, history, previous)
+-            });
+-            if let Some((history_index, _)) = source {
+-                treatment_states
+-                    .entry((history_index, previous_state_id))
+-                    .or_default()
+-                    .push(EdgeMidpointRequest {
+-                        feature_index,
+-                        slots,
+-                    });
++        let source = feature.native_ref.as_deref().and_then(|scope| {
++            let (history, _, previous) = if scope_histories.contains_key(scope) {
++                bound_history_state_pair(
++                    scope,
++                    state_id,
++                    previous_state_id,
++                    scope_histories,
++                    histories,
++                )
+             } else {
+-                losses.push(
+-                    crate::loss::F3dLossCode::HistoricalEdgeMidpointsUnresolved.note(format!(
+-                        "feature {} edge selection has no bound input state {previous_state_id}",
+-                        feature.id
+-                    )),
+-                );
+-            }
++                unique_history_state_pair(histories, state_id, previous_state_id)
++            }?;
++            history_state_indexes(histories, history, previous)
++        });
++        if let Some((history_index, _)) = source {
++            treatment_states
++                .entry((history_index, previous_state_id))
++                .or_default()
++                .push(EdgeMidpointRequest {
++                    feature_index,
++                    output_state_id: state_id,
++                    slots,
++                    has_unresolved,
++                });
++        } else if !slots.is_empty() {
++            losses.push(
++                crate::loss::F3dLossCode::HistoricalEdgeMidpointsUnresolved.note(format!(
++                    "feature {} edge selection has no bound input state {previous_state_id}",
++                    feature.id
++                )),
++            );
+         }
+     }
+     let mut feature_edge_midpoints = HashMap::<usize, Vec<cadmpeg_ir::math::Point3>>::new();
+@@ -1186,6 +1196,8 @@ pub(crate) fn bind_feature_outputs(
+     let mut state_body_centers = HashMap::<i64, Vec<(i64, cadmpeg_ir::math::Point3)>>::new();
+     let mut state_body_bounds =
+         HashMap::<i64, Vec<(i64, (cadmpeg_ir::math::Point3, cadmpeg_ir::math::Point3))>>::new();
++    let mut state_body_vertices =
++        HashMap::<i64, BTreeMap<i64, Vec<cadmpeg_ir::math::Point3>>>::new();
+     let mut state_inserted_plane =
+         HashMap::<i64, (cadmpeg_ir::math::Point3, cadmpeg_ir::math::Vector3)>::new();
+     let mut state_solid_outputs = HashMap::<i64, Vec<i64>>::new();
+@@ -1247,28 +1259,277 @@ pub(crate) fn bind_feature_outputs(
+             history.advance_topology(index);
+             let cur_state_id = history.states()[index].state_id;
+             if let Some(requests) = treatment_states.remove(&(history_index, cur_state_id)) {
+-                let topology = history.topology(&history.states()[index]);
+-                let samples = topology.map(|topology| KeyedRows::new(&topology.edge_samples));
+-                for EdgeMidpointRequest {
+-                    feature_index,
+-                    slots,
+-                } in requests
+-                {
+-                    let mut midpoints = Vec::new();
+-                    for slot in slots {
+-                        let sample = topology
+-                            .filter(|topology| topology.edges.contains(&slot))
+-                            .and_then(|_| samples.as_ref()?.get(slot));
+-                        if let Some(sample) = sample {
+-                            midpoints.push(sample.interior);
++                if let Some(prev_topology) = history.topology(&history.states()[index]) {
++                    let edge_samples = KeyedRows::new(&prev_topology.edge_samples);
++                    let is_line_edge = |slot: i64| -> bool {
++                        let Some(ec) = prev_topology.edge_curves.iter().find(|e| e.entity == slot)
++                        else {
++                            return false;
++                        };
++                        let Some(ca) = prev_topology
++                            .curve_axes
++                            .iter()
++                            .find(|c| Some(c.curve) == ec.carrier)
++                        else {
++                            return false;
++                        };
++                        let Some(ev) = prev_topology.edge_vertices.iter().find(|e| e.edge == slot)
++                        else {
++                            return false;
++                        };
++                        let Some(c0) = prev_topology
++                            .vertex_points
++                            .iter()
++                            .find(|v| v.entity == ev.start_vertex)
++                            .map(|v| v.carrier)
++                        else {
++                            return false;
++                        };
++                        let Some(p0) = prev_topology
++                            .point_positions
++                            .iter()
++                            .find(|p| p.point == c0)
++                            .map(|p| p.position)
++                        else {
++                            return false;
++                        };
++                        let vx = p0.x - ca.origin.x;
++                        let vy = p0.y - ca.origin.y;
++                        let vz = p0.z - ca.origin.z;
++                        let dx = ca.direction.x;
++                        let dy = ca.direction.y;
++                        let dz = ca.direction.z;
++                        let d_len_sq = dx * dx + dy * dy + dz * dz;
++                        if d_len_sq <= EPS_HISTORY_LINE_AXIS_DIR_NORM_SQ_E12 {
++                            return false;
++                        }
++                        let cx = vy * dz - vz * dy;
++                        let cy = vz * dx - vx * dz;
++                        let cz = vx * dy - vy * dx;
++                        (cx * cx + cy * cy + cz * cz) / d_len_sq < EPS_HISTORY_LINE_AXIS_CROSS_SQ_E5
++                    };
++                    let edge_endpoints = |slot: i64| -> Option<(
++                        cadmpeg_ir::math::Point3,
++                        cadmpeg_ir::math::Point3,
++                    )> {
++                        let ev = prev_topology
++                            .edge_vertices
++                            .iter()
++                            .find(|e| e.edge == slot)?;
++                        let c0 = prev_topology
++                            .vertex_points
++                            .iter()
++                            .find(|v| v.entity == ev.start_vertex)?
++                            .carrier;
++                        let c1 = prev_topology
++                            .vertex_points
++                            .iter()
++                            .find(|v| v.entity == ev.end_vertex)?
++                            .carrier;
++                        let p0 = prev_topology
++                            .point_positions
++                            .iter()
++                            .find(|p| p.point == c0)?
++                            .position;
++                        let p1 = prev_topology
++                            .point_positions
++                            .iter()
++                            .find(|p| p.point == c1)?
++                            .position;
++                        Some((p0, p1))
++                    };
++                    for EdgeMidpointRequest {
++                        feature_index,
++                        output_state_id,
++                        slots: explicit_slots,
++                        has_unresolved,
++                    } in requests
++                    {
++                        let transition_opt = history
++                            .states()
++                            .iter()
++                            .find(|s| s.state_id == output_state_id)
++                            .and_then(|s| s.transition.as_ref());
++                        let curr_segments: Vec<(
++                            cadmpeg_ir::math::Point3,
++                            cadmpeg_ir::math::Point3,
++                        )> = if let Some(transition) = transition_opt {
++                            let find_vertex_point = |v_ent: i64| -> Option<i64> {
++                                transition
++                                    .rows
++                                    .vertex_points
++                                    .set
++                                    .iter()
++                                    .find(|v| v.entity == v_ent)
++                                    .or_else(|| {
++                                        prev_topology
++                                            .vertex_points
++                                            .iter()
++                                            .find(|v| v.entity == v_ent)
++                                    })
++                                    .map(|v| v.carrier)
++                            };
++                            let find_point_pos = |pt_ent: i64| -> Option<cadmpeg_ir::math::Point3> {
++                                transition
++                                    .rows
++                                    .point_positions
++                                    .set
++                                    .iter()
++                                    .find(|p| p.point == pt_ent)
++                                    .or_else(|| {
++                                        prev_topology
++                                            .point_positions
++                                            .iter()
++                                            .find(|p| p.point == pt_ent)
++                                    })
++                                    .map(|p| p.position)
++                            };
++                            transition
++                                .rows
++                                .edge_vertices
++                                .set
++                                .iter()
++                                .filter_map(|ev| {
++                                    let c0 = find_vertex_point(ev.start_vertex)?;
++                                    let c1 = find_vertex_point(ev.end_vertex)?;
++                                    if c0 == c1 {
++                                        return None;
++                                    }
++                                    let q0 = find_point_pos(c0)?;
++                                    let q1 = find_point_pos(c1)?;
++                                    Some((q0, q1))
++                                })
++                                .collect()
+                         } else {
+-                            losses.push(crate::loss::F3dLossCode::HistoricalEdgeMidpointsUnresolved.note(
+-                                format!("historical edge slot {slot} has no carrier sample in bound input state {cur_state_id}"),
+-                            ));
++                            Vec::new()
++                        };
++                        let is_merely_shortened =
++                            |p0: cadmpeg_ir::math::Point3, p1: cadmpeg_ir::math::Point3| -> bool {
++                                let dx = p1.x - p0.x;
++                                let dy = p1.y - p0.y;
++                                let dz = p1.z - p0.z;
++                                let len_sq = dx * dx + dy * dy + dz * dz;
++                                if len_sq <= EPS_HISTORY_EDGE_SEGMENT_LEN_SQ_E12 {
++                                    return false;
++                                }
++                                curr_segments.iter().any(|&(q0, q1)| {
++                                    let v0x = q0.x - p0.x;
++                                    let v0y = q0.y - p0.y;
++                                    let v0z = q0.z - p0.z;
++                                    let c0x = v0y * dz - v0z * dy;
++                                    let c0y = v0z * dx - v0x * dz;
++                                    let c0z = v0x * dy - v0y * dx;
++                                    let dist0_sq = (c0x * c0x + c0y * c0y + c0z * c0z) / len_sq;
++                                    if dist0_sq > EPS_HISTORY_EDGE_COLLINEAR_DIST_SQ_E6 {
++                                        return false;
++                                    }
++                                    let v1x = q1.x - p0.x;
++                                    let v1y = q1.y - p0.y;
++                                    let v1z = q1.z - p0.z;
++                                    let c1x = v1y * dz - v1z * dy;
++                                    let c1y = v1z * dx - v1x * dz;
++                                    let c1z = v1x * dy - v1y * dx;
++                                    let dist1_sq = (c1x * c1x + c1y * c1y + c1z * c1z) / len_sq;
++                                    if dist1_sq > EPS_HISTORY_EDGE_COLLINEAR_DIST_SQ_E6 {
++                                        return false;
++                                    }
++                                    let t0 = (v0x * dx + v0y * dy + v0z * dz) / len_sq;
++                                    let t1 = (v1x * dx + v1y * dy + v1z * dz) / len_sq;
++                                    let t_min = t0.min(t1);
++                                    let t_max = t0.max(t1);
++                                    t_max > 0.05 && t_min < 0.95 && (t_max - t_min) > 0.05
++                                })
++                            };
++                        let slots: Vec<i64> = if !explicit_slots.is_empty() && !has_unresolved {
++                            let filtered: Vec<i64> = explicit_slots
++                                .iter()
++                                .copied()
++                                .filter(|&s| {
++                                    !edge_endpoints(s)
++                                        .is_some_and(|(p0, p1)| is_merely_shortened(p0, p1))
++                                })
++                                .collect();
++                            if filtered.is_empty() {
++                                explicit_slots
++                            } else {
++                                filtered
++                            }
++                        } else if let Some(transition) =
++                            transition_opt.filter(|t| t.topology.edges.deleted.len() <= 128)
++                        {
++                            let line_slots: Vec<i64> = transition
++                                .topology
++                                .edges
++                                .deleted
++                                .iter()
++                                .copied()
++                                .filter(|&s| {
++                                    is_line_edge(s)
++                                        && edge_endpoints(s)
++                                            .is_some_and(|(p0, p1)| !is_merely_shortened(p0, p1))
++                                })
++                                .collect();
++                            let mut combined = explicit_slots;
++                            let extra = if line_slots.is_empty() {
++                                transition
++                                    .topology
++                                    .edges
++                                    .deleted
++                                    .iter()
++                                    .copied()
++                                    .filter(|&s| {
++                                        edge_endpoints(s)
++                                            .is_some_and(|(p0, p1)| !is_merely_shortened(p0, p1))
++                                    })
++                                    .collect::<Vec<_>>()
++                            } else {
++                                line_slots
++                            };
++                            for s in extra {
++                                if !combined.contains(&s) {
++                                    combined.push(s);
++                                }
++                            }
++                            let filtered: Vec<i64> = combined
++                                .iter()
++                                .copied()
++                                .filter(|&s| {
++                                    !edge_endpoints(s)
++                                        .is_some_and(|(p0, p1)| is_merely_shortened(p0, p1))
++                                })
++                                .collect();
++                            if filtered.is_empty() {
++                                combined
++                            } else {
++                                filtered
++                            }
++                        } else {
++                            explicit_slots
++                        };
++                        let mut midpoints = Vec::new();
++                        for slot in slots {
++                            let sample = prev_topology
++                                .edges
++                                .contains(&slot)
++                                .then(|| edge_samples.get(slot))
++                                .flatten();
++                            if let Some(sample) = sample {
++                                midpoints.push(sample.interior);
++                            } else if let Some((p0, p1)) = edge_endpoints(slot) {
++                                midpoints.push(cadmpeg_ir::math::Point3::new(
++                                    (p0.x + p1.x) * 0.5,
++                                    (p0.y + p1.y) * 0.5,
++                                    (p0.z + p1.z) * 0.5,
++                                ));
++                            } else {
++                                losses.push(crate::loss::F3dLossCode::HistoricalEdgeMidpointsUnresolved.note(
++                                    format!("historical edge slot {slot} has no carrier sample in bound input state {cur_state_id}"),
++                                ));
++                            }
++                        }
++                        if !midpoints.is_empty() {
++                            feature_edge_midpoints.insert(feature_index, midpoints);
+                         }
+-                    }
+-                    if !midpoints.is_empty() {
+-                        feature_edge_midpoints.insert(feature_index, midpoints);
+                     }
+                 }
+             }
+@@ -1284,7 +1545,12 @@ pub(crate) fn bind_feature_outputs(
+                     .filter_map(|&b| Some((b, body_index.solid_edges(b)?)))
+                     .collect();
+                 let mut bounds_list = Vec::new();
++                let mut vertices_map = BTreeMap::new();
+                 for (&b, edges) in &solid_edges {
++                    let vpos = body_index.edge_vertex_positions(edges);
++                    if !vpos.is_empty() {
++                        vertices_map.insert(b, vpos);
++                    }
+                     if let Some(bds) = body_index.edge_bounds(edges) {
+                         bounds_list.push((b, bds));
+                     } else {
+@@ -1297,6 +1563,9 @@ pub(crate) fn bind_feature_outputs(
+                         );
+                     }
+                 }
++                if !vertices_map.is_empty() {
++                    state_body_vertices.insert(cur_state_id, vertices_map);
++                }
+                 if output_states.contains(&cur_state_id) {
+                     let centers: Vec<(i64, cadmpeg_ir::math::Point3)> = bounds_list
+                         .iter()
+@@ -1310,9 +1579,10 @@ pub(crate) fn bind_feature_outputs(
+                         })
+                         .collect();
+                     if !centers.is_empty() {
+-                        state_body_centers.insert(cur_state_id, centers);
++                        state_body_centers.insert(cur_state_id, centers.clone());
+                     }
+                     if let Some(transition) = history.states()[index].transition.as_ref() {
++                        let mut chosen_plane = None;
+                         for &fid in &transition.topology.faces.inserted {
+                             if let Some(fs) =
+                                 topology.face_surfaces.iter().find(|f| f.entity == fid)
+@@ -1322,12 +1592,32 @@ pub(crate) fn bind_feature_outputs(
+                                     .iter()
+                                     .find(|s| s.surface == fs.carrier)
+                                 {
+-                                    state_inserted_plane
+-                                        .insert(cur_state_id, (sp.origin, sp.normal));
+-                                    break;
++                                    if centers.len() >= 2 {
++                                        let separates = centers.iter().any(|&(_, c1)| {
++                                            centers.iter().any(|&(_, c2)| {
++                                                let d1 = (c1.x - sp.origin.x) * sp.normal.x
++                                                    + (c1.y - sp.origin.y) * sp.normal.y
++                                                    + (c1.z - sp.origin.z) * sp.normal.z;
++                                                let d2 = (c2.x - sp.origin.x) * sp.normal.x
++                                                    + (c2.y - sp.origin.y) * sp.normal.y
++                                                    + (c2.z - sp.origin.z) * sp.normal.z;
++                                                d1 * d2 < -1.0e-4
++                                            })
++                                        });
++                                        if separates {
++                                            chosen_plane = Some((sp.origin, sp.normal));
++                                            break;
++                                        }
++                                    }
++                                    if chosen_plane.is_none() {
++                                        chosen_plane = Some((sp.origin, sp.normal));
++                                    }
+                                 }
+                             }
+                         }
++                        if let Some(plane) = chosen_plane {
++                            state_inserted_plane.insert(cur_state_id, plane);
++                        }
+                     }
+                 }
+                 if !bounds_list.is_empty() {
+@@ -1438,6 +1728,8 @@ pub(crate) fn bind_feature_outputs(
+         };
+         let mut newly_absorbed = BTreeSet::new();
+         let before_bds = state_body_bounds.get(&previous_state_id);
++        let before_verts = state_body_vertices.get(&previous_state_id);
++        let after_verts = state_body_vertices.get(&state_id);
+         if let (Some(prev_bds), Some(cur_bds)) = (before_bds, state_body_bounds.get(&state_id)) {
+             for (b1, (cmin, cmax)) in cur_bds {
+                 if absorbed_bodies.contains(b1) {
+@@ -1452,7 +1744,7 @@ pub(crate) fn bind_feature_outputs(
+                     || (cmax.z - cmin.z) > (pmax.z - pmin.z) + EPS_HISTORY_BODY_BBOX_GROWTH_E3;
+                 if b1_grew {
+                     for (b2, (b2_min, b2_max)) in prev_bds {
+-                        if b2 == b1 || active.contains_key(b2) || absorbed_bodies.contains(b2) {
++                        if b2 == b1 || absorbed_bodies.contains(b2) {
+                             continue;
+                         }
+                         let b2_unchanged = cur_bds.iter().find(|(cb, _)| cb == b2).is_some_and(
+@@ -1483,7 +1775,35 @@ pub(crate) fn bind_feature_outputs(
+                             && cmax.y >= b2_max.y - EPS_HISTORY_BODY_BBOX_CONTAINMENT_E2
+                             && cmin.z <= b2_min.z + EPS_HISTORY_BODY_BBOX_CONTAINMENT_E2
+                             && cmax.z >= b2_max.z - EPS_HISTORY_BODY_BBOX_CONTAINMENT_E2;
+-                        if b2_unchanged && !prev_covered && cur_covers {
++                        let vertices_absorbed = match (
++                            before_verts.and_then(|m| m.get(b1)),
++                            after_verts.and_then(|m| m.get(b1)),
++                            before_verts.and_then(|m| m.get(b2)),
++                        ) {
++                            (Some(b1_prev), Some(b1_cur), Some(b2_prev)) => {
++                                let close =
++                                    |a: cadmpeg_ir::math::Point3, b: cadmpeg_ir::math::Point3| {
++                                        let dx = a.x - b.x;
++                                        let dy = a.y - b.y;
++                                        let dz = a.z - b.z;
++                                        dx * dx + dy * dy + dz * dz < 1.0e-4
++                                    };
++                                let b2_unique: Vec<_> = b2_prev
++                                    .iter()
++                                    .copied()
++                                    .filter(|&v2| !b1_prev.iter().any(|&v1| close(v1, v2)))
++                                    .collect();
++                                !b2_unique.is_empty() && {
++                                    let matched = b2_unique
++                                        .iter()
++                                        .filter(|&&v2| b1_cur.iter().any(|&vc| close(vc, v2)))
++                                        .count();
++                                    matched * 2 >= b2_unique.len()
++                                }
++                            }
++                            _ => true,
++                        };
++                        if b2_unchanged && !prev_covered && cur_covers && vertices_absorbed {
+                             newly_absorbed.insert(*b2);
+                             absorbed_into.insert(*b2, *b1);
+                         }
+@@ -1495,13 +1815,6 @@ pub(crate) fn bind_feature_outputs(
+             FeatureDefinition::Operation(op) => op,
+             FeatureDefinition::PostProcess { operation, .. } => operation,
+         };
+-        let is_cut_extrude = matches!(
+-            op_ref,
+-            FeatureOperation::Extrude {
+-                op: cadmpeg_ir::features::BooleanOp::Cut,
+-                ..
+-            }
+-        );
+         let is_split_body = matches!(op_ref, FeatureOperation::SplitBody { .. });
+         if let Some(midpoints) = feature_edge_midpoints.get(&idx) {
+             let formatted = midpoints
+@@ -1555,6 +1868,7 @@ pub(crate) fn bind_feature_outputs(
+                 deleted_set.insert(b);
+             }
+         }
++        deleted_set.extend(newly_absorbed.iter().copied());
+         if after_solid.is_some() {
+             prev_feature_solid = after_solid;
+         }
+@@ -1596,7 +1910,6 @@ pub(crate) fn bind_feature_outputs(
+                     .copied()
+                     .filter(|b| {
+                         !absorbed_bodies.contains(b)
+-                            && !newly_absorbed.contains(b)
+                             && (before.contains(b) || after.contains(b) || deleted_set.contains(b))
+                     })
+                     .collect()
+@@ -1604,7 +1917,7 @@ pub(crate) fn bind_feature_outputs(
+                 solid_outputs
+                     .iter()
+                     .copied()
+-                    .filter(|b| !absorbed_bodies.contains(b) && !newly_absorbed.contains(b))
++                    .filter(|b| !absorbed_bodies.contains(b))
+                     .collect()
+             };
+             if let (Some(before), Some(after)) = (before_solid, after_solid) {
+@@ -1613,22 +1926,12 @@ pub(crate) fn bind_feature_outputs(
+                     .chain(before.difference(after))
+                     .chain(deleted_set.iter())
+                 {
+-                    if !absorbed_bodies.contains(b)
+-                        && !newly_absorbed.contains(b)
+-                        && !filtered.contains(b)
+-                    {
++                    if !absorbed_bodies.contains(b) && !filtered.contains(b) {
+                         filtered.push(*b);
+                     }
+                 }
+                 filtered.sort_unstable();
+             }
+-            if is_cut_extrude {
+-                for (&abs_b, &host_b) in &absorbed_into {
+-                    if filtered.contains(&host_b) && !filtered.contains(&abs_b) {
+-                        filtered.push(abs_b);
+-                    }
+-                }
+-            }
+             if is_split_body {
+                 absorbed_into.retain(|_, host_b| !filtered.contains(host_b));
+             }
+@@ -1644,6 +1947,11 @@ pub(crate) fn bind_feature_outputs(
+                     .or_insert(formatted);
+             }
+         }
++        if let (Some(before), Some(after)) = (before_solid, after_solid) {
++            for &b in after.difference(before) {
++                absorbed_bodies.remove(&b);
++            }
++        }
+         absorbed_bodies.extend(newly_absorbed);
+         if state_id == previous_state_id {
+             continue;

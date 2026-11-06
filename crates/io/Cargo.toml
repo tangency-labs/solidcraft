@@ -11,10 +11,12 @@ workspace = true
 [features]
 # Tests only: trust a model cache even when the build has no git commit.
 trust-unknown-source = []
+f3d = ["cadmpeg-registry/f3d"]
 
 [dependencies]
 solidcore-record = { workspace = true }
 solidcraft-geom = { workspace = true }
+solidcraft-sketch = { workspace = true }
 solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }
 solidcraft-profile = { workspace = true }
@@ -30,6 +32,7 @@ chardetng = { workspace = true }
 encoding_rs = { workspace = true }
 # FreeCAD and Rhino import (pure Rust, so the browser build has it too).
 cadmpeg-core = { workspace = true }
+cadmpeg-container = "=0.6.8"
 cadmpeg-ir = { workspace = true }
 cadmpeg-registry = { workspace = true }
 

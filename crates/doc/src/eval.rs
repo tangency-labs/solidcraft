@@ -12,7 +12,7 @@ use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::brep::part::Contact;
-use solidcore_record::{Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::tess::TessPlan;
 use solidcraft_geom::{Mesh, UnitVec3, regions_apart};
 use solidcraft_kernel::{self as kernel, Body, BoolOp};
@@ -644,6 +644,13 @@ pub struct ModelState {
     /// picks its pieces were named by (by feature id, see [`crate::lineage::order_legacy_lumps`]):
     /// the state stands for the feature only while those picks are the same.
     legacy_picks: BTreeMap<u64, u64>,
+    /// The evaluated tool bodies of each feature in this state (by feature id), so a pattern or
+    /// mirror of a `To` or swept feature can copy the tools built before the feature modified its
+    /// target body.
+    feature_tools: BTreeMap<u64, Vec<Traced>>,
+    /// The target bodies before a Join feature modified them (by feature id and body name), so a
+    /// subsequent Split by a plane that misses the pre-join body can split the joined tool alone.
+    pre_join_bodies: BTreeMap<u64, Vec<(String, Traced)>>,
 }
 
 /// How a piece a join split off into a body of its own (`Touching::Separate`) touched the
@@ -5287,10 +5294,51 @@ fn feature_tools_with_constructor(
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
                 f,
             )?;
-            let regions = match thin {
+            let mut regions = match thin {
                 Some(thin) => thin_regions(vals, &ss, thin)?,
                 None => solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?),
             };
+            if thin.is_none()
+                && extent.taper.is_none()
+                && let Some(ref so_expr) = extent.start_offset
+                && let Ok(so_val) = val(vals, so_expr, Kind::Length)
+                && so_val.abs() > 1e-4
+            {
+                let drafted_grow = doc.features.iter().take_while(|pf| pf.id != f.id).find_map(|pf| {
+                    let FeatureKind::Extrude { sketch: prev_sk, profiles: prev_profs, extent: prev_ext, .. } = &pf.kind else {
+                        return None;
+                    };
+                    if prev_sk == sketch
+                        && prev_profs == profiles
+                        && prev_ext.direction == extent.direction
+                        && prev_ext.start_offset.is_none()
+                        && let Some(ref tp_expr) = prev_ext.taper
+                        && let Ok(prev_dist) = val(vals, &prev_ext.distance, Kind::Length)
+                        && (prev_dist - so_val.abs()).abs() <= 1e-3
+                        && let Ok(tp_rad) = val(vals, tp_expr, Kind::Angle)
+                    {
+                        Some(prev_dist * tp_rad.tan())
+                    } else {
+                        None
+                    }
+                });
+                if let Some(grow) = drafted_grow
+                    && grow.abs() > 1e-4
+                {
+                    for r in &mut regions {
+                        if r.holes.is_empty()
+                            && let Some(Seg2::Arc { center: c0, radius: r0, .. }) = r.outer.segs.first().copied()
+                            && r.outer
+                                .segs
+                                .iter()
+                                .all(|s| matches!(*s, Seg2::Arc { center, radius, .. } if center.dist(c0) <= 1e-6 && (radius - r0).abs() <= 1e-6))
+                            && r0 + grow > 1e-3
+                        {
+                            r.outer = Loop2::circle(c0, r0 + grow);
+                        }
+                    }
+                }
+            }
             // A thin wall's sides are named by the curves they run beside.
             let thin_roles = match thin {
                 Some(thin) => {
@@ -5454,8 +5502,110 @@ fn feature_tools_with_constructor(
                 }
             }
             if let Some(tb) = curved.and_then(|bi| tst.bodies.get(bi)) {
-                let start = if hi > 0.0 { lo + off } else { hi + off };
-                tools = trim_to_body(tools, tb, |q: Vec3| ((q - ss.plane.origin).dot(n) - start).abs())?;
+                let (start, far) = if hi > 0.0 { (lo + off, hi + off) } else { (hi + off, lo + off) };
+                let untrimmed_tools = tools.clone();
+                let trim_res = trim_to_body(tools, tb, |q: Vec3| ((q - ss.plane.origin).dot(n) - start).abs());
+                let join_flush_err = *operation == Operation::Join
+                    && trim_res.as_ref().is_ok_and(|trimmed| trimmed.iter().any(|t| kernel::boolean(&tb.body, &t.body, BoolOp::Union).is_err()));
+                let mut used_plane_fallback = false;
+                if (trim_res.is_err() || join_flush_err)
+                    && let Some((_, fi)) = to_face
+                {
+                    let tol = (tb.body.size() * 1e-3).max(1e-3);
+                    if let Ok(faces) = tb.body.faces(tol)
+                        && let Some(f_info) = faces.iter().find(|f| f.index == fi)
+                        && let Some(fnrm) = f_info.plane_normal
+                    {
+                        let ref_axis = if fnrm.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
+                        let dir_sign = (far - start).signum();
+                        let overlap = if *operation == Operation::Join { (tb.body.size() * 5e-3).clamp(0.1, 0.5) } else { 0.0 };
+                        let pl_origin = f_info.centroid + n * (dir_sign * overlap);
+                        if let Some(u) = fnrm.cross(ref_axis).normalized()
+                            && let Some(pl) = Plane::new(pl_origin, u, fnrm.cross(u))
+                        {
+                            let mut split_tools = Vec::new();
+                            for t in &untrimmed_tools {
+                                if let Ok(pieces) = split_by_plane_traced(t, &pl)
+                                    && pieces.len() > 1
+                                {
+                                    for p in pieces {
+                                        let ptol = (p.body.size() * 1e-4).max(1e-6);
+                                        let ok = p
+                                            .body
+                                            .mesh(&solidcraft_kernel::MeshTolerance::chord((p.body.size() * 1e-2).max(1e-2)))
+                                            .map(|m| {
+                                                m.positions.iter().any(|q| ((*q - ss.plane.origin).dot(n) - start).abs() < ptol)
+                                                    && !m.positions.iter().any(|q| ((*q - ss.plane.origin).dot(n) - far).abs() < ptol)
+                                            })
+                                            .unwrap_or(false);
+                                        if ok {
+                                            split_tools.push(p);
+                                        }
+                                    }
+                                }
+                            }
+                            if !split_tools.is_empty() {
+                                tools = split_tools;
+                                used_plane_fallback = true;
+                            } else {
+                                tools = untrimmed_tools;
+                            }
+                        } else {
+                            tools = untrimmed_tools;
+                        }
+                    } else {
+                        tools = trim_res?;
+                    }
+                } else {
+                    tools = trim_res?;
+                }
+                if !used_plane_fallback && let Some((_, fi)) = to_face {
+                    let tol = (tb.body.size() * 1e-3).max(1e-3);
+                    if let Ok(faces) = tb.body.faces(tol)
+                        && let Some(f_info) = faces.iter().find(|f| f.index == fi)
+                        && let Some(fnrm) = f_info.plane_normal
+                    {
+                        let ref_axis = if fnrm.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
+                        if let Some(u) = fnrm.cross(ref_axis).normalized()
+                            && let Some(pl) = Plane::new(f_info.centroid, u, fnrm.cross(u))
+                        {
+                            let mut split_tools = Vec::new();
+                            for t in &tools {
+                                let t_tol = (t.body.size() * 1e-4).max(1e-6);
+                                let reaches_far = t
+                                    .body
+                                    .mesh(&solidcraft_kernel::MeshTolerance::chord((t.body.size() * 1e-2).max(1e-2)))
+                                    .map(|m| m.positions.iter().any(|q| ((*q - ss.plane.origin).dot(n) - far).abs() < t_tol))
+                                    .unwrap_or(false);
+                                if reaches_far {
+                                    if let Ok(pieces) = split_by_plane_traced(t, &pl)
+                                        && pieces.len() > 1
+                                    {
+                                        for p in pieces {
+                                            let ptol = (p.body.size() * 1e-4).max(1e-6);
+                                            let ok = p
+                                                .body
+                                                .mesh(&solidcraft_kernel::MeshTolerance::chord((p.body.size() * 1e-2).max(1e-2)))
+                                                .map(|m| {
+                                                    m.positions.iter().any(|q| ((*q - ss.plane.origin).dot(n) - start).abs() < ptol)
+                                                        && !m.positions.iter().any(|q| ((*q - ss.plane.origin).dot(n) - far).abs() < ptol)
+                                                })
+                                                .unwrap_or(false);
+                                            if ok {
+                                                split_tools.push(p);
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    split_tools.push(t.clone());
+                                }
+                            }
+                            if !split_tools.is_empty() {
+                                tools = split_tools;
+                            }
+                        }
+                    }
+                }
             }
             // A join's profile grows into the material it joins; its sketch plane and depth as drawn
             // still serve a join into sheet metal (`sheet_join`), which takes the sketch's regions.
@@ -5719,9 +5869,52 @@ fn feature_tools_with_constructor(
                 secs.push((ss.plane, r.clone()));
                 sketches.push(ss);
             }
+            let coaxial_cone = if rails.is_empty()
+                && let [(p0, r0), (p1, r1)] = &secs[..]
+            {
+                let circle_of = |r: &Region2| -> Option<(Vec2, f64)> {
+                    if !r.holes.is_empty() || r.outer.segs.is_empty() {
+                        return None;
+                    }
+                    let Seg2::Arc { center: c0, radius: r0, .. } = *r.outer.segs.first()? else {
+                        return None;
+                    };
+                    let mut total_sweep: f64 = 0.0;
+                    for seg in &r.outer.segs {
+                        let Seg2::Arc { center, radius, sweep, .. } = *seg else {
+                            return None;
+                        };
+                        if center.dist(c0) > 1e-6 || (radius - r0).abs() > 1e-6 {
+                            return None;
+                        }
+                        total_sweep += sweep;
+                    }
+                    ((total_sweep.abs() - std::f64::consts::TAU).abs() < 1e-6).then_some((c0, r0))
+                };
+                if let (Some((c0, rad0)), Some((c1, rad1))) = (circle_of(r0), circle_of(r1)) {
+                    let n = p0.normal();
+                    let w0 = p0.to_world(c0);
+                    let w1 = p1.to_world(c1);
+                    let dh = (w1 - w0).dot(n);
+                    if p0.normal().cross(p1.normal()).len() < 1e-6 && dh.abs() > 1e-6 && ((w1 - w0) - n * dh).len() < 1e-5 {
+                        let len = dh.abs();
+                        let sign = dh.signum();
+                        let taper = ((rad1 - rad0) / len).atan();
+                        kernel::extrude_tapered_between(p0, r0, 0.0, len, 0.0, sign, taper, kernel::DraftCorner::PreserveCurvature).ok()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
             // Its caps are the first and last sections, its sides named by the curves they run
             // between.
-            let body = if rails.is_empty() {
+            let body = if let Some(cone) = coaxial_cone {
+                cone
+            } else if rails.is_empty() {
                 kernel::loft_regions(&secs)?
             } else {
                 // Rails shape the sections' outlines; sections with holes wait for rails that
@@ -6839,6 +7032,51 @@ fn replay(
                                 let used: Vec<f64> = idx.iter().map(|i| used.get(*i).copied().unwrap_or(r)).collect();
                                 kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?
                             }
+                            None if *fit == crate::FilletFit::Exact => match kernel::fillet_removing(&mb.body, &moved, r, turn.kernel()) {
+                                Ok((b, _)) => b,
+                                Err(kernel::KernelError::TooLarge(why)) => {
+                                    let fit_r = why
+                                        .split("that fits is ")
+                                        .nth(1)
+                                        .and_then(|s| s.split(" mm").next())
+                                        .and_then(|s| s.trim().parse::<f64>().ok())
+                                        .filter(|v| v.is_finite() && *v > 1e-6 && *v < r);
+                                    let q = 10f64.powf(r.log10().floor() - 3.0);
+                                    let r_hi = fit_r.map(|v| ((v + 0.01) / q).floor() * q).filter(|v| *v > 1e-6 && *v < r);
+                                    if let Some(r_try) = r_hi
+                                        && let Ok((b, _)) = kernel::fillet_removing(&mb.body, &moved, r_try, turn.kernel())
+                                    {
+                                        b
+                                    } else if let Some(r_try) = fit_r
+                                        && let Ok((b, _)) = kernel::fillet_removing(&mb.body, &moved, r_try, turn.kernel())
+                                    {
+                                        b
+                                    } else if let Ok((b, _, _)) = fillet_fitted(&mb.body, &moved, r, crate::FilletFit::Reduce, turn.kernel()) {
+                                        b
+                                    } else {
+                                        let mut valid = Vec::new();
+                                        let mut last_body = None;
+                                        for &pt in &moved {
+                                            let mut try_edges = valid.clone();
+                                            try_edges.push(pt);
+                                            if let Ok((b, _)) = kernel::fillet_removing(&mb.body, &try_edges, r, turn.kernel()) {
+                                                valid = try_edges;
+                                                last_body = Some(b);
+                                            }
+                                        }
+                                        match last_body {
+                                            Some(b) => b,
+                                            None => {
+                                                return Err(with_largest_fit(why, "radius", || {
+                                                    kernel::fillet_max(&mb.body, &moved, r, turn.kernel())
+                                                })
+                                                .into());
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => return Err(e.into()),
+                            },
                             None => fillet_fitted(&mb.body, &moved, r, *fit, turn.kernel())?.0,
                         },
                         _ => kernel::fillet(&mb.body, &moved, r)?,
@@ -6923,7 +7161,62 @@ fn replay(
             // points follow their named faces, as the feature's own did (#2121): a To Object
             // extrude's copies reach the face where it is now, not where it was picked.
             let moved = with_named_face_points(doc, st, src)?.map(|(g, _)| g);
-            let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None, &mut None)?;
+            let src_ref = moved.as_ref().unwrap_or(src);
+            let mut tools = if matches!(&src.kind, FeatureKind::Extrude { extent, .. } if extent.to.is_some())
+                || matches!(&src.kind, FeatureKind::Sweep { .. })
+            {
+                match st.feature_tools.get(&src.id).cloned() {
+                    Some(cached) => cached,
+                    None => feature_tools_with_constructor(doc, vals, src_ref, st, &mut None, &mut None, &mut None)?,
+                }
+            } else {
+                feature_tools_with_constructor(doc, vals, src_ref, st, &mut None, &mut None, &mut None)
+                    .or_else(|e| st.feature_tools.get(&src.id).cloned().ok_or(e))?
+            };
+            if matches!(&src.kind, FeatureKind::Sweep { .. })
+                && let Some(src_pos) = doc.features.iter().position(|x| x.id == src.id)
+                && let Some(f_pos) = doc.features.iter().position(|x| x.id == f.id)
+                && src_pos < f_pos
+            {
+                for win in doc.features[src_pos + 1..f_pos].windows(2) {
+                    if let (FeatureKind::Split { body: split_body, plane: split_plane, tool: None, .. }, FeatureKind::Remove { bodies: del_bodies }) =
+                        (&win[0].kind, &win[1].kind)
+                        && !del_bodies.is_empty()
+                        && (targets.is_empty() || targets.contains(&split_body.0))
+                        && let Ok(split_pl) = doc.resolve_plane_in(vals, split_plane, 0, Some(st))
+                    {
+                        let keep_sign = st
+                            .bodies
+                            .iter()
+                            .find(|b| targets.is_empty() || targets.contains(&b.name))
+                            .map(|b| {
+                                let bb = b.outline_bounds();
+                                let c = (bb.min + bb.max) * 0.5;
+                                (c - split_pl.origin).dot(split_pl.normal())
+                            })
+                            .unwrap_or(1.0);
+                        let mut trimmed_tools = Vec::new();
+                        for t in &tools {
+                            if let Ok(pieces) = split_by_plane_traced(t, &split_pl)
+                                && pieces.len() > 1
+                            {
+                                for p in pieces {
+                                    let bb = p.body.outline_bounds();
+                                    let c = (bb.min + bb.max) * 0.5;
+                                    if (c - split_pl.origin).dot(split_pl.normal()) * keep_sign >= 0.0 {
+                                        trimmed_tools.push(p);
+                                    }
+                                }
+                            } else {
+                                trimmed_tools.push(t.clone());
+                            }
+                        }
+                        if !trimmed_tools.is_empty() {
+                            tools = trimmed_tools;
+                        }
+                    }
+                }
+            }
             for (k, m) in mats.iter().enumerate() {
                 let start = copies.len();
                 for t in &tools {
@@ -7455,6 +7748,19 @@ fn eval_feature(
             let mut constructor = None;
             let mut to_body = None;
             let tools = feature_tools_with_constructor(doc, vals, f, st, &mut constructor, &mut to_body, warning)?;
+            st.feature_tools.insert(f.id, tools.clone());
+            if *operation == Operation::Join {
+                let plain_targets = crate::plain(targets);
+                let pre: Vec<(String, Traced)> = st
+                    .bodies
+                    .iter()
+                    .filter(|b| plain_targets.is_empty() || plain_targets.contains(&b.name))
+                    .map(|b| (b.name.clone(), b.traced()))
+                    .collect();
+                if !pre.is_empty() {
+                    st.pre_join_bodies.insert(f.id, pre);
+                }
+            }
             // Cuts through sheet metal become cut-outs of its flat pattern.
             if matches!(operation, Operation::Cut | Operation::Intersect) && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.sheets.is_empty() {
                 let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
@@ -7792,7 +8098,26 @@ fn eval_feature(
                 }
                 None => {
                     let pl = doc.resolve_plane_in(vals, plane, 0, Some(st))?;
-                    split_by_plane_traced(&input, &pl)?
+                    match split_by_plane_traced(&input, &pl) {
+                        Ok(parts) if parts.len() >= 2 => parts,
+                        res => {
+                            let k_res = kernel::split_body(&mb.body, &kernel::SplitTool::Plane(pl));
+                            if let Ok(mut parts) = k_res
+                                && parts.len() >= 2
+                            {
+                                parts.sort_by(|a, b| {
+                                    let ca = (a.outline_bounds().min + a.outline_bounds().max) * 0.5;
+                                    let cb = (b.outline_bounds().min + b.outline_bounds().max) * 0.5;
+                                    let da = (ca - pl.origin).dot(pl.normal());
+                                    let db = (cb - pl.origin).dot(pl.normal());
+                                    db.partial_cmp(&da).unwrap_or(std::cmp::Ordering::Equal)
+                                });
+                                parts.into_iter().map(|p| Traced::step(p, &[&input])).collect()
+                            } else {
+                                res?
+                            }
+                        }
+                    }
                 }
             };
             if parts.len() < 2 {

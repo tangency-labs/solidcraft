@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "cadmpeg-codec-f3d"
+description = "Decode and encode Autodesk Fusion .f3d B-rep, design, and appearance data."
+version = "0.6.8"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/cadmpeg/cadmpeg"
+homepage = "https://github.com/cadmpeg/cadmpeg"
+rust-version = "1.88"
+readme = "README.md"
+documentation = "https://docs.rs/cadmpeg-codec-f3d"
+keywords = ["cad", "fusion-360", "f3d", "brep", "geometry"]
+categories = ["encoding", "parser-implementations", "graphics"]
+
+[lib]
+name = "cadmpeg_codec_f3d"
+path = "src/lib.rs"
+
+[dependencies]
+cadmpeg-asm = "=0.6.8"
+cadmpeg-container = "=0.6.8"
+cadmpeg-core = "=0.6.8"
+cadmpeg-ir = "=0.6.8"
+cadmpeg-protein = "=0.6.8"
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+roxmltree = "0.21"
+lzma-rs = "0.3"
+sha2 = "0.11"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip", "raw_value", "unbounded_depth"] }
+tempfile = "3"
+serde-value = "0.7"
+memchr = "2"

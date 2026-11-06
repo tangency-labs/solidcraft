@@ -25,7 +25,9 @@ pub mod limits;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
-pub use native_cad::{NATIVE_CAD_EXTS, is_native_cad_path, native_cad_to_step};
+pub use native_cad::{NATIVE_CAD_EXTS, is_native_cad_path, native_cad_decode_full, native_cad_ir_to_step, native_cad_to_step};
+mod native_timeline;
+pub use native_timeline::{native_cad_to_document, native_cad_to_document_with_model, native_cad_to_document_with_model_validating};
 pub mod paper;
 mod ply;
 mod ply_complex;

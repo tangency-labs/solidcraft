@@ -793,6 +793,14 @@ impl Session {
         Self::with_model(doc, visibility, model)
     }
 
+    /// A session on `doc` with its already-evaluated `model`.
+    pub fn opened_with_model(mut doc: Document, model: solidcraft_doc::Model) -> Self {
+        solidcraft_io::vfs::install_checks();
+        let visibility = std::mem::take(&mut doc.visibility);
+        let doc = Arc::new(doc);
+        Self::with_model(doc, visibility, model)
+    }
+
     /// The model `doc`'s file kept, when it is `doc`'s evaluation and the cache is not turned off.
     pub(crate) fn saved_model(doc: &Arc<Document>, saved: Option<&solidcraft_doc::SavedModel>) -> Option<Model> {
         saved

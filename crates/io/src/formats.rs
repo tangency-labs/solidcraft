@@ -217,6 +217,15 @@ pub static FORMATS: &[FormatSpec] = &[
         import: Some(ImportSpec { target: ImportTarget::Brep, options: BREP_IMPORT, native_only: true }),
         export: None,
     },
+    #[cfg(feature = "f3d")]
+    FormatSpec {
+        id: "f3d",
+        label: "Autodesk Fusion",
+        extensions: &["f3d", "f3z"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::Brep, options: BREP_IMPORT, native_only: true }),
+        export: None,
+    },
     FormatSpec {
         id: "stl",
         label: "STL",
@@ -397,6 +406,9 @@ pub fn import_filters(native: bool) -> Vec<(&'static str, Vec<&'static str>)> {
         let Some(import) = f.import.as_ref() else { continue };
         match import.target {
             ImportTarget::Design => add("SolidCraft design (container or JSON)", f.extensions),
+            #[cfg(feature = "f3d")]
+            ImportTarget::Brep if import.native_only => add("FreeCAD, Rhino and Fusion", f.extensions),
+            #[cfg(not(feature = "f3d"))]
             ImportTarget::Brep if import.native_only => add("FreeCAD and Rhino", f.extensions),
             ImportTarget::Brep => add(f.label, f.extensions),
             ImportTarget::Mesh => add("Mesh (3MF, STL, OBJ, glTF)", f.extensions),
@@ -438,6 +450,10 @@ mod tests {
             assert!(crate::is_step_path(&format!("part.{e}")), "is_step_path misses .{e}");
         }
         for e in ["step", "stp", "igs", "iges", "fcstd", "3dm"] {
+            assert!(with_target(ImportTarget::Brep).contains(&e), "registry misses B-rep .{e}");
+        }
+        #[cfg(feature = "f3d")]
+        for e in ["f3d", "f3z"] {
             assert!(with_target(ImportTarget::Brep).contains(&e), "registry misses B-rep .{e}");
         }
         for e in with_target(ImportTarget::Mesh) {
@@ -486,6 +502,8 @@ mod tests {
         assert_eq!(for_path("a.3mf").map(|f| f.id), Some("3mf"));
         assert_eq!(for_path("a.dxf").map(|f| f.id), Some("dxf-sketch"));
         assert_eq!(import_for_path("a.glb").map(|f| f.id), Some("gltf"));
+        #[cfg(feature = "f3d")]
+        assert_eq!(import_for_path("a.f3d").map(|f| f.id), Some("f3d"));
         assert!(for_path("a.png").is_none());
         assert!(for_path("nodot").is_none());
     }
@@ -500,6 +518,15 @@ mod tests {
         assert!(importable(false).all(|f| f.id != "fcstd" && f.id != "3dm"));
         assert!(!open_extensions(false).contains(&"fcstd"));
         assert!(open_extensions(false).contains(&"igs"));
+        #[cfg(feature = "f3d")]
+        {
+            assert!(importable(true).any(|f| f.id == "f3d"));
+            assert!(open_extensions(true).contains(&"f3d"));
+            assert!(open_extensions(true).contains(&"f3z"));
+            assert!(importable(false).all(|f| f.id != "f3d"));
+            assert!(!open_extensions(false).contains(&"f3d"));
+            assert!(!open_extensions(false).contains(&"f3z"));
+        }
     }
 
     /// The Open dialog's groups, as the hosts show them.
@@ -510,10 +537,16 @@ mod tests {
         assert_eq!(find("SolidCraft design (container or JSON)"), vec!["sc", "solidcraft", "solvecraft", "json"]);
         assert_eq!(find("STEP"), vec!["step", "stp"]);
         assert_eq!(find("IGES"), vec!["igs", "iges"]);
+        #[cfg(not(feature = "f3d"))]
         assert_eq!(find("FreeCAD and Rhino"), vec!["fcstd", "3dm"]);
+        #[cfg(feature = "f3d")]
+        assert_eq!(find("FreeCAD, Rhino and Fusion"), vec!["fcstd", "3dm", "f3d", "f3z"]);
         assert_eq!(find("Mesh (3MF, STL, OBJ, glTF)"), vec!["stl", "3mf", "obj", "glb", "gltf"]);
         assert_eq!(find("Point cloud (PLY, XYZ, PTS)"), vec!["ply", "xyz", "pts"]);
         assert_eq!(find("Sketch drawings (DXF, SVG)"), vec!["dxf", "svg"]);
+        #[cfg(not(feature = "f3d"))]
         assert!(import_filters(false).iter().all(|(l, _)| *l != "FreeCAD and Rhino"));
+        #[cfg(feature = "f3d")]
+        assert!(import_filters(false).iter().all(|(l, _)| *l != "FreeCAD, Rhino and Fusion"));
     }
 }

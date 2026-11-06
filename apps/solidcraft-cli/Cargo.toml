@@ -26,6 +26,7 @@ raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]
 # The profiler, compiled in so any build can say where its time goes (`--profile`,
 # SOLIDCRAFT_PROFILE=1); it records nothing until asked.
 profile = ["solidcraft-engine/profile"]
+f3d = ["solidcraft-engine/f3d"]
 
 [dependencies]
 solidcore-record = { workspace = true }
