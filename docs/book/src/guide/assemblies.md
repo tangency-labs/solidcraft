@@ -193,7 +193,8 @@ Mesh bodies (STL, 3MF and OBJ imports) are not checked by either command: each i
 `unchecked` as `{a: name, b: null, reason: "mesh body: not checked"}`, so `count: 0` or an empty
 `overlaps` is not mistaken for "no overlap" when a mesh body was in the design.
 
-**Gear**, **Rack and Pinion** and **Screw** (on the **ASSEMBLE** panel) are motion links whose
+**Gear** and **Rack and Pinion** (in **ASSEMBLE** › **POWER TRANSMISSION**) and **Screw** (in
+**ASSEMBLE** › **JOINTS**) are motion links whose
 ratio comes from the parts rather than a typed number:
 
 - **Gear** (`joint.gear {a, b, ra, rb}`) couples two joints that turn. Joint 2 turns ra/rb as far
