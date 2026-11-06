@@ -1757,3 +1757,240 @@ fn then_with_segments_is_refused_with_a_message() {
     }
     assert_eq!(apply_commands(&app, &d).unwrap()[0].1["then"], json!([{"height": "20 mm", "angle": "45 deg"}]));
 }
+
+/// A flange on the picked `edges`, each split into the same two stretches with heights and angles
+/// of its own: the dialog's per-edge rows then carry the same labels on every edge.
+fn multi_edge_flange(h: &mut crate::scenario::Harness, edges: &[[f64; 3]], heights: &[(&str, &str)], angles: &[(&str, &str)]) -> u64 {
+    // A window tall enough for every edge's rows: each picked edge adds six rows, and a dialog
+    // taller than the screen has rows below it.
+    h.call("ui.resize", json!({"width": 1600, "height": 2600}));
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let list: Vec<serde_json::Value> = edges
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            json!({"point": p, "segments": [
+                {"from": 0.0, "to": 0.5, "angle": angles[i].0, "height": heights[i].0},
+                {"from": 0.5, "to": 1.0, "angle": angles[i].1, "height": heights[i].1}
+            ]})
+        })
+        .collect();
+    h.app
+        .run("sheet.flange", json!({"type": "edge", "edges": list, "height": "20 mm", "angle": "90 deg", "position": "inside", "flip": false}))
+        .unwrap();
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    h.app.session.doc.features.last().unwrap().id
+}
+
+/// The dialog's stretches, per picked edge, as `(from, to, angle, height)` typed.
+fn segment_rows(h: &crate::scenario::Harness) -> Vec<Vec<(String, String, String, String)>> {
+    match &h.app.dialog.as_ref().expect("a dialog").kind {
+        Kind::Sheet(Sm::Flange { segments, .. }) => segments
+            .iter()
+            .map(|(_, list)| list.iter().map(|r| (r.from.clone(), r.to.clone(), r.angle.clone(), r.height.clone())).collect())
+            .collect(),
+        other => panic!("not a flange dialog: {other:?}"),
+    }
+}
+
+/// The number a `height`/`angle` field holds, for comparing a drag's effect.
+fn field_number(text: &str) -> f64 {
+    let number: String = text.chars().take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-').collect();
+    number.parse().unwrap_or_else(|e| panic!("`{text}` is not a number: {e}"))
+}
+
+/// Drag the label of the `k`th row named `text` sideways by `dx` points. Every picked edge's rows
+/// carry the same labels, and the label rects are published in draw order, one per edge, so the
+/// `k`th is the `k`th edge's row.
+fn drag_label(h: &mut crate::scenario::Harness, text: &str, k: usize, dx: f32) {
+    let rects: Vec<egui::Rect> = crate::scenario::rects(&format!("dialog:label:{text}")).into_iter().map(|(_, r)| r).collect();
+    assert!(rects.len() > k, "`{text}`: {} label rects drawn, want one per edge: {rects:?}", rects.len());
+    eprintln!("DEBUG `{text}`[{k}] rects={rects:?} window={:?} content={:?}", crate::scenario::rect_of("dialog:window"), h.ctx.content_rect());
+    let c = rects[k].center();
+    h.step(&json!({"drag": [[c.x, c.y], [c.x + dx, c.y]], "steps": 8})).unwrap();
+    h.frames(3);
+}
+
+/// Two picked edges, each split into two stretches: dragging one edge's label changes that edge's
+/// value alone. The labels repeat, so a row's scrub (label-drag) id must be scoped per edge; with
+/// one shared form scope the rows share the id, the last edge's row takes the drag and every
+/// edge's value moves with it (#5927, #5928).
+#[test]
+fn dragging_one_edges_segment_height_leaves_the_other_edge_alone() {
+    let mut h = crate::scenario::Harness::new();
+    let id = multi_edge_flange(
+        &mut h,
+        &[[50.0, 0.0, 2.5], [50.0, 60.0, 2.5]],
+        &[("20 mm", "15 mm"), ("25 mm", "10 mm")],
+        &[("90 deg", "45 deg"), ("60 deg", "30 deg")],
+    );
+    h.app.edit_feature(id);
+    h.frames(6);
+    let before = segment_rows(&h);
+    assert_eq!(before.len(), 2, "the dialog holds both edges: {before:?}");
+    assert_eq!(
+        before[0],
+        vec![("0".into(), "0.5".into(), "90 deg".into(), "20 mm".into()), ("0.5".into(), "1".into(), "45 deg".into(), "15 mm".into())],
+        "{before:?}"
+    );
+    assert_eq!(
+        before[1],
+        vec![("0".into(), "0.5".into(), "60 deg".into(), "25 mm".into()), ("0.5".into(), "1".into(), "30 deg".into(), "10 mm".into())],
+        "{before:?}"
+    );
+    // Drag edge 2's second stretch's angle label, the last edge in the form: with one shared
+    // scope this drag moved edge 1's angle too, because both rows held the same id.
+    drag_label(&mut h, "Segment 2 angle", 1, 40.0);
+    let after_last = segment_rows(&h);
+    assert_eq!(after_last[0], before[0], "edge 1 is untouched by edge 2's drag: {after_last:?}");
+    assert_ne!(after_last[1][1].2, before[1][1].2, "edge 2's dragged angle moved: {after_last:?}");
+    assert_eq!(after_last[1][0], before[1][0], "edge 2's other stretch stays");
+    // Drag edge 1's first stretch's height label; 40 points moves a 20 mm value by 4 mm.
+    drag_label(&mut h, "Segment 1 height", 0, 40.0);
+    let after = segment_rows(&h);
+    assert_ne!(field_number(&after[0][0].3), field_number(&before[0][0].3), "the dragged edge's height moved: {after:?}");
+    assert_eq!(after[0][0].0, before[0][0].0);
+    assert_eq!(after[0][0].1, before[0][0].1);
+    assert_eq!(after[0][0].2, before[0][0].2, "the dragged row's angle stays");
+    assert_eq!(after[0][1], before[0][1], "the dragged edge's other stretch stays");
+    assert_eq!(after[1], after_last[1], "edge 2's height and angle are untouched by edge 1's drag: {after:?}");
+    // The command the dialog would run carries each drag in its own edge only.
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    let params = &c[0].1["params"];
+    assert_eq!(params["edges"][1]["point"], json!([50.0, 60.0, 2.5]), "{}", params);
+    assert_eq!(params["edges"][1]["segments"][0], json!({"from": 0.0, "to": 0.5, "angle": "60 deg", "height": "25 mm"}), "{}", params);
+    assert_eq!(params["edges"][1]["segments"][1], json!({"from": 0.5, "to": 1.0, "angle": after[1][1].2, "height": "10 mm"}), "{}", params);
+    assert_eq!(params["edges"][0]["segments"][0]["height"], json!(after[0][0].3.clone()), "{}", params);
+    assert_eq!(params["edges"][0]["segments"][0]["angle"], json!("90 deg"), "{}", params);
+    assert_eq!(params["edges"][0]["segments"][1], json!({"from": 0.5, "to": 1.0, "angle": "45 deg", "height": "15 mm"}), "{}", params);
+}
+
+/// Three picked edges with the same two stretches each: dragging one field on each edge changes
+/// that edge's value alone, so every edge's rows hold ids of their own (#5927, #5928).
+#[test]
+fn dragging_each_of_three_edges_fields_changes_only_that_edge() {
+    let mut h = crate::scenario::Harness::new();
+    let id = multi_edge_flange(
+        &mut h,
+        &[[50.0, 0.0, 2.5], [50.0, 60.0, 2.5], [0.0, 30.0, 2.5]],
+        &[("20 mm", "15 mm"), ("25 mm", "10 mm"), ("30 mm", "12 mm")],
+        &[("90 deg", "45 deg"), ("60 deg", "30 deg"), ("80 deg", "40 deg")],
+    );
+    h.app.edit_feature(id);
+    h.frames(6);
+    let mut before = segment_rows(&h);
+    assert_eq!(before.len(), 3, "the dialog holds all three edges: {before:?}");
+    for (edge, label) in [(0usize, "Segment 1 height"), (1, "Segment 2 angle"), (2, "Segment 1 angle")] {
+        drag_label(&mut h, label, edge, 40.0);
+        let after = segment_rows(&h);
+        for other in 0..3 {
+            if other == edge {
+                continue;
+            }
+            assert_eq!(after[other], before[other], "edge {} after dragging edge {}'s `{label}`: {after:?}", other + 1, edge + 1);
+        }
+        let moved = match label {
+            "Segment 1 height" => after[edge][0].3 != before[edge][0].3,
+            "Segment 2 angle" => after[edge][1].2 != before[edge][1].2,
+            _ => after[edge][0].2 != before[edge][0].2,
+        };
+        assert!(moved, "edge {}'s `{label}` moved: {after:?}", edge + 1);
+        before = after;
+    }
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let params = apply_commands(&h.app, &d).unwrap()[0].1["params"].clone();
+    let seg = |edge: usize, m: usize| params["edges"][edge]["segments"][m].clone();
+    assert_eq!(seg(0, 0)["height"], json!(before[0][0].3.clone()), "{params}");
+    assert_eq!(seg(1, 1)["angle"], json!(before[1][1].2.clone()), "{params}");
+    assert_eq!(seg(2, 0)["angle"], json!(before[2][0].2.clone()), "{params}");
+    // Every stretch the drags did not touch is the design's.
+    assert_eq!(seg(0, 1), json!({"from": 0.5, "to": 1.0, "angle": "45 deg", "height": "15 mm"}), "{params}");
+    assert_eq!(seg(1, 0), json!({"from": 0.0, "to": 0.5, "angle": "60 deg", "height": "25 mm"}), "{params}");
+    assert_eq!(seg(2, 1), json!({"from": 0.5, "to": 1.0, "angle": "40 deg", "height": "12 mm"}), "{params}");
+    assert_eq!(seg(0, 0)["from"], json!(0.0), "{params}");
+    assert_eq!(seg(0, 0)["to"], json!(0.5), "{params}");
+    assert_eq!(seg(1, 1)["height"], json!("10 mm"), "{params}");
+    assert_eq!(seg(2, 0)["height"], json!("30 mm"), "{params}");
+}
+
+/// The byte-identical per-edge round-trip after a label drag: the drag changes the dragged
+/// stretch's height only, the other edge's list comes back byte for byte as the design wrote it,
+/// and Edit Feature on the redefined feature sends the same bytes back (#5927, #5928).
+#[test]
+fn a_dragged_segment_round_trip_keeps_every_other_edge_byte_identical() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.resize", json!({"width": 1600, "height": 2000}));
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let design = json!({
+        "type": "edge",
+        "edges": [
+            {"point": [50.0, 0.0, 2.5], "segments": [
+                {"from": 0.0, "to": 0.3, "angle": "90 deg", "height": "20 mm"},
+                {"from": 0.3, "to": 1.0, "angle": "45 deg", "height": "15 mm", "flip": false}
+            ]},
+            {"point": [50.0, 60.0, 2.5], "segments": [
+                {"from": 0.0, "to": 0.6, "height": "25 mm", "flip": true},
+                {"from": 0.6, "to": 1.0, "height": "10 mm"}
+            ]}
+        ],
+        "height": "20 mm",
+        "angle": "90 deg",
+        "position": "inside",
+        "flip": true
+    });
+    h.app.run("sheet.flange", design.clone()).unwrap();
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    let id = h.app.session.doc.features.last().unwrap().id;
+    h.app.edit_feature(id);
+    h.frames(6);
+    let before = segment_rows(&h);
+    assert_eq!(before.len(), 2, "{before:?}");
+    // Drag edge 1's first stretch's height: 20 mm moves by 4 mm at 40 points.
+    drag_label(&mut h, "Segment 1 height", 0, 40.0);
+    let after = segment_rows(&h);
+    assert_eq!(after[1], before[1], "edge 2's list is untouched: {after:?}");
+    assert_ne!(after[0][0].3, before[0][0].3, "edge 1's dragged height moved: {after:?}");
+    assert_eq!(
+        (after[0][0].0.as_str(), after[0][0].1.as_str(), after[0][0].2.as_str()),
+        ("0", "0.3", "90 deg"),
+        "the dragged stretch keeps its bounds and angle"
+    );
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    let params = c[0].1["params"].clone();
+    assert_eq!(
+        serde_json::to_string(&params["edges"][1]).unwrap(),
+        serde_json::to_string(&design["edges"][1]).unwrap(),
+        "the edge the drag did not touch goes back as the design wrote it: {params}"
+    );
+    let mut expected = design.clone();
+    expected["edges"][0]["segments"][0]["height"] = json!(after[0][0].3.clone());
+    assert_eq!(serde_json::to_string(&params).unwrap(), serde_json::to_string(&expected).unwrap(), "only the dragged height differs: {params}");
+    // OK applies it; Edit Feature sends the same parameters back, byte for byte.
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "OK applies the dragged value");
+    let f = h.app.session.doc.features.last().unwrap().id;
+    h.app.edit_feature(f);
+    h.frames(6);
+    let d = h.app.dialog.clone().expect("the dialog is open again");
+    let again = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(
+        serde_json::to_string(&again[0].1["params"]).unwrap(),
+        serde_json::to_string(&params).unwrap(),
+        "the edit after the drag is byte-identical: {}",
+        again[0].1["params"]
+    );
+    assert_eq!(segment_rows(&h)[1], before[1], "edge 2 still comes back as it was");
+}

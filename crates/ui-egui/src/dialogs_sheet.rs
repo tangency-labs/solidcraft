@@ -316,45 +316,50 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                     for (n, p) in edge_point_list(inputs).iter().enumerate() {
                         let slot = segments_slot(segments, *p);
                         let Some((_, list)) = segments.get_mut(slot) else { continue };
-                        form_row(ui, &format!("Edge {}", n + 1), |ui| {
-                            let add = crate::ui_kit::button(ui, "Split Edge", crate::ui_kit::Button::Normal).backing_on_hover_text(
-                                crate::i18n::tr_label("One more stretch of the picked edge, each with its own angle, height and turns"),
-                            );
-                            if add.clicked() && list.len() < 64 {
-                                add_segment(list);
+                        // Every picked edge carries the same row labels, and a row's scrub (label
+                        // drag) id is its scope id plus the label: each edge's block needs a scope
+                        // of its own, or dragging one edge's `Segment 1 height` moves every edge's.
+                        ui.scope_builder(egui::UiBuilder::new().id_salt(("sm_edge_segments", n)), |ui| {
+                            form_row(ui, &format!("Edge {}", n + 1), |ui| {
+                                let add = crate::ui_kit::button(ui, "Split Edge", crate::ui_kit::Button::Normal).backing_on_hover_text(
+                                    crate::i18n::tr_label("One more stretch of the picked edge, each with its own angle, height and turns"),
+                                );
+                                if add.clicked() && list.len() < 64 {
+                                    add_segment(list);
+                                }
+                            });
+                            let mut drop = None;
+                            for (m, row) in list.iter_mut().enumerate() {
+                                let part = m + 1;
+                                form_row(ui, &format!("Segment {part}"), |ui| {
+                                    if crate::ui_kit::bin_button(ui, crate::i18n::tr_label("Remove this segment")).clicked() {
+                                        drop = Some(m);
+                                    }
+                                    ui.label(format!("{} … {}", row.from.trim(), row.to.trim()));
+                                });
+                                let (e, changed) = crate::ui_kit::text_row(ui, &format!("Segment {part} from"), &mut row.from, "0");
+                                enter |= e;
+                                row.equal &= !changed;
+                                let (e, changed) = crate::ui_kit::text_row(ui, &format!("Segment {part} to"), &mut row.to, "1");
+                                enter |= e;
+                                row.equal &= !changed;
+                                enter |= expr_row(ui, &format!("Segment {part} angle"), &mut row.angle);
+                                enter |= expr_row(ui, &format!("Segment {part} height"), &mut row.height);
+                                // The stretch's own side: the feature's, or the other one. A side the
+                                // design spelled out (even the feature's) stays as it was until this
+                                // choice is moved off the one it shows.
+                                let mut way = usize::from(matches!(row.flip, Some(f) if f != *flip));
+                                choice_row(ui, &format!("Segment {part} turns"), &format!("sm_segment_way_{n}_{m}"), &mut way, &BEND_WAY_LABELS);
+                                if way == 1 {
+                                    row.flip = Some(!*flip);
+                                } else if row.flip == Some(!*flip) {
+                                    row.flip = None;
+                                }
+                            }
+                            if let Some(m) = drop {
+                                remove_segment(list, m);
                             }
                         });
-                        let mut drop = None;
-                        for (m, row) in list.iter_mut().enumerate() {
-                            let part = m + 1;
-                            form_row(ui, &format!("Segment {part}"), |ui| {
-                                if crate::ui_kit::bin_button(ui, crate::i18n::tr_label("Remove this segment")).clicked() {
-                                    drop = Some(m);
-                                }
-                                ui.label(format!("{} … {}", row.from.trim(), row.to.trim()));
-                            });
-                            let (e, changed) = crate::ui_kit::text_row(ui, &format!("Segment {part} from"), &mut row.from, "0");
-                            enter |= e;
-                            row.equal &= !changed;
-                            let (e, changed) = crate::ui_kit::text_row(ui, &format!("Segment {part} to"), &mut row.to, "1");
-                            enter |= e;
-                            row.equal &= !changed;
-                            enter |= expr_row(ui, &format!("Segment {part} angle"), &mut row.angle);
-                            enter |= expr_row(ui, &format!("Segment {part} height"), &mut row.height);
-                            // The stretch's own side: the feature's, or the other one. A side the
-                            // design spelled out (even the feature's) stays as it was until this
-                            // choice is moved off the one it shows.
-                            let mut way = usize::from(matches!(row.flip, Some(f) if f != *flip));
-                            choice_row(ui, &format!("Segment {part} turns"), &format!("sm_segment_way_{n}_{m}"), &mut way, &BEND_WAY_LABELS);
-                            if way == 1 {
-                                row.flip = Some(!*flip);
-                            } else if row.flip == Some(!*flip) {
-                                row.flip = None;
-                            }
-                        }
-                        if let Some(m) = drop {
-                            remove_segment(list, m);
-                        }
                     }
                     crate::ui_kit::section(ui, "flange_advanced", "Advanced", false, |ui| {
                         enter |= hint_row(ui, "Bend Radius", radius, crate::i18n::tr_label("from the rule"));
