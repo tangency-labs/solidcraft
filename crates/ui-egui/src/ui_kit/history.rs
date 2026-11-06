@@ -75,7 +75,7 @@ pub(crate) struct HistoryChip<'a> {
 
 /// Share the feature classification across chips and name rows. Surface aliases also
 /// cover Patch/Stitch/Thicken and other surface features without a Surface-prefixed kind.
-fn feature_icon_accent(kind: &str, icon: &str) -> Option<&'static str> {
+pub(crate) fn feature_icon_accent(kind: &str, icon: &str) -> Option<&'static str> {
     let tab = if kind.starts_with("Sketch") {
         "SKETCH"
     } else if kind.starts_with("Surface") || icon.starts_with("surface_") || icon == "continuity" {

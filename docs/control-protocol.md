@@ -934,6 +934,13 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `theme_import` (a `solidcraft-theme/1` file's JSON or text: adds the theme and turns it on; the reply's `theme_imported` is its id)
 - `theme_options` (default `{}`): a map of theme id to option-id/value map, merged per theme; `{"theme_options":{"my-theme":{"enabled":true,"amount":5}}}` changes those options, `null` resets one option, and an empty map resets that theme. Unknown themes or option ids, wrong types, unknown choices and out-of-range numbers refuse the entire call and name the key, before imports, removals, dialogs or other preference effects occur.
 - `theme_remove` (an imported theme's id; also removes its saved option values)
+- `timeline_2d` (default false: the History at the bottom is the 2D Timeline, with a row for each component in a Modeling track and an Assembly track; false keeps the 1D timeline)
+- `timeline_2d_cell_dots` (default true: empty cells in the 2D Timeline show a small alignment dot)
+- `timeline_2d_component_activation` (default true: a click on a component's row label or radio dot in the 2D Timeline makes that component active)
+- `timeline_2d_dependent_color` (default `[56, 189, 248]`: the RGB outline of the features that depend on the selected feature in the 2D Timeline)
+- `timeline_2d_dot_opacity` (default 0.35, 0.05…1: how strong the 2D Timeline's alignment dots are)
+- `timeline_2d_prereq_color` (default `[245, 158, 11]`: the RGB outline of the features the selected feature depends on in the 2D Timeline)
+- `timeline_2d_unsuppress_mode` (`restore_state` (default), `unsuppress_all`: unsuppressing a feature in the 2D Timeline keeps the dependents suppressed separately there in this session suppressed, or unsuppresses all dependents)
 - `timeline_origin_bodies` (default false: the History on the left or under the browser starts with the active component's Bodies folder and the Origin, the browser's rows with their eyes, folds and menus; the bottom History is unchanged)
 - `toast_place` (`corner` (default: notices and offers stack in one column in the view's bottom-right corner, each 360 points wide, buttons right-aligned with the main action right-most, #7893), `centre` (at the bottom centre above the view toolbar, each as wide as its text, as before))
 - `trackpad_pan` (default true: two-finger scroll pans, except Touchpad always zooms; pinch zooms)

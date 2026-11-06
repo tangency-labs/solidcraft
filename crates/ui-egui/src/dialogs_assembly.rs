@@ -1802,7 +1802,7 @@ pub(crate) fn snap_name(k: SnapKind) -> &'static str {
 // ---- timeline and browser ----
 
 /// A joint's menu (timeline and browser): Edit, Drive, Suppress, Delete.
-fn joint_menu(
+pub(crate) fn joint_menu(
     app: &SolveApp,
     ui: &mut egui::Ui,
     (id, kind, suppressed): (u64, JointKind, bool),

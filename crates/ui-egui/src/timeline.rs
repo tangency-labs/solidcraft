@@ -811,8 +811,14 @@ pub(crate) fn tick_playback(app: &mut SolveApp, ctx: &egui::Context) {
     app.timeline_playback = Some(playback);
 }
 
+/// Renders the design history timeline. With the opt-in `timeline_2d` preference on, the 2D
+/// Timeline (`crate::timeline_2d`) draws instead; otherwise the 1D timeline below is unchanged.
 pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::browser::sync_reveals(app);
+    if app.preferences.timeline_2d {
+        crate::timeline_2d::timeline(app, ui);
+        return;
+    }
     let t = Tokens::get();
     app.shell.history_dock_space = Some(ui.available_rect_before_wrap());
     if Container::for_layout(app.ui.layout, Surface::Panel).floating() {

@@ -303,6 +303,7 @@ mod theme_options;
 #[cfg(test)]
 mod thin_extrude_tests;
 pub mod timeline;
+pub mod timeline_2d;
 mod timeline_fold;
 mod timeline_folders;
 pub mod timeline_left;
@@ -3338,6 +3339,7 @@ impl SolveApp {
         render_workspace::displayed::finish(self, ui.ctx());
     }
 
+    /// Renders the main CAD workspace UI including ribbon, sidebar browser, timeline, and 3D viewport.
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {
         if self.embedded {
             self.ui.layout = shell::LayoutMode::Docked;
@@ -3431,7 +3433,9 @@ impl SolveApp {
                     // A dialog in the left column holds the History's place.
                     (!dialog_column::holds(self)).then(|| timeline_left::floating_rect(self, below_ribbon))
                 } else {
-                    show_timeline.then(|| timeline::floating_rect(full))
+                    show_timeline.then(|| {
+                        if self.preferences.timeline_2d { timeline_2d::floating_rect(self, ui.ctx(), full) } else { timeline::floating_rect(full) }
+                    })
                 };
                 // Draw the scene first, then let the unchanged panel layouts cover it. The
                 // viewport keeps its full projection even underneath the browser and cards.
