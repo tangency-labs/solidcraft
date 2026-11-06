@@ -75,6 +75,14 @@
 //!   `SmFace::Point3DClassify` is [`crate::query::face::p1::point_3d_classify`] on a
 //!   copy of that B-rep (its UV trim curve and trimmed surface cache additions are not
 //!   kept).
+//! - **Point/vertex ray-firing (`WR-62`).** Upstream `SmTLSPointVertex::SolveIt`
+//!   omits `break;` at the end of `case SM_SO_RAYFIRE:` and falls through into
+//!   `case SM_SO_3D_SIGNED_DIRECTED_MINIMIZE:`, recomputing `dParam` without
+//!   snapping `[-SM_EFF_ZERO * dScale, 0.0)` to `0.0` and negating `dParam` /
+//!   `dSign` when `m_bSwapOrder` is `TRUE` (inherited by `SmTLSVertexVertex::SolveIt`).
+//!   Here `SolverOperation::Rayfire` ends its arm with `dist_sq = param * param`
+//!   and `sign = 1.0`, matching `SmTLSPointCurve::SolveIt` and
+//!   `SmTLSPointFace::SolveIt`.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::Curve;
@@ -1079,6 +1087,10 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
     /// `SmTLSPointVertex::SolveIt`: the distance (or ray, directed or projected
     /// measure) between the point and a vertex as a single-value solution with no
     /// variables.
+    ///
+    /// On [`SolverOperation::Rayfire`], ends its arm with the ray-snapped
+    /// `dist_sq = param * param` and `sign = 1.0` instead of repeating upstream's
+    /// missing `break;` fallthrough into `SM_SO_3D_SIGNED_DIRECTED_MINIMIZE` (`WR-62`).
     fn solve_point_vertex(
         &mut self,
         ts: &mut TopologySolver<'_, '_, O>,
@@ -1148,36 +1160,35 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
 
         // switch on operation type to set dSign and dDistSq of Sol = dSign * sqrt(dDistSq)
         match op {
-            SolverOperation::Rayfire | SolverOperation::Signed3dDirectedMinimize => {
-                if op == SolverOperation::Rayfire {
-                    let ray = opt_vector(s, 0)?;
-                    let mut param = line_closest_point(self.point, ray, vertex_point);
-                    let tol = s.tolerance_3d + objects.vertex_tolerance(vertex)?;
-                    let scale = self.point.max_dimension();
+            SolverOperation::Rayfire => {
+                let ray = opt_vector(s, 0)?;
+                let mut param = line_closest_point(self.point, ray, vertex_point);
+                let tol = s.tolerance_3d + objects.vertex_tolerance(vertex)?;
+                let scale = self.point.max_dimension();
 
-                    // No answer if we are out of tol on wrong side of ray
-                    if param < -EFF_ZERO * scale {
-                        return Ok(());
-                    }
+                // No answer if we are out of tol on wrong side of ray
+                if param < -EFF_ZERO * scale {
+                    return Ok(());
+                }
 
-                    // When in tol on wrong side or ray - snap to end point
-                    if param < 0.0 {
-                        param = 0.0;
-                    }
+                // When in tol on wrong side or ray - snap to end point
+                if param < 0.0 {
+                    param = 0.0;
+                }
 
-                    let ray_pnt = self.point + param * ray;
-                    let dist_to_ray = ray_pnt.distance(vertex_point);
+                let ray_pnt = self.point + param * ray;
+                let dist_to_ray = ray_pnt.distance(vertex_point);
 
-                    // no answer - ray too from from vertex
-                    if dist_to_ray > tol {
-                        return Ok(());
-                    }
+                // no answer - ray too from from vertex
+                if dist_to_ray > tol {
+                    return Ok(());
+                }
 
-                    // (upstream sets dDistSq = dParam*dParam here; the fall
-                    // through below overwrites it)
-                } // end SM_SO_RAYFIRE (falls through)
+                // The following assumes that the ray vector is unitized
+                dist_sq = param * param;
+            }
 
-                // SM_SO_3D_SIGNED_DIRECTED_MINIMIZE
+            SolverOperation::Signed3dDirectedMinimize => {
                 let dir = opt_vector(s, 0)?;
                 let mut param = line_closest_point(self.point, dir, vertex_point);
                 let tol = s.tolerance_3d + objects.vertex_tolerance(vertex)?;
@@ -2357,6 +2368,19 @@ pub(crate) mod tests {
     }
 
     impl TopologyObjects<Obj> for Scene {
+        fn object_zone_tol_3d(&self, k: &Kernel, object: Obj) -> Result<f64> {
+            let system = || zone_tol_3d(k, SmallTopoType::NormalSize);
+            match object {
+                Obj::Vertex(_) => self.vertex_tolerance(object),
+                Obj::Edge(_) => self.edge_tolerance(object),
+                Obj::Curve(..) => match self.curve_edge(object)? {
+                    Some(edge) => self.edge_tolerance(edge),
+                    None => Ok(system()),
+                },
+                Obj::Analytic(_) | Obj::Surface(_) => Ok(system()),
+                Obj::Face(_) => self.face_tolerance(object),
+            }
+        }
         fn shape_member_object(&self, member: ShapeMember) -> Result<Obj> {
             match member {
                 ShapeMember::Vertex((_, key)) => Ok(Obj::Vertex(key.index() as usize)),
@@ -2694,5 +2718,382 @@ pub(crate) mod tests {
         assert_eq!(s.objects[1], Some(Obj::Edge(0)));
         assert!((s.start.solution_value - 4.0).abs() < 1e-12);
         assert!((s.start.parameters[0] - 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn wr62_rayfire_vertex_just_behind_start_snaps_to_zero() {
+        let k = Kernel::default();
+
+        let behind_in_tol = 1.0 - 1.0e-13;
+        let raw_param = behind_in_tol - 1.0;
+        assert!(raw_param < 0.0);
+        assert!(raw_param >= -EFF_ZERO);
+
+        let sc = Scene {
+            vertices: vec![
+                (Vec3::new(behind_in_tol, 0.0, 0.0), 0.0),
+                (Vec3::new(1.0 - 1.0e-11, 0.0, 0.0), 0.0),
+                (Vec3::new(1.0, 0.0, 0.0), 0.0),
+                (Vec3::new(1000.0 - 8.0e-10, 5.0e-10, 0.0), 0.0),
+            ],
+            curves: Vec::new(),
+            edges: Vec::new(),
+        };
+        let ray = [Vec3::new(1.0, 0.0, 0.0)];
+
+        // PointVertex in both swap orders snaps in-tolerance behind-start vertices to +0.0.
+        for (swap, obj1, obj2) in [
+            (false, None, Some(Obj::Vertex(0))),
+            (true, Some(Obj::Vertex(0)), None),
+        ] {
+            let mut ts = TopologySolver::new(
+                &k,
+                &sc,
+                SolverOperation::Rayfire,
+                SolutionRequested::All,
+                1e-6,
+                BIG_DOUBLE,
+                &ray,
+            );
+            let mut ls = LocalSolver::new(LocalSolverKind::PointVertex, swap, None);
+            ls.set_point(Vec3::new(1.0, 0.0, 0.0));
+            ls.solve_it(&k, &mut ts, obj1, obj2).unwrap();
+            assert_eq!(ts.base.solutions.len(), 1);
+            let sol = ts.base.solutions.get(0).unwrap();
+            assert_eq!(sol.start.solution_value, 0.0);
+            assert!(sol.start.solution_value.is_sign_positive());
+            assert_eq!(sol.num_objects, 1);
+            assert_eq!(sol.objects[0], Some(Obj::Vertex(0)));
+        }
+
+        // VertexVertex inherits SmTLSPointVertex::SolveIt in both swap orders.
+        for (swap, obj1, obj2, expected_objs) in [
+            (
+                false,
+                Some(Obj::Vertex(2)),
+                Some(Obj::Vertex(0)),
+                [Some(Obj::Vertex(2)), Some(Obj::Vertex(0))],
+            ),
+            (
+                true,
+                Some(Obj::Vertex(0)),
+                Some(Obj::Vertex(2)),
+                [Some(Obj::Vertex(0)), Some(Obj::Vertex(2))],
+            ),
+        ] {
+            let mut ts = TopologySolver::new(
+                &k,
+                &sc,
+                SolverOperation::Rayfire,
+                SolutionRequested::All,
+                1e-6,
+                BIG_DOUBLE,
+                &ray,
+            );
+            let mut ls = LocalSolver::new(LocalSolverKind::VertexVertex, swap, None);
+            ls.solve_it(&k, &mut ts, obj1, obj2).unwrap();
+            assert_eq!(ts.base.solutions.len(), 1);
+            let sol = ts.base.solutions.get(0).unwrap();
+            assert_eq!(sol.start.solution_value, 0.0);
+            assert!(sol.start.solution_value.is_sign_positive());
+            assert_eq!(sol.num_objects, 2);
+            assert_eq!([sol.objects[0], sol.objects[1]], expected_objs);
+        }
+
+        // Scaled origin (scale = 1000.0 => -EFF_ZERO * scale = -1e-9) with lateral offset
+        // within tol = 1e-9 from the snapped start point (1000, 0, 0).
+        let mut ts = TopologySolver::new(
+            &k,
+            &sc,
+            SolverOperation::Rayfire,
+            SolutionRequested::All,
+            1.0e-9,
+            BIG_DOUBLE,
+            &ray,
+        );
+        let mut ls = LocalSolver::new(LocalSolverKind::PointVertex, false, None);
+        ls.set_point(Vec3::new(1000.0, 0.0, 0.0));
+        ls.solve_it(&k, &mut ts, None, Some(Obj::Vertex(3)))
+            .unwrap();
+        assert_eq!(ts.base.solutions.len(), 1);
+        let sol = ts.base.solutions.get(0).unwrap();
+        assert_eq!(sol.start.solution_value, 0.0);
+        assert!(sol.start.solution_value.is_sign_positive());
+
+        // Vertex outside -EFF_ZERO * scale behind start is rejected.
+        let mut ts = TopologySolver::new(
+            &k,
+            &sc,
+            SolverOperation::Rayfire,
+            SolutionRequested::All,
+            1e-6,
+            BIG_DOUBLE,
+            &ray,
+        );
+        let mut ls = LocalSolver::new(LocalSolverKind::PointVertex, false, None);
+        ls.set_point(Vec3::new(1.0, 0.0, 0.0));
+        ls.solve_it(&k, &mut ts, None, Some(Obj::Vertex(1)))
+            .unwrap();
+        assert!(ts.base.solutions.is_empty());
+    }
+
+    #[test]
+    fn wr62_rayfire_swapped_order_keeps_positive_distance() {
+        use crate::geom::tree::NodeGeomType;
+
+        let k = Kernel::default();
+        let behind = 1.0 - 1.0e-13;
+        let sc = Scene {
+            vertices: vec![
+                (Vec3::new(1.0, 0.0, 0.0), 0.0),
+                (Vec3::new(3.0, 0.0, 0.0), 0.0),
+                (Vec3::new(6.0, 0.0, 0.0), 0.0),
+                (Vec3::new(behind, 0.0, 0.0), 0.0),
+            ],
+            curves: Vec::new(),
+            edges: Vec::new(),
+        };
+        let ray = [Vec3::new(1.0, 0.0, 0.0)];
+
+        // Single vertex ahead at distance +2.0 keeps +2.0 in both swap orders.
+        for swap in [false, true] {
+            let (pv1, pv2) = if swap {
+                (Some(Obj::Vertex(1)), None)
+            } else {
+                (None, Some(Obj::Vertex(1)))
+            };
+            let mut ts = TopologySolver::new(
+                &k,
+                &sc,
+                SolverOperation::Rayfire,
+                SolutionRequested::All,
+                1e-6,
+                BIG_DOUBLE,
+                &ray,
+            );
+            let mut ls = LocalSolver::new(LocalSolverKind::PointVertex, swap, None);
+            ls.set_point(Vec3::new(1.0, 0.0, 0.0));
+            ls.solve_it(&k, &mut ts, pv1, pv2).unwrap();
+            assert_eq!(ts.base.solutions.len(), 1);
+            let sol = ts.base.solutions.get(0).unwrap();
+            assert_eq!(sol.start.solution_value, 2.0);
+            assert_eq!(sol.objects[0], Some(Obj::Vertex(1)));
+
+            let (vv1, vv2, expected_objs) = if swap {
+                (
+                    Some(Obj::Vertex(1)),
+                    Some(Obj::Vertex(0)),
+                    [Some(Obj::Vertex(1)), Some(Obj::Vertex(0))],
+                )
+            } else {
+                (
+                    Some(Obj::Vertex(0)),
+                    Some(Obj::Vertex(1)),
+                    [Some(Obj::Vertex(0)), Some(Obj::Vertex(1))],
+                )
+            };
+            let mut ts = TopologySolver::new(
+                &k,
+                &sc,
+                SolverOperation::Rayfire,
+                SolutionRequested::All,
+                1e-6,
+                BIG_DOUBLE,
+                &ray,
+            );
+            let mut ls = LocalSolver::new(LocalSolverKind::VertexVertex, swap, None);
+            ls.solve_it(&k, &mut ts, vv1, vv2).unwrap();
+            assert_eq!(ts.base.solutions.len(), 1);
+            let sol = ts.base.solutions.get(0).unwrap();
+            assert_eq!(sol.start.solution_value, 2.0);
+            assert_eq!([sol.objects[0], sol.objects[1]], expected_objs);
+        }
+
+        // Two vertices ahead at distances 2.0 (Vertex(1)) and 5.0 (Vertex(2)) solved in
+        // swapped order keep +2.0 and cull +5.0 instead of negating and evicting the nearer hit.
+        let mut ts = TopologySolver::new(
+            &k,
+            &sc,
+            SolverOperation::Rayfire,
+            SolutionRequested::All,
+            1e-6,
+            BIG_DOUBLE,
+            &ray,
+        );
+        let mut ls = LocalSolver::new(LocalSolverKind::PointVertex, true, None);
+        ls.set_point(Vec3::new(1.0, 0.0, 0.0));
+        ls.solve_it(&k, &mut ts, Some(Obj::Vertex(1)), None)
+            .unwrap();
+        ls.solve_it(&k, &mut ts, Some(Obj::Vertex(2)), None)
+            .unwrap();
+        assert_eq!(ts.base.solutions.len(), 1);
+        let sol = ts.base.solutions.get(0).unwrap();
+        assert_eq!(sol.start.solution_value, 2.0);
+        assert_eq!(sol.objects[0], Some(Obj::Vertex(1)));
+
+        // End-to-end solve_trees on Rayfire with a behind-within-EFF_ZERO vertex and a
+        // farther vertex ahead snaps the nearest hit to 0.0 and culls the rest.
+        let query = Tree::from_point(Vec3::new(1.0, 0.0, 0.0), 0.0, true);
+        let mut vtree = Tree::new_spatial(&Extent3d::from_bounds(0.0, -1.0, -1.0, 7.0, 1.0, 1.0));
+        vtree
+            .add_to_spatial_tree(
+                &Extent3d::from_bounds(behind, 0.0, 0.0, behind, 0.0, 0.0),
+                Some(Obj::Vertex(3)),
+                NodeGeomType::Default,
+            )
+            .unwrap();
+        vtree
+            .add_to_spatial_tree(
+                &Extent3d::from_bounds(3.0, 0.0, 0.0, 3.0, 0.0, 0.0),
+                Some(Obj::Vertex(1)),
+                NodeGeomType::Default,
+            )
+            .unwrap();
+        let mut ts = TopologySolver::new(
+            &k,
+            &sc,
+            SolverOperation::Rayfire,
+            SolutionRequested::All,
+            1e-6,
+            BIG_DOUBLE,
+            &ray,
+        );
+        let mut ls = LocalSolver::new(LocalSolverKind::PointVertex, false, None);
+        ls.set_point(Vec3::new(1.0, 0.0, 0.0));
+        ts.solve_trees(&query, &vtree, &mut ls).unwrap();
+        assert_eq!(ts.base.solutions.len(), 1);
+        let sol = ts.base.solutions.get(0).unwrap();
+        assert_eq!(sol.start.solution_value, 0.0);
+        assert!(sol.start.solution_value.is_sign_positive());
+        assert_eq!(sol.objects[0], Some(Obj::Vertex(3)));
+    }
+
+    #[test]
+    fn wr62_non_rayfire_operations_unchanged() {
+        let k = Kernel::default();
+        let sc = Scene {
+            vertices: vec![
+                (Vec3::new(5.0, 0.0, 0.0), 0.0),
+                (Vec3::new(-2.0, 0.0, 0.0), 0.0),
+                (Vec3::new(1.0, 0.0, 0.0), 0.0),
+            ],
+            curves: Vec::new(),
+            edges: Vec::new(),
+        };
+        let dir_x = [Vec3::new(1.0, 0.0, 0.0)];
+        let proj_vecs = [Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 0.0)];
+
+        // Signed3dDirectedMinimize still preserves signed distances and swap negation.
+        for (vi, swap, expected) in [
+            (0, false, 4.0),
+            (0, true, -4.0),
+            (1, false, -3.0),
+            (1, true, 3.0),
+        ] {
+            let (obj1, obj2) = if swap {
+                (Some(Obj::Vertex(vi)), Some(Obj::Vertex(2)))
+            } else {
+                (Some(Obj::Vertex(2)), Some(Obj::Vertex(vi)))
+            };
+            let mut ts = TopologySolver::new(
+                &k,
+                &sc,
+                SolverOperation::Signed3dDirectedMinimize,
+                SolutionRequested::All,
+                1e-6,
+                BIG_DOUBLE,
+                &dir_x,
+            );
+            let mut ls = LocalSolver::new(LocalSolverKind::VertexVertex, swap, None);
+            ls.solve_it(&k, &mut ts, obj1, obj2).unwrap();
+            assert_eq!(ts.base.solutions.len(), 1);
+            assert_eq!(
+                ts.base.solutions.get(0).unwrap().start.solution_value,
+                expected
+            );
+        }
+
+        // Minimize, Maximize, Intersect, AtDistance, and SignedDirectedMinimize remain exact.
+        let empty_vecs: &[Vec3] = &[];
+        for (op, best, at_dist, vecs, pt, vi, swap, expected) in [
+            (
+                SolverOperation::Minimize,
+                BIG_DOUBLE,
+                None,
+                empty_vecs,
+                Vec3::new(1.0, 0.0, 0.0),
+                0,
+                false,
+                4.0,
+            ),
+            (
+                SolverOperation::Maximize,
+                0.0,
+                None,
+                empty_vecs,
+                Vec3::new(1.0, 0.0, 0.0),
+                0,
+                false,
+                4.0,
+            ),
+            (
+                SolverOperation::Intersect,
+                BIG_DOUBLE,
+                None,
+                empty_vecs,
+                Vec3::new(5.0, 0.0, 0.0),
+                0,
+                false,
+                0.0,
+            ),
+            (
+                SolverOperation::AtDistance,
+                BIG_DOUBLE,
+                Some(4.0),
+                empty_vecs,
+                Vec3::new(1.0, 0.0, 0.0),
+                0,
+                false,
+                4.0,
+            ),
+            (
+                SolverOperation::SignedDirectedMinimize,
+                BIG_DOUBLE,
+                None,
+                proj_vecs.as_slice(),
+                Vec3::new(1.0, 0.0, 0.0),
+                0,
+                false,
+                -4.0,
+            ),
+            (
+                SolverOperation::SignedDirectedMinimize,
+                BIG_DOUBLE,
+                None,
+                proj_vecs.as_slice(),
+                Vec3::new(1.0, 0.0, 0.0),
+                0,
+                true,
+                4.0,
+            ),
+        ] {
+            let mut ts = TopologySolver::new(&k, &sc, op, SolutionRequested::All, 1e-6, best, vecs);
+            if let Some(d) = at_dist {
+                ts.base.set_at_distance(d);
+            }
+            let mut ls = LocalSolver::new(LocalSolverKind::PointVertex, swap, None);
+            ls.set_point(pt);
+            let (o1, o2) = if swap {
+                (Some(Obj::Vertex(vi)), None)
+            } else {
+                (None, Some(Obj::Vertex(vi)))
+            };
+            ls.solve_it(&k, &mut ts, o1, o2).unwrap();
+            assert_eq!(ts.base.solutions.len(), 1);
+            assert_eq!(
+                ts.base.solutions.get(0).unwrap().start.solution_value,
+                expected
+            );
+        }
     }
 }
