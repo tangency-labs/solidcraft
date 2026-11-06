@@ -121,10 +121,15 @@ impl Renderer {
         let refused = self.product.take(device, queue, &self.uniform, &self.uniform_bgl, frame.key, &frame.slot, None, false).err();
         let caught = crate::caught(scopes);
         let highlight_refused = self.highlight.take(device, queue, &self.uniform, &self.uniform_bgl, frame.hl_key, &frame.hl_slot, None, false).err();
-        let failed = caught.or(refused).or(highlight_refused);
+        let product_failed = caught.or(refused);
+        if product_failed.is_some() {
+            // Only a refused product upload drops the product batches; a refused highlight
+            // keeps the product picture and is reported below.
+            self.product = Batches { key: Some(frame.key), ..Batches::default() };
+        }
+        let failed = product_failed.or(highlight_refused);
         if let Some(error) = &failed {
             log::error!("product preview upload failed: {error}");
-            self.product = Batches { key: Some(frame.key), ..Batches::default() };
             self.refused_upload = Some(error.clone());
             if let Some(Ok(mut sink)) = frame.upload_error.as_ref().map(|sink| sink.lock()) {
                 *sink = Some(error.clone());
