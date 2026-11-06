@@ -3416,7 +3416,7 @@ pub(crate) fn show_shader_preparation(app: &mut SolveApp, ctx: &egui::Context) -
         return false;
     }
     let mut cancel = false;
-    crate::ui_kit::Window::new(egui::Id::new("render_shader_preparation"), "", app.tr("render.image_preparing")).show_passive_body(ctx, |ui| {
+    crate::ui_kit::Window::new(egui::Id::unique("render_shader_preparation"), "", app.tr("render.image_preparing")).show_passive_body(ctx, |ui| {
         let warning = ui.label(app.tr("render.gpu_job_shader_wait"));
         crate::scenario::publish_rect("render:shader-preparation:warning", warning.rect);
         ui.horizontal(|ui| {
@@ -3428,8 +3428,8 @@ pub(crate) fn show_shader_preparation(app: &mut SolveApp, ctx: &egui::Context) -
         crate::scenario::publish_target("render:shader-preparation:cancel", button.rect);
         cancel = button.clicked();
     });
-    if cancel {
-        app.start("render.cancel");
+    if cancel && let Err(error) = app.run("render.cancel", json!({"job": handle.id()})) {
+        app.set_status(error, true);
     }
     ctx.request_repaint_after(std::time::Duration::from_millis(100));
     true
