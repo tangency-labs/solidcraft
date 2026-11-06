@@ -69,14 +69,18 @@ pub(crate) fn stored(doc: &Document, text: &str) -> String {
     }
 }
 
-/// A computed model-space value written back to an editable field. Kept to a micrometre so a
-/// snapped drag does not write float residue like `1.2000000000000002 mm` (#9035, #9036).
+/// A computed model-space value written back to an editable field. Use all significant digits:
+/// display precision must never round a value that will be sent back to the model. Snapped
+/// drag writes go through [`model_drag`] instead (#9035).
 pub(crate) fn model(doc: &Document, mm: f64) -> String {
-    doc.design_length(mm).1
+    let unit = unit(doc);
+    let scale = unit_info(unit).map(|(_, scale)| scale).unwrap_or(1.0);
+    format!("{} {unit}", mm / scale)
 }
 
-/// A dragged length for an editable field: rounded to Preferences › Length decimals, but never
-/// coarser than the snap step so the written value still matches what the arrow snapped to (#9035).
+/// A snapped-drag length for an editable field: rounded to Preferences › Length decimals, but
+/// never coarser than the snap step so the written value still matches what the arrow snapped to
+/// (#9035). Alt/free drag keeps [`model`]'s full precision.
 pub(crate) fn model_drag(doc: &Document, mm: f64, step_mm: f64, decimals: u8) -> String {
     let u = unit(doc);
     let scale = unit_info(u).map(|(_, scale)| scale).unwrap_or(1.0);
