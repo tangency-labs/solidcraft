@@ -982,6 +982,10 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
             // Round in the value's own default unit (round(2.4 in) = 2 in for an inch parameter).
             let scale = scale_bare(Value::num(1.0), a.len, a.ang, d);
             let x = if scale != 0.0 { a.v / scale } else { a.v };
+            // Unit conversions leave noise (`3 in / 1 in` is 2.9999999999999996): a value within
+            // rounding error of a whole number is that number, so `floor` does not drop to 2.
+            let nearest = x.round();
+            let x = if (x - nearest).abs() <= 1e-9 * nearest.abs().max(1.0) { nearest } else { x };
             let r = match f {
                 "floor" => x.floor(),
                 "ceil" => x.ceil(),
@@ -1442,6 +1446,26 @@ mod tests {
         {
             assert_eq!(ev(e, Kind::Unitless).unwrap(), want, "{e}");
         }
+    }
+
+    /// `floor`, `ceil`, `trunc` and `round` work on the number a person typed, not on float noise:
+    /// `3 in / 1 in` is 2.9999999999999996 in floats, and `floor` of it must still be 3.
+    #[test]
+    fn rounding_functions_ignore_float_noise() {
+        for (e, want) in [("floor(3 in / 1 in)", 3.0), ("ceil(3 in / 1 in)", 3.0), ("trunc(3 in / 1 in)", 3.0), ("floor(-3 in / 1 in)", -3.0)] {
+            assert_eq!(ev(e, Kind::Unitless).unwrap(), want, "{e}");
+        }
+        let d = Defaults { len: 25.4, ang: std::f64::consts::PI / 180.0 };
+        let look = |_: &str| Err(DocError::Expr("no parameters".into()));
+        for e in ["floor(3 in)", "ceil(3 in)", "trunc(3 in)", "round(3 in)"] {
+            let got = eval_with_defaults(e, &look, d).unwrap().to_kind_in(Kind::Length, d).unwrap();
+            assert!((got - 76.2).abs() < 1e-9, "{e} gave {got}");
+        }
+        let got = eval_with_defaults("floor(30 deg)", &look, Defaults::default()).unwrap().to_kind(Kind::Angle).unwrap();
+        assert!((got - 30f64.to_radians()).abs() < 1e-9, "floor(30 deg) gave {got}");
+        // A real fraction still rounds the way its name says.
+        assert_eq!(ev("floor(2.9999)", Kind::Unitless).unwrap(), 2.0);
+        assert_eq!(ev("ceil(3.0001)", Kind::Unitless).unwrap(), 4.0);
     }
 
     /// A count from a length (`(L - 20) / 210`, the 210 read as unit-less) names the fix (#5901).
