@@ -1,0 +1,47 @@
+{
+  "en": {
+    "cmd.pointcloud_reload": "Reload Point Cloud",
+    "file_load.reloading_cloud": "Reloading point cloud",
+    "ui.point_cloud_reload": "Reload from file"
+  },
+  "fr": {
+    "cmd.pointcloud_reload": "Recharger le nuage de points",
+    "file_load.reloading_cloud": "Rechargement du nuage de points",
+    "ui.point_cloud_reload": "Recharger le fichier"
+  },
+  "de": {
+    "cmd.pointcloud_reload": "Punktwolke neu laden",
+    "file_load.reloading_cloud": "Punktwolke wird neu geladen",
+    "ui.point_cloud_reload": "Aus Datei neu laden"
+  },
+  "ja": {
+    "cmd.pointcloud_reload": "点群を再読み込み",
+    "file_load.reloading_cloud": "点群を再読み込み中",
+    "ui.point_cloud_reload": "ファイルから再読み込み"
+  },
+  "zh": {
+    "cmd.pointcloud_reload": "重新加载点云",
+    "file_load.reloading_cloud": "正在重新加载点云",
+    "ui.point_cloud_reload": "从文件重新加载"
+  },
+  "ko": {
+    "cmd.pointcloud_reload": "포인트 클라우드 다시 불러오기",
+    "file_load.reloading_cloud": "포인트 클라우드 다시 불러오는 중",
+    "ui.point_cloud_reload": "파일에서 다시 불러오기"
+  },
+  "ar": {
+    "cmd.pointcloud_reload": "إعادة تحميل سحابة النقاط",
+    "file_load.reloading_cloud": "جارٍ إعادة تحميل سحابة النقاط",
+    "ui.point_cloud_reload": "إعادة التحميل من الملف"
+  },
+  "he": {
+    "cmd.pointcloud_reload": "טעינה מחדש של ענן נקודות",
+    "file_load.reloading_cloud": "טוען מחדש ענן נקודות",
+    "ui.point_cloud_reload": "טעינה מחדש מהקובץ"
+  },
+  "vi": {
+    "cmd.pointcloud_reload": "Tải lại đám mây điểm",
+    "file_load.reloading_cloud": "Đang tải lại đám mây điểm",
+    "ui.point_cloud_reload": "Tải lại từ tệp"
+  }
+}
