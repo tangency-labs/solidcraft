@@ -50,6 +50,14 @@ pub(crate) fn default(doc: &Document, number: &str) -> String {
     }
 }
 
+/// A primitive's size: the number in the design's units ("20 in"), the way the primitive dialogs
+/// have always shown it (#630). A primitive is a size the user asks for, not a tool's preset, so
+/// its size keeps the design's units and the preference that scales the operation dialogs does
+/// not reach it (#12418).
+pub(crate) fn primitive_default(doc: &Document, number: &str) -> String {
+    format!("{} {}", number.trim(), unit(doc))
+}
+
 /// The size a tool ships with, in millimetres, shown in the design's unit (#12418). The size
 /// keeps the millimetres the tool ships with, so an extrude of 10 mm is 10 mm in every design,
 /// and it is written with as few digits as the design's unit allows, so that an inch design
@@ -100,8 +108,9 @@ fn short_number(value: f64) -> String {
     format_significant(value, MAX_DIGITS)
 }
 
-/// `value` rounded to `digits` significant digits.
-fn round_significant(value: f64, digits: usize) -> f64 {
+/// `value` rounded to `digits` significant digits. Crate-visible so that a test can ask whether
+/// a shorter form would still keep the size (#12418).
+pub(crate) fn round_significant(value: f64, digits: usize) -> f64 {
     if value == 0.0 {
         return 0.0;
     }

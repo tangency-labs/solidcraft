@@ -90,7 +90,9 @@ extrude of 10 mm starts at `10 mm` in a millimetre design, `1 cm` in a centimetr
 in an inch one. A metric unit converts exactly; an imperial one keeps the size within 2% of it, so
 the part is the part the tool intends. Preferences (Design, *Start new lengths with the size their
 tool ships with*) can turn this off, and the number the tool ships with is then read in the
-design's units (`10 in`), as before. Canvas handles and live sketch
+design's units (`10 in`), as before. The primitive dialogs (Box, Cylinder, Sphere, Torus, Cone,
+Coil) keep their sizes in the design's units, as they always have: a box of `20` is 20 in in an
+inch design. Canvas handles and live sketch
 values use the same units as the operation. Angles, counts and scale factors keep their own
 units. Preferences selects the default units for new designs; existing designs use their own
 Document Settings.

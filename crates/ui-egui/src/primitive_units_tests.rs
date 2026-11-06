@@ -1,9 +1,8 @@
 //! #630: the Box, Cylinder, Sphere, Torus and Coil dialogs show the unit of their sizes, as the
-//! other dialogs do ("10 mm"), in the design's units. OK makes the size the tool ships with
-//! (#12418): a millimetre size shown in the design's units ("10 mm", "1 cm", "0.4 in"). A bare
-//! number typed into a field still means the design's units. #5638: the Box dialog places the
-//! box by its corner or centre, the Cylinder and Cone dialogs by their base and the Sphere and
-//! Torus dialogs by their centre, typed or picked.
+//! other dialogs do ("10 mm"), in the design's units. OK makes what the bare numbers made before,
+//! and a bare number typed into a field still means the design's units. #5638: the Box dialog
+//! places the box by its corner or centre, the Cylinder and Cone dialogs by their base and the
+//! Sphere and Torus dialogs by their centre, typed or picked.
 
 use serde_json::{Value, json};
 use solidcraft_engine::Session;
@@ -122,19 +121,6 @@ fn primitive_dialogs_show_millimetres_and_make_the_same_sizes() {
     assert_size(&mut h.app.session, [20.0, 20.0, 20.0]);
 }
 
-/// The sizes an inch design shows for a primitive: the size the tool ships with, in inches
-/// (#12418).
-fn inches_of(cmd: &str) -> &'static [(&'static str, &'static str)] {
-    match cmd {
-        "solid.box" => &[("length", "0.8 in"), ("width", "0.8 in"), ("height", "0.8 in")],
-        "solid.cylinder" => &[("diameter", "0.8 in"), ("height", "0.8 in")],
-        "solid.sphere" => &[("diameter", "0.8 in")],
-        "solid.torus" => &[("major", "0.8 in"), ("minor", "0.2 in")],
-        "solid.coil" => &[("diameter", "1.6 in"), ("revolutions", "4"), ("pitch", "0.31 in"), ("section_size", "0.12 in")],
-        other => panic!("no primitive {other}"),
-    }
-}
-
 #[test]
 fn in_an_inch_design_primitive_dialogs_show_inches_and_read_bare_numbers_as_inches() {
     for (cmd, sizes) in PRIMITIVES {
@@ -142,21 +128,16 @@ fn in_an_inch_design_primitive_dialogs_show_inches_and_read_bare_numbers_as_inch
         h.app.start(cmd);
         h.frames(3);
         let shown = fields(&h);
-        let want: Vec<(&str, String)> = inches_of(cmd).iter().map(|(k, v)| (*k, (*v).to_string())).collect();
+        let want: Vec<(&str, String)> =
+            sizes.iter().map(|(k, v)| (*k, if *k == "revolutions" { (*v).to_string() } else { format!("{v} in") })).collect();
         assert_eq!(shown, want, "{cmd}");
         assert_shown(&h, &shown);
         ok(&mut h);
-        // The part is the size the tool ships with, to within the 2% the inches may drift.
+        // The same size the bare numbers made in an inch design.
         let made = volume(&mut h.app.session);
-        let before = bare_volume("mm", cmd, sizes);
-        assert!(made > 0.0 && (made - before).abs() < 0.1 * before, "{cmd}: {made} mm³, the millimetre design made {before} mm³");
+        let before = bare_volume("in", cmd, sizes);
+        assert!(made > 0.0 && (made - before).abs() < 1e-6 * before, "{cmd}: {made} mm³, the bare numbers made {before} mm³");
     }
-    // The box is 20 mm, shown as "0.8 in".
-    let mut h = design("in");
-    h.app.start("solid.box");
-    h.frames(3);
-    ok(&mut h);
-    assert_size(&mut h.app.session, [20.32, 20.32, 20.32]);
     // A bare number typed into a field is in the design's units; a typed unit is honoured.
     let mut h = design("in");
     h.app.start("solid.box");
@@ -165,9 +146,9 @@ fn in_an_inch_design_primitive_dialogs_show_inches_and_read_bare_numbers_as_inch
     type_into(&mut h, "height", "10 mm");
     h.frames(2);
     let (_, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
-    assert_eq!((&params["length"], &params["width"], &params["height"]), (&json!("0.8 in"), &json!("2 in"), &json!("10 mm")));
+    assert_eq!((&params["length"], &params["width"], &params["height"]), (&json!("20 in"), &json!("2 in"), &json!("10 mm")));
     ok(&mut h);
-    assert_size(&mut h.app.session, [20.32, 50.8, 10.0]);
+    assert_size(&mut h.app.session, [508.0, 50.8, 10.0]);
 }
 
 #[test]
@@ -175,9 +156,9 @@ fn a_centimetre_design_shows_centimetres() {
     let mut h = design("cm");
     h.app.start("solid.sphere");
     h.frames(3);
-    assert_eq!(fields(&h), vec![("diameter", "2 cm".to_string())]);
+    assert_eq!(fields(&h), vec![("diameter", "20 cm".to_string())]);
     ok(&mut h);
-    assert_size(&mut h.app.session, [20.0, 20.0, 20.0]);
+    assert_size(&mut h.app.session, [200.0, 200.0, 200.0]);
 }
 
 /// The sizes a primitive feature keeps, as stored.
@@ -346,6 +327,8 @@ fn operation_length_defaults_follow_every_design_unit() {
     for units in ["mm", "cm", "m", "in", "ft"] {
         let h = design(units);
         let metric = matches!(units, "mm" | "cm" | "m");
+        // How many millimetres a design unit holds.
+        let scale = solidcraft_engine::doc::expr::unit_info(units).unwrap().1;
         for &(command, numbers) in CASES {
             let mut d = crate::dialogs::Dialog::for_command(&h.app, command).unwrap_or_else(|| panic!("no dialog for {command}"));
             let values: Vec<_> = crate::length_input::fields(&h.app.session.doc, &mut d.kind).into_iter().map(|v| v.clone()).collect();
@@ -367,8 +350,18 @@ fn operation_length_defaults_follow_every_design_unit() {
                     "{command} in {units}: {value} is {shown} mm, the tool ships {millimetres} mm"
                 );
                 if !metric {
-                    // An imperial size is short enough to read at a glance (#12418).
-                    assert!(significant_digits(text) <= 2, "{command} in {units}: {value} is not short enough");
+                    // An imperial size is as short as it can be and still the size the tool ships
+                    // with (#12418): the fewest significant digits that keep it within 2%. Two
+                    // digits hold every size but 5 mm in feet, which is "0.0164 ft": "0.016 ft"
+                    // would be 2.5% off, more than the size may drift.
+                    let exact = millimetres / scale;
+                    for digits in 1..significant_digits(text) {
+                        let shorter = crate::length_input::round_significant(exact, digits);
+                        assert!(
+                            (shorter - exact).abs() > 0.02 * exact.abs(),
+                            "{command} in {units}: {value} carries more digits than the size needs"
+                        );
+                    }
                 }
             }
         }
