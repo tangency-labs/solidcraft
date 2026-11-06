@@ -36,7 +36,9 @@
 //! `SmTemporaryRadiusChange`, which only the solver it is applied to evaluates before
 //! the change is reverted, so the copies evaluate as the shared object does.
 //! This foundation supports solver construction/loading; it does not substitute a
-//! result for the remaining fillet execution stages. No recursion.
+//! result for the remaining fillet execution stages. Band checks recognize constrained
+//! closest-point endpoints within the existing solver tolerance in geometric space.
+//! No recursion.
 //! Attributes (issue #1462): upstream they live on the bodies' objects; here
 //! [`FilletSession::with_second_base`] moves the target's (and second base's) own
 //! attributes ([`Brep::add_attribute`]) into the session store under the bodies' issued
@@ -5255,6 +5257,8 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                     .clone()
                     .ok_or_else(|| invalid("filleted edge without curve"))?;
                 let edge_ivl_b = self.target.edge(edge_b)?.interval;
+                let edge_start_b = edge_curve_b.evaluate_point(k, edge_ivl_b.min())?;
+                let edge_end_b = edge_curve_b.evaluate_point(k, edge_ivl_b.max())?;
                 let (Some(rails_a), Some(rails_b)) = (rails.get(a), rails.get(b)) else {
                     continue;
                 };
@@ -5313,6 +5317,17 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                 continue; // beside the band, not across it
                             }
                             let e = edge_curve_b.evaluate_point(k, t)?;
+                            // A constrained closest point can return an endpoint one
+                            // parameter ulp inside the interval. It is still beside
+                            // the band: testing only t would extend the band's chord
+                            // across the face and falsely catch a distant rail (#2903).
+                            // Use the existing solver tolerance in geometric space,
+                            // independent of the edge curve's parameterization.
+                            if (e - edge_start_b).length() <= tol
+                                || (e - edge_end_b).length() <= tol
+                            {
+                                continue;
+                            }
                             let r = curve_b.evaluate_point(k, on_rail.parameter)?;
                             let mut chord = e - r;
                             let width = chord.length();

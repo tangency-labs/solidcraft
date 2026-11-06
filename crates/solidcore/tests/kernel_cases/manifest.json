@@ -100,18 +100,18 @@
       "ungraded": {}
     },
     "fillets": {
-      "cases": 270,
+      "cases": 274,
       "chain": {
-        "1": 5,
+        "1": 9,
         "13": 4,
         "2": 6,
         "4": 236,
         "7": 2,
         "8": 1
       },
-      "expressible": 46,
+      "expressible": 50,
       "not_expressible": 16,
-      "operation_expressible": 254,
+      "operation_expressible": 258,
       "reasons": {
         "SolidCraft has no command for it yet": 2,
         "refused or failed in SolidCraft, not in a kernel operation": 14
@@ -1017,7 +1017,7 @@
     {
       "case": "history/cov-parameters-cyclic-expression-refused",
       "why": [
-        "the failure is SolidCraft's, not a kernel operation's: step 4 (parameters.change): expression: circular reference: A → B → A"
+        "the failure is SolidCraft's, not a kernel operation's: step 4 (parameters.change): expression: circular reference: A \u2192 B \u2192 A"
       ]
     },
     {
@@ -1264,7 +1264,7 @@
     {
       "case": "inspect/cov-continuity-refuses-too-few-samples",
       "why": [
-        "the failure is SolidCraft's, not a kernel operation's: step 2 (inspect.continuity): invalid parameters for `inspect.continuity`: `samples` must be 3…257 stations along each edge"
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (inspect.continuity): invalid parameters for `inspect.continuity`: `samples` must be 3\u2026257 stations along each edge"
       ]
     },
     {
@@ -1282,7 +1282,7 @@
     {
       "case": "inspect/cov-isocurve-refuses-zero-curves",
       "why": [
-        "the failure is SolidCraft's, not a kernel operation's: step 2 (inspect.isocurve): invalid parameters for `inspect.isocurve`: `count` must be a whole number of curves each way, 1…100"
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (inspect.isocurve): invalid parameters for `inspect.isocurve`: `count` must be a whole number of curves each way, 1\u2026100"
       ]
     },
     {
@@ -1665,7 +1665,7 @@
     {
       "case": "sheet-metal/570-flange-refuses-thickness-it-would-ignore",
       "why": [
-        "no kernel operation ran before the failure: step 4 (sheet.flange): invalid parameters for `sheet.flange`: `thickness` is not a sheet.flange parameter: the sheet metal rule sets it. Make a rule with sheet.manage_rules {name, thickness, …} and pass its name as `rule`"
+        "no kernel operation ran before the failure: step 4 (sheet.flange): invalid parameters for `sheet.flange`: `thickness` is not a sheet.flange parameter: the sheet metal rule sets it. Make a rule with sheet.manage_rules {name, thickness, \u2026} and pass its name as `rule`"
       ]
     },
     {
@@ -1971,7 +1971,7 @@
     {
       "case": "surfaces/cov-offset-tolerance-out-of-range-refused",
       "why": [
-        "the failure is SolidCraft's, not a kernel operation's: step 2 (surface.offset): invalid input: the offset tolerance must be 0.000001…10 mm"
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (surface.offset): invalid input: the offset tolerance must be 0.000001\u202610 mm"
       ]
     },
     {
