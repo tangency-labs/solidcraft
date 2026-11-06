@@ -29,7 +29,7 @@ including the dialogs and tools for these features.
 
 ## Get it running (about 10 minutes on a fast machine)
 
-You need stable Rust 1.95 or newer (required by egui/eframe 0.36). For the web
+You need stable Rust 1.96 or newer (required by monty, the MCP script sandbox; egui/eframe 0.36 need 1.95). For the web
 build you also need `rustup target add wasm32-unknown-unknown` and [`trunk`](https://github.com/trunk-rs/trunk)
 ([documentation](https://trunk-rs.github.io/trunk/)).
 

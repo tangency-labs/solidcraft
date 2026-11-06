@@ -5642,6 +5642,8 @@
   "ui.mcp_agents": "Tác tử qua MCP",
   "ui.mcp_compact": "Đầu ra gọn",
   "ui.mcp_compact_note": "Dành cho các tác tử kết nối qua máy chủ MCP (solidcraft-cli mcp): inspect_design tóm tắt các bản phác thảo và kết quả công cụ không được định dạng đẹp, nên tốn ít token hơn. Áp dụng cho các phiên tác tử bắt đầu sau khi thay đổi; --compact hoặc SOLIDCRAFT_MCP_COMPACT=1 cũng bật nó.",
+  "ui.mcp_scx": "Chế độ kịch bản (scx)",
+  "ui.mcp_scx_note": "Dành cho tác tử kết nối qua máy chủ MCP (solidcraft-cli mcp): thay cho các công cụ thông thường, tác tử dùng run, design và look, và dựng mô hình bằng các kịch bản Python ngắn với từ vựng CAD. Kịch bản chạy trong hộp cát, không truy cập được tệp, mạng hay chương trình khác. Trong thử nghiệm, chế độ này giảm 20-59 % chi phí một phiên dựng mô hình. Áp dụng cho các phiên tác tử bắt đầu sau khi thay đổi; --scx hoặc SOLIDCRAFT_MCP_SCX=1 cũng bật chế độ này.",
   "ui.measure": "Đo lường",
   "ui.mesh_format_3mf": "3MF",
   "ui.mesh_format_3mf_tagged": "3MF kèm thẻ bề mặt",

@@ -1605,6 +1605,10 @@ preference_settings! {
     /// `inspect_design` summarises sketches and tool JSON is not pretty-printed. Off: as always.
     /// The server asks once per agent session (`mcp.options`), so a change applies to the next one.
     mcp_compact: bool = false, PAGE_ASSISTANT;
+    /// Script mode for agents connected through the MCP server (docs/mcp.md, "Script mode"): the tools are
+    /// `run`, `design` and `look`, and the agent builds with short Python scripts run in a sandbox.
+    /// Off: the usual tools. Like `mcp_compact`, it applies to the next agent session.
+    mcp_scx: bool = false, PAGE_ASSISTANT;
 
     // ---- Sketch / selection modifier bindings (classic defaults; alternate mapping is opt-in) ----
     /// Modifier that suppresses sketch auto-snap while drawing or dragging a sketch point.
@@ -6771,13 +6775,14 @@ mod tests {
         assert!(!app.ui.dark, "an explicit theme does not follow the desktop");
     }
 
-    /// Compact output for MCP agents: off by default, a checkbox on the AI page (there with the
-    /// chat off too), reported to the bridged MCP server as `mcp.options`, reset by Restore Defaults.
+    /// Compact output and script mode for MCP agents: off by default, checkboxes on the AI page
+    /// (there with the chat off too), reported to the bridged MCP server as `mcp.options`, reset by
+    /// Restore Defaults.
     #[test]
     fn mcp_compact_output_is_an_ai_preference_the_server_reads() {
         use serde_json::json;
         let mut h = crate::scenario::Harness::new();
-        assert_eq!(h.call("mcp.options", json!({}))["result"], json!({"compact": false}));
+        assert_eq!(h.call("mcp.options", json!({}))["result"], json!({"compact": false, "scx": false}));
         h.call("ui.prefs", json!({"ai_features": false, "open": "AI"}));
         h.frames(3);
         assert!(crate::scenario::handle_at("prefs:mcp_compact").is_some(), "the checkbox is on the AI page with the chat off");
@@ -6785,9 +6790,13 @@ mod tests {
         h.call("ui.prefs", json!({"mcp_compact": true}));
         h.frames(2);
         assert!(h.app.preferences.mcp_compact);
-        assert_eq!(h.call("mcp.options", json!({}))["result"], json!({"compact": true}));
+        assert_eq!(h.call("mcp.options", json!({}))["result"], json!({"compact": true, "scx": false}));
+        assert!(crate::scenario::handle_at("prefs:mcp_scx").is_some(), "script mode is a checkbox beside it");
+        h.call("ui.prefs", json!({"mcp_scx": true}));
+        h.frames(2);
+        assert_eq!(h.call("mcp.options", json!({}))["result"], json!({"compact": true, "scx": true}));
         h.call("ui.prefs", json!({"button": "defaults"}));
-        assert_eq!(h.call("mcp.options", json!({}))["result"], json!({"compact": false}));
+        assert_eq!(h.call("mcp.options", json!({}))["result"], json!({"compact": false, "scx": false}));
     }
 
     /// Theme files (#2255): a built-in one and an imported one turn on through `ui.prefs`, the

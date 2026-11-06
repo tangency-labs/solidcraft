@@ -182,6 +182,50 @@ solidcraft-cli mcp --connect 127.0.0.1:7878 --compact
 SOLIDCRAFT_MCP_COMPACT=1 solidcraft-cli mcp --connect 127.0.0.1:7878
 ```
 
+### Script mode
+
+Script mode (scx) gives the agent three tools instead of the usual ones: `run`, `design` and
+`look`. The agent builds with short Python scripts in a CAD vocabulary (`box`, `cylinder`,
+`hole`, `sketch(...).extrude`, `fillet`, `hollow`, `with part(...)`, `cmd(...)` for any other
+command), which the server instructions list. Every `run` reply ends with what changed: bodies
+created, changed (volume before and after, bounding box) and removed, so the agent checks its work
+without extra calls. Measured against the usual tools on the same tasks, it cut the cost of a
+modelling session by 20-59 % at about the same accuracy; the tasks, the harness and the results are in
+[the scx write-up](https://github.com/dudedagger42/solidcraft/tree/all/scx-hybrid/docs/scx-hybrid).
+
+It is off by default and turned on like compact output, with no change to the client
+configuration:
+
+- **Preferences › AI › Agents through MCP › Script mode (scx)** in the app, for every server
+  bridged to it. It applies to agent sessions started after the change.
+- `solidcraft-cli mcp --scx`.
+- The environment variable `SOLIDCRAFT_MCP_SCX=1` (the same values as `SOLIDCRAFT_MCP_COMPACT`).
+
+| Tool | Arguments | What it does |
+| --- | --- | --- |
+| `run` | `code`, `look?`, `new?` | Runs a script. Steps run as they come, so the ones before an error stay. The reply has what the script printed, its last expression, an error with its line and a hint, and what changed. `look: true` adds a small picture; `new: true` (or a name) starts a new, empty design first. |
+| `design` | | Outline of the design: every body with volume, bounding box and face count, and the parts. |
+| `look` | `view?`, `size?` | A small picture of the model (`iso`, `front`, `top`...). |
+
+Scripts run in a sandbox, [Monty](https://github.com/pydantic/monty), a Python interpreter
+written in Rust that has no access to the host: opening files, the network, environment variables,
+starting programs and importing modules other than `json` and `math` all fail with
+`PermissionError` or `NameError`. A script reaches SolidCraft only through `execute`, `measure`,
+`list_commands` and `new_design`, answered exactly as when the agent calls them, under the same
+[path rules](#which-files-the-agent-can-reach). Each script runs in its own `solidcraft-cli
+scx-worker` process, which the operating system caps at 1 GiB of memory (a Job Object on Windows,
+`RLIMIT_AS` on Linux and the BSDs) and which may start no other process. Each step may compute for
+30 seconds. A script that goes past a limit ends with `MemoryError`, `TimeoutError` or
+`RecursionError`; the server and the design go on.
+
+The language is a subset of Python 3: functions, loops, comprehensions, f-strings, `dict`, `list`,
+`set` and `tuple`, but no classes that inherit and no imports beyond `json` and `math`.
+
+```sh
+solidcraft-cli mcp --connect 127.0.0.1:7878 --scx
+SOLIDCRAFT_MCP_SCX=1 solidcraft-cli mcp --connect 127.0.0.1:7878
+```
+
 ### Tool annotations
 
 Each tool says what it may do, for clients that ask before running tools (or auto-approve on

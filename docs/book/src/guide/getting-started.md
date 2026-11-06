@@ -9,7 +9,7 @@ working (see the [compatibility notes](https://github.com/tangency-labs/solidcra
 Download the installer for your system from the
 [Download section of the README](https://github.com/tangency-labs/solidcraft#download) or the
 [releases page](https://github.com/tangency-labs/solidcraft/releases), or build it yourself with
-stable Rust (1.95 or newer):
+stable Rust (1.96 or newer):
 
 ```sh
 git clone https://github.com/tangency-labs/solidcraft && cd solidcraft

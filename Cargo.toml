@@ -8,7 +8,7 @@ exclude = ["vendor"]
 version = "0.40.0-rc.2"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-rust-version = "1.95"
+rust-version = "1.96"
 authors = ["SolidCraft contributors"]
 repository = "https://github.com/bherbruck/solidcraft"
 
@@ -51,6 +51,9 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+# The sandboxed Python interpreter of the MCP server's script mode (crates/mcp/src/scx).
+monty = "1.5.0"
+monty-types = "1.5.0"
 # command parameter and result schemas
 schemars = "1.2"
 serde_path_to_error = "0.1"

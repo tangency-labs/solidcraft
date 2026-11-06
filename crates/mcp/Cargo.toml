@@ -11,6 +11,9 @@ workspace = true
 [dependencies]
 solidcraft-engine = { workspace = true }
 serde_json = { workspace = true }
+# Script mode (src/scx): runs model-written Python with no access to the host.
+monty = { workspace = true }
+monty-types = { workspace = true }
 
 [dev-dependencies]
 # The renderer `solidcraft-cli mcp` installs, so the tests' screenshots are drawn as the server's.
