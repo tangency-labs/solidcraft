@@ -434,6 +434,7 @@ fn patterns_of_components_place_occurrences() {
     run(&mut s, "component.activate", json!({"component": "root"}));
     let r = run(&mut s, "solid.pattern.rectangular", json!({"components": ["Peg"], "dir1": [0, 0, 1], "count1": 3, "spacing1": 20}));
     assert_eq!(r["occurrences"].as_array().map(Vec::len), Some(2), "{r}");
+    assert!(r.get("feature").and_then(|v| v.as_u64()).is_some(), "component pattern records a Pattern feature: {r}");
     let m = run(&mut s, "inspect.measure", json!({}));
     assert_eq!(m["body_count"], 3, "{m}");
     let zs: Vec<f64> = m["bodies"].as_array().unwrap().iter().filter_map(|b| b["bbox"]["min"][2].as_f64()).collect();
@@ -441,6 +442,50 @@ fn patterns_of_components_place_occurrences() {
         assert!(zs.iter().any(|x| (x - z).abs() < 1e-6), "{zs:?}");
     }
     assert!(s.execute("solid.pattern.circular", &json!({"components": ["Nope"], "axis": "Z", "count": 2})).is_err());
+}
+
+/// #12116: a Pattern of a component keeps its count expression, so changing the parameter
+/// adds or removes placements the way a body or feature pattern does. Survivors keep their ids.
+#[test]
+fn component_pattern_follows_its_count_parameter() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "2", "unit": ""}));
+    run(&mut s, "component.create", json!({"name": "Unit"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new", "body_name": "Block"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let r = run(&mut s, "solid.pattern.rectangular", json!({"components": ["Unit"], "dir1": [1, 0, 0], "count1": "n", "spacing1": 30}));
+    assert_eq!(r["occurrences"].as_array().map(Vec::len), Some(1), "{r}");
+    let first_copy = r["occurrences"][0].as_u64().expect("copy id");
+    let names = |s: &Session| -> Vec<String> { s.doc.occurrences.iter().filter(|o| o.component != 0).map(|o| o.name.clone()).collect() };
+    assert_eq!(names(&s), ["Unit:1", "Unit:2"], "{:?}", names(&s));
+
+    let change = run(&mut s, "parameters.change", json!({"name": "n", "expression": "4"}));
+    assert!(change["recomputed"].as_u64().unwrap_or(0) >= 1, "pattern must rebuild: {change}");
+    assert_eq!(names(&s), ["Unit:1", "Unit:2", "Unit:3", "Unit:4"], "{:?}", names(&s));
+    assert!(s.doc.occurrences.iter().any(|o| o.id == first_copy), "survivor keeps its id");
+    // The box is centred on each placement: centres at 0, 30, 60, 90 (bbox min is 5 mm left).
+    let xs: Vec<f64> = run(&mut s, "inspect.measure", json!({}))["bodies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|b| {
+            let lo = b["bbox"]["min"][0].as_f64()?;
+            let hi = b["bbox"]["max"][0].as_f64()?;
+            Some((lo + hi) / 2.0)
+        })
+        .collect();
+    for x in [0.0_f64, 30.0, 60.0, 90.0] {
+        assert!(xs.iter().any(|v| (v - x).abs() < 1e-6), "want centre x={x} in {xs:?}");
+    }
+
+    let shrink = run(&mut s, "parameters.change", json!({"name": "n", "expression": "2"}));
+    assert!(shrink["recomputed"].as_u64().unwrap_or(0) >= 1, "{shrink}");
+    assert_eq!(names(&s), ["Unit:1", "Unit:2"], "{:?}", names(&s));
+    assert!(s.doc.occurrences.iter().any(|o| o.id == first_copy), "survivor keeps its id after shrink");
+
+    run(&mut s, "parameters.change", json!({"name": "n", "expression": "4"}));
+    assert_eq!(names(&s).len(), 4, "{:?}", names(&s));
+    assert!(s.doc.occurrences.iter().any(|o| o.id == first_copy), "survivor keeps its id after grow again");
 }
 
 /// #4763: a body of a component moved 60 mm along X, patterned from the root. The copy goes
