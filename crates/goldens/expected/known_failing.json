@@ -1,5 +1,5 @@
 {
   "blend.fillet_executive_p3": {
-    "real-box-high-corner-setback-eight": "tangency-labs/solidcore#2933: the corner patch overruns the setback of 8 along the top round and folds (pinched creases, two sliver faces); edge tolerance 5.17e-5"
+    "real-box-high-corner-setback-eight": "tangency-labs/solidcore#2933: the N x N corner patch meets the three rounds up to 4.35 degrees off tangent; edge tolerance 5.17e-5"
   }
 }

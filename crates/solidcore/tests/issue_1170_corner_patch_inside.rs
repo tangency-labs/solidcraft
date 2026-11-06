@@ -1,7 +1,6 @@
 //! #1170 (WR-461): the setback corner patch of three rounds stays inside the faces it
 //! meets. A box 60 x 40 x 20 with r5 rounds on the three edges at (60, 40, 20) and a
-//! setback on that corner. The setback itself needs `fillet_setback_from_start_vertex`
-//! (WR-445, #1169), so every case here sets it.
+//! setback on that corner.
 
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::math::Point3;
@@ -26,7 +25,6 @@ fn at_corner(b: &Brep, v: VertexId) -> solidcore::Result<bool> {
 /// The box filleted with a setback at its far corner.
 fn build(setback: f64, stay_inside: bool) -> solidcore::Result<(Kernel, Brep)> {
     let mut k = Kernel::default();
-    k.fixes.fillet_setback_from_start_vertex = true;
     k.fixes.corner_blend_stays_inside_neighbours = stay_inside;
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0)?;
     let mut edges = Vec::new();

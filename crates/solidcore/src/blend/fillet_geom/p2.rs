@@ -650,12 +650,11 @@ fn g2_rail_rail_curve(
 /// The point and the tangent `set_back_dist` along edge `e` from the filleted vertex
 /// `cp_vertex` (`CalcSetBackVert`'s walk along the edge's curve).
 ///
-/// Upstream chooses the direction with `GetVertex()` (the primary edge use's vertex) and walks
-/// the curve's natural interval, so on an edge whose primary edge use runs against its curve
-/// the point is measured from the far vertex (WR-445, #1169). With
-/// `Kernel::fixes.fillet_setback_from_start_vertex` it walks the edge's own interval from the
-/// end `cp_vertex` marks (`GetStartVertex()` marks the start), a negative length from the
-/// other end.
+/// It walks the edge's own interval from the end `cp_vertex` marks (`GetStartVertex()` marks
+/// the start), a negative length from the other end, as the fork does. Upstream chooses the
+/// direction with `GetVertex()` (the primary edge use's vertex) and walks the curve's natural
+/// interval, so on an edge whose primary edge use runs against its curve the point is
+/// measured from the far vertex (WR-445).
 pub(crate) fn set_back_frame(
     k: &Kernel,
     target: &Brep,
@@ -666,31 +665,15 @@ pub(crate) fn set_back_frame(
 ) -> Result<(Point3, Point3)> {
     let curve = edge::curve(target, e)?.ok_or_else(|| SolidError::null_pointer(op))?;
     let owner_zone_tol_3d = Some(edge::tolerance(target, e)?);
-    let pv = if k.fixes.fillet_setback_from_start_vertex {
-        let ivl = edge::interval(target, e)?;
-        let from_start = edge::start_vertex(target, e)? == cp_vertex;
-        let (start, length) = if from_start {
-            (ivl.min(), set_back_dist)
-        } else {
-            (ivl.max(), -set_back_dist)
-        };
-        let end_param = arc_length_param(k, curve, start, length, owner_zone_tol_3d, op)?;
-        curve.evaluate(k, end_param, 1, true, true)?
+    let ivl = edge::interval(target, e)?;
+    let from_start = edge::start_vertex(target, e)? == cp_vertex;
+    let (start, length) = if from_start {
+        (ivl.min(), set_back_dist)
     } else {
-        let ivl = curve.natural_interval();
-        // Walk along the curve for dSetBackDist
-        if edge::vertex(target, e)? == cp_vertex {
-            let end_param =
-                arc_length_param(k, curve, ivl.min(), set_back_dist, owner_zone_tol_3d, op)?;
-            curve.evaluate(k, end_param, 1, true, true)?
-        } else {
-            let mut new_curve = curve.copy(k)?;
-            let new_ivl = new_curve.reverse_parameterization(k, &ivl)?;
-            let end_param =
-                arc_length_param(k, &new_curve, new_ivl.min(), set_back_dist, None, op)?;
-            new_curve.evaluate(k, end_param, 1, true, true)?
-        }
+        (ivl.max(), -set_back_dist)
     };
+    let end_param = arc_length_param(k, curve, start, length, owner_zone_tol_3d, op)?;
+    let pv = curve.evaluate(k, end_param, 1, true, true)?;
     let orig = pv.first().copied().ok_or_else(|| SolidError::sm_err(op))?;
     let normal = pv.get(1).copied().ok_or_else(|| SolidError::sm_err(op))?;
     Ok((orig, normal))
@@ -3503,12 +3486,11 @@ mod tests {
         assert!(fb.geom(g).unwrap().vertices.is_empty());
     }
 
-    /// The setback is measured from the filleted vertex along the edge (WR-445, #1169). Upstream
-    /// picks the direction from the primary edge use's vertex but walks the curve's natural
-    /// interval, so on an edge whose primary edge use runs against its curve the point comes
-    /// from the far vertex, whichever end is filleted.
+    /// The setback is measured from the filleted vertex along the edge (WR-445), also on an
+    /// edge whose primary edge use runs against its curve, where upstream measures from the
+    /// far vertex whichever end is filleted.
     #[test]
-    fn a_setback_is_measured_from_the_filleted_vertex_with_the_fix() {
+    fn a_setback_is_measured_from_the_filleted_vertex() {
         let mut k = Kernel::default();
         let target =
             crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 60.0, 40.0, 20.0)
@@ -3532,39 +3514,20 @@ mod tests {
             out
         };
 
-        // upstream: right on an edge whose primary edge use runs with its curve, the far
-        // vertex's distance on one that runs against it
-        let upstream = errors(&k);
+        let found = errors(&k);
         assert!(
-            upstream.iter().any(|&(against, _)| against),
+            found.iter().any(|&(against, _)| against),
             "no edge runs against its curve"
         );
-        assert!(upstream
-            .iter()
-            .filter(|&&(against, _)| !against)
-            .all(|&(_, err)| err < 1e-9));
-        assert!(
-            upstream
-                .iter()
-                .filter(|&&(against, _)| against)
-                .all(|&(_, err)| err > 1.0),
-            "{upstream:?}"
-        );
-
-        k.fixes.fillet_setback_from_start_vertex = true;
-        assert!(
-            errors(&k).iter().all(|&(_, err)| err < 1e-9),
-            "{:?}",
-            errors(&k)
-        );
+        assert!(found.iter().all(|&(_, err)| err < 1e-9), "{found:?}");
     }
 
-    /// The setback walks the edge's own interval, not its curve's natural interval (WR-445,
-    /// #1169): each box edge's curve is replaced by a line running 10 past both its ends, the
-    /// edge keeping the middle part as its interval. Upstream walks from the natural interval's
+    /// The setback walks the edge's own interval, not its curve's natural interval (WR-445):
+    /// each box edge's curve is replaced by a line running 10 past both its ends, the edge
+    /// keeping the middle part as its interval. Upstream walks from the natural interval's
     /// start, 10 outside the edge, from either end.
     #[test]
-    fn a_setback_walks_the_edges_own_interval_with_the_fix() {
+    fn a_setback_walks_the_edges_own_interval() {
         let mut k = Kernel::default();
         let mut target =
             crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 60.0, 40.0, 20.0)
@@ -3608,11 +3571,6 @@ mod tests {
             out
         };
 
-        // upstream: from either end the walk starts outside the edge
-        let upstream = errors(&k);
-        assert!(upstream.iter().all(|&err| err > 1.0), "{upstream:?}");
-
-        k.fixes.fillet_setback_from_start_vertex = true;
         let fixed = errors(&k);
         assert!(fixed.iter().all(|&err| err < 1e-9), "{fixed:?}");
     }

@@ -6,8 +6,7 @@
 //! patch's edge, the one nearer the other's faces: two near-equal distances, so a
 //! section half could come out as the approximation, 1.4e-5 off the round. With
 //! `fillet_patch_keeps_fillet_edges` every edge between the patch and a round is the
-//! round's own edge and lies on it. The setback itself needs
-//! `fillet_setback_from_start_vertex` (WR-445).
+//! round's own edge and lies on it.
 
 #![allow(
     clippy::unwrap_used,
@@ -43,7 +42,6 @@ fn face_middle_from_origin(k: &Kernel, b: &Brep, f: FaceId) -> f64 {
 #[test]
 fn wr_546_setback_patch_meets_the_rounds_on_their_own_edges() {
     let mut k = Kernel::default();
-    k.fixes.fillet_setback_from_start_vertex = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 40.0).unwrap();
     let edges: Vec<_> = b.edges().ids().collect();

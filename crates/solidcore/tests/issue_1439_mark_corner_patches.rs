@@ -29,7 +29,6 @@ fn at_corner(b: &Brep, v: VertexId) -> bool {
 /// set-back corner in the session's corner list.
 fn build(mark: Option<bool>) -> (Brep, Vec<(usize, FaceId)>, usize) {
     let mut k = Kernel::default();
-    k.fixes.fillet_setback_from_start_vertex = true;
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
     let mut edges = Vec::new();
     for e in b.edges().ids() {

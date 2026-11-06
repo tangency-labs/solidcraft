@@ -356,7 +356,6 @@ fn eased_setback_takes_the_order_2_section_at_thumbweight_0() {
     };
     for (ease, want) in [(0.0, 62279.332678480074), (4.0, 62375.682794873181)] {
         let mut k = kernel(true);
-        k.fixes.fillet_setback_from_start_vertex = true;
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 40.0).unwrap();
         let edges: Vec<EdgeId> = b
             .edges()

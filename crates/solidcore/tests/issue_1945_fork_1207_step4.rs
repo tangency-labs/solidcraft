@@ -146,7 +146,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.extrusion_origin_scaled_zero = true;
     k.fixes.sheet_sweep_joins_profile_wires = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
-    k.fixes.fillet_setback_from_start_vertex = true;
     k.fixes.fillet_corner_sphere_from_four_arcs = true;
     k.fixes.imprint_trims_edge_to_proto_vertex = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;

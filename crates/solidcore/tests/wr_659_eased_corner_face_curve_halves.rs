@@ -37,7 +37,6 @@ fn at_point(b: &Brep, v: VertexId, p: [f64; 3]) -> bool {
 /// (`fillet_corner_face_curve_halves`); and the corner patch's faces.
 fn build(setback: f64, ease: f64, halves: bool) -> (Kernel, Brep, Vec<solidcore::FaceId>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_setback_from_start_vertex = true;
     k.fixes.fillet_corner_face_curve_halves = halves;
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
     let edges: Vec<EdgeId> = b

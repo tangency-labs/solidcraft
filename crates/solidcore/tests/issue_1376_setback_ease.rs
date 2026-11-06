@@ -55,7 +55,6 @@ const ROUND: Spec = Spec {
 /// and the faces of the set-back corners' patches (`set_mark_corner_patches`).
 fn build(spec: Spec) -> (Kernel, Brep, Vec<FaceId>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_setback_from_start_vertex = true;
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 40.0).unwrap();
     let mut edges = Vec::new();
     for e in b.edges().ids() {

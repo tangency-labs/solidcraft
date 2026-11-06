@@ -205,7 +205,6 @@
   "volume_representational_end_continuities",
   "sheet_sweep_joins_profile_wires",
   "point_solve_keeps_triangle_guess",
-  "fillet_setback_from_start_vertex",
   "fillet_corner_sphere_from_four_arcs",
   "analytic_corner_failure_is_false",
   "sphere_from_arcs_common_centre",

@@ -165,7 +165,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_round_ends_at_tangent_continuation",
     "fillet_run_on_bspline_trims",
     "fillet_run_on_past_far_end_only",
-    "fillet_setback_from_start_vertex",
     "fillet_split_edge_keeps_near_half",
     "fillet_statuses_pass_on",
     "fillet_tangent_point_one_sided_step",

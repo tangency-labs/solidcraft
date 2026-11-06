@@ -277,7 +277,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.fillet_removal_takes_ring_fillets = true;
     k.fixes.fillet_retry_radius_as_first = true;
     k.fixes.fillet_run_on_past_far_end_only = true;
-    k.fixes.fillet_setback_from_start_vertex = true;
     k.fixes.fillet_split_edge_keeps_near_half = true;
     k.fixes.fillet_tangent_point_one_sided_step = true;
     k.fixes.fillet_torus_center_on_axis = true;
