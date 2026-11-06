@@ -1,6 +1,5 @@
 {
  "issue": "https://github.com/tangency-labs/solidcraft/issues/4006",
- "pr": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992)",
  "test": "none: geometry is the issue's",
  "summary": "A quadrilateral revolved 270 degrees about an oblique axis 0.33 mm from one corner, one edge perpendicular to the axis to within 7e-12 rad. In SolidCraft the result changed with the first solid's operation (join or new); the kernel operation is the same revolve.",
  "cases": [

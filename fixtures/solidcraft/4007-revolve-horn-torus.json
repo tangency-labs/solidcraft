@@ -1,6 +1,5 @@
 {
  "issue": "https://github.com/tangency-labs/solidcraft/issues/4007",
- "pr": "none: closed on SolidCraft without a linked PR",
  "test": "none: geometry is the issue's",
  "summary": "A half disc whose circle touches the axis (a horn torus) revolved 270 degrees, plus a ring-torus control 1 mm further out.",
  "cases": [

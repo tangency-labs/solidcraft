@@ -1,6 +1,5 @@
 {
  "issue": "https://github.com/tangency-labs/solidcraft/issues/4005",
- "pr": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992)",
  "test": "none: geometry is the issue's",
  "summary": "A rectangle revolved about an oblique axis parallel to two of its edges. The coordinates are the issue's, rounded to 9 decimals, so the 'parallel' edges are off by about 1e-10.",
  "cases": [
