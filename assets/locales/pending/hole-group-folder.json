@@ -1,0 +1,30 @@
+{
+  "en": {
+    "prefs.design_tools.hole_group": "Group holes made together",
+    "prefs.design_tools.hole_group_help": "Holes made in one go share a folder in History, closed at first; open it to edit a hole on its own."
+  },
+  "ar": {
+    "prefs.design_tools.hole_group": "تجميع الثقوب المصنوعة معًا",
+    "prefs.design_tools.hole_group_help": "الثقوب المصنوعة دفعة واحدة تشترك في مجلد في السجل، مغلق في البداية؛ افتحه لتحرير كل ثقب على حدة."
+  },
+  "de": {
+    "prefs.design_tools.hole_group": "Gemeinsam erstellte Bohrungen gruppieren",
+    "prefs.design_tools.hole_group_help": "In einem Schritt erstellte Bohrungen teilen sich einen Ordner im Verlauf, zunächst geschlossen; öffnen Sie ihn, um eine Bohrung einzeln zu bearbeiten."
+  },
+  "he": {
+    "prefs.design_tools.hole_group": "קיבוץ חורים שנוצרו יחד",
+    "prefs.design_tools.hole_group_help": "חורים שנוצרו בפעולה אחת חולקים תיקייה בהיסטוריה, סגורה בהתחלה; פתחו אותה כדי לערוך חור בנפרד."
+  },
+  "ja": {
+    "prefs.design_tools.hole_group": "一緒に作成した穴をまとめる",
+    "prefs.design_tools.hole_group_help": "一度に作成した穴は履歴で1つのフォルダーにまとめられ、最初は閉じています。開くと穴を個別に編集できます。"
+  },
+  "vi": {
+    "prefs.design_tools.hole_group": "Nhóm các lỗ được tạo cùng lúc",
+    "prefs.design_tools.hole_group_help": "Các lỗ được tạo trong một lần dùng chung một thư mục trong Lịch sử, ban đầu được đóng; mở thư mục để sửa từng lỗ."
+  },
+  "zh": {
+    "prefs.design_tools.hole_group": "将一起创建的孔分组",
+    "prefs.design_tools.hole_group_help": "一次创建的孔在历史中共用一个文件夹，初始为折叠；展开后可单独编辑每个孔。"
+  }
+}
