@@ -109,7 +109,7 @@ const RULER: f32 = 14.0;
 const BARS: f32 = 40.0;
 
 fn id(key: &str) -> egui::Id {
-    egui::Id::new(("sc_range_track", key))
+    egui::Id::unique(("sc_range_track", key))
 }
 
 fn state(ctx: &egui::Context, key: &str) -> State {

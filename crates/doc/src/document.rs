@@ -61,6 +61,9 @@ pub enum PlaneRef {
     /// Another plane rotated about a line (in world coordinates) by an angle expression. With
     /// `line`, an edge or round face of the model ([`crate::construct::model_axis`]), the line is
     /// found there on each evaluation and `axis_origin`/`axis_dir` are where it was when picked.
+    /// With `direction_only`, only the axis direction is used: it is projected onto the base
+    /// (nothing of that projection is kept as geometry) and the plane turns about the line
+    /// through `pivot`, or through the base origin when `pivot` is absent.
     AtAngle {
         base: Box<PlaneRef>,
         axis_origin: Vec3,
@@ -68,6 +71,12 @@ pub enum PlaneRef {
         angle: Expr,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         line: Option<Box<GeoRef>>,
+        /// Use only the axis direction (projected onto the base), not the axis as a full line.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        direction_only: bool,
+        /// Pivot for `direction_only`; absent means the base plane's origin.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pivot: Option<Box<GeoRef>>,
     },
     /// A construction plane feature (by id).
     Construction { feature: FeatureId },
@@ -321,6 +330,12 @@ pub struct Extent {
     /// Through all bodies in the direction(s) instead of `distance`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub through_all: bool,
+    /// Two Sides as older builds read it: `distance2` goes the other way from wherever the
+    /// first side went, so a negative entered distance sends it back along the normal. Saved
+    /// designs from before entered distances kept their sides carry it, so they rebuild as
+    /// they did whatever their expressions evaluate to; new and edited extrudes leave it off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub second_follows_first: bool,
     /// Taper angle (expression; positive grows the profile).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(angle = "Taper angle")]
@@ -452,8 +467,14 @@ pub enum AxisRef {
     SketchAxis { axis: String },
     /// World X / Y / Z axis through the origin.
     World { axis: String },
-    /// Any line in the sketch plane, in world coordinates.
-    Line { origin: Position, dir: Dir },
+    /// Any line in the sketch plane, in world coordinates. The origin's coordinates are length
+    /// expressions, so the axis follows parameter changes.
+    Line {
+        #[serde(with = "point_expr")]
+        #[walk(placement)]
+        origin: PointExpr,
+        dir: Dir,
+    },
     /// An edge or round face of the model (a straight or circular edge, a cylinder, cone or
     /// torus face), found again on each evaluation: [`crate::construct::model_axis`].
     Model { geo: GeoRef },
@@ -659,6 +680,12 @@ impl AlignFrame {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FeatureKind {
+    /// A feature a newer SolidCraft saved that this build can't read ([`crate::newer_file`]): it
+    /// holds its place on the timeline, reports an error when evaluated, and goes back into the
+    /// file as it came.
+    NewerFileFeature {
+        raw: crate::newer_file::RawFeature,
+    },
     /// A recorded timeline ownership boundary. Geometry is converted from its
     /// current local frame into the destination component frame exactly once.
     BodyTransfer {
@@ -1044,6 +1071,8 @@ pub enum FeatureKind {
     Split {
         body: BodyName,
         plane: PlaneRef,
+        // The tool face is picked (and named), so the split follows it (#11674).
+        #[walk(picks_faces)]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool: Option<FaceAt>,
         /// A straight line of this sketch as the tool (#1552): the plane through it along the
@@ -1479,7 +1508,7 @@ pub enum FeatureKind {
     },
     /// Plastic lip (raised band) or groove (recess) along the rim face picked at `face`.
     Lip {
-        face: Position,
+        face: FacePick,
         #[walk(length = "Width")]
         width: Expr,
         #[walk(length = "Height")]
@@ -2410,6 +2439,12 @@ pub enum HoleKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Tip angle")]
         tip_angle: Option<Expr>,
+        /// Printing aid: two bridge layers this thick below the counterbore's floor (a slot along
+        /// X, then a square), so a printer bridges the step instead of sagging into it. Absent:
+        /// a plain counterbore.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Bridge layer")]
+        bridge: Option<Expr>,
     },
     Countersink {
         #[walk(length = "Countersink diameter")]
@@ -2594,6 +2629,7 @@ impl FeatureKind {
     /// Short type name (timeline tooltip, `inspect`).
     pub fn type_name(&self) -> &'static str {
         match self {
+            FeatureKind::NewerFileFeature { .. } => "NewerFileFeature",
             FeatureKind::BodyTransfer { .. } => "BodyTransferFeature",
             FeatureKind::Sketch { .. } => "Sketch",
             FeatureKind::Extrude { .. } => "ExtrudeFeature",
@@ -2679,6 +2715,7 @@ impl FeatureKind {
     /// Design-file variant key (e.g. `"extrude"`, `"box"`, `"sheet_flange"`).
     pub fn kind_key(&self) -> &'static str {
         match self {
+            FeatureKind::NewerFileFeature { .. } => "newer_file_feature",
             FeatureKind::BodyTransfer { .. } => "body_transfer",
             FeatureKind::Sketch { .. } => "sketch",
             FeatureKind::Extrude { .. } => "extrude",
@@ -2841,6 +2878,7 @@ impl FeatureKind {
     /// Default name prefix (`Extrude` → `Extrude1`).
     pub fn base_name(&self) -> &'static str {
         match self {
+            FeatureKind::NewerFileFeature { .. } => "Unknown",
             FeatureKind::BodyTransfer { .. } => "BodyTransfer",
             FeatureKind::Sketch { .. } => "Sketch",
             FeatureKind::Extrude { .. } => "Extrude",
@@ -3113,6 +3151,10 @@ pub fn is_counted_body_name(name: &str) -> bool {
 /// The document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
+    /// Set when a newer SolidCraft saved the file this came from: what to tell the user, and what
+    /// this build couldn't read and keeps for the next save ([`crate::newer_file`]).
+    #[serde(skip)]
+    pub newer_file: Option<std::sync::Arc<crate::newer_file::NewerFile>>,
     /// Named image intent and immutable embedded HDR sources. Active jobs and device state are not saved.
     #[serde(default, skip_serializing_if = "crate::render_settings::RenderSettings::is_empty")]
     pub render: std::sync::Arc<crate::render_settings::RenderSettings>,
@@ -3474,6 +3516,7 @@ impl Document {
 
     pub fn new(name: &str) -> Self {
         Document {
+            newer_file: None,
             render: Default::default(),
             format: default_format(),
             format_pending: crate::format::pending_names(),
@@ -3895,7 +3938,12 @@ impl Document {
 
     /// Read a design file's JSON (any format this build knows; older ones are upgraded).
     pub fn from_json(s: &str) -> Result<Document> {
-        crate::render_resources::check_json_budget(s)?;
+        // A newer build's resources may not read here; the section stays out then (`newer_file`).
+        if let Err(why) = crate::render_resources::check_json_budget(s).and_then(|()| crate::render_texture_resources::check_json_budget(s))
+            && !crate::format::says_newer(s)
+        {
+            return Err(why);
+        }
         let mut d = crate::format::read(s)?;
         if d.features.len() > MAX_FEATURES || d.params.len() > MAX_PARAMS {
             return Err(DocError::Invalid("document too large".into()));
@@ -3907,6 +3955,11 @@ impl Document {
         Ok(d)
     }
     pub fn to_json(&self) -> String {
+        if self.newer_file.is_some() {
+            let mut value = serde_json::to_value(self).unwrap_or_default();
+            crate::newer_file::restore(self, &mut value);
+            return serde_json::to_string_pretty(&value).unwrap_or_default();
+        }
         serde_json::to_string_pretty(self).unwrap_or_default()
     }
 
@@ -4390,7 +4443,7 @@ impl Document {
                 let b = self.resolve_plane_in(vals, base, depth + 1, st)?;
                 Ok(b.offset(Self::eval_in(vals, distance, Kind::Length)?))
             }
-            PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line } => {
+            PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line, direction_only, pivot } => {
                 let b = self.resolve_plane_in(vals, base, depth + 1, st)?;
                 let a = Self::eval_in(vals, angle, Kind::Angle)?;
                 let (axis_origin, axis_dir) = match line {
@@ -4400,7 +4453,26 @@ impl Document {
                     }
                     None => (*axis_origin, *axis_dir),
                 };
-                let d = axis_dir.normalized().ok_or_else(|| DocError::Invalid("rotation axis".into()))?;
+                let (axis_origin, d) = if *direction_only {
+                    let n = b.normal();
+                    let in_plane = axis_dir - n * n.dot(axis_dir);
+                    let d = in_plane
+                        .normalized()
+                        .ok_or_else(|| DocError::Invalid("the axis is square to the plane, so it has no direction in the plane".into()))?;
+                    let pivot = match pivot {
+                        Some(g) => {
+                            let st = st.ok_or_else(|| DocError::Invalid("this plane is built from the model: evaluate first".into()))?;
+                            crate::construct::point(&crate::construct::Ctx { doc: self, vals, st, depth }, g)?
+                        }
+                        None => b.origin,
+                    };
+                    // Keep the pivot in the base so a slightly off pick still turns about an in-plane line.
+                    let pivot = pivot - n * n.dot(pivot - b.origin);
+                    (pivot, d)
+                } else {
+                    let d = axis_dir.normalized().ok_or_else(|| DocError::Invalid("rotation axis".into()))?;
+                    (axis_origin, d)
+                };
                 let rot = |v: Vec3| v * a.cos() + d.cross(v) * a.sin() + d * (d.dot(v) * (1.0 - a.cos()));
                 let o = axis_origin + rot(b.origin - axis_origin);
                 Plane::new(o, rot(b.x), rot(b.y)).ok_or_else(|| DocError::Invalid("degenerate plane".into()))

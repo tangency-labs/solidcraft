@@ -39,6 +39,7 @@ fn plate_doc() -> (Document, u64) {
                 distance2: None,
                 start_offset: None,
                 through_all: false,
+                second_follows_first: false,
                 taper: None,
                 corner: Default::default(),
                 to: None,
@@ -103,6 +104,35 @@ fn set_back_reports_restored_features() {
     // No change: nothing recomputed and nothing restored.
     m.evaluate(&doc);
     assert_eq!((m.last_recomputed, m.last_restored), (0, 0));
+}
+
+/// Adding a line and deleting it again leaves the solved geometry as it was: the extrude and
+/// everything after it take their earlier results from the cache.
+#[test]
+fn a_sketch_line_added_and_deleted_restores_the_extrude() {
+    let (mut doc, s) = plate_doc();
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    assert_eq!((m.last_recomputed, m.last_restored), (2, 0));
+
+    let (a, b, line) = {
+        let sk = doc.sketch_mut(s).unwrap();
+        let a = sk.add_point(Vec2::new(5.0, 5.0), None).unwrap();
+        let b = sk.add_point(Vec2::new(6.0, 5.0), None).unwrap();
+        (a, b, sk.add_line_pts(a, b, None).unwrap())
+    };
+    m.evaluate(&doc);
+    assert_eq!((m.last_recomputed, m.last_restored), (2, 0));
+
+    {
+        let sk = doc.sketch_mut(s).unwrap();
+        sk.remove_curves(&[line]);
+        sk.remove_points(&[b]);
+        sk.remove_points(&[a]);
+    }
+    m.evaluate(&doc);
+    assert_eq!((m.last_recomputed, m.last_restored), (0, 2));
+    assert!(rel(measure(&m.state().bodies[0].body).unwrap().volume, 24000.0) < 1e-9);
 }
 
 /// Setting a parameter back restores every feature on a design whose states are large next to
@@ -316,6 +346,7 @@ fn box_fillet_cut_timeline() {
                 distance2: None,
                 start_offset: None,
                 through_all: false,
+                second_follows_first: false,
                 taper: None,
                 corner: Default::default(),
                 to: None,
@@ -1101,6 +1132,7 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             distance2: None,
             start_offset: None,
             through_all: false,
+            second_follows_first: false,
             taper: None,
             corner: Default::default(),
             to: None,

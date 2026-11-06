@@ -4,6 +4,7 @@
 mod actions;
 mod assistant;
 mod assistant_entry;
+mod attention;
 mod checks;
 mod choice;
 mod color;
@@ -26,6 +27,7 @@ mod navigation;
 mod navigation_menu;
 mod navigation_settings;
 pub(crate) mod panel;
+mod panel_host;
 mod preferences;
 mod preferences_assistant;
 #[allow(dead_code, reason = "composed by the Preferences pages of #9875 to #9883")]
@@ -49,6 +51,7 @@ mod status;
 mod table;
 mod text;
 mod text_menu;
+mod theme_picker;
 mod tree;
 mod value_focus;
 mod viewport_status;
@@ -57,6 +60,7 @@ pub(crate) use actions::*;
 pub use actions::{Button, button};
 pub(crate) use assistant::*;
 pub(crate) use assistant_entry::*;
+pub(crate) use attention::*;
 #[cfg(test)]
 pub(crate) use checks::tests::{raster as raster_ui, textures_update as update_test_textures};
 #[cfg(test)]
@@ -89,6 +93,7 @@ pub(crate) use panel::{
 pub use panel::{DialogButtons, Window};
 #[cfg(test)]
 pub(crate) use panel::{collapsible_header, header};
+pub(crate) use panel_host::*;
 pub(crate) use preferences::*;
 pub(crate) use preferences_assistant::*;
 #[allow(unused_imports, reason = "composed by the Preferences pages of #9875 to #9883")]
@@ -97,7 +102,7 @@ pub(crate) use preferences_figure_data::{
     paint_aa_2x, paint_aa_4x, paint_aa_8x, paint_aa_off, paint_ao_on, paint_frame_rate, paint_quick_measure, paint_tess_coarse, paint_tess_fine,
     paint_tess_normal, paint_tess_ultra, paint_vertex_markers, paint_view_angles, paint_view_grid, paint_view_perspective, paint_view_shadow,
 };
-pub(crate) use preferences_figures::{ThemeSample, paint_theme_system, paint_theme_thumbnail};
+pub(crate) use preferences_figures::{ThemeSample, paint_theme_thumbnail_rounded};
 pub(crate) use preferences_navigation::*;
 pub(crate) use preferences_small::*;
 pub(crate) use radial::{RADIAL_RADIUS, radial_menu};
@@ -115,6 +120,7 @@ pub(crate) use table::*;
 #[cfg(test)]
 pub(crate) use text::ellipsize_middle;
 pub(crate) use text_menu::menu_open as text_menu_open;
+pub(crate) use theme_picker::*;
 pub(crate) use tree::*;
 pub(crate) use value_focus::*;
 pub(crate) use viewport_status::*;

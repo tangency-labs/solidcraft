@@ -217,7 +217,7 @@ pub(super) fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut dialog) = app.library.action_dialog.take() else { return };
     let mut confirm = false;
     let mut cancel = false;
-    let (closed, action) = crate::ui_kit::Window::new(egui::Id::new("library_file_action"), "folder", label(dialog.action))
+    let (closed, action) = crate::ui_kit::Window::new(egui::Id::unique("library_file_action"), "folder", label(dialog.action))
         .actions(label(dialog.action), crate::i18n::tr("ui.cancel"), None)
         .fields()
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -226,13 +226,13 @@ pub(super) fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
             if dialog.action == Action::Rename {
                 let input = crate::ui_kit::bounded_cell_editor(
                     ui,
-                    ui.id().with("library_filename"),
+                    ui.scope_id().with("library_filename"),
                     &mut dialog.name,
                     "library.new_filename",
                     dialog.error.is_some(),
                     255,
                 );
-                input.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, crate::i18n::tr("library.new_filename")));
+                input.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, crate::i18n::tr("library.new_filename")));
                 if dialog.focus {
                     input.request_focus();
                     dialog.focus = false;

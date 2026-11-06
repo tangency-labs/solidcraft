@@ -189,11 +189,11 @@ fn split_handle(app: &mut SolveApp, ui: &egui::Ui, available: Rect) {
         return;
     }
     let rail = Rect::from_x_y_ranges(browser.x_range(), browser.bottom() - SPLIT_RAIL / 2.0..=history.top() + SPLIT_RAIL / 2.0);
-    let overlay = Container::new(ui.ctx(), Surface::Panel).area(egui::Id::new("sc_column_split")).fixed_pos(rail.min);
+    let overlay = Container::new(ui.ctx(), Surface::Panel).area(egui::Id::unique("sc_column_split")).fixed_pos(rail.min);
     ui.ctx().set_sublayer(ui.layer_id(), overlay.layer());
     overlay.show(ui.ctx(), |ui| {
         ui.set_min_size(rail.size());
-        let response = ui.interact(rail, egui::Id::new("sc_column_split_rail"), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeVertical);
+        let response = ui.interact(rail, egui::Id::unique("sc_column_split_rail"), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeVertical);
         if response.dragged() {
             let delta = ui.input(|input| input.pointer.delta().y);
             if delta.is_finite() {
@@ -226,6 +226,7 @@ fn card_fill(app: &SolveApp, floating: bool) -> egui::Color32 {
 
 /// Full-height left card, or a card sharing the browser column below it.
 pub fn left_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
+    crate::browser::sync_reveals(app);
     let t = Tokens::get();
     let available = ui.available_rect_before_wrap();
     app.shell.history_dock_space = Some(available);
@@ -245,19 +246,20 @@ pub fn left_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         let fill = card_fill(app, container.floating());
         let frame = container.frame(ui.ctx(), fill, crate::frame::Side::Left).inner_margin(t.space_4);
         let inner = (bounds.size() - frame.total_margin().sum()).max(egui::Vec2::ZERO);
-        let card = Container::new(ui.ctx(), Surface::Panel).area(egui::Id::new("sc_timeline_left_card")).fixed_pos(bounds.min).show(ui.ctx(), |ui| {
-            let response = container.show_frame(ui, frame, available, |ui| {
-                ui.set_min_size(inner);
-                ui.set_max_size(inner);
-                ui.set_clip_rect(ui.clip_rect().intersect(Rect::from_min_size(ui.max_rect().min, inner)));
-                left_timeline(app, ui);
+        let card =
+            Container::new(ui.ctx(), Surface::Panel).area(egui::Id::unique("sc_timeline_left_card")).fixed_pos(bounds.min).show(ui.ctx(), |ui| {
+                let response = container.show_frame(ui, frame, available, |ui| {
+                    ui.set_min_size(inner);
+                    ui.set_max_size(inner);
+                    ui.set_clip_rect(ui.clip_rect().intersect(Rect::from_min_size(ui.max_rect().min, inner)));
+                    left_timeline(app, ui);
+                });
+                if stacked(app) {
+                    let width = crate::browser::browser_width(app.preferences.browser_width);
+                    crate::browser::resize_column(app, ui, response.response.rect, width, "left-history-rail");
+                    split_handle(app, ui, available);
+                }
             });
-            if stacked(app) {
-                let width = crate::browser::browser_width(app.preferences.browser_width);
-                crate::browser::resize_column(app, ui, response.response.rect, width, "left-history-rail");
-                split_handle(app, ui, available);
-            }
-        });
         app.shell.history = Some(card.response.rect);
         crate::scenario::publish_rect("history:vertical", card.response.rect);
         if !stacked(app) {
@@ -296,7 +298,7 @@ fn names_fit(width: f32) -> bool {
 fn seam_handle(app: &mut SolveApp, ui: &mut egui::Ui, card: Rect, parent: egui::LayerId) {
     let seam = crate::ui_kit::HistorySeam::new(card);
     let bounds = seam.edge.union(seam.pill);
-    let overlay = Container::new(ui.ctx(), Surface::Panel).area(egui::Id::new("history_seam_overlay")).fixed_pos(bounds.min);
+    let overlay = Container::new(ui.ctx(), Surface::Panel).area(egui::Id::unique("history_seam_overlay")).fixed_pos(bounds.min);
     // The grip follows its panel when clicked, while remaining below movable dialogs.
     ui.ctx().set_sublayer(parent, overlay.layer());
     overlay.show(ui.ctx(), |ui| {
@@ -386,7 +388,7 @@ fn timeline_transport(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         } else {
             handle
         };
-        let drag = ui.interact(drag_rect, egui::Id::new("sc_history_dock_grip"), Sense::drag());
+        let drag = ui.interact(drag_rect, egui::Id::unique("sc_history_dock_grip"), Sense::drag());
         crate::scenario::publish_handle("history:grip", drag_rect.center());
         dock_drag(app, ui, &drag);
     }
@@ -470,7 +472,7 @@ pub(crate) fn dock_drag(app: &mut SolveApp, ui: &egui::Ui, drag: &egui::Response
                 Dock::UnderBrowser => column_rects(app, available, false, false).1,
             };
             let t = Tokens::get();
-            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("history_dock_preview")));
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("history_dock_preview")));
             painter.rect(zone, t.radius_lg, t.accent.gamma_multiply(0.18), Stroke::new(t.space_2, t.accent), egui::StrokeKind::Inside);
             crate::scenario::publish_rect("history:dock_preview", zone);
             crate::scenario::publish_rect(&format!("history:dock:{}", target.id()), zone);
@@ -1052,7 +1054,7 @@ fn timeline_group_name(
     let Some(mut rename) = app.menu.rename.take() else { return false };
     let left = rect.left() + 38.0 + offset;
     let edit_rect = Rect::from_min_max(pos2(left, rect.top() + 1.0), pos2(rect.right() - 3.0, rect.bottom() - 1.0));
-    let edit_id = ui.id().with(("timeline_group_rename", group.id));
+    let edit_id = ui.scope_id().with(("timeline_group_rename", group.id));
     let response = crate::ui_kit::inline_name(ui, edit_rect, edit_id, &mut rename.text);
     crate::scenario::publish_handle(&format!("timeline-folder-rename:{}", group.name), edit_rect.center());
     if !rename.focused {
@@ -1147,7 +1149,7 @@ fn vertical_group_row(
     crate::scenario::publish_handle(&format!("timeline-folder:{}", group.name), rect.center());
     let fold_rect = Rect::from_min_max(pos2(rect.left() + offset, rect.top()), pos2(rect.left() + offset + 18.0, rect.bottom()));
     crate::scenario::publish_handle(&format!("timeline-folder-fold:{}", group.name), fold_rect.center());
-    let fold = ui.interact(fold_rect, ui.id().with(("timeline_group_fold", group.id)), Sense::click());
+    let fold = ui.interact(fold_rect, ui.scope_id().with(("timeline_group_fold", group.id)), Sense::click());
     if fold.clicked() {
         if open {
             app.tree.collapsed.insert(key.clone());
@@ -1264,7 +1266,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
     let n = features.len();
     let marker = app.session.doc.marker.unwrap_or(n);
     let from_view = [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)];
-    let drag_id = ui.id().with("tl_vertical_drag");
+    let drag_id = ui.scope_id().with("tl_vertical_drag");
     let mut rows = Rows {
         sketch_states: crate::sketch_state::SketchStates::of(app),
         names,
@@ -1282,7 +1284,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
             })
             .collect(),
         results: crate::timeline::result_index(&app.session.model.results),
-        reveal: app.tree.timeline_reveal.take(),
+        reveal: app.tree.timeline_reveal,
         from_view,
         linked_hover: app.viewport.hover_feature.filter(|id| plan.referenced(*id)),
         drag: ui.data(|data| data.get_temp(drag_id)),
@@ -1480,8 +1482,8 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
         None => {
             crate::scenario::publish_rect(&format!("history:feature:{name}"), rect);
             crate::scenario::publish_handle(&format!("timeline:{name}"), rect.center());
-            if rows.reveal == Some(id) {
-                ui.scroll_to_rect(rect, Some(egui::Align::Center));
+            if rows.reveal == Some(id) && crate::semantic_content::scroll_acknowledged(ui, rect) {
+                app.tree.timeline_reveal = None;
             }
         }
     }

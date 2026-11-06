@@ -4,20 +4,20 @@ struct ShadowResult { transmittance: vec3<f32>, branch_pdf: f32, crossings: u32,
 fn blocked_shadow() -> ShadowResult {
     return ShadowResult(vec3<f32>(0.0),0.0,0u,false);
 }
-fn shadow_transmittance(origin: vec3<f32>, direction: vec3<f32>, limit: f32) -> ShadowResult {
+fn shadow_transmittance(origin: vec3<f32>, origin_low: vec3<f32>, direction: vec3<f32>, limit: f32, minimum: f32) -> ShadowResult {
     var result = ShadowResult(vec3<f32>(1.0),1.0,0u,false);
     var o = origin;
-    var o_low = vec3<f32>(0.0);
+    var o_low = origin_low;
     var ray_excluded = 0xffffffffu;
-    var ray_minimum = u.lighting.x;
+    var ray_minimum = minimum;
     var medium_id = 0.0;
     var medium_ior = 1.0;
     var sigma = vec3<f32>(0.0);
     var entry = origin;
-    var entry_low = vec3<f32>(0.0);
+    var entry_low = origin_low;
     // Up to 64 interfaces. If traversal cannot establish visibility, block it.
     for (var step=0u; step<=64u; step+=1u) {
-        let traversed = dot(precise_point_delta(o,o_low,origin,vec3<f32>(0.0)),direction);
+        let traversed = dot(precise_point_delta(o,o_low,origin,origin_low),direction);
         let remaining = limit-traversed;
         // Outside media nothing beyond the endpoint matters. Inside, the
         // endpoint branch below must still see the farther boundary.
@@ -33,6 +33,7 @@ fn shadow_transmittance(origin: vec3<f32>, direction: vec3<f32>, limit: f32) -> 
             return result;
         }
         if step==64u { return blocked_shadow(); }
+        if OPAQUE_SCENE {return blocked_shadow();}
         let t = triangle(hit.triangle);
         if t.base.w<=0.0 || t.coat.w<=0.0 { return blocked_shadow(); }
         var position=surface_point(t,hit.bary);
@@ -75,7 +76,7 @@ fn shadow_transmittance(origin: vec3<f32>, direction: vec3<f32>, limit: f32) -> 
                 // The first crossing from the shading point exits a closed body:
                 // the point touches or lies within it (see the path loop).
                 if medium_id==0.0 && step==0u {
-                    medium_id=t.optics.w; medium_ior=t.parameters.z; sigma=t.optics.xyz; entry=origin; entry_low=vec3<f32>(0.0);
+                    medium_id=t.optics.w; medium_ior=t.parameters.z; sigma=t.optics.xyz; entry=origin; entry_low=origin_low;
                 }
                 if medium_id==0.0 || medium_id!=t.optics.w { return blocked_shadow(); }
                 result.transmittance*=exp(-sigma*length(precise_point_delta(position,position_low,entry,entry_low)));
@@ -99,7 +100,7 @@ fn shadow_transmittance(origin: vec3<f32>, direction: vec3<f32>, limit: f32) -> 
 
 @compute @workgroup_size(1)
 fn shadow_reference() {
-    let shadow=shadow_transmittance(u.eye.xyz,u.back.xyz,u.back.w);
+    let shadow=shadow_transmittance(u.eye.xyz,vec3<f32>(0.0),u.back.xyz,u.back.w,u.lighting.x);
     accumulation[0]=vec4<f32>(shadow.transmittance,1.0);
     accumulation[1]=vec4<f32>(shadow.branch_pdf,f32(shadow.crossings),select(0.0,1.0,shadow.solid),1.0);
 }

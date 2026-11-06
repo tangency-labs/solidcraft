@@ -278,7 +278,7 @@ fn selection_indices(ss: &SolvedSketch, selection: &ProfileSel, mut notes: Optio
                     .profiles
                     .iter()
                     .enumerate()
-                    .filter(|(_, profile)| profile.region.contains(*point))
+                    .filter(|(_, profile)| profile.contains(*point))
                     .min_by(|(_, a), (_, b)| a.area.total_cmp(&b.area))
                     .ok_or_else(|| DocError::Unknown(format!("profile at {:?} in {}", [point.x, point.y], ss.name)))?;
                 indices.push(index);
@@ -453,6 +453,7 @@ mod tests {
                         distance2: None,
                         start_offset: None,
                         through_all: false,
+                        second_follows_first: false,
                         taper: None,
                         corner: Default::default(),
                         to: None,
@@ -637,6 +638,7 @@ mod tests {
                         distance2: None,
                         start_offset: None,
                         through_all: false,
+                        second_follows_first: false,
                         taper: None,
                         corner: Default::default(),
                         to: None,

@@ -1039,6 +1039,27 @@ fn shipped_themes_draw_dimensions_in_their_own_readable_colour() {
 }
 
 #[test]
+fn onyx_keeps_gold_dimensions_distinct_from_grey_construction_lines() {
+    use crate::theme_files::{OptionValue, builtin, resolve_with};
+    let onyx = builtin().iter().find(|theme| theme.id == "onyx").unwrap();
+    for (foreground, gold, driven) in [("muted", [199, 178, 139], [165, 148, 116]), ("vibrant", [255, 209, 102], [255, 177, 102])] {
+        let values = std::collections::BTreeMap::from([("foreground_colours".into(), OptionValue::Choice(foreground.into()))]);
+        let t = resolve_with(onyx, &values);
+        assert_eq!(rgb(t.dimension), gold, "{foreground}: retain authored dimensions");
+        assert_eq!(rgb(t.dimension_driven), driven, "{foreground}: retain authored driven dimensions");
+        for construction in [t.sketch_construction, t.sketch_centerline] {
+            assert_eq!(rgb(construction), [181, 183, 184], "{foreground}: construction stays grey");
+            for dimension in [t.dimension, t.dimension_driven] {
+                assert!(normal(rgb(dimension), rgb(construction)) >= FLOOR, "{foreground}: dimensions remain distinct");
+            }
+            for ground in [t.viewport_top, t.viewport_bottom] {
+                assert!(crate::theme::contrast_ratio(construction, ground) >= 3.0, "{foreground}: readable construction lines");
+            }
+        }
+    }
+}
+
+#[test]
 fn the_shader_gets_the_modes_colours_and_its_stripes() {
     for dark in [false, true] {
         let off = crate::gpu::analysis_colors(&Tokens::themed(dark, ColorVision::Off).analysis);

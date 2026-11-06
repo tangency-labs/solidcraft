@@ -465,9 +465,9 @@ fn thumbnail_card(
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
     response.widget_info(|| {
         if status.active {
-            egui::WidgetInfo::selected(egui::WidgetType::Button, true, true, name)
+            egui::WidgetInfo::selected(egui::Role::Button, true, true, name)
         } else {
-            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name)
+            egui::WidgetInfo::labeled(egui::Role::Button, true, name)
         }
     });
     let t = crate::theme::Tokens::get();
@@ -631,7 +631,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
             egui::Stroke::new(1.0, crate::theme::Tokens::get().border),
             egui::StrokeKind::Inside,
         );
-        home.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::i18n::tr("library.home")));
+        home.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr("library.home")));
         crate::scenario::publish_handle("library:home", home.rect.center());
         if home.on_hover_text(crate::i18n::tr("library.home_hint")).clicked() {
             go_home(app);
@@ -650,12 +650,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
         label_ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
         let picker = crate::ui_kit::list_picker(&mut label_ui, "library_folder_section", &name, app.library.folders_expanded);
         picker.widget_info(|| {
-            egui::WidgetInfo::selected(
-                egui::WidgetType::CollapsingHeader,
-                true,
-                app.library.folders_expanded,
-                crate::i18n::tr("library.recent_folders"),
-            )
+            egui::WidgetInfo::selected(egui::Role::DisclosureTriangle, true, app.library.folders_expanded, crate::i18n::tr("library.recent_folders"))
         });
         crate::scenario::publish_target("library:folders", picker.rect);
         if picker.on_hover_text(crate::i18n::tr("library.recent_folders")).clicked() {
@@ -674,7 +669,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
             egui::StrokeKind::Inside,
         );
         let settings = settings.on_hover_text(crate::i18n::tr("library.choose_folder"));
-        settings.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::i18n::tr("library.choose_folder")));
+        settings.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr("library.choose_folder")));
         crate::scenario::publish_handle("library:settings", settings.rect.center());
         if settings.clicked() {
             choose_folder(app);
@@ -777,11 +772,11 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
                     .show(ui, |ui| {
                         let response = crate::ui_kit::shell_search_field(
                             ui,
-                            ui.id().with("library_search"),
+                            ui.scope_id().with("library_search"),
                             &mut app.library.search,
                             crate::i18n::tr("library.search_hint"),
                         );
-                        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, crate::i18n::tr("library.search_label")));
+                        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, crate::i18n::tr("library.search_label")));
                     })
                     .response
                     .rect
@@ -810,9 +805,9 @@ pub(super) fn app_bar_toggle(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::
         return false;
     }
     let t = crate::theme::Tokens::get();
-    let response = ui.interact(rect, ui.id().with("document_browser_toggle"), egui::Sense::click());
+    let response = ui.interact(rect, ui.scope_id().with("document_browser_toggle"), egui::Sense::click());
     let label = if app.library.collapsed { crate::i18n::tr("library.show") } else { crate::i18n::tr("library.hide") };
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     crate::scenario::publish_handle("library:toggle", rect.center());
     crate::scenario::publish_rect("library:toggle", rect);
     if response.hovered() || response.has_focus() {
@@ -823,7 +818,7 @@ pub(super) fn app_bar_toggle(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::
     }
     crate::icons::paint_app_bar(ui.painter(), rect.shrink(4.0), "document_browser", 1.0);
     if response.on_hover_text(label).clicked() {
-        ui.memory_mut(|memory| memory.request_focus(ui.id().with("document_browser_toggle")));
+        ui.memory_mut(|memory| memory.request_focus(ui.scope_id().with("document_browser_toggle")));
         app.library.collapsed = !app.library.collapsed;
     }
     true
@@ -866,7 +861,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_rect("library:panel", ui.max_rect());
             insert_footer(app, ui);
             // Keep content widget identities independent of the footer.
-            ui.scope_builder(egui::UiBuilder::new().id(ui.id().with("library_contents")), |ui| {
+            ui.scope_builder(egui::UiBuilder::new().scope_id(ui.scope_id().with("library_contents")), |ui| {
                 egui::Frame::NONE.inner_margin(6).show(ui, |ui| {
                     chosen = contents(app, ui);
                 });

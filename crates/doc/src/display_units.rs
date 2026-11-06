@@ -89,20 +89,45 @@ pub fn format_value(value: f64, kind: expr::Kind, unit: &str, decimals: u8, f: &
     if unit_kind != kind {
         return Err(DocError::Invalid("number display unit has a different kind".into()));
     }
-    format_display(value / scale, scale, decimals, f)
+    format_display(value / scale, scale, decimals, f, None)
 }
 
 /// Format a unit-less number with the same validation and decimal rounding policy.
 pub fn format_number(x: f64, decimals: u8, f: &NumberFormat) -> Result<Shown> {
-    format_display(x, 1.0, decimals, f)
+    format_display(x, 1.0, decimals, f, None)
 }
 
-fn format_display(x: f64, scale: f64, decimals: u8, f: &NumberFormat) -> Result<Shown> {
+/// Format an internal value with a rounding step in the selected display unit.
+/// The step is a shortest round-trip decimal, finite, positive and at most 1e6.
+/// Input decimal preparation precedes step rounding; requested decimal precision follows it.
+/// Both rounding operations use `f.ties`. The original value is never changed.
+/// The exact snapped display magnitude must be at most 1e12. An out-of-range snap
+/// returns [`DocError::Invalid`] before final decimal-place rounding, even if that
+/// final rounding would bring the displayed value back into range.
+pub fn format_value_with_step(value: f64, kind: expr::Kind, unit: &str, decimals: u8, step: f64, f: &NumberFormat) -> Result<Shown> {
+    let (unit_kind, scale) = expr::unit_info(unit).ok_or_else(|| DocError::Invalid("unknown number display unit".into()))?;
+    if unit_kind != kind {
+        return Err(DocError::Invalid("number display unit has a different kind".into()));
+    }
+    format_display(value / scale, scale, decimals, f, Some(step))
+}
+
+/// Format a unit-less number with the step policy of [`format_value_with_step`].
+/// Decimal precision can round a step multiple again; `Shown.value` always matches the text.
+/// Out-of-range snapped magnitudes are rejected before final decimal-place rounding.
+pub fn format_number_with_step(x: f64, decimals: u8, step: f64, f: &NumberFormat) -> Result<Shown> {
+    format_display(x, 1.0, decimals, f, Some(step))
+}
+
+fn format_display(x: f64, scale: f64, decimals: u8, f: &NumberFormat, step: Option<f64>) -> Result<Shown> {
     // The unit table supplies a positive finite scale. Its decimal step must be at most
     // 1e-9 internal units; the precision floor can make the effective tie window narrower.
     let unit_resolution = (scale.log10() + 9.0).ceil().max(0.0) as usize;
     let resolution = unit_resolution.max(usize::from(decimals) + 3);
-    let (rounded, value) = round_decimal(x, decimals, resolution, f.ties)?;
+    let (rounded, value) = match step {
+        Some(step) => round_decimal_step(x, step, decimals, resolution, f.ties)?,
+        None => round_decimal(x, decimals, resolution, f.ties)?,
+    };
     let (integer, fraction) = rounded.split_once('.').unwrap_or((&rounded, ""));
     let fraction = if f.trailing_zeros { fraction } else { fraction.trim_end_matches('0') };
     let integer = if !f.leading_zero && integer == "0" && !fraction.is_empty() { "" } else { integer };
@@ -121,16 +146,25 @@ fn format_display(x: f64, scale: f64, decimals: u8, f: &NumberFormat) -> Result<
     Ok(Shown { text, value })
 }
 
-/// Prepare a bounded magnitude, then round decimal digits, never a binary tie comparison.
-fn round_decimal(x: f64, decimals: u8, resolution: usize, ties: Ties) -> Result<(String, f64)> {
+/// Validate and prepare the magnitude once, identically for both rounding paths.
+fn prepare_decimal(x: f64, decimals: u8, resolution: usize) -> Result<String> {
     if decimals > 8 {
         return Err(DocError::Invalid("number precision must be at most 8 decimal places".into()));
     }
     if !x.is_finite() || x.abs() > 1e12 {
         return Err(DocError::Invalid("display value must be finite with magnitude at most 1e12".into()));
     }
-    let prepared = format!("{:.*}", resolution, x.abs());
-    let (integer, fraction) = prepared.split_once('.').unwrap_or((&prepared, ""));
+    Ok(format!("{:.*}", resolution, x.abs()))
+}
+
+/// Prepare a bounded magnitude, then round decimal digits, never a binary tie comparison.
+fn round_decimal(x: f64, decimals: u8, resolution: usize, ties: Ties) -> Result<(String, f64)> {
+    let prepared = prepare_decimal(x, decimals, resolution)?;
+    round_prepared(&prepared, x.is_sign_negative(), decimals, ties)
+}
+
+fn round_prepared(prepared: &str, negative: bool, decimals: u8, ties: Ties) -> Result<(String, f64)> {
+    let (integer, fraction) = prepared.split_once('.').unwrap_or((prepared, ""));
     let places = usize::from(decimals);
     let mut digits: Vec<u8> = integer.bytes().chain(fraction.bytes().take(places)).collect();
     let discarded = fraction.as_bytes().get(places..).unwrap_or_default();
@@ -166,8 +200,79 @@ fn round_decimal(x: f64, decimals: u8, resolution: usize, ties: Ties) -> Result<
     }
     let rounded = String::from_utf8(digits).map_err(|_| DocError::Invalid("invalid prepared digits".into()))?;
     let magnitude = rounded.parse::<f64>().map_err(|_| DocError::Invalid("invalid rounded number".into()))?;
-    let negative = x.is_sign_negative() && magnitude != 0.0;
+    let negative = negative && magnitude != 0.0;
     Ok((rounded, if negative { -magnitude } else { magnitude }))
+}
+
+/// Divide decimal digits by a small decimal coefficient, retaining the full quotient.
+/// A shortest f64 coefficient has at most 17 significant digits. With the unit table's
+/// resolution <= 15, a scaled divisor is <= 1e21, so remainder * 10 fits u128.
+/// At most 324 appended zeros are needed, even for the smallest positive subnormal.
+fn round_decimal_step(x: f64, step: f64, decimals: u8, resolution: usize, ties: Ties) -> Result<(String, f64)> {
+    if !step.is_finite() || step <= 0.0 || step > 1e6 {
+        return Err(DocError::Invalid("number rounding step must be finite, positive and at most 1e6".into()));
+    }
+    let prepared = prepare_decimal(x, decimals, resolution)?;
+    let scientific = format!("{step:e}");
+    let (mantissa, exponent) = scientific.split_once('e').ok_or_else(|| DocError::Invalid("invalid decimal step".into()))?;
+    let fraction = mantissa.split_once('.').map_or(0, |(_, f)| f.len());
+    let coefficient = mantissa.replace('.', "").parse::<u128>().map_err(|_| DocError::Invalid("invalid step coefficient".into()))?;
+    let exponent = exponent.parse::<i32>().map_err(|_| DocError::Invalid("invalid step exponent".into()))? - fraction as i32;
+    let shift = exponent + resolution as i32;
+    let divisor = if shift > 0 { 10_u128.checked_pow(shift as u32).and_then(|n| coefficient.checked_mul(n)) } else { Some(coefficient) }
+        .ok_or_else(|| DocError::Invalid("rounding step scale overflow".into()))?;
+    let mut remainder = 0_u128;
+    let mut quotient = Vec::new();
+    for digit in prepared.bytes().filter(|d| *d != b'.').chain(std::iter::repeat_n(b'0', (-shift).max(0) as usize)) {
+        remainder = remainder * 10 + u128::from(digit - b'0');
+        quotient.push((remainder / divisor) as u8);
+        remainder %= divisor;
+    }
+    let up = remainder * 2 > divisor
+        || (remainder * 2 == divisor && (ties == Ties::HalfAwayFromZero || quotient.last().is_some_and(|d| !d.is_multiple_of(2))));
+    // Exact quotient * coefficient, with the rounding increment folded into the carry.
+    let mut carry = if up { coefficient } else { 0 };
+    let mut product = Vec::new();
+    for digit in quotient.iter().rev() {
+        let n = u128::from(*digit) * coefficient + carry;
+        product.push(b'0' + (n % 10) as u8);
+        carry = n / 10;
+    }
+    while carry > 0 {
+        product.push(b'0' + (carry % 10) as u8);
+        carry /= 10;
+    }
+    product.reverse();
+    let product = String::from_utf8(product).map_err(|_| DocError::Invalid("invalid step digits".into()))?;
+    let mut magnitude = product.trim_start_matches('0').to_string();
+    if magnitude.is_empty() {
+        magnitude.push('0');
+    }
+    if exponent >= 0 {
+        if magnitude != "0" {
+            magnitude.extend(std::iter::repeat_n('0', exponent as usize));
+        }
+    } else {
+        let places = (-exponent) as usize;
+        if magnitude.len() <= places {
+            magnitude = format!("{}{}", "0".repeat(places + 1 - magnitude.len()), magnitude);
+        }
+        magnitude.insert(magnitude.len() - places, '.');
+    }
+    let (integer, fraction) = magnitude.split_once('.').unwrap_or((&magnitude, ""));
+    let whole = integer.parse::<u64>().map_err(|_| DocError::Invalid("rounded display magnitude overflow".into()))?;
+    if whole > 1_000_000_000_000 || (whole == 1_000_000_000_000 && fraction.bytes().any(|d| d != b'0')) {
+        return Err(DocError::Invalid("rounded display magnitude must be at most 1e12".into()));
+    }
+    // round_prepared needs at least the requested fraction digits, including for integer steps.
+    let missing = usize::from(decimals).saturating_sub(fraction.len());
+    if missing > 0 {
+        if !magnitude.contains('.') {
+            magnitude.push('.');
+        }
+        magnitude.extend(std::iter::repeat_n('0', missing));
+    }
+    round_prepared(&magnitude, x.is_sign_negative(), decimals, ties)
 }
 
 fn grouped_digits(text: &mut String, digits: &str, integer: bool, groups: bool) {
@@ -468,6 +573,214 @@ mod number_tests {
         assert_eq!(serde_json::from_value::<NumberFormat>(serde_json::to_value(f).unwrap()).unwrap(), f);
         for bad in [serde_json::json!({"locale":"en"}), serde_json::json!({"marker":"Point"}), serde_json::json!({"ties":"unknown"})] {
             assert!(serde_json::from_value::<NumberFormat>(bad).is_err());
+        }
+    }
+
+    #[test]
+    fn step_ties_and_decimal_fractions() {
+        for (x, step, dp, even, away) in [
+            (1.25, 0.5, 1, "1.0", "1.5"),
+            (1.75, 0.5, 1, "2.0", "2.0"),
+            (12.5, 5.0, 0, "10", "15"),
+            (25.0, 10.0, 0, "20", "30"),
+            (0.125, 0.05, 2, "0.10", "0.15"),
+            (0.375, 0.25, 2, "0.50", "0.50"),
+            (0.15, 0.1, 1, "0.2", "0.2"),
+            (0.25, 0.1, 1, "0.2", "0.3"),
+            (1.25, 0.5, 0, "1", "2"),
+        ] {
+            for (ties, expected) in [(Ties::HalfEven, even), (Ties::HalfAwayFromZero, away)] {
+                let f = NumberFormat { ties, ..NumberFormat::default() };
+                for sign in [1.0, -1.0] {
+                    let shown = format_number_with_step(sign * x, dp, step, &f).unwrap();
+                    assert_eq!(shown.text, if sign < 0.0 { format!("−{expected}") } else { expected.into() });
+                    assert_eq!(shown.value, sign * expected.parse::<f64>().unwrap());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn step_prepares_display_before_division_and_keeps_boundary_neighbors() {
+        for ties in [Ties::HalfEven, Ties::HalfAwayFromZero] {
+            let f = NumberFormat { ties, ..NumberFormat::default() };
+            for x in [1.75_f64.next_down(), 1.75, 1.75_f64.next_up(), 1.7499999996] {
+                assert_eq!(format_number_with_step(x, 1, 0.5, &f).unwrap().text, "2.0");
+            }
+            for x in [1.25_f64.next_down(), 1.25, 1.25_f64.next_up()] {
+                let expected = if ties == Ties::HalfEven { "1.0" } else { "1.5" };
+                assert_eq!(format_number_with_step(x, 1, 0.5, &f).unwrap().text, expected);
+                assert_eq!(format_number_with_step(-x, 1, 0.5, &f).unwrap().text, format!("−{expected}"));
+            }
+            assert_eq!(format_number_with_step(1.7499999994, 1, 0.5, &f).unwrap().text, "1.5");
+            assert_eq!(format_number_with_step(1.7500000006, 1, 0.5, &f).unwrap().text, "2.0");
+        }
+        let f = NumberFormat::default();
+        // The precision floor narrows the preparation window at eight decimals.
+        assert_eq!(format_number_with_step(1.7499999996, 8, 0.5, &f).unwrap().text, "1.50000000");
+    }
+
+    #[test]
+    fn step_tiny_values_large_magnitudes_and_exact_final_digits() {
+        let f = NumberFormat::default();
+        for step in [f64::from_bits(1), f64::MIN_POSITIVE, 1e-200, 1e-20, 1e-8] {
+            for x in [0.0, -0.0, f64::from_bits(1), -1e11, 1e11, 34947628153.461784] {
+                let shown = format_number_with_step(x, 5, step, &f).unwrap();
+                assert!(shown.value.is_finite());
+                assert_eq!(shown.value, shown.text.replace('−', "-").parse::<f64>().unwrap());
+            }
+        }
+        assert_eq!(format_number_with_step(1e12, 8, f64::from_bits(1), &f).unwrap().text, "1000000000000.00000000");
+        assert_eq!(format_number_with_step(34947628153.461784, 5, 1e-8, &f).unwrap().text, "34947628153.46178");
+        // A tiny step can move an exact decimal tie by less than any f64 ULP.
+        // Keep those digits through the second rounding rather than parsing the snap to f64.
+        assert_eq!(format_number_with_step(1.25, 1, 3e-323, &f).unwrap().text, "1.3");
+        assert_eq!(format_number_with_step(-1.25, 1, 3e-323, &f).unwrap().text, "−1.3");
+        for step in [0.5, 10.0, 1e6] {
+            for x in [-0.0, -0.1] {
+                let shown = format_number_with_step(x, 2, step, &f).unwrap();
+                assert_eq!(shown.text, "0.00");
+                assert_eq!(shown.value.to_bits(), 0.0_f64.to_bits());
+            }
+        }
+    }
+
+    #[test]
+    fn step_extreme_coefficients_have_independent_expected_digits() {
+        // Shortest decimals: largest subnormal = 2225073858507201 * 10^-323,
+        // smallest normal = 22250738585072014 * 10^-324. For x=1.25, integer
+        // division leaves remainders 2221948386734081 and 354296156594724.
+        // Twice the first is above its divisor, twice the second below: the
+        // snap is just above/below 1.25, so final rounding gives 1.3/1.2 in BOTH modes.
+        // Other expected digits were calculated with independent rational arithmetic.
+        for (step, quarter) in [(f64::MIN_POSITIVE.next_down(), "1.3"), (f64::MIN_POSITIVE, "1.2")] {
+            for ties in [Ties::HalfEven, Ties::HalfAwayFromZero] {
+                let f = NumberFormat { ties, ..NumberFormat::default() };
+                for (x, dp, expected) in [
+                    (1.25, 1, quarter),
+                    (99999999999.75, 0, "100000000000"),
+                    (99999999999.75, 1, "99999999999.7"),
+                    (99999999999.75, 2, "99999999999.75"),
+                    (34947628153.461784, 2, "34947628153.46"),
+                    (34947628153.461784, 5, "34947628153.46178"),
+                ] {
+                    for sign in [1.0, -1.0] {
+                        let shown = format_number_with_step(sign * x, dp, step, &f).unwrap();
+                        let text = if sign < 0.0 { format!("−{expected}") } else { expected.into() };
+                        assert_eq!(shown.text, text, "x={x:?}, step={step:e}, dp={dp}, ties={ties:?}");
+                        assert_eq!(shown.value, sign * expected.parse::<f64>().unwrap());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn step_and_final_decimal_rounding_carry_independently() {
+        // 9.975 / .05 = 199.5: both modes increment the step index to 200.
+        // 9.96 / .03 = 332 exactly: only the final rounding carries to 10.0.
+        // 1.26 / .1 = 12.6: the snap is 1.3, then zero decimals give 1 (not 1.26).
+        // 1.49 / .5 = 2.98: the snap is 1.5, then zero decimals give 2 (not 1).
+        for (x, step, dp, even, away) in [
+            (9.975, 0.05, 2, "10.00", "10.00"),
+            (9.96, 0.03, 1, "10.0", "10.0"),
+            (1.26, 0.1, 0, "1", "1"),
+            (1.49, 0.5, 0, "2", "2"),
+            (100000000000.25, 0.1, 0, "100000000000", "100000000000"),
+            (100000000000.25, 0.1, 1, "100000000000.2", "100000000000.3"),
+            (100000000000.25, 0.1, 2, "100000000000.20", "100000000000.30"),
+            (999999999999.75, 0.25, 0, "1000000000000", "1000000000000"),
+        ] {
+            for (ties, expected) in [(Ties::HalfEven, even), (Ties::HalfAwayFromZero, away)] {
+                let f = NumberFormat { ties, ..NumberFormat::default() };
+                for sign in [1.0, -1.0] {
+                    let shown = format_number_with_step(sign * x, dp, step, &f).unwrap();
+                    assert_eq!(shown.text, if sign < 0.0 { format!("−{expected}") } else { expected.into() });
+                    assert_eq!(shown.value, sign * expected.parse::<f64>().unwrap());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn step_rejects_invalid_inputs_and_out_of_range_snap() {
+        let f = NumberFormat::default();
+        for step in [0.0, -0.0, -0.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e6_f64.next_up()] {
+            assert!(matches!(format_number_with_step(1.0, 2, step, &f), Err(DocError::Invalid(_))));
+            assert!(matches!(format_value_with_step(1.0, Length, "mm", 2, step, &f), Err(DocError::Invalid(_))));
+        }
+        for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e12_f64.next_up(), -1e12_f64.next_up()] {
+            assert!(matches!(format_number_with_step(x, 2, 0.5, &f), Err(DocError::Invalid(_))));
+        }
+        for dp in [9, 255] {
+            assert!(matches!(format_number_with_step(1.0, dp, 0.5, &f), Err(DocError::Invalid(_))));
+        }
+        for x in [1e12, -1e12] {
+            for ties in [Ties::HalfEven, Ties::HalfAwayFromZero] {
+                let f = NumberFormat { ties, ..f };
+                for step in [600_000.0, 0.6] {
+                    // The .6 snap has magnitude 1e12 + .2: reject it even though
+                    // zero decimal places would otherwise bring it back to 1e12.
+                    assert!(matches!(format_number_with_step(x, 0, step, &f), Err(DocError::Invalid(_))));
+                }
+            }
+            assert_eq!(format_number_with_step(x, 0, 1e6, &f).unwrap().value, x);
+        }
+        for (kind, unit) in [(Length, "deg"), (Angle, "mm"), (Length, "unknown")] {
+            assert!(matches!(format_value_with_step(1.0, kind, unit, 2, 0.5, &f), Err(DocError::Invalid(_))));
+        }
+    }
+
+    #[test]
+    fn step_units_options_and_input_preservation() {
+        let f = NumberFormat::default();
+        let input: f64 = 25.4 * 1.25;
+        let bits = input.to_bits();
+        assert_eq!(format_value_with_step(input, Length, "in", 1, 0.5, &f).unwrap().text, "1.0");
+        assert_eq!(input.to_bits(), bits);
+        assert_eq!(format_value_with_step(std::f64::consts::PI / 6.0, Angle, "deg", 1, 5.0, &f).unwrap().text, "30.0");
+        assert_eq!(format_value_with_step(1e15, Length, "m", 1, 10.0, &f).unwrap().value, 1e12);
+        let styled = NumberFormat { marker: DecimalMarker::Comma, groups: true, ..f };
+        assert_eq!(format_number_with_step(-12345.25, 2, 0.5, &styled).unwrap().text, "−12\u{202f}345,00");
+        let trim = NumberFormat { leading_zero: false, trailing_zeros: false, ..styled };
+        assert_eq!(format_number_with_step(-0.6, 3, 0.5, &trim).unwrap().text, "−,5");
+        assert_eq!(format_number_with_step(1.23456789, 8, 1e-8, &styled).unwrap().text, "1,234\u{202f}567\u{202f}89");
+        for (distance, expected) in [(0.4, "1.0"), (0.6, "0.5")] {
+            assert_eq!(format_value_with_step((0.75 - distance * 1e-4) * 1e-6, Length, "nm", 1, 0.5, &f).unwrap().text, expected);
+        }
+        for step in [1e6_f64.next_down(), 0.12345678901234567, 2.2250738585072014e-308] {
+            let shown = format_number_with_step(12345.6789, 8, step, &f).unwrap();
+            assert_eq!(shown.value, shown.text.parse::<f64>().unwrap());
+        }
+        // Explicitly keep both historical policies, including their different decimal ties.
+        assert_eq!(format_number(2.665, 2, &f).unwrap().text, "2.66");
+        assert_eq!(length_number(2.665, "mm", 2), "2.67");
+    }
+
+    #[test]
+    fn step_seeded_integer_reference_and_hostile_domain() {
+        let mut seed = 0x4896_1138_0abc_def1;
+        for _ in 0..20_000 {
+            // Independent bounded integer oracle: x and step are thousandths; dp=3.
+            let n = random(&mut seed) % 1_000_000;
+            let s = random(&mut seed) % 100_000 + 1;
+            for ties in [Ties::HalfEven, Ties::HalfAwayFromZero] {
+                let f = NumberFormat { ties, ..NumberFormat::default() };
+                let q = n / s;
+                let r = n % s;
+                let up = 2 * r > s || (2 * r == s && (ties == Ties::HalfAwayFromZero || q % 2 == 1));
+                let expected = (q + u64::from(up)) * s;
+                let text = format!("{}.{:03}", expected / 1000, expected % 1000);
+                let shown = format_number_with_step(n as f64 / 1000.0, 3, s as f64 / 1000.0, &f).unwrap();
+                assert_eq!(shown.text, text);
+                // Exercise arbitrary positive subnormals and normal steps without quotient overflow.
+                let step = f64::from_bits(random(&mut seed));
+                if step.is_finite() && step > 0.0 && step <= 1e6 {
+                    let shown = format_number_with_step(n as f64, 3, step, &f).unwrap();
+                    assert!(shown.value.is_finite() && shown.value >= 0.0);
+                    assert_eq!(shown.value, shown.text.parse::<f64>().unwrap());
+                }
+            }
         }
     }
 

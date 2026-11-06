@@ -6,16 +6,21 @@ use solidcraft_render::{Camera, StandardView};
 use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
 use crate::schema::view_navigation::{
-    CameraReply, NormalToParams, RenderBrowser, RenderFocus, RenderSelect, StandardViewParams, TabStep, TabStepParams,
+    CameraReply, NavigatorParams, NormalToParams, RenderBrowser, RenderFocus, RenderLive, RenderSelect, RibbonTabsOnly, RibbonTabsOnlyParams,
+    StandardViewParams, TabStep, TabStepParams, ZoomTool,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
 
+const ZOOM_TOOL_CONTRACT: TypedContract<ZoomTool> = TypedContract::new();
 const FOCUS_CONTRACT: TypedContract<RenderFocus> = TypedContract::new();
+const NAVIGATOR_CONTRACT: TypedContract<NavigatorParams> = TypedContract::new();
+const RENDER_LIVE_CONTRACT: TypedContract<RenderLive> = TypedContract::new();
 const BROWSER_CONTRACT: TypedContract<RenderBrowserRequest> = TypedContract::new();
 const TAB_STEP_CONTRACT: TypedContract<TabStepParams> = TypedContract::new();
 const STANDARD_VIEW_CONTRACT: TypedContract<StandardViewParams> = TypedContract::new();
 const NORMAL_TO_CONTRACT: TypedContract<NormalToParams> = TypedContract::new();
+const RIBBON_TABS_ONLY_CONTRACT: TypedContract<RibbonTabsOnlyParams> = TypedContract::new();
 
 // Both existing request forms share the Browser command and its published schema.
 #[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -50,20 +55,31 @@ CommandSpec::new("view.status_items", "Viewport Status Items", crate::checked!("
     .params("no parameters → {items}; persistent viewport effects, oldest slot first, with structured settings and executable clear requests; read-only, no model evaluation"),
 CommandSpec::new("view.fit", "Fit", fit)
     .icon("fit").key("F6").noundo().doc_only().params("no parameters → frame the active canvas or selection; display only"),
-CommandSpec::new("view.home", "Home view", home)
+CommandSpec::new("view.home", "Home View", home)
     .icon("home").noundo().doc_only().params("no parameters → home orientation framing the active canvas; display only"),
-CommandSpec::new("view.tool", "Navigation tool", tool)
+CommandSpec::new("view.tool", "Navigation Tool", tool)
     .icon("orbit").noundo().doc_only().params("tool: orbit|pan|zoom|none → tool; latch a camera tool, none releases it"),
-CommandSpec::new("view.spin", "Continuous orbit", spin)
+CommandSpec::new("view.tool.zoom", "Drag to Zoom", crate::checked!("view.tool.zoom", zoom_tool))
+    .icon("zoom").noundo().doc_only()
+    .contract(&ZOOM_TOOL_CONTRACT).output(output_schema_for::<ZoomTool>)
+    .params("on?: bool (omitted: toggle) → on?; latch the Zoom tool for left-button drags. A shortcut assigned in the UI zooms while held"),
+CommandSpec::new("view.spin", "Continuous Orbit", spin)
     .icon("spin").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; continuous orbit until the next click or key"),
-CommandSpec::new("view.visual_style", "Visual style", visual_style)
+CommandSpec::new("view.visual_style", "Visual Style", visual_style)
     .icon("style").noundo().doc_only().params("style: shaded_with_edges|shaded|wireframe|shaded_with_hidden_edges → style, index (0..3 in that order)"),
 CommandSpec::new("view.grid", "Grid", grid)
     .icon("style").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; show the viewport grid"),
-CommandSpec::new("view.ground_shadow", "Ground shadow", ground_shadow)
+CommandSpec::new("view.ground_shadow", "Ground Shadow", ground_shadow)
     .icon("style").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; show the ground shadow"),
-CommandSpec::new("view.navigation_bar", "Navigation bar", navigation_bar)
+CommandSpec::new("view.navigation_bar", "Navigation Bar", navigation_bar)
     .icon("pan").noundo().doc_only().params("visible?: bool (omitted: toggle) → visible?; show the navigation bar (window setting)"),
+CommandSpec::new("view.navigator", "Custom View Navigator", crate::checked!("view.navigator", navigator))
+    .icon("nav_settings").noundo().doc_only()
+    .contract(&NAVIGATOR_CONTRACT).output(output_schema_for::<NavigatorParams>)
+    .params("style?: axes|cube|custom; body?: body name|null; texture?: themed|modeled; arrows?, home?: bool → the navigator as set; the app's view navigator, never saved in the design; never opens a dialog (a toolbar start opens the Custom View Navigator panel)"),
+CommandSpec::new("view.ribbon_tabs_only", "Ribbon Tabs Only", crate::checked!("view.ribbon_tabs_only", ribbon_tabs_only))
+    .icon("chevron").noundo().doc_only().contract(&RIBBON_TABS_ONLY_CONTRACT).output(output_schema_for::<RibbonTabsOnly>)
+    .params("on?: bool (omitted: switch) → on?; fold the ribbon to its tab row, a tab click shows its panels over the view (window setting)"),
 CommandSpec::new("view.render_focus", "Render Focus View", crate::checked!("view.render_focus", render_focus))
     .icon("render_scene").noundo().doc_only()
     .contract(&FOCUS_CONTRACT).output(output_schema_for::<RenderFocus>)
@@ -80,6 +96,10 @@ CommandSpec::new("view.render_browser", "Render Browser", crate::checked!("view.
 CommandSpec::new("view.render_inspector", "Render Inspector", render_inspector)
     .icon("inspect").noundo().doc_only()
     .params("visible: bool → {visible}; per-document Inspector visibility; never edits the design or opens a dialog"),
+CommandSpec::new("view.render_live", "Pause or Resume Live Render", crate::checked!("view.render_live", render_live))
+    .icon("render_image").noundo().doc_only()
+    .contract(&RENDER_LIVE_CONTRACT).output(output_schema_for::<RenderLive>)
+    .params("paused: bool → {paused}; pause or resume this document's live Render preview; headless validation only, never saves settings or changes a final image"),
 CommandSpec::new("view.render_select", "Render selection", crate::checked!("view.render_select", render_select))
     .contract(&RENDER_SELECT).output(output_schema_for::<RenderSelect>)
     .icon("select").noundo().doc_only()
@@ -302,6 +322,10 @@ fn view_toggle(p: &Value, cmd: &str, key: &str) -> Result<Value> {
     }
 }
 
+fn zoom_tool(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.tool.zoom", "on")
+}
+
 fn spin(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.spin", "on")
 }
@@ -315,6 +339,17 @@ fn navigation_bar(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.navigation_bar", "visible")
 }
 
+fn ribbon_tabs_only(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.ribbon_tabs_only";
+    let p = match p {
+        Value::Null => json!({}),
+        Value::Object(_) => p.clone(),
+        _ => return Err(bad(cmd, "parameters must be an object")),
+    };
+    let request: RibbonTabsOnlyParams = serde_json::from_value(p).map_err(|e| bad(cmd, e.to_string()))?;
+    serde_json::to_value(RibbonTabsOnly { on: request.on, param_warnings: Vec::new() }).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
 fn status_items(s: &mut Session, p: &Value) -> Result<Value> {
     if !p.is_object() {
         return Err(bad("view.status_items", "parameters must be an empty object"));
@@ -324,8 +359,25 @@ fn status_items(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!(crate::status_items::StatusItems { items: s.status_items() }))
 }
 
+/// The app sets the navigator; the engine checks the parameters and that a named body exists.
+fn navigator(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.navigator";
+    let request: NavigatorParams = serde_json::from_value(if p.is_null() { json!({}) } else { p.clone() }).map_err(|e| bad(cmd, e.to_string()))?;
+    if let Some(Some(name)) = &request.body
+        && s.world_state()?.body(name).is_none()
+    {
+        return Err(bad(cmd, format!("no body named `{name}`")));
+    }
+    serde_json::to_value(request).map_err(|e| bad(cmd, e.to_string()))
+}
+
 fn render_focus(_s: &mut Session, p: &Value) -> Result<Value> {
     let request: RenderFocus = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_focus", e.to_string()))?;
+    Ok(json!(request))
+}
+
+fn render_live(_s: &mut Session, p: &Value) -> Result<Value> {
+    let request: RenderLive = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_live", e.to_string()))?;
     Ok(json!(request))
 }
 
@@ -608,7 +660,9 @@ mod tests {
                 assert!(s.execute(id, &json!({key:value})).is_err(), "{id}: {value}");
             }
         }
-        for (id, key) in [("view.spin", "on"), ("view.grid", "on"), ("view.ground_shadow", "on"), ("view.navigation_bar", "visible")] {
+        for (id, key) in
+            [("view.tool.zoom", "on"), ("view.spin", "on"), ("view.grid", "on"), ("view.ground_shadow", "on"), ("view.navigation_bar", "visible")]
+        {
             assert_eq!(s.execute(id, &json!({})).unwrap(), json!({}));
             assert_eq!(s.execute(id, &Value::Null).unwrap(), json!({}));
             for on in [false, true] {
@@ -618,7 +672,17 @@ mod tests {
                 assert!(s.execute(id, &json!({key:value})).is_err(), "{id}: {value}");
             }
         }
-        for id in ["view.fit", "view.home", "view.tool", "view.spin", "view.visual_style", "view.grid", "view.ground_shadow", "view.navigation_bar"] {
+        for id in [
+            "view.fit",
+            "view.home",
+            "view.tool",
+            "view.tool.zoom",
+            "view.spin",
+            "view.visual_style",
+            "view.grid",
+            "view.ground_shadow",
+            "view.navigation_bar",
+        ] {
             for params in [json!(true), json!(1), json!("orbit"), json!([]), json!({"unexpected":true})] {
                 assert!(s.execute(id, &params).is_err(), "{id}: {params}");
             }
@@ -626,6 +690,21 @@ mod tests {
         assert_eq!(s.doc.to_json(), before);
         assert!(s.undo.is_empty());
         assert!(s.camera.is_none());
+    }
+
+    #[test]
+    fn ribbon_tabs_only_echoes_the_request_without_editing_the_design() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        assert_eq!(s.execute("view.ribbon_tabs_only", &json!({})).unwrap(), json!({}));
+        for on in [false, true] {
+            assert_eq!(s.execute("view.ribbon_tabs_only", &json!({"on":on})).unwrap(), json!({"on":on}));
+        }
+        for params in [json!({"on":0}), json!({"on":"true"}), json!({"on":[]}), json!({"unexpected":true}), json!(true), json!([])] {
+            assert!(s.execute("view.ribbon_tabs_only", &params).is_err(), "{params}");
+        }
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
     }
 
     #[test]
@@ -1129,7 +1208,7 @@ fn render_workspace_focus_and_browser_validate_without_side_effects() {
     let camera = session.camera;
     let document = session.doc.clone();
     let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
-    for (id, field) in [("view.render_focus", "on"), ("view.render_browser", "open")] {
+    for (id, field) in [("view.render_focus", "on"), ("view.render_browser", "open"), ("view.render_live", "paused")] {
         let command = crate::find_command(id).unwrap();
         assert!(command.contract.is_some() && command.output.is_some());
         for on in [true, false] {

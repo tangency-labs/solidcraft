@@ -415,6 +415,35 @@ fn hostile_geometry_is_an_error_never_a_panic() {
     }
 }
 
+/// A curve whose definition leads back to itself, directly or through another curve, is refused
+/// with an error that names a curve of the loop. A 2D trimmed curve in a pcurve used to follow
+/// its basis without the depth check of the other readers, until the stack overflowed and the
+/// app closed; here it is reached both as a surface curve and as the profile of a face's surface.
+#[test]
+fn a_curve_that_refers_to_itself_is_an_error_never_a_crash() {
+    let trimmed = |id: u64, basis: u64| format!("#{id}=TRIMMED_CURVE('',#{basis},(PARAMETER_VALUE(0.)),(PARAMETER_VALUE(1.)),.T.,.PARAMETER.);");
+    for curves in [trimmed(20, 20), trimmed(20, 21) + &trimmed(21, 20)] {
+        let ex = file(&format!(
+            "{BASE}#10=PLANE('',#4);#11=VECTOR('',#3,1.);#12=LINE('',#1,#11);\
+             #13=(GEOMETRIC_REPRESENTATION_CONTEXT(2)PARAMETRIC_REPRESENTATION_CONTEXT()REPRESENTATION_CONTEXT('2D SPACE',''));\
+             {curves}#14=DEFINITIONAL_REPRESENTATION('',(#20),#13);#15=PCURVE('',#10,#14);#16=SURFACE_CURVE('',#12,(#15),.CURVE_3D.);\
+             #17=SURFACE_OF_LINEAR_EXTRUSION('',#16,#11);"
+        ));
+        let read = [Reader::new(&ex, MM).curve(16).map(|_| ()), Reader::new(&ex, MM).surface(17).map(|_| ())];
+        for got in read {
+            let Err(e) = got else { panic!("read although it refers to itself: {curves}") };
+            assert!(e.contains("curve #20") || e.contains("curve #21"), "{e}");
+        }
+    }
+    // A 3D curve and a surface that refer to themselves name themselves too.
+    let ex = file(&format!("{BASE}{}", trimmed(10, 10)));
+    let e = Reader::new(&ex, MM).curve(10).err().unwrap_or_default();
+    assert!(e.contains("curve #10"), "{e}");
+    let ex = file(&format!("{BASE}#10=OFFSET_SURFACE('',#10,1.,.F.);"));
+    let e = Reader::new(&ex, MM).surface(10).err().unwrap_or_default();
+    assert!(e.contains("surface #10"), "{e}");
+}
+
 /// Every edge curve and face surface of every STEP file in `SOLIDCRAFT_STEP_CORPUS` (the
 /// tangency-labs/models files): read, written, read back. Run with `--ignored`.
 #[test]

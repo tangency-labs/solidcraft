@@ -44,8 +44,8 @@ pub fn toggle_shortcut(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
-fn panel_id(left: bool) -> Id {
-    Id::new(if left { "sc_agent_chat_left" } else { "sc_agent_chat_right" })
+fn panel_salt(left: bool) -> &'static str {
+    if left { "sc_agent_chat_left" } else { "sc_agent_chat_right" }
 }
 
 /// The largest thumbnail of a message's picture, and its largest preview while hovered (points).
@@ -53,15 +53,6 @@ fn panel_id(left: bool) -> Id {
 const THUMB_MAX: (f32, f32) = (150.0, 56.0);
 #[cfg(not(target_arch = "wasm32"))]
 const PREVIEW_MAX: (f32, f32) = (560.0, 380.0);
-
-/// Forget the panel's own idea of its width, so the preference applies on the next frame.
-pub fn forget_width(ctx: &egui::Context) {
-    ctx.data_mut(|d| {
-        for left in [true, false] {
-            d.remove::<egui::containers::panel::PanelState>(panel_id(left));
-        }
-    });
-}
 
 /// Show or hide the panel (a folded panel unfolds first).
 pub fn toggle(app: &mut SolveApp) {
@@ -123,7 +114,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.agent_chat.window_placed = false;
     }
     // New chat, when the chat has focus (its input, or the pointer over the panel).
-    let in_chat = ctx.memory(|m| m.has_focus(Id::new("sc_agent_chat_input")))
+    let in_chat = ctx.memory(|m| m.has_focus(Id::unique("sc_agent_chat_input")))
         || ctx.pointer_hover_pos().is_some_and(|p| app.agent_chat.panel_rect.is_some_and(|r| r.contains(p)));
     if app.agent_chat.open && in_chat && ctx.input_mut(|i| i.consume_shortcut(&NEW_CHAT_SHORTCUT)) {
         request_new_chat(app);
@@ -153,18 +144,27 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let left = app.preferences.agent_chat_side == "left";
     let host = Container::new(ui.ctx(), Surface::Panel);
-    let side = |id: Id| host.edge(id, if left { Edge::Left } else { Edge::Right });
+    let side = |salt: &'static str| host.edge(salt, if left { Edge::Left } else { Edge::Right });
     if app.preferences.agent_chat_minimized {
-        let r = host
-            .show_edge(ui, side(Id::new("sc_agent_chat_strip")).exact_size(STRIP).resizable(false), host.edge_frame(t.panel), |ui| strip(app, ui));
+        let r = host.show_edge(ui, side("sc_agent_chat_strip").exact_size(STRIP).resizable(false), host.edge_frame(t.panel), |ui| strip(app, ui));
         app.agent_chat.drop_rect = Some(r.response.rect);
         show_drop_hint(app, &ctx);
         return;
     }
     let width = app.preferences.agent_chat_width.clamp(MIN_WIDTH, MAX_WIDTH);
+    if std::mem::take(&mut app.agent_chat.forget_width) {
+        // A panel's state is keyed by the Ui it is shown in and its salt; either side's would
+        // override the preference once the panel moves there.
+        let scope = ui.scope_id();
+        ctx.data_mut(|d| {
+            for side in [true, false] {
+                d.remove::<egui::containers::panel::PanelState>(scope.with(panel_salt(side)));
+            }
+        });
+    }
     let r = host.show_edge(
         ui,
-        side(panel_id(left)).default_size(width).size_range(MIN_WIDTH..=MAX_WIDTH).resizable(true),
+        side(panel_salt(left)).default_size(width).size_range(MIN_WIDTH..=MAX_WIDTH).resizable(true),
         host.edge_frame(t.dialog_body),
         |ui| ui_kit::scope(ui, |ui| body(app, ui, left)),
     );
@@ -254,7 +254,7 @@ fn floating(app: &mut SolveApp, ui: &mut egui::Ui) {
     let anchor = if left { bounds.left_top() } else { bounds.right_top() };
     let frame = ui_kit::Panel::feature_frame(&ctx, app.ui.layout, side);
     let inner = (vec2(width, height) - frame.total_margin().sum()).max(egui::Vec2::ZERO);
-    let panel = ui_kit::Panel::new(tr("ui.assistant"), Id::new("sc_agent_chat_floating"), anchor, available, side, frame).width(width);
+    let panel = ui_kit::Panel::new(tr("ui.assistant"), Id::unique("sc_agent_chat_floating"), anchor, available, side, frame).width(width);
     if let Some(card) = panel.fixed_window(&ctx, inner).show(&ctx, |ui| {
         ui.set_min_size(inner);
         ui.set_max_size(inner);
@@ -267,7 +267,7 @@ fn floating(app: &mut SolveApp, ui: &mut egui::Ui) {
             } else {
                 Rect::from_x_y_ranges(rect.left()..=rect.left() + t.space_4, rect.y_range())
             };
-            let response = ui.interact(rail, Id::new("sc_agent_chat_resize"), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+            let response = ui.interact(rail, Id::unique("sc_agent_chat_resize"), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
             crate::scenario::publish_handle("agent_chat:resize", rail.center());
             if response.dragged() {
                 let delta = ui.input(|i| i.pointer.delta().x) * if left { 1.0 } else { -1.0 };
@@ -459,7 +459,7 @@ fn gallery_window(app: &mut SolveApp, ctx: &egui::Context) {
     let mut step: isize = if left { -1 } else { isize::from(right) };
     let t = Tokens::get();
     let max = ctx.content_rect().size() * vec2(0.8, 0.7);
-    let modal = ui_kit::Container::new(ctx, ui_kit::Surface::Window).modal(Id::new("sc_agent_chat_gallery")).show(ctx, |ui| {
+    let modal = ui_kit::Container::new(ctx, ui_kit::Surface::Window).modal(Id::unique("sc_agent_chat_gallery")).show(ctx, |ui| {
         ui.set_max_width(max.x);
         ui.horizontal(|ui| {
             let prev = ui_kit::button(ui, tr("ui.agent_chat_previous_picture"), ui_kit::Button::Enabled(count > 1));
@@ -517,7 +517,7 @@ fn show_drop_hint(app: &SolveApp, ctx: &egui::Context) {
 #[cfg(not(target_arch = "wasm32"))]
 fn drop_hint(ctx: &egui::Context, area: Rect) {
     let t = Tokens::get();
-    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::new("sc_agent_chat_drop_hint")));
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::unique("sc_agent_chat_drop_hint")));
     let zone = area.shrink(6.0);
     painter.rect(zone, t.radius_xl, t.accent.gamma_multiply(0.16), Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
     let font = egui::FontId::proportional(Tokens::get().font_heading);
@@ -692,7 +692,7 @@ fn strip(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let r = ui.max_rect();
     let button = Rect::from_center_size(pos2(r.center().x, r.top() + 22.0), vec2(26.0, 26.0));
-    let resp = ui.interact(button, Id::new("sc_agent_chat_unfold"), Sense::click());
+    let resp = ui.interact(button, Id::unique("sc_agent_chat_unfold"), Sense::click());
     crate::scenario::publish_handle("agent_chat:unfold", button.center());
     if resp.hovered() {
         ui.painter().rect_filled(button, t.radius_sm, t.hover);
@@ -702,15 +702,7 @@ fn strip(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.painter().circle_filled(pos2(r.center().x, button.bottom() + 10.0), 3.5, state_color(state));
     let waiting = app.agent_chat.waiting();
     if waiting > 0 {
-        let at = button.right_top() + vec2(-3.0, 3.0);
-        ui.painter().circle_filled(at, 6.5, t.warning);
-        ui.painter().text(
-            at,
-            Align2::CENTER_CENTER,
-            waiting.min(9).to_string(),
-            egui::FontId::proportional(crate::theme::Tokens::get().font_badge),
-            t.panel,
-        );
+        ui_kit::attention_mark(ui.painter(), button, Some(waiting));
     }
     ui.painter().line_segment(
         if app.preferences.agent_chat_side == "left" { [r.right_top(), r.right_bottom()] } else { [r.left_top(), r.left_bottom()] },
@@ -758,7 +750,7 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, left: bool) {
             }
             // Drag the header across the window to dock on the other side.
             if !popped {
-                let drag = ui.interact(title, Id::new("sc_agent_chat_grip"), Sense::drag());
+                let drag = ui.interact(title, Id::unique("sc_agent_chat_grip"), Sense::drag());
                 crate::scenario::publish_handle("agent_chat:grip", title.center());
                 dock_drag(app, ui, &drag, left);
             }
@@ -813,7 +805,7 @@ fn dock_drag(app: &mut SolveApp, ui: &egui::Ui, drag: &egui::Response, left: boo
         };
         crate::scenario::publish_rect("agent_chat:dock_hint", zone);
         let t = Tokens::get();
-        let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::new("sc_agent_chat_dock_hint")));
+        let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::unique("sc_agent_chat_dock_hint")));
         painter.rect(zone, t.radius_xl, t.accent.gamma_multiply(0.18), Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
         painter.text(
             zone.center(),
@@ -885,7 +877,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let busy = state == State::Busy;
     // Enter sends (queues while the agent works); Ctrl/Cmd+Enter sends now; Esc stops. They are
     // read before the field sees them so no newline is typed.
-    let focused = ui.memory(|m| m.has_focus(Id::new("sc_agent_chat_input")));
+    let focused = ui.memory(|m| m.has_focus(Id::unique("sc_agent_chat_input")));
     let (steer, esc) = if focused {
         ui.input_mut(|i| (i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter), busy && i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)))
     } else {
@@ -894,7 +886,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let (mut send_clicked, mut stop_clicked, mut enter, mut pick_clicked) = (false, false, false, false);
     let mut remove_picked_at = None;
     let frame = Container::new(ui.ctx(), Surface::Viewport).edge_frame(egui::Color32::TRANSPARENT);
-    let composer = Container::new(ui.ctx(), Surface::Viewport).edge(Id::new("sc_agent_chat_composer"), Edge::Bottom);
+    let composer = Container::new(ui.ctx(), Surface::Viewport).edge("sc_agent_chat_composer", Edge::Bottom);
     composer.resizable(false).show_separator_line(false).frame(frame).show(ui, |ui| {
         let footer = ui_kit::assistant_composer_footer(ui, |ui| {
             let boxed = ui_kit::assistant_composer(ui, focused, |ui| {
@@ -920,7 +912,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .show(ui, |ui| {
                         ui_kit::assistant_input(
                             ui,
-                            Id::new("sc_agent_chat_input"),
+                            Id::unique("sc_agent_chat_input"),
                             &mut app.agent_chat.input,
                             tr(if busy { "ui.agent_chat_placeholder_busy" } else { "ui.agent_chat_placeholder" }),
                         )
@@ -1056,6 +1048,8 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui.spacing_mut().item_spacing.y = Tokens::get().space_10;
                 conversation(app, ui);
             });
+            // Last, so the scroll goes to this area and not to one nested in the conversation.
+            scroll_while_selecting(ui);
         });
     if esc || stop_clicked {
         cancel(app);
@@ -1401,7 +1395,7 @@ fn config_select(app: &mut SolveApp, ui: &mut egui::Ui, option: &acp::ConfigOpti
         }
         response
     };
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, enabled, format!("{name}: {selected}")));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, enabled, format!("{name}: {selected}")));
     response.backing_on_hover_text(tip);
     match picked {
         Some(ui_kit::Picked::Listed(value)) => super::set_config_option(app, &option.id, &value),
@@ -1445,11 +1439,13 @@ mod config_ui_tests {
     fn draw_switcher(app: &mut SolveApp, ctx: &egui::Context, width: f32) {
         crate::scenario::clear_handles();
         let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 700.0));
-        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+        ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
             ui.allocate_ui(vec2(width - 16.0, 600.0), |ui| {
                 ui_kit::scope(ui, |ui| switcher(app, ui));
             });
-        });
+        })
+        .textures_delta
+        .clear();
     }
 
     #[test]
@@ -1678,6 +1674,40 @@ fn copy_message_menu(ui: &egui::Ui, response: &egui::Response, n: usize, text: &
     }
 }
 
+/// A text selection dragged near or past the top or bottom of the conversation scrolls it, faster
+/// the further out, so a long answer can be selected in one drag (#11527). Only a drag towards
+/// that edge does: a click, a double click or a held press on a line by the edge, or a drag from
+/// there into the conversation, scrolls nothing. `ui`: the conversation's scroll area, once its
+/// content is drawn.
+#[cfg(not(target_arch = "wasm32"))]
+fn scroll_while_selecting(ui: &egui::Ui) {
+    // Scrolling starts this far inside the edge, and goes this many points a second for each
+    // point further out, up to four times as far out; once the pointer has moved more than
+    // `TOWARDS` that way since the press.
+    const EDGE: f32 = 32.0;
+    const SPEED: f32 = 16.0;
+    const TOWARDS: f32 = 8.0;
+    let view = ui.clip_rect();
+    let pointer = ui.input(|i| i.pointer.press_origin().filter(|p| i.pointer.primary_down() && view.contains(*p)).zip(i.pointer.latest_pos()));
+    let Some((from, at)) = pointer else {
+        return;
+    };
+    if !ui.ctx().plugin::<egui::text_selection::LabelSelectionState>().lock().has_selection() {
+        return;
+    }
+    let content = ui.min_rect();
+    let out = if at.y < view.top() + EDGE && from.y - at.y > TOWARDS && content.top() < view.top() - 0.5 {
+        at.y - (view.top() + EDGE)
+    } else if at.y > view.bottom() - EDGE && at.y - from.y > TOWARDS && content.bottom() > view.bottom() + 0.5 {
+        at.y - (view.bottom() - EDGE)
+    } else {
+        return;
+    };
+    let step = out.clamp(-4.0 * EDGE, 4.0 * EDGE) * SPEED * ui.input(|i| i.stable_dt).min(0.1);
+    // A positive delta moves the content down, showing what is above.
+    ui.scroll_with_delta_animation(vec2(0.0, -step), egui::style::ScrollAnimation::none());
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
@@ -1696,7 +1726,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let before = ui.cursor();
                 ui_kit::assistant_bubble(ui, |ui| {
                     if !text.is_empty() {
-                        ui.add(egui::Label::new(RichText::new(text).color(t.text)).selectable(true).wrap());
+                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).color(t.text)).wrap());
                     }
                     if !pictures.is_empty() {
                         if let Some(at) = picture_strip(ui, n, pictures) {
@@ -1709,25 +1739,27 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     context_chips(ui, context, false);
                     files_line(ui, files.iter().map(String::as_str));
                     if copyable {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| copy_message_button(ui, n, text));
+                        // Top-aligned: a row centred across its height takes all the height left in
+                        // the conversation's view, which stretched a prompt near the top.
+                        ui.with_layout(Layout::right_to_left(Align::Min), |ui| copy_message_button(ui, n, text));
                     }
                 });
                 if copyable {
                     let drawn = egui::Rect::from_x_y_ranges(before.x_range(), before.min.y..=ui.cursor().min.y);
-                    let resp = ui.interact(drawn, Id::new(("agent_chat_msg", n)), Sense::hover());
+                    let resp = ui.interact(drawn, Id::unique(("agent_chat_msg", n)), Sense::hover());
                     copy_message_menu(ui, &resp, n, text);
                 }
             }
             Item::Agent { thought, text } => {
                 if *thought {
-                    ui.add(egui::Label::new(RichText::new(text).italics().color(t.text_dim)).selectable(true).wrap());
+                    super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).italics().color(t.text_dim)).wrap());
                 } else {
                     let before = ui.cursor();
                     ui_kit::assistant_prose(ui, |ui| super::markdown_view::show(ui, n, text));
                     if !text.is_empty() {
                         copy_message_button(ui, n, text);
                         let drawn = egui::Rect::from_x_y_ranges(before.x_range(), before.min.y..=ui.cursor().min.y);
-                        let resp = ui.interact(drawn, Id::new(("agent_chat_msg", n)), Sense::hover());
+                        let resp = ui.interact(drawn, Id::unique(("agent_chat_msg", n)), Sense::hover());
                         copy_message_menu(ui, &resp, n, text);
                     }
                 }
@@ -1801,7 +1833,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
             Item::Approval { id, title, tool, answer: given } => {
                 ui_kit::assistant_approval(ui, tr("ui.agent_chat_approval"), |ui| {
                     ui_kit::assistant_tool_detail(ui, |ui| {
-                        ui.add(egui::Label::new(RichText::new(title).monospace().size(t.font_caption)).selectable(true).wrap());
+                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(title).monospace().size(t.font_caption)).wrap());
                     });
                     match given {
                         Some(true) => {
@@ -1897,7 +1929,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             match (&editing, edit_buf.as_mut()) {
                 (Some((i, _)), Some(buf)) if *i == n => {
-                    let te = ui_kit::message_field(ui, Id::new(("sc_agent_pending_input", n)), buf, "");
+                    let te = ui_kit::message_field(ui, Id::unique(("sc_agent_pending_input", n)), buf, "");
                     crate::scenario::publish_rect("agent_chat:pending_input", te.rect);
                     ui.horizontal(|ui| {
                         if ui_kit::button(ui, tr("ui.agent_chat_save"), ui_kit::Button::Normal).clicked() {
@@ -1910,7 +1942,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 _ => {
                     if !p.text.is_empty() {
-                        ui.add(egui::Label::new(RichText::new(&p.text).color(t.text)).selectable(true).wrap());
+                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(&p.text).color(t.text)).wrap());
                     }
                     if p.image {
                         ui.label(RichText::new(tr("ui.agent_chat_view_attached")).color(t.text_dim).size(crate::theme::Tokens::get().font_small));

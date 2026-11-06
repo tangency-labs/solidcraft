@@ -1218,3 +1218,24 @@ fn rectangular_pattern_of_a_join_on_a_hollow_part_copies_the_whole_boss() {
     );
     assert!(rel(volume(&mut s), 79500.0) < 1e-6, "patterned copy lost material");
 }
+
+/// A Move that copies can be the source of a feature pattern (#5931): each pattern copy is
+/// another moved copy, placed round the axis, and the same as patterning the copied body.
+#[test]
+fn circular_pattern_of_a_moved_copy_adds_one_body_per_instance() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Block"}));
+    run(&mut s, "solid.move", json!({"bodies": ["Block"], "translate": [10, 0, 0], "copy": true, "name": "Move1"}));
+    let one = volume(&mut s);
+    run(&mut s, "solid.pattern.circular", json!({"features": ["Move1"], "axis": "Z", "count": 4, "angle": "360 deg"}));
+    assert!(rel(volume(&mut s), one * 2.5) < 1e-6 && s.world_state().unwrap().bodies.len() == 5, "the moved copy repeats three more times");
+    // Moving the first copy elsewhere moves the repeats with it: they follow the feature.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": "Move1", "command": "solid.move", "params": {"bodies": ["Block"], "translate": [20, 0, 0], "copy": true}}),
+    );
+    assert_eq!(s.world_state().unwrap().bodies.len(), 5);
+    let far = s.world_state().unwrap().bodies.iter().map(|b| b.mesh().bounds().max.x).fold(f64::MIN, f64::max);
+    assert!(far > 20.0, "the repeats follow the redefined Move: {far}");
+}

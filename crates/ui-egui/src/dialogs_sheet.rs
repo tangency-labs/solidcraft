@@ -505,8 +505,11 @@ pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
     if let Some(body) = app.session.model.state().sheets.last().map(|sheet| sheet.body.clone()) {
         export_flat(app, &body, extension);
     } else {
-        // Let the command report its ordinary "no sheet body" error without opening a picker.
-        let _ = app.run(id, json!({}));
+        // Let the command report its ordinary "no sheet body" error without opening a picker;
+        // nothing starts, so the ribbon goes back to the tab it was started from (#10540).
+        if app.run(id, json!({})).is_err() {
+            app.restore_command_tab();
+        }
     }
     true
 }
@@ -1047,7 +1050,7 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
     // to its width limit, so its actual edge, rather than a fixed reserve, bounds the view.
     let panel_left = painter
         .ctx()
-        .memory(|m| m.area_rect(egui::Id::new(("sc_dialog", "FLAT PATTERN"))))
+        .memory(|m| m.area_rect(egui::Id::unique(("sc_dialog", "FLAT PATTERN"))))
         .map(|panel| panel.left())
         .unwrap_or(rect.right() - crate::frame::DIALOG_MAX_W);
     let content = crate::shell::content_rect(app, rect);
