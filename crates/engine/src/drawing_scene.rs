@@ -283,7 +283,8 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // After the views, as they need the views' frames: one read for the sheet's dimensions.
     let frames: BTreeMap<u64, ViewFrame> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
     let wanted = dimensions_on(drawing, on.iter().map(|(id, ..)| *id));
-    let dimensions = draw_dimensions(s, drawing, &wanted, |view| frames.get(&view).copied());
+    let group = |view: u64| on.binary_search_by_key(&view, |(id, ..)| *id).ok().and_then(|at| on.get(at)).map(|(_, v, _)| v.line_group.value);
+    let dimensions = draw_dimensions(s, drawing, &wanted, |view| Some((*frames.get(&view)?, group(view)?)));
     assembly.add_dimensions(dimensions.iter());
     let (scene, views, objects, dimensions) = assembly.finish()?;
     Ok(SheetScene { scene, views, objects, dimensions, out_of_date: Vec::new() })
@@ -396,7 +397,7 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     });
     match lines {
         Ok((lines, rect)) => {
-            let (mut group, drew) = paper_lines(&lines, id, LineGroup::DEFAULT);
+            let (mut group, drew) = paper_lines(&lines, id, view.line_group.value);
             let pictures = picture_items(id, &view_parts(&set, styles), rect);
             // The pictures go under the strokes, so the owners start with one empty entry for each.
             let owner = |at: usize| lines.lines.get(at).map(|line| (line.shown, line.source));
@@ -413,14 +414,18 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
 }
 
 /// The records of `wanted` read once, each drawn through its view's frame (`None`: its view isn't
-/// drawn), in `wanted`'s order. A record that can't be read says so instead.
-fn draw_dimensions(s: &Session, d: &Drawing, wanted: &[Arc<Dimension>], frame: impl Fn(u64) -> Option<ViewFrame>) -> Vec<DrawnDimension> {
+/// drawn), in its line group, in `wanted`'s order. A record that can't be read says so instead.
+fn draw_dimensions(
+    s: &Session,
+    d: &Drawing,
+    wanted: &[Arc<Dimension>],
+    frame: impl Fn(u64) -> Option<(ViewFrame, LineGroup)>,
+) -> Vec<DrawnDimension> {
     let ids: Vec<u64> = wanted.iter().map(|record| record.id).collect();
     let read = s.doc.resolve_dimensions(&s.model, d, &ids);
     let one = |at: usize, record: &Arc<Dimension>| match read.as_ref().map(|all| all.get(at)) {
         Ok(Some(resolved)) => {
-            let group =
-                frame(record.view).and_then(|frame| crate::drawing_dimension_paper::paper_group(record, resolved, &frame, LineGroup::DEFAULT));
+            let group = frame(record.view).and_then(|(frame, lines)| crate::drawing_dimension_paper::paper_group(record, resolved, &frame, lines));
             let nothing = group.is_none() && !resolved.points.is_empty() && frame(record.view).is_some();
             let why = nothing.then(|| "what it measures has no place to draw on its view".to_string());
             DrawnDimension { dimension: record.id, view: record.view, status: resolved.status.clone(), group, why }
@@ -903,7 +908,7 @@ pub fn step(s: &mut Session) -> bool {
     let drawn = draw(s, &shown, id, &view);
     let shows = SourceKey::of(&shown);
     // The view's dimensions through its new frame, in the same swap as its lines.
-    let frame = drawn.frame;
+    let frame = drawn.frame.map(|frame| (frame, view.line_group.value));
     let these = dimensions_on(&d, std::iter::once(id));
     let lines = draw_dimensions(s, &d, &these, |_| frame);
     let cache = &mut s.drawing_scenes;
@@ -926,7 +931,8 @@ fn step_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)
     let Some(view) = stale.first().map(|record| record.view) else { return false };
     let (these, others): (Vec<_>, Vec<_>) = stale.into_iter().partition(|record| record.view == view);
     let entry = s.drawing_scenes.views.get(&view);
-    let (frame, view_serial) = (entry.and_then(|e| e.drawn.frame), entry.map_or(0, |e| e.serial));
+    let frame = entry.and_then(|e| Some((e.drawn.frame?, e.view.line_group.value)));
+    let view_serial = entry.map_or(0, |e| e.serial);
     let lines = draw_dimensions(s, d, &these, |_| frame);
     let cache = &mut s.drawing_scenes;
     cache.serial += 1;

@@ -15,6 +15,7 @@ use solidcore_record::Seg2;
 use solidcraft_doc::drawing_view::{TangentEdges, ViewDirection, ViewSettings};
 use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, SheetSize};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide, Scale};
+use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_geom::paper::{MAX_DASH_MM, ObjectKind};
 use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_render::VisualStyle;
@@ -216,6 +217,20 @@ impl JsonSchema for TangentEdgesParam {
     }
 }
 
+/// An ISO 128 line group, by its wide line.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(transparent)]
+pub struct LineGroupParam(pub LineGroup);
+
+impl JsonSchema for LineGroupParam {
+    fn schema_name() -> Cow<'static, str> {
+        "LineGroup".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "An ISO 128 line group, by its wide line in millimetres.", "type": "string", "enum": LineGroup::NAMES})
+    }
+}
+
 /// The chord the lines are sampled at, in paper millimetres.
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 #[serde(transparent)]
@@ -332,8 +347,9 @@ pub struct EditParams {
     pub set: ViewSet,
 }
 
-/// The settings `drawing.view.edit` changes, each only when given. For the seven that can follow
-/// the view's parent, `null` means follow it (a base view's scale can't: it has no parent).
+/// The settings `drawing.view.edit` changes, each only when given. For the eight that can follow
+/// the view's parent, `null` means follow it (a base view's scale can't: it has no parent; a base
+/// view's line group follows its sheet's, then its drawing's).
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]
@@ -348,6 +364,9 @@ pub struct ViewSet {
     pub reference_hides_model: Option<Option<bool>>,
     #[serde(deserialize_with = "super::present")]
     pub tangent_edges: Option<Option<TangentEdgesParam>>,
+    /// The line group its lines and dimensions are drawn in.
+    #[serde(deserialize_with = "super::present")]
+    pub line_group: Option<Option<LineGroupParam>>,
     /// The occurrence subtrees it draws.
     #[serde(deserialize_with = "super::present")]
     pub source: Option<Option<SourceParam>>,
@@ -366,7 +385,7 @@ pub struct ViewSet {
     #[serde(deserialize_with = "super::present")]
     #[schemars(with = "PlaceParam")]
     pub place: Option<PlaceParam>,
-    /// A projected view's display settings (styles, reference parts, tangent edges) all following
+    /// A projected view's display settings (styles, reference parts, tangent edges, line group) all following
     /// its parent (true), or all its own, at the values they have now (false).
     #[serde(deserialize_with = "super::present")]
     #[schemars(with = "bool")]
@@ -379,6 +398,10 @@ pub struct ViewSet {
 pub enum FromResult {
     This,
     Parent,
+    /// No view of the chain sets it: the view's sheet does.
+    Sheet,
+    /// No view of the chain nor its sheet sets it: the drawing does.
+    Drawing,
     Default,
 }
 
@@ -401,6 +424,8 @@ pub struct SettingsResult {
     pub reference_style: SettingResult<String>,
     pub reference_hides_model: SettingResult<bool>,
     pub tangent_edges: SettingResult<String>,
+    /// The ISO 128 line group it is drawn in, by its wide line.
+    pub line_group: SettingResult<String>,
     /// The occurrence subtrees it draws: every body when null.
     pub occurrences: SettingResult<Option<Vec<Vec<u64>>>>,
     /// Occurrence paths it leaves out, with everything under them: none when null.

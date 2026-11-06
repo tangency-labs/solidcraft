@@ -7,6 +7,7 @@ use solidcore_record::Vec3;
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_sheet::{self, Orientation, PaperSize};
 use solidcraft_geom::drawing_view::NamedView;
+use solidcraft_geom::paper::line::LineGroup;
 
 use super::*;
 use crate::drawing::{Excluded, Sheet, Source};
@@ -324,6 +325,7 @@ fn the_views_rules_are_kept_on_reading() {
         dpi: 300.0,
         documents: None,
         excluded: Excluded::default(),
+        line_group: None,
     }));
     let other_id = ids::encode(other);
     assert_eq!(
@@ -429,6 +431,36 @@ fn a_view_resolves_through_its_chain() {
     let close = |a: Vec3, b: Vec3| (a - b).len() < 1e-12;
     assert!(close(turned.x, Vec3::X) && close(turned.y, Vec3::Z), "{turned:?}");
     assert_eq!(d.resolve_view(99).unwrap_err().to_string(), format!("the drawing has no view {}", ids::encode(99)));
+}
+
+/// A view no view of its chain sets a line group for draws in its sheet's, else its drawing's,
+/// and says which gave it.
+#[test]
+fn a_view_draws_in_its_sheets_line_group_else_the_drawings() {
+    let (mut d, _, [front, right, _]) = three();
+    assert_eq!(d.resolve_view(right).unwrap().line_group, Setting { value: LineGroup::Mm0_5, set_by: SetBy::Drawing });
+    d.line_group = LineGroup::Mm1;
+    assert_eq!(d.resolve_view(right).unwrap().line_group, Setting { value: LineGroup::Mm1, set_by: SetBy::Drawing });
+    Arc::make_mut(&mut d.sheets[0]).line_group = Some(LineGroup::Mm0_35);
+    for view in [front, right] {
+        assert_eq!(d.resolve_view(view).unwrap().line_group, Setting { value: LineGroup::Mm0_35, set_by: SetBy::Sheet });
+    }
+}
+
+/// A view's own line group beats its sheet's, and the views projected from it follow it.
+#[test]
+fn a_views_own_line_group_beats_its_sheets_and_its_children_follow() {
+    let (mut d, _, [front, right, top]) = three();
+    Arc::make_mut(&mut d.sheets[0]).line_group = Some(LineGroup::Mm0_35);
+    view_mut(&mut d, right).settings.line_group = Some(LineGroup::Mm0_7);
+    assert_eq!(d.resolve_view(right).unwrap().line_group, Setting { value: LineGroup::Mm0_7, set_by: SetBy::This });
+    assert_eq!(d.resolve_view(top).unwrap().line_group, Setting { value: LineGroup::Mm0_7, set_by: SetBy::Parent(right) });
+    assert_eq!(d.resolve_view(front).unwrap().line_group.set_by, SetBy::Sheet);
+    // Saved with the view, and read back.
+    let v = file(&d);
+    let saved = v["views"].as_array().unwrap().iter().find(|v| v["id"] == json!(ids::encode(right))).unwrap();
+    assert_eq!(saved["settings"]["line_group"], json!("0.7"));
+    assert_eq!(Drawing::from_json(&v.to_string()).unwrap().resolve_view(top).unwrap().line_group.value, LineGroup::Mm0_7);
 }
 
 /// A view placed at a point is there; one lined up with its parent takes its own place along the

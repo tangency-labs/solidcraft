@@ -6,7 +6,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    let settings = ["documents", "dpi", "excluded", "name", "orientation", "size", "title_block", "title_block_overrides"];
+    let settings = ["documents", "dpi", "excluded", "line_group", "name", "orientation", "size", "title_block", "title_block_overrides"];
     let with = |key: &'static str| -> Vec<&'static str> {
         let mut keys: Vec<&str> = settings.iter().copied().chain([key]).collect();
         keys.sort_unstable();

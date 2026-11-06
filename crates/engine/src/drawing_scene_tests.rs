@@ -799,6 +799,64 @@ fn a_change_of_reference_parts_redraws_the_views() {
     assert_ne!(bytes(&settled(&mut s, sheet).scene), bytes(&after.scene));
 }
 
+/// A sheet's line group draws its views and dimensions again in that group's widths: at 0.7 a
+/// visible edge is 0.7 wide, a reference part's edge 0.35, its hidden edges 0.35 dashed 12 and 3
+/// widths, a dimension's lines 0.35, also when it alone is drawn again. `build` and the provider
+/// draw one thing, and the 0.5 group chosen again, or followed again, gives back today's bytes.
+#[test]
+fn a_change_of_line_group_redraws_the_views_in_its_widths() {
+    let mut design = Session::default();
+    let mut part = |name: &str, body: &str| {
+        let occurrence = run(&mut design, "component.create", json!({"name": name}))["occurrence"].as_u64().unwrap();
+        run(&mut design, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": body, "operation": "new"}));
+        run(&mut design, "component.activate", json!({"component": 0}));
+        occurrence
+    };
+    part("Front", "BodyFront");
+    let behind = part("Behind", "BodyBehind");
+    run(&mut design, "occurrence.move", json!({"occurrence": behind, "translate": [10, 10, 0]}));
+    run(&mut design, "occurrence.bom_type", json!({"occurrence": behind, "bom_type": "reference"}));
+    let (mut s, sheet, [front, top]) = front_and_top_of(design);
+    let shown_whole = json!({"reference_style": "visible_hidden", "reference_shown_percent": 100});
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": shown_whole}));
+    let added = run(&mut s, "drawing.dimension.add", json!({"view": ids::encode(front), "kind": {"linear": {"a": [0, 0, 10], "b": [20, 0, 10]}}}));
+    let dimension = ids::decode(added["dimension"].as_str().unwrap()).unwrap();
+    let before = settled(&mut s, sheet);
+    let set = |s: &mut Session, group: Value| run(s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "line_group": group}));
+    set(&mut s, json!("0.7"));
+    let stale = extract(&mut s, sheet).unwrap().stale;
+    assert!(stale.len() == 2 && stale.contains(&front) && stale.contains(&top), "{stale:?}");
+    let after = settled(&mut s, sheet);
+    let strokes = |group: &Group| {
+        let mut found: Vec<(f64, Option<Vec<f64>>)> = group
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Stroke { width_mm, pattern, .. } => Some((*width_mm, pattern.as_ref().map(|p| p.lengths_mm.clone()))),
+                _ => None,
+            })
+            .collect();
+        found.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        found.dedup();
+        found
+    };
+    let group = LineGroup::Mm0_7;
+    let (wide, narrow) = (LineKind::Visible.width_mm(group), LineKind::Thin.width_mm(group));
+    let dashes = LineKind::Hidden.dashes_mm(group).unwrap().to_vec();
+    assert_eq!((wide, narrow, LineKind::Hidden.width_mm(group)), (0.7, 0.35, 0.35));
+    assert_eq!(strokes(group_of(&after.scene, front)), [(narrow, None), (narrow, Some(dashes)), (wide, None)]);
+    assert_eq!(strokes(group_of(&after.scene, dimension)), [(narrow, None)]);
+    assert_eq!(bytes(&built(&s, sheet).scene), bytes(&after.scene), "the provider and a build draw one thing");
+    // A dimension drawn again on its own keeps its view's group.
+    run(&mut s, "drawing.dimension.edit", json!({"dimension": ids::encode(dimension), "set": {"offset_mm": 15.0}}));
+    assert_eq!(strokes(group_of(&settled(&mut s, sheet).scene, dimension)), [(narrow, None)]);
+    run(&mut s, "edit.undo", json!({}));
+    set(&mut s, json!("0.5"));
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&before.scene));
+    set(&mut s, Value::Null);
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&before.scene));
+}
+
 /// A run of text moves with its group: its start moves, and nothing else changes.
 #[test]
 fn text_moves_with_its_group() {

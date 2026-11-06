@@ -1090,6 +1090,7 @@ fn hostile_params_never_panic() {
         "reference_hides_model",
         "reference_shown_percent",
         "tangent_edges",
+        "line_group",
         "sheet",
         "position_mm",
         "profile",

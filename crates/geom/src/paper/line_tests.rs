@@ -48,3 +48,17 @@ fn every_kind_is_a_stroke_the_scene_takes() {
         scene.validate().unwrap_or_else(|e| panic!("{group:?}: {e}"));
     }
 }
+
+/// A group is saved by its wide line's width as text, and read only by one of the seven names; its
+/// default is the 0.5 mm group.
+#[test]
+fn a_line_group_is_saved_by_its_wide_line() {
+    for (group, name) in GROUPS.into_iter().zip(LineGroup::NAMES) {
+        assert_eq!(serde_json::to_value(group).unwrap(), serde_json::json!(name));
+        assert_eq!(serde_json::from_value::<LineGroup>(serde_json::json!(name)).unwrap(), group);
+    }
+    for bad in [serde_json::json!("0.6"), serde_json::json!(0.5), serde_json::json!("Mm0_5"), serde_json::json!(""), serde_json::json!(null)] {
+        assert!(serde_json::from_value::<LineGroup>(bad.clone()).is_err(), "{bad}");
+    }
+    assert_eq!(LineGroup::default(), LineGroup::DEFAULT);
+}
