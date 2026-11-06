@@ -52,6 +52,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_also_asks"), &mut app.preferences.keep_unsaved_also_asks).on_hover_text(tip);
                 }
             }
+            setting::save_prompt_one_at_a_time(app, ui).on_hover_text(app.tr("prefs.save_prompt_one_at_a_time_help"));
             ui_kit::settings_form(ui, labels, |ui| {
                 let shown = ui_kit::settings_row_help(ui, app.tr("ui.autosave_every"), crate::i18n::tr_label("0 turns it off"), |ui| {
                     let number = ui_kit::settings_number(ui, &mut app.autosave_minutes, 0.0..=120.0, 0.5);
