@@ -32,6 +32,7 @@ Two columns of checkboxes.
 | Clicking the running tool's button ends it | Checkbox | `Prefs.ribbon_click_ends_tool` | `true` | Existing `prefs.ribbon_click_ends_tool_note`: the lit ribbon button ends the tool and restores selection; off restarts it. | none | Retained newer control; immediately after shortcut cycling, before the Project pair. |
 | Project face edges into new sketches | Checkbox | `app.session.auto_project` (session; in the Snapshot) | per session | none | none | Not a `Prefs` field. |
 | Ask for Project options first | Checkbox | `Prefs.project_options_dialog` | `true` | none | none | |
+| Show the cursor's coordinates in a sketch | Checkbox | `Prefs.sketch_cursor_coordinates` | `true` | `prefs.sketch.cursor_coordinates_note`: X and Y from the sketch origin beside the pointer, also with no tool running; off shows them only while a tool places a point. | none | New in #11070; last row of the second column. |
 
 ## Opening and closing
 

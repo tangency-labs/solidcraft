@@ -257,6 +257,7 @@ pub(crate) mod sketch_attachment_ui;
 #[cfg(test)]
 mod sketch_attachment_ui_tests;
 mod sketch_construction;
+mod sketch_cursor_readout;
 pub mod sketch_dims;
 pub(crate) mod sketch_display;
 #[cfg(test)]

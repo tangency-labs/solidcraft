@@ -1208,7 +1208,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
             let readout = painter.text(
                 crate::tool_cursor::readout_at(painter, proj.rect, sp),
                 egui::Align2::LEFT_TOP,
-                format!("{}, {}", crate::prefs::show_mm(app, hp.x, 1), crate::prefs::show_mm(app, hp.y, 1)),
+                crate::sketch_cursor_readout::text(app, *hp),
                 egui::FontId::proportional(crate::theme::Tokens::get().font_small),
                 tk.text_dim,
             );

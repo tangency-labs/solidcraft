@@ -1704,6 +1704,9 @@ preference_settings! {
     /// its half-axes and axes can be dimensioned. Off: the ellipse alone, and D on it gives its
     /// minor radius, labelled R, as before.
     ellipse_axes: bool = true, PAGE_SKETCH;
+    /// In an open sketch with no tool running, the pointer's sketch coordinates beside it (#11070).
+    /// Off: only a sketch tool shows them, while it places a point, as before.
+    sketch_cursor_coordinates: bool = true, PAGE_SKETCH;
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
     drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
     /// While Move's triad drags a component drawn as a layer of its own, what is under the pointer
@@ -6333,6 +6336,7 @@ mod tests {
             ("sketch_recent_snap", json!(true), PAGE_SKETCH),
             ("line_hover_tangent_arc", json!(true), PAGE_SKETCH),
             ("ribbon_click_ends_tool", json!(false), PAGE_SKETCH),
+            ("sketch_cursor_coordinates", json!(false), PAGE_SKETCH),
             ("msaa", json!(8), PAGE_GRAPHICS),
             ("single_surface_analysis", json!(false), PAGE_GRAPHICS),
         ];
@@ -7726,6 +7730,7 @@ mod tests {
                 ("shortcut_cycles_modes", "prefs.sketch.shortcut_cycles_modes"),
                 ("ribbon_click_ends_tool", "prefs.ribbon_click_ends_tool"),
                 ("project_options_dialog", "prefs.sketch.project_options"),
+                ("sketch_cursor_coordinates", "prefs.sketch.cursor_coordinates"),
                 ("sketch_face_activates_part", "prefs.sketch_face_activates_part"),
                 ("sketch_open_look_at", "prefs.sketch_open_look_at"),
                 ("selection_shift_add_only", "prefs.shift_add_ctrl_toggle"),
