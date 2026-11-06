@@ -1677,16 +1677,9 @@ fn render_preview_tab_surfaces_preserve_scene_backplates_and_viewport_overrides(
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn progressive_image_controls_route_to_the_registered_host() {
-    // GPU path tracing can hang on a software adapter (lavapipe); see issue #12664.
-    // Skipped there until that is fixed; it still runs on real GPUs.
-    let software = solidcraft_gpu::select::Policy::from_env()
-        .ok()
-        .and_then(solidcraft_gpu::select::pick)
-        .is_some_and(|(_, report)| report.tier == solidcraft_gpu::select::Tier::Software);
-    if software {
-        eprintln!("skipping progressive UI device test: software GPU adapter (#12664)");
-        return;
-    }
+    use solidcraft_engine::render::job::Phase;
+    use std::time::{Duration, Instant};
+
     let host = solidcraft_gpu::select::Policy::from_env()
         .and_then(|policy| solidcraft_gpu::select::pick(policy).ok_or_else(|| "no qualifying adapter".to_string()))
         .and_then(|(adapter, _)| solidcraft_gpu::path::host_on_adapter(&adapter).map_err(|e| e.to_string()));
@@ -1749,14 +1742,21 @@ fn progressive_image_controls_route_to_the_registered_host() {
 
     h.step(&json!({"click":{"handle":"render:stage:render.start"}})).unwrap();
     let job = h.app.render_workspace.view.job.unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let handle = h.app.session.render_job_handle(job).unwrap();
+    // The first mapped render compiles a separate pipeline on a cold Vulkan cache.
+    // Allow the GPU host's setup budget, then keep the short deadline after preparation.
+    let setup_deadline = Instant::now() + Duration::from_secs(600);
+    let mut render_deadline = None;
     while h.app.render_workspace.view.completed.is_none() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "progressive UI job did not complete: {:?}",
-            h.app.session.execute("render.status", &json!({"job":job}))
-        );
-        std::thread::sleep(std::time::Duration::from_millis(5));
+        let status = handle.status().unwrap();
+        let now = Instant::now();
+        let deadline = match status.progress.phase {
+            Phase::Queued | Phase::Preparing => setup_deadline,
+            Phase::Failed | Phase::Cancelled => panic!("progressive UI job ended: {status:?}"),
+            _ => *render_deadline.get_or_insert(now + Duration::from_secs(30)),
+        };
+        assert!(now < deadline, "progressive UI job did not complete: {status:?}");
+        std::thread::sleep(Duration::from_millis(5));
         h.frames(1);
     }
     let status = h.app.session.execute("render.status", &json!({"job":job})).unwrap();
@@ -1787,8 +1787,8 @@ fn progressive_image_controls_route_to_the_registered_host() {
     assert_eq!(image_params(&h.app).unwrap(), checked);
     let started = h.app.run("render.start", checked).unwrap();
     let job = serde_json::from_value(started["job"].clone()).unwrap();
-    let status = h.app.session.render_job_handle(job).unwrap().wait_timeout(std::time::Duration::from_secs(30)).unwrap();
-    assert_eq!(status.progress.phase, solidcraft_engine::render::job::Phase::Completed, "{:?}", status.error);
+    let status = h.app.session.render_job_handle(job).unwrap().wait_timeout(Duration::from_secs(30)).unwrap();
+    assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
     assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
     assert_eq!(h.app.session.undo.len(), undo);
     assert!(!h.app.session.is_dirty());
