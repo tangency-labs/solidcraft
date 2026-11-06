@@ -8441,6 +8441,44 @@ mod tests {
         assert!(crate::scenario::rect_of("prefs:ok").is_some());
     }
 
+    /// Picking an installed family, not Built-in, reloads the interface fonts on a later frame
+    /// while the window is open: the window must keep its body and footer through the reload and
+    /// across a close and reopen (#2571, still reported after #2221).
+    #[test]
+    fn picking_an_installed_font_keeps_the_preferences_window_full() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Interface"}));
+        super::reveal_preference(&mut h, "prefs:ui_font");
+        let combo = crate::scenario::handle_at("prefs:ui_font").unwrap();
+        h.call("ui.click", json!({"x": combo.x, "y": combo.y}));
+        // The installed families list on a thread: wait for a real family row. A host without
+        // any installed family has nothing to pick here.
+        let mut family = None;
+        for _ in 0..240 {
+            family = crate::scenario::handles("prefs:font:").into_iter().find(|(n, _)| n != "prefs:font_builtin");
+            if family.is_some() {
+                break;
+            }
+            h.frames(1);
+        }
+        let Some((row, at)) = family else {
+            eprintln!("skipped: no installed font family was listed");
+            return;
+        };
+        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        h.frames(4);
+        assert_eq!(h.app.preferences.ui_font, row["prefs:font:".len()..], "the picked family is the interface font");
+        for _ in 0..8 {
+            assert!(crate::scenario::rect_of("prefs:ok").is_some(), "the window's body stays drawn through the font reload");
+            h.frames(1);
+        }
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        h.call("ui.prefs", json!({"open": "Interface"}));
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:ok").is_some(), "reopened, the window is still whole");
+    }
+
     #[test]
     fn appearance_popups_own_escape_restore_focus_and_leave_cancel_to_the_next_escape() {
         for font in [true, false] {
