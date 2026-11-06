@@ -5428,7 +5428,7 @@ mod dropdown_toggle_tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-        crate::toolbar_custom::reorder(&mut h.app, "SKETCH", "sketch.ellipse", "FINISH SKETCH", None);
+        crate::toolbar_custom::force_into_panel(&mut h.app, "SKETCH", "sketch.ellipse", "FINISH SKETCH");
         h.settle();
         h.step(&json!({"click": {"handle": "button:sketch.ellipse"}})).unwrap();
         assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.ellipse"), "the click starts the tool");

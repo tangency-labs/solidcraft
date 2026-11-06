@@ -319,6 +319,16 @@ pub fn reorder(app: &mut SolveApp, tab: &str, id: &str, panel: &str, before: Opt
     app.toolbar_custom.panels.insert(key(tab, panel), ids);
 }
 
+/// Test setup: put a command at the end of any panel of the tab, the way a design saved before
+/// drops were kept within their panel can have it (the drag itself no longer does this).
+#[cfg(test)]
+pub fn force_into_panel(app: &mut SolveApp, tab: &str, id: &str, panel: &str) {
+    let mut ids = own(app, tab, panel);
+    ids.retain(|x| x != id);
+    ids.push(id.to_string());
+    app.toolbar_custom.panels.insert(key(tab, panel), ids);
+}
+
 /// The pin icon of a drop-down row: pin the command, or remove it when it is pinned.
 pub fn toggle(app: &mut SolveApp, tab: &str, id: &str) {
     if pinned_on(app, tab, id).is_some() {
