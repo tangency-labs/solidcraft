@@ -904,8 +904,25 @@ fn paste_inserts_at_the_cursor_and_replaces_the_selection() {
     right_click(&ctx, rect.get().center(), &mut draw);
     assert_eq!(selection(&ctx, id), Some((0, 6)), "a right press inside the selection keeps it");
     pick(&ctx, "text_paste", &mut draw);
-    assert_eq!(*value.borrow(), "4 mm  ", "Paste replaces the selection; a single line takes line breaks as spaces");
+    assert_eq!(*value.borrow(), "4 mm ", "Paste replaces the selection; each line ending becomes one space");
     set_clipboard(None);
+}
+
+#[test]
+fn single_line_paste_normalizes_each_line_ending_to_one_space() {
+    for ending in ["\r\n", "\n", "\r"] {
+        let clip = format!("尺寸{ending}🙂");
+        let mut text = String::new();
+        let inserted = egui::TextBuffer::insert_text(&mut super::SingleLineBuffer(&mut text), &clip, egui::text::CharIndex(0));
+        assert_eq!(text, "尺寸 🙂", "keyboard paste with {ending:?}");
+        assert_eq!(inserted, 4);
+
+        let mut text = String::new();
+        let done = text_menu::apply(&mut text, None, Edit::Paste, Some(&clip), Field::LINE);
+        assert_eq!(text, "尺寸 🙂", "menu paste with {ending:?}");
+        assert_eq!(done.range.primary.index.0, 4);
+        assert!(done.changed);
+    }
 }
 
 #[test]

@@ -910,6 +910,7 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
     let mut submit = false;
     let mut left = false;
     let mut discard = false;
+    let mut comment_rect = egui::Rect::NOTHING;
     let reveal = d.focus_new;
     let response = table.row(ui, "new", false, |row| {
         row.cell(|_| {});
@@ -950,6 +951,7 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
         });
         row.cell(|ui| {
             let response = ui_kit::expandable_cell_editor(ui, comment_id, &mut d.new_comment, "Comment", "param:new:comment");
+            comment_rect = response.rect;
             select_all_on_tab(ui, &response, &d.new_comment);
             crate::scenario::publish_handle("param:new:comment", response.rect.center());
             left |= response.lost_focus();
@@ -972,13 +974,13 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
     let valid = !d.new_name.trim().is_empty() && live.is_ok();
     crate::scenario::publish_count("param:new:valid", f64::from(valid));
     let clicked = ui.input(|i| i.pointer.any_click().then(|| i.pointer.interact_pos()).flatten());
-    let clicked_outside = !menu_was_open && clicked.is_some_and(|p| !response.rect.contains(p));
+    let inside_row = |p| response.rect.contains(p) || comment_rect.contains(p);
+    let clicked_outside = !menu_was_open && clicked.is_some_and(|p| !inside_row(p));
     // Losing a cell's focus is not leaving the draft: a click or Tab into another cell
-    // must keep its values and geometry (#4461). The unit menu belongs to the draft too.
+    // must keep its values and geometry (#4461). The unit menu and comment overlay belong to the draft too.
     let left_row = !menu_was_open
         && !egui::Popup::is_any_open(ui.ctx())
-        && (clicked_outside
-            || (left && !ui.memory(|m| row_ids.iter().any(|id| m.has_focus(*id))) && !clicked.is_some_and(|p| response.rect.contains(p))));
+        && (clicked_outside || (left && !ui.memory(|m| row_ids.iter().any(|id| m.has_focus(*id))) && !clicked.is_some_and(inside_row)));
     let abandoned = d.new_name.trim().is_empty() && clicked_outside;
     if discard || abandoned {
         d.adding = false;
@@ -2370,11 +2372,10 @@ mod tests {
         h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
         h.frames(3);
         h.step(&json!({"key":"A","cmd":true})).unwrap();
-        h.app.synthetic.push(egui::Event::Paste("Mounting\r\n尺寸\n🙂".into()));
+        h.app.synthetic.push(egui::Event::Paste("Mounting\r\n尺寸\n🙂\rClearance".into()));
         h.frame();
         let draft = h.app.params.as_ref().unwrap().comments.get("width").cloned().unwrap();
-        assert!(!draft.contains(['\r', '\n']), "visual wrapping must not add stored line breaks: {draft:?}");
-        assert!(draft.contains("Mounting") && draft.contains("尺寸") && draft.contains('🙂'));
+        assert_eq!(draft, "Mounting 尺寸 🙂 Clearance");
         h.step(&json!({"key":"Enter"})).unwrap();
         h.frames(2);
         assert!(crate::scenario::rect_of("param:comment:width:popup").is_none());
@@ -2456,8 +2457,14 @@ mod tests {
         h.step(&json!({"text":"25 mm"})).unwrap();
         h.step(&json!({"click":{"handle":"param:new:comment:expand"}})).unwrap();
         h.frames(3);
-        assert!(crate::scenario::rect_of("param:new:comment:popup").is_some());
+        let popup = crate::scenario::rect_of("param:new:comment:popup").unwrap();
+        let row = crate::scenario::rect_of("dialog:table:user:new").unwrap();
+        let inside = egui::pos2(popup.center().x, popup.bottom() - 8.0);
+        assert!(!row.contains(inside), "the click is below the compact draft row");
         assert!(h.app.session.doc.param("width").is_none(), "opening the expanded draft field stays in its row");
+        h.step(&json!({"click":[inside.x, inside.y]})).unwrap();
+        h.frames(2);
+        assert!(h.app.session.doc.param("width").is_none(), "clicking inside the expanded editor keeps the parameter as a draft");
         h.step(&json!({"text":"Overall width"})).unwrap();
         h.step(&json!({"click":{"handle":"dialog:Filter"}})).unwrap();
         h.frames(2);

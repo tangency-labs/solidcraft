@@ -130,7 +130,7 @@ pub fn apply(text: &mut dyn TextBuffer, range: Option<CCursorRange>, edit: Edit,
             let insert = if field.multiline {
                 clip
             } else {
-                line = clip.replace(['\r', '\n'], " ");
+                line = clip.replace("\r\n", " ").replace(['\r', '\n'], " ");
                 &line
             };
             text.insert_text_at(&mut at, insert, field.limit);
