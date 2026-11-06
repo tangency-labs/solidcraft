@@ -2157,7 +2157,7 @@ fn corner_drag_angle_edits_and_undoes_once() {
     h.step(&json!({"drag":[{"sketch":[0,0]},{"sketch":[10,6]}]})).unwrap();
     assert!(crate::dim_view::editing(), "releasing the corner drag opens the angle value");
     assert_eq!(h.app.session.doc.to_json(), original, "placement alone is a draft");
-    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")));
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")));
     type_value(&mut h, "60");
     h.step(&json!({"key":"Enter"})).unwrap();
     let new = added(&h, dims);
