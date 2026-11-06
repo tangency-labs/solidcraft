@@ -238,6 +238,7 @@ fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     crate::scenario::publish_target("prefs:trackpad_pan", response.rect);
                 });
                 setting::orbit_reverse(app, ui);
+                setting::trackpad_twist_turns(app, ui);
                 let response = setting::zoom_stop_at_model(app, ui).backing_on_hover_text(crate::i18n::tr("prefs.zoom_stop_at_model_tip"));
                 crate::scenario::publish_target("prefs:zoom_stop_at_model", response.rect);
             });

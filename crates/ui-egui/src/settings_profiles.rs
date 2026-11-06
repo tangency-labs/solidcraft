@@ -130,6 +130,7 @@ const PROFILE_KEYS: &[&str] = &[
     "timeline_under_browser",
     "toast_place",
     "trackpad_pan",
+    "trackpad_twist_turns",
     "trackpad_zoom_modifier",
     "ui_font",
     "ui_scale",
