@@ -293,6 +293,8 @@ impl Mapper<'_> {
                 let out: Vec<Value> = a.iter().map(|x| self.picks(x, body).unwrap_or_else(|| x.clone())).collect();
                 Some(Value::Array(out))
             }
+            // A point written `{x, y, z}` among the picks, as one written `[x, y, z]`.
+            Value::Object(o) if ["x", "y", "z"].iter().all(|k| o.contains_key(*k)) => self.pick(v, body),
             Value::Object(o) => {
                 let b = o.get("body").and_then(Value::as_str).map(str::to_string);
                 let mut m = o.clone();

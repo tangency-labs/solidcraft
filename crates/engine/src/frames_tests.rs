@@ -516,6 +516,22 @@ fn an_object_form_hole_turns_with_the_picked_body() {
     assert!((object - bore).abs() < 1e-6 * bore, "object form cut {object}");
 }
 
+/// An edge picked with a point written `{x, y, z}` in a list is found in a moved component, as
+/// one written `[x, y, z]` is.
+#[test]
+fn an_object_form_pick_in_a_list_maps_into_a_moved_component() {
+    let filleted = |edge: Value| {
+        let mut s = moved_part();
+        let before = volume(&mut s);
+        // The edge along X at the top front: world (65, 0, 10).
+        run(&mut s, "solid.fillet", json!({"edges": [edge], "radius": 2}));
+        before - volume(&mut s)
+    };
+    let array = filleted(json!([65, 0, 10]));
+    let object = filleted(json!({"x": 65, "y": 0, "z": 10}));
+    assert!((array - object).abs() < 1e-9 * array.max(1.0), "{array} against {object}");
+}
+
 /// A new placement given to `timeline.redefine` is still a world point.
 #[test]
 fn a_new_primitive_placement_is_still_mapped_from_the_world() {
