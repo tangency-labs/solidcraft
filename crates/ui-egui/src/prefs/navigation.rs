@@ -1,6 +1,8 @@
 //! Navigation preferences, composed from indexed shared controls and canonical figures.
 use super::*;
 
+/// The Navigation page of Preferences: the preset, mouse buttons, Orbit around, orbit style, wheel
+/// and trackpad settings (the two-finger twist among them) and the view settings.
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     ui_kit::settings_page(ui, |ui| {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
