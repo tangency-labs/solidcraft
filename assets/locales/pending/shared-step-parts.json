@@ -1,0 +1,42 @@
+{
+  "en": {
+    "cmd.component_make_independent": "Make independent",
+    "prefs.share_imported_parts": "Share repeated STEP parts",
+    "prefs.share_imported_parts_note": "Link identical parts on new STEP imports and group their instances in the browser. Turn off to keep the file's separate part definitions and list each instance individually."
+  },
+  "ar": {
+    "cmd.component_make_independent": "جعله مستقلاً",
+    "prefs.share_imported_parts": "مشاركة أجزاء STEP المتكررة",
+    "prefs.share_imported_parts_note": "ربط الأجزاء المتطابقة عند استيراد ملفات STEP جديدة وتجميع نسخها في المستعرض. عطّل هذا الخيار للاحتفاظ بتعريفات الأجزاء المنفصلة في الملف وعرض كل نسخة على حدة."
+  },
+  "de": {
+    "cmd.component_make_independent": "Unabhängig machen",
+    "prefs.share_imported_parts": "Wiederholte STEP-Teile gemeinsam nutzen",
+    "prefs.share_imported_parts_note": "Identische Teile bei neuen STEP-Importen verknüpfen und ihre Instanzen im Browser gruppieren. Deaktivieren, um die getrennten Teiledefinitionen der Datei beizubehalten und jede Instanz einzeln aufzulisten."
+  },
+  "he": {
+    "cmd.component_make_independent": "הפוך לעצמאי",
+    "prefs.share_imported_parts": "שיתוף חלקי STEP חוזרים",
+    "prefs.share_imported_parts_note": "קישור חלקים זהים בייבוא חדש של קובצי STEP וקיבוץ המופעים שלהם בדפדפן. יש לכבות אפשרות זו כדי לשמור את הגדרות החלקים הנפרדות שבקובץ ולהציג כל מופע בנפרד."
+  },
+  "ja": {
+    "cmd.component_make_independent": "独立させる",
+    "prefs.share_imported_parts": "繰り返し配置されたSTEP部品を共有",
+    "prefs.share_imported_parts_note": "新しくSTEPファイルをインポートする際に同一部品をリンクし、ブラウザーでそのインスタンスをグループ化します。オフにすると、ファイル内の個別の部品定義を維持し、各インスタンスを個別に表示します。"
+  },
+  "ko": {
+    "cmd.component_make_independent": "독립적으로 만들기",
+    "prefs.share_imported_parts": "반복된 STEP 부품 공유",
+    "prefs.share_imported_parts_note": "새 STEP 파일을 가져올 때 동일한 부품을 연결하고 브라우저에서 해당 인스턴스를 그룹화합니다. 끄면 파일의 개별 부품 정의를 유지하고 각 인스턴스를 개별적으로 나열합니다."
+  },
+  "vi": {
+    "cmd.component_make_independent": "Tạo bản độc lập",
+    "prefs.share_imported_parts": "Dùng chung các chi tiết STEP trùng lặp",
+    "prefs.share_imported_parts_note": "Liên kết các chi tiết giống hệt nhau khi nhập STEP mới và nhóm các thể hiện của chúng trong trình duyệt. Tắt để giữ các định nghĩa chi tiết riêng biệt trong tệp và liệt kê riêng từng thể hiện."
+  },
+  "zh": {
+    "cmd.component_make_independent": "设为独立",
+    "prefs.share_imported_parts": "共享重复的 STEP 零件",
+    "prefs.share_imported_parts_note": "进行新的 STEP 导入时，链接相同零件，并在浏览器中将其实例分组。关闭后保留文件中各自独立的零件定义，并单独列出每个实例。"
+  }
+}

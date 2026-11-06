@@ -4251,6 +4251,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "solidcore-record",
  "solidcraft-geom",
  "solidcraft-profile",

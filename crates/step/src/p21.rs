@@ -118,6 +118,8 @@ impl Entity {
 /// A parsed exchange file.
 #[derive(Clone, Debug, Default)]
 pub struct Exchange {
+    /// End of the first DATA declaration, outside quoted header text and comments.
+    pub data_start: Option<usize>,
     /// FILE_SCHEMA names.
     pub schemas: Vec<String>,
     /// FILE_NAME originating system.
@@ -476,6 +478,7 @@ pub fn parse_with(text: &str, watch: Option<&dyn Progress>) -> Result<Exchange, 
                     lx.list_rest(1)?;
                 }
                 lx.expect(b';')?;
+                ex.data_start.get_or_insert(lx.i);
                 loop {
                     lx.ws()?;
                     if lx.peek() != Some(b'#') {

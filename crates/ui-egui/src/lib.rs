@@ -1228,7 +1228,7 @@ impl SolveApp {
     }
 
     /// Run a command programmatically (JSON parameters, no dialogs).
-    pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+    pub fn run(&mut self, id: &str, mut params: Value) -> Result<Value, String> {
         if solidcraft_engine::panels::commands::is_command(id) {
             return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
         }
@@ -1239,6 +1239,7 @@ impl SolveApp {
         if matches!(id, "edit.undo" | "edit.redo" | "timeline.play") {
             self.close_editor_for_history()?;
         }
+        file_load::import_preferences(id, &mut params, self.preferences.share_imported_parts);
         // Commands may start only detected slicers and the programs the user added under Custom….
         if matches!(id, "file.save_mesh" | "file.send_to_slicer") {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);

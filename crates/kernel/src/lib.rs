@@ -201,7 +201,7 @@ pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass};
 pub use mesh_convert::convert_prismatic_mesh;
 pub use meshbody::{MAX_TRIANGLES, mesh_body};
 pub use native::{body_from_smlib, smlib_body};
-pub use native::{brep_record, decode_native_body, encode_native_body, native_preview_mesh};
+pub use native::{brep_record, decode_native_body, encode_native_body, exact_geometry_eq, native_preview_mesh};
 pub use offset::with_same_surface;
 pub use ops::{BoolOp, apart, boolean, half_space, join_apart, place_matrix, split_by_plane, transform, transform_matrix, union_all, union_apart};
 pub use point_path::{
@@ -221,8 +221,8 @@ pub use solidcraft_smlib::trace as smlib_trace;
 pub use splitface::{SplitTool, split_body, split_faces, split_faces_with_map};
 pub use step::step_export;
 pub use step_in::{
-    ImportIssue, ImportReport, ImportedBody, IssueKind, StepImport, StepNode, StepReading, step_cache_alive, step_import, step_import_shared,
-    step_orientation_errors, step_validate,
+    ImportIssue, ImportReport, ImportedBody, IssueKind, StepImport, StepLibrary, StepNode, StepReading, StepSource, StepText, step_cache_alive,
+    step_import, step_import_shared, step_orientation_errors, step_validate,
 };
 pub use step_out::{ExportBody, ExportProduct, StepHeader, step_export_bodies, step_export_products};
 pub use surface_extend::{ExtendLimit, ExtendMode, ExtendOptions, extend_surface};

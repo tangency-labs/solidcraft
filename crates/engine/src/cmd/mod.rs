@@ -32,6 +32,7 @@ mod compare_picture_tests;
 mod component;
 mod component_clone;
 mod component_clone_assembly;
+mod component_independent;
 mod construct;
 mod delete;
 pub(crate) mod diagnostics;

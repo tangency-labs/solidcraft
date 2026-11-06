@@ -457,6 +457,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.browser_eye_left,
                     "browser_eye_left",
                 );
+                layout_check(
+                    ui,
+                    app.tr("prefs.share_imported_parts"),
+                    app.tr("prefs.share_imported_parts_note"),
+                    &mut app.preferences.share_imported_parts,
+                    "share_imported_parts",
+                );
             });
         });
         ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {

@@ -31,11 +31,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("open")
         .key("Ctrl+O")
         .noundo()
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
+        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); share_parts?: bool for a STEP file (default true: link identical definitions; false: keep separately authored definitions independent, retaining the file's existing instances); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
     CommandSpec::new("file.insert_step", "Insert STEP", insert_step)
         .at("SOLID", "INSERT")
         .icon("import")
-        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
+        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); share_parts?: bool (STEP only; default true: link identical definitions; false: keep separately authored definitions independent, retaining the file's existing instances); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", insert_mesh)
         .at("SOLID", "INSERT")
         .icon("import")
@@ -142,9 +142,10 @@ struct StepOptions {
     /// `folder: true`: an import that brings more than one item gets a `Group #N` history folder
     /// (`import_folder`). `false` (the default) makes none, as before the option.
     folder: bool,
+    share_parts: bool,
 }
 
-fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
+fn step_options(p: &Value, path: &str, cmd: &str) -> Result<StepOptions> {
     let y_up = match p.get("up") {
         None | Some(Value::Null) => false,
         Some(v) => match v.as_str().map(|u| u.trim().to_ascii_lowercase()).as_deref() {
@@ -170,7 +171,20 @@ fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
             ));
         }
     };
-    Ok(StepOptions { y_up, names, folder })
+    let share_parts = match p.get("share_parts") {
+        None | Some(Value::Null) => true,
+        Some(v) => {
+            if !std::path::Path::new(path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"))
+            {
+                return Err(bad(cmd, "`share_parts` applies to STEP files only"));
+            }
+            v.as_bool().ok_or_else(|| bad(cmd, "`share_parts` must be a boolean"))?
+        }
+    };
+    Ok(StepOptions { y_up, names, folder, share_parts })
 }
 
 /// Read a STEP file as an Import feature.
@@ -208,7 +222,14 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptio
     let sf = read_step(path, options.names)?;
     let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&sf.name).to_string();
     let cname = import::component_name(path, name);
-    let (id, placed) = import::add_in_component(s, sf.kind, &fname, sf.body_names, &cname, import::Tree::Step(&sf.import))?;
+    let (id, placed) = import::add_in_component(
+        s,
+        sf.kind,
+        &fname,
+        sf.body_names,
+        &cname,
+        import::Tree::Step { import: &sf.import, share_parts: options.share_parts },
+    )?;
     // Y up: the import's component is turned a quarter turn about X (Y becomes Z), so an
     // assembly's parts and instances turn together.
     let turned = if options.y_up { turn_up(s, &placed)? } else { None };
@@ -328,7 +349,7 @@ fn mesh_up(p: &Value, path: &str, cmd: &str) -> Result<Option<bool>> {
     if !solidcraft_io::is_gltf_path(path) {
         return Err(bad(cmd, "`up` applies to STEP, IGES and glTF files only"));
     }
-    Ok(Some(step_options(p, cmd)?.y_up))
+    Ok(Some(step_options(p, path, cmd)?.y_up))
 }
 
 /// `units` for an STL, OBJ or PLY file: the unit its coordinates are in (one of
@@ -369,7 +390,7 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
     if !solidcraft_io::is_step_path(path) {
         return Err(bad(cmd, "only STEP, IGES, FreeCAD and Rhino files (.step, .stp, .igs, .iges, .fcstd, .3dm) can be inserted"));
     }
-    let options = step_options(p, cmd)?;
+    let options = step_options(p, path, cmd)?;
     let placement = match p.get("matrix") {
         None | Some(Value::Null) => None,
         Some(m) => Some(super::component::matrix::rigid(m, super::component::matrix::tolerance(p, cmd)?, cmd)?),
@@ -397,6 +418,11 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if !solidcraft_io::is_step_path(path) && !solidcraft_io::is_gltf_path(path) && p.get("up").is_some_and(|v| !v.is_null()) {
         return Err(bad("doc.open", "`up` applies to STEP, IGES and glTF files only"));
+    }
+    if (!solidcraft_io::is_step_path(path) || solidcraft_io::is_iges_path(path) || solidcraft_io::is_native_cad_path(path))
+        && p.get("share_parts").is_some_and(|v| !v.is_null())
+    {
+        return Err(bad("doc.open", "`share_parts` applies to STEP files only"));
     }
     if let Some(command) = super::drawing_import_command(path) {
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
@@ -435,7 +461,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         let mut fresh = Session::new(Document::new(&stem));
         fresh.set_validation(s.validation());
         let r = if solidcraft_io::is_step_path(path) {
-            add_step(&mut fresh, path, None, &step_options(p, "doc.open")?)?
+            add_step(&mut fresh, path, None, &step_options(p, path, "doc.open")?)?
         } else {
             add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?, mesh_units(p, path, "doc.open")?)?
         };
@@ -2450,11 +2476,12 @@ mod tests {
         let mut imports = 0;
         let mut n = 0;
         while !steps.done() {
-            if let Some(text) = steps.next_import() {
-                assert!(text.contains("ISO-10303-21"));
+            let held = steps.import_reading().map(|reading| {
                 imports += 1;
-            }
+                reading.unwrap().finish_shared().unwrap()
+            });
             steps.step();
+            drop(held);
             n += 1;
             assert_eq!(steps.progress().0, n);
         }
