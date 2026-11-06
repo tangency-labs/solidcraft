@@ -180,6 +180,7 @@
   "render.flare_strength": "Highlight flare strength",
   "render.flare_threshold": "Scene-linear flare threshold",
   "render.frame_centre_mark": "Centre mark",
+  "render.glass_model_help": "Glass roughness scatters transmitted rays. Dispersion and film colour use three wavelength bands. Rough sheets require straight transmitted shadows off.",
   "render.hdr_primaries_declared": "The source declares its colour primaries.",
   "render.hdr_primaries_srgb": "Colour primaries: sRGB/D65",
   "render.hdr_primaries_undeclared": "The source does not declare primaries; review the renderer colour requirements.",
