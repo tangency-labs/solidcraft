@@ -4326,8 +4326,8 @@ mod tests {
         crate::theme_files::add(&mut app.preferences.custom_themes, file).unwrap();
         let entries = theme_picker::entries(&app);
         let state = theme_picker::State { tone: Some(true), high: Some(false), imported: false, ..Default::default() };
-        assert_eq!((state.count(&entries, "tone", false), state.count(&entries, "tone", true)), (8, 14));
-        assert_eq!((state.count(&entries, "contrast", false), state.count(&entries, "contrast", true)), (14, 4));
+        assert_eq!((state.count(&entries, "tone", false), state.count(&entries, "tone", true)), (8, 15));
+        assert_eq!((state.count(&entries, "contrast", false), state.count(&entries, "contrast", true)), (15, 4));
         assert_eq!(state.count(&entries, "imported", true), 0);
         let state = theme_picker::State { high: Some(true), imported: true, ..state };
         assert_eq!(state.count(&entries, "tone", true), 1);
