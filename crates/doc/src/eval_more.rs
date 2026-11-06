@@ -664,6 +664,11 @@ pub(super) fn sheet_eval(
                 }
                 // A segmented edge makes one flange per run of segments that share an angle, a
                 // height and a side: the same bend carries on (see `add_flanges_each`).
+                //
+                // The invariant the runs keep: the first starts at the edge's start (0), the last
+                // ends at its end (1), and each starts where the run before it ends, so the runs
+                // are sorted, contiguous and non-overlapping and every accepted stretch is covered.
+                let (edge_height, edge_angle) = (height, angle);
                 let mut runs: Vec<(f64, f64, f64, f64, bool)> = Vec::new();
                 // The end of the edge the runs made so far cover. A run starts here, never before
                 // it, so the runs are sorted, contiguous and non-overlapping by construction, and
@@ -705,8 +710,10 @@ pub(super) fn sheet_eval(
                         // it absorbs the stretch instead, its end moving on to the stretch's end but
                         // never backwards, so the edge stays covered from the first stretch to the
                         // last and no interval is left out of trimming or the flat pattern (the
-                        // sliver's own angle and height do not build). Every span the build makes
-                        // then runs forwards, so none reaches trimming or the flat pattern reversed.
+                        // sliver's own angle and height do not build). A stretch absorbed before any
+                        // run exists is covered by the run that follows it, which starts at the
+                        // edge's start. Every span the build makes then runs forwards, so none
+                        // reaches trimming or the flat pattern reversed.
                         covered = covered.max(seg.to);
                         if let Some(last) = runs.last_mut() {
                             last.1 = covered;
@@ -722,19 +729,25 @@ pub(super) fn sheet_eval(
                             last.1 = seg.to;
                         }
                     } else {
-                        // Another bend starts at the covered end, where the run before it ends.
+                        // Another bend starts at the covered end, where the run before it ends. The
+                        // first run starts at the edge's start however much `covered` has advanced
+                        // over stretches absorbed before it: those stretches cannot be bends of
+                        // their own, so this run covers them and the edge is covered from 0.
+                        let start = if runs.is_empty() { sheet::WHOLE_EDGE.0 } else { start };
                         runs.push((start, seg.to, height, angle, side));
                     }
                     covered = seg.to;
                 }
-                // The command accepts a first `from` and a last `to` within the junction tolerance
-                // of the edge's ends; the ends themselves are what builds, so snap them, as a
-                // merged run snaps the junctions it spans away.
-                if let Some(first) = runs.first_mut()
-                    && first.0.abs() <= sheet::SEGMENT_JOIN_EPS
-                {
-                    first.0 = sheet::WHOLE_EDGE.0;
+                if runs.is_empty() {
+                    // A list every stretch of which is absorbed cannot be written through
+                    // `sheet.flange` (its last `to` must reach the edge's end), but a stored design
+                    // can hold one: the edge still builds whole, as the feature's own bend, rather
+                    // than losing its flange.
+                    runs.push((sheet::WHOLE_EDGE.0, sheet::WHOLE_EDGE.1, edge_height, edge_angle, *flip));
                 }
+                // The command accepts a last `to` within the junction tolerance of the edge's end;
+                // the end itself is what builds, so snap it, as a merged run snaps the junctions it
+                // spans away.
                 if let Some(last) = runs.last_mut()
                     && (last.1 - sheet::WHOLE_EDGE.1).abs() <= sheet::SEGMENT_JOIN_EPS
                 {

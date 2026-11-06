@@ -207,7 +207,9 @@ partition: the junction is snapped shut whatever the two stretches' angle, heigh
 no gap survives into trimming or the flat pattern, and only stretches that match make one bend. A
 stretch narrower than that tolerance is no bend of its own: the run before it takes that stretch
 (its angle and height do not build), so the bends still tile the edge with nothing left uncovered
-and no reversed span reaches the flat pattern.
+and no reversed span reaches the flat pattern. That includes stretches at the very start of the
+edge, with no run before them: the bend that follows them takes them and still starts at the edge's
+start, so the first bend covers the edge from 0 and the last ends at 1.
 The whole stretch must lie on one straight line of the outline, with no gap in it: a stretch
 along a curve is refused (its fractions would only follow chords), a stretch across a notch or a
 step is refused too, and a straight edge a cut-out has shortened can still be split because the

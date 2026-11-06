@@ -116,10 +116,13 @@ falls back to the edge's own value, then the feature's.
   and end relief. A junction the command accepts within `SEGMENT_JOIN_EPS` is snapped shut, and a
   stretch narrower than that tolerance is no bend of its own: the run before it takes that stretch
   (its angle and height do not build), so the bends still tile the edge with nothing left uncovered,
-  every span the build makes runs forwards, and none reaches the flat pattern reversed. A junction
-  that overlaps, not just one that gaps, is snapped the same way: a stretch that starts below the
-  covered end starts where the edge is already covered, so the runs are sorted, contiguous and never
-  overlap and the part is the partition's.
+  every span the build makes runs forwards, and none reaches the flat pattern reversed. The same
+  holds for stretches at the very start, with no run before them yet: they are absorbed by the run
+  that follows them, and that run still starts at the edge's start (0), so the first bend covers the
+  edge from 0 and the last ends at 1 however many stretches were absorbed. A junction that overlaps,
+  not just one that gaps, is snapped the same way: a stretch that starts below the covered end starts
+  where the edge is already covered, so the runs are sorted, contiguous and never overlap and the
+  part is the partition's.
 - **Refused:** `segments` on a base or contour flange; a split edge whose stretch leaves one
   straight line of the outline (a cut-out that shortened the line is fine, a notch or a step across
   it is not); `then` with `segments` (the Flange dialog refuses it and names the edge, rather than

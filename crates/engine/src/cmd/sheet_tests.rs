@@ -7317,3 +7317,154 @@ fn flange_segments_a_first_junction_overlap_never_starts_a_run_before_the_first_
         assert_eq!(f["bends"], flat(&mut exact)["bends"], "{position}: {f}");
     }
 }
+
+/// The exact chain judge round 6 found: [0, 7.5e-10], [7.5e-10, 1.5e-9], [1.5e-9, 1] at 20 mm and
+/// 90°, inside and outside the bend. Neither leading stretch can be a bend of its own, so the run
+/// that covers them takes them; it still starts at the edge's start, so nothing of the edge is left
+/// uncovered and the part is the whole-edge flange's, bends, flat size and all (#5927, #5928).
+#[test]
+fn flange_segments_absorb_leading_slivers_and_still_start_the_bend_at_zero() {
+    for position in ["inside", "outside"] {
+        let mut s = Session::default();
+        al2_base(&mut s);
+        run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0.0,"to":0.00000000075},
+                {"from":0.00000000075,"to":0.0000000015},
+                {"from":0.0000000015,"to":1.0}]}],
+                "height":"20 mm","angle":"90 deg","position":position}),
+        );
+        assert!(no_errors_or_warnings(&s), "{position}: {:?}", s.model.results);
+        let f = flat(&mut s);
+        let bends = bends_of(&f);
+        assert_eq!(bends.len(), 1, "{position}: the whole edge is one bend: {bends:?}");
+        assert!((bends[0].3 - 0.0).abs() < 1e-12, "{position}: the bend starts at {}: {bends:?}", bends[0].3);
+        assert!((bends[0].4 - 200.0).abs() < 1e-12, "{position}: the bend ends at {}: {bends:?}", bends[0].4);
+        // The same part as the whole-edge flange of that height and angle: volume, flat size and
+        // the bend table (each bend's length, angle, direction and centre line).
+        let mut whole = Session::default();
+        al2_base(&mut whole);
+        run(&mut whole, "sheet.flange", json!({"edges":[[100,0,2]],"height":"20 mm","angle":"90 deg","position":position}));
+        assert!(no_errors_or_warnings(&whole), "{position}: {:?}", whole.model.results);
+        let whole_flat = flat(&mut whole);
+        assert!(rel(volume(&mut s), volume(&mut whole)) < 1e-9, "{position}: {} vs {}", volume(&mut s), volume(&mut whole));
+        assert_eq!(f["bends"], whole_flat["bends"], "{position}: {f}");
+        assert_eq!(f["flat_size_mm"], whole_flat["flat_size_mm"], "{position}: {f}");
+    }
+}
+
+/// The same leading chain, then a stretch of another height: the absorbed stretches do not shift
+/// the junction, so the 20 mm bend covers the edge from 0 to the junction at 0.5 and the 15 mm one
+/// the rest, exactly as the partition with the slivers merged away builds (#5927, #5928).
+#[test]
+fn flange_segments_leading_slivers_do_not_shift_the_junction() {
+    for position in ["inside", "outside"] {
+        let mut s = Session::default();
+        al2_base(&mut s);
+        run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0.0,"to":0.00000000075},
+                {"from":0.00000000075,"to":0.0000000015},
+                {"from":0.0000000015,"to":0.5,"height":"20 mm"},
+                {"from":0.5,"to":1.0,"height":"15 mm"}]}],
+                "height":"20 mm","angle":"90 deg","position":position}),
+        );
+        assert!(no_errors_or_warnings(&s), "{position}: {:?}", s.model.results);
+        let f = flat(&mut s);
+        let bends = bends_of(&f);
+        assert_eq!(bends.len(), 2, "{position}: 20 mm then 15 mm: {bends:?}");
+        assert!((bends[0].3 - 0.0).abs() < 1e-12, "{position}: the first bend starts at {}: {bends:?}", bends[0].3);
+        assert!((bends[0].4 - 100.0).abs() < 1e-12, "{position}: the first bend ends at {}: {bends:?}", bends[0].4);
+        assert!((bends[1].3 - 100.0).abs() < 1e-12, "{position}: the second bend starts at {}: {bends:?}", bends[1].3);
+        assert!((bends[1].4 - 200.0).abs() < 1e-12, "{position}: the second bend ends at {}: {bends:?}", bends[1].4);
+        let mut exact = Session::default();
+        al2_base(&mut exact);
+        run(
+            &mut exact,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0.0,"to":0.5,"height":"20 mm"},
+                {"from":0.5,"to":1.0,"height":"15 mm"}]}],
+                "height":"20 mm","angle":"90 deg","position":position}),
+        );
+        assert!(no_errors_or_warnings(&exact), "{position}: {:?}", exact.model.results);
+        assert!(rel(volume(&mut s), volume(&mut exact)) < 1e-9, "{position}: {} vs {}", volume(&mut s), volume(&mut exact));
+        assert_eq!(f["bends"], flat(&mut exact)["bends"], "{position}: {f}");
+    }
+}
+
+/// A single sliver at the very start, then the rest of the edge: the sliver cannot be a bend of its
+/// own, and the run that covers it starts at the edge's start, so the part is the whole-edge
+/// flange's (#5927, #5928).
+#[test]
+fn flange_segments_a_single_leading_sliver_builds_the_whole_edge_flange() {
+    for position in ["inside", "outside"] {
+        let mut s = Session::default();
+        al2_base(&mut s);
+        run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0.0,"to":0.0000000001},
+                {"from":0.0000000001,"to":1.0}]}],
+                "height":"20 mm","angle":"90 deg","position":position}),
+        );
+        assert!(no_errors_or_warnings(&s), "{position}: {:?}", s.model.results);
+        let f = flat(&mut s);
+        let bends = bends_of(&f);
+        assert_eq!(bends.len(), 1, "{position}: the whole edge is one bend: {bends:?}");
+        assert!((bends[0].3 - 0.0).abs() < 1e-12, "{position}: the bend starts at {}: {bends:?}", bends[0].3);
+        assert!((bends[0].4 - 200.0).abs() < 1e-12, "{position}: the bend ends at {}: {bends:?}", bends[0].4);
+        let mut whole = Session::default();
+        al2_base(&mut whole);
+        run(&mut whole, "sheet.flange", json!({"edges":[[100,0,2]],"height":"20 mm","angle":"90 deg","position":position}));
+        assert!(no_errors_or_warnings(&whole), "{position}: {:?}", whole.model.results);
+        assert!(rel(volume(&mut s), volume(&mut whole)) < 1e-9, "{position}: {} vs {}", volume(&mut s), volume(&mut whole));
+        assert_eq!(f["bends"], flat(&mut whole)["bends"], "{position}: {f}");
+    }
+}
+
+/// A stored design whose segment list is slivers only: every stretch is narrower than the junction
+/// tolerance, so none of them can be a bend of its own. `sheet.flange` cannot write such a list (its
+/// last `to` must reach the edge's end), but a design file can hold one; the edge still builds
+/// whole, as the feature's own bend, instead of losing its flange (#5927, #5928).
+#[test]
+fn flange_segments_a_sliver_only_edge_builds_the_whole_edge() {
+    let mut s = Session::default();
+    al2_base(&mut s);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[{"from":0,"to":1}]}],"height":"20 mm","angle":"90 deg"}),
+    );
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    {
+        let doc = std::sync::Arc::make_mut(&mut s.doc);
+        for f in doc.features.iter_mut() {
+            let solidcraft_doc::FeatureKind::SheetFlange { edges, .. } = &mut f.kind else { continue };
+            for e in edges.iter_mut() {
+                if !e.segments.is_empty() {
+                    let at = |from: f64, to: f64| solidcraft_doc::FlangeSegment { from, to, angle: None, height: None, flip: None };
+                    e.segments = vec![at(0.0, 2.5e-10), at(2.5e-10, 5e-10), at(5e-10, 7.5e-10), at(7.5e-10, 1e-9)];
+                }
+            }
+        }
+    }
+    s.refresh();
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    let f = flat(&mut s);
+    let bends = bends_of(&f);
+    assert_eq!(bends.len(), 1, "the whole edge is one bend: {bends:?}");
+    assert!((bends[0].3 - 0.0).abs() < 1e-12, "the bend starts at {}: {bends:?}", bends[0].3);
+    assert!((bends[0].4 - 200.0).abs() < 1e-12, "the bend ends at {}: {bends:?}", bends[0].4);
+    let mut whole = Session::default();
+    al2_base(&mut whole);
+    run(&mut whole, "sheet.flange", json!({"edges":[[100,0,2]],"height":"20 mm","angle":"90 deg"}));
+    assert!(no_errors_or_warnings(&whole), "{:?}", whole.model.results);
+    assert!(rel(volume(&mut s), volume(&mut whole)) < 1e-9, "{} vs {}", volume(&mut s), volume(&mut whole));
+    assert_eq!(f["bends"], flat(&mut whole)["bends"], "{f}");
+}
