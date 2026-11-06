@@ -22,15 +22,23 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/brep_pair.rs"]
+mod brep_pair;
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
 #[path = "support/panic_fuzz.rs"]
 mod panic_fuzz;
 
+use std::io::Write as _;
+
 use panic_fuzz::{
     assert_no_findings, fuzz, parse_env_u64, parse_hangs, parse_repro, Family, Rng, Settings,
 };
+use solidcore::blend::feature_executive::{
+    defeature_and_rebuild, defeature_and_rebuild_with_edges, RebuildBrepType,
+};
 use solidcore::blend::fillet_executive::api as fillet;
+use solidcore::blend::fillet_executive::api::FilletSurfaceArg;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::boolean::api_brep as boolean;
 use solidcore::curve::curve::Curve;
@@ -38,27 +46,45 @@ use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::object::ObjectRef;
+use solidcore::heal::face_props::HealerOpType;
+use solidcore::heal::heal_data::p1::api_heal_brep;
+use solidcore::heal::stitch::p1 as stitching;
+use solidcore::intersect::api_intersectors as intersectors;
 use solidcore::mass::integrator::properties::{brep_mass_properties_default, brep_volume_default};
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
+use solidcore::offset::offset_faces::OffsetFacesExecutive;
 use solidcore::primitive::api_curves as curves;
 use solidcore::primitive::api_primitives as prim;
 use solidcore::primitive::primitive_creation::SweepOptions;
 use solidcore::query::api_queries as q;
+use solidcore::query::brep::BrepIdentity;
+use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_brep as sweeps;
 use solidcore::sweep::api_brep::OffsetCornerType;
 use solidcore::sweep::api_surfaces;
+use solidcore::topology::api_files::read_part_from_file;
 use solidcore::topology::api_files::{read_brep_from_file, write_brep_to_file};
+use solidcore::topology::api_projection as projection;
 use solidcore::topology::brep::mirror::mirror;
+use solidcore::topology::brep::p1::heal_brep;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p3::{brep_copy, topology_ref};
+use solidcore::topology::brep::p5::remove_faces;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::topology::brep_cache::{arena_identity, CacheObject};
+use solidcore::topology::brep_data::BrepData;
 use solidcore::topology::brep_data_write::FromBrepEnv;
+use solidcore::topology::brep_data_write::{AttributeTable, DATABASE_VERSION};
+use solidcore::topology::database_io::{DatabaseWriter, FileType};
+use solidcore::topology::face::p2 as face_p2;
+use solidcore::topology::part_file::{Part, PartEnv};
 use solidcore::topology::proto_topology::p1::api_transform::{
     api_scale, api_scale_by_pt, api_transform, TransformObject,
 };
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{EdgeId, EdgeuseId, FaceId};
 use solidcore::{Brep, CancelToken, EntityRef, Kernel, Point2, Point3};
+use solidcore::{BrepId, Vec3, VertexId};
 
 type P = [f64; 3];
 
@@ -259,6 +285,148 @@ enum Step {
         ascii: bool,
         edits: Vec<(f64, u8, u64)>,
     },
+    /// Closest point (`which` 0, 1), relationship (2), distance (3) of bodies `a` and
+    /// `b`; `find_faces` (4) and `find_edge` (5) at `point` on `a`.
+    BodyQuery {
+        a: usize,
+        b: usize,
+        point: P,
+        which: u8,
+    },
+    /// `boolean_lists` of the bodies `first` and `second`, with the surfaces of the
+    /// faces `(body, face, into the first list)`.
+    BooleanLists {
+        op: i32,
+        first: Vec<usize>,
+        second: Vec<usize>,
+        surfaces: Vec<(usize, usize, bool)>,
+    },
+    /// `boolean_trees` of the bodies (a `None` slot for each `holes` entry).
+    BooleanTrees {
+        bodies: Vec<usize>,
+        holes: Vec<usize>,
+        tree: Vec<i64>,
+    },
+    /// `non_manifold_sweep` along `dir`, or `non_manifold_rotational_sweep` about
+    /// `rotate` (base, axis, angle), of the selected faces, edges, vertices.
+    NmSweep {
+        body: usize,
+        dir: P,
+        dist: f64,
+        rotate: Option<(P, P, f64)>,
+        stitch: bool,
+        merge: bool,
+        faces: Option<Vec<usize>>,
+        edges: Option<Vec<usize>>,
+        vertices: Option<Vec<usize>>,
+    },
+    /// `create_curve_sweep_from_edges` (`edges`) or `_from_faces` of the picks.
+    SweepFrom {
+        body: usize,
+        edges: bool,
+        picks: Vec<usize>,
+        path: Profile,
+        scale: Option<Profile>,
+        bits: u8,
+    },
+    /// `create_skin_from_faces` of `(body, face)` picks.
+    SkinFromFaces {
+        faces: Vec<(usize, usize)>,
+        degree: usize,
+    },
+    /// `surface_surface_fillet` of face `fa` of `a` and face `fb` of `b` (`free`: bit 0
+    /// the first as a free surface, bit 1 the second, bit 2 the second on the first's
+    /// body).
+    SurfaceFillet {
+        a: usize,
+        fa: usize,
+        b: usize,
+        fb: usize,
+        free: u8,
+        r1: f64,
+        r2: f64,
+        tolerance: f64,
+        xsect: u32,
+        mirror: bool,
+        complement: bool,
+    },
+    BlendPrimitive {
+        body: usize,
+        e1: usize,
+        f1: usize,
+        e2: usize,
+        f2: usize,
+        same: bool,
+    },
+    /// `create_helix` (origin, height, start and end radius, turns, tolerance), then
+    /// a pipe of radius `pipe` along it.
+    Helix {
+        values: [f64; 8],
+        right: bool,
+        pipe: Option<f64>,
+    },
+    /// `heal_brep` up to healer step `op` (or `api_heal_brep` for `op > 26`).
+    Heal {
+        body: usize,
+        op: u8,
+        subset: Option<(Vec<usize>, Vec<usize>, Vec<usize>)>,
+        uv: bool,
+    },
+    /// The stitch entry points (`kind`).
+    Stitch {
+        body: usize,
+        kind: u8,
+        tolerance: f64,
+        flags: u8,
+        keep: Vec<usize>,
+        delete: Vec<usize>,
+        samples: u64,
+    },
+    /// A part file of the bodies and the tree, mutated, read by `read_part_from_file`.
+    PartRoundTrip {
+        bodies: Vec<usize>,
+        tree: Vec<i64>,
+        ascii: bool,
+        edits: Vec<(f64, u8, u64)>,
+    },
+    OffsetFaces {
+        body: usize,
+        faces: Vec<usize>,
+        distance: f64,
+    },
+    /// `defeature_and_rebuild` of the faces, or `_with_edges` of the first face and
+    /// the edges.
+    Defeature {
+        body: usize,
+        faces: Vec<usize>,
+        edges: Option<Vec<usize>>,
+        base: u8,
+        feature: u8,
+    },
+    /// `remove_faces` (the open body is kept, for the stitch and heal steps).
+    RemoveFaces {
+        body: usize,
+        faces: Vec<usize>,
+    },
+    /// `project_brep_onto_plane` (0), `create_silhouette_curves` (1),
+    /// `project_curve_onto_brep` (2) of `curve` along `normal`.
+    Project {
+        body: usize,
+        point: P,
+        normal: P,
+        which: u8,
+        curve: Profile,
+    },
+    /// `intersect_brep_with_plane` (0), `intersect_breps` of `a` with `b` (1) or
+    /// itself (2), `intersect_curve_brep` of `curve` (3).
+    Section {
+        a: usize,
+        b: usize,
+        point: P,
+        normal: P,
+        which: u8,
+        curve: Profile,
+    },
 }
 
 /// What a family's programs are made of.
@@ -272,6 +440,14 @@ enum Mix {
     Transforms,
     Analysis,
     Files,
+    BodyQueries,
+    BooleanSets,
+    NmSweeps,
+    SurfaceBlends,
+    Helix,
+    Heal,
+    Parts,
+    FaceOps,
 }
 
 // ---------------------------------------------------------------------------------------
@@ -714,10 +890,189 @@ fn op_step(r: &mut Rng, mix: Mix, p: f64) -> Step {
         Mix::Files => Step::FileRoundTrip {
             body,
             ascii: r.chance(0.5),
-            edits: (0..r.below(4))
-                .map(|_| (r.unit(), r.below(6) as u8, r.next_u64()))
-                .collect(),
+            edits: file_edits(r),
         },
+        Mix::BodyQueries => Step::BodyQuery {
+            a: body,
+            b: r.below(8),
+            point: point(r, p),
+            which: r.below(6) as u8,
+        },
+        Mix::BooleanSets => {
+            if r.chance(0.5) {
+                Step::BooleanLists {
+                    op: r.pick(&[0, 1, 2, 3, 4, 0, 1, 3, -1, 5, i32::MAX, i32::MIN]),
+                    first: picks(r, 3),
+                    second: picks(r, 3),
+                    surfaces: (0..r.below(3))
+                        .map(|_| (r.below(8), r.below(64), r.chance(0.5)))
+                        .collect(),
+                }
+            } else {
+                Step::BooleanTrees {
+                    bodies: picks(r, 4),
+                    holes: picks(r, 1),
+                    tree: tree(r),
+                }
+            }
+        }
+        Mix::NmSweeps => match r.below(4) {
+            0 | 1 => {
+                let sel = |r: &mut Rng| r.chance(0.5).then(|| picks(r, 3));
+                Step::NmSweep {
+                    body,
+                    dir: direction(r, p),
+                    dist: size(r, p),
+                    rotate: r
+                        .chance(0.4)
+                        .then(|| (point(r, p), direction(r, p), angle(r, p))),
+                    stitch: r.chance(0.5),
+                    merge: r.chance(0.5),
+                    faces: sel(r),
+                    edges: sel(r),
+                    vertices: sel(r),
+                }
+            }
+            2 => Step::SweepFrom {
+                body,
+                edges: r.chance(0.5),
+                picks: picks(r, 4),
+                path: profile(r, p),
+                scale: r.chance(0.2).then(|| profile(r, p)),
+                bits: r.next_u64() as u8,
+            },
+            _ => Step::SkinFromFaces {
+                faces: (0..r.below(4)).map(|_| (r.below(8), r.below(64))).collect(),
+                degree: r.pick(&[0, 1, 2, 3, 3, 5, 99, usize::MAX]),
+            },
+        },
+        Mix::SurfaceBlends => {
+            if r.chance(0.6) {
+                Step::SurfaceFillet {
+                    a: body,
+                    fa: r.below(64),
+                    b: r.below(8),
+                    fb: r.below(64),
+                    free: r.below(8) as u8,
+                    r1: r.hostile(p, -2.0, 2.0),
+                    r2: r.hostile(p, -2.0, 2.0),
+                    tolerance: r.hostile(p, 1e-4, 1e-2),
+                    xsect: r.pick(&[0, 1, 2, 3, u32::MAX]),
+                    mirror: r.chance(0.3),
+                    complement: r.chance(0.3),
+                }
+            } else {
+                Step::BlendPrimitive {
+                    body,
+                    e1: r.below(64),
+                    f1: r.below(64),
+                    e2: r.below(64),
+                    f2: r.below(64),
+                    same: r.chance(0.5),
+                }
+            }
+        }
+        Mix::Helix => {
+            let o = point(r, p);
+            Step::Helix {
+                values: [
+                    o[0],
+                    o[1],
+                    o[2],
+                    size(r, p),
+                    size(r, p),
+                    size(r, p),
+                    r.hostile(p, 0.1, 12.0),
+                    r.hostile(p, 1e-4, 1e-2),
+                ],
+                right: r.chance(0.5),
+                pipe: r.chance(0.2).then(|| r.hostile(p, 0.05, 0.5)),
+            }
+        }
+        Mix::Heal => {
+            if r.chance(0.4) {
+                Step::Heal {
+                    body,
+                    op: r.pick(&[26, 26, 5, 7, 9, 12, 16, 20, 23, 25, 27]),
+                    subset: r
+                        .chance(0.3)
+                        .then(|| (picks(r, 3), picks(r, 3), picks(r, 3))),
+                    uv: r.chance(0.3),
+                }
+            } else {
+                Step::Stitch {
+                    body,
+                    kind: r.below(6) as u8,
+                    tolerance: r.hostile(p, 1e-6, 1e-1),
+                    flags: r.below(16) as u8,
+                    keep: picks(r, 3),
+                    delete: picks(r, 3),
+                    samples: r.pick(&[0, 1, 4, 64, u64::MAX]),
+                }
+            }
+        }
+        Mix::Parts => Step::PartRoundTrip {
+            bodies: picks(r, 3),
+            tree: tree(r),
+            ascii: r.chance(0.5),
+            edits: file_edits(r),
+        },
+        Mix::FaceOps => match r.below(5) {
+            0 => Step::OffsetFaces {
+                body,
+                faces: picks(r, 3),
+                distance: r.hostile(p, -1.0, 1.0),
+            },
+            1 => Step::Defeature {
+                body,
+                faces: picks(r, 3),
+                edges: r.chance(0.3).then(|| picks(r, 4)),
+                base: r.below(4) as u8,
+                feature: r.below(4) as u8,
+            },
+            2 => Step::RemoveFaces {
+                body,
+                faces: picks(r, 2),
+            },
+            3 => Step::Project {
+                body,
+                point: point(r, p),
+                normal: direction(r, p),
+                which: r.below(3) as u8,
+                curve: profile(r, p),
+            },
+            _ => Step::Section {
+                a: body,
+                b: r.below(8),
+                point: point(r, p),
+                normal: direction(r, p),
+                which: r.below(4) as u8,
+                curve: profile(r, p),
+            },
+        },
+    }
+}
+
+fn file_edits(r: &mut Rng) -> Vec<(f64, u8, u64)> {
+    (0..r.below(4))
+        .map(|_| (r.unit(), r.below(6) as u8, r.next_u64()))
+        .collect()
+}
+
+/// A postfix Boolean tree: mostly well formed (leaves then operators), sometimes
+/// random nodes, out-of-range leaves and operators.
+fn tree(r: &mut Rng) -> Vec<i64> {
+    if r.chance(0.7) {
+        let leaves = 1 + r.below(4);
+        let mut t: Vec<i64> = (0..leaves).map(|_| r.below(5) as i64).collect();
+        for _ in 1..leaves {
+            t.push(-(1 + r.below(6) as i64));
+        }
+        t
+    } else {
+        (0..r.below(6))
+            .map(|_| r.pick(&[0, 1, 2, 7, -1, -2, -3, -4, -5, -6, -7, i64::MIN, i64::MAX]))
+            .collect()
     }
 }
 
@@ -727,7 +1082,9 @@ fn program(r: &mut Rng, mix: Mix) -> Vec<Step> {
     // most programs keep most values sane so they get deep into an operation
     let p = r.pick(&[0.0, 0.05, 0.15, 0.4]);
     match mix {
-        Mix::Primitives | Mix::Sweeps => (0..=r.below(2)).map(|_| op_step(r, mix, p)).collect(),
+        Mix::Primitives | Mix::Sweeps | Mix::Helix => {
+            (0..=r.below(2)).map(|_| op_step(r, mix, p)).collect()
+        }
         _ => {
             let mut steps: Vec<Step> = (0..=r.below(3)).map(|_| body_step(r, p / 2.0)).collect();
             for _ in 0..=r.below(3) {
@@ -1170,6 +1527,696 @@ fn queries(k: &mut Kernel, b: &mut Brep, point: P, param: f64, uv: [f64; 2], pic
     }
 }
 
+fn picked_vertices(b: &Brep, picks: &[usize]) -> Vec<VertexId> {
+    let all: Vec<VertexId> = b.vertices().ids().collect();
+    picks.iter().filter_map(|&i| nth(&all, i)).collect()
+}
+
+fn pick_face(b: &Brep, i: usize) -> Option<FaceId> {
+    nth(&q::get_faces(b).unwrap_or_default(), i)
+}
+
+fn pick_edge(b: &Brep, i: usize) -> Option<EdgeId> {
+    nth(&q::get_edges(b).unwrap_or_default(), i)
+}
+
+fn face_surface(b: &Brep, i: usize) -> Option<Surface> {
+    let f = pick_face(b, i)?;
+    face_p2::surface(b, f).ok().flatten().cloned()
+}
+
+fn vec3(p: P) -> Vec3 {
+    Vec3::new(p[0], p[1], p[2])
+}
+
+/// The body-to-body and point queries.
+fn body_query(k: &mut Kernel, a: &Brep, b: &Brep, point: P, which: u8) {
+    // read-only stand-ins that keep their geometry's owners (a `Brep` clone has none)
+    let (Ok(mut a), Ok(mut b)) = (a.clone_standing_for_self(), b.clone_standing_for_self()) else {
+        return;
+    };
+    if which >= 4 {
+        if which == 4 {
+            let _ = q::find_faces(
+                k,
+                &mut a,
+                BrepId::from_index(0),
+                pt(point),
+                &arena_identity,
+                &|_| None,
+            );
+        } else {
+            let _ = q::find_edge(k, &a, pt(point));
+        }
+        return;
+    }
+    let proven = [
+        BrepIdentity::of_brep_with_id(BrepId::from_index(0), &a),
+        BrepIdentity::of_brep_with_id(BrepId::from_index(1), &b),
+    ];
+    let identities = [proven[0].identity(), proven[1].identity()];
+    let mut empty = Brep::new();
+    let second = if which < 2 { &mut empty } else { &mut b };
+    let Ok(objects) = brep_pair::Pair::new(k, [&mut a, second], &identities) else {
+        return;
+    };
+    let h = [
+        brep_pair::Object(0, CacheObject::Brep),
+        brep_pair::Object(1, CacheObject::Brep),
+    ];
+    match which {
+        0 => {
+            let _ = q::brep_closest_point(k, &objects, h[0], pt(point));
+        }
+        1 => {
+            let _ = q::brep_closest_point_all(k, &objects, h[0], pt(point));
+        }
+        _ => {
+            // the solve on the live B-reps, then the classification on them (as a
+            // caller holding the B-reps mutably does; `brep_relationship` and
+            // `brep_distance` are the two in one)
+            let Ok(solution) = q::brep_relationship_solve(k, &objects, h[0], h[1]) else {
+                return;
+            };
+            let [l0, l1] = &objects.lives;
+            let _ = l0.with_brep(|a| {
+                l1.with_brep(|b| {
+                    if which == 2 {
+                        q::brep_relationship_classify(k, &objects, &solution, h, a, b).map(|_| ())
+                    } else {
+                        let (a, b) = (
+                            q::BrepRef {
+                                brep: a,
+                                handle: h[0],
+                            },
+                            q::BrepRef {
+                                brep: b,
+                                handle: h[1],
+                            },
+                        );
+                        q::brep_distance(k, &objects, a, b).map(|_| ())
+                    }
+                })
+            });
+        }
+    }
+}
+
+fn helix(k: &mut Kernel, v: &[f64; 8], right: bool, pipe: Option<f64>) -> Option<Brep> {
+    let c = curves::create_helix(&curves::HelixParams {
+        origin: pt([v[0], v[1], v[2]]),
+        height: v[3],
+        radius_start: v[4],
+        radius_end: v[5],
+        num_turns: v[6],
+        right_handed: right,
+        tolerance: v[7],
+    })
+    .ok()?;
+    let path = Curve::from(c);
+    sweeps::create_pipe_sweep(k, pipe?, Some(&path), true).ok()
+}
+
+fn healer_op(op: u8) -> Option<HealerOpType> {
+    HealerOpType::from_code(i64::from(op))
+}
+
+fn stitch(k: &mut Kernel, b: &mut Brep, s: &Step) {
+    let Step::Stitch {
+        kind,
+        tolerance,
+        flags,
+        keep,
+        delete,
+        samples,
+        ..
+    } = s
+    else {
+        return;
+    };
+    match kind {
+        0 => {
+            let _ = stitching::api_stitch(k, Some(b));
+        }
+        1 => {
+            let _ = stitching::api_stitch_into_solid(k, Some(b));
+        }
+        2 => {
+            let _ = stitching::api_stitch_into_shell(k, Some(b), flags & 1 != 0, *tolerance);
+        }
+        3 => {
+            let options = stitching::AdvancedStitchOptions {
+                squeeze_small_edges: flags & 1 != 0,
+                split_edges_with_vertices: flags & 2 != 0,
+                making_manifold_solid: flags & 4 != 0,
+                remove_laminar_slivers: flags & 8 != 0,
+            };
+            let _ = stitching::api_stitch_advanced(k, Some(b), *tolerance, options);
+        }
+        4 => {
+            let start = picked_faces(b, keep).first().copied();
+            let _ = stitching::api_unify_normals(k, Some(b), start, *samples);
+        }
+        _ => {
+            let (keep, delete) = (picked_faces(b, keep), picked_faces(b, delete));
+            let _ = stitching::api_simple_face_stitch(k, Some(b), &keep, &delete);
+        }
+    }
+}
+
+/// The B-rep section of a part file: `b` as `SmBrepData` written with its attribute
+/// indices (`WriteToDB(.., TRUE)`), its surfaces' NURBs made first.
+fn part_brep(k: &Kernel, b: &Brep, ascii: bool) -> Option<Vec<u8>> {
+    let store = AttributeStore::new();
+    let records = NotifyRecords::new();
+    let own = |e: EntityRef| b.owner_identity(e);
+    let env = FromBrepEnv {
+        attributes: &store,
+        key_of: &own,
+        records: &records,
+        curve_key: &|_: EdgeId| ObjectKey(0),
+        uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
+        surface_key: &|_: FaceId| ObjectKey(0),
+    };
+    let file_type = if ascii {
+        FileType::Ascii
+    } else {
+        FileType::Binary
+    };
+    let mut all = Vec::new();
+    let mut data = BrepData::from_brep(b, &env, &mut all).ok()?;
+    // (makes the missing NURBs)
+    data.write_to_file_with_nurbs(k, file_type).ok()?;
+    let mut map = std::collections::BTreeSet::new();
+    let mut attrs = AttributeTable {
+        store: &store,
+        all: &mut all,
+        map: &mut map,
+    };
+    let mut db = DatabaseWriter::open_for_write(file_type);
+    data.write_to_db(DATABASE_VERSION, &mut attrs, &mut db, true)
+        .ok()?;
+    Some(db.into_bytes())
+}
+
+/// A part file of `breps` and `tree` (no stand-alone curves or surfaces), in the
+/// layout `read_part_from_file` reads.
+fn part_file(k: &Kernel, breps: &[&Brep], tree: &[i64], ascii: bool) -> Option<Vec<u8>> {
+    let version = DATABASE_VERSION;
+    let bodies = breps
+        .iter()
+        .map(|b| part_brep(k, b, ascii))
+        .collect::<Option<Vec<_>>>()?;
+    let mut out = Vec::new();
+    if ascii {
+        let _ = write!(
+            out,
+            "//[Output Summary]\n//   (1) {} Curves\n//   (2) 0 Surfaces\n\
+             //   (3) {} Boolean Tree Nodes\n//   (4) {} Breps\n\n// Boolean Trees\n",
+            version * 1_000_000,
+            tree.len(),
+            breps.len()
+        );
+        for node in tree {
+            let _ = writeln!(out, "{node}");
+        }
+        out.extend_from_slice(b"\n\n");
+        for (i, body) in bodies.iter().enumerate() {
+            let _ = write!(out, "\n\n// [Brep #{i}]\n");
+            out.extend_from_slice(body);
+        }
+        out.extend_from_slice(b"\n0 // Total number of attributes\n");
+    } else {
+        for count in [
+            version * 1_000_000,
+            0,
+            tree.len() as u64,
+            breps.len() as u64,
+        ] {
+            out.extend_from_slice(&count.to_le_bytes());
+        }
+        for node in tree {
+            out.extend_from_slice(&node.to_le_bytes());
+        }
+        for body in &bodies {
+            out.extend_from_slice(body);
+        }
+        out.extend_from_slice(&0u64.to_le_bytes());
+    }
+    Some(out)
+}
+
+fn part_round_trip(
+    k: &mut Kernel,
+    breps: &[&Brep],
+    tree: &[i64],
+    ascii: bool,
+    edits: &[(f64, u8, u64)],
+) {
+    let Some(mut bytes) = part_file(k, breps, tree, ascii) else {
+        return;
+    };
+    mutate(&mut bytes, edits, ascii);
+    let mut attributes = AttributeStore::new();
+    let mut records = NotifyRecords::new();
+    let key_of = |i: usize, e: EntityRef| caller_named_in(i, e);
+    let mut env = PartEnv {
+        attributes: &mut attributes,
+        key_of: &key_of,
+        records: &mut records,
+        next_key: 1 << 50,
+    };
+    let mut part = Part {
+        curves: Vec::new(),
+        surfaces: Vec::new(),
+        boolean_tree_nodes: Vec::new(),
+        breps: Vec::new(),
+    };
+    if read_part_from_file(k, Some(bytes), ascii, &mut part, &mut env).is_ok() {
+        for b in &mut part.breps {
+            b.refresh_cached_topology();
+            let _ = q::brep_bounding_box(k, b, false);
+            // (a coarse volume: the read-back bodies are whole, and the part's tree
+            // runs on them below)
+            let _ = brep_volume_default(k, b, 1e-2);
+        }
+        let mut slots: Vec<Option<Brep>> = part.breps.into_iter().map(Some).collect();
+        let _ = boolean::boolean_trees(k, &mut slots, &part.boolean_tree_nodes);
+    }
+}
+
+fn caller_named_in(i: usize, entity: EntityRef) -> ObjectRef {
+    let r = caller_named(entity);
+    ObjectRef {
+        type_code: r.type_code,
+        key: ObjectKey(r.key.0 + (i as u64) * 100_000_000_000),
+    }
+}
+
+fn rebuild_type(t: u8) -> RebuildBrepType {
+    [
+        RebuildBrepType::None,
+        RebuildBrepType::PlanarCap,
+        RebuildBrepType::ExtendSurface,
+        RebuildBrepType::FromOtherBrep,
+    ][usize::from(t) % 4]
+}
+
+/// The steps of the families added after slice 1 that need a body (`bodies` is not
+/// empty); `Some` with a body to keep.
+#[allow(clippy::too_many_lines)] // one arm per step
+fn wide_step(k: &mut Kernel, step: &Step, bodies: &[Brep]) -> Option<Brep> {
+    let n = bodies.len();
+    // an independent copy that owns its geometry (a `Brep` clone owns none); a copy
+    // that fails skips the step
+    let body = |k: &mut Kernel, i: usize| brep_copy(k, &bodies[i % n]).ok();
+    match step {
+        Step::BodyQuery { a, b, point, which } => {
+            body_query(k, &bodies[a % n], &bodies[b % n], *point, *which);
+            None
+        }
+        Step::BooleanLists {
+            op,
+            first,
+            second,
+            surfaces,
+        } => {
+            let l1: Vec<Brep> = first.iter().map(|&i| body(k, i)).collect::<Option<_>>()?;
+            let l2: Vec<Brep> = second.iter().map(|&i| body(k, i)).collect::<Option<_>>()?;
+            let (mut s1, mut s2) = (Vec::new(), Vec::new());
+            for &(b, f, into_first) in surfaces {
+                if let Some(s) = face_surface(&bodies[b % n], f) {
+                    if into_first {
+                        s1.push(s);
+                    } else {
+                        s2.push(s);
+                    }
+                }
+            }
+            boolean::boolean_lists(k, &l1, &s1, &l2, &s2, *op)
+                .ok()
+                .and_then(|r| r.breps.into_iter().next())
+        }
+        Step::BooleanTrees {
+            bodies: which,
+            holes,
+            tree,
+        } => {
+            let mut slots: Vec<Option<Brep>> = which
+                .iter()
+                .map(|&i| body(k, i).map(Some))
+                .collect::<Option<_>>()?;
+            for &h in holes {
+                if !slots.is_empty() {
+                    let i = h % slots.len();
+                    slots[i] = None;
+                }
+            }
+            boolean::boolean_trees(k, &mut slots, tree).ok()?;
+            slots.into_iter().flatten().next()
+        }
+        Step::NmSweep {
+            body: i,
+            dir,
+            dist,
+            rotate,
+            stitch,
+            merge,
+            faces,
+            edges,
+            vertices,
+        } => {
+            let mut b = body(k, *i)?;
+            let f: Option<Vec<Option<FaceId>>> = faces
+                .as_ref()
+                .map(|p| picked_faces(&b, p).into_iter().map(Some).collect());
+            let e: Option<Vec<Option<EdgeId>>> = edges
+                .as_ref()
+                .map(|p| picked_edges(&b, p).into_iter().map(Some).collect());
+            let v: Option<Vec<Option<VertexId>>> = vertices
+                .as_ref()
+                .map(|p| picked_vertices(&b, p).into_iter().map(Some).collect());
+            let selection = sweeps::SweepSelection {
+                faces: f.as_deref(),
+                edges: e.as_deref(),
+                vertices: v.as_deref(),
+            };
+            let r = match rotate {
+                None => sweeps::non_manifold_sweep(
+                    k,
+                    &mut b,
+                    None,
+                    vec3(*dir),
+                    *dist,
+                    *stitch,
+                    *merge,
+                    selection,
+                ),
+                Some((base, axis, angle)) => sweeps::non_manifold_rotational_sweep(
+                    k,
+                    &mut b,
+                    Some(sweeps::RegionBrep::Swept),
+                    pt(*base),
+                    vec3(*axis),
+                    *angle,
+                    *stitch,
+                    *merge,
+                    selection,
+                ),
+            };
+            r.ok().map(|()| b)
+        }
+        Step::SweepFrom {
+            body: i,
+            edges,
+            picks,
+            path,
+            scale,
+            bits,
+        } => {
+            let b = body(k, *i)?;
+            let path = curves_of(k, path)?;
+            let scale = match scale {
+                Some(s) => Some(curves_of(k, s)?),
+                None => None,
+            };
+            let options = SweepOptions {
+                cap_ends: bits & 1 != 0,
+                translational_sweep: bits & 2 != 0,
+                move_profile_center_to_path: bits & 4 != 0,
+                orient_profile_perpendicular_to_path: bits & 8 != 0,
+                move_to_profile: bits & 16 != 0,
+                profile_at_path_start: bits & 32 != 0,
+            };
+            let sc0 = scale.as_ref().and_then(|v| v.first());
+            let sc1 = scale.as_ref().and_then(|v| v.get(1));
+            let options = (bits & 64 == 0).then_some(&options);
+            let r = if *edges {
+                let e: Vec<(&Brep, EdgeId)> = picked_edges(&b, picks)
+                    .into_iter()
+                    .map(|e| (&b, e))
+                    .collect();
+                sweeps::create_curve_sweep_from_edges(k, &e, path.first(), sc0, sc1, options)
+            } else {
+                let f: Vec<(&Brep, FaceId)> = picked_faces(&b, picks)
+                    .into_iter()
+                    .map(|f| (&b, f))
+                    .collect();
+                sweeps::create_curve_sweep_from_faces(k, &f, path.first(), sc0, sc1, options)
+            };
+            r.ok().map(|s| s.brep)
+        }
+        Step::SkinFromFaces { faces, degree } => {
+            let owners: Vec<Brep> = faces
+                .iter()
+                .map(|&(b, _)| body(k, b))
+                .collect::<Option<_>>()?;
+            let f: Vec<(&Brep, FaceId)> = owners
+                .iter()
+                .zip(faces)
+                .filter_map(|(b, &(_, f))| Some((b, pick_face(b, f)?)))
+                .collect();
+            api_surfaces::create_skin_from_faces(k, &f, *degree)
+                .ok()
+                .map(|s| s.brep)
+        }
+        Step::SurfaceFillet {
+            a,
+            fa,
+            b,
+            fb,
+            free,
+            r1,
+            r2,
+            tolerance,
+            xsect,
+            mirror,
+            complement,
+        } => {
+            let (mut ba, mut bb) = (body(k, *a)?, body(k, *b)?);
+            let (sa, sb) = (face_surface(&ba, *fa)?, face_surface(&bb, *fb)?);
+            let (Some(face_a), Some(face_b)) = (pick_face(&ba, *fa), pick_face(&bb, *fb)) else {
+                return None;
+            };
+            let first = if free & 1 != 0 {
+                FilletSurfaceArg::Free(&sa)
+            } else {
+                FilletSurfaceArg::Face {
+                    body: &mut ba,
+                    face: face_a,
+                }
+            };
+            let second = if free & 4 != 0 {
+                // a face of the first body (only with the first on a body)
+                FilletSurfaceArg::FirstBodyFace(face_b)
+            } else if free & 2 != 0 {
+                FilletSurfaceArg::Free(&sb)
+            } else {
+                FilletSurfaceArg::Face {
+                    body: &mut bb,
+                    face: face_b,
+                }
+            };
+            fillet::surface_surface_fillet(
+                k,
+                first,
+                second,
+                *r1,
+                *r2,
+                *tolerance,
+                *xsect,
+                *mirror,
+                *complement,
+            )
+            .ok()
+            .flatten()
+        }
+        Step::BlendPrimitive {
+            body: i,
+            e1,
+            f1,
+            e2,
+            f2,
+            same,
+        } => {
+            let mut b = body(k, *i)?;
+            let (Some(e1), Some(f1), Some(e2), Some(f2)) = (
+                pick_edge(&b, *e1),
+                pick_face(&b, *f1),
+                pick_edge(&b, *e2),
+                pick_face(&b, *f2),
+            ) else {
+                return None;
+            };
+            prim::create_blend_primitive(k, &mut b, e1, f1, e2, f2, *same)
+                .ok()
+                .map(|_| b)
+        }
+        Step::Heal {
+            body: i,
+            op,
+            subset,
+            uv,
+        } => {
+            let mut b = body(k, *i)?;
+            let r = match healer_op(*op) {
+                None => api_heal_brep(k, Some(&mut b)),
+                Some(op) => {
+                    let lists = subset.as_ref().map(|(v, e, f)| {
+                        (
+                            picked_vertices(&b, v),
+                            picked_edges(&b, e),
+                            picked_faces(&b, f),
+                        )
+                    });
+                    let (v, e, f) = match &lists {
+                        Some((v, e, f)) => (Some(&v[..]), Some(&e[..]), Some(&f[..])),
+                        None => (None, None, None),
+                    };
+                    heal_brep(k, &mut b, op, v, e, f, *uv)
+                }
+            };
+            r.ok().map(|()| b)
+        }
+        Step::Stitch { body: i, .. } => {
+            let mut b = body(k, *i)?;
+            stitch(k, &mut b, step);
+            Some(b)
+        }
+        Step::PartRoundTrip {
+            bodies: which,
+            tree,
+            ascii,
+            edits,
+        } => {
+            // (the bodies themselves, as for `FileRoundTrip`)
+            let breps: Vec<&Brep> = which.iter().map(|&i| &bodies[i % n]).collect();
+            part_round_trip(k, &breps, tree, *ascii, edits);
+            None
+        }
+        Step::OffsetFaces {
+            body: i,
+            faces,
+            distance,
+        } => {
+            let mut b = body(k, *i)?;
+            let f = picked_faces(&b, faces);
+            OffsetFacesExecutive::new()
+                .offset_faces(k, &mut b, &f, *distance)
+                .ok()
+                .map(|()| b)
+        }
+        Step::Defeature {
+            body: i,
+            faces,
+            edges,
+            base,
+            feature,
+        } => {
+            let mut b = body(k, *i)?;
+            let f = picked_faces(&b, faces);
+            let (base, feature) = (rebuild_type(*base), rebuild_type(*feature));
+            let r = match edges {
+                Some(e) => {
+                    let e = picked_edges(&b, e);
+                    let face = f.first().copied()?;
+                    defeature_and_rebuild_with_edges(k, &mut b, face, &e, base, feature)
+                }
+                None => defeature_and_rebuild(k, &mut b, &f, base, feature),
+            };
+            r.ok().map(|_| b)
+        }
+        Step::RemoveFaces { body: i, faces } => {
+            let mut b = body(k, *i)?;
+            let f = picked_faces(&b, faces);
+            remove_faces(k, &mut b, true, &f).ok().map(|()| b)
+        }
+        Step::Project {
+            body: i,
+            point,
+            normal,
+            which,
+            curve,
+        } => {
+            let mut b = body(k, *i)?;
+            let mut out = Vec::new();
+            match which {
+                0 => {
+                    let _ = projection::project_brep_onto_plane(
+                        k,
+                        Some(&b),
+                        vec3(*point),
+                        vec3(*normal),
+                        &mut out,
+                    );
+                }
+                1 => {
+                    let _ = projection::create_silhouette_curves(
+                        k,
+                        Some(&b),
+                        vec3(*point),
+                        vec3(*normal),
+                        &mut out,
+                    );
+                }
+                _ => {
+                    let c = bspline_of(k, curve);
+                    let _ = projection::project_curve_onto_brep(
+                        k,
+                        Some(&mut b),
+                        c.as_ref(),
+                        vec3(*normal),
+                        &mut out,
+                    );
+                }
+            }
+            None
+        }
+        Step::Section {
+            a,
+            b,
+            point,
+            normal,
+            which,
+            curve,
+        } => {
+            let mut x = body(k, *a)?;
+            match which {
+                0 => {
+                    let _ = intersectors::intersect_brep_with_plane(
+                        k,
+                        &mut x,
+                        pt(*point),
+                        vec3(*normal),
+                    );
+                }
+                1 => {
+                    let mut y = body(k, *b)?;
+                    let _ = intersectors::intersect_breps(
+                        k,
+                        intersectors::BrepOperands::Two(&mut x, &mut y),
+                        true,
+                    );
+                }
+                2 => {
+                    let _ = intersectors::intersect_breps(
+                        k,
+                        intersectors::BrepOperands::Same(&mut x),
+                        false,
+                    );
+                }
+                _ => {
+                    if let Some(c) = curves_of(k, curve).and_then(|c| c.into_iter().next()) {
+                        let _ = intersectors::intersect_curve_brep(k, &c, &mut x);
+                    }
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 /// Runs a program; errors end a step, never the program.
 fn execute(steps: &[Step], cancel: &CancelToken) {
     let mut k = Kernel::default();
@@ -1433,12 +2480,17 @@ fn execute(steps: &[Step], cancel: &CancelToken) {
                 None
             }
             Step::FileRoundTrip { body, ascii, edits } if n > 0 => {
-                let Ok(b) = brep_copy(k, &bodies[body % n]) else {
-                    continue;
-                };
-                file_round_trip(k, &b, *ascii, edits);
+                // (the body itself: a `Brep::clone` drops its face surfaces' owners, so
+                // the writer would leave its surfaces out)
+                file_round_trip(k, &bodies[body % n], *ascii, edits);
                 None
             }
+            Step::Helix {
+                values,
+                right,
+                pipe,
+            } => helix(k, values, *right, *pipe),
+            _ if n > 0 => wide_step(k, step, &bodies),
             _ => None,
         };
         if let Some(b) = made {
@@ -1512,6 +2564,51 @@ fn panic_fuzz_analysis() {
 #[test]
 fn panic_fuzz_files() {
     run_family("files", Mix::Files, 25);
+}
+
+#[test]
+fn panic_fuzz_body_queries() {
+    run_family("body_queries", Mix::BodyQueries, 15);
+}
+
+#[test]
+fn panic_fuzz_boolean_sets() {
+    run_family("boolean_sets", Mix::BooleanSets, 4);
+}
+
+#[test]
+fn panic_fuzz_nm_sweeps() {
+    // (the fifth case, 15137747025202472589, a curve sweep from edges along an ellipse,
+    // takes 10 s optimised and past the hang limit in a debug build; the slow cases the
+    // fuzz finds are tracked in #2756)
+    run_family("nm_sweeps", Mix::NmSweeps, 4);
+}
+
+#[test]
+fn panic_fuzz_surface_blends() {
+    run_family("surface_blends", Mix::SurfaceBlends, 10);
+}
+
+#[test]
+fn panic_fuzz_helix() {
+    run_family("helix", Mix::Helix, 40);
+}
+
+#[test]
+fn panic_fuzz_heal() {
+    run_family("heal", Mix::Heal, 15);
+}
+
+#[test]
+fn panic_fuzz_parts() {
+    // (the seventh case, a binary part of a swung body and a torus read back, took past
+    // 20 s in a debug build on Brep clones; see #2756 for the slow cases)
+    run_family("parts", Mix::Parts, 6);
+}
+
+#[test]
+fn panic_fuzz_face_ops() {
+    run_family("face_ops", Mix::FaceOps, 10);
 }
 
 /// `SOLIDCORE_PANIC_FUZZ_REPRO` takes `<family>:<u64 seed>`; anything else is an error
