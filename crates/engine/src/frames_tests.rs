@@ -490,6 +490,32 @@ fn an_object_form_axis_maps_into_a_moved_component() {
     }
 }
 
+/// A hole whose position and direction are written `{x, y, z}` is drilled like one written
+/// `[x, y, z]`, in a turned component picked from the root: the direction turns with the body.
+#[test]
+fn an_object_form_hole_turns_with_the_picked_body() {
+    let drilled = |position: Value, direction: Value| {
+        let mut s = moved_part();
+        run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [1, 0, 0], "angle": "90 deg", "origin": [50, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        let before = volume(&mut s);
+        run(&mut s, "solid.hole", json!({"position": position, "direction": direction, "diameter": 4, "depth": 5}));
+        before - volume(&mut s)
+    };
+    // The block's face at the top of the world once turned, at its middle.
+    let mut s = moved_part();
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [1, 0, 0], "angle": "90 deg", "origin": [50, 0, 0]}));
+    let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap();
+    let (lo, hi) = world_bbox(&s, &body);
+    let (x, y, z) = ((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, hi.z);
+    let array = drilled(json!([x, y, z]), json!([0, 0, -1]));
+    let object = drilled(json!({"x": x, "y": y, "z": z}), json!({"x": 0, "y": 0, "z": -1}));
+    // A flat-bottomed hole of radius 2, 5 deep.
+    let bore = std::f64::consts::PI * 4.0 * 5.0;
+    assert!((array - bore).abs() < 1e-6 * bore, "array form cut {array}");
+    assert!((object - bore).abs() < 1e-6 * bore, "object form cut {object}");
+}
+
 /// A new placement given to `timeline.redefine` is still a world point.
 #[test]
 fn a_new_primitive_placement_is_still_mapped_from_the_world() {

@@ -222,7 +222,8 @@ struct Mapper<'a> {
 
 impl Mapper<'_> {
     fn pick(&mut self, v: &Value, body: Option<&str>) -> Option<Value> {
-        let p = vec3(v)?;
+        // `[x, y, z]` or `{x, y, z}`: a direction given with it then turns with the picked body.
+        let p = crate::params::vec3(v)?;
         let under = if self.here { None } else { frame_at(self.s, self.world, &self.f, p, body) };
         let m = if self.here { self.f.sketch } else { under.as_ref().map(|(m, _)| *m).unwrap_or(self.f.active) };
         self.first.get_or_insert(m);
