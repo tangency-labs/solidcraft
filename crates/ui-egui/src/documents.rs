@@ -1288,7 +1288,7 @@ fn tab_rename_field(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: &s
     let Some(mut rename) = app.menu.rename.take() else { return };
     let t = Tokens::get();
     ui.painter().rect_filled(rect, t.radius_sm, t.field);
-    let id = ui.id().with("doc_tab_rename");
+    let id = ui.scope_id().with("doc_tab_rename");
     let response = crate::ui_kit::inline_name(ui, rect.shrink2(vec2(4.0, 0.0)), id, &mut rename.text);
     if rename.text.chars().count() > MAX_DESIGN_NAME {
         rename.text = rename.text.chars().take(MAX_DESIGN_NAME).collect();
@@ -1311,7 +1311,7 @@ fn tab_rename_field(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: &s
         // Dropping the edit keeps the old name.
     } else if commit {
         if rename.text.trim() != shown.trim() {
-            crate::context_menu::commit_rename(app, &rename);
+            let _ = crate::context_menu::commit_rename(app, &rename);
         }
     } else {
         app.menu.rename = Some(rename);
