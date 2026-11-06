@@ -1686,6 +1686,10 @@ preference_settings! {
     /// The first length dimension of a sketch with nothing sized yet scales the whole drawing to
     /// its value (#1365). Off: it sizes only what it measures (#4109).
     first_dimension_scales: bool = true, PAGE_SKETCH;
+    /// With `first_dimension_scales`: the drawing scales about the sketch origin even when nothing
+    /// ties it there, so a shape drawn away from the origin moves as it grows (the behaviour
+    /// before #11043). Off (the default): such a shape scales about its own middle and stays put.
+    first_dimension_scales_about_origin: bool = false, PAGE_SKETCH;
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;

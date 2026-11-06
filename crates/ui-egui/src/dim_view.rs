@@ -117,6 +117,9 @@ struct DimensionDraft {
     /// The first dimension of a sketch scales it rather than distorting it (#1365), unless the
     /// Sketch preference is off (#4109).
     scale_sketch: bool,
+    /// It scales about the sketch origin even for a drawing nothing ties there (the Sketch
+    /// preference, off by default: a free drawing scales about its own middle, #11043).
+    scale_about_origin: bool,
 }
 
 impl DimensionDraft {
@@ -130,7 +133,12 @@ impl DimensionDraft {
     fn params(&self, expr: &str) -> serde_json::Value {
         // The first dimension of a sketch scales it rather than distorting it (#1365), unless the
         // Sketch preference is off (#4109).
-        let mut params = json!({"entities": entities_value(&self.entities), "value": expr, "scale_sketch": self.scale_sketch});
+        let mut params = json!({
+            "entities": entities_value(&self.entities),
+            "value": expr,
+            "scale_sketch": self.scale_sketch,
+            "scale_about_origin": self.scale_about_origin,
+        });
         if let Some(at) = self.at {
             params["text_at"] = json!([at.x, at.y]);
         }
@@ -409,6 +417,7 @@ fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, 
         driven,
         half_axes: app.preferences.ellipse_axes,
         scale_sketch: app.preferences.first_dimension_scales,
+        scale_about_origin: app.preferences.first_dimension_scales_about_origin,
     };
     if !draft.preview.sketch(sketch).is_some_and(|solved| solved.report.ok()) {
         return Err("That dimension conflicts with the sketch constraints".into());
