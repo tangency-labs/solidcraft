@@ -485,8 +485,8 @@ fn place_pierced_points(sk: &mut Sketch) {
 /// samples to the other curve (`closed`: the samples run round): the extremum of the gap nearest
 /// zero, refined between the samples by the parabola through its neighbours. Curves that cross
 /// have a zero gap too, but no extremum there, so a crossing is not taken for a touch (#11535).
-/// Where the gap has no extremum (an open curve running away from the other), the gap nearest
-/// zero.
+/// An open curve's ends count as extrema too: a touch at its end, or a monotone gap (an open
+/// curve running away from the other), takes the gap nearest zero.
 fn touch_gap(gaps: &[f64], closed: bool) -> f64 {
     let n = gaps.len();
     let at = |i: usize, back: bool| -> Option<f64> {
@@ -511,11 +511,16 @@ fn touch_gap(gaps: &[f64], closed: bool) -> f64 {
             best = Some(v);
         }
     }
-    best.unwrap_or_else(|| {
-        // No interior extremum: the gap is monotone, so its extremum is at an end of the curve.
-        let (first, last) = (gaps[0], gaps[gaps.len() - 1]);
-        if first.abs() <= last.abs() { first } else { last }
-    })
+    // An open curve's ends are extrema of its gap too (a touch at its end, or a gap that is
+    // monotone and has no other extremum).
+    if !closed && let (Some(&first), Some(&last)) = (gaps.first(), gaps.last()) {
+        for end in [first, last] {
+            if best.is_none_or(|b| end.abs() < b.abs()) {
+                best = Some(end);
+            }
+        }
+    }
+    best.unwrap_or(0.0)
 }
 
 fn line_dist(p: Vec2, a: Vec2, b: Vec2) -> f64 {
@@ -3470,5 +3475,25 @@ mod typed_dimension_tests {
             sk.add_constraint(ConstraintKind::Vertical { l }, None).unwrap();
         }
         assert!(solve(&mut sk).ok());
+    }
+}
+
+#[cfg(test)]
+mod touch_gap_tests {
+    use super::touch_gap;
+
+    /// #11535: an open curve that touches the other at its end (the gap y = 9t^2 - 8t^3 starts at
+    /// zero with zero slope, and has its interior maximum 1.63 further on) has residual zero.
+    #[test]
+    fn an_open_curve_touching_at_its_end_has_no_residual() {
+        let gaps: Vec<f64> = (0..=100).map(|i| f64::from(i) / 100.0).map(|t| 9.0 * t * t - 8.0 * t * t * t).collect();
+        assert!(touch_gap(&gaps, false).abs() < 1e-12);
+    }
+
+    /// A crossing's zero, with a bigger extremum beside it, is not a touch.
+    #[test]
+    fn a_crossing_is_not_a_touch() {
+        let gaps: Vec<f64> = (0..=100).map(|i| (f64::from(i) / 100.0 - 0.5) * 4.0 + 0.2 * (f64::from(i) / 8.0).sin()).collect();
+        assert!(touch_gap(&gaps, false).abs() > 0.5);
     }
 }
