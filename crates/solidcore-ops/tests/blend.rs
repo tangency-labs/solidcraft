@@ -536,7 +536,9 @@ fn nearest_edge(b: &Body, p: [f64; 3]) -> usize {
 /// lifted to the plane: semi-axes `R` along y and `R sqrt(5) / 2` along x, centred at
 /// x = 10 less half the top's offset (the axis runs 1 along x to 2 along z).
 #[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
 fn a_tangent_chain_is_one_chamfer_measured_at_its_widest_wedge() {
+    const SQRT_5: f64 = 2.236_067_977_499_79;
     all_fixes();
     let case = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -572,7 +574,7 @@ fn a_tangent_chain_is_one_chamfer_measured_at_its_widest_wedge() {
         top = t.0;
         wall = wall.max(w.1);
     }
-    let (c, s) = (-wall, (1.0 - wall * wall).sqrt());
+    let (c, s) = (-wall, wall.acos().sin());
     let (r_top, r_wall) = ((2.0 - c) / s, (1.0 - 2.0 * c) / s);
     chamfer_sides(&b, &rim, &[top, top], 1.0, ChamferSecond::Distance(2.0)).unwrap();
     let (k, made) = kernel_copy(&b);
@@ -585,7 +587,7 @@ fn a_tangent_chain_is_one_chamfer_measured_at_its_widest_wedge() {
         })
         .unwrap();
     let radius = 5.0 - r_wall;
-    let half_x = radius * 5.0_f64.sqrt() / 2.0;
+    let half_x = radius * SQRT_5 / 2.0;
     assert!(rel(bx.max().y, radius) < 1e-8, "{}", bx.max().y);
     assert!(rel(bx.min().y, -radius) < 1e-8, "{}", bx.min().y);
     let middle = 10.0 - r_top / 2.0;
