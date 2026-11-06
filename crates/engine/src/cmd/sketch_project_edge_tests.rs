@@ -171,6 +171,50 @@ fn a_projected_edge_that_is_gone_fails_its_sketch_not_replaced() {
 /// A boss 20 x 20 x 10 made as its own body on the plate and joined into it afterwards: no body
 /// has the link's body name any more. The join left the boss's top edge from (30, 10, 30) to
 /// (30, 30, 30) as it was, and the link finds it by its name on the body that has it now.
+/// A sketch that fails for an edge gone by name still opens for editing (#12085): its own circle
+/// and the projected line, kept where it was and marked lost, are there to repair. It still
+/// fails, as does the extrude built from it; deleting the lost projection repairs both.
+#[test]
+fn a_sketch_that_lost_its_projected_edge_opens_with_its_curves_and_the_link_marked_lost() {
+    let mut s = Session::default();
+    plate(&mut s);
+    run(&mut s, "solid.fillet", json!({"edges": [[100, 25, 20]], "radius": "4 mm", "name": "Round"}));
+    run(&mut s, "timeline.suppress", json!({"feature": "Round", "suppressed": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "20 mm", "name": "Top"}));
+    let projected_curves = run(&mut s, "sketch.project", json!({"refs": [{"edge": [100, 25, 20], "body": "Body1"}]}))["created"]["curves"].clone();
+    run(&mut s, "sketch.circle.center", json!({"center": [50, 25], "radius": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Top", "distance": "5 mm", "name": "Boss"}));
+    let top = s.doc.find_feature("Top").unwrap().id;
+    let boss_error = |s: &Session| s.model.result(s.doc.find_feature("Boss").unwrap().id).unwrap().error.clone();
+    let curves = |s: &mut Session| run(s, "sketch.inspect", json!({"sketch": "Top"}))["curves"].as_array().map_or(0, Vec::len);
+    let name = stored(&s).edge_name.unwrap();
+    run(&mut s, "timeline.suppress", json!({"feature": "Round", "suppressed": false}));
+    assert_eq!(reselect(&s), Some(name.clone()), "{}", trouble(&s));
+    assert!(s.model.state().sketch(top).is_none(), "a failed sketch not edited is not shown");
+    assert!(boss_error(&s).is_some());
+
+    run(&mut s, "sketch.edit", json!({"sketch": "Top"}));
+    assert_eq!(reselect(&s), Some(name.clone()), "still fails while edited");
+    assert!(boss_error(&s).is_some(), "the extrude does not build from the held sketch");
+    assert!(link(&s).lost);
+    assert_line(&s, 100.0, (0.0, 50.0), "kept where it was");
+    assert_eq!(curves(&mut s), 2, "the circle and the lost projection");
+    // Another edit keeps it shown.
+    run(&mut s, "sketch.point", json!({"point": [10, 10]}));
+    assert!(link(&s).lost);
+    run(&mut s, "sketch.finish", json!({}));
+    assert!(s.model.state().sketch(top).is_none(), "finished, it is not shown");
+
+    // Repaired from inside: the lost projection deleted.
+    run(&mut s, "sketch.edit", json!({"sketch": "Top"}));
+    run(&mut s, "sketch.delete", json!({"entities": projected_curves}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(trouble(&s), "");
+    assert_eq!(boss_error(&s), None);
+    assert!(s.doc.sketch(top).unwrap().links.is_empty());
+}
+
 #[test]
 fn a_projected_edge_whose_body_was_joined_into_another_is_found_there() {
     let mut s = Session::default();
