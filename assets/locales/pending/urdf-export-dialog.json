@@ -2,7 +2,6 @@
   "en": {
     "Couple motion links": "Couple motion links",
     "Export URDF": "Export URDF",
-    "Export URDF…": "Export URDF…",
     "Mesh file prefix": "Mesh file prefix",
     "Joint effort": "Joint effort",
     "Joint velocity": "Joint velocity",
@@ -12,7 +11,6 @@
   "ar": {
     "Couple motion links": "ربط وصلات الحركة",
     "Export URDF": "تصدير URDF",
-    "Export URDF…": "تصدير URDF…",
     "Mesh file prefix": "بادئة ملف الشبكة",
     "Joint effort": "قوة المفصل",
     "Joint velocity": "سرعة المفصل",
@@ -22,7 +20,6 @@
   "he": {
     "Couple motion links": "צימוד קישורי תנועה",
     "Export URDF": "ייצוא URDF",
-    "Export URDF…": "ייצוא URDF…",
     "Mesh file prefix": "קידומת קובץ רשת",
     "Joint effort": "כוח מפרק",
     "Joint velocity": "מהירות מפרק",
@@ -32,7 +29,6 @@
   "ja": {
     "Couple motion links": "モーションリンクを連結",
     "Export URDF": "URDF をエクスポート",
-    "Export URDF…": "URDF をエクスポート…",
     "Mesh file prefix": "メッシュファイルの接頭辞",
     "Joint effort": "ジョイントの力",
     "Joint velocity": "ジョイントの速度",
@@ -42,7 +38,6 @@
   "vi": {
     "Couple motion links": "Ghép các liên kết chuyển động",
     "Export URDF": "Xuất URDF",
-    "Export URDF…": "Xuất URDF…",
     "Mesh file prefix": "Tiền tố tệp lưới",
     "Joint effort": "Lực khớp",
     "Joint velocity": "Vận tốc khớp",
@@ -52,7 +47,6 @@
   "zh": {
     "Couple motion links": "耦合运动链接",
     "Export URDF": "导出 URDF",
-    "Export URDF…": "导出 URDF…",
     "Mesh file prefix": "网格文件前缀",
     "Joint effort": "关节力",
     "Joint velocity": "关节速度",
