@@ -7187,3 +7187,133 @@ fn flange_segments_absorb_a_run_of_slivers_without_leaving_a_hole() {
         assert_eq!(f["bends"], flat(&mut merged)["bends"], "{position}: {f}");
     }
 }
+
+/// The chain judge round 5 found: [0, 0.5], [0.4999999992, 0.4999999994],
+/// [0.4999999986, 0.4999999988], [0.4999999988, 1] at 20 mm, 15 mm, 20 mm and 20 mm. Every stretch
+/// starts where the edge is already covered, so the runs are sorted, contiguous and never overlap,
+/// and the part is the merged partition's (#5927, #5928).
+#[test]
+fn flange_segments_a_backward_sliver_chain_never_makes_overlapping_runs() {
+    for position in ["inside", "outside"] {
+        let mut s = Session::default();
+        al2_base(&mut s);
+        run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0.0,"to":0.5,"height":"20 mm"},
+                {"from":0.4999999992,"to":0.4999999994,"height":"15 mm"},
+                {"from":0.4999999986,"to":0.4999999988,"height":"20 mm"},
+                {"from":0.4999999988,"to":1.0,"height":"20 mm"}]}],
+                "height":"20 mm","angle":"90 deg","position":position}),
+        );
+        assert!(no_errors_or_warnings(&s), "{position}: {:?}", s.model.results);
+        let f = flat(&mut s);
+        let bends = bends_of(&f);
+        assert_eq!(bends.len(), 1, "{position}: the 20 mm stretches either side of the slivers are one bend: {bends:?}");
+        assert!((bends[0].3 - 0.0).abs() < 1e-9, "{position}: the bend starts at {}: {bends:?}", bends[0].3);
+        assert!((bends[0].4 - 200.0).abs() < 1e-9, "{position}: the bend ends at {}: {bends:?}", bends[0].4);
+        // The merged partition [(0, 0.5, 20), (0.5, 1, 20)] is the whole edge at 20 mm: the build
+        // must be that partition's part, flat pattern and all.
+        let mut merged = Session::default();
+        al2_base(&mut merged);
+        run(
+            &mut merged,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0.0,"to":0.5,"height":"20 mm"},
+                {"from":0.5,"to":1.0,"height":"20 mm"}]}],
+                "height":"20 mm","angle":"90 deg","position":position}),
+        );
+        assert!(no_errors_or_warnings(&merged), "{position}: {:?}", merged.model.results);
+        assert!(rel(volume(&mut s), volume(&mut merged)) < 1e-9, "{position}: {} vs {}", volume(&mut s), volume(&mut merged));
+        assert_eq!(f["bends"], flat(&mut merged)["bends"], "{position}: {f}");
+    }
+}
+
+/// A chain that moves backwards at a junction, then forwards again across the tolerance: the
+/// stretches after the backward sliver start where the edge is covered, so the runs stay sorted,
+/// contiguous and non-overlapping, and the part is the exact partition's (#5927, #5928).
+#[test]
+fn flange_segments_a_backward_then_forward_chain_stays_contiguous() {
+    for position in ["inside", "outside"] {
+        let mut s = Session::default();
+        al2_base(&mut s);
+        run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0.0,"to":0.5,"height":"20 mm"},
+                {"from":0.4999999992,"to":0.4999999994,"height":"15 mm"},
+                {"from":0.4999999986,"to":0.6,"height":"15 mm"},
+                {"from":0.5999999992,"to":1.0,"height":"20 mm"}]}],
+                "height":"20 mm","angle":"90 deg","position":position}),
+        );
+        assert!(no_errors_or_warnings(&s), "{position}: {:?}", s.model.results);
+        let f = flat(&mut s);
+        let bends = bends_of(&f);
+        assert_eq!(bends.len(), 3, "{position}: 20 mm, 15 mm, 20 mm: {bends:?}");
+        assert!((bends[0].3 - 0.0).abs() < 1e-9, "{position}: the first bend starts at {}: {bends:?}", bends[0].3);
+        assert!((bends[2].4 - 200.0).abs() < 1e-9, "{position}: the last bend ends at {}: {bends:?}", bends[2].4);
+        for pair in bends.windows(2) {
+            assert!(pair[1].3 >= pair[0].4, "{position}: a run starts {} before the run before it ends at {}: {bends:?}", pair[1].3, pair[0].4);
+            assert!((pair[0].4 - pair[1].3).abs() < 1e-9, "{position}: the bends leave a gap at {}: {bends:?}", pair[0].4);
+        }
+        // The exact partition of the edge the tolerance leaves.
+        let mut exact = Session::default();
+        al2_base(&mut exact);
+        run(
+            &mut exact,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0.0,"to":0.5,"height":"20 mm"},
+                {"from":0.5,"to":0.6,"height":"15 mm"},
+                {"from":0.6,"to":1.0,"height":"20 mm"}]}],
+                "height":"20 mm","angle":"90 deg","position":position}),
+        );
+        assert!(no_errors_or_warnings(&exact), "{position}: {:?}", exact.model.results);
+        assert!(rel(volume(&mut s), volume(&mut exact)) < 1e-9, "{position}: {} vs {}", volume(&mut s), volume(&mut exact));
+        assert_eq!(f["bends"], flat(&mut exact)["bends"], "{position}: {f}");
+    }
+}
+
+/// An overlap at the first junction: the second stretch starts just under the first one's end, and
+/// the stretch after it starts under the sliver's end. Every run starts where the edge is covered,
+/// so none starts before the run before it ends (#5927, #5928).
+#[test]
+fn flange_segments_a_first_junction_overlap_never_starts_a_run_before_the_first_ends() {
+    for position in ["inside", "outside"] {
+        let mut s = Session::default();
+        al2_base(&mut s);
+        run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0.0,"to":0.5,"height":"20 mm"},
+                {"from":0.4999999992,"to":0.4999999994,"height":"15 mm"},
+                {"from":0.4999999986,"to":1.0,"height":"15 mm"}]}],
+                "height":"20 mm","angle":"90 deg","position":position}),
+        );
+        assert!(no_errors_or_warnings(&s), "{position}: {:?}", s.model.results);
+        let f = flat(&mut s);
+        let bends = bends_of(&f);
+        assert_eq!(bends.len(), 2, "{position}: 20 mm then 15 mm: {bends:?}");
+        for pair in bends.windows(2) {
+            assert!(pair[1].3 >= pair[0].4, "{position}: a run starts {} before the run before it ends at {}: {bends:?}", pair[1].3, pair[0].4);
+            assert!((pair[0].4 - pair[1].3).abs() < 1e-12, "{position}: the bends leave a gap at {}: {bends:?}", pair[0].4);
+        }
+        let mut exact = Session::default();
+        al2_base(&mut exact);
+        run(
+            &mut exact,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0.0,"to":0.5,"height":"20 mm"},
+                {"from":0.5,"to":1.0,"height":"15 mm"}]}],
+                "height":"20 mm","angle":"90 deg","position":position}),
+        );
+        assert!(no_errors_or_warnings(&exact), "{position}: {:?}", exact.model.results);
+        assert!(rel(volume(&mut s), volume(&mut exact)) < 1e-9, "{position}: {} vs {}", volume(&mut s), volume(&mut exact));
+        assert_eq!(f["bends"], flat(&mut exact)["bends"], "{position}: {f}");
+    }
+}

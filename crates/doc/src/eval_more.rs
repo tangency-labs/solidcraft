@@ -665,6 +665,10 @@ pub(super) fn sheet_eval(
                 // A segmented edge makes one flange per run of segments that share an angle, a
                 // height and a side: the same bend carries on (see `add_flanges_each`).
                 let mut runs: Vec<(f64, f64, f64, f64, bool)> = Vec::new();
+                // The end of the edge the runs made so far cover. A run starts here, never before
+                // it, so the runs are sorted, contiguous and non-overlapping by construction, and
+                // every accepted stretch's coverage is preserved up to the junction tolerance.
+                let mut covered = sheet::WHOLE_EDGE.0;
                 for (j, seg) in e.segments.iter().enumerate() {
                     let height = match &seg.height {
                         Some(x) => val(vals, x, Kind::Length)?,
@@ -687,38 +691,41 @@ pub(super) fn sheet_eval(
                     }
                     let side = seg.flip.unwrap_or(*flip);
                     // A junction the command accepts is one the build snaps shut, whether the two
-                    // stretches match or not: a run that carries on takes the next stretch's end,
-                    // and a run with another angle, height or side starts where the last one ends,
-                    // so no interior gap of the junction tolerance reaches trimming or the flat
-                    // pattern. The 1e-12 comparison only says whether they are the same bend.
-                    let joined = runs.last().copied().filter(|last| (last.1 - seg.from).abs() <= sheet::SEGMENT_JOIN_EPS);
-                    match joined {
-                        Some(last) if (last.2 - height).abs() < 1e-12 && (last.3 - angle).abs() < 1e-12 && last.4 == side => {
-                            if let Some(last) = runs.last_mut() {
-                                // The same bend carries on: the junction closes, and the run never
-                                // shrinks past the stretch that carries it on.
-                                last.1 = last.1.max(seg.to);
-                            }
+                    // stretches match or not: the next stretch starts where the edge is covered, so
+                    // no interior gap of the junction tolerance reaches trimming or the flat pattern
+                    // and no run starts before the run before it ends. The 1e-12 comparison only
+                    // says whether they are the same bend.
+                    let start = seg.from.max(covered);
+                    // Snapping the start to the covered end closes a tolerated gap or overlap.
+                    let start = if start <= covered + sheet::SEGMENT_JOIN_EPS { covered } else { start };
+                    if seg.to - start <= sheet::SEGMENT_JOIN_EPS {
+                        // The stretch cannot be a bend of its own: it is narrower than the junction
+                        // tolerance once the run before it is snapped to it, or it ends behind the
+                        // covered end because it moves backwards across the junction. The run before
+                        // it absorbs the stretch instead, its end moving on to the stretch's end but
+                        // never backwards, so the edge stays covered from the first stretch to the
+                        // last and no interval is left out of trimming or the flat pattern (the
+                        // sliver's own angle and height do not build). Every span the build makes
+                        // then runs forwards, so none reaches trimming or the flat pattern reversed.
+                        covered = covered.max(seg.to);
+                        if let Some(last) = runs.last_mut() {
+                            last.1 = covered;
                         }
-                        Some(last) => {
-                            // Another bend starts at the junction. Snapping its start to the run
-                            // before it closes a tolerated gap or overlap. A stretch narrower than
-                            // the junction tolerance cannot be a bend of its own: the run before it
-                            // absorbs the stretch instead, its end moving on to the sliver's end, so
-                            // the edge stays covered from the first stretch to the last and no
-                            // interval is left out of trimming or the flat pattern (the sliver's own
-                            // angle and height do not build). Every span the build makes then runs
-                            // forwards, so none reaches trimming or the flat pattern reversed.
-                            if seg.to - seg.from > sheet::SEGMENT_JOIN_EPS && seg.to > last.1 {
-                                runs.push((last.1, seg.to, height, angle, side));
-                            } else if let Some(last) = runs.last_mut() {
-                                // The run before the sliver takes its stretch; a run never ends
-                                // before the stretch it absorbed.
-                                last.1 = last.1.max(seg.to);
-                            }
-                        }
-                        None => runs.push((seg.from, seg.to, height, angle, side)),
+                        continue;
                     }
+                    let same_bend =
+                        runs.last().is_some_and(|last| (last.2 - height).abs() < 1e-12 && (last.3 - angle).abs() < 1e-12 && last.4 == side);
+                    if same_bend {
+                        // The same bend carries on: the junction closes and the run takes the
+                        // stretch's end.
+                        if let Some(last) = runs.last_mut() {
+                            last.1 = seg.to;
+                        }
+                    } else {
+                        // Another bend starts at the covered end, where the run before it ends.
+                        runs.push((start, seg.to, height, angle, side));
+                    }
+                    covered = seg.to;
                 }
                 // The command accepts a first `from` and a last `to` within the junction tolerance
                 // of the edge's ends; the ends themselves are what builds, so snap them, as a
