@@ -11,6 +11,7 @@ use solidcraft_geom::{Mesh, UnitVec3};
 
 use super::measure_shape::{Shape, Slot, add_round, centre};
 use crate::params::bad;
+use crate::schema::inspect::{MeasureKind, MeasureResult, Measured, MeasuredItems};
 use crate::{Result, Sel, Session};
 
 /// Geometry of a picked item, as points or triangles.
@@ -672,16 +673,20 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
                 .ok_or_else(|| bad(cmd, "an item can't be measured (pick vertices, edges, faces, bodies, sketch curves or profiles)"))?,
         );
     }
-    let mut out = json!({"items": described.iter().map(|d| d.json.clone()).collect::<Vec<_>>()});
+    let mut out =
+        MeasuredItems { items: described.iter().map(|d| d.json.as_object().cloned().unwrap_or_default()).collect(), ..MeasuredItems::default() };
     if let [one] = described.as_slice() {
-        for k in ["diameter", "radius", "circumference", "angle_deg", "arc_length", "center", "slot"] {
-            if let Some(v) = one.json.get(k) {
-                out[k] = v.clone();
-            }
-        }
+        let copy = |k: &str| one.json.get(k).cloned();
+        out.diameter = copy("diameter");
+        out.radius = copy("radius");
+        out.circumference = copy("circumference");
+        out.angle_deg = copy("angle_deg");
+        out.arc_length = copy("arc_length");
+        out.center = copy("center");
+        out.slot = copy("slot");
         if let Some(sl) = &one.slot {
-            out["center_from"] = json!(sl.centres.0);
-            out["center_to"] = json!(sl.centres.1);
+            out.center_from = Some(sl.centres.0.into());
+            out.center_to = Some(sl.centres.1.into());
         }
     }
     if let [a, b] = described.as_slice() {
@@ -705,39 +710,42 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
             max = Some(exact);
         }
         if let (Some((p, q)), Some(d)) = (near, min) {
-            out["distance_mm"] = json!(d);
-            out["from"] = json!(p);
-            out["to"] = json!(q);
-            out["delta"] = json!(q - p);
-            out["min"] = json!(d);
+            out.set_closest(d, p, q);
         }
         if let Some((d, p, q)) = exact_min(&a.shape, &b.shape) {
-            out["distance_mm"] = json!(d);
-            out["from"] = json!(p);
-            out["to"] = json!(q);
-            out["delta"] = json!(q - p);
-            out["min"] = json!(d);
+            out.set_closest(d, p, q);
         }
         if let (Some((p, q)), Some(d)) = (far, max) {
-            out["max"] = json!(d);
-            out["max_from"] = json!(p);
-            out["max_to"] = json!(q);
-            out["max_delta"] = json!(q - p);
+            out.max = Some(d);
+            out.max_from = Some(p.into());
+            out.max_to = Some(q.into());
+            out.max_delta = Some((q - p).into());
         }
         if let Some(c) = c {
-            out["center_distance"] = json!(c.distance);
-            out["center_from"] = json!(c.from);
-            out["center_to"] = json!(c.to);
-            out["center_delta"] = json!(c.to - c.from);
+            out.center_distance = Some(c.distance);
+            out.center_from = Some(c.from.into());
+            out.center_to = Some(c.to.into());
+            out.center_delta = Some((c.to - c.from).into());
         }
-        out["measure"] = json!(if c.is_some() { "center" } else { "min" });
+        out.measure = Some(if c.is_some() { MeasureKind::Center } else { MeasureKind::Min });
         if let (Some(da), Some(db)) = (a.dir, b.dir) {
             let both_faces = matches!(sels.as_slice(), [Sel::Face { .. }, Sel::Face { .. }]);
             let cos = if both_faces { da.dot(db) } else { corner_cos(a.shape, b.shape).unwrap_or_else(|| da.dot(db).abs()) };
-            out["angle_deg"] = json!(cos.clamp(-1.0, 1.0).acos().to_degrees());
+            out.angle_deg = Some(json!(cos.clamp(-1.0, 1.0).acos().to_degrees()));
         }
     }
-    Ok(out)
+    serde_json::to_value(MeasureResult { measured: Measured::Items(Box::new(out)), param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
+}
+
+impl MeasuredItems {
+    /// The closest distance between two items and where it is: `distance_mm` and `min` are one.
+    fn set_closest(&mut self, d: f64, p: Vec3, q: Vec3) {
+        self.distance_mm = Some(d);
+        self.min = Some(d);
+        self.from = Some(p.into());
+        self.to = Some(q.into());
+        self.delta = Some((q - p).into());
+    }
 }
 
 /// Farthest pair of points between two pieces of geometry (on their samples and vertices).
