@@ -365,6 +365,6 @@ fn a_center_point_arc_takes_three_clicks_without_enter() {
             _ => None,
         });
         assert!(arc.is_some_and(|r| (r - radius).abs() < 0.5), "radius {radius} at {angle} deg: three clicks made the arc, got {arc:?}");
-        assert!(!sketch.constraints.iter().any(|c| c.is_dimension()), "radius {radius} at {angle} deg: clicks alone add no typed dimension");
+        assert!(!sketch.constraints.iter().any(|c| c.kind.is_dimension()), "radius {radius} at {angle} deg: clicks alone add no typed dimension");
     }
 }
