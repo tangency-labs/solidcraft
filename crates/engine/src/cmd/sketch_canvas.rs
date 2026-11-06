@@ -307,6 +307,7 @@ mod tests {
     }
 
     use solidcore_record::Vec2;
+    use solidcraft_geom::Vec2Geom as _;
 
     /// A line drawn on the image ends up at the asked direction, turned about its first point,
     /// the shorter way, with the image's size kept (#11989).
@@ -347,7 +348,7 @@ mod tests {
             assert!(na.dist(a) < 1e-9, "{case}: a moved to {na:?}");
             let line = nb - na;
             assert!((na.dist(nb) - 25.0).abs() < 1e-9, "{case}");
-            let want = target.unwrap_or(0.0).to_radians();
+            let want = target.unwrap_or(0.0_f64).to_radians();
             // Parallel to the asked direction (either way along it).
             assert!((line.x * want.sin() - line.y * want.cos()).abs() < 1e-9, "{case}: {line:?}");
         }
