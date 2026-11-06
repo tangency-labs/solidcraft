@@ -122,8 +122,9 @@ fn inverse_transpose(r: &[[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
 
 /// Axis and angle of an already validated rotation (column-major). Near a half turn the
 /// largest diagonal gives the axis without dividing by sin(angle), which is then nearly zero.
-pub fn axis_angle(m: &Mat) -> (solidcraft_geom::Vec3, f64) {
-    use solidcraft_geom::Vec3;
+pub fn axis_angle(m: &Mat) -> (solidcore_record::Vec3, f64) {
+    use solidcore_record::Vec3;
+    use solidcraft_geom::prelude::*;
     let skew = Vec3::new(m[1][2] - m[2][1], m[2][0] - m[0][2], m[0][1] - m[1][0]);
     let cosine = ((m[0][0] + m[1][1] + m[2][2] - 1.0) * 0.5).clamp(-1.0, 1.0);
     let angle = (skew.len() * 0.5).atan2(cosine);

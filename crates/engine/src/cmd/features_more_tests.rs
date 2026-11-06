@@ -2707,7 +2707,7 @@ fn an_emboss_that_works_has_no_warning() {
 
 #[test]
 fn move_origin_and_matrix_use_world_coordinates_for_placed_bodies() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     for transform in [
         json!({"origin": ["110 mm", "15 mm", 0], "angle": "90 deg", "translate": ["0 mm", "0 mm", "7 mm"]}),
         json!({"matrix": [0,-1,0,125, 1,0,0,-95, 0,0,1,7]}),
@@ -2725,7 +2725,7 @@ fn move_origin_and_matrix_use_world_coordinates_for_placed_bodies() {
 
 #[test]
 fn a_matrix_turn_maps_each_translated_component_about_the_world_origin() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let mut s = Session::default();
     for (name, x) in [("A", 100), ("B", 200)] {
         let component = run(&mut s, "component.create", json!({"name": name, "grounded": false}));
@@ -2744,7 +2744,7 @@ fn a_matrix_turn_maps_each_translated_component_about_the_world_origin() {
 
 #[test]
 fn a_turn_with_no_pivot_goes_about_the_world_origin_in_a_placed_component() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     for explicit_axis in [false, true] {
         let mut s = Session::default();
         let component = run(&mut s, "component.create", json!({"name": "Offset", "grounded": false}));
@@ -2766,7 +2766,7 @@ fn a_turn_with_no_pivot_goes_about_the_world_origin_in_a_placed_component() {
 
 #[test]
 fn move_origin_and_matrix_apply_to_each_repeated_placement() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     for transform in [json!({"origin": ["50 mm", 0, 0], "angle": "90 deg"}), json!({"matrix": [0,-1,0,50, 1,0,0,-50, 0,0,1,0]})] {
         let mut s = Session::default();
         let (a, b) = twice_placed_blade(&mut s);
