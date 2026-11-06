@@ -85,7 +85,7 @@ fn volume(brep: &Brep) -> solidcore::Result<f64> {
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
-    let mut copy = brep.clone();
+    let mut copy = brep.clone_standing_for_self()?;
     brep_volume(&kernel, &mut copy, 1e-9, &attrs)
 }
 
