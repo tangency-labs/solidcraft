@@ -1676,17 +1676,11 @@ fn render_preview_tab_surfaces_preserve_scene_backplates_and_viewport_overrides(
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+/// Exercise the registered GPU host through the UI, including mapped output and glass.
 fn progressive_image_controls_route_to_the_registered_host() {
-    // GPU path tracing can hang on a software adapter (lavapipe); see issue #12664.
-    // Skipped there until that is fixed; it still runs on real GPUs.
-    let software = solidcraft_gpu::select::Policy::from_env()
-        .ok()
-        .and_then(solidcraft_gpu::select::pick)
-        .is_some_and(|(_, report)| report.tier == solidcraft_gpu::select::Tier::Software);
-    if software {
-        eprintln!("skipping progressive UI device test: software GPU adapter (#12664)");
-        return;
-    }
+    use solidcraft_engine::render::job::Phase;
+    use std::time::{Duration, Instant};
+
     let host = solidcraft_gpu::select::Policy::from_env()
         .and_then(|policy| solidcraft_gpu::select::pick(policy).ok_or_else(|| "no qualifying adapter".to_string()))
         .and_then(|(adapter, _)| solidcraft_gpu::path::host_on_adapter(&adapter).map_err(|e| e.to_string()));
@@ -1749,14 +1743,24 @@ fn progressive_image_controls_route_to_the_registered_host() {
 
     h.step(&json!({"click":{"handle":"render:stage:render.start"}})).unwrap();
     let job = h.app.render_workspace.view.job.unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let handle = h.app.session.render_job_handle(job).unwrap();
+    // The first mapped render compiles a separate pipeline on a cold Vulkan cache.
+    // Allow the GPU host's setup budget, then keep the short deadline after preparation.
+    let submitted = Instant::now();
+    let queue_deadline = submitted + Duration::from_secs(30);
+    let setup_deadline = submitted + Duration::from_secs(600);
+    let mut render_deadline = None;
     while h.app.render_workspace.view.completed.is_none() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "progressive UI job did not complete: {:?}",
-            h.app.session.execute("render.status", &json!({"job":job}))
-        );
-        std::thread::sleep(std::time::Duration::from_millis(5));
+        let status = handle.status().unwrap();
+        let now = Instant::now();
+        let deadline = match status.progress.phase {
+            Phase::Queued => queue_deadline,
+            Phase::Preparing => setup_deadline,
+            Phase::Failed | Phase::Cancelled => panic!("progressive UI job ended: {status:?}"),
+            _ => *render_deadline.get_or_insert(now + Duration::from_secs(30)),
+        };
+        assert!(now < deadline, "progressive UI job did not complete: {status:?}");
+        std::thread::sleep(Duration::from_millis(5));
         h.frames(1);
     }
     let status = h.app.session.execute("render.status", &json!({"job":job})).unwrap();
@@ -1787,8 +1791,8 @@ fn progressive_image_controls_route_to_the_registered_host() {
     assert_eq!(image_params(&h.app).unwrap(), checked);
     let started = h.app.run("render.start", checked).unwrap();
     let job = serde_json::from_value(started["job"].clone()).unwrap();
-    let status = h.app.session.render_job_handle(job).unwrap().wait_timeout(std::time::Duration::from_secs(30)).unwrap();
-    assert_eq!(status.progress.phase, solidcraft_engine::render::job::Phase::Completed, "{:?}", status.error);
+    let status = h.app.session.render_job_handle(job).unwrap().wait_timeout(Duration::from_secs(30)).unwrap();
+    assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
     assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
     assert_eq!(h.app.session.undo.len(), undo);
     assert!(!h.app.session.is_dirty());
@@ -6975,9 +6979,12 @@ fn auto_opened_image_cancel_returns_to_model_and_preserves_previous_or_explicit_
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn auto_opened_image_failure_returns_to_model_and_reports_the_job_error() {
+/// Hold a GPU job in preparation to verify the window, shared keys and failure cleanup.
+fn gpu_preparation_shows_shader_warning_then_reports_job_failure() {
     use solidcraft_engine::render::job;
-    struct Failed;
+    use std::sync::{Mutex, mpsc};
+    use std::time::Duration;
+    struct Failed(mpsc::Sender<()>, Mutex<mpsc::Receiver<()>>);
     impl job::ImageExecutor for Failed {
         fn descriptor(&self) -> job::Result<ExecutorDescriptor> {
             let mut descriptor = job::CpuHost::cooperative().descriptor()?;
@@ -6989,11 +6996,15 @@ fn auto_opened_image_failure_returns_to_model_and_reports_the_job_error() {
             job::admit(scene, request)
         }
         fn begin(&self, _: ProductScene, _: job::ImageRequest, _: job::JobOptions, _: job::CancelToken) -> job::Result<Box<dyn job::ImageWork>> {
+            self.0.send(()).unwrap();
+            let _ = self.1.lock().unwrap().recv_timeout(Duration::from_secs(10));
             Err(job::JobError::new(job::ErrorCode::Internal, "controlled image failure"))
         }
     }
     let mut h = output_viewer_fixture();
-    let host = job::ImageHost::with_executor(Arc::new(Failed)).unwrap();
+    let (entered, preparing) = mpsc::channel();
+    let (release, wait) = mpsc::channel();
+    let host = job::ImageHost::with_executor(Arc::new(Failed(entered, Mutex::new(wait)))).unwrap();
     h.app.session.register_render_job_host(host.clone()).unwrap();
     h.app.render_workspace.path_host = PathHost::Ready(host);
     h.app.render_workspace.view.method = ImageMethod::GpuRaytrace;
@@ -7001,7 +7012,28 @@ fn auto_opened_image_failure_returns_to_model_and_reports_the_job_error() {
     let job = h.app.render_workspace.view.job.unwrap();
     assert_eq!(h.app.render_workspace.view.auto_result_job.as_ref().map(|auto| auto.job), Some(job));
     let handle = h.app.session.render_job_handle(job).unwrap();
-    assert_eq!(handle.wait_timeout(std::time::Duration::from_secs(10)).unwrap().progress.phase, job::Phase::Failed);
+    preparing.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(handle.status().unwrap().progress.phase, job::Phase::Preparing);
+    let keys = [egui::Key::Enter, egui::Key::Escape];
+    let events = keys
+        .into_iter()
+        .map(|key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE })
+        .collect();
+    let _ = h.ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+        assert!(show_shader_preparation(&mut h.app, ui.ctx()));
+        for key in keys {
+            assert!(ui.ctx().input_mut(|input| input.consume_key(egui::Modifiers::NONE, key)), "{key:?} must be available to other windows");
+        }
+        assert!(progress_pill(&mut h.app, ui, "render:progress"));
+    });
+    assert!(crate::scenario::rect_of("render:progress:name").is_some());
+    assert!(crate::scenario::rect_of("dialog:progress:render:progress").is_some());
+    for control in ["warning", "spinner", "cancel"] {
+        assert!(crate::scenario::rect_of(&format!("render:shader-preparation:{control}")).is_some());
+    }
+    release.send(()).unwrap();
+    assert_eq!(handle.wait_timeout(Duration::from_secs(10)).unwrap().progress.phase, job::Phase::Failed);
+    assert!(!show_shader_preparation(&mut h.app, &h.ctx));
     cache_render_images(&mut h.app, &h.ctx);
     assert!(!h.app.render_workspace.view.result);
     assert!(h.app.render_workspace.view.auto_result_job.is_none());
