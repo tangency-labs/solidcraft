@@ -6,9 +6,10 @@
 //! **Short names.** Each case is a small synthetic file written with the long names, whose
 //! expected result is a closed form, and the same file with one entity written in its
 //! short name. A short name is read correctly when both files import the same. Each
-//! short name is the one the short-name tables of the AP203 (`CONFIG_CONTROL_DESIGN`) and
-//! AP214 (`AUTOMOTIVE_DESIGN`) schemas give for its entity (both tables agree on every
-//! name below), and each occurs in the corpus: `steptools/ap203/clip.stp` and
+//! short name is the one ISO's published short-name list for ISO 10303 gives for its
+//! entity (<https://standards.iso.org/iso/10303/tech/short_names/short-names.txt>, one
+//! name per entity across all parts, so it holds for the AP203 `CONFIG_CONTROL_DESIGN` and
+//! AP214 `AUTOMOTIVE_DESIGN` schemas alike), and each occurs in the corpus: `steptools/ap203/clip.stp` and
 //! `socks.stp` (CATIA V4 exports) write every entity in its short form. They are read
 //! today through a text replacement over the file (`step_import::import`), for eleven
 //! simple-instance names; #2582 asks for the mapping per entity in the parser. Today:
@@ -470,6 +471,7 @@ fn rename_changes_whole_entity_names_only() {
         "#1=(LNGUNT()NAMED_UNIT(*));#2=LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.),#1);\
 #3=PLANE('',#4);#5=(NAMED_UNIT(*)PLANE_ANGLE_UNIT());#6=COMPOSITE_CURVE_SEGMENT(.C.,.T.,#7);"
     );
+    // `PLN` is an arbitrary token here, not a short name (PLANE's short name is PLANE).
     assert_eq!(
         rename(text, "PLANE", "PLN"),
         text.replace("#3=PLANE(", "#3=PLN(")
