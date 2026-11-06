@@ -97,6 +97,10 @@ pub struct ThemeFile {
     /// Levels newer than [`REQUIREMENTS_LEVEL`] disable options and overlays.
     #[serde(default = "default_requirements_level", skip_serializing_if = "is_default_requirements_level")]
     pub requires: u64,
+    /// What the theme arranges besides its colours, by section (`theme_layout`), kept as written
+    /// so a section this version doesn't know survives export.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub layout: BTreeMap<String, Value>,
 }
 
 /// Theme option/overlay format level understood by this app.
@@ -127,6 +131,7 @@ impl Default for ThemeFile {
             options: Vec::new(),
             overlays: Vec::new(),
             requires: default_requirements_level(),
+            layout: BTreeMap::new(),
         }
     }
 }
@@ -595,6 +600,12 @@ pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
         return Err("option effects require `requires` of at least 2".into());
     }
     let overlays = if requires > REQUIREMENTS_LEVEL { Vec::new() } else { parse_overlays(v.get("overlays"), &options)? };
+    let layout: BTreeMap<String, Value> = match v.get("layout") {
+        None => BTreeMap::new(),
+        Some(Value::Object(layout)) => layout.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        Some(_) => return Err("`layout` must be an object of layout sections".into()),
+    };
+    crate::theme_layout::Layout::parse(&layout)?;
     Ok(ThemeFile {
         id: slug(name),
         name: name.to_string(),
@@ -607,6 +618,7 @@ pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
         options,
         overlays,
         requires,
+        layout,
     })
 }
 
@@ -1311,6 +1323,9 @@ pub fn export_file(theme: &ThemeFile) -> Value {
         }
         if !is_default_requirements_level(&theme.requires) {
             obj.insert("requires".into(), json!(theme.requires));
+        }
+        if !theme.layout.is_empty() {
+            obj.insert("layout".into(), json!(theme.layout));
         }
     }
     value
