@@ -1643,6 +1643,21 @@ mod tests {
         orbit(&mut app, rect, 20.0, -15.0, None);
         assert!(app.cam.back().dist(expected.back()) < 1e-9);
         assert_eq!(app.cam.roll, 0.0);
+        // Look At a sketch on XY turned -130° about X comes out upside down (#12458): a drag up
+        // and a little sideways stands it upright, and dragging down then looks from above.
+        let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+        app.preferences.orbit_around = OrbitAround::ViewCentre;
+        let (sin, cos) = (-130f64).to_radians().sin_cos();
+        let (x, y) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, cos, sin));
+        app.cam = crate::dialogs::square_sketch_axes(app.cam.looking_from(x.cross(y)), x, y);
+        assert!(app.cam.roll.abs() > 3.0, "the sketch view is not upside down: roll {}", app.cam.roll);
+        for (dx, dy, steps) in [(4.0, -16.0, 16), (2.0, 16.0, 10), (0.0, 16.0, 20)] {
+            for _ in 0..steps {
+                orbit(&mut app, rect, dx, dy, None);
+            }
+        }
+        assert!(app.cam.roll.abs() < 1e-9, "the sketch view stays rolled: {}", app.cam.roll);
+        assert!(app.cam.up_dir().z > 0.0 && app.cam.pitch > 0.5, "not looking from above: pitch {}", app.cam.pitch);
     }
 
     #[test]
