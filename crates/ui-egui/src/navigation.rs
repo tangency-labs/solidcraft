@@ -311,6 +311,50 @@ pub(crate) fn claims_scroll(modifiers: egui::Modifiers, zoom_modifier: Option<eg
     zoom_modifier.is_some_and(|chosen| modifiers.matches_exact(chosen) && !(modifiers.mac_cmd && modifiers.ctrl))
 }
 
+/// How long a twist may pause, in seconds, before it has ended and its cursor pivot is let go.
+const TWIST_PAUSE: f64 = 0.25;
+
+/// The trackpad's two-finger rotation this frame in radians, counter-clockwise positive (egui's
+/// `Event::Rotate` counts clockwise). Events that carry a non-finite angle are ignored.
+pub(crate) fn twist_radians(input: &egui::InputState) -> f64 {
+    input
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            egui::Event::Rotate(r) if r.is_finite() => Some(-f64::from(*r)),
+            _ => None,
+        })
+        .sum()
+}
+
+/// Turn the view about the world's up axis (Z, or Y in a Y-up design) by `radians`, through the
+/// centre that Orbit around names: the view's centre, the world origin, or the model point under
+/// the cursor, chosen when the twist begins. A counter-clockwise twist turns the model
+/// counter-clockwise as seen from above, so the model follows the fingers. Pitch and roll stay
+/// as they are.
+pub(crate) fn twist_turn(app: &mut SolveApp, rect: Rect, radians: f64, hover: Option<Pos2>) {
+    if !radians.is_finite() {
+        return;
+    }
+    let pivot = match app.preferences.orbit_around {
+        OrbitAround::ViewCentre => None,
+        OrbitAround::Origin => Some(Vec3::ZERO),
+        OrbitAround::Cursor => Some(match app.viewport.twist_pivot {
+            Some(p) => p,
+            None => {
+                let p = pivot_under(app, &projection(app, rect), hover.unwrap_or(rect.center()));
+                app.viewport.twist_pivot = Some(p);
+                p
+            }
+        }),
+    };
+    let keep = pivot.map(|p| (p, app.cam.frame_coords(p)));
+    app.cam.yaw = (app.cam.yaw + radians) % std::f64::consts::TAU;
+    if let Some((p, coords)) = keep {
+        app.cam.place(p, coords);
+    }
+}
+
 /// Combined pinch-to-zoom factor for one frame (1 = no pinch input).
 ///
 /// Some input paths deliver pinch as a zoom-modified wheel instead of `Event::Zoom`.
@@ -730,6 +774,23 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         app.viewport.orbit_free = None;
         let sign = crate::prefs::orbit_sign(app);
         orbit(app, rect, sign * f64::from(raw.shift_pan.x), sign * f64::from(raw.shift_pan.y), hover);
+    }
+    // A two-finger twist on the trackpad turns the view about the world's up axis (#6286).
+    // The OS does not send a rotation on every frame of a slow twist, so the twist's cursor pivot
+    // is kept through short gaps and let go only once the twist has paused or a button is pressed.
+    // That is checked before this frame's rotation: an idle window draws no frames in between, so
+    // the first rotation of a new twist must not turn about the last twist's point.
+    let (twist, now, pressed) = ui.input(|i| (twist_radians(i), i.time, i.pointer.any_pressed()));
+    if pressed || app.viewport.twist_last.is_none_or(|last| now - last > TWIST_PAUSE) {
+        app.viewport.twist_pivot = None;
+        app.viewport.twist_last = None;
+    }
+    if wheel_inside && caps.orbit && app.preferences.trackpad_twist_turns && twist != 0.0 {
+        app.cancel_view_animation();
+        app.viewport.orbit_free = None;
+        app.viewport.spin = false;
+        twist_turn(app, rect, twist, hover);
+        app.viewport.twist_last = Some(now);
     }
     let zoom_held = (inside || app.viewport.zoom_shortcut_drag)
         && ui.input(|input| crate::keymap::drag_zoom_held(app, input))

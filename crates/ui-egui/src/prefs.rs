@@ -1450,6 +1450,9 @@ preference_settings! {
     /// Shift with two-finger trackpad scrolling orbits the view the other way, both ways at once,
     /// as natural scrolling turns it (#8410).
     orbit_reverse: bool = false, PAGE_NAVIGATION => check("ui.reverse_trackpad_orbit_direction", "Shift with two-finger scrolling orbits the other way");
+    /// A two-finger twist on the trackpad turns the view about the world's up axis (#6286). Off
+    /// by default: the twist does nothing, as before.
+    trackpad_twist_turns: bool = false, PAGE_NAVIGATION => check_id_help("prefs.trackpad_twist_turns", "prefs.trackpad_twist_turns_tip");
     /// View changes (axis view, Look At, Home) animate; `look_at_speed` scales how fast.
     look_at_anim: bool = true, PAGE_NAVIGATION => check("Animate view changes", "ui.look_at_anim_desc");
     look_at_speed: f32 = 1.0, PAGE_NAVIGATION, accept(0.25..=4.0) => enabled_slider(look_at_anim, "Animation speed", 0.5..=3.0, 0.25, |v| format!("{v:.2}×"));
