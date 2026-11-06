@@ -592,6 +592,11 @@ impl AgentChat {
     pub(crate) fn without_design(&self) -> bool {
         self.state() == State::Ready && self.tools_available == Some(false)
     }
+    /// Why [`Self::without_design`], and what to do about it: the chat's endpoint did not start,
+    /// or `solidcraft-cli` was not found (as the notice `connect` posts says).
+    pub(crate) fn no_design_hint(&self) -> &'static str {
+        if self.tools_port.is_none() { tr("ui.agent_chat_no_control") } else { tr("ui.agent_chat_no_design_hint") }
+    }
     #[cfg(test)]
     pub(crate) fn set_state(&mut self, state: State) {
         self.state = Some(state);
@@ -955,7 +960,10 @@ pub(crate) fn assistant_tip(app: &SolveApp, mark: AssistantMark) -> String {
         Some(key) => format!("{} ({key})", tr("ui.assistant")),
         None => tr("ui.assistant").to_string(),
     };
-    format!("{name} — {state}")
+    match mark {
+        AssistantMark::NoDesign => format!("{name} — {state}\n{}", app.agent_chat.no_design_hint()),
+        _ => format!("{name} — {state}"),
+    }
 }
 
 /// `solidcraft-cli` next to this program, else on the search path.

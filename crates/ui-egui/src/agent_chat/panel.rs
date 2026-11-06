@@ -699,7 +699,8 @@ fn strip(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     ui_kit::disclosure(ui.painter(), button.center(), false, t.text);
     let state = app.agent_chat.state();
-    ui.painter().circle_filled(pos2(r.center().x, button.bottom() + 10.0), 3.5, state_color(state));
+    let dot = if app.agent_chat.without_design() { t.warning } else { state_color(state) };
+    ui.painter().circle_filled(pos2(r.center().x, button.bottom() + 10.0), 3.5, dot);
     let waiting = app.agent_chat.waiting();
     if waiting > 0 {
         ui_kit::attention_mark(ui.painter(), button, Some(waiting));
@@ -757,7 +758,7 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, left: bool) {
                     },
                 );
                 if without_design {
-                    badge.backing_on_hover_text(tr("ui.agent_chat_no_design_hint"));
+                    badge.backing_on_hover_text(app.agent_chat.no_design_hint());
                 }
             }
             // Drag the header across the window to dock on the other side.

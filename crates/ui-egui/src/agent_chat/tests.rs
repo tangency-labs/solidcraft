@@ -3682,6 +3682,15 @@ fn an_agent_without_the_design_tools_is_not_shown_as_ready() {
     let tip = assistant_tip(&h.app, AssistantMark::NoDesign);
     assert!(tip.contains(tr("ui.agent_chat_state_no_design")), "{tip}");
     assert!(tr("ui.agent_chat_no_design_hint").contains("SOLIDCRAFT_CLI"));
+    // The hint names the cause: the chat's endpoint that did not start, or the missing CLI;
+    // the application bar's tooltip carries it too.
+    h.app.agent_chat.tools_port = None;
+    assert_eq!(h.app.agent_chat.no_design_hint(), tr("ui.agent_chat_no_control"));
+    assert!(assistant_tip(&h.app, AssistantMark::NoDesign).contains(tr("ui.agent_chat_no_control")));
+    h.app.agent_chat.tools_port = Some(12345);
+    assert_eq!(h.app.agent_chat.no_design_hint(), tr("ui.agent_chat_no_design_hint"));
+    assert!(assistant_tip(&h.app, AssistantMark::NoDesign).contains(tr("ui.agent_chat_no_design_hint")));
+    assert!(!assistant_tip(&h.app, AssistantMark::Ready).contains(tr("ui.agent_chat_no_design_hint")));
 
     // A turn in progress, or one waiting for approval, still shows what it is doing.
     h.app.agent_chat.set_state(State::Busy);
