@@ -255,7 +255,7 @@ fn selection_visibility_section_and_view_revisions_reuse_world_geometry() {
     assert!(!session.body_visible("Block"));
     assert!(Arc::ptr_eq(&world, &session.world_state().unwrap()));
     run(&mut session, "inspect.section", json!({"plane":{"origin":[0,0,2],"normal":[0,0,1]}}));
-    assert!(session.section.is_some());
+    assert!(!session.section.is_empty());
     assert!(Arc::ptr_eq(&world, &session.world_state().unwrap()));
     session.invalidate_view(session.revision + 10);
     assert!(Arc::ptr_eq(&world, &session.world_state().unwrap()));

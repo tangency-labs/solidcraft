@@ -83,7 +83,7 @@ fn drawable(app: &SolveApp) -> bool {
         && app.session.analysis.is_none()
         && app.session.continuity.is_empty()
         && app.session.isocurves.is_empty()
-        && super::section_plane(app).is_none()
+        && super::section_planes(app).is_empty()
 }
 
 /// The layer drawing the world shown now: the one under way when its bodies are still dragged

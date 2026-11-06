@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use solidcore_record::Vec3;
 use solidcraft_geom::Mesh;
+use solidcraft_geom::prelude::*;
 
 use crate::SceneAnalysis;
 use crate::hatch::{HATCH_COLOURS, Hatch};
@@ -40,6 +41,11 @@ impl SceneMesh {
     /// A solid body in `color`, with no face of its own look.
     pub fn solid(mesh: Arc<Mesh>, color: Rgb) -> SceneMesh {
         SceneMesh { mesh, color, face_colors: Vec::new(), opacity: 1.0, closed: true, hatch: Hatch(0) }
+    }
+
+    /// An open sheet in `color` (not [`SceneMesh::closed`]).
+    pub fn sheet(mesh: Arc<Mesh>, color: Rgb) -> SceneMesh {
+        SceneMesh { closed: false, ..SceneMesh::solid(mesh, color) }
     }
 
     /// Is the body drawn see-through? (Its opacity is below [`SEE_THROUGH`].)
@@ -84,9 +90,12 @@ pub struct Scene {
     pub background: Option<(Rgb, Rgb)>,
     /// Scene radius for clipping planes.
     pub radius: f64,
-    /// A section cut: (normal, d); what lies where normal·p > d is cut away, and the inside
-    /// shows as a hatched cap.
-    pub clip: Option<(Vec3, f64)>,
+    /// A section cut by up to [`MAX_SECTION_PLANES`] planes, each (normal, d): what lies where
+    /// normal·p > d for any one of them is cut away, and the inside shows as a hatched cap.
+    pub clip: Vec<(Vec3, f64)>,
+    /// Each clip plane's hatch, an index into [`SECTION_HATCH_ANGLES`] ([`section_hatch_of`]);
+    /// one missing: its place in `clip`.
+    pub clip_hatch: Vec<usize>,
     /// The colour the section cap is tinted toward (default: [`SECTION_CAP`]).
     pub cap: Option<Rgb>,
     /// The section cap without its hatch: plain, in the body's own colour.
@@ -98,12 +107,53 @@ pub struct Scene {
     pub analysis: Option<SceneAnalysis>,
 }
 
+/// The most planes a section cuts with: the viewport shader's fixed array of clip planes.
+pub const MAX_SECTION_PLANES: usize = 6;
+
 /// The section cap's default tint, as in the viewport.
 pub const SECTION_CAP: Rgb = Rgb(214, 128, 72);
 
 /// The section hatch's other colours by default, as in the viewport: a steel and a sage that tint
 /// a cut face about as strongly as the cap does, so the cut stays calm.
 pub const SECTION_HATCH: [Rgb; HATCH_COLOURS - 1] = [Rgb(84, 138, 168), Rgb(108, 180, 126)];
+
+/// The angle (degrees) each plane's cut faces are hatched at, by the plane's id
+/// ([`section_hatch_of`]), in the plane's own frame ([`section_hatch_line`]).
+pub const SECTION_HATCH_ANGLES: [f64; MAX_SECTION_PLANES] = [45.0, 135.0, 30.0, 60.0, 120.0, 150.0];
+
+/// The hatch of the section plane with id `id` (from 1): an index into [`SECTION_HATCH_ANGLES`],
+/// the same whichever other planes are on show.
+pub fn section_hatch_of(id: u64) -> usize {
+    (id.saturating_sub(1) % MAX_SECTION_PLANES as u64) as usize
+}
+
+/// The section plane's own frame (right, up) as seen from the side its normal `n` points to,
+/// world Z up: fixed by the plane alone, so its hatch keeps its direction as the camera moves.
+pub fn section_plane_frame(n: Vec3) -> (Vec3, Vec3) {
+    let n = n.normalized().unwrap_or(Vec3::Z);
+    let right = if n.z.abs() < 0.9 { Vec3::Z.cross(n) } else { Vec3::X - n * n.x };
+    let right = right.normalized().unwrap_or_else(|| n.any_perp());
+    (right, n.cross(right))
+}
+
+/// The direction of the hatch lines on the `index`-th plane (normal `n`) of a section.
+pub fn section_hatch_line(n: Vec3, index: usize) -> Vec3 {
+    let (right, up) = section_plane_frame(n);
+    let a = SECTION_HATCH_ANGLES[index % MAX_SECTION_PLANES].to_radians();
+    right * a.cos() + up * a.sin()
+}
+
+/// The `index`-th section plane's hatch on a `w × h` picture through `view_proj`: the stripe
+/// phase is `x·s[0] + y·s[1]` (pixels, y down), a stripe every 9/√2 pixels, the lines running
+/// as the plane's hatch line looks at the centre of the picture. Face on, the first plane's
+/// hatch is the 45 degree stripes of old: `(x + y) / 9`.
+pub fn section_hatch(view_proj: &crate::Mat4, n: Vec3, index: usize, w: f64, h: f64) -> [f64; 2] {
+    let (l, o) = (view_proj.apply(section_hatch_line(n, index)), view_proj.apply(Vec3::ZERO));
+    let (dx, dy) = ((l[0] - o[0]) * w, (o[1] - l[1]) * h);
+    let len = dx.hypot(dy);
+    let across = if len > 1e-12 && len.is_finite() { [-dy / len, dx / len] } else { [std::f64::consts::FRAC_1_SQRT_2; 2] };
+    across.map(|c| c * std::f64::consts::SQRT_2 / 9.0)
+}
 
 /// RGBA pixels (`w × h`) to PNG bytes.
 pub fn png(w: usize, h: usize, rgba: Vec<u8>) -> Option<Vec<u8>> {

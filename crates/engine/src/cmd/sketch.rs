@@ -1119,7 +1119,8 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
     before.marker = marker.filter(|m| *m < before.features.len());
     let mut after = (*s.doc).clone();
     after.marker = marker.filter(|m| *m < after.features.len());
-    let changed = before != after || entry.pending_moves != s.pending_moves || entry.visibility != s.visibility;
+    let section = s.undo.get(start..).unwrap_or_default().iter().find_map(|snap| snap.section.clone()).filter(|was| *was != s.section_state());
+    let changed = before != after || entry.pending_moves != s.pending_moves || entry.visibility != s.visibility || section.is_some();
     s.undo.truncate(start);
     if changed {
         s.undo.push(Snapshot {
@@ -1128,6 +1129,7 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
             active_sketch: None,
             pending_moves: entry.pending_moves.clone(),
             visibility: entry.visibility.clone(),
+            section,
         });
         if s.undo.len() > crate::MAX_UNDO {
             s.undo.remove(0);

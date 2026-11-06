@@ -13,6 +13,7 @@ use solidcraft_geom::prelude::*;
 use std::sync::{Arc, Mutex};
 
 use solidcore_record::Vec3;
+pub use solidcraft_render::MAX_SECTION_PLANES;
 
 use crate::pbr;
 use wgpu::util::DeviceExt;
@@ -185,11 +186,12 @@ fn octahedral6(n: [f32; 3]) -> u32 {
     let q = |v: f32| ((v.clamp(-1.0, 1.0) + 1.0) * 31.0).round() as u32 + 1;
     (q(y).min(63) << 6) | q(x).min(63)
 }
-/// The shader's `U`: the view-projection matrix, 10 `vec4`s (the tenth carries the ambient
-/// occlusion radius), the 8 analysis colours, their flags, the depth direction, the model
-/// matrix, the two whole-body highlight colours, then the section hatch colours, the product
-/// lights, and the sky (`uniform_bytes`).
-const UNIFORM_SIZE: u64 = 480 + 16 * solidcraft_render::hatch::HATCH_COLOURS as u64 + 16 + 21 * 64 + 16;
+/// The shader's `U`: the view-projection matrix, 3 `vec4`s, the section's
+/// [`MAX_SECTION_PLANES`] planes, 6 more `vec4`s (the last carries the ambient occlusion
+/// radius), the 8 analysis colours, their flags, the depth direction, the model matrix, the two
+/// whole-body highlight colours, the section hatch colours, the product lights (a flag and
+/// count, then 21 lights of 4 `vec4`s), each section plane's hatch and the sky (`uniform_bytes`).
+const UNIFORM_SIZE: u64 = 480 + 16 * (2 * MAX_SECTION_PLANES as u64 - 1) + 16 * solidcraft_render::hatch::HATCH_COLOURS as u64 + 16 + 21 * 64 + 16;
 
 /// The identity, column-major: a scene drawn where it was built.
 const IDENTITY: [[f32; 4]; 4] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
@@ -1034,8 +1036,11 @@ pub struct Frame {
     pub back: [f32; 3],
     /// Viewport size in physical pixels.
     pub size_px: [f32; 2],
-    /// Section cut: (normal, d); fragments with normal·p > d are hidden. A zero normal: none.
-    pub clip: [f32; 4],
+    /// Section cut: up to [`MAX_SECTION_PLANES`] planes (normal, d), the first ones; fragments
+    /// with normal·p > d for any one are hidden. A zero normal: no plane (the first: no section).
+    pub clip: [[f32; 4]; MAX_SECTION_PLANES],
+    /// Each clip plane's hatch, an index into `solidcraft_render::SECTION_HATCH_ANGLES`.
+    pub clip_hatch: [usize; MAX_SECTION_PLANES],
     /// Colour of the inside of cut bodies (straight sRGB, 0..1); alpha 1 hatches it, 0 leaves it plain in the body's colour.
     pub cap: [f32; 4],
     /// Canvases and decals.
@@ -2134,20 +2139,22 @@ impl Batches {
 const STENCIL_BASE: u32 = 128;
 
 /// The section's pipelines (see `Renderer::tri_cut`), drawn in this order. The cap shows where
-/// the section plane lies inside a body: where the faces behind the plane, on the view ray
-/// through the pixel, are left by the ray more often than entered. The stencil counts them, so
+/// the view ray comes into what the section keeps (inside every plane) inside a body: where the
+/// faces past that point, on the view ray through the pixel, are left by the ray more often than
+/// entered. The stencil counts them, so
 /// no depth is compared where bodies touch: a cut body's far wall and the face of the body it
 /// rests on lie at one depth, and settling that by depth let the other body show through the
 /// cap in specks, stripes and triangles. The display meshes are watertight, so the count is
 /// exact for closed bodies; an open one (a surface body, a solid with faces left out) gets no
 /// cap.
 struct Cut {
-    /// Counts the crossings in the stencil from [`STENCIL_BASE`]: a back face behind the plane
-    /// adds one, a front face takes one away. No colour, no depth. Above the base, the plane is
+    /// Counts the crossings in the stencil from [`STENCIL_BASE`]: a back face past where the view
+    /// ray comes into what the section keeps adds one, a front face takes one away. No colour, no depth. Above the base, the plane is
     /// inside a body; at or below it, outside (an open sheet seen from its front counts below).
     count: wgpu::RenderPipeline,
-    /// Where the count is above the base, the nearest back face, by its true depth, in its body's cut
-    /// colour (the body the plane lies inside: the ray leaves it there).
+    /// Where the count is above the base, the nearest back face past that point, by its true
+    /// depth, in its body's cut colour (the body the cut lies inside: the ray leaves it there),
+    /// hidden itself where the body reaches past another plane first.
     fill: wgpu::RenderPipeline,
     /// The cap again, only there, at the section plane's depth (pushed as faces are), so what
     /// lies on the cut face draws over it: depth only, as `fill` drew its colour (#6728).
@@ -2948,8 +2955,8 @@ impl Renderer {
         let marks = |source: TriSource| {
             cut_states.as_ref().map(|(count, fill, rest, _)| {
                 (
-                    solid_writes("sc_tris_count", "fs_clip", None, Some(count.clone()), source, false),
-                    solid("sc_tris_fill", "fs_solid", Some(wgpu::Face::Front), Some(fill.clone()), source),
+                    solid_writes("sc_tris_count", "fs_section_count", None, Some(count.clone()), source, false),
+                    solid("sc_tris_fill", "fs_section_fill", Some(wgpu::Face::Front), Some(fill.clone()), source),
                     solid("sc_tris_rest", "fs_solid_open", None, rest.clone(), source),
                 )
             })
@@ -3521,7 +3528,7 @@ pub fn frame_key(cb: &Frame) -> u64 {
     cb.back.map(f32::to_bits).hash(&mut h);
     cb.eye.map(f32::to_bits).hash(&mut h);
     cb.size_px.map(f32::to_bits).hash(&mut h);
-    cb.clip.map(f32::to_bits).hash(&mut h);
+    cb.clip.iter().flatten().for_each(|v| v.to_bits().hash(&mut h));
     cb.cap.map(f32::to_bits).hash(&mut h);
     cb.analysis.map(f32::to_bits).hash(&mut h);
     cb.analysis_colors.map(f32::to_bits).hash(&mut h);
@@ -3921,7 +3928,7 @@ impl Renderer {
                     d.draw(pass, smooth, flat, tally);
                 }
             };
-        let sectioned = cb.clip[..3].iter().map(|c| c * c).sum::<f32>() > 0.25;
+        let sectioned = cb.clip[0][..3].iter().map(|c| c * c).sum::<f32>() > 0.25;
         match (
             res.tri_cut.as_ref().filter(|_| sectioned),
             res.tri_cut_planned.as_ref(),
@@ -4470,6 +4477,25 @@ fn load_depth<T>(first: bool, clear: T) -> wgpu::LoadOp<T> {
     if first { wgpu::LoadOp::Clear(clear) } else { wgpu::LoadOp::Load }
 }
 
+/// A section's planes (normal, d) as [`Frame::clip`]: the first [`MAX_SECTION_PLANES`], the
+/// rest of the slots unused.
+pub fn clip_planes(planes: &[(Vec3, f64)]) -> [[f32; 4]; MAX_SECTION_PLANES] {
+    let mut clip = [[0.0; 4]; MAX_SECTION_PLANES];
+    for (slot, (n, d)) in clip.iter_mut().zip(planes) {
+        *slot = [n.x as f32, n.y as f32, n.z as f32, *d as f32];
+    }
+    clip
+}
+
+/// A section's planes' hatches as [`Frame::clip_hatch`], beside [`clip_planes`].
+pub fn clip_hatches(hatch: &[usize]) -> [usize; MAX_SECTION_PLANES] {
+    let mut out = [0; MAX_SECTION_PLANES];
+    for (slot, h) in out.iter_mut().zip(hatch) {
+        *slot = *h;
+    }
+    out
+}
+
 /// Uniform bytes for a frame.
 pub fn uniform_bytes(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool) -> Vec<u8> {
     uniform_bytes_placing(cb, w, h, linear, reversed, IDENTITY)
@@ -4490,7 +4516,7 @@ fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: boo
     let mut v: Vec<f32> = gpu_view_proj(cb.view_proj, reversed).iter().flatten().copied().collect();
     v.extend([cb.back[0], cb.back[1], cb.back[2], if linear { 1.0 } else { 0.0 }]);
     v.extend([w.max(1.0), h.max(1.0), 0.0, if cb.outline { 1.0 } else { 0.0 }]);
-    v.extend(cb.clip);
+    v.extend(cb.clip.iter().flatten());
     v.extend(cb.cap);
     v.extend(cb.analysis);
     match &cb.access {
@@ -4519,6 +4545,12 @@ fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: boo
     for index in 0..21 {
         let light = cb.product_lights.as_ref().and_then(|lights| lights.get(index)).copied().unwrap_or([0.0; 16]);
         v.extend(light.map(|value| if value.is_finite() { value } else { 0.0 }));
+    }
+    let vp = solidcraft_render::Mat4(cb.view_proj.map(|c| c.map(f64::from)));
+    for (c, hatch) in cb.clip.iter().zip(cb.clip_hatch) {
+        let n = Vec3::new(f64::from(c[0]), f64::from(c[1]), f64::from(c[2]));
+        let [x, y] = solidcraft_render::section_hatch(&vp, n, hatch, f64::from(w.max(1.0)), f64::from(h.max(1.0)));
+        v.extend([x as f32, y as f32, 0.0, 0.0]);
     }
     v.extend(cb.sky.map(|value| if value.is_finite() { value } else { 0.0 }));
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
@@ -4757,6 +4789,38 @@ mod tests {
         assert_ne!(super::frame_key(&frame), previous);
     }
 
+    /// The uniform fills the shader's `U` exactly, the section's planes and their hatch included.
+    #[test]
+    fn the_uniform_matches_the_shader_layout() {
+        let mut f = cached_frame();
+        f.clip = super::clip_planes(&[(super::Vec3::X, 1.0); super::MAX_SECTION_PLANES]);
+        f.clip[super::MAX_SECTION_PLANES - 1] = [0.0, 0.0, 1.0, 7.25];
+        f.clip_hatch = super::clip_hatches(&[0, 1, 2, 3, 4, 5]);
+        f.view_proj = solidcraft_render::Camera::default().view_proj(1.0, 40.0).to_f32();
+        let bytes = super::uniform_bytes(&f, 64.0, 64.0, false, false);
+        assert_eq!(bytes.len() as u64, super::UNIFORM_SIZE);
+        let v: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+        assert_eq!(v[24..28], [1.0, 0.0, 0.0, 1.0], "the first plane follows the screen");
+        let last = 16 + 8 + 4 * super::MAX_SECTION_PLANES;
+        assert_eq!(v[last - 2..last], [1.0, 7.25], "the last plane sits before the cap colour");
+        // Each plane's hatch comes just before the sky, as the shared `section_hatch` has it.
+        let vp = solidcraft_render::Mat4(f.view_proj.map(|c| c.map(f64::from)));
+        let hatches = |v: &[f32]| v[v.len() - 4 - 4 * super::MAX_SECTION_PLANES..v.len() - 4].to_vec();
+        let hatch = &hatches(&v);
+        for (k, (h, c)) in hatch.as_chunks::<4>().0.iter().zip(&f.clip).enumerate() {
+            let n = super::Vec3::new(f64::from(c[0]), f64::from(c[1]), f64::from(c[2]));
+            let [x, y] = solidcraft_render::section_hatch(&vp, n, k, 64.0, 64.0);
+            assert_eq!(h, &[x as f32, y as f32, 0.0, 0.0], "plane {k}'s hatch");
+        }
+        assert_ne!(hatch[..2], hatch[4..6], "the first two planes, alike but for their hatch, hatch differently");
+        // The hatch goes with the plane, not its slot: the second plane alone keeps its own.
+        f.clip_hatch = super::clip_hatches(&[1]);
+        let bytes = super::uniform_bytes(&f, 64.0, 64.0, false, false);
+        let v: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+        let [x, y] = solidcraft_render::section_hatch(&vp, super::Vec3::X, 1, 64.0, 64.0);
+        assert_eq!(hatches(&v)[..2], [x as f32, y as f32]);
+    }
+
     /// A frame with a fixed picture, and a key that names everything it shows.
     fn cached_frame() -> super::Frame {
         use std::sync::{Arc, Mutex};
@@ -4778,7 +4842,8 @@ mod tests {
             view_proj: [[0.0; 4]; 4],
             back: [0.0; 3],
             size_px: [800.0, 600.0],
-            clip: [0.0; 4],
+            clip: [[0.0; 4]; super::MAX_SECTION_PLANES],
+            clip_hatch: [0; super::MAX_SECTION_PLANES],
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),
@@ -4849,7 +4914,8 @@ mod tests {
             ("lighting", key(|f| f.back[0] += 1.0)),
             ("eye", key(|f| f.eye[0] += 1.0)),
             ("size", key(|f| f.size_px[0] += 1.0)),
-            ("section", key(|f| f.clip[0] = 1.0)),
+            ("section", key(|f| f.clip[0][0] = 1.0)),
+            ("second section plane", key(|f| f.clip[1][0] = 1.0)),
             ("section cap", key(|f| f.cap[0] = 0.5)),
             ("analysis", key(|f| f.analysis[0] = 1.0)),
             ("analysis colours", key(|f| f.analysis_colors[0] = 1.0)),
@@ -5261,7 +5327,8 @@ mod glass_tests {
             view_proj: [[0.1, 0.0, 0.0, 0.0], [0.0, 0.1, 0.0, 0.0], [0.0, 0.0, -0.01, 0.0], [0.0, 0.0, 0.5, 1.0]],
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
-            clip: [0.0; 4],
+            clip: [[0.0; 4]; super::MAX_SECTION_PLANES],
+            clip_hatch: [0; super::MAX_SECTION_PLANES],
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),
@@ -5460,7 +5527,8 @@ mod glass_tests {
             view_proj: [[0.1, 0.0, 0.0, 0.0], [0.0, 0.1, 0.0, 0.0], [0.0, 0.0, -0.01, 0.0], [0.0, 0.0, 0.5, 1.0]],
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
-            clip: [0.0; 4],
+            clip: [[0.0; 4]; super::MAX_SECTION_PLANES],
+            clip_hatch: [0; super::MAX_SECTION_PLANES],
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),
