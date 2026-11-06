@@ -7,7 +7,7 @@
 Standard library only (Python 3.11+ for tomllib). Every number comes from the repo:
 plan/units/*.toml, plan/PROGRESS.md (claims; generated, not committed), harness/callgraph/units.json (upstream
 line counts at the pin), scripts/upstream-pin.env (upstream version and commit),
-reports/difftest/*.json (not committed: CI's artifact, see scripts/fetch-reports.sh),
+crates/goldens/expected/*.jsonl and known_failing.json (stored expectations, not runtime passes),
 reports/solids/solids.json (not committed: CI's artifact, see scripts/fetch-solids.sh),
 reports/ssi-corpus.json, plan/upstream-issues/*.md, site/sprints.toml, the
 module file headers under crates/solidcore/src and git history (timeline). Output is
@@ -35,6 +35,7 @@ sys.dont_write_bytecode = True  # keep harness/plan clean
 sys.path.insert(0, str(ROOT / "harness/plan"))
 import progress  # noqa: E402  (reuse the checklist's counting logic)
 import units as plan_units  # noqa: E402  (the shared plan loader)
+from golden_inventory import load_inventory  # noqa: E402
 
 REPO = os.environ.get("GITHUB_REPOSITORY", "tangency-labs/solidcore")
 REPO_URL = f"https://github.com/{REPO}"
@@ -185,15 +186,32 @@ def load_claims():
     return claims
 
 
-def load_reports():
-    """unit -> (report without its cases, path) from reports/difftest/. The reports are
-    not committed; CI fetches main's latest set first (scripts/fetch-reports.sh)."""
-    reports = {}
-    for p in sorted((ROOT / "reports/difftest").glob("*.json")):
-        d = json.loads(p.read_text())
-        d.pop("cases", None)
-        reports[d.get("unit", p.stem)] = (d, p)
-    return reports
+def golden_body(uid, info, head_sha):
+    """Render stored expectations with exact source links, never measured CI passes."""
+    if info is None:
+        return '<p class="muted">No committed golden inventory yet.</p>'
+    source = f"{REPO_URL}/blob/{head_sha}/crates/goldens/expected"
+    known = "".join(f'<li><code>{esc(name)}</code>: {inline(reason)}</li>'
+                    for name, reason in sorted(info["known_failures"].items()))
+    deferred = "".join(f'<li><code>{esc(unit)}</code>: {n}</li>'
+                       for unit, n in sorted(info["deferred_by_unit"].items()))
+    return f"""
+<p class="muted">This is committed inventory, not a runtime result or a correctness proof.
+A golden records what solidcore produced when blessed. Current results require the
+<a href="{REPO_URL}/actions/workflows/ci.yml">canonical CI gate</a>, not these counts.</p>
+<dl class="facts">
+<div><dt>Golden records</dt><dd>{fmt_int(info['records'])}</dd></div>
+<div><dt>Stored error outcomes</dt><dd>{fmt_int(info['errors'])}</dd></div>
+<div><dt>Stored deferrals</dt><dd>{fmt_int(info['deferrals'])}</dd></div>
+<div><dt>Stored harness rejections</dt><dd>{fmt_int(info['rejections'])}</dd></div>
+<div><dt>Known-failure entries</dt><dd>{len(info['known_failures'])}</dd></div>
+</dl>
+<p>Metadata counts describe fields in the stored records; they are not passes or live failures.</p>
+{('<h3>Recorded deferrals</h3><ul>' + deferred + '</ul>') if deferred else ''}
+{('<h3>Known failures (not blessed)</h3><ul>' + known + '</ul>') if known else ''}
+<p>Source at <code>{esc(head_sha[:9])}</code>:
+<a href="{source}/{esc(uid)}.jsonl">golden JSONL</a> ·
+<a href="{source}/known_failing.json">known-failure list</a>.</p>"""
 
 
 SOLIDS_SCHEMA = 1
@@ -367,16 +385,15 @@ reference: per model the JSON's <code>corpus.models[]</code> records <code>name<
 <code>volume</code>, <code>area</code> and <code>center_of_mass</code> with their <code>rel_err</code>.</p>"""
     corpus_section = f'<h2 id="corpus">Corpus (real models)</h2>\n{corpus_html}'
     intro = f"""<h1>Solids</h1>
-<p class="muted">Units passing difftest says the port matches the C++ function by function; this page says
-whether whole solids come out. The <code>primitives</code> example
+<p class="muted">This page preserves the available primitives report, not the current golden gate's
+execution results. The <code>primitives</code> example
 (<a href="{REPO_URL}/tree/main/crates/solidcore/examples/primitives"><code>crates/solidcore/examples/primitives</code></a>)
 builds each primitive through the public API in pure Rust and checks that it is a closed manifold solid with the
 analytic Euler-Poincare characteristic, volume, area and bounding box (relative tolerance
 {esc(fmt_num((sol or {}).get("rel_tol", 1e-9)))}). A primitive that stops at code not ported yet names the
 unit and upstream symbol it is blocked on.</p>"""
     if not sol:
-        return (intro + '<p class="warn">No data yet: <code>reports/solids/solids.json</code> is missing. CI uploads it '
-                'from every push to <code>main</code> (<code>scripts/fetch-solids.sh</code>); locally, run '
+        return (intro + '<p class="warn">No data yet: <code>reports/solids/solids.json</code> is missing. Locally, run '
                 '<code>cargo run -p solidcore --example primitives -- --json reports/solids/solids.json</code>.</p>\n'
                 + corpus_section)
     total, built, passed = solids_counts(sol)
@@ -439,8 +456,8 @@ unit and upstream symbol it is blocked on.</p>"""
 <p><strong>Solids: {built}/{total} build, {passed}/{total} pass.</strong>
 {('Blocked on: ' + btiles + '.') if btiles else ''}</p>
 <h2>Primitives</h2>
-<p class="muted">From <a href="{up}reports/solids.json"><code>reports/solids.json</code></a> (CI's latest
-<code>main</code> run). Each check shows the measured value, the analytic one and the relative error; a check
+<p class="muted">From the available <a href="{up}reports/solids.json"><code>reports/solids.json</code></a>,
+not a current CI verdict. Each check shows the recorded value, the analytic one and the relative error; a check
 that could not be measured says so. Hover a failed check for its message.</p>
 <div class="scroll"><table><thead><tr><th>Primitive</th><th>Status</th><th>Blocker</th>{head}</tr></thead>
 <tbody>{"".join(rows)}</tbody></table></div>
@@ -763,7 +780,7 @@ def chart_svg(points, cid="chart", title="Share of upstream lines ported over ti
     parts.append(f'<line class="cross" x1="0" x2="0" y1="{T}" y2="{H - B}" visibility="hidden"/>')
     parts.append(f'<rect class="hit" x="{L}" y="{T}" width="{W - L - R}" height="{H - T - B}"/>')
     parts.append("</svg>")
-    legend = ('<div class="legend"><span><i class="sw green"></i>green (matches C++ within 1e-9)</span>'
+    legend = ('<div class="legend"><span><i class="sw green"></i>green (historical port-plan status)</span>'
               '<span><i class="sw partial"></i>green + partial (ported)</span></div>')
     return (legend + '<div class="chartbox">' + "".join(parts) +
             '<div class="tip" hidden></div></div>')
@@ -931,6 +948,7 @@ with a draft PR titled <code>port: &lt;unit id&gt;</code> (<a href="{REPO_URL}/b
 # ---------------------------------------------------------------- pages
 
 def build(out):
+    """Build source-labelled inventory pages without turning expectations into CI results."""
     t_start = time.time()
     head_sha, head_date = head_info()
     units = progress.load_units()
@@ -943,7 +961,7 @@ def build(out):
     status = {u["id"]: u["status"] for u in units}
     s = progress.summary(units)
     callgraph = json.loads((ROOT / "harness/callgraph/units.json").read_text())
-    reports = load_reports()
+    inventory = load_inventory(ROOT)
     solids = load_solids()
     ssi = json.loads((ROOT / "reports/ssi-corpus.json").read_text())
     gallery = load_gallery()
@@ -1024,15 +1042,15 @@ def build(out):
     body = f"""
 <section class="hero">
 <h1>solidcore</h1>
-<p class="lede">solidcore is a Rust port of NVIDIA's SMLib, the boundary-representation (B-rep) solid
-modeling kernel from <a href="{UPSTREAM_URL}">usd-brep</a> (Apache-2.0; ported from and tested against
-{UPSTREAM_PIN_HTML}), written in safe Rust: no
-<code>unsafe</code>, no panics on bad input, deterministic, and buildable for WebAssembly. The upstream
-code is split into {s['units']} port units. A unit only counts as <strong>green</strong> when the
-<em>difftest</em> gate runs the Rust and the upstream C++ (through FFI) on the same inputs (upstream tests,
-fixtures and fixed-seed generated cases) and the topology is identical and every value agrees within
-1e-9 relative. A <strong>partial</strong> unit passes every case it can run; its other cases are
-<em>deferred</em> because they reach code that is not ported yet. This page is regenerated from the
+<p class="lede">solidcore is a boundary-representation (B-rep) solid modeling kernel in safe Rust,
+started as a port of NVIDIA's SMLib from <a href="{UPSTREAM_URL}">usd-brep</a> (Apache-2.0;
+reference {UPSTREAM_PIN_HTML}). The C++ is now reading material, not the correctness target.
+CI checks Rust outputs against committed goldens; a golden proves an output unchanged, not correct.
+Correctness is established by closed forms, geometric checks and invariants.</p>
+<p>Green and partial below are historical <strong>port-plan statuses</strong>, not current CI verdicts.
+The {s['units']} units' golden record counts describe stored expectations, never measured passes.
+See <a href="{REPO_URL}/actions/workflows/ci.yml">canonical CI</a> for execution results.
+This page is regenerated from the
 <a href="{REPO_URL}">repository</a> on every push to <code>main</code>.</p>
 </section>
 <section class="kpis">
@@ -1063,10 +1081,10 @@ v{esc(UPSTREAM_VERSION)} in green or partial units; {gpct:.1f}% green</div></div
 <p class="legend"><span><i class="sw green"></i>green</span><span><i class="sw partial"></i>partial</span></p>
 </section>
 <section>
-<h2>Surface/surface intersection corpus</h2>
+<h2>Historical surface/surface intersection corpus</h2>
 <p>{len(ssi.get('cases', []))} cases from the external
 <a href="{esc(ssi.get('corpus', {}).get('repo', ''))}">ssi-corpus</a>, scored against known true intersections.
-Rust and C++ are compared where the Rust path is ported: {par.get('compared', 0)} compared,
+The committed historical comparison records {par.get('compared', 0)} Rust/C++ cases compared,
 {par.get('identical', 0)} agree within 1e-9, {par.get('mismatched', 0)} mismatched.
 <a href="ssi.html">All cases</a>.</p>
 <div class="scroll narrow"><table><thead><tr><th>Verdict</th><th>C++</th><th>Rust</th></tr></thead>
@@ -1075,7 +1093,7 @@ Rust and C++ are compared where the Rust path is ported: {par.get('compared', 0)
 <section>
 <h2>Elsewhere</h2>
 <ul>
-<li><a href="units/index.html">All {len(units)} units</a>, with difftest results and blockers.</li>
+<li><a href="units/index.html">All {len(units)} units</a>, with committed golden inventory and recorded deferrals.</li>
 <li><a href="graph.html">Dependency graph</a>: what is ready to claim and what blocks the most.</li>
 <li><a href="solids.html">Solids</a>: {f"{s_built}/{s_total} primitives build, {s_passed}/{s_total} pass" if solids else "no data yet"}, and what blocks each.</li>
 <li><a href="cases.html">Kernel cases</a>: {sum(len(cs) for cs in gallery.values())} cases of the kernel corpus with their renders and status.</li>
@@ -1119,7 +1137,7 @@ Rust and C++ are compared where the Rust path is ported: {par.get('compared', 0)
 {chart_table(apts)}
 <h2>Units</h2>
 <p class="muted">{len(us)} units; <a href="../units/index.html?module={esc(m)}">open in the full units table</a>
-for difftest counts and blockers.</p>
+for stored golden counts and recorded deferrals, not runtime passes.</p>
 <div class="scroll"><table class="sortable"><thead><tr><th data-sort="text">Unit</th><th data-sort="num">Status</th>
 <th data-sort="num">Layer</th><th data-sort="num">Lines</th></tr></thead><tbody>{urows}</tbody></table></div>
 """
@@ -1130,18 +1148,16 @@ for difftest counts and blockers.</p>
     modules = sorted({progress.module(u) for u in units})
     rows = []
     for u in sorted(units, key=lambda u: (u["layer"], u["id"])):
-        rep = reports.get(u["id"], (None, None))[0]
+        info = inventory.get(u["id"])
         nfn = len(callgraph.get(u["id"], {}).get("functions", []))
-        if rep:
-            # a confirmed C++ defect run anyway (cpp_defect) counts as passed; a parked one
-            # (not run) is neither passed nor failed and is listed on the unit page
-            cp = rep.get("cases_passed", 0) + rep.get("cases_cpp_defect", 0)
-            cd, cf = rep.get("cases_deferred", 0), rep.get("cases_failed", 0)
-            blockers = sorted(rep.get("deferred_by_unit", {}).items(), key=lambda kv: (-kv[1], kv[0]))
-            btxt = ", ".join(f'<a href="{esc(b)}.html">{esc(b)}</a>&nbsp;({n})' for b, n in blockers[:3])
+        if info is not None:
+            blockers = sorted(info["deferred_by_unit"].items(), key=lambda kv: (-kv[1], kv[0]))
+            btxt = ", ".join((f'<a href="{esc(b)}.html">{esc(b)}</a>' if b in by_id else esc(b))
+                             + f'&nbsp;({n})' for b, n in blockers[:3])
             if len(blockers) > 3:
                 btxt += f" +{len(blockers) - 3}"
-            nums = f"<td class=num>{cp}</td><td class=num>{cd}</td><td class=num>{cf}</td>"
+            nums = (f'<td class=num>{info["records"]}</td><td class=num>{info["deferrals"]}</td>'
+                    f'<td class=num>{len(info["known_failures"])}</td>')
         else:
             btxt = ""
             nums = '<td class=num data-v="-1">–</td><td class=num data-v="-1">–</td><td class=num data-v="-1">–</td>'
@@ -1157,8 +1173,9 @@ for difftest counts and blockers.</p>
     body = f"""
 <h1>Units</h1>
 <p class="muted">{len(units)} port units from <code>plan/units/</code>. Cases come from
-<code>reports/difftest/&lt;unit&gt;.json</code>; blockers are the units deferred cases wait on (with case
-counts). Click a column heading to sort.</p>
+<code>crates/goldens/expected/&lt;unit&gt;.jsonl</code>. These are stored expectations, not runtime
+passes or correctness proofs. Known failures are listed separately, not blessed. Status is the
+historical port plan; deferrals describe the recorded outputs. Click a column heading to sort.</p>
 <div class="filters" data-table="units">
 <label>Search <input type="search" name="q" placeholder="unit id"></label>
 <label>Status <select name="status"><option value="">all</option>{status_opts}</select></label>
@@ -1167,8 +1184,8 @@ counts). Click a column heading to sort.</p>
 </div>
 <div class="scroll"><table id="units" class="sortable">
 <thead><tr><th data-sort="text">Unit</th><th data-sort="num">Status</th><th data-sort="num">Layer</th>
-<th data-sort="num">Lines</th><th data-sort="num">Fns</th><th data-sort="num">Passed</th>
-<th data-sort="num">Deferred</th><th data-sort="num">Failed</th><th>Top blockers</th></tr></thead>
+<th data-sort="num">Lines</th><th data-sort="num">Fns</th><th data-sort="num">Golden records</th>
+<th data-sort="num">Stored deferrals</th><th data-sort="num">Known failures</th><th>Recorded deferrals</th></tr></thead>
 <tbody>{''.join(rows)}</tbody></table></div>
 """
     write("units/index.html", P("Units · solidcore", body, 1, "units", path="units/index.html"))
@@ -1187,10 +1204,6 @@ counts). Click a column heading to sort.</p>
         exists = "(" not in src and (ROOT / src).exists()
         hrows = header_table(src) if exists else []
         look = header_lookup(hrows)
-        rep, rep_path = reports.get(uid, (None, None))
-        if rep_path is not None:
-            (out / "reports").mkdir(parents=True, exist_ok=True)
-            shutil.copy(rep_path, out / "reports" / f"{uid}.json")
         fns = sorted(cg.get("functions", []), key=lambda f: (f["file"], f["line"], f["name"]))
         frows = []
         for f in fns:
@@ -1210,46 +1223,7 @@ counts). Click a column heading to sort.</p>
             htable = ('<details><summary>Module file-header table ({} rows)</summary><div class="scroll"><table>'
                       '<thead><tr><th>Rust</th><th>Upstream</th></tr></thead><tbody>{}</tbody></table></div></details>').format(
                 len(hrows), "".join(f"<tr><td>{inline(r)}</td><td>{inline(p)}</td></tr>" for r, p in hrows))
-        if rep:
-            dbu = sorted(rep.get("deferred_by_unit", {}).items(), key=lambda kv: (-kv[1], kv[0]))
-            dtable = "".join(f'<tr><td><a href="{esc(b)}.html"><code>{esc(b)}</code></a> {badge(status.get(b, "?"))}</td>'
-                             f'<td class=num>{n}</td></tr>' for b, n in dbu)
-            floors = rep.get("abs_floors") or []
-            defects = [c for c in rep.get("cases", []) if isinstance(c, dict) and c.get("outcome") == "cpp_defect"]
-            cpp_defects = ("<p>Cases where the C++ reference is verified wrong (a confirmed upstream issue; "
-                           "the Rust result is kept and the case counts as passed): "
-                           + ", ".join(f'<code>{esc(c.get("name", ""))}</code> ({esc(c.get("cpp_defect", ""))})'
-                                       for c in defects) + "</p>") if defects else ""
-            parked = [c for c in rep.get("cases", []) if isinstance(c, dict) and c.get("outcome") == "parked"]
-            parked_cases = ("<p>Parked cases: the C++ reference is verified wrong (a confirmed upstream "
-                            "issue), so they are not run in the gate and count neither as passed nor as "
-                            "failed. A nightly job runs them against upstream's latest release and reports "
-                            "any that start to agree; removing the entry's <code>cpp_defect</code> runs one "
-                            "again. "
-                            + ", ".join(f'<code>{esc(c.get("name", ""))}</code> ({esc(c.get("cpp_defect", ""))})'
-                                        for c in parked) + "</p>") if parked else ""
-            diff = f"""
-<dl class="facts">
-<div><dt>Cases</dt><dd>{fmt_int(rep.get('cases_total', 0))}</dd></div>
-<div><dt>Passed</dt><dd>{fmt_int(rep.get('cases_passed', 0))}</dd></div>
-{f"<div><dt>C++ defect (counted as passed)</dt><dd>{fmt_int(rep['cases_cpp_defect'])}</dd></div>" if rep.get('cases_cpp_defect') else ''}
-{f"<div><dt>Parked (C++ defect, not run)</dt><dd>{fmt_int(rep['cases_parked'])}</dd></div>" if rep.get('cases_parked') else ''}
-{f"<div><dt>Known mismatch</dt><dd>{fmt_int(rep['cases_known_mismatch'])}</dd></div>" if rep.get('cases_known_mismatch') else ''}
-<div><dt>Deferred</dt><dd>{fmt_int(rep.get('cases_deferred', 0))}</dd></div>
-<div><dt>Failed</dt><dd>{fmt_int(rep.get('cases_failed', 0))}</dd></div>
-<div><dt>Both errored</dt><dd>{fmt_int(rep.get('cases_both_errored', 0))}</dd></div>
-<div><dt>Max rel. error</dt><dd>{esc(repr(rep.get('max_rel_err')))}</dd></div>
-<div><dt>Tolerance</dt><dd>{esc(repr(rep.get('rel_tol')))} rel.</dd></div>
-<div><dt>Seeds</dt><dd>{esc(str(rep.get('seeds', '')))}</dd></div>
-</dl>
-{('<p>Absolute floors: <code>' + esc(json.dumps(floors)) + '</code></p>') if floors else ''}
-{cpp_defects}
-{parked_cases}
-<h3>Blocked by</h3>
-{('<div class="scroll narrow"><table><thead><tr><th>Unported unit</th><th>Deferred cases</th></tr></thead><tbody>' + dtable + '</tbody></table></div>') if dtable else '<p class="muted">Nothing: no deferred cases.</p>'}
-<p><a href="../reports/{esc(uid)}.json">Report JSON</a> (per-case results, from CI's latest <code>main</code> run)</p>"""
-        else:
-            diff = '<p class="muted">No difftest report yet.</p>'
+        diff = golden_body(uid, inventory.get(uid), head_sha)
         claim = f'<p>Claimed: {inline(u["claim"])}</p>' if u.get("claim") else ""
         srclink = (f'<a href="{REPO_URL}/blob/{head_sha}/{esc(src)}"><code>{esc(src)}</code></a>' if exists
                    else '<span class="muted">no single module (crate-wide unit)</span>' if "(" in src
@@ -1271,9 +1245,10 @@ counts). Click a column heading to sort.</p>
 {status_steps(unit_hist.get(uid, []), tl0, tl1)}
 <p>Source: {srclink}</p>
 <p>Upstream: {upfiles or '<span class="muted">none</span>'}</p>
-<h2>Notes</h2>
+<h2>Port-plan notes</h2>
+<p class="muted">These notes preserve historical port measurements and limitations, not current CI results.</p>
 <p class="notes">{inline(u.get('notes', '')) or '<span class="muted">none</span>'}</p>
-<h2>Difftest</h2>
+<h2>Goldens</h2>
 {diff}
 <h2>Dependencies</h2>
 <p><strong>Depends on:</strong> {unit_links(u['depends_on'])}</p>

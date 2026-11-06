@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Regenerate plan/PROGRESS.md from plan/units/*.toml and the difftest reports.
+"""Regenerate plan/PROGRESS.md from plan statuses and committed golden inventory.
 
 The Pages workflow (.github/workflows/pages.yml) runs this on main and publishes the result
 on the site as PROGRESS.md; plan/PROGRESS.md is gitignored and never committed. Locally:
-    python3 harness/plan/progress.py          # from plan/units and reports/difftest/
+    python3 harness/plan/progress.py          # from plan/units and crates/goldens/expected/
     python3 harness/plan/progress.py --prs    # also mark units with an open "port: <id>" PR
-Output is deterministic (no timestamps); statuses, claims and report counts drive changes.
-Reports are not committed: CI uploads them from main (artifact `difftest-reports`) and
-`scripts/fetch-reports.sh` downloads the latest set into reports/difftest/.
+Output is deterministic (no timestamps); plan statuses, claims and stored-record counts drive
+changes. A committed golden is an expectation, not proof of correctness or a current CI pass.
 
 The counting helpers (`summary`, `is_ready`, `module`, `DONE`) are also imported by the
 GitHub Pages site generator (site/build.py), so both report the same numbers.
@@ -21,6 +20,7 @@ import re
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import units as plan_units  # noqa: E402  (the shared plan loader)
+from golden_inventory import load_inventory  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DONE = ("green", "partial")
@@ -43,30 +43,9 @@ def load_units():
 
 
 def load_case_counts(units):
-    """Default-run counts from reports/difftest/; omit units without a report.
-
-    Notes can describe stress runs or contain operation numbers (e.g. "op-0 cases"),
-    so they are not a source for the published case count. Reject invalid reports
-    before replacing the checklist, rather than publishing a misleading number.
-    """
-    counts = {}
-    for u in units:
-        if u["status"] not in DONE:
-            continue
-        path = ROOT / "reports/difftest" / f"{u['id']}.json"
-        if not path.exists():
-            continue
-        try:
-            report = json.loads(path.read_text())
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"{path}: invalid difftest report") from exc
-        if not isinstance(report, dict) or report.get("unit") != u["id"]:
-            raise ValueError(f"{path}: report unit must match {u['id']!r}")
-        count = report.get("cases_total")
-        if type(count) is not int or count < 0:
-            raise ValueError(f"{path}: cases_total must be a non-negative integer")
-        counts[u["id"]] = count
-    return counts
+    """Stored golden records by unit; omit units without a committed golden file."""
+    inventory = load_inventory(ROOT)
+    return {u["id"]: inventory[u["id"]]["records"] for u in units if u["id"] in inventory}
 
 
 def module(u):
@@ -89,6 +68,7 @@ def summary(units):
 
 
 def main():
+    """Publish historical port-plan states and explicitly labelled golden counts."""
     units = load_units()
     if "--prs" in sys.argv:
         prs = json.loads(subprocess.run(
@@ -114,7 +94,7 @@ def main():
 
     def cases(u):
         count = case_counts.get(u["id"])
-        return f", {count} cases" if count is not None else ""
+        return f", {count} golden records" if count is not None else ""
 
     def line(u):
         s = u["status"]
@@ -130,7 +110,7 @@ def main():
     out = [
         "# Port progress",
         "",
-        "Generated from `plan/units/*.toml` and CI's `reports/difftest/*.json` by "
+        "Generated from `plan/units/*.toml` and `crates/goldens/expected/*.jsonl` by "
         "`harness/plan/progress.py`; do not edit by hand.",
         "",
         f"**{count['green'] + count['partial']} / {len(units)} units ported** "
@@ -138,7 +118,11 @@ def main():
         f"**{done:,} / {total:,} upstream lines ({100 * done / total:.1f}%)**. "
         f"{count['claimed']} claimed, {count['blocked']} blocked, {count['todo']} todo.",
         "",
-        "Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · "
+        "Plan status is historical port progress, not a current CI result. Golden record counts "
+        "describe stored expectations, not correctness or runtime passes. Known failures are listed "
+        "separately in `crates/goldens/expected/known_failing.json`.",
+        "",
+        "Legend: ✅ green (port-plan status) · 🟡 partial (port-plan status; some code deferred) · "
         "🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.",
         "",
         "## Ready to claim now",

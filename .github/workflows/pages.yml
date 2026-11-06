@@ -7,7 +7,7 @@ name: Pages
 #
 # Triggers:
 # - push to main: every merge (statuses, upstream issues, the site itself).
-# - workflow_run of "CI" on main: fresh difftest reports (case counts).
+# - workflow_run of "CI" on main: refresh the source inventory after CI completes.
 # - schedule (hourly): claims from open "port: <unit id>" PRs.
 # - workflow_dispatch: manual rebuild.
 on:
@@ -23,7 +23,7 @@ on:
 
 permissions:
   contents: read
-  actions: read  # download main's difftest-reports artifact
+  actions: read  # download the optional primitives artifact
   pull-requests: read  # open "port:" PRs for the checklist's claims
   pages: write
   id-token: write
@@ -40,10 +40,6 @@ jobs:
         with:
           ref: main
           fetch-depth: 0 # full history for the progress timeline
-      - name: Fetch main's difftest reports
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: scripts/fetch-reports.sh || echo "no reports; unit pages will say so"
       - name: Fetch main's solids report
         env:
           GH_TOKEN: ${{ github.token }}
