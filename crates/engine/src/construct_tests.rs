@@ -621,20 +621,25 @@ fn construction_lives_in_the_component_frame() {
     assert!(near(point(&s, "PinTop"), Vec3::new(50.0, 20.0, 10.0)), "{:?}", point(&s, "PinTop"));
 }
 
-/// A construction plane in a moved component sections where the viewport draws it, not where
-/// the component was modelled.
+/// A construction plane in a moved (and turned) component sections where the viewport draws it,
+/// not where the component was modelled: the plane halves the box's height, which the turn
+/// about X laid along Y.
 #[test]
 fn a_section_on_a_construction_plane_cuts_where_the_component_stands() {
     let mut s = Session::default();
     run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
     run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10}));
     run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Mid"}));
-    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 0, 30]}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 0, 30], "axis": [1, 0, 0], "angle": "90 deg"}));
+    // The box as `inspect.measure` answers it, placed in the world.
+    let bbox = run(&mut s, "inspect.measure", json!({}))["bodies"][0]["bbox"].clone();
+    let mid_y = (bbox["min"][1].as_f64().unwrap() + bbox["max"][1].as_f64().unwrap()) / 2.0;
+    assert!(mid_y.abs() > 1.0, "the turn moved the box's middle off y = 0: {bbox}");
     let r = run(&mut s, "inspect.section", json!({"plane": "Mid"}));
-    let z = r["section"]["origin"][2].as_f64().unwrap();
-    assert!((z - 35.0).abs() < 1e-9, "the cut goes through the placed plane: {r}");
+    let y = r["section"]["origin"][1].as_f64().unwrap();
+    assert!((y - mid_y).abs() < 1e-9, "the cut halves the placed box: {r}");
     let n = &r["section"]["normal"];
-    assert!((n[2].as_f64().unwrap().abs() - 1.0).abs() < 1e-9, "{r}");
+    assert!((n[1].as_f64().unwrap().abs() - 1.0).abs() < 1e-9 && n[2].as_f64().unwrap().abs() < 1e-9, "the normal turned with the box: {r}");
 }
 
 #[test]
