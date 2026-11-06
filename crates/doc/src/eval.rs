@@ -1535,13 +1535,11 @@ fn replayed_sources<'a>(doc: &'a Document, features: &[crate::FeatureId]) -> Vec
     out
 }
 
-/// Document-level inputs any feature may read: construction planes (resolved by name), sheet
+/// Document-level inputs any feature may read: construction geometry (resolved by name), sheet
 /// metal and plastic rules (and the parameters they use), components and body placement.
 fn context_digest(doc: &Document, vals: &BTreeMap<String, Value>) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    for f in doc.features.iter().filter(|f| {
-        matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
-    }) {
+    for f in doc.features.iter().filter(|f| f.kind.is_construction()) {
         fingerprint(doc, 0, f, vals, false, &ImportDigests::default()).hash(&mut h);
     }
     doc.units.hash(&mut h);
