@@ -2051,7 +2051,9 @@ fn a_point_removed_from_a_spline_goes_with_its_dimension_and_undoes() {
     run(&mut s, "sketch.line", json!({"points": [format!("{sid}.end"), [40, 6]], "connect": false}));
     let sk = sketch(&s);
     let si = sk.curve_index(&sid).unwrap();
-    let names: Vec<String> = sk.curves[si].kind.point_ids().iter().map(|i| sk.points[*i].id.clone()).collect();
+    // Its fit points, not their tangent handles (#6502).
+    let CurveKind::Spline { pts, .. } = &sk.curves[si].kind else { panic!("a spline") };
+    let names: Vec<String> = pts.iter().map(|i| sk.points[*i].id.clone()).collect();
     run(&mut s, "sketch.dimension", json!({"entities": [names[1], names[2]], "value": 12.8}));
     let before = sketch(&s);
     let at = |sk: &solidcraft_sketch::Sketch, id: &str| sk.point(sk.point_index(id).unwrap()).unwrap();
@@ -2060,7 +2062,8 @@ fn a_point_removed_from_a_spline_goes_with_its_dimension_and_undoes() {
     assert_eq!((r["curve"].as_str(), r["point"].as_str(), r["deleted"].as_bool()), (Some(sid.as_str()), Some(names[1].as_str()), Some(true)), "{r}");
     let after = sketch(&s);
     assert!(after.point_index(&names[1]).is_none(), "the point went");
-    let left: Vec<String> = after.curves[si].kind.point_ids().iter().map(|i| after.points[*i].id.clone()).collect();
+    let CurveKind::Spline { pts: left, .. } = &after.curves[si].kind else { panic!("a spline") };
+    let left: Vec<String> = left.iter().map(|i| after.points[*i].id.clone()).collect();
     assert_eq!(left, [names[0].clone(), names[2].clone(), names[3].clone()]);
     let segs = after.exact_segs(si).unwrap();
     for id in &left {
@@ -4414,7 +4417,10 @@ fn inside_offset_wall(s: &Session, output: &str) -> Vec2 {
     let sk = sketch(s);
     let index = sk.curve_index(output).unwrap();
     let q = sk.exact_pieces(index)[0].point_at(0.5);
-    let source: Vec<_> = (0..sk.curves.len()).filter(|i| *i < index && !sk.freeform_offsets.iter().any(|o| o.output == sk.curves[*i].id)).collect();
+    // The source curves, not a spline's tangent handle lines (#6502) or an offset's output.
+    let source: Vec<_> = (0..sk.curves.len())
+        .filter(|i| *i < index && sk.curves[*i].spline_handle_of.is_none() && !sk.freeform_offsets.iter().any(|o| o.output == sk.curves[*i].id))
+        .collect();
     let p = source
         .iter()
         .flat_map(|i| sk.exact_pieces(*i))

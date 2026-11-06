@@ -179,8 +179,11 @@ impl Sketch {
         if pts.len() < if periodic { 5 } else { 3 } {
             return Err(SketchError::Invalid(format!("a spline keeps at least {} points", if periodic { 3 } else { 2 })));
         }
+        // The spline's own tangent handle lines (#6502) are part of it, not other geometry.
+        let spline_id = curve.id.clone();
+        let own = |c: &crate::model::Curve| c.spline_handle_of.as_deref() == Some(spline_id.as_str());
         if !periodic && (at == 0 || at == last) {
-            let joined = self.curves.iter().enumerate().any(|(i, c)| i != ci && c.kind.uses(p))
+            let joined = self.curves.iter().enumerate().any(|(i, c)| i != ci && !own(c) && c.kind.uses(p))
                 || self.constraints.iter().any(|k| {
                     let (points, curves) = k.kind.indices();
                     points.contains(&p) || (curves.contains(&ci) && matches!(k.kind, ConstraintKind::Tangent { .. } | ConstraintKind::Smooth { .. }))
@@ -198,15 +201,34 @@ impl Sketch {
                 left.iter().map(|i| self.point(*i).ok_or_else(|| SketchError::Unknown(format!("point {i}")))).collect::<Result<_>>()?;
             crate::periodic::validate_periodic_points(&pos)?;
         }
-        if let Some(CurveKind::Spline { pts, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
+        // The point's tangent handle (#6502) goes with it: the handle point, and the construction
+        // line from the point to it.
+        let mut handle = None;
+        if let Some(CurveKind::Spline { pts, handles, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
             *pts = left;
+            if at < handles.len() {
+                handle = Some(handles.remove(at));
+            }
         }
+        if let Some(h) = handle {
+            let lines: Vec<usize> =
+                self.curves.iter().enumerate().filter(|(_, c)| own(c) && c.kind.uses(h) && c.kind.uses(p)).map(|(i, _)| i).collect();
+            self.drop_curves(&lines);
+        }
+        // The handle point goes unless something else still uses it; removed with `p` in one go,
+        // so neither index shifts under the other.
+        let handle = handle.filter(|h| *h != 0 && !self.point_used_by_curve(*h));
         // The origin (point 0) is never removed.
         if p == 0 || self.point_used_by_curve(p) {
+            if let Some(h) = handle {
+                self.keep_ties_through(&[h]);
+                self.remove_points(&[h]);
+            }
             return Ok(false);
         }
-        self.keep_ties_through(&[p]);
-        self.remove_points(&[p]);
+        let gone: Vec<usize> = std::iter::once(p).chain(handle).collect();
+        self.keep_ties_through(&gone);
+        self.remove_points(&gone);
         Ok(true)
     }
 

@@ -304,7 +304,11 @@ fn associated_spline_offset_hides_fit_nodes_and_follows_a_source_drag_live() {
     let original = h.app.session.world_state().unwrap().sketch(sid).unwrap().sketch.clone();
     let source = original.curve_index("s1").unwrap();
     let derived = original.curve_index(&output).unwrap();
-    let source_points = original.curves[source].kind.point_ids();
+    // The source's fit points; its tangent handles (#6502) show only while it is selected.
+    let source_points = match &original.curves[source].kind {
+        solidcraft_engine::sketch::CurveKind::Spline { pts, .. } => pts.clone(),
+        kind => kind.point_ids(),
+    };
     let derived_points = original.curves[derived].kind.point_ids();
     assert!(derived_points.len() > 100, "exercise the crowded generated fit nodes");
     for &i in &source_points {

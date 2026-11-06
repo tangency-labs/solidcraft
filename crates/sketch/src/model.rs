@@ -2166,7 +2166,7 @@ impl Sketch {
     }
 
     /// Remove curves only (points stay), remapping constraints.
-    fn drop_curves(&mut self, which: &[usize]) {
+    pub(crate) fn drop_curves(&mut self, which: &[usize]) {
         self.prune_offsets_for_removed_curves(which);
         let removed: std::collections::BTreeSet<String> = which.iter().filter_map(|i| self.curves.get(*i).map(|c| c.id.clone())).collect();
         self.prune_equations(&removed);

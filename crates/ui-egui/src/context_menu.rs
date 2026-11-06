@@ -3241,7 +3241,11 @@ mod tests {
         let count = |h: &crate::scenario::Harness, id: &str| {
             let state = crate::open_meshing::session_world(&h.app.session);
             let sk = &state.sketch(sid).unwrap().sketch;
-            sk.curves[sk.curve_index(id).unwrap()].kind.point_ids().len()
+            // Its fit points, not their tangent handles (#6502).
+            match &sk.curves[sk.curve_index(id).unwrap()].kind {
+                solidcraft_engine::sketch::CurveKind::Spline { pts, .. } => pts.len(),
+                kind => kind.point_ids().len(),
+            }
         };
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 80.0;
@@ -3301,7 +3305,9 @@ mod tests {
         let places = |h: &crate::scenario::Harness| {
             let state = h.app.session.world_state().unwrap();
             let sk = &state.sketch(sid).unwrap().sketch;
-            sk.curves[sk.curve_index(&fit).unwrap()].kind.point_ids().iter().map(|i| sk.point(*i).unwrap()).collect::<Vec<_>>()
+            // Its fit points, not their tangent handles (#6502), which go with a removed point.
+            let solidcraft_engine::sketch::CurveKind::Spline { pts, .. } = &sk.curves[sk.curve_index(&fit).unwrap()].kind else { panic!("a spline") };
+            pts.iter().map(|i| sk.point(*i).unwrap()).collect::<Vec<_>>()
         };
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 80.0;
