@@ -151,7 +151,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<ListResult>)
         .params(
             "compact?: bool (counts of bodies, features, sketches and construction planes instead of their names; occurrences leave out \
-             identity transforms; children as occurrence ids); bodies?: bool (with compact: body names, not their count)",
+             identity transforms; children as occurrence ids); bodies?: bool (with compact: body names, not their count). An occurrence's \
+             transform is a column-major 4×4 (m[column][row]) with the translation in the last column. occurrence.move's matrix is that \
+             same placement row by row: three rows, the translation in the last column of each",
         ),
     CommandSpec::new("component.properties", "Component Physical Properties", crate::checked!("component.properties", properties::component))
         .icon("measure").noundo()
@@ -172,7 +174,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("measure").noundo()
         .contract(&OCCURRENCE_PROPERTIES_CONTRACT)
         .output(output_schema_for::<OccurrencePropertiesResult>)
-        .params("occurrence: id or name; path?: [occurrence ids] (required if nested under multiple instances); descendants?: bool (default true); about?: [x, y, z] (mm). Physical properties of this placement in world coordinates, including pending moves; volume, density, mass, center of mass and inertia_g_mm2 only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals; total inertia as in component.properties. A placement inside it that counts as a reference (its occurrence's bom_type, else its component's) adds nothing, nor does anything inside that; this placement counts whatever its type"),
+        .params("occurrence: id or name; path?: [occurrence ids] (required if nested under multiple instances); descendants?: bool (default true); about?: [x, y, z] (mm). Physical properties of this placement in world coordinates, including pending moves; volume, density, mass, center of mass and inertia_g_mm2 only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals; total inertia as in component.properties. A placement inside it that counts as a reference (its occurrence's bom_type, else its component's) adds nothing, nor does anything inside that; this placement counts whatever its type. placement: where the occurrence sits, in_parent and world, each {position (mm), axis, angle_deg, matrix (the 3×4 rows occurrence.move takes)}"),
     CommandSpec::new("component.rename", "Rename Component", crate::checked!("component.rename", rename))
         .icon("rename")
         .contract(&RENAME_CONTRACT)
