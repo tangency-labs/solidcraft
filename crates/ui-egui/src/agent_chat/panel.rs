@@ -1038,6 +1038,8 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     if pick_clicked {
         start_pick(app);
     }
+    // Select All and Copy of the whole conversation, read before its labels see the keys.
+    super::select_all::handle(app, ui.ctx());
     egui::ScrollArea::vertical()
         .id_salt("sc_agent_chat_scroll")
         .max_height(ui.available_height())
@@ -1718,6 +1720,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut open_gallery: Option<Gallery> = None;
     let current_doc = app.session.doc.clone();
     let units = summary::Units { units: &app.session.doc.units, decimals: app.preferences.length_decimals };
+    let all_selected = app.agent_chat.all_selected;
     for (n, item) in app.agent_chat.items.iter().enumerate() {
         match item {
             Item::User { text, image, pictures, context, files } => {
@@ -1726,7 +1729,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let before = ui.cursor();
                 ui_kit::assistant_bubble(ui, |ui| {
                     if !text.is_empty() {
-                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).color(t.text)).wrap());
+                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).color(t.text)).wrap(), all_selected);
                     }
                     if !pictures.is_empty() {
                         if let Some(at) = picture_strip(ui, n, pictures) {
@@ -1752,10 +1755,10 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             Item::Agent { thought, text } => {
                 if *thought {
-                    super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).italics().color(t.text_dim)).wrap());
+                    super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).italics().color(t.text_dim)).wrap(), false);
                 } else {
                     let before = ui.cursor();
-                    ui_kit::assistant_prose(ui, |ui| super::markdown_view::show(ui, n, text));
+                    ui_kit::assistant_prose(ui, |ui| super::markdown_view::show(ui, n, text, all_selected));
                     if !text.is_empty() {
                         copy_message_button(ui, n, text);
                         let drawn = egui::Rect::from_x_y_ranges(before.x_range(), before.min.y..=ui.cursor().min.y);
@@ -1833,7 +1836,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
             Item::Approval { id, title, tool, answer: given } => {
                 ui_kit::assistant_approval(ui, tr("ui.agent_chat_approval"), |ui| {
                     ui_kit::assistant_tool_detail(ui, |ui| {
-                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(title).monospace().size(t.font_caption)).wrap());
+                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(title).monospace().size(t.font_caption)).wrap(), false);
                     });
                     match given {
                         Some(true) => {
@@ -1942,7 +1945,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 _ => {
                     if !p.text.is_empty() {
-                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(&p.text).color(t.text)).wrap());
+                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(&p.text).color(t.text)).wrap(), false);
                     }
                     if p.image {
                         ui.label(RichText::new(tr("ui.agent_chat_view_attached")).color(t.text_dim).size(crate::theme::Tokens::get().font_small));
