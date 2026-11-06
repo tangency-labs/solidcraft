@@ -51,7 +51,8 @@ pub use curves::{
 };
 pub use decompose::Budget;
 pub use dims::{
-    DimFrame, DimLayout, chain_centres, default_text, default_text_offset, dim_frame, dim_layout, dim_layout_reaching, dim_reach, encode_text,
+    DimFrame, DimLayout, chain_centres, default_text, default_text_offset, dim_frame, dim_frame_at, dim_layout, dim_layout_reaching, dim_reach,
+    encode_text,
 };
 pub use ends::{END_TOL, EndReport, EndTouch, UntiedEnd, loose_ends};
 pub use equation::{EquationCurve, MAX_EQUATION_TEXT, VariableUnit};

@@ -24,7 +24,7 @@ use serde_json::json;
 use solidcore_record::Vec2;
 use solidcraft_engine::Sel;
 use solidcraft_engine::sketch::{
-    ConstraintKind, DimFrame, chain_centres, default_text, default_text_offset, dim_frame, dim_layout_reaching, dim_reach,
+    ConstraintKind, DimFrame, chain_centres, default_text, default_text_offset, dim_frame_at, dim_layout_reaching, dim_reach,
 };
 
 use crate::SolveApp;
@@ -183,9 +183,10 @@ pub(crate) fn ellipse_as_before(half_axes: bool, params: &mut serde_json::Value)
 }
 
 /// How a dimension is drawn: with Draw ellipses with their axes off, a radius on an ellipse
-/// is drawn as a radius, as before, instead of to its minor axis end.
-pub(crate) fn shown_frame(half_axes: bool, sk: &solidcraft_engine::sketch::Sketch, k: &ConstraintKind) -> Option<DimFrame> {
-    match dim_frame(sk, k)? {
+/// is drawn as a radius, as before, instead of to its minor axis end. `text` is the stored text
+/// position: an angle's arc goes in the sector of its value that the text sits in.
+pub(crate) fn shown_frame(half_axes: bool, sk: &solidcraft_engine::sketch::Sketch, k: &ConstraintKind, text: Option<Vec2>) -> Option<DimFrame> {
+    match dim_frame_at(sk, k, text)? {
         DimFrame::HalfAxis { center, len, .. } if !half_axes => Some(DimFrame::Radial { center, radius: len, diameter: false, arc: None }),
         frame => Some(frame),
     }
@@ -860,7 +861,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         // A draft is drawn as it will be added: with the preference it was made with.
         let half_axes =
             if is_draft { draft.as_ref().map_or(app.preferences.ellipse_axes, |(_, d)| d.half_axes) } else { app.preferences.ellipse_axes };
-        let Some(frame) = shown_frame(half_axes, sk, &c.kind) else { continue };
+        let Some(frame) = shown_frame(half_axes, sk, &c.kind, c.text) else { continue };
         let anchor = match frame {
             DimFrame::Linear { p0, p1, .. } => (p0 + p1) * 0.5,
             DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } | DimFrame::HalfAxis { center, .. } => center,
@@ -1831,7 +1832,9 @@ mod tests {
         // The placed offset (15 above the measured line) is kept with the dimension.
         assert_eq!(c.text, Some(Vec2::new(0.0, 15.0)), "{c:?}");
         // And the text draws at that offset from the edited geometry, not at the default place.
-        let DimFrame::Linear { p0, p1, dir } = dim_frame(&solved.sketch, &c.kind).unwrap() else { panic!("a length dimension is linear") };
+        let DimFrame::Linear { p0, p1, dir } = solidcraft_engine::sketch::dim_frame(&solved.sketch, &c.kind).unwrap() else {
+            panic!("a length dimension is linear")
+        };
         let t = c.text.unwrap();
         let want = h
             .at(&json!({"world":[(p0 + p1).x * 0.5 + dir.x * t.x + dir.perp().x * t.y, (p0 + p1).y * 0.5 + dir.y * t.y + dir.perp().y * t.y, 0.]}))
