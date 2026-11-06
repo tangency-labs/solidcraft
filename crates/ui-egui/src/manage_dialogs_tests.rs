@@ -962,6 +962,18 @@ fn a_new_cards_density_takes_the_assigned_density_and_can_be_saved() {
     let draft = empty.draft.as_mut().unwrap();
     draft.card.add_property("density", &draft.density);
     assert_eq!(draft.card.properties[0].values, vec![String::new()]);
+    // A tiny density is not rounded to 0 kg/m³, which no card accepts.
+    let mut tiny = crate::material_editor::Editor::default();
+    tiny.begin(&doc, None, false);
+    let draft = tiny.draft.as_mut().unwrap();
+    draft.name = "Aerogel trace".into();
+    draft.density = "0.0000000001".into();
+    draft.card_enabled = true;
+    draft.card.designation = "trace".into();
+    draft.card.add_property("density", &draft.density);
+    let value: f64 = draft.card.properties[0].values[0].parse().unwrap();
+    assert!(value > 0.0, "{value}");
+    assert!(draft.command(&doc).is_ok(), "{:?}", draft.command(&doc));
 }
 
 fn source_id(card: &crate::material_editor::CardDraft) -> String {

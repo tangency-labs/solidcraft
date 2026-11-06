@@ -206,8 +206,11 @@ impl CardDraft {
             && solidcraft_engine::doc::valid_density(g_cm3)
             && let Some(value) = property.values.first_mut()
         {
-            // 7.85 g/cm³ is 7850 kg/m³, not 7849.999999999999.
-            *value = ((g_cm3 * 1000.0 * 1e6).round() / 1e6).to_string();
+            // 7.85 g/cm³ is 7850 kg/m³, not 7849.999999999999; a density too small for six
+            // decimals keeps its unrounded value rather than becoming 0, which no card accepts.
+            let kg_m3 = g_cm3 * 1000.0;
+            let rounded = (kg_m3 * 1e6).round() / 1e6;
+            *value = if rounded > 0.0 { rounded } else { kg_m3 }.to_string();
         }
         self.properties.push(property);
     }
