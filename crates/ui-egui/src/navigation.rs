@@ -778,16 +778,19 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // A two-finger twist on the trackpad turns the view about the world's up axis (#6286).
     // The OS does not send a rotation on every frame of a slow twist, so the twist's cursor pivot
     // is kept through short gaps and let go only once the twist has paused or a button is pressed.
+    // That is checked before this frame's rotation: an idle window draws no frames in between, so
+    // the first rotation of a new twist must not turn about the last twist's point.
     let (twist, now, pressed) = ui.input(|i| (twist_radians(i), i.time, i.pointer.any_pressed()));
+    if pressed || app.viewport.twist_last.is_none_or(|last| now - last > TWIST_PAUSE) {
+        app.viewport.twist_pivot = None;
+        app.viewport.twist_last = None;
+    }
     if wheel_inside && caps.orbit && app.preferences.trackpad_twist_turns && twist != 0.0 {
         app.cancel_view_animation();
         app.viewport.orbit_free = None;
         app.viewport.spin = false;
         twist_turn(app, rect, twist, hover);
         app.viewport.twist_last = Some(now);
-    } else if pressed || app.viewport.twist_last.is_none_or(|last| now - last > TWIST_PAUSE) {
-        app.viewport.twist_pivot = None;
-        app.viewport.twist_last = None;
     }
     let zoom_held = (inside || app.viewport.zoom_shortcut_drag)
         && ui.input(|input| crate::keymap::drag_zoom_held(app, input))

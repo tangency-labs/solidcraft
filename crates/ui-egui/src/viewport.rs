@@ -12011,6 +12011,35 @@ mod tests {
         }
         h.frames(30);
         assert!(h.app.viewport.twist_pivot.is_none(), "a paused twist lets its pivot go");
+        // A window at rest draws no frames, so the next twist can come straight after a long
+        // pause, or with a click: either way the last twist's pivot is let go first.
+        let stale = Vec3::new(1.0e4, -1.0e4, 1.0e4);
+        let at = h.ctx.input(|i| i.time);
+        for (last, press) in [(at - 10.0, false), (at, true)] {
+            h.app.viewport.twist_pivot = Some(stale);
+            h.app.viewport.twist_last = Some(last);
+            if press {
+                h.app.synthetic.push(egui::Event::PointerButton {
+                    pos: pos2(800.0, 500.0),
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            h.app.synthetic.push(egui::Event::Rotate(-0.1));
+            h.frame();
+            assert_ne!(h.app.viewport.twist_pivot, Some(stale), "a new twist (press {press}) never turns about the last twist's pivot");
+            if press {
+                h.app.synthetic.push(egui::Event::PointerButton {
+                    pos: pos2(800.0, 500.0),
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                });
+                h.frame();
+            }
+        }
+        h.frames(30);
 
         let still = h.app.cam;
         h.app.synthetic.push(egui::Event::Rotate(f32::NAN));
