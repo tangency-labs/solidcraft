@@ -340,6 +340,39 @@ fn tangent_moves_only_the_second_pick() {
     check_order(line_and_circle(), "sketch.constraint.tangent", "c1", "l1");
 }
 
+/// #12092: Tangent with a line's end point and a circle puts that end on the circle and makes the
+/// line tangent there, in one step. In either pick order only the picked end moves: the line turns
+/// about its other end and gets longer or shorter, and the circle stays.
+#[test]
+fn tangent_at_a_lines_end_puts_the_end_on_the_circle() {
+    // Where the line ends up: its end's distance from the centre, and the line's.
+    let touch = |s: &Session| {
+        let sk = sketch(s);
+        let (a, b) = (pt(s, "l1.start"), pt(s, "l1.end"));
+        let c = sk.point(sk.resolve_point("c1.center").unwrap()).unwrap();
+        let line = (b - a).cross(c - a).abs() / a.dist(b);
+        (b.dist(c), line, sk.radius(sk.curve_index("c1").unwrap()).unwrap())
+    };
+    for (a, b) in [("c1", "l1.end"), ("l1.end", "c1")] {
+        let mut s = line_and_circle();
+        let circle = snap(&s, "c1");
+        let undo = s.undo.len();
+        let r = run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
+        assert_eq!(r["constraints"].as_array().map(Vec::len), Some(2), "{a}, {b}: {r}");
+        let (end, line, radius) = touch(&s);
+        assert!((radius - 5.0).abs() < 1e-9, "{a}, {b}: the circle keeps its size: {radius}");
+        assert!((end - 5.0).abs() < 1e-6 && (line - 5.0).abs() < 1e-6, "{a}, {b}: end {end}, line {line} from the centre");
+        assert!(same(&snap(&s, "c1"), &circle), "{a}, {b}: the circle moved");
+        let start = pt(&s, "l1.start");
+        assert!(start.dist(solidcore_record::Vec2::new(5.0, 3.0)) < 1e-9, "{a}, {b}: the line's other end moved to {start:?}");
+        assert_eq!(s.undo.len(), undo + 1, "{a}, {b}: one undo step");
+    }
+    // A point that ends no curve names no curve to be tangent: the refusal says what to pick.
+    let mut s = line_and_circle();
+    let e = s.execute("sketch.constraint.tangent", &json!({"a": "l1", "b": "c1.center"})).unwrap_err().to_string();
+    assert!(e.contains("end"), "{e}");
+}
+
 #[test]
 fn a_fixed_second_pick_makes_the_first_move() {
     let mut s = line_and_circle();

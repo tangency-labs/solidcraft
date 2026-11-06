@@ -157,7 +157,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_tangent")
         .enabled(in_sketch)
-        .params(concat!("a, b: curves or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created)", model_operand_doc!())),
+        .params(concat!("a, b: curves or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or the end point of a line or an arc: that end then lies on the other curve (or on the other end point), and its curve is tangent there, in one step (`constraints` lists both)", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.equal", "Equal", c_equal)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_equal")
@@ -2511,12 +2511,95 @@ fn two_curves_or_axes(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<(usize, u
 }
 
 fn c_tangent(s: &mut Session, p: &Value) -> Result<Value> {
-    let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.tangent", &["a", "b"])?;
-    constrain(s, p, "sketch.constraint.tangent", |sk| {
-        two_curves_or_axes(sk, p, "sketch.constraint.tangent")
-            .and_then(|ab| two_different("sketch.constraint.tangent", ab))
-            .map(|(a, b)| ConstraintKind::Tangent { a, b })
-    })
+    let cmd = "sketch.constraint.tangent";
+    let p = &super::sketch_project::project_operands(s, p, cmd, &["a", "b"])?;
+    let sk = sketch_store::read(&s.doc, sketch_store::target(s, p, cmd)?)?;
+    if tangent_end(sk, p, "a").is_some() || tangent_end(sk, p, "b").is_some() {
+        return tangent_at_end(s, p, cmd);
+    }
+    constrain(s, p, cmd, |sk| two_curves_or_axes(sk, p, cmd).and_then(|ab| two_different(cmd, ab)).map(|(a, b)| ConstraintKind::Tangent { a, b }))
+}
+
+/// The point a Tangent operand names when it names no curve and no sketch axis (#12092).
+fn tangent_end(sk: &Sketch, p: &Value, key: &str) -> Option<usize> {
+    let id = p.get(key)?.as_str()?;
+    if sk.curve_index(id).is_some() || sk.sketch_axis_curve(id).is_some() {
+        return None;
+    }
+    sk.resolve_point(id)
+}
+
+/// The one curve that ends at point `q`, leaving out `other`; `None` when no curve or more than
+/// one does.
+fn ended_by(sk: &Sketch, q: usize, other: Option<usize>) -> Option<usize> {
+    let mut owners = sk
+        .curves
+        .iter()
+        .enumerate()
+        .filter(|(i, c)| Some(*i) != other && c.kind.ends().is_some_and(|(start, end)| start == q || end == q))
+        .map(|(i, _)| i);
+    let first = owners.next()?;
+    owners.next().is_none().then_some(first)
+}
+
+/// Tangent with a curve's end point for `a` or `b` (#12092): that end lies on the other curve,
+/// or on the other end point, and the curve it ends is tangent to the other curve there. Both
+/// constraints come in one step. A line's end picked with a curve is what moves; otherwise the
+/// first pick stays and the second moves, as with two curves.
+fn tangent_at_end(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
+    let not_an_end = |key: &str| {
+        let id = p.get(key).and_then(Value::as_str).unwrap_or_default();
+        bad(cmd, format!("`{id}` is not the end of one curve: pick a curve, or the end point of a line or an arc"))
+    };
+    let (out, info) = edit(s, p, cmd, true, |sk, _| {
+        let rep = solve(&mut sk.clone());
+        let (pa, pb) = (tangent_end(sk, p, "a"), tangent_end(sk, p, "b"));
+        let ca = if pa.is_none() { Some(line_or_axis_ref(sk, p.get("a"), cmd, "a")?) } else { None };
+        let cb = if pb.is_none() { Some(line_or_axis_ref(sk, p.get("b"), cmd, "b")?) } else { None };
+        let a = match (ca, pa) {
+            (Some(c), _) => c,
+            (None, Some(q)) => ended_by(sk, q, cb).ok_or_else(|| not_an_end("a"))?,
+            (None, None) => return Err(not_an_end("a")),
+        };
+        let b = match (cb, pb) {
+            (Some(c), _) => c,
+            (None, Some(q)) => ended_by(sk, q, Some(a)).ok_or_else(|| not_an_end("b"))?,
+            (None, None) => return Err(not_an_end("b")),
+        };
+        let (a, b) = two_different(cmd, (a, b))?;
+        let held = |k: &ConstraintKind| sk.constraints.iter().any(|c| !c.driven && c.kind == *k);
+        let touch = match (pa, pb) {
+            (Some(q), Some(r)) if q != r => Some(ConstraintKind::Coincident { p: q, q: r }),
+            (Some(q), None) => Some(ConstraintKind::PointOnCurve { p: q, c: b }),
+            (None, Some(r)) => Some(ConstraintKind::PointOnCurve { p: r, c: a }),
+            _ => None,
+        };
+        let mut ids = Vec::new();
+        if let Some(k) = touch.filter(|k| !held(k)) {
+            ids.push(add_c(sk, k)?);
+        }
+        let tangent = add_c(sk, ConstraintKind::Tangent { a, b })?;
+        ids.push(tangent.clone());
+        // A line's end and a curve, in either order: only that end moves, so the line turns about
+        // its other end and gets longer or shorter to meet the curve (#12092). Otherwise, as for
+        // two curves, the first pick stays and the second moves.
+        let end = match (pa, pb) {
+            (Some(q), None) => Some((q, a, b)),
+            (None, Some(r)) => Some((r, b, a)),
+            _ => None,
+        };
+        let far = end.and_then(|(q, line, other)| match sk.curves.get(line).map(|c| &c.kind) {
+            Some(k @ CurveKind::Line { .. }) => k.ends().map(|(start, end)| (q, if start == q { end } else { start }, other)),
+            _ => None,
+        });
+        match far {
+            Some((q, f, other)) => apply_in_order(sk, &rep, &[Ent::Curve(other), Ent::Point(f)], Ent::Point(q), cmd, &ids)?,
+            None => apply_in_order(sk, &rep, &[Ent::Curve(a)], Ent::Curve(b), cmd, &ids)?,
+        }
+        Ok((tangent, ids))
+    })?;
+    let (tangent, ids) = out;
+    Ok(json!({"constraint": tangent, "constraints": ids, "sketch": info}))
 }
 fn c_equal(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("curves").is_some() {
