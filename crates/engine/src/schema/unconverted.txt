@@ -28,7 +28,6 @@ explode.delete
 explode.list
 explode.show
 expr.evaluate
-face.delete
 file.export
 file.export_view_dxf
 file.insert_mesh
@@ -225,7 +224,6 @@ solid.hole
 solid.loft
 solid.mirror
 solid.move
-solid.offset_face
 solid.pattern.circular
 solid.pattern.path
 solid.pattern.rectangular
