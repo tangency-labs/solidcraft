@@ -83,6 +83,34 @@ class GoldenInventoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.counts()
 
+    def test_distinct_out_of_order_cases_refuse(self):
+        """An unsorted inventory cannot publish, even without duplicate identities."""
+        self.rows.reverse()
+        self.write()
+        with self.assertRaisesRegex(ValueError, r"geom\.fixture\.jsonl:3: case names must be sorted"):
+            self.counts()
+
+    def test_known_failure_unit_needs_a_golden_file(self):
+        """A known-failure mapping cannot silently disappear with its unit's file."""
+        (self.directory / (self.uid + ".jsonl")).unlink()
+        with self.assertRaisesRegex(ValueError, r"known_failing\.json: known-failure unit has no golden file"):
+            self.counts()
+
+    def test_known_failures_need_a_mapping_at_the_top_level(self):
+        """An array of reasons is not the documented unit-to-case mapping."""
+        self.known = []
+        self.write()
+        with self.assertRaisesRegex(ValueError, r"known_failing\.json: expected a unit-to-case mapping"):
+            self.counts()
+
+    def test_missing_inventory_directory_refuses(self):
+        """An omitted checkout directory must not become an empty publication."""
+        with tempfile.TemporaryDirectory(prefix="missing golden inventory ") as empty:
+            missing = Path(empty) / "crates/goldens/expected"
+            with self.assertRaises(FileNotFoundError) as error:
+                self.progress.load_inventory(Path(empty))
+            self.assertIn(str(missing), str(error.exception))
+
     def test_known_failure_cannot_also_have_a_golden_record(self):
         """The inventory enforces the gate's no-blessed-known-failure boundary."""
         self.known[self.uid]["a_error"] = "solidcore#999: still wrong"

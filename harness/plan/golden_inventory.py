@@ -21,7 +21,7 @@ def load_inventory(root):
     """
     directory = Path(root) / "crates/goldens/expected"
     if not directory.exists():
-        return {}
+        raise FileNotFoundError(f"{directory}: golden inventory directory not found")
     known_path = directory / "known_failing.json"
     known = read_json(known_path.read_text(), known_path) if known_path.exists() else {}
     if not isinstance(known, dict):

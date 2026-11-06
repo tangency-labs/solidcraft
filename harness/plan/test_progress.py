@@ -109,6 +109,18 @@ class CaseCountsTest(unittest.TestCase):
                     self.render([unit])
                 self.assertEqual(checklist.read_text(), "existing checklist\n")
 
+    def test_missing_inventory_does_not_overwrite_existing_checklist(self):
+        """An omitted golden directory fails before replacing a published checklist."""
+        unit = self.unit("curve.example", "An earlier experiment had 41 cases.")
+        directory = self.root / "crates/goldens/expected"
+        directory.rename(directory.with_name("expected-away"))
+        checklist = self.root / "plan/PROGRESS.md"
+        checklist.write_text("existing checklist\n")
+        with self.assertRaises(FileNotFoundError) as error:
+            self.render([unit])
+        self.assertIn(str(directory), str(error.exception))
+        self.assertEqual(checklist.read_text(), "existing checklist\n")
+
 
 if __name__ == "__main__":
     unittest.main()
