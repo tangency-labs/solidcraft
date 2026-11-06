@@ -1158,8 +1158,9 @@ pub(crate) fn is_open(app: &SolveApp, key: &str, default: bool) -> bool {
     fold_open(app, key, default)
 }
 
-/// Whether a row is open in the tree's own folds, whatever a search shows.
-fn fold_open(app: &SolveApp, key: &str, default: bool) -> bool {
+/// Whether a row is open in the tree's own folds, whatever a search shows. The vertical History
+/// reads its folds here: a search filters the Browser's rows, not the History's.
+pub(crate) fn fold_open(app: &SolveApp, key: &str, default: bool) -> bool {
     if is_placement_key(key) {
         return placement_open(app, key);
     }
@@ -1188,8 +1189,14 @@ pub(crate) fn toggle(app: &mut SolveApp, key: &str, default: bool) {
         app.tree.search.toggle_closed(key);
         return;
     }
+    toggle_fold(app, key, default);
+}
+
+/// A row opened or closed by hand in the tree's own folds, whatever a search shows: the vertical
+/// History's folds, which a search leaves alone. The next Find in Browser leaves it as it is.
+pub(crate) fn toggle_fold(app: &mut SolveApp, key: &str, default: bool) {
     app.tree.found_rows.retain(|(row, _)| row != key);
-    let open = is_open(app, key, default);
+    let open = fold_open(app, key, default);
     set_open(app, key, default, !open);
 }
 
