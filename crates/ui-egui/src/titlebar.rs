@@ -25,6 +25,8 @@ use crate::theme::Tokens;
 pub const BUTTON_WIDTH: f32 = 46.0;
 /// The three caption buttons together.
 pub const WIDTH: f32 = 3.0 * BUTTON_WIDTH;
+/// How far a glass theme's joined caption strip stands in from the window's right edge.
+const CAPTION_MARGIN: f32 = 8.0;
 /// Room for the macOS traffic lights at the bar's left end.
 pub const TRAFFIC_LIGHTS: f32 = 76.0;
 /// Windows' resize border at 100 % (96 DPI): `SM_CXSIZEFRAME` + `SM_CXPADDEDBORDER`, 4 + 4 px.
@@ -99,18 +101,52 @@ pub fn caption_buttons(app: &mut SolveApp, ui: &mut Ui, bar: Rect) {
     let t = Tokens::get();
     let max = maximized(ui.ctx());
     let mut clicked = None;
+    // A glass theme with tiles joins the caption buttons in one strip hanging from the window's
+    // top edge: narrow silver Minimize and Maximize, a wide red Close with a bold white cross,
+    // inside a dark outline rounded at its outer bottom corners. The strip keeps the buttons'
+    // total width. Orbs stay apart, in the accent; Close in the error colour.
+    let tiles = t.borders.glass.is_some_and(|glass| glass.bubbles == Some(crate::glass::BubbleShape::Square));
+    let shares = if tiles { [0.75, 0.75, 1.5] } else { [1.0; 3] };
+    let margin = if tiles { CAPTION_MARGIN } else { 0.0 };
+    let unit = (WIDTH - margin) / 3.0;
+    let strip = Rect::from_min_max(pos2(bar.right() - WIDTH, bar.top()), pos2(bar.right() - margin, bar.top() + (bar.height() * 0.62).round()));
+    let silver = Color32::from_rgb(0xb4, 0xc0, 0xcc);
+    let mut x = bar.right() - WIDTH;
     for (i, c) in CAPTIONS.into_iter().enumerate() {
-        let r = Rect::from_min_size(pos2(bar.right() - WIDTH + i as f32 * BUTTON_WIDTH, bar.top()), vec2(BUTTON_WIDTH, bar.height()));
+        let width = shares.get(i).copied().unwrap_or(1.0) * unit;
+        let r = Rect::from_min_size(pos2(x, bar.top()), vec2(width, bar.height()));
+        x += width;
         let resp = ui.interact(r, caption_id(c), Sense::click());
-        let fill = match (resp.is_pointer_button_down_on(), resp.hovered()) {
-            (true, _) => t.app_bar_hover_subtle,
-            (_, true) => t.app_bar_hover_button,
-            _ if resp.has_focus() => t.app_bar_hover_button,
-            _ => Color32::TRANSPARENT,
+        let close = matches!(c, Caption::Close);
+        let tint = match (close, tiles) {
+            (true, _) => t.error,
+            (false, true) => silver,
+            (false, false) => t.accent,
         };
-        ui.painter().rect_filled(r, 0.0, fill);
-        let ink = t.app_bar_text;
-        paint_glyph(ui, c, max, r.center(), Stroke::new(1.0, ink));
+        let state = crate::glass::Bubble::of(&resp, true, false);
+        let segment = Rect::from_min_max(r.min, pos2(r.right(), strip.bottom()));
+        let last = CAPTIONS.len() - 1;
+        let corner = egui::CornerRadius { nw: 0, ne: 0, sw: if i == 0 { t.radius_md } else { 0 }, se: if i == last { t.radius_md } else { 0 } };
+        // A solid face under the glass: red for Close, silver for the others.
+        if tiles {
+            ui.painter().rect_filled(segment, corner, if close { t.error.gamma_multiply(0.85) } else { silver.gamma_multiply(0.45) });
+        }
+        let joined = t.tile_segment(ui.painter(), segment, corner, tint, state);
+        let bubble = if joined { None } else { t.bubble(ui.painter(), r.shrink(4.0), tint, state) };
+        if !joined && bubble.is_none() {
+            let fill = match (resp.is_pointer_button_down_on(), resp.hovered()) {
+                (true, _) => t.app_bar_hover_subtle,
+                (_, true) => t.app_bar_hover_button,
+                _ if resp.has_focus() => t.app_bar_hover_button,
+                _ => Color32::TRANSPARENT,
+            };
+            ui.painter().rect_filled(r, 0.0, fill);
+        }
+        let stroke = if joined && close { Stroke::new(2.0, Color32::WHITE) } else { Stroke::new(1.0, t.app_bar_text) };
+        paint_glyph(ui, c, max, if joined { segment.center() } else { r.center() }, stroke);
+        if let Some(bubble) = bubble {
+            bubble.finish(ui.painter());
+        }
         let tip = match c {
             Caption::Minimize => "Minimize",
             Caption::Maximize if max => "Restore",
@@ -120,6 +156,10 @@ pub fn caption_buttons(app: &mut SolveApp, ui: &mut Ui, bar: Rect) {
         if resp.backing_on_hover_text(tip).clicked() {
             clicked = Some(c);
         }
+    }
+    if tiles {
+        let outline = egui::CornerRadius { nw: 0, ne: 0, sw: t.radius_md, se: t.radius_md };
+        ui.painter().rect_stroke(strip, outline, Stroke::new(1.0, t.app_bar_text.gamma_multiply(0.55)), egui::StrokeKind::Inside);
     }
     let action = match clicked {
         Some(Caption::Minimize) => "minimize",

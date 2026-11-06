@@ -137,7 +137,23 @@ pub(crate) fn navigation_button_editable(ui: &mut Ui, rect: Rect, button: Naviga
         response.surrender_focus();
     }
     let (fill, focus) = navigation_visual(button.kind, button.selected, response.hovered(), pressed, response.has_focus());
-    if let Some(fill) = navigation_fill(&t, fill) {
+    // A glass theme's buttons sit on its bubbles: tiles fill the whole button (its menu chevron and
+    // label too), so the bar's tiles line up edge to edge; orbs sit round the icon of an icon-only
+    // button. Others keep their rounded fill.
+    let state = match fill {
+        _ if !ui.is_enabled() => crate::glass::Bubble::Disabled,
+        NavigationFill::None => crate::glass::Bubble::Rest,
+        NavigationFill::Hover => crate::glass::Bubble::Hover,
+        NavigationFill::Press | NavigationFill::Active => crate::glass::Bubble::On,
+    };
+    let bubble = match t.borders.glass.and_then(|glass| glass.bubbles) {
+        Some(crate::glass::BubbleShape::Square) => t.bubble(ui.painter(), rect, t.accent, state),
+        Some(crate::glass::BubbleShape::Round) if !button.labels && !button.menu => t.bubble(ui.painter(), rect, t.accent, state),
+        _ => None,
+    };
+    if bubble.is_none()
+        && let Some(fill) = navigation_fill(&t, fill)
+    {
         ui.painter().rect_filled(rect, metrics.button_radius, fill);
     }
     if focus {
@@ -161,6 +177,9 @@ pub(crate) fn navigation_button_editable(ui: &mut Ui, rect: Rect, button: Naviga
         button.icon,
         ink,
     );
+    if let Some(bubble) = bubble {
+        bubble.finish(ui.painter());
+    }
     x += metrics.icon;
     if let Some(text) = text {
         x += if button.menu { NAV_MENU_GAP } else { NAV_LABEL_GAP };
