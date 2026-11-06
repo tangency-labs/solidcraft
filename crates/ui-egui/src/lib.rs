@@ -297,6 +297,7 @@ mod status_bar;
 #[cfg(test)]
 mod sweep_dialog_tests;
 pub(crate) mod test_boat;
+pub mod text_glow;
 pub mod theme;
 pub mod theme_files;
 mod theme_options;
@@ -3332,6 +3333,7 @@ impl SolveApp {
         if self.file_picker_busy() {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
         }
+        text_glow::apply(ui.ctx());
         control::publish_design(self, &control::DESIGN_WATCH);
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);

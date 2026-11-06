@@ -1,0 +1,86 @@
+{
+  "en": {
+    "prefs.text_glow": "Text glow"
+  },
+  "en-GB": {
+    "prefs.text_glow": "Text glow"
+  },
+  "ar": {
+    "prefs.text_glow": "توهج النص"
+  },
+  "cs": {
+    "prefs.text_glow": "Záře textu"
+  },
+  "da": {
+    "prefs.text_glow": "Tekstglød"
+  },
+  "de": {
+    "prefs.text_glow": "Textschein"
+  },
+  "es": {
+    "prefs.text_glow": "Brillo del texto"
+  },
+  "fr": {
+    "prefs.text_glow": "Halo du texte"
+  },
+  "gl": {
+    "prefs.text_glow": "Brillo do texto"
+  },
+  "he": {
+    "prefs.text_glow": "זוהר טקסט"
+  },
+  "hu": {
+    "prefs.text_glow": "Szöveg ragyogása"
+  },
+  "id": {
+    "prefs.text_glow": "Cahaya teks"
+  },
+  "it": {
+    "prefs.text_glow": "Alone del testo"
+  },
+  "ja": {
+    "prefs.text_glow": "文字のグロー"
+  },
+  "ko": {
+    "prefs.text_glow": "글자 광채"
+  },
+  "ms": {
+    "prefs.text_glow": "Cahaya teks"
+  },
+  "nb": {
+    "prefs.text_glow": "Tekstglød"
+  },
+  "nl": {
+    "prefs.text_glow": "Tekstgloed"
+  },
+  "pl": {
+    "prefs.text_glow": "Poświata tekstu"
+  },
+  "pt-BR": {
+    "prefs.text_glow": "Brilho do texto"
+  },
+  "ro": {
+    "prefs.text_glow": "Strălucirea textului"
+  },
+  "ru": {
+    "prefs.text_glow": "Свечение текста"
+  },
+  "sv": {
+    "prefs.text_glow": "Textglöd"
+  },
+  "tr": {
+    "prefs.text_glow": "Metin parıltısı"
+  },
+  "uk": {
+    "prefs.text_glow": "Сяйво тексту"
+  },
+  "vi": {
+    "prefs.text_glow": "Quầng sáng chữ"
+  },
+  "zh": {
+    "prefs.text_glow": "文字光晕"
+  },
+  "zh-TW": {
+    "prefs.text_glow": "文字光暈"
+  }
+}
