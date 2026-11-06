@@ -225,5 +225,7 @@ fn origin_plane_names(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
         let response = setting::hide_origin(app, ui);
         crate::scenario::publish_target("prefs:hide_origin", response.rect);
         crate::scenario::publish_target("dialog:Hide origin by default", response.rect);
+        let response = setting::origin_axes_across_view(app, ui).backing_on_hover_text(app.tr("prefs.origin_axes_across_view_help"));
+        crate::scenario::publish_target("prefs:origin_axes_across_view", response.rect);
     });
 }

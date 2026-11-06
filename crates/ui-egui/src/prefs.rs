@@ -1487,6 +1487,10 @@ preference_settings! {
     hole_moves: bool = false, PAGE_TOOLS => check("Move holes by clicking or dragging");
     /// The browser's Origin folder starts hidden in designs that don't keep its eye themselves.
     hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
+    /// The X, Y and Z origin axes run through the origin to the edges of the view, both ways, so
+    /// they stay in sight as references wherever the view is (#11123). Off: short axes from the
+    /// origin, solid then dashed, as before.
+    origin_axes_across_view: bool = true, PAGE_DESIGN => check_id("prefs.origin_axes_across_view");
     /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit): a marker that
     /// drags it across the model and a ring that turns it. Off by default: the feature is then placed
     /// by its click only, as before, and its Position input takes faces only.
