@@ -2520,10 +2520,11 @@ fn c_tangent(s: &mut Session, p: &Value) -> Result<Value> {
     constrain(s, p, cmd, |sk| two_curves_or_axes(sk, p, cmd).and_then(|ab| two_different(cmd, ab)).map(|(a, b)| ConstraintKind::Tangent { a, b }))
 }
 
-/// The point a Tangent operand names when it names no curve and no sketch axis (#12092).
+/// The point a Tangent operand names when it names no curve and no sketch axis (#12092). `x` and
+/// `y` name the axes even before their lines exist, as in [`line_or_axis_ref`].
 fn tangent_end(sk: &Sketch, p: &Value, key: &str) -> Option<usize> {
     let id = p.get(key)?.as_str()?;
-    if sk.curve_index(id).is_some() || sk.sketch_axis_curve(id).is_some() {
+    if sk.curve_index(id).is_some() || solidcraft_sketch::sketch_axis_geom(id).is_some() {
         return None;
     }
     sk.resolve_point(id)
