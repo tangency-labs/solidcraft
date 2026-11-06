@@ -747,7 +747,7 @@ mod tests {
         }
     }
 
-    /// Reports a changed rejection through check_unit without changing the case inventory.
+    /// Reports a changed rejection through `check_unit` without changing the case inventory.
     #[test]
     fn check_unit_reports_a_rejection_change_even_when_the_output_is_empty() {
         let ctx = CaseContext {
