@@ -371,7 +371,14 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 setting::render_previous_geometry_budget(app, ui).backing_on_hover_text(app.tr("prefs.render_previous_geometry_budget_help"));
                 setting::render_legacy_image_defaults(app, ui).backing_on_hover_text(app.tr("prefs.render_legacy_image_defaults_help"));
             });
+            ui_kit::row(ui, app.tr_label("Joint symbols"), |ui| {
+                let mut selected = usize::from(app.preferences.joint_symbols.min(crate::dialogs_assembly::RING_AND_AXIS));
+                ui_kit::dropdown(ui, "pref_joint_symbols", &mut selected, &["White on dark", "Solid accent", "Solid amber", "Ring and axis"]);
+                app.preferences.joint_symbols = selected as u8;
+            });
         });
+        let response = setting::highlight_moving_joints(app, ui).on_hover_text(app.tr("prefs.highlight_moving_joints_help"));
+        crate::scenario::publish_handle("prefs:highlight_moving_joints", response.rect.center());
     });
 }
 

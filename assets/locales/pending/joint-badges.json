@@ -1,0 +1,74 @@
+{
+  "en": {
+    "Joint symbols": "Joint symbols",
+    "Ring and axis": "Ring and axis",
+    "Solid accent": "Solid accent",
+    "Solid amber": "Solid amber",
+    "White on dark": "White on dark",
+    "prefs.highlight_moving_joints": "Highlight moving joints",
+    "prefs.highlight_moving_joints_help": "Dim rigid joints and joints whose parts are fully constrained, so you can see what can still move"
+  },
+  "ar": {
+    "Joint symbols": "رموز المفاصل",
+    "Ring and axis": "حلقة ومحور",
+    "Solid accent": "لون مميز ممتلئ",
+    "Solid amber": "كهرماني ممتلئ",
+    "White on dark": "أبيض على داكن",
+    "prefs.highlight_moving_joints": "تمييز المفاصل المتحركة",
+    "prefs.highlight_moving_joints_help": "تعتيم المفاصل الصلبة والمفاصل التي قُيّدت أجزاؤها بالكامل، لترى ما يزال قابلاً للحركة"
+  },
+  "de": {
+    "Joint symbols": "Gelenksymbole",
+    "Ring and axis": "Ring und Achse",
+    "Solid accent": "Akzentfarbe, gefüllt",
+    "Solid amber": "Bernstein, gefüllt",
+    "White on dark": "Weiß auf dunkel",
+    "prefs.highlight_moving_joints": "Bewegliche Gelenke hervorheben",
+    "prefs.highlight_moving_joints_help": "Starre Gelenke und Gelenke voll bestimmter Teile abdunkeln, damit sichtbar bleibt, was sich noch bewegen kann"
+  },
+  "he": {
+    "Joint symbols": "סמלי מפרקים",
+    "Ring and axis": "טבעת וציר",
+    "Solid accent": "צבע הדגשה מלא",
+    "Solid amber": "ענבר מלא",
+    "White on dark": "לבן על כהה",
+    "prefs.highlight_moving_joints": "הדגשת מפרקים נעים",
+    "prefs.highlight_moving_joints_help": "עמעום מפרקים קשיחים ומפרקים שחלקיהם מאולצים לחלוטין, כדי לראות מה עדיין יכול לזוז"
+  },
+  "ja": {
+    "Joint symbols": "ジョイントの記号",
+    "Ring and axis": "リングと軸",
+    "Solid accent": "アクセントカラーで塗りつぶし",
+    "Solid amber": "アンバーで塗りつぶし",
+    "White on dark": "暗い背景に白",
+    "prefs.highlight_moving_joints": "可動ジョイントを強調表示",
+    "prefs.highlight_moving_joints_help": "剛体ジョイントと、部品が完全に拘束されたジョイントを暗く表示し、まだ動かせるものを確認できるようにします"
+  },
+  "ko": {
+    "Joint symbols": "조인트 기호",
+    "Ring and axis": "링과 축",
+    "Solid accent": "강조 색 채움",
+    "Solid amber": "호박색 채움",
+    "White on dark": "어두운 배경에 흰색",
+    "prefs.highlight_moving_joints": "움직이는 조인트 강조",
+    "prefs.highlight_moving_joints_help": "강체 조인트와 부품이 완전히 구속된 조인트를 어둡게 표시하여 아직 움직일 수 있는 것을 보여 줍니다"
+  },
+  "vi": {
+    "Joint symbols": "Ký hiệu khớp",
+    "Ring and axis": "Vòng và trục",
+    "Solid accent": "Tô màu nhấn",
+    "Solid amber": "Tô màu hổ phách",
+    "White on dark": "Trắng trên nền tối",
+    "prefs.highlight_moving_joints": "Làm nổi bật khớp chuyển động",
+    "prefs.highlight_moving_joints_help": "Làm mờ khớp cứng và khớp có các chi tiết đã bị ràng buộc hoàn toàn, để thấy những gì còn có thể chuyển động"
+  },
+  "zh": {
+    "Joint symbols": "关节符号",
+    "Ring and axis": "圆环和轴",
+    "Solid accent": "实心强调色",
+    "Solid amber": "实心琥珀色",
+    "White on dark": "深色底白色",
+    "prefs.highlight_moving_joints": "突出显示活动关节",
+    "prefs.highlight_moving_joints_help": "调暗刚性关节和零件已完全约束的关节，以便看清哪些仍可移动"
+  }
+}
