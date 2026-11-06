@@ -908,3 +908,24 @@ fn construction_on_a_moved_body_moves_with_it() {
     let (o, d) = axis(&s, "Tether");
     assert!(on_line(o, d, Vec3::new(0.0, 0.0, 20.0)) && on_line(o, d, Vec3::new(0.0, 50.0, 20.0)), "{o:?} {d:?}");
 }
+
+/// #12022: a plane made of picks, made in a moved component, goes through its picks in the
+/// world, whichever constructor makes it (Plane Through Axis and Point left its point unmapped).
+#[test]
+fn planes_made_of_picks_in_a_moved_component_go_through_their_world_picks() {
+    let cases = [
+        ("construct.plane.axis_point", json!({"axis":{"axis":"Mast"},"point":{"point":[60,5,7]},"name":"F"})),
+        ("construct.plane.three_points", json!({"a":{"point":[50,0,0]},"b":{"point":[50,0,10]},"c":{"point":[60,5,7]},"name":"F"})),
+    ];
+    for (cmd, params) in cases {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name":"Part","grounded":false}));
+        run(&mut s, "occurrence.move", json!({"occurrence":"Part:1","translate":[50,0,3]}));
+        run(&mut s, "construct.axis.two_points", json!({"a":{"point":[50,0,0]},"b":{"point":[50,0,10]},"name":"Mast"}));
+        run(&mut s, cmd, params);
+        let pl = plane(&s, "F");
+        for p in [Vec3::new(50.0, 0.0, 0.0), Vec3::new(50.0, 0.0, 10.0), Vec3::new(60.0, 5.0, 7.0)] {
+            assert!(on_plane(&pl, p), "{cmd}: {p:?} on {pl:?}");
+        }
+    }
+}
