@@ -467,6 +467,21 @@ fn removed_note(gone: &[Vec3]) -> String {
     }
 }
 
+thread_local! {
+    /// Current feature evaluation validation mode (`EachStep`, `EachFeature`, or `Off`).
+    static EVAL_VALIDATION: std::cell::Cell<kernel::Validation> = const { std::cell::Cell::new(kernel::Validation::EachFeature) };
+}
+
+/// Restores `EVAL_VALIDATION` to its previous value when dropped.
+struct EvalValidationGuard(kernel::Validation);
+
+impl Drop for EvalValidationGuard {
+    /// Restores the saved validation mode on scope exit.
+    fn drop(&mut self) {
+        EVAL_VALIDATION.set(self.0);
+    }
+}
+
 /// A blend's refusal as too large (`why`) with the largest `size` (radius, distance) that fits,
 /// as `search` finds it by building candidates ([`kernel::fillet_max`]): the refusal as it is
 /// when none fits or the search itself fails (a candidate failing for another reason says
@@ -476,6 +491,9 @@ fn with_largest_fit(
     size: &str,
     search: impl FnOnce() -> std::result::Result<Option<(f64, kernel::Body)>, kernel::KernelError>,
 ) -> kernel::KernelError {
+    if EVAL_VALIDATION.get() == kernel::Validation::Off {
+        return kernel::KernelError::TooLarge(why);
+    }
     // On solidcore the refusal names a size already, less a margin (34.99 where 35 builds), and
     // its edge: the edge stays, the size is the largest the search builds, solidcore's where the
     // search finds none.
@@ -2350,6 +2368,7 @@ impl Model {
             let r = match frame_error.or(bad_param) {
                 Some(e) => Err(kernel::KernelError::Failed(e)),
                 None => kernel::guard(&f.name, || {
+                    let _val_guard = EvalValidationGuard(EVAL_VALIDATION.replace(validation));
                     let (r, deferred) =
                         kernel::validating(validation, || eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair));
                     r.map_err(|e| match e {
@@ -5745,13 +5764,13 @@ fn feature_tools_with_constructor(
         FeatureKind::Torus { center, major, minor, .. } => {
             Ok(unnamed(vec![kernel::torus(point(vals, center)?, val(vals, major, Kind::Length)?, val(vals, minor, Kind::Length)?)?]))
         }
-        FeatureKind::Cone { base, axis, radius, top_radius, height, .. } => Ok(unnamed(vec![more::cone(
+        FeatureKind::Cone { base, axis, radius, top_radius, height, .. } => Ok(vec![more::cone(
             point(vals, base)?,
             axis.0,
             val(vals, radius, Kind::Length)?,
             val(vals, top_radius, Kind::Length)?,
             val(vals, height, Kind::Length)?,
-        )?])),
+        )?]),
         FeatureKind::Hole { .. } => Ok(hole_feature_tools(vals, st, f)?.into_iter().map(|(tool, _)| tool).collect()),
         _ => Err(DocError::Invalid(format!("{} cannot be patterned or mirrored yet", f.name))),
     }
@@ -6083,15 +6102,28 @@ fn from_profile_on_closed_path(segs: Vec<solidcore_record::Seg2>, path: &Plane, 
 /// Where an extrude of distance `d` starts and ends along the sketch normal, before any start
 /// offset: one side, the other, both (symmetric), or a second distance on the other side.
 ///
-/// A second distance (`distance2`) goes the other way from the first side, wherever that went:
-/// against the normal for `direction: negative` (#2700), and back along it when a negative
-/// distance or a To Object below the sketch sends the first side down.
+/// A second distance (`distance2`) goes the other way from the first side: against the normal,
+/// or along it for `direction: negative` (#2700). Entered distances keep those sides whatever
+/// their signs; a To Object below the sketch or a Through All that reaches down sends the first
+/// side down and the second back along the normal.
 pub(crate) fn extent_sides(vals: &BTreeMap<String, Value>, extent: &crate::Extent, d: f64, direction: crate::Direction) -> Result<(f64, f64)> {
     Ok(match (&extent.distance2, direction) {
         (Some(d2), _) => {
-            let first = if direction == crate::Direction::Negative { -d } else { d };
+            let negative = direction == crate::Direction::Negative;
+            let first = if negative { -d } else { d };
             let d2 = val(vals, d2, Kind::Length)?;
-            (if first < 0.0 { d2 } else { -d2 }, first)
+            // An entered distance keeps its side whatever its sign: Direction fixes the sides,
+            // and a sign only turns its own side over. A reach computed from the model (To
+            // Object, Through All) has the sign of where the object is, so the other side
+            // follows it.
+            let second = if extent.second_follows_first || extent.to.is_some() || extent.through_all {
+                if first < 0.0 { d2 } else { -d2 }
+            } else if negative {
+                d2
+            } else {
+                -d2
+            };
+            (second, first)
         }
         (None, crate::Direction::Positive) => (0.0, d),
         (None, crate::Direction::Negative) => (-d, 0.0),
@@ -7956,8 +7988,8 @@ fn eval_feature(
         FeatureKind::Cone { base, axis, radius, top_radius, height, operation } => {
             let (radius, top_radius, height) =
                 (val(vals, radius, Kind::Length)?, val(vals, top_radius, Kind::Length)?, val(vals, height, Kind::Length)?);
-            let b = more::cone(point(vals, base)?, axis.0, radius, top_radius, height)?;
-            apply_op(doc, st, f, vec![b], *operation, &[])
+            let tool = more::cone(point(vals, base)?, axis.0, radius, top_radius, height)?;
+            apply_traced(doc, st, f, vec![tool], *operation, &[])
         }
         FeatureKind::Combine { target, tools, operation, keep_tools } => {
             if tools.iter().any(|t| t == target) {

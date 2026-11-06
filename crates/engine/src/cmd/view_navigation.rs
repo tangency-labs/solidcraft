@@ -7,11 +7,12 @@ use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
 use crate::schema::view_navigation::{
     CameraReply, NavigatorParams, NormalToParams, RenderBrowser, RenderFocus, RenderSelect, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams,
-    TabStep, TabStepParams,
+    TabStep, TabStepParams, ZoomTool,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
 
+const ZOOM_TOOL_CONTRACT: TypedContract<ZoomTool> = TypedContract::new();
 const FOCUS_CONTRACT: TypedContract<RenderFocus> = TypedContract::new();
 const NAVIGATOR_CONTRACT: TypedContract<NavigatorParams> = TypedContract::new();
 const BROWSER_CONTRACT: TypedContract<RenderBrowserRequest> = TypedContract::new();
@@ -57,6 +58,10 @@ CommandSpec::new("view.home", "Home View", home)
     .icon("home").noundo().doc_only().params("no parameters → home orientation framing the active canvas; display only"),
 CommandSpec::new("view.tool", "Navigation Tool", tool)
     .icon("orbit").noundo().doc_only().params("tool: orbit|pan|zoom|none → tool; latch a camera tool, none releases it"),
+CommandSpec::new("view.tool.zoom", "Drag to Zoom", crate::checked!("view.tool.zoom", zoom_tool))
+    .icon("zoom").noundo().doc_only()
+    .contract(&ZOOM_TOOL_CONTRACT).output(output_schema_for::<ZoomTool>)
+    .params("on?: bool (omitted: toggle) → on?; latch the Zoom tool for left-button drags. A shortcut assigned in the UI zooms while held"),
 CommandSpec::new("view.spin", "Continuous Orbit", spin)
     .icon("spin").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; continuous orbit until the next click or key"),
 CommandSpec::new("view.visual_style", "Visual Style", visual_style)
@@ -310,6 +315,10 @@ fn view_toggle(p: &Value, cmd: &str, key: &str) -> Result<Value> {
         Some(value) => value.as_bool().map(|on| json!({key: on})).ok_or_else(|| bad(cmd, format!("{key} must be a boolean"))),
         None => Ok(json!({})),
     }
+}
+
+fn zoom_tool(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.tool.zoom", "on")
 }
 
 fn spin(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -641,7 +650,9 @@ mod tests {
                 assert!(s.execute(id, &json!({key:value})).is_err(), "{id}: {value}");
             }
         }
-        for (id, key) in [("view.spin", "on"), ("view.grid", "on"), ("view.ground_shadow", "on"), ("view.navigation_bar", "visible")] {
+        for (id, key) in
+            [("view.tool.zoom", "on"), ("view.spin", "on"), ("view.grid", "on"), ("view.ground_shadow", "on"), ("view.navigation_bar", "visible")]
+        {
             assert_eq!(s.execute(id, &json!({})).unwrap(), json!({}));
             assert_eq!(s.execute(id, &Value::Null).unwrap(), json!({}));
             for on in [false, true] {
@@ -651,7 +662,17 @@ mod tests {
                 assert!(s.execute(id, &json!({key:value})).is_err(), "{id}: {value}");
             }
         }
-        for id in ["view.fit", "view.home", "view.tool", "view.spin", "view.visual_style", "view.grid", "view.ground_shadow", "view.navigation_bar"] {
+        for id in [
+            "view.fit",
+            "view.home",
+            "view.tool",
+            "view.tool.zoom",
+            "view.spin",
+            "view.visual_style",
+            "view.grid",
+            "view.ground_shadow",
+            "view.navigation_bar",
+        ] {
             for params in [json!(true), json!(1), json!("orbit"), json!([]), json!({"unexpected":true})] {
                 assert!(s.execute(id, &params).is_err(), "{id}: {params}");
             }

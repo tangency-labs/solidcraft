@@ -1,4 +1,5 @@
 //! The first local appearance-library consumer, inside the existing Appearance panel.
+#[cfg(not(target_arch = "wasm32"))]
 use crate::dialogs_appearance::selected_params;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ui_kit::BackingTooltipExt as _;

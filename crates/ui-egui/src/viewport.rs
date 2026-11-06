@@ -133,6 +133,12 @@ pub struct ViewportState {
     pub rect: Option<Rect>,
     pub(crate) layout: Option<crate::viewport_layout::Layout>,
     pub(crate) palette_rect: Option<Rect>,
+    /// None before the host's early confirmation paint; Some(NOTHING) means
+    /// no visible pair this pass. Late controls retain the already drawn rect.
+    pub(crate) host_confirm: Option<Rect>,
+    /// Snapshot of this host pass's shared persistent Window paint. None is a
+    /// bounded-ledger failure; the usable seam then refuses placement/framing.
+    pub(crate) host_windows: Option<Vec<Rect>>,
     pub(crate) dialog_rect: Option<Rect>,
     /// OK or Cancel clicked in the view's corner for the open dialog (#6709), which
     /// `dialogs::show` acts on in the same frame as its own buttons.
@@ -182,6 +188,8 @@ pub struct ViewportState {
     /// The preset's navigation for the left-button drag under way (Alias: Shift+Alt), taken
     /// when the button went down, so the drag neither selects nor moves sketch geometry.
     pub primary_nav: Option<NavMode>,
+    /// A primary press that started with the Zoom shortcut owns the pointer until release.
+    pub(crate) zoom_shortcut_drag: bool,
     /// Button-free gesture and its last owned pointer position, kept through pauses.
     pub(crate) modifier_nav: Option<(NavMode, Pos2)>,
     /// The mode the middle or right drag under way started with, kept until its button is
@@ -2108,7 +2116,7 @@ fn shadow_geometry(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::M
         return geometry;
     }
     let mut scene = GpuScene::default();
-    ground_shadow(&mut scene, app, ground_bounds(app, st));
+    ground_shadow(&mut scene, app, ground_boxes(app, st));
     let geometry = ShadowGeometry { key, state: st.clone(), bytes: std::sync::Arc::new(scene.shadow), palette: scene.palette };
     if let Ok(mut cache) = app.viewport.shadow.lock() {
         *cache = Some(geometry.clone());
@@ -2116,11 +2124,16 @@ fn shadow_geometry(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::M
     geometry
 }
 
-/// A soft dark ellipse on the ground under the shown bodies (darkest in the middle).
-fn ground_bounds(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::ModelState>) -> solidcraft_engine::geom::Aabb3 {
+/// Each shown body's box in the camera's Z-up frame (the ground is its XY plane).
+fn ground_boxes(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::ModelState>) -> Vec<solidcraft_engine::geom::Aabb3> {
     let boxes = body_bounds(app, st);
     let shown = st.bodies.iter().zip(boxes.iter()).filter(|(x, (_, bb))| !bb.is_empty() && app.body_visible(&x.name));
-    frame_bounds(app, shown.flat_map(|(_, (_, bb))| box_corners(bb)))
+    shown.map(|(_, (_, bb))| frame_bounds(app, box_corners(bb).into_iter())).collect()
+}
+
+/// The box around all shown bodies in the camera's Z-up frame.
+fn ground_bounds(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::ModelState>) -> solidcraft_engine::geom::Aabb3 {
+    ground_boxes(app, st).iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, b| a.union(b))
 }
 
 /// The corners of a box.
@@ -2162,30 +2175,75 @@ fn ground_height(app: &SolveApp, bounds: solidcraft_engine::geom::Aabb3) -> f64 
     ground - 1e-3 * (1.0 + bounds.diagonal())
 }
 
-fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, b: solidcraft_engine::geom::Aabb3) {
-    if b.is_empty() {
+/// A soft dark ellipse on the ground under each group of shown bodies (darkest in the middle).
+fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, framed: Vec<solidcraft_engine::geom::Aabb3>) {
+    let all = framed.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, b| a.union(b));
+    if all.is_empty() {
         return;
     }
-    let size = b.size();
-    let c = b.center();
-    let z = ground_height(app, b);
-    let (rx, ry) = (size.x * 0.62 + size.z * 0.15, size.y * 0.62 + size.z * 0.15);
-    if !(rx > 0.0 && ry > 0.0) {
-        return;
-    }
+    // Every ellipse lies on the lowest body's ground, so none floats beside a lower body.
+    let z = ground_height(app, all);
     let dark = if crate::theme::viewport_dark() { 150 } else { 80 };
+    for b in shadow_groups(framed) {
+        let (c, (rx, ry)) = (b.center(), shadow_radii(&b));
+        if !(rx > 0.0 && ry > 0.0) {
+            continue;
+        }
+        let at = |r: f64, a: f64| app.cam.from_frame(Vec3::new(c.x + rx * r * a.cos(), c.y + ry * r * a.sin(), z)).to_f32();
+        shadow_ellipse(sc, dark, at);
+    }
+}
+
+/// The half-axes of the ground shadow's ellipse under a box (in the camera's Z-up frame).
+fn shadow_radii(b: &solidcraft_engine::geom::Aabb3) -> (f64, f64) {
+    let size = b.size();
+    (size.x * 0.62 + size.z * 0.15, size.y * 0.62 + size.z * 0.15)
+}
+
+/// The boxes the ground shadow draws one ellipse under each (#10442): bodies whose boxes meet on
+/// the ground share one, and bodies apart get one each. One ellipse over all of them was darkest
+/// in its middle, which for two bodies side by side is the empty gap between them.
+fn shadow_groups(mut boxes: Vec<solidcraft_engine::geom::Aabb3>) -> Vec<solidcraft_engine::geom::Aabb3> {
+    // More groups than this is a crowd (an array, an assembly): one ellipse under it all, as
+    // before, keeps the scene small.
+    const MOST: usize = 64;
+    let meet = |a: &solidcraft_engine::geom::Aabb3, b: &solidcraft_engine::geom::Aabb3| {
+        a.min.x <= b.max.x && b.min.x <= a.max.x && a.min.y <= b.max.y && b.min.y <= a.max.y
+    };
+    // Merge until no two groups meet: a merged box can reach a group it missed before.
+    let mut merged = true;
+    while merged && boxes.len() > 1 {
+        merged = false;
+        let mut out: Vec<solidcraft_engine::geom::Aabb3> = Vec::with_capacity(boxes.len());
+        for b in boxes {
+            match out.iter_mut().find(|o| meet(o, &b)) {
+                Some(o) => {
+                    *o = o.union(&b);
+                    merged = true;
+                }
+                None => out.push(b),
+            }
+            if out.len() > MOST {
+                return vec![out.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, b| a.union(b))];
+            }
+        }
+        boxes = out;
+    }
+    boxes
+}
+
+/// One soft ellipse of shadow triangles, `at(r, angle)` placing a point `r` (0 middle, 1 rim)
+/// of the way out.
+fn shadow_ellipse(sc: &mut GpuScene, dark: u32, at: impl Fn(f64, f64) -> [f32; 3]) {
     // Rings from the middle out, fading to nothing.
     let rings = [(0.0, dark), (0.55, dark * 3 / 4), (0.85, dark / 3), (1.0, 0)];
     let n = 48;
-    let at = |r: f64, k: usize| {
-        let a = k as f64 / n as f64 * std::f64::consts::TAU;
-        app.cam.from_frame(Vec3::new(c.x + rx * r * a.cos(), c.y + ry * r * a.sin(), z)).to_f32()
-    };
+    let angle = |k: usize| k as f64 / n as f64 * std::f64::consts::TAU;
     for w in rings.windows(2) {
         let ((r0, a0), (r1, a1)) = (w[0], w[1]);
         let (c0, c1) = (sc.color([0, 0, 0, a0 as u8]), sc.color([0, 0, 0, a1 as u8]));
         for k in 0..n {
-            let (p00, p01, p10, p11) = (at(r0, k), at(r0, k + 1), at(r1, k), at(r1, k + 1));
+            let (p00, p01, p10, p11) = (at(r0, angle(k)), at(r0, angle(k + 1)), at(r1, angle(k)), at(r1, angle(k + 1)));
             sc.shadow_tri(p00, c0);
             sc.shadow_tri(p10, c1);
             sc.shadow_tri(p11, c1);
@@ -5587,9 +5645,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::design_properties::overlay(app, &painter, &proj);
     crate::sketch_dims::show(app, ui, &proj);
     crate::select_other::show(app, ui.ctx());
-    axis_view(app, ui, rect);
-    crate::view_angles::show(app, ui, rect);
-    crate::navigation_bar_view::show(app, ui, rect);
+    if !app.universal_panel_host_enabled() {
+        axis_view(app, ui, rect);
+        crate::view_angles::show(app, ui, rect);
+        crate::navigation_bar_view::show(app, ui, rect);
+    }
     crate::viewport_status::show(app, ui.ctx(), rect);
     crate::viewport_status_fixture::show(app, ui.ctx(), rect);
     // The notices and the agent chip first, so the 3D mouse picture can keep clear of them.
@@ -7086,6 +7146,40 @@ pub(crate) fn scene_palette(dark: bool, mode: crate::theme::ColorVision) -> soli
 
 pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(rect) = app.viewport.rect {
+        if app.universal_panel_frame().is_some() {
+            let Ok(usable) = crate::shell::host_usable(app) else {
+                // Refuse new control placement without inventing an occupied
+                // viewport. An early pair already painted remains authoritative.
+                app.viewport.layout = Some(crate::viewport_layout::Layout {
+                    viewport: rect,
+                    content: rect,
+                    drawable: Rect::NOTHING,
+                    middle: Rect::NOTHING,
+                    navigation: Rect::NOTHING,
+                    axis_view: Rect::NOTHING,
+                    confirm: app.viewport.host_confirm.unwrap_or(Rect::NOTHING),
+                    usable: None,
+                });
+                return;
+            };
+            let navigation = if app.ui.show_navigation_bar { crate::navigation_bar_view::measured(app, ctx, rect).rect } else { Rect::NOTHING };
+            let orbit = crate::navigation_bar::canvas_caps(app).orbit;
+            app.viewport.layout = Some(if let Some(confirm) = app.viewport.host_confirm {
+                crate::viewport_layout::Layout::host_with_retained_confirm(rect, &usable, app.preferences.navigator_style, confirm, navigation, orbit)
+            } else if orbit {
+                crate::viewport_layout::Layout::host(rect, &usable, app.preferences.navigator_style, crate::view_confirm::size(app), navigation)
+            } else {
+                crate::viewport_layout::Layout::host_with_axis(
+                    rect,
+                    &usable,
+                    app.preferences.navigator_style,
+                    crate::view_confirm::size(app),
+                    navigation,
+                    false,
+                )
+            });
+            return;
+        }
         let docks = crate::shell::fit_rects(app);
         let mut content = crate::shell::content_rect(app, rect);
         if crate::render_ui::focused(app) {
@@ -7126,6 +7220,19 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
             crate::viewport_layout::Layout::with_content(rect, content, &docks, ctx.pixels_per_point(), style, corner, navigation)
         });
     }
+}
+
+/// The opt-in host paints its existing controls after resolving actual Area
+/// visibility. This does not render the scene or call navigation::handle again.
+pub(crate) fn show_host_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
+    refresh_layout(app, ui.ctx());
+    if crate::navigation_bar::canvas_caps(app).orbit {
+        axis_view(app, ui, rect);
+        if !crate::render_workspace::active(app) {
+            crate::view_angles::show(app, ui, rect);
+        }
+    }
+    crate::navigation_bar_view::show(app, ui, rect);
 }
 
 /// Orientation controls share the layout reservation used by model fitting.
@@ -7510,7 +7617,7 @@ mod tests {
             let mut app = SolveApp::new(session, crate::Services::default());
             app.cam.up = up;
             let mut scene = GpuScene::default();
-            ground_shadow(&mut scene, &app, ground_bounds(&app, &app.session.world_state()?));
+            ground_shadow(&mut scene, &app, ground_boxes(&app, &app.session.world_state()?));
             assert!(!scene.shadow.is_empty());
             for vertex in scene.shadow.as_chunks::<{ crate::gpu::TRI_SIZE }>().0 {
                 let height = f32::from_le_bytes(vertex[coordinate * 4..coordinate * 4 + 4].try_into()?);
@@ -7545,7 +7652,7 @@ mod tests {
                 assert!(std::sync::Arc::ptr_eq(&after.bytes, &shadow_geometry(&app, &state).bytes), "unchanged placement stays cached");
                 crate::prefs::set(&mut app, &json!({"ground_shadow_follows_model": follows_model}))?;
                 let mut scene = GpuScene::default();
-                ground_shadow(&mut scene, &app, ground_bounds(&app, &app.session.world_state()?));
+                ground_shadow(&mut scene, &app, ground_boxes(&app, &app.session.world_state()?));
                 assert!(!scene.shadow.is_empty());
                 for vertex in scene.shadow.as_chunks::<{ crate::gpu::TRI_SIZE }>().0 {
                     let actual = f32::from_le_bytes(vertex[coordinate * 4..coordinate * 4 + 4].try_into()?);
@@ -7556,7 +7663,7 @@ mod tests {
                 }
                 app.session.visibility.hidden_bodies.push("Box".into());
                 let mut hidden = GpuScene::default();
-                ground_shadow(&mut hidden, &app, ground_bounds(&app, &app.session.world_state()?));
+                ground_shadow(&mut hidden, &app, ground_boxes(&app, &app.session.world_state()?));
                 assert!(hidden.shadow.is_empty(), "hidden bodies cast no shadow");
             }
         }
@@ -7569,7 +7676,7 @@ mod tests {
         session.execute("solid.box", &json!({"length": 30, "width": 30, "height": 10}))?;
         let app = SolveApp::new(session, crate::Services::default());
         let mut scene = GpuScene::default();
-        ground_shadow(&mut scene, &app, ground_bounds(&app, &crate::open_meshing::session_world(&app.session)));
+        ground_shadow(&mut scene, &app, ground_boxes(&app, &crate::open_meshing::session_world(&app.session)));
         assert!(scene.trans.is_empty(), "the ground shadow must not trigger order-independent transparency");
         assert_eq!(scene.shadow.len(), 48 * 5 * 3 * crate::gpu::TRI_SIZE, "all shadow rings are retained");
         let shadow_alpha = |v: &[u8]| {
@@ -7577,6 +7684,40 @@ mod tests {
             scene.palette.get(crate::gpu::PaletteIndex(i)).map(|c| c[3])
         };
         assert!(scene.shadow.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.iter().any(|v| shadow_alpha(v).is_some_and(|a| a > 0)));
+        Ok(())
+    }
+
+    /// Two bodies apart get a shadow each, and the gap between them gets none of the darkest
+    /// middle (#10442); bodies that meet keep sharing one.
+    #[test]
+    fn ground_shadow_leaves_the_gap_between_bodies_apart() -> Result<(), Box<dyn std::error::Error>> {
+        use solidcraft_engine::geom::Aabb3;
+        let block = |x0: f64| Aabb3 { min: Vec3::new(x0, -30.0, 0.0), max: Vec3::new(x0 + 40.0, 30.0, 20.0) };
+        let (left, right) = (block(-60.0), block(20.0));
+        let groups = shadow_groups(vec![left, right]);
+        assert_eq!(groups, vec![left, right], "bodies 40 apart cast a shadow each");
+        let gap = Vec3::new(0.0, 0.0, 0.0);
+        for g in &groups {
+            let ((rx, ry), c) = (shadow_radii(g), g.center());
+            let r = (((gap.x - c.x) / rx).powi(2) + ((gap.y - c.y) / ry).powi(2)).sqrt();
+            assert!(r > 0.85, "the gap's middle is in a shadow's faint rim at most, not its dark middle: {r}");
+        }
+        // Touching, and a third body reaching both through a merged box: one shadow.
+        assert_eq!(shadow_groups(vec![block(-40.0), block(0.0)]).len(), 1);
+        let bridge = Aabb3 { min: Vec3::new(-25.0, 25.0, 0.0), max: Vec3::new(25.0, 40.0, 5.0) };
+        assert_eq!(shadow_groups(vec![left, right, bridge]).len(), 1, "a body touching both joins them");
+        // A crowd falls back to one shadow under it all.
+        let crowd: Vec<_> = (0..100).map(|i| block(f64::from(i) * 100.0)).collect();
+        assert_eq!(shadow_groups(crowd).len(), 1);
+
+        let mut session = solidcraft_engine::Session::default();
+        for x in [-60, 20] {
+            session.execute("solid.box", &json!({"length": 40, "width": 60, "height": 20, "corner": [x, -30, 0], "operation": "new"}))?;
+        }
+        let app = SolveApp::new(session, crate::Services::default());
+        let mut scene = GpuScene::default();
+        ground_shadow(&mut scene, &app, ground_boxes(&app, &app.session.world_state()?));
+        assert_eq!(scene.shadow.len(), 2 * 48 * 5 * 3 * crate::gpu::TRI_SIZE, "one ellipse under each body");
         Ok(())
     }
 

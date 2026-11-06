@@ -41,6 +41,15 @@ pub struct RenderBrowser {
     pub open: bool,
 }
 
+/// Latch or release the viewport's Zoom tool. With no flag, the UI toggles it.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ZoomTool {
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub on: Option<bool>,
+}
+
 /// Empty input for the read-only viewport effect query.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

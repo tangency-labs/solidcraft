@@ -57,6 +57,7 @@ impl Catalog {
 
 static ENGLISH: Catalog = Catalog::new("en", "English", include_str!(concat!(env!("OUT_DIR"), "/locales/en.json")));
 static ARABIC: Catalog = Catalog::new("ar", "العربية", include_str!(concat!(env!("OUT_DIR"), "/locales/ar.json")));
+static BULGARIAN: Catalog = Catalog::new("bg", "Български", include_str!(concat!(env!("OUT_DIR"), "/locales/bg.json")));
 static BOSNIAN: Catalog = Catalog::new("bs", "Bosanski", include_str!(concat!(env!("OUT_DIR"), "/locales/bs.json")));
 static CATALAN: Catalog = Catalog::new("ca", "Català", include_str!(concat!(env!("OUT_DIR"), "/locales/ca.json")));
 static CZECH: Catalog = Catalog::new("cs", "Čeština", include_str!(concat!(env!("OUT_DIR"), "/locales/cs.json")));
@@ -96,6 +97,7 @@ static CHINESE_TRADITIONAL: Catalog = Catalog::new("zh-TW", "繁體中文", incl
 pub const LOCALES: &[&Catalog] = &[
     &ENGLISH,
     &ARABIC,
+    &BULGARIAN,
     &BOSNIAN,
     &CATALAN,
     &CZECH,
@@ -783,7 +785,7 @@ mod tests {
     #[test]
     fn newly_catalogued_command_labels_translate() {
         let cases = [
-            ("cs", "Příruba", "Zebra analýza", "Studie pohybu"),
+            ("cs", "Obruba", "Zebra analýza", "Pohybová studie"),
             ("da", "Flange", "Zebraanalyse", "Bevægelsesanalyse"),
             ("nb", "Flens", "Zebraanalyse", "Bevegelsesanalyse"),
             ("zh", "法兰", "斑马纹分析", "运动研究"),

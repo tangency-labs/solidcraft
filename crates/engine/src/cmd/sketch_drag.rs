@@ -38,7 +38,8 @@ const MAX_STEPS: usize = 64;
 /// shorter than a step over this; at most `MAX_STEPS` such solves per drag.
 const HALVINGS: usize = 16;
 /// Steps of a drag that isn't live solved at once past a failed step, at most (see
-/// [`drag_entity`] and [`ahead_batch`]).
+/// [`drag_entity`] and [`ahead_batch`]). The browser build solves one at a time.
+#[cfg(not(target_arch = "wasm32"))]
 const AHEAD: usize = 8;
 /// An arc whose sweep gets this close (radians) to 0 or a full turn has run into its start.
 const SWEEP_EPS: f64 = 1e-6;
