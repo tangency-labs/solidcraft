@@ -4435,8 +4435,10 @@ impl Renderer {
 /// the texture's first write and never clears it. Some AMD Radeon drivers then kept that memory's
 /// old compression state, and the multisampled scene showed as nothing at all (no grid, origin
 /// planes or bodies), a flat colour or speckles (#6828, #7157, #6613, #7052). At 1x the scene is
-/// drawn into a texture its own pass clears, which is why 1x anti-aliasing showed it.
-fn clear_resolve_targets<'a>(encoder: &mut wgpu::CommandEncoder, views: impl IntoIterator<Item = &'a wgpu::TextureView>) -> u32 {
+/// drawn into a texture its own pass clears, which is why 1x anti-aliasing showed it. Headless
+/// pictures (`ui.render`, the MCP screenshot, thumbnails) resolve into a new texture each time
+/// and clear it here too ([`crate::capture`], #10140).
+pub(crate) fn clear_resolve_targets<'a>(encoder: &mut wgpu::CommandEncoder, views: impl IntoIterator<Item = &'a wgpu::TextureView>) -> u32 {
     let mut cleared = 0;
     for view in views {
         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

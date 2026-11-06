@@ -56,6 +56,9 @@ struct State {
     /// The last picture's scene key and accessibility map version (each picture uploads anew).
     key: u64,
     access_version: u64,
+    /// The resolve textures cleared before their first resolve (tests count them).
+    #[cfg(test)]
+    resolve_clears: u32,
 }
 
 impl Capturer {
@@ -88,7 +91,14 @@ impl Capturer {
             samples,
             depth,
             max_side,
-            state: Mutex::new(State { renderer, background, key: 0, access_version: 0 }),
+            state: Mutex::new(State {
+                renderer,
+                background,
+                key: 0,
+                access_version: 0,
+                #[cfg(test)]
+                resolve_clears: 0,
+            }),
             device,
             queue,
             lost: Arc::default(),
@@ -244,6 +254,14 @@ impl Capturer {
         let multisampled_view = multisampled.as_ref().map(|t| t.create_view(&Default::default()));
         let background = background_vertices(device, top, bottom);
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_capture") });
+        // Multisampled, the picture's texture is written only by the resolve: cleared first, or
+        // some AMD Radeon Direct3D 12 drivers read it back black or as garbage (#10140), as the
+        // viewport's resolve targets showed nothing until they were cleared (#6828).
+        let _cleared = crate::view::clear_resolve_targets(&mut encoder, multisampled_view.is_some().then_some(&resolved_view));
+        #[cfg(test)]
+        {
+            state.resolve_clears += _cleared;
+        }
         state.renderer.prepare(device, queue, &mut encoder, frame);
         {
             let (view, resolve_target, store) = match &multisampled_view {
@@ -653,6 +671,34 @@ mod tests {
         assert_eq!(color(&almost, &almost.tris).map(|c| c[3]), Some(255));
         let trace = geometry(0.0);
         assert_eq!(color(&trace, &trace.glass).map(|c| c[3]), Some(13), "0.05 of 255");
+    }
+
+    /// A multisampled picture is resolved into a new texture nothing else writes. On some AMD
+    /// Radeon Direct3D 12 drivers an uncleared one read back black or as garbage, so `ui.render`
+    /// and the MCP screenshot came back black while the window showed the model (#10140). Each
+    /// picture clears its new resolve texture once, before the resolve, and shows its background.
+    #[test]
+    fn a_multisampled_picture_clears_its_resolve_texture_before_the_resolve() {
+        let Ok(capturer) = Capturer::headless() else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let clears = || capturer.state.lock().map(|s| s.resolve_clears).unwrap_or(u32::MAX);
+        let rgba = capturer.rgba(&Scene::default(), &Camera::default(), 32, 24).unwrap();
+        // The light background gradient, opaque, in every corner: not black, not transparent.
+        for at in [0, 31, 23 * 32, 23 * 32 + 31] {
+            let p = rgba.get(at * 4..at * 4 + 4).unwrap();
+            assert!(p[0] > 150 && p[1] > 150 && p[2] > 150 && p[3] == 255, "pixel {at} shows the background: {p:?}");
+        }
+        let expected = u32::from(capturer.samples() > 1);
+        assert_eq!(clears(), expected, "the multisampled picture's resolve texture is cleared first; one sample resolves nothing");
+        capturer.rgba(&Scene::default(), &Camera::default(), 32, 24).unwrap();
+        assert_eq!(clears(), 2 * expected, "every picture has a new resolve texture, cleared again");
+        // One sample: the picture's own pass clears the texture it draws into.
+        if let Ok(single) = Capturer::headless_single_sample() {
+            single.rgba(&Scene::default(), &Camera::default(), 32, 24).unwrap();
+            assert_eq!(single.state.lock().map(|s| s.resolve_clears).ok(), Some(0));
+        }
     }
 
     /// Bodies dragged as a layer of their own ([`crate::view::MovingLayer`]) are drawn moved by
