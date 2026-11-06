@@ -505,6 +505,10 @@ mod tests {
         assert!(presets(Protocol::OpenAi).iter().all(|p| !p.name.is_empty() && p.base_url.starts_with("http")));
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Mammouth AI" && key_safe_for(p.base_url)));
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Mistral AI" && p.base_url == "https://api.mistral.ai/v1"));
+        // #11816: Google's OpenAI-compatible endpoint, with the key sent only over HTTPS.
+        assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Google Gemini"
+            && p.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
+            && key_safe_for(p.base_url)));
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Cheaper Inference" && key_safe_for(p.base_url)));
         assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.anthropic.com/v1"));
         for name in ["DeepSeek", "Qwen"] {
