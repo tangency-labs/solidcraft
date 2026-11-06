@@ -60,7 +60,11 @@ def card(sprint):
     img.paste(emblem, (235 - emblem.width // 2, (H - emblem.height) // 2), emblem)
 
     x = 480
-    d.text((x, 120), sprint["title"], font=font(64, bold=True), fill=TEXT)
+    # The title at 64 px, smaller only when it would run past the right margin.
+    size = 64
+    while size > 36 and d.textlength(sprint["title"], font=font(size, bold=True)) > W - 40 - x:
+        size -= 2
+    d.text((x, 120 + (64 - size) // 2), sprint["title"], font=font(size, bold=True), fill=TEXT)
     f_sum = font(28)
     y = 224
     for line in textwrap.wrap(sprint["summary"], width=44)[:6]:

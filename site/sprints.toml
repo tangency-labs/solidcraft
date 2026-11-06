@@ -18,3 +18,11 @@ summary = "solidcore's kernel rig: every corpus case replayed through solidcore-
 project = 2
 milestone = 2
 emblem = "kernel-rig.png"
+
+[[sprint]]
+slug = "local-operation"
+title = "Local Operation Sprint"
+summary = "The local operation and the offset on certified decisions only: the soundness gate's checks certified, reach and extension acceptance exact, the vertex splits and tangent edges built by default."
+project = 3
+milestone = 3
+emblem = "local-operation.png"

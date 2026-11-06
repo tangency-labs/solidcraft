@@ -92,7 +92,8 @@ These are fetched at run time (never committed) and used only by the goldens cra
 
 ### Sprint emblems
 
-- Files: `site/assets/sprints/blends.png` and `site/assets/sprints/kernel-rig.png`
+- Files: `site/assets/sprints/blends.png`, `site/assets/sprints/kernel-rig.png` and
+  `site/assets/sprints/local-operation.png`
 - Origin: original images made for this project with Google's Gemini image model
   (`gemini-3.1-flash-lite-image`), then cut out to a transparent background; no third-party
   artwork or marks
