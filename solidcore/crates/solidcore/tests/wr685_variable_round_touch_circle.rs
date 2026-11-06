@@ -208,7 +208,10 @@ fn folding_balls_are_refused_naming_the_radius() {
 #[test]
 fn a_progressive_spline_round_builds() {
     let v = spline_round(kernel(true), HOLDS).expect("builds");
-    eprintln!("{v} vs the envelope's 5957.718502, rel {}", rel(v, 5957.718502));
+    eprintln!(
+        "{v} vs the envelope's 5957.718502, rel {}",
+        rel(v, 5957.718502)
+    );
     assert!(rel(v, 5957.718502) < 3.1e-8, "{v}");
 }
 
