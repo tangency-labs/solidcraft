@@ -67,6 +67,7 @@ pub mod construct;
 pub mod delete;
 pub mod diagnostics;
 pub mod edit;
+pub mod face_edits;
 pub mod features;
 pub mod features_more;
 pub mod file;

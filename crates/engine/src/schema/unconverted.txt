@@ -6,7 +6,6 @@ doc.open
 doc.recover
 doc.recovery_discard
 doc.recovery_list
-face.delete
 file.export
 file.insert_mesh
 file.insert_step
@@ -47,7 +46,6 @@ solid.hole
 solid.loft
 solid.mirror
 solid.move
-solid.offset_face
 solid.pattern.circular
 solid.pattern.path
 solid.pattern.rectangular
