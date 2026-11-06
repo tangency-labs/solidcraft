@@ -160,37 +160,73 @@ pub(super) fn face_ref(s: &Session, v: &Value, body: Option<&str>, cmd: &str) ->
 /// The body a command that works on one body's faces applies to: `body` when given, or else the
 /// one body every picked point lies on, so the feature keeps it (its evaluation otherwise takes
 /// the body whose box is nearest the first point, and coincident faces tie there).
-/// A point on coincident faces of several bodies (bodies touching flush) says none of them: the
-/// command is refused and names them. With one body, names among the picks or picks on no face,
-/// nothing is chosen here and evaluation decides as before.
-pub(super) fn faces_body(s: &Session, p: &Value, refs: &[Value], points: &[Vec3], cmd: &str) -> Result<Option<String>> {
+/// A point on coincident faces of several bodies (bodies touching flush) says none of them:
+/// evaluation decides as it always has, and the command's result warns and names them
+/// ([`FacesBody::warn`]). With one body, names among the picks or picks on no face, nothing is
+/// chosen here and evaluation decides as before.
+pub(super) fn faces_body(s: &Session, p: &Value, refs: &[Value], points: &[Vec3]) -> FacesBody {
     if let Some(n) = str_(p, "body") {
-        return Ok(Some(n.to_string()));
+        return FacesBody { body: Some(n.to_string()), tie: None };
     }
+    let none = FacesBody { body: None, tie: None };
     if s.model.state().bodies.len() < 2 || refs.iter().any(Value::is_string) {
-        return Ok(None);
+        return none;
     }
     let mut found: Option<String> = None;
     for &pt in points {
         let name = match face_at_in(s, pt, None) {
             Ok(Some((m, _, d, name))) if near_face(&m, d) => name,
-            Ok(_) => return Ok(None),
+            Ok(_) => return none,
             Err(tied) => {
                 let on = tied.first().is_some_and(|b| matches!(face_at_in(s, pt, Some(b)), Ok(Some((m, _, d, _))) if near_face(&m, d)));
-                if !on {
-                    return Ok(None);
-                }
-                let at = [pt.x, pt.y, pt.z].map(short_number).join(", ");
-                return Err(bad(cmd, format!("the face at [{at}] is on {}; pick the face on one body, or name one with `body`", and_list(&tied))));
+                // Evaluation still decides, as it always has; the result says the pick was shared.
+                return FacesBody { body: None, tie: on.then_some((pt, tied)) };
             }
         };
         match &found {
-            Some(f) if *f != name => return Ok(None),
+            Some(f) if *f != name => return none,
             Some(_) => {}
             None => found = Some(name),
         }
     }
-    Ok(found)
+    FacesBody { body: found, tie: None }
+}
+
+/// What [`faces_body`] found for a command's face picks.
+pub(super) struct FacesBody {
+    /// The body to save in the feature: the one named, or the one every pick lies on.
+    pub body: Option<String>,
+    /// A pick on coincident faces of several bodies (bodies touching flush), and those bodies.
+    tie: Option<(Vec3, Vec<String>)>,
+}
+
+impl FacesBody {
+    /// The body a face of the picks is looked up on: the feature's, or for a shared pick the
+    /// first body it lies on, as the faces are the same there.
+    pub fn lookup(&self) -> Option<&str> {
+        self.body.as_deref().or_else(|| self.tie.as_ref().and_then(|(_, b)| b.first()).map(String::as_str))
+    }
+
+    /// The command's result, with a warning when a pick lay on coincident faces of several
+    /// bodies: it names them and the body that changed, so a caller can name one with `body`.
+    pub fn warn(&self, mut out: Value) -> Value {
+        let Some((pt, tied)) = &self.tie else { return out };
+        let at = [pt.x, pt.y, pt.z].map(short_number).join(", ");
+        let changed = out.get("changed_bodies").and_then(Value::as_array).and_then(|a| a.first()).and_then(Value::as_str).map(str::to_string);
+        let mut note = format!("the face at [{at}] is on {}", and_list(tied));
+        if let Some(c) = changed {
+            note.push_str(&format!(", and {c} was changed"));
+        }
+        note.push_str("; name one with `body` to choose");
+        let note = match out.get("warning").and_then(Value::as_str) {
+            Some(w) if !w.is_empty() => format!("{w}; {note}"),
+            _ => note,
+        };
+        if let Some(o) = out.as_object_mut() {
+            o.insert("warning".into(), json!(note));
+        }
+        out
+    }
 }
 
 /// A coordinate for a message: at most three decimals, without trailing zeros.
