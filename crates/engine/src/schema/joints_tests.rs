@@ -352,6 +352,11 @@ fn the_schemas_take_what_the_handlers_read() {
             (full.clone(), true),
             (with(json!({"values": [1, "w"], "limits": [[0, 90], null], "flip": true, "offset": "w", "angle": 5, "name": "J", "quiet": true})), true),
             (with(json!({"value": 3})), true),
+            (
+                json!({"type": "revolute", "a": {"edge": {"x": 0, "y": 0, "z": 0}, "z": {"x": 0, "y": 0, "z": 1}}, "b": {"point": {"x": 1, "y": 2, "z": 3}}}),
+                true,
+            ),
+            (json!({"type": "revolute", "a": {"edge": {"x": 0, "y": 0}}, "b": "Origin"}), false),
             (json!({"a": {"face": [0, 0, 0]}, "b": "Origin"}), false),
             (json!({"type": "revolute", "b": "Origin"}), false),
             (json!({"type": "revolute", "a": 5, "b": "Origin"}), false),

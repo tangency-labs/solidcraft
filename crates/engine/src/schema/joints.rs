@@ -357,7 +357,13 @@ impl JsonSchema for JointOriginArg {
         "JointOriginArg".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        let point = json!({"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3});
+        // `params::vec3` reads [x, y, z] and {x, y, z}.
+        let forms = [
+            json!({"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}),
+            json!({"type": "object", "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"}}, "required": ["x", "y", "z"]}),
+        ];
+        let point = json!({"anyOf": forms});
+        let at = |description: &str| json!({"description": description, "anyOf": forms});
         json_schema!({
             "description": "A joint origin: the name of a joint origin made with joint.origin, or an object that says where it is, in world coordinates. Give one of face, circle, edge or point (a point [x, y, z]; for face and circle also a face's name, as model.faces lists it), or a frame {origin, z, x?}.",
             "anyOf": [
@@ -368,14 +374,14 @@ impl JsonSchema for JointOriginArg {
                         "occurrence": {"description": "The occurrence the origin is on, by id or name. Default: found from the point, or the named face's component.", "type": ["number", "string"]},
                         "face": {"description": "The centre of a planar face: a point on it [x, y, z], or its name.", "anyOf": [point, {"type": "string"}]},
                         "circle": {"description": "The centre of a round end: a point [x, y, z] on its wall, rim or centre, or the round face's name.", "anyOf": [point, {"type": "string"}]},
-                        "edge": {"description": "A point [x, y, z] on an edge of a planar face.", "type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
-                        "point": {"description": "A point [x, y, z].", "type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                        "edge": at("A point [x, y, z] on an edge of a planar face."),
+                        "point": at("A point [x, y, z]."),
                         "frame": {"description": "An explicit frame {origin: [x, y, z], z: [x, y, z], x?: [x, y, z]}.", "type": "object"},
-                        "z": {"description": "The frame's z axis, a direction [x, y, z], where it is not the face's normal.", "type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                        "z": at("The frame's z axis, a direction [x, y, z], where it is not the face's normal."),
                         "x": {"description": "The frame's turn about z: a direction [x, y, z], a face's name or {face: [x, y, z]}.", "anyOf": [point, {"type": "string"}, {"type": "object"}]},
                         "end": {"description": "A circle's end: the name of the face across its rim there.", "type": "string"},
-                        "on": {"description": "An edge origin: a point on the face to use.", "type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
-                        "corner": {"description": "An edge origin: a point near one end of the edge, for the corner there.", "type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                        "on": at("An edge origin: a point on the face to use."),
+                        "corner": at("An edge origin: a point near one end of the edge, for the corner there."),
                         "body": {"description": "The body a face name is on.", "type": "string"}
                     }
                 }
