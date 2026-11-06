@@ -738,20 +738,45 @@ pub(crate) fn over_tool_boxes(app: &SolveApp, ctx: &egui::Context, p: egui::Pos2
 /// Where a value box whose top left would be `pos` goes so it stays in the drawing area `view`:
 /// as it is when it fits; else mirrored through the pointer (a box set off the cursor, past the
 /// view's edge, goes to the cursor's other side, still clear of it, #2201); else pushed inside.
+/// A box that would still sit on the pointer moves beside it: there it would take the click meant
+/// for the next point, and the shape would wait for Enter (#12208).
 fn in_view(pos: Pos2, view: Option<egui::Rect>, pointer: Option<Pos2>) -> Pos2 {
     let Some(view) = view else { return pos };
     let fits = |p: Pos2| view.contains_rect(egui::Rect::from_min_size(p, BOX));
-    if fits(pos) {
+    let placed = if fits(pos) {
+        pos
+    } else if let Some(mirrored) = pointer.map(|c| c + (c - (pos + BOX * 0.5)) - BOX * 0.5).filter(|p| fits(*p)) {
+        mirrored
+    } else {
+        let max = (view.max - BOX).max(view.min);
+        pos.clamp(view.min, max)
+    };
+    off_pointer(placed, pointer, fits)
+}
+
+/// Gap between the pointer and a value box moved off it.
+const POINTER_GAP: f32 = 12.0;
+
+/// The most a value box spans from its top left: wider than `BOX`, as a box grows with its label
+/// and value ("Radius 12.345").
+const REACH: egui::Vec2 = egui::vec2(110.0, BOX.y);
+
+/// `pos` when the box there is clear of the pointer; else the box beside the pointer (right,
+/// left, below, above, the first that `fits`), keeping its other coordinate.
+fn off_pointer(pos: Pos2, pointer: Option<Pos2>, fits: impl Fn(Pos2) -> bool) -> Pos2 {
+    let Some(c) = pointer else { return pos };
+    if !egui::Rect::from_min_size(pos, REACH).expand(2.0).contains(c) {
         return pos;
     }
-    if let Some(c) = pointer {
-        let mirrored = c + (c - (pos + BOX * 0.5)) - BOX * 0.5;
-        if fits(mirrored) {
-            return mirrored;
-        }
-    }
-    let max = (view.max - BOX).max(view.min);
-    pos.clamp(view.min, max)
+    [
+        egui::pos2(c.x + POINTER_GAP, pos.y),
+        egui::pos2(c.x - POINTER_GAP - REACH.x, pos.y),
+        egui::pos2(pos.x, c.y + POINTER_GAP),
+        egui::pos2(pos.x, c.y - POINTER_GAP - REACH.y),
+    ]
+    .into_iter()
+    .find(|p| fits(*p))
+    .unwrap_or(pos)
 }
 
 #[cfg(test)]
