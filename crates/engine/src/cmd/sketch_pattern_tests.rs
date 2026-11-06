@@ -607,6 +607,29 @@ fn circular_quantity_expression_survives_parameter_edits_undo_and_reopen() {
     assert_eq!(sketch(&reopened).curves.len(), 4);
 }
 
+/// #4811: an older design whose pattern count reads a parameter named `g`, now a unit, opens with
+/// the count renamed with the parameter, and the pattern keeps its copies and follows it. `2 g` was
+/// 2 × the parameter in the older build, so it is renamed too, though `g` after a number now reads as grams.
+#[test]
+fn an_older_pattern_count_on_a_parameter_named_after_a_unit_follows_its_rename() {
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name":"qqg","expression":"3","unit":""}));
+    run(&mut s, "sketch.circle.center", json!({"center":[20,0],"radius":2,"id":"seed"}));
+    run(&mut s, "sketch.pattern.circular", json!({"entities":["seed"],"center":"origin","count":"2 qqg"}));
+    assert_eq!(sketch(&s).curves.len(), 6);
+    // Saved by an older build, where `g` could name a parameter.
+    let mut file: serde_json::Value = serde_json::from_str(&s.doc.to_json().replace("qqg", "g")).unwrap();
+    file["format"] = json!("solidcraft/30");
+    file.as_object_mut().unwrap().remove("format_pending");
+    let doc = solidcraft_doc::format::read(&file.to_string()).unwrap();
+    let mut opened = Session { doc: doc.into(), active_sketch: s.active_sketch, ..Default::default() };
+    opened.refresh();
+    assert_eq!(sketch(&opened).patterns[0].count_expression.as_deref(), Some("2 g_param"));
+    assert_eq!(sketch(&opened).curves.len(), 6);
+    run(&mut opened, "parameters.change", json!({"name":"g_param","expression":"4"}));
+    assert_eq!(sketch(&opened).curves.len(), 8);
+}
+
 #[test]
 fn circular_quantity_rejects_invalid_expressions_and_parameter_changes_atomically() {
     let mut s = new_sketch();
