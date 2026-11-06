@@ -188,6 +188,7 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+/// Draw render controls and status above the active model or image viewport.
 pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::render_workspace::show_shader_preparation(app, ui.ctx());
     crate::shell::register_panel(app, "render:focus:exit", None, None);

@@ -1676,6 +1676,7 @@ fn render_preview_tab_surfaces_preserve_scene_backplates_and_viewport_overrides(
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+/// Exercise the registered GPU host through the UI, including mapped output and glass.
 fn progressive_image_controls_route_to_the_registered_host() {
     use solidcraft_engine::render::job::Phase;
     use std::time::{Duration, Instant};
@@ -1745,13 +1746,16 @@ fn progressive_image_controls_route_to_the_registered_host() {
     let handle = h.app.session.render_job_handle(job).unwrap();
     // The first mapped render compiles a separate pipeline on a cold Vulkan cache.
     // Allow the GPU host's setup budget, then keep the short deadline after preparation.
-    let setup_deadline = Instant::now() + Duration::from_secs(600);
+    let submitted = Instant::now();
+    let queue_deadline = submitted + Duration::from_secs(30);
+    let setup_deadline = submitted + Duration::from_secs(600);
     let mut render_deadline = None;
     while h.app.render_workspace.view.completed.is_none() {
         let status = handle.status().unwrap();
         let now = Instant::now();
         let deadline = match status.progress.phase {
-            Phase::Queued | Phase::Preparing => setup_deadline,
+            Phase::Queued => queue_deadline,
+            Phase::Preparing => setup_deadline,
             Phase::Failed | Phase::Cancelled => panic!("progressive UI job ended: {status:?}"),
             _ => *render_deadline.get_or_insert(now + Duration::from_secs(30)),
         };
@@ -6975,6 +6979,7 @@ fn auto_opened_image_cancel_returns_to_model_and_preserves_previous_or_explicit_
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+/// Hold a GPU job in preparation to verify the window, shared keys and failure cleanup.
 fn gpu_preparation_shows_shader_warning_then_reports_job_failure() {
     use solidcraft_engine::render::job;
     use std::sync::{Mutex, mpsc};
