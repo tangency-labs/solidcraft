@@ -1,5 +1,7 @@
 {
   "blend.fillet_executive_p3": {
+    "issue-2349-teardrop-full-r0.5": "tangency-labs/solidcore#2349: the closed round's first span is off the true round by 7.9e-4 against a 4e-5 edge tolerance; the curved-spine mitre and both exact pcurves remain unimplemented",
+    "issue-2349-teardrop-full-r3": "tangency-labs/solidcore#2349: the closed-angle mitre is not certified; tangency-labs/solidcore#2404 tracks the refusal size whose fresh build fails validity",
     "real-box-high-corner-setback-eight": "tangency-labs/solidcore#2933: the N x N corner patch meets the three rounds up to 4.35 degrees off tangent; edge tolerance 5.17e-5"
   }
 }

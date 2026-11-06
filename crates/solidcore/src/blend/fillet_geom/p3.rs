@@ -77,9 +77,10 @@
 //!   appends it to the new rail's list. The new fillet vertex (`new (pPseudoBrep)
 //!   SmFilletVertex()`, CO-PORTED in `blend.fillet_geom_p1`) is a pseudo-B-rep vertex
 //!   at the origin with an unknown type and no corner.
-//! - **Tests.** `TopologySplit` is covered by this file's unit tests only: the C++
-//!   needs a real `SmFilletExecutive` (it calls `GetFilletCornerOfVertex`), so difftest
-//!   does not run it.
+//! - **Tests.** The standalone runner cannot call `TopologySplit`: C++ needs a real
+//!   `SmFilletExecutive` (it calls `GetFilletCornerOfVertex`). The executive part 3
+//!   teardrop checkpoints exercise the split through that real executive; this
+//!   file's unit tests also check its early error paths and vertex allocation.
 
 use crate::blend::fillet_corner::p3::{ExecutiveErrorObject, FilletCorner};
 use crate::blend::fillet_custom_solver::OffsetSurface;
@@ -101,7 +102,7 @@ use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
 use crate::topology::edge;
 use crate::topology::edgeuse::p1::{self as eu1, primary_edgeuse};
-use crate::topology::{Brep, EdgeId, EdgeuseId, VertexId, VertexuseId};
+use crate::topology::{Brep, EdgeId, EdgeuseId, Vertex, VertexId, VertexuseId};
 
 use super::p1::{
     check_seam_on, check_seam_out, evaluate_mate, set_surface_closure, CornerLookup, FilStatus,
@@ -1576,7 +1577,11 @@ impl FilletBrep {
             }
 
             // 2b. create a new SmFilletVertex
-            let v = self.brep_mut().add_vertex(Point3::new(0.0, 0.0, 0.0))?;
+            // Placement new supplies the context, not B-rep list ownership.
+            // SmFilletVertex() calls SmVertex(), whose tolerance starts at zero.
+            let v = self
+                .brep_mut()
+                .add_unlinked_vertex_record(Vertex::default())?;
             self.insert_fillet_vertex(v, FilletVertex::new(k, None));
             if let Some(slot) = new_vert.get_mut(this_rail_idx) {
                 *slot = Some(v);
@@ -1966,6 +1971,7 @@ mod tests {
         let k = Kernel::default();
         let mut fb = FilletBrep::new();
         let (g, ends) = two_rail_geom(&mut fb, &k);
+        let split_vertex_index = fb.brep().vertices().len();
         let rail0 = fb.geom(g).unwrap().rail(0).unwrap();
         let e = fb
             .topology_split(
@@ -1995,6 +2001,13 @@ mod tests {
         // the end edge use was taken off the first rail before the stub
         assert!(!fb.brep().edge(rail0).unwrap().edgeuses.contains(&ends[0]));
         assert_eq!(fb.brep().edgeuse(ends[0]).unwrap().edge, None);
+        // The first allocation is the split vertex; rail-use construction can
+        // subsequently allocate a shell placeholder before failing.
+        // SmFilletVertex() inherits SmVertex's zero tolerance, not ZoneTol3d.
+        let (split_id, split_vertex) = fb.brep().vertices().iter().nth(split_vertex_index).unwrap();
+        assert_eq!(split_vertex.point, Point3::ZERO);
+        assert_eq!(split_vertex.tolerance, 0.0);
+        assert!(!fb.brep().vertex_list().contains(&split_id));
     }
 
     #[test]
