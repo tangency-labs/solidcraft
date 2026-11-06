@@ -102,11 +102,7 @@ render.library.environment.apply
 render.library.physical.prepare
 render.library.studio.apply
 render.library.studio.prepare
-render.library.surface.bind
 render.library.surface.prepare
-render.library.surface.unbind
-render.optics.bind
-render.optics.unbind
 render.preflight
 render.result.pin
 render.result.regrade
@@ -285,13 +281,8 @@ timeline.roll_to
 timeline.rollback
 timeline.suppress
 timeline.ungroup
-view.ambient_occlusion
 view.apply
 view.delete
-view.graphics_preset
-view.history_layout
-view.layout
 view.list
-view.navigate
 view.rename
 view.save
