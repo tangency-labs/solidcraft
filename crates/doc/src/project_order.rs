@@ -381,7 +381,7 @@ mod tests {
         let c = v(7.9995, 7.9995);
         let (p, q) = (v(10., c.y), v(c.x, 10.));
         let exact: Vec<Vec2> =
-            (0..=8).map(|k| f64::from(k) * std::f64::consts::FRAC_PI_16).map(|t| v(8. + 2. * t.cos(), 8. + 2. * t.sin())).collect();
+            (0..=8).map(|k| f64::from(k) * std::f64::consts::FRAC_PI_8 / 2.).map(|t| v(8. + 2. * t.cos(), 8. + 2. * t.sin())).collect();
         let square = |top: Vec<LinkGeom>| {
             let mut out = vec![LinkGeom::Line(v(0., 0.), v(10., 0.)), LinkGeom::Line(v(10., 0.), p), LinkGeom::Arc { c, a: p, b: q }];
             out.extend(top);
