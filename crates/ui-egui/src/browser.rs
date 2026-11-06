@@ -533,9 +533,11 @@ pub fn group_items(app: &SolveApp, id: u64, scope: &str) -> Vec<Item> {
     v
 }
 
-/// Move Sketches to Their Parts (`component.move_sketches.to_parts`) for `sketches` (ids).
+/// Move Sketches to Their Parts (`component.move_sketches.to_parts`) for `sketches` (ids). They
+/// go as numbers: a string is a name first, and a sketch may be named like another one's id.
 pub(crate) fn sketches_to_parts_item(sketches: Vec<String>) -> Item {
-    Item::action("component.move_sketches.to_parts", "Move Sketches to Their Parts", "move").with(json!({ "sketches": sketches }))
+    let ids: Vec<u64> = sketches.iter().filter_map(|k| k.parse().ok()).collect();
+    Item::action("component.move_sketches.to_parts", "Move Sketches to Their Parts", "move").with(json!({ "sketches": ids }))
 }
 
 /// The menu of a folder row (Bodies, Sketches, Construction).
@@ -3485,7 +3487,11 @@ fn apply_drop(app: &mut SolveApp, d: DropAction) {
         DropAction::Component { to, folder, keys } => {
             let _ = match folder {
                 "bodies" => app.run("component.move_bodies", json!({ "bodies": keys, "component": to })),
-                "sketches" => app.run("component.move_sketches", json!({ "sketches": keys, "component": to })),
+                "sketches" => {
+                    // Ids, as numbers: a string is a sketch's name first, and a sketch may be named like another one's id.
+                    let ids: Vec<u64> = keys.iter().filter_map(|k| k.parse().ok()).collect();
+                    app.run("component.move_sketches", json!({ "sketches": ids, "component": to }))
+                }
                 _ => Ok(serde_json::Value::Null),
             };
         }

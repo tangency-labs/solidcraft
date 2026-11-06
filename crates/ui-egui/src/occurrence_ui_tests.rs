@@ -669,11 +669,27 @@ fn sketches_folder_moves_its_sketches_to_the_part_they_are_on() {
     let target = Target::Folder { component: 0, folder: "sketches".into(), scope: "c0".into() };
     let items = context_menu::items(&h.app, &target);
     let item = items.iter().find(|i| i.id == "component.move_sketches.to_parts").expect("on the Sketches folder's menu");
-    assert_eq!(item.params.as_ref().unwrap()["sketches"], json!([on_face.to_string(), on_xy.to_string()]));
+    // Ids, as numbers: a string would be a sketch's name first.
+    assert_eq!(item.params.as_ref().unwrap()["sketches"], json!([on_face, on_xy]));
     context_menu::run_item(&mut h.app, item, egui::Pos2::ZERO);
     assert_eq!(h.app.session.doc.feature(on_face).unwrap().component, component);
     assert_eq!(h.app.session.doc.feature(on_xy).unwrap().component, 0);
     let (status, _, error) = h.app.status.clone().unwrap();
     assert!(!error && status.contains("Moved 1") && status.contains("1 stayed") && status.contains("not on a part's face"), "{status}");
     assert!(context_menu::items(&h.app, &Target::Sketch { id: on_xy }).iter().any(|i| i.id == "component.move_sketches.to_parts"));
+}
+
+/// Dragging a sketch onto a part moves that sketch when another one is named like its id: the
+/// drag sends ids as numbers, and a string would be a sketch's name first (#9748).
+#[test]
+fn dragging_a_sketch_onto_a_part_moves_it_when_another_is_named_like_its_id() {
+    let (mut h, component, _) = crate::test_support::component_box();
+    let dragged = h.app.run("sketch.create", json!({"name":"Dragged","plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.finish_sketch();
+    let other = h.app.run("sketch.create", json!({"name":"Other","plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.finish_sketch();
+    h.app.run("timeline.rename", json!({"feature": other, "name": dragged.to_string()})).unwrap();
+    super::apply_drop(&mut h.app, super::DropAction::Component { to: component, folder: "sketches", keys: vec![dragged.to_string()] });
+    assert_eq!(h.app.session.doc.feature(dragged).unwrap().component, component);
+    assert_eq!(h.app.session.doc.feature(other).unwrap().component, 0);
 }

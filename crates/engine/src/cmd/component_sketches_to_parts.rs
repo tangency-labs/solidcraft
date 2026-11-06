@@ -6,7 +6,7 @@ use solidcore_record::Plane;
 use solidcraft_doc::{EmbossFace, FeatureKind, PlaneRef, apply_point, apply_vector, mat_inverse, mat_mul};
 use solidcraft_geom::prelude::*;
 
-use crate::params::{bad, name_or_id_list};
+use crate::params::{bad, name_or_id_values};
 use crate::schema::component::{MoveSketchesToPartsResult, SketchKeptInPlace, SketchMovedToPart};
 use crate::{Result, Session};
 
@@ -100,16 +100,18 @@ fn part_of(s: &Session, owner: u64, plane: &PlaneRef) -> std::result::Result<u64
 pub(super) fn to_parts(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.move_sketches.to_parts";
     let ids: Vec<u64> = if p.get("sketches").is_some() {
-        let keys = name_or_id_list(cmd, p, "sketches")?;
+        // Named or numbered: an exact name wins over an id it looks like, as in the timeline (#9748).
+        let keys = name_or_id_values(cmd, p, "sketches")?;
         let mut ids = Vec::with_capacity(keys.len().min(10_000));
-        for key in &keys {
-            match s.doc.find_feature(key) {
+        for key in keys {
+            let id = crate::cmd::edit::feature_id(s, Some(key), cmd)?;
+            match s.doc.feature(id) {
                 Some(f) if matches!(f.kind, FeatureKind::Sketch { .. }) => {
                     if !ids.contains(&f.id) {
                         ids.push(f.id);
                     }
                 }
-                _ => return Err(bad(cmd, format!("no sketch `{key}`"))),
+                _ => return Err(bad(cmd, format!("no sketch `{}`", key.as_str().map_or_else(|| key.to_string(), str::to_owned)))),
             }
         }
         ids
@@ -133,7 +135,7 @@ pub(super) fn to_parts(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     for (id, component) in moves {
-        super::move_sketches(s, &json!({"sketches": [id.to_string()], "component": component}))?;
+        super::move_sketches(s, &json!({"sketches": [id], "component": component}))?;
     }
     (result.moved, result.stayed) = (result.sketches.len(), result.kept.len());
     serde_json::to_value(result).map_err(|e| bad(cmd, e.to_string()))
