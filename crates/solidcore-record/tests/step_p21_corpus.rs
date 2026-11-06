@@ -116,7 +116,7 @@ fn repository_files_parse() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     for (path, entities) in [
         (
-            "crates/difftest/src/units/topology_brep_constructor_tetra.stp",
+            "crates/goldens/src/units/topology_brep_constructor_tetra.stp",
             86,
         ),
         (
