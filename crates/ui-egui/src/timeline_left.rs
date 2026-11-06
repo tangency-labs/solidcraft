@@ -351,7 +351,7 @@ pub fn left_timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
         .inner_rect;
     if busy {
         let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
-        crate::ui_kit::history_busy_veil(ui, list, true, accent, &crate::timeline::computing_text(app));
+        crate::ui_kit::history_busy_veil(ui, list, accent);
     }
 }
 

@@ -1488,15 +1488,8 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
     });
     if busy {
         let area = Rect::from_min_max(pos2(controls_left - t.space_4, r.top() + t.space_3), pos2(r.right() - t.space_3, r.bottom() - t.space_3));
-        crate::ui_kit::history_busy_veil(ui, area, false, accent, &computing_text(app));
+        crate::ui_kit::history_busy_veil(ui, area, accent);
     }
-}
-
-/// "Computing… N s", counted from when the history change started computing.
-pub(crate) fn computing_text(app: &SolveApp) -> String {
-    let since = [app.computing_since(), app.applying.as_ref().map(|job| job.started)].into_iter().flatten().reduce(f64::min);
-    let seconds = since.map_or(0.0, |since| ((crate::now_ms() - since) / 1000.0).max(0.0).floor());
-    crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))])
 }
 
 /// Select what a feature made, so the browser shows it. While the browser's rows start closed

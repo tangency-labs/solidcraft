@@ -289,6 +289,24 @@ fn hold_the_change(h: &mut Harness) -> std::sync::mpsc::Sender<Option<solidcraft
     job.map(crate::deferred::Deferred::hold).unwrap()
 }
 
+/// The "Computing… N s" text the last frame painted over `area`.
+fn progress_over(h: &Harness, area: egui::Rect) -> Vec<String> {
+    fn walk(shape: &egui::Shape, area: egui::Rect, word: &str, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(text) if text.visual_bounding_rect().intersects(area) && text.galley.text().contains(word) => {
+                out.push(text.galley.text().to_string());
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, area, word, out)),
+            _ => {}
+        }
+    }
+    let computing = crate::i18n::format("dialog.computing", &[("seconds", "0")]);
+    let word = computing.split_whitespace().next().unwrap_or_default();
+    let mut out = Vec::new();
+    h.shapes.iter().for_each(|clipped| walk(&clipped.shape, area, word, &mut out));
+    out
+}
+
 fn names(h: &Harness) -> Vec<String> {
     h.app.session.doc.features.iter().map(|f| f.name.clone()).collect()
 }
@@ -311,7 +329,10 @@ fn the_bottom_strip_shows_a_dropped_move_and_takes_nothing_more_while_it_compute
     assert_eq!(marker(&h), None, "the design is as it was while the move computes");
     let shown = rect_of("history:marker").unwrap().center();
     assert!(at(&features[0]).x < shown.x && shown.x < at(&features[1]).x, "the marker shows where it was dropped: {shown:?}");
-    assert!(rect_of("history:busy").is_some(), "the strip looks busy");
+    let busy = rect_of("history:busy");
+    assert!(busy.is_some(), "the strip looks busy");
+    let progress = progress_over(&h, busy.unwrap_or(egui::Rect::NOTHING));
+    assert!(progress.is_empty(), "the strip shows no progress of its own, the viewport does: {progress:?}");
     h.step(&json!({"drag": [[shown.x, shown.y], [first.x - 16.0, first.y]]})).unwrap();
     h.step(&json!({"click": {"handle": "history:last"}})).unwrap();
     assert!(h.app.deferred_queue.is_empty(), "nothing queued behind the move: {:?}", h.app.deferred_queue);
@@ -355,6 +376,13 @@ fn a_reorder_in_the_history_beside_the_browser_computes_off_the_window_thread() 
     }
     assert!(h.app.computing_since().is_some(), "the reorder computes off the window thread");
     assert_eq!(names(&h), ["A", "B", "C"], "nothing moved yet");
+    let done = hold_the_change(&mut h);
+    h.frames(2);
+    let busy = crate::scenario::rect_of("history:busy");
+    assert!(busy.is_some(), "the list looks busy");
+    let progress = progress_over(&h, busy.unwrap_or(egui::Rect::NOTHING));
+    assert!(progress.is_empty(), "the list shows no progress of its own, the viewport does: {progress:?}");
+    drop(done);
     until_settled(&mut h);
     assert_eq!(names(&h), ["C", "A", "B"]);
 }
