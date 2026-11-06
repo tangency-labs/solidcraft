@@ -1553,6 +1553,18 @@ preference_settings! {
     save_mesh_quality: String = "standard".into();
     /// The programs the user added to the slicer list, newest first.
     custom_slicers: Vec<String> = Vec::new();
+    /// The network folders the user added to Send to Slicer (#2304), in the order added: a folder,
+    /// usually a mounted share, that a slicer on another computer reads. No page reset discards
+    /// this user-made list; the engine gets it before each slicer command. An entry that doesn't
+    /// read is dropped on its own, not the whole list.
+    #[serde(deserialize_with = "network_folders_that_read")]
+    network_folders: Vec<solidcraft_engine::remote_slicers::RemoteTarget> = Vec::new();
+    /// Send to Slicer: the last format (`3mf`, `stl` or `stl-ascii`). 3MF, as before the
+    /// dialog had a Format row.
+    send_format: String = "3mf".into();
+    /// Send to Slicer: the last quality (`standard`, `fine` or `finest`). Standard, as before the
+    /// dialog had a Quality row.
+    send_quality: String = "standard".into();
     /// AI features (docs/agent-chat.md): the master switch. Off: no AI button, shortcut, menu
     /// entry or panel, and nothing is looked for or started.
     ai_features: bool = true, PAGE_ASSISTANT;
@@ -3292,6 +3304,23 @@ fn calibrations_that_read<'de, D: serde::Deserializer<'de>>(
 fn devices_that_read<'de, D: serde::Deserializer<'de>>(saved: D) -> Result<std::collections::BTreeSet<String>, D::Error> {
     let saved = Vec::<serde_json::Value>::deserialize(saved)?;
     Ok(saved.into_iter().filter_map(|device| device.as_str().map(str::to_owned)).collect())
+}
+
+/// The saved network folders that still read. One this version can't read (a kind from a newer
+/// release, a hand edit) is dropped on its own, with a log line, not with the others.
+fn network_folders_that_read<'de, D: serde::Deserializer<'de>>(saved: D) -> Result<Vec<solidcraft_engine::remote_slicers::RemoteTarget>, D::Error> {
+    let saved = Vec::<serde_json::Value>::deserialize(saved)?;
+    Ok(saved
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, folder)| match serde_json::from_value(folder) {
+            Ok(folder) => Some(folder),
+            Err(error) => {
+                log::warn!("preferences: network folder {} can't be read ({error}); leaving it out", i + 1);
+                None
+            }
+        })
+        .collect())
 }
 
 /// The saved button jobs that still read. A job this version doesn't know (from a newer release)
@@ -6639,6 +6668,23 @@ mod tests {
         other.load_prefs(&saved);
         assert_eq!(serde_json::to_value(&other.preferences.personal_sheet_rules).unwrap(), expected);
         assert!(other.session.doc.sheet.rules.is_empty(), "a personal rule is not a rule of the design");
+    }
+
+    /// A saved network folder this version can't read (a kind from a newer release, a hand edit)
+    /// is left out on its own: it emptied the whole list, and the next save wrote that back.
+    #[test]
+    fn a_network_folder_that_does_not_read_leaves_the_others() {
+        use serde_json::json;
+        let p = super::lenient(&json!({"length_decimals": 4, "network_folders": [
+            {"name": "NAS", "kind": "folder", "folder": "/mnt/nas"},
+            {"name": "Newer", "kind": "webdav", "url": "https://printer.local/prints"},
+            {"name": "No folder", "kind": "folder"},
+            null,
+            {"name": "Shop", "kind": "folder", "folder": "/mnt/shop"},
+        ]}));
+        assert_eq!(p.length_decimals, 4);
+        let names: Vec<_> = p.network_folders.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["NAS", "Shop"]);
     }
 
     /// The interface font (#1290): a font that can be read, or empty for the built-in one; saved

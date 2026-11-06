@@ -86,6 +86,8 @@ const READ_ON_A_COPY: &[&str] = &[
 
 /// Exports and readings computing at once; more run here.
 const MAX_ANSWERING: usize = 4;
+/// At most this many sends to network folders wait for a worker; more are refused in words.
+const MAX_SENDS_WAITING: usize = 64;
 
 /// How often a design change is computed again because the design changed under it before it
 /// runs here anyway.
@@ -128,6 +130,22 @@ fn reading(req: &ControlRequest) -> Option<(&'static str, Value)> {
         }
         _ => None,
     }
+}
+
+/// Commands that can send to a network folder (#2304).
+const SEND_TO_A_FOLDER: &[&str] = &["file.save_mesh", "file.send_to_slicer"];
+
+/// A request that sends to one of the user's network folders: the command and its parameters. A
+/// copy to a slow share takes seconds, and the window would answer nothing meanwhile.
+fn sending_to_a_network_folder(app: &crate::SolveApp, req: &ControlRequest) -> Option<(&'static str, Value)> {
+    if !matches!(req.method.as_str(), "engine.execute" | "command") {
+        return None;
+    }
+    let (command, params) = executed(&req.params)?;
+    let id = spec_id(command).filter(|id| SEND_TO_A_FOLDER.contains(id))?;
+    let slicer = params.get("slicer").and_then(Value::as_str)?;
+    solidcraft_engine::remote_slicers::resolve(&app.preferences.network_folders, slicer)?;
+    Some((id, params))
 }
 
 /// Requests that change the design: they wait while one computes.
@@ -179,6 +197,19 @@ impl ControlJob {
             Err(TryRecvError::Empty) => None,
         }
     }
+}
+
+/// A command to run on a copy of the session, taken when it was asked for. A send to a network
+/// folder that waits for a worker is one: it sends the design as it was then.
+pub(crate) struct OnACopy {
+    req: ControlRequest,
+    /// The command, as the toolbar names it.
+    label: String,
+    /// When it was asked for (ms).
+    asked: f64,
+    scope: Option<solidcraft_engine::io::vfs::PathScope>,
+    /// The command on the copy, and its reply.
+    run: Box<dyn FnOnce() -> Option<Value> + Send>,
 }
 
 fn label(app: &SolveApp, command: &str) -> String {
@@ -398,6 +429,27 @@ impl SolveApp {
         {
             return self.answer_on_a_copy(req, id, params);
         }
+        // Sending to a network folder: on a copy too, whatever the preference, so the window
+        // keeps answering while the file is copied (#2304). With every worker busy it waits for
+        // one, never running here: a slow share would hold the window up.
+        if let Some((id, params)) = sending_to_a_network_folder(self, &req) {
+            let now = self.control_answering.len() < MAX_ANSWERING && self.control_sends_waiting.is_empty();
+            if !now && self.control_sends_waiting.len() >= MAX_SENDS_WAITING {
+                let _ = req.reply.send(json!({"ok": false, "error": "too many sends to network folders are waiting; try again"}));
+                return None;
+            }
+            // The copy is taken now: a send that waits still sends the design as it is now, not
+            // an edit made meanwhile or another tab's design.
+            let work = match self.send_on_a_copy(req, id, params) {
+                Ok(work) => work,
+                Err(req) => return Some(req),
+            };
+            if now {
+                return self.start_on_a_copy(work).err();
+            }
+            self.control_sends_waiting.push_back(work);
+            return None;
+        }
         if !self.preferences.agent_off_thread {
             return Some(req);
         }
@@ -427,10 +479,19 @@ impl SolveApp {
     /// there: at once when it is done within the app's wait, otherwise once it is in. `None`: it
     /// is taken care of; `Some`: it runs here (no threads).
     fn answer_on_a_copy(&mut self, req: ControlRequest, id: &'static str, params: Value) -> Option<ControlRequest> {
-        let Ok(scope) = crate::control::request_scope(self, &req.params) else { return Some(req) };
+        match self.on_a_copy(req, id, params) {
+            Ok(work) => self.start_on_a_copy(work).err(),
+            Err(req) => Some(req),
+        }
+    }
+
+    /// Command `id` on a copy of the session as it is now, with the request's folder scope and
+    /// level; the request back when it can't run on a copy.
+    fn on_a_copy(&self, req: ControlRequest, id: &'static str, params: Value) -> Result<OnACopy, ControlRequest> {
+        let Ok(scope) = crate::control::request_scope(self, &req.params) else { return Err(req) };
         // The request's own level (#9184) checks it on the copy, and the reply says so, as
         // `control::handle` does; a word that is no level is refused there.
-        let Ok(level) = crate::control::request_param_check(&req.method, &req.params) else { return Some(req) };
+        let Ok(level) = crate::control::request_param_check(&req.method, &req.params) else { return Err(req) };
         let mut copy = self.session.scratch();
         if let Some(level) = level {
             copy.param_check = level;
@@ -438,7 +499,7 @@ impl SolveApp {
         // The copy has no history and no file (#9624): an inspection reports the design's own.
         let s = &self.session;
         let own = (id == "document.inspect").then(|| (s.undo.len(), s.redo.len(), s.path.clone()));
-        let rx = spawn(scope, move || {
+        let run = Box::new(move || {
             let mut reply = match copy.execute(id, &params) {
                 Ok(mut v) => {
                     if let (Some((undo, redo, path)), Some(o)) = (own, v.as_object_mut()) {
@@ -455,13 +516,26 @@ impl SolveApp {
             }
             Some(reply)
         });
-        let Some(rx) = rx else { return Some(req) };
-        let job = ControlJob { label: label(self, id), req, work: Work::Answer, done: rx, started: crate::now_ms(), steps: None };
+        Ok(OnACopy { label: label(self, id), asked: crate::now_ms(), req, scope, run })
+    }
+
+    /// Start `work` on a worker; the request back when no worker could start.
+    fn start_on_a_copy(&mut self, work: OnACopy) -> Result<(), ControlRequest> {
+        let OnACopy { req, label, asked, scope, run } = work;
+        let Some(rx) = spawn(scope, run) else { return Err(req) };
+        let job = ControlJob { label, req, work: Work::Answer, done: rx, started: asked, steps: None };
         match within_wait(self, &job.done) {
             Some(reply) => self.answered(job, reply),
             None => self.control_answering.push(job),
         }
-        None
+        Ok(())
+    }
+
+    /// A send to a network folder, on a copy that takes the user's folders as they are now; the
+    /// request back when it can't run there.
+    fn send_on_a_copy(&mut self, req: ControlRequest, id: &'static str, params: Value) -> Result<OnACopy, ControlRequest> {
+        self.session.network_folders = solidcraft_engine::remote_slicers::sanitized(&self.preferences.network_folders);
+        self.on_a_copy(req, id, params)
     }
 
     /// An export's or a reading's reply, from its copy, with the echo an export leaves when it
@@ -471,7 +545,9 @@ impl SolveApp {
             return;
         }
         let reply = reply.unwrap_or_else(|| json!({"ok": false, "error": format!("`{}` ended without a reply", job.label)}));
-        let export = executed(&job.req.params).and_then(|(command, _)| spec_id(command)).is_some_and(|id| ANSWERED_ON_A_COPY.contains(&id));
+        let export = executed(&job.req.params)
+            .and_then(|(command, _)| spec_id(command))
+            .is_some_and(|id| ANSWERED_ON_A_COPY.contains(&id) || SEND_TO_A_FOLDER.contains(&id));
         if reply["ok"] == true && export {
             let language = crate::i18n::Locale::for_language(&self.preferences.language);
             self.session.echo(language.format("ui.command_done", &[("command", job.label.as_str())]));
@@ -497,6 +573,18 @@ impl SolveApp {
                 }
             }
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+        // Sends that waited for a worker, in order, as workers come free, each on the copy taken
+        // when it was asked for; never here, where a slow share would hold the window up.
+        while self.control_answering.len() < MAX_ANSWERING
+            && let Some(work) = self.control_sends_waiting.pop_front()
+        {
+            if work.req.refuse_cancelled_chat() {
+                continue;
+            }
+            if let Err(req) = self.start_on_a_copy(work) {
+                let _ = req.reply.send(json!({"ok": false, "error": "no worker could start the send to the network folder; try again"}));
+            }
         }
         let Some(job) = &self.control_job else { return };
         if job.req.refuse_cancelled_chat() {
