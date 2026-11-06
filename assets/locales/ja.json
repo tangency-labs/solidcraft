@@ -5436,6 +5436,8 @@
   "ui.fine": "細かい",
   "ui.finest": "最も細かい",
   "ui.finish_sketch": "スケッチを終了",
+  "ui.first_dimension_scales": "最初の寸法で図形全体をスケールする",
+  "ui.first_dimension_scales_tip": "オン: スケッチの最初の長さ寸法で、測定する図形全体をスケールし、形を保ちます。オフ: 寸法は測定する対象のサイズだけを変えます。",
   "ui.fit": "フィット",
   "ui.fix_unfix": "固定/固定解除",
   "ui.flat": "展開",

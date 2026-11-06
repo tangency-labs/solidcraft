@@ -5436,6 +5436,8 @@
   "ui.fine": "Mịn",
   "ui.finest": "Mịn nhất",
   "ui.finish_sketch": "Hoàn tất phác thảo",
+  "ui.first_dimension_scales": "Kích thước đầu tiên co giãn bản vẽ",
+  "ui.first_dimension_scales_tip": "Bật: kích thước chiều dài đầu tiên của bản phác thảo co giãn toàn bộ hình mà nó đo, nên hình dạng được giữ nguyên. Tắt: kích thước chỉ đổi cỡ phần mà nó đo.",
   "ui.fit": "Vừa vặn (Fit)",
   "ui.fix_unfix": "Cố định/Uncố định",
   "ui.flat": "Phẳng",

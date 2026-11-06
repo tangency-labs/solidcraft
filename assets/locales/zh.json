@@ -5436,6 +5436,8 @@
   "ui.fine": "精细",
   "ui.finest": "最精细",
   "ui.finish_sketch": "完成草图",
+  "ui.first_dimension_scales": "第一个尺寸缩放整个图形",
+  "ui.first_dimension_scales_tip": "开启：草图的第一个长度尺寸会缩放它所测量的图形，保持其形状不变。关闭：尺寸只改变所测量对象的大小。",
   "ui.fit": "适合",
   "ui.fix_unfix": "固定/取消固定",
   "ui.flat": "平面",
