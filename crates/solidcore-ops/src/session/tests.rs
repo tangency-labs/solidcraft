@@ -8,7 +8,7 @@ use super::*;
 use crate::make_box;
 
 fn all_fixes() {
-    set_fixes(UpstreamFixes::NAMES.iter().copied()).unwrap();
+    set_thread_fixes(UpstreamFixes::NAMES.iter().copied()).unwrap();
 }
 
 /// The hook is process-wide: the tests that install one take turns.
@@ -226,6 +226,39 @@ fn in_own_process(test: &str, f: impl FnOnce()) {
         stdout.contains("1 passed"),
         "child must execute the selected test: {stdout}"
     );
+}
+
+/// Two threads with different fixes run alternating calls on the one kernel, each with its own
+/// from its first call to its last: the race #2983 was.
+#[test]
+fn a_threads_fixes_are_its_own_call_by_call() {
+    use std::sync::Barrier;
+    let turns = Arc::new(Barrier::new(2));
+    let thread = |on: &'static [&'static str]| {
+        let turns = Arc::clone(&turns);
+        std::thread::spawn(move || {
+            set_thread_fixes(on.iter().copied()).unwrap();
+            assert_eq!(fixes(), on);
+            let mut want = UpstreamFixes::default();
+            for name in on {
+                *want.flag_mut(name).unwrap() = true;
+            }
+            let mut own = true;
+            for _ in 0..16 {
+                turns.wait();
+                own &= run("reads its fixes", |k| Ok(k.fixes == want)).unwrap();
+            }
+            assert!(own);
+        })
+    };
+    let first = thread(&UpstreamFixes::NAMES[..1]);
+    let second = thread(&UpstreamFixes::NAMES[1..2]);
+    first.join().unwrap();
+    second.join().unwrap();
+    // an unknown name changes nothing, on this thread either
+    all_fixes();
+    assert!(set_thread_fixes(["no_such_fix"]).is_err());
+    assert_eq!(fixes(), UpstreamFixes::NAMES);
 }
 
 /// Setting the fixes from inside a kernel call (an application's provenance rule runs in one)

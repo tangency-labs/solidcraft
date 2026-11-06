@@ -298,7 +298,7 @@ mod tests {
     use solidcore::{Point3, Vec2};
 
     fn all_fixes() {
-        session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+        session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
     }
 
     /// The cap of the box [0, 10]^2 x [10, 15], its bottom open: five planar faces, each its own

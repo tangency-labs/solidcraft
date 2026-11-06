@@ -96,7 +96,7 @@ pub(crate) fn raw_counts(e: &Value) -> [usize; 3] {
 pub(crate) fn rig_fixes() {
     let text = std::fs::read_to_string(corpus().join("fixes.json")).unwrap();
     let names: Vec<String> = serde_json::from_str(&text).unwrap();
-    session::set_fixes(names.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(names.iter().map(String::as_str)).unwrap();
 }
 
 /// `|a - b| / |b|`.

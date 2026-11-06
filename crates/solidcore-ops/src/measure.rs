@@ -430,7 +430,7 @@ pub(crate) mod tests {
     use crate::{make_box, session};
 
     fn all_fixes() {
-        session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+        session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
     }
 
     /// The order of a body made in the kernel with no record between: the kernel's own lists.

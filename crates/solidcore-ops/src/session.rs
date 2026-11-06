@@ -6,7 +6,8 @@
 //!   ([`set_fixes`], by `UpstreamFixes` flag name); which ones is the application's choice, never
 //!   ops'. Everything else about the kernel (its tolerances, context, caches) is the kernel's
 //!   default: ops offers no way to change it, so every kernel the session makes is configured
-//!   alike ([`fresh`]).
+//!   alike ([`fresh`]). Each call takes them as it starts. Under `cfg(test)` a test's thread
+//!   names its own, so tests with different fixes share the kernel without racing (#2983).
 //! - **Panics:** a panic inside a call is caught; the kernel, which it may have left half-updated,
 //!   is replaced by a fresh one of the same configuration, carrying the process-lifetime state the
 //!   kernel keeps as upstream keeps it for the process (the fillet solver's latched step), and the
@@ -77,15 +78,10 @@ impl std::fmt::Display for FixesRefused {
 
 impl std::error::Error for FixesRefused {}
 
-/// The kernel runs with exactly the fixes named in `on` (each an `UpstreamFixes` field name;
-/// every other flag off) from the next call on. Nothing changes if a name is unknown.
-///
-/// # Errors
-/// [`FixesRefused::Unknown`] naming the first name `UpstreamFixes` does not have;
-/// [`FixesRefused::Reentered`] from inside a kernel call.
-pub fn set_fixes<'a>(
+/// The fix set `on` names.
+fn named<'a>(
     on: impl IntoIterator<Item = &'a str>,
-) -> std::result::Result<(), FixesRefused> {
+) -> std::result::Result<UpstreamFixes, FixesRefused> {
     if in_call() {
         return Err(FixesRefused::Reentered);
     }
@@ -95,11 +91,30 @@ pub fn set_fixes<'a>(
             .flag_mut(name)
             .ok_or_else(|| FixesRefused::Unknown(name.to_owned()))? = true;
     }
+    Ok(fixes)
+}
+
+/// The kernel runs with exactly the fixes named in `on` (each an `UpstreamFixes` field name;
+/// every other flag off) from the next call on. Nothing changes if a name is unknown.
+///
+/// # Errors
+/// [`FixesRefused::Unknown`] naming the first name `UpstreamFixes` does not have;
+/// [`FixesRefused::Reentered`] from inside a kernel call.
+pub fn set_fixes<'a>(
+    on: impl IntoIterator<Item = &'a str>,
+) -> std::result::Result<(), FixesRefused> {
+    let fixes = named(on)?;
     *FIXES.lock().unwrap_or_else(PoisonError::into_inner) = Some(fixes);
-    let mut kernel = KERNEL.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(k) = kernel.as_mut() {
-        k.fixes = fixes;
-    }
+    Ok(())
+}
+
+/// [`set_fixes`] for this test's thread alone, whatever other tests on parallel threads name.
+#[cfg(test)]
+pub(crate) fn set_thread_fixes<'a>(
+    on: impl IntoIterator<Item = &'a str>,
+) -> std::result::Result<(), FixesRefused> {
+    let fixes = named(on)?;
+    THREAD_FIXES.with(|f| f.set(Some(fixes)));
     Ok(())
 }
 
@@ -114,6 +129,10 @@ pub fn fixes() -> Vec<&'static str> {
 }
 
 fn current_fixes() -> UpstreamFixes {
+    #[cfg(test)]
+    if let Some(fixes) = THREAD_FIXES.with(Cell::get) {
+        return fixes;
+    }
     FIXES
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -146,6 +165,9 @@ fn replacement(old: Option<&Kernel>) -> Kernel {
 }
 
 thread_local! {
+    /// A test's own fixes, when it named some ([`set_thread_fixes`]).
+    #[cfg(test)]
+    static THREAD_FIXES: Cell<Option<UpstreamFixes>> = const { Cell::new(None) };
     /// How many kernel calls this thread is inside: a panic now is caught ([`run_on`]).
     static IN_CALL: Cell<u32> = const { Cell::new(0) };
     /// Whether this thread is running the failure callback.
@@ -279,6 +301,7 @@ fn run_with<T: Answer>(
     }
     let mut guard = KERNEL.lock().unwrap_or_else(PoisonError::into_inner);
     let k = guard.get_or_insert_with(fresh);
+    k.fixes = current_fixes();
     set_current(Some(call));
     IN_CALL.with(|d| d.set(d.get() + 1));
     let depth = Depth;

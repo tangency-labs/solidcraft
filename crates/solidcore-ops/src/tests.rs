@@ -14,7 +14,7 @@ use crate::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body, C
 
 /// Every test here runs with every fix on, as an application with all of them named would.
 fn all_fixes() {
-    session::set_fixes(UpstreamFixes::NAMES.iter().copied()).unwrap();
+    session::set_thread_fixes(UpstreamFixes::NAMES.iter().copied()).unwrap();
 }
 
 #[test]

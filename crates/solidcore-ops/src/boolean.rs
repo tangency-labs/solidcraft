@@ -240,7 +240,7 @@ mod tests {
     use crate::session::{self, set_failure_hook, Failure};
 
     fn all_fixes() {
-        session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+        session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
     }
 
     #[test]
