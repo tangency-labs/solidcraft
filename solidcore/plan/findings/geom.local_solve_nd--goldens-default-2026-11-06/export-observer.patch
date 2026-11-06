@@ -1,0 +1,32 @@
+diff --git a/crates/goldens/src/units/blend_fillet_executive_p3/end_to_end.rs b/crates/goldens/src/units/blend_fillet_executive_p3/end_to_end.rs
+index eccac6f61..f61324b68 100644
+--- a/crates/goldens/src/units/blend_fillet_executive_p3/end_to_end.rs
++++ b/crates/goldens/src/units/blend_fillet_executive_p3/end_to_end.rs
+@@ -801,0 +802,17 @@ fn run_rust(
++    if let Some(path) = std::env::var_os("SOLIDCORE_2791_EXPORT") {
++        let path = std::path::PathBuf::from(path);
++        let attributes = solidcore::geom::attribute::AttributeStore::default();
++        let records = solidcore::topology::topology::NotifyRecords::new();
++        let key_of = |entity| body.owner_identity(entity);
++        let env = solidcore::topology::brep_data_write::FromBrepEnv {
++            attributes: &attributes, key_of: &key_of, records: &records,
++            curve_key: &|_| solidcore::geom::attribute::ObjectKey(0),
++            uv_curve_key: &|_| solidcore::geom::attribute::ObjectKey(0),
++            surface_key: &|_| solidcore::geom::attribute::ObjectKey(0),
++        };
++        let bytes = solidcore::topology::api_files::write_brep_to_file(k, Some(&body), &env, true)?;
++        std::fs::write(&path, bytes).map_err(|e| RealSolidRunError::Fixture(HarnessError::new(e.to_string())))?;
++        let check = solidcore::topology::brep::validation::check_brep(k, &mut body, solidcore::topology::brep::validation::CheckLevel::Level2);
++        std::fs::write(path.with_extension("check.json"), serde_json::to_vec_pretty(&serde_json::json!({"result_status":result_status,"check":format!("{:?}",check),"record":values})).map_err(|e| RealSolidRunError::Fixture(HarnessError::new(e.to_string())))?).map_err(|e| RealSolidRunError::Fixture(HarnessError::new(e.to_string())))?;
++    }
++
+--- a/crates/diagnostics/src/render.rs
++++ b/crates/diagnostics/src/render.rs
+@@ -139,0 +140,7 @@
++    if let Ok(raw) = std::env::var("SOLIDCORE_2791_VIEWPORT") {
++        let p: Vec<f64> = raw.split(',').map(|x|x.parse().unwrap()).collect();
++        let [x,y,_]=view.project([p[0],p[1],p[2]]);
++        let scale=width as f64/p[3];
++        return Frame { scale,offset:[width as f64/2.0-x*scale,height as f64/2.0-y*scale],view };
++    }
++
