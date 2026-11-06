@@ -5,6 +5,7 @@ use crate::ui_kit;
 use crate::ui_kit::{choice_row, expr_row, hint_row};
 use solidcraft_engine::kernel::Continuity;
 
+/// Returns the command identifier associated with a dialog kind, if any.
 pub(super) fn command(kind: &Kind) -> Option<&'static str> {
     match kind {
         Kind::Material { .. } => Some("material.assign"),
@@ -31,6 +32,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Measure { .. } => Some("inspect.measure"),
         Kind::Section { .. } => Some("inspect.section"),
         Kind::Rename { .. } => Some("timeline.rename"),
+        Kind::RenameGroup { .. } => Some("timeline.rename_group"),
         Kind::ConfirmDelete { .. } => Some("timeline.delete"),
         Kind::Extrude { .. } => Some("solid.extrude"),
         Kind::Fillet { chamfer, .. } => Some(if *chamfer { "solid.chamfer" } else { "solid.fillet" }),
@@ -905,6 +907,7 @@ fn section_slider(app: &SolveApp, ui: &mut egui::Ui, offset: &mut String, (lo, h
     });
 }
 
+/// Renders specialized parameter input rows for dialogs that require custom form fields.
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let mut enter = false;
     let through_point = offset_through_point(d).is_some();
@@ -1199,7 +1202,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 ui_kit::text(ui, tr("section.off_hint"), ui_kit::Text::Hint("section_off"));
             }
         }
-        Kind::Rename { name, .. } => {
+        Kind::Rename { name, .. } | Kind::RenameGroup { name, .. } => {
             form_row(ui, "Name", |ui| {
                 enter |= ui_kit::focused_text_field(ui, name, "");
             });

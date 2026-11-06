@@ -386,6 +386,10 @@ crate::dialog_descriptor::dialog_descriptors! {
                 feature: u64,
                 name: String,
             },
+            RenameGroup {
+                group: u64,
+                name: String,
+            },
             /// Delete a feature that others depend on.
             ConfirmDelete {
                 features: Vec<u64>,
@@ -1340,6 +1344,10 @@ impl Dialog {
 
     pub fn rename(feature: u64, name: &str) -> Dialog {
         Dialog::new(Kind::Rename { feature, name: name.to_string() }, vec![])
+    }
+
+    pub fn rename_group(group: u64, name: &str) -> Dialog {
+        Dialog::new(Kind::RenameGroup { group, name: name.to_string() }, vec![])
     }
 
     #[cfg(test)]
@@ -2610,10 +2618,12 @@ fn tr(text: &str) -> &str {
     solidcraft_ui_text::tr_label(text)
 }
 
+/// Publishes accessibility widget information for a dialog checkbox.
 fn publish_check(ui: &egui::Ui, response: &egui::Response, selected: bool) {
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), selected, tr(crate::ui_kit::row_label(ui))));
 }
 
+/// Returns the uppercase title bar text for a dialog kind.
 fn title(k: &Kind) -> &'static str {
     match k {
         Kind::Sketch => "CREATE SKETCH",
@@ -2659,6 +2669,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Combine { .. } => "COMBINE",
         Kind::EditParam { .. } => "EDIT DIMENSION",
         Kind::Rename { .. } => "RENAME",
+        Kind::RenameGroup { .. } => "RENAME GROUP",
         Kind::ConfirmDelete { .. } => "DELETE FEATURE",
         Kind::Assembly(k) => k.title(),
         Kind::Sheet(k) => k.title(),
@@ -6197,6 +6208,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
+        Kind::RenameGroup { group, name } => ("timeline.rename_group", json!({"group": group, "name": name})),
         Kind::ConfirmDelete { features, groups, .. } => ("timeline.delete", crate::timeline::delete_params(features, groups)),
         Kind::SketchIntersect { projection_link, .. } => {
             need(0, "geometry or bodies")?;
