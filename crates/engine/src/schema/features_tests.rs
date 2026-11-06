@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, FilletParams, FilletResult, OffsetPlaneParams,
-    PipeParams, PlaneAtAngleParams, ScaleParams, SphereParams, TorusParams,
+    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, DraftParams, ExtrudeParams, FeatureResult, FilletParams, FilletResult,
+    OffsetPlaneParams, PipeParams, PlaneAtAngleParams, ScaleParams, ShellParams, SphereParams, TorusParams,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms, sketch_rectangle};
@@ -372,4 +372,133 @@ fn converted_primitives_and_body_commands_reply_with_feature_result() {
     let r = s.execute("solid.sphere", &json!({"radius": 1, "center": [22, 0, 0], "operation": "intersect"})).unwrap_or_else(|e| panic!("{e}"));
     let (changed, removed) = (r["changed_bodies"].as_array().cloned(), r["removed_bodies"].as_array().cloned());
     assert!(changed.is_some_and(|c| c.contains(&json!("Bounding"))) && removed.is_some_and(|r| r.contains(&json!("Peg"))), "{r}");
+}
+
+// ---- Shell and Draft (#12752) ----
+
+/// A 20 mm cube, `Box`: its top face is at z = 20, a side face at x = 0.
+fn cube(level: ParamCheck) -> Session {
+    let mut s = Session { param_check: level, ..Session::default() };
+    s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20, "body_name": "Box"})).unwrap_or_else(|e| panic!("{e}"));
+    s
+}
+
+fn shell() -> Value {
+    json!({"faces": [[10, 10, 20]], "thickness": 2})
+}
+
+fn draft() -> Value {
+    json!({"faces": [[0, 10, 10]], "angle": 3, "neutral": "XY"})
+}
+
+/// `base` with `key` set to `value`.
+fn with(base: &Value, key: &str, value: Value) -> Value {
+    let mut p = base.clone();
+    p[key] = value;
+    p
+}
+
+#[test]
+fn the_shell_and_draft_schemas_and_the_key_check_agree() {
+    assert_keys(
+        input_schema_for::<ShellParams>(),
+        &["body", "body_name", "body_names", "direction", "faces", "name", "participants", "tangent_chain", "thickness"],
+    );
+    assert_keys(input_schema_for::<DraftParams>(), &["angle", "body", "body_name", "body_names", "faces", "name", "neutral", "participants", "pull"]);
+}
+
+/// #12752: calls to Shell and Draft that fail today get the same message in strict. The faces
+/// fail on the shared helper's sketch, which has no body; the rest need the cube's faces.
+#[test]
+fn strict_keeps_the_shell_and_draft_errors() {
+    assert_strict_keeps_todays_errors(&[
+        ("solid.shell", json!({"thickness": 1})),
+        ("solid.shell", json!({"faces": null, "thickness": 1})),
+        ("solid.shell", json!({"faces": 5, "thickness": 1})),
+        ("solid.shell", json!({"faces": [true], "thickness": 1})),
+        ("solid.shell", json!({"faces": vec![[0, 0, 0]; 1001], "thickness": 1})),
+        ("solid.draft", json!({"angle": 3, "neutral": "XY"})),
+        ("solid.draft", json!({"faces": [], "angle": 3, "neutral": "XY"})),
+        ("solid.draft", json!({"faces": [[1, 2]], "angle": 3, "neutral": "XY"})),
+    ]);
+    for (id, p) in [
+        ("solid.shell", with(&shell(), "thickness", json!(null))),
+        ("solid.shell", with(&shell(), "thickness", json!("2 deg"))),
+        ("solid.shell", with(&shell(), "direction", json!("sideways"))),
+        ("solid.draft", with(&draft(), "angle", json!("2 mm"))),
+        ("solid.draft", json!({"faces": [[0, 10, 10]], "angle": 3})),
+        ("solid.draft", with(&draft(), "neutral", json!(null))),
+        ("solid.draft", with(&draft(), "neutral", json!(1.5))),
+        ("solid.draft", with(&draft(), "neutral", json!("Nope"))),
+        ("solid.draft", with(&draft(), "neutral", json!({"origin": [0, 0, 0]}))),
+    ] {
+        let off = cube(ParamCheck::Off).execute(id, &p).err().map(|e| e.to_string());
+        assert!(off.is_some(), "{id} {p} should fail today");
+        assert_eq!(cube(ParamCheck::Strict).execute(id, &p).err().map(|e| e.to_string()), off, "{id} {p}");
+    }
+}
+
+/// #12752: keys of the wrong type that Shell and Draft ignore today (a `tangent_chain` that isn't
+/// true or false is read as false, a `pull` that isn't a point as the plane's normal) are refused
+/// by the contracts: in Warn the call still works, with a warning naming the key.
+#[test]
+fn the_shell_and_draft_contracts_refuse_what_the_handlers_ignore() {
+    for (id, p, key) in [
+        ("solid.shell", with(&shell(), "tangent_chain", json!("yes")), "tangent_chain"),
+        ("solid.shell", with(&shell(), "direction", json!(5)), "direction"),
+        ("solid.shell", with(&shell(), "body", json!(5)), "body"),
+        ("solid.draft", with(&draft(), "pull", json!("up")), "pull"),
+        ("solid.draft", with(&draft(), "body", json!(["Box"])), "body"),
+    ] {
+        assert!(cube(ParamCheck::Off).execute(id, &p).is_ok(), "{id} {p} works today");
+        let warned = cube(ParamCheck::Warn).execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        assert!(warned["param_warnings"].to_string().contains(key), "{warned}");
+        let error = cube(ParamCheck::Strict).execute(id, &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(error.contains(&format!("`{key}`")), "{id} {p}: {error}");
+    }
+}
+
+/// #12752: the Shell and Draft schemas take what the handlers take. Each call is checked against
+/// both the schema and the handler on the cube, with the check off, so the two can't drift apart.
+#[test]
+fn the_shell_and_draft_schemas_take_what_the_handlers_take() {
+    let shell_schema = input_schema_for::<ShellParams>();
+    let draft_schema = input_schema_for::<DraftParams>();
+    for (id, schema, p) in [
+        ("solid.shell", &shell_schema, shell()),
+        ("solid.shell", &shell_schema, json!({"faces": [], "thickness": 2})),
+        ("solid.shell", &shell_schema, with(&with(&shell(), "direction", json!("outside")), "tangent_chain", json!(true))),
+        ("solid.shell", &shell_schema, with(&shell(), "direction", json!(""))),
+        ("solid.shell", &shell_schema, with(&shell(), "direction", json!("sideways"))),
+        ("solid.shell", &shell_schema, json!({"faces": [[10, 10]], "thickness": 2})),
+        ("solid.shell", &shell_schema, json!({"thickness": 2})),
+        ("solid.draft", &draft_schema, draft()),
+        ("solid.draft", &draft_schema, with(&with(&draft(), "neutral", json!({"origin": [0, 0, 0], "normal": [0, 0, 1]})), "pull", json!([0, 0, 1]))),
+        ("solid.draft", &draft_schema, with(&draft(), "angle", json!("3 deg"))),
+        ("solid.draft", &draft_schema, with(&draft(), "neutral", json!(1.5))),
+        ("solid.draft", &draft_schema, json!({"faces": [[0, 10, 10]], "angle": 3})),
+    ] {
+        let takes = cube(ParamCheck::Off).execute(id, &p).is_ok();
+        assert_eq!(conforms(schema.as_value(), schema.as_value(), &p), takes, "{id} {p}");
+    }
+}
+
+/// #12752: Shell and Draft reply as feature commands do, in Warn without warnings: the cube
+/// opened at the top, closed hollow, and drafted. A misspelt key is ignored today: Warn says so,
+/// and strict refuses it.
+#[test]
+fn shell_and_draft_reply_with_their_schemas() {
+    let schema = output_schema_for::<FeatureResult>();
+    let schema = schema.as_value();
+    for (id, p) in [("solid.shell", shell()), ("solid.shell", json!({"faces": [], "thickness": 2})), ("solid.draft", draft())] {
+        let r = cube(ParamCheck::Warn).execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{r}");
+        assert_eq!(r["changed_bodies"], json!(["Box"]), "{id}: {r}");
+    }
+    let p = with(&shell(), "tangent_chian", json!(true));
+    let r = cube(ParamCheck::Warn).execute("solid.shell", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+    assert!(r["param_warnings"].to_string().contains("tangent_chian"), "{r}");
+    let error = cube(ParamCheck::Strict).execute("solid.shell", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("`tangent_chian`"), "{error}");
 }
