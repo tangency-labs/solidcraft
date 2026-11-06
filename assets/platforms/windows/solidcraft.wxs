@@ -33,8 +33,9 @@
          every update (#9366). This relies on the component rules: a component keeps its GUID and
          its files keep their names and folder; a file that moves or is renamed gets a new
          component. The Start menu shortcut is part of the SolidcraftApp component and is not
-         advertised, so removing the old product leaves it in place (an advertised shortcut
-         belongs to the old product and could be removed with it). -->
+         advertised, so removing the old product leaves it in place, and its file name differs
+         from the advertised shortcut of older releases, whose removal deletes that name (see
+         StartMenuShortcut). -->
     <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallExecute"
         DowngradeErrorMessage="A newer version of SolidCraft is already installed." />
     <!-- With the old files still in place during the install, the default rules ("o": replace
@@ -100,7 +101,20 @@
            The UpgradeCode above is unchanged, so this MSI major-upgrades a pre-rename install. -->
       <Component Id="SolidcraftApp" Guid="A379D509-D776-4B34-A3A4-71FBF5724971">
         <File Id="SolidcraftExe" Source="$(var.BinDir)\solidcraft.exe" KeyPath="yes">
-          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="SolidCraft"
+          <!-- The file is "SolidCraft CAD.lnk", not the "SolidCraft.lnk" of the releases before
+               #9366 (0.30.1 and earlier), and that name must never change again. Those releases
+               advertised the shortcut, and an advertised shortcut is removed with its feature, by
+               file name: when the old product is removed after this one is installed
+               (afterInstallExecute), its ShortcutRemove would delete a new "SolidCraft.lnk" too,
+               leaving no Start menu entry. A different name leaves the old removal only its own
+               file. The cost is that the Start menu entry reads "SolidCraft CAD". Keeping
+               "SolidCraft" would need either a custom action that rewrites the shortcut after
+               RemoveExistingProducts, or DisplayResourceDll plus a new string resource in
+               solidcraft.exe, which writes a localized name into the shared Programs folder's
+               desktop.ini; both are more to get wrong than a file name. Renaming it later would
+               orphan this file: the component stays installed through an update, so the old
+               product never removes it. -->
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="SolidCraft CAD"
               Description="SolidCraft parametric 3D CAD" WorkingDirectory="INSTALLFOLDER" Advertise="no"
               Icon="SolidcraftIcon.exe" IconIndex="0" />
         </File>
