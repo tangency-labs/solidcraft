@@ -11,6 +11,7 @@
 
 mod aabb2;
 mod arcfit;
+pub mod arrange;
 mod ball;
 pub mod blend;
 pub mod brep;
