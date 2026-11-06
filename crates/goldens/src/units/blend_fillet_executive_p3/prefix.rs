@@ -455,7 +455,8 @@ pub(super) fn run(
         {
             prior = snapshot(&session, &mut Vec::new())?;
             if let Some(FilletObject::Corner(id)) = session.executive().corners.first().copied() {
-                statuses[2] = match session.make_nx1_corner_topology(k, id) {
+                // the corner's own MakeCornerTopology (virtual), as the shim calls it
+                statuses[2] = match session.make_corner_topology(k, id) {
                     Ok(()) => 0.0,
                     Err(error) => status(error)?,
                 };

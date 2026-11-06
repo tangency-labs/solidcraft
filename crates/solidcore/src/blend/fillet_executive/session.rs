@@ -23,7 +23,7 @@
 //! (`SmCurveCache.cpp:1508`, `curve_cache.rs:608`). The frozen target makes repeated
 //! loads equivalent. An external custom/non-full-tree cache provider is not yet
 //! accepted; this is not an arbitrary warmed-cache parity claim.
-//! Live corner stages dispatch `NByOne`, `NByOneClosed`, `NByTwo` and `NxN` corners
+//! Live corner stages dispatch `NByOne`, `NByTwo` and `NxN` corners
 //! to the ported corner code. One vertex dispatch (`live_corner_vert_geom`) serves every corner kind;
 //! mate vertices nest through it, bounded by `MAX_MATE_DEPTH`. An Nx2 corner's
 //! vertex calculators receive every retained solver of the
@@ -888,7 +888,8 @@ fn live_corner_vert_geom(
     }
 }
 
-/// `SmFilletCorner::CalcCornerVertGeom` of the ordinary Nx1, closed Nx1, Nx2 and `NxN`
+/// `SmFilletCorner::CalcCornerVertGeom` of the ordinary Nx1, Nx2 (the blend corners, the
+/// closed Turn among them) and `NxN`
 /// corner `id` over the live session's objects (the corner sits in its slot of
 /// `corners`). Not upstream (#2406): at an End that can wait
 /// for its rails' rollover (`rolled_end`), a rail end its rail does not reach on the End's
@@ -2357,6 +2358,18 @@ impl<'target> FilletSession<'target> {
     pub fn make_nx1_corner_topology(&mut self, k: &Kernel, id: FilletCornerId) -> Result<()> {
         self.objects
             .make_nx1_corner_topology(k, id, &mut self.executive)
+    }
+
+    /// Build one corner's pseudo-topology by its class (`SmFilletCorner::MakeCornerTopology`,
+    /// virtual): the dispatch the executive's corner-vertex loop runs per corner, so an
+    /// `NByOne` corner builds as [`FilletSession::make_nx1_corner_topology`] and a blend
+    /// corner (the closed Turn among them, #2349) by its event.
+    ///
+    /// # Errors
+    /// Unresolved corner/solver identities or the corner's topology producer's errors.
+    pub fn make_corner_topology(&mut self, k: &mut Kernel, id: FilletCornerId) -> Result<()> {
+        self.objects
+            .vertices_make_topology(k, FilletObject::Corner(id), &mut self.executive)
     }
 
     /// Calculate one ordinary `NByOne` corner's vertices using its retained solver.
@@ -5882,16 +5895,54 @@ impl SessionObjects<'_> {
             extended_surfaces,
             topo_edges: &mut executive.topo_edges,
         };
-        let gaps = if corner.kind.corner_type() == FilletCornerType::NByOneClosed {
-            corner.make_nx1_closed_corner_topology(env)?;
-            None
-        } else {
-            corner.make_nx1_corner_topology(env)?
-        };
-        match gaps {
+        match corner.make_nx1_corner_topology(env)? {
             Some(gaps) => self.nx1_end_gap_checks(k, id, gaps, executive),
             None => Ok(()),
         }
+    }
+
+    /// The closed Turn's topology (#2349) with the solver of its one filleted edge use.
+    fn make_closed_turn_corner_topology(
+        &mut self,
+        k: &Kernel,
+        id: FilletCornerId,
+        executive: &FilletExecutive<FilletObject>,
+    ) -> Result<()> {
+        const OP_TURN: &str = "blend::fillet_corner::topology::make_closed_turn_topology";
+        let edgeuse = self
+            .corners
+            .get(id.0 as usize)
+            .and_then(|corner| corner.solver_eus.as_deref())
+            .and_then(|edgeuses| edgeuses.first())
+            .copied()
+            .ok_or_else(|| invalid("corner has no actual solver edge use"))?;
+        let object = FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(edgeuse));
+        let Some(FilletObject::Solver(solver)) = executive.fillet_solver_of_edgeuse(object) else {
+            return Err(SolidError::null_pointer(OP_TURN));
+        };
+        let SessionObjects {
+            target,
+            pseudo,
+            solvers,
+            corners,
+            ..
+        } = self;
+        let solver = solvers
+            .get_mut(solver.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("corner solver is not live"))?;
+        let corner = corners
+            .get_mut(id.0 as usize)
+            .ok_or_else(|| invalid("corner is not live"))?;
+        corner.make_closed_turn_topology(
+            crate::blend::fillet_corner::topology::closed_turn::ClosedTurnTopologyEnv {
+                k,
+                target,
+                pseudo,
+                corner: id,
+                solver,
+            },
+        )
     }
     /// The end of `SmFilletNx1Corner::MakeCornerTopology` for a mixed-convexity end
     /// face spanning several faces: the corner's vertex geometry and the two new side
@@ -6034,6 +6085,15 @@ impl SessionObjects<'_> {
             .is_some_and(crate::blend::blend_corner::BlendCorner::is_join)
         {
             return self.make_join_corner_topology(k, id, executive);
+        }
+        // Not the fork's (#2349): a closed edge meeting itself at an angle is a Turn of its
+        // one blend, Mitred, with its one solver
+        if self
+            .corners
+            .get(id.0 as usize)
+            .is_some_and(FilletCorner::is_closed_turn)
+        {
+            return self.make_closed_turn_corner_topology(k, id, executive);
         }
         // The fork's (smlib 41a39ec): SmBlendCorner::MakeCornerTopology builds an End at a
         // smooth vertex on the plane square to its edge (MakeEndAtSmoothVertex)
@@ -6589,9 +6649,7 @@ impl CornerVertexAccess<FilletObject> for SessionObjects<'_> {
         // open or degenerate corner's moved code (the fork's 53c47b8), a Join is dispatched
         // in the Nx2 corner's (WR-697)
         match self.corner_object(corner)?.kind.corner_type() {
-            FilletCornerType::NByOne | FilletCornerType::NByOneClosed => {
-                self.make_nx1_corner_topology(k, id, executive)
-            }
+            FilletCornerType::NByOne => self.make_nx1_corner_topology(k, id, executive),
             FilletCornerType::NByTwo => self.make_nx2_corner_topology(k, id, executive),
             FilletCornerType::NByNConvex => self.make_convex_nxn_corner_topology(k, id, executive),
             FilletCornerType::NByNConcave => {
@@ -6604,8 +6662,10 @@ impl CornerVertexAccess<FilletObject> for SessionObjects<'_> {
             | FilletCornerType::Open
             | FilletCornerType::Degenerate => self.make_end_corner_topology(k, id, executive),
             // Abstract upstream (pure virtual): no corner object has these types; nor the 1x1
-            // and 2x2 corners', whose classes the blend corner's Join replaced (#2400).
-            FilletCornerType::Unknown
+            // and 2x2 corners', whose classes the blend corner's Join replaced (#2400), nor
+            // the closed Nx1 corner's, which its Join and closed Turn replaced (#2349).
+            FilletCornerType::NByOneClosed
+            | FilletCornerType::Unknown
             | FilletCornerType::NByN
             | FilletCornerType::OneByOne
             | FilletCornerType::TwoByTwo => Err(invalid("no corner object has this type")),

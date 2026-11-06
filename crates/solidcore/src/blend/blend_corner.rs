@@ -20,6 +20,7 @@
 //! | [`ball`]                     | the Ball (`ClassifyBall`, `BuildBallSurface`, `CreateBallPatch`; 79d4763, a6243fa, f8e6709, 4241a1b) |
 //! | [`BlendEnd`], [`BlendCorner::is_end_on_end_face`] | `SmBlendEnd`, `IsEndOnEndFace` (53c47b8) |
 //! | [`BlendCorner::is_closed_join`] | `IsClosedJoin` (543d25a) |
+//! | [`BlendCorner::is_closed_turn`], [`FilletCorner::make_closed_turn_topology`] | not the fork's: a closed edge meeting itself at an angle, Mitred (#2349; replaces `SmFilletNx1ClosedCorner`) |
 //! | [`FilletCorner::make_join_topology`] | `MakeJoinTopology`, `sm_JoinSides` (`SmBlendCornerJoin.cpp`, 68e039c, 543d25a) |
 //! | `FilletBrep::calc_join_section` | `SmFilletVertex::CalcJoinSection` (543d25a) |
 //! | `FilletBrep::calc_rail_int_end_surface` | `SmFilletVertex::CalcRailIntEndSurface` (`SmBlendCornerEnd.cpp`, 3e26f76) |
@@ -185,6 +186,15 @@ impl BlendCorner {
     #[must_use]
     pub fn is_closed_join(self, solver_eus: Option<&[EdgeuseId]>) -> bool {
         self.event == BlendCornerEvent::Join && solver_eus.is_some_and(|eus| eus.len() == 1)
+    }
+
+    /// Not the fork's (#2349): a Turn of one closed blended edge meeting itself at an
+    /// angle (`solver_eus`, the corner's `m_pSolverEUs`), Mitred: the round's two ends
+    /// meet on the mitre as two blends turning at a side edge do
+    /// ([`FilletCorner::make_closed_turn_topology`]).
+    #[must_use]
+    pub fn is_closed_turn(self, solver_eus: Option<&[EdgeuseId]>) -> bool {
+        self.event == BlendCornerEvent::Turn && solver_eus.is_some_and(|eus| eus.len() == 1)
     }
 
     /// `IsSetBack`: the Setback (the fork's 61547af).

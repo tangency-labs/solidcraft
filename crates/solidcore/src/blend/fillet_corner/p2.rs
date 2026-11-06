@@ -73,9 +73,10 @@
 //!   ([`FilletExecutiveData`]) and the B-rep being filleted (for `sm_TestG1Continuity`)
 //!   explicitly; `SM_ASSERT_ERR` (a debug assertion) is not reproduced, the `NULL` it
 //!   returns is `None`.
-//! - **The closed Nx1 corner** (`SmFilletNx1ClosedCorner`) has no `AdjustTangentCorner`
-//!   or `GetTangentFilletSolver` of its own (the fork's smlib#113 caa67d0; WR-697): it is
-//!   only the edge meeting itself at an angle, a G1 one being the blend corner's Join.
+//! - **The closed Nx1 corner** (`SmFilletNx1ClosedCorner`) is not built: a closed edge
+//!   meeting itself is the blend corner's Join when G1 (the fork's smlib#113 caa67d0;
+//!   WR-697) and its closed Turn at an angle (#2349), neither of which is tangent to
+//!   another blend.
 //! - **`MakeConstantRadiusFillet`** is unit `blend.fillet_corner_p1`'s
 //!   [`FilletCorner::make_constant_radius_fillet`].
 //!

@@ -700,11 +700,12 @@ impl Recovery<'_> {
                 return Ok(());
             }
             let corner = required(self.fillets.fillet_vertex(self.start(r0)?)?.fillet_corner())?;
-            // the fork's `|| IsClosedJoin()` in place of the 1x1 corner (543d25a; WR-697)
+            // `SM_FCR_N_x_1_CLOSED`: one closed blend meeting itself, now the blend corner's
+            // closed Join (the fork's `IsClosedJoin()`, 543d25a; WR-697) or closed Turn (#2349)
             let corner_type = self.corners.corner_type(corner)?;
-            let closed_join =
-                corner_type == FilletCornerType::NByTwo && self.corners.is_closed_join(corner)?;
-            if corner_type != FilletCornerType::NByOneClosed && !closed_join {
+            let meets_itself =
+                corner_type == FilletCornerType::NByTwo && self.corners.meets_itself(corner)?;
+            if !meets_itself {
                 return Err(SolidError::sm_err(OP));
             }
             if unknown0 {

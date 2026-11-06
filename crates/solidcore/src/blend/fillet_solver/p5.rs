@@ -86,9 +86,12 @@ pub trait RailClassificationContext {
     /// # Errors
     /// An unresolved corner.
     fn corner_type(&self, corner: FilletCornerId) -> Result<FilletCornerType>;
-    /// `(IsClosedJoin(), IsEndOnEndFace())` of the corner (the fork's 543d25a, 53c47b8;
-    /// WR-697). The default, for a context without blend corners: no closed Join, and an
-    /// end on its end face exactly at an Nx1 corner.
+    /// Whether the corner is one closed blend meeting itself (the fork's `IsClosedJoin()`,
+    /// 543d25a, or a closed Turn, #2349: [`FilletCorner::meets_itself`]), and
+    /// `IsEndOnEndFace()` (the fork's 53c47b8; WR-697). The default, for a context without
+    /// blend corners: neither, and an end on its end face exactly at an Nx1 corner.
+    ///
+    /// [`FilletCorner::meets_itself`]: crate::blend::fillet_corner::p3::FilletCorner::meets_itself
     ///
     /// # Errors
     /// An unresolved corner.
@@ -186,7 +189,7 @@ impl<C: RailClassificationContext> SplitCorners for ContextCorners<'_, C> {
     fn corner_type(&self, id: FilletCornerId) -> Result<FilletCornerType> {
         self.0.corner_type(id)
     }
-    fn is_closed_join(&self, id: FilletCornerId) -> Result<bool> {
+    fn meets_itself(&self, id: FilletCornerId) -> Result<bool> {
         Ok(self.0.corner_blend_tests(id)?.0)
     }
 }
@@ -574,7 +577,8 @@ mod tests {
     use crate::intersect::point_class::PointClassType;
     use crate::math::Vec3;
 
-    /// A corner store resolving only corner types, through `F`.
+    /// A corner store resolving only corner types, through `F`; a blend corner (`NByTwo`)
+    /// is one closed blend meeting itself.
     struct CornerTypes<F>(F);
 
     impl<F: Fn(FilletCornerId) -> Result<FilletCornerType>> SplitCorners for CornerTypes<F> {
@@ -593,8 +597,8 @@ mod tests {
         fn corner_type(&self, id: FilletCornerId) -> Result<FilletCornerType> {
             (self.0)(id)
         }
-        fn is_closed_join(&self, _: FilletCornerId) -> Result<bool> {
-            Ok(false)
+        fn meets_itself(&self, id: FilletCornerId) -> Result<bool> {
+            Ok((self.0)(id)? == FilletCornerType::NByTwo)
         }
     }
 
@@ -702,7 +706,7 @@ mod tests {
             &mut target,
             &mut fb,
             id,
-            &mut CornerTypes(|_| Ok(FilletCornerType::NByOneClosed)),
+            &mut CornerTypes(|_| Ok(FilletCornerType::NByTwo)),
             &mut adjusted,
             &mut NoOwnership,
         );

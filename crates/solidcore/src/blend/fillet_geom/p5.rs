@@ -769,9 +769,14 @@ impl FilletBrep {
             .fillet_corner()
             .ok_or_else(|| SolidError::null_pointer(OP_INT_FILLET))?;
 
-        // First, check if we have an adjusted Nx2 Concave corner
+        // First, check if we have an adjusted Nx2 Concave corner (not a closed Turn, a blend
+        // corner by type whose vertex ends its mitre on its common face, as the closed Nx1
+        // corner's did: #2349)
         let the_corner = corners.corner(corner)?;
-        if the_corner.corner_type() == FilletCornerType::NByTwo && !the_corner.is_bevel_corner() {
+        if the_corner.corner_type() == FilletCornerType::NByTwo
+            && !the_corner.is_bevel_corner()
+            && !the_corner.is_closed_turn()
+        {
             self.calc_nx2_vert_fillet_x_fillet_with_context(k, v, context)?;
             return Ok(());
         }

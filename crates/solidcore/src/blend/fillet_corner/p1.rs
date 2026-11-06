@@ -85,7 +85,7 @@
 //!   the executive's [`FilletExecutiveData`] are passed to the methods that need them
 //!   (`m_pExecutive`'s `m_vExtendedSurfacesMap` is
 //!   [`FilletExecutiveData::extended_surfaces_map`]). The virtual methods dispatch on
-//!   [`FilletCorner::kind`]; the `SmFilletNx1ClosedCorner` / `SmFilletNx2Corner`
+//!   [`FilletCorner::kind`]; the `SmFilletNx2Corner`
 //!   overrides of `GetTangentFilletSolver` belong to unit `blend.fillet_corner_p2` and
 //!   are [`SolidError::Unported`] there. `SqueezeEdge` removes the deleted edge and
 //!   vertex from the corner's lists at once instead of leaving the `NULL` slots that
@@ -841,8 +841,9 @@ impl FilletCorner {
     }
 
     /// `IsTangentCorner` (virtual): `m_bG1Case` for the Nx2 corner (the blend corner's
-    /// Join), `FALSE` for every other kind; the closed Nx1 corner, which only meets itself at
-    /// an angle now, never is one (the fork's smlib#113 caa67d0).
+    /// Join), `FALSE` for every other kind. A closed Turn's `m_bG1Case` stays `FALSE`: its
+    /// blend meets itself at an angle (#2349; the closed Nx1 corner it replaces never was
+    /// one since the fork's smlib#113 caa67d0).
     #[must_use]
     pub const fn is_tangent_corner(&self) -> bool {
         match self.kind {
@@ -854,9 +855,10 @@ impl FilletCorner {
     /// `GetTangentFilletSolver(pFS)` (virtual): the Nx2 override (unit
     /// `blend.fillet_corner_p2`), which tests `sm_TestG1Continuity` on the filleted edges of
     /// `b`, the B-rep being filleted; a closed Join's own solver (the fork's 543d25a); `None`
-    /// for the base class (`SM_REF1(pFS)`) and the closed Nx1 corner (the fork's smlib#113
-    /// caa67d0). The 1x1 and 2x2 corners' overrides went with their classes (#2400): the
-    /// blend corner's Join replaced them.
+    /// for the base class (`SM_REF1(pFS)`) and a closed Turn, whose blend meets itself at an
+    /// angle (#2349; the closed Nx1 corner it replaces returned `None` since the fork's
+    /// smlib#113 caa67d0). The 1x1 and 2x2 corners' overrides went with their classes
+    /// (#2400): the blend corner's Join replaced them.
     ///
     /// # Errors
     ///
@@ -901,6 +903,8 @@ impl FilletCorner {
                     .ok_or_else(|| SolidError::invalid_input(OP, NULL_DEREF))?;
                 Ok((solver_of(eu) == Some(fs)).then_some(fs))
             }
+            // a closed Turn's blend meets itself at an angle: it does not continue (#2349)
+            FilletCornerKind::NByTwo if self.is_closed_turn() => Ok(None),
             FilletCornerKind::NByTwo => {
                 self.tangent_fillet_solver_nx2_with_lookup(k, b, fs, solver_of)
             }

@@ -756,7 +756,6 @@ fn corner_kind(code: i64) -> Result<FilletCornerKind, HarnessError> {
         2 => FilletCornerKind::Degenerate,
         5 => FilletCornerKind::ThreeByTwoMixed,
         6 => FilletCornerKind::FourByThree,
-        7 => FilletCornerKind::NByOneClosed,
         8 => FilletCornerKind::NByOne,
         9 => FilletCornerKind::NByTwo,
         11 => FilletCornerKind::ConvexNByN,

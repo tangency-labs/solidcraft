@@ -62,7 +62,7 @@ use solidcore::blend::fillet_corner::p3::{
     FilletExecutiveData,
 };
 use solidcore::blend::fillet_executive::p3::ErrorInfo;
-use solidcore::blend::fillet_geom::p1::{FilletCornerId, FilletCornerType, FilletSolverId};
+use solidcore::blend::fillet_geom::p1::{FilletCornerId, FilletSolverId};
 use solidcore::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGenerator};
 use solidcore::intersect::surface_intersector::p1::SrfIndex;
 use solidcore::kernel::Kernel;
@@ -253,11 +253,12 @@ enum Inputs {
 
 /// The derived classes by the shim's index. `SmFillet1x1Corner` and `SmFillet2x2Corner`
 /// (indices 0 and 1) have no Rust class: the blend corner's Join replaced them and they
-/// were deleted (#2400), so their cases are retired ([`retired`]).
+/// were deleted (#2400); nor has `SmFilletNx1ClosedCorner` (index 2), which the blend
+/// corner's Join and closed Turn replaced (#2349). Their cases are retired ([`retired`]).
 const KINDS: [Option<FilletCornerKind>; 11] = [
     None,
     None,
-    Some(FilletCornerKind::NByOneClosed),
+    None,
     Some(FilletCornerKind::NByOne),
     Some(FilletCornerKind::Degenerate),
     Some(FilletCornerKind::Open),
@@ -268,7 +269,8 @@ const KINDS: [Option<FilletCornerKind>; 11] = [
     Some(FilletCornerKind::ConcaveNByN),
 ];
 
-/// Whether the shim's class index `i` is a class deleted with #2400 (1x1, 2x2).
+/// Whether the shim's class index `i` is a deleted class (1x1, 2x2 with #2400; closed Nx1
+/// with #2349).
 pub(super) fn deleted_kind(i: usize) -> bool {
     KINDS.get(i).is_some_and(Option::is_none)
 }
@@ -279,14 +281,17 @@ fn kind_of(i: usize) -> Result<FilletCornerKind, HarnessError> {
         .get(i)
         .copied()
         .flatten()
-        .ok_or_else(|| harness("corner class index without a Rust class (1x1 and 2x2 deleted, #2400)"))
+        .ok_or_else(|| {
+            harness("corner class index without a Rust class (1x1, 2x2 deleted, #2400; closed Nx1, #2349)")
+        })
 }
 
 /// A case of the old corner code deleted with #2400: a corner of the deleted
-/// `SmFillet1x1Corner` or `SmFillet2x2Corner`, or `AdjustTangentCorner` (the Nx2
+/// `SmFillet1x1Corner` or `SmFillet2x2Corner` (or `SmFilletNx1ClosedCorner`, deleted with
+/// #2349), or `AdjustTangentCorner` (the Nx2
 /// override went with the fork's smlib#113 34288e5, the closed Nx1 one with caa67d0;
 /// every corner's is the base class's success now). Not run: no Rust code is left to
-/// compare (plan/difftest-waivers.toml).
+/// construct; their golden rows are retired with the class.
 fn retired(case: &Case) -> bool {
     matches!(
         case.parse::<Inputs>(),
@@ -592,11 +597,9 @@ fn create_rust(
         c.edges.len() as f64,
         c.surfaces.len() as f64,
     ]);
-    rec.push(if c.corner_type() == FilletCornerType::NByOneClosed {
-        flag(c.g1_case)
-    } else {
-        -1.0
-    });
+    // `m_bG1Case` of the closed Nx1 corner only: no corner is one (#2349), and its
+    // cases are retired
+    rec.push(-1.0);
     create_output(&rec)
 }
 

@@ -41,8 +41,7 @@
 //!   new fillet vertices and edges) is [`CornerEnv::corner`]. The context is [`Kernel`].
 //! - **Constructors.** `SmFilletCorner(...)` (unit `blend.fillet_corner_p1`) and the
 //!   constructors of the derived classes owned by `blend.fillet_corner_p2`
-//!   (`SmFilletNx1ClosedCorner`, `SmFilletNx1Corner`,
-//!   `SmFillet3x2MixedConvexityCorner`, `SmFilletNx2Corner`, `SmFilletNxNCorner`) only
+//!   (`SmFilletNx1Corner`, `SmFillet3x2MixedConvexityCorner`, `SmFilletNx2Corner`, `SmFilletNxNCorner`) only
 //!   initialise members: they are CO-PORTED here as [`FilletCorner::new`] so
 //!   [`FilletCorner::create`] can build every kind. `m_eStatus` (never initialised
 //!   upstream) starts as [`FilStatus::Unprocessed`]; `SmFilletNx2Corner`'s `m_bG1Case`
@@ -53,7 +52,7 @@
 //!   ([`FilletExecutiveData::error`]) is CO-PORTED from `blend.fillet_executive_p1`.
 //!   The corner methods take the kernel through [`CornerEnv::k`]
 //!   (mutable: `MakeFaceBrep`'s `SmBrep::MakeFaceWithCurves` needs it). `MakeAnalyticCornerSurface` and
-//!   the `SmFilletConvexNxNCorner` / `SmFilletNx1ClosedCorner` overrides are
+//!   the `SmFilletConvexNxNCorner` overrides are
 //!   [`crate::blend::fillet_corner::p2`]'s, `SmFilletEdge::MakeFilletEdge` is
 //!   `FilletBrep::make_fillet_edge` and `ReCalcFilletGeom` is
 //!   `FilletBrep::re_calc_fillet_geom` on the corner's solvers.
@@ -123,8 +122,6 @@ const SM_BIG_DOUBLE: f64 = BIG_DOUBLE;
 /// The derived class of a fillet corner (`SmFilletCorner` is abstract upstream).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilletCornerKind {
-    /// `SmFilletNx1ClosedCorner`.
-    NByOneClosed,
     /// `SmFilletNx1Corner`.
     NByOne,
     /// `SmFilletDegenerateCorner`.
@@ -148,7 +145,6 @@ impl FilletCornerKind {
     #[must_use]
     pub const fn corner_type(self) -> FilletCornerType {
         match self {
-            Self::NByOneClosed => FilletCornerType::NByOneClosed,
             Self::NByOne => FilletCornerType::NByOne,
             Self::Degenerate => FilletCornerType::Degenerate,
             Self::Open => FilletCornerType::Open,
@@ -164,7 +160,6 @@ impl FilletCornerKind {
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
-            Self::NByOneClosed => "SmFilletNx1ClosedCorner",
             Self::NByOne => "SmFilletNx1Corner",
             Self::Degenerate => "SmFilletDegenerateCorner",
             Self::Open => "SmFilletOpenCorner",
@@ -312,7 +307,7 @@ pub struct FilletCorner {
     pub tangency_tol_radians: f64,
     /// `m_eStatus` (not initialised upstream).
     pub status: FilStatus,
-    /// `m_bG1Case` of `SmFilletNx1ClosedCorner` / `SmFilletNx2Corner`.
+    /// `m_bG1Case` of `SmFilletNx2Corner`.
     pub g1_case: bool,
     /// `m_bMitre` of `SmFilletNx2Corner` (the fork's, WR-634, tangency-labs/smlib@9ba2b12;
     /// `FALSE` from the constructor): the two blends are mitred at the common face's
@@ -564,7 +559,8 @@ impl FilletCorner {
     /// dTangencyTolRadians)` and the derived constructors (CO-PORTED, module docs):
     /// no fillet vertices, edges or surfaces, every flag off except
     /// `m_bExtendedSurfacePatch`, no setback; the degenerate corner sets
-    /// `m_bDegenerate`, the closed Nx1 corner clears `m_bG1Case`.
+    /// `m_bDegenerate`; `m_bG1Case` starts `FALSE`. The closed Nx1 corner is not built:
+    /// a closed edge meeting itself is the blend corner's Join or closed Turn (#2349).
     #[must_use]
     pub fn new(
         kind: FilletCornerKind,
@@ -597,7 +593,7 @@ impl FilletCorner {
             approx_tol_3d,
             tangency_tol_radians,
             status: FilStatus::Unprocessed,
-            // SmFilletNx1ClosedCorner: m_bG1Case = FALSE
+            // SmFilletNx2Corner: m_bG1Case = FALSE until MakeCornerTopology
             g1_case: false,
             // SmFilletNx2Corner: m_bMitre = FALSE (the fork's, 9ba2b12)
             mitre: false,
@@ -644,6 +640,25 @@ impl FilletCorner {
     pub fn is_closed_join(&self) -> bool {
         self.blend
             .is_some_and(|blend| blend.is_closed_join(self.solver_eus.as_deref()))
+    }
+
+    /// Not the fork's (#2349): a blend corner's Turn of one closed blended edge meeting
+    /// itself at an angle, Mitred ([`BlendCorner::is_closed_turn`]).
+    ///
+    /// [`BlendCorner::is_closed_turn`]: crate::blend::blend_corner::BlendCorner::is_closed_turn
+    #[must_use]
+    pub fn is_closed_turn(&self) -> bool {
+        self.blend
+            .is_some_and(|blend| blend.is_closed_turn(self.solver_eus.as_deref()))
+    }
+
+    /// One closed blended edge meeting itself: a closed Join or a closed Turn. Its blend
+    /// is split in two at the corner, and the corner's edges hold both ends of it (where
+    /// upstream tests `SM_FCR_N_x_1_CLOSED`, the fork its 1x1 corner's replacement,
+    /// `IsClosedJoin`).
+    #[must_use]
+    pub fn meets_itself(&self) -> bool {
+        self.is_closed_join() || self.is_closed_turn()
     }
 
     /// `IsEndOnEndFace()` (virtual; the fork's 53c47b8, WR-697): a blend corner's End on
@@ -890,7 +905,14 @@ impl FilletCorner {
                             } else if total_eus == 1 {
                                 None // MSG: Corner Case Not Implemented
                             } else {
-                                Some(make(FilletCornerKind::NByOneClosed))
+                                // Not the fork's (#2349): at an angle it is the blend
+                                // corner's Turn, Mitred: the blend meets itself on its
+                                // mitre (in place of SmFilletNx1ClosedCorner)
+                                Some(blend_corner(
+                                    FilletCornerKind::NByTwo,
+                                    BlendCornerEvent::Turn,
+                                    BlendEnd::OnEndFace,
+                                ))
                             }
                         }
                         _ => None, // MSG: Corner Case Not Implemented
@@ -1898,6 +1920,12 @@ impl FilletCorner {
                 || blend.is_swept()
                 || blend.is_chamfer()
         }) {
+            return Ok(());
+        }
+        // Not the fork's (#2349): a closed Turn's one rail crosses each side edge once, so
+        // there is no gap at a side edge to adjust (the closed Nx1 corner it replaces
+        // adjusted nothing either)
+        if self.is_closed_turn() {
             return Ok(());
         }
         match self.kind {

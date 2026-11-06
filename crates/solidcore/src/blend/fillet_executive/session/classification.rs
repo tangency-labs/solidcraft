@@ -261,7 +261,7 @@ impl crate::blend::fillet_solver::p5::RailClassificationContext for Context<'_> 
     ) -> crate::error::Result<(bool, bool)> {
         self.corners
             .get(id.0 as usize)
-            .map(|c| (c.is_closed_join(), c.is_end_on_end_face()))
+            .map(|c| (c.meets_itself(), c.is_end_on_end_face()))
             .ok_or_else(|| super::invalid("rollover corner is not live in this session"))
     }
     fn corners(&self) -> crate::blend::fillet_geom::p1::CornerLookup<'_> {

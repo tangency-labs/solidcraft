@@ -104,7 +104,8 @@ struct Fixture {
     corners: TestCorners,
 }
 
-/// The corner store of the fixture: every corner has type `.0` (`None`: never asked).
+/// The corner store of the fixture: every corner has type `.0` (`None`: never asked); a
+/// blend corner (`NByTwo`) is one closed blend meeting itself.
 struct TestCorners(Option<FilletCornerType>);
 
 impl SplitCorners for TestCorners {
@@ -122,6 +123,9 @@ impl SplitCorners for TestCorners {
     }
     fn corner_type(&self, _: FilletCornerId) -> Result<FilletCornerType> {
         Ok(self.0.expect("the corner type is not asked"))
+    }
+    fn meets_itself(&self, id: FilletCornerId) -> Result<bool> {
+        Ok(self.corner_type(id)? == FilletCornerType::NByTwo)
     }
 }
 
@@ -421,7 +425,7 @@ fn both_full_rollovers_execute_in_order_and_preserve_first_mutation_on_error() {
         ..Script::default()
     };
     let mut adjusted = vec![FilletCornerId(9)];
-    f.corners = TestCorners(Some(FilletCornerType::NByOneClosed));
+    f.corners = TestCorners(Some(FilletCornerType::NByTwo));
     assert!(f.context().process(id, &mut adjusted, &mut script).is_err());
     assert_eq!(script.calls, ["full0", "full1"]);
     assert!(f.fb.geom(id).unwrap().need_split);
@@ -438,7 +442,7 @@ fn failed_first_full_rollover_stops_before_second() {
     }
     let mut f = Fixture::new([&[1.0], &[1.0]], true);
     let id = f.geom;
-    f.corners = TestCorners(Some(FilletCornerType::NByOneClosed));
+    f.corners = TestCorners(Some(FilletCornerType::NByTwo));
     assert_eq!(
         f.context().process(id, &mut vec![], &mut Failing),
         Err(SolidError::sm_err("first"))

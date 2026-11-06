@@ -1091,35 +1091,43 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
 
-    /// The targeted variants reach every return of the Nx2 override: the solver's
-    /// registration index, `-1` for NULL. A closed Nx1 corner has no override: a
-    /// closed edge meeting itself G1 is the Join, so its variants all return NULL.
+    /// Live tangent variants return a solver registration index or `-1` for NULL;
+    /// the deleted closed-Nx1 variants explicitly reject their retired class.
     #[test]
     fn tangent_variants_return_solvers() {
         let (_, base) = tangent_cases();
         let base = base.unwrap();
         let expect = [
-            ("nx2_g1_query0", 1.0),
-            ("nx2_g1_query1", 0.0),
-            ("nx2_g1_query2", -1.0),
-            ("nx2_g1_one_registered_query0", -1.0),
-            ("nx2_g1_one_registered_query1", -1.0),
-            ("nx2_not_g1_query0", -1.0),
-            ("nx2_not_g1_query1", -1.0),
-            ("nx2_not_g1_query2", -1.0),
-            ("nx2_not_g1_one_registered_query0", -1.0),
-            ("nx2_not_g1_one_registered_query1", -1.0),
-            ("nx1_closed_g1_query0", -1.0),
-            ("nx1_closed_g1_query1", -1.0),
-            ("nx1_closed_g1_other_registered", -1.0),
-            ("nx1_closed_not_g1_query0", -1.0),
-            ("nx1_closed_not_g1_query1", -1.0),
-            ("nx1_closed_not_g1_other_registered", -1.0),
+            ("nx2_g1_query0", Some(1.0)),
+            ("nx2_g1_query1", Some(0.0)),
+            ("nx2_g1_query2", Some(-1.0)),
+            ("nx2_g1_one_registered_query0", Some(-1.0)),
+            ("nx2_g1_one_registered_query1", Some(-1.0)),
+            ("nx2_not_g1_query0", Some(-1.0)),
+            ("nx2_not_g1_query1", Some(-1.0)),
+            ("nx2_not_g1_query2", Some(-1.0)),
+            ("nx2_not_g1_one_registered_query0", Some(-1.0)),
+            ("nx2_not_g1_one_registered_query1", Some(-1.0)),
+            ("nx1_closed_g1_query0", None),
+            ("nx1_closed_g1_query1", None),
+            ("nx1_closed_g1_other_registered", None),
+            ("nx1_closed_not_g1_query0", None),
+            ("nx1_closed_not_g1_query1", None),
+            ("nx1_closed_not_g1_other_registered", None),
         ];
         let variants = tangent_variants(&base);
         assert_eq!(variants.len(), expect.len());
         for ((name, inner), (want_name, want)) in variants.into_iter().zip(expect) {
             assert_eq!(name, want_name);
+            assert_eq!(p1::retired_inputs(&inner), want.is_none(), "{name}");
+            let Some(want) = want else {
+                let error = run_rust(&Inputs::P1Corner { inner }).unwrap_err();
+                assert!(
+                    error.0.starts_with("corner class index without a Rust class"),
+                    "{name}: {error}"
+                );
+                continue;
+            };
             let o = run_rust(&Inputs::P1Corner { inner }).unwrap();
             let got = o.values.get("solvers").and_then(|v| v.first().copied());
             assert_eq!(got, Some(want), "{name}: {o:?}");

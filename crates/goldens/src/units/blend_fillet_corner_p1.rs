@@ -345,11 +345,12 @@ struct ExtAddIn {
 
 /// The derived classes by the shim's index. `SmFillet1x1Corner` and `SmFillet2x2Corner`
 /// (indices 0 and 1) have no Rust class: the blend corner's Join replaced them and they
-/// were deleted (#2400), so their cases are retired ([`retired`]).
+/// were deleted (#2400); nor has `SmFilletNx1ClosedCorner` (index 2), which the blend
+/// corner's Join and closed Turn replaced (#2349). Their cases are retired ([`retired`]).
 const KINDS: [Option<FilletCornerKind>; 11] = [
     None,
     None,
-    Some(FilletCornerKind::NByOneClosed),
+    None,
     Some(FilletCornerKind::NByOne),
     Some(FilletCornerKind::Degenerate),
     Some(FilletCornerKind::Open),
@@ -360,8 +361,9 @@ const KINDS: [Option<FilletCornerKind>; 11] = [
     Some(FilletCornerKind::ConcaveNByN),
 ];
 
-/// A case on a corner of the deleted `SmFillet1x1Corner` or `SmFillet2x2Corner` (#2400):
-/// not run, no Rust class is left to compare (plan/difftest-waivers.toml).
+/// A case on a corner of the deleted `SmFillet1x1Corner` or `SmFillet2x2Corner` (#2400),
+/// or `SmFilletNx1ClosedCorner` (#2349): not run, no Rust class is left to construct;
+/// their golden rows are retired with the class.
 fn retired(case: &Case) -> bool {
     retired_inputs(&case.inputs)
 }

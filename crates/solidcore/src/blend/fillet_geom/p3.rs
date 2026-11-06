@@ -1703,9 +1703,9 @@ impl FilletBrep {
         // pFilletCorner->GetCornerType() (upstream dereferences a NULL corner)
         let corner_type = corners
             .corner_type(fillet_corner.ok_or_else(|| SolidError::null_pointer(OP_SPLIT))?)?;
-        let closed_join = corner_type == FilletCornerType::NByTwo
+        let meets_itself = corner_type == FilletCornerType::NByTwo
             && corners
-                .is_closed_join(fillet_corner.ok_or_else(|| SolidError::null_pointer(OP_SPLIT))?)?;
+                .meets_itself(fillet_corner.ok_or_else(|| SolidError::null_pointer(OP_SPLIT))?)?;
 
         // move the side edgeuses associated to the original geom to the new geom
         let ref_eus = self.geom(g)?.ref_eus.clone();
@@ -1720,10 +1720,9 @@ impl FilletBrep {
             if self.fillet_edge(e)?.fillet_corner() != fillet_corner {
                 continue;
             }
-            // the fork's `|| IsClosedJoin()` in place of the 1x1 corner (543d25a; WR-697)
-            if (corner_type == FilletCornerType::NByOneClosed || closed_join)
-                && Some(eu) == primary_edgeuse(self.brep(), e)?
-            {
+            // `SM_FCR_N_x_1_CLOSED`: one closed blend meeting itself, now the blend corner's
+            // closed Join (the fork's `IsClosedJoin()`, 543d25a; WR-697) or closed Turn (#2349)
+            if meets_itself && Some(eu) == primary_edgeuse(self.brep(), e)? {
                 continue;
             }
 
@@ -1769,12 +1768,14 @@ pub trait SplitCorners {
     fn corner_type(&self, id: FilletCornerId) -> Result<FilletCornerType> {
         Ok(self.lookup().corner(id)?.corner_type())
     }
-    /// `pCorner->IsClosedJoin()` (the fork's 543d25a; WR-697).
+    /// Whether the corner is one closed blend meeting itself
+    /// ([`FilletCorner::meets_itself`]: the fork's `IsClosedJoin()`, 543d25a, WR-697; or a
+    /// closed Turn, #2349).
     ///
     /// # Errors
     /// [`CornerLookup::corner`]'s for an id not in the table.
-    fn is_closed_join(&self, id: FilletCornerId) -> Result<bool> {
-        Ok(self.lookup().corner(id)?.is_closed_join())
+    fn meets_itself(&self, id: FilletCornerId) -> Result<bool> {
+        Ok(self.lookup().corner(id)?.meets_itself())
     }
 }
 

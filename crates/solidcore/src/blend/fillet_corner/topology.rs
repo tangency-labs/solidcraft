@@ -11,7 +11,7 @@
 //! | `find_side_edgeuse`, `find_closed_side_edgeuse` | `sm_FindSideEdgeuse`, `sm_FindClosedSideEdgeuse` |
 //! | `same_convexity_edges` | `same_convexity_edges` |
 //! | `is_tangent_seam_at_vertex` | `sm_IsTangentSeamAtVertex` (fork 856b54e) |
-//! | [`FilletCorner::make_nx1_closed_corner_topology`] ([`closed_nx1`]) | `SmFilletNx1ClosedCorner::MakeCornerTopology` |
+//! | [`FilletCorner::make_closed_turn_topology`] ([`closed_turn`]) | the blend corner's closed Turn, in place of `SmFilletNx1ClosedCorner::MakeCornerTopology` (#2349) |
 //! | [`FilletCorner::make_3x2_mixed_corner_topology`] ([`mixed_3x2`]) | `SmFillet3x2MixedConvexityCorner::MakeCornerTopology` |
 //! | `make_4x2_concave_corner_topology` (crate, `concave_4x2`) | `SmFilletNx2Corner::Make4x2ConcaveCornerTopology` |
 //! | 4x3, open and degenerate corners ([`end_corners`]) | `SmFillet4x3Corner`, `SmFilletOpenCorner`, `SmFilletDegenerateCorner` `::MakeCornerTopology` |
@@ -37,7 +37,7 @@
 //! tangency-labs/smlib@856b54e). There is no recursion.
 
 mod ball;
-pub mod closed_nx1;
+pub mod closed_turn;
 mod concave_4x2;
 pub mod concave_nxn;
 pub mod end_corners;

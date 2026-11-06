@@ -1,72 +1,97 @@
-//! Topology at a corner where one closed filleted edge meets its side edges.
+//! The blend corner's closed Turn: one closed blended edge meeting itself at an angle,
+//! Mitred (#2349).
 //!
-//! Upstream: `source/SMLib/src/SmFilletCorner.cpp` (4962–5129).
+//! Upstream: none; it replaces `SmFilletNx1ClosedCorner` (`source/SMLib/src/SmFilletCorner.cpp`
+//! 4962–5129), whose construction is the mitre and is kept step for step.
 //!
 //! | Rust | Upstream |
 //! |------|----------|
-//! | [`FilletCorner::make_nx1_closed_corner_topology`] | `SmFilletNx1ClosedCorner::MakeCornerTopology` |
+//! | [`FilletCorner::make_closed_turn_topology`] | `SmFilletNx1ClosedCorner::MakeCornerTopology` (the angle case) |
 //!
-//! Deviations: the caller lends the actual target, pseudo-B-rep and solver (the
-//! [`Nx1TopologyEnv`] of the open `Nx1` corner; its global-merge switch is not used).
-//! A corner with no side edge use (upstream then reads `m_vVertices[0]` of an empty
-//! list) and a closed corner with more than two edge uses but fewer than two fillet
-//! vertices are input errors. There is no recursion.
+//! A closed edge meeting itself G1 is the blend corner's Join (the fork's 543d25a); at an
+//! angle the blend's two ends turn at the vertex as two blends turn at a side edge, and
+//! are Mitred (`docs/generic-blend.md` §3.2): each runs on to the other and both are cut
+//! on their crossing. The corner is a blend corner of one solver edge use, as the closed
+//! Join is ([`BlendCorner::is_closed_turn`]): a fillet vertex where the rail crosses each
+//! side edge, at two edge uses a vertex where the round meets itself on the face it
+//! shares with itself, and one `FILLET_X_FILLET` edge, the mitre, between them. The
+//! round is split in two at the corner (`need_split`), so the mitre is the
+//! intersection of its two ends, certified as any Turn's off the exact class
+//! ([`crate::blend::blend_corner::exact_mitre_curve`]).
 //!
-//! The corner does not test its edge for G1 (WR-697; the fork's smlib#113 caa67d0):
-//! `FilletCorner::create` makes a closed edge meeting itself G1 the blend corner's Join
-//! (543d25a), so this corner only sees an edge meeting itself at an angle, and its G1
-//! branches (a `MATE` vertex, a `CROSS_SECTION` edge, blending) are gone (#2400).
+//! Deviations: the caller lends the actual target, pseudo-B-rep and solver. A corner with
+//! no side edge use (upstream then reads `m_vVertices[0]` of an empty list) and a closed
+//! corner with more than two edge uses but fewer than two fillet vertices are input
+//! errors. There is no recursion.
+//!
+//! [`BlendCorner::is_closed_turn`]: crate::blend::blend_corner::BlendCorner::is_closed_turn
 
-use super::{need, new_corner_vertex, Nx1TopologyEnv};
-use crate::blend::fillet_corner::p3::{FilletCorner, FilletCornerKind};
+use super::{need, new_corner_vertex};
+use crate::blend::fillet_corner::p3::FilletCorner;
+use crate::blend::fillet_executive::session::SolverObject;
 use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletCornerId, FilletEdgeType, FilletVertexType,
 };
 use crate::error::{EntityRef, Result, SolidError};
 use crate::intersect::point_class::PointClassType;
+use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use crate::topology::edge;
 use crate::topology::edgeuse::{p1 as eu1, p3 as eu3};
+use crate::topology::{edge, Brep};
 
-const OP: &str = "blend::fillet_corner::topology::make_nx1_closed_corner_topology";
+const OP: &str = "blend::fillet_corner::topology::make_closed_turn_topology";
+
+/// What [`FilletCorner::make_closed_turn_topology`] borrows from the executive.
+pub struct ClosedTurnTopologyEnv<'a> {
+    /// The executive's kernel.
+    pub k: &'a Kernel,
+    /// The target whose edge uses the corner stores.
+    pub target: &'a mut Brep,
+    /// The executive's actual pseudo-B-rep.
+    pub pseudo: &'a mut crate::blend::fillet_geom::p1::FilletBrep,
+    /// This corner's identity in the executive's corner store.
+    pub corner: FilletCornerId,
+    /// The loaded concrete solver of the corner's one filleted edge use.
+    pub solver: &'a mut SolverObject,
+}
 
 fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
 impl FilletCorner {
-    /// Construct the rail vertices and the single cross edge of an actual
-    /// `NByOneClosed` corner (`SmFilletNx1ClosedCorner::MakeCornerTopology`).
+    /// The closed Turn's topology (`SmFilletNx1ClosedCorner::MakeCornerTopology`, whose
+    /// construction is the mitre): the vertices where the rail crosses the side edges,
+    /// at two edge uses the vertex where the round meets itself on its common face, and
+    /// the mitre between them.
     ///
-    /// The closed edge meets itself at an angle (a G1 one is the blend corner's Join): the
-    /// corner is not blending, and the fillet geometry's split flag is set. Allocations and
-    /// corner-list insertions occur in native order and remain visible if a later
-    /// operation fails. Vertex geometry is computed later.
+    /// The corner is not blending, and the fillet geometry's split flag is set.
+    /// Allocations and corner-list insertions occur in native order and remain visible if
+    /// a later operation fails. Vertex geometry is computed later.
     ///
     /// # Errors
-    /// Invalid topology or a different corner kind; those of the edge-use binormal,
+    /// Invalid topology or a corner that is not a closed Turn; those of the edge-use binormal,
     /// curve evaluation, solver rail lookups and pseudo-topology operations;
     /// `SM_ERR_NULL_POINTER` for a side edge use without a radial; `SM_ERR` when the
     /// new fillet edge does not have exactly two edge uses.
     #[allow(clippy::too_many_lines)]
-    pub fn make_nx1_closed_corner_topology(&mut self, env: Nx1TopologyEnv<'_>) -> Result<()> {
+    pub fn make_closed_turn_topology(&mut self, env: ClosedTurnTopologyEnv<'_>) -> Result<()> {
         fn lookup(corner: FilletCornerId, this: &FilletCorner) -> CornerLookup<'_> {
             CornerLookup {
                 this: Some((Some(corner), this)),
                 ..Default::default()
             }
         }
-        let Nx1TopologyEnv {
+        let ClosedTurnTopologyEnv {
             k,
             target,
             pseudo,
             corner,
             solver,
-            ..
         } = env;
         let solver = solver.base_mut();
-        if self.kind != FilletCornerKind::NByOneClosed {
-            return Err(invalid("requires an NByOneClosed corner"));
+        if !self.is_closed_turn() {
+            return Err(invalid("requires a closed Turn"));
         }
 
         // locals - 1st outward bound fillet edgeuse, its FilletSolver, and its 1st fillet geom
@@ -82,7 +107,7 @@ impl FilletCorner {
         let total = all.len();
         let mut seam_edgeuse = None;
 
-        // The filleted edge is not G1-closed: `FilletCorner::create` made an edge that is
+        // The filleted edge meets itself at an angle: `FilletCorner::create` made a G1 one
         // the blend corner's Join (WR-697; smlib#113 caa67d0)
         let filleted_edge = eu1::edge(target, fil_edgeuse)?;
 

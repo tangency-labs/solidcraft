@@ -514,12 +514,13 @@ fn teardrop_boss(k: &mut Kernel) -> Brep {
 }
 
 /// The closed-edge corner where a closed edge meets itself at an angle: the teardrop boss's
-/// foot, rounded r 0.5 and r 1, is the closed Nx1 corner at the tip (543d25a makes only a
-/// closed edge meeting itself G1 the Join), the fork's angle case alone (smlib#113 caa67d0,
-/// 2ac7a17). The volumes are the port's own (no closed form; the fork was not run on this
-/// body), each body clean with the boss's round and the plate's.
+/// foot, rounded r 0.5 and r 1, is the blend corner's closed Turn, Mitred, at the tip
+/// (#2349; 543d25a makes a closed edge meeting itself G1 the Join). It replaced the closed
+/// Nx1 corner, the fork's angle case (smlib#113 caa67d0, 2ac7a17), with its construction
+/// step for step, so the volumes are unchanged: the port's own (no closed form; the fork
+/// was not run on this body), each body clean with the boss's round and the plate's.
 #[test]
-fn a_closed_edge_meeting_itself_at_an_angle_is_the_closed_corner() {
+fn a_closed_edge_meeting_itself_at_an_angle_is_the_closed_turn() {
     let foot = [[15.5, 0.0, 0.0]];
     for (r, want) in [(0.5, 7133.840112885839517), (1.0, 7140.722103719867846)] {
         let mut k = all_fixes();
@@ -529,7 +530,11 @@ fn a_closed_edge_meeting_itself_at_an_angle_is_the_closed_corner() {
         assert!(cs[0].0.distance(Point3::new(0.0, 0.0, 0.0)) <= 1e-12);
         assert_eq!(
             (cs[0].1, cs[0].2, cs[0].3),
-            (FilletCornerKind::NByOneClosed, None, 12)
+            (
+                FilletCornerKind::NByTwo,
+                Some((BlendCornerEvent::Turn, BlendEnd::OnEndFace)),
+                12
+            )
         );
         round(&mut k, &mut b, &foot, r);
         let v = volume(&k, &mut b);
