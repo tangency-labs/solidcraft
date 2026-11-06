@@ -206,6 +206,7 @@ pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
 pub(crate) mod plugins;
 pub mod point_clouds;
+pub mod pointer_light;
 pub mod prefs;
 pub mod prefs_notice;
 mod prefs_search;

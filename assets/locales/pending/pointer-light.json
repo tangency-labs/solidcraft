@@ -1,0 +1,86 @@
+{
+  "en": {
+    "prefs.background_motion": "Light follows the pointer"
+  },
+  "ar": {
+    "prefs.background_motion": "يتبع الضوء المؤشر"
+  },
+  "cs": {
+    "prefs.background_motion": "Světlo sleduje ukazatel"
+  },
+  "da": {
+    "prefs.background_motion": "Lyset følger markøren"
+  },
+  "de": {
+    "prefs.background_motion": "Licht folgt dem Zeiger"
+  },
+  "en-GB": {
+    "prefs.background_motion": "Light follows the pointer"
+  },
+  "es": {
+    "prefs.background_motion": "La luz sigue al puntero"
+  },
+  "fr": {
+    "prefs.background_motion": "La lumière suit le pointeur"
+  },
+  "gl": {
+    "prefs.background_motion": "A luz segue o punteiro"
+  },
+  "he": {
+    "prefs.background_motion": "האור עוקב אחר הסמן"
+  },
+  "hu": {
+    "prefs.background_motion": "A fény követi a mutatót"
+  },
+  "id": {
+    "prefs.background_motion": "Cahaya mengikuti penunjuk"
+  },
+  "it": {
+    "prefs.background_motion": "La luce segue il puntatore"
+  },
+  "ja": {
+    "prefs.background_motion": "光がポインターに追従する"
+  },
+  "ko": {
+    "prefs.background_motion": "빛이 포인터를 따라감"
+  },
+  "ms": {
+    "prefs.background_motion": "Cahaya mengikut penuding"
+  },
+  "nb": {
+    "prefs.background_motion": "Lyset følger pekeren"
+  },
+  "nl": {
+    "prefs.background_motion": "Licht volgt de aanwijzer"
+  },
+  "pl": {
+    "prefs.background_motion": "Światło podąża za wskaźnikiem"
+  },
+  "pt-BR": {
+    "prefs.background_motion": "A luz segue o ponteiro"
+  },
+  "ro": {
+    "prefs.background_motion": "Lumina urmează cursorul"
+  },
+  "ru": {
+    "prefs.background_motion": "Свет следует за указателем"
+  },
+  "sv": {
+    "prefs.background_motion": "Ljuset följer pekaren"
+  },
+  "tr": {
+    "prefs.background_motion": "Işık işaretçiyi izler"
+  },
+  "uk": {
+    "prefs.background_motion": "Світло стежить за вказівником"
+  },
+  "vi": {
+    "prefs.background_motion": "Ánh sáng theo con trỏ"
+  },
+  "zh": {
+    "prefs.background_motion": "光线跟随指针"
+  },
+  "zh-TW": {
+    "prefs.background_motion": "光線跟隨指標"
+  }
+}
