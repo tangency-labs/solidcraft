@@ -456,6 +456,38 @@ fn a_surface_revolve_about_a_picked_edge_of_a_moved_component() {
     assert!(near(edge.0, line.0) && near(edge.1, line.1), "{edge:?} against {line:?}");
 }
 
+/// A revolve axis given only by its direction passes through the world origin in a moved
+/// component, as one with `origin: [0, 0, 0]` does: solid and surface revolves, made and edited.
+#[test]
+fn an_axis_without_an_origin_passes_through_the_world_origin() {
+    let made = |command: &str, axis: Value| {
+        let mut s = moved_part();
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Ring"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"sketch": "Ring", "axis": axis, "name": "Turn"});
+        if command == "solid.revolve" {
+            p["operation"] = json!("new");
+        }
+        run(&mut s, command, p.clone());
+        let body = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
+        let first = world_bbox(&s, &body);
+        // Edit Feature with the same axis given again.
+        run(&mut s, "timeline.redefine", json!({"feature": "Turn", "command": command, "params": p}));
+        let body = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
+        (first, world_bbox(&s, &body))
+    };
+    for command in ["solid.revolve", "surface.revolve"] {
+        let (given, given_edit) = made(command, json!({"origin": [0, 0, 0], "dir": [0, 0, 1]}));
+        let (omitted, omitted_edit) = made(command, json!({"dir": [0, 0, 1]}));
+        assert!(near(given.0, omitted.0) && near(given.1, omitted.1), "{command}: {given:?} against {omitted:?}");
+        assert!(
+            near(given_edit.0, omitted_edit.0) && near(given_edit.1, omitted_edit.1),
+            "{command}, edited: {given_edit:?} against {omitted_edit:?}"
+        );
+    }
+}
+
 /// A new placement given to `timeline.redefine` is still a world point.
 #[test]
 fn a_new_primitive_placement_is_still_mapped_from_the_world() {
