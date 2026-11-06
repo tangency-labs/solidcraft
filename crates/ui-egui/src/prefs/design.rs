@@ -89,6 +89,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "value_boxes_in_view",
                     "Show values beside their handles in the view",
                 ),
+                (
+                    setting::scaled_length_defaults,
+                    "ui.scaled_length_defaults_help",
+                    "scaled_length_defaults",
+                    "Start new lengths with the size their tool ships with",
+                ),
             ] {
                 ui.horizontal_wrapped(|ui| {
                     let response = setting(app, ui).backing_on_hover_text(app.tr(help));

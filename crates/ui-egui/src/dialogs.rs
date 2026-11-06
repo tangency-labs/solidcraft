@@ -4616,9 +4616,9 @@ fn fillet_kind(size: &str, chamfer: bool) -> Kind {
     Kind::Fillet { radius: size.into(), chamfer, chain: true, ctype: 0, distance2: size.into(), angle: "45 deg".into(), flip: false, setback: None }
 }
 
-/// A length field's first text: `number` in the design's units, with the unit written out so the
-/// field shows it as the other dialogs show theirs ("20 mm", "20 in"). OK makes the size the bare
-/// number would.
+/// A length field's first text: `number` is the size the tool ships with, in millimetres, shown
+/// in the design's units ("20 mm", "0.8 in"), with the unit written out so the field shows it as
+/// the other dialogs show theirs. OK makes that size.
 pub(crate) fn length_default(s: &Session, number: &str) -> String {
     crate::length_input::default(&s.doc, number)
 }

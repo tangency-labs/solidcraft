@@ -1218,6 +1218,10 @@ preference_settings! {
     /// Decimals shown for lengths and angles.
     length_decimals: u8 = 2, PAGE_DESIGN;
     angle_decimals: u8 = 1, PAGE_DESIGN;
+    /// A new length field starts with the size its tool ships with, shown in the design's unit
+    /// ("0.4 in" for an extrude of 10 mm in an inch design) (#12418). Off: the number the tool
+    /// ships with is read in the design's unit ("10 in"), as before.
+    scaled_length_defaults: bool = true, PAGE_DESIGN => check_id_help("ui.scaled_length_defaults", "ui.scaled_length_defaults_help");
     /// The most parameters Down arrow lists in an empty expression box (#9246): fewer keeps the
     /// list light in a large design.
     parameter_list_rows: u16 = 50, PAGE_DESIGN;
@@ -2285,6 +2289,9 @@ fn sync_window_theme(app: &mut SolveApp, ctx: &egui::Context, follows_system: bo
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     sync_surface_analysis(app);
     apply_network(&app.preferences);
+    // A new length field starts with the size its tool ships with, shown in the design's unit
+    // (#12418). The dialogs are built on this thread, so the preference is handed to it here.
+    crate::length_input::set_scaled_length_defaults(app.preferences.scaled_length_defaults);
     // The features computed from now on are checked as the preference says.
     app.session.set_validation(app.preferences.validation);
     // The profiler records while the preference is on (switched when it changes; at start-up only
