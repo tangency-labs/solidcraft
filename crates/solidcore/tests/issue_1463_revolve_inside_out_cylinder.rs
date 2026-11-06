@@ -11,6 +11,9 @@
 //!   cylinder (or cone) for a profile line running against the axis. Fork commit
 //!   tangency-labs/smlib 9853e54, which that flag ports, builds them from the low end
 //!   upwards, never inside out.
+//!
+//! tangency-labs/solidcore#2539: the cylinder a revolved line sweeps is exact: its net lies
+//! on the cylinder the profile defines, to rounding, with the circle's weights.
 
 #![allow(
     clippy::unwrap_used,
@@ -19,7 +22,10 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use std::f64::consts::FRAC_1_SQRT_2;
+
 use solidcore::curve::curve::Curve;
+use solidcore::curve::line::Line;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
@@ -219,4 +225,108 @@ fn issue_1463_revolved_cylinders_are_never_inside_out() {
             k.fixes.nurb_cylinder_inside_out_frame = false;
         }
     }
+}
+
+/// tangency-labs/solidcore#2539: SolidCraft's enclosure part `periph_case_R` is notched by
+/// `t26`, a rectangle turned a whole turn about its side on a tilted axis (SolidCraft's
+/// exact `smlib_revolve` inputs). The side 8 off the axis sweeps an exact cylinder: each
+/// control point of its net lies on it to rounding (a weight-1 point 8 from the axis, a
+/// corner of the circle's square, weight `1/sqrt(2)`, 8 sqrt(2) from it), each column of
+/// the net keeps the height of one end of the side along the axis, the weights are the
+/// circle's, the cylinder's radius is 8, and points sampled over the surface lie 8 from the
+/// axis, its STEP and NURB forms agreeing to rounding.
+#[test]
+fn issue_2539_a_revolved_line_sweeps_its_exact_cylinder() {
+    let mut k = Kernel::default();
+    k.fixes.revolve_analytic_profile_faces = true;
+    let corners = [
+        Vec3::new(15.984703566454204, -14.5, -54.99999718598504),
+        Vec3::new(15.984703566454204, -6.5, -54.99999718598504),
+        Vec3::new(10.977696236960533, -6.5, 16.499998671090406),
+        Vec3::new(10.977696236960533, -14.5, 16.499998671090406),
+    ];
+    let curves: Vec<Curve> = (0..corners.len())
+        .map(|i| {
+            let (a, b) = (corners[i], corners[(i + 1) % corners.len()]);
+            Curve::from(Line::create_line_segment(3, a, b, None).unwrap())
+        })
+        .collect();
+    let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+    let base = Vec3::new(12.07395, -6.5, 0.84551);
+    let axis = Vec3::new(-0.06985700109333194, -0.0, 0.997557015612765);
+    let b = create_rotational_sweep(&mut k, &refs, base, axis, 360.0, true).unwrap();
+    assert!(is_manifold_solid(&b).unwrap());
+    let cones: Vec<Cone> = b
+        .face_list()
+        .iter()
+        .filter_map(
+            |&f| match b.face(f).unwrap().surface.as_ref().unwrap().kind() {
+                SurfaceKind::Cone(c) => Some((**c).clone()),
+                _ => None,
+            },
+        )
+        .collect();
+    assert_eq!(cones.len(), 1);
+    assert!(cones[0].is_cylinder_class());
+    // the axis as the profile gives it, the side's ends' heights along it
+    let along = |p: Vec3| (p - base).dot(axis);
+    let off = |p: Vec3| {
+        let d = p - base;
+        (d - axis * d.dot(axis)).length()
+    };
+    let heights = [along(corners[0]), along(corners[3])];
+    // rounding at the part's size (coordinates up to 56)
+    let rounding = 64.0 * f64::EPSILON * 56.0;
+    let net_base = cones[0].rev().base();
+    let (rows, columns, net) = net_base.control_points().unwrap();
+    assert_eq!((rows, columns), (9, 2));
+    // each column is one end of the side (which one is the construction's choice)
+    let end: Vec<usize> = (0..columns)
+        .map(|c| {
+            let q = net[c];
+            let h = along(Vec3::new(q.x / q.w, q.y / q.w, q.z / q.w));
+            usize::from((h - heights[1]).abs() < (h - heights[0]).abs())
+        })
+        .collect();
+    assert_ne!(end[0], end[1]);
+    assert!(
+        (cones[0].base_radius() - 8.0).abs() <= rounding,
+        "radius {}",
+        cones[0].base_radius()
+    );
+    for (i, q) in net.iter().enumerate() {
+        let corner = i / columns % 2 == 1;
+        let weight = if corner { FRAC_1_SQRT_2 } else { 1.0 };
+        assert!(
+            (q.w - weight).abs() <= f64::EPSILON,
+            "control point {i}: weight {}",
+            q.w
+        );
+        let p = Vec3::new(q.x / q.w, q.y / q.w, q.z / q.w);
+        let radius = if corner {
+            8.0 * std::f64::consts::SQRT_2
+        } else {
+            8.0
+        };
+        assert!(
+            (off(p) - radius).abs() <= rounding,
+            "control point {i}: {} from the axis",
+            off(p)
+        );
+        let h = (along(p) - heights[end[i % columns]]).abs();
+        assert!(h <= rounding, "control point {i}: {h} off its end's height");
+    }
+    let domain = net_base.natural_uv_domain();
+    for s in [0.0, 0.123, 0.5, 0.876, 1.0] {
+        for t in [0.0, 0.37, 1.0] {
+            let p = net_base.evaluate_point(domain.evaluate(s, t)).unwrap();
+            assert!(
+                (off(p) - 8.0).abs() <= rounding,
+                "({s}, {t}): {} from the axis",
+                off(p)
+            );
+        }
+    }
+    let gap = step_nurb_gap(&k, &cones[0]);
+    assert!(gap <= rounding, "STEP and NURB {gap} apart");
 }
