@@ -57,6 +57,7 @@ use solidcore_record::Vec2;
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile};
+use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_geom::revision::RevisionRecord;
 use solidcraft_geom::title_block::TitleBlock;
 
@@ -145,6 +146,10 @@ pub struct Drawing {
     /// The font family its text is set in, by name; empty: the built-in font.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub font: String,
+    /// The ISO 128 line group its lines are drawn in, unless a sheet or a view chooses another
+    /// ([`Drawing::resolve_view`]). Always written, so a later default can't change an old drawing.
+    #[serde(default)]
+    pub line_group: LineGroup,
     /// In order, each behind its own `Arc`, so an undo step shares every sheet it didn't change.
     pub sheets: Vec<Arc<Sheet>>,
     /// By id ([`Drawing::add_views`]), each behind its own `Arc`, as the sheets are.
@@ -218,6 +223,9 @@ pub struct Sheet {
     pub documents: Option<SheetComponent>,
     #[serde(default)]
     pub excluded: Excluded,
+    /// Its own line group: none follows the drawing's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_group: Option<LineGroup>,
 }
 
 /// A component of one of the drawing's designs.
@@ -332,6 +340,7 @@ impl Drawing {
             dpi: DEFAULT_DPI,
             documents: None,
             excluded: Excluded::default(),
+            line_group: None,
         };
         let drawing = Drawing {
             format: DRAWING.format_string(DRAWING.current()),
@@ -345,6 +354,7 @@ impl Drawing {
             updates: Updates::default(),
             language: language.into(),
             font: String::new(),
+            line_group: LineGroup::DEFAULT,
             sheets: vec![Arc::new(first)],
             views: Vec::new(),
             dimensions: Vec::new(),

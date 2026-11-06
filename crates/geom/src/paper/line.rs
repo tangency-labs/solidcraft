@@ -8,15 +8,23 @@
 //!   leader, a reference part's edge, hatching) are narrow. A hidden line is dashed, 12 line widths
 //!   on and 3 off.
 
-/// A line group, named by its wide line's width.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// A line group, named by its wide line's width, and saved by it as text: `"0.25"` to `"2"`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum LineGroup {
+    #[serde(rename = "0.25")]
     Mm0_25,
+    #[serde(rename = "0.35")]
     Mm0_35,
+    #[default]
+    #[serde(rename = "0.5")]
     Mm0_5,
+    #[serde(rename = "0.7")]
     Mm0_7,
+    #[serde(rename = "1")]
     Mm1,
+    #[serde(rename = "1.4")]
     Mm1_4,
+    #[serde(rename = "2")]
     Mm2,
 }
 
@@ -32,6 +40,9 @@ pub enum LineKind {
 impl LineGroup {
     /// The group a drawing's lines are in until it chooses one.
     pub const DEFAULT: LineGroup = LineGroup::Mm0_5;
+
+    /// The names a group is saved and asked for by, smallest first.
+    pub const NAMES: [&'static str; 7] = ["0.25", "0.35", "0.5", "0.7", "1", "1.4", "2"];
 
     /// Its wide and narrow lines' widths, in millimetres.
     const fn widths_mm(self) -> (f64, f64) {

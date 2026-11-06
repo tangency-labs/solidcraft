@@ -39,7 +39,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<SheetsResult>)
         .params(
             "after?: a sheet (id or name; default the last); name?; size?: {standard: a3} or {custom: {sides_mm: [w, h]}}; \
-             orientation?: landscape|portrait; title_block?: a definition, \"built-in\" or null; dpi?: 25..2400 (each defaulting to the sheet it follows); documents?: {source: id, \
+             orientation?: landscape|portrait; title_block?: a definition, \"built-in\" or null; dpi?: 25..2400; line_group?: 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2, or null for the drawing's (each defaulting to the sheet it follows); documents?: {source: id, \
              component: id (0 the design)}; excluded?: {count?, print?}; title_block_overrides?: {cell: text} (none of these unless given) → sheet: the new sheet's id, sheets. \
              One undo step.",
         ),
@@ -51,7 +51,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<SheetsResult>)
         .params(
             "sheet: id or name; name?, size?, orientation?, title_block?: a definition, \"built-in\" (its general tolerances empty) or null \
-             (a new block keeps the overrides of the text cells it still has), dpi?; \
+             (a new block keeps the overrides of the text cells it still has), dpi?, line_group?: the ISO 128 line group its views are drawn in \
+             (0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2), or null for the drawing's; \
              documents?: {source: id, component: id (0 the design)} or null; excluded?: {count?, print?}; title_block_overrides?: {cell: text, shown in place of \
              its value, or null to drop it} or null to drop them all → the drawing's sheets, and after a change of paper or title block `outside`: the sheet's views whose \
              boundary leaves its drawing space or lies over its title block (none is moved), and after a new title block `lost`: the cells whose typed text \
@@ -163,6 +164,11 @@ fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<Vec<String>> {
     }
     if p.get("dpi").is_some() {
         sheet.dpi = num(p, "dpi").ok_or_else(|| bad(cmd, "`dpi` must be a number"))?;
+    }
+    match p.get("line_group") {
+        None => {}
+        Some(Value::Null) => sheet.line_group = None,
+        Some(group) => sheet.line_group = Some(super::drawing::line_group(cmd, group)?),
     }
     match p.get("documents") {
         None => {}

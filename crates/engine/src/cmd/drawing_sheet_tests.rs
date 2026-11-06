@@ -1,4 +1,5 @@
 use serde_json::json;
+use solidcraft_geom::paper::line::LineGroup;
 
 use super::*;
 use crate::cmd::drawing_view::tests::three_views;
@@ -60,6 +61,35 @@ fn a_new_sheet_takes_the_paper_of_the_sheet_it_follows() {
     let id = run(&mut s, "drawing.sheet.add", told)["sheet"].clone();
     let added = sheets(&s).into_iter().find(|sheet| json!(ids::encode(sheet.id)) == id).unwrap();
     assert!(added.documents.is_some() && added.excluded.print && !added.excluded.count);
+}
+
+/// A sheet sets a line group of its own for its views, or `null` follows the drawing's again, each
+/// one undo step; anything but a name of ISO 128's series is refused.
+#[test]
+fn a_sheet_sets_its_own_line_group_or_follows_the_drawing() {
+    let mut s = drawing_session();
+    let steps = s.undo.len();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "line_group": "1"}));
+    assert_eq!((sheets(&s)[0].line_group, s.undo.len()), (Some(LineGroup::Mm1), steps + 1));
+    assert_eq!(run(&mut s, "drawing.inspect", json!({}))["sheets"][0]["line_group"], "1");
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "line_group": null}));
+    assert_eq!((sheets(&s)[0].line_group, s.undo.len()), (None, steps + 2));
+    for bad in [json!("0.6"), json!(1), json!("Mm1"), json!([])] {
+        let why = refused(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "line_group": bad}));
+        assert!(why.contains("`line_group` is one of"), "{bad}: {why}");
+    }
+}
+
+/// A new sheet takes the line group of the sheet it follows, unless told another or none.
+#[test]
+fn a_new_sheet_takes_the_line_group_of_the_sheet_it_follows() {
+    let mut s = drawing_session();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "line_group": "0.35"}));
+    run(&mut s, "drawing.sheet.add", json!({}));
+    run(&mut s, "drawing.sheet.add", json!({"line_group": "2"}));
+    run(&mut s, "drawing.sheet.add", json!({"line_group": null}));
+    let groups: Vec<Option<LineGroup>> = sheets(&s).iter().map(|sheet| sheet.line_group).collect();
+    assert_eq!(groups, [Some(LineGroup::Mm0_35), Some(LineGroup::Mm0_35), Some(LineGroup::Mm2), None]);
 }
 
 /// A sheet's id comes from the session's id source: two sessions seeded alike and run alike give

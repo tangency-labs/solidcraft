@@ -1,7 +1,8 @@
 use super::*;
 use crate::cmd::{Part, command_specs, find_command};
 use crate::tests::Folder;
-use solidcraft_doc::drawing::template;
+use solidcraft_doc::drawing::{Units, Updates, template};
+use solidcraft_geom::cell::Projection;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"))
@@ -263,6 +264,42 @@ fn a_drawing_is_made_only_of_a_design_with_something_in_it() {
     assert!(Arc::ptr_eq(&s.doc, &full));
 }
 
+/// `drawing.create` and `drawing.set` refuse a key they don't take, as every other drawing command
+/// does, naming it, with nothing changed: a typo is never taken for a setting left as it was. Every
+/// key they take still takes, in one call.
+#[test]
+fn an_unknown_key_is_refused_and_changes_nothing() {
+    let mut s = design();
+    let before = s.doc.clone();
+    for (p, key) in [(json!({"nmae": "Plate"}), "nmae"), (json!({"name": "Plate", "profile": "iso_129_1"}), "profile")] {
+        let e = refused(&mut s, "drawing.create", p.clone());
+        assert!(e.contains(&format!("unknown field `{key}`")), "{p}: {e}");
+        assert!(Arc::ptr_eq(&s.doc, &before) && s.open_drawing.is_none(), "{p}: nothing changed");
+    }
+    let every =
+        json!({"name": "Plate", "template": "iso-a4-part", "language": "de", "units": "in", "projection": "first", "line_group": "0.7", "font": ""});
+    run(&mut s, "drawing.create", every);
+    let made = open_one(&s);
+    assert_eq!((made.name.as_str(), made.language.as_str(), made.projection, made.line_group), ("Plate", "de", Projection::First, LineGroup::Mm0_7));
+    let paper = made.sheets[0].sheet.size_mm().unwrap();
+    assert_eq!((&made.units, paper.x.max(paper.y)), (&Units::Fixed { unit: "in".into() }, 297.0), "A4, from the template");
+    let steps = s.undo.len();
+    for (p, key) in [(json!({"line_groups": "0.5"}), "line_groups"), (json!({"font": "Liberation Sans", "fnot": 1}), "fnot")] {
+        let e = refused(&mut s, "drawing.set", p.clone());
+        assert!(e.contains(&format!("unknown field `{key}`")), "{p}: {e}");
+        assert!(Arc::ptr_eq(&open_one(&s), &made) && s.undo.len() == steps, "{p}: nothing changed");
+    }
+    let every = json!({"name": "Plate 2", "language": "en-GB", "units": "follow_model", "projection": "third", "updates": "deferred", "line_group": "1", "font": "Liberation Sans", "revision_numbering": {"start": 0}});
+    run(&mut s, "drawing.set", every);
+    let set = open_one(&s);
+    assert_eq!((set.name.as_str(), set.language.as_str(), &set.units, set.projection), ("Plate 2", "en-GB", &Units::FollowModel, Projection::Third));
+    assert_eq!(
+        (set.updates, set.line_group, set.font.as_str(), set.revisions.numbering.start),
+        (Updates::Deferred, LineGroup::Mm1, "Liberation Sans", 0)
+    );
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+}
+
 /// While a drawing is open the model's commands wait, and the drawing's run only while one is:
 /// running a command, running it inside another and listing it all say so.
 #[test]
@@ -366,6 +403,33 @@ fn a_drawings_updates_are_automatic_or_deferred() {
     for bad in [json!("sometimes"), json!("Deferred"), json!(true), json!(null)] {
         assert!(refused(&mut s, "drawing.set", json!({"updates": bad})).contains("automatic or deferred"), "{bad}");
     }
+}
+
+/// A drawing's line group is one of ISO 128's, 0.5 when nothing chooses: shown by
+/// `drawing.inspect` beside each sheet's own, chosen by `drawing.create`, changed by `drawing.set`
+/// as one undo step, saved with the design, and anything else refused.
+#[test]
+fn a_drawings_line_group_is_set_as_one_undo_step_and_saved() {
+    let folder = Folder::new("drawing-line-group");
+    let mut s = design();
+    let made = run(&mut s, "drawing.create", json!({}));
+    assert_eq!((&made["line_group"], &made["sheets"][0]["line_group"]), (&json!("0.5"), &Value::Null));
+    let steps = s.undo.len();
+    assert_eq!(run(&mut s, "drawing.set", json!({"line_group": "0.7"}))["line_group"], "0.7");
+    assert_eq!(s.undo.len(), steps + 1);
+    run(&mut s, "file.save", json!({"path": folder.path("plate.solidcraft")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("plate.solidcraft")}));
+    assert_eq!(opened.doc.drawings[0].line_group, LineGroup::Mm0_7);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, "drawing.inspect", json!({}))["line_group"], "0.5");
+    for bad in [json!("0.6"), json!(0.5), json!("Mm0_5"), json!(null)] {
+        assert!(
+            refused(&mut s, "drawing.set", json!({"line_group": bad})).contains("`line_group` is one of 0.25, 0.35, 0.5, 0.7, 1, 1.4, 2"),
+            "{bad}"
+        );
+    }
+    assert_eq!(run(&mut design(), "drawing.create", json!({"line_group": "1.4"}))["line_group"], "1.4");
 }
 
 /// A drawing's font is a family named by `drawing.create` or `drawing.set` (one undo step), saved
@@ -623,6 +687,8 @@ fn hostile_drawing_params_never_panic() {
     run(&mut s, "drawing.create", json!({"name": "Second"}));
     assert_eq!(s.scratch().open_drawing, s.open_drawing, "each copy has the drawing open");
     let keys = ["name", "language", "units", "drawing", "key", "value", "values", "keys", "checkpoint", "id"];
+    // `drawing.create`'s and `drawing.set`'s other keys.
+    let keys = [&keys[..], &["template", "projection", "updates", "line_group", "font", "revision_numbering"]].concat();
     let skipped = |id: &str| matches!(id, "doc.open" | "file.save" | "file.save_as") || id.starts_with("doc.recover");
     let mut internal = Vec::new();
     for spec in command_specs().iter().filter(|spec| spec.part != Part::Model && !skipped(spec.id)) {

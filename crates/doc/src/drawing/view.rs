@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use solidcore_record::{Plane, Vec2};
 use solidcraft_geom::drawing_view::{ProjectedSide, Scale, is_paper_coordinate, projected_basis};
 use solidcraft_geom::paper::MAX_SIDE_MM;
+use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_render::VisualStyle;
 
 use super::{Drawing, add_by_id, in_id_order, require};
@@ -96,6 +97,10 @@ pub enum SetBy {
     This,
     /// The parent of this id, the nearest that sets it.
     Parent(u64),
+    /// No view of the chain: the view's sheet.
+    Sheet,
+    /// No view of the chain nor its sheet: the drawing.
+    Drawing,
     /// No view of the chain: the default.
     Default,
 }
@@ -121,6 +126,8 @@ pub struct ResolvedView {
     pub occurrences: Setting<Option<OccurrencePaths>>,
     /// The subtrees it leaves out: none when None.
     pub hide: Setting<Option<OccurrencePaths>>,
+    /// The line group its lines are drawn in: the chain's, else its sheet's, else the drawing's.
+    pub line_group: Setting<LineGroup>,
     pub reference_shown_percent: f64,
 }
 
@@ -275,6 +282,11 @@ impl Drawing {
         }
         let scale = inherited(&chain, |s| s.scale).ok_or_else(|| DocError::Invalid(format!("view {} has no scale", ids::encode(id))))?;
         let defaults = ViewSettings::default();
+        let sheet = chain.first().and_then(|view| self.sheets.iter().find(|sheet| sheet.id == view.sheet));
+        let line_group = inherited(&chain, |s| s.line_group).unwrap_or(match sheet.and_then(|sheet| sheet.line_group) {
+            Some(value) => Setting { value, set_by: SetBy::Sheet },
+            None => Setting { value: self.line_group, set_by: SetBy::Drawing },
+        });
         Ok(ResolvedView {
             source,
             basis,
@@ -285,6 +297,7 @@ impl Drawing {
             tangent_edges: or_default(&chain, |s| s.tangent_edges, defaults.tangent_edges),
             occurrences: or_default(&chain, |s| s.occurrences.clone().map(Some), None),
             hide: or_default(&chain, |s| s.hide.clone().map(Some), None),
+            line_group,
             reference_shown_percent: chain.first().map_or(0.0, |view| view.reference_shown_percent),
         })
     }

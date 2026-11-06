@@ -50,7 +50,7 @@ use solidcraft_io::paper::MAX_PICTURE_DPI;
 use solidcraft_render::VisualStyle;
 
 use super::CommandSpec;
-use crate::drawing_view::{CHORD_RANGE, Extents, LineRequest, Lines, NOTHING_CHOSEN, OnSheet, Room, ShownSet, Styles, Unmeasured};
+use crate::drawing_view::{CHORD_RANGE, Extents, LeftOut, LineRequest, Lines, NOTHING_CHOSEN, OnSheet, Room, ShownSet, Styles, Unmeasured};
 use crate::params::bad;
 use crate::schema::drawing_view::{
     AccuracyResult, AlongParam, AngleFromParam, BaseParams, BoxResult, ChoicesResult, CopyParams, CreateResult, DPI_RANGE, EditParams, EditResult,
@@ -100,7 +100,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<EditResult>)
-        .params("view: a saved view's id; set: {scale?, visual_style?, reference_style?, reference_hides_model?, tangent_edges?, source?: {occurrences: [[ids…]]}, hide?: [[ids…]] as drawing.view.snapshot's: each a value, or null to follow the parent (a base view keeps a scale); reference_shown_percent?; view?: a base view's direction; place?: {at: [x, y]} or {aligned: n}; linked?: a projected view's display settings all following its parent (true) or all its own, as they are now (false)} → {view, changed: [fields], followers: [the views projected from it whose settings changed with it]}. One undo step; no model is evaluated."),
+        .params("view: a saved view's id; set: {scale?, visual_style?, reference_style?, reference_hides_model?, tangent_edges?, line_group?: an ISO 128 line group by its wide line (0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2), source?: {occurrences: [[ids…]]}, hide?: [[ids…]] as drawing.view.snapshot's: each a value, or null to follow the parent (a base view keeps a scale; a base view's line group follows its sheet's, then its drawing's); reference_shown_percent?; view?: a base view's direction; place?: {at: [x, y]} or {aligned: n}; linked?: a projected view's display settings all following its parent (true) or all its own, as they are now (false)} → {view, changed: [fields], followers: [the views projected from it whose settings changed with it]}. One undo step; no model is evaluated."),
     CommandSpec::new(MOVE, "Move View to Sheet", crate::checked!("drawing.view.move_to_sheet", move_to_sheet))
         .icon("move")
         .in_drawing()
@@ -316,6 +316,45 @@ fn measurements(s: &Session, request: &SnapshotParams, basis: &Plane, scale: Sca
     read.collect()
 }
 
+/// Refused when saved view `view` of `record` doesn't draw a part that one of the occurrence paths
+/// `paths` places: an annotation attaches only to what its view draws.
+pub(super) fn check_drawn<'a>(record: &Drawing, view: u64, paths: impl IntoIterator<Item = &'a [u64]>, cmd: &str) -> Result<()> {
+    match not_drawn(record, view, paths) {
+        Some(why) => Err(bad(cmd, format!("view {} doesn't draw that part: {why}", ids::encode(view)))),
+        None => Ok(()),
+    }
+}
+
+/// Why view `view` of `record` doesn't draw the first of `paths` it leaves out, in words ([`left_out`]);
+/// nothing when it draws them all, or for a view that can't be resolved, which its own reply reports.
+/// The view is resolved once, however many paths there are.
+fn not_drawn<'a>(record: &Drawing, view: u64, paths: impl IntoIterator<Item = &'a [u64]>) -> Option<String> {
+    let resolved = record.resolve_view(view).ok()?;
+    let left = paths.into_iter().find_map(|path| crate::drawing_view::left_out(&resolved, path))?;
+    Some(match left {
+        LeftOut::Hidden { by, set_by } => format!("its hide leaves out occurrence path {by:?}{}", set_on(set_by)),
+        LeftOut::NotChosen { set_by } => format!("its source draws only the occurrences it chose{}", set_on(set_by)),
+    })
+}
+
+/// Where a setting that leaves a part out was set, in words for [`not_drawn`]: nothing when the view
+/// itself or the default set it. Hide and the chosen occurrences come from a view's chain today, but
+/// a sheet and a drawing can set other settings (its line group), so each says where.
+fn set_on(set_by: SetBy) -> String {
+    match set_by {
+        SetBy::Parent(parent) => format!(" (set on view {})", ids::encode(parent)),
+        SetBy::Sheet => " (set on its sheet)".to_string(),
+        SetBy::Drawing => " (set on the drawing)".to_string(),
+        SetBy::This | SetBy::Default => String::new(),
+    }
+}
+
+/// The warning for an annotation on view `view` that points through `paths`, when the view's
+/// settings were changed to leave one of them out after it was added: it stays, and says so.
+pub(super) fn drawn_warning<'a>(record: &Drawing, view: u64, paths: impl IntoIterator<Item = &'a [u64]>) -> Vec<String> {
+    not_drawn(record, view, paths).map(|why| format!("view {} doesn't draw this part now: {why}", ids::encode(view))).into_iter().collect()
+}
+
 /// Refused when `view` would show nothing of a design that has bodies to show. One with nothing to
 /// measure anyway isn't the choice's fault, and gets its placeholder.
 fn check_shows_bodies(shown: &std::result::Result<ShownSet, Unmeasured>, view: &ResolvedView, cmd: &str) -> Result<()> {
@@ -410,6 +449,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             reference_style: setting(resolved.reference_style, own.reference_style, snake_name),
             reference_hides_model: setting(resolved.reference_hides_model, own.reference_hides_model, |b| b),
             tangent_edges: setting(resolved.tangent_edges, own.tangent_edges, snake_name),
+            line_group: setting(resolved.line_group, own.line_group, snake_name),
             occurrences: setting(resolved.occurrences, own.occurrences.clone().map(Some), path_lists),
             hide: setting(resolved.hide, own.hide.clone().map(Some), path_lists),
         },
@@ -455,14 +495,20 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// The display settings a linked view takes from its parent: every inheritable one but the scale,
 /// which keeps its own switch.
-const DISPLAY_GROUP: usize = 4;
+const DISPLAY_GROUP: usize = 5;
 
 /// How many of the display settings `own` sets itself.
 fn display_set(own: &ViewOverrides) -> usize {
-    [own.visual_style.is_some(), own.reference_style.is_some(), own.reference_hides_model.is_some(), own.tangent_edges.is_some()]
-        .into_iter()
-        .filter(|set| *set)
-        .count()
+    [
+        own.visual_style.is_some(),
+        own.reference_style.is_some(),
+        own.reference_hides_model.is_some(),
+        own.tangent_edges.is_some(),
+        own.line_group.is_some(),
+    ]
+    .into_iter()
+    .filter(|set| *set)
+    .count()
 }
 
 /// View `id` of `d`, for `cmd`.
@@ -508,6 +554,7 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet) -> Result<Vec<String>> {
         own.reference_style = (!linked).then_some(resolved.reference_style.value);
         own.reference_hides_model = (!linked).then_some(resolved.reference_hides_model.value);
         own.tangent_edges = (!linked).then_some(resolved.tangent_edges.value);
+        own.line_group = (!linked).then_some(resolved.line_group.value);
     }
     if let Some(scale) = set.scale {
         if base && scale.is_none() {
@@ -526,6 +573,9 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet) -> Result<Vec<String>> {
     }
     if let Some(edges) = set.tangent_edges {
         own.tangent_edges = edges.map(|e| e.0);
+    }
+    if let Some(group) = set.line_group {
+        own.line_group = group.map(|g| g.0);
     }
     if let Some(source) = &set.source {
         own.occurrences = source.as_ref().map(|chosen| occurrence_paths(&chosen.occurrences));
@@ -560,6 +610,7 @@ fn changed_fields(a: &View, b: &View) -> Vec<String> {
         ("reference_style", x.reference_style != y.reference_style),
         ("reference_hides_model", x.reference_hides_model != y.reference_hides_model),
         ("tangent_edges", x.tangent_edges != y.tangent_edges),
+        ("line_group", x.line_group != y.line_group),
         ("source", x.occurrences != y.occurrences),
         ("hide", x.hide != y.hide),
         ("reference_shown_percent", a.reference_shown_percent != b.reference_shown_percent),
@@ -595,6 +646,8 @@ fn setting<T, U>(resolved: Setting<T>, own: Option<T>, show: impl Fn(T) -> U) ->
     let (from, parent) = match resolved.set_by {
         SetBy::This => (FromResult::This, None),
         SetBy::Parent(id) => (FromResult::Parent, Some(ids::encode(id))),
+        SetBy::Sheet => (FromResult::Sheet, None),
+        SetBy::Drawing => (FromResult::Drawing, None),
         SetBy::Default => (FromResult::Default, None),
     };
     SettingResult { value: show(resolved.value), from, parent, set: own.map(&show) }
@@ -693,7 +746,9 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
             view.place = shifted(original, to - from);
             match original.kind {
                 // The copy follows none of the views it came from: a projected view copied alone is
-                // a base view, looking the way it did, with the settings it had as its own.
+                // a base view, looking the way it did, with the settings it had as its own. Its line
+                // group is its own only when its chain gave it: else it follows its new sheet, as a
+                // base view copied does.
                 ViewKind::Projected { .. } if *old == id => {
                     view.kind = ViewKind::Base { source: resolved.source, view: looking(&resolved.basis) };
                     view.settings = ViewOverrides {
@@ -704,6 +759,7 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
                         tangent_edges: Some(resolved.tangent_edges.value),
                         occurrences: resolved.occurrences.value.clone(),
                         hide: resolved.hide.value.clone(),
+                        line_group: matches!(resolved.line_group.set_by, SetBy::This | SetBy::Parent(_)).then_some(resolved.line_group.value),
                     };
                     view.place = ViewPlace::At([to.x, to.y]);
                 }
@@ -765,6 +821,7 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
         tangent_edges: request.tangent_edges.map(|edges| edges.0),
         occurrences: chosen.map(occurrence_paths),
         hide: request.hide.as_deref().map(occurrence_paths),
+        line_group: None,
     };
     let place = ViewPlace::At([position.x, position.y]);
     let kind = ViewKind::Base { source, view: direction };

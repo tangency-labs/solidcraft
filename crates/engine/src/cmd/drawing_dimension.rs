@@ -19,6 +19,7 @@ use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
 use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
+use super::drawing_view::{check_drawn, drawn_warning};
 use crate::params::bad;
 use crate::schema::drawing_dimension::{
     AddParams, CandidateResult, CornerParam, DimensionResult, DimensionSet, EdgeParam, EditParams, EditResult, FaceParam, InspectParams, KindParam,
@@ -68,7 +69,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              occurrences its body is placed through, from the top; offset_mm?: the dimension line's distance on paper (default 10;              a linear, length or chain one's on the side away from what it measures); \
              text?: centred (default) or {at: [x, y]} from the view's centre; decimals?: 0..6 (default 2); override_text? (not a \
              chain's) → what drawing.dimension.inspect answers for it. Saved by the edges' names, never the points picked; one the \
-             view can't measure is refused. One undo step; no model is evaluated.",
+             view can't measure, or on a part it doesn't draw, is refused. One undo step; no model is evaluated.",
         ),
     CommandSpec::new(EDIT, "Edit Drawing Dimension", crate::checked!("drawing.dimension.edit", edit))
         .icon("dimension")
@@ -110,7 +111,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              members?: a chain's [{value, text}] from its first point, last_good? (the value it last read, kept when the design \
              is saved, when it has none now), exact, candidates?: [{edge: {body, index}}, {corner: [x, y, z]} or {face: {body, index}}]: \
              what an ambiguous name finds, or a lost one's leads; one of a slot's kind passes back to drawing.dimension.repair as it \
-             stands}. Read-only; no model is evaluated.",
+             stands, warnings?: its view edited since to leave out a part it measures}. Read-only; no model is evaluated.",
         ),
 ];
 
@@ -156,6 +157,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
             DimensionKind::Chain { points, direction: direction.unwrap_or(LinearDirection::Aligned) }
         }
     };
+    check_drawn(&record, view, kind.paths(), ADD)?;
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
     let mut dimension = Dimension {
         id,
@@ -494,6 +496,7 @@ fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
         last_good: last_good.map(shown),
         exact: r.exact,
         candidates,
+        warnings: drawn_warning(&d, dimension.view, dimension.kind.paths()),
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))

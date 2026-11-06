@@ -7,6 +7,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Deserializer, Serialize};
 use solidcore_record::Plane;
 use solidcraft_geom::drawing_view::{Invalid, NamedView, Scale, basis_looking};
+use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_render::VisualStyle;
 
 /// The most of its reference parts a view shows, as a percent.
@@ -120,6 +121,10 @@ pub struct ViewOverrides {
     /// The subtrees it leaves out: none when no view of its chain sets them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hide: Option<OccurrencePaths>,
+    /// The ISO 128 line group its lines are drawn in: its sheet's, then its drawing's, when no view
+    /// of its chain sets one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_group: Option<LineGroup>,
 }
 
 impl ViewOverrides {

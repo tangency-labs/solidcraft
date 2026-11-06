@@ -90,6 +90,37 @@ fn a_note_goes_on_a_sheet_a_view_an_edge_or_a_corner() {
     assert_eq!(saved(&s), before);
 }
 
+/// A note's leader attaches only to a part its view draws. On the copy its view hides, an edge or
+/// a corner is refused and the drawing left as it was; on the other copy it is added; a note on the
+/// view or the sheet points at no part. One added before the hide stays, and inspect warns until
+/// the edit is undone.
+#[test]
+fn a_notes_leader_is_refused_on_a_part_its_view_leaves_out() {
+    let (mut s, _, view, [first, second]) = placed();
+    let v = ids::encode(view);
+    let kept = on_edge(&mut s, view, first)["note"].clone();
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide": [[first]]}}));
+    let words = format!("its hide leaves out occurrence path [{first}]");
+    let warned = run(&mut s, INSPECT, json!({"note": kept}));
+    assert_eq!(warned["warnings"], json!([format!("view {v} doesn't draw this part now: {words}")]), "{warned}");
+    let before = saved(&s);
+    let edge = json!({"anchor": {"edge": {"view": v, "edge": {"point": [40, 0, 0], "path": [first]}}}, "at": [0, 0], "content": "A"});
+    let corner = json!({"anchor": {"corner": {"view": v, "corner": {"point": [80, 0, 30], "path": [first]}}}, "at": [0, 0], "content": "A"});
+    for p in [edge, corner] {
+        let e = refused(&mut s, ADD, p.clone());
+        assert!(e.contains(&format!("view {v} doesn't draw that part: {words}")), "{p}: {e}");
+    }
+    assert_eq!(saved(&s), before);
+    let on_second = json!({"anchor": {"edge": {"view": v, "edge": {"point": [140, 0, 0], "path": [second]}}}, "at": [0, 0], "content": "A"});
+    assert_eq!(run(&mut s, ADD, on_second)["status"], "ok");
+    run(&mut s, ADD, json!({"anchor": {"view": v}, "at": [0, 0], "content": "On the view"}));
+    run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [0, 0], "content": "On the sheet"}));
+    for _ in 0..4 {
+        run(&mut s, "edit.undo", json!({}));
+    }
+    assert!(run(&mut s, INSPECT, json!({"note": kept}))["warnings"].is_null());
+}
+
 /// The same edge through each copy names its own: the two placements' leaders end 100 mm apart.
 #[test]
 fn two_copies_are_told_apart_by_path() {
