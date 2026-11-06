@@ -31,7 +31,8 @@
 //! Unported at the first call reached. The temporary transform waits on B-rep
 //! bounding boxes before any mutation; no translation is faked. Destruction is
 //! Rust ownership; the temporary-transform token is restored explicitly after the
-//! caller's complete scope, including error exits. There is no input-dependent recursion.
+//! caller's complete scope, including error exits. Cooperative cancellation propagates
+//! through ignored-status helpers. There is no input-dependent recursion.
 //! `BooleanPostProcess`'s `DeleteTopologicalVertex` runs without the caller's
 //! notification identities, so the survivor edge's joined curve comes back owned under
 //! a kernel-issued identity of that edge; the owner identity the curve of each
@@ -177,7 +178,7 @@ impl<T> MergeState<T> {
 fn ignore_failure<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -1057,7 +1058,35 @@ impl TemporaryBrepShift {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
+
+    #[test]
+    fn cancellation_status_ignore_failure_preserves_control_errors() {
+        for error in [
+            SolidError::cancelled("cancelled-callee"),
+            SolidError::unported("callee", "unit"),
+            SolidError::FaceTrimsUnavailable {
+                operation: "face-classification",
+                entity: EntityRef::Face(FaceId::from_index(0)),
+            },
+        ] {
+            assert_eq!(ignore_failure::<()>(Err(error.clone())), Err(error));
+        }
+    }
+
+    #[test]
+    fn cancellation_status_survives_ignored_merge_failure() {
+        let cancelled = SolidError::cancelled("boolean-region-classification");
+        assert_eq!(ignore_failure::<()>(Err(cancelled.clone())), Err(cancelled));
+        assert_eq!(ignore_failure(Ok(7)), Ok(Some(7)));
+        assert_eq!(
+            ignore_failure::<()>(Err(SolidError::sm_err("ordinary-classification-failure"))),
+            Ok(None)
+        );
+        let unported = SolidError::unported("callee", "unit");
+        assert_eq!(ignore_failure::<()>(Err(unported.clone())), Err(unported));
+    }
 
     #[test]
     fn audit_483_boxes_fail_before_temporary_translation() {

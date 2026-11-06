@@ -157,11 +157,12 @@ fn sm_err(entity: VertexuseId) -> SolidError {
     }
 }
 
-/// Ignores a status upstream ignores, letting [`SolidError::Unported`] through.
+/// Ignores an ordinary upstream status; unported dependencies, cancellation and
+/// unavailable face trims propagate.
 fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -172,7 +173,9 @@ fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
 fn ignored_status<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => Err(e),
+        Err(e) if e.is_unported_or_cancelled() || matches!(e, SolidError::InvalidInput { .. }) => {
+            Err(e)
+        }
         Err(_) => Ok(None),
     }
 }
@@ -852,14 +855,11 @@ fn global_point_solve(
                 ..PointClassifyOptions::default()
             },
         );
-        match status {
-            Err(e) if e.is_unported() => Err(e),
-            Err(_) => Ok(false),
-            Ok(()) => Ok(matches!(
+        Ok(ignored(status)?.is_some()
+            && matches!(
                 pc.point_class(),
                 PointClassType::Face | PointClassType::Edge | PointClassType::Vertex
-            )),
-        }
+            ))
     };
     let solutions = surface
         .global_point_solve_face_tested::<crate::surface::surface::p4::NoObject>(
@@ -1717,6 +1717,34 @@ pub fn notify(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cancellation_status_ignored_preserves_control_errors() {
+        for error in [
+            SolidError::cancelled("cancelled-callee"),
+            SolidError::unported("callee", "unit"),
+            SolidError::FaceTrimsUnavailable {
+                operation: "face-classification",
+                entity: EntityRef::Face(FaceId::from_index(0)),
+            },
+        ] {
+            assert_eq!(ignored::<()>(Err(error.clone())), Err(error));
+        }
+    }
+
+    #[test]
+    fn cancellation_status_ignored_status_preserves_control_errors() {
+        for error in [
+            SolidError::cancelled("cancelled-callee"),
+            SolidError::unported("callee", "unit"),
+            SolidError::FaceTrimsUnavailable {
+                operation: "face-classification",
+                entity: EntityRef::Face(FaceId::from_index(0)),
+            },
+        ] {
+            assert_eq!(ignored_status::<()>(Err(error.clone())), Err(error));
+        }
+    }
     use crate::geom::extent1d::Extent1d;
     use crate::topology::{Edge, Edgeuse, Loopuse, Region, Shell, Vertex};
 

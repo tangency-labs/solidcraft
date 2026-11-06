@@ -34,6 +34,16 @@ pub const MAX_CONTAINMENT_TESTS: usize = 1 << 16;
 /// `InvalidInput` past [`MAX_CONTAINMENT_TESTS`]; an unported bounding box; those of the
 /// topology walk and of [`is_inner_shell_of`].
 pub fn put_enclosing_shells_first(k: &mut Kernel, b: &mut Brep) -> Result<()> {
+    put_enclosing_shells_first_with_bbox(k, b, |k, b, shell| {
+        calculate_shell_bounding_box(k, b, shell, false)
+    })
+}
+
+fn put_enclosing_shells_first_with_bbox(
+    k: &mut Kernel,
+    b: &mut Brep,
+    mut bounding_box: impl FnMut(&mut Kernel, &Brep, ShellId) -> Result<crate::geom::extent3d::Extent3d>,
+) -> Result<()> {
     let infinite = b.infinite_region();
     let mut tests = 0usize;
     for r in regions(b, None)? {
@@ -50,12 +60,12 @@ pub fn put_enclosing_shells_first(k: &mut Kernel, b: &mut Brep) -> Result<()> {
             if !rec.is_faceuse_shell() || !rec.is_closed(b, s)? {
                 continue;
             }
-            match calculate_shell_bounding_box(k, b, s, false) {
+            match bounding_box(k, b, s) {
                 Ok(bx) => {
                     let size = bx.size();
                     candidates.push((size.x * size.y * size.z, s));
                 }
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 // != SM_SUCCESS: not a candidate
                 Err(_) => {}
             }
@@ -94,4 +104,37 @@ pub fn put_enclosing_shells_first(k: &mut Kernel, b: &mut Brep) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::boolean::api_brep::boolean_difference;
+    use crate::math::Point3;
+    use crate::primitive::api_primitives::create_box;
+
+    #[test]
+    fn cancellation_status_enclosing_shell_boxes_do_not_become_missing_candidates() {
+        let mut k = Kernel::default();
+        let outer = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
+        let inner = create_box(&mut k, Point3::new(2.0, 2.0, 2.0), 2.0, 2.0, 2.0).unwrap();
+        let original = boolean_difference(&mut k, outer, inner).unwrap();
+        for error in [
+            SolidError::cancelled("shell-box"),
+            SolidError::unported("shell-box", "unit"),
+            SolidError::FaceTrimsUnavailable {
+                operation: "shell-box",
+                entity: crate::error::EntityRef::Face(crate::topology::FaceId::from_index(0)),
+            },
+        ] {
+            let mut b = original.clone_standing_for_self().unwrap();
+            let mut reached = 0;
+            let result = put_enclosing_shells_first_with_bbox(&mut k, &mut b, |_, _, _| {
+                reached += 1;
+                Err(error.clone())
+            });
+            assert_eq!(reached, 1, "the hollow box must reach a closed-shell box");
+            assert_eq!(result, Err(error));
+        }
+    }
 }

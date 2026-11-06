@@ -2649,11 +2649,9 @@ fn subdivide_face_body(
         }));
     for (start, end) in iso_lines {
         // create IsoLineCrvOnSurf (status ignored upstream; a failure is not compared)
-        let line = match surface_of_face(b, face)?.create_line_on_surf(k, start, end) {
-            Ok(line) => line,
-            Err(e) if e.is_unported() => return Err(e),
-            Err(_) => return Err(SolidError::invalid_input(OP_SUBDIVIDE, "no iso line")),
-        };
+        let line = required_subdivision_iso_line(
+            surface_of_face(b, face)?.create_line_on_surf(k, start, end),
+        )?;
         curves_3d.push(Curve::from(line));
     }
 
@@ -2902,9 +2900,41 @@ pub fn test_closure_split_region(
     Ok(out)
 }
 
+/// An ordinary iso-line failure has no output to subdivide with; control errors
+/// retain their original cause rather than becoming an invalid subdivision.
+fn required_subdivision_iso_line<T>(result: Result<T>) -> Result<T> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) if error.is_unported_or_cancelled() => Err(error),
+        Err(_) => Err(SolidError::invalid_input(OP_SUBDIVIDE, "no iso line")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cancellation_status_subdivision_retains_control_errors() {
+        assert_eq!(required_subdivision_iso_line(Ok(7)), Ok(7));
+        assert_eq!(
+            required_subdivision_iso_line::<()>(Err(SolidError::sm_err("ordinary-iso-line"))),
+            Err(SolidError::invalid_input(OP_SUBDIVIDE, "no iso line"))
+        );
+        for error in [
+            SolidError::cancelled("iso-line"),
+            SolidError::unported("iso-line", "unit"),
+            SolidError::FaceTrimsUnavailable {
+                operation: "iso-line",
+                entity: EntityRef::Face(FaceId::from_index(0)),
+            },
+        ] {
+            assert_eq!(
+                required_subdivision_iso_line::<()>(Err(error.clone())),
+                Err(error)
+            );
+        }
+    }
     use crate::geom::attribute::AttributeStore;
     use crate::topology::brep_data::{
         EdgeData, EuData, FaceData, FaceuseData, Keyed, LoopData, RegionData, ShellData, VertexData,

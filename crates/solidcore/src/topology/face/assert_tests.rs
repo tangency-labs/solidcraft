@@ -56,6 +56,15 @@ use crate::topology::{Brep, EdgeId, FaceId, LoopId, VertexId};
 
 const OP: &str = "topology::face::assert_tests";
 
+/// A failed geometric assertion solve is inconclusive only for an ordinary status.
+fn ignored_assert_result<T>(result: Result<T>) -> Result<Option<T>> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(error) if error.is_unported_or_cancelled() => Err(error),
+        Err(_) => Ok(None),
+    }
+}
+
 fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
@@ -285,7 +294,7 @@ pub fn has_coincident_edges(
                 let xsect_tol = xsect_tol_3d_from_zones(k, survive_zone_tol, delete_zone_tol);
                 let survive_curve = deref(survive_curve)?;
                 let delete_curve = deref(delete_curve)?;
-                let found = survive_curve.global_coincidence_checker(
+                let found = ignored_assert_result(survive_curve.global_coincidence_checker(
                     k,
                     &survive_ivl,
                     delete_curve,
@@ -296,18 +305,17 @@ pub fn has_coincident_edges(
                         Some(CurveHandle(survive_curve.natural_interval())),
                         Some(CurveHandle(delete_curve.natural_interval())),
                     ],
-                );
+                ))?;
                 // status ignored: a failed check leaves bAdditionalWorkNeeded FALSE
                 let (additional_work_needed, types) = match found {
-                    Ok(c) => (
+                    Some(c) => (
                         c.additional_work_needed,
                         c.solutions
                             .iter()
                             .map(|s| s.solution_type)
                             .collect::<Vec<_>>(),
                     ),
-                    Err(e) if e.is_unported() => return Err(e),
-                    Err(_) => (false, Vec::new()),
+                    None => (false, Vec::new()),
                 };
 
                 // check for coincidence
@@ -389,17 +397,17 @@ fn do_loops_intersect_in_uv(
                 continue; // inconclusive - nothing to intersect
             };
             let interval2 = uv_curve2.natural_interval();
-            let solutions = match uv_curve1.global_curve_intersect::<CurveHandle>(
-                k,
-                &interval1,
-                &uv_curve2,
-                &interval2,
-                uv_tol,
-                &crate::curve::curve::p8::CurveIntersectOptions::default(),
-            ) {
-                Ok(s) => s,
-                Err(e) if e.is_unported() => return Err(e),
-                Err(_) => continue, // inconclusive - the intersector gave up on this pair
+            let Some(solutions) =
+                ignored_assert_result(uv_curve1.global_curve_intersect::<CurveHandle>(
+                    k,
+                    &interval1,
+                    &uv_curve2,
+                    &interval2,
+                    uv_tol,
+                    &crate::curve::curve::p8::CurveIntersectOptions::default(),
+                ))?
+            else {
+                continue; // inconclusive - the intersector gave up on this pair
             };
 
             // any solution at all places the two Loops on one another
@@ -449,6 +457,25 @@ pub fn assert_test_face38(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cancellation_status_face_assertion_failures_are_not_inconclusive() {
+        assert_eq!(ignored_assert_result(Ok(7)), Ok(Some(7)));
+        assert_eq!(
+            ignored_assert_result::<()>(Err(SolidError::sm_err("ordinary-solve"))),
+            Ok(None)
+        );
+        for error in [
+            SolidError::cancelled("face-assert-solve"),
+            SolidError::unported("face-assert-solve", "unit"),
+            SolidError::FaceTrimsUnavailable {
+                operation: "face-assert-solve",
+                entity: crate::error::EntityRef::Face(FaceId::from_index(0)),
+            },
+        ] {
+            assert_eq!(ignored_assert_result::<()>(Err(error.clone())), Err(error));
+        }
+    }
     use crate::boolean::api_brep::boolean_difference;
     use crate::geom::axis2_placement::Axis2Placement;
     use crate::math::{Point3, Vec3};

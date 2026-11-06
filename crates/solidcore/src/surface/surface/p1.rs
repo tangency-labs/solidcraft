@@ -853,11 +853,13 @@ fn first_derivatives_or_zero(
     surface: &Surface,
     uv: Point2,
 ) -> Result<(Point3, Vec3, Vec3)> {
-    match surface.evaluate_1st_derivatives(k, uv, true, true) {
-        Ok(d) => Ok(d),
-        Err(e @ SolidError::Unported { .. }) => Err(e),
-        Err(_) => Ok((Vec3::ZERO, Vec3::ZERO, Vec3::ZERO)),
-    }
+    Ok(
+        ignored_surface_result(surface.evaluate_1st_derivatives(k, uv, true, true))?.unwrap_or((
+            Vec3::ZERO,
+            Vec3::ZERO,
+            Vec3::ZERO,
+        )),
+    )
 }
 
 /// `SmTol::GetScaledZero(const SmSurface&)`: scaled to the surface's midpoint and
@@ -868,19 +870,12 @@ fn first_derivatives_or_zero(
 /// [`SolidError::Unported`] from the size or the evaluation (their other failures are
 /// ignored: zero size, zero point).
 pub fn scaled_zero_of_surface(k: &Kernel, surface: &Surface) -> Result<f64> {
-    let size = match surface.approximate_size(k, None) {
-        Ok(s) => s,
-        Err(e @ SolidError::Unported { .. }) => return Err(e),
-        Err(_) => Vec2::ZERO,
-    };
-    let pnt = match surface.evaluate_point(
+    let size = ignored_surface_result(surface.approximate_size(k, None))?.unwrap_or(Vec2::ZERO);
+    let pnt = ignored_surface_result(surface.evaluate_point(
         k,
         surface.natural_uv_domain_with_nurb(k)?.evaluate(0.5, 0.5),
-    ) {
-        Ok(p) => p,
-        Err(e @ SolidError::Unported { .. }) => return Err(e),
-        Err(_) => Point3::ZERO,
-    };
+    ))?
+    .unwrap_or(Point3::ZERO);
     Ok(scaled_zero2(&pnt, &size))
 }
 
@@ -1121,15 +1116,10 @@ pub fn get_surface_cache_with_face<O: Copy + PartialEq>(
     face: &mut dyn CacheFace<O>,
 ) -> Result<TrimSrfCache<O>> {
     // if possible - get or make TrimSrfCache
-    match make_trim_srf_cache_with_face(k, surface, handle, face) {
-        Ok(c) => Ok(c),
-        Err(
-            e @ (SolidError::Unported { .. }
-            | SolidError::InvalidInput { .. }
-            | SolidError::NotFound { .. }),
-        ) => Err(e),
+    match ignored_trim_cache_result(make_trim_srf_cache_with_face(k, surface, handle, face))? {
+        Some(c) => Ok(c),
         // else - get or make SurfaceCache
-        Err(_) => Ok(TrimSrfCache::from_base(make_surface_cache(
+        None => Ok(TrimSrfCache::from_base(make_surface_cache(
             k, surface, handle,
         )?)),
     }
@@ -1148,15 +1138,10 @@ pub fn get_trim_surface_cache<O: Copy + PartialEq>(
     handle: Option<O>,
 ) -> Result<TrimSrfCache<O>> {
     // if possible - get or make TrimSrfCache
-    match make_trim_srf_cache(k, surface, handle) {
-        Ok(c) => Ok(c),
-        Err(
-            e @ (SolidError::Unported { .. }
-            | SolidError::InvalidInput { .. }
-            | SolidError::NotFound { .. }),
-        ) => Err(e),
+    match ignored_trim_cache_result(make_trim_srf_cache(k, surface, handle))? {
+        Some(c) => Ok(c),
         // else - get or make SurfaceCache
-        Err(_) => Ok(TrimSrfCache::from_base(make_surface_cache(
+        None => Ok(TrimSrfCache::from_base(make_surface_cache(
             k, surface, handle,
         )?)),
     }
@@ -1175,11 +1160,10 @@ pub fn get_surface_cache<O: Copy + PartialEq>(
     handle: Option<O>,
 ) -> Result<SurfaceCache<O>> {
     // if possible - get or make TrimSrfCache
-    match make_trim_srf_cache(k, surface, handle) {
-        Ok(c) => Ok(c.into_base()),
-        Err(e @ SolidError::Unported { .. }) => Err(e),
+    match ignored_surface_result(make_trim_srf_cache(k, surface, handle))? {
+        Some(c) => Ok(c.into_base()),
         // else - get or make SurfaceCache
-        Err(_) => make_surface_cache(k, surface, handle),
+        None => make_surface_cache(k, surface, handle),
     }
 }
 
@@ -1867,13 +1851,12 @@ impl Surface {
 
         // surface eval (status ignored; passed on with the opt-in fix, WR-663,
         // tangency-labs/smlib 21dcf69)
-        let derivs = match passed_on(
+        let derivs = match ignored_surface_result(passed_on(
             self.evaluate(k, uv, 1, 1, upper_flags(false)),
             k.fixes.query_statuses_pass_on,
-        )? {
-            Ok(m) => first_block(&m),
-            Err(e @ SolidError::Unported { .. }) => return Err(e),
-            Err(_) => [[Vec3::ZERO; 2]; 2],
+        )?)? {
+            Some(m) => first_block(&m),
+            None => [[Vec3::ZERO; 2]; 2],
         };
 
         // decompose the projection of crVec onto the tangent plane into Du and Dv
@@ -2021,13 +2004,12 @@ impl Surface {
         {
             // with the opt-in fix no domain can be shown continuous without the knots:
             // an uninitialised domain (WR-663, tangency-labs/smlib 1612a7d)
-            let knots = match self.knots_with_nurb(k, SurfParamType::U, None) {
-                Ok(kn) => kn.0,
-                Err(e) if k.fixes.query_statuses_pass_on && !e.is_unported() => {
-                    return Ok(Extent2d::new());
-                }
-                Err(_) => Vec::new(),
-            };
+            let knots =
+                match ignored_surface_result(self.knots_with_nurb(k, SurfParamType::U, None))? {
+                    Some(kn) => kn.0,
+                    None if k.fixes.query_statuses_pass_on => return Ok(Extent2d::new()),
+                    None => Vec::new(),
+                };
             let u_conts = cache.u_continuities();
             let n = u_conts.len();
             for (i, &cont) in u_conts.iter().enumerate() {
@@ -2062,13 +2044,12 @@ impl Surface {
         }
 
         {
-            let knots = match self.knots_with_nurb(k, SurfParamType::V, None) {
-                Ok(kn) => kn.0,
-                Err(e) if k.fixes.query_statuses_pass_on && !e.is_unported() => {
-                    return Ok(Extent2d::new());
-                }
-                Err(_) => Vec::new(),
-            };
+            let knots =
+                match ignored_surface_result(self.knots_with_nurb(k, SurfParamType::V, None))? {
+                    Some(kn) => kn.0,
+                    None if k.fixes.query_statuses_pass_on => return Ok(Extent2d::new()),
+                    None => Vec::new(),
+                };
             let v_conts = cache.v_continuities();
             let n = v_conts.len();
             for (j, &cont) in v_conts.iter().enumerate() {
@@ -2432,11 +2413,8 @@ impl Surface {
 
         // get or create SurfaceCache with Subdivision Tree containing Bounding boxes
         // (smsurf_GetSurfaceCache returns NULL when no cache can be made: NER)
-        let mut cache = match get_surface_cache::<()>(k, self, None) {
-            Ok(c) => c,
-            Err(e) if e.is_unported() => return Err(e),
-            Err(_) => return Err(SolidError::null_pointer(OP_BOX)),
-        };
+        let mut cache = ignored_surface_result(get_surface_cache::<()>(k, self, None))?
+            .ok_or(SolidError::null_pointer(OP_BOX))?;
         let top = cache
             .get_tree(k)?
             .top_node()
@@ -2723,17 +2701,10 @@ impl Surface {
         tol: f64,
     ) -> Result<bool> {
         // a failure upstream answers FALSE (except an unported call here)
-        fn or_false<T>(r: Result<T>) -> Result<Option<T>> {
-            match r {
-                Ok(v) => Ok(Some(v)),
-                Err(e) if e.is_unported() => Err(e),
-                Err(_) => Ok(None),
-            }
-        }
         let Some(gen) = s.gen_curve() else {
             return Ok(false);
         };
-        let Some(Some((_, radius, _, _))) = or_false(gen.is_arc(k, 9, tol))? else {
+        let Some(Some((_, radius, _, _))) = ignored_surface_result(gen.is_arc(k, 9, tol))? else {
             return Ok(false);
         };
         if radius <= tol {
@@ -2743,11 +2714,13 @@ impl Surface {
         // the curvature of the generatrix direction's iso-curve, at the middle of the domain
         let uv = self.natural_uv_domain_with_nurb(k)?.mid();
         let Some([_, du, dv, _, duu, dvv]) =
-            or_false(self.evaluate_2nd_derivatives(k, uv, true, true))?
+            ignored_surface_result(self.evaluate_2nd_derivatives(k, uv, true, true))?
         else {
             return Ok(false);
         };
-        let Some(normal) = or_false(self.evaluate_normal(k, uv, side(true), side(true)))? else {
+        let Some(normal) =
+            ignored_surface_result(self.evaluate_normal(k, uv, side(true), side(true)))?
+        else {
             return Ok(false);
         };
         let (d1, d2) = if s.swap_uv() { (du, duu) } else { (dv, dvv) };
@@ -2834,11 +2807,7 @@ impl Surface {
         let mut silhouette =
             SurfaceSilhouette::new(k, self, uv_domain, perspective, eye_point_or_view_vector)?;
         // (the tracer constructor's pSC->GetTree(), whose failure it ignores)
-        if let Err(e) = cache.get_tree(k) {
-            if e.is_unported() {
-                return Err(e);
-            }
-        }
+        let _ = ignored_surface_result(cache.get_tree(k))?;
         let traced = silhouette.do_trace(k, cache, approx_tol_3d, ang_tol_rad)?;
         let mut curves_3d = traced.curves_3d;
         let mut curves_uv = traced.uv_curves;
@@ -4791,9 +4760,72 @@ fn nesting_depth(depth: usize, op: &'static str) -> Result<usize> {
     Ok(depth + 1)
 }
 
+/// Trim-cache construction also treats invalid topology as a mandatory error.
+fn ignored_trim_cache_result<T>(result: Result<T>) -> Result<Option<T>> {
+    match result {
+        Err(error @ (SolidError::InvalidInput { .. } | SolidError::NotFound { .. })) => Err(error),
+        other => ignored_surface_result(other),
+    }
+}
+
+/// The value of a surface call whose ordinary upstream status is ignored.
+/// Control errors must leave the caller before it reads a fallback value.
+pub(super) fn ignored_surface_result<T>(r: Result<T>) -> Result<Option<T>> {
+    ignored(r)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cancellation_status_trim_cache_failure_does_not_select_an_untrimmed_cache() {
+        assert_eq!(ignored_trim_cache_result(Ok(7)), Ok(Some(7)));
+        assert_eq!(
+            ignored_trim_cache_result::<()>(Err(SolidError::sm_err("ordinary-cache-error"))),
+            Ok(None)
+        );
+        for error in [
+            SolidError::cancelled("trim-cache"),
+            SolidError::unported("trim-cache", "unit"),
+            SolidError::FaceTrimsUnavailable {
+                operation: "trim-cache",
+                entity: crate::error::EntityRef::Face(crate::topology::FaceId::from_index(0)),
+            },
+            SolidError::invalid_input("trim-cache", "invalid topology"),
+            SolidError::NotFound {
+                operation: "trim-cache",
+                entity: crate::error::EntityRef::Face(crate::topology::FaceId::from_index(0)),
+            },
+        ] {
+            assert_eq!(
+                ignored_trim_cache_result::<()>(Err(error.clone())),
+                Err(error)
+            );
+        }
+    }
+
+    #[test]
+    fn cancellation_status_ignored_surface_result_preserves_control_errors() {
+        assert_eq!(ignored_surface_result(Ok(7)), Ok(Some(7)));
+        assert_eq!(
+            ignored_surface_result::<()>(Err(SolidError::sm_err("ordinary-surface-error"))),
+            Ok(None)
+        );
+        for error in [
+            SolidError::cancelled("cancelled-callee"),
+            SolidError::PreparationRequired {
+                operation: "surface-cache",
+            },
+            SolidError::unported("callee", "unit"),
+            SolidError::FaceTrimsUnavailable {
+                operation: "face-classification",
+                entity: crate::error::EntityRef::Face(crate::topology::FaceId::from_index(0)),
+            },
+        ] {
+            assert_eq!(ignored_surface_result::<()>(Err(error.clone())), Err(error));
+        }
+    }
 
     fn issue_2009_kernels() -> (Kernel, Kernel) {
         let off = Kernel::default();

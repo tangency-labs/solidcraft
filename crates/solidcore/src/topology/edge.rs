@@ -666,10 +666,18 @@ pub fn create_trimmed_nurbs_curve(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Opt
 
     // Trim the CurveCopy to the EdgeInterval
     let mut ivl = b.edge(e)?.interval; // may snap sIvl by tol to existing knots
-    match copy.trim(k, &mut ivl, TrimMode::Notify) {
+    let status = copy.trim(k, &mut ivl, TrimMode::Notify);
+    trimmed_nurbs_result(status, copy)
+}
+
+/// A failed trim has no curve; control errors leave before the copy is selected.
+fn trimmed_nurbs_result(status: Result<()>, copy: Curve) -> Result<Option<Curve>> {
+    match status {
         Ok(()) => Ok(Some(copy)),
-        Err(err) if err.is_unported() => Err(err),
-        Err(_) => Ok(None),
+        Err(err) => {
+            failed(err)?;
+            Ok(None)
+        }
     }
 }
 
@@ -723,9 +731,10 @@ pub struct RadialSector {
     pub coincident_faceuse: Option<FaceuseId>,
 }
 
-/// An error a caller treats as a failed status: [`SolidError::Unported`] propagates.
+/// An error a caller treats as a failed status: unported dependencies and
+/// cooperative cancellation propagate.
 fn failed(e: SolidError) -> Result<()> {
-    if e.is_unported() {
+    if e.is_unported_or_cancelled() {
         Err(e)
     } else {
         Ok(())
@@ -2962,6 +2971,22 @@ pub(crate) fn crease_angle(k: &Kernel) -> f64 {
     }
 }
 
+/// A shell step-off keeps partial output only for an ordinary numerical failure.
+fn shell_step_off_status(status: Result<()>) -> Result<()> {
+    match status {
+        Err(err)
+            if err.is_unported_or_cancelled()
+                || matches!(
+                    err,
+                    SolidError::InvalidInput { .. } | SolidError::NotFound { .. }
+                ) =>
+        {
+            Err(err)
+        }
+        _ => Ok(()),
+    }
+}
+
 /// `GetBlendEdgeuse`'s body: its edge use, or why it returns `NULL` (a tangent edge as
 /// [`NotBlendable::Tangent`], not yet told from a smooth one).
 fn blend_edgeuse_unless(
@@ -3059,18 +3084,9 @@ fn blend_edgeuse_unless(
         let opts = eu2::StepOffOptions::default();
         // `SE`: a failing step-off keeps what it wrote into the same locals
         for (eu, ev) in [(cur0, &mut ev0), (cur1, &mut ev1)] {
-            if let Err(err) =
-                eu2::evaluate_binormal_step_off_into(k, b, eu, test_param, step_off, &opts, ev)
-            {
-                if matches!(
-                    err,
-                    SolidError::Unported { .. }
-                        | SolidError::InvalidInput { .. }
-                        | SolidError::NotFound { .. }
-                ) {
-                    return Err(err);
-                }
-            }
+            shell_step_off_status(eu2::evaluate_binormal_step_off_into(
+                k, b, eu, test_param, step_off, &opts, ev,
+            ))?;
         }
         let (pnt, fu_normal) = (ev0.point, ev0.face_normal);
         let (pnt2, fu_normal2) = (ev1.point, ev1.face_normal);
@@ -3169,7 +3185,82 @@ pub(crate) mod notification_test_support {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
+
+    #[test]
+    fn cancellation_status_trimmed_curve_handler_preserves_control_errors() {
+        let copy = || Curve::from(BSplineCurve::default());
+        assert!(trimmed_nurbs_result(Ok(()), copy()).unwrap().is_some());
+        assert!(
+            trimmed_nurbs_result(Err(SolidError::sm_err("trim")), copy())
+                .unwrap()
+                .is_none()
+        );
+        for error in [
+            SolidError::cancelled("trim"),
+            SolidError::unported("trim", "unit"),
+            SolidError::FaceTrimsUnavailable {
+                operation: "trim",
+                entity: EntityRef::Face(FaceId::from_index(0)),
+            },
+        ] {
+            assert_eq!(
+                trimmed_nurbs_result(Err(error.clone()), copy()).unwrap_err(),
+                error
+            );
+        }
+    }
+
+    #[test]
+    fn cancellation_status_shell_step_off_handler_preserves_control_errors() {
+        assert_eq!(shell_step_off_status(Ok(())), Ok(()));
+        assert_eq!(
+            shell_step_off_status(Err(SolidError::sm_err("step-off"))),
+            Ok(())
+        );
+        for error in [
+            SolidError::cancelled("step-off"),
+            SolidError::unported("step-off", "unit"),
+            SolidError::FaceTrimsUnavailable {
+                operation: "step-off",
+                entity: EntityRef::Face(FaceId::from_index(0)),
+            },
+            SolidError::invalid_input("step-off", "invalid topology"),
+            SolidError::NotFound {
+                operation: "step-off",
+                entity: EntityRef::Face(FaceId::from_index(0)),
+            },
+        ] {
+            assert_eq!(shell_step_off_status(Err(error.clone())), Err(error));
+        }
+    }
+
+    #[test]
+    fn cancellation_status_failed_preserves_control_errors() {
+        for error in [
+            SolidError::cancelled("cancelled-callee"),
+            SolidError::unported("callee", "unit"),
+            SolidError::FaceTrimsUnavailable {
+                operation: "face-classification",
+                entity: EntityRef::Face(FaceId::from_index(0)),
+            },
+        ] {
+            assert_eq!(failed(error.clone()), Err(error));
+        }
+    }
+
+    #[test]
+    fn cancellation_status_survives_failed_radial_classification() {
+        let cancelled = SolidError::cancelled("radial-sector-classification");
+        assert_eq!(failed(cancelled.clone()), Err(cancelled));
+        assert_eq!(
+            failed(SolidError::sm_err("ordinary-classification-failure")),
+            Ok(())
+        );
+        let unported = SolidError::unported("callee", "unit");
+        assert_eq!(failed(unported.clone()), Err(unported));
+    }
     use crate::curve::curve::Curve as C;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::crv_basic::Curve as NlCurve;

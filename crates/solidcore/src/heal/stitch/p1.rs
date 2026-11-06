@@ -661,7 +661,7 @@ fn test_and_split_edge_with(
     // Must have a point which can split the Edge.
     let (e1, e2, new_v) = match split(k, b, e, dropped.parameter) {
         Ok(r) => r,
-        Err(err) if err.is_unported() => return Err(err),
+        Err(err) if err.is_unported_or_cancelled() => return Err(err),
         Err(_) => {
             // most probable reason; don't really care too much.
             out.reason = SplitReason::CloseToBoundary;
@@ -2048,7 +2048,7 @@ impl<'c> Stitch<'c> {
             let s_ljj = at1(&sorted2, ljj_to_glue)?;
             match self.edit_glue_vertices(k, b, vtx1, vtx2_to_glue, None) {
                 Ok(()) => {}
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(e) => {
                     // Prevent infinite loop: if the glue failed, don't mess with these two
                     // vertices anymore.
@@ -2301,7 +2301,7 @@ impl<'c> Stitch<'c> {
                             set_none(&mut v_edges, jj)?;
                             break;
                         }
-                        Err(err) if err.is_unported() => return Err(err),
+                        Err(err) if err.is_unported_or_cancelled() => return Err(err),
                         Err(_) if !self.ignore_problems => return Err(sm_err()),
                         Err(_) => {}
                     }
@@ -2863,6 +2863,205 @@ mod tests {
     use super::*;
     use crate::geom::object::NotifyOperation;
     use crate::topology::EdgeuseOwner;
+
+    #[test]
+    fn cancellation_status_split_refusal_is_not_a_boundary_answer() {
+        for error in [
+            SolidError::cancelled("split-edge"),
+            SolidError::unported("split-edge", "unit"),
+            SolidError::FaceTrimsUnavailable {
+                operation: "split-edge",
+                entity: EntityRef::Face(FaceId::from_index(0)),
+            },
+        ] {
+            let mut k = Kernel::default();
+            let mut b = crate::primitive::api_primitives::create_box(
+                &mut k,
+                Point3::ZERO,
+                10.0,
+                20.0,
+                30.0,
+            )
+            .unwrap();
+            let edge = b.edge_list()[0];
+            let record = b.edge(edge).unwrap();
+            let point = record
+                .curve
+                .as_ref()
+                .unwrap()
+                .evaluate_point(&k, record.interval.evaluate(0.5))
+                .unwrap();
+            let mut reached = false;
+            let result =
+                test_and_split_edge_with(&mut k, &mut b, edge, point, 0.01, |_, _, _, _| {
+                    reached = true;
+                    Err(error.clone())
+                });
+            assert!(reached, "the real box edge must reach its split");
+            assert_eq!(result.unwrap_err(), error);
+        }
+    }
+
+    #[derive(Debug)]
+    struct RefusingStitchEdits {
+        error: SolidError,
+        calls: usize,
+    }
+    impl StitchEditContext for RefusingStitchEdits {
+        fn set_point(
+            &mut self,
+            _k: &mut Kernel,
+            b: &mut Brep,
+            v: VertexId,
+            point: Point3,
+        ) -> Result<()> {
+            b.vertex_mut(v)?.point = point;
+            Ok(())
+        }
+        fn glue_vertices(
+            &mut self,
+            _k: &mut Kernel,
+            _b: &mut Brep,
+            _keep: VertexId,
+            _delete: VertexId,
+            _wire: Option<&[EdgeId]>,
+        ) -> Result<()> {
+            self.calls += 1;
+            Err(self.error.clone())
+        }
+        fn remove_faces(
+            &mut self,
+            _k: &mut Kernel,
+            _b: &mut Brep,
+            _faces: &[FaceId],
+        ) -> Result<()> {
+            panic!("unexpected edit in cancellation propagation test")
+        }
+        fn glue_edges(
+            &mut self,
+            _k: &mut Kernel,
+            _b: &mut Brep,
+            _keep: EdgeId,
+            _orientation: OrientType,
+            _dist: f64,
+            _nest: bool,
+            _delete: EdgeId,
+            _inside: Option<&[FaceuseId]>,
+        ) -> Result<()> {
+            self.calls += 1;
+            Err(self.error.clone())
+        }
+        fn squeeze_edge(
+            &mut self,
+            _k: &mut Kernel,
+            _b: &mut Brep,
+            _e: Option<EdgeId>,
+            _keep: VertexId,
+        ) -> Result<()> {
+            panic!("unexpected edit in cancellation propagation test")
+        }
+        fn split_edge(
+            &mut self,
+            _k: &mut Kernel,
+            _b: &mut Brep,
+            _e: EdgeId,
+            _t: f64,
+        ) -> Result<(Option<EdgeId>, Option<EdgeId>, Option<VertexId>)> {
+            panic!("unexpected edit in cancellation propagation test")
+        }
+        fn brep_pre_edit(&mut self, _k: &mut Kernel, _b: &mut Brep) -> Result<()> {
+            panic!("unexpected edit in cancellation propagation test")
+        }
+        fn delete_face(
+            &mut self,
+            _k: &mut Kernel,
+            _b: &mut Brep,
+            _f: FaceId,
+            _delete_ev: bool,
+            _nest: bool,
+            _out: Option<&mut Vec<EntityRef>>,
+            _region: Option<RegionId>,
+        ) -> Result<()> {
+            panic!("unexpected edit in cancellation propagation test")
+        }
+        fn face_notify(
+            &mut self,
+            _b: &mut Brep,
+            _f: FaceId,
+            _operation: NotifyOperation,
+            _data1: Option<EntityRef>,
+            _data3: Option<EntityRef>,
+        ) -> Result<()> {
+            panic!("unexpected edit in cancellation propagation test")
+        }
+    }
+
+    #[test]
+    fn cancellation_status_stitch_glue_errors_propagate_even_when_problems_are_ignored() {
+        for error in [
+            SolidError::cancelled("stitch-glue"),
+            SolidError::unported("stitch-glue", "unit"),
+            SolidError::FaceTrimsUnavailable {
+                operation: "stitch-glue",
+                entity: EntityRef::Face(FaceId::from_index(0)),
+            },
+        ] {
+            for ignore_problems in [false, true] {
+                let mut k = Kernel::default();
+                let mut b = crate::primitive::api_primitives::create_box(
+                    &mut k,
+                    Point3::ZERO,
+                    10.0,
+                    20.0,
+                    30.0,
+                )
+                .unwrap();
+                let vertices = b.vertex_list().to_vec();
+                let mut edits = RefusingStitchEdits {
+                    error: error.clone(),
+                    calls: 0,
+                };
+                let mut cb = DefaultStitchCallback::new();
+                let mut stitch = Stitch::new(&mut cb, 100.0, false, false);
+                stitch.ignore_problems = ignore_problems;
+                stitch.edits = Some(&mut edits);
+                let result = stitch.stitch_vertex_pairs(
+                    &mut k,
+                    &mut b,
+                    &mut [Some(vertices[0])],
+                    &mut [Some(vertices[1])],
+                );
+                assert_eq!(result.unwrap_err(), error);
+                assert_eq!(edits.calls, 1, "the vertex glue must actually be reached");
+
+                let mut b = Brep::new_with_infinite_region().unwrap();
+                let shell = b
+                    .add_shell_record(crate::topology::Shell {
+                        region: b.infinite_region(),
+                        ..Default::default()
+                    })
+                    .unwrap();
+                let edges = edges_between(&mut b, EdgeuseOwner::Shell(Some(shell)), 2);
+                for &edge in &edges {
+                    b.edge_mut(edge).unwrap().curve = Some(Curve::from(
+                        crate::curve::line::Line::from_points(Point3::ZERO, Point3::X, 3),
+                    ));
+                }
+                let vertex = b.edge(edges[0]).unwrap().vertices[0];
+                let mut edits = RefusingStitchEdits {
+                    error: error.clone(),
+                    calls: 0,
+                };
+                let mut cb = DefaultStitchCallback::new();
+                let mut stitch = Stitch::new(&mut cb, 0.01, false, false);
+                stitch.ignore_problems = ignore_problems;
+                stitch.edits = Some(&mut edits);
+                let result = stitch.stitch_edges_of_vertices(&mut k, &mut b, &[Some(vertex)]);
+                assert_eq!(result.unwrap_err(), error);
+                assert_eq!(edits.calls, 1, "the edge glue must actually be reached");
+            }
+        }
+    }
 
     /// The kernel's reused arena record map is bound to one B-rep value: a later edit of
     /// the same value starts on a fresh seeding of it whatever the edit before changed,

@@ -239,6 +239,7 @@
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use super::p1::ignored_surface_result;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::p8::CurveIntersectOptions;
@@ -2222,10 +2223,15 @@ impl Surface {
             // SmCone::Evaluate: its only failure is the inherited NURB evaluation, which
             // leaves what that evaluation wrote (no STEP position correction follows)
             SurfaceKind::Cone(c) => {
-                match self.evaluate(k, uv, highest_u_deriv, highest_v_deriv, flags) {
-                    Ok(d) => Ok(Some(d)),
-                    Err(e) if e.is_unported() => Err(e),
-                    Err(_) => c.rev().base().evaluate_ignoring_status(
+                match ignored_surface_result(self.evaluate(
+                    k,
+                    uv,
+                    highest_u_deriv,
+                    highest_v_deriv,
+                    flags,
+                ))? {
+                    Some(d) => Ok(Some(d)),
+                    None => c.rev().base().evaluate_ignoring_status(
                         uv,
                         highest_u_deriv,
                         highest_v_deriv,
@@ -2354,11 +2360,8 @@ impl Surface {
     pub fn degree_with_nurb(&self, k: &Kernel, param: SurfParamType) -> Result<usize> {
         match self.kind() {
             SurfaceKind::SurfOfExtrusion(s) if s.base().gw_nurb().is_none() => {
-                match s.base_with_nurb(k) {
-                    Ok(base) => Ok(base.degree(param)),
-                    Err(e) if e.is_unported() => Err(e),
-                    Err(_) => Ok(0), // FS
-                }
+                Ok(ignored_surface_result(s.base_with_nurb(k))?
+                    .map_or(0, |base| base.degree(param)))
             }
             _ => {
                 if self.revolution_nurb_missing() {
@@ -2648,10 +2651,9 @@ impl Surface {
         match self.kind() {
             SurfaceKind::Step(s) => s.knots_with_nurb(k, param, ivl),
             SurfaceKind::SurfOfExtrusion(s) if s.base().gw_nurb().is_none() => {
-                match s.base_with_nurb(k) {
-                    Ok(b) => b.knots(param, ivl),
-                    Err(e) if e.is_unported() => Err(e),
-                    Err(_) => self.knots(param, ivl),
+                match ignored_surface_result(s.base_with_nurb(k))? {
+                    Some(b) => b.knots(param, ivl),
+                    None => self.knots(param, ivl),
                 }
             }
             _ => self.knots(param, ivl),
@@ -5441,10 +5443,7 @@ impl<'s> SurfaceEval<'s> {
         let (status, derivs) = eval_second_derivatives_with_output(k, surface, self.uv, flags);
         // Upstream Evaluate writes this array even when zero-tangent correction
         // ultimately fails. Its accessors still read the partially written values.
-        if let Err(error) = status {
-            if error.is_unported() {
-                return Err(error);
-            }
+        if ignored_surface_result(status)?.is_none() {
             for (i, row) in self.pvv.iter_mut().enumerate() {
                 for (j, slot) in row.iter_mut().enumerate() {
                     if i + j <= 2 {
@@ -6974,7 +6973,7 @@ pub fn drop_vectors(du: Vec3, dv: Vec3, vectors: &[Vec3]) -> Result<Vec<Vec2>> {
                 *slot = uv;
                 ok = true;
             }
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => {
                 ok = false;
                 break;
@@ -7576,7 +7575,10 @@ impl<O: SolutionObject> LsiGlobalSolver<'_, '_, O> {
             // WR-663, tangency-labs/smlib 21dcf69)
             let hit = match surf_box.intersect_line(point_on_line, self.line_vector) {
                 Ok(h) => h,
-                Err(e) if self.kernel.fixes.query_statuses_pass_on && !e.is_unported() => {
+                Err(e)
+                    if self.kernel.fixes.query_statuses_pass_on
+                        && !e.is_unported_or_cancelled() =>
+                {
                     return Ok(true);
                 }
                 Err(e) => return Err(e),
