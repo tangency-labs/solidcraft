@@ -56,7 +56,10 @@ pub use host::{
     CaptureLease, CaptureProfile, CpuHost, HostKind, ImageHost, JobEnvironmentInfo, JobHandle, JobStatus, LinearAlphaConvention,
     LinearColourEncoding, LinearMasterInfo, PreparedSubmission, PreviewInfo, RenderFrame, RenderPreview, RetainedMetadata,
 };
-pub use image::{Admission, ImageTask, TaskPoll, admit, admit_geometry, admit_geometry_with_limits};
+pub use image::{
+    Admission, BodyRole, ImageTask, MAX_TILES, OrthoFrame, PicturePoll, PictureRequest, PictureTask, PixelWindow, Projection, Supersample, TaskPoll,
+    admit, admit_geometry, admit_geometry_with_limits, admit_picture,
+};
 pub use lens::ThinLens;
 pub use lighting::{AreaLight, AreaLights, DirectionalLights, MAX_AREA_LIGHTS, MAX_DIRECTIONAL_LIGHTS, StudioLighting, Sun, ToneMap};
 pub use png::PngTask;
