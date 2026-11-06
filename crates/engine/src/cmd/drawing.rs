@@ -15,32 +15,33 @@ use solidcraft_doc::drawing::balloon::balloons_by_row;
 use solidcraft_doc::drawing::fields::{Component, Values};
 use solidcraft_doc::drawing::table::Kind;
 use solidcraft_doc::drawing::view::{MAX_VIEW_DEPTH, View, ViewKind};
-use solidcraft_doc::drawing::{self, Drawing, Source, Units, Updates, template};
+use solidcraft_doc::drawing::{self, Drawing, Source, template};
 use solidcraft_doc::drawing_view::ViewDirection;
 use solidcraft_doc::{Document, ids};
-use solidcraft_geom::cell::{Content, Projection};
+use solidcraft_geom::cell::Content;
 use solidcraft_geom::drawing_view::ProjectedSide;
 use solidcraft_geom::paper::line::LineGroup;
-use solidcraft_geom::revision::Numbering;
 use solidcraft_geom::title_block::CellKind;
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
 use crate::schema::drawing::{
-    SheetTemplateChange, TemplateApplyParams, TemplateApplyResult, TemplateEntry, TemplateListParams, TemplateListResult, TemplateSaveParams,
-    TemplateSaveResult,
+    DrawingCreateParams, DrawingSetParams, SheetTemplateChange, TemplateApplyParams, TemplateApplyResult, TemplateEntry, TemplateListParams,
+    TemplateListResult, TemplateSaveParams, TemplateSaveResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 /// The longest template file path taken, in bytes, as the sheet export's.
 const MAX_PATH_BYTES: usize = 4096;
+const CREATE_CONTRACT: TypedContract<DrawingCreateParams> = TypedContract::new();
+const SET_CONTRACT: TypedContract<DrawingSetParams> = TypedContract::new();
 const TEMPLATE_APPLY_CONTRACT: TypedContract<TemplateApplyParams> = TypedContract::new();
 const TEMPLATE_LIST_CONTRACT: TypedContract<TemplateListParams> = TypedContract::new();
 const TEMPLATE_SAVE_CONTRACT: TypedContract<TemplateSaveParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("drawing.create", "Create Drawing", create).any_part().icon("new").doc_only().params(
+    CommandSpec::new("drawing.create", "Create Drawing", crate::checked!("drawing.create", create)).any_part().icon("new").doc_only().contract(&CREATE_CONTRACT).params(
         "name?: the drawing's name (default: the design's); template?: a built-in's name (drawing.template.list; default iso-a3-part for a part, iso-a2-assembly for an assembly, a design that places components) or a .json template file (drawing.template.save); language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins); font?: the font family its text is set in, by name (default: the template's, the built-in font for the built-ins); line_group?: the ISO 128 line group its lines are drawn in, by its wide line, one of 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2 (default: the template's, 0.5 for the built-ins). Adds a drawing of this design made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
     ),
     CommandSpec::new("drawing.template.apply", "Apply Drawing Template", crate::checked!("drawing.template.apply", template_apply))
@@ -96,10 +97,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.inspect", "Inspect Drawing", inspect).in_drawing().icon("inspect").noundo().doc_only().params(
         "→ {id, name, units, projection, updates: automatic or deferred, language, font, line_group, font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?}] (each text cell as the sheet shows it: its fields' values, \"-\" for one with none, or the text typed over it with the value it hides as `value`), title_block_overrides, dpi, line_group (its own, or null for the drawing's), documents, excluded, views: [{id, kind: base|projected, parent?, side?, label, dimensions: [ids], balloons: [ids]}], base views by id, each followed by those projected from it}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
     ),
-    CommandSpec::new("drawing.set", "Drawing Settings", set)
+    CommandSpec::new("drawing.set", "Drawing Settings", crate::checked!("drawing.set", set))
         .in_drawing()
         .icon("settings")
         .doc_only()
+        .contract(&SET_CONTRACT)
         .params("name?, language?: a BCP 47 tag, units?: \"follow_model\" or one length unit such as \"mm\", projection?: first or third (angle), which every projected view follows, updates?: automatic, or deferred: its views follow a changed model only on drawing.update, font?: the font family its text is set in, by name, never a file (\"\": the built-in font). line_group?: the ISO 128 line group its lines are drawn in, by its wide line: 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2; a sheet or a view may choose another. revision_numbering?: {start: 0 or 1}, the number new revisions count from: rows already there stay as typed. One undo step."),
     CommandSpec::new("drawing.properties", "Drawing Properties", properties).in_drawing().icon("settings").noundo().doc_only().params(
         "→ metadata: the drawing's properties as saved (other tools' keys too); properties: project, part_number, revision, author, organization, description and license, each its text or null. The design properties' rules (document.metadata).",
@@ -114,53 +116,23 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("key, or keys: [keys] → metadata, removed: [keys that were there]"),
 ];
 
-/// `units` as given: `follow_model`, or a length unit the drawing's rules check.
-fn units(cmd: &str, p: &Value) -> Result<Option<Units>> {
-    match p.get("units") {
-        None => Ok(None),
-        Some(Value::String(u)) if u == "follow_model" => Ok(Some(Units::FollowModel)),
-        Some(Value::String(u)) => Ok(Some(Units::Fixed { unit: u.clone() })),
-        Some(_) => Err(bad(cmd, "`units` is \"follow_model\" or a length unit such as \"mm\"")),
-    }
-}
-
-/// `projection` as given: first or third angle.
-fn projection(cmd: &str, p: &Value) -> Result<Option<Projection>> {
-    match p.get("projection") {
-        None => Ok(None),
-        Some(v) => serde_json::from_value(v.clone()).map(Some).map_err(|_| bad(cmd, "`projection` is first or third (angle)")),
-    }
-}
-
-/// `updates` as given: when the views follow a changed model.
-fn updates(cmd: &str, p: &Value) -> Result<Option<Updates>> {
-    match p.get("updates") {
-        None => Ok(None),
-        Some(v) => serde_json::from_value(v.clone()).map(Some).map_err(|_| bad(cmd, "`updates` is automatic or deferred")),
-    }
-}
-
 /// A `line_group` as given, for a drawing, a sheet or a view: one of ISO 128's groups, by its wide line.
+pub(crate) fn line_group_of(v: &Value) -> std::result::Result<LineGroup, String> {
+    serde_json::from_value(v.clone()).map_err(|_| format!("`line_group` is one of {}", LineGroup::NAMES.join(", ")))
+}
+
+/// [`line_group_of`], refused as `cmd`.
 pub(super) fn line_group(cmd: &str, v: &Value) -> Result<LineGroup> {
-    serde_json::from_value(v.clone()).map_err(|_| bad(cmd, format!("`line_group` is one of {}", LineGroup::NAMES.join(", "))))
+    line_group_of(v).map_err(|e| bad(cmd, e))
 }
 
 /// `font` as given: a font family's name, never a file (drawings name fonts by family, so they
 /// travel).
-fn font<'a>(cmd: &str, p: &'a Value) -> Result<Option<&'a str>> {
-    let font = text(cmd, p, "font")?;
+fn font<'a>(cmd: &str, font: Option<&'a str>) -> Result<Option<&'a str>> {
     if let Some(family) = font {
         solidcraft_sketch::check_family(family).map_err(|e| bad(cmd, e.to_string()))?;
     }
     Ok(font.map(str::trim))
-}
-
-/// How `p` asks new revisions to be named. A start the record's rules refuse is refused with them.
-fn revision_numbering(cmd: &str, p: &Value) -> Result<Option<Numbering>> {
-    match p.get("revision_numbering") {
-        None => Ok(None),
-        Some(v) => serde_json::from_value(v.clone()).map(Some).map_err(|_| bad(cmd, "`revision_numbering` is {start: 0 or 1}")),
-    }
 }
 
 /// An optional text parameter: absent, or a string.
@@ -183,29 +155,30 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "the design is empty: there is nothing to draw yet"));
     }
     drawing::check_count(s.doc.drawings.len() + 1).map_err(|e| bad(cmd, e.to_string()))?;
-    let name = text(cmd, p, "name")?.map_or_else(|| s.doc.name.clone(), str::to_string);
+    let request: DrawingCreateParams = crate::schema::read(cmd, p)?;
+    let name = request.name.unwrap_or_else(|| s.doc.name.clone());
     let fail = |e: solidcraft_doc::DocError| bad(cmd, e.to_string());
-    let from = text(cmd, p, "template")?.unwrap_or_else(|| template::default_for(template::is_assembly(&s.doc)));
+    let from = request.template.as_deref().unwrap_or_else(|| template::default_for(template::is_assembly(&s.doc)));
     let chosen = template_named(cmd, from)?;
     // Not the id of a drawing undo or redo could bring back either.
     let steps = s.undo.iter().chain(&s.redo).filter_map(|step| step.part);
     let taken: BTreeSet<u64> = s.doc.drawings.iter().map(|d| d.id).chain(steps).collect();
     let mut d = template::instantiate(&chosen, &name, &taken, &mut s.ids).map_err(fail)?;
-    if let Some(language) = text(cmd, p, "language")? {
-        d.language = language.to_string();
+    if let Some(language) = request.language {
+        d.language = language;
     }
-    if let Some(projection) = projection(cmd, p)? {
+    if let Some(projection) = request.projection {
         d.projection = projection;
     }
-    if let Some(group) = p.get("line_group") {
-        d.line_group = line_group(cmd, group)?;
+    if let Some(group) = request.line_group {
+        d.line_group = group;
     }
     let source = d.allocate_id(&mut s.ids).map_err(fail)?;
     d.sources.push(Source { id: source });
-    if let Some(units) = units(cmd, p)? {
+    if let Some(units) = request.units {
         d.units = units;
     }
-    if let Some(font) = font(cmd, p)? {
+    if let Some(font) = font(cmd, request.font.as_deref())? {
         d.font = font.to_string();
     }
     d.validate().map_err(fail)?;
@@ -500,29 +473,30 @@ fn format_mass(grams: f64) -> String {
 
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.set";
+    let request: DrawingSetParams = crate::schema::read(cmd, p)?;
     s.edit_drawing(cmd, |d| {
-        if let Some(name) = text(cmd, p, "name")? {
-            d.name = name.to_string();
+        if let Some(name) = request.name {
+            d.name = name;
         }
-        if let Some(language) = text(cmd, p, "language")? {
-            d.language = language.to_string();
+        if let Some(language) = request.language {
+            d.language = language;
         }
-        if let Some(units) = units(cmd, p)? {
+        if let Some(units) = request.units {
             d.units = units;
         }
-        if let Some(projection) = projection(cmd, p)? {
+        if let Some(projection) = request.projection {
             d.projection = projection;
         }
-        if let Some(updates) = updates(cmd, p)? {
+        if let Some(updates) = request.updates {
             d.updates = updates;
         }
-        if let Some(group) = p.get("line_group") {
-            d.line_group = line_group(cmd, group)?;
+        if let Some(group) = request.line_group {
+            d.line_group = group;
         }
-        if let Some(font) = font(cmd, p)? {
+        if let Some(font) = font(cmd, request.font.as_deref())? {
             d.font = font.to_string();
         }
-        if let Some(numbering) = revision_numbering(cmd, p)? {
+        if let Some(numbering) = request.revision_numbering {
             Arc::make_mut(&mut d.revisions).numbering = numbering;
         }
         Ok(())
