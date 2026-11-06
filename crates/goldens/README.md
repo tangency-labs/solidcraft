@@ -62,8 +62,8 @@ blessed), `1` any failure, `2` usage or setup error.
 
 ## Checking and blessing
 
-* **Agreement.** Integers, topology, the operation's error status and deferrals agree
-  exactly. Each float agrees when `a == b`, both are NaN, or
+* **Agreement.** Integers, topology, the operation's error status, deferrals and
+  rejection reasons agree exactly. Each float agrees when `a == b`, both are NaN, or
   `|a-b| <= 1e-9 * max(|a|,|b|)`, plus an absolute floor only where the runner documents
   one for that key in `abs_floors()`. Never loosen either to make a case pass.
 * **File format** (`src/golden.rs`): line 1 `{"unit": <id>, "format": 1}`, then one
@@ -91,6 +91,10 @@ blessed), `1` any failure, `2` usage or setup error.
 * **Deferred cases.** A Rust side that reaches code that is not ported returns
   `SolidError::Unported`; the runner maps it to `Output::deferred(unit, symbol)`, and
   the golden records the deferral like any other output.
+* **Rejections are recorded.** A case whose fixture construction was refused before the
+  operation ran stores its exact `Output::rejected` reason and compares it exactly, so a
+  rejection is never an empty success and an empty reason is still a rejection. A
+  non-rejected case omits the key, so its line is unchanged.
 
 ## Adding a runner for unit `foo.bar`
 

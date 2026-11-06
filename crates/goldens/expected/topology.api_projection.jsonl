@@ -44,6 +44,6 @@
 {"case":"silhouette_box10_long_normal","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56484.0,56484.0,2065004.0]],"n":93},"status":[0.0]}}
 {"case":"silhouette_box10_zero_normal","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0],"status":[1007.0]}}
 {"case":"silhouette_fillet_box_oblique","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[169298.6282744874,169298.6282744874,21754555.220659163],[66.50000000000001,66.50000000000001,702.2322330470337]],"n":277},"status":[0.0]}}
-{"case":"silhouette_null_body","deferred":null,"error":null,"ints":{},"topology":null,"values":{}}
+{"case":"silhouette_null_body","deferred":null,"error":null,"ints":{},"rejected":"null B-rep dereferenced upstream (SmApiCreateSilhouetteCurves)","topology":null,"values":{}}
 {"case":"silhouette_null_zero_normal","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0],"status":[1007.0]}}
 {"case":"silhouette_torus","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[70534.12900516426,70841.72998725541,3389108.006813345]],"n":116},"status":[0.0]}}

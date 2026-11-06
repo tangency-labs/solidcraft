@@ -1,10 +1,10 @@
-//! Structured result of running one case on one side (C++ or Rust).
+//! Structured result of running one kernel case.
 
 use std::collections::BTreeMap;
 
 use solidcore::SolidError;
 
-/// What one side produced for a case. Both sides must fill the *same* keys.
+/// What the runner produced for a case.
 ///
 /// * `values`: floating-point arrays, compared with the 1e-9 relative rule.
 /// * `ints`: integer arrays (indices, counts, flags), compared exactly.
@@ -20,10 +20,11 @@ use solidcore::SolidError;
 ///   [`Output::unported`]) when the port reached code that is not ported yet
 ///   ([`SolidError::Unported`]). The case is then *deferred*: neither pass nor
 ///   fail, and nothing is compared (docs/porting.md §4a).
-/// * `rejected`: set by the C++ side only when fixture construction failed before
-///   the operation ran, or an FFI guard or crash trap refused an input that is
-///   undefined in C++ (AGENTS.md section 4, step 5.6). No Rust call or parity
-///   comparison is made. (A `deferred` from the C++ side is a harness error.)
+/// * `rejected`: the runner refused fixture construction or an input precondition
+///   before the operation under test ran. The golden stores the exact reason and
+///   compares it exactly: a rejection is never an empty success, and an empty
+///   reason is still a rejection. Some legacy reason strings describe upstream
+///   guards; they do not mean the C++ was run.
 /// * `diagnostics`: named counts the Rust side reports for the record (e.g. arena
 ///   records no walk reaches); written to the report, never compared.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -38,7 +39,8 @@ pub struct Output {
     pub error: Option<String>,
     /// The Rust side hit an unported callee; the case is deferred.
     pub deferred: Option<Deferred>,
-    /// The native fixture constructor rejected the input before the operation ran.
+    /// The exact reason fixture construction was refused before the operation ran;
+    /// recorded in the golden and compared exactly. `None` means no rejection was reported.
     pub rejected: Option<String>,
     /// Rust-side diagnostics for the report (never compared); boxed, as most outputs
     /// have none.
@@ -85,8 +87,8 @@ impl Output {
         Self::default()
     }
 
-    /// Native fixture construction failed before the operation under test ran.
-    /// This is neither a parity pass nor a failure; only the C++ side may set it.
+    /// Fixture construction or an input precondition was refused before the operation ran.
+    /// The reason is recorded in the golden, separately from an operation error.
     pub fn rejected(reason: impl Into<String>) -> Self {
         Self {
             rejected: Some(reason.into()),

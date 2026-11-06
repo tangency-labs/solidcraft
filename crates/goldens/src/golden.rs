@@ -8,21 +8,23 @@
 //!
 //! File format, one JSON object per line, sorted by case name:
 //! * line 1: `{"unit": <id>, "format": 1}`;
-//! * then one line per case: `{"case", "error", "deferred", "values", "ints", "topology"}`.
+//! * then one line per case: `{"case", "error", "deferred", "rejected", "values", "ints",
+//!   "topology"}`. A non-rejected case omits `"rejected"`; a rejection stores its exact
+//!   reason, including an empty string, and is compared exactly.
 //!
 //! A float array of at most [`FULL`] entries is stored in full. A longer one is stored as
 //! `{"n": N, "blocks": [[sum, abs_sum, weighted_sum], ...]}`, one triple per [`BLOCK`] entries
 //! (the last block may be shorter), with `weighted_sum = Σ (j + 1) x_j` over the block, so a
 //! change in any block, or entries swapped within one, shows. Integer arrays follow the same
 //! rule with exact sums. Non-finite floats are written as the strings `"NaN"`, `"inf"`,
-//! `"-inf"`. Topology and the error status are stored in full.
+//! `"-inf"`. Topology, the error status and a rejection's reason are stored in full.
 //!
 //! Comparison, per float: [`values_agree`] (the 1e-9 relative rule of
 //! `docs/definitions-and-certificates.md`, with the unit's documented absolute floors). Per
 //! block: each of the three sums agrees within `REL_TOL` of the block's absolute sum (times
 //! `BLOCK` for the weighted sum), plus the floor times the block length. Integers, topology,
-//! errors and deferrals agree exactly. A case in the golden that the run does not produce, or
-//! a case the run produces that the golden lacks, fails.
+//! errors, deferrals and rejection reasons agree exactly. A case in the golden that the run
+//! does not produce, or a case the run produces that the golden lacks, fails.
 //!
 //! Known failures: a case whose result is wrong today is listed in `known_failing.json` in the
 //! goldens directory, `{"<unit>": {"<case>": "<issue>: <what is wrong>"}}`, instead of being
@@ -123,14 +125,18 @@ pub fn encode(case: &str, out: &Output) -> Value {
         .deferred
         .as_ref()
         .map(|d| json!({"unit": d.unit, "symbol": d.symbol}));
-    json!({
-        "case": case,
-        "error": out.error,
-        "deferred": deferred,
-        "values": values,
-        "ints": int_map,
-        "topology": topology,
-    })
+    let mut line = Map::from_iter([
+        ("case".into(), json!(case)),
+        ("error".into(), json!(out.error)),
+        ("deferred".into(), json!(deferred)),
+        ("values".into(), Value::Object(values)),
+        ("ints".into(), Value::Object(int_map)),
+        ("topology".into(), json!(topology)),
+    ]);
+    if let Some(reason) = &out.rejected {
+        line.insert("rejected".into(), Value::String(reason.clone()));
+    }
+    Value::Object(line)
 }
 
 /// A golden file: its cases by name.
@@ -318,7 +324,7 @@ pub fn diff(golden: &Value, now: &Value, floors: &[AbsFloor]) -> Option<Change> 
         floors,
         change: Change::default(),
     };
-    for field in ["error", "deferred", "topology", "ints"] {
+    for field in ["error", "deferred", "rejected", "topology", "ints"] {
         d.exact(field, &golden[field], &now[field]);
     }
     d.floats(&golden["values"], &now["values"]);
@@ -608,6 +614,175 @@ mod tests {
         g.remove("c");
         let stale = check_unit(&Named(vec!["a"]), &ctx, &opts, &g, &known, false);
         assert!(stale.harness_error.is_some(), "listed but no such case");
+    }
+
+    /// Rejects success/rejection transitions even when every other output field is empty.
+    #[test]
+    fn rejection_and_empty_success_differ_in_both_directions() {
+        let empty = encode("c", &Output::new());
+        let rejected = encode("c", &Output::rejected("invalid fixture"));
+        assert!(
+            diff(&empty, &rejected, &[]).is_some(),
+            "a rejection must not pass as an empty success"
+        );
+        assert!(
+            diff(&rejected, &empty, &[]).is_some(),
+            "an empty success must not pass as a rejection"
+        );
+    }
+
+    /// Compares rejection text exactly and identifies it as the changed field.
+    #[test]
+    fn a_changed_rejection_reason_fails_and_an_unchanged_one_passes() {
+        let g = encode("c", &Output::rejected("invalid fixture"));
+        assert!(diff(&g, &encode("c", &Output::rejected("invalid fixture")), &[]).is_none());
+        let c = diff(
+            &g,
+            &encode("c", &Output::rejected("invalid fixture: missing face")),
+            &[],
+        )
+        .expect("a changed rejection reason is a change");
+        assert_eq!(c.count, 1);
+        assert!(c.details[0].starts_with("rejected: "), "{:?}", c.details);
+        assert!(c.details[0].contains("invalid fixture: missing face"));
+    }
+
+    /// Distinguishes an empty reason from no rejection, with missing/null as None.
+    #[test]
+    fn an_empty_rejection_reason_is_recorded_and_differs_from_none() {
+        let empty_reason = encode("c", &Output::rejected(""));
+        assert_eq!(empty_reason.get("rejected"), Some(&json!("")));
+        let success = encode("c", &Output::new());
+        assert!(
+            success.get("rejected").is_none(),
+            "a non-rejected line omits the key: {success}"
+        );
+        assert!(diff(&success, &empty_reason, &[]).is_some());
+        assert!(diff(&empty_reason, &success, &[]).is_some());
+
+        let mut null_line = success.clone();
+        if let Value::Object(map) = &mut null_line {
+            map.insert("rejected".into(), Value::Null);
+        }
+        assert!(
+            diff(&null_line, &success, &[]).is_none(),
+            "a missing and an explicit null rejection both mean None"
+        );
+        assert!(
+            diff(&null_line, &empty_reason, &[]).is_some(),
+            "null is not Some(\"\")"
+        );
+    }
+
+    /// Keeps the format-1 serialized bytes of non-rejected results unchanged.
+    #[test]
+    fn a_non_rejected_line_keeps_its_encoded_bytes() {
+        assert_eq!(
+            encode("c", &out(&[1.0])).to_string(),
+            r#"{"case":"c","deferred":null,"error":null,"ints":{"n":[1]},"topology":{"adjacency":{},"entities":{"faces":[0,1]}},"values":{"v":[1.0]}}"#
+        );
+    }
+
+    /// Ensures rejection handling does not mask status, topology, integer or value changes.
+    #[test]
+    fn rejection_comparison_leaves_other_fields_exact() {
+        let base = Output {
+            rejected: Some("invalid fixture".into()),
+            ..out(&[1.0])
+        };
+        let g = encode("c", &base);
+        assert!(diff(&g, &g.clone(), &[]).is_none());
+        let mut error = base.clone();
+        error.error = Some("nl_error".into());
+        assert!(diff(&g, &encode("c", &error), &[]).is_some());
+        let mut deferred = base.clone();
+        deferred.deferred = Some(crate::output::Deferred {
+            unit: "u".into(),
+            symbol: "s".into(),
+        });
+        assert!(diff(&g, &encode("c", &deferred), &[]).is_some());
+        let mut topology = base.clone();
+        topology.topology = Some(Topology::new().count("faces", 3));
+        assert!(diff(&g, &encode("c", &topology), &[]).is_some());
+        let mut ints = base.clone();
+        ints.ints.insert("extra".into(), vec![0]);
+        assert!(diff(&g, &encode("c", &ints), &[]).is_some());
+        let mut values = base;
+        values.values.insert("v".into(), vec![1.0 + 1e-6]);
+        assert!(diff(&g, &encode("c", &values), &[]).is_some());
+    }
+
+    /// A unit with named cases and an optional rejection reason for each case.
+    struct Outcomes(Vec<(&'static str, Option<&'static str>)>);
+
+    impl UnitDiff for Outcomes {
+        /// Names this isolated outcome-comparison test unit.
+        fn id(&self) -> &'static str {
+            "golden.rejected"
+        }
+        /// Retains every configured case name without consulting its output.
+        fn cases(&self, _ctx: &CaseContext) -> Result<Vec<crate::Case>, HarnessError> {
+            Ok(self
+                .0
+                .iter()
+                .map(|(n, _)| crate::Case {
+                    unit: self.id().into(),
+                    name: (*n).into(),
+                    source: crate::case::CaseSource::Inline,
+                    inputs: json!({}),
+                })
+                .collect())
+        }
+        /// Produces the configured rejection or an otherwise empty successful result.
+        fn run_rust(&self, case: &crate::Case) -> Result<Output, HarnessError> {
+            let reason = self
+                .0
+                .iter()
+                .find(|(n, _)| *n == case.name.as_str())
+                .and_then(|(_, r)| *r);
+            Ok(match reason {
+                Some(r) => Output::rejected(r),
+                None => Output::new(),
+            })
+        }
+    }
+
+    /// Reports a changed rejection through check_unit without changing the case inventory.
+    #[test]
+    fn check_unit_reports_a_rejection_change_even_when_the_output_is_empty() {
+        let ctx = CaseContext {
+            root: std::env::temp_dir(),
+            seeds: 0,
+        };
+        let opts = RunOptions::default();
+        let none = KnownFailing::new();
+        let unit = Outcomes(vec![("a", None), ("b", Some("invalid fixture"))]);
+        let mut g = Golden::new();
+        g.insert("a".into(), encode("a", &Output::new()));
+        g.insert("b".into(), encode("b", &Output::rejected("other reason")));
+
+        let res = check_unit(&unit, &ctx, &opts, &g, &none, false);
+        assert!(!res.passed(), "{res:?}");
+        assert_eq!(res.cases(), 2);
+        let changed: Vec<&str> = res.changed.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(changed, ["b"]);
+        assert!(res.added.is_empty() && res.removed.is_empty() && res.broken.is_empty());
+        assert!(res.now.contains_key("a") && res.now.contains_key("b"));
+        assert_eq!(res.changed[0].1.count, 1);
+        assert!(
+            res.changed[0].1.details[0].starts_with("rejected: "),
+            "{:?}",
+            res.changed[0].1.details
+        );
+
+        g.insert(
+            "b".into(),
+            encode("b", &Output::rejected("invalid fixture")),
+        );
+        let same = check_unit(&unit, &ctx, &opts, &g, &none, false);
+        assert!(same.passed(), "{same:?}");
+        assert_eq!(same.cases(), 2);
+        assert!(same.changed.is_empty() && same.added.is_empty() && same.removed.is_empty());
     }
 
     #[test]
