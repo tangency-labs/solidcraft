@@ -100,9 +100,11 @@ fn body_features_list_what_built_each_body() {
     let run = |s: &mut Session, id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
     let id = |r: Value| r["feature"].as_u64().unwrap_or_else(|| panic!("{r}"));
     let a = id(run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "A"})));
-    let b = id(run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [50, 0, 0], "operation": "new", "body_name": "B"})));
+    let b =
+        id(run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [50, 0, 0], "operation": "new", "body_name": "B"})));
     let fillet = id(run(&mut s, "solid.fillet", json!({"body": "A", "edges": [[10, 0, 10]], "radius": 1})));
-    let tool = id(run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 20, "corner": [5, 5, -5], "operation": "new", "body_name": "T"})));
+    let tool =
+        id(run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 20, "corner": [5, 5, -5], "operation": "new", "body_name": "T"})));
     let combine = id(run(&mut s, "solid.combine", json!({"target": "A", "tools": ["T"], "operation": "cut"})));
 
     let listed = |r: &Value, body: &str| -> Vec<u64> {

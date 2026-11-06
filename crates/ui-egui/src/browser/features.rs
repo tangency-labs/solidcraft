@@ -209,7 +209,16 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
 /// The features that built a body, one level in under its row (#11945): the feature rows the
 /// Features folder draws, without dragging, each lit as there when the view lights it.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn body_rows(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, component: u64, path: &[u64], body_row: &str, features: &[u64], depth: usize) {
+pub(super) fn body_rows(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    acts: &mut Actions,
+    component: u64,
+    path: &[u64],
+    body_row: &str,
+    features: &[u64],
+    depth: usize,
+) {
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(path) };
     let here = Here { component, path, scope: &scope };
     let from_view = [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)];
@@ -1287,8 +1296,11 @@ mod tests {
     fn body_rows_fold_open_on_the_features_that_built_them() {
         let mut h = Harness::new();
         h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"name":"Base","body_name":"Plate"})).unwrap();
-        h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"corner":[50,0,0],"operation":"new","name":"Block","body_name":"Other"})).unwrap();
-        let round = h.app.run("solid.fillet", json!({"body":"Plate","edges":[[10,0,10]],"radius":1,"name":"Round"})).unwrap()["feature"].as_u64().unwrap();
+        h.app
+            .run("solid.box", json!({"length":5,"width":5,"height":5,"corner":[50,0,0],"operation":"new","name":"Block","body_name":"Other"}))
+            .unwrap();
+        let round =
+            h.app.run("solid.fillet", json!({"body":"Plate","edges":[[10,0,10]],"radius":1,"name":"Round"})).unwrap()["feature"].as_u64().unwrap();
         h.frames(3);
         assert_eq!(fold_of("Plate"), None, "off by default: no fold arrow on a body");
         assert_eq!(count("Round"), 0);

@@ -28,7 +28,8 @@ impl Session {
             let after = &r.state.bodies;
             let names: HashSet<&str> = after.iter().map(|b| b.name.as_str()).collect();
             // What the feature consumed: bodies there before and gone after.
-            let consumed: Vec<u64> = before.iter().filter(|(name, _)| !names.contains(name.as_str())).flat_map(|(_, (_, _, list))| list.iter().copied()).collect();
+            let consumed: Vec<u64> =
+                before.iter().filter(|(name, _)| !names.contains(name.as_str())).flat_map(|(_, (_, _, list))| list.iter().copied()).collect();
             let mut next: HashMap<String, (solidcraft_doc::kernel::Body, u64, Vec<u64>)> = HashMap::with_capacity(after.len());
             for b in after {
                 let list = match before.get(&b.name) {
@@ -40,7 +41,8 @@ impl Session {
                     _ if b.feature == id => touched(Vec::new(), &consumed, id, &order),
                     // A piece of a body made earlier (a split): what built the bodies of its creator.
                     _ => {
-                        let inherited = before.values().filter(|(_, creator, _)| *creator == b.feature).flat_map(|(_, _, list)| list.iter().copied()).collect();
+                        let inherited =
+                            before.values().filter(|(_, creator, _)| *creator == b.feature).flat_map(|(_, _, list)| list.iter().copied()).collect();
                         touched(inherited, &consumed, id, &order)
                     }
                 };
@@ -49,7 +51,12 @@ impl Session {
             before = next;
         }
         // The model as it stands (a sketch shown live keeps its last results).
-        self.model.state().bodies.iter().map(|b| (b.name.clone(), before.get(&b.name).map(|(_, _, list)| list.clone()).unwrap_or_else(|| vec![b.feature]))).collect()
+        self.model
+            .state()
+            .bodies
+            .iter()
+            .map(|b| (b.name.clone(), before.get(&b.name).map(|(_, _, list)| list.clone()).unwrap_or_else(|| vec![b.feature])))
+            .collect()
     }
 }
 
