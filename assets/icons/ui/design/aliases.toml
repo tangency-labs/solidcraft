@@ -50,6 +50,11 @@ contact_check = { master = "interference", accent = "form" }
 view_save = { master = "camera", accent = "form" }
 # MODEL / SKETCH: New Sketch vs Edit Sketch shared the sketch master (#11482 / #12134).
 sketch_edit = { master = "edit", accent = "sketch" }
+# 3D sketch tools share 2D masters; construction accent marks them as off-plane (#11482).
+line3d = { master = "line", accent = "construction" }
+arc3d = { master = "arc3", accent = "construction" }
+spline3d = { master = "spline", accent = "construction" }
+point3d = { master = "point", accent = "construction" }
 
 # Legacy feature-history id for the same Split Body operation.
 split = "split_body"
