@@ -403,14 +403,12 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// the fork doesn't have stays on, and where solidcore builds what SMLib refuses, a result right
 /// against its closed form is a win.
 ///
-/// `fillet_refuse_rounds_breaking_through` (WR-707, solidcore#2311): sound geometry refused. With it
-/// on, 11 rig cases that pass with it off, each graded against its closed form or invariants, are
-/// refused as breaking through the part (190-fillet-disc-rim-past-its-2mm-wall fails status 1001
-/// instead): every-hole-top-rim-r12-past-plate-bottom, 1080-chamfer-runs-into-openings-cut-by-them
-/// (3350, its closed form), 1080-fillet-notched-block-top-outline-r8,
-/// 324-fillet-over-hole-cut-by-overlong-cylinder, 324-fillet-over-hole-overlap,
-/// 5158-fillet-adjacent-plate-edges-as-thick-as-plate and the sloped and equal-slope basin rims of
-/// #1080 and #5835. A fix under the same flag is in progress on solidcore.
+/// `fillet_refuse_rounds_breaking_through` (WR-707, solidcore#2311): sound geometry refused. At
+/// solidcore 9856ffee5, with it on, the fillet rig's 1668-fillet-both-sides-of-thin-wall-r7 is
+/// refused as breaking through the wall into the hollow behind it ("the largest radius that fits is
+/// 6.828 mm"), where with it off it builds the closed form, 39509.938 (at 8ddce9016 it refused 11
+/// rig cases that pass with it off; at this pin the other 270 fillet rig cases come out as with it
+/// off).
 ///
 /// `fillet_round_ends_on_outline` (WR-730, solidcore#2541): volumes wrong against their closed
 /// forms, and rounds too big for their faces built instead of refused. With it on, each of these
@@ -422,7 +420,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// `a_corner_round_wider_than_its_faces_overflows_and_takes_the_corners_other_edges`,
 /// `overflow_goes_first`, `corners_refuse_what_they_cannot_build` and
 /// `fillet_edge_removed_by_a_larger_overflowing_round_is_noted` are refused (too large, no room,
-/// status 1001), where with it off they build.
+/// status 1001), where with it off they build. Measured again at solidcore 9856ffee5: the same.
 #[cfg(test)]
 const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through", "fillet_round_ends_on_outline"];
 
