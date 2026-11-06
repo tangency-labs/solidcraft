@@ -1069,8 +1069,11 @@ pub fn srf_srf_intersection_with_context(
     // on both, where they cross: the plane goes on as itself past the face it was made for, so
     // its domain does not end the curve. A flat surface meets the plane in a line, which the
     // analytic intersector gives exactly. Points off a surface, and an end where the surface
-    // touches the plane, are met by the intersectors below.
-    if k.fixes.fillet_surface_plane_curve_on_plane_equation && curves_3d.is_empty() {
+    // touches the plane, are met by the intersectors below. A round of touch circles needs it
+    // (#2704): its end section leaves the end face's plane, so its side curve is this one.
+    if (k.fixes.fillet_surface_plane_curve_on_plane_equation || k.fixes.fillet_gn_section_generator)
+        && curves_3d.is_empty()
+    {
         let plane_first = matches!(surf1.kind(), SurfaceKind::Plane(_));
         if let (Some(start_pnt), Some(end_pnt), true) = (
             start,
