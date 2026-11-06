@@ -1798,7 +1798,7 @@ pub fn build_setback_fill<S: SetbackSolvers>(
     let worst = if open {
         None
     } else {
-        let worst = containment(&fill, &planes.planes, convex)?;
+        let worst = containment(k, &fill, &planes.planes, convex, tol)?;
         if worst == f64::INFINITY {
             return Ok(Err(SetbackRefusal::not_built(
                 "Fillet Error: the setback corner's fill is not certified to stay on the material's side of its curved faces",

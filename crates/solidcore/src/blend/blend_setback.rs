@@ -2836,15 +2836,17 @@ fn fill_hole_with(
 /// `SmBlendSetback::Containment`: the most any patch of `fill` stands past a face out of the
 /// corner (positive: past it): out of the material for a convex corner (`convex`), into it
 /// for a concave one. A certified bound: every patch lies in the convex hull of its control
-/// points (weights positive). Beside a curved face (solidcore#2343): 0 where every patch is
-/// certified on the material's side of every face, by the faces' implicit forms, else
-/// `f64::INFINITY` (the fork's `HUGE_VAL`, 37c9e1d).
+/// points (weights positive). Not the fork (solidcore#2904): where that hull stands more than
+/// `tol` past a plane, the bound is tightened on the patch itself ([`plane_bound`], polling
+/// `k`'s cancel token), so a fill on the material's side is not refused for its control net. Beside a curved face
+/// (solidcore#2343): 0 where every patch is certified on the material's side of every face,
+/// by the faces' implicit forms, else `f64::INFINITY` (the fork's `HUGE_VAL`, 37c9e1d).
 ///
 /// # Errors
 /// `SM_ERR_INVALID_INPUT` for an empty fill; `SM_ERR` for a patch with a weight not positive
 /// (beside a curved face also: of more than one span, or of degree below 2 across a face it
 /// lies on).
-pub fn containment(fill: &Fill, faces: &[Face], convex: bool) -> Result<f64> {
+pub fn containment(k: &Kernel, fill: &Fill, faces: &[Face], convex: bool, tol: f64) -> Result<f64> {
     if fill.patches.is_empty() {
         return Err(SolidError::invalid_input(
             OP,
@@ -2861,13 +2863,96 @@ pub fn containment(fill: &Fill, faces: &[Face], convex: bool) -> Result<f64> {
         if canonical.weights.iter().any(|&w| !(w > 0.0)) {
             return Err(sm_err()); // a patch with a weight not positive
         }
-        for &pt in &canonical.control_points {
-            for face in faces {
-                worst = smax(worst, side * (pt - face.point).dot(face.normal));
+        let one_span = canonical.u_knots.len() == 2 && canonical.v_knots.len() == 2;
+        for face in faces {
+            let mut hull = f64::NEG_INFINITY;
+            for &pt in &canonical.control_points {
+                hull = smax(hull, side * (pt - face.point).dot(face.normal));
             }
+            if hull > tol && one_span {
+                hull = plane_bound(k, &canonical, face, side, tol)?;
+            }
+            worst = smax(worst, hull);
         }
     }
     Ok(worst)
+}
+
+/// A certified bound of how far a one-span patch (`canonical`, weights positive) stands past
+/// the plane `face` on `side`, tighter than its control net's: the distance is `f / w`, `f`
+/// the homogeneous form `w ((X - X0) . N) side` and `w` the weight, both in Bernstein form.
+/// Each piece's coefficients bound it there (`f_k / w_k`, the weights positive); a piece
+/// bounded past `tol` is halved each way by de Casteljau, up to [`graph::GRAPH_DEPTH`] times,
+/// so the bound converges on the patch's own distance [48]. Past `tol` at that depth the bound
+/// stands, and the fill is refused by its caller. The pieces are kept on a stack of at most
+/// `3 GRAPH_DEPTH + 1`, each polling the kernel's cancel token.
+///
+/// The bound carries its rounding. With `M` the largest `w_k sum_c |P_kc - X0_c| |N_c|` and
+/// `K = 8 + GRAPH_DEPTH (p + q)`: each coefficient of `f` is computed in 8 operations on
+/// terms of at most `M`, and a halving's de Casteljau takes `n` rounded sums of convex pairs
+/// along a direction of degree `n` (its products by 1/2 exact), so every piece's `f_k` is
+/// within `gamma_K M` of its exact value and its `w_k`, convex combinations of the positive
+/// weights, within a relative `gamma_K`, at least `w_min (1 - gamma_K)`. The ratio, its
+/// division and the final sum then move at most `3 gamma_(K + 2) M / (w_min (1 - gamma_K))`.
+/// A computed weight not positive refuses the bound (`f64::INFINITY`).
+fn plane_bound(
+    k: &Kernel,
+    canonical: &crate::nurbs::b_spline_surface::p1::SurfaceCanonical,
+    face: &Face,
+    side: f64,
+    tol: f64,
+) -> Result<f64> {
+    let (p, q) = (canonical.u_degree, canonical.v_degree);
+    let rational = canonical.weights.len() == canonical.control_points.len();
+    let mut f = certify::t_make(p, q);
+    let mut w = certify::t_make(p, q);
+    let (mut most, mut w_min) = (0.0f64, f64::INFINITY);
+    for (i, &pt) in canonical.control_points.iter().enumerate() {
+        let wi = if rational {
+            el(&canonical.weights, i)?
+        } else {
+            1.0
+        };
+        let d = pt - face.point;
+        let terms = d.x.abs() * face.normal.x.abs()
+            + d.y.abs() * face.normal.y.abs()
+            + d.z.abs() * face.normal.z.abs();
+        most = smax(most, wi * terms);
+        w_min = smin(w_min, wi);
+        *el_mut(&mut w.c, i)? = wi;
+        *el_mut(&mut f.c, i)? = wi * side * d.dot(face.normal);
+    }
+    let ops = 8 + graph::GRAPH_DEPTH * (p + q);
+    let shrink = 1.0 - crate::nurbs::math::gamma(ops);
+    if !(w_min > 0.0 && shrink > 0.0) {
+        return Ok(f64::INFINITY);
+    }
+    let rounding = 3.0 * crate::nurbs::math::gamma(ops + 2) * most / (w_min * shrink);
+    let mut worst = f64::NEG_INFINITY;
+    let mut pieces = vec![(f, w, graph::GRAPH_DEPTH)];
+    while let Some((f, w, depth)) = pieces.pop() {
+        k.check_cancelled(OP)?;
+        let mut hull = f64::NEG_INFINITY;
+        for (&fi, &wi) in f.c.iter().zip(&w.c) {
+            if !(wi > 0.0) {
+                return Ok(f64::INFINITY);
+            }
+            hull = smax(hull, fi / wi);
+        }
+        if !(hull + rounding > tol) || depth == 0 {
+            worst = smax(worst, hull);
+            continue;
+        }
+        let (fa, fb) = certify::t_split(&f, 0)?;
+        let (wa, wb) = certify::t_split(&w, 0)?;
+        for (fh, wh) in [(&fb, &wb), (&fa, &wa)] {
+            let (f0, f1) = certify::t_split(fh, 1)?;
+            let (w0, w1) = certify::t_split(wh, 1)?;
+            pieces.push((f1, w1, depth - 1));
+            pieces.push((f0, w0, depth - 1));
+        }
+    }
+    Ok(worst + rounding)
 }
 
 #[cfg(test)]
@@ -2886,6 +2971,72 @@ mod tests {
                 c * binomial(n, i).unwrap() * s.powi(i as i32) * (1.0 - s).powi((n - i) as i32)
             })
             .sum()
+    }
+
+    /// A quarter of the unit circle about the z axis from (1, 0) to (0, 1), as the rational
+    /// quadratic arc, carried up z from 0 to 1: a one-span patch of degree (2, 1).
+    fn quarter_cylinder() -> BSplineSurface {
+        let h = 0.5f64.sqrt();
+        let mut pts = Vec::new();
+        let mut ws = Vec::new();
+        for (x, y, w) in [(1.0, 0.0, 1.0), (1.0, 1.0, h), (0.0, 1.0, 1.0)] {
+            for z in [0.0, 1.0] {
+                pts.push(Point3::new(x, y, z));
+                ws.push(w);
+            }
+        }
+        BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 2,
+            v_degree: 1,
+            control_points: &pts,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[3, 3],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(ws.as_slice()),
+            uv_domain: None,
+        })
+        .unwrap()
+    }
+
+    /// The quarter cylinder stands at most 1 past the plane through the axis square to
+    /// (1, 1, 0) / sqrt 2 (at 45 degrees), its control net sqrt 2 (the arc's middle point). The
+    /// bound is the net's where that is within the tolerance; past it, it is taken on the patch:
+    /// never below the patch's own 1, within a tolerance a thousandth above 1 (the halved nets
+    /// close in on the arc quadratically), and still past one below.
+    #[test]
+    fn a_patch_past_a_plane_is_bounded_on_itself_where_its_net_passes_the_tolerance() {
+        let fill = Fill {
+            patches: vec![quarter_cylinder()],
+            round: Vec::new(),
+            face: Vec::new(),
+            reversed: Vec::new(),
+            degree: 2,
+        };
+        let k = Kernel::default();
+        let n = Vec3::new(1.0, 1.0, 0.0) * 0.5f64.sqrt();
+        let plane = [Face::plane(Point3::new(0.0, 0.0, 0.0), n)];
+        let net = containment(&k, &fill, &plane, true, 2.0).unwrap();
+        assert!((net - 2f64.sqrt()).abs() < 1e-15, "{net}");
+        let within = containment(&k, &fill, &plane, true, 1.001).unwrap();
+        assert!((1.0..=1.001).contains(&within), "{within}");
+        let past = containment(&k, &fill, &plane, true, 0.9).unwrap();
+        assert!(past >= 1.0 && past < 2f64.sqrt(), "{past}");
+        // on a concave corner's side the net is within any tolerance: its ends, -1 / sqrt 2
+        let concave = containment(&k, &fill, &plane, false, 1e-6).unwrap();
+        assert!((concave + 0.5f64.sqrt()).abs() < 1e-15, "{concave}");
+        // the halving polls the kernel's cancel token; the net's bound needs none
+        let mut k = Kernel::default();
+        let token = crate::kernel::CancelToken::new();
+        k.set_cancel_token(token.clone());
+        token.cancel();
+        assert_eq!(
+            containment(&k, &fill, &plane, true, 0.9),
+            Err(SolidError::cancelled(OP))
+        );
+        assert!(containment(&k, &fill, &plane, true, 2.0).is_ok());
     }
 
     #[test]

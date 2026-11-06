@@ -584,7 +584,7 @@ fn setback_box_corner(radii: [f64; 3], round_order: usize, ease: f64, order: usi
             order,
         );
     }
-    let worst = containment(&fill, &faces, true).unwrap();
+    let worst = containment(&k, &fill, &faces, true, 1e-12 * size).unwrap();
     println!("  stands past a face by at most {worst:.3e} (certified)");
     assert!(worst <= 1e-12 * size);
     // a G1 fill is held convex: the Gaussian curvature of every patch is not negative

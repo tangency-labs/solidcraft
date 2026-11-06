@@ -589,7 +589,7 @@ impl SetbackFill {
             })
             .collect();
         let fill = fill_hole(k, &self.faces, &rounds, self.order, self.tol).map_err(|r| r.error)?;
-        if containment(&fill, &self.faces, self.convex)? > self.tol {
+        if containment(k, &fill, &self.faces, self.convex, self.tol)? > self.tol {
             return Err(refuse("a setback's fill stands past a face it meets"));
         }
         Ok(fill)

@@ -172,7 +172,8 @@ fn dump(radii: [f64; 3], setback: f64) -> String {
                         writeln!(out, "cp {p} {j} {:e} {:e} {:e}", c.x, c.y, c.z).unwrap();
                     }
                 }
-                let worst = containment(&fill, &faces, true).unwrap();
+                // the control net's bound, as the fork prints it (no tolerance to tighten it to)
+                let worst = containment(&kernel, &fill, &faces, true, f64::INFINITY).unwrap();
                 writeln!(out, "containment {worst:e}").unwrap();
             }
             Err(e) => writeln!(out, "fill k {k:e} refused {:?}", e.reason).unwrap(),
