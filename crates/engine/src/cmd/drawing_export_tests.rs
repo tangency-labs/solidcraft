@@ -65,6 +65,22 @@ fn a_sheet_exports_as_its_scenes_svg() {
     assert_ne!(other["svg"], reply["svg"]);
 }
 
+/// A sheet with the built-in title block exports its labels and values as text: in SVG one path of
+/// filled outlines for each run of the scene, and in PNG its pixels (#4890 B3).
+#[test]
+fn a_title_blocks_text_is_written_as_filled_outlines() {
+    let (mut s, sheet, _) = front_and_top();
+    let block = serde_json::to_value(solidcraft_geom::title_block::default_block()).unwrap();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": block}));
+    let scene = sheet_scene(&s, sheet);
+    let runs = scene.groups.iter().flat_map(|g| &g.items).filter(|item| matches!(item, solidcraft_geom::paper::Item::Text(_))).count();
+    let svg = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}))["svg"].as_str().unwrap().to_string();
+    assert!(runs > 12, "each label and value: {runs}");
+    assert_eq!(svg.matches("<path fill=\"#000\" stroke=\"none\" d=\"M").count(), runs);
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "format": "png", "dpi": 50}));
+    assert_eq!(reply["data"].as_str().and_then(base64_decode), Some(scene_png(&s, sheet, PngOptions { dpi: 50.0, colour: PngColour::Grey })));
+}
+
 /// With a path the file holds the same SVG and the reply names it instead.
 #[test]
 fn a_path_gets_the_svg_written_to_it() {

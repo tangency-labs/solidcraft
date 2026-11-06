@@ -408,6 +408,34 @@ fn a_miss_is_kept() {
     assert_eq!(folder.found(Han::Japanese, '\u{30b9}').as_deref(), Some("a.ttf"), "another character is another search");
 }
 
+/// What the window's way in `now` gives once the search has answered, failing the test if it hasn't
+/// in 120 s.
+fn answered<T>(now: impl Fn() -> std::result::Result<T, SketchError>) -> std::result::Result<T, SketchError> {
+    let started = std::time::Instant::now();
+    loop {
+        match now() {
+            Err(SketchError::FontPending) => assert!(started.elapsed().as_secs() < 120, "the search never answered"),
+            other => return other,
+        }
+        std::thread::yield_now();
+    }
+}
+
+/// Measuring lines for the window searches no more than setting text does: pending until the search
+/// answers, then the lines the waiting way in measures.
+#[test]
+fn the_windows_lines_wait_for_no_search() {
+    let folder = Folder::new("lines-now", &["a.ttf"]);
+    let dirs = folder.dirs();
+    let plain = TextStyle::default();
+    let now = || paper_lines_now(&dirs, "A \u{30c6}", None, "", 5.0, Some(4.0), &plain);
+    assert!(matches!(now(), Err(SketchError::FontPending)));
+    assert!(paper_lines_now(&dirs, "A", None, "", 5.0, None, &plain).is_ok(), "nothing to fall back to is never pending");
+    let answer = answered(now);
+    let waited = paper_lines_in(&dirs, "A \u{30c6}", None, "", 5.0, Some(4.0), &plain).unwrap();
+    assert_eq!(answer.unwrap().lines, waited.lines);
+}
+
 /// The window's way in never searches: it says the fonts are being looked for until they are found.
 #[test]
 fn the_windows_way_in_waits_for_no_search() {
@@ -418,12 +446,7 @@ fn the_windows_way_in_waits_for_no_search() {
     assert!(matches!(now(), Err(SketchError::FontPending)));
     // Nothing to fall back to is never pending.
     assert!(paper_text_now(&dirs, "A", None, "", AT, 5.0, 0.0, &plain).unwrap().is_some());
-    let answer = loop {
-        match now() {
-            Err(SketchError::FontPending) => std::thread::yield_now(),
-            other => break other,
-        }
-    };
+    let answer = answered(now);
     let (runs, fonts) = mixed(answer.unwrap().unwrap());
     assert_eq!((runs.len(), fonts.len()), (2, 2));
 }

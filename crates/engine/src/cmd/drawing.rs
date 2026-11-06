@@ -10,18 +10,16 @@ use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use solidcraft_doc::bom::{self, Mass, Tree};
+use solidcraft_doc::bom::{self, Tree};
 use solidcraft_doc::drawing::balloon::balloons_by_row;
-use solidcraft_doc::drawing::fields::{Component, Values};
 use solidcraft_doc::drawing::table::Kind;
 use solidcraft_doc::drawing::view::{MAX_VIEW_DEPTH, View, ViewKind};
 use solidcraft_doc::drawing::{self, Drawing, Source, template};
 use solidcraft_doc::drawing_view::ViewDirection;
 use solidcraft_doc::{Document, ids};
-use solidcraft_geom::cell::Content;
+use solidcraft_geom::cell::Warning;
 use solidcraft_geom::drawing_view::ProjectedSide;
 use solidcraft_geom::paper::line::LineGroup;
-use solidcraft_geom::title_block::CellKind;
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
@@ -30,6 +28,7 @@ use crate::schema::drawing::{
     TemplateListResult, TemplateSaveParams, TemplateSaveResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
+use crate::title_block_text::{self, CellText, Note};
 use crate::{EngineError, Result, Session};
 
 /// The longest template file path taken, in bytes, as the sheet export's.
@@ -95,7 +94,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "drawing: id → deleted: its id; closed when it was open (one undo step of the model)",
     ),
     CommandSpec::new("drawing.inspect", "Inspect Drawing", inspect).in_drawing().icon("inspect").noundo().doc_only().params(
-        "→ {id, name, units, projection, updates: automatic or deferred, language, font, line_group, font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?}] (each text cell as the sheet shows it: its fields' values, \"-\" for one with none, or the text typed over it with the value it hides as `value`), title_block_overrides, dpi, line_group (its own, or null for the drawing's), documents, excluded, views: [{id, kind: base|projected, parent?, side?, label, dimensions: [ids], balloons: [ids]}], base views by id, each followed by those projected from it}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
+        "→ {id, name, units, projection, updates: automatic or deferred, language, font, line_group, font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, font_fallbacks: which font set each script of its title blocks' text that the drawing's font lacks, as lines such as \"Kana set in BIZ UDPGothic\", properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?, notes?}] (each text cell as the sheet shows it: its fields' values, nothing for one with none, or the text typed over it with the value it hides as `value`; `notes` are what doesn't fit on paper, each {fit: chars (with count and max), height or width}, shown whole, or {refused: why} for a label or value the drawing's font can't set, left off the sheet), title_block_overrides, dpi, line_group (its own, or null for the drawing's), documents, excluded, views: [{id, kind: base|projected, parent?, side?, label, dimensions: [ids], balloons: [ids]}], base views by id, each followed by those projected from it}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
     ),
     CommandSpec::new("drawing.set", "Drawing Settings", crate::checked!("drawing.set", set))
         .in_drawing()
@@ -376,15 +375,20 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
     // One tree for the drawing: each component it documents is weighed once.
     let mut tree = Tree::new(&s.doc, &state);
     let mut sheets = Vec::with_capacity(d.sheets.len());
+    // The title blocks' text, labels too, for which font set each script the drawing's font lacks.
+    let mut texts: Vec<String> = Vec::new();
     for (at, sheet) in d.sheets.iter().enumerate() {
         let size = sheet.sheet.size_mm().map_err(|e| bad(cmd, e.to_string()))?;
+        let cells = title_block_cells(&s.doc, &mut tree, d, at)?;
+        texts.extend(cells.iter().filter_map(|cell| cell["text"].as_str()).map(str::to_string));
+        texts.extend(sheet.title_block.iter().flat_map(|block| &block.cells).filter_map(|cell| cell.label.as_ref()).map(|label| label.text.clone()));
         sheets.push(json!({
             "id": ids::encode(sheet.id),
             "name": sheet.name,
             "size_mm": [size.x, size.y],
             "orientation": sheet.sheet.orientation,
             "title_block": sheet.title_block,
-            "title_block_cells": title_block_cells(&s.doc, &mut tree, d, at),
+            "title_block_cells": cells,
             "title_block_overrides": sheet.title_block_overrides,
             "dpi": sheet.dpi,
             "line_group": sheet.line_group,
@@ -405,6 +409,7 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
         "font": d.font,
         "line_group": d.line_group,
         "font_note": solidcraft_sketch::paper_font_note(&solidcraft_sketch::font_dirs(), &d.font),
+        "font_fallbacks": solidcraft_sketch::paper_fallback_notes(&solidcraft_sketch::font_dirs(), &d.font, &d.language, texts.iter().map(String::as_str)),
         "properties": d.properties,
         "sources": d.sources.iter().map(|source| json!({"id": ids::encode(source.id)})).collect::<Vec<_>>(),
         "sheets": sheets,
@@ -435,40 +440,35 @@ fn parts_lists(d: &Drawing, tree: &mut Tree<'_>) -> Vec<Value> {
         .collect()
 }
 
-/// The text cells of sheet `at`'s title block as the sheet shows them (`drawing.inspect`).
-fn title_block_cells(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize) -> Vec<Value> {
-    let Some(sheet) = d.sheets.get(at) else { return Vec::new() };
-    let Some(block) = &sheet.title_block else { return Vec::new() };
-    // What the model says of the component it documents: a component since deleted has nothing.
-    let id = sheet.documents.map(|documents| documents.component);
-    let (mass, materials) = id.and_then(|id| tree.component(id).ok()).unzip();
-    let mass = mass.and_then(|mass| if let Mass::Grams(grams) = mass { Some(format_mass(grams)) } else { None });
-    let material = materials.filter(|m| !m.is_empty()).map(|m| m.join("; "));
-    let component = id.and_then(|id| documented(doc, id, material.as_deref(), mass.as_deref()));
-    let values = Values { drawing: d, sheet: at, component };
-    let cell = |name: &str, content: &Content| {
-        let value = values.text(content);
-        match sheet.title_block_overrides.get(name) {
-            Some(typed) => json!({"name": name, "text": typed, "value": value}),
-            None => json!({"name": name, "text": value}),
-        }
+/// The text cells of sheet `at`'s title block as the sheet shows them (`drawing.inspect`), each
+/// with what doesn't fit on paper or why its text is off the sheet.
+fn title_block_cells(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize) -> Result<Vec<Value>> {
+    let shown = title_block_text::shown(doc, tree, d, at);
+    // Laid out for its notes only: nothing is placed on a sheet here.
+    // `Drawing::validate` checks the layout, so an error here is a drawing that skipped it.
+    let block = match d.sheets.get(at) {
+        Some(sheet) => sheet.title_block.as_ref().zip(sheet.title_block_layout()?),
+        None => None,
     };
-    block.cells.iter().filter_map(|c| if let CellKind::Text(text) = &c.kind { Some(cell(&c.name, &text.content)) } else { None }).collect()
-}
-
-/// Component `id` of the design (0: the design itself) as a title block's fields read it, with
-/// what the model says of it; none when the design has no such component.
-fn documented<'a>(doc: &'a Document, id: u64, material: Option<&'a str>, mass: Option<&'a str>) -> Option<Component<'a>> {
-    if id == 0 {
-        return Some(Component { name: &doc.name, metadata: &doc.metadata, properties: None, material, mass });
-    }
-    let c = doc.components.iter().find(|c| c.id == id)?;
-    Some(Component { name: &c.name, metadata: &c.metadata, properties: Some(&c.properties), material, mass })
-}
-
-/// A mass as a sheet shows it: kilograms to two places, until #4867 gives drawings their units.
-fn format_mass(grams: f64) -> String {
-    format!("{:.2} kg", grams / 1000.0)
+    let notes = block.map(|(block, placed)| title_block_text::lay(block, &placed, &d.font, &d.language, &shown, true).notes).unwrap_or_default();
+    let note = |note: &Note| match note {
+        Note::Fit(Warning::Chars { count, max }) => json!({"fit": "chars", "count": count, "max": max}),
+        Note::Fit(Warning::Height) => json!({"fit": "height"}),
+        Note::Fit(Warning::Width) => json!({"fit": "width"}),
+        Note::Refused(why) => json!({"refused": why}),
+    };
+    let cell = |shown: &CellText| {
+        let mut cell = json!({"name": shown.name, "text": shown.text});
+        if let Some(value) = &shown.replaced {
+            cell["value"] = json!(value);
+        }
+        let notes: Vec<Value> = notes.iter().filter(|(cell, _)| *cell == shown.name).map(|(_, n)| note(n)).collect();
+        if !notes.is_empty() {
+            cell["notes"] = json!(notes);
+        }
+        cell
+    };
+    Ok(shown.iter().map(cell).collect())
 }
 
 fn set(s: &mut Session, p: &Value) -> Result<Value> {

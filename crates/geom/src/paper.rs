@@ -327,8 +327,7 @@ impl Prepared<'_> {
 
     /// The font a run names: there, as the scene was checked.
     pub fn font(&self, run: &TextRun) -> Option<&Font> {
-        let fonts = &self.scene.fonts;
-        fonts.binary_search_by_key(&run.font, |f| f.id).ok().and_then(|at| fonts.get(at))
+        text::font_in(&self.scene.fonts, &run.font)
     }
 }
 

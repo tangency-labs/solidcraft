@@ -59,7 +59,7 @@ use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile};
 use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_geom::revision::RevisionRecord;
-use solidcraft_geom::title_block::TitleBlock;
+use solidcraft_geom::title_block::{TitleBlock, TitleBlockLayout};
 
 use crate::format::DRAWING;
 use crate::ids::{self, IdSource};
@@ -263,10 +263,15 @@ impl Sheet {
     /// Where its title block sits, in paper millimetres (none without one), once its drawing border
     /// and the block on it lay out on the paper: the rule a sheet is held to, as drawing them uses it.
     pub fn title_block_outline(&self) -> Result<Option<Aabb2>> {
+        Ok(self.title_block_layout()?.map(|layout| layout.outline))
+    }
+
+    /// Its title block laid out on its drawing border (none without a block): each cell's place.
+    pub fn title_block_layout(&self) -> Result<Option<TitleBlockLayout>> {
         let border = self.border.as_ref().map(|border| border.layout(&self.sheet)).transpose().map_err(from_sheet)?;
         let Some(block) = &self.title_block else { return Ok(None) };
         let border = border.ok_or_else(|| DocError::Invalid("its title block sits on a drawing border, and it has none".into()))?;
-        Ok(Some(block.layout(&border).map_err(|e| DocError::Invalid(e.to_string()))?.outline))
+        Ok(Some(block.layout(&border).map_err(|e| DocError::Invalid(e.to_string()))?))
     }
 
     /// Gives the sheet `block` (`None`: no title block). Text typed over a cell stays while `block`

@@ -851,7 +851,7 @@ impl JsonSchema for SceneResult {
 }
 
 /// A paper scene's schema ([`solidcraft_geom::paper::Scene`]): its groups of `kinds`, each holding
-/// strokes, and fills and pictures too when it is a `whole_sheet`'s.
+/// strokes, and fills, pictures, text and its fonts too when it is a `whole_sheet`'s.
 pub(super) fn paper_scene_schema(generator: &mut SchemaGenerator, kinds: &[ObjectKind], whole_sheet: bool) -> Schema {
     let point = json!({"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2});
     let segment = generator.subschema_for::<PathSegResult>();
@@ -907,7 +907,7 @@ pub(super) fn paper_scene_schema(generator: &mut SchemaGenerator, kinds: &[Objec
         "required": ["kind", "source", "rect", "opacity"],
         "additionalProperties": false
     });
-    let items = if whole_sheet { json!({"anyOf": [stroke, fill, picture]}) } else { stroke };
+    let items = if whole_sheet { json!({"anyOf": [stroke, fill, picture, text_item_schema(point.clone())]}) } else { stroke };
     let kinds: Vec<Value> = kinds.iter().filter_map(|kind| serde_json::to_value(kind).ok()).collect();
     let group = json!({
         "type": "object",
@@ -915,10 +915,87 @@ pub(super) fn paper_scene_schema(generator: &mut SchemaGenerator, kinds: &[Objec
         "required": ["object", "kind", "items"],
         "additionalProperties": false
     });
+    let mut properties = json!({"size_mm": point, "groups": {"type": "array", "items": group}});
+    if whole_sheet {
+        properties["fonts"] = json!({"type": "array", "items": font_schema(ring)});
+    }
     json_schema!({
         "type": "object",
-        "properties": {"size_mm": point, "groups": {"type": "array", "items": group}},
+        "properties": properties,
         "required": ["size_mm", "groups"],
+        "additionalProperties": false
+    })
+}
+
+/// A font's id: a hash of its face.
+fn font_id_schema() -> Value {
+    json!({"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 255}, "minItems": 32, "maxItems": 32})
+}
+
+/// One run of text in a paper scene.
+fn text_item_schema(point: Value) -> Value {
+    let glyph = json!({
+        "type": "object",
+        "properties": {"id": {"type": "integer", "minimum": 0}, "x": {"type": "number"}, "rise": {"type": "number"}, "advance": {"type": "number"}},
+        "required": ["id", "x", "rise", "advance"],
+        "additionalProperties": false
+    });
+    let range = json!({
+        "type": "object",
+        "properties": {"start": {"type": "integer", "minimum": 0}, "end": {"type": "integer", "minimum": 0}},
+        "required": ["start", "end"],
+        "additionalProperties": false
+    });
+    let cluster = json!({
+        "type": "object",
+        "properties": {"glyphs": range, "text": range},
+        "required": ["glyphs", "text"],
+        "additionalProperties": false
+    });
+    json!({
+        "type": "object",
+        "properties": {
+            "kind": {"const": "text"}, "font": font_id_schema(), "scale": {"type": "number"}, "origin": point, "angle": {"type": "number"},
+            "slant": {"type": "number"}, "glyphs": {"type": "array", "items": glyph}, "text": {"type": "string"},
+            "clusters": {"type": "array", "items": cluster}, "rtl": {"type": "boolean"}
+        },
+        "required": ["kind", "font", "scale", "origin", "angle", "slant", "glyphs", "text", "clusters", "rtl"],
+        "additionalProperties": false
+    })
+}
+
+/// One font a paper scene's text uses: never its bytes.
+fn font_schema(ring: Value) -> Value {
+    let int = json!({"type": "integer"});
+    let flags = json!({
+        "type": "object",
+        "properties": {"fixed_pitch": {"type": "boolean"}, "serif": {"type": "boolean"}, "italic": {"type": "boolean"}, "symbolic": {"type": "boolean"}},
+        "required": ["fixed_pitch", "serif", "italic", "symbolic"],
+        "additionalProperties": false
+    });
+    let metrics = json!({
+        "type": "object",
+        "properties": {
+            "ascent": int, "descent": int, "cap_height": int, "bbox": {"type": "array", "items": int, "minItems": 4, "maxItems": 4},
+            "italic_angle": {"type": "number"}, "flags": flags, "stem_v": int
+        },
+        "required": ["ascent", "descent", "cap_height", "bbox", "italic_angle", "flags", "stem_v"],
+        "additionalProperties": false
+    });
+    let glyph = json!({
+        "type": "object",
+        "properties": {"advance": int, "outline": {"type": "array", "items": ring}},
+        "required": ["advance", "outline"],
+        "additionalProperties": false
+    });
+    json!({
+        "type": "object",
+        "properties": {
+            "id": font_id_schema(), "face": int, "postscript_name": {"type": "string"}, "family": {"type": "string"},
+            "embed": {"enum": ["subset", "whole", "outlines"]}, "num_glyphs": int, "units_per_em": int, "metrics": metrics,
+            "glyphs": {"type": "object", "additionalProperties": glyph}
+        },
+        "required": ["id", "face", "postscript_name", "family", "embed", "num_glyphs", "units_per_em", "metrics", "glyphs"],
         "additionalProperties": false
     })
 }

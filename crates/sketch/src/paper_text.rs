@@ -186,6 +186,20 @@ pub fn paper_lines_in(
     measure(dirs, text, family, language, height, wrap, style, true)
 }
 
+/// [`paper_lines_in`] for the window's thread, as [`paper_text_now`] is [`paper_text_in`]'s: it refuses
+/// with [`SketchError::FontPending`] until the search for fonts to fall back to has answered.
+pub fn paper_lines_now(
+    dirs: &[PathBuf],
+    text: &str,
+    family: Option<&str>,
+    language: &str,
+    height: f64,
+    wrap: Option<f64>,
+    style: &TextStyle,
+) -> Result<PaperLines> {
+    measure(dirs, text, family, language, height, wrap, style, false)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn measure(
     dirs: &[PathBuf],

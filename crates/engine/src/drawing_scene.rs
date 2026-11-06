@@ -3,9 +3,10 @@
 //! same thing. In paint order: the sheet's drawing border ([`SheetLayout::paper`]), then each view
 //! on the sheet by id, its lines as [`paper_group`] makes them, then the dimensions of those
 //! views, by view and id ([`crate::drawing_dimension_paper`]), then its title block's lines and
-//! projection symbol, in the drawing's projection ([`TitleBlockLayout::paper`]). Images placed on
-//! the sheet sit between the border and the views ([`groups`]), so a view's lines draw over a photo.
-//! Text and tables each join as one more kind of group. A shaded view's group holds
+//! projection symbol, in the drawing's projection ([`TitleBlockLayout::paper`]), with its labels
+//! and values set on them ([`title_block_text`]). Images placed on the sheet sit between the border
+//! and the views ([`groups`]), so a view's lines draw over a photo. Tables join as one more kind of
+//! group. A shaded view's group holds
 //! its pictures under its lines; nothing here draws their pixels ([`crate::drawing_picture`]).
 //!
 //! [`build`] draws a sheet at once, each view the one way: its lines worked out centred on the view,
@@ -49,16 +50,17 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+use solidcraft_doc::bom::Tree;
 use solidcraft_doc::drawing::dimension::{self, Dimension};
 use solidcraft_doc::drawing::view::{ResolvedView, View};
 use solidcraft_doc::drawing::{Drawing, Sheet, Updates};
 use solidcraft_doc::drawing_view::TangentEdges;
-use solidcraft_doc::{DocError, ModelState, ids};
+use solidcraft_doc::{DocError, Document, ModelState, ids};
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::hlr::Source;
 use solidcraft_geom::paper::line::LineGroup;
-use solidcraft_geom::paper::text::TextRun;
+use solidcraft_geom::paper::text::{Font, TextRun, font_in};
 use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, ObjectKind, Picture, Scene};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb2, ArcMap};
@@ -66,6 +68,7 @@ use solidcraft_geom::{Aabb2, ArcMap};
 use crate::drawing_picture::{picture_items, view_parts};
 use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, Shown, ShownSet, Stats, Styles, Unmeasured, paper_lines};
 use crate::params::bad;
+use crate::title_block_text::{self, CellText, Set};
 use crate::{EngineError, Result, Session};
 
 #[path = "drawing_scene_kept.rs"]
@@ -182,6 +185,9 @@ pub struct SheetView {
     pub dimensions: Vec<DimensionState>,
     /// The dimensions out of date whose views aren't: [`step`] reads them once the views are done.
     pub stale_dimensions: Vec<u64>,
+    /// A title block's or a dimension's text waits for the search for a font to fall back to: the
+    /// page extracts again on its next tick, and the text is set once the search has answered.
+    pub waiting_for_fonts: bool,
 }
 
 /// What is under a point of a sheet ([`hit`]).
@@ -294,12 +300,13 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // placed as they are drawn, so at most one view's are held beside the scene.
     let shown = crate::drawing_view::shown(s);
     let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(s, &shown, *id, view)));
-    let mut assembly = assemble(record, drawing.projection, &crate::drawing_pictures::groups(drawing, sheet), drawn)?;
+    let (text, _) = block_text(record, &Lettering::of(s, drawing), &cell_texts(s, drawing, sheet), true)?;
+    let mut assembly = assemble(record, drawing.projection, &text, &crate::drawing_pictures::groups(drawing, sheet), drawn)?;
     // After the views, as they need the views' frames: one read for the sheet's dimensions.
     let frames: BTreeMap<u64, ViewFrame> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
     let wanted = dimensions_on(drawing, on.iter().map(|(id, ..)| *id));
     let group = |view: u64| on.binary_search_by_key(&view, |(id, ..)| *id).ok().and_then(|at| on.get(at)).map(|(_, v, _)| v.line_group.value);
-    let dimensions = draw_dimensions(s, drawing, &wanted, |view| Some((*frames.get(&view)?, group(view)?)));
+    let dimensions = draw_dimensions(s, drawing, &wanted, |view| Some((*frames.get(&view)?, group(view)?)), true);
     assembly.add_dimensions(dimensions.iter());
     let (scene, views, objects, dimensions) = assembly.finish()?;
     Ok(SheetScene { scene, views, objects, dimensions, out_of_date: Vec::new() })
@@ -369,7 +376,26 @@ struct DrawnDimension {
     view: u64,
     status: dimension::Status,
     group: Option<Group>,
+    /// The fonts its group's text uses.
+    fonts: Vec<Font>,
     why: Option<String>,
+    /// Whether its text waits for a font to fall back to: [`extract`] reads it again until it doesn't.
+    pending: bool,
+}
+
+/// What a drawing's dimensions read and are set in: its units (the design's, when it follows them),
+/// its language and its font. A dimension drawn in other ones is read again.
+#[derive(Clone, Debug, PartialEq)]
+struct Lettering {
+    units: String,
+    language: String,
+    font: String,
+}
+
+impl Lettering {
+    fn of(s: &Session, d: &Drawing) -> Lettering {
+        Lettering { units: s.doc.drawing_units(d).to_string(), language: d.language.clone(), font: d.font.clone() }
+    }
 }
 
 /// View `id`, drawing as `view` does, of the bodies `shown` holds: its lines, the hidden ones too
@@ -435,19 +461,34 @@ fn draw_dimensions(
     d: &Drawing,
     wanted: &[Arc<Dimension>],
     frame: impl Fn(u64) -> Option<(ViewFrame, LineGroup)>,
+    wait: bool,
 ) -> Vec<DrawnDimension> {
     let ids: Vec<u64> = wanted.iter().map(|record| record.id).collect();
     let read = s.doc.resolve_dimensions(&s.model, d, &ids);
     let one = |at: usize, record: &Arc<Dimension>| match read.as_ref().map(|all| all.get(at)) {
         Ok(Some(resolved)) => {
-            let group = frame(record.view).and_then(|(frame, lines)| crate::drawing_dimension_paper::paper_group(record, resolved, &frame, lines));
-            let nothing = group.is_none() && !resolved.points.is_empty() && frame(record.view).is_some();
-            let why = nothing.then(|| "what it measures has no place to draw on its view".to_string());
-            DrawnDimension { dimension: record.id, view: record.view, status: resolved.status.clone(), group, why }
+            let paper = frame(record.view)
+                .and_then(|(frame, lines)| crate::drawing_dimension_paper::paper_group(record, resolved, &frame, lines, &d.font, &d.language, wait));
+            let drawn = |group, fonts, why, pending| DrawnDimension {
+                dimension: record.id,
+                view: record.view,
+                status: resolved.status.clone(),
+                group,
+                fonts,
+                why,
+                pending,
+            };
+            match paper {
+                Some(paper) => drawn(Some(paper.group), paper.fonts, paper.why, paper.pending),
+                None => {
+                    let nothing = !resolved.points.is_empty() && frame(record.view).is_some();
+                    drawn(None, Vec::new(), nothing.then(|| "what it measures has no place to draw on its view".to_string()), false)
+                }
+            }
         }
         Ok(None) | Err(_) => {
             let status = dimension::Status::Unmeasurable(format!("dimension {} can't be read", ids::encode(record.id)));
-            DrawnDimension { dimension: record.id, view: record.view, status, group: None, why: None }
+            DrawnDimension { dimension: record.id, view: record.view, status, group: None, fonts: Vec::new(), why: None, pending: false }
         }
     };
     wanted.iter().enumerate().map(|(at, record)| one(at, record)).collect()
@@ -486,20 +527,25 @@ enum LeftOut {
 }
 
 impl Assembly {
-    /// Puts `group` in the scene moved to `centre`, and gives the box round it there.
-    fn add(&mut self, group: &Group, centre: Vec2) -> std::result::Result<Aabb2, LeftOut> {
-        let more = group.records();
+    /// Puts `group`, whose text uses `fonts`, in the scene moved to `centre`, and gives the box round
+    /// it there. Only a group that joins adds to the scene's fonts, and a font's records it adds count.
+    fn add(&mut self, group: &Group, fonts: &[Font], centre: Vec2) -> std::result::Result<Aabb2, LeftOut> {
+        self.alone.add_fonts(fonts.iter().cloned());
+        let more = group.records().saturating_add(self.scene.font_records_beyond(&self.alone.fonts));
         if self.records.saturating_add(more) > MAX_RECORDS {
+            self.alone.fonts.clear();
             return Err(LeftOut::TooManyRecords);
         }
         self.alone.groups.push(moved(group, centre));
         if let Err(e) = self.alone.validate() {
             self.alone.groups.clear();
+            self.alone.fonts.clear();
             return Err(LeftOut::Invalid(e.to_string()));
         }
         self.records += more;
-        let bounds = self.alone.groups.first().map_or(Aabb2::EMPTY, group_bounds);
+        let bounds = self.alone.groups.first().map_or(Aabb2::EMPTY, |one| group_bounds(one, &self.alone.fonts));
         self.scene.groups.append(&mut self.alone.groups);
+        self.scene.add_fonts(std::mem::take(&mut self.alone.fonts));
         Ok(bounds)
     }
 
@@ -511,7 +557,7 @@ impl Assembly {
             let mut drawn = false;
             match (self.placed.get(&one.view).map(|(_, centre)| *centre), &one.group) {
                 (None, _) => why = Some("its view isn't drawn".into()),
-                (Some(centre), Some(group)) => match self.add(group, centre) {
+                (Some(centre), Some(group)) => match self.add(group, &one.fonts, centre) {
                     Ok(bounds_mm) => {
                         drawn = true;
                         self.objects.push(SheetObject { object: one.dimension, kind: ObjectKind::Dimension, bounds_mm, boundary_mm: None });
@@ -537,42 +583,52 @@ impl Assembly {
 }
 
 /// The scene of sheet `record`: its border, then `images`, then each of `views` (its id, centre and
-/// lines, in id order) moved to its centre, with its title block, its symbol in `projection`, to go
-/// on top ([`Assembly::finish`]). A view that would take the scene past a paper scene's limits is
-/// left out and says why, and the views after it are still drawn when they fit.
+/// lines, in id order) moved to its centre, with its title block, its symbol in `projection` and
+/// its cells' text as [`block_text`] set it, to go on top ([`Assembly::finish`]). A view that would
+/// take the scene past a paper scene's limits is left out and says why, and the views after it are
+/// still drawn when they fit.
 fn assemble<D: Borrow<Drawn>>(
     record: &Sheet,
     projection: Projection,
+    text: &Set,
     images: &[Group],
     views: impl Iterator<Item = (u64, Vec2, D)>,
 ) -> Result<Assembly> {
     let size_mm = record.sheet.size_mm().map_err(|e| bad(CMD, e.to_string()))?;
     let layout = record.border.as_ref().map(|border| border.layout(&record.sheet)).transpose().map_err(|e| bad(CMD, e.to_string()))?;
     let mut border = layout.as_ref().map_or_else(Vec::new, |layout| layout.paper(record.id));
-    // The block sits on the border. It's painted over the views, but counted with the border, so no
-    // view takes its records.
-    let block = match (&record.title_block, &layout) {
-        (Some(block), Some(layout)) => Some(block.layout(layout).map_err(|e| bad(CMD, e.to_string()))?.paper(record.id, projection)),
-        _ => None,
+    // The block sits on the border. It's painted over the views, but counted with the border (its
+    // text's fonts too), so no view takes its records.
+    let (block, fonts) = match (&record.title_block, &layout) {
+        (Some(block), Some(layout)) => {
+            let placed = block.layout(layout).map_err(|e| bad(CMD, e.to_string()))?;
+            let mut group = placed.paper(record.id, projection);
+            group.items.extend(text.runs.iter().cloned().map(Item::Text));
+            (Some(group), text.fonts.clone())
+        }
+        _ => (None, Vec::new()),
     };
     let mut objects = Vec::new();
     if !border.is_empty() {
         // The border's groups are one object, measured before the images painted with them join
         // them: an image isn't one of the objects a sheet's commands pick.
-        let bounds_mm = border.iter().map(group_bounds).fold(Aabb2::EMPTY, |all, one| all.union(&one));
+        let bounds_mm = border.iter().map(|group| group_bounds(group, &[])).fold(Aabb2::EMPTY, |all, one| all.union(&one));
         objects.push(SheetObject { object: record.id, kind: ObjectKind::DrawingBorder, bounds_mm, boundary_mm: None });
     }
     border.extend_from_slice(images);
     let records = border.iter().chain(&block).map(Group::records).fold(0usize, usize::saturating_add);
-    let scene = Scene::new(size_mm, border);
+    let mut scene = Scene::new(size_mm, border);
     let alone = Scene::new(size_mm, Vec::with_capacity(1));
+    // The block's fonts, each once: all they hold counts, as the table held none before.
+    scene.add_fonts(fonts);
+    let records = records.saturating_add(alone.font_records_beyond(&scene.fonts));
     let mut assembly = Assembly { scene, records, alone, states: Vec::new(), objects, placed: BTreeMap::new(), dimensions: Vec::new(), block };
     for (view, centre, drawn) in views {
         let drawn: &Drawn = drawn.borrow();
         let mut status = drawn.status.clone();
         let mut lines = None;
         if let Some(group) = &drawn.group {
-            match assembly.add(group, centre) {
+            match assembly.add(group, &[], centre) {
                 Ok(bounds) => {
                     lines = Some(bounds);
                     if let Some(frame) = drawn.frame {
@@ -596,16 +652,20 @@ fn assemble<D: Borrow<Drawn>>(
     Ok(assembly)
 }
 
-/// The box round what `group` draws, along its lines' paths and round its pictures. Text isn't
-/// measured here: nothing on a sheet draws any yet, and its outlines need its font.
-fn group_bounds(group: &Group) -> Aabb2 {
+/// The box round what `group` draws: along its lines' paths and its text's outlines, in `fonts`,
+/// and round its pictures.
+fn group_bounds(group: &Group, fonts: &[Font]) -> Aabb2 {
     let mut bounds = Aabb2::EMPTY;
     for item in &group.items {
         let mut add = |path: &[Seg2]| path.iter().for_each(|seg| bounds = bounds.union(&seg.bounds()));
         match item {
             Item::Stroke { path, .. } => add(path),
             Item::Fill { region } => region.loops().for_each(|ring| add(&ring.segs)),
-            Item::Text(_) => {}
+            Item::Text(run) => {
+                if let Some(font) = font_in(fonts, &run.font) {
+                    run.outlines(font).for_each(|ring| add(&ring.segs));
+                }
+            }
             Item::Picture(picture) => bounds = bounds.union(&picture.rect),
         }
     }
@@ -629,6 +689,26 @@ fn moved(group: &Group, by: Vec2) -> Group {
         Item::Picture(picture) => Item::Picture(Picture { rect: Aabb2 { min: picture.rect.min + by, max: picture.rect.max + by }, ..*picture }),
     });
     Group { object: group.object, kind: group.kind, items: items.collect() }
+}
+
+/// The text cells of sheet `sheet` of `d` as `s`'s design shows them ([`title_block_text::shown`]).
+fn cell_texts(s: &Session, d: &Drawing, sheet: u64) -> Vec<CellText> {
+    let Some(at) = d.sheets.iter().position(|x| x.id == sheet && x.title_block.is_some()) else { return Vec::new() };
+    let state = s.model.state();
+    title_block_text::shown(&s.doc, &mut Tree::new(&s.doc, &state), d, at)
+}
+
+/// Sheet `record`'s title block text, its cells as `cells` gives them, set on paper in `lettering`'s
+/// font and language: nothing without a block. Also whether a text waits for a font to fall back
+/// to, which only the window's sheet leaves to the search's thread (`wait` false).
+fn block_text(record: &Sheet, lettering: &Lettering, cells: &[CellText], wait: bool) -> Result<(Set, bool)> {
+    Ok(match (&record.title_block, record.title_block_layout().map_err(|e| bad(CMD, e.to_string()))?) {
+        (Some(block), Some(placed)) => {
+            let laid = title_block_text::lay(block, &placed, &lettering.font, &lettering.language, cells, wait);
+            (laid.set(), laid.pending)
+        }
+        _ => (Set::default(), false),
+    })
 }
 
 /// Sheet `sheet` of `d`.
@@ -719,12 +799,12 @@ impl Entry {
 }
 
 /// A dimension's last drawing, and what it was drawn from: its record, the world state, its view's
-/// drawing (by serial, which holds its frame) and the drawing's units.
+/// drawing (by serial, which holds its frame) and the drawing's lettering.
 struct DimensionEntry {
     state: Arc<ModelState>,
     record: Arc<Dimension>,
     view_serial: u64,
-    units: String,
+    lettering: Lettering,
     drawn: DrawnDimension,
     serial: u64,
 }
@@ -741,16 +821,35 @@ struct Inputs {
     dimensions: Vec<(u64, u64)>,
 }
 
-/// The last answer of [`extract`], for the sheet, drawing, world state, units and serial it was for:
-/// the same five again return it as it is.
+/// The last answer of [`extract`], for the sheet, drawing, design, world state, lettering and serial
+/// it was for: the same six again return it as it is. Its title block's cells and their text set on
+/// paper hold for the same first five ([`Assembled::reads`]), so views drawn set no text, and its
+/// scene is used again for the same inputs, cells and faces.
 struct Assembled {
     sheet: u64,
     drawing: Arc<Drawing>,
+    doc: Arc<Document>,
     state: Arc<ModelState>,
-    units: String,
+    lettering: Lettering,
+    cells: Vec<CellText>,
+    text: Arc<Set>,
+    /// Whether a text of the block waits for a font to fall back to: until it doesn't, the block is
+    /// set again on each [`extract`], and the sheet put together with it is never reused.
+    pending: bool,
     serial: u64,
     inputs: Inputs,
     answer: SheetView,
+}
+
+impl Assembled {
+    /// Whether it was read from sheet `sheet` of `d`, `doc`, `state` and `lettering`, all as they are.
+    fn reads(&self, sheet: u64, d: &Arc<Drawing>, doc: &Arc<Document>, state: &Arc<ModelState>, lettering: &Lettering) -> bool {
+        self.sheet == sheet
+            && self.lettering == *lettering
+            && Arc::ptr_eq(&self.drawing, d)
+            && Arc::ptr_eq(&self.doc, doc)
+            && Arc::ptr_eq(&self.state, state)
+    }
 }
 
 impl Cache {
@@ -794,27 +893,59 @@ impl Cache {
     }
 
     /// Keeps `records` as `lines` drew them, numbered with the cache's serial.
-    fn keep_dimensions(&mut self, records: Vec<Arc<Dimension>>, lines: Vec<DrawnDimension>, state: &Arc<ModelState>, view_serial: u64, units: &str) {
+    fn keep_dimensions(
+        &mut self,
+        records: Vec<Arc<Dimension>>,
+        lines: Vec<DrawnDimension>,
+        state: &Arc<ModelState>,
+        view_serial: u64,
+        lettering: &Lettering,
+    ) {
         let serial = self.serial;
         for (record, drawn) in records.into_iter().zip(lines) {
-            let entry = DimensionEntry { state: state.clone(), record, view_serial, units: units.to_string(), drawn, serial };
+            let entry = DimensionEntry { state: state.clone(), record, view_serial, lettering: lettering.clone(), drawn, serial };
             self.dimensions.insert(entry.record.id, entry);
         }
     }
 
     /// The dimensions of the views `on`, by view and id, to read again: each whose view is up to
-    /// date, last drawn from another record, model, drawing of its view, or units.
-    fn stale_dimensions(&self, d: &Drawing, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>, units: &str) -> Vec<Arc<Dimension>> {
+    /// date, last drawn from another record, model, drawing of its view, or lettering.
+    fn stale_dimensions(&self, d: &Drawing, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>, lettering: &Lettering) -> Vec<Arc<Dimension>> {
+        self.dimensions_where(d, on, state, lettering, |current| current.is_none())
+    }
+
+    /// The dimensions of the views `on`, by view and id, read as they are now but with text that
+    /// waits for its font: [`extract`] sets it, as it has no lines to draw again.
+    fn waiting_dimensions(
+        &self,
+        d: &Drawing,
+        on: &[(u64, ResolvedView, Vec2)],
+        state: &Arc<ModelState>,
+        lettering: &Lettering,
+    ) -> Vec<Arc<Dimension>> {
+        self.dimensions_where(d, on, state, lettering, |current| current.is_some_and(|e| e.drawn.pending))
+    }
+
+    /// The dimensions of the up-to-date views `on` that `keep` takes, given each one's entry when it
+    /// was read from this record, model, drawing of its view and lettering.
+    fn dimensions_where(
+        &self,
+        d: &Drawing,
+        on: &[(u64, ResolvedView, Vec2)],
+        state: &Arc<ModelState>,
+        lettering: &Lettering,
+        keep: impl Fn(Option<&DimensionEntry>) -> bool,
+    ) -> Vec<Arc<Dimension>> {
         let fresh = on.iter().filter(|(id, view, _)| self.fresh(*id, state, view));
         let serials: BTreeMap<u64, u64> = fresh.filter_map(|(id, ..)| self.views.get(id).map(|e| (*id, e.serial))).collect();
         let current = |record: &Arc<Dimension>, serial: u64| {
             self.dimensions
                 .get(&record.id)
-                .is_some_and(|e| Arc::ptr_eq(&e.record, record) && Arc::ptr_eq(&e.state, state) && e.view_serial == serial && e.units == units)
+                .filter(|e| Arc::ptr_eq(&e.record, record) && Arc::ptr_eq(&e.state, state) && e.view_serial == serial && e.lettering == *lettering)
         };
-        let mut stale = dimensions_on(d, serials.keys().copied());
-        stale.retain(|record| serials.get(&record.view).is_some_and(|serial| !current(record, *serial)));
-        stale
+        let mut found = dimensions_on(d, serials.keys().copied());
+        found.retain(|record| serials.get(&record.view).is_some_and(|serial| keep(current(record, *serial))));
+        found
     }
 }
 
@@ -863,27 +994,38 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     forget_closed(s);
     let d = s.drawing(CMD)?.clone();
     let state = s.world_state()?;
-    let units = s.doc.drawing_units(&d).to_string();
-    let cache = &mut s.drawing_scenes;
-    if let Some(last) = &cache.last
-        && last.sheet == sheet
-        && last.serial == cache.serial
-        && last.units == units
-        && Arc::ptr_eq(&last.drawing, &d)
-        && Arc::ptr_eq(&last.state, &state)
+    let lettering = Lettering::of(s, &d);
+    let on = views_on(&d, sheet)?;
+    set_waiting_dimensions(s, &d, &on, &state, &lettering);
+    let last = s.drawing_scenes.last.as_ref().filter(|last| !last.pending && last.reads(sheet, &d, &s.doc, &state, &lettering));
+    if let Some(last) = last
+        && last.serial == s.drawing_scenes.serial
     {
         return Ok(last.answer.clone());
     }
+    // The title block's cells are read and set again only for another sheet, drawing, design, model
+    // or lettering (a name or a mass can change them), not for each view drawn.
+    let (cells, text, pending) = match last {
+        Some(last) => (last.cells.clone(), last.text.clone(), false),
+        None => {
+            let cells = cell_texts(s, &d, sheet);
+            let (text, pending) = block_text(sheet_of(&d, sheet)?, &lettering, &cells, false)?;
+            (cells, Arc::new(text), pending)
+        }
+    };
+    let doc = s.doc.clone();
+    let cache = &mut s.drawing_scenes;
     let record = sheet_of(&d, sheet)?;
-    let on = views_on(&d, sheet)?;
     cache.sheet = Some(sheet);
     catch_up(s, &d, on.iter().map(|(id, ..)| *id), &state);
     let cache = &mut s.drawing_scenes;
     let stale = on.iter().filter(|(id, view, _)| !cache.fresh(*id, &state, view)).map(|(id, ..)| *id).collect();
-    let stale_dimensions = cache.stale_dimensions(&d, &on, &state, &units).iter().map(|record| record.id).collect();
+    let stale_dimensions = cache.stale_dimensions(&d, &on, &state, &lettering).iter().map(|record| record.id).collect();
+    let waiting_for_fonts = pending || !cache.waiting_dimensions(&d, &on, &state, &lettering).is_empty();
     let inputs = cache.inputs(&d, record, &on);
     let (scene, views, objects, dimensions, generation) = match cache.last.take() {
-        Some(last) if last.inputs == inputs => {
+        // Text set while a font was looked for can differ with the same cells and faces.
+        Some(last) if !last.pending && !pending && last.inputs == inputs && last.cells == cells && last.text.faces() == text.faces() => {
             (last.answer.scene, last.answer.views, last.answer.objects, last.answer.dimensions, last.answer.generation)
         }
         _ => {
@@ -892,29 +1034,31 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
             cache.views.retain(|id, _| kept.contains(id));
             cache.dimensions.retain(|id, _| d.dimension(*id).is_some());
             let drawn = on.iter().filter_map(|(id, _, centre)| cache.views.get(id).map(|e| (*id, *centre, &e.drawn)));
-            let mut assembly = assemble(record, d.projection, &inputs.images, drawn)?;
+            let mut assembly = assemble(record, d.projection, &text, &inputs.images, drawn)?;
             assembly.add_dimensions(inputs.dimensions.iter().filter_map(|(id, _)| cache.dimensions.get(id).map(|e| &e.drawn)));
             let (scene, views, objects, dimensions) = assembly.finish()?;
             (Arc::new(scene), views, objects.into(), dimensions, GENERATION.fetch_add(1, Ordering::Relaxed).wrapping_add(1))
         }
     };
-    let answer = SheetView { scene, generation, views, stale, objects, dimensions, stale_dimensions };
-    cache.last = Some(Assembled { sheet, drawing: d, state, units, serial: cache.serial, inputs, answer: answer.clone() });
+    let answer = SheetView { scene, generation, views, stale, objects, dimensions, stale_dimensions, waiting_for_fonts };
+    cache.last =
+        Some(Assembled { sheet, drawing: d, doc, state, lettering, cells, text, pending, serial: cache.serial, inputs, answer: answer.clone() });
     Ok(answer)
 }
 
 /// Draws the first view out of date on the sheet last extracted or, with none, reads the dimensions
 /// out of date of one view, and says whether more are waiting: a short piece of work for the UI's
-/// tick, one view's projection or one read of a view's dimensions.
+/// tick, one view's projection or one read of a view's dimensions. Text that waits for its font is
+/// no work for it: [`extract`] sets it, and its answer says so ([`SheetView::waiting_for_fonts`]).
 pub fn step(s: &mut Session) -> bool {
     let Some((d, on, state)) = drawable(s) else { return false };
-    let units = s.doc.drawing_units(&d).to_string();
+    let lettering = Lettering::of(s, &d);
     let waiting: Vec<(u64, ResolvedView)> =
         on.iter().filter(|(id, view, _)| !s.drawing_scenes.fresh(*id, &state, view)).map(|(id, view, _)| (*id, view.clone())).collect();
-    let Some((id, view)) = waiting.first().cloned() else { return step_dimensions(s, &d, &on, &state, units) };
+    let Some((id, view)) = waiting.first().cloned() else { return step_dimensions(s, &d, &on, &state, lettering) };
     let done = job_for(s, &d, id, view, state.clone()).run();
     finish(s, done);
-    waiting.len() > 1 || !s.drawing_scenes.stale_dimensions(&d, &on, &state, &units).is_empty()
+    waiting.len() > 1 || !s.drawing_scenes.stale_dimensions(&d, &on, &state, &lettering).is_empty()
 }
 
 /// What [`step`] and [`begin`] draw from: the drawing open, the views of the sheet last extracted
@@ -945,14 +1089,14 @@ pub struct Job {
 }
 
 /// What a job was asked from: its request, the view as it resolved, and the session's world state,
-/// revision and drawing units then.
+/// revision and the drawing's lettering then.
 struct Ticket {
     request: u64,
     view: u64,
     resolved: ResolvedView,
     state: Arc<ModelState>,
     revision: u64,
-    units: String,
+    lettering: Lettering,
 }
 
 /// A job's work, for [`finish`]: the view's lines and what they show, its dimensions through its new
@@ -981,7 +1125,7 @@ impl Job {
         // The view's dimensions through its new frame, taken in the same swap as its lines.
         let frame = drawn.frame.map(|frame| (frame, ticket.resolved.line_group.value));
         let dimensions = dimensions_on(&drawing, std::iter::once(ticket.view));
-        let lines = draw_dimensions(&copy, &drawing, &dimensions, |_| frame);
+        let lines = draw_dimensions(&copy, &drawing, &dimensions, |_| frame, false);
         Done { ticket, drawn, shows, dimensions, lines, shown: (state, shown) }
     }
 }
@@ -1000,8 +1144,8 @@ pub fn begin(s: &mut Session) -> Option<Job> {
 fn job_for(s: &mut Session, d: &Arc<Drawing>, id: u64, view: ResolvedView, state: Arc<ModelState>) -> Job {
     let request = REQUEST.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
     s.drawing_scenes.requested = Some(request);
-    let units = s.doc.drawing_units(d).to_string();
-    let ticket = Ticket { request, view: id, resolved: view, state, revision: s.revision, units };
+    let lettering = Lettering::of(s, d);
+    let ticket = Ticket { request, view: id, resolved: view, state, revision: s.revision, lettering };
     Job { copy: designed(s), drawing: d.clone(), ticket, shown: s.drawing_scenes.shown.take() }
 }
 
@@ -1016,7 +1160,7 @@ pub fn finish(s: &mut Session, done: Done) -> bool {
     }
     s.drawing_scenes.requested = None;
     // Any change to the document since, even one undone, moves the revision: so the drawing, its
-    // dimensions' records and its units are as they were.
+    // dimensions' records and its lettering (units, font, language) are as they were.
     let holds = s.revision == ticket.revision
         && s.world_state().is_ok_and(|state| Arc::ptr_eq(&state, &ticket.state))
         && s.drawing(CMD).ok().and_then(|d| d.resolve_view(ticket.view).ok()).is_some_and(|view| view == ticket.resolved);
@@ -1029,7 +1173,7 @@ pub fn finish(s: &mut Session, done: Done) -> bool {
     let serial = cache.serial;
     let entry = Entry { state: ticket.state.clone(), shows, view: ticket.resolved, drawn, serial };
     cache.views.insert(ticket.view, entry);
-    cache.keep_dimensions(dimensions, lines, &ticket.state, serial, &ticket.units);
+    cache.keep_dimensions(dimensions, lines, &ticket.state, serial, &ticket.lettering);
     #[cfg(test)]
     {
         cache.projections += 1;
@@ -1051,17 +1195,17 @@ fn designed(s: &Session) -> Session {
 
 /// Reads the dimensions out of date of the first view that has any, through its frame, and says
 /// whether another view's are waiting.
-fn step_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>, units: String) -> bool {
-    let stale = s.drawing_scenes.stale_dimensions(d, on, state, &units);
+fn step_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>, lettering: Lettering) -> bool {
+    let stale = s.drawing_scenes.stale_dimensions(d, on, state, &lettering);
     let Some(view) = stale.first().map(|record| record.view) else { return false };
     let (these, others): (Vec<_>, Vec<_>) = stale.into_iter().partition(|record| record.view == view);
     let entry = s.drawing_scenes.views.get(&view);
     let frame = entry.and_then(|e| Some((e.drawn.frame?, e.view.line_group.value)));
     let view_serial = entry.map_or(0, |e| e.serial);
-    let lines = draw_dimensions(s, d, &these, |_| frame);
+    let lines = draw_dimensions(s, d, &these, |_| frame, false);
     let cache = &mut s.drawing_scenes;
     cache.serial += 1;
-    cache.keep_dimensions(these, lines, state, view_serial, &units);
+    cache.keep_dimensions(these, lines, state, view_serial, &lettering);
     !others.is_empty()
 }
 
@@ -1076,6 +1220,25 @@ fn catch_up(s: &mut Session, d: &Drawing, on: impl Iterator<Item = u64> + Clone,
         cache.drawing = Some(d.id);
     }
     keep_what_shows_the_same(s, on, state);
+}
+
+/// Sets the text of each dimension on `on` that waited for its font, once the search has answered:
+/// one read of those dimensions alone, kept only when its text is set, so a text still waiting
+/// changes nothing.
+fn set_waiting_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>, lettering: &Lettering) {
+    let waiting = s.drawing_scenes.waiting_dimensions(d, on, state, lettering);
+    if waiting.is_empty() {
+        return;
+    }
+    let cache = &s.drawing_scenes;
+    let lines = draw_dimensions(s, d, &waiting, |view| cache.views.get(&view).and_then(|e| Some((e.drawn.frame?, e.view.line_group.value))), false);
+    let set: Vec<(Arc<Dimension>, DrawnDimension)> = waiting.into_iter().zip(lines).filter(|(_, drawn)| !drawn.pending).collect();
+    let cache = &mut s.drawing_scenes;
+    for (record, drawn) in set {
+        let Some(view_serial) = cache.dimensions.get(&record.id).map(|e| e.view_serial) else { continue };
+        cache.serial += 1;
+        cache.keep_dimensions(vec![record], vec![drawn], state, view_serial, lettering);
+    }
 }
 
 /// Each view of `on` drawn from another world state that showed what `state` shows takes `state`:
