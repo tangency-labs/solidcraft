@@ -23,11 +23,6 @@
 //! | `sphere_plane` | status 1001 | status 1001 |
 //! | `tee_is_fitted` | 1.47e-3 off, tolerance 1e-3 | 1.47e-3 off, tolerance 1e-3 |
 //!
-//! The fork's later marks say where its 1001s come from: `SmFilletNx1Corner`, after the
-//! exact round is built, where the round ends on the cut (the pipes) or at the rim's one
-//! vertex on the sphere's seam (the ball). Only the status is checked here: which step of
-//! the fillet returned it isn't visible through `fillet_edges`.
-//!
 //! Those two columns were checked on the default kernel and with `fillet_exact_round_classes`
 //! alone while the default was the pinned corner; the blend corner, always built since #2400,
 //! builds `sphere_plane` (its End at a smooth vertex, as the fork since smlib#124) and, on
@@ -40,16 +35,19 @@
 //! against the unchanged fitted tolerance. The historical 1.47e-3 mark describes the
 //! earlier fitted surface, not this definition.
 //!
-//! `sphere_plane` with every fix: the fork at b785227 (before smlib#124) still returns 1001; at
-//! 63c7962 and 18e96f1 (smlib#124) the same round (`SmApiFilletEdges`, r 2, section 1, continuity
-//! 1, thumbweight 1) returns success with 5 faces and volume 3272.764885312161
-//! (`SmApiBrepComputeVolume` at 1e-7), which the port matched until #2864 (its round revolved, on
-//! the ball to 1e-14, valid at level 2). That is not the closed form: the ball R 10 below z = 4 is
-//! 4000 pi / 3 - 288 pi = 3284.011520552530, and the round r 2 (the ball's centre ring at z = 2,
-//! radius sqrt 60) takes away pi (40.5 - 2 sqrt 60 (pi - sqrt 3.75 / 4 - 2 asin 1 / 4)) =
-//! 22.492758031488, which leaves 3261.518762521043 (the case's `want`, the fork's capi figure). The
-//! fork's round and the port's take away 11.246635240 only.
-//! Tracked in tangency-labs/solidcore#2441.
+//! Each case selects a point on every edge of the rim it rounds, as the fork's capi has since
+//! tangency-labs/smlib@18bd2f5 (#2441). Two rims are more than one edge: the ball's rim
+//! z = 4 is two edges, joined at (+-sqrt 84, 0, 4), and B's seam at (5, 5 sqrt 3, -5) splits
+//! the pipes' arc into a long piece and a short one up to the cut. The fork's one point per
+//! rim reached only part of these two, so its round had to end at a smooth vertex where the
+//! unselected part carries on, and `SmFilletNx1Corner` returned 1001 there: the two 1001s
+//! above are that End, not the exact classes. Half a rim, built (#2660) or refused (#2864), is
+//! not the body the case's volume is for.
+//!
+//! `sphere_plane` is checked against its closed form, `sphere_plane_closed_form`: the ball
+//! R 10 below z = 4 is 4000 pi / 3 - 288 pi = 3284.011520552530, and the round r 2 (the
+//! ball's centre ring at z = 2, radius sqrt 60) takes away pi (40.5 - 2 sqrt 60 (pi -
+//! sqrt 3.75 / 4 - 2 asin 1 / 4)) = 22.492758031488, which leaves 3261.518762521043.
 //! One difference from the fork: the two pipes' union itself fails 1001 here without
 //! `ssi_split_curves_at_singular_points` (WR-77), so the pipes get that flag wherever the
 //! fork's mark is about their round.
@@ -57,7 +55,7 @@
 //! How this test drives the kernel differs from the capi: edges are picked as the nearest
 //! within 0.1 of each point, and `fillet_edges` runs with section type 1, continuity 1 and
 //! thumbweight 1, the arguments `round_edges` gives `SetFilletParameters`, without the capi's
-//! overflow handling, which takes more than one edge (each case here rounds one).
+//! overflow handling, which acts only when the blends of several edges overflow their faces.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -65,7 +63,9 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::blend::blend_corner::end::RUNS_ON_ACROSS_SEAM;
 use solidcore::blend::fillet_executive::api::fillet_edges;
+use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
@@ -87,6 +87,13 @@ const X_AXIS: V3 = [1.0, 0.0, 0.0];
 const Y_AXIS: V3 = [0.0, 1.0, 0.0];
 const Z_AXIS: V3 = [0.0, 0.0, 1.0];
 const DOWN: V3 = [0.0, 0.0, -1.0];
+
+/// The ball R 10 below z = 4 less the round r 2 on its whole rim, in closed form.
+fn sphere_plane_closed_form() -> f64 {
+    let cut_ball = 4000.0 * PI / 3.0 - 288.0 * PI;
+    let ring = 2.0 * 60f64.sqrt() * (PI - 3.75f64.sqrt() / 4.0 - 2.0 * 0.25f64.asin());
+    cut_ball - PI * (40.5 - ring)
+}
 
 fn pt(a: V3) -> Point3 {
     Point3::new(a[0], a[1], a[2])
@@ -147,6 +154,7 @@ enum RoundKind {
 struct Case {
     name: &'static str,
     build: fn(&mut Kernel) -> Result<Brep>,
+    /// A point on every edge of the rim to round. Two points on one edge pick it once.
     points: Vec<V3>,
     r: f64,
     want: f64,
@@ -267,6 +275,12 @@ fn cases() -> Vec<Case> {
         / (2.0 * g).cos();
     let zq = -5.0 - 5.0 * 1f64.cos();
     let yq = (100.0 - (zq + 10.0) * (zq + 10.0)).sqrt();
+    // B's seam at (5, 5 sqrt 3, -5) splits the pipes' arc, and the fork's two points both lie
+    // on its long piece. `hs` is halfway along the short one, from the seam (B's angle 0) to
+    // the cut at z = -2 (B's angle asin 0.6).
+    let hs = 0.5 * 0.6f64.asin();
+    let zs = -5.0 + 5.0 * hs.sin();
+    let ys = (100.0 - (zs + 10.0) * (zs + 10.0)).sqrt();
     vec![
         Case {
             name: "coaxial_cones",
@@ -295,7 +309,11 @@ fn cases() -> Vec<Case> {
         Case {
             name: "cylinders_touching_at_a_point",
             build: cylinders_touching_at_a_point,
-            points: vec![[5.0 * 1f64.sin(), yq, zq], [-5.0 * 1f64.sin(), yq, zq]],
+            points: vec![
+                [5.0 * 1f64.sin(), yq, zq],
+                [-5.0 * 1f64.sin(), yq, zq],
+                [5.0 * hs.cos(), ys, zs],
+            ],
             r: 1.0,
             want: 13442.703130586538,
             kind: RoundKind::Rational(12, 2),
@@ -343,9 +361,9 @@ fn cases() -> Vec<Case> {
         Case {
             name: "sphere_plane",
             build: sphere_plane,
-            points: vec![[0.0, 84f64.sqrt(), 4.0]],
+            points: vec![[0.0, 84f64.sqrt(), 4.0], [0.0, -(84f64.sqrt()), 4.0]],
             r: 2.0,
-            want: 3261.518762521006,
+            want: sphere_plane_closed_form(),
             kind: RoundKind::Revolved,
             faces: vec![
                 Quadric::Plane([0.0, 0.0, 4.0], Z_AXIS),
@@ -557,19 +575,16 @@ fn holds(mark: Mark, got: &Graded) -> bool {
     }
 }
 
-/// The fork's mark at 7ac037e (smlib#77 merged) and still at d01d7b0.
+/// The fork's mark at 7ac037e (smlib#77 merged) and still at d01d7b0 for the six rims of
+/// one edge; the two rims of more than one edge, selected whole, pass (#2441).
 fn mark_after(name: &str) -> Mark {
     match name {
-        "cylinders_touching_at_a_point" | "sphere_plane" => Mark::Status1001,
         "tee_is_fitted" => Mark::OverTolerance(1.47e-3),
         _ => Mark::Passes,
     }
 }
 
-/// The current section construction fixes the fitted tee. The ball cut flat, its rim's one
-/// edge picked, built as the fork's does since smlib#124 (63c7962, 18e96f1), the half rim
-/// ending at the sphere's seam (#2441, #2660); a round does not end at a seam (#2864), so
-/// it is refused, code 1001 as before smlib#124. The other marks are unchanged.
+/// The current section construction fixes the fitted tee. The other marks are unchanged.
 fn mark_with_section_fixes(name: &str) -> Mark {
     match name {
         "tee_is_fitted" => Mark::Passes,
@@ -657,6 +672,37 @@ fn the_pipes_join_only_with_wr77() {
 
 /// The grading sees what it's for: on a case that passes, a volume one part in 1e5 off and
 /// each wrong surface kind are refused, and the fork's marks on it don't hold.
+/// The ball's rim with one of its two edges picked, as the case was before #2441: the half
+/// rim's round would end at the sphere's seam, and a round does not end at a seam (#2864).
+/// The session, driven as `fillet_edges` drives it, says that is why (the 1001 is the status
+/// `fillet_edges` returns, checked by `holds`).
+#[test]
+fn the_ball_s_half_rim_is_refused() {
+    let mut case = cases()
+        .into_iter()
+        .find(|c| c.name == "sphere_plane")
+        .unwrap();
+    case.points.truncate(1);
+    for kernel in [solidcraft_kernel, solidcraft_before_definitions] {
+        let got = grade(&case, &mut kernel());
+        assert!(holds(Mark::Status1001, &got), "{got:?}");
+
+        let mut k = kernel();
+        let mut b = sphere_plane(&mut k).unwrap();
+        let e = pick(&k, &b, case.points[0]).unwrap();
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        let r = s
+            .prepare_constant_radius_edges(&mut k, &[e], case.r, 1, 1, 1.0)
+            .and_then(|()| s.do_fillet(&mut k));
+        assert!(r.is_err(), "the half rim's round refused");
+        assert_eq!(
+            s.error_info().comment,
+            RUNS_ON_ACROSS_SEAM,
+            "refused at the seam"
+        );
+    }
+}
+
 #[test]
 fn the_grading_refuses_a_wrong_volume_and_a_wrong_kind() {
     let graded = |want_factor: f64, kind: RoundKind| {
