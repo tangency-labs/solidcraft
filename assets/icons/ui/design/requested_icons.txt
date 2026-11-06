@@ -161,6 +161,7 @@ mirror	false
 motion_link	false
 move	false
 nav_settings	false
+network_folder	false
 new	false
 normal	false
 offset	false
