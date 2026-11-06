@@ -346,6 +346,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `message_field` | Growing message editor; owner retains scroll and Enter routing | field tokens |
 | `cell_editor`, `bounded_cell_editor`, `search_field`, `library_cell` | Stable-ID inline/search editors; bounded variant caps Unicode characters; `library_cell` attaches a Library dropdown inside the editor border | field tokens, `text/error` |
 | `wide_cell_editor` | A table cell editor that, while focused and too narrow for its text, opens over the cells to its right and wraps, with the live value or error under it (#9358) | field tokens, popup frame, `text/error` |
+| `expandable_cell_editor` | A single-line table cell with a trailing mini-button inside its frame opening a wrapped overlay at least 30 monospace characters wide and five rows tall; Enter or leaving the field finishes editing, and pasted line breaks become spaces | field tokens, `form_close_size`, popup frame |
 | `menu_filter` | The filter at the top of a long menu: search glyph, frameless editor and a rule under them, so it does not read as an entry; the caller filters and owns focus | `space_8/16`, `font_label`, `form_dim/ink`, `dialog_rule` |
 | `text_area` | Bounded multiline JSON/data editor | field tokens |
 | `dropdown`, `dropdown_menu`, `compact_dropdown_menu` | Indexed choices or caller-supplied menu controls | `control_height`, `text_dim`, form tokens |

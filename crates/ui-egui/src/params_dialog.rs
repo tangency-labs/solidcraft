@@ -606,9 +606,9 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                 });
                 row.cell(|ui| {
                     let mut comment = d.comments.get(&r.name).cloned().unwrap_or_else(|| r.comment.clone());
-                    let id = ui.make_persistent_id(("comment", &r.name));
+                    let id = ui.make_persistent_id(("comment", salt, &r.name));
                     let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
-                    let response = ui_kit::cell_editor(ui, id, &mut comment, "Comment", false);
+                    let response = ui_kit::expandable_cell_editor(ui, id, &mut comment, "Comment", &format!("param:comment:{}", r.name));
                     let entered = enter_for(ui, focused);
                     if response.changed() {
                         d.comments.insert(r.name.clone(), comment.clone());
@@ -758,7 +758,7 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
             ui_kit::text(ui, &value, ui_kit::Text::Value("new_value", invalid)).backing_on_hover_text(&value);
         });
         row.cell(|ui| {
-            let response = ui_kit::cell_editor(ui, comment_id, &mut d.new_comment, "Comment", false);
+            let response = ui_kit::expandable_cell_editor(ui, comment_id, &mut d.new_comment, "Comment", "param:new:comment");
             select_all_on_tab(ui, &response, &d.new_comment);
             crate::scenario::publish_handle("param:new:comment", response.rect.center());
             left |= response.lost_focus();
@@ -1807,6 +1807,171 @@ mod tests {
             assert!(crate::scenario::rect_of("dialog:body:viewport").unwrap().height() > 0.0);
         }
     }
+    #[test]
+    fn expanded_comment_opens_explicitly_wraps_and_saves_on_click_away() {
+        let evidence = |h: &mut crate::scenario::Harness, name: &str| {
+            let Some(directory) = std::env::var_os("SOLIDCRAFT_COMMENT_EVIDENCE") else { return };
+            let directory = std::path::PathBuf::from(directory);
+            std::fs::create_dir_all(&directory).unwrap();
+            crate::icons::clear_texture_cache(&h.ctx);
+            let output = h.ctx.run_ui(egui::RawInput { screen_rect: Some(h.ctx.content_rect()), focused: true, ..Default::default() }, |ui| {
+                h.app.logic(ui.ctx());
+                h.app.ui(ui);
+            });
+            let mut textures = std::collections::HashMap::from([(egui::TextureId::Managed(0), h.ctx.fonts(|fonts| fonts.image()))]);
+            crate::ui_kit::update_test_textures(&mut textures, &output.textures_delta);
+            let dialog = crate::scenario::rect_of("dialog:header").unwrap().union(crate::scenario::rect_of("dialog:footer").unwrap());
+            let dialog = crate::scenario::rect_of("param:comment:width:popup").map_or(dialog, |popup| dialog.union(popup));
+            for (suffix, bounds) in [("", h.ctx.content_rect()), ("-dialog", dialog)] {
+                let mut image = crate::ui_kit::test_raster(&h.ctx, output.shapes.clone(), h.ctx.pixels_per_point(), bounds, &textures);
+                let background = crate::theme::Tokens::get().dialog_body.to_array();
+                for pixel in image.pixels_mut() {
+                    let remaining = 1.0 - f32::from(pixel.0[3]) / 255.0;
+                    for (dest, back) in pixel.0.iter_mut().zip(background) {
+                        *dest = (f32::from(*dest) + f32::from(back) * remaining).round() as u8;
+                    }
+                }
+                image.save(directory.join(format!("solidcraft-comment-{name}{suffix}.png"))).unwrap();
+            }
+        };
+        let mut h = escape_dialog();
+        evidence(&mut h, "before");
+        h.step(&json!({"click":{"handle":"param:comment:width"}})).unwrap();
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none(), "ordinary editing stays compact");
+        h.run(&json!([{"key":"A","cmd":true}, {"text":"Pending inline comment"}])).unwrap();
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        let popup = crate::scenario::rect_of("param:comment:width:popup").unwrap();
+        let tokens = crate::theme::Tokens::get();
+        let font = egui::FontId::monospace(tokens.font_label);
+        let width = h.ctx.fonts_mut(|fonts| fonts.layout_no_wrap("M".repeat(30), font.clone(), tokens.form_ink)).size().x;
+        let line_height = h.ctx.fonts_mut(|fonts| fonts.row_height(&font));
+        assert!(popup.width() >= width, "expanded comment fits thirty characters: {popup:?}");
+        assert!(popup.height() >= line_height * 5.0, "expanded comment shows five lines: {popup:?}");
+        assert!(h.ctx.content_rect().contains_rect(popup), "popup stays within the window: {popup:?}");
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, "Saved comment", "opening does not prematurely save the inline draft");
+        assert_eq!(h.app.params.as_ref().unwrap().comments.get("width").map(String::as_str), Some("Pending inline comment"));
+
+        let long = "A longer comment with enough words to wrap across several visible rows while editing the parameter";
+        h.run(&json!([{"key":"A","cmd":true}, {"text":long}])).unwrap();
+        h.frames(2);
+        evidence(&mut h, "after");
+        assert!(
+            h.shapes
+                .iter()
+                .any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == long && text.galley.rows.len() > 1)),
+            "the expanded text wraps"
+        );
+        h.step(&json!({"click":{"handle":"dialog:Filter"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none());
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, long);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, "Saved comment", "the entire edit is one undoable command");
+    }
+
+    #[test]
+    fn expanded_comment_paste_stays_single_line_and_enter_commits() {
+        let mut h = escape_dialog();
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.app.synthetic.push(egui::Event::Paste("Mounting\r\n尺寸\n🙂".into()));
+        h.frame();
+        let draft = h.app.params.as_ref().unwrap().comments.get("width").cloned().unwrap();
+        assert!(!draft.contains(['\r', '\n']), "visual wrapping must not add stored line breaks: {draft:?}");
+        assert!(draft.contains("Mounting") && draft.contains("尺寸") && draft.contains('🙂'));
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none());
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, draft);
+        assert!(h.app.params.is_some(), "Enter finishes the field without closing Parameters");
+    }
+
+    #[test]
+    fn expanded_comment_escape_discards_draft_and_closes_parameters() {
+        let mut h = escape_dialog();
+        let before = escape_state(&h);
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        h.run(&json!([{"key":"A","cmd":true}, {"text":"Expanded pending comment"}])).unwrap();
+        assert_eq!(h.app.params.as_ref().unwrap().comments.get("width").map(String::as_str), Some("Expanded pending comment"));
+        escape_closed(&mut h, &before, "10 mm");
+        h.frames(3);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none(), "reopening Parameters starts with the compact editor");
+    }
+
+    #[test]
+    fn expanded_comment_scrolls_long_text_and_reopens_after_tab() {
+        let mut h = escape_dialog();
+        let long = "A mounting clearance note with dimensions and installation details. ".repeat(40);
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        h.run(&json!([{"key":"A","cmd":true}, {"text":long}])).unwrap();
+        h.frames(2);
+        let (painted, text) = h
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text == long && text.galley.rows.len() > 1 => Some((shape, text)),
+                _ => None,
+            })
+            .unwrap();
+        assert!(text.galley.size().y > painted.clip_rect.height(), "very long text scrolls within its editor");
+        assert!(painted.clip_rect.height() < h.ctx.content_rect().height() / 2.0, "the editor leaves the dialog reachable");
+        h.step(&json!({"key":"Tab"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none(), "Tab leaves the expanded editor");
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, long);
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_some());
+        h.run(&json!([{"key":"A","cmd":true}, {"text":"Reopened"}, {"key":"Enter"}])).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, "Reopened");
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none());
+    }
+
+    #[test]
+    fn expanded_comment_context_menu_keeps_draft_until_edit_finishes() {
+        let mut h = escape_dialog();
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        h.run(&json!([{"key":"A","cmd":true}, {"text":"Pending expanded comment"}])).unwrap();
+        h.step(&json!({"click":{"handle":"param:comment:width:popup"},"button":"right"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::handle_at("menu:text_select_all").is_some());
+        h.step(&json!({"click":{"handle":"menu:text_select_all"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_some(), "the context menu returns to the expanded editor");
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, "Saved comment", "using the context menu does not commit the draft");
+        h.run(&json!([{"text":"Replacement from menu selection"}, {"key":"Enter"}])).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, "Replacement from menu selection");
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none());
+    }
+
+    #[test]
+    fn expanded_comment_draft_stays_in_row_until_click_away() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.step(&json!({"start":"parameters.change"})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
+        h.step(&json!({"text":"width"})).unwrap();
+        h.step(&json!({"click":{"handle":"param:new:expression"}})).unwrap();
+        h.step(&json!({"text":"25 mm"})).unwrap();
+        h.step(&json!({"click":{"handle":"param:new:comment:expand"}})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::rect_of("param:new:comment:popup").is_some());
+        assert!(h.app.session.doc.param("width").is_none(), "opening the expanded draft field stays in its row");
+        h.step(&json!({"text":"Overall width"})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Filter"}})).unwrap();
+        h.frames(2);
+        let parameter = h.app.session.doc.param("width").unwrap();
+        assert_eq!(parameter.expr, "25 mm");
+        assert_eq!(parameter.comment, "Overall width");
+    }
+
     /// #9358: a formula longer than its column opens wide while it is edited, over the cells to
     /// its right, so all of it shows; Enter applies it and the field goes back into its column.
     /// A formula that fits stays in its cell.

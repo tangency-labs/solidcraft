@@ -1169,10 +1169,10 @@ pub fn cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, in
 
 /// Stable-ID cell/name editor with a caller-supplied character cap. Tokens: cell_editor tokens.
 pub(crate) fn bounded_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize) -> Response {
-    cell_editor_frame(ui, id, value, hint, invalid, limit, true)
+    cell_editor_frame(ui, id, value, hint, invalid, limit, true, 0.0)
 }
 
-fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize, frame: bool) -> Response {
+fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize, frame: bool, reserve: f32) -> Response {
     let t = Tokens::get();
     let editor = text_input(egui::TextEdit::singleline(value))
         .char_limit(limit)
@@ -1182,6 +1182,12 @@ fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, 
         .background_color(if invalid { t.form_error_fill } else { t.input_fill() })
         .text_color(if invalid { t.form_error } else { t.form_ink })
         .clip_text(true);
+    let editor = if reserve > 0.0 {
+        let inset = t.form_inset.round() as i8;
+        editor.margin(egui::Margin { left: inset, right: inset.saturating_add(reserve.round() as i8), top: 0, bottom: 0 })
+    } else {
+        editor
+    };
     let editor = if invalid {
         editor.frame(
             egui::Frame::NONE
@@ -1295,6 +1301,139 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
         info.current_text_value = Some(value.clone());
         info
     });
+    response
+}
+
+struct SingleLineBuffer<'a>(&'a mut String);
+
+impl egui::TextBuffer for SingleLineBuffer<'_> {
+    fn type_id(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<SingleLineBuffer<'static>>()
+    }
+
+    fn is_mutable(&self) -> bool {
+        true
+    }
+
+    fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    fn insert_text(&mut self, text: &str, at: egui::text::CharIndex) -> usize {
+        self.0.insert_text(&text.replace(['\r', '\n'], " "), at)
+    }
+
+    fn delete_char_range(&mut self, range: std::ops::Range<egui::text::CharIndex>) {
+        self.0.delete_char_range(range);
+    }
+}
+
+/// A compact single-line cell with an explicit, wrapped 30-character/five-row editor.
+/// The returned editor response retains the caller's change and focus-loss commit handling.
+/// Tokens: cell_editor, form_close_size, popup frame and font_label.
+pub(crate) fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, handle: &str) -> Response {
+    let t = Tokens::get();
+    let open_id = id.with("expanded");
+    let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
+    let mut open = focused && ui.data(|d| d.get_temp::<bool>(open_id).unwrap_or(false));
+    let width = dimension(ui.available_width());
+    let anchor = egui::Rect::from_min_size(ui.cursor().min, vec2(width, row_height()));
+    if open && !ui.is_rect_visible(anchor) {
+        ui.memory_mut(|m| m.surrender_focus(id));
+        open = false;
+    }
+    let mut response = if open {
+        let (rect, response) = ui.allocate_exact_size(anchor.size(), egui::Sense::hover());
+        ui.painter().rect_filled(rect, t.control_radius, t.input_fill());
+        let text = egui::Rect::from_min_max(rect.min, egui::pos2((rect.right() - t.form_close_size).max(rect.left()), rect.bottom()));
+        paint_text(ui, text.shrink2(vec2(t.form_inset, 0.0)), value, egui::FontId::monospace(t.font_label), t.form_ink, false);
+        response
+    } else {
+        cell_editor_frame(ui, id, value, hint, false, usize::MAX, true, t.form_close_size)
+    };
+    let button_rect = egui::Rect::from_center_size(
+        egui::pos2(response.rect.right() - t.form_close_size / 2.0, response.rect.center().y),
+        vec2(t.form_close_size, t.form_close_size),
+    );
+    let button = ui
+        .scope_builder(egui::UiBuilder::new().id_salt(id.with("expand_button")).max_rect(button_rect), |ui| {
+            ui.set_clip_rect(ui.clip_rect().intersect(response.rect.shrink(t.control_border_stroke(t.control_border).width.max(1.0))));
+            super::compact_button(ui, "…", crate::i18n::tr("ui.expand_text_editor"), true, open)
+        })
+        .inner;
+    button.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), crate::i18n::tr("ui.expand_text_editor")));
+    scenario::publish_target(&format!("{handle}:expand"), button.rect);
+    // Focus leaves a field on pointer press, before the button reports a released click.
+    let opening = (button.clicked() || button.is_pointer_button_down_on()) && !open;
+    open |= opening;
+    if open && ui.is_rect_visible(response.rect) {
+        let font = egui::FontId::monospace(t.font_label);
+        let text_width = ui.fonts_mut(|f| f.layout_no_wrap("M".repeat(30), font.clone(), t.form_ink)).size().x;
+        let width = (text_width + 2.0 * t.form_inset).max(width);
+        let height = (ui.fonts_mut(|f| f.row_height(&font)) + ui.spacing().extra_text_line_spacing) * 5.0 + t.space_8;
+        let ctx = ui.ctx().clone();
+        let shown = Container::new(&ctx, Surface::Popup)
+            .area(id.with("expanded_popup"))
+            .fixed_pos(response.rect.min)
+            .constrain(true)
+            .order(egui::Order::Foreground)
+            .show(&ctx, |ui| {
+                Container::popup_frame(ui.style())
+                    .fill(t.control_fill)
+                    .show(ui, |ui| {
+                        ui.set_width(width);
+                        egui::ScrollArea::vertical()
+                            .max_height(height.min(ctx.content_rect().height() - t.space_24))
+                            .show(ui, |ui| {
+                                let mut buffer = SingleLineBuffer(value);
+                                let mut response = ui.add(
+                                    text_input(egui::TextEdit::multiline(&mut buffer))
+                                        .id(id)
+                                        .font(font)
+                                        .hint_text(crate::i18n::tr_label(hint))
+                                        .vertical_align(egui::Align::Min)
+                                        .desired_width(width)
+                                        .desired_rows(5)
+                                        .return_key(None)
+                                        .lock_focus(false)
+                                        .text_color(t.form_ink)
+                                        .background_color(t.input_fill()),
+                                );
+                                if opening || button.clicked() || ui.is_sizing_pass() {
+                                    response.request_focus();
+                                }
+                                super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
+                                let enter = ui.input(|i| i.raw.events.iter().any(|event| matches!(event,
+                                    egui::Event::Key { key: egui::Key::Enter, pressed: true, repeat: false, modifiers, .. } if *modifiers == egui::Modifiers::NONE
+                                )));
+                                if response.has_focus() && enter {
+                                    response.surrender_focus();
+                                }
+                                publish(ui, &response, egui::WidgetType::TextEdit);
+                                response
+                            })
+                            .inner
+                    })
+                    .inner
+            });
+        response = shown.inner;
+        if egui::Popup::is_id_open(&ctx, egui::Popup::default_response_id(&response))
+            || (response.lost_focus() && shown.response.contains_pointer() && ui.input(|i| i.pointer.any_down()))
+        {
+            response.request_focus();
+        }
+        scenario::publish_target(&format!("{handle}:popup"), response.rect.intersect(shown.response.rect));
+        open = opening || ctx.memory(|m| m.has_focus(id));
+    } else {
+        open = false;
+    }
+    ui.data_mut(|d| d.insert_temp(open_id, open));
+    response.widget_info(|| {
+        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), crate::i18n::tr_label(hint));
+        info.current_text_value = Some(value.clone());
+        info
+    });
+    scenario::publish_target(handle, response.rect);
     response
 }
 
@@ -1919,7 +2058,7 @@ pub(crate) fn library_cell(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     let response = ui
         .scope_builder(egui::UiBuilder::new().max_rect(field).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
             ui.set_clip_rect(ui.clip_rect().intersect(field));
-            cell_editor_frame(ui, id, value, hint, false, usize::MAX, false)
+            cell_editor_frame(ui, id, value, hint, false, usize::MAX, false, 0.0)
         })
         .inner;
     let button = egui::Rect::from_min_max(egui::pos2(split, rect.top()), rect.max);
