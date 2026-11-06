@@ -30,14 +30,16 @@ pub(crate) fn text(app: &SolveApp, p: Vec2) -> String {
 
 /// The sketch coordinates to show for a pointer at `pointer` in the open sketch with no tool
 /// running: the hovered point of the sketch, else where the pointer's ray meets the sketch plane.
-/// None when the preference is off, a tool runs (it shows its own), or no 2D sketch is open.
+/// None when the preference is off, a tool runs (it shows its own), or no 2D sketch is open
+/// (none, or a 3D sketch).
 pub(crate) fn idle_point(app: &SolveApp, proj: &Proj, pointer: Pos2) -> Option<Vec2> {
     if !app.preferences.sketch_cursor_coordinates || app.tool.is_some() {
         return None;
     }
     let sid = app.session.active_sketch?;
     let world = crate::open_meshing::shown_world(app);
-    let ss = world.sketch(sid)?;
+    // A 3D sketch's points leave its plane: X and Y on it would not say where the pointer is.
+    let ss = world.sketch(sid).filter(|ss| !ss.sketch.view.three_d)?;
     if let Some(Hit::SketchPoint { sketch, at, .. }) = &app.viewport.hover
         && *sketch == sid
         && at.is_finite()
