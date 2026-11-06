@@ -18,7 +18,7 @@ use serde_json::Value;
 use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
-use super::types::{FeatureCommon, LengthExpr, OperationParam, Point3, TouchingParam, feature_common};
+use super::types::{FeatureCommon, LengthExpr, OperationParam, Point3, TouchingParam, feature_common, present};
 use crate::params::{self, MAX_STRING_LIST};
 
 /// The most faces, or holes, one call may pick, as `cmd/surface.rs` reads them.
@@ -66,9 +66,20 @@ impl JsonSchema for FacePoints {
     }
 }
 
-/// `bodies` for Stitch and Thicken: a name or a list of 1 to 10 000 names, read by
-/// `params::string_list` (as [`NameList`] reads it), with its messages. Not `NameList`'s own
-/// schema, which allows the empty list and `null` the handlers refuse.
+/// The handlers' message for `bodies` with no body in it.
+const BODIES_MESSAGE: &str = "`bodies` must list bodies";
+
+/// `bodies` for Stitch and Thicken: a name or a list of 1 to 10 000 names, read as
+/// `params::string_list` reads it (through [`NameList`]), with its messages. `string_list` reads
+/// `null` as no names, which the handlers then refuse; the contract refuses `null` and an empty
+/// list with that message.
+fn surface_bodies<'de, D: Deserializer<'de>>(d: D) -> Result<Option<NameList>, D::Error> {
+    let v = Value::deserialize(d)?;
+    let names = if v.is_null() { NameList::default() } else { NameList::deserialize(v).map_err(D::Error::custom)? };
+    if names.0.is_empty() { Err(D::Error::custom(whole(BODIES_MESSAGE))) } else { Ok(Some(names)) }
+}
+
+/// The schema of [`surface_bodies`]. Not `NameList`'s own, which allows the empty list.
 fn bodies_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
         "description": "The surface bodies, by name: one, or a list of 1 to 10 000.",
@@ -88,9 +99,9 @@ fn bodies_required(schema: &mut Schema) {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = bodies_required)]
 pub struct StitchParams {
-    // Optional in the type, required in the schema: left out, `null` or empty, the handler
-    // refuses the call with its own message ("`bodies` must list bodies").
-    #[serde(default)]
+    // Optional in the type, required in the schema: left out, the handler refuses the call with
+    // its own message ("`bodies` must list bodies"), which the contract gives `null` and `[]`.
+    #[serde(default, deserialize_with = "surface_bodies")]
     #[schemars(schema_with = "bodies_schema")]
     pub bodies: Option<NameList>,
     /// How far apart two edges may be and still be sewn together. Default: 0, edges that meet.
@@ -135,7 +146,7 @@ pub struct ReverseNormalParams {
 #[schemars(deny_unknown_fields, transform = bodies_required)]
 pub struct ThickenParams {
     // Required in the schema (`bodies_required`), optional in the type, as Stitch's.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "surface_bodies")]
     #[schemars(schema_with = "bodies_schema")]
     pub bodies: Option<NameList>,
     /// How thick, along each surface's normal; negative: against it.
@@ -205,8 +216,10 @@ fn faces_required(schema: &mut Schema) {
 #[schemars(deny_unknown_fields, transform = faces_required)]
 pub struct OffsetParams {
     // Optional in the type, required in the schema: left out, the handler refuses the call with
-    // its own message, as for an empty list.
-    #[serde(default)]
+    // its own message, which the contract gives `null` and an empty list (`present`: a `null`
+    // goes to `OffsetFaces`, which refuses it).
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "OffsetFaces")]
     pub faces: Option<OffsetFaces>,
     /// The body the faces are on, by name. Default: the body at the points.
     #[serde(default)]
@@ -304,8 +317,10 @@ fn face_required(schema: &mut Schema) {
 #[schemars(deny_unknown_fields, transform = face_required)]
 pub struct UntrimParams {
     // Optional in the type, required in the schema: left out, the handler refuses the call with
-    // its own message ("`face` is required: {body, point}").
-    #[serde(default)]
+    // its own message ("`face` is required: {body, point}"). A `null` goes to `UntrimFace`
+    // (`present`), which refuses it as the handler does.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "UntrimFace")]
     pub face: Option<UntrimFace>,
     #[serde(default)]
     pub holes: Option<UntrimHoles>,
