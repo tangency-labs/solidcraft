@@ -25,18 +25,50 @@ pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryT
     }
     let n = app.session.doc.features.len();
     let marker = app.session.doc.marker.unwrap_or(n);
-    let position = match control {
+    // The steps are the features the History shows: in the bottom bar, only those of the
+    // component it shows (`timeline_scope`, #11430). A step lands where dropping the marker in
+    // that slot would.
+    let view = transport_view(app);
+    let len = view.len();
+    if len == 0 && n > 0 && !matches!(control, crate::ui_kit::HistoryTransport::Play) {
+        // The marker stays, but the click still takes over from playback, as a step does.
+        stop_playback(app);
+        return;
+    }
+    let slot = view.slot(marker);
+    let slot = match control {
         crate::ui_kit::HistoryTransport::First => 0,
-        crate::ui_kit::HistoryTransport::Back => marker.saturating_sub(1),
+        crate::ui_kit::HistoryTransport::Back => slot.saturating_sub(1),
         crate::ui_kit::HistoryTransport::Play => {
             app.start("timeline.play");
             return;
         }
-        crate::ui_kit::HistoryTransport::Forward => marker.saturating_add(1).min(n),
-        crate::ui_kit::HistoryTransport::Last => n,
+        crate::ui_kit::HistoryTransport::Forward => slot.saturating_add(1).min(len),
+        crate::ui_kit::HistoryTransport::Last => len,
     };
+    let position = view.index(slot);
+    // From a marker outside the shown features, the nearest shown slot can lie the other way:
+    // First and Back never add features, and Forward and Last never roll any back.
+    let backwards = matches!(control, crate::ui_kit::HistoryTransport::First | crate::ui_kit::HistoryTransport::Back);
+    if (backwards && position > marker) || (!backwards && position < marker) {
+        stop_playback(app);
+        return;
+    }
     let params = if position < n { json!({"position":position}) } else { json!({}) };
     let _ = app.run_heavy("timeline.roll_to", params);
+}
+
+/// The features the History controls step through: those the bottom bar shows (one component's
+/// and those inside it while the bar shows one, without the components kept out of the bar), or
+/// every feature for the History on the left or in the browser, or when Preferences > Layout
+/// turns "History steps by component" off.
+fn transport_view(app: &SolveApp) -> crate::timeline_fold::View {
+    let doc = &app.session.doc;
+    if app.preferences.timeline_left || app.preferences.history_in_browser || !app.preferences.history_steps_component {
+        return crate::timeline_fold::View::of(doc, None, true);
+    }
+    let within = crate::timeline_scope::shown(app).map(|c| crate::timeline_scope::components_within(app, c));
+    crate::timeline_fold::View::of(doc, within.as_ref(), app.tree.history_show_hidden)
 }
 
 /// A click runs a History control; a right-click offers to show or hide the Play button.
@@ -2202,6 +2234,174 @@ mod tests {
         h.app.run("file.new", json!({})).unwrap();
         assert_eq!(h.app.tree.timeline_scope, crate::timeline_scope::Scope::Follow, "file.new");
         assert_eq!(h.app.tree.timeline_followed, None, "it follows the new design's own component");
+    }
+
+    /// While a component is active, the History controls step through the features the timeline
+    /// shows (that component's), not the whole design's (#11430).
+    #[test]
+    fn the_history_controls_step_through_the_active_components_features() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("view.history_layout", json!({"dock": "bottom"})).unwrap();
+        h.app.run("component.create", json!({"name": "Left"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "LeftBox"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("component.create", json!({"name": "Right"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new_body", "name": "RightBox"}))
+            .unwrap();
+        h.app.run("component.activate", json!({"component": "Left"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [0, 0, 10], "operation": "new_body", "name": "LeftTop"}))
+            .unwrap();
+        let names: Vec<String> = h.app.session.doc.features.iter().map(|f| f.name.clone()).collect();
+        assert_eq!(names, ["LeftBox", "RightBox", "LeftTop"]);
+        let features = h.app.session.doc.features.clone();
+        h.settle();
+        // Positions are the design's: 0 before LeftBox, 2 before LeftTop, None the end.
+        for (control, position) in [
+            ("back", Some(2)),
+            ("back", Some(0)),
+            ("back", Some(0)),
+            ("forward", Some(2)),
+            ("forward", None),
+            ("forward", None),
+            ("first", Some(0)),
+            ("last", None),
+        ] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, position, "{control}");
+            assert_eq!(h.app.session.doc.features, features, "transport only moves the marker");
+        }
+        // Show All steps through every feature again.
+        h.step(&json!({"click": {"handle": "timeline:components"}})).unwrap();
+        h.settle();
+        for (control, position) in [("back", Some(2)), ("back", Some(1)), ("back", Some(0)), ("forward", Some(1))] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, position, "show all: {control}");
+        }
+        // Back to Left's features with the marker between them (after LeftBox, before RightBox):
+        // Forward adds LeftTop, the next feature the bar shows, not only the hidden RightBox.
+        h.step(&json!({"click": {"handle": "timeline:components"}})).unwrap();
+        h.settle();
+        h.step(&json!({"click": {"handle": "history:forward"}})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.doc.marker, None, "forward from between the shown features");
+    }
+
+    /// A component with no features of its own lists nothing, so the controls leave the marker
+    /// where it is rather than stepping through other components' features (#11430).
+    #[test]
+    fn the_history_controls_of_a_component_with_no_features_do_nothing() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("view.history_layout", json!({"dock": "bottom"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"})).unwrap();
+        h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "name": "Side"})).unwrap();
+        h.app.run("component.create", json!({"name": "Empty"})).unwrap();
+        h.settle();
+        h.app.run("timeline.roll_to", json!({"position": 1})).unwrap();
+        h.settle();
+        for control in ["first", "back", "forward", "last"] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, Some(1), "{control}");
+        }
+        // A control that leaves the marker still takes over from playback, as any other step does.
+        for control in ["first", "back", "forward", "last"] {
+            h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+            h.settle();
+            h.app.start("timeline.play");
+            h.frames(2);
+            assert!(h.app.timeline_playback.is_some(), "playing before {control}");
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.frames(2);
+            assert!(h.app.timeline_playback.is_none(), "{control} stops playback");
+        }
+    }
+
+    /// With the marker outside the shown features (after them, or before them), a control never
+    /// moves it the other way: Forward and Last don't roll back over hidden features, and First
+    /// and Back don't add them (#11430).
+    #[test]
+    fn the_history_controls_never_step_against_their_direction() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("view.history_layout", json!({"dock": "bottom"})).unwrap();
+        h.app.run("component.create", json!({"name": "Left"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "LeftBox"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("component.create", json!({"name": "Right"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new_body", "name": "RightBox"}))
+            .unwrap();
+        // Left shows only LeftBox, and the marker is at the end, after RightBox.
+        h.app.run("component.activate", json!({"component": "Left"})).unwrap();
+        h.settle();
+        for control in ["forward", "last"] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, None, "{control} past the shown features");
+        }
+        // Right shows only RightBox, and the marker is at the start, before LeftBox.
+        h.app.run("component.activate", json!({"component": "Right"})).unwrap();
+        h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+        h.settle();
+        for control in ["back", "first"] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, Some(0), "{control} before the shown features");
+        }
+    }
+
+    /// With "History steps by component" off, the controls step through
+    /// the whole design as before, even while a component is active (#11430).
+    #[test]
+    fn the_history_controls_step_through_the_whole_design_when_the_preference_is_off() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.history_steps_component = false;
+        h.app.run("view.history_layout", json!({"dock": "bottom"})).unwrap();
+        h.app.run("component.create", json!({"name": "Left"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "LeftBox"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("component.create", json!({"name": "Right"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new_body", "name": "RightBox"}))
+            .unwrap();
+        h.app.run("component.activate", json!({"component": "Left"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [0, 0, 10], "operation": "new_body", "name": "LeftTop"}))
+            .unwrap();
+        h.settle();
+        for (control, position) in [("back", Some(2)), ("back", Some(1)), ("back", Some(0)), ("forward", Some(1)), ("last", None), ("first", Some(0))]
+        {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, position, "{control}");
+        }
+    }
+
+    /// Preferences > Layout shows "History steps by component" as a
+    /// checkbox with its note, and clicking it turns the preference off and on (#11430).
+    #[test]
+    fn the_layout_page_has_a_checkbox_for_the_history_controls_preference() {
+        let mut h = Harness::new();
+        h.call("ui.prefs", json!({"language": "en", "open": "Layout"}));
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["history_steps_component"], true, "on by default");
+        crate::prefs::reveal_preference(&mut h, "prefs:history_steps_component");
+        h.step(&json!({"click": {"handle": "prefs:history_steps_component"}})).unwrap();
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["history_steps_component"], false, "a click turns it off");
+        h.step(&json!({"click": {"handle": "prefs:history_steps_component"}})).unwrap();
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["history_steps_component"], true, "a second click turns it on again");
+        for locale in ["ar", "de", "he", "ja", "ko", "vi", "zh"] {
+            for id in ["prefs.history_steps_component", "prefs.history_steps_component_note"] {
+                let text = crate::i18n::Locale::for_language(locale).text(id);
+                assert_ne!(text, crate::i18n::Locale::for_language("en").text(id), "{locale} translates {id}");
+            }
+        }
     }
 
     /// Find in Timeline on the last body of a history longer than the timeline scrolls its

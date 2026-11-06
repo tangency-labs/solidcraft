@@ -457,6 +457,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.browser_eye_left,
                     "browser_eye_left",
                 );
+                layout_check(
+                    ui,
+                    app.tr("prefs.history_steps_component"),
+                    app.tr("prefs.history_steps_component_note"),
+                    &mut app.preferences.history_steps_component,
+                    "history_steps_component",
+                );
             });
         });
         ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {

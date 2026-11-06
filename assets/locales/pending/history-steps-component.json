@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "prefs.history_steps_component": "خطوات السجل حسب المكوّن",
+    "prefs.history_steps_component_note": "عندما يكون مكوّن نشطًا أو محددًا، تتنقل عناصر تحكم السجل بين ميزات ذلك المكوّن كما يعرضها السجل في الأسفل. عند إيقافه تتنقل بين كل ميزات التصميم. السجل على اليسار أو تحت المستعرض يتنقل دائمًا بين كل الميزات."
+  },
+  "de": {
+    "prefs.history_steps_component": "Verlaufsschritte je Komponente",
+    "prefs.history_steps_component_note": "Ist eine Komponente aktiv oder ausgewählt, gehen die Verlaufssteuerelemente durch deren Features, so wie der Verlauf unten sie zeigt. Aus: Sie gehen durch alle Features des Designs. Der Verlauf links oder unter dem Browser geht immer durch alle Features."
+  },
+  "en": {
+    "prefs.history_steps_component": "History steps by component",
+    "prefs.history_steps_component_note": "With a component active or picked, the History controls step through that component's features, as the History at the bottom shows them. Off: they step through every feature of the design. The History on the left or under the browser always steps through every feature."
+  },
+  "he": {
+    "prefs.history_steps_component": "צעדי ציר הזמן לפי רכיב",
+    "prefs.history_steps_component_note": "כשרכיב פעיל או נבחר, פקדי ציר הזמן עוברים בין הפיצ'רים של אותו רכיב, כפי שציר הזמן למטה מציג אותם. כבוי: הם עוברים בין כל הפיצ'רים של התכנון. ציר הזמן משמאל או מתחת לדפדפן עובר תמיד בין כל הפיצ'רים."
+  },
+  "ja": {
+    "prefs.history_steps_component": "コンポーネント単位で履歴を移動",
+    "prefs.history_steps_component_note": "コンポーネントがアクティブまたは選択されているとき、履歴コントロールは下部の履歴に表示されるとおり、そのコンポーネントのフィーチャだけを移動します。オフにすると、デザインのすべてのフィーチャを移動します。左側またはブラウザー下の履歴は常にすべてのフィーチャを移動します。"
+  },
+  "ko": {
+    "prefs.history_steps_component": "구성 요소별 히스토리 이동",
+    "prefs.history_steps_component_note": "구성 요소가 활성화되었거나 선택되어 있으면 기록 컨트롤이 아래쪽 히스토리에 보이는 대로 그 구성 요소의 피처만 이동합니다. 끄면 디자인의 모든 피처를 이동합니다. 왼쪽 또는 브라우저 아래의 히스토리는 항상 모든 피처를 이동합니다."
+  },
+  "vi": {
+    "prefs.history_steps_component": "Bước Lịch sử theo cụm chi tiết",
+    "prefs.history_steps_component_note": "Khi một cụm chi tiết đang kích hoạt hoặc được chọn, các điều khiển Lịch sử đi qua các tính năng của cụm đó, như dòng Lịch sử ở cạnh dưới hiển thị. Tắt: chúng đi qua mọi tính năng của thiết kế. Cây Lịch sử ở bên trái hoặc dưới cây thư mục luôn đi qua mọi tính năng."
+  },
+  "zh": {
+    "prefs.history_steps_component": "历史按组件逐步移动",
+    "prefs.history_steps_component_note": "当某个组件处于活动或选中状态时，历史控件按底部历史的显示，只在该组件的特征之间移动。关闭后，它们在设计的所有特征之间移动。左侧或浏览器下方的历史始终在所有特征之间移动。"
+  }
+}
