@@ -25,6 +25,8 @@
 //! | [`NoSurfaceHandle`]                                      | (none: the handle type of an intersector without caches) |
 //!
 //! Deviations:
+//! - **Singular directions (#2695).** `sm_AddSingDir` merges only directions that are the same
+//!   one, not upstream's `0.9`, which took branches closer than 25.8 degrees for one.
 //! - **Dupin bottom axis (WR-69).** `Kernel::fixes.dupin_bottom_hyperbola_axis`
 //!   uses `1/sqrt(abs(k1))` for the bottom hyperbola's second axis, matching its
 //!   conjugate top branch. Off by default for pinned C++ parity.
@@ -243,11 +245,21 @@ pub struct AdvSurfaceIntersector<'s, 't, O> {
     pub(crate) tangent_curve_seeds: Vec<[Point2; 2]>,
 }
 
-/// `sm_AddSingDir`: appends `sing_vec` to `dirs[..count]` unless a stored direction
-/// is within `acos(0.9)` of it.
+/// Above this dot product two unit singular directions are one: a double root of the
+/// indicatrices' intersection, a tangent curve's direction, reported twice. Rounding splits a
+/// double root by atan(sqrt(e / l)) each way, for the difference of the curvatures' error `e`
+/// and its other eigenvalue `l`, so this 0.08 degrees reads `e / l` under 5e-7 as one direction.
+const SAME_SING_DIR_DOT: f64 = 1.0 - 1.0e-6;
+
+/// `sm_AddSingDir`: appends `sing_vec` to `dirs[..count]` unless a stored direction is
+/// the same one ([`SAME_SING_DIR_DOT`]). Upstream's `0.9` took two branches closer than
+/// 25.8 degrees for one, and so a branch point for a tangent curve (#2695).
 fn add_sing_dir(sing_vec: Vec3, count: &mut usize, dirs: &mut [Vec3; MAX_SING_DIRS]) -> Result<()> {
     // see if crSingVec is already in aSingDirections array
-    let found = dirs.iter().take(*count).any(|d| d.dot(sing_vec) > 0.9);
+    let found = dirs
+        .iter()
+        .take(*count)
+        .any(|d| d.dot(sing_vec) > SAME_SING_DIR_DOT);
 
     // when crSingVec is not in aSingDirections - add it
     if !found {
@@ -2192,5 +2204,17 @@ mod tests {
         }
         assert_eq!(n, 8);
         assert!(add_sing_dir(Vec3::new(0.0, 0.0, 1.0), &mut n, &mut dirs).is_err());
+    }
+
+    /// Two rounds of radius 2 touching at a knife edge's top (#2695) cross in branches
+    /// 2 atan(1 / sqrt(21)) = 24.6 degrees apart: two directions, not one.
+    #[test]
+    fn add_sing_dir_keeps_close_branches() {
+        let mut dirs = [Vec3::UNDEF; MAX_SING_DIRS];
+        let mut n = 0;
+        let a = (1.0_f64 / 21.0_f64.sqrt()).atan();
+        add_sing_dir(Vec3::new(a.cos(), a.sin(), 0.0), &mut n, &mut dirs).unwrap();
+        add_sing_dir(Vec3::new(a.cos(), -a.sin(), 0.0), &mut n, &mut dirs).unwrap();
+        assert_eq!(n, 2);
     }
 }

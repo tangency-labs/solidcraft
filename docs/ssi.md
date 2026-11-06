@@ -413,6 +413,8 @@ marching direction; at the branch point B (right) there are four, and both branc
 a point with parallel normals from the two Dupin indicatrices: no common direction is a tangent
 point, two a tangent curve, more a singularity whose directions are the indicatrices' intersections
 (preferring one into both domains at a start, else the one closest to the previous direction).
+Directions count as one only when they are the same one, to about 0.08°: upstream's 25.8° window read
+two close branches as a tangent curve (#2695).
 Equal umbilical curvatures are a coincidence. It runs on start points and on points the corrector
 lands on, not on every point the marcher passes, so the base marcher steps straight through a branch
 point. The fork's fixes, all off by default:
