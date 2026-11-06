@@ -114,6 +114,100 @@ impl ConstructGeom {
     }
 }
 
+/// One of the seven named items of a placement's Origin folder: the O point, the X, Y and Z
+/// axes, and the XY, XZ and YZ planes. Case-insensitive to parse; the `Plane::named` aliases
+/// (TOP/FRONT/RIGHT) stay root-only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DatumItem {
+    O,
+    X,
+    Y,
+    Z,
+    XY,
+    XZ,
+    YZ,
+}
+
+impl DatumItem {
+    /// The item's name as a key spells it.
+    pub fn name(self) -> &'static str {
+        match self {
+            DatumItem::O => "O",
+            DatumItem::X => "X",
+            DatumItem::Y => "Y",
+            DatumItem::Z => "Z",
+            DatumItem::XY => "XY",
+            DatumItem::XZ => "XZ",
+            DatumItem::YZ => "YZ",
+        }
+    }
+
+    /// Case-insensitive; the Plane::named aliases (TOP/FRONT/RIGHT) stay root-only.
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name.to_ascii_uppercase().as_str() {
+            "O" => DatumItem::O,
+            "X" => DatumItem::X,
+            "Y" => DatumItem::Y,
+            "Z" => DatumItem::Z,
+            "XY" => DatumItem::XY,
+            "XZ" => DatumItem::XZ,
+            "YZ" => DatumItem::YZ,
+            _ => return None,
+        })
+    }
+
+    /// The item in its component's own frame: O the point, X/Y/Z the axes, XY/XZ/YZ the planes.
+    pub fn geom(self) -> ConstructGeom {
+        match self {
+            DatumItem::O => ConstructGeom::Point(Vec3::ZERO),
+            DatumItem::X => ConstructGeom::Axis { origin: Vec3::ZERO, dir: Vec3::X },
+            DatumItem::Y => ConstructGeom::Axis { origin: Vec3::ZERO, dir: Vec3::Y },
+            DatumItem::Z => ConstructGeom::Axis { origin: Vec3::ZERO, dir: Vec3::Z },
+            DatumItem::XY => ConstructGeom::Plane(Plane::XY),
+            DatumItem::XZ => ConstructGeom::Plane(Plane::XZ),
+            DatumItem::YZ => ConstructGeom::Plane(Plane::YZ),
+        }
+    }
+}
+
+/// An origin datum of an exact placement. The empty path is never a `DatumRef`: the root keeps
+/// `PlaneRef::Origin` and `GeoRef::Origin` as they are.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DatumRef {
+    /// The occurrence ids of the placement, root first.
+    pub path: Vec<u64>,
+    pub item: DatumItem,
+}
+
+impl DatumRef {
+    /// The datum's Browser key: `o:2/3/origin/XY`.
+    pub fn key(&self) -> String {
+        format!("o:{}/origin/{}", self.path.iter().map(|id| id.to_string()).collect::<Vec<_>>().join("/"), self.item.name())
+    }
+
+    /// Strict: canonical non-zero decimal ids, depth at most 64, length at most 2048. Rejects
+    /// `c0/origin`, `o:01/origin/X` and `o:0/origin/X`.
+    pub fn parse_key(key: &str) -> Option<Self> {
+        if key.len() > 2048 {
+            return None;
+        }
+        let rest = key.strip_prefix("o:")?;
+        let (ids, item) = rest.rsplit_once("/origin/")?;
+        if ids.is_empty() || ids.split('/').count() > 64 {
+            return None;
+        }
+        let path = ids.split('/').map(|id| id.parse::<u64>().ok().filter(|n| *n != 0 && n.to_string() == id)).collect::<Option<Vec<_>>>()?;
+        Some(DatumRef { path, item: DatumItem::parse(item)? })
+    }
+}
+
+/// An origin datum of an exact placement, resolved at evaluation time: the item in its own
+/// component's frame, placed by the placement's world frame. It follows the component on every
+/// evaluation, the way `PlaneRef::Face` re-finds its face.
+pub fn resolve_datum(doc: &Document, _st: &ModelState, d: &DatumRef) -> Result<ConstructGeom> {
+    Ok(d.item.geom().placed(&doc.placement_frame(&d.path)?))
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Construct {
     pub feature: u64,
