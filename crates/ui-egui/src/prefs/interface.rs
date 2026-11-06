@@ -88,6 +88,32 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         }
                     }
                 });
+                // How strong a glass theme's gloss is: the theme's own until the user sets it.
+                let label = app.tr("prefs.gloss");
+                let glass = Tokens::get().borders.glass;
+                ui_kit::row(ui, label, |ui| {
+                    ui.add_enabled_ui(glass.is_some(), |ui| {
+                        let own = glass.map_or(0.0, |g| f32::from(g.sheen.a()) / 255.0);
+                        let mut value = app.preferences.glass_gloss.unwrap_or(own);
+                        let response = ui_kit::named_control(ui, label, |ui| {
+                            ui_kit::slider(
+                                ui,
+                                &mut value,
+                                0.0..=1.0,
+                                ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
+                            )
+                        });
+                        crate::scenario::publish_target("prefs:glass_gloss", response.rect);
+                        if response.changed() {
+                            app.preferences.glass_gloss = Some(value);
+                        }
+                        if app.preferences.glass_gloss.is_some()
+                            && ui_kit::button(ui, app.tr("prefs.appearance.theme_own"), ui_kit::Button::Ghost).clicked()
+                        {
+                            app.preferences.glass_gloss = None;
+                        }
+                    });
+                });
                 // A picture of the user's behind the model.
                 let label = app.tr("prefs.background_image");
                 ui_kit::row(ui, label, |ui| {

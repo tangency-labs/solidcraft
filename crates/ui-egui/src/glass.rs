@@ -9,6 +9,17 @@ use serde_json::{Map, Value, json};
 
 use crate::theme::Tokens;
 
+thread_local! {
+    /// The user's own gloss (`set_gloss`), 0 to 1, over the theme's sheen; `None`: the theme's.
+    static GLOSS: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
+}
+
+/// The user's own gloss over a glass theme's sheen and streaks (`prefs::apply`, every frame): how
+/// strong they are, 0 (none) to 1; `None` keeps the theme's. Not a number: the theme's.
+pub fn set_gloss(gloss: Option<f32>) {
+    GLOSS.set(gloss.filter(|g| g.is_finite()).map(|g| g.clamp(0.0, 1.0)));
+}
+
 /// The glass finish of a theme.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Glass {
@@ -102,6 +113,17 @@ const STREAKS: [(f32, f32, f32); 4] = [(0.18, 84.0, 0.5), (0.235, 30.0, 0.42), (
 const MAX_SHEEN_HEIGHT: f64 = 128.0;
 
 impl Glass {
+    /// The sheen as drawn: the theme's colour, as strong as the user's gloss when they set one.
+    fn lit(self) -> Color32 {
+        match GLOSS.get() {
+            Some(gloss) => {
+                let [r, g, b, _] = self.sheen.to_srgba_unmultiplied();
+                Color32::from_rgba_unmultiplied(r, g, b, (gloss * 255.0).round() as u8)
+            }
+            None => self.sheen,
+        }
+    }
+
     /// A glossy bubble of `radius` behind an icon at `center`, tinted with `tint`: a translucent
     /// body, a glow along its bottom and a rim. `paint_bubble_gloss` then covers the icon with the
     /// bubble's highlight. Paint only: no layout or input target. Too small or non-finite: nothing.
@@ -172,7 +194,7 @@ impl Glass {
     /// fading out `sheen_height` points down. Too small, non-finite or no sheen: `None`.
     pub fn sheen_mesh(self, rect: egui::Rect, radius: impl Into<egui::CornerRadius>) -> Option<egui::Mesh> {
         let height = self.sheen_height.min(rect.height() * 0.5);
-        if !rect.is_finite() || !height.is_finite() || height < 2.0 || rect.width() < 4.0 || self.sheen.a() == 0 {
+        if !rect.is_finite() || !height.is_finite() || height < 2.0 || rect.width() < 4.0 || self.lit().a() == 0 {
             return None;
         }
         let path = outline(rect, radius.into());
@@ -181,7 +203,7 @@ impl Glass {
         let mut mesh = egui::Mesh::default();
         mesh.colored_vertex(egui::pos2(rect.center().x, rect.top() + height), Color32::TRANSPARENT);
         for point in &path {
-            mesh.colored_vertex(*point, self.sheen.gamma_multiply((1.0 - (point.y - rect.top()) / height).clamp(0.0, 1.0)));
+            mesh.colored_vertex(*point, self.lit().gamma_multiply((1.0 - (point.y - rect.top()) / height).clamp(0.0, 1.0)));
         }
         for i in 0..count {
             mesh.add_triangle(0, i + 1, (i + 1) % count + 1);
@@ -194,10 +216,10 @@ impl Glass {
     /// surface; each surface shows the part it covers, cut to its rectangle and brightest along its
     /// top. White light as strong as the sheen's alpha. `None`: nothing to show.
     pub fn streaks_mesh(self, screen: egui::Rect, rect: egui::Rect) -> Option<egui::Mesh> {
-        if !rect.is_finite() || !screen.is_finite() || rect.width() < 4.0 || rect.height() < 4.0 || self.sheen.a() == 0 {
+        if !rect.is_finite() || !screen.is_finite() || rect.width() < 4.0 || rect.height() < 4.0 || self.lit().a() == 0 {
             return None;
         }
-        let light = Color32::WHITE.gamma_multiply(f32::from(self.sheen.a()) / 255.0);
+        let light = Color32::WHITE.gamma_multiply(f32::from(self.lit().a()) / 255.0);
         let mut mesh = egui::Mesh::default();
         for (at, width, strength) in STREAKS {
             // The band leans: its left edge moves right as it goes down the window. It is soft:
@@ -237,7 +259,7 @@ impl Glass {
     /// towards a soft split across the middle, inside the button's corners. Dimmer while pressed
     /// or on, fainter when disabled. Paint only; too small or no sheen: nothing.
     pub fn paint_gloss(self, painter: &egui::Painter, rect: egui::Rect, radius: impl Into<egui::CornerRadius>, pressed: bool, enabled: bool) {
-        if !rect.is_finite() || rect.height() < 8.0 || rect.width() < 8.0 || self.sheen.a() == 0 {
+        if !rect.is_finite() || rect.height() < 8.0 || rect.width() < 8.0 || self.lit().a() == 0 {
             return;
         }
         let strength = match (enabled, pressed) {
@@ -247,7 +269,7 @@ impl Glass {
         };
         let split = rect.center().y;
         // The outline's lower half folds up onto the split: the top half's rounded outline.
-        let face = |y: f32| self.sheen.gamma_multiply(strength * (0.3 + 0.7 * ((split - y) / (split - rect.top())).clamp(0.0, 1.0)));
+        let face = |y: f32| self.lit().gamma_multiply(strength * (0.3 + 0.7 * ((split - y) / (split - rect.top())).clamp(0.0, 1.0)));
         let top = outline(rect, radius.into()).into_iter().map(|p| egui::pos2(p.x, p.y.min(split))).collect();
         fan(painter, egui::pos2(rect.center().x, split), face(split), top, |p| face(p.y));
     }
@@ -364,7 +386,12 @@ fn outline(rect: egui::Rect, corner: egui::CornerRadius) -> Vec<egui::Pos2> {
 
 /// Corners `by` points tighter, for an outline inside another.
 fn shrunk(corner: egui::CornerRadius, by: u8) -> egui::CornerRadius {
-    egui::CornerRadius { nw: corner.nw.saturating_sub(by), ne: corner.ne.saturating_sub(by), sw: corner.sw.saturating_sub(by), se: corner.se.saturating_sub(by) }
+    egui::CornerRadius {
+        nw: corner.nw.saturating_sub(by),
+        ne: corner.ne.saturating_sub(by),
+        sw: corner.sw.saturating_sub(by),
+        se: corner.se.saturating_sub(by),
+    }
 }
 
 /// Points round an ellipse, for the bubbles' gradients.
@@ -404,7 +431,9 @@ mod tests {
         let glass = Glass { sheen: Color32::from_white_alpha(128), sheen_height: 30.0, bubbles: Some(BubbleShape::Square) };
         let exported = export(glass);
         assert_eq!(parse(exported.as_object().unwrap()), Ok(glass));
-        for (key, value) in [("sheen", json!("white")), ("sheen_height", json!(-1)), ("sheen_height", json!(500)), ("bubbles", json!(true)), ("extra", json!(1))] {
+        for (key, value) in
+            [("sheen", json!("white")), ("sheen_height", json!(-1)), ("sheen_height", json!(500)), ("bubbles", json!(true)), ("extra", json!(1))]
+        {
             let mut bad = exported.clone();
             bad[key] = value;
             assert!(parse(bad.as_object().unwrap()).is_err(), "{key}");
@@ -420,7 +449,9 @@ mod tests {
         let painter = egui::Painter::new(ctx, egui::LayerId::background(), egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)));
         let glass = Glass { sheen: Color32::from_white_alpha(166), sheen_height: 40.0, bubbles: None };
         let content = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(300.0, 200.0));
-        for (fill, lit) in [(Color32::from_rgba_unmultiplied(200, 220, 240, 170), true), (Color32::from_rgb(200, 220, 240), false), (Color32::TRANSPARENT, false)] {
+        for (fill, lit) in
+            [(Color32::from_rgba_unmultiplied(200, 220, 240, 170), true), (Color32::from_rgb(200, 220, 240), false), (Color32::TRANSPARENT, false)]
+        {
             let frame = egui::Frame::NONE.fill(fill);
             let backed = glass.backing(&painter, frame, content, egui::Shape::Noop);
             assert_eq!(matches!(backed, egui::Shape::Vec(_)), lit, "{fill:?}");

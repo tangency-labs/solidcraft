@@ -2013,7 +2013,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 } else {
                     Rect::from_center_size(icon_rect.center(), egui::Vec2::splat((side + 12.0).min(whole.width() - 2.0)))
                 };
-                let bubble = if persistent { None } else { t.bubble(&painter, bubble_rect, t.accent, crate::glass::Bubble::of(&resp, info.enabled, on)) };
+                let bubble =
+                    if persistent { None } else { t.bubble(&painter, bubble_rect, t.accent, crate::glass::Bubble::of(&resp, info.enabled, on)) };
                 let neutral = if bubble.is_some() {
                     egui::Shape::Noop
                 } else if on {

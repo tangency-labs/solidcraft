@@ -925,7 +925,9 @@ Bubbles replace the flat hover and pressed fills of ribbon, title bar and naviga
 buttons: `round` puts an orb round the icon with a highlight over it; `square` puts a tile
 over the whole button, and joins the caption buttons into one strip. The finish adds no
 layout space, input targets or opacity of its own; without `borders.glass` every surface
-paints exactly as before. The sheen's alpha also sets how bright the streaks are.
+paints exactly as before. The sheen's alpha also sets how bright the streaks are; Preferences ›
+Appearance › **Gloss** (`glass_gloss`) replaces that alpha with the user's own, and **Theme's
+own** gives the theme's back.
 
 ## Theme icon and tab colours
 
