@@ -56,6 +56,8 @@
 //! - **A chamfer round a circle** (a linear section, class circle) is traced unless
 //!   `fillet_chamfer_cone_on_arc` (WR-421) is on as well: the fork revolves it
 //!   unconditionally; here that revolution stays behind its own flag.
+//! - **A point spine with a noncircular section (#2905).** The spherical builders
+//!   require a circular section; other sections stay with their own traced generator.
 //! - **Recognisers' statuses.** `SmSphere::IsNurbSurfaceSphere` returning `TRUE` without a
 //!   sphere (its `SER`s) is "no sphere", as the fork's `&& pNurbSphere != NULL` reads it:
 //!   [`Sphere::is_nurb_surface_sphere`]'s non-`Unported` errors.
@@ -2563,6 +2565,11 @@ fn exact_fillet_geom_of_class(
             Ok(true)
         }
         BlendSpine::Point => {
+            // A point class describes the rolling ball, not a straight section between
+            // its contacts. The spherical builders cannot construct that chamfer.
+            if section(ops)? != FilletSurfaceGeneratorType::Circular {
+                return Ok(false);
+            }
             // (solidcore #2403) one face's offset collapsed onto a line or circle, the other a
             // surface: the ball touches the one along a circle and the other at a point, and
             // its piece is the ball's triangle, rebuilt on a recalc from its new ends
