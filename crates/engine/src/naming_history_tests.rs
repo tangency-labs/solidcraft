@@ -845,3 +845,35 @@ fn a_sketch_on_a_thickened_surface_follows_the_face() {
     assert!((volume - (4800.0 + boss)).abs() < 0.05 && (min_y - (-8.0)).abs() < 1e-6, "reopened: {volume} {min_y}");
     assert_eq!(error(&cold, "Boss"), None);
 }
+
+/// A sketch on a face of a cut with two sides keeps its attachment (#12124).
+#[test]
+fn a_sketch_on_a_face_of_a_two_sided_cut_keeps_its_attachment() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, -10], "body_name": "Body1"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Cut"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [30, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    // Two sides on the same side of the sketch plane: the direction fixes the two sides and
+    // the sign of a distance turns over only its own side, so a negative first distance and a
+    // positive second one put both ends of the cut's tool below the plane; both caps claimed
+    // one name and neither face could be told from the other.
+    run(&mut s, "solid.extrude", json!({"sketch": "Cut", "distance": -7, "distance2": 3, "operation": "cut", "name": "Pocket"}));
+    // A sketch on either of the two faces the cut left keeps its attachment.
+    for (name, point) in [("OnUpper", [20.0, 15.0, -3.0]), ("OnLower", [20.0, 15.0, -7.0])] {
+        let made = s.execute("sketch.create", &json!({"plane": {"face": point}, "name": name}));
+        let refused = made.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(refused.is_empty(), "the sketch on the cut's face at {point:?} was refused: {refused}");
+        assert_eq!(error(&s, name), None);
+    }
+    // The two faces have a name each, so the history can tell them apart.
+    let cut = id(&s, "Pocket");
+    let named = names(&s, "Body1");
+    assert!(named.iter().all(|(_, exact)| *exact), "{named:?}");
+    assert!(named.iter().any(|(n, _)| n == &format!("F{cut}:bottom")), "{named:?}");
+    assert!(named.iter().any(|(n, _)| n == &format!("F{cut}:top")), "{named:?}");
+    // The attachment is kept when the design is opened again.
+    let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(error(&cold, "OnUpper"), None);
+    assert_eq!(error(&cold, "OnLower"), None);
+}
