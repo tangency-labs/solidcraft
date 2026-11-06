@@ -3222,8 +3222,18 @@ impl CircularCrossSectionFsg {
         let cl = Curve::from(center_line.clone());
         let (sweep, revolve, _) =
             super::p1::circle_swept_or_revolved(k, &cl, rail1, rail2, approx_tol_3d)?;
+        // a round whose rails meet at an end has no ball there. A piece of a law-cornered
+        // round ends at its range instead, inside the rails, over which its law is enclosed
+        // above the tolerance (`stays`): its rails may run on to where the ball fades to a
+        // point
+        let piece = matches!(law_curves, Some((_, _, _, Some(_))));
         let ivl = rail1.natural_interval();
-        for t in [ivl.min(), ivl.max()] {
+        let ends = if piece {
+            Vec::new()
+        } else {
+            vec![ivl.min(), ivl.max()]
+        };
+        for t in ends {
             let end1 = rail1.evaluate_point(t)?;
             let end2 = rail2.evaluate_point(t)?;
             if end1.distance(end2) < approx_tol_3d {

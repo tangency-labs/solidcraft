@@ -16,15 +16,18 @@ use common::*;
 use std::f64::consts::PI;
 use std::io::Read as _;
 
+use solidcore::blend::definition_check::surface_kind_name;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::Kernel;
 use solidcore::query::api_queries::{edge_closest_point, face_bounding_box};
+use solidcore::surface::procedural_blend::{BlendRef, ProceduralBlend};
+use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::api_files::write_brep_to_file;
 use solidcore::topology::brep_data_write::FromBrepEnv;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::EdgeuseId;
 use solidcore::topology::{edge, loopuse};
-use solidcore::{EdgeId, FaceId, Vec3};
+use solidcore::{EdgeId, FaceId, Point2, Vec3};
 use solidcore_record::brep::Brep as Record;
 
 use solidcore_ops::{
@@ -293,7 +296,112 @@ fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
             vertex_at(&b, p);
         }
         assert!(b.check(CheckLevel::All).unwrap().is_valid());
+        // every face the split makes is the round's definition, not a trace of it: each piece
+        // between the law's corners a rolling-ball round of its own piece of the law, and each
+        // dip's zone the corner ball's patch
+        let (k, made) = kernel_copy(&b);
+        let corners: Vec<f64> = knots
+            .windows(2)
+            .filter(|w| w[0] != w[1])
+            .map(|w| w[0])
+            .collect();
+        let corners = [corners.as_slice(), &[1.0]].concat();
+        let dips = (1..radii.len() - 1)
+            .filter(|&i| radii[i] < radii[i - 1] && radii[i] < radii[i + 1])
+            .count();
+        let piece_round = LawPieces::new(from, middle, rails, radii[0]);
+        let (mut pieces, mut zones) = (Vec::new(), 0);
+        for &f in made.face_list() {
+            let s = made.face(f).unwrap().surface.as_ref().unwrap();
+            match s.procedural_blend() {
+                _ if matches!(s.kind(), SurfaceKind::Plane(_)) => {}
+                Some(BlendRef::Procedural(pb)) => {
+                    // the piece whose law every point of the definition rolls
+                    let law = (0..radii.len() - 1).find(|&i| {
+                        let r = |y: f64| {
+                            let c = (y - corners[i]) / (corners[i + 1] - corners[i]);
+                            radii[i] + c * (radii[i + 1] - radii[i])
+                        };
+                        definition_points(&k, pb)
+                            .iter()
+                            .all(|&p| piece_round.off(p, r) < 1e-6)
+                    });
+                    pieces.push(law);
+                }
+                // (the copy keeps the zone's ball patch, not the corner definition beside it)
+                None if surface_kind_name(s) == "ball-patch" => zones += 1,
+                _ => panic!("{radii:?} from {from:?}: {:?}", surface_kind_name(s)),
+            }
+        }
+        pieces.sort_unstable();
+        let want: Vec<Option<usize>> = (0..radii.len() - 1).map(Some).collect();
+        assert_eq!(pieces, want, "{radii:?} from {from:?}");
+        assert_eq!(zones, dips, "{radii:?} from {from:?}");
     }
+}
+
+/// A round of a linear radius law along a box's straight edge, between its two faces at a
+/// right angle: the ball of radius r(y) at the edge's fraction y lies r(y) in from each face.
+struct LawPieces {
+    from: Vec3,
+    along: Vec3,
+    inward: Vec3,
+}
+
+impl LawPieces {
+    /// The edge from `from` through its middle `middle`, its start's rail ends `rails` at
+    /// radius `r0`.
+    fn new(from: [f64; 3], middle: [f64; 3], rails: [[f64; 3]; 2], r0: f64) -> Self {
+        let v = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
+        let from = v(from);
+        let [a, b] = rails.map(|p| (v(p) - from) / r0);
+        Self {
+            from,
+            along: (v(middle) - from) * 2.0,
+            inward: a + b,
+        }
+    }
+
+    /// How far `p` is off the envelope of the balls of radius `r(y)` centred at
+    /// C(y) = from + y along + r(y) inward: h(y) = |p − C(y)|² − r(y)² is at least 0 for
+    /// every y exactly where p is outside every ball, and 0 where it touches one. For a linear
+    /// `r` it is a quadratic in y whose leading coefficient is |along|² + r′² > 0 (the edge is
+    /// square to its faces' normals), so a ternary search over the edge and a length past each
+    /// end finds its least value, which is 2 r (|p − C| − r) to first order: halved over r, a
+    /// distance.
+    fn off(&self, p: Vec3, r: impl Fn(f64) -> f64) -> f64 {
+        let h = |y: f64| {
+            let d = p - (self.from + self.along * y + self.inward * r(y));
+            d.x * d.x + d.y * d.y + d.z * d.z - r(y) * r(y)
+        };
+        let (mut lo, mut hi) = (-1.0, 2.0);
+        for _ in 0..200 {
+            let (a, b) = (lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0);
+            if h(a) < h(b) {
+                hi = b;
+            } else {
+                lo = a;
+            }
+        }
+        let y = 0.5 * (lo + hi);
+        (h(y) / (2.0 * r(y))).abs()
+    }
+}
+
+/// Points of `pb`'s definition, on a 5 x 5 grid of its net.
+fn definition_points(k: &Kernel, pb: &ProceduralBlend) -> Vec<Vec3> {
+    let d = pb.net().natural_uv_domain();
+    let (lo, hi) = (d.min(), d.max());
+    let mut out = Vec::new();
+    for i in 0..5 {
+        for j in 0..5 {
+            let (a, b) = (f64::from(i) / 4.0, f64::from(j) / 4.0);
+            let uv = Point2::new(lo.x + a * (hi.x - lo.x), lo.y + b * (hi.y - lo.y));
+            let st = pb.definition_parameters(uv);
+            out.push(pb.evaluate_definition(k, st.x, st.y, 0, 0).unwrap()[0][0]);
+        }
+    }
+    out
 }
 
 /// Select the cube's edge along x at y = z = 20, with its record Order.

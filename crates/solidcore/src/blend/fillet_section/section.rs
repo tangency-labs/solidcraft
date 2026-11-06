@@ -1384,8 +1384,14 @@ impl GnSectionFsg {
             // "the rails have no length"
             return Err(SolidError::sm_err(OP));
         }
-        // (at the curves' own start: with a law their parameter is not t)
-        let s_first = c_min;
+        // (on the curves' own parameter: with a law it is not t, and the first station is the
+        // round's start, i_min, at its parameter on the rails; a piece of a law-cornered
+        // round starts inside them, where the rails' own start may be past its ball's
+        // fading to a point)
+        let s_first = match law_cp.first() {
+            Some(&cp) if law_round.is_some() => cp,
+            _ => c_min,
+        };
 
         // the offsets and the sides, at the first station: the centre line there is the
         // ball's centre

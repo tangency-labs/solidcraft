@@ -633,8 +633,8 @@ impl FilletSession<'_> {
         } else {
             Ok(())
         };
-        // (not upstream, #2489) the blend face log is read after the split, whose faces
-        // replace the round's
+        // (not upstream) the blend face log is read after the split, whose faces replace
+        // the round's
         let logged = self.take_blend_faces(k, status.is_ok() && split.is_ok());
         (status, split.and(logged))
     }
@@ -818,8 +818,8 @@ impl FilletSession<'_> {
             // The fork's SetMarkCornerPatches (60af574): mark the set-back corners'
             // patch faces, which the merge copies into the target with their marks.
             session.mark_corner_patches()?;
-            // (not upstream, #2489) with `Kernel::blend_face_log` on: mark every face made,
-            // with what made it, read back from the target after filleting
+            // (not upstream) with `Kernel::blend_face_log` on: mark every face made, with
+            // what made it, read back from the target after filleting
             session.mark_blend_faces(k)?;
             let editing = session.objects.target.editing_enabled();
             session.objects.target.set_editing_enabled(true);
