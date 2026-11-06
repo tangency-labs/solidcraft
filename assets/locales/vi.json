@@ -3623,6 +3623,7 @@
   "render.glass_model_help": "Độ nhám kính làm tán xạ tia truyền qua. Tán sắc và màu màng dùng ba dải bước sóng. Tấm nhám cần tắt bóng truyền thẳng.",
   "render.glass_roughness": "Độ nhám kính",
   "render.gpu_depth": "Độ sâu đường truyền tia tối đa",
+  "render.gpu_job_shader_wait": "Chuẩn bị shader có thể mất vài phút",
   "render.gpu_options_help": "Số mẫu, độ sâu, hạt giống và độ phơi sáng được lưu cùng thiết lập này. Chỉ lưu phương thức tạo ảnh đang hoạt động.",
   "render.gpu_path_crashed": "Lần trước SolidCraft đã đóng khi đang thiết lập nó trên bộ điều hợp đồ họa này, nhiều khả năng là trong trình điều khiển đồ họa, nên nó sẽ không tự thiết lập lại. Hãy dùng dò tia trên CPU, hoặc thử lại (cập nhật trình điều khiển cũng sẽ thử lại).",
   "render.gpu_path_failed": "Bộ dò đường truyền tia GPU không khả dụng",

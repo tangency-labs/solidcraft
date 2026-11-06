@@ -3377,6 +3377,7 @@
   "render.glass_model_help": "Glasrauheit streut durchgelassene Strahlen. Dispersion und Schichtfarbe verwenden drei Wellenlängenbänder. Raue Scheiben benötigen ausgeschaltete gerade Schattenübertragung.",
   "render.glass_roughness": "Glasrauheit",
   "render.gpu_depth": "Maximale Pfadtiefe",
+  "render.gpu_job_shader_wait": "Shader-Vorbereitung kann Minuten dauern",
   "render.gpu_options_help": "Samples, Tiefe, Startwert und Belichtung werden mit diesem Setup gespeichert. Es wird nur die aktive Bildmethode gespeichert.",
   "render.gpu_path_crashed": "SolidCraft wurde beim letzten Einrichten auf diesem Grafikadapter beendet, wahrscheinlich im Grafiktreiber, und richtet ihn deshalb nicht von selbst erneut ein. Verwenden Sie stattdessen Raytracing auf der CPU oder versuchen Sie es erneut (nach einem Treiberupdate wird es ebenfalls erneut versucht).",
   "render.gpu_path_failed": "GPU-Pathtracer nicht verfügbar",

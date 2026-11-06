@@ -2902,6 +2902,7 @@
   "render.glass_model_help": "유리 거칠기는 투과 광선을 산란시킵니다. 분산과 박막 색상은 세 파장 대역을 사용합니다. 거친 얇은 판은 직선 투과 그림자를 꺼야 합니다.",
   "render.glass_roughness": "유리 거칠기",
   "render.gpu_depth": "최대 경로 깊이",
+  "render.gpu_job_shader_wait": "셰이더 준비에 몇 분이 걸릴 수 있습니다",
   "render.gpu_options_help": "샘플, 깊이, 시드, 노출은 이 설정과 함께 저장됩니다. 활성 이미지 방식만 저장됩니다.",
   "render.gpu_path_failed": "GPU 패스 트레이서를 사용할 수 없음",
   "render.gpu_path_first_setup": "이 GPU에서 첫 설정은 몇 분이 걸릴 수 있으며, 그동안 SolidCraft는 계속 사용할 수 있습니다. 드라이버가 컴파일된 셰이더를 보관하면 이후 시작에서 재사용합니다.",

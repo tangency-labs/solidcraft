@@ -3623,6 +3623,7 @@
   "render.glass_model_help": "Glass roughness scatters transmitted rays. Dispersion and film color use three wavelength bands. Rough sheets require straight transmitted shadows off.",
   "render.glass_roughness": "Glass roughness",
   "render.gpu_depth": "Maximum path depth",
+  "render.gpu_job_shader_wait": "Shader setup can take minutes",
   "render.gpu_options_help": "Samples, depth, seed and exposure are saved with this setup. Only the active image method is saved.",
   "render.gpu_path_crashed": "SolidCraft closed while setting it up on this graphics adapter last time, most likely inside the graphics driver, so it is not set up again by itself. Choose CPU ray tracing instead, or try again (a driver update also tries again).",
   "render.gpu_path_failed": "GPU path tracer unavailable",
