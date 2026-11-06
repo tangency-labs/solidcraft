@@ -102,10 +102,16 @@ mod enabled {
         TracePasses,
         /// Steps of a surface-surface intersection march.
         MarchSteps,
+        /// Candidate pairs supplied to a topology coincidence phase, before incidence filters.
+        CoincidenceCandidates,
+        /// Geometric query invocations in a topology coincidence phase (including empty edge searches).
+        CoincidenceQueries,
+        /// Trim classification invocations after a successful coincidence projection.
+        CoincidenceClassifications,
     }
 
     /// How many [`Counter`]s there are.
-    pub const COUNTERS: usize = 6;
+    pub const COUNTERS: usize = 9;
 
     impl Counter {
         /// Every counter, in the order of [`Profile`]'s counter arrays.
@@ -116,6 +122,9 @@ mod enabled {
             Self::NetEvaluations,
             Self::TracePasses,
             Self::MarchSteps,
+            Self::CoincidenceCandidates,
+            Self::CoincidenceQueries,
+            Self::CoincidenceClassifications,
         ];
 
         /// The counter's key in the JSONL records.
@@ -128,6 +137,9 @@ mod enabled {
                 Self::NetEvaluations => "net_evaluations",
                 Self::TracePasses => "trace_passes",
                 Self::MarchSteps => "march_steps",
+                Self::CoincidenceCandidates => "coincidence_candidates",
+                Self::CoincidenceQueries => "coincidence_queries",
+                Self::CoincidenceClassifications => "coincidence_classifications",
             }
         }
 
