@@ -806,7 +806,6 @@
   "cmd.inspect_center_of_mass": "Centro de massa",
   "cmd.inspect_clearance": "Afastamento",
   "cmd.inspect_colored_components": "Ativar cores dos componentes",
-  "cmd.inspect_colored_components_disable": "Desativar cores dos componentes",
   "cmd.inspect_compare": "Comparar corpos",
   "cmd.inspect_continuity": "Análise de continuidade",
   "cmd.inspect_curvature_comb": "Análise de pente de curvatura",
