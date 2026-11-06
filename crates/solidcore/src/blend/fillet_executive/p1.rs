@@ -59,7 +59,10 @@
 //! - `Evaluate` is `const` upstream and caches the B-spline extension through a cast
 //!   away from `const`; here [`FilletLaw::evaluate`] takes `&mut self` and stores it in
 //!   `FilletLawKind::BSpline::extended_law`. The context passed to
-//!   `CreateExtendedCurve` only allocates, so no `Kernel` is needed.
+//!   `CreateExtendedCurve` only allocates, so no `Kernel` is needed. Not upstream: inside
+//!   the law curve's domain the evaluation reads the curve, not a cached extension (which
+//!   reproduces it there only to rounding: a law that is 0 at its end read 3e-15 through it,
+//!   and the corner at that end took the round for one of positive width).
 //! - The "unable to extend non-B-spline laws" branch is unreachable (both the law curve
 //!   and its extension are B-splines) and not ported.
 //! - A G1-closed law curve is not extended: `CreateExtendedCurve` hands back an
@@ -200,7 +203,9 @@ impl FilletLaw {
     /// edge map onto the law curve; a parameter within `SM_EFF_ZERO * (1 + |min| +
     /// |max|)` outside the curve's domain snaps to the end, a parameter further out
     /// extends the curve (`C-infinity`, to twice the overshoot and at least a tenth of
-    /// the domain) and keeps the extension for later evaluations.
+    /// the domain) and keeps the extension for later evaluations. Inside the curve's domain
+    /// it evaluates the curve itself even once an extension exists (not upstream, which then
+    /// evaluates the extension everywhere, reproducing the curve only to rounding).
     ///
     /// # Errors
     ///
@@ -311,6 +316,27 @@ fn bspline_evaluate(
     // Map parameter back to interval of the curve.
     let mut law_t = edge_map.evaluate(t);
 
+    // Not upstream: within the law curve's own domain (its ends snapped within the parameter
+    // tolerance, as below) the law is its curve. An extension an earlier evaluation past the
+    // domain cached continues the curve there, but evaluated inside the domain it only
+    // reproduces the curve to rounding (3e-15 where the curve is 0), which upstream reads
+    // once the extension exists.
+    let curve_ivl = law_curve.natural_interval();
+    if extended_law.is_some() {
+        let curve_tol = EFF_ZERO * (1.0 + curve_ivl.min().abs() + curve_ivl.max().abs());
+        let mut on_curve = None;
+        if curve_ivl.contains_value(law_t, 0.0) {
+            on_curve = Some(law_t);
+        } else if law_t < curve_ivl.min() && law_t + curve_tol > curve_ivl.min() {
+            on_curve = Some(curve_ivl.min());
+        } else if law_t > curve_ivl.max() && law_t - curve_tol < curve_ivl.max() {
+            on_curve = Some(curve_ivl.max());
+        }
+        if let Some(at) = on_curve {
+            return law_values(law_curve, at, param_scale, reverse);
+        }
+    }
+
     // when parameter is beyond current range
     let mut new_extension = None;
     if !ivl.contains_value(law_t, 0.0) {
@@ -366,7 +392,13 @@ fn bspline_evaluate(
         }
     }
     let law = extended_law.as_ref().unwrap_or(law_curve);
+    law_values(law, law_t, param_scale, reverse)
+}
 
+/// The radius and its first two derivatives by the edge parameter, from `law` at `law_t`
+/// (`param_scale`: the edge interval's length over the edge map's; `reverse`: the law runs
+/// from the interval's end).
+fn law_values(law: &BSplineCurve, law_t: f64, param_scale: f64, reverse: bool) -> Result<[f64; 3]> {
     let pv = law.evaluate(law_t, 2, true, true)?;
     let x = |i: usize| {
         pv.get(i)

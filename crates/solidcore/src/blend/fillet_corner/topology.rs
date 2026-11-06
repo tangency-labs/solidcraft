@@ -641,7 +641,18 @@ impl FilletCorner {
             }
         }
         let [same0, same1] = same;
-        let mixed = !same0 || !same1;
+        // A variable round whose radius is 0 at the vertex closes onto it: its rails end on
+        // their side edges at the vertex and its end rib has no length, so at a corner of mixed
+        // convexity there is no hole between the rib and the side edges' extensions to cap
+        // (the cap extends the end face by 7.5 times that radius: by nothing). It ends as at a
+        // corner of one convexity.
+        let closes_onto_vertex = match &*solver_object {
+            SolverObject::VariableRadius(vr) => {
+                nx1_end::variable_radius_at_vertex(target, filleted, vr, vertex)? <= 0.0
+            }
+            _ => false,
+        };
+        let mixed = (!same0 || !same1) && !closes_onto_vertex;
         let mut end_face = None;
         let mut extend_edge = None;
 

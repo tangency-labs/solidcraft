@@ -1,5 +1,6 @@
-//! A B-spline radius law round on a cube edge (difftest
-//! `law-cube20-e0-deg1-4-2-4-c0-corner`, `prog_test` `smFilletTest.cpp:399`).
+//! A B-spline radius law round on a cube edge (golden `law-cube20-e0-deg2-smooth-4-2-4`,
+//! `prog_test` `smFilletTest.cpp:399`; the law is smooth, as a law with a corner inside its
+//! edge is refused on this kernel, #2727, `variable_round_law_corner_refused.rs`).
 //!
 //! `SmFilletEdge::CalcFilletIntSideFace` and `CalcCrossSection` work on upstream's
 //! pointers to the faces' surfaces, which keep their face as owner; the port's copies
@@ -25,7 +26,7 @@ fn bspline_law_round_drops_points_on_face_owned_surfaces_without_point_test() {
     let mut body = create_box(&mut k, Vec3::ZERO, 20.0, 20.0, 20.0).unwrap();
     let edge = *p1::edges(&body, None).unwrap().first().unwrap();
 
-    // degree 1, radii 4 -> 2 -> 4 over knots [0, 0.5, 1] (multiplicities 2, 1, 2)
+    // degree 2, control radii 4, 2, 4 over knots [0, 1] (multiplicities 3, 3)
     let control = [
         Vec3::new(4.0, 0.0, 0.0),
         Vec3::new(2.0, 0.0, 0.0),
@@ -33,11 +34,11 @@ fn bspline_law_round_drops_points_on_face_owned_surfaces_without_point_test() {
     ];
     let curve = BSplineCurve::create_canonical(&CanonicalData {
         dim: 3,
-        degree: 1,
+        degree: 2,
         control_points: &control,
         form: BSplineCurveForm::default(),
-        knot_multiplicities: &[2, 1, 2],
-        knots: &[0.0, 0.5, 1.0],
+        knot_multiplicities: &[3, 3],
+        knots: &[0.0, 1.0],
         knot_type: KnotType::default(),
         weights: None,
         trim: None,

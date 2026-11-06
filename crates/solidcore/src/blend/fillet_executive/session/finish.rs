@@ -39,12 +39,13 @@
 //! No recursion.
 
 use super::original_trim::OriginalSurfaceDeletion;
-use super::{invalid, FilletBody, FilletObject, FilletSession, SessionObjects};
+use super::{invalid, FilletBody, FilletObject, FilletSession, SessionObjects, SolverObject};
 use crate::blend::fillet_cliff_overflow::Refusal;
 use crate::blend::fillet_executive::p3::{
     ErrorInfo, FilletExecutive, FilletFinishAccess, StitchAttempt, StitchSettings,
 };
 use crate::blend::fillet_geom::p1::FilletErrorType;
+use crate::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::object::NotifyOperation;
 use crate::geom::tol::approx_tol3d;
@@ -655,6 +656,48 @@ impl FilletSession<'_> {
         }
     }
 
+    /// Not the fork's (#2727): great circles have no corner of a radius law to stop at. Swept
+    /// over one, the surface's net doubles back on itself (`check_brep` #5): the 20 cube's
+    /// law 4, 2, 4 builds such a net, and 3, 2, 4, 2, 3 one over 140 mm across. A circular
+    /// variable round whose law has a corner inside its edge is built only as its balls'
+    /// union (`fixes.fillet_gn_section_generator`, WR-696), which splits it there; without
+    /// it the round is refused before the target is touched.
+    fn refuse_great_circles_over_a_law_corner(&mut self, k: &Kernel) -> Result<()> {
+        if k.fixes.fillet_gn_section_generator {
+            return Ok(());
+        }
+        let mut crossed = false;
+        for solver in self.objects.solvers.iter().flatten() {
+            let SolverObject::VariableRadius(vr) = solver else {
+                continue;
+            };
+            let circular = vr
+                .curve_based
+                .solver
+                .fillet_surface_generator()
+                .is_some_and(|fsg| {
+                    fsg.fillet_surface_generator_type() == FilletSurfaceGeneratorType::Circular
+                });
+            if circular
+                && !vr
+                    .law
+                    .corner_parameters(&vr.law_interval, vr.law_orientation)?
+                    .is_empty()
+            {
+                crossed = true;
+            }
+        }
+        if !crossed {
+            return Ok(());
+        }
+        self.note_refusal(Refusal {
+            code: FilletErrorType::CornerUnsupported,
+            reason: None,
+            comment: "Fillet Error: a variable round's radius law has a corner inside its edge, which a sweep of great circles cannot follow: its net would double back on itself",
+        });
+        Err(failure())
+    }
+
     /// `JoinBlendedVertexFans` (the fork's, tangency-labs/smlib@e418750, WR-665): the
     /// inverse of the fan split after the blends: the target's vertices still at a split
     /// point (within their own tolerance of it), joined into the first of them
@@ -726,6 +769,7 @@ impl FilletSession<'_> {
             });
             return Err(failure());
         }
+        self.refuse_great_circles_over_a_law_corner(k)?;
         // WR-459: the clean-up after filleting leaves the target's own edges and faces.
         self.objects.cleanup_kept = if k.fixes.fillet_cleanup_keeps_target_faces {
             Some((

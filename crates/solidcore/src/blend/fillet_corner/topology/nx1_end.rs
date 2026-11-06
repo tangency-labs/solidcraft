@@ -27,6 +27,7 @@ use crate::blend::fillet_executive::session::{FilletBody, FilletObject, SolverOb
 use crate::blend::fillet_geom::p1::{
     FilletBrep, FilletCornerId, FilletEdgeType, FilletGeomId, FilletVertex, FilletVertexType,
 };
+use crate::blend::fillet_standard_solver::p1::VariableRadiusFs;
 use crate::error::{EntityRef, Result, SolidError, SM_ERR, SM_ERR_INVALID_INPUT};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
@@ -86,31 +87,7 @@ pub fn find_surface_extension_dist_at_corner(
         SolverObject::ConstantDistance(cd) => ext_dist = cd.distance(),
         // return radius at vertex
         SolverObject::VariableRadius(vr) => {
-            let e = need(eu1::edge(target, fillet_edgeuse)?, "edge use without edge")?;
-            let ivl = edge::interval(target, e)?;
-            let vu = need(
-                eu1::vertexuse(target, fillet_edgeuse)?,
-                "edge use without vertex use",
-            )?;
-            let vert = target.vertexuse(vu)?.vertex;
-            let orient = eu1::orientation(target, fillet_edgeuse)?;
-            let parameter = if (vert == Some(corner_vertex) && orient == OrientType::Opposite)
-                || (vert != Some(corner_vertex) && orient == OrientType::Same)
-            {
-                ivl.max()
-            } else {
-                ivl.min()
-            };
-            let interval = vr.law_interval;
-            let orientation = vr.law_orientation;
-            // SmVariableRadiusFS::GetFilletRadius is a `double` function whose
-            // `SER(m_rLaw->Evaluate(..))` returns the failed `SmStatus` itself, so a
-            // failed law evaluation yields the status code as the radius.
-            ext_dist = match vr.law.evaluate(parameter, &interval, orientation) {
-                Ok(values) => values[0],
-                Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(e) => f64::from(status_of(&e)),
-            };
+            ext_dist = variable_radius_at_vertex(target, fillet_edgeuse, vr, corner_vertex)?;
         }
         // SE(SM_ERR): reported only
         SolverObject::SurfaceSurface(_) => {}
@@ -120,6 +97,48 @@ pub fn find_surface_extension_dist_at_corner(
     // with a slight crease for extension values greater than about 7.5.
     let rad_factor = 7.5;
     Ok(rad_factor * ext_dist)
+}
+
+/// `SmVariableRadiusFS::GetFilletRadius` at the corner end of `fillet_edgeuse`: the law's
+/// radius at the end of the filleted edge that lies on `corner_vertex`.
+/// `SmVariableRadiusFS::GetFilletRadius` is a `double` function whose
+/// `SER(m_rLaw->Evaluate(..))` returns the failed `SmStatus` itself, so a failed law
+/// evaluation yields the status code as the radius.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for an edge use without vertex use or edge (upstream
+/// dereferences them); [`SolidError::Unported`] from the law evaluation.
+pub fn variable_radius_at_vertex(
+    target: &Brep,
+    fillet_edgeuse: EdgeuseId,
+    vr: &VariableRadiusFs,
+    corner_vertex: VertexId,
+) -> Result<f64> {
+    let e = need(eu1::edge(target, fillet_edgeuse)?, "edge use without edge")?;
+    let ivl = edge::interval(target, e)?;
+    let vu = need(
+        eu1::vertexuse(target, fillet_edgeuse)?,
+        "edge use without vertex use",
+    )?;
+    let vert = target.vertexuse(vu)?.vertex;
+    let orient = eu1::orientation(target, fillet_edgeuse)?;
+    let parameter = if (vert == Some(corner_vertex) && orient == OrientType::Opposite)
+        || (vert != Some(corner_vertex) && orient == OrientType::Same)
+    {
+        ivl.max()
+    } else {
+        ivl.min()
+    };
+    let interval = vr.law_interval;
+    let orientation = vr.law_orientation;
+    // a copy: the evaluation may build the law's extension (`m_pExtendedLaw`), the solver's
+    // own law keeps building it when it evaluates
+    let mut law = vr.law.clone();
+    Ok(match law.evaluate(parameter, &interval, orientation) {
+        Ok(values) => values[0],
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(e) => f64::from(status_of(&e)),
+    })
 }
 
 /// The live objects of the end of `SmFilletNx1Corner::MakeCornerTopology`.
