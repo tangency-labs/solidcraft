@@ -52,9 +52,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use solidcore_ops::blend::{
-    blend, chamfer_sides_ordered, edge_faces_along_ordered, Blend, ChamferSecond, Corners,
+    blend_ordered, chamfer_sides_ordered, edge_faces_along_ordered, fillet_variable_ordered, Blend,
+    ChamferSecond, Corners, SetBack,
 };
-use solidcore_ops::boolean::{boolean, BooleanOp};
+use solidcore_ops::boolean::{boolean, union_all, BooleanOp};
 use solidcore_ops::extend::{extend_sheet, Continuation};
 use solidcore_ops::split::{split_faces, Tool};
 use solidcore_ops::stitch::{merge_faces, stitch};
@@ -81,6 +82,7 @@ const PORTED: &[&str] = &[
     "offset_faces",
     "split_faces",
     "extend_sheet",
+    "draft",
     "thicken",
     "untrim_face",
     "boolean",
@@ -92,6 +94,8 @@ const PORTED: &[&str] = &[
     "sweep",
     "screw_sweep",
     "blend_dropping",
+    "blend_setback",
+    "fillet_variable",
     "chamfer_sides",
     "stitch",
     "split_body_by_sheet",
@@ -227,35 +231,88 @@ fn f64s<const N: usize>(v: &Value) -> Option<[f64; N]> {
     (a.len() == N).then_some(out)
 }
 
-/// A pick's record indices.
-fn picked(p: &Value) -> Result<Vec<usize>, Stop> {
-    let mut out = Vec::new();
-    for x in p["picked"].as_array().into_iter().flatten() {
-        match x["index"].as_u64() {
-            Some(i) => out.push(usize::try_from(i).unwrap()),
-            None => return Err(Stop::Unsupported(format!("a pick missed: {x}"))),
-        }
+/// A pick's record indices, optionally bounded by its record order's length.
+fn picked(op: &str, selection: &Value, length: Option<usize>) -> Result<Vec<usize>, Stop> {
+    let bad = |what: &str| Stop::Fail(format!("{op}: parameter {what}"));
+    selection["picked"]
+        .as_array()
+        .ok_or_else(|| bad("picked"))?
+        .iter()
+        .map(|pick| {
+            if let Some(miss) = pick.get("miss") {
+                let why = miss.as_str().ok_or_else(|| bad("miss"))?;
+                if pick.get("index").is_some() {
+                    return Err(bad("pick must hit or miss"));
+                }
+                return Err(Stop::Unsupported(format!("{op}: pick missed: {why}")));
+            }
+            let index = pick["index"]
+                .as_u64()
+                .and_then(|i| usize::try_from(i).ok())
+                .ok_or_else(|| bad("index"))?;
+            if length.is_some_and(|length| index >= length) {
+                return Err(bad("pick outside record order"));
+            }
+            Ok(index)
+        })
+        .collect()
+}
+
+/// Parses typed record picks without reordering them: misses are unsupported; bad data fails.
+fn record_picks(
+    op: &str,
+    selection: &Value,
+    kind: &str,
+    length: usize,
+) -> Result<Vec<usize>, Stop> {
+    if selection["kind"].as_str() != Some(kind) {
+        return Err(Stop::Fail(format!("{op}: parameter pick kind")));
     }
-    Ok(out)
+    picked(op, selection, Some(length))
+}
+
+/// Checks a single-pick operation's cardinality before classifying a traced miss.
+fn record_pick(op: &str, selection: &Value, kind: &str, length: usize) -> Result<usize, Stop> {
+    let bad = || Stop::Fail(format!("{op}: exactly one {kind} pick required"));
+    if selection["picked"].as_array().map(Vec::len) != Some(1) {
+        return Err(bad());
+    }
+    record_picks(op, selection, kind, length)?
+        .first()
+        .copied()
+        .ok_or_else(bad)
+}
+
+/// Looks up the record order once; an unrepresentable result is unsupported, not a refusal.
+fn ensure_order(slot: &mut Slot, op: &str) -> Result<Order, Stop> {
+    ensure_order_with(slot, op, Body::to_record)
+}
+
+fn ensure_order_with(
+    slot: &mut Slot,
+    op: &str,
+    export: impl FnOnce(&Body) -> solidcore_ops::Result<(Record, Order)>,
+) -> Result<Order, Stop> {
+    if slot.order.is_none() {
+        // a body an operation made: its record order is the one its record is written in
+        let (_, order) = export(&slot.body).map_err(|e| match e {
+            solidcore_ops::Error::Unsupported(why) => {
+                Stop::Unsupported(format!("{op}: to_record: {why}"))
+            }
+            e => Stop::Fail(format!("{op}: to_record: {e}")),
+        })?;
+        slot.order = Some(order);
+    }
+    slot.order
+        .clone()
+        .ok_or_else(|| Stop::Fail(format!("{op}: no record order")))
 }
 
 /// The picked faces' record indices, and the record order they are taken through: an operation
 /// takes record indices with the body's [`Order`].
 fn faces(slot: &mut Slot, pick: &Value) -> Result<(Vec<usize>, Order), Stop> {
-    let record = picked(pick)?;
-    if slot.order.is_none() {
-        // a body an operation made: its record order is the one its record is written in
-        let (_, order) = slot
-            .body
-            .to_record()
-            .map_err(|e| Stop::Unsupported(format!("to_record for a pick: {e}")))?;
-        slot.order = Some(order);
-    }
-    let order = slot
-        .order
-        .clone()
-        .ok_or_else(|| Stop::Fail("no record order".to_owned()))?;
-    Ok((record, order))
+    let record = picked("pick", pick, None)?;
+    Ok((record, ensure_order(slot, "pick")?))
 }
 
 /// A traced profile: its curves as the operation takes them (`line`, `arc`, `nurbs`).
@@ -460,40 +517,47 @@ fn call_with_copy(
             let r = offset::shell(&s.body, &order, &open, t);
             in_place(Slot { order: None, ..s }, r)
         }
+        "fillet_variable" => {
+            if ins.len() != 1 {
+                return Err(bad("one input"));
+            }
+            let mut source = first()?;
+            ensure_order(&mut source, "fillet_variable")?;
+            let s = copy_for_edit(&source)?;
+            let order = s
+                .order
+                .as_ref()
+                .ok_or_else(|| Stop::Fail("fillet_variable: missing copied order".to_owned()))?;
+            let edge = record_pick("fillet_variable", &p["edge"], "edge", order.edges.len())?;
+            let start = f64s::<3>(&p["start"]).ok_or_else(|| bad("start"))?;
+            let degree = p["degree"]
+                .as_u64()
+                .and_then(|d| usize::try_from(d).ok())
+                .ok_or_else(|| bad("degree"))?;
+            let numbers = |key: &str| {
+                p[key]
+                    .as_array()
+                    .and_then(|a| a.iter().map(Value::as_f64).collect::<Option<Vec<_>>>())
+                    .ok_or_else(|| bad(key))
+            };
+            let knots = numbers("knots")?;
+            let radii = numbers("radii")?;
+            let r = fillet_variable_ordered(&s.body, order, edge, start, degree, &knots, &radii);
+            in_place(Slot { order: None, ..s }, r)
+        }
         "extend_sheet" => {
             if ins.len() != 1 {
                 return Err(bad("one input"));
             }
             let mut source = first()?;
-            if source.order.is_none() {
-                let (_, order) = source
-                    .body
-                    .to_record()
-                    .map_err(|e| Stop::Fail(format!("order before extend_sheet: {e}")))?;
-                source.order = Some(order);
-            }
+            ensure_order(&mut source, "extend_sheet")?;
             // Map the source record's indices through the preparation copy.
             let s = copy_for_edit(&source)?;
             let order = s
                 .order
                 .as_ref()
                 .ok_or_else(|| Stop::Fail("extend_sheet: missing copied order".to_owned()))?;
-            if p["edge"]["kind"].as_str() != Some("edge") {
-                return Err(bad("edge pick kind"));
-            }
-            let picked = p["edge"]["picked"]
-                .as_array()
-                .ok_or_else(|| bad("edge picked"))?;
-            let [pick] = picked.as_slice() else {
-                return Err(bad("exactly one edge"));
-            };
-            let edge = pick["index"]
-                .as_u64()
-                .and_then(|i| usize::try_from(i).ok())
-                .ok_or_else(|| bad("edge index"))?;
-            if order.edges.get(edge).is_none() {
-                return Err(bad("edge outside record order"));
-            }
+            let edge = record_pick("extend_sheet", &p["edge"], "edge", order.edges.len())?;
             let distance = p["distance"].as_f64().ok_or_else(|| bad("distance"))?;
             let how = match p["how"].as_str().ok_or_else(|| bad("how"))? {
                 "natural" => Continuation::Natural,
@@ -528,18 +592,11 @@ fn call_with_copy(
                 .iter()
                 .map(split_tool)
                 .collect::<Result<Vec<_>, _>>()?;
-            if s.order.is_none() {
-                let (_, order) = s
-                    .body
-                    .to_record()
-                    .map_err(|e| Stop::Fail(format!("order before split_faces: {e}")))?;
-                s.order = Some(order);
-            }
-            let order = s.order.as_ref().unwrap();
+            let order = ensure_order(&mut s, "split_faces")?;
             if picked.iter().any(|&i| order.faces.get(i).is_none()) {
                 return Err(bad("face outside record order"));
             }
-            match split_faces(&s.body, order, &picked, &tools) {
+            match split_faces(&s.body, &order, &picked, &tools) {
                 Ok(Some((body, _))) => made(Ok(body)),
                 Ok(None) => Err("tools do not split any selected face".to_owned()),
                 Err(e) => Err(e.to_string()),
@@ -807,6 +864,81 @@ fn call_with_copy(
             let r = chamfer_sides_ordered(&s.body, &order, &edges, &along, distance, second);
             in_place(Slot { order: None, ..s }, r)
         }
+        "blend_setback" => {
+            if ins.len() != 1 {
+                return Err(bad("one input"));
+            }
+            let mut source = first()?;
+            ensure_order(&mut source, "blend_setback")?;
+            let s = copy_for_edit(&source)?;
+            let order = s
+                .order
+                .as_ref()
+                .ok_or_else(|| Stop::Fail("blend_setback: missing copied order".to_owned()))?;
+            let kind = match p["kind"].as_str() {
+                Some("round") => Blend::Round,
+                Some("curvature") => Blend::Curvature,
+                Some("chord") => Blend::Chord,
+                Some("chamfer") => Blend::Chamfer,
+                _ => return Err(bad("kind")),
+            };
+            let edges = record_picks("blend_setback", &p["edges"], "edge", order.edges.len())?;
+            let vertices = record_picks(
+                "blend_setback",
+                &p["corners"],
+                "vertex",
+                order.vertices.len(),
+            )?;
+            let numbers = |key: &str| {
+                p[key]
+                    .as_array()
+                    .and_then(|a| a.iter().map(Value::as_f64).collect::<Option<Vec<_>>>())
+                    .ok_or_else(|| bad(key))
+            };
+            let sizes = numbers("sizes")?;
+            let distances = numbers("setbacks")?;
+            if edges.is_empty()
+                || vertices.is_empty()
+                || sizes.len() != edges.len()
+                || distances.len() != vertices.len()
+            {
+                return Err(bad("sizes and setbacks must match their picks"));
+            }
+            // Validate every supplied value before retaining the first pick of each entity,
+            // as the traced wrapper does: a bad duplicate must not disappear.
+            if sizes
+                .iter()
+                .chain(&distances)
+                .any(|&x| !x.is_finite() || x <= 0.0 || x > solidcore_ops::blend::MAX_SIZE)
+            {
+                return Ok(Err(solidcore_ops::Error::Argument.to_string()));
+            }
+            let mut unique = Vec::new();
+            let mut each = Vec::new();
+            for (edge, size) in edges.into_iter().zip(sizes) {
+                if !unique.contains(&edge) {
+                    unique.push(edge);
+                    each.push(size);
+                }
+            }
+            let mut setbacks: Vec<SetBack> = Vec::new();
+            for (vertex, distance) in vertices.into_iter().zip(distances) {
+                if !setbacks.iter().any(|s| s.vertex == vertex) {
+                    setbacks.push(SetBack { vertex, distance });
+                }
+            }
+            let r = blend_ordered(
+                &s.body,
+                order,
+                kind,
+                &unique,
+                &each,
+                &setbacks,
+                Corners::Filled,
+            )
+            .map(|_| ());
+            in_place(Slot { order: None, ..s }, r)
+        }
         "blend_dropping" => {
             if p.get("turn").is_some() {
                 return Err(Stop::Unsupported(
@@ -828,7 +960,7 @@ fn call_with_copy(
                 .collect::<Option<_>>()
                 .ok_or_else(|| bad("sizes"))?;
             let mut s = copy_for_edit(&first()?)?;
-            let (edges, _) = faces(&mut s, &p["edges"])?;
+            let (edges, order) = faces(&mut s, &p["edges"])?;
             let one_size = sizes.len() == 1;
             if !(one_size || sizes.len() == edges.len()) {
                 return Err(bad("sizes"));
@@ -852,7 +984,8 @@ fn call_with_copy(
                     );
                 }
             }
-            let r = blend(&s.body, kind, &unique, &each, &[], Corners::Filled).map(|_| ());
+            let r = blend_ordered(&s.body, &order, kind, &unique, &each, &[], Corners::Filled)
+                .map(|_| ());
             in_place(Slot { order: None, ..s }, r)
         }
         "merge_faces" => {
@@ -860,36 +993,12 @@ fn call_with_copy(
                 return Err(bad("one input"));
             }
             let mut s = copy_for_edit(&first()?)?;
-            let selection = &p["keep"];
-            if selection["kind"].as_str() != Some("edge") {
-                return Err(bad("keep must select edges"));
-            }
-            let keep = selection["picked"]
-                .as_array()
-                .ok_or_else(|| bad("keep picked"))?
-                .iter()
-                .map(|pick| {
-                    pick["index"]
-                        .as_u64()
-                        .and_then(|i| usize::try_from(i).ok())
-                        .ok_or_else(|| bad("keep edge index"))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            if s.order.is_none() {
-                let (_, order) = s
-                    .body
-                    .to_record()
-                    .map_err(|e| Stop::Fail(format!("order before merge_faces: {e}")))?;
-                s.order = Some(order);
-            }
-            let order = s.order.as_ref().unwrap();
-            if keep.iter().any(|&i| order.edges.get(i).is_none()) {
-                return Err(bad("keep edge outside record order"));
-            }
+            let order = ensure_order(&mut s, "merge_faces")?;
+            let keep = record_picks("merge_faces", &p["keep"], "edge", order.edges.len())?;
             let body = Arc::try_unwrap(s.body).map_err(|_| {
                 Stop::Fail("copy before merge_faces: the copy is shared".to_owned())
             })?;
-            made(merge_faces(body, order, &keep))
+            made(merge_faces(body, &order, &keep))
         }
         "stitch" => {
             let s = copy_for_edit(&first()?)?;
@@ -1129,6 +1238,53 @@ fn run_case_with_records(
 }
 
 #[test]
+fn record_order_lookup_keeps_cached_selection_order_and_operand() {
+    let body = Arc::new(solidcore_ops::make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap());
+    let (before, expected) = body.to_record().unwrap();
+    let mut slot = Slot { body, order: None };
+    let exported = ensure_order(&mut slot, "split_faces").unwrap();
+    assert_eq!(exported.faces, expected.faces);
+    assert_eq!(exported.edges, expected.edges);
+    assert_eq!(exported.vertices, expected.vertices);
+    slot.order.as_mut().unwrap().faces.rotate_left(2);
+    let expected = slot.order.clone().unwrap();
+    let cached = ensure_order_with(&mut slot, "pick", |_| {
+        panic!("a cached record order must not be exported again")
+    })
+    .unwrap();
+    assert_eq!(cached.faces, expected.faces);
+    assert_eq!(cached.edges, expected.edges);
+    assert_eq!(cached.vertices, expected.vertices);
+    assert_eq!(slot.body.to_record().unwrap().0, before);
+}
+
+#[test]
+fn record_order_lookup_distinguishes_unsupported_from_failed_preparation() {
+    let body = Arc::new(solidcore_ops::make_box([0.0; 3], [10.0; 3]).unwrap());
+    let before = body.to_record().unwrap().0;
+    for error in [
+        solidcore_ops::Error::Unsupported("unrepresentable result"),
+        solidcore_ops::Error::Argument,
+    ] {
+        let unsupported = matches!(error, solidcore_ops::Error::Unsupported(_));
+        let mut slot = Slot {
+            body: body.clone(),
+            order: None,
+        };
+        let result = ensure_order_with(&mut slot, "split_faces", |_| Err(error));
+        match result {
+            Err(Stop::Unsupported(why)) if unsupported => {
+                assert!(why.contains("split_faces") && why.contains("unrepresentable result"));
+            }
+            Err(Stop::Fail(why)) if !unsupported => assert!(why.contains("split_faces")),
+            other => panic!("wrong order-lookup classification: {other:?}"),
+        }
+        assert!(slot.order.is_none());
+        assert_eq!(slot.body.to_record().unwrap().0, before);
+    }
+}
+
+#[test]
 fn chamfer_dispatch_preserves_order_direction_sizes_and_operand() {
     session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
     for (direction, second, x, z) in [
@@ -1209,6 +1365,64 @@ fn chamfer_dispatch_preserves_order_direction_sizes_and_operand() {
         let removed = 0.5 * (20.0 - x) * (20.0 - z) * 20.0;
         assert!((out.body.volume(1e-9).unwrap() - (8000.0 - removed)).abs() < 1e-6);
         assert!((body.volume(1e-9).unwrap() - 8000.0).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn blend_replay_keeps_the_record_edge_after_reordering_and_aliasing() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let body = Arc::new(solidcore_ops::make_box([0.0; 3], [20.0; 3]).unwrap());
+    let (before, original) = body.to_record().unwrap();
+    let selected = before
+        .edges
+        .iter()
+        .position(|edge| {
+            edge.vertices.iter().all(|&i| {
+                let point = before.vertices[i as usize].point;
+                point[1] == 0.0 && point[2] == 20.0
+            })
+        })
+        .unwrap();
+    let selected = original.edges[selected];
+    for mode in 0..4 {
+        let mut order = original.clone();
+        match mode {
+            1 => order.edges.rotate_left(3),
+            2 => order.edges.insert(0, selected),
+            _ => {}
+        }
+        // One record can name the same kernel edge more than once. Pick its last alias.
+        let index = order
+            .edges
+            .iter()
+            .rposition(|&edge| edge == selected)
+            .unwrap();
+        let input = Slot {
+            body: Arc::clone(&body),
+            order: (mode != 3).then_some(order),
+        };
+        let step = serde_json::json!({"op":"blend_dropping","params":{
+            "kind":"round","sizes":[2.0],
+            "edges":{"kind":"edge","picked":[{"index":index}]}
+        }});
+        let result = call(&step, &mut [input.clone()]).unwrap().unwrap();
+        assert!(!Arc::ptr_eq(&result.body, &input.body));
+        assert!(result.order.is_none());
+        assert_eq!(result.body.counts().unwrap(), [7, 15, 10]);
+        let expected = 8000.0 - 80.0 * (1.0 - std::f64::consts::FRAC_PI_4);
+        assert!((result.body.volume(1e-9).unwrap() - expected).abs() / expected < 1e-9);
+        let record = result.body.to_record().unwrap().0;
+        for point in [[0., 2., 20.], [20., 2., 20.], [0., 0., 18.], [20., 0., 18.]] {
+            assert!(
+                record.vertices.iter().any(|v| v
+                    .point
+                    .iter()
+                    .zip(point)
+                    .all(|(a, b)| (a - b).abs() < 1e-9)),
+                "mode {mode} rounded another edge: missing rail endpoint {point:?}"
+            );
+        }
+        assert_eq!(input.body.to_record().unwrap().0, before);
     }
 }
 
@@ -1612,6 +1826,337 @@ fn untrim_point_holes_do_not_hide_missing_required_parameters() {
             "{parameter}"
         );
     }
+}
+
+/// The filled radius-5 corner with explicit setback8 already has a successful captured
+/// result; the runner must replay it rather than skip its operation as unported.
+#[test]
+fn filled_setback_replays_the_captured_corner() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let entry = corpus().join("ladder/07-fillets/013-corner-setback.json");
+    let e: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+    assert_eq!(e["rig"]["status"], "pass");
+    assert!(e["calls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|c| c["error"].is_null()));
+    run_case(&entry, &e).unwrap();
+}
+
+fn filled_setback_input() -> (Value, Slot) {
+    let entry = corpus().join("ladder/07-fillets/013-corner-setback.json");
+    let e: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+    let record = serde_json::from_value(records(&entry, &e)["b2"].clone()).unwrap();
+    let (body, order) = Body::from_record(&record, true).unwrap();
+    let step = e["calls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["op"] == "blend_setback")
+        .unwrap()
+        .clone();
+    (
+        step,
+        Slot {
+            body: Arc::new(body),
+            order: Some(order),
+        },
+    )
+}
+
+#[test]
+fn filled_setback_maps_edges_and_vertices_independently_and_keeps_the_operand() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let (step, input) = filled_setback_input();
+    let (before, _) = input.body.to_record().unwrap();
+    let original = input.order.as_ref().unwrap();
+    for permuted in [false, true] {
+        let mut input = input.clone();
+        let mut step = step.clone();
+        if permuted {
+            let mut order = original.clone();
+            order.edges.rotate_left(5);
+            order.vertices.reverse();
+            for pick in step["params"]["edges"]["picked"].as_array_mut().unwrap() {
+                let selected = original.edges[pick["index"].as_u64().unwrap() as usize];
+                pick["index"] =
+                    serde_json::json!(order.edges.iter().position(|&e| e == selected).unwrap());
+            }
+            let selected = original.vertices[3];
+            step["params"]["corners"]["picked"][0]["index"] =
+                serde_json::json!(order.vertices.iter().position(|&v| v == selected).unwrap());
+            input.order = Some(order);
+        }
+        let output = call(&step, &mut [input.clone()]).unwrap().unwrap();
+        assert!(!Arc::ptr_eq(&output.body, &input.body));
+        assert!(output.order.is_none());
+        let (record, _) = output.body.to_record().unwrap();
+        assert_eq!(
+            (
+                record.faces.len(),
+                record.edges.len(),
+                record.vertices.len()
+            ),
+            (15, 36, 23)
+        );
+        let has = |point: [f64; 3]| {
+            record
+                .vertices
+                .iter()
+                .any(|v| v.point.iter().zip(point).all(|(a, b)| (a - b).abs() < 1e-9))
+        };
+        // The six rail ends are fixed by the radius and distance from the selected corner.
+        for point in [
+            [52., 35., 20.],
+            [52., 40., 15.],
+            [55., 32., 20.],
+            [60., 32., 15.],
+            [55., 40., 12.],
+            [60., 35., 12.],
+        ] {
+            assert!(has(point), "missing setback rail {point:?}");
+        }
+        assert!(has([0., 0., 0.]));
+        assert!(!has([60., 40., 20.]));
+        assert_eq!(input.body.to_record().unwrap().0, before);
+    }
+}
+
+#[test]
+fn filled_setback_ordered_api_rejects_foreign_entities_without_editing() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let (_, input) = filled_setback_input();
+    let before = input.body.to_record().unwrap().0;
+    let original = input.order.as_ref().unwrap();
+    for invalid in 0..4 {
+        let mut order = original.clone();
+        let mut edges = vec![3, 2, 4];
+        let mut vertex = 3;
+        match invalid {
+            0 => order.edges[3] = solidcore::EdgeId::from_index(1_000_000),
+            1 => order.vertices[3] = solidcore::VertexId::from_index(1_000_000),
+            2 => edges[0] = order.edges.len(),
+            _ => vertex = order.vertices.len(),
+        }
+        let r = blend_ordered(
+            &input.body,
+            &order,
+            Blend::Round,
+            &edges,
+            &[5.0; 3],
+            &[SetBack {
+                vertex,
+                distance: 8.0,
+            }],
+            Corners::Filled,
+        );
+        assert!(
+            matches!(r, Err(solidcore_ops::Error::Argument)),
+            "{invalid}: {r:?}"
+        );
+        assert_eq!(input.body.to_record().unwrap().0, before);
+    }
+}
+
+#[test]
+fn filled_setback_duplicate_picks_keep_first_values_without_hiding_refusals() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let (step, input) = filled_setback_input();
+    let expected = call(&step, &mut [input.clone()])
+        .unwrap()
+        .unwrap()
+        .body
+        .to_record()
+        .unwrap()
+        .0;
+    let mut duplicate = step.clone();
+    let edge = duplicate["params"]["edges"]["picked"][0].clone();
+    duplicate["params"]["edges"]["picked"]
+        .as_array_mut()
+        .unwrap()
+        .push(edge);
+    duplicate["params"]["sizes"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!(2.0));
+    let vertex = duplicate["params"]["corners"]["picked"][0].clone();
+    duplicate["params"]["corners"]["picked"]
+        .as_array_mut()
+        .unwrap()
+        .push(vertex);
+    duplicate["params"]["setbacks"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!(4.0));
+    let output = call(&duplicate, &mut [input.clone()]).unwrap().unwrap();
+    assert_eq!(output.body.to_record().unwrap().0, expected);
+    for key in ["sizes", "setbacks"] {
+        let mut invalid = duplicate.clone();
+        *invalid["params"][key]
+            .as_array_mut()
+            .unwrap()
+            .last_mut()
+            .unwrap() = serde_json::json!(-1.0);
+        assert!(call(&invalid, &mut [input.clone()]).unwrap().is_err());
+    }
+    for key in ["edges", "corners"] {
+        let mut outside = step.clone();
+        outside["params"][key]["picked"][0]["index"] = serde_json::json!(1_000_000);
+        assert!(matches!(
+            call(&outside, &mut [input.clone()]),
+            Err(Stop::Fail(_))
+        ));
+        let mut missed = step.clone();
+        missed["params"][key]["picked"][0] = serde_json::json!({"miss":"no entity near point"});
+        assert!(matches!(
+            call(&missed, &mut [input.clone()]),
+            Err(Stop::Unsupported(_))
+        ));
+    }
+    let mut no_room = step;
+    no_room["params"]["setbacks"] = serde_json::json!([40.0]);
+    assert!(call(&no_room, &mut [input]).unwrap().is_err());
+}
+
+/// The recorded operations already passed in SolidCraft; replay must reach their existing
+/// kernel construction instead of skipping the variable-radius request.
+#[test]
+fn variable_fillet_replays_all_five_captured_laws() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let names = [
+        "fillets/cov-fillet-variable-box-edge-1-to-5-on-its-cone",
+        "ladder/07-fillets/005-variable-r5-to-r1",
+        "ladder/07-fillets/006-variable-r5-to-zero",
+        "ladder/07-fillets/007-variable-r5-to-1e-3",
+        "ladder/07-fillets/012-variable-into-rounded-corner",
+    ];
+    let mut failures = Vec::new();
+    for name in names {
+        let entry = corpus().join(format!("{name}.json"));
+        let e: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+        assert_eq!(e["rig"]["status"], "pass", "{name}");
+        assert!(e["calls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["error"].is_null()));
+        match run_case(&entry, &e) {
+            Ok(deviation) => println!("{name}: pass, relative volume deviation {deviation:?}"),
+            Err(why) => failures.push(format!("{name}: {why:?}")),
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+fn variable_fillet_step(edge: usize, start: [f64; 3]) -> Value {
+    serde_json::json!({"op": "fillet_variable", "params": {
+        "edge": {"kind": "edge", "picked": [{"index": edge}]},
+        "start": start, "degree": 1,
+        "knots": [0.0,0.0,0.25,0.75,1.0,1.0], "radii": [4.0,2.0,4.0,2.0]
+    }})
+}
+
+#[test]
+fn variable_fillet_replay_maps_the_copy_and_keeps_the_operand() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let body = Arc::new(solidcore_ops::make_box([0.0; 3], [20.0; 3]).unwrap());
+    let (before, original) = body.to_record().unwrap();
+    let edge = before
+        .edges
+        .iter()
+        .position(|e| {
+            e.vertices.iter().all(|&v| {
+                let p = before.vertices[usize::try_from(v).unwrap()].point;
+                p[1] == 20.0 && p[2] == 20.0
+            })
+        })
+        .unwrap();
+    let selected = original.edges[edge];
+    for permuted in [false, true] {
+        let mut order = original.clone();
+        if permuted {
+            order.edges.rotate_left(5);
+            order.vertices.reverse();
+        }
+        let edge = order.edges.iter().position(|&e| e == selected).unwrap();
+        let input = Slot {
+            body: body.clone(),
+            order: permuted.then_some(order),
+        };
+        for (point, from) in [([-10.0, 20.0, 20.0], 0.0), ([30.0, 20.0, 20.0], 20.0)] {
+            let step = variable_fillet_step(edge, point);
+            let output = call(&step, &mut [input.clone()]).unwrap().unwrap();
+            assert!(!Arc::ptr_eq(&output.body, &body));
+            assert!(output.order.is_none());
+            assert_eq!(output.body.counts().unwrap()[0], 10);
+            let (record, _) = output.body.to_record().unwrap();
+            for want in [[from, 16.0, 20.0], [from, 20.0, 16.0]] {
+                assert!(
+                    record.vertices.iter().any(|v| v
+                        .point
+                        .iter()
+                        .zip(want)
+                        .all(|(a, b)| (a - b).abs() < 1e-9)),
+                    "missing start rail {want:?}"
+                );
+            }
+            assert_eq!(body.to_record().unwrap().0, before);
+        }
+    }
+}
+
+#[test]
+fn variable_fillet_metadata_cannot_be_accepted_as_the_laws_refusal() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let body = Arc::new(solidcore_ops::make_box([0.0; 3], [20.0; 3]).unwrap());
+    let (before, order) = body.to_record().unwrap();
+    let input = Slot {
+        body: body.clone(),
+        order: Some(order),
+    };
+    let step = variable_fillet_step(0, [0.0; 3]);
+    for parameter in ["edge", "start", "degree", "knots", "radii"] {
+        let mut bad = step.clone();
+        bad["params"].as_object_mut().unwrap().remove(parameter);
+        assert!(
+            matches!(call(&bad, &mut [input.clone()]), Err(Stop::Fail(_))),
+            "{parameter}"
+        );
+    }
+    for edge in [
+        serde_json::json!({"kind": "face", "picked": [{"index":0}]}),
+        serde_json::json!({"kind": "edge", "picked": []}),
+        serde_json::json!({"kind": "edge", "picked": [{"index":0},{"index":1}]}),
+        serde_json::json!({"kind": "edge", "picked": [{"index":999}]}),
+        serde_json::json!({"kind": "edge", "picked": [{"index":0,"miss":"none"}]}),
+    ] {
+        let mut bad = step.clone();
+        bad["params"]["edge"] = edge;
+        assert!(matches!(
+            call(&bad, &mut [input.clone()]),
+            Err(Stop::Fail(_))
+        ));
+    }
+    let mut missed = step.clone();
+    missed["params"]["edge"]["picked"] = serde_json::json!([{"miss":"none"}]);
+    assert!(
+        matches!(call(&missed, &mut [input.clone()]), Err(Stop::Unsupported(why)) if why.contains("missed"))
+    );
+    for (key, value) in [
+        ("degree", serde_json::json!(0)),
+        ("radii", serde_json::json!([-1.0, 2.0])),
+        ("knots", serde_json::json!([0, 1])),
+        ("radii", serde_json::json!([])),
+    ] {
+        let mut refused = step.clone();
+        refused["params"][key] = value;
+        assert!(
+            matches!(call(&refused, &mut [input.clone()]), Ok(Err(_))),
+            "{key}"
+        );
+    }
+    assert_eq!(body.to_record().unwrap().0, before);
 }
 
 fn sweep_replay_fixture(name: &str, op: &str) -> (PathBuf, Value, Value) {
@@ -2172,6 +2717,9 @@ fn a_pre_edit_copy_failure_cannot_count_as_the_edits_refusal() {
         "stitch",
         "merge_faces",
         "extend_sheet",
+        "fillet_variable",
+        "blend_setback",
+        "draft",
     ] {
         let step = serde_json::json!({
             "op": op, "error": "expected edit refusal",
@@ -2229,9 +2777,12 @@ fn an_invalid_copy_order_cannot_count_as_an_expected_refusal() {
             "edge": {"kind": "edge", "picked": [{"index": 0}]},
             "distance": 1, "how": "natural"
         }}),
+        serde_json::json!({"op": "fillet_variable", "params": {}}),
+        serde_json::json!({"op": "blend_setback", "params": {}}),
         serde_json::json!({"op": "merge_faces", "params": {
             "keep": {"kind": "edge", "picked": []}
         }}),
+        serde_json::json!({"op": "draft", "params": {}}),
     ] {
         step["error"] = serde_json::json!("expected refusal");
         match call(&step, &mut [input.clone()]) {
@@ -3001,6 +3552,8 @@ fn split_body_and_merge_faces_metadata_do_not_masquerade_as_refusals() {
         serde_json::json!({"kind":"edge"}),
         serde_json::json!({"kind":"edge","picked":[{}]}),
         serde_json::json!({"kind":"edge","picked":[{"index":100000}]}),
+        serde_json::json!({"kind":"edge","picked":[{"miss":false}]}),
+        serde_json::json!({"kind":"edge","picked":[{"miss":"missed","index":0}]}),
     ] {
         let step = serde_json::json!({"op":"merge_faces","params":{"keep":keep}});
         assert!(matches!(
@@ -3008,6 +3561,13 @@ fn split_body_and_merge_faces_metadata_do_not_masquerade_as_refusals() {
             Err(Stop::Fail(_))
         ));
     }
+    let missed = serde_json::json!({"op":"merge_faces","params":{
+        "keep":{"kind":"edge","picked":[{"miss":"no edge at traced point"}]}
+    }});
+    assert!(matches!(
+        call(&missed, &mut [input.clone()]),
+        Err(Stop::Unsupported(_))
+    ));
     for tool in [serde_json::json!(null), serde_json::json!({"plane":{}})] {
         let step = serde_json::json!({"op":"split_body","params":{"tool":tool}});
         assert!(matches!(
@@ -3019,6 +3579,22 @@ fn split_body_and_merge_faces_metadata_do_not_masquerade_as_refusals() {
         "origin":[3,0,0],"xaxis":[0,0,0],"yaxis":[0,0,1],"u":[-1,11],"v":[-1,11]
     }}}});
     assert!(matches!(call_outputs(&step, &mut [input]), Ok(Err(_))));
+}
+
+#[test]
+fn record_picks_preserve_order_and_duplicate_parameter_alignment() {
+    let picks = serde_json::json!({"kind":"edge","picked":[
+        {"index":1},{"index":1},{"index":0}
+    ]});
+    assert_eq!(record_picks("blend", &picks, "edge", 2).unwrap(), [1, 1, 0]);
+    assert!(matches!(
+        record_picks("blend", &picks, "edge", 1),
+        Err(Stop::Fail(_))
+    ));
+    assert!(matches!(
+        record_picks("blend", &picks, "vertex", 2),
+        Err(Stop::Fail(_))
+    ));
 }
 
 /// Captured split followed by merging its redundant faces, with the original grading.
@@ -3156,6 +3732,9 @@ fn extend_sheet_metadata_and_refusal_are_distinct() {
         serde_json::json!({"kind":"edge","picked":[{}]}),
         serde_json::json!({"kind":"edge","picked":[{"index":3},{"index":1}]}),
         serde_json::json!({"kind":"edge","picked":[{"index":100000}]}),
+        serde_json::json!({"kind":"edge","picked":[{"miss":false}]}),
+        serde_json::json!({"kind":"edge","picked":[{"miss":"missed","index":3}]}),
+        serde_json::json!({"kind":"edge","picked":[{"miss":"missed"},{"index":3}]}),
     ] {
         let mut bad = step.clone();
         bad["params"]["edge"] = pick;
@@ -3164,6 +3743,13 @@ fn extend_sheet_metadata_and_refusal_are_distinct() {
             Err(Stop::Fail(_))
         ));
     }
+    let mut missed = step.clone();
+    missed["params"]["edge"] =
+        serde_json::json!({"kind":"edge","picked":[{"miss":"no edge at traced point"}]});
+    assert!(matches!(
+        call(&missed, &mut [input.clone()]),
+        Err(Stop::Unsupported(_))
+    ));
     assert!(matches!(
         call(
             &sheet_extension_step(3, 5.0, "unported_mode"),

@@ -291,6 +291,127 @@ fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
     }
 }
 
+/// Select the cube's edge along x at y = z = 20, with its record Order.
+fn variable_ordered_edge(b: &Body) -> (solidcore_ops::Order, usize) {
+    let (record, order) = b.to_record().unwrap();
+    let edge = record
+        .edges
+        .iter()
+        .position(|e| {
+            e.vertices.iter().all(|&v| {
+                let p = record.vertices[usize::try_from(v).unwrap()].point;
+                p[1] == 20.0 && p[2] == 20.0
+            })
+        })
+        .unwrap();
+    (order, edge)
+}
+
+#[test]
+fn a_record_ordered_variable_round_keeps_its_selected_edge() {
+    all_fixes();
+    for permuted in [false, true] {
+        let b = make_box([0.0; 3], [20.0; 3]).unwrap();
+        let (mut order, edge) = variable_ordered_edge(&b);
+        let selected = order.edges[edge];
+        if permuted {
+            order.edges.rotate_left(5);
+        }
+        let edge = order.edges.iter().position(|&e| e == selected).unwrap();
+        solidcore_ops::fillet_variable_ordered(
+            &b,
+            &order,
+            edge,
+            [-10.0, 20.0, 20.0],
+            1,
+            &[0.0, 0.0, 1.0, 1.0],
+            &[2.0, 2.0],
+        )
+        .unwrap();
+        let want = 8000.0 - (1.0 - PI / 4.0) * 4.0 * 20.0;
+        assert!((b.volume(1e-9).unwrap() - want).abs() <= want * 1e-9);
+        for point in [
+            [0.0, 18.0, 20.0],
+            [0.0, 20.0, 18.0],
+            [20.0, 18.0, 20.0],
+            [20.0, 20.0, 18.0],
+        ] {
+            vertex_at(&b, point);
+        }
+        assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    }
+}
+
+/// Reversing this law leaves its total volume the same, so its start's radius-4 rail
+/// vertices and its ten faces, not volume alone, prove which end receives the law.
+#[test]
+fn a_record_ordered_variable_round_keeps_the_near_end_and_tie_rule() {
+    all_fixes();
+    for point in [[-10.0, 20.0, 20.0], [30.0, 20.0, 20.0], [10.0, 20.0, 20.0]] {
+        let b = make_box([0.0; 3], [20.0; 3]).unwrap();
+        let (record, _) = b.to_record().unwrap();
+        let (mut order, edge) = variable_ordered_edge(&b);
+        let selected = order.edges[edge];
+        let solidcore_record::brep::Curve::Line { start, .. } = record.edges[edge].curve else {
+            panic!("the selected edge is a line");
+        };
+        let from_x = if point[0] < 0.0 {
+            0.0
+        } else if point[0] > 20.0 {
+            20.0
+        } else {
+            start[0]
+        };
+        order.edges.reverse();
+        let edge = order.edges.iter().position(|&e| e == selected).unwrap();
+        solidcore_ops::fillet_variable_ordered(
+            &b,
+            &order,
+            edge,
+            point,
+            1,
+            &[0.0, 0.0, 0.25, 0.75, 1.0, 1.0],
+            &[4.0, 2.0, 4.0, 2.0],
+        )
+        .unwrap();
+        assert_eq!(b.counts().unwrap()[0], 10, "start {point:?}");
+        vertex_at(&b, [from_x, 16.0, 20.0]);
+        vertex_at(&b, [from_x, 20.0, 16.0]);
+        assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    }
+}
+
+#[test]
+fn an_ordered_variable_round_rejects_bad_selection_without_editing() {
+    all_fixes();
+    let b = make_box([0.0; 3], [20.0; 3]).unwrap();
+    let (before, _) = b.to_record().unwrap();
+    let (order, edge) = variable_ordered_edge(&b);
+    let law = |order: &solidcore_ops::Order, edge: usize, start| {
+        solidcore_ops::fillet_variable_ordered(
+            &b,
+            order,
+            edge,
+            start,
+            1,
+            &[0.0, 0.0, 1.0, 1.0],
+            &[2.0, 2.0],
+        )
+    };
+    assert_eq!(
+        law(&order, usize::MAX, [0.0, 20.0, 20.0]),
+        Err(Error::Argument)
+    );
+    let mut missing = order.clone();
+    missing.edges[edge] = EdgeId::from_index(1_000_000);
+    assert_eq!(law(&missing, edge, [0.0, 20.0, 20.0]), Err(Error::Argument));
+    assert_eq!(
+        law(&order, edge, [f64::NAN, 20.0, 20.0]),
+        Err(Error::Argument)
+    );
+    assert_eq!(b.to_record().unwrap().0, before);
+}
+
 #[test]
 fn arguments_are_checked_before_the_kernel() {
     all_fixes();

@@ -35,6 +35,7 @@ use solidcore::blend::round_room::rounds_cross;
 use solidcore::geom::attribute::{ids, Attribute, AttributeHandle, AttributeHandlers, Behavior};
 use solidcore::mass::integrator::properties::edge_length;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use solidcore::query::api_queries::point_distance;
 use solidcore::surface::procedural_blend::chamfer::ChamferSize;
 use solidcore::topology::brep::p2::{is_manifold_solid, ArenaNotifyState};
 use solidcore::topology::brep::p3::{brep_copy, delete_face, DeleteFaceOptions};
@@ -88,7 +89,9 @@ pub enum Corners {
     Open,
 }
 
-/// A corner set back: its vertex (record index) and the setback along each of its edges.
+/// A corner set back: its vertex and the setback along each of its edges.
+/// The vertex indexes the native list for [`blend`], or the supplied record order for
+/// [`blend_ordered`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SetBack {
     /// The corner's vertex.
@@ -870,7 +873,7 @@ fn setbacks_fit(k: &Kernel, b: &Brep, setbacks: &[(VertexId, f64)]) -> solidcore
     Ok(true)
 }
 
-/// The edges of `body` at record indices `edges` blended by `kind`, edge i at `sizes[i]` (or
+/// The edges of `body` at native-list indices `edges` blended by `kind`, edge i at `sizes[i]` (or
 /// `sizes[0]` for every edge), the corners at `setbacks` set back (not for a chamfer, whose
 /// corners are bevelled) and, with [`Corners::Open`], left open. When some of the rounds
 /// overflow their faces across cliffs and others fit (more than one edge, no setbacks, corners
@@ -901,6 +904,40 @@ pub fn blend(
     setbacks: &[SetBack],
     corners: Corners,
 ) -> Result<Blended> {
+    blend_impl(body, None, kind, edges, sizes, setbacks, corners)
+}
+
+/// Blend edges and setback vertices selected through the input record's [`crate::Order`].
+///
+/// `edges` indexes `order.edges`; each [`SetBack::vertex`] indexes `order.vertices`.
+/// The order must belong to `body` (or have been mapped through its copy). Construction,
+/// sizes, corner handling and refusals are those of [`blend`]. Returned hole indices, when
+/// corners are open, refer to the result's native lists, as in [`blend`].
+///
+/// # Errors
+/// The errors of [`blend`], including [`Error::Argument`] for an absent index or an entity
+/// in the supplied order that does not belong to the body.
+pub fn blend_ordered(
+    body: &Body,
+    order: &crate::Order,
+    kind: Blend,
+    edges: &[usize],
+    sizes: &[f64],
+    setbacks: &[SetBack],
+    corners: Corners,
+) -> Result<Blended> {
+    blend_impl(body, Some(order), kind, edges, sizes, setbacks, corners)
+}
+
+fn blend_impl(
+    body: &Body,
+    order: Option<&crate::Order>,
+    kind: Blend,
+    edges: &[usize],
+    sizes: &[f64],
+    setbacks: &[SetBack],
+    corners: Corners,
+) -> Result<Blended> {
     let one_size = sizes.len() == 1;
     if edges.is_empty()
         || !(one_size || sizes.len() == edges.len())
@@ -923,12 +960,17 @@ pub fn blend(
         })
         .collect();
     with_body("blend", body, |k, b| {
-        let picked = match each_once(b.edge_list(), edges) {
+        let edge_order = order.map_or_else(|| b.edge_list(), |o| o.edges.as_slice());
+        let picked = match each_once(edge_order, edges) {
             Ok(p) => p,
             Err(e) => return Ok(Err(e)),
         };
+        if order.is_some() && picked.iter().any(|e| !b.edge_list().contains(e)) {
+            return Ok(Err(Error::Argument));
+        }
         let vertices: Vec<usize> = setbacks.iter().map(|s| s.vertex).collect();
-        let back: Vec<(VertexId, f64)> = match each_once(b.vertex_list(), &vertices) {
+        let vertex_order = order.map_or_else(|| b.vertex_list(), |o| o.vertices.as_slice());
+        let back: Vec<(VertexId, f64)> = match each_once(vertex_order, &vertices) {
             Ok(vs) => vs
                 .into_iter()
                 .zip(setbacks)
@@ -936,6 +978,9 @@ pub fn blend(
                 .collect(),
             Err(e) => return Ok(Err(e)),
         };
+        if order.is_some() && back.iter().any(|(v, _)| !b.vertex_list().contains(v)) {
+            return Ok(Err(Error::Argument));
+        }
         if !setbacks_fit(k, b, &back)? {
             return Ok(Err(Error::NoRoom));
         }
@@ -1467,9 +1512,9 @@ fn law_pinches(degree: usize, knots: &[f64], radii: &[f64]) -> bool {
     false
 }
 
-/// The edge of `body` at record index `edge` rounded with the radius law of `degree`, `knots`
+/// The edge of `body` at native edge-list index `edge` rounded with the radius law of `degree`, `knots`
 /// and control radii `radii` (a clamped B-spline from 0 to 1), running from the edge's end at
-/// its vertex of record index `start`. A solid gives a solid. A law with a corner gives the
+/// its vertex of native vertex-list index `start`. A solid gives a solid. A law with a corner gives the
 /// union of its balls, the round's faces split there (the kernel's law corners).
 ///
 /// # Errors
@@ -1487,6 +1532,63 @@ pub fn fillet_variable(
     knots: &[f64],
     radii: &[f64],
 ) -> Result<()> {
+    fillet_variable_impl(
+        body,
+        None,
+        edge,
+        VariableStart::Vertex(start),
+        degree,
+        knots,
+        radii,
+    )
+}
+
+/// Record edge `edge` of `body`, taken through `order`, rounded with the radius law of
+/// [`fillet_variable`], starting at the edge curve's end nearest `start`.
+///
+/// Distances are measured by the kernel at the edge's parameter-interval ends. A tie starts
+/// the law at the interval's first end. Selection and filleting hold the same body lock;
+/// neither native list positions nor a vertex index are inferred from the record index.
+///
+/// # Errors
+///
+/// Those of [`fillet_variable`]; [`Error::Argument`] for an order naming a missing edge or
+/// a non-finite start point; the kernel's refusal of endpoint evaluation or distance.
+pub fn fillet_variable_ordered(
+    body: &Body,
+    order: &crate::Order,
+    edge: usize,
+    start: [f64; 3],
+    degree: usize,
+    knots: &[f64],
+    radii: &[f64],
+) -> Result<()> {
+    fillet_variable_impl(
+        body,
+        Some(order),
+        edge,
+        VariableStart::Point(start),
+        degree,
+        knots,
+        radii,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum VariableStart {
+    Vertex(usize),
+    Point([f64; 3]),
+}
+
+fn fillet_variable_impl(
+    body: &Body,
+    order: Option<&crate::Order>,
+    edge: usize,
+    start: VariableStart,
+    degree: usize,
+    knots: &[f64],
+    radii: &[f64],
+) -> Result<()> {
     if !law_ok(degree, knots, radii) {
         return Err(Error::Argument);
     }
@@ -1495,12 +1597,37 @@ pub fn fillet_variable(
             "a radius law that is zero inside its edge",
         ));
     }
+    if matches!(start, VariableStart::Point(p) if p.iter().any(|x| !x.is_finite())) {
+        return Err(Error::Argument);
+    }
     with_body("fillet_variable", body, |k, b| {
-        let (Some(&e), Some(&v)) = (b.edge_list().get(edge), b.vertex_list().get(start)) else {
+        let edges = order.map_or_else(|| b.edge_list(), |o| o.edges.as_slice());
+        let Some(&e) = edges.get(edge) else {
             return Ok(Err(Error::Argument));
         };
-        let Some(reversed) = room::runs_back(b, e, v)? else {
+        if order.is_some() && !b.edge_list().contains(&e) {
             return Ok(Err(Error::Argument));
+        }
+        let reversed = match start {
+            VariableStart::Vertex(start) => {
+                let Some(&v) = b.vertex_list().get(start) else {
+                    return Ok(Err(Error::Argument));
+                };
+                let Some(reversed) = room::runs_back(b, e, v)? else {
+                    return Ok(Err(Error::Argument));
+                };
+                reversed
+            }
+            VariableStart::Point([x, y, z]) => {
+                let edge = b.edge(e)?;
+                let Some(curve) = edge.curve.as_ref() else {
+                    return Ok(Err(Error::Argument));
+                };
+                let lo = curve.evaluate_point(k, edge.interval.min())?;
+                let hi = curve.evaluate_point(k, edge.interval.max())?;
+                let point = Vec3::new(x, y, z);
+                point_distance(hi, point)?.value < point_distance(lo, point)?.value
+            }
         };
         let law = FilletLaw::of_radii(degree, knots, radii, reversed)?;
         // the band's room along a straight edge between planes, at evenly spaced stations
