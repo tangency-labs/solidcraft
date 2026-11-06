@@ -761,7 +761,7 @@ fn helical_sweep(
     if g.internal_gear {
         params["profiles"] = json!([{"point": internal_rim_point(g)}])
     }
-    eprintln!("{}", params);
+
     run(s, "solid.sweep", params).map_err(|e| bad("gears", format!("helical gear sweep failed: {e}")))?;
     Ok(())
 }
