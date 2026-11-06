@@ -242,11 +242,10 @@ fn clamp_dir<T: Clone>(
             entity: None,
         });
     }
-    let len_q = unsigned(n, OP)? + 1;
     let len_uq = unsigned(mq, OP)?.checked_add(1).ok_or_else(|| oob(OP))?;
 
     // Initial control points.
-    let mut qw = Vec::with_capacity(len_q);
+    let mut qw = Vec::new();
     for i in is..=ie {
         qw.push(at(pw, i, OP)?);
     }
@@ -283,7 +282,7 @@ fn clamp_dir<T: Clone>(
     }
 
     // Load the knot vector.
-    let mut uq = Vec::with_capacity(len_uq);
+    let mut uq = Vec::new();
     uq.extend(core::iter::repeat_n(b[0], unsigned(p, OP)? + 1));
     for i in (span1 + 1)..=(span2 - mult2) {
         uq.push(at(up, i, OP)?);

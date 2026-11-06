@@ -250,7 +250,7 @@ pub fn insert_knots(r: &[f64], p: usize, x: &[f64]) -> Result<Vec<f64>> {
     }
 
     // Refine knot vector.
-    let mut s = Vec::with_capacity(r.len() + x.len());
+    let mut s = Vec::new();
     for i in 0..=ps {
         s.push(rdi(r, i, OP)?);
     }

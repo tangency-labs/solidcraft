@@ -548,7 +548,7 @@ fn euclid_at(sur: &Surface, i: usize, j: usize) -> Result<Point3> {
 /// when missing).
 fn euclidean_net(sur: &Surface) -> (Vec<Point3>, Vec<f64>) {
     let count = (sur.n() + 1) * (sur.m() + 1);
-    let mut points = Vec::with_capacity(count);
+    let mut points = Vec::new();
     let mut weights = vec![0.0; count];
     let mut is_rational = false;
     let mut l_count = 0usize;

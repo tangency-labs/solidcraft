@@ -486,7 +486,7 @@ impl Curve {
         for i in j..=nsp {
             set(&mut pts, i - j, get(pw, i, OP)?.to_euclid(), OP)?;
         }
-        let mut cd = Vec::with_capacity(to_len(der));
+        let mut cd = Vec::new();
         for k in 0..=der {
             let mut c = Vec3::new(0.0, 0.0, 0.0);
             for i in 0..=p {
@@ -1316,11 +1316,6 @@ impl Curve {
         // Passed all the tests.
         Ok(true)
     }
-}
-
-/// `der + 1` as a capacity.
-fn to_len(der: isize) -> usize {
-    usize::try_from(der).map_or(0, |d| d.saturating_add(1))
 }
 
 /// Binomial coefficients `tri[k][j]`, `k, j <= NL_MAXDER`.

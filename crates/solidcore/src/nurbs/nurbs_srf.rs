@@ -1056,10 +1056,10 @@ pub fn decompose_srf(sur: &Surface) -> Result<Vec<Vec<Surface>>> {
         std::mem::swap(&mut bw, &mut nbw);
     }
 
-    let mut rows: Vec<Vec<Surface>> = Vec::with_capacity(nsu);
+    let mut rows: Vec<Vec<Surface>> = Vec::new();
     let mut it = patches.into_iter();
     for _ in 0..nsu {
-        let mut row = Vec::with_capacity(nsv);
+        let mut row = Vec::new();
         for _ in 0..nsv {
             let pt = it.next().ok_or_else(|| oob(OP_DECOMPOSE))?;
             row.push(Surface::new(pt.net, p, q, pt.u, pt.v)?);
