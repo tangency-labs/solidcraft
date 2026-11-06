@@ -172,8 +172,11 @@ pub enum Unsoundness {
     GeometryUnchecked,
     /// The input was a manifold solid and the body is not.
     NotManifoldSolid,
-    /// The body is a manifold solid whose volume is not positive.
+    /// The body is a manifold solid whose volume's enclosure lies below 0.
     VolumeNotPositive,
+    /// The body is a manifold solid whose volume's enclosure still holds 0 after its
+    /// budget: its sign is not proved.
+    VolumeUndecided,
 }
 
 /// How loops of an offset face touch without crossing ([`OffsetFailure::WallsTouch`]).
@@ -448,6 +451,10 @@ impl core::fmt::Display for OffsetFailure {
                 Unsoundness::VolumeNotPositive => f.write_str(
                     "the local operation's body is a manifold solid whose volume is not \
                      positive: refused, the input unchanged",
+                ),
+                Unsoundness::VolumeUndecided => f.write_str(
+                    "the local operation's body is a manifold solid whose volume's sign \
+                     could not be proved: refused, the input unchanged",
                 ),
             },
             Self::ExactCurveUncut => f.write_str(
