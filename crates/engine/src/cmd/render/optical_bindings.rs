@@ -11,7 +11,13 @@ use solidcraft_doc::{
 use solidcraft_render::ProductScene;
 use std::{collections::BTreeMap, sync::Arc};
 
-pub(super) fn resolve(s: &Session, scene: &ProductScene, bindings: &OpticalBindings, command: &str) -> Result<Vec<super::transmission::Override>> {
+fn resolve_each<T>(
+    s: &Session,
+    scene: &ProductScene,
+    bindings: &OpticalBindings,
+    command: &str,
+    convert: impl Fn(usize, &str, OpticalMaterial) -> Result<T>,
+) -> Result<Vec<T>> {
     bindings.validate().map_err(|e| bad(command, e.to_string()))?;
     let identities = super::surface_bindings::targets(s, command)?;
     let visible: BTreeMap<_, _> = scene.meshes.iter().enumerate().map(|(i, b)| (b.name.as_str(), i)).collect();
@@ -20,13 +26,42 @@ pub(super) fn resolve(s: &Session, scene: &ProductScene, bindings: &OpticalBindi
     for binding in bindings.iter() {
         let name = identities.get(&binding.target).ok_or_else(|| bad(command, "saved optical target changed; explicit rebinding required"))?;
         let index = visible.get(name.as_str()).ok_or_else(|| bad(command, "saved optical target is hidden or absent"))?;
-        let mut value = serde_json::to_value(binding.optics).map_err(|e| bad(command, e.to_string()))?;
-        value["body_index"] = json!(index);
-        value["body_name"] = json!(name);
-        result.push(serde_json::from_value(value).map_err(|e| bad(command, e.to_string()))?);
+        result.push(convert(*index, name, binding.optics)?);
     }
     Ok(result)
 }
+
+pub(super) fn resolve(s: &Session, scene: &ProductScene, bindings: &OpticalBindings, command: &str) -> Result<Vec<super::transmission::Override>> {
+    resolve_each(s, scene, bindings, command, |index, name, optics| {
+        let mut value = serde_json::to_value(optics).map_err(|e| bad(command, e.to_string()))?;
+        value["body_index"] = json!(index);
+        value["body_name"] = json!(name);
+        serde_json::from_value(value).map_err(|e| bad(command, e.to_string()))
+    })
+}
+
+#[cfg(test)]
+pub(super) fn resolve_cpu(
+    s: &Session,
+    scene: &ProductScene,
+    bindings: &OpticalBindings,
+    command: &str,
+) -> Result<Vec<solidcraft_render::job::DielectricOptions>> {
+    resolve_cpu_path(s, scene, bindings, false, command)
+}
+pub(super) fn resolve_cpu_path(
+    s: &Session,
+    scene: &ProductScene,
+    bindings: &OpticalBindings,
+    path: bool,
+    command: &str,
+) -> Result<Vec<solidcraft_render::job::DielectricOptions>> {
+    bindings.validate_for_cpu_path(path).map_err(|e| bad(command, e.to_string()))?;
+    resolve_each(s, scene, bindings, command, |index, name, optics| {
+        optics.to_cpu_for_path(index, name, path).map_err(|e| bad(command, e.to_string()))
+    })
+}
+
 fn empty() -> Value {
     json!({})
 }
@@ -54,8 +89,8 @@ pub(super) fn bind(s: &mut Session, params: &Value) -> Result<Value> {
     if s.doc.render.setups.get(&input.name).is_some_and(|old| old.optics != setup.optics) {
         return Err(bad(command, "setup patch cannot erase or replace saved optics; use explicit bind/unbind"));
     }
-    if !matches!(setup.job, Some(RenderJob::GpuPath { .. })) {
-        return Err(bad(command, "portable optics require an explicit GPU setup"));
+    if !matches!(setup.job, Some(RenderJob::CpuRaytrace { .. } | RenderJob::GpuPath { .. })) {
+        return Err(bad(command, "portable optics require an explicit CPU or GPU raytrace setup"));
     }
     let mut scene = crate::product_scene::extract(s)?;
     let name = &scene
@@ -72,8 +107,15 @@ pub(super) fn bind(s: &mut Session, params: &Value) -> Result<Value> {
     }
     setup.optics.set(SavedOptics { target, optics: input.optics }, input.replace).map_err(|e| bad(command, e.to_string()))?;
     setup.validate().map_err(|e| bad(command, e.to_string()))?;
-    let resolved = resolve(s, &scene, &setup.optics, command)?;
-    super::transmission::apply(&mut scene, &resolved, command)?;
+    if matches!(setup.job, Some(RenderJob::CpuRaytrace { .. })) {
+        // Offline saving resolves identity and numerical compatibility. The selected
+        // CPU image producer still certifies actual geometry before any transport.
+        let path = matches!(&setup.job,Some(RenderJob::CpuRaytrace{options,..}) if options.path.is_some());
+        resolve_cpu_path(s, &scene, &setup.optics, path, command)?;
+    } else {
+        let resolved = resolve(s, &scene, &setup.optics, command)?;
+        super::transmission::apply(&mut scene, &resolved, command)?;
+    }
     let mut settings = (*s.doc.render).clone();
     settings.setups.insert(input.name.clone(), setup.clone());
     settings.validate().map_err(|e| bad(command, e.to_string()))?;
@@ -145,5 +187,50 @@ mod tests {
         let target = s.doc.render.setups["Studio"].optics.iter().next().unwrap().target.clone();
         s.execute("render.optics.unbind", &json!({"name":"Studio","target":target,"expected_revision":s.revision})).unwrap();
         assert!(s.doc.render.setups["Studio"].optics.is_empty());
+    }
+
+    #[test]
+    fn cpu_saved_optics_are_offline_undoable_and_keep_stable_identity_and_mass() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":10,"width":10,"height":3,"body_name":"Optics"})).unwrap();
+        s.execute("material.assign", &json!({"bodies":["Optics"],"material":"Steel"})).unwrap();
+        s.execute("render.settings.set",&json!({"name":"CPU glass","set":{"width":8,"height":8,"job":{"method":"cpu_raytrace","options":{"progressive":{"samples_per_pixel":3,"seed":81}}}}})).unwrap();
+        assert!(s.render_job_host().is_none());
+        let physical = s.execute("component.properties", &json!({"component":"root"})).unwrap();
+        assert!(physical["total"]["mass_g"].as_f64().unwrap() > 0.0);
+        let before = s.doc.clone();
+        let undo = s.undo.len();
+        let evaluations = s.evaluations;
+        s.execute(
+            "render.optics.bind",
+            &json!({"name":"CPU glass","body_index":0,"body_name":"Optics","expected_revision":s.revision,
+            "optics":{"ior":1.51,"absorption_per_mm":[0.1,0.02,0.0],"boundary":"closed_mesh"}}),
+        )
+        .unwrap();
+        assert_eq!(s.undo.len(), undo + 1);
+        assert_eq!(s.evaluations, evaluations);
+        assert_eq!(s.doc.features, before.features);
+        assert_eq!(s.doc.materials, before.materials);
+        assert_eq!(s.execute("component.properties", &json!({"component":"root"})).unwrap(), physical);
+        let saved = s.doc.clone();
+        let scene = crate::product_scene::extract(&s).unwrap();
+        let cpu = resolve_cpu(&s, &scene, &s.doc.render.setups["CPU glass"].optics, "check").unwrap();
+        assert_eq!(cpu[0].body_name, "Optics");
+        assert_eq!(cpu[0].ior, 1.51);
+        assert_eq!(cpu[0].boundary, solidcraft_render::job::DielectricBoundary::ClosedBox);
+        assert_eq!(
+            s.doc.render.setups["CPU glass"].optics.iter().next().unwrap().optics.boundary,
+            solidcraft_doc::render_optics::OpticalBoundary::ClosedMesh
+        );
+        let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        assert_eq!(reopened.render, s.doc.render);
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(*s.doc, *before);
+        s.execute("edit.redo", &json!({})).unwrap();
+        assert_eq!(*s.doc, *saved);
+        s.execute("browser.visibility", &json!({"items":["Optics"],"visible":false})).unwrap();
+        let hidden = crate::product_scene::extract(&s).unwrap();
+        assert!(resolve_cpu(&s, &hidden, &s.doc.render.setups["CPU glass"].optics, "check").unwrap_err().to_string().contains("hidden or absent"));
+        s.execute("edit.undo", &json!({})).unwrap();
     }
 }

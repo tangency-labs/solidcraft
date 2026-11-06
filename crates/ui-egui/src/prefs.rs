@@ -31,6 +31,7 @@ mod mouse3d;
 mod navbar;
 mod navigation;
 mod sketch;
+mod theme_picker;
 mod tools;
 
 use crate::SolveApp;
@@ -1180,6 +1181,12 @@ preference_settings! {
     cut_preview_tint: bool = true, PAGE_GRAPHICS => check_id("prefs.cut_preview_tint");
     /// Restore the previous platform-specific fixed Render preview geometry budget.
     render_previous_geometry_budget: bool = false, PAGE_GRAPHICS => check_id("prefs.render_previous_geometry_budget");
+    /// Restore Raster for new Render setups, fixed CPU sampling and its mode selector.
+    /// Refit on entry and keep shot activation camera-neutral, with the previous preview
+    /// framing, navigation, picking and selection overlays. Disable automatic live feedback
+    /// and automatic result opening; retain the previous result/cancel viewing behavior.
+    /// GPU sample edits round to powers of two.
+    render_legacy_image_defaults: bool = false, PAGE_GRAPHICS => check_id("prefs.render_legacy_image_defaults");
     /// How finely the viewport tessellates curved faces and edges: `coarse`, `normal`, `fine` or
     /// `ultra` (#1287). Only the display plan the viewport draws; never the design or exports.
     display_quality: String = "normal".into(), PAGE_GRAPHICS;
@@ -1262,6 +1269,10 @@ preference_settings! {
     theme: String = "dark".into(), PAGE_APPEARANCE;
     /// A picture behind the model in place of the view's background; empty for none.
     background_image: String = String::new(), PAGE_APPEARANCE;
+    /// Theme used when the operating system is light; unknown ids resolve to Light.
+    theme_day: String = "light".into(), PAGE_APPEARANCE;
+    /// Theme used when the operating system is dark; unknown ids resolve to Dark.
+    theme_night: String = "dark".into(), PAGE_APPEARANCE;
     /// The 3D view's colours: the theme's own, or the Light or Dark theme's whatever the window
     /// uses (#4146).
     viewport_theme: crate::theme::ViewportTheme = crate::theme::ViewportTheme::Theme, PAGE_APPEARANCE;
@@ -1435,6 +1446,9 @@ preference_settings! {
     /// How the offer is made for a file whose header names no program known to save Y up: a note
     /// over the view (the default), the dialog, or nothing (#7717).
     stand_up_unknown: StandUpUnknown = StandUpUnknown::default(), PAGE_DESIGN;
+    /// Dragging Extrude's distance arrow stops at flat faces parallel to the profile over it and
+    /// outlines them (`extrude_face_snap`, #2398). Off: the drag moves in round steps only.
+    extrude_arrow_face_stops: bool = true, PAGE_TOOLS => check_id("prefs.extrude_arrow_face_stops");
     /// Extrude: with a profile picked, a face, vertex or parallel plane picked off its plane
     /// switches the extent to To Object (off: picks only add profiles, as before). A click into the
     /// Profiles box makes the next picks profiles again.
@@ -1603,6 +1617,8 @@ preference_settings! {
     sketch_state_icons: bool = true, PAGE_SKETCH;
     /// Show the construction-line family in Sketch CREATE; off restores the earlier menu.
     sketch_construction_lines: bool = true, PAGE_SKETCH;
+    /// Use the only straight construction line in the preselection as Mirror's reference.
+    sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
     /// A sketch tool's shortcut pressed again before the first point steps to the tool's next
     /// creation mode (#2459). Off (the default): the key starts the tool again, as it always has.
     shortcut_cycles_modes: bool = false, PAGE_SKETCH;
@@ -1727,6 +1743,10 @@ pub struct PrefsWindow {
     applied_profile: Option<bool>,
     /// The appearance last asked of the native window ([`sync_window_theme`]).
     window_theme: Option<egui::SystemTheme>,
+    /// Last observed OS tone, independent of the selected theme's tone.
+    system_theme_dark: Option<bool>,
+    /// Import callbacks fill the same slot as a card click; never persisted in preferences.
+    theme_picker_night: bool,
     /// The perspective angle the view was last drawn with ([`follow_view_fov`]); 0 before the first.
     drawn_fov: f64,
     /// The search text of the interface font list.
@@ -2016,151 +2036,10 @@ pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, ser
 /// ones, with Import…, Export… (the theme on now as a complete file, to start a new one from)
 /// and Remove (an imported theme). Like the other preferences, a choice applies at once.
 fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let mut choices = theme_choices(app);
-    // While a file is followed (#7573) it is the theme, so no tile shows as chosen.
-    let following = !app.prefs_window.follow.path(&app.preferences.theme_follow).is_empty();
-    choices.sort_by_key(|(id, _)| match id.as_str() {
-        "light" => 0,
-        "dark" => 1,
-        "system" => 2,
-        _ => 3,
-    });
-    let mut tile_action: Option<(&str, String)> = None;
-    let mut action_theme: Option<String> = None;
-    let mut chosen: Option<String> = None;
-    let mut action: Option<&str> = None;
-    let mut import_tile = None;
-    let t = Tokens::get();
-    let width = t.space_24 * 3.0 + t.space_16;
-    let height = t.space_24 * 4.0;
-    let dark_sample = ui_kit::ThemeSample::from_tokens(&Tokens::dark());
-    let carousel_id = "appearance_themes";
-    // Reveal the active theme after a programmatic selection or import too.
-    let selection_key = ui.make_persistent_id((carousel_id, "selection"));
-    let carousel_key = ui.make_persistent_id(carousel_id);
-    ui.data_mut(|data| {
-        if data.get_temp::<String>(selection_key).as_deref() != Some(app.preferences.theme.as_str()) {
-            let index = choices.iter().position(|(id, _)| id == &app.preferences.theme).unwrap_or(0);
-            data.insert_temp(carousel_key, index.saturating_sub(1));
-            data.insert_temp(selection_key, app.preferences.theme.clone());
-        }
-    });
-    let mut item = |ui: &mut egui::Ui, index: usize| {
-        if let Some((id, label)) = choices.get(index) {
-            let palette = match id.as_str() {
-                "light" | "system" => Tokens::light(),
-                "dark" => Tokens::dark(),
-                _ => crate::theme_files::find(id, &app.preferences.custom_themes)
-                    .map(|f| resolved_theme(&app.preferences, f))
-                    .unwrap_or_else(Tokens::dark),
-            };
-            let custom = app.preferences.custom_themes.iter().any(|t| t.id == *id);
-            let note = app.tr(if id == "system" {
-                "prefs.follows_os"
-            } else if custom {
-                "prefs.imported_file"
-            } else {
-                "prefs.built_in"
-            });
-            let options = crate::theme_files::find(id, &app.preferences.custom_themes)
-                .is_some_and(|file| !crate::theme_options::offered(file, crate::theme_options::PROVIDERS).is_empty());
-            if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[label, note]) {
-                return;
-            }
-            let sample = ui_kit::ThemeSample::from_tokens(&palette);
-            let response = ui_kit::picture_card(
-                ui,
-                &ui_kit::Card {
-                    label,
-                    sub: Some(note),
-                    selected: !following && app.preferences.theme == *id,
-                    enabled: true,
-                    options: options.then(|| app.tr("prefs.theme_options_badge")),
-                    check: false,
-                    aspect: 124.0 / 76.0,
-                    figure: &|p, rect| {
-                        if id == "system" {
-                            ui_kit::paint_theme_system(p, rect, &sample, &dark_sample);
-                        } else {
-                            ui_kit::paint_theme_thumbnail(p, rect, &sample);
-                        }
-                    },
-                },
-                width.min(ui.available_width()),
-            );
-            if options {
-                crate::scenario::publish_rect(&format!("prefs:theme_options_badge:{id}"), response.rect);
-            }
-            crate::scenario::publish_target(&format!("prefs:theme_tile:{id}"), response.rect);
-            crate::scenario::publish_target(&format!("prefs:theme:{id}"), response.rect);
-            if !following && app.preferences.theme == *id {
-                crate::scenario::publish_target("prefs:theme", response.rect);
-            }
-            if response.clicked() {
-                chosen = Some(id.clone());
-            }
-            ui_kit::Menu::context(&response, |ui| {
-                ui_kit::Menu::show(ui, Tokens::get().form_card_width, |ui| {
-                    if ui_kit::MenuItem::new("theme_export", app.tr_label("Export…"), "export").show(ui).clicked() {
-                        tile_action = Some(("export", id.clone()));
-                        ui.close();
-                    }
-                    if custom {
-                        let mut remove = ui_kit::MenuItem::new("theme_remove", app.tr_label("Remove"), "delete");
-                        remove.danger = true;
-                        if remove.show(ui).clicked() {
-                            tile_action = Some(("remove", id.clone()));
-                            ui.close();
-                        }
-                    }
-                });
-            });
-        } else {
-            let tile = ui_kit::theme_import_tile(ui, app.tr_label("Import…"), app.tr("prefs.theme_file"))
-                .backing_on_hover_text(app.tr("prefs.theme_import_hint"));
-            import_tile = Some(tile.rect);
-            if tile.clicked() {
-                action = Some("import");
-            }
-            // The keyboard's paste needs no menu; this is for touch screens and the browser's mouse users.
-            #[cfg(not(target_arch = "wasm32"))]
-            ui_kit::Menu::context(&tile, |ui| {
-                ui_kit::Menu::show(ui, Tokens::get().form_card_width, |ui| {
-                    if ui_kit::MenuItem::new("theme_paste", app.tr("prefs.theme_paste"), "paste").show(ui).clicked() {
-                        action = Some("paste");
-                        ui.close();
-                    }
-                });
-            });
-        }
-    };
-    if crate::prefs_search::suppress_chrome(ui) {
-        for index in 0..=choices.len() {
-            item(ui, index);
-        }
-    } else {
-        ui_kit::carousel(ui, carousel_id, choices.len() + 1, width, height, &mut item);
-        for (label, handle, help) in [
-            ("prefs.carousel_previous", "prefs:theme_previous", "prefs.appearance.previous_themes"),
-            ("prefs.carousel_next", "prefs:theme_next", "prefs.appearance.next_themes"),
-        ] {
-            if let Some(rect) = crate::scenario::rect_of(&format!("prefs:carousel:{}", crate::i18n::tr(label))) {
-                crate::scenario::publish_target(handle, rect);
-                ui.interact(rect, ui.make_persistent_id((handle, "help")), egui::Sense::hover()).backing_on_hover_text(app.tr(help));
-            }
-        }
-    }
-    app.prefs_window.import_tile = import_tile;
-    if let Some((kind, id)) = tile_action {
-        action = Some(kind);
-        action_theme = Some(id);
-    }
-    if let Some(id) = chosen {
-        // Choosing a theme stops following a file (#7573).
-        stop_following(app);
-        select_theme(app, &id);
-        ui.data_mut(|data| data.insert_temp(selection_key, id));
-    }
+    theme_picker::row(app, ui);
+}
+
+fn theme_action(app: &mut SolveApp, ui: &mut egui::Ui, action: Option<&str>, action_theme: Option<String>) {
     match action {
         Some("import") => app.pick_open_for(&["json"], |app, path| {
             let Some(path) = path else { return };
@@ -2178,7 +2057,7 @@ fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
         Some("export") => {
-            let system_dark = system_dark(app, ui.ctx()).unwrap_or(app.ui.dark);
+            let system_dark = system_dark(app, ui.ctx()).unwrap_or_else(|| app.prefs_window.system_theme_dark.unwrap_or(app.ui.dark));
             let file = theme_file(app, action_theme.as_deref().unwrap_or(&app.preferences.theme), system_dark);
             let name = file.get("name").and_then(serde_json::Value::as_str).unwrap_or("Theme").to_string();
             let text = serde_json::to_string_pretty(&file).unwrap_or_default();
@@ -2410,10 +2289,11 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
         up_axis_changed(app);
     }
     follow_view_fov(app);
-    if app.preferences.theme == "system"
-        && let Some(dark) = system_dark(app, ctx)
-    {
-        app.ui.dark = dark;
+    let os_dark = system_dark(app, ctx).unwrap_or_else(|| app.prefs_window.system_theme_dark.unwrap_or(app.ui.dark));
+    app.prefs_window.system_theme_dark = Some(os_dark);
+    if app.preferences.theme == "system" {
+        let id = theme_picker::active_id(&app.preferences, os_dark);
+        app.ui.dark = crate::theme_files::find(id, &app.preferences.custom_themes).map_or(id == "dark", |f| f.base.is_dark());
     }
     // A theme file's palette, in place of its base's (dark or light); the visuals follow. A
     // followed file (#7573) wins while it is followed and has read completely once.
@@ -2425,7 +2305,9 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(custom) = &custom {
         app.ui.dark = custom.dark;
     }
-    let follows_system = app.preferences.theme == "system" && custom.is_none();
+    // Custom Day/Night palettes still need native OS appearance notifications. Fixing
+    // the native window to the slot's tone can stop those notifications on macOS.
+    let follows_system = app.preferences.theme == "system" && followed_theme(&app.preferences, &app.prefs_window.follow).is_none();
     if crate::theme::set_custom(custom) {
         app.styled = false;
     }
@@ -3429,9 +3311,15 @@ fn button_jobs_that_read<'de, D: serde::Deserializer<'de>>(
 /// Every theme the Theme list offers, as (id, name): the modes, the built-in theme files, then
 /// the imported ones.
 fn theme_choices(app: &SolveApp) -> Vec<(String, String)> {
-    let modes = THEMES.iter().map(|(id, label)| ((*id).to_string(), crate::i18n::tr_label(label).to_string()));
+    let modes = THEMES.iter().filter(|(id, _)| *id != "system").map(|(id, label)| ((*id).to_string(), crate::i18n::tr_label(label).to_string()));
     let files = crate::theme_files::builtin().iter().chain(&app.preferences.custom_themes).map(|t| (t.id.clone(), t.name.clone()));
-    modes.chain(files).collect()
+    let mut choices: Vec<_> = modes.chain(files).collect();
+    choices.sort_by_key(|(id, _)| match id.as_str() {
+        "light" => 0,
+        "dark" => 1,
+        _ => 2,
+    });
+    choices
 }
 
 /// Turn a theme on (a mode or a theme file's id); dark follows it.
@@ -3529,7 +3417,11 @@ pub fn import_theme(app: &mut SolveApp, v: &serde_json::Value) -> Result<String,
         other => crate::theme_files::from_value(other)?,
     };
     let id = crate::theme_files::add(&mut app.preferences.custom_themes, theme)?;
-    select_theme(app, &id);
+    if app.prefs_window.open && app.prefs_window.section == PAGE_APPEARANCE {
+        theme_picker::choose(app, app.prefs_window.theme_picker_night, &id);
+    } else {
+        select_theme(app, &id);
+    }
     Ok(id)
 }
 
@@ -3550,13 +3442,17 @@ fn remove_theme(app: &mut SolveApp, id: &str) -> Result<(), String> {
 fn current_theme_file(app: &SolveApp) -> serde_json::Value {
     match active_theme_file(app) {
         Some(f) => export_theme_file(f),
-        None => theme_file(app, &app.preferences.theme, app.ui.dark),
+        None => theme_file(app, &app.preferences.theme, app.prefs_window.system_theme_dark.unwrap_or(app.ui.dark)),
     }
 }
 
 fn active_theme_file(app: &SolveApp) -> Option<&crate::theme_files::ThemeFile> {
-    followed_theme(&app.preferences, &app.prefs_window.follow)
-        .or_else(|| crate::theme_files::find(&app.preferences.theme, &app.preferences.custom_themes))
+    followed_theme(&app.preferences, &app.prefs_window.follow).or_else(|| {
+        crate::theme_files::find(
+            theme_picker::active_id(&app.preferences, app.prefs_window.system_theme_dark.unwrap_or(app.ui.dark)),
+            &app.preferences.custom_themes,
+        )
+    })
 }
 
 /// The single runtime decision used by controls, ui.prefs and renderer activation. It never
@@ -3895,9 +3791,10 @@ fn theme_options_reply(app: &SolveApp) -> solidcraft_engine::schema::ui_prefs::T
 /// Export the tile the user chose, without applying it or changing the dialog snapshot.
 fn theme_file(app: &SolveApp, id: &str, system_dark: bool) -> serde_json::Value {
     use crate::theme_files::{Base, export, find};
+    let id = if id == "system" { theme_picker::slot_id(&app.preferences, system_dark) } else { id };
     match find(id, &app.preferences.custom_themes) {
         Some(f) => export_theme_file(f),
-        None if id == "dark" || (id == "system" && system_dark) => export("Dark", Base::Dark, &crate::theme::Tokens::dark()),
+        None if id == "dark" => export("Dark", Base::Dark, &crate::theme::Tokens::dark()),
         None => export("Light", Base::Light, &crate::theme::Tokens::light()),
     }
 }
@@ -4236,8 +4133,11 @@ pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) 
     // Keep small scroll steps so a target cannot be skipped on a long Preferences page.
     for _ in 0..32 {
         let page = crate::scenario::rect_of("dialog:page_body").expect("preference body");
+        // Scroll offsets are pixel-rounded: the final item can extend a fraction
+        // of a point beyond the viewport even at the maximum scroll offset.
+        // Match the tolerance used by the colour-vision sample geometry checks.
         let visible = crate::scenario::rect_of(handle)
-            .map(|r| page.contains_rect(r))
+            .map(|r| page.expand(1.0).contains_rect(r))
             .unwrap_or_else(|| crate::scenario::handle_at(handle).is_some_and(|p| page.shrink(crate::theme::Tokens::get().space_16).contains(p)));
         if visible {
             return;
@@ -4261,6 +4161,217 @@ pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn theme_traits_use_resolved_background_and_maximal_contrast() {
+        use theme_picker::{Classification, theme_traits};
+        let light = Tokens::light();
+        let dark = Tokens::dark();
+        assert_eq!(theme_traits(&light), Classification { dark: false, high: false });
+        assert_eq!(theme_traits(&dark), Classification { dark: true, high: false });
+        for (ground, ink, night) in [(egui::Color32::WHITE, egui::Color32::BLACK, false), (egui::Color32::BLACK, egui::Color32::WHITE, true)] {
+            let mut palette = light;
+            palette.dialog_footer = ground;
+            palette.form_ink = ink;
+            assert_eq!(theme_traits(&palette), Classification { dark: night, high: true });
+        }
+        let mut palette = light;
+        for (gray, night) in [(187, true), (188, false)] {
+            palette.dialog_footer = egui::Color32::from_gray(gray);
+            assert_eq!(theme_traits(&palette).dark, night, "linear luminance straddles 0.5");
+        }
+        let maximal: Vec<_> = crate::theme_files::builtin()
+            .iter()
+            .filter(|f| theme_traits(&resolved_theme(&Prefs::default(), f)).high)
+            .map(|f| f.id.as_str())
+            .collect();
+        assert_eq!(maximal.len(), 4, "ordinary palettes must stay Standard: {maximal:?}");
+        assert!(maximal.contains(&"1-bit") && maximal.contains(&"1-bit-dark"));
+    }
+
+    #[test]
+    fn theme_slots_default_persist_allow_command_access_and_restore_with_appearance() {
+        let mut h = crate::scenario::Harness::new();
+        assert_eq!((&h.app.preferences.theme_day[..], &h.app.preferences.theme_night[..]), ("light", "dark"));
+        let out = super::set(&mut h.app, &json!({"theme_day":"akari", "theme_night":"onyx"})).unwrap();
+        assert_eq!((out["theme_day"].as_str(), out["theme_night"].as_str()), (Some("akari"), Some("onyx")));
+        let out = h.call("ui.prefs", json!({}));
+        assert_eq!(out["result"]["theme_day"], "akari");
+        assert_eq!(out["result"]["theme_night"], "onyx");
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert_eq!((restored.preferences.theme_day.as_str(), restored.preferences.theme_night.as_str()), ("akari", "onyx"));
+        h.call("ui.prefs", json!({"theme_day":"clay", "theme_night":"clay-dark", "open":"Appearance"}));
+        assert_eq!(h.app.preferences.theme_day, "clay");
+        defaults(&mut h.app, PAGE_GENERAL);
+        assert_eq!(h.app.preferences.theme_day, "clay", "another page's reset does not clear slots");
+        defaults(&mut h.app, PAGE_APPEARANCE);
+        assert_eq!((h.app.preferences.theme_day.as_str(), h.app.preferences.theme_night.as_str()), ("light", "dark"));
+    }
+
+    #[test]
+    fn theme_slots_resolve_unknown_and_recursive_ids_without_changing_saved_intent() {
+        let mut prefs = Prefs { theme: "system".into(), theme_day: "missing".into(), theme_night: "system".into(), ..Default::default() };
+        assert_eq!(theme_picker::active_id(&prefs, false), "light");
+        assert_eq!(theme_picker::active_id(&prefs, true), "dark");
+        assert_eq!((&prefs.theme_day[..], &prefs.theme_night[..]), ("missing", "system"));
+        prefs.theme = "onyx".into();
+        assert_eq!(theme_picker::active_id(&prefs, false), "onyx");
+        assert_eq!(theme_picker::active_id(&prefs, true), "onyx");
+        let mut h = crate::scenario::Harness::new();
+        h.app.services.desktop_dark = Some(Box::new(|| Some(false)));
+        let out = h.call("ui.prefs", json!({"theme":"system", "theme_day":"missing", "theme_night":"system"}));
+        assert!(out["error"].is_null(), "{out}");
+        h.frames(2);
+        assert!(!h.app.ui.dark);
+        assert_eq!(h.app.preferences.theme_day, "missing");
+        h.app.services.desktop_dark = Some(Box::new(|| Some(true)));
+        h.frames(2);
+        assert!(h.app.ui.dark);
+        assert_eq!(h.app.preferences.theme_night, "system");
+    }
+
+    #[test]
+    fn theme_onyx_is_reachable_selectable_and_shows_its_options_in_both_views() {
+        for grid in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1467,"height":1146}));
+            h.call("ui.prefs", json!({"language":"en","theme":"light","open":"Appearance"}));
+            h.frames(5);
+            if grid {
+                h.step(&json!({"click":{"handle":"prefs:theme_view:1"}})).unwrap();
+                h.frames(3);
+                super::reveal_preference(&mut h, "prefs:theme_tile:onyx");
+            } else {
+                for _ in 0..theme_choices(&h.app).len() {
+                    if crate::scenario::rect_of("prefs:theme_tile:onyx").is_some() {
+                        break;
+                    }
+                    h.step(&json!({"click":{"handle":"prefs:theme_next"}})).unwrap();
+                    h.frames(3);
+                }
+            }
+            h.step(&json!({"click":{"handle":"prefs:theme_tile:onyx"}})).unwrap();
+            h.frames(4);
+            assert_eq!(h.app.preferences.theme, "onyx");
+            assert!(crate::scenario::rect_of("prefs:theme_options_badge:onyx").is_some());
+            assert!(crate::scenario::rect_of("prefs:theme_options_header").is_some());
+            let out = h.call("ui.prefs", json!({}));
+            assert_eq!(out["result"]["theme_option_values"]["opacity"], 80.0);
+        }
+    }
+
+    #[test]
+    fn theme_system_resolves_custom_day_and_night_by_os_including_cross_tone_slots() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        let desktop = Arc::new(AtomicBool::new(false));
+        let reading = desktop.clone();
+        let mut h = crate::scenario::Harness::new();
+        h.app.services.desktop_dark = Some(Box::new(move || Some(reading.load(Ordering::Relaxed))));
+        h.call("ui.prefs", json!({"theme":"system", "theme_day":"onyx", "theme_night":"akari"}));
+        h.frames(3);
+        assert!(h.app.ui.dark, "the OS is light, but the Day slot may hold a dark theme");
+        assert_eq!(h.app.prefs_window.window_theme, Some(egui::SystemTheme::SystemDefault));
+        assert_eq!(active_theme_file(&h.app).unwrap().id, "onyx");
+        assert_eq!(current_theme_file(&h.app)["name"], "Onyx");
+        desktop.store(true, Ordering::Relaxed);
+        h.frames(3);
+        assert!(!h.app.ui.dark);
+        assert_eq!(active_theme_file(&h.app).unwrap().id, "akari");
+        h.call("ui.prefs", json!({"theme_day":"dark", "theme_night":"light"}));
+        h.frames(2);
+        assert_eq!(current_theme_file(&h.app)["base"], "light");
+        desktop.store(false, Ordering::Relaxed);
+        h.frames(2);
+        assert_eq!(current_theme_file(&h.app)["base"], "dark");
+        // If OS observation temporarily disappears, the mode button must use the same
+        // remembered OS tone as rendering, rather than the cross-tone slot's palette.
+        h.app.services.desktop_dark = Some(Box::new(|| None));
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"open":"Appearance"}));
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"prefs:theme_mode:0"}})).unwrap();
+        assert_eq!(h.app.preferences.theme, "dark", "leaving System preserves the theme actually in effect");
+    }
+
+    #[test]
+    fn theme_mode_switches_preserve_the_effective_theme_and_fill_only_the_aimed_slot() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        select_theme(&mut app, "onyx");
+        theme_picker::switch_mode(&mut app, true, true);
+        assert_eq!((&app.preferences.theme[..], &app.preferences.theme_day[..], &app.preferences.theme_night[..]), ("system", "light", "onyx"));
+        theme_picker::choose(&mut app, false, "akari");
+        assert_eq!((&app.preferences.theme[..], &app.preferences.theme_day[..], &app.preferences.theme_night[..]), ("system", "akari", "onyx"));
+        theme_picker::switch_mode(&mut app, false, false);
+        assert_eq!(app.preferences.theme, "akari", "leaving system picks the effective Day theme, not its tone's default");
+        theme_picker::switch_mode(&mut app, true, false);
+        theme_picker::choose(&mut app, true, "clay-dark");
+        theme_picker::switch_mode(&mut app, false, true);
+        assert_eq!(app.preferences.theme, "clay-dark");
+        let mut state = theme_picker::State::default();
+        assert!(!state.night && !state.grid && state.tone.is_none());
+        state.aim(true);
+        assert!(state.night && state.tone == Some(true));
+        state.aim(false);
+        assert!(!state.night && state.tone == Some(false));
+    }
+
+    #[test]
+    fn theme_filter_counts_ignore_only_their_own_group() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let file = crate::theme_files::from_value(&json!({"format":"solidcraft-theme/1", "name":"Imported maximal", "base":"dark", "colors":{"dialog_footer":"#000000", "form_ink":"#ffffff"}})).unwrap();
+        crate::theme_files::add(&mut app.preferences.custom_themes, file).unwrap();
+        let entries = theme_picker::entries(&app);
+        let state = theme_picker::State { tone: Some(true), high: Some(false), imported: false, ..Default::default() };
+        assert_eq!((state.count(&entries, "tone", false), state.count(&entries, "tone", true)), (8, 14));
+        assert_eq!((state.count(&entries, "contrast", false), state.count(&entries, "contrast", true)), (14, 4));
+        assert_eq!(state.count(&entries, "imported", true), 0);
+        let state = theme_picker::State { high: Some(true), imported: true, ..state };
+        assert_eq!(state.count(&entries, "tone", true), 1);
+        assert_eq!(state.count(&entries, "contrast", true), 1);
+        assert_eq!(state.count(&entries, "contrast", false), 0);
+        assert_eq!(state.count(&entries, "imported", true), 1);
+    }
+
+    #[test]
+    fn theme_carousel_wheel_passes_vertical_to_page_and_handles_horizontal_and_shift() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1467,"height":1146}));
+        h.call("ui.prefs", json!({"language":"en","theme":"light","open":"Appearance"}));
+        h.frames(6);
+        for (delta, modifiers, horizontal) in [
+            (egui::vec2(1.0, -96.0), egui::Modifiers::NONE, false),
+            (egui::vec2(-180.0, 0.0), egui::Modifiers::NONE, true),
+            (egui::vec2(0.0, -180.0), egui::Modifiers::SHIFT, true),
+        ] {
+            let before = crate::scenario::rect_of("prefs:card:Light").unwrap();
+            let at = crate::scenario::rect_of("prefs:theme_viewport").unwrap().center();
+            h.frame_with(vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::MouseWheel {
+                    source: egui::MouseWheelSource::Unknown,
+                    unit: egui::MouseWheelUnit::Point,
+                    delta,
+                    modifiers,
+                    phase: egui::TouchPhase::Move,
+                },
+            ]);
+            h.frames(60);
+            let after = crate::scenario::rect_of("prefs:card:Light").unwrap();
+            if horizontal {
+                assert!(after.left() < before.left() - 100.0, "horizontal wheel must move a card: {before:?} -> {after:?}");
+                assert!((after.top() - before.top()).abs() < 1.0, "horizontal wheel must leave the page in place");
+            } else {
+                assert!((after.left() - before.left()).abs() < 1.0, "vertical wheel must not move carousel");
+                assert!(after.top() < before.top() - 50.0, "vertical wheel must scroll the page");
+            }
+        }
+    }
+
     /// Profile operations switches the profiler when it changes, and only then: an agent's
     /// diagnostics.profile in between is not undone next frame.
     #[test]
@@ -6170,6 +6281,7 @@ mod tests {
             ("direct_interaction", json!(true), PAGE_TOOLS),
             ("hole_snaps", json!(true), PAGE_TOOLS),
             ("hole_moves", json!(true), PAGE_TOOLS),
+            ("extrude_arrow_face_stops", json!(false), PAGE_TOOLS),
             ("extrude_auto_to_object", json!(false), PAGE_TOOLS),
             ("extrude_view_isometric", json!(true), PAGE_TOOLS),
             ("extrude_view_return", json!(true), PAGE_TOOLS),
@@ -6194,6 +6306,7 @@ mod tests {
             ("hide_constraint_glyphs_zoomed_out", json!(false), PAGE_SKETCH),
             ("suppress_sketch_snap", json!(ModifierCombo::NONE), PAGE_SKETCH),
             ("sketch_state_icons", json!(false), PAGE_SKETCH),
+            ("sketch_mirror_auto_line", json!(false), PAGE_SKETCH),
             ("sketch_tracking_guides", json!(false), PAGE_SKETCH),
             ("sketch_tracking_points", json!(false), PAGE_SKETCH),
             ("sketch_align_points", json!(true), PAGE_SKETCH),
@@ -6662,12 +6775,16 @@ mod tests {
     /// back complete, imported themes are saved with the preferences, Remove falls back to the
     /// base and Cancel takes an import back.
     #[test]
-    fn system_theme_tile_export_uses_os_brightness_without_selecting_it() {
+    fn system_theme_export_uses_os_slot_without_selecting_it() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         app.preferences.theme = "light".into();
         app.ui.dark = false;
         assert_eq!(theme_file(&app, "system", true)["base"], "dark");
         assert_eq!(theme_file(&app, "system", false)["base"], "light");
+        app.preferences.theme_day = "akari".into();
+        app.preferences.theme_night = "onyx".into();
+        assert_eq!(theme_file(&app, "system", false)["name"], "Akari");
+        assert_eq!(theme_file(&app, "system", true)["name"], "Onyx");
         assert_eq!(app.preferences.theme, "light");
         assert!(!app.ui.dark);
     }
@@ -6856,15 +6973,7 @@ mod tests {
         h.app.home.open = false;
         h.call("ui.prefs", json!({"theme": "dark", "open": "Interface"}));
         h.frames(2);
-        // The Import card is the last one in the theme carousel: page it into view.
-        for _ in 0..40 {
-            if h.app.prefs_window.import_tile.is_some() {
-                break;
-            }
-            h.step(&json!({"click":{"handle":"prefs:theme_next"}})).unwrap();
-            h.frames(2);
-        }
-        assert!(h.app.prefs_window.import_tile.is_some(), "the Import card is reachable in the theme carousel");
+        assert!(h.app.prefs_window.import_tile.is_some(), "Import is always visible");
         let (root, out) = (h.dir.join("root"), h.dir.join("out"));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&out).unwrap();
@@ -6875,7 +6984,7 @@ mod tests {
             h.app.services.pick_open = Some(Box::new(move |_| Box::pin(std::future::ready(Some(answer.clone())))));
             h.app.status = None;
             vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || {
-                h.step(&json!({"click":{"handle":"dialog:Import…"}})).unwrap();
+                h.step(&json!({"click":{"handle":"prefs:theme_import"}})).unwrap();
                 h.frames(4);
             });
             let status = h.app.status.clone().map(|(text, ..)| text);
@@ -6992,28 +7101,26 @@ mod tests {
                     });
                 }
                 assert!(painted_count, "count comes from actual themes");
-                for _ in 0..choices.len() + 1 {
+                while crate::scenario::rect_of("prefs:theme_previous").is_some() {
                     h.step(&json!({"click":{"handle":"prefs:theme_previous"}})).unwrap();
-                    h.frames(2);
+                    h.frames(3);
                 }
                 let mut found = std::collections::BTreeSet::new();
                 for _ in 0..choices.len() + 1 {
                     for (id, _) in &choices {
                         if let Some(rect) = crate::scenario::rect_of(&format!("prefs:theme:{id}")) {
                             assert!(page.expand(1.0).contains_rect(rect), "{base} width={screen}: {id} {rect:?}");
-                            assert!((rect.width() - 88.0).abs() <= 1.0);
                             found.insert(id.clone());
                         }
                     }
-                    if let Some(import) = h.app.prefs_window.import_tile {
-                        assert!(page.expand(1.0).contains_rect(import));
+                    if crate::scenario::rect_of("prefs:theme_next").is_none() {
                         break;
                     }
                     h.step(&json!({"click":{"handle":"prefs:theme_next"}})).unwrap();
-                    h.frames(2);
+                    h.frames(3);
                 }
                 assert_eq!(found, choices.into_iter().map(|(id, _)| id).collect());
-                assert!(h.app.prefs_window.import_tile.is_some(), "Import is the last carousel card");
+                assert!(h.app.prefs_window.import_tile.is_some(), "Import stays visible while scrolling");
                 assert_eq!(h.app.preferences.theme, base, "scrolling does not select a theme");
                 assert_eq!(h.app.preferences.ui_scale, 1.0);
                 assert_eq!(h.app.preferences.viewport_background, None);
@@ -8185,7 +8292,7 @@ mod tests {
         let out = h.call("ui.prefs", json!({"theme": "gruvbox-dark-hard"}));
         assert_eq!(out["result"]["theme"], "gruvbox-dark", "{out}");
         assert_eq!(out["result"]["theme_option_values"]["contrast"], "hard");
-        assert!(out["result"]["theme_ids"].as_array().is_some_and(|ids| ids.len() == 3 + crate::theme_files::builtin().len()), "{out}");
+        assert!(out["result"]["theme_ids"].as_array().is_some_and(|ids| ids.len() == 2 + crate::theme_files::builtin().len()), "{out}");
         h.frames(2);
         let hard = resolved_theme(&h.app.preferences, active_theme_file(&h.app).unwrap());
         assert!(h.app.ui.dark);
@@ -8408,6 +8515,20 @@ mod tests {
         for bad in ["1.234,5", "1,2,3", ",", "abc", "", "inf", "NaN"] {
             assert_eq!(super::parse_number(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn render_legacy_image_defaults_round_trips_and_resets() {
+        use serde_json::json;
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        assert!(!app.preferences.render_legacy_image_defaults);
+        let out = super::set(&mut app, &json!({"render_legacy_image_defaults":true})).unwrap();
+        assert_eq!(out["render_legacy_image_defaults"], true);
+        let mut restored = crate::SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(restored.preferences.render_legacy_image_defaults);
+        super::defaults(&mut restored, super::PAGE_GRAPHICS);
+        assert!(!restored.preferences.render_legacy_image_defaults);
     }
 
     #[test]
