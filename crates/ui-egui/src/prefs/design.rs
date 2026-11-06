@@ -186,6 +186,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let response = setting::insert_lists_open_designs(app, ui);
             crate::scenario::publish_target("prefs:insert_lists_open_designs", response.rect);
             crate::scenario::publish_target("dialog:Insert Design lists the designs open in other tabs first", response.rect);
+            // Tabs and the Browser's top row named after the design's file (#7267).
+            let response = setting::names_from_file(app, ui);
+            crate::scenario::publish_target("prefs:names_from_file", response.rect);
         });
     });
 }
