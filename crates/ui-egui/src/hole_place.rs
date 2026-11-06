@@ -11,6 +11,9 @@
 //! Create Hole › Move holes by clicking or dragging (`hole_moves`): every placed hole has a handle at its
 //! centre that drags it across the model (snapping as a pick would) and takes it out when
 //! clicked, and a pick elsewhere on a face that already has a hole moves the hole there.
+//!
+//! Create Hole › Group holes made together (`hole_group`): the holes one Hole dialog makes, two or
+//! more, go into a feature folder in History, closed at first.
 
 use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_engine::geom::prelude::*;
@@ -259,6 +262,30 @@ pub(crate) fn pick_moves(d: &mut Dialog, s: &Session, sel: &Sel) -> bool {
         return false;
     }
     move_place(d, s, i, sel.clone())
+}
+
+/// The features the Hole commands among `replies` made, in order.
+pub(crate) fn holes_made(replies: &[(String, serde_json::Value)]) -> Vec<u64> {
+    replies.iter().filter(|(id, _)| id == "solid.hole").filter_map(|(_, reply)| reply.get("feature").and_then(serde_json::Value::as_u64)).collect()
+}
+
+/// With Group holes made together on (Preferences), the holes one Hole dialog made (two or more)
+/// go into a feature folder in History, closed at first: opened, each hole is edited on its own.
+/// The folder sits where the holes went (inside the folder they were added to, if any).
+pub(crate) fn group_made(app: &mut SolveApp, d: &Dialog, made: Vec<u64>) {
+    if !app.preferences.hole_group || d.editing.is_some() || !matches!(d.kind, Kind::Hole { .. }) || made.len() < 2 {
+        return;
+    }
+    let parent = made.first().and_then(|first| app.session.doc.timeline_groups.iter().find(|g| g.features.contains(first))).map(|g| g.id);
+    match app.run("timeline.group", serde_json::json!({"name": "Holes", "features": made, "parent": parent})) {
+        Ok(reply) => {
+            if let Some(id) = reply.get("group").and_then(serde_json::Value::as_u64) {
+                app.tree.collapsed.insert(format!("timeline_group:{id}"));
+            }
+        }
+        // The holes stand; only the folder is missing.
+        Err(error) => app.set_status(error, true),
+    }
 }
 
 /// The hovered face's snap marks, and the face places' handles when holes move by dragging.
