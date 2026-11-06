@@ -3722,6 +3722,7 @@ fn clicked_setup_save_reload_and_switch_keep_gpu_numeric_intent_without_a_host()
         job: Some(RenderJob::GpuPath {
             transparent_background: true,
             options: Box::new(GpuJob {
+                caustics: None,
                 aging: Default::default(),
                 nested_media: true,
                 volume: Some(solidcraft_engine::render::job::volume::HomogeneousVolume { extinction_per_mm: 0.0, ..Default::default() }),
@@ -15451,5 +15452,275 @@ fn classic_results_and_comparison_keep_their_reserved_chrome_and_scale_policy() 
         if comparison {
             assert_eq!(crate::scenario::rect_of("render:compare:canvas"), Some(canvas));
         }
+    }
+}
+
+fn advanced_glass_saved_fixture(method: ImageMethod) -> Harness {
+    use solidcraft_engine::render::glass_model::{Dispersion, GlassModel, ThinFilm};
+    let mut h = stable_glass_draft_fixture(method, true);
+    let target = materials::read_targets(&mut h.app).unwrap().into_iter().find(|target| target.name == "Glass A").unwrap();
+    let mut optics = h.app.session.doc.render.setups["Studio"].optics.iter().next().unwrap().optics;
+    optics.model = Some(GlassModel {
+        roughness: 0.21,
+        dispersion: Some(Dispersion { abbe_number: 57.0 }),
+        thin_film: Some(ThinFilm { ior: 1.37, thickness_nm: 263.0 }),
+    });
+    // Authored inactive scattering is independent of the interface model and
+    // must survive an edit to just one optical field.
+    optics.subsurface = Some(solidcraft_engine::render::transmission::subsurface::Subsurface { scattering_per_mm: 0.0, anisotropy: 0.42 });
+    h.app
+        .run(
+            "render.optics.bind",
+            json!({"name":"Studio","body_index":target.ordinal,"body_name":target.name,
+        "expected_revision":h.app.session.revision,"replace":true,"optics":optics}),
+        )
+        .unwrap();
+    setups::load(&mut h.app);
+    h.app.render_workspace.view.live_paused = true;
+    h
+}
+
+#[test]
+fn advanced_glass_lens_save_preserves_caustic_job_drafts_and_refuses_unsaved_optics_atomically() {
+    use solidcraft_engine::doc::render_settings::RenderJob;
+    use solidcraft_engine::render::job::{CausticOptions, CpuProgressiveOptions, ThinLens};
+    for method in [ImageMethod::CpuRaytrace, ImageMethod::GpuRaytrace] {
+        let mut h = advanced_glass_saved_fixture(method);
+        let saved = h.app.session.doc.render.setups["Studio"].clone();
+        let quality = CausticOptions { photons: 8192, radius_mm: 0.125, max_depth: 11, seed: 901 };
+        h.app.render_workspace.view.studio.caustics = Some(quality);
+        if method == ImageMethod::CpuRaytrace {
+            h.app.render_workspace.view.raytrace.progressive = Some(CpuProgressiveOptions { samples_per_pixel: 7, seed: 93 });
+        } else {
+            h.app.render_workspace.view.samples = 7;
+            h.app.render_workspace.view.seed = 93;
+        }
+        h.app.cam.yaw += 0.125;
+        setups::refresh_dirty(&mut h.app);
+        let live_camera = h.app.cam;
+        let before = h.app.session.doc.clone();
+        let model = h.app.session.model.state();
+        let undo = h.app.session.undo.len();
+        let mut expected_saved = saved.clone();
+        let mut expected_draft = setups::draft(&h.app).unwrap();
+        assert_ne!(expected_draft.job, saved.job, "the fixture must carry independent caustic quality and sampling drafts");
+        let lens = ThinLens { aperture_radius_mm: 0.05, focus_distance_mm: 80.0 };
+        for setup in [&mut expected_saved, &mut expected_draft] {
+            match setup.job.as_mut().unwrap() {
+                RenderJob::CpuRaytrace { options, .. } => options.lens = Some(lens),
+                RenderJob::GpuPath { options, .. } => options.lens = Some(lens),
+                RenderJob::Raster { .. } => panic!("the fixture requires an image job"),
+            }
+        }
+        shot::set_lens(&mut h.app, "Studio", Some(lens)).unwrap();
+        assert_eq!(h.app.session.doc.render.setups["Studio"], expected_saved, "lens Save must preserve every saved advanced optical and job value");
+        assert_eq!(setups::draft(&h.app).unwrap(), expected_draft, "independent caustic quality and sampling must remain in the unsaved draft");
+        assert_eq!(image_request(&h.app).unwrap()["settings"], json!(expected_draft));
+        assert!(h.app.render_workspace.view.dirty);
+        assert_eq!(h.app.cam, live_camera);
+        assert_eq!(h.app.session.doc.render.setups["Studio"].optics, saved.optics);
+        assert!(Arc::ptr_eq(&model, &h.app.session.model.state()));
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert!(h.app.render_workspace.view.job.is_none());
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc, before);
+        assert_eq!(h.app.cam, live_camera);
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.render.setups["Studio"], expected_saved);
+        assert_eq!(h.app.cam, live_camera);
+
+        let mut h = advanced_glass_saved_fixture(method);
+        let source = h.app.session.doc.render.setups["Studio"].optics.iter().next().unwrap().optics;
+        let target = materials::read_targets(&mut h.app).unwrap().into_iter().find(|target| target.name == "Glass A").unwrap();
+        let mut binding = materials::Binding::from_saved(target, &h.app, source);
+        binding.glass.model.as_mut().unwrap().roughness = 0.43;
+        h.app.render_workspace.view.materials.enabled = true;
+        h.app.render_workspace.view.materials.bindings.push(binding);
+        h.app.render_workspace.view.studio.caustics = Some(quality);
+        let before = h.app.session.doc.clone();
+        let model = h.app.session.model.state();
+        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        let camera = h.app.cam;
+        let request = image_request(&h.app).unwrap();
+        let error = shot::set_lens(&mut h.app, "Studio", Some(lens)).unwrap_err();
+        assert!(error.contains(h.app.tr("render.setup_runtime_unsupported")), "an unreviewed optical override must refuse a lens Save");
+        assert!(Arc::ptr_eq(&before, &h.app.session.doc));
+        assert!(Arc::ptr_eq(&model, &h.app.session.model.state()));
+        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert_eq!(h.app.cam, camera);
+        assert_eq!(image_request(&h.app).unwrap(), request, "a refused lens Save must preserve the complete optical and caustic draft");
+        assert!(h.app.render_workspace.view.materials.bindings[0].has_unsaved_optics_intent());
+    }
+}
+
+#[test]
+fn advanced_glass_pointer_edit_keeps_saved_dispersion_film_and_independent_optics_through_native_reopen() {
+    use solidcraft_engine::doc::render_optics::SavedOptics;
+    for method in [ImageMethod::CpuRaytrace, ImageMethod::GpuRaytrace] {
+        let mut h = advanced_glass_saved_fixture(method);
+        h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Body{name:"Glass A".into()}]})).unwrap();
+        let selected = object_selection(&h.app);
+        selection_editor(&mut h.app, &selected);
+        h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
+        h.frames(3);
+        let document = h.app.session.doc.clone();
+        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        let saved = document.render.setups["Studio"].clone();
+        let original = saved.optics.iter().next().unwrap().clone();
+        assert!(h.app.render_workspace.view.materials.bindings.is_empty(), "opening a saved row must not create an unsaved material override");
+        assert_eq!(image_request(&h.app).unwrap()["settings"], json!(saved), "opening the advanced editor must preserve the complete saved setup");
+        stable_glass_draft_click(&mut h, &format!("dialog:section:{}", crate::i18n::tr("render.appearance_editor.glass")));
+        stable_glass_draft_reveal(&mut h, "render:glass:roughness");
+        let field = crate::scenario::rect_of("render:glass:roughness").unwrap();
+        assert!(stable_glass_draft_viewport(&h).contains_rect(field));
+        h.step(&json!({"click":[field.center().x,field.center().y],"double":true})).unwrap();
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.step(&json!({"text":"0.43"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(2);
+        let mut changed = original.optics;
+        changed.model.as_mut().unwrap().roughness = 0.43;
+        let binding = h.app.render_workspace.view.materials.bindings.iter().find(|binding| binding.target.name == "Glass A").unwrap();
+        assert_eq!(binding.glass.model, changed.model, "a roughness edit must retain the hydrated dispersion and film values");
+        assert!(binding.has_unsaved_optics_intent());
+        let mut expected = saved.clone();
+        expected.optics.set(SavedOptics { target: original.target.clone(), optics: changed }, true).unwrap();
+        let request = image_request(&h.app).unwrap();
+        assert_eq!(request["settings"], json!(expected), "changing roughness must preserve saved camera/lens, maps, coat, absorption and scattering");
+        assert!(request.pointer("/raytrace/dielectrics").is_none(), "a stable advanced edit must keep its stable target lane");
+        setups::refresh_dirty(&mut h.app);
+        assert!(h.app.render_workspace.view.dirty);
+        assert!(Arc::ptr_eq(&document, &h.app.session.doc));
+        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+        stable_glass_draft_click(&mut h, &format!("dialog:section:{}", crate::i18n::tr("render.appearance_editor.saved")));
+        h.step(&json!({"widget":h.app.tr("render.appearance_editor.replace")})).unwrap();
+        stable_glass_draft_click(&mut h, "render:optics-save");
+        assert_eq!(
+            h.app.session.doc.render.setups["Studio"], expected,
+            "the real saved-optics button must commit the prospective model exactly once"
+        );
+        assert_eq!(h.app.session.undo.len(), history.1 + 1);
+        assert_eq!(h.app.session.doc.features, document.features);
+        assert_eq!(h.app.session.doc.materials, document.materials);
+        assert_eq!(h.app.session.doc.appearances, document.appearances);
+        let path = h.dir.join(format!("advanced-glass-{method:?}.solidcraft"));
+        h.app.run("file.save", json!({"path":path})).unwrap();
+        h.app.run("doc.open", json!({"path":path})).unwrap();
+        assert_eq!(h.app.session.doc.render.setups["Studio"], expected, "actual native save/open retains the advanced stable assignment");
+        h.app.render_workspace.view.name = "Studio".into();
+        enter(&mut h.app, true).unwrap();
+        setups::load(&mut h.app);
+        h.app.render_workspace.view.live_paused = true;
+        assert_eq!(image_request(&h.app).unwrap()["settings"], json!(expected));
+        assert!(h.app.render_workspace.view.materials.bindings.is_empty(), "native hydration must not create an unsaved material override");
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn advanced_glass_live_request_host(h: &mut Harness, method: ImageMethod) -> bool {
+    use solidcraft_engine::render::{RenderFeature, job};
+    if method == ImageMethod::CpuRaytrace {
+        let host = job::CpuHost::for_platform().unwrap();
+        h.app.session.set_render_job_host(Some(host.clone())).unwrap();
+        h.app.render_workspace.image_host = Some(host);
+        return image_host(&h.app, method).is_ok();
+    }
+    struct RequestOnly;
+    impl job::ImageExecutor for RequestOnly {
+        fn supports_glass_models(&self) -> bool {
+            true
+        }
+        fn supports_caustics(&self) -> bool {
+            true
+        }
+        fn descriptor(&self) -> job::Result<ExecutorDescriptor> {
+            let mut descriptor = job::CpuHost::cooperative().descriptor()?;
+            descriptor.id = ExecutorId::new("ui-request-only").unwrap();
+            descriptor.profiles[0].features.push(RenderFeature::Progressive);
+            Ok(descriptor)
+        }
+        fn admit(&self, _: &ProductScene, _: &job::ImageRequest, _: job::JobOptions) -> job::Result<job::Admission> {
+            Err(job::JobError::new(job::ErrorCode::HostUnavailable, "paused UI request test does not render"))
+        }
+        fn begin(&self, _: ProductScene, _: job::ImageRequest, _: job::JobOptions, _: job::CancelToken) -> job::Result<Box<dyn job::ImageWork>> {
+            Err(job::JobError::new(job::ErrorCode::HostUnavailable, "paused UI request test does not render"))
+        }
+    }
+    h.app.render_workspace.path_host = PathHost::Ready(job::ImageHost::with_executor(Arc::new(RequestOnly)).unwrap());
+    true
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn caustic_quality_survives_cpu_gpu_ui_save_load_and_changes_the_paused_live_request_identity() {
+    use solidcraft_engine::render::job::CausticOptions;
+    for method in [ImageMethod::CpuRaytrace, ImageMethod::GpuRaytrace] {
+        let mut h = advanced_glass_saved_fixture(method);
+        let can_observe_live = advanced_glass_live_request_host(&mut h, method);
+        h.app.preferences.render_legacy_image_defaults = false;
+        h.app.viewport.rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(256.0, 192.0)));
+        h.app.render_workspace.view.live_paused = true;
+        let saved = h.app.session.doc.render.setups["Studio"].clone();
+        let document = h.app.session.doc.clone();
+        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        let quality = CausticOptions { photons: 8192, radius_mm: 0.125, max_depth: 11, seed: 901 };
+        h.app.render_workspace.view.studio.caustics = Some(quality);
+        setups::refresh_dirty(&mut h.app);
+        assert!(h.app.render_workspace.view.dirty, "the clean-shot fingerprint includes explicit caustic quality");
+        let request = image_request(&h.app).unwrap();
+        assert_eq!(request["settings"]["job"]["options"]["caustics"], json!(quality));
+        assert_eq!(request["settings"]["optics"], json!(saved.optics));
+        let mut runtime = json!({});
+        if method == ImageMethod::CpuRaytrace {
+            cpu::params(&h.app, &mut runtime).unwrap();
+            assert_eq!(runtime["raytrace"]["caustics"], json!(quality), "CPU temporary request capture retains all four quality controls");
+        } else {
+            studio::params(&h.app, &mut runtime).unwrap();
+            assert_eq!(runtime["caustics"], json!(quality), "GPU temporary request capture retains all four quality controls");
+        }
+        if can_observe_live {
+            live::advance(&mut h.app, &h.ctx, 100.0);
+            let first = live::inspect(&h.app);
+            assert_eq!(first["request"]["settings"]["job"]["options"]["caustics"], json!(quality));
+            let mut changed = quality;
+            changed.radius_mm = 0.25;
+            h.app.render_workspace.view.studio.caustics = Some(changed);
+            live::advance(&mut h.app, &h.ctx, 101.0);
+            let next = live::inspect(&h.app);
+            assert!(
+                next["generation"].as_u64().unwrap() > first["generation"].as_u64().unwrap(),
+                "a radius edit invalidates the previous live request identity"
+            );
+            assert_eq!(next["request"]["settings"]["job"]["options"]["caustics"], json!(changed));
+            assert_eq!(next["request"]["settings"]["optics"], json!(saved.optics));
+            assert_eq!(next["pending"], false);
+            assert_eq!(next["running"], false, "inspecting paused live intent must not submit a render");
+            h.app.render_workspace.view.studio.caustics = Some(quality);
+        }
+        assert!(Arc::ptr_eq(&document, &h.app.session.doc));
+        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+        setups::save(&mut h.app).unwrap();
+        let expected = h.app.session.doc.render.setups["Studio"].clone();
+        assert_eq!(image_request(&h.app).unwrap()["settings"], json!(expected));
+        h.app.render_workspace.view.studio.caustics = None;
+        setups::refresh_dirty(&mut h.app);
+        assert!(h.app.render_workspace.view.dirty);
+        setups::load(&mut h.app);
+        assert_eq!(h.app.render_workspace.view.studio.caustics, Some(quality));
+        assert!(!h.app.render_workspace.view.dirty);
+        if method == ImageMethod::CpuRaytrace {
+            assert_eq!(h.app.render_workspace.view.raytrace.caustics, Some(quality));
+        }
+        let path = h.dir.join(format!("caustic-quality-{method:?}.solidcraft"));
+        h.app.run("file.save", json!({"path":path})).unwrap();
+        h.app.run("doc.open", json!({"path":path})).unwrap();
+        assert_eq!(h.app.session.doc.render.setups["Studio"], expected);
+        h.app.render_workspace.view.name = "Studio".into();
+        enter(&mut h.app, true).unwrap();
+        setups::load(&mut h.app);
+        h.app.render_workspace.view.live_paused = true;
+        assert_eq!(h.app.render_workspace.view.studio.caustics, Some(quality));
+        assert_eq!(image_request(&h.app).unwrap()["settings"], json!(expected));
+        assert!(h.app.render_workspace.view.job.is_none());
     }
 }
