@@ -19,9 +19,11 @@ use crate::params::{bad, bool_, expr, str_};
 use crate::schema::browser::{
     BodyRenameParams, BodyRenamed, BrowserFoldParams, BrowserFoldResult, BrowserGroupMade, BrowserGroupParams, BrowserGroupRenamed,
     BrowserMoveParams, BrowserMoved, BrowserOrderParams, BrowserOrdered, BrowserRenameGroupParams, BrowserUngroupParams, BrowserUngrouped,
-    BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, Isolated, RepairDone, RepairFace, RepairHole,
-    RepairParams, RepairResult, RepairSewn, VisibilityState,
+    BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, Isolated, PlaneFrame, RedefineAttachment,
+    RedefineSketchParams, RedefineSketchResult, RepairDone, RepairFace, RepairHole, RepairParams, RepairResult, RepairSewn, ViewApplyParams,
+    ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult, ViewRenameParams, ViewRenamed, ViewSaveParams, ViewSaved, VisibilityState,
 };
+use crate::schema::view_navigation::CameraReply;
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
@@ -35,6 +37,12 @@ const MOVE_CONTRACT: TypedContract<BrowserMoveParams> = TypedContract::new();
 const ORDER_CONTRACT: TypedContract<BrowserOrderParams> = TypedContract::new();
 const VISIBILITY_CONTRACT: TypedContract<BrowserVisibilityParams> = TypedContract::new();
 const FOLD_CONTRACT: TypedContract<BrowserFoldParams> = TypedContract::new();
+const REDEFINE_SKETCH_CONTRACT: TypedContract<RedefineSketchParams> = TypedContract::new();
+const VIEW_SAVE_CONTRACT: TypedContract<ViewSaveParams> = TypedContract::new();
+const VIEW_RENAME_CONTRACT: TypedContract<ViewRenameParams> = TypedContract::new();
+const VIEW_DELETE_CONTRACT: TypedContract<ViewDeleteParams> = TypedContract::new();
+const VIEW_LIST_CONTRACT: TypedContract<ViewListParams> = TypedContract::new();
+const VIEW_APPLY_CONTRACT: TypedContract<ViewApplyParams> = TypedContract::new();
 
 /// A reply as JSON: the commands here build their replies from the types their output schemas
 /// describe, so the two can't drift apart.
@@ -56,8 +64,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "body: its name (a part the modelling kernel refuses, or an open part that should be a solid); gap?: expr (default 0.2 mm, at most 1 mm: free edges that pair up within it are sewn, each sewn edge carrying its own gap as its tolerance); patch_holes?: bool (default false: loops of free edges left are patched, in the plane of the faces around them where those are that plane, else tangent to them, and sewn in; otherwise the reply offers the patches); name? → the feature, and repair: what changed face by face (rebuilt and refused faces, sewn gaps, holes with their surface.patch), faces and largest edge tolerance before and after, closed, modelling, volume. Refused with why when nothing applies",
         ),
-    CommandSpec::new("sketch.redefine", "Redefine Sketch Plane", redefine_sketch)
+    CommandSpec::new("sketch.redefine", "Redefine Sketch Plane", crate::checked!("sketch.redefine", redefine_sketch))
         .icon("plane")
+        .contract(&REDEFINE_SKETCH_CONTRACT)
+        .output(output_schema_for::<RedefineSketchResult>)
         .params("sketch: id or name; plane: as sketch.create; frame?: as sketch.create; author_path?: exact owner occurrence ids; explicitly rebinds or freezes the plane while preserving geometry and dimension names"),
     CommandSpec::new("browser.group", "New Group", crate::checked!("browser.group", group))
         .icon("folder")
@@ -84,13 +94,33 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&UNITS_CONTRACT)
         .output(crate::schema::output_schema_for::<DocumentUnitsResult>)
         .params("units: mm|cm|m|in|ft (display and unit-less parameters; values keep their meaning)"),
-    CommandSpec::new("view.save", "New Named View", view_save)
+    CommandSpec::new("view.save", "New Named View", crate::checked!("view.save", view_save))
         .icon("camera")
+        .contract(&VIEW_SAVE_CONTRACT)
+        .output(output_schema_for::<ViewSaved>)
         .params("name?; camera: {target: [x,y,z], yaw, pitch, distance, fov?} (replaces a view of the same name)"),
-    CommandSpec::new("view.rename", "Rename Named View", view_rename).icon("rename").params("view: name, name"),
-    CommandSpec::new("view.delete", "Delete Named View", view_delete).icon("delete").params("view: name"),
-    CommandSpec::new("view.list", "List Named Views", view_list).icon("list").noundo().doc_only(),
-    CommandSpec::new("view.apply", "Restore Named View", view_apply).icon("camera").noundo().params(
+    CommandSpec::new("view.rename", "Rename Named View", crate::checked!("view.rename", view_rename))
+        .icon("rename")
+        .contract(&VIEW_RENAME_CONTRACT)
+        .output(output_schema_for::<ViewRenamed>)
+        .params("view: name, name"),
+    CommandSpec::new("view.delete", "Delete Named View", crate::checked!("view.delete", view_delete))
+        .icon("delete")
+        .contract(&VIEW_DELETE_CONTRACT)
+        .output(output_schema_for::<ViewDeleted>)
+        .params("view: name"),
+    CommandSpec::new("view.list", "List Named Views", crate::checked!("view.list", view_list))
+        .icon("list")
+        .noundo()
+        .contract(&VIEW_LIST_CONTRACT)
+        .output(output_schema_for::<ViewListResult>)
+        .doc_only(),
+    CommandSpec::new("view.apply", "Restore Named View", crate::checked!("view.apply", view_apply))
+        .icon("camera")
+        .noundo()
+        .contract(&VIEW_APPLY_CONTRACT)
+        .output(output_schema_for::<CameraReply>)
+        .params(
         "view?: front|back|top|bottom|left|right|iso|home (frames the model) | a named view's name; or camera?: {target: [x,y,z], yaw, pitch, distance, fov?, roll?} (radians, mm, about the up axis; yaw: heading of the line of sight, 0 along +Y (Front), π/2 along +X (Left), π (Back), −π/2 (Right); pitch: the eye's elevation, within ±π/2, π/2 = Top; roll defaults to 0, turns the picture clockwise, must be finite and is clamped to ±π; the View angles readout shows these in degrees; up is refused: the up axis comes from the design settings) → camera. The viewport (and the MCP screenshot) moves there. View state: not saved, not an undo step",
     ),
     CommandSpec::new("browser.order", "Order Browser Items", crate::checked!("browser.order", order))
@@ -1049,14 +1079,47 @@ fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
     reply(kept)
 }
 
+/// A camera `view.save` keeps, as the handler reads it (and `ViewCamera`, its contract type): a
+/// [`solidcraft_doc::NamedView`] of finite numbers with a positive distance, or the message the
+/// handler refuses it with.
+pub(crate) fn saved_view_form(c: &Value) -> std::result::Result<solidcraft_doc::NamedView, String> {
+    let v: solidcraft_doc::NamedView = serde_json::from_value(c.clone()).map_err(|e| format!("bad camera: {e}"))?;
+    let ok = [v.target.x, v.target.y, v.target.z, v.yaw, v.pitch, v.distance, v.fov].iter().all(|x| x.is_finite()) && v.distance > 0.0;
+    if ok { Ok(v) } else { Err("the camera must be finite with a positive distance".into()) }
+}
+
+/// The camera `view.apply` turns to for a `camera` it is given, as the handler reads it (and
+/// `ApplyCamera`, its contract type), or the message the handler refuses it with.
+pub(crate) fn applied_camera_form(c: &Value) -> std::result::Result<crate::render::Camera, String> {
+    if c.get("up").is_some() {
+        return Err("camera `up` is not supported: the up axis comes from the design settings".into());
+    }
+    let roll = match c.get("roll") {
+        Some(value) => value.as_f64().filter(|r| r.is_finite()).ok_or("camera `roll` must be a finite number in radians")?,
+        None => 0.0,
+    };
+    let v: solidcraft_doc::NamedView = serde_json::from_value(c.clone()).map_err(|e| format!("bad camera: {e}"))?;
+    // Past a pole the same view has other angles; the orbit would snap it back (#6032).
+    if !(v.pitch.abs() <= std::f64::consts::FRAC_PI_2 + 1e-9) {
+        return Err("camera `pitch` must be within ±π/2 radians (±90°)".into());
+    }
+    let cam = crate::render::Camera { roll: roll.clamp(-std::f64::consts::PI, std::f64::consts::PI), ..camera_of(&v) };
+    if !usable_camera(&cam) {
+        return Err("the camera must be finite with a positive distance".into());
+    }
+    Ok(cam)
+}
+
+/// A camera the viewport can be put at: finite, with a positive distance and a field of view of
+/// at least 0.
+fn usable_camera(cam: &crate::render::Camera) -> bool {
+    cam.is_valid() && cam.fov.is_finite() && cam.fov >= 0.0
+}
+
 fn view_save(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.save";
     let c = p.get("camera").ok_or_else(|| bad(cmd, "`camera` is required"))?;
-    let mut v: solidcraft_doc::NamedView = serde_json::from_value(c.clone()).map_err(|e| bad(cmd, format!("bad camera: {e}")))?;
-    let ok = [v.target.x, v.target.y, v.target.z, v.yaw, v.pitch, v.distance, v.fov].iter().all(|x| x.is_finite()) && v.distance > 0.0;
-    if !ok {
-        return Err(bad(cmd, "the camera must be finite with a positive distance"));
-    }
+    let mut v = saved_view_form(c).map_err(|e| bad(cmd, e))?;
     let n = s.doc.named_views.len();
     v.name = match str_(p, "name").map(str::trim).filter(|n| !n.is_empty()) {
         Some(n) if n.len() <= 128 => n.to_string(),
@@ -1070,7 +1133,7 @@ fn view_save(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.doc_mut();
     d.named_views.retain(|x| x.name != name);
     d.named_views.push(v);
-    Ok(json!({ "view": name }))
+    reply(cmd, ViewSaved { view: name, param_warnings: Vec::new() })
 }
 
 fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1078,23 +1141,7 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
     let cam = match (str_(p, "view"), p.get("camera")) {
         (Some(_), Some(_)) => return Err(bad(cmd, "give `view` or `camera`, not both")),
         (None, None) => return Err(bad(cmd, "`view` (a name) or `camera` is required")),
-        (None, Some(c)) => {
-            if c.get("up").is_some() {
-                return Err(bad(cmd, "camera `up` is not supported: the up axis comes from the design settings"));
-            }
-            let roll = match c.get("roll") {
-                Some(value) => {
-                    value.as_f64().filter(|r| r.is_finite()).ok_or_else(|| bad(cmd, "camera `roll` must be a finite number in radians"))?
-                }
-                None => 0.0,
-            };
-            let v: solidcraft_doc::NamedView = serde_json::from_value(c.clone()).map_err(|e| bad(cmd, format!("bad camera: {e}")))?;
-            // Past a pole the same view has other angles; the orbit would snap it back (#6032).
-            if !(v.pitch.abs() <= std::f64::consts::FRAC_PI_2 + 1e-9) {
-                return Err(bad(cmd, "camera `pitch` must be within ±π/2 radians (±90°)"));
-            }
-            crate::render::Camera { roll: roll.clamp(-std::f64::consts::PI, std::f64::consts::PI), ..camera_of(&v) }
-        }
+        (None, Some(c)) => applied_camera_form(c).map_err(|e| bad(cmd, e))?,
         // Standard view names come first, as in the browser's Named Views folder.
         (Some(name), None) => match crate::render::StandardView::parse(name) {
             Some(sv) => {
@@ -1106,11 +1153,11 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
             None => s.doc.named_views.iter().find(|v| v.name == name).map(camera_of).ok_or_else(|| bad(cmd, format!("no named view `{name}`")))?,
         },
     };
-    if !cam.is_valid() || !cam.fov.is_finite() || cam.fov < 0.0 {
+    if !usable_camera(&cam) {
         return Err(bad(cmd, "the camera must be finite with a positive distance"));
     }
     s.camera = Some(cam);
-    Ok(json!({ "camera": cam }))
+    reply(cmd, CameraReply { camera: cam, param_warnings: Vec::new() })
 }
 
 /// The orbit camera of a named view (Z up, no roll).
@@ -1134,17 +1181,18 @@ fn view_rename(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(v) = s.doc_mut().named_views.get_mut(i) {
         v.name = name.to_string();
     }
-    Ok(json!({ "view": name }))
+    reply(cmd, ViewRenamed { view: name.to_string(), param_warnings: Vec::new() })
 }
 
 fn view_delete(s: &mut Session, p: &Value) -> Result<Value> {
-    let i = view_index(s, p, "view.delete")?;
+    let cmd = "view.delete";
+    let i = view_index(s, p, cmd)?;
     let v = s.doc_mut().named_views.remove(i);
-    Ok(json!({ "deleted": v.name }))
+    reply(cmd, ViewDeleted { deleted: v.name, param_warnings: Vec::new() })
 }
 
 fn view_list(s: &mut Session, _p: &Value) -> Result<Value> {
-    Ok(json!({ "views": s.doc.named_views }))
+    reply("view.list", ViewListResult { views: s.doc.named_views.clone(), param_warnings: Vec::new() })
 }
 
 /// The keys whose strings name bodies, alone or in a list (`body`, `targets`…), at any depth of a
@@ -1491,17 +1539,17 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
 
     let attachment = s.doc.feature(id).and_then(|feature| match &feature.kind {
         FeatureKind::Sketch { plane, .. } => Some(if super::sketch::face::anchor(plane).is_some() {
-            "exact_face"
+            RedefineAttachment::ExactFace
         } else if solidcraft_doc::sheet::plane_sheet_face(plane).is_some() {
-            "sheet_face"
+            RedefineAttachment::SheetFace
         } else {
-            "fixed"
+            RedefineAttachment::Fixed
         }),
         _ => None,
     });
-    let mut out = json!({ "sketch": id,"attachment":attachment });
-    super::sketch::frame_reply(&mut out, frame, &placement);
-    Ok(out)
+    let note = frame.and_then(|f| super::sketch::frame_note(Some(f), &placement)).map(str::to_string);
+    let frame = frame.and_then(PlaneFrame::from_name);
+    reply(cmd, RedefineSketchResult { sketch: id, attachment, frame, note, created: None, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

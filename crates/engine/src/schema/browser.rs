@@ -9,7 +9,8 @@ use serde_json::{Value, json};
 
 use solidcraft_doc::BrowserEntry;
 
-use super::check::whole;
+use super::canvas::CanvasPlane;
+use super::check::{located, whole};
 use super::types::{FeatureCommon, LengthExpr, feature_common, present};
 
 /// Repair a part the modelling kernel refuses, or an open part that should be a solid: faces
@@ -1102,6 +1103,469 @@ pub struct BodyRenamed {
     pub body: String,
     /// Its name now, without surrounding spaces.
     pub name: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+// ---- Named views and Redefine Sketch (#12499) ----
+//
+// As above: each key reads as its handler reads it and fails with the handler's message. A key
+// the handler can't do without is optional in the type and required in the schema, so the
+// handler's own message is what a call that leaves it out gets. Whether a view or a sketch
+// exists, and whether a plane or a face can be found, stays the handler's to check.
+
+fn view_required(schema: &mut Schema) {
+    require(schema, &["view"]);
+}
+
+fn view_and_name_required(schema: &mut Schema) {
+    require(schema, &["view", "name"]);
+}
+
+fn camera_required(schema: &mut Schema) {
+    require(schema, &["camera"]);
+}
+
+fn sketch_and_plane_required(schema: &mut Schema) {
+    require(schema, &["sketch", "plane"]);
+}
+
+/// A named view, as `view.rename` and `view.delete` read `view`: text.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ViewKey(pub String);
+
+impl<'de> Deserialize<'de> for ViewKey {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(n) => Ok(ViewKey(n)),
+            _ => Err(D::Error::custom(whole("`view` must be a view name"))),
+        }
+    }
+}
+
+impl JsonSchema for ViewKey {
+    fn schema_name() -> Cow<'static, str> {
+        "ViewKey".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "A named view's name.", "type": "string"})
+    }
+}
+
+fn some_view<'de, D: Deserializer<'de>>(d: D) -> Result<Option<ViewKey>, D::Error> {
+    ViewKey::deserialize(d).map(Some)
+}
+
+/// The name `view.save` gives a view: at most 128 bytes once surrounding spaces are cut; nothing
+/// left means the next free "Named View" number.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SavedViewName(pub String);
+
+impl<'de> Deserialize<'de> for SavedViewName {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(n) if n.trim().len() > MAX_NAME_BYTES => Err(D::Error::custom(whole("`name` is too long"))),
+            Value::String(n) => Ok(SavedViewName(n)),
+            _ => Err(D::Error::custom("must be text")),
+        }
+    }
+}
+
+impl JsonSchema for SavedViewName {
+    fn schema_name() -> Cow<'static, str> {
+        "SavedViewName".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "A name of at most 128 bytes once surrounding spaces are cut.", "type": "string"})
+    }
+}
+
+/// The point a saved camera looks at, as the schemas of the view commands give it.
+fn target_schema() -> Value {
+    json!({
+        "description": "The point the camera looks at, in mm: [x, y, z].",
+        "type": "array",
+        "items": {"type": "number"},
+        "minItems": 3,
+        "maxItems": 3
+    })
+}
+
+/// The camera `view.save` keeps, as the handler reads it: finite numbers and a positive
+/// distance. A `name` inside it is replaced by the call's `name`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ViewCamera(pub solidcraft_doc::NamedView);
+
+impl<'de> Deserialize<'de> for ViewCamera {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::browser::saved_view_form(&Value::deserialize(d)?).map(ViewCamera).map_err(|why| D::Error::custom(whole(why)))
+    }
+}
+
+impl JsonSchema for ViewCamera {
+    fn schema_name() -> Cow<'static, str> {
+        "ViewCamera".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "An orbit camera. Angles are in radians, about the up axis.",
+            "type": "object",
+            "properties": {
+                "target": target_schema(),
+                "yaw": {"description": "Turn about the up axis; 0 looks along +Y, from the front.", "type": "number"},
+                "pitch": {"description": "Elevation of the eye above the ground plane.", "type": "number"},
+                "distance": {"description": "From the target to the eye, in mm.", "type": "number", "exclusiveMinimum": 0},
+                "fov": {"description": "Vertical field of view; 0 is orthographic. Default: 0.", "type": "number", "default": 0.0}
+            },
+            "required": ["target", "yaw", "pitch", "distance"]
+        })
+    }
+}
+
+/// Keep the camera as a named view of the design. One undo step. A view of the same name is
+/// replaced.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = camera_required)]
+pub struct ViewSaveParams {
+    // Optional in the type and required in the schema (`camera_required`): left out, the handler
+    // refuses it with its own message.
+    /// The camera to keep: `{target: [x, y, z], yaw, pitch, distance, fov?}`, finite, with a
+    /// distance above 0.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ViewCamera")]
+    pub camera: Option<ViewCamera>,
+    /// The view's name, at most 128 bytes once surrounding spaces are cut. Default: "Named View"
+    /// and the first number no view's name has. A value that is not text is reported, though the
+    /// handler would read it as left out.
+    #[serde(default)]
+    pub name: Option<SavedViewName>,
+}
+
+/// What `view.save` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ViewSaved {
+    /// The name the view was kept under.
+    pub view: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Rename a named view. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = view_and_name_required)]
+pub struct ViewRenameParams {
+    // Required in the schema (`view_and_name_required`), optional in the type, as `group` above.
+    /// The view to rename, by name.
+    #[serde(default, deserialize_with = "some_view", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ViewKey")]
+    pub view: Option<ViewKey>,
+    /// The new name, 1 to 128 characters once surrounding spaces are cut; no other view may
+    /// have it.
+    #[serde(default, deserialize_with = "some_new_name", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "NewName")]
+    pub name: Option<NewName>,
+}
+
+/// What `view.rename` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ViewRenamed {
+    /// The view's name now, without surrounding spaces.
+    pub view: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Delete a named view. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = view_required)]
+pub struct ViewDeleteParams {
+    // Required in the schema (`view_required`), optional in the type.
+    /// The view to delete, by name.
+    #[serde(default, deserialize_with = "some_view", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ViewKey")]
+    pub view: Option<ViewKey>,
+}
+
+/// What `view.delete` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ViewDeleted {
+    /// The name of the view that is gone.
+    pub deleted: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// `view.list` takes no parameters.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ViewListParams {}
+
+/// A named view, as `view.list` gives it. Only its schema is described here: the reply carries
+/// the design's own [`solidcraft_doc::NamedView`] values.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ViewEntry {
+    /// The view's name.
+    pub name: String,
+    /// The point the camera looks at, in mm.
+    pub target: [f64; 3],
+    /// Turn about the up axis, in radians.
+    pub yaw: f64,
+    /// Elevation of the eye, in radians.
+    pub pitch: f64,
+    /// From the target to the eye, in mm.
+    pub distance: f64,
+    /// Vertical field of view in radians; 0 is orthographic.
+    pub fov: f64,
+}
+
+/// What `view.list` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ViewListResult {
+    /// The design's named views, in the order they were made.
+    #[schemars(with = "Vec<ViewEntry>")]
+    pub views: Vec<solidcraft_doc::NamedView>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// The camera `view.apply` turns to, as the handler reads it: `up` is refused, `roll` is finite,
+/// the pitch within ±π/2 and the rest finite with a positive distance.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ApplyCamera(pub solidcraft_render::Camera);
+
+impl<'de> Deserialize<'de> for ApplyCamera {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::browser::applied_camera_form(&Value::deserialize(d)?).map(ApplyCamera).map_err(|why| D::Error::custom(whole(why)))
+    }
+}
+
+impl JsonSchema for ApplyCamera {
+    fn schema_name() -> Cow<'static, str> {
+        "ApplyCamera".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "An orbit camera. Angles are in radians, about the up axis, which comes from the design settings.",
+            "type": "object",
+            "properties": {
+                "target": target_schema(),
+                "yaw": {"description": "Turn about the up axis; 0 looks along +Y (Front), π/2 along +X (Left), π (Back), -π/2 (Right).", "type": "number"},
+                "pitch": {"description": "Elevation of the eye above the ground plane, within ±π/2; π/2 is Top.", "type": "number", "minimum": -std::f64::consts::FRAC_PI_2, "maximum": std::f64::consts::FRAC_PI_2},
+                "distance": {"description": "From the target to the eye, in mm.", "type": "number", "exclusiveMinimum": 0},
+                "fov": {"description": "Vertical field of view; 0 is orthographic. Default: 0.", "type": "number", "minimum": 0, "default": 0.0},
+                "roll": {"description": "Turn about the viewing direction, clockwise; a finite number, clamped to ±π. Default: 0.", "type": "number", "default": 0.0}
+            },
+            "required": ["target", "yaw", "pitch", "distance"],
+            "not": {"required": ["up"]}
+        })
+    }
+}
+
+/// Move the viewport (and the MCP screenshot) to a standard view, a named view or a camera. View
+/// state only: not saved with the design and not an undo step. Give `view` or `camera`, not both.
+/// (A `view` that is not text is read as absent when a `camera` is given, as the handler does.)
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ViewApplyKeys {
+    /// A standard view: front, back, top, bottom, left, right, iso or home (the model framed
+    /// from there), or a named view's name. Not with `camera`.
+    #[serde(default)]
+    pub view: Option<String>,
+    /// A camera to turn to. Not with `view`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ApplyCamera")]
+    pub camera: Option<ApplyCamera>,
+}
+
+/// `view.apply`'s parameters: [`ViewApplyKeys`] with the two forms told apart.
+///
+/// The handler reads `view` as text and takes anything else as absent, and reads `camera` only
+/// when `view` is not text, so the same holds here: a `view` that is not text is not looked at
+/// when a `camera` is given, and one of neither is left to the handler's message.
+#[derive(Debug)]
+pub struct ViewApplyParams(pub ViewApplyKeys);
+
+impl<'de> Deserialize<'de> for ViewApplyParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut value = Value::deserialize(d)?;
+        if value.get("view").is_some_and(Value::is_string) {
+            if value.get("camera").is_some() {
+                return Err(D::Error::custom(whole("give `view` or `camera`, not both")));
+            }
+        } else if let Some(keys) = value.as_object_mut() {
+            keys.remove("view");
+        }
+        serde_path_to_error::deserialize(&value).map(ViewApplyParams).map_err(|e| D::Error::custom(located(&e)))
+    }
+}
+
+impl JsonSchema for ViewApplyParams {
+    fn schema_name() -> Cow<'static, str> {
+        "ViewApplyParams".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let mut schema = ViewApplyKeys::json_schema(generator);
+        schema.insert("anyOf".into(), json!([{"required": ["view"]}, {"required": ["camera"]}]));
+        schema.insert("not".into(), json!({"required": ["view", "camera"]}));
+        schema
+    }
+}
+
+/// A sketch by id or name, as `sketch.redefine` reads `sketch`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SketchKey(pub String);
+
+impl<'de> Deserialize<'de> for SketchKey {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::Number(n) => Ok(SketchKey(n.to_string())),
+            Value::String(s) => Ok(SketchKey(s)),
+            _ => Err(D::Error::custom(whole("`sketch` must be an id or name"))),
+        }
+    }
+}
+
+impl JsonSchema for SketchKey {
+    fn schema_name() -> Cow<'static, str> {
+        "SketchKey".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "A sketch's feature id (a number) or its name.", "type": ["number", "string"]})
+    }
+}
+
+fn some_sketch<'de, D: Deserializer<'de>>(d: D) -> Result<Option<SketchKey>, D::Error> {
+    SketchKey::deserialize(d).map(Some)
+}
+
+/// The coordinates an explicit plane `{origin, x_dir, y_dir}` is given in: `world` or
+/// `component`, the component's own. (No doc on the variants: they would make the schema a
+/// `oneOf` of constants instead of a plain `enum`.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum PlaneFrame {
+    World,
+    Component,
+}
+
+impl PlaneFrame {
+    /// The frame a handler names, as `world` or `component`.
+    pub fn from_name(name: &str) -> Option<PlaneFrame> {
+        match name {
+            "world" => Some(PlaneFrame::World),
+            "component" => Some(PlaneFrame::Component),
+            _ => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for PlaneFrame {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(f) if f == "world" => Ok(PlaneFrame::World),
+            Value::String(f) if f == "component" => Ok(PlaneFrame::Component),
+            _ => Err(D::Error::custom(whole("`frame` must be \"world\" or \"component\""))),
+        }
+    }
+}
+
+/// The occurrence ids of the placement a sketch is authored in, from the outermost down, as
+/// `sketch.redefine` reads `author_path`: at most 64 nonzero whole numbers.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AuthorPath(pub Vec<u64>);
+
+impl<'de> Deserialize<'de> for AuthorPath {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::Array(path) if path.len() <= MAX_PATH => path
+                .iter()
+                .map(|id| id.as_u64().filter(|id| *id != 0).ok_or_else(|| D::Error::custom(whole("invalid author_path id"))))
+                .collect::<Result<_, _>>()
+                .map(AuthorPath),
+            _ => Err(D::Error::custom(whole("author_path must contain at most64 ids"))),
+        }
+    }
+}
+
+impl JsonSchema for AuthorPath {
+    fn schema_name() -> Cow<'static, str> {
+        "AuthorPath".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Occurrence ids, outermost first: at most 64 whole numbers above 0.",
+            "type": "array",
+            "items": {"type": "integer", "minimum": 1},
+            "maxItems": MAX_PATH
+        })
+    }
+}
+
+/// Move a sketch to another plane, keeping its geometry and its dimension names: an origin or
+/// construction plane, an explicit plane, or a planar face of the model. A face it follows is
+/// refused where the sketch's own geometry would depend on later features. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = sketch_and_plane_required)]
+pub struct RedefineSketchParams {
+    // Optional in the type and required in the schema (`sketch_and_plane_required`): left out,
+    // the handler refuses it with its own message.
+    /// The sketch to move, by feature id or name.
+    #[serde(default, deserialize_with = "some_sketch", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchKey")]
+    pub sketch: Option<SketchKey>,
+    /// The new plane, as `sketch.create` takes it. A picked face is read as it reads one.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "CanvasPlane")]
+    pub plane: Option<CanvasPlane>,
+    /// Move the plane this far along its normal (mm or a length expression). Default: 0.
+    #[serde(default)]
+    pub offset: Option<LengthExpr>,
+    /// The placement the sketch is authored in, as occurrence ids from the outermost down. Default: the
+    /// sketch's saved one, else the active occurrence, else the component's only placement; a
+    /// component sketch in a design with several placements needs it.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "AuthorPath")]
+    pub author_path: Option<AuthorPath>,
+    /// For an explicit plane `{origin, x_dir, y_dir}`: whether it is in the world's or the
+    /// component's own coordinates. Default: world. A named plane or a face takes none.
+    #[serde(default)]
+    pub frame: Option<PlaneFrame>,
+}
+
+/// How a redefined sketch is attached to its plane: `exact_face` (to a face of a body, which it
+/// follows), `sheet_face` (to a face of a sheet part) or `fixed` (where it is: an origin,
+/// construction or explicit plane).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RedefineAttachment {
+    ExactFace,
+    SheetFace,
+    Fixed,
+}
+
+/// What `sketch.redefine` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RedefineSketchResult {
+    /// The sketch's feature id.
+    pub sketch: u64,
+    /// How it is attached now.
+    pub attachment: Option<RedefineAttachment>,
+    /// For an explicit plane: the coordinates it was read in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<PlaneFrame>,
+    /// For a world plane put into a component that is moved or turned: how it was stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// What the session reports for every sketch command: the ids of the points, curves,
+    /// constraints and dimensions the sketch gained, `{points, curves, constraints, dimensions}`.
+    /// The handler leaves it out; the session adds it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Value>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

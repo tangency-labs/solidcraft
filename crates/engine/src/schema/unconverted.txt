@@ -200,7 +200,6 @@ sketch.rectangle.center
 sketch.rectangle.rounded
 sketch.rectangle.three_point
 sketch.rectangle.two_point
-sketch.redefine
 sketch.scale
 sketch.slot.arc_center
 sketch.slot.arc_three_point
@@ -281,8 +280,3 @@ timeline.roll_to
 timeline.rollback
 timeline.suppress
 timeline.ungroup
-view.apply
-view.delete
-view.list
-view.rename
-view.save

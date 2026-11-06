@@ -789,17 +789,23 @@ pub(super) fn plane_frame(p: &Value, cmd: &str) -> Result<Option<&'static str>> 
     }
 }
 
+/// The note a reply carries when a world plane went into a moved or turned component
+/// (`placement`: that component's) for an explicit plane read in `frame`, where it differs from
+/// the component's own.
+pub(super) fn frame_note(frame: Option<&str>, placement: &solidcraft_doc::Mat) -> Option<&'static str> {
+    (frame == Some("world") && !solidcraft_doc::is_identity(placement)).then_some(
+        "the plane was read in world coordinates and the component is moved or turned, so it is stored at that world place in the component; frame: \"component\" reads it in the component's own coordinates",
+    )
+}
+
 /// The reply's `frame` for an explicit plane, with a note when a world plane went into a moved
 /// or turned component (`placement`: that component's), where it differs from the component's own.
 pub(super) fn frame_reply(out: &mut Value, frame: Option<&str>, placement: &solidcraft_doc::Mat) {
     let Some(o) = out.as_object_mut() else { return };
     let Some(frame) = frame else { return };
     o.insert("frame".into(), json!(frame));
-    if frame == "world" && !solidcraft_doc::is_identity(placement) {
-        o.insert(
-            "note".into(),
-            json!("the plane was read in world coordinates and the component is moved or turned, so it is stored at that world place in the component; frame: \"component\" reads it in the component's own coordinates"),
-        );
+    if let Some(note) = frame_note(Some(frame), placement) {
+        o.insert("note".into(), json!(note));
     }
 }
 
