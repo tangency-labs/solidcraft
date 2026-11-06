@@ -41,6 +41,19 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             });
         });
+        // While settings are on trial, the question about them comes first (#4015).
+        let on_trial = app.graphics.trial.is_some();
+        if !app.graphics.apis.is_empty() {
+            ui_kit::settings_section(ui, "api", app.tr("ui.graphics_api"), |ui| {
+                // The dropdown takes the whole width, as the graphics card's does; the note below
+                // says when it applies.
+                graphics_api(app, ui, on_trial);
+                if let Some(warning) = freeze_warning(app) {
+                    ui_kit::text(ui, &warning, ui_kit::Text::Error("graphics_api_freezes"));
+                }
+                restart_now(app, ui, on_trial);
+            });
+        }
         ui_kit::settings_section(ui, "quality", app.tr("prefs.curved_surfaces"), |ui| {
             use solidcraft_engine::doc::display_quality::DisplayQuality;
             let current = DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default();
@@ -95,13 +108,15 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(t.space_10, t.space_10);
                 for (m, figure) in MSAA.into_iter().zip(figures) {
-                    let enabled = app.msaa_supported.is_empty() || app.msaa_supported.contains(&m);
+                    let supported = app.msaa_supported.is_empty() || app.msaa_supported.contains(&m);
+                    let enabled = supported && !on_trial;
                     let label = if m == 1 { app.tr("ui.colour_vision_off").to_owned() } else { format!("{m}×") };
+                    let hint = app.tr(if on_trial { "settings.graphics_trial_first" } else { "settings.graphics_applies_on_restart" });
                     let response = ui_kit::picture_card(
                         ui,
                         &ui_kit::Card {
                             label: &label,
-                            sub: Some(if enabled { "" } else { app.tr("prefs.not_on_gpu") }),
+                            sub: Some(if supported { "" } else { app.tr("prefs.not_on_gpu") }),
                             selected: app.preferences.msaa == m,
                             enabled,
                             options: None,
@@ -111,8 +126,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         },
                         (t.space_24 * 5.0 + t.space_10).min(ui.max_rect().width()),
                     )
-                    .backing_on_hover_text(app.tr("settings.msaa_applies_on_restart"))
-                    .backing_on_disabled_hover_text(app.tr("settings.msaa_applies_on_restart"));
+                    .backing_on_hover_text(hint)
+                    .backing_on_disabled_hover_text(if supported { hint } else { app.tr("prefs.not_on_gpu") });
                     crate::scenario::publish_target(&format!("prefs:msaa:{m}"), response.rect);
                     crate::scenario::publish_target(&format!("prefs:option:{label}"), response.rect);
                     if enabled && response.clicked() {
@@ -122,6 +137,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             if app.msaa_compatibility {
                 ui_kit::text(ui, app.tr("prefs.anti_aliasing_amd_dx12"), ui_kit::Text::Hint("msaa_compatibility"));
+            }
+            // Without an API to choose (macOS), the restart for the anti-aliasing comes here.
+            if app.graphics.apis.is_empty() {
+                restart_now(app, ui, on_trial);
             }
             ui_kit::settings_form(ui, help_label_width, |ui| {
                 ui_kit::settings_row_help(ui, app.tr("prefs.graphics_page.supersampling"), app.tr("settings.supersampling_note"), |ui| {
@@ -552,4 +571,43 @@ fn field_of_view_row(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         response
     });
+}
+
+/// The graphics API (#4015): Automatic or one of [`Graphics::apis`], tried at the next start.
+/// `WGPU_BACKEND` decides it when set, and settings on trial are kept or dropped first.
+fn graphics_api(app: &mut SolveApp, ui: &mut egui::Ui, on_trial: bool) {
+    if let Some(value) = app.graphics.env_override.clone() {
+        let note = crate::i18n::format("settings.graphics_api_env", &[("value", &value)]);
+        ui.add_enabled_ui(false, |ui| ui_kit::dropdown_menu(ui, "pref_graphics_api", &value, |_| {})).response.on_disabled_hover_text(note);
+        return;
+    }
+    let apis: Vec<&str> = std::iter::once("auto").chain(app.graphics.apis.iter().copied()).collect();
+    ui.add_enabled_ui(!on_trial, |ui| {
+        ui_kit::dropdown_menu(ui, "pref_graphics_api", &graphics_api_label(&app.preferences.graphics_api), |ui| {
+            for api in apis {
+                if ui_kit::list_picker(ui, api, &graphics_api_label(api), app.preferences.graphics_api == api).clicked() {
+                    app.preferences.graphics_api = api.into();
+                }
+            }
+        })
+    })
+    .response
+    .on_disabled_hover_text(app.tr("settings.graphics_trial_first"));
+}
+
+/// The graphics API and anti-aliasing apply at start ([`Graphics`]): a note, and Restart now
+/// once the chosen ones differ from the saved ones.
+fn restart_now(app: &mut SolveApp, ui: &mut egui::Ui, on_trial: bool) {
+    if app.services.graphics_path.is_none() {
+        return;
+    }
+    ui_kit::text(ui, app.tr("settings.graphics_applies_on_restart"), ui_kit::Text::Hint("graphics_restart"));
+    if !on_trial
+        && selected_graphics(app) != app.graphics.saved
+        && ui_kit::button(ui, app.tr("settings.graphics_restart_now"), ui_kit::Button::Normal).clicked()
+    {
+        // The choice stays (as OK keeps it) and is tried by the start that follows.
+        close(app, false);
+        restart_for_graphics(app);
+    }
 }
