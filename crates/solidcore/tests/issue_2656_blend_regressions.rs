@@ -466,34 +466,129 @@ fn outside_setback_with_solidcraft_s_calls_is_the_closed_form() {
     assert_rel(v, 9_526.705_048_390, 1e-9, "outside-setback");
 }
 
-/// The rig's every-block-cylinder-tangent-concave-arc-r2-partial-chain input
-/// (block 40 x 20 x 15 joined to the cylinder R10 x 30): the concave
-/// arc where the block's top meets the cylinder is split at the cylinder's seam, and the
-/// pick (the rig's point) takes one piece. The round of that piece would end at the seam
-/// vertex, where the arc runs on between the same two faces: a round does not end at a seam
-/// (#2864), so the blend refuses it instead of capping it there with #453's construction.
+/// The rig's every-block-cylinder-tangent-concave-arc-r2-partial-chain input: a block
+/// x 0..40, y -10..10, z 0..15 joined to a cylinder R 10, z 0..30, about the z axis. The
+/// block's sides y = +-10 run tangent into the cylinder's wall at x = 0, so its top meets the
+/// wall in the concave half circle z = 15, rho = 10, x > 0, split in two at the cylinder's
+/// seam. V = 12000 + 3000 pi - 750 pi (block and cylinder less their overlap, a half disc 15
+/// high).
+fn block_cylinder(k: &mut Kernel) -> Brep {
+    let bl = create_box(k, Point3::new(0.0, -10.0, 0.0), 40.0, 20.0, 15.0).unwrap();
+    let cy = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 10.0, 30.0).unwrap();
+    let mut b = boolean_union(k, bl, cy).unwrap();
+    b.refresh_cached_topology();
+    b
+}
+
+/// Points on the half circle's two pieces: the rig's pick (y < 0) and its mirror, with the
+/// end of the half circle each piece reaches, (0, -+10, 15).
+const ARC_PIECES: [([f64; 3], [f64; 3]); 2] = [
+    (
+        [8.867375777689988, -4.60471376596052, 15.0],
+        [0.0, -10.0, 15.0],
+    ),
+    (
+        [8.867375777689988, 4.60471376596052, 15.0],
+        [0.0, 10.0, 15.0],
+    ),
+];
+
+/// The block and cylinder are the closed form, and the seam splits the half circle in two:
+/// each piece reaches one end of it, not the other.
+#[test]
+fn block_cylinder_is_the_closed_form() {
+    let mut k = solidcraft_kernel();
+    let mut b = block_cylinder(&mut k);
+    let (_, v) = measured(&mut k, &mut b);
+    assert_rel(v, 12_000.0 + 2_250.0 * std::f64::consts::PI, 1e-9, "part");
+    let pieces: Vec<EdgeId> = ARC_PIECES.iter().map(|&(p, _)| pick(&k, &b, p)).collect();
+    assert_ne!(pieces[0], pieces[1]);
+    for (&piece, &(_, end)) in pieces.iter().zip(&ARC_PIECES) {
+        let ends: Vec<Point3> = edge::vertices(&b, piece, None)
+            .unwrap()
+            .into_iter()
+            .map(|v| b.vertex(v.unwrap()).unwrap().point)
+            .collect();
+        let at = |p: [f64; 3]| {
+            ends.iter()
+                .any(|q| q.distance(Point3::new(p[0], p[1], p[2])) < 1e-9)
+        };
+        assert!(at(end), "{ends:?}");
+        assert!(
+            !at([0.0, -end[1], 15.0]),
+            "the piece ends at the seam: {ends:?}"
+        );
+    }
+}
+
+/// One piece rounded alone (the rig's pick, then its mirror): the round would end at the
+/// seam vertex, where the arc runs on between the same two faces. A round does not end at a
+/// seam (#2864), so the blend refuses it, saying why, instead of capping it there with
+/// #453's construction.
 #[test]
 fn block_cylinder_arc_piece_is_refused_at_the_seam() {
     let mut k = solidcraft_kernel();
-    let bl = create_box(&mut k, Point3::new(0.0, -10.0, 0.0), 40.0, 20.0, 15.0).unwrap();
-    let cy = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 30.0).unwrap();
-    let mut b = boolean_union(&mut k, bl, cy).unwrap();
-    b.refresh_cached_topology();
-    let at_pick = [8.867375777689988, -4.60471376596052, 15.0];
-    let piece = pick(&k, &b, at_pick);
-    let ends: Vec<Point3> = edge::vertices(&b, piece, None)
+    for &(at_pick, _) in &ARC_PIECES {
+        let mut b = block_cylinder(&mut k);
+        let r = blend(&mut k, &mut b, Kind::Round, &[at_pick], 2.0);
+        assert_eq!(r.unwrap_err().1, RUNS_ON_ACROSS_SEAM, "not capped");
+    }
+}
+
+/// Both pieces rounded r 2: the torus about the z axis (centre circle rho 12, z 17) over the
+/// block, cut by its side planes |y| = 10. At radius rho in [10, 12] it adds the spandrel
+/// height 2 - sqrt(4 - (rho - 12)^2) over the arc of length 2 rho asin(10 / rho), so
+/// V = 12000 + 2250 pi + 23.378532906443 = 19091.962003483477 (the rig case's `method`).
+#[test]
+fn block_cylinder_both_pieces_round_the_half_circle() {
+    let mut k = solidcraft_kernel();
+    let mut b = block_cylinder(&mut k);
+    let picks = ARC_PIECES.map(|(p, _)| p);
+    blend(&mut k, &mut b, Kind::Round, &picks, 2.0).unwrap();
+    let (_, v) = measured(&mut k, &mut b);
+    assert_rel(v, 19_091.962_003_483_477, 1e-9, "both pieces");
+}
+
+/// Both pieces rounded r 2 through the session's `do_fillet` (its tolerance scope, the split
+/// at radius corners and the closed-manifold check) with every fix but
+/// `geometric_g2_continuity`, as the blend's other End tests: the same torus, valid at level
+/// 2 and a manifold solid, its volume at 1e-12.
+#[test]
+fn block_cylinder_both_pieces_round_through_do_fillet() {
+    let mut k = Kernel::default();
+    for &name in UpstreamFixes::NAMES {
+        if name != "geometric_g2_continuity" {
+            *k.fixes.flag_mut(name).unwrap() = true;
+        }
+    }
+    let mut b = block_cylinder(&mut k);
+    let pieces: Vec<EdgeId> = ARC_PIECES.iter().map(|&(p, _)| pick(&k, &b, p)).collect();
+    {
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_per_edge_constant_radius(
+            &mut k,
+            &pieces,
+            &[2.0; 2],
+            &[FilletSurfaceGeneratorType::Circular; 2],
+            1,
+            1.0,
+        )
+        .unwrap();
+        s.do_fillet(&mut k).unwrap();
+    }
+    stitch_and_orient(&mut k, &mut b, &StitchAndOrientOptions::default()).unwrap();
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
         .unwrap()
-        .into_iter()
-        .map(|v| b.vertex(v.unwrap()).unwrap().point)
-        .collect();
-    let at = |p: Point3| ends.iter().any(|q| q.distance(p) < 1e-9);
-    assert!(at(Point3::new(0.0, -10.0, 15.0)), "{ends:?}");
-    assert!(
-        !at(Point3::new(0.0, 10.0, 15.0)),
-        "the piece ends at the seam: {ends:?}"
-    );
-    let r = blend(&mut k, &mut b, Kind::Round, &[at_pick], 2.0);
-    assert_eq!(r.unwrap_err().1, RUNS_ON_ACROSS_SEAM, "not capped");
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(is_manifold_solid(&b).unwrap());
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    let v = brep_volume(&k, &mut b, 1e-12, &attrs).unwrap();
+    assert_rel(v, 19_091.962_003_483_477, 1e-9, "do_fillet");
 }
 
 /// tangency-labs/solidcore#2679 (the blend corner): fillets/1207 with the r3 round's end
