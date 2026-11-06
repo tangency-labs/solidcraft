@@ -859,6 +859,10 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     FileAction::Command("file.export_obj").run(app);
                     close = true;
                 }
+                if item_if(ui, &format!("{}…", app.tr("ui.export_glb")), "", "export", shown) {
+                    FileAction::Export("glb").run(app);
+                    close = true;
+                }
                 if item_if(ui, "Export URDF…", &urdf_key, "export", shown) {
                     FileAction::Command("file.export_urdf").run(app);
                     close = true;

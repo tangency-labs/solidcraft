@@ -14,12 +14,14 @@ mod design_metadata;
 mod dxf;
 mod dxf_out;
 pub mod formats;
+mod glb;
 pub use design::{
     DesignCompression, DesignContainerReader, DesignPreview, FileKind, THUMBNAIL_SIZE, file_kind, is_design_container, read_design_file,
     read_design_geometry, read_design_preview, read_design_thumbnail, read_design_thumbnail_file, read_drawing, read_drawing_file,
     write_design_container, write_design_container_with_cache, write_design_container_with_compression, write_design_container_with_preview,
     write_design_container_with_thumbnail, write_drawing_container,
 };
+pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};
 mod legacy_dir;
 pub mod limits;
 #[cfg(test)]
@@ -95,7 +97,7 @@ pub const MAX_DESIGN_BYTES: usize = 256 << 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {
-    #[error("unsupported format `{0}` (use stl, obj, step, 3mf, urdf or sc)")]
+    #[error("unsupported format `{0}` (use stl, obj, step, 3mf, glb, urdf or sc)")]
     Format(String),
     #[error("nothing to export: the design has no bodies")]
     Empty,
@@ -395,6 +397,9 @@ pub enum Format {
     /// A robot description of the assembly with its mesh files ([`urdf()`]); written by the
     /// engine, since it is several files.
     Urdf,
+    /// Binary glTF with the bodies' looks ([`export_glb`]); written from the document, which
+    /// holds the looks.
+    Glb,
 }
 
 impl Format {
@@ -410,6 +415,7 @@ impl Format {
             "3mf" => Format::ThreeMf,
             "3mf-tagged" => Format::ThreeMfTagged,
             "urdf" => Format::Urdf,
+            "glb" => Format::Glb,
             e if e == "json" || is_design_ext(e) => Format::Design,
             _ => return Err(IoError::Format(ext)),
         })
@@ -824,6 +830,7 @@ pub fn export_with_parts(
         }
         Format::Design => return Err(IoError::Format("sc (save the document instead)".into())),
         Format::Urdf => return Err(IoError::Format("urdf (an assembly package; use file.export)".into())),
+        Format::Glb => return Err(IoError::Format("glb (its looks come from the design; use file.export)".into())),
     })
 }
 

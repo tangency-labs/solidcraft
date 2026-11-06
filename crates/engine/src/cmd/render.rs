@@ -374,6 +374,27 @@ fn backends(s: &mut Session, params: &Value) -> Result<Value> {
         "cpu_resource_profiles": solidcraft_render::job::CpuBudget::ALL.map(|budget| json!({"id":budget,"limits":budget.limits()}))}))
 }
 
+/// The placed bodies (by world name) that a saved render setup gives an image texture or optics,
+/// each with the first such setup's name and what it gives: what a file without render setups
+/// cannot hold (GLB export, #1553). A binding whose body is gone binds nothing.
+pub(super) fn bound_bodies(s: &Session, cmd: &str) -> Result<std::collections::BTreeMap<String, (String, &'static str)>> {
+    let mut out = std::collections::BTreeMap::new();
+    let setups = &s.doc.render.setups;
+    if setups.values().all(|x| x.surfaces.is_empty() && x.optics.is_empty()) {
+        return Ok(out);
+    }
+    let names = surface_bindings::targets(s, cmd)?;
+    for (setup, x) in setups {
+        let bound = x.surfaces.iter().map(|b| (&b.target, "an image texture")).chain(x.optics.iter().map(|b| (&b.target, "optics")));
+        for (target, what) in bound {
+            if let Some(name) = names.get(target) {
+                out.entry(name.clone()).or_insert_with(|| (setup.clone(), what));
+            }
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

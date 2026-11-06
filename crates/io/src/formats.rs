@@ -257,6 +257,16 @@ pub static FORMATS: &[FormatSpec] = &[
         import: Some(ImportSpec { target: ImportTarget::Mesh, options: &[UP_Y], native_only: false }),
         export: None,
     },
+    // Writing is GLB only (one file); the glTF row above reads both, and stays the row a
+    // `.glb` path finds first.
+    FormatSpec {
+        id: "glb",
+        label: "GLB (glTF binary)",
+        extensions: &["glb"],
+        role: Role::Artifact,
+        import: None,
+        export: Some(ExportSpec { command: "file.export", format: None, options: &[], scope: ExportScope::Bodies, lossless: false }),
+    },
     FormatSpec {
         id: "ply",
         label: "PLY point cloud",
@@ -486,6 +496,10 @@ mod tests {
         assert_eq!(for_path("a.3mf").map(|f| f.id), Some("3mf"));
         assert_eq!(for_path("a.dxf").map(|f| f.id), Some("dxf-sketch"));
         assert_eq!(import_for_path("a.glb").map(|f| f.id), Some("gltf"));
+        assert_eq!(for_path("a.glb").map(|f| f.id), Some("gltf"));
+        let writes = |ext: &str| exportable().filter(|f| f.extensions.contains(&ext)).map(|f| f.id).collect::<Vec<_>>();
+        assert_eq!(writes("glb"), vec!["glb"]);
+        assert!(writes("gltf").is_empty(), "a .gltf file is never written");
         assert!(for_path("a.png").is_none());
         assert!(for_path("nodot").is_none());
     }
