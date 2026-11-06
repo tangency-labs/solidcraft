@@ -199,11 +199,12 @@ fn wr_657_three_chamfers_offsets() {
             REL
         ));
     }
-    // upstream: Ok with loop gaps and volume 0 at +1, refused (1001) at -1
+    // upstream: Ok with loop gaps and volume 0 at +1, refused (1001) at -1. With each plane's
+    // extension on the plane itself the default reaches the closed form at +1 too.
     let mut k = kernel(false);
     let mut b = chamfered(&mut k, Some(&[0, 9, 8]));
     let result = offset_full(&mut k, &mut b, 1.0);
-    assert!(!report(
+    assert!(report(
         &k,
         "wr_657 three chamfers offset +1 default",
         result,

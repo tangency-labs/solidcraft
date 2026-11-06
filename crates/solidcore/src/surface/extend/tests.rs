@@ -1697,6 +1697,44 @@ fn a_small_sphere_patch_far_from_the_origin_extends_on_its_sphere() {
     }
 }
 
+/// A quarter of a sphere up to its pole (half a turn round the axis, 0 to 90 degrees of
+/// latitude) extended round its axis: the pole's row is on the axis and has no angle of its
+/// own, and turns with the others, its middle weight from the same half angle.
+#[test]
+fn a_sphere_patch_up_to_its_pole_extends_round_its_axis_on_its_sphere() {
+    use crate::surface::implicit::{AnalyticSupport, Implicit};
+    use crate::surface::sphere::{Sphere, SphereOptions};
+    let kk = k();
+    let mut sp = Sphere::new(
+        &kk,
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::X,
+        Vec3::Y,
+        Extent2d::from_bounds(0.0, 0.0, 180.0, 90.0),
+        10.0,
+        SphereOptions::default(),
+    )
+    .unwrap();
+    sp.make_nurb(&kk).unwrap();
+    let s = Surface::from(sp);
+    let on = AnalyticSupport::check(&kk, &s).unwrap().implicit();
+    let Implicit::Sphere { centre, radius } = on else {
+        panic!("not a sphere: {on:?}");
+    };
+    let e = s
+        .extended_sides(
+            &kk,
+            &[BoxSide::UMin, BoxSide::UMax],
+            Continuity::Natural,
+            1.0,
+        )
+        .unwrap();
+    let SurfaceKind::BSpline(grown) = e.surface.kind() else {
+        panic!("not a B-spline: {:?}", e.surface.kind());
+    };
+    on_its_analytic(grown, &on, |x| (x - centre).length() - radius, 1e-11);
+}
+
 /// A small patch of a torus far from the origin (4 degrees round its axis by 6 of its tube,
 /// radii 6 and 2) extended 1.5 past every side: round its axis and along its tube.
 #[test]

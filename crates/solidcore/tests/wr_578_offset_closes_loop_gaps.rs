@@ -28,7 +28,6 @@ mod offset_fixture;
 use offset_fixture::{planar_faces_at, report, shell};
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::curve::curve::Curve;
-use solidcore::error::SM_ERR;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
@@ -125,17 +124,19 @@ fn wr_578_box_and_cylinder_shell_other_seams() {
     }
 }
 
-/// Seam 125 with the opt-in alone: the offset is no closed solid, and the shell refuses it
-/// (`SM_ERR`) instead of handing it back as upstream's `ShellBrep` does (WR-454), so the
-/// flag never turns upstream's refusal into a broken body.
+/// Seam 125, whose seam rim edge took the other arc of its circle (a trim point at the
+/// circle's seam has two parameters) and left no closed solid: each edge now takes the arc
+/// its base edge runs along, and the shell is sound as at seam 200.
 #[test]
-fn wr_578_other_seams_are_refused() {
-    for seam in [125.0] {
-        match shell_1494_with(kernel(true), seam).1 {
-            Err(e) => assert_eq!(e.sm_status(), Some(SM_ERR), "seam {seam}"),
-            other => panic!("seam {seam}: {other:?}"),
-        }
-    }
+fn wr_578_seam_125_shells_sound() {
+    let (k, result) = shell_1494(true, 125.0);
+    assert!(report(
+        &k,
+        "wr_578 shell/1494 seam 125",
+        result,
+        Some(SHELL_1494),
+        1e-6
+    ));
 }
 
 /// Without the opt-in the shell is not that sound body (upstream refuses it, 1001).

@@ -688,17 +688,17 @@ fn on_definition(
         };
     };
     // each row's joint point and the points past it, as continued
-    let mut joint = Vec::with_capacity(rows);
-    let mut past = Vec::with_capacity(rows);
+    let mut joint = Vec::new();
+    let mut past = Vec::new();
     for r in 0..rows {
         joint.push(point(&slot(&mut cpts, index(0)?, r)?));
-        let mut row = Vec::with_capacity(deg);
+        let mut row = Vec::new();
         for k in 1..=deg {
             row.push(point(&slot(&mut cpts, index(k)?, r)?));
         }
         past.push(row);
     }
-    let mut rebuilt: Vec<Vec<(Vec3, f64)>> = Vec::with_capacity(rows);
+    let mut rebuilt: Vec<Vec<(Vec3, f64)>> = Vec::new();
     match (*implicit, iso) {
         // a plane: each point the plane's at its own coordinates in the plane
         (Implicit::Plane { origin, normal }, _) => {
@@ -751,19 +751,34 @@ fn on_definition(
                 });
             }
             let (origin, axis) = (f.origin, f.axis);
+            // every row turns by the same angle (the form is a tensor product): take it from
+            // the row farthest from the axis, since a row on the axis (a pole) has no angle
+            let mut far = (0.0_f64, 0.0_f64);
+            for (&(j, _), row) in joint.iter().zip(&past) {
+                let &[_, (end, _)] = row.as_slice() else {
+                    return Err(SolidError::sm_err(OP));
+                };
+                let centre = origin + axis * axis.dot(j - origin);
+                let (r0, r1) = (j - centre, end - centre);
+                if r0.length() > far.0 {
+                    far = (r0.length(), axis.dot(r0.cross(r1)).atan2(r0.dot(r1)));
+                }
+            }
+            if !(far.0.is_finite() && far.0 > 0.0) {
+                return Err(SolidError::sm_err(OP));
+            }
+            let delta = far.1;
+            let half = 0.5 * delta;
+            if half.cos().is_nan() || half.cos() <= 0.0 {
+                return Ok(None);
+            }
             for (&(j, wj), row) in joint.iter().zip(&past) {
-                let &[_, (end, wn)] = row.as_slice() else {
+                let &[_, (_, wn)] = row.as_slice() else {
                     return Err(SolidError::sm_err(OP));
                 };
                 let centre = origin + axis * axis.dot(j - origin);
                 let r0 = j - centre;
-                let r1 = end - centre;
-                let delta = axis.dot(r0.cross(r1)).atan2(r0.dot(r1));
                 let turn = |phi: f64| r0 * phi.cos() + axis.cross(r0) * phi.sin();
-                let half = 0.5 * delta;
-                if half.cos().is_nan() || half.cos() <= 0.0 {
-                    return Ok(None);
-                }
                 rebuilt.push(vec![
                     (
                         centre + turn(half) * (1.0 / half.cos()),

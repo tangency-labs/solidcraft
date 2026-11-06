@@ -2931,11 +2931,14 @@ impl OffsetGeometryCreation {
             trim_ivl.add_value(found_param);
         } // end iter twice
 
-        // `Kernel::fixes.offset_closed_curve_trim_arc` (WR-463, #403): on a closed curve the
-        // two trim points bound two arcs and the interval between them is only one of them.
-        // The edge takes the arc that runs where the base edge does; when a trim point lies
-        // on the curve's seam the other arc is an interval too, else the edge is not trimmed.
-        if k.fixes.offset_closed_curve_trim_arc {
+        // (WR-463, #403): on a closed curve the two trim points bound two arcs and the
+        // interval between them is only one of them. The edge takes the arc that runs where
+        // the base edge does; when a trim point lies on the curve's seam the other arc is an
+        // interval too, else the edge is not trimmed. A trim point at the seam has two
+        // parameters at one point, so which of them the search above found is a matter of
+        // rounding: without this the edge can take the whole other arc. A closed base edge
+        // runs all the way round, so it has no arc to choose.
+        if !brep.edge_is_closed(base_edge)? {
             let nat_ivl = curve_of(brep, curve_3d)?.natural_interval();
             let seam_tol = EFF_ZERO * (1.0 + nat_ivl.max_dimension());
             let tol = self.this_approx_tol_3d;
@@ -2951,10 +2954,13 @@ impl OffsetGeometryCreation {
                     out_param -= nat_ivl.length();
                 }
                 let out_mid = curve.evaluate_point(k, out_param)?;
-                if distance(out_mid, base_mid) < distance(in_mid, base_mid) {
+                let lo = curve.evaluate_point(k, trim_ivl.min())?;
+                let hi = curve.evaluate_point(k, trim_ivl.max())?;
+                // two trim points at one place with the whole curve between them bound no
+                // other arc: its middle is at its ends
+                let other_arc = distance(out_mid, hi) > tol;
+                if other_arc && distance(out_mid, base_mid) < distance(in_mid, base_mid) {
                     let seam = curve.evaluate_point(k, nat_ivl.min())?;
-                    let lo = curve.evaluate_point(k, trim_ivl.min())?;
-                    let hi = curve.evaluate_point(k, trim_ivl.max())?;
                     if distance(lo, seam) <= tol {
                         trim_ivl = Extent1d::from_raw(trim_ivl.max(), nat_ivl.max());
                     } else if distance(hi, seam) <= tol {
