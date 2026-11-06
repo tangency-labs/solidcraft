@@ -2,7 +2,7 @@
 //! against analytic expected values.
 //!
 //! Each file in `fixtures/solidcraft/` holds the cases of one SolidCraft issue that was
-//! found and fixed on SolidCraft's earlier kernel: the issue, the fixing PR and its test,
+//! reproduced on SolidCraft's earlier kernel: the issue, a fixing PR if any, and its test,
 //! and per case a list of `SM_API`-level steps (primitives, booleans, fillet, chamfer, offset)
 //! whose last body, `result`, is checked against values known in closed form (volume,
 //! lump count, face bounds). They keep those bugs fixed once the operations run end to
@@ -75,9 +75,10 @@ type P3 = [f64; 3];
 pub struct CaseFile {
     /// The SolidCraft issue.
     pub issue: String,
-    /// The SolidCraft PR that fixed it (or, with no PR, the commit).
-    pub pr: String,
-    /// That PR's test the cases come from.
+    /// The SolidCraft PR that fixed it (or, with no PR, the commit), if one exists.
+    #[serde(default)]
+    pub pr: Option<String>,
+    /// The test or issue reproduction the cases come from.
     pub test: String,
     /// What broke, where the geometry and values come from.
     pub summary: String,
@@ -2323,7 +2324,10 @@ mod tests {
                 l.id.starts_with("a52-")
                     || l.id.starts_with("catics-")
                     || (l.file.issue.contains("/issues/")
-                        && (l.file.pr.contains("/pull/") || l.file.pr.contains("/commit/"))),
+                        && l.file
+                            .pr
+                            .as_ref()
+                            .is_none_or(|pr| { pr.contains("/pull/") || pr.contains("/commit/") })),
                 "{}",
                 l.id
             );

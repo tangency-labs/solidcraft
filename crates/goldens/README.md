@@ -293,8 +293,9 @@ for harness errors; verdicts never fail the run.
 
 A correctness report, separate from the gate like `--ssi-corpus`: it never changes a
 unit's status and verdicts never fail the run. `fixtures/solidcraft/` holds one file per
-SolidCraft issue that was found and fixed on SolidCraft's earlier kernel (the issue, the
-fixing PR and the test the cases come from). Each case is a list of `SM_API`-level steps
+SolidCraft issue reproduced on SolidCraft's earlier kernel (the issue, the fixing PR if
+any, and the test or issue reproduction the cases come from). Omit `pr` for an unresolved
+issue; its report records `pr: null`. Each case is a list of `SM_API`-level steps
 and the values its `result` body must have, known in closed form, so the bugs stay
 fixed once the operations run end to end here. Geometry and tolerances are those of the
 SolidCraft PR's own test wherever it has one.
