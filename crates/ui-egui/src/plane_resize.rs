@@ -9,6 +9,7 @@ use egui::{CursorIcon, Painter, Pos2, Rect, Stroke, StrokeKind, vec2};
 use serde_json::json;
 use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::theme::Tokens;
