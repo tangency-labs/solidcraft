@@ -280,7 +280,7 @@ pub(crate) fn group_made(app: &mut SolveApp, d: &Dialog, made: Vec<u64>) {
     match app.run("timeline.group", serde_json::json!({"name": "Holes", "features": made, "parent": parent})) {
         Ok(reply) => {
             if let Some(id) = reply.get("group").and_then(serde_json::Value::as_u64) {
-                app.tree.collapsed.insert(format!("timeline_group:{id}"));
+                crate::timeline_folders::set_open(app, id, false);
             }
         }
         // The holes stand; only the folder is missing.
