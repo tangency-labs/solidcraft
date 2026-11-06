@@ -608,6 +608,27 @@ pub const COLOURED_TABS: &[(&str, &str)] = &[
 thread_local! {
     /// The user's own tab colours (`set_tab_colors`), per thread like the theme.
     static TAB_COLORS: Cell<Option<std::rc::Rc<BTreeMap<String, Color32>>>> = const { Cell::new(None) };
+    /// Whether each tab has a colour of its own (`set_individual_tabs`).
+    static INDIVIDUAL_TABS: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The standard colour of each tab that otherwise shares the theme's accent, while each tab has a
+/// colour of its own (Preferences › Appearance › Tab colours): one hue per tab, strong enough
+/// for a pill and a line on light and dark themes alike. Model keeps the accent, and the tabs
+/// with colours of their own (Sketch, Surface, Mesh, Form, Sheet Metal, Render) keep theirs.
+pub const STANDARD_TAB_COLOURS: &[(&str, [u8; 3])] = &[
+    ("ASSEMBLE", [122, 92, 214]),
+    ("INSERT", [47, 163, 154]),
+    ("INSPECT", [224, 97, 58]),
+    ("MANAGE", [107, 138, 47]),
+    ("VIEW", [63, 160, 200]),
+    ("WELDMENTS", [160, 82, 45]),
+];
+
+/// Give each tab a colour of its own (`STANDARD_TAB_COLOURS`) or not (`prefs::apply`, every
+/// frame). Returns whether that changed anything.
+pub fn set_individual_tabs(on: bool) -> bool {
+    INDIVIDUAL_TABS.replace(on) != on
 }
 
 /// Use the user's own tab colours (`prefs::apply`, every frame; empty: the theme's). Returns
@@ -619,13 +640,17 @@ pub fn set_tab_colors(colors: BTreeMap<String, Color32>) -> bool {
     !same
 }
 
-/// The user's own colour for a tab, if any (the Render workspace's tabs share one).
+/// A tab's own colour, if it has one over the theme's: the user's (the Render workspace's tabs
+/// share one), else its standard colour while each tab has its own.
 fn user_tab_color(tab: &str) -> Option<Color32> {
     let key = if tab.starts_with("RENDER") { "RENDER" } else { tab };
     let held = TAB_COLORS.take();
     let color = held.as_ref().and_then(|colors| colors.get(key).copied());
     TAB_COLORS.set(held);
-    color
+    color.or_else(|| {
+        let standard = INDIVIDUAL_TABS.get().then(|| STANDARD_TAB_COLOURS.iter().find(|(id, _)| *id == key)).flatten();
+        standard.map(|(_, [r, g, b])| Color32::from_rgb(*r, *g, *b))
+    })
 }
 
 /// Palette ramp for icons on a surface explicitly accented by its active tab.

@@ -1276,6 +1276,9 @@ preference_settings! {
     /// `SKETCH`, …): their pills, lines, soft selections and accented icons. A tab left out keeps
     /// the theme's.
     tab_colors: BTreeMap<String, String> = BTreeMap::new(), PAGE_APPEARANCE;
+    /// Each ribbon tab that shares the theme's accent gets a standard colour of its own
+    /// (`theme::STANDARD_TAB_COLOURS`); off keeps the theme's. The user's own colours win.
+    tab_colours_individual: bool = false, PAGE_APPEARANCE;
     /// Theme used when the operating system is light; unknown ids resolve to Light.
     theme_day: String = "light".into(), PAGE_APPEARANCE;
     /// Theme used when the operating system is dark; unknown ids resolve to Dark.
@@ -2340,7 +2343,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
         let [r, g, b] = crate::dialogs_appearance::parse_color(&json!(color))?;
         Some((tab.clone(), egui::Color32::from_rgb(r, g, b)))
     });
-    if crate::theme::set_tab_colors(tab_colors.collect()) {
+    if crate::theme::set_tab_colors(tab_colors.collect()) | crate::theme::set_individual_tabs(app.preferences.tab_colours_individual) {
         app.styled = false;
     }
     // egui's end-of-frame shortcuts only change its context; the saved preference would

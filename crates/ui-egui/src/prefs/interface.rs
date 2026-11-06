@@ -664,6 +664,10 @@ fn browser_visibility(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// or one of the user's; Theme's own gives all of them back.
 fn tab_colours(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     ui_kit::settings_form(ui, t.space_24 * 6.0 + t.space_6, |ui| {
+        ui_kit::row(ui, "", |ui| {
+            let response = ui_kit::checkbox(ui, app.tr("prefs.tab_colours_individual"), &mut app.preferences.tab_colours_individual);
+            crate::scenario::publish_target("prefs:tab_colours_individual", response.rect);
+        });
         let tokens = Tokens::get();
         for (id, name) in crate::theme::COLOURED_TABS {
             ui_kit::row(ui, crate::i18n::tr_label(name), |ui| {
