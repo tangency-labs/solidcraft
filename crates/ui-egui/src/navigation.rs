@@ -1595,6 +1595,10 @@ mod tests {
         }
     }
 
+    /// The upright orbit on a rolled view (#12458): the model turns the way the pointer goes on
+    /// screen, the roll eases to zero within 240 points of travel in one drag or many strokes, an
+    /// unrolled view orbits as before, and a Look At sketch view that comes out upside down
+    /// stands upright and can then be turned to look from above.
     #[test]
     fn upright_orbit_from_a_rolled_view_turns_with_the_pointer_and_stands_up() {
         use super::*;
