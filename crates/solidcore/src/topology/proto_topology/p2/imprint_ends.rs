@@ -486,8 +486,8 @@ fn extended_curve(k: &Kernel, curve: &Curve, at_end: bool, new_end: f64) -> Opti
     }
     let s = (new_end - a) / (b - a);
     let first = if at_end { pts.len() - 1 - degree } else { 0 };
-    let mut h: Vec<Vec3> = Vec::with_capacity(degree + 1);
-    let mut hw: Vec<f64> = Vec::with_capacity(degree + 1);
+    let mut h: Vec<Vec3> = Vec::new();
+    let mut hw: Vec<f64> = Vec::new();
     for i in 0..=degree {
         let w = if rational { *wts.get(first + i)? } else { 1.0 };
         h.push(*pts.get(first + i)? * w);

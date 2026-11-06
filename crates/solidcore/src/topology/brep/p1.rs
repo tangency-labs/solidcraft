@@ -3134,7 +3134,7 @@ pub fn create_corner_blend(
     // pass the call along (FALSE = bicubic patch through curves and crossTangents)
     // the neighbour surfaces are evaluation copies (keeping their owners), so the
     // drops can hold the B-rep mutably through the face services
-    let mut owned: Vec<Option<Surface>> = Vec::with_capacity(ordered_surfs.len());
+    let mut owned: Vec<Option<Surface>> = Vec::new();
     for face in &ordered_surfs {
         let copy = match face {
             Some(f) => face2::surface(b, *f)?

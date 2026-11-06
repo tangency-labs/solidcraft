@@ -223,7 +223,7 @@ pub fn create_face_in_region_from_surface(
 
         // UV curves must be parameterized the same as their Edges, which will be the
         // same as the 3d curves.
-        let mut uv_curves: Vec<Curve> = Vec::with_capacity(natural.uv_curves.len());
+        let mut uv_curves: Vec<Curve> = Vec::new();
         for (ii, mut uv) in natural.uv_curves.into_iter().enumerate() {
             let crv_domain = at(&natural.curves_3d, ii)?.natural_interval();
             ignore_status(crate::error::passed_on(
@@ -469,7 +469,7 @@ pub fn create_planar_faces_with_3d_curves(
     // spine points
     let plane = Surface::create_plane_with_3d_curves(k, curves, tol).map_err(plane_failed)?;
 
-    let mut ordered: Vec<Option<Curve>> = Vec::with_capacity(plane.ordered_curves.len());
+    let mut ordered: Vec<Option<Curve>> = Vec::new();
     for &ci in &plane.ordered_curves {
         // (the curves themselves go into the new edges upstream: exact copies)
         ordered.push(Some(at(curves, ci)?.clone_for_evaluation()?));
