@@ -122,8 +122,6 @@ sheet.path_flange
 sketch.arc.center_point
 sketch.arc.tangent
 sketch.arc.three_point
-sketch.auto_constrain
-sketch.auto_constrain_from_datum
 sketch.auto_project
 sketch.blend_curve
 sketch.break
@@ -139,18 +137,15 @@ sketch.circle.three_tangent
 sketch.circle.two_point
 sketch.circle.two_tangent
 sketch.conic
-sketch.constrainer
 sketch.constraint.coincident
 sketch.constraint.collinear
 sketch.constraint.concentric
-sketch.constraint.curvature
 sketch.constraint.equal
 sketch.constraint.fix
 sketch.constraint.horizontal_vertical
 sketch.constraint.midpoint
 sketch.constraint.parallel
 sketch.constraint.perpendicular
-sketch.constraint.polygon
 sketch.constraint.symmetry
 sketch.constraint.tangent
 sketch.construction
@@ -166,9 +161,7 @@ sketch.ellipse
 sketch.export_dxf
 sketch.extend
 sketch.fillet
-sketch.finish_auto_constrain
 sketch.fit_curves_to_section
-sketch.glyphs
 sketch.include_3d
 sketch.infinite
 sketch.insert_dxf
@@ -207,7 +200,6 @@ sketch.slot.arc_three_point
 sketch.slot.center_point
 sketch.slot.center_to_center
 sketch.slot.overall
-sketch.snap
 sketch.solve
 sketch.spline.control_point
 sketch.spline.control_point_5
@@ -215,7 +207,6 @@ sketch.spline.fit_point
 sketch.spline3d
 sketch.spun_profile
 sketch.text
-sketch.toggle_driven
 sketch.trim
 sketch.trim.path
 solid.align
