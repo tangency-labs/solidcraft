@@ -481,6 +481,48 @@ fn place_pierced_points(sk: &mut Sketch) {
 }
 
 /// Distance from `p` to the infinite line through `a`, `b` (signed by side).
+/// What a tangent to a free-form curve has to bring to zero, from the signed gaps of the curve's
+/// samples to the other curve (`closed`: the samples run round): the extremum of the gap nearest
+/// zero, refined between the samples by the parabola through its neighbours. Curves that cross
+/// have a zero gap too, but no extremum there, so a crossing is not taken for a touch (#11535).
+/// An open curve's ends count as extrema too: a touch at its end, or a monotone gap (an open
+/// curve running away from the other), takes the gap nearest zero.
+fn touch_gap(gaps: &[f64], closed: bool) -> f64 {
+    let n = gaps.len();
+    let at = |i: usize, back: bool| -> Option<f64> {
+        let j = match (back, closed) {
+            (true, true) => (i + n - 1) % n,
+            (false, true) => (i + 1) % n,
+            (true, false) => i.checked_sub(1)?,
+            (false, false) => i + 1,
+        };
+        gaps.get(j).copied()
+    };
+    let mut best: Option<f64> = None;
+    for (i, &g) in gaps.iter().enumerate() {
+        let (Some(p), Some(q)) = (at(i, true), at(i, false)) else { continue };
+        if !((g >= p && g >= q) || (g <= p && g <= q)) {
+            continue;
+        }
+        let bend = p - 2.0 * g + q;
+        let v = if bend.abs() > 1e-15 { g - (q - p) * (q - p) / (8.0 * bend) } else { g };
+        let v = if v.is_finite() { v } else { g };
+        if best.is_none_or(|b| v.abs() < b.abs()) {
+            best = Some(v);
+        }
+    }
+    // An open curve's ends are extrema of its gap too (a touch at its end, or a gap that is
+    // monotone and has no other extremum).
+    if !closed && let (Some(&first), Some(&last)) = (gaps.first(), gaps.last()) {
+        for end in [first, last] {
+            if best.is_none_or(|b| end.abs() < b.abs()) {
+                best = Some(end);
+            }
+        }
+    }
+    best.unwrap_or(0.0)
+}
+
 fn line_dist(p: Vec2, a: Vec2, b: Vec2) -> f64 {
     let d = b - a;
     let l = d.len().max(1e-12);
@@ -557,21 +599,26 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
         Tangent { a, b } => {
             let (la, lb) = (s.is_line(a), s.is_line(b));
             if s.is_freeform(a) || s.is_freeform(b) {
-                // Without a shared end point: the curves touch (closest approach zero).
+                // Without a shared end point: the curves touch (an extremum of the gap is zero).
                 let (f, o) = if s.is_freeform(a) { (a, b) } else { (b, a) };
-                let poly = s.poly(f);
-                // Signed gap at the closest approach (smooth through zero, unlike its size).
-                let closest = |v: &mut dyn Iterator<Item = f64>| v.fold(f64::INFINITY, |m: f64, x| if x.abs() < m.abs() { x } else { m });
-                let d = if s.is_line(o) {
+                let mut poly = s.poly(f);
+                // A closed curve's polyline ends where it starts: its samples run round.
+                let closed = poly.len() > 2 && poly.first().zip(poly.last()).is_some_and(|(p, q)| p.dist(*q) < 1e-9);
+                if closed {
+                    poly.pop();
+                }
+                // Signed gaps (smooth through zero, unlike their sizes).
+                let gaps: Vec<f64> = if s.is_line(o) {
                     let (p0, p1) = s.line(o);
-                    closest(&mut poly.iter().map(|q| line_dist(*q, p0, p1)))
+                    poly.iter().map(|q| line_dist(*q, p0, p1)).collect()
                 } else if s.is_freeform(o) {
                     let other = s.poly(o);
-                    closest(&mut poly.iter().map(|q| crate::curves::polyline_signed_dist(&other, *q)))
+                    poly.iter().map(|q| crate::curves::polyline_signed_dist(&other, *q)).collect()
                 } else {
                     let (cc, r) = s.round(o);
-                    closest(&mut poly.iter().map(|q| q.dist(cc) - r))
+                    poly.iter().map(|q| q.dist(cc) - r).collect()
                 };
+                let d = touch_gap(&gaps, closed);
                 out.push(if d.is_finite() { d } else { 0.0 });
             } else if la || lb {
                 let (l, c) = if la { (a, b) } else { (b, a) };
@@ -3428,5 +3475,25 @@ mod typed_dimension_tests {
             sk.add_constraint(ConstraintKind::Vertical { l }, None).unwrap();
         }
         assert!(solve(&mut sk).ok());
+    }
+}
+
+#[cfg(test)]
+mod touch_gap_tests {
+    use super::touch_gap;
+
+    /// #11535: an open curve that touches the other at its end (the gap y = 9t^2 - 8t^3 starts at
+    /// zero with zero slope, and has its interior maximum 1.63 further on) has residual zero.
+    #[test]
+    fn an_open_curve_touching_at_its_end_has_no_residual() {
+        let gaps: Vec<f64> = (0..=100).map(|i| f64::from(i) / 100.0).map(|t| 9.0 * t * t - 8.0 * t * t * t).collect();
+        assert!(touch_gap(&gaps, false).abs() < 1e-12);
+    }
+
+    /// A crossing's zero, with a bigger extremum beside it, is not a touch.
+    #[test]
+    fn a_crossing_is_not_a_touch() {
+        let gaps: Vec<f64> = (0..=100).map(|i| (f64::from(i) / 100.0 - 0.5) * 4.0 + 0.2 * (f64::from(i) / 8.0).sin()).collect();
+        assert!(touch_gap(&gaps, false).abs() > 0.5);
     }
 }
