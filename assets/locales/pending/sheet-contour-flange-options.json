@@ -1,0 +1,34 @@
+{
+  "en": {
+    "sheet.flange.side_1": "Side 1",
+    "sheet.flange.side_2": "Side 2"
+  },
+  "ja": {
+    "sheet.flange.side_1": "側 1",
+    "sheet.flange.side_2": "側 2"
+  },
+  "zh": {
+    "sheet.flange.side_1": "侧 1",
+    "sheet.flange.side_2": "侧 2"
+  },
+  "de": {
+    "sheet.flange.side_1": "Seite 1",
+    "sheet.flange.side_2": "Seite 2"
+  },
+  "ko": {
+    "sheet.flange.side_1": "측면 1",
+    "sheet.flange.side_2": "측면 2"
+  },
+  "ar": {
+    "sheet.flange.side_1": "الجانب 1",
+    "sheet.flange.side_2": "الجانب 2"
+  },
+  "he": {
+    "sheet.flange.side_1": "צד 1",
+    "sheet.flange.side_2": "צד 2"
+  },
+  "vi": {
+    "sheet.flange.side_1": "Mặt 1",
+    "sheet.flange.side_2": "Mặt 2"
+  }
+}

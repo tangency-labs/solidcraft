@@ -207,6 +207,29 @@ word!(
     ["centerline", "start", "end", "mould", "mold"]
 );
 
+/// Where a contour flange's chain lies across the sheet thickness: center, side1 or side2, lower
+/// case (read by `sheet::flange`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContourOrientation(pub String);
+
+impl<'de> Deserialize<'de> for ContourOrientation {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)?.as_str() {
+            Some(w @ ("center" | "side1" | "side2")) => Ok(ContourOrientation(w.to_string())),
+            _ => Err(D::Error::custom("must be center, side1 or side2")),
+        }
+    }
+}
+
+impl JsonSchema for ContourOrientation {
+    fn schema_name() -> Cow<'static, str> {
+        "ContourOrientation".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "center, side1 or side2, lower case.", "enum": ["center", "side1", "side2"]})
+    }
+}
+
 /// A corner relief's shape: notch, round, rectangular or tear, in any case and with blanks
 /// around it (read by `ReliefShape::parse`).
 #[derive(Clone, Debug, PartialEq)]
@@ -372,6 +395,13 @@ pub struct FlangeParams {
     /// Contour: the flange runs from the sketch plane the other way. Default: false.
     #[serde(default)]
     pub reverse: Option<bool>,
+    /// Contour: where the chain lies across the sheet thickness. Default: side1.
+    #[serde(default)]
+    pub orientation: Option<ContourOrientation>,
+    /// Contour: the flange runs `distance` each way across the sketch plane (twice as wide).
+    /// Default: false.
+    #[serde(default)]
+    pub symmetric: Option<bool>,
     /// Edge: the edges that get a flange.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "FlangeEdges")]

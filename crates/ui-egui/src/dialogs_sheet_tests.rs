@@ -92,6 +92,39 @@ fn a_click_on_the_bottom_edge_makes_an_edge_flange() {
     assert_eq!(c[0].1["type"], "edge", "{:?}", c[0].1);
 }
 
+#[test]
+fn contour_flange_options_round_trip_through_feature_editing() {
+    let mut app = plate(crate::shell::LayoutMode::Docked);
+    app.run("sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, -1]}, "name": "Contour"})).unwrap();
+    app.run("sketch.line", json!({"points": [[0, 0], [40, 0], [40, -30]], "ids": ["l1", "l2"]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run(
+        "sheet.flange",
+        json!({
+            "type": "contour",
+            "sketch": "Contour",
+            "curves": ["l1", "l2"],
+            "distance": "20 mm",
+            "radius": "1.5 mm",
+            "orientation": "side2",
+            "symmetric": true
+        }),
+    )
+    .unwrap();
+
+    let feature = app.session.doc.features.last().unwrap().clone();
+    let edit = edit_dialog(&app, feature.id, None).unwrap();
+    assert!(matches!(
+        &edit.kind,
+        Kind::Sheet(Sm::Flange { ty: 2, radius, orientation: 2, symmetric: true, .. }) if radius == "1.5 mm"
+    ));
+    let commands = apply_commands(&app, &edit).unwrap();
+    assert_eq!(commands[0].0, "timeline.redefine");
+    assert_eq!(commands[0].1["params"]["orientation"], "side2");
+    assert_eq!(commands[0].1["params"]["symmetric"], true);
+    assert_eq!(commands[0].1["params"]["radius"], "1.5 mm");
+}
+
 /// Hem takes edges and an optional gap; rules make and pick a rule with its expressions.
 #[test]
 fn hem_and_rules() {
