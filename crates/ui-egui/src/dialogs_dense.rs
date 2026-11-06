@@ -898,8 +898,11 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 enter |= expr_row(ui, "Distance", offset);
             }
         }
-        Kind::AnglePlane { angle } => {
+        Kind::AnglePlane { angle, direction_only } => {
             enter |= expr_row(ui, "Angle", angle);
+            ui_kit::options(ui, "plane_angle_options", &mut [("Use axis direction only", direction_only)]);
+            const PIVOT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
+            set_object_accepting(&mut d.inputs, &mut d.active, "Pivot", PIVOT, *direction_only);
         }
         // The angle turns the plane from its reference, so it shows once one is picked.
         Kind::TangentPlane { angle } => {

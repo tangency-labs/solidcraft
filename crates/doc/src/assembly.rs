@@ -210,11 +210,14 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
             map_plane_ref(m, base);
             map_geo_ref(m, point);
         }
-        PlaneRef::AtAngle { base, axis_origin, axis_dir, line, .. } => {
+        PlaneRef::AtAngle { base, axis_origin, axis_dir, line, pivot, .. } => {
             map_plane_ref(m, base);
             *axis_origin = apply_point(m, *axis_origin);
             *axis_dir = apply_vector(m, *axis_dir);
             if let Some(g) = line {
+                map_geo_ref(m, g);
+            }
+            if let Some(g) = pivot {
                 map_geo_ref(m, g);
             }
         }

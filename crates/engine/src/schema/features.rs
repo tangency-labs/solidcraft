@@ -429,6 +429,14 @@ pub struct PlaneAtAngleParams {
     pub axis: AxisLine,
     /// How far to turn, counterclockwise looking back along `axis`'s direction.
     pub angle: AngleExpr,
+    /// Use only the axis direction (projected onto `base`), not the axis as a full line.
+    /// When true, the plane turns about the line through `pivot` (or the base origin).
+    #[serde(default)]
+    pub direction_only: Option<bool>,
+    /// Pivot for `direction_only`: a vertex, sketch point, construction point or fixed point.
+    /// Omit to use the base plane's origin. `null` counts as not given.
+    #[serde(default)]
+    pub pivot: Option<GeoRefParam>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: PlaneCommon,
 }
