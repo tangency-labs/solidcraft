@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 use super::{
     LibraryDescribeParams, LibraryDescription, LibraryListParams, LibraryPage, LibraryPreview, LibraryPreviewParams, LibraryTargets,
-    LibraryTargetsParams,
+    LibraryTargetsParams, RenderTarget, StableRenderTarget,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -124,7 +124,7 @@ fn render_library_commands_reply_with_their_schemas() {
     let empty = run(&mut s, "render.library.targets", json!({}));
     matches(&targets, &empty);
     assert!(empty["bounds"].is_null(), "{empty}");
-    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 5, "body_name": "Target"}));
+    let created = run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 5, "body_name": "Target"}));
     run(
         &mut s,
         "appearance.assign",
@@ -134,6 +134,35 @@ fn render_library_commands_reply_with_their_schemas() {
     matches(&targets, &r);
     assert_eq!((r["total"].as_u64(), r["items"][0]["name"].as_str()), (Some(1), Some("Target")), "{r}");
     assert!(r["items"][0]["pbr"].is_object() && r["bounds"].is_object(), "{r}");
+    assert_eq!(
+        r["items"][0]["stable_target"],
+        json!({"definition":"Target","feature":created["feature"],"component":0,"occurrence_path":[]}),
+        "the typed reply must preserve the saved root-body identity"
+    );
+    let mut without_stable = r.clone();
+    without_stable["items"][0] = serde_json::to_value(RenderTarget {
+        ordinal: 0,
+        name: "Unbound".into(),
+        stable_target: None,
+        color: [180, 120, 70],
+        opacity: 1.0,
+        pbr: None,
+    })
+    .unwrap();
+    assert_eq!(without_stable["items"][0].get("stable_target"), Some(&Value::Null), "an unavailable identity stays an explicit null");
+    matches(&targets, &without_stable);
+    let authority =
+        solidcraft_doc::render_surface::RenderBodyTarget { definition: "Part".into(), feature: 7, component: 3, occurrence_path: vec![11, 3, 6] };
+    authority.validate().unwrap();
+    let mut nested = r.clone();
+    nested["items"][0]["stable_target"] = serde_json::to_value(StableRenderTarget::from(&authority)).unwrap();
+    matches(&targets, &nested);
+    assert_eq!(
+        serde_json::from_value::<solidcraft_doc::render_surface::RenderBodyTarget>(nested["items"][0]["stable_target"].clone()).unwrap(),
+        authority
+    );
+    nested["items"][0]["stable_target"]["occurrence_path"] = json!([11, "not an occurrence id", 6]);
+    assert!(!conforms(targets.as_value(), targets.as_value(), &nested), "the reply schema must describe the stable identity's actual fields");
     if cfg!(feature = "bundled-render-library") {
         matches(&preview, &run(&mut s, "render.library.preview", json!({"id": "SURF-001"})));
     }

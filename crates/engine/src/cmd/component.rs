@@ -60,7 +60,7 @@ mod occurrence_tests;
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.cycle_color", "Cycle Component Color", cycle_color)
         .icon("colored_components").doc_only()
-        .params("component: id or name; saves the next identification colour and enables Component Colors; shared by every instance, separate from appearances"),
+        .params("component: id or name; saves the next identification colour and turns Component Colors on; shared by every instance, separate from appearances"),
     CommandSpec::new("component.hide_history", "Hide Component History", hide_history)
         .icon("eye").doc_only()
         .params("component: id or name; keeps the component's features in the design but leaves them out of the History bar (#10393)"),
@@ -394,6 +394,8 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     let id = component(s, p, "component", cmd)?;
     let name =
         str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
+    let st = s.model.state();
+    let placed = s.doc.body_frames_with_source(&st);
     let d = s.doc_mut();
     if id == 0 {
         d.name = name.to_string();
@@ -406,6 +408,8 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
                 o.name = format!("{name}:{k}");
             }
         }
+        // A sketch projecting a body of one of those placements keeps it.
+        super::sketch_project::follow_placed_renames(d, &st, &placed, None);
     }
     Ok(json!({"component": id, "name": name}))
 }

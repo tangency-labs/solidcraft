@@ -3418,6 +3418,62 @@ fn a_failed_batch_reports_what_really_happened() {
     assert_eq!(methods(&b), ["engine.batch"]);
 }
 
+/// #5957: `batch` runs the steps of a script file (`path`), as an array or `{commands}`, as it
+/// runs them sent inline: tool steps, rollback and reply. The file is read within the agent's
+/// folders; one outside them, missing, not JSON or without steps, or `path` with `commands`,
+/// fails before anything runs.
+#[test]
+fn batch_runs_a_script_file() {
+    use solidcraft_engine::io::vfs::PathScope;
+    let base = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-mcp-script-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let (root, out) = (base.join("root"), base.join("out"));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&out).unwrap();
+    let file = |d: &std::path::Path, name: &str, text: &str| {
+        let p = d.join(name);
+        std::fs::write(&p, text).unwrap();
+        p.to_string_lossy().to_string()
+    };
+    let steps = json!([
+        {"command": "set_parameter", "params": {"name": "w", "value": 20}},
+        {"command": "solid.box", "params": {"length": "w", "width": 10, "height": 10}},
+    ]);
+    let mut s = Server::new(Box::new(Headless::default())).with_path_scope(Some(PathScope::new([root.clone()])));
+    let array = file(&root, "steps.json", &steps.to_string());
+    let r = tool(&mut s, "batch", json!({"path": array}));
+    assert_eq!((&r["completed"], &r["results"][0]["value"]), (&json!(2), &json!(20.0)), "{r}");
+    let bodies = tool(&mut s, "inspect_design", json!({"measure": false}))["bodies"].as_array().map(Vec::len);
+    assert_eq!(bodies, Some(1));
+
+    // `{commands}`, as `solidcraft-cli script` writes it; a failing step rolls the batch back.
+    let script = json!({"commands": [{"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5}}, {"command": "parameters.change", "params": {"name": "h2", "expression": "1 +"}}]});
+    let r = raw_tool(&mut s, "batch", json!({"path": file(&root, "script.json", &script.to_string())}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((&body["failed"]["index"], &body["rolled_back"]), (&json!(1), &json!(true)), "{body}");
+    assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["bodies"].as_array().map(Vec::len), Some(1));
+
+    let outside = file(&out, "steps.json", &steps.to_string());
+    for (args, says) in [
+        (json!({"path": outside}), "outside"),
+        (json!({"path": root.join("missing.json").to_string_lossy()}), "missing.json"),
+        (json!({"path": file(&root, "bad.json", "[{")}), "not JSON"),
+        (json!({"path": file(&root, "empty.json", "[]")}), "no steps"),
+        (json!({"path": file(&root, "odd.json", "{\"steps\": []}")}), "no `commands`"),
+        (json!({"path": array, "commands": steps}), "not both"),
+        (json!({"path": ""}), "must name"),
+        (json!({}), "`commands` must be"),
+    ] {
+        let r = raw_tool(&mut s, "batch", args.clone());
+        assert_eq!(r["result"]["isError"], true, "{args}: {r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap_or_default();
+        assert!(text.contains(says), "{args}: {text}");
+    }
+    assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["bodies"].as_array().map(Vec::len), Some(1), "nothing ran");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
 /// Batch steps may name the tools an agent knows: `list_commands` and `set_parameter` run as
 /// engine.commands (filtered as the tool filters) and parameters.change; tools that can't be
 /// steps fail the batch before anything is sent.
@@ -3585,6 +3641,8 @@ fn a_bridged_server_leaves_the_check_to_an_app_that_makes_it() {
         let level = req["params"]["param_check"].clone();
         match req["method"].as_str() {
             Some("control.capabilities") => json!({"ok": true, "result": {"param_check": ["off", "warn", "strict"]}}),
+            // The server's own question, not a tool call: it carries no level.
+            Some("mcp.options") => json!({"ok": true, "result": {"compact": false}}),
             Some("engine.batch") => {
                 log.lock().unwrap().push(level.clone());
                 json!({"ok": true, "result": {"completed": 1, "results": [{"param_warnings": ["the app's own"]}], "undone": 0}, "param_check": level})
@@ -3691,4 +3749,170 @@ fn plain_headless_adds_no_notice() {
     let mut s = server();
     let r = raw_tool(&mut s, "list_commands", json!({}));
     assert_eq!(r["result"]["content"].as_array().unwrap().len(), 1);
+}
+
+/// A design with one 720-point sketch extruded into Body1, on a server with these options.
+fn server_with_big_sketch(options: crate::Options) -> Server {
+    let mut s = Server::new(Box::new(Headless::default())).with_options(options);
+    let points: Vec<[f64; 2]> = (0..720)
+        .map(|i| {
+            let t = f64::from(i) / 720.0 * std::f64::consts::TAU;
+            [30.0 * t.cos(), 30.0 * t.sin()]
+        })
+        .collect();
+    tool(
+        &mut s,
+        "batch",
+        json!({"commands": [
+            {"command": "sketch.create", "params": {"plane": "XY"}},
+            {"command": "sketch.line", "params": {"points": points, "closed": true}},
+            {"command": "sketch.finish"},
+            {"command": "solid.extrude", "params": {"distance": 5}},
+        ]}),
+    );
+    s
+}
+
+/// `inspect_design`'s text and error flag.
+fn inspect_text(s: &mut Server, args: Value) -> (bool, String) {
+    let r = raw_tool(s, "inspect_design", args);
+    (r["result"]["isError"] == json!(true), r["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string())
+}
+
+/// Off by default: `inspect_design` has its old arguments and returns every sketch in full,
+/// pretty-printed; `document.inspect` adds no sketch counts unless asked.
+#[test]
+fn inspect_design_is_unchanged_without_compact_output() {
+    let mut s = server_with_big_sketch(crate::Options::default());
+    let defs = tool_definitions();
+    let def = defs.iter().find(|d| d["name"] == "inspect_design").unwrap();
+    assert_eq!(def["inputSchema"]["properties"]["sketches"]["type"], "boolean", "{def}");
+    assert!(def["inputSchema"]["properties"].get("bodies").is_none(), "{def}");
+    let listed = call(&mut s, 1, "tools/list", json!({}));
+    assert!(listed["result"]["tools"].as_array().unwrap().iter().any(|t| t == def), "tools/list serves the default definition");
+
+    let (err, full) = inspect_text(&mut s, json!({"measure": false}));
+    assert!(!err && full.contains("\n  "), "pretty-printed");
+    let d: Value = serde_json::from_str(&full).unwrap();
+    assert_eq!(d["sketches"][0]["curves"].as_array().map(Vec::len), Some(720), "full sketch contents by default");
+    let (_, summary) = inspect_text(&mut s, json!({"measure": false, "sketches": false}));
+    let d: Value = serde_json::from_str(&summary).unwrap();
+    assert_eq!(d["sketches"][0]["curves"], 720, "{d}");
+    assert!(d["sketches"][0].get("points").is_none() && d["sketches"][0].get("plane").is_none(), "{d}");
+
+    // The compact arguments are not there.
+    let r = raw_tool(&mut s, "inspect_design", json!({"bodies": ["Body1"]}));
+    assert_eq!(r["error"]["code"], -32602, "{r}");
+    let r = raw_tool(&mut s, "inspect_design", json!({"sketches": ["Sketch1"]}));
+    assert_eq!(r["error"]["code"], -32602, "{r}");
+}
+
+/// With compact output (#15): sketch summaries, compact JSON; full sketch contents only for the
+/// sketches asked for; `bodies` keeps only those bodies.
+#[test]
+fn compact_inspect_design_summarises_sketches_unless_asked() {
+    let mut s = server_with_big_sketch(crate::Options { compact: true });
+    let listed = call(&mut s, 1, "tools/list", json!({}));
+    let def = listed["result"]["tools"].as_array().unwrap().iter().find(|d| d["name"] == "inspect_design").cloned().unwrap();
+    assert!(def["inputSchema"]["properties"]["bodies"].is_object(), "{def}");
+    assert_eq!(def, crate::tool_definitions_with(crate::Options { compact: true }).into_iter().find(|d| d["name"] == "inspect_design").unwrap());
+    // Arguments are checked against the tools as listed: `bodies` only with compact output.
+    let bodies = json!({"bodies": ["Body1"]});
+    assert!(crate::tools::check_arguments_with("inspect_design", &bodies, crate::Options { compact: true }).is_ok());
+    assert!(crate::tools::check_arguments("inspect_design", &bodies).is_err_and(|e| e.contains("bodies")));
+
+    let (_, summary) = inspect_text(&mut s, json!({"measure": false}));
+    assert!(summary.len() < 4000, "{} bytes: {summary}", summary.len());
+    assert!(!summary.contains("\n "), "compact JSON");
+    let d: Value = serde_json::from_str(&summary).unwrap();
+    let sk = &d["sketches"][0];
+    assert!(sk["points"].as_u64().is_some_and(|n| n >= 720), "{sk}");
+    assert_eq!((&sk["curves"], &sk["profiles"]), (&json!(720), &json!(1)), "{sk}");
+    assert!(sk["constraints"].is_u64() && sk["dof"].is_number() && sk["plane"].is_object(), "{sk}");
+    assert_eq!(inspect_text(&mut s, json!({"measure": false, "sketches": false})).1, summary);
+    assert_eq!(inspect_text(&mut s, json!({"measure": false, "sketches": "summary"})).1, summary);
+    let name = sk["name"].as_str().unwrap().to_string();
+    let (_, full) = inspect_text(&mut s, json!({"measure": false, "sketches": [name]}));
+    assert!(full.len() > 50_000 && full.len() > 20 * summary.len(), "{} vs {}", full.len(), summary.len());
+    let f: Value = serde_json::from_str(&full).unwrap();
+    assert_eq!(f["sketches"][0]["curves"].as_array().map(Vec::len), Some(720));
+    assert_eq!(inspect_text(&mut s, json!({"measure": false, "sketches": true})).1.len(), full.len());
+    let (err, e) = inspect_text(&mut s, json!({"sketches": ["Nope"]}));
+    assert!(err && e.contains("no sketch") && e.contains(&name), "{e}");
+
+    let (_, one) = inspect_text(&mut s, json!({"bodies": ["Body1"]}));
+    let one: Value = serde_json::from_str(&one).unwrap();
+    assert_eq!(one["bodies"].as_array().map(Vec::len), Some(1), "{one}");
+    assert!(one["bodies"][0]["volume_mm3"].as_f64().is_some_and(|v| v > 0.0) && one["bodies"][0]["visible"] == true, "{one}");
+    let (err, e) = inspect_text(&mut s, json!({"bodies": ["Nope"]}));
+    assert!(err && e.contains("no body `Nope`") && e.contains("Body1"), "{e}");
+
+    // Other tools' JSON is compact too.
+    let r = raw_tool(&mut s, "measure", json!({}));
+    let text = r["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(!text.contains('\n') && serde_json::from_str::<Value>(text).is_ok(), "{text}");
+}
+
+/// A headless design behind an "app" whose `mcp.options` answers are `replies`, one per question
+/// (the last one repeats), counting the questions in `asked`.
+struct AppWithPrefs {
+    inner: Headless,
+    replies: Vec<Result<Option<Value>, String>>,
+    asked: std::rc::Rc<std::cell::Cell<usize>>,
+}
+
+impl crate::Backend for AppWithPrefs {
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        self.inner.call(method, params)
+    }
+    fn has_ui(&self) -> bool {
+        false
+    }
+    fn describe(&self) -> String {
+        "test app".into()
+    }
+    fn app_options(&mut self) -> Result<Option<Value>, String> {
+        let n = self.asked.get();
+        self.asked.set(n + 1);
+        self.replies.get(n).or(self.replies.last()).cloned().unwrap_or(Ok(None))
+    }
+}
+
+fn inspect_design_is_compact(s: &mut Server) -> bool {
+    let listed = call(s, 1, "tools/list", json!({}));
+    let def = listed["result"]["tools"].as_array().and_then(|t| t.iter().find(|d| d["name"] == "inspect_design")).cloned().unwrap_or_default();
+    def["inputSchema"]["properties"]["bodies"].is_object()
+}
+
+/// The app's Preferences turn compact output on for a bridged server; it asks until the app
+/// answers once (here: not running at first), then keeps that answer for the session.
+#[test]
+fn compact_output_follows_the_apps_preference() {
+    let asked = std::rc::Rc::new(std::cell::Cell::new(0));
+    let app = |replies: Vec<Result<Option<Value>, String>>| {
+        Box::new(AppWithPrefs { inner: Headless::default(), replies, asked: asked.clone() }) as Box<dyn crate::Backend>
+    };
+    let not_running = Err(format!("{} 127.0.0.1:7878 (refused)", crate::backend::NOT_RUNNING));
+
+    let mut s = Server::new(app(vec![not_running.clone(), Ok(Some(json!({"compact": true}))), Ok(Some(json!({"compact": false})))]));
+    assert!(!inspect_design_is_compact(&mut s), "not known yet: the server's own options (off)");
+    assert!(inspect_design_is_compact(&mut s), "the app answered: compact");
+    assert!(inspect_design_is_compact(&mut s), "kept for the session");
+    let r = raw_tool(&mut s, "measure", json!({}));
+    assert!(!r["result"]["content"][0]["text"].as_str().unwrap_or("\n").contains('\n'), "tool calls follow it too: {r}");
+    assert_eq!(asked.get(), 2, "not asked again once answered");
+
+    // An app from before the setting, or with it off: off.
+    asked.set(0);
+    let mut s = Server::new(app(vec![Ok(None)]));
+    assert!(!inspect_design_is_compact(&mut s) && !inspect_design_is_compact(&mut s));
+    assert_eq!(asked.get(), 1);
+    let mut s = Server::new(app(vec![Ok(Some(json!({"compact": false})))]));
+    assert!(!inspect_design_is_compact(&mut s));
+
+    // The command line turns it on whatever the app says.
+    let mut s = Server::new(app(vec![Ok(Some(json!({"compact": false})))])).with_options(crate::Options { compact: true });
+    assert!(inspect_design_is_compact(&mut s));
+    let mut s = Server::new(app(vec![not_running])).with_options(crate::Options { compact: true });
+    assert!(inspect_design_is_compact(&mut s));
 }

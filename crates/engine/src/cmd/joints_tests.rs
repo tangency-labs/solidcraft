@@ -124,6 +124,27 @@ fn revolute_hinge_turns_about_the_knuckle() {
     assert!(near(place(&s, "LeafB", p), Vec3::new(20.0, 29.0, 37.0)));
 }
 
+/// A joint value too large says so, rather than that it is not a number (#9625).
+#[test]
+fn a_joint_value_out_of_range_says_so() {
+    let mut s = Session::default();
+    leaf(&mut s, "LeafA");
+    leaf(&mut s, "LeafB");
+    let o = occ(&s, "LeafA");
+    run(&mut s, "occurrence.ground", json!({"occurrence": o, "grounded": true}));
+    let hinge = json!({"type": "revolute", "a": {"occurrence": "LeafA", "circle": [1, 37, 4]}, "b": {"occurrence": "LeafB", "circle": [1, 37, 4]}, "flip": true, "name": "Hinge"});
+    run(&mut s, "joint.create", hinge);
+    for value in [json!(1e9), json!(-5e15)] {
+        let e = s.execute("joint.drive", &json!({"joint": "Hinge", "value": value})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(
+            e.contains("a joint value must be a number between -1e9 and 1e9") && !e.contains("a joint value must be a number or"),
+            "{value}: {e}"
+        );
+    }
+    let e = s.execute("joint.drive", &json!({"joint": "Hinge", "value": true})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("a joint value must be a number or an expression") && !e.contains("between"), "{e}");
+}
+
 /// Two 10 mm cubes in components A (grounded) and B.
 fn two_cubes() -> Session {
     let mut s = Session::default();
@@ -2697,4 +2718,47 @@ fn driving_an_angle_reports_the_number_a_person_would_read() {
     // Only what is reported is rounded: the stored value keeps full precision.
     let j = s.doc.assembly.joints.iter().find(|j| j.name == "Turn").unwrap();
     assert_ne!(j.values[0].to_degrees(), 30.0, "the stored angle keeps its bits");
+}
+
+#[test]
+fn new_joints_generate_type_prefixed_names_or_keep_custom_name() {
+    let mut s = two_cubes();
+    let (a, b) = (occ(&s, "A"), occ(&s, "B"));
+
+    // 1. Without name: revolute joint defaults to "Revolute Joint1"
+    let r1 = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "revolute",
+            "a": {"occurrence": a, "face": [5, 5, 10]},
+            "b": {"occurrence": b, "face": [25, 5, 0]}
+        }),
+    );
+    assert_eq!(r1["name"], "Revolute Joint1");
+
+    // 2. Without name: slider joint defaults to "Slider Joint1"
+    let r2 = run(
+        &mut s,
+        "joint.as_built",
+        json!({
+            "type": "slider",
+            "a": "A",
+            "b": "B"
+        }),
+    );
+    assert_eq!(r2["name"], "Slider Joint1");
+
+    // 3. With custom name: preserves custom name exactly
+    let r3 = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "rigid",
+            "name": "CustomRigid",
+            "a": {"occurrence": a, "face": [5, 5, 10]},
+            "b": {"occurrence": b, "face": [25, 5, 0]}
+        }),
+    );
+    assert_eq!(r3["name"], "CustomRigid");
 }

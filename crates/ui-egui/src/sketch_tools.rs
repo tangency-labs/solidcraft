@@ -3,6 +3,7 @@
 //! tools for free-form curves and slots, text placement, and constraint glyphs. Like `tools`,
 //! these are UI state only: every action runs a command.
 
+use crate::i18n::{tr, tr_engine_error};
 use crate::icons::markers::glyph_icon;
 use crate::icons::markers::glyph_letter;
 use crate::ui_kit::BackingTooltipExt as _;
@@ -449,7 +450,7 @@ fn comb_options_card(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
     let mut options = comb_options();
     let (length_tip, teeth_tip) = (app.tr("ui.comb_length_tip").to_string(), app.tr("ui.comb_teeth_tip").to_string());
     let shown = crate::ui_kit::Container::new(ctx, crate::ui_kit::Surface::Canvas)
-        .area(egui::Id::new("sc_comb_options"))
+        .area(egui::Id::unique("sc_comb_options"))
         .fixed_pos(available.left_top() + egui::vec2(tk.space_16, tk.space_16))
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
@@ -485,6 +486,10 @@ fn comb_options_card(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
 /// Curvature combs (`Session::comb`): teeth and the envelope through their tips.
 fn combs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let Some(shown) = &app.session.comb else { return };
+    // The teeth are the design's: not while a value is typed and the sketch is drawn at it.
+    if crate::dim_view::preview_world(app).is_some() {
+        return;
+    }
     let tk = crate::theme::Tokens::get();
     for comb in &shown.teeth {
         let mut tips: Vec<Pos2> = Vec::new();
@@ -921,9 +926,9 @@ pub fn hint(id: &str) -> Option<String> {
             "inspect.continuity" => "Continuity: click an edge for its numbers (the button again turns the colours off)",
             "canvas.insert" => crate::i18n::tr("canvas.place_hint"),
             "canvas.decal" => crate::i18n::tr("canvas.decal_place_hint"),
-            "sketch.trim" => "Trim: click the piece of a curve to remove, or drag across the pieces to remove",
-            "sketch.extend" => "Extend: click a curve near the end to extend (Shift: click two curves to extend both to where they meet)",
-            "sketch.break" => "Break: click a curve where it should split",
+            "sketch.trim" => tr("sketch.hint.trim"),
+            "sketch.extend" => tr("sketch.hint.extend"),
+            "sketch.break" => tr("sketch.hint.break"),
             "sketch.line.midpoint" => "Midpoint line: click the middle, then an end",
             "sketch.arc.tangent" => "Tangent arc: click the end of a line or arc, then the arc's end",
             "sketch.ellipse" => "Ellipse: click the centre, the end of the major axis, then a point on it",
@@ -943,7 +948,7 @@ pub fn hint(id: &str) -> Option<String> {
             "sketch.constraint.polygon" => "Polygon: click the lines of a closed chain; right-click to apply",
             "sketch.centerline" => "Centerline: click lines",
             "sketch.project_to_surface" => "Project to surface: click curves of other sketches, right-click, then click the face",
-            "sketch.intersection_curve" => "Intersection curve: click two faces",
+            "sketch.intersection_curve" => "Intersection curve: click two faces or curves of other sketches",
             "sketch.spun_profile" => "Spun profile: click the body, then the axis line",
             _ => return None,
         }
@@ -981,12 +986,17 @@ fn sketch_entity(app: &SolveApp, hits: &[Hit]) -> Option<(String, bool)> {
 }
 
 /// The two editable curves that meet at sketch point `pi`, in curve order, which is the order
-/// the corner commands resolve them in from a `point` parameter. Construction curves are
-/// ignored when more than two meet. Each side must be a line, or an arc for a fillet.
+/// the corner commands resolve them in from a `point` parameter. An ellipse's axis is never a
+/// side (the engine refuses it), and construction curves are ignored when more than two meet.
+/// Each side must be a line, or an arc for a fillet.
 pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, arcs_ok: bool) -> Option<(usize, usize)> {
     use solidcraft_engine::sketch::CurveKind;
-    let candidates =
-        sk.curves.iter().enumerate().filter(|(ci, c)| !sk.is_linked_curve(*ci) && c.kind.ends().is_some_and(|(a, b)| a == pi || b == pi));
+    let candidates = sk
+        .curves
+        .iter()
+        .enumerate()
+        // The cheap end test first: the axis test scans the constraints.
+        .filter(|(ci, c)| c.kind.ends().is_some_and(|(a, b)| a == pi || b == pi) && !sk.is_linked_curve(*ci) && !sk.is_ellipse_axis(*ci));
     let mut curves: Vec<_> = candidates.clone().take(3).collect();
     // Center rectangles have construction diagonals at their corners. Match the engine's
     // corner selection: when more than two curves meet, use the profile sides.
@@ -1296,13 +1306,19 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
         }
         Mode::Steps => match cmd {
             "sketch.intersection_curve" => {
-                if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)).filter(|r| r.get("face").is_some()) {
+                // Either side is a face or a curve of another sketch (#11048).
+                if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)).filter(|r| r.get("face").is_some() || r.get("curve").is_some()) {
                     tool.picks.push(r.to_string());
                     if tool.picks.len() >= 2 {
                         let a: Value = serde_json::from_str(&tool.picks[0]).unwrap_or(Value::Null);
                         let b: Value = serde_json::from_str(&tool.picks[1]).unwrap_or(Value::Null);
-                        let _ = app.run(cmd, json!({"a": a, "b": b}));
+                        // Done: the hint asks for the next pair again (a failure keeps its error).
+                        if app.run(cmd, json!({"a": a, "b": b})).is_ok() {
+                            app.set_status(crate::tools::hint(cmd), false);
+                        }
                         tool.picks.clear();
+                    } else {
+                        app.set_status(app.tr("ui.intersection_curve_second_pick").to_string(), false);
                     }
                 }
             }
@@ -1345,7 +1361,7 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
     }
     if tool.cmd == "sketch.circle.two_tangent" && tool.picks.len() == 2 {
         if let Err(error) = crate::sketch_dims::validate(app, tool) {
-            app.set_status(error, true);
+            app.set_status(tr_engine_error(&error), true);
             return;
         }
         if run_entities(app, tool) {
@@ -1361,7 +1377,7 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
     }
     let Some(Mode::Points(n)) = mode(tool.cmd) else { return };
     if let Err(error) = crate::sketch_dims::validate(app, tool) {
-        app.set_status(error, true);
+        app.set_status(tr_engine_error(&error), true);
         return;
     }
     let p = crate::sketch_dims::placed(app, tool, &p);
@@ -1397,7 +1413,7 @@ fn run_points(app: &mut SolveApp, t: &Tool) -> bool {
     let params = match (t.cmd, p.as_slice()) {
         ("sketch.line.midpoint", [m, e]) => json!({"mid": arg(m), "end": xy(e.0)}),
         ("sketch.arc.tangent", [s, e]) => json!({"start": arg(s), "end": xy(e.0)}),
-        ("sketch.ellipse", [c, m, q]) => json!({"center": xy(c.0), "major": xy(m.0), "minor": xy(q.0)}),
+        ("sketch.ellipse", [c, m, q]) => json!({"center": xy(c.0), "major": xy(m.0), "minor": xy(q.0), "axes": app.preferences.ellipse_axes}),
         ("sketch.conic", [a, b, x]) => {
             // The typed Rho box, or the parabola the command defaults to.
             let rho = crate::sketch_dims::locked_value(app, t, "Rho").unwrap_or(0.5);
@@ -1472,6 +1488,12 @@ pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
             tool.pts.clear();
             true
         }
+        // Intersection Curve: the right-click starts the picks over (#11048).
+        Mode::Steps if tool.cmd == "sketch.intersection_curve" && !tool.picks.is_empty() => {
+            tool.picks.clear();
+            app.set_status(crate::tools::hint(tool.cmd), false);
+            true
+        }
         Mode::Steps if !tool.picks.is_empty() && tool.picks.last().is_some_and(|x| x != "|") => {
             tool.picks.push("|".into());
             true
@@ -1485,12 +1507,51 @@ pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
     }
 }
 
-/// The cursor's Trim piece, keyed by design revision, sketch, curve and cursor: the viewport's
-/// hover and the preview both ask for it each frame, and it intersects the curve with every other.
-type TrimPieceKey = (u64, u64, String, [u64; 2]);
+type SolvedSketchRef = std::sync::Arc<solidcraft_engine::doc::SolvedSketch>;
+
+/// The shown state's solve of `sketch`, shared.
+fn solved_sketch(app: &SolveApp, sketch: u64) -> Option<SolvedSketchRef> {
+    crate::open_meshing::session_world(&app.session).sketches.iter().find(|s| s.feature == sketch).cloned()
+}
+
+/// Which sketch state a hover cache was made from: the design revision and the solve itself,
+/// held weakly so its place is not reused while the cache remembers it (a live drag swaps in a
+/// new solve without a new revision).
+struct SketchStateKey {
+    revision: u64,
+    solve: std::sync::Weak<solidcraft_engine::doc::SolvedSketch>,
+    curve: String,
+}
+
+impl SketchStateKey {
+    fn new(app: &SolveApp, solve: &SolvedSketchRef, curve: &str) -> SketchStateKey {
+        SketchStateKey { revision: app.session.revision, solve: std::sync::Arc::downgrade(solve), curve: curve.to_string() }
+    }
+    fn matches(&self, app: &SolveApp, solve: &SolvedSketchRef, curve: &str) -> bool {
+        self.revision == app.session.revision && std::ptr::eq(self.solve.as_ptr(), std::sync::Arc::as_ptr(solve)) && self.curve == curve
+    }
+}
+
+/// Trim's hover over one curve: the cuts on it, made once per sketch state (they intersect the
+/// curve with every other one), and the last piece the cursor chose (the viewport's hover and the
+/// preview both ask for it each frame).
+struct TrimHoverCache {
+    key: SketchStateKey,
+    hover: Option<solidcraft_engine::cmd::TrimHover>,
+    piece: Option<([u64; 2], Option<Vec<Vec2>>)>,
+}
+
+/// Extend's preview of one curve, per sketch state and growing end (it depends on the cursor
+/// only through the end, [`solidcraft_engine::cmd::extend_end_at`]).
+struct ExtendPreviewCache {
+    key: SketchStateKey,
+    at_b: bool,
+    piece: Option<Vec<Vec2>>,
+}
 
 thread_local! {
-    static TRIM_PIECE: std::cell::RefCell<Option<(TrimPieceKey, Option<Vec<Vec2>>)>> = const { std::cell::RefCell::new(None) };
+    static TRIM_HOVER: RefCell<Option<TrimHoverCache>> = const { RefCell::new(None) };
+    static EXTEND_PREVIEW: RefCell<Option<ExtendPreviewCache>> = const { RefCell::new(None) };
 }
 
 /// With Trim active and the cursor over curve `id` of `sketch` (the active sketch): the piece a
@@ -1502,14 +1563,27 @@ pub(crate) fn trim_hover_piece(app: &SolveApp, sketch: u64, id: &str) -> Option<
     if active_sketch(app) != Some(sketch) {
         return None;
     }
-    let key = (app.session.revision, sketch, id.to_string(), [at.x.to_bits(), at.y.to_bits()]);
-    if let Some(piece) = TRIM_PIECE.with(|c| c.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, p)| p.clone())) {
-        return piece;
-    }
-    let st = crate::open_meshing::session_world(&app.session);
-    let piece = solidcraft_engine::cmd::trim_piece(&st.sketch(sketch)?.sketch, id, *at);
-    TRIM_PIECE.with(|c| *c.borrow_mut() = Some((key, piece.clone())));
-    piece
+    let solve = solved_sketch(app, sketch)?;
+    let cursor = [at.x.to_bits(), at.y.to_bits()];
+    TRIM_HOVER.with(|c| {
+        let mut c = c.borrow_mut();
+        let cache = match c.take() {
+            Some(cache) if cache.key.matches(app, &solve, id) => c.insert(cache),
+            _ => c.insert(TrimHoverCache {
+                key: SketchStateKey::new(app, &solve, id),
+                hover: solidcraft_engine::cmd::trim_hover(&solve.sketch, id),
+                piece: None,
+            }),
+        };
+        if let Some((k, piece)) = &cache.piece
+            && *k == cursor
+        {
+            return piece.clone();
+        }
+        let piece = cache.hover.as_ref().and_then(|h| h.piece(*at));
+        cache.piece = Some((cursor, piece.clone()));
+        piece
+    })
 }
 
 /// Extend preview: the geometry that would be added, based on the hover position over curve `id`
@@ -1522,19 +1596,37 @@ fn extend_preview_piece(app: &SolveApp, sketch: u64, id: &str) -> Option<Vec<Vec
     if active_sketch(app) != Some(sketch) {
         return None;
     }
-    let st = crate::open_meshing::session_world(&app.session);
-    let sk = st.sketch(sketch)?;
-    let hover_pos = hover.0;
-    let ci = sk.sketch.curve_index(id)?;
-    let kind = sk.sketch.curves.get(ci)?.kind.clone();
+    let solve = solved_sketch(app, sketch)?;
+    let sk = &solve.sketch;
+    let ci = sk.curve_index(id)?;
+    // An infinite line in the way is cut short about the cursor, so the preview then follows it.
+    let at_b = solidcraft_engine::cmd::extend_end_at(sk, ci, hover.0).filter(|_| !sk.curves.iter().any(|c| c.infinite));
+    let Some(at_b) = at_b else { return extend_preview_uncached(sk, ci, hover.0) };
+    EXTEND_PREVIEW.with(|c| {
+        let mut c = c.borrow_mut();
+        if let Some(cache) = c.as_ref()
+            && cache.at_b == at_b
+            && cache.key.matches(app, &solve, id)
+        {
+            return cache.piece.clone();
+        }
+        let piece = extend_preview_uncached(sk, ci, hover.0);
+        *c = Some(ExtendPreviewCache { key: SketchStateKey::new(app, &solve, id), at_b, piece: piece.clone() });
+        piece
+    })
+}
+
+/// [`extend_preview_piece`] worked out afresh.
+fn extend_preview_uncached(sk: &solidcraft_engine::sketch::Sketch, ci: usize, hover_pos: Vec2) -> Option<Vec<Vec2>> {
+    let kind = sk.curves.get(ci)?.kind.clone();
     // Arcs extend along their circle either way round, up to the first geometry in the way.
     if let solidcraft_engine::sketch::CurveKind::Arc { .. } = kind {
-        return solidcraft_engine::cmd::extend_arc_preview(&sk.sketch, ci, hover_pos);
+        return solidcraft_engine::cmd::extend_arc_preview(sk, ci, hover_pos);
     }
     let solidcraft_engine::sketch::CurveKind::Line { a, b } = kind else { return None };
-    let at_b = hover_pos.dist(sk.sketch.point(b)?) <= hover_pos.dist(sk.sketch.point(a)?);
-    let end = sk.sketch.point(if at_b { b } else { a })?;
-    let hit = solidcraft_engine::cmd::extend_preview(&sk.sketch, ci, hover_pos)?;
+    let at_b = hover_pos.dist(sk.point(b)?) <= hover_pos.dist(sk.point(a)?);
+    let end = sk.point(if at_b { b } else { a })?;
+    let hit = solidcraft_engine::cmd::extend_preview(sk, ci, hover_pos)?;
     Some(vec![end, hit])
 }
 
@@ -1698,7 +1790,8 @@ fn sketch_px_per_mm(plane: &Plane, proj: &Proj) -> Option<f32> {
 
 fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Pos2>) {
     let Some(sid) = active_sketch(app) else { return };
-    let st = crate::open_meshing::session_world(&app.session);
+    // While a dimension's value is typed, the glyphs sit where that value puts their geometry.
+    let st = crate::dim_view::preview_world(app).unwrap_or_else(|| crate::open_meshing::session_world(&app.session));
     let Some(ss) = st.sketch(sid) else { return };
     if ss.sketch.view.hide_constraints {
         GLYPHS.with(|g| g.borrow_mut().clear());

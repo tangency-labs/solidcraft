@@ -60,7 +60,46 @@ fn joint_from_two_snaps() {
     assert_eq!(app.session.doc.assembly.joints.len(), 1);
 }
 
-/// A straight edge is the revolute axis, even when both adjacent faces are perpendicular to it.
+/// A joint origin can be the design origin or a sketch point, not just faces, edges and vertices
+/// (#10290). The origin snaps to the world origin with z up; a sketch point snaps to its world
+/// position with the sketch plane's normal as z, and both make a joint.
+#[test]
+fn joint_origin_can_be_the_origin_or_a_sketch_point() {
+    let mut app = two_boxes();
+    // A sketch point on B's top face, at world (35, 5, 10).
+    app.session.execute("component.activate", &json!({"component": "B"})).unwrap();
+    app.session
+        .execute("sketch.create", &json!({"plane": {"origin": [30.0, 0.0, 10.0], "x_dir": [1.0, 0.0, 0.0], "y_dir": [0.0, 1.0, 0.0]}, "name": "S"}))
+        .unwrap();
+    app.session.execute("sketch.point", &json!({"point": [5.0, 5.0], "id": "q"})).unwrap();
+    app.session.execute("sketch.finish", &json!({})).unwrap();
+    let sketch = app.session.doc.find_feature("S").unwrap().id;
+
+    // The two picks a joint origin input now accepts.
+    let origin = Sel::Vertex { body: String::new(), point: Vec3::ZERO };
+    let sketch_point = Sel::SketchPoint { id: format!("{sketch}:q") };
+    let so = |s: &Sel| snap_of(&app.session, s).expect("a snap for the pick");
+    let o = so(&origin);
+    let sp = so(&sketch_point);
+    assert!(o.at.dist(Vec3::ZERO) < 1e-6, "the world origin snaps to the origin: {o:?}");
+    assert!(o.z.dist(Vec3::Z) < 1e-9, "the origin's z is up: {o:?}");
+    assert!(sp.at.dist(Vec3::new(35.0, 5.0, 10.0)) < 1e-6, "the sketch point snaps to its world position: {sp:?}");
+    assert!(sp.z.dist(Vec3::Z) < 1e-9, "the sketch point's z is the plane normal: {sp:?}");
+
+    // And a joint can be made from them.
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, origin);
+    d.pick(&app.session, sketch_point);
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.kind = 1;
+        f.fit_limits(&app.session.doc);
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints.len(), 1, "a joint was made from the origin and the sketch point");
+}
 #[test]
 fn revolute_joint_uses_the_picked_straight_edges() {
     let mut app = two_boxes();
@@ -834,7 +873,7 @@ fn slider_drag_does_not_open_suggestions_over_the_slider() {
         .unwrap();
     h.app.start("joint.drive");
     h.frames(4);
-    let editor = egui::Id::new("sc_drive_value");
+    let editor = egui::Id::unique("sc_drive_value");
     let bounds = h
         .output
         .accesskit_update
@@ -1430,4 +1469,172 @@ fn interference_checks_off_the_window_thread_and_drops_a_check_of_a_changed_desi
     assert_eq!(overlaps, 1, "the shared volume, drawn in red");
     compute(&mut app, true);
     assert_eq!(state(&app), (None, 0, false), "a check of the design before the change is dropped");
+}
+
+#[test]
+fn joint_dialog_applies_custom_name_or_falls_back_to_type_default() {
+    // 1. Empty name field: commands() generates payload without "name", backend creates "Rigid Joint1"
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].0, "joint.create");
+    assert!(cmds[0].1.get("name").is_none());
+    for (id, p) in cmds {
+        let r = app.run(&id, p).unwrap();
+        assert_eq!(r["name"], "Rigid Joint1");
+    }
+
+    // 2. Custom name in f.name: reset to fresh boxes so B is at its initial coordinates
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.name = "MyCustomJoint".into();
+    }
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].1["name"], "MyCustomJoint");
+    for (id, p) in cmds {
+        let r = app.run(&id, p).unwrap();
+        assert_eq!(r["name"], "MyCustomJoint");
+    }
+}
+
+/// An imported assembly makes a joint per placed part: with "Group joints in the History" on, from
+/// the second joint the timeline shows them as one grouped button with their count, and clicking
+/// it shows (and hides) each one.
+#[test]
+fn many_joints_start_grouped_in_the_timeline() {
+    let mut h = crate::scenario::Harness::new();
+    assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
+    for (name, x) in [("A", 0), ("B", 30)] {
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.create", json!({ "name": name })).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let at = |o: &str| json!({"occurrence": o, "point": [30, 10, 5], "z": [1, 0, 0]});
+    h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Held"})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::handle_at("timeline:joints").is_none(), "one joint shows on its own");
+    let first = h.app.session.doc.assembly.joints[0].clone();
+    for i in 1..=JOINT_GROUP_MIN as u64 {
+        let mut copy = first.clone();
+        copy.id = first.id + i;
+        copy.name = format!("Held {i}");
+        h.app.session.doc_mut().assembly.joints.push(copy);
+    }
+    h.frames(2);
+    assert_eq!(h.app.session.doc.assembly.joints.len(), 2);
+    assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "a second joint starts them grouped");
+    let group = crate::scenario::handle_at("timeline:joints").expect("the grouped joints button");
+    assert_eq!(h.call("ui.click", json!({"x": group.x, "y": group.y}))["ok"], true);
+    assert!(joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "clicking the group shows each joint");
+    let group = crate::scenario::handle_at("timeline:joints").expect("the grouped joints button");
+    assert_eq!(h.call("ui.click", json!({"x": group.x, "y": group.y}))["ok"], true);
+    assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "clicking it again groups them");
+}
+
+/// With "Group joints in the History" off, as it is by default, the History shows each joint as it
+/// always has: no grouped button, a tile for every joint, and the left History's JOINTS header
+/// without a count. Turned on, the joints group; turned off again, they show one by one.
+#[test]
+fn joints_show_one_by_one_when_their_grouping_is_off() {
+    let mut h = crate::scenario::Harness::new();
+    for (name, x) in [("A", 0), ("B", 30)] {
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.create", json!({ "name": name })).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let at = |o: &str| json!({"occurrence": o, "point": [30, 10, 5], "z": [1, 0, 0]});
+    for name in ["Held", "Held again"] {
+        h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": name})).unwrap();
+    }
+    h.frames(2);
+    assert!(!h.app.preferences.history_group_joints, "grouping is off by default");
+    assert!(joints_open(&h.app, 2, JointRun::Loose), "each joint shows");
+    assert!(crate::scenario::handle_at("timeline:joints").is_none(), "no grouped button");
+    for name in ["Held", "Held again"] {
+        assert!(crate::scenario::handle_at(&format!("timeline-joint:{name}")).is_some(), "{name} has its own tile");
+    }
+    assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
+    h.frames(2);
+    assert!(!joints_open(&h.app, 2, JointRun::Loose), "turned on, the two joints group");
+    assert!(crate::scenario::handle_at("timeline:joints").is_some(), "the grouped button appears");
+    assert!(crate::scenario::handle_at("timeline-joint:Held").is_none());
+    assert_eq!(h.call("ui.prefs", json!({"history_group_joints": false}))["ok"], true);
+    h.frames(2);
+    assert!(joints_open(&h.app, 2, JointRun::Loose), "turned off again, each joint shows");
+    assert!(crate::scenario::handle_at("timeline:joints").is_none(), "and the grouped button goes");
+    assert!(crate::scenario::handle_at("timeline-joint:Held").is_some());
+}
+
+/// The joints after the History bar's features belong to the whole design. Without the bar's
+/// groups, as by default, they stay while the bar shows only the edited component, as they always
+/// have; with the groups, a bar that shows one component leaves them out.
+#[test]
+fn joints_stay_in_the_history_bar_showing_one_component_without_its_groups() {
+    let mut h = crate::scenario::Harness::new();
+    for (name, x) in [("A", 0), ("B", 30)] {
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.create", json!({ "name": name })).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let at = |o: &str| json!({"occurrence": o, "point": [30, 10, 5], "z": [1, 0, 0]});
+    h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Held"})).unwrap();
+    h.app.run("component.activate", json!({"component": "A"})).unwrap();
+    h.frames(2);
+    assert!(!h.app.preferences.history_bar_groups, "the bar's groups are off by default");
+    assert!(crate::timeline_scope::shown(&h.app).is_some(), "the bar shows the edited component");
+    assert!(crate::scenario::handle_at("timeline-joint:Held").is_some(), "the design's joint still shows");
+    assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+    h.frames(2);
+    assert!(crate::scenario::handle_at("timeline-joint:Held").is_none(), "with the groups, one component's bar leaves it out");
+}
+
+/// The grouped joints' arrow has a well of its own at the button's end: it lights up only under
+/// the pointer, and clicking it shows and hides the joints like the rest of the button.
+#[test]
+fn the_grouped_joints_arrow_lights_up_under_the_pointer() {
+    let mut h = crate::scenario::Harness::new();
+    assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
+    for (name, x) in [("A", 0), ("B", 30)] {
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.create", json!({ "name": name })).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let at = |o: &str| json!({"occurrence": o, "point": [30, 10, 5], "z": [1, 0, 0]});
+    h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Held"})).unwrap();
+    let first = h.app.session.doc.assembly.joints[0].clone();
+    // Thousands of joints, as an imported assembly makes: the count is four digits wide.
+    for i in 1..=1200u64 {
+        let mut copy = first.clone();
+        copy.id = first.id + i;
+        copy.name = format!("Held {i}");
+        h.app.session.doc_mut().assembly.joints.push(copy);
+    }
+    h.frames(2);
+    let arrow = crate::scenario::rect_of("timeline:joints_arrow").expect("the arrow's well");
+    let group = crate::scenario::handle_at("timeline:joints").expect("the grouped joints button");
+    assert!(arrow.left() > group.x, "the arrow sits at the button's right end");
+    let hot = |h: &mut crate::scenario::Harness, x: f32, y: f32| {
+        h.call("ui.move", json!({"x": x, "y": y}));
+        h.frames(1);
+        crate::scenario::count_of("timeline:joints_arrow_hot")
+    };
+    assert_eq!(hot(&mut h, arrow.center().x, arrow.center().y), Some(1.0), "the well lights up under the pointer");
+    let icon_x = arrow.left() - 2.0 * (arrow.left() - group.x) + 6.0;
+    assert_eq!(hot(&mut h, icon_x, arrow.center().y), Some(0.0), "not over the icon or the count");
+    assert_eq!(h.call("ui.click", json!({"x": arrow.center().x, "y": arrow.center().y}))["ok"], true);
+    assert!(joints_open(&h.app, 1201, JointRun::Loose), "clicking the arrow shows each joint");
+    let arrow = crate::scenario::rect_of("timeline:joints_arrow").expect("the arrow's well");
+    assert_eq!(h.call("ui.click", json!({"x": arrow.center().x, "y": arrow.center().y}))["ok"], true);
+    assert!(!joints_open(&h.app, 1201, JointRun::Loose), "and groups them again");
 }

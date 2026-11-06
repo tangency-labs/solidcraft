@@ -17,7 +17,7 @@ pub(crate) struct ReviewAndApply<'a> {
 
 impl ReviewAndApply<'_> {
     pub(crate) fn show(&self, ctx: &egui::Context, valid: bool, acknowledged: &mut bool, content: impl FnOnce(&mut egui::Ui)) -> (bool, Action) {
-        Confirm::new(egui::Id::new("render_review_apply"), "inspect", self.title)
+        Confirm::new(egui::Id::unique("render_review_apply"), "inspect", self.title)
             .actions(self.apply, tr("ui.cancel"), self.copy.then(|| tr("render.physical_copy_plan")))
             .secondary_left()
             .show(ctx, valid && *acknowledged, |ui| self.content(ui, acknowledged, content))

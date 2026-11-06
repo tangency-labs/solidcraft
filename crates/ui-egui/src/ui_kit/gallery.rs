@@ -1,5 +1,5 @@
 //! Table-driven layout/paint references in both themes. No window or GPU required.
-use super::preferences_figures::{ThemeSample, paint_theme_system, paint_theme_thumbnail};
+use super::preferences_figures::{ThemeSample, paint_theme_thumbnail};
 use super::*;
 use crate::ui_kit::{Container, Surface};
 use crate::{scenario, theme::Tokens};
@@ -57,6 +57,128 @@ fn navigation_sample(ui: &mut Ui, size: crate::navigation_bar::Size) {
 
 // One entry per element/variant: names, rendering and geometry expectations stay together.
 const ELEMENTS: &[Element] = &[
+    element!("theme_mode_segments", |ui, _| {
+        theme_segments(
+            ui,
+            "gallery_mode",
+            &[ThemeSegment::new("One theme", ThemeGlyph::Monitor, None), ThemeSegment::new("Follow system", ThemeGlyph::Contrast, None)],
+            Some(1),
+            false,
+        );
+    }),
+    element!("theme_imported_filter", |ui, _| {
+        theme_segments(ui, "gallery_imported", &[ThemeSegment::new("Imported", ThemeGlyph::None, Some(2))], Some(0), false);
+    }),
+    element!("theme_toolbar", |ui, _| {
+        theme_toolbar(
+            ui,
+            "gallery_toolbar",
+            68.0,
+            0.0,
+            |ui| {
+                theme_segments(
+                    ui,
+                    "gallery_tone",
+                    &[ThemeSegment::new("Light", ThemeGlyph::Sun, Some(9)), ThemeSegment::new("Dark", ThemeGlyph::Moon, Some(17))],
+                    Some(0),
+                    false,
+                );
+            },
+            |ui| {
+                theme_segments(
+                    ui,
+                    "gallery_view",
+                    &[ThemeSegment::new("Carousel", ThemeGlyph::Carousel, None), ThemeSegment::new("Grid", ThemeGlyph::Grid, None)],
+                    Some(0),
+                    true,
+                );
+            },
+        );
+    }),
+    element!("theme_browser_grid", |ui, _| {
+        theme_browser(ui, "gallery_grid", 14, true, None, |ui, _, width| {
+            theme_card(
+                ui,
+                &ThemeCard {
+                    name: "Light",
+                    note: "Built in",
+                    options: None,
+                    sample: ThemeSample::from_tokens(&Tokens::light()),
+                    selected: false,
+                    dark: false,
+                    high: false,
+                    day: false,
+                    night: false,
+                },
+                width,
+            );
+        });
+    }),
+    element!("theme_segments", |ui, _| {
+        theme_segments(
+            ui,
+            "gallery",
+            &[ThemeSegment::new("Light", ThemeGlyph::Sun, Some(10)), ThemeSegment::new("Dark", ThemeGlyph::Moon, Some(17))],
+            Some(0),
+            false,
+        );
+    }),
+    element!("theme_import_button", |ui, _| {
+        theme_import_button(ui, "Import theme file…");
+    }),
+    element!("theme_slot", |ui, _| {
+        theme_slot(
+            ui,
+            &ThemeSlot {
+                title: "Day theme",
+                name: "Light",
+                hint: "Pick from below",
+                aimed: true,
+                night: false,
+                width: ui.available_width(),
+                sample: ThemeSample::from_tokens(&Tokens::light()),
+            },
+        );
+    }),
+    element!("theme_card", |ui, _| {
+        theme_card(
+            ui,
+            &ThemeCard {
+                name: "Dark",
+                note: "Built in · High contrast",
+                options: Some("Has options"),
+                sample: ThemeSample::from_tokens(&Tokens::dark()),
+                selected: true,
+                dark: true,
+                high: true,
+                day: true,
+                night: true,
+            },
+            118.0,
+        );
+    }),
+    element!("theme_empty", |ui, _| {
+        theme_empty(ui, "No theme matches these filters.", "Clear filters", || {});
+    }),
+    element!("theme_browser", |ui, _| {
+        theme_browser(ui, "gallery_browser", 9, false, None, |ui, i, width| {
+            theme_card(
+                ui,
+                &ThemeCard {
+                    name: if i % 2 == 0 { "Light" } else { "Dark" },
+                    note: "Built in",
+                    options: None,
+                    sample: ThemeSample::from_tokens(&Tokens::get()),
+                    selected: i == 0,
+                    dark: i % 2 != 0,
+                    high: false,
+                    day: false,
+                    night: false,
+                },
+                width,
+            );
+        });
+    }),
     element!("viewport_status_item", "viewport_status:sample:item", Some("viewport_status:sample:close"), |ui, _| {
         let item = StatusItem {
             id: "sample".into(),
@@ -192,7 +314,7 @@ const ELEMENTS: &[Element] = &[
         .enumerate()
         {
             let rect = tree_row_rect(ui, row);
-            assert_eq!(tree_row(ui, ui.id().with(("tree_geometry", index)), row).rect, Some(rect));
+            assert_eq!(tree_row(ui, ui.scope_id().with(("tree_geometry", index)), row).rect, Some(rect));
         }
     }),
     element!("editor_section", |ui, _| {
@@ -260,19 +382,23 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("tree_row", |ui, _| {
         let actions = [TreeAction { icon: "plus", hover_only: false, label: "Add", reason: None, target: "gallery:tree:add" }];
-        tree_row(ui, ui.id().with("tree_plain"), &Row { label: "Objects", fold: Some(true), actions: &actions, ..Default::default() });
-        tree_row(ui, ui.id().with("tree_subtitle"), &Row { label: "Output", subtitle: "1920 × 1080 · PNG", selected: true, ..Default::default() });
+        tree_row(ui, ui.scope_id().with("tree_plain"), &Row { label: "Objects", fold: Some(true), actions: &actions, ..Default::default() });
+        tree_row(
+            ui,
+            ui.scope_id().with("tree_subtitle"),
+            &Row { label: "Output", subtitle: "1920 × 1080 · PNG", selected: true, ..Default::default() },
+        );
     }),
     element!("tree_header", |ui, state| {
         tree_header(ui, "Scene", &mut state.selected, &["By object", "By look"], "Search objects");
         tree_row(
             ui,
-            ui.id().with("compact_environment"),
+            ui.scope_id().with("compact_environment"),
             &Row { compact: true, label: "Environment", icon: "environment_map", subtitle: "Studio Soft 2K", ..Default::default() },
         );
         tree_row(
             ui,
-            ui.id().with("compact_object"),
+            ui.scope_id().with("compact_object"),
             &Row {
                 compact: true,
                 depth: 1,
@@ -288,7 +414,7 @@ const ELEMENTS: &[Element] = &[
     element!("tree_row_disabled_actions", |ui, _| {
         let actions =
             [TreeAction { icon: "lookat", hover_only: true, label: "Solo", reason: Some("Not available yet"), target: "gallery:tree:solo" }];
-        tree_row(ui, ui.id().with("tree_actions"), &Row { label: "Light", actions: &actions, ..Default::default() });
+        tree_row(ui, ui.scope_id().with("tree_actions"), &Row { label: "Light", actions: &actions, ..Default::default() });
     }),
     element!("selection_actions", |ui, _| {
         let actions = [
@@ -301,7 +427,7 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("catalog_scope", |ui, state| {
         catalog_scope(ui, |ui| {
-            search_field(ui, ui.id().with("catalog_search"), &mut state.value, "Search appearances");
+            search_field(ui, ui.scope_id().with("catalog_search"), &mut state.value, "Search appearances");
             segmented(
                 ui,
                 &mut state.selected,
@@ -582,35 +708,6 @@ const ELEMENTS: &[Element] = &[
         );
         settings_pointer_preview(ui, true, "Normal", true);
     }),
-    element!("preference_theme_carousel", |ui, _| {
-        let light = ThemeSample::from_tokens(&Tokens::light());
-        let dark = ThemeSample::from_tokens(&Tokens::dark());
-        carousel(ui, "gallery_theme_carousel", 4, 88.0, 96.0, |ui, index| {
-            if index == 3 {
-                theme_import_tile(ui, "Import…", "theme file");
-            } else {
-                let label = ["Light", "Dark", "System"][index];
-                picture_card(
-                    ui,
-                    &Card {
-                        label,
-                        sub: Some(if index == 2 { "Follows the OS" } else { "Built in" }),
-                        selected: index == 0,
-                        enabled: true,
-                        options: None,
-                        check: false,
-                        aspect: 124.0 / 76.0,
-                        figure: &|p, rect| match index {
-                            0 => paint_theme_thumbnail(p, rect, &light),
-                            1 => paint_theme_thumbnail(p, rect, &dark),
-                            _ => paint_theme_system(p, rect, &light, &dark),
-                        },
-                    },
-                    88.0,
-                );
-            }
-        });
-    }),
     element!("picture_card", |ui, _| {
         use super::preferences_figure_data as figures;
         let gap = ui.spacing().item_spacing.x;
@@ -738,36 +835,15 @@ const ELEMENTS: &[Element] = &[
             help_icon(ui, "Applies when SolidCraft restarts.");
         });
     }),
-    element!("carousel", |ui, _| {
-        let sample = ThemeSample::from_tokens(&Tokens::get());
-        let width = Tokens::get().space_24 * 2.0 + Tokens::get().space_24;
-        carousel(ui, "gallery_carousel", 6, width, width * 0.8, |ui, index| {
-            let label = ["Light", "Dark", "System", "Gruvbox", "Studio", "Mono"][index % 6];
-            picture_card(
-                ui,
-                &Card {
-                    label,
-                    sub: Some("Built in"),
-                    selected: index == 1,
-                    enabled: true,
-                    options: None,
-                    check: false,
-                    aspect: 124.0 / 76.0,
-                    figure: &|p, r| paint_theme_thumbnail(p, r, &sample),
-                },
-                width,
-            );
-        });
-    }),
     element!("preference_theme_thumbnails", |ui, _| {
         let (light, dark) = (ThemeSample::from_tokens(&Tokens::light()), ThemeSample::from_tokens(&Tokens::dark()));
         ui.horizontal(|ui| {
-            for kind in 0..3 {
+            for kind in 0..2 {
                 let (rect, _) = ui.allocate_exact_size(vec2(88.0, 88.0 * 76.0 / 124.0), egui::Sense::hover());
                 match kind {
                     0 => paint_theme_thumbnail(ui.painter(), rect, &light),
                     1 => paint_theme_thumbnail(ui.painter(), rect, &dark),
-                    _ => paint_theme_system(ui.painter(), rect, &light, &dark),
+                    _ => {}
                 }
             }
         });
@@ -924,7 +1000,7 @@ const ELEMENTS: &[Element] = &[
     element!("assistant_composer", |ui, s| {
         assistant_composer_footer(ui, |ui| {
             assistant_composer(ui, false, |ui| {
-                assistant_input(ui, ui.id().with("assistant_gallery"), &mut s.value, "Ask for a change…");
+                assistant_input(ui, ui.scope_id().with("assistant_gallery"), &mut s.value, "Ask for a change…");
             });
         });
     }),
@@ -1148,7 +1224,7 @@ const ELEMENTS: &[Element] = &[
         workspace_menu(ui, &crate::context_menu::items(&app, &crate::context_menu::Target::Workspace), None, 550.0);
     }),
     element!("window", "dialog:footer", Some("dialog:ok"), |ui, _| {
-        Window::new(ui.id().with("window"), "settings", "Preferences").content(
+        Window::new(ui.scope_id().with("window"), "settings", "Preferences").content(
             ui,
             true,
             |ui| {
@@ -1177,7 +1253,7 @@ const ELEMENTS: &[Element] = &[
         );
     }),
     element!("confirm_warning", "dialog:footer", Some("dialog:apply"), |ui, _| {
-        Confirm::new(ui.id().with("confirm"), "status_warning", "Save changes?")
+        Confirm::new(ui.scope_id().with("confirm"), "status_warning", "Save changes?")
             .tone(Tone::Warning)
             .actions("Save", "Cancel", Some("Don't Save"))
             .content(ui, true, |ui| {
@@ -1185,7 +1261,7 @@ const ELEMENTS: &[Element] = &[
             });
     }),
     element!("confirm_danger", "dialog:footer", Some("dialog:ok"), |ui, _| {
-        Confirm::new(ui.id().with("confirm"), "delete", "Delete")
+        Confirm::new(ui.scope_id().with("confirm"), "delete", "Delete")
             .tone(Tone::Danger)
             .detail("Fillet2 · Chamfer1")
             .actions("Delete", "Cancel", None)
@@ -1194,7 +1270,7 @@ const ELEMENTS: &[Element] = &[
             });
     }),
     element!("confirm_info", "dialog:footer", Some("dialog:ok"), |ui, _| {
-        Confirm::new(ui.id().with("confirm"), "help", "Replace file?").actions("Replace", "Cancel", None).content(ui, true, |ui| {
+        Confirm::new(ui.scope_id().with("confirm"), "help", "Replace file?").actions("Replace", "Cancel", None).content(ui, true, |ui| {
             text(ui, "A file with this name already exists.", Text::Report("message", false));
         });
     }),
@@ -1202,7 +1278,7 @@ const ELEMENTS: &[Element] = &[
         text(ui, "solid.fillet · replayable", Text::MonoNote("sample"));
     }),
     element!("color_thumbnail", |ui, _| {
-        color_thumbnail(ui, ui.id().with("thumb"), Tokens::get().accent, "Sample", ());
+        color_thumbnail(ui, ui.scope_id().with("thumb"), Tokens::get().accent, "Sample", ());
     }),
     element!("list_frame", |ui, _| {
         list_frame(ui, "sample", |ui| {
@@ -1264,7 +1340,7 @@ const ELEMENTS: &[Element] = &[
         active_pill(ui);
     }),
     element!("library_cell", |ui, s| {
-        library_cell(ui, ui.id().with("library"), &mut s.value, "Default material", |ui| {
+        library_cell(ui, ui.scope_id().with("library"), &mut s.value, "Default material", |ui| {
             button(ui, "Steel", Button::Normal);
         });
     }),
@@ -1324,7 +1400,7 @@ const ELEMENTS: &[Element] = &[
                         text(ui, "Width", Text::Cell);
                     });
                     row.cell(|ui| {
-                        cell_editor(ui, ui.id().with("expression"), &mut s.value, "Expression", false);
+                        cell_editor(ui, ui.scope_id().with("expression"), &mut s.value, "Expression", false);
                     });
                     row.cell(|ui| {
                         bin_button(ui, "Delete");
@@ -1367,19 +1443,22 @@ const ELEMENTS: &[Element] = &[
         slider(ui, &mut 12.0, 0.0..=100.0, Slider { show_value: false, integer: true, ..Default::default() });
     }),
     element!("canvas_value_field", |ui, s| {
-        canvas_value_field(ui, ui.id().with("canvas_value"), &mut s.value, false);
+        canvas_value_field(ui, ui.scope_id().with("canvas_value"), &mut s.value, false);
     }),
     element!("placement_field", |ui, s| {
-        placement_field(ui, ui.id().with("placement"), &mut s.value, "Distance");
+        placement_field(ui, ui.scope_id().with("placement"), &mut s.value, "Distance");
     }),
     element!("bounded_cell_editor", |ui, s| {
-        bounded_cell_editor(ui, ui.id().with("name"), &mut s.value, "Name", false, 128);
+        bounded_cell_editor(ui, ui.scope_id().with("name"), &mut s.value, "Name", false, 128);
     }),
     element!("password_field", |ui, s| {
-        password_field(ui, ui.id().with("secret"), &mut s.value, "API key");
+        password_field(ui, ui.scope_id().with("secret"), &mut s.value, "API key");
     }),
     element!("number_field", |ui, _| {
         number_field(ui, &mut 3_u32, 1..=200, 1.0, "");
+    }),
+    element!("number_field_preserving", |ui, _| {
+        number_field_preserving(ui, &mut 256_u32, 1..=64, 1.0, "");
     }),
     element!("number_fields", |ui, _| {
         row(ui, "Target", |ui| {
@@ -1394,6 +1473,25 @@ const ELEMENTS: &[Element] = &[
             list_picker(ui, "preset", "Preset", true);
         });
     }),
+    element!("bounded_dropdown_menu", |ui, state| {
+        let choices = [
+            "CPU lens acceptance with a long captured shot name for the retained image",
+            "GPU lens acceptance with a second long captured shot name for the result",
+        ];
+        let selected = state.selected.min(choices.len() - 1);
+        let width = ui.available_width().min(Tokens::get().form_card_width * 0.75);
+        let response = bounded_dropdown_menu(ui, "gallery_bounded_menu", choices[selected], width, |ui| {
+            for (index, label) in choices.iter().enumerate() {
+                let response = list_picker(ui, &format!("bounded:{index}"), label, selected == index);
+                if response.clicked() {
+                    state.selected = index;
+                    ui.close();
+                }
+                response.on_hover_text(*label);
+            }
+        });
+        response.on_hover_text(choices[selected]);
+    }),
     element!("dropdown_menu_with_close_behavior", |ui, s| {
         dropdown_menu_with_close_behavior(ui, "gallery_editable_menu", "Preset", egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
             text_field(ui, &mut s.value, "Filter…");
@@ -1403,7 +1501,7 @@ const ELEMENTS: &[Element] = &[
         });
     }),
     element!("message_field", |ui, s| {
-        message_field(ui, ui.id().with("message"), &mut s.value, "Message");
+        message_field(ui, ui.scope_id().with("message"), &mut s.value, "Message");
     }),
     element!("text_lines", |ui, _| {
         text_lines(ui, "gallery", "Licence\nSecond line");
@@ -1422,7 +1520,7 @@ const ELEMENTS: &[Element] = &[
                     text(ui, "Width", Text::Cell);
                 });
                 row.cell(|ui| {
-                    cell_editor(ui, ui.id().with("value"), &mut s.value, "", false);
+                    cell_editor(ui, ui.scope_id().with("value"), &mut s.value, "", false);
                 });
             });
         });
@@ -1460,13 +1558,13 @@ const ELEMENTS: &[Element] = &[
         name_cell_with_hint(ui, "Width", false, "Double-click to rename");
     }),
     element!("search_field", |ui, s| {
-        search_field(ui, ui.id().with("search"), &mut s.value, "Search");
+        search_field(ui, ui.scope_id().with("search"), &mut s.value, "Search");
     }),
     element!("menu_filter", |ui, s| {
-        menu_filter(ui, ui.id().with("menu_filter"), &mut s.value, "Filter");
+        menu_filter(ui, ui.scope_id().with("menu_filter"), &mut s.value, "Filter");
     }),
     element!("cell_editor", |ui, s| {
-        cell_editor(ui, ui.id().with("cell"), &mut s.value, "Expression", true);
+        cell_editor(ui, ui.scope_id().with("cell"), &mut s.value, "Expression", true);
     }),
     element!("color_field", |ui, _| {
         color_field(ui, &mut [120, 150, 180]);
@@ -1499,14 +1597,14 @@ const ELEMENTS: &[Element] = &[
         angle_field(ui, &mut 45.0);
     }),
     element!("text_area", |ui, s| {
-        text_area(ui, "Gallery", ui.id().with("area"), &mut s.value, 5, 1024);
+        text_area(ui, "Gallery", ui.scope_id().with("area"), &mut s.value, 5, 1024);
     }),
     element!("color_swatch", |ui, _| {
-        color_swatch(ui, ui.id().with("swatch"), Tokens::get().accent, true, "Sample", 1);
+        color_swatch(ui, ui.scope_id().with("swatch"), Tokens::get().accent, true, "Sample", 1);
     }),
     element!("swatch_grid", |ui, _| {
         swatch_grid(ui, &[1, 2, 3], |ui, n| {
-            color_swatch(ui, ui.id().with(n), Tokens::get().accent, true, "Sample", *n);
+            color_swatch(ui, ui.scope_id().with(n), Tokens::get().accent, true, "Sample", *n);
         });
     }),
     element!("action_menu", |ui, _| {
@@ -1583,7 +1681,7 @@ const ELEMENTS: &[Element] = &[
         choice_row(ui, "Gallery", "gallery", &mut s.selected, &["One", "Two"]);
     }),
     element!("multiline_text_field", "dialog:widget:Gallery", Some("dialog:Gallery"), |ui, s| {
-        multiline_text_field(ui, "Gallery", ui.id().with("text"), &mut s.value);
+        multiline_text_field(ui, "Gallery", ui.scope_id().with("text"), &mut s.value);
     }),
     element!("searchable_dropdown", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, _| {
         row(ui, "Gallery", |ui| {
@@ -1619,7 +1717,7 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("inline_name", |ui, s| {
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), row_height()), egui::Sense::hover());
-        inline_name(ui, rect, ui.id().with("inline_name"), &mut s.value);
+        inline_name(ui, rect, ui.scope_id().with("inline_name"), &mut s.value);
     }),
     element!("field", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         row(ui, "Gallery", |ui| {
@@ -1949,7 +2047,7 @@ const ELEMENTS: &[Element] = &[
         let anchor = ui.allocate_space(vec2(100.0, row_height())).1;
         popup_list(
             ui.ctx(),
-            ui.id().with("popup"),
+            ui.scope_id().with("popup"),
             anchor,
             Some(0),
             &[PopupOption { kind: "parameter", text: "Width", detail: "10 mm", color: Tokens::get().text }],
@@ -2234,7 +2332,7 @@ fn table_cells_keep_alignment_fixed_rows_editing_and_action_targets() {
                                     text(ui, name, Text::Cell);
                                 });
                                 row.cell(|ui| {
-                                    let response = cell_editor(ui, ui.id().with("expression"), value, "Expression", false);
+                                    let response = cell_editor(ui, ui.scope_id().with("expression"), value, "Expression", false);
                                     scenario::publish_handle(&format!("gallery:cell:{name}"), response.rect.center());
                                     scenario::publish_rect(&format!("gallery:cell:{name}"), response.rect);
                                 });
@@ -2281,7 +2379,7 @@ fn popup_suggestions_and_selectable_lists_keep_click_selection() {
         let mut draw = |ui: &mut Ui| {
             selected = popup_list(
                 ui.ctx(),
-                egui::Id::new("suggestions"),
+                egui::Id::unique("suggestions"),
                 egui::Rect::from_min_size(egui::pos2(10.0, 10.0), vec2(220.0, 24.0)),
                 Some(0),
                 &[
@@ -2324,7 +2422,7 @@ fn many_draggable_samples_wrap_inside_the_available_width() {
         scope(ui, |ui| {
             bounds = ui.available_rect_before_wrap();
             swatch_grid(ui, &(0..20).collect::<Vec<_>>(), |ui, index| {
-                let response = color_swatch(ui, ui.id().with(index), Tokens::get().accent, false, "Sample", *index);
+                let response = color_swatch(ui, ui.scope_id().with(index), Tokens::get().accent, false, "Sample", *index);
                 rects.push(response.rect);
             });
         });
@@ -2357,6 +2455,7 @@ fn gallery_covers_every_inline_element() {
         "sphere.rs",
         "status.rs",
         "table.rs",
+        "theme_picker.rs",
         "tree.rs",
     ] {
         let source = std::fs::read_to_string(root.join(file)).unwrap();
@@ -2694,7 +2793,7 @@ fn confirm_radial_and_history_rows_keep_multitone_artwork() {
                             "danger" => Tone::Danger,
                             _ => Tone::Info,
                         };
-                        Confirm::new(ui.id().with("confirm"), icon, "Confirm").tone(tone).content(ui, true, |_| {});
+                        Confirm::new(ui.scope_id().with("confirm"), icon, "Confirm").tone(tone).content(ui, true, |_| {});
                     }
                 }
             });
@@ -2956,7 +3055,7 @@ fn tree_icon_actions_keep_repeated_light_rows_independent() {
         for index in 0..3 {
             let target = format!("light:{index}:visibility");
             let actions = [TreeAction { icon: "eye", hover_only: false, label: "Hide", reason: Some("Not available yet"), target: &target }];
-            let row = tree_row(ui, ui.id().with(index), &Row { compact: true, label: "Directional", actions: &actions, ..Default::default() });
+            let row = tree_row(ui, ui.scope_id().with(index), &Row { compact: true, label: "Directional", actions: &actions, ..Default::default() });
             for action in row.actions {
                 assert!(ids.insert(action.id), "each light action must have its own widget identity");
             }
@@ -2982,19 +3081,14 @@ fn card_looks_follow_selected_hover_disabled_and_focus() {
 
 #[test]
 fn cards_size_to_their_container_and_survive_hostile_sizes() {
-    use super::preferences_cards::{card_width, carousel_window};
+    use super::preferences_cards::card_width;
     assert_eq!(card_width(320.0, 4, 10.0), 72.5);
     assert_eq!(card_width(320.0, 0, 10.0), 320.0);
     for bad in [0.0, -5.0, f32::NAN, f32::INFINITY, f32::MAX] {
         let w = card_width(bad, 3, 10.0);
         assert!(w.is_finite() && w >= 0.0, "{bad}: {w}");
-        let (first, visible) = carousel_window(5, 9, bad, 88.0, 8.0, 26.0);
-        assert!(first + visible <= 5 && visible >= 1, "{bad}: {first} {visible}");
     }
-    assert_eq!(carousel_window(0, 3, 400.0, 88.0, 8.0, 26.0), (0, 0));
     // 400 wide: two arrows and their gaps leave 332, which fits three 88-wide items with gaps.
-    assert_eq!(carousel_window(6, 0, 400.0, 88.0, 8.0, 26.0), (0, 3));
-    assert_eq!(carousel_window(6, 5, 400.0, 88.0, 8.0, 26.0), (3, 3), "the offset stops at the last full window");
 }
 
 fn sample_card<'a>(label: &'a str, selected: bool, enabled: bool) -> super::preferences_cards::Card<'a> {
@@ -3049,8 +3143,8 @@ fn picture_cards_and_tiles_click_only_when_enabled_and_never_panic() {
 }
 
 #[test]
-fn preset_card_help_icon_and_carousel_behave() {
-    use super::preferences_cards::{carousel, help_icon, preset_card};
+fn preset_card_and_help_icon_behave() {
+    use super::preferences_cards::{help_icon, preset_card};
     let ctx = crate::fonts::test_context();
     let icon = |p: &egui::Painter, r: egui::Rect, ink: egui::Color32| crate::icons::paint_ink(p, r, "settings", ink);
     super::test_support::frame(&ctx, vec![], |ui| {
@@ -3061,29 +3155,6 @@ fn preset_card_help_icon_and_carousel_behave() {
         let help = help_icon(ui, "Help text");
         assert!(help.rect.width() > 8.0 && help.rect.width() < 20.0);
     });
-    // The next arrow moves the window by one and stays inert at the end.
-    let mut first = vec![];
-    let mut at = None;
-    for pass in 0..6 {
-        let events = match (pass, at) {
-            (2, Some(p)) => super::test_support::pointer(p, true),
-            (3, Some(p)) => super::test_support::pointer(p, false),
-            _ => vec![],
-        };
-        super::test_support::frame(&ctx, events, |ui| {
-            let (f, visible) = carousel(ui, "carousel_test", 5, 60.0, 40.0, |ui, _| {
-                ui.allocate_exact_size(egui::vec2(60.0, 40.0), egui::Sense::hover());
-            });
-            first.push((f, visible));
-            if let Some(rect) = scenario::rect_of("prefs:carousel:Next") {
-                at = Some(rect.center());
-            }
-        });
-    }
-    let (f0, visible) = first[0];
-    assert_eq!(f0, 0);
-    assert!((1..5).contains(&visible), "{visible}");
-    assert!(first.last().unwrap().0 >= 1, "the next arrow advanced the window: {first:?}");
 }
 
 /// Light and dark boards of the shared Preferences widgets and of every figure, rendered on the CPU.
@@ -3096,7 +3167,7 @@ fn preference_widgets_and_figures_board_in_both_themes() {
     for dark in [false, true] {
         crate::theme::set_dark(dark);
         for (board, names) in [
-            ("widgets", &["picture_card", "toggle_tile", "preset_card", "help_icon", "carousel", "preference_theme_thumbnails"][..]),
+            ("widgets", &["picture_card", "toggle_tile", "preset_card", "help_icon", "theme_browser", "preference_theme_thumbnails"][..]),
             ("figures", &["preference_figures"][..]),
         ] {
             for scale in [1.0_f32, 2.0] {

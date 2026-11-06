@@ -1,19 +1,20 @@
 # Bounded primary spatial AA proposal (#620 / existing render-quality work)
 
-Source port on the personal rendering branch's CPU/GPU2 snapshot. Written tests
-for this recovered unit have not run on this integrated revision; compilation,
-layout, PNG, performance and full project validation remain the caller's next
-gate. See [advanced CPU integration](render-cpu-advanced-integration.md) for the
-exact source baseline and recovery provenance.
+This unit originated as a source port on the personal rendering branch's
+CPU/GPU2 snapshot. The combined CPU-feature renderer build, layout and numerical
+regressions have now executed. Current combined engine/UI/native qualification,
+performance and full-project validation remain separate gates. See
+[advanced CPU integration](render-cpu-advanced-integration.md) for the exact source baseline and recovery provenance.
 
-`raytrace.primary_samples` is a transient request option: omitted/1 retains the
+`raytrace.primary_samples` is the runtime option, also saved as CPU
+`job.options.primary_samples`: omitted/1 retains the
 legacy fixed-centre route,4 uses a2x2 pixel-box grid,16 uses4x4. Other counts
 refuse. Default1 is omitted from serialized options to preserve the default
-request representation. Nothing is added to document/RenderSetup persistence,
-undo, GPU MSAA, material libraries or optical boundary definitions. The integrated
-CPU image UI already exposes 1/4/16 primary samples; engine/MCP and the CLI's
+request representation. Typed CPU setup edits use the existing save/Undo path;
+GPU MSAA, material libraries and optical boundary definitions are independent.
+The integrated CPU image UI already exposes 1/4/16 primary samples; engine/MCP and the CLI's
 runtime raytrace options use the same request contract. This recovered follow-up
-changes the bounded reuse implementation, without introducing saved AA state.
+changes the bounded reuse implementation, without adding a second saved AA authority.
 
 The single-primary branch keeps its former generator, reuse proof, R addition
 order/divisor, primary-background shortcut, seeds, work debits and encoding.
@@ -44,8 +45,10 @@ apply exposure/Reinhard once to G, then composite C*T(G)+(1-C)*decode(background
 in display-linear sRGB before one sRGB encoding. All-miss pixels retain the exact
 background bytes; full coverage omits background operations. Background remains
 display-referred, not an emitter and not exposure-controlled. Do not averageRGB8,
-individually tone-mapped paths or tone the premultiplied P. Output alpha stays255;
-coverage is internal quadrature, not transparency/refraction support.
+individually tone-mapped paths or tone the premultiplied P. Opaque output keeps
+alpha255; explicit [transparent PNG](render-cpu-output.md#transparent-png-coverage)
+exports straight RGB and rounded geometric coverage. Neither mode turns material
+opacity into physical refraction.
 
 One ImageTask/PendingPixel/BVH/host pool and one cumulative1e9 WorkBudget remain.
 AA retains fixed scalar/Vec3 accumulators; reuse adds no fields. Per-R-add
@@ -56,7 +59,8 @@ cancellation is checked again just before pixel bytes are emitted. Running
 progress still counts completed OUTPUT pixels. No partial PNG or samples reduced
 on exhaustion. Existing384MiB job/512MiB host limits and PNG encoder are retained.
 A compile-time type-length check and written layout regression require actual
-ImageTask<=4096 bytes; because no build has run, actual layout is NOT qualified.
+ImageTask<=4096 bytes; that guard passed in the combined CPU-feature build.
+Other feature/platform configurations retain their own validation gates.
 
 Cost can grow with S*R, traversal, lights, HDR and bounces. Retaining exact
 intra-spatial primary reuse does not establish any work-budget success. Limits
@@ -73,7 +77,8 @@ same caps/layout. The blanket birth-proof policy assertion changes as described
 above; existing observable assertions remain. New actual-consumer tests compare
 every ordered R accumulator prefix, logical coverage and PNG bytes with the same
 ImageTask route whose proof is revoked before its first shading completion.
-Execution, type/layout checks and all acceptance gates are pending.
+The renderer numerical and type/layout checks have executed. Current combined
+engine/UI/native and full-project acceptance remain pending.
 Default-vs-historical exact-build byte/work comparison, engine/host preflight
 validation, arbitrary projection scenes, allocation/layout and ownership gates,
 Clippy/wasm and required cargo xtask ci are required before publication. Designer

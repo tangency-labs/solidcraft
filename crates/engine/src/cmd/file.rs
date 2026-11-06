@@ -31,15 +31,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("open")
         .key("Ctrl+O")
         .noundo()
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh)"),
+        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
     CommandSpec::new("file.insert_step", "Insert STEP", insert_step)
         .at("SOLID", "INSERT")
         .icon("import")
-        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
+        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", insert_mesh)
         .at("SOLID", "INSERT")
         .icon("import")
-        .params("path: .3mf, .stl, .obj, .ply (with faces), .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept)"),
+        .params("path: .3mf, .stl, .obj, .ply (with faces), .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept); units?: mm|cm|m|in|ft for an STL or OBJ file, or a PLY file with faces (default mm): the unit its coordinates are in, scaled to millimetres as the file is read (a 3MF or glTF file states its own). The design keeps the millimetre mesh and not the unit, so insert the file again to try another"),
     CommandSpec::new("file.save", "Save", save)
         .icon("save")
         .key("Ctrl+S")
@@ -139,6 +139,9 @@ struct StepOptions {
     /// (Y becomes Z), as the app's "Stand it up" offer does. `z` (the default) keeps the file's axes.
     y_up: bool,
     names: solidcraft_io::StepNames,
+    /// `folder: true`: an import that brings more than one item gets a `Group #N` history folder
+    /// (`import_folder`). `false` (the default) makes none, as before the option.
+    folder: bool,
 }
 
 fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
@@ -157,7 +160,17 @@ fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
             .and_then(solidcraft_io::StepNames::parse)
             .ok_or_else(|| bad(cmd, "`names` must be \"auto\", \"solid\", \"product\" or \"instance\""))?,
     };
-    Ok(StepOptions { y_up, names })
+    let folder = match p.get("folder") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(folder)) => *folder,
+        Some(_) => {
+            return Err(bad(
+                cmd,
+                "`folder` must be true (an import that brings more than one item goes into a `Group #N` history folder) or false (no folder)",
+            ));
+        }
+    };
+    Ok(StepOptions { y_up, names, folder })
 }
 
 /// Read a STEP file as an Import feature.
@@ -200,6 +213,7 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptio
     // assembly's parts and instances turn together.
     let turned = if options.y_up { turn_up(s, &placed)? } else { None };
     let created = created_bodies(s, id);
+    let folder = if options.folder { import_folder(s, id, &placed)? } else { None };
     let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
     let mut out = json!({"path": path, "feature": id, "name": fname, "bodies": created, "created_bodies": created, "warnings": sf.warnings, "system": sf.import.system});
     if let Some((up, exporter)) = exporter_up(&sf.import) {
@@ -210,11 +224,34 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptio
     if let Some(turned) = turned {
         out["stand_up"] = json!(turned);
     }
+    if let Some(folder) = folder {
+        out["group"] = json!(folder);
+    }
     if let Some(mark) = profiled {
         let report = crate::schema::diagnostics::ProfileReport::new(&mark.report(), 20);
         out["profile"] = serde_json::to_value(report).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     }
     Ok(out)
+}
+
+/// An import that brings more than one item into the history (its Import feature and the rigid
+/// joints holding its parts together) goes into a history folder of its own, named `Group #N`,
+/// holding the feature and those joints, so it stands apart from the features before and after
+/// it and the History shows it as one chip. The folder sits in the folder the feature was put
+/// in, if any. Returns the folder.
+fn import_folder(s: &mut Session, feature: u64, placed: &import::Placed) -> Result<Option<u64>> {
+    if placed.joints.is_empty() {
+        return Ok(None);
+    }
+    let parent = s.doc.timeline_groups.iter().find(|folder| folder.features.contains(&feature)).map(|folder| folder.id);
+    let name = next_group_name(&s.doc);
+    super::edit::new_folder(s, &name, vec![feature], placed.joints.clone(), parent, "file.insert_step").map(Some)
+}
+
+/// The first `Group #N` no history folder is named yet.
+fn next_group_name(doc: &Document) -> String {
+    let taken = |name: &str| doc.timeline_groups.iter().any(|folder| folder.name == name);
+    (1..=doc.timeline_groups.len() + 1).map(|n| format!("Group #{n}")).find(|name| !taken(name)).unwrap_or_else(|| "Group".into())
 }
 
 /// The bodies an import feature built, by name.
@@ -225,7 +262,7 @@ fn created_bodies(s: &Session, feature: u64) -> Vec<String> {
 /// Add a MeshImport feature for a 3MF, STL, OBJ or glTF file, in a new component named after the
 /// file. A glTF file's nodes become components in it, and its materials the bodies' looks; it is
 /// in metres with Y up, so unless `y_up` is false its component is turned to Z up (#1505).
-fn add_mesh(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<bool>) -> Result<Value> {
+fn add_mesh(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<bool>, unit: Option<(&'static str, f64)>) -> Result<Value> {
     let err = |e: solidcraft_io::IoError| EngineError::Other(format!("{path}: {e}"));
     let bytes = solidcraft_io::vfs::read(path, solidcraft_io::MAX_3MF_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let gltf = solidcraft_io::is_gltf_path(path);
@@ -239,7 +276,7 @@ fn add_mesh(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<bool>)
         }
         (g.feature, Some(g.plan), g.looks)
     } else {
-        (solidcraft_io::mesh_import_feature(&bytes, path).map_err(err)?, None, Vec::new())
+        (solidcraft_io::mesh_import_feature_in(&bytes, path, unit.map_or(1.0, |(_, mm)| mm)).map_err(err)?, None, Vec::new())
     };
     let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&mf.name).to_string();
     let cname = import::component_name(path, name);
@@ -262,6 +299,9 @@ fn add_mesh(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<bool>)
     let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
     let mut out = json!({"path": path, "feature": id, "name": fname, "bodies": bodies, "created_bodies": bodies, "warnings": mf.warnings});
     placed.report(&mut out);
+    if let Some((name, _)) = unit {
+        out["units"] = json!(name);
+    }
     if let Some(turned) = turned {
         out["stand_up"] = json!(turned);
     }
@@ -291,6 +331,27 @@ fn mesh_up(p: &Value, path: &str, cmd: &str) -> Result<Option<bool>> {
     Ok(Some(step_options(p, cmd)?.y_up))
 }
 
+/// `units` for an STL, OBJ or PLY file: the unit its coordinates are in (one of
+/// `solidcraft_doc::point_cloud::UNITS`, the same as a point cloud's), which they are scaled from
+/// to millimetres as the file is read. The design keeps the millimetre mesh and not the unit, so
+/// importing again is how a different unit is tried. A 3MF or glTF file states its own.
+fn mesh_units(p: &Value, path: &str, cmd: &str) -> Result<Option<(&'static str, f64)>> {
+    let names = || solidcraft_doc::point_cloud::UNITS.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ");
+    let unit = match p.get("units") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::String(u)) => solidcraft_doc::point_cloud::UNITS
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(u))
+            .map(|(name, mm)| (*name, *mm))
+            .ok_or_else(|| bad(cmd, format!("`units` must be one of {} (not `{u}`)", names())))?,
+        Some(_) => return Err(bad(cmd, format!("`units` must be one of {}", names()))),
+    };
+    if solidcraft_io::is_gltf_path(path) || path.to_ascii_lowercase().ends_with(".3mf") {
+        return Err(bad(cmd, "`units` applies to STL, OBJ and PLY files only: a 3MF or glTF file states its own"));
+    }
+    Ok(Some(unit))
+}
+
 fn insert_mesh(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.insert_mesh";
     let path = path_arg(p, cmd)?;
@@ -298,7 +359,8 @@ fn insert_mesh(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "only 3MF, STL, OBJ, PLY and glTF files (.3mf, .stl, .obj, .ply, .glb, .gltf) can be inserted as meshes"));
     }
     let up = mesh_up(p, path, cmd)?;
-    add_mesh(s, path, str_(p, "name"), up)
+    let unit = mesh_units(p, path, cmd)?;
+    add_mesh(s, path, str_(p, "name"), up, unit)
 }
 
 fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
@@ -375,7 +437,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         let r = if solidcraft_io::is_step_path(path) {
             add_step(&mut fresh, path, None, &step_options(p, "doc.open")?)?
         } else {
-            add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?)?
+            add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?, mesh_units(p, path, "doc.open")?)?
         };
         // The design is the file: its component is the one being worked in.
         if let Some(c) = r["component"].as_u64() {
@@ -426,6 +488,11 @@ fn opened_design(
     let mut out = json!({"path": path, "features": s.doc.features.len(), "errors": errors, "name": s.doc.name});
     if read_only {
         out["read_only"] = json!(true);
+    }
+    // A newer SolidCraft saved it: opened all the same, and the reply says so.
+    if let Some(file) = &s.doc.newer_file {
+        out["newer_file"] = file.report();
+        out["warnings"] = json!(file.warnings());
     }
     let now = solidcraft_io::design_lock::now_secs();
     if let Some(lock) = solidcraft_io::design_lock::held_elsewhere(std::path::Path::new(path), now) {
@@ -520,6 +587,16 @@ fn write(s: &mut Session, cmd: &str, path: &str, format: &str, compression: &str
     // A path outside the agent's folders says so first, whatever its name.
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
     check_design_name(cmd, path)?;
+    // A move not captured yet isn't in the document a file holds: refuse, rather than write the
+    // file without it and say nothing (#9736). The app asks the Capture Position question first.
+    // An exploded view shown saves as before: its placements aren't the design's.
+    if s.moved_uncaptured() {
+        let moved: Vec<&str> = s.doc.occurrences.iter().filter(|o| s.pending_moves.contains_key(&o.id)).map(|o| o.name.as_str()).collect();
+        return Err(EngineError::Other(format!(
+            "{path}: {} moved and not captured yet; component.capture_position keeps the move and component.revert_position puts it back, then save",
+            moved.join(", ")
+        )));
+    }
     if s.path.as_deref() == Some(path) {
         if s.read_only {
             return Err(EngineError::Other(format!("{path}: the design was opened read-only; save it to another file with file.save_as")));
@@ -573,7 +650,21 @@ fn write_bytes(
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
     s.mark_saved();
-    Ok(json!({"path": path, "bytes": bytes.len(), "name": s.doc.name}))
+    let mut out = json!({"path": path, "bytes": bytes.len(), "name": s.doc.name});
+    // A newer SolidCraft's file keeps what this version can't read, and its format number. What
+    // couldn't go back, because the design was changed around it, is said.
+    if s.doc.newer_file.is_some() {
+        let mut lost = solidcraft_doc::newer_file::not_kept(&s.doc);
+        if format == "json" && s.doc.newer_file.as_ref().is_some_and(|file| file.needs_container()) {
+            lost.push("the parts of the file beside the design, which plain JSON has no room for: save as .sc to keep them".to_string());
+        }
+        out["kept_format"] = json!(s.doc.format);
+        if !lost.is_empty() {
+            out["warnings"] = json!(lost.iter().map(|what| format!("Not kept: {what}. The previous file is `{path}.bak`.")).collect::<Vec<_>>());
+            out["not_kept"] = json!(lost);
+        }
+    }
+    Ok(out)
 }
 
 impl Session {
@@ -640,6 +731,21 @@ impl Session {
         self.read_only = done.read_only;
         self.saved = done.saved.clone();
         self.saved_visibility = done.saved_visibility.clone();
+    }
+
+    /// The design's file was renamed (browser OPFS rename, or an equivalent host move): keep the
+    /// open session on the new path, and when the design name was borrowed from the file, follow
+    /// it so the tab title matches the file list (#11375). A name the user chose is kept, as on
+    /// Save As.
+    pub fn follow_file_rename(&mut self, old_path: &str, new_path: &str) {
+        if self.path.as_deref() != Some(old_path) || old_path == new_path {
+            return;
+        }
+        if let Some(stem) = saved_name(&self.doc.name, Some(old_path), new_path, self.user_named) {
+            let from = self.doc.name.clone();
+            rename_design(self, &from, &stem);
+        }
+        self.path = Some(new_path.to_string());
     }
 
     /// Another program or computer wrote the design's file since it was opened or last saved:
@@ -1147,6 +1253,34 @@ mod tests {
         assert!(p["by_category"].as_array().is_some_and(|c| !c.is_empty()) && p["wall_ms"].as_f64().is_some_and(|w| w > 0.0), "{p}");
     }
 
+    /// Renaming the open design's file updates its path and, when the name came from the file,
+    /// the design name the tab shows (#11375).
+    #[test]
+    fn follow_file_rename_updates_path_and_borrowed_design_name() {
+        let mut s = Session::default();
+        s.doc_mut().name = "Plate".into();
+        s.path = Some("opfs://Plate.solidcraft".into());
+        s.user_named = false;
+        s.follow_file_rename("opfs://Plate.solidcraft", "opfs://Bracket.solidcraft");
+        assert_eq!(s.path.as_deref(), Some("opfs://Bracket.solidcraft"));
+        assert_eq!(s.doc.name, "Bracket");
+
+        let mut kept = Session::default();
+        kept.doc_mut().name = "My part".into();
+        kept.path = Some("opfs://Plate.solidcraft".into());
+        kept.user_named = true;
+        kept.follow_file_rename("opfs://Plate.solidcraft", "opfs://Bracket.solidcraft");
+        assert_eq!(kept.path.as_deref(), Some("opfs://Bracket.solidcraft"));
+        assert_eq!(kept.doc.name, "My part");
+
+        let mut other = Session::default();
+        other.doc_mut().name = "Other".into();
+        other.path = Some("opfs://Other.solidcraft".into());
+        other.follow_file_rename("opfs://Plate.solidcraft", "opfs://Bracket.solidcraft");
+        assert_eq!(other.path.as_deref(), Some("opfs://Other.solidcraft"));
+        assert_eq!(other.doc.name, "Other");
+    }
+
     /// #8139: with `objects: "component"` a 3MF has one object for each placement of a component
     /// with two or more bodies, its bodies the object's parts; the design's own bodies stay objects
     /// of their own. The default (and `objects: "body"`) is one object per body, as before. Read
@@ -1392,6 +1526,60 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A design a newer SolidCraft saved opens through the command agents and the app use: the
+    /// reply warns, what it can't read shows as that feature's error, work goes on around it, and
+    /// saving keeps the feature and the file's number in both encodings.
+    #[test]
+    fn a_newer_design_opens_and_saving_keeps_what_it_cant_read() {
+        let dir = std::env::temp_dir().join(format!("sc_newer_design_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+        let mut file: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+        let newer = solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1);
+        file["format"] = json!(newer);
+        let future = json!({"id": 900, "name": "Lattice1", "type": "gyroid_lattice", "cell": 2.5});
+        file["features"].as_array_mut().unwrap().push(future.clone());
+        file["future_section"] = json!([1, 2]);
+        for name in ["newer.json", "newer.sc"] {
+            let path = dir.join(name);
+            let source = solidcraft_doc::Document::from_json(&file.to_string()).unwrap();
+            let bytes = if name.ends_with(".sc") { solidcraft_io::write_design_container(&source).unwrap() } else { file.to_string().into_bytes() };
+            std::fs::write(&path, bytes).unwrap();
+            let path = path.to_string_lossy().to_string();
+            let mut opened = Session::default();
+            let reply = opened.execute("doc.open", &json!({"path": path})).unwrap();
+            assert_eq!(reply["errors"], 1, "{reply}");
+            assert_eq!(reply["features"], 2, "{reply}");
+            assert!(reply["newer_file"]["not_understood"].to_string().contains("gyroid_lattice"), "{reply}");
+            let first = reply["warnings"][0].as_str().unwrap();
+            assert_eq!(
+                first,
+                format!(
+                    "Saved by a newer SolidCraft (format {}, this version reads up to {}). If something's missing, update.",
+                    solidcraft_doc::format::FORMAT + 1,
+                    solidcraft_doc::format::FORMAT
+                )
+            );
+            assert_eq!(opened.model.state().bodies.len(), 1, "the box still builds");
+            let lattice = opened.doc.features.iter().position(|f| f.name == "Lattice1").unwrap();
+            assert!(opened.model.results[lattice].error.as_deref().unwrap().contains("gyroid_lattice"));
+            opened.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).unwrap();
+            let saved = opened.execute("file.save", &json!({})).unwrap();
+            assert_eq!(saved["kept_format"], json!(newer), "{saved}");
+            assert!(saved.get("not_kept").is_none(), "{saved}");
+            let mut again = Session::default();
+            again.execute("doc.open", &json!({"path": path})).unwrap();
+            assert_eq!(again.doc.features.len(), 3);
+            assert_eq!(again.model.state().bodies.len(), 2);
+            let written: Value = serde_json::from_str(&again.doc.to_json()).unwrap();
+            assert_eq!(written["format"], json!(newer));
+            assert_eq!(written["future_section"], json!([1, 2]));
+            assert!(written["features"].as_array().unwrap().contains(&future));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// #5467: a script, the CLI or the control channel never gets a prompt. A Save over a file
     /// another program or computer changed since it was opened is refused with an error naming
     /// `overwrite`, which replaces it; a design opened read-only only saves to another file.
@@ -1429,6 +1617,53 @@ mod tests {
         ro.execute("file.save_as", &json!({"path": b.to_string_lossy()})).unwrap();
         assert!(!ro.read_only);
         ro.execute("file.save", &json!({})).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #9736: a component moved and not captured yet is a change the file doesn't hold. The
+    /// design reads as unsaved, and Save and Save As refuse, naming the component, until the move
+    /// is captured (then the file has it) or reverted (then the design is as saved).
+    #[test]
+    fn a_move_not_captured_is_unsaved_and_saving_waits_for_it() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-pending-move-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("two.sc").to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0], "body_name": "BaseB"})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 30, "corner": [15, 15, 10], "body_name": "ArmB"})).unwrap();
+        s.execute("component.from_bodies", &json!({"bodies": ["BaseB", "ArmB"]})).unwrap();
+        s.execute("file.save_as", &json!({"path": path})).unwrap();
+        assert!(!s.is_dirty());
+        let arm = s.doc.occurrences.iter().find(|o| o.name.starts_with("ArmB")).unwrap().name.clone();
+        let arm_x = |s: &Session| {
+            let world = s.world_state().unwrap();
+            let body = world.bodies.iter().find(|b| b.name.starts_with("ArmB")).unwrap();
+            solidcraft_kernel::measure(&body.body).unwrap().centroid.x
+        };
+        for answer in ["component.revert_position", "component.capture_position"] {
+            s.execute("occurrence.move", &json!({"occurrence": arm, "translate": [7, 0, 0], "capture": false})).unwrap();
+            assert!(s.is_dirty(), "{answer}: the move is a change to save");
+            for (cmd, p) in [("file.save", json!({})), ("file.save_as", json!({"path": dir.join("other.sc").to_string_lossy()}))] {
+                let e = s.execute(cmd, &p).unwrap_err().to_string();
+                assert!(e.contains(&arm) && e.contains("not captured") && e.contains("component.capture_position"), "{cmd}: {e}");
+            }
+            assert!(!dir.join("other.sc").exists(), "nothing written");
+            s.execute(answer, &json!({})).unwrap();
+            s.execute("file.save", &json!({})).unwrap();
+            assert!(!s.is_dirty(), "{answer}");
+        }
+        let opened = Session::new(crate::io::read_design(&std::fs::read(&path).unwrap()).unwrap());
+        assert!((arm_x(&opened) - 27.0).abs() < 1e-6, "the captured move is in the file: {}", arm_x(&opened));
+        // An exploded view shown places the components only while it is shown: no change to
+        // save, and the design saves as it is. A move on top of it is one.
+        s.execute("explode.create", &json!({"name": "Apart", "moves": [{"occurrence": arm, "translate": [0, 0, 40]}]})).unwrap();
+        s.execute("file.save", &json!({})).unwrap();
+        s.execute("explode.show", &json!({"view": "Apart"})).unwrap();
+        assert!(!s.pending_moves.is_empty() && !s.is_dirty(), "an exploded view shown");
+        s.execute("file.save", &json!({})).unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": arm, "translate": [5, 0, 0], "capture": false})).unwrap();
+        assert!(s.is_dirty());
+        assert!(s.execute("file.save", &json!({})).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1845,6 +2080,79 @@ mod tests {
         assert_eq!(reopened.model.last_recomputed, 0, "taken from the file, not evaluated");
         assert!(reopened.model.results.iter().zip(&s.model.results).all(|(a, b)| a.ms == b.ms));
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// A design's saved model writes each tap marking once, and every state names the markings
+    /// it holds by place: every state listed the markings of all the features before it, so a
+    /// design of many marked cylinders grew with the square of its features (400 cylinders: 34 of
+    /// a 37 MB manifest), passed the cache's size limit and kept only some of its states. Opened
+    /// from the file, every state holds the markings it was evaluated with, to the bit.
+    #[test]
+    fn a_saved_model_writes_each_tap_marking_once() {
+        let design = |cylinders: usize| {
+            let mut s = Session::new(Document::new("Marked"));
+            let run = |s: &mut Session, id: &str, p: Value| s.execute(id, &p).unwrap();
+            for i in 0..cylinders {
+                let x = 10 * i;
+                run(&mut s, "solid.cylinder", json!({"radius":3,"height":6,"base":[x,0,0]}));
+                run(&mut s, "solid.thread", json!({"face":[x + 3,0,2],"designation":"M6","length":4}));
+            }
+            s
+        };
+        let size = |s: &Session| serde_json::to_vec(&saved_geometry(s, &s.doc).unwrap().records).unwrap().len();
+        let (few, s) = (design(4), design(12));
+        let markings = &s.model.state().threads;
+        assert_eq!(markings.len(), 12, "one marking per cylinder");
+        let per_cylinder = (size(&s) - size(&few)) / 8;
+        let all = serde_json::to_vec(markings).unwrap().len();
+        assert!(per_cylinder * 2 < all, "each later cylinder adds {per_cylinder} bytes, its markings are {all}");
+        let saved = saved_geometry(&s, &s.doc).unwrap();
+        let records = &saved.records;
+        let written = records["threads"].as_array().unwrap();
+        let texts: std::collections::HashSet<String> = written.iter().map(Value::to_string).collect();
+        assert_eq!((texts.len(), written.len()), (12, 12), "each marking once in the manifest");
+        for (r, feature) in s.model.results.iter().zip(records["features"].as_array().unwrap()) {
+            let state = &records["states"][feature["state"].as_u64().unwrap() as usize];
+            let named: Vec<Value> = state["threads"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|run| {
+                    let first = run[0].as_u64().unwrap() as usize;
+                    (first..first + run[1].as_u64().unwrap() as usize).map(|i| written[i].clone())
+                })
+                .collect();
+            assert_eq!(Value::Array(named), serde_json::to_value(&r.state.threads).unwrap(), "{}: its own markings", r.name);
+        }
+        // Opened from the file as saved: nothing evaluated, every state as evaluated.
+        let bytes = solidcraft_io::write_design_container_with_cache(&s.doc, solidcraft_io::DesignCompression::Fast, None, Some(&saved)).unwrap();
+        let kept = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&bytes)).unwrap().geometry().unwrap();
+        let reopened = Session::opened(solidcraft_io::read_design(&bytes).unwrap(), Some(&kept));
+        assert_eq!(reopened.model.last_recomputed, 0, "taken from the file, not evaluated");
+        assert_eq!(reopened.model.results.len(), s.model.results.len());
+        for (a, b) in reopened.model.results.iter().zip(&s.model.results) {
+            assert_eq!(a.ms, b.ms, "{}: taken from the file", b.name);
+            assert_eq!(serde_json::to_string(&a.state.threads).unwrap(), serde_json::to_string(&b.state.threads).unwrap(), "{}", b.name);
+            let names = |r: &solidcraft_doc::FeatureResult| r.state.bodies.iter().map(|b| (b.name.clone(), b.feature)).collect::<Vec<_>>();
+            assert_eq!(names(a), names(b), "{}", b.name);
+        }
+    }
+
+    /// A saved model whose states name one large tap marking over and over is refused: every
+    /// state holds its own copy of each marking it lists, so a marking counts by its text.
+    #[test]
+    fn a_saved_model_repeating_a_large_tap_marking_is_refused() {
+        let mut s = Session::new(Document::new("Marked"));
+        s.execute("solid.cylinder", &json!({"radius":3,"height":6,"base":[0,0,0]})).unwrap();
+        s.execute("solid.thread", &json!({"face":[3,0,2],"designation":"M6","length":4})).unwrap();
+        let saved = saved_geometry(&s, &s.doc).unwrap();
+        assert!(solidcraft_doc::Model::adopt(&s.doc, &saved).is_ok());
+        let mut hostile = solidcraft_doc::SavedModel { records: saved.records.clone(), bodies: saved.bodies.clone() };
+        hostile.records["threads"][0]["designation"] = json!("M".repeat(1 << 20));
+        let repeated: Vec<Value> = (0..4000).map(|_| json!([0, 1])).collect();
+        let last = hostile.records["states"].as_array().unwrap().len() - 1;
+        hostile.records["states"][last]["threads"] = Value::Array(repeated);
+        assert!(solidcraft_doc::Model::adopt(&s.doc, &hostile).is_err());
     }
 
     #[test]

@@ -13,7 +13,7 @@ use egui::{Response, RichText, Ui, vec2};
 /// approximating font metrics with integer margins (Plex Mono and Sans differ).
 pub(super) fn text_input(edit: egui::TextEdit<'_>) -> egui::TextEdit<'_> {
     let t = Tokens::get();
-    edit.vertical_align(egui::Align::Center).margin(vec2(t.form_inset, 0.0)).min_size(vec2(0.0, t.control_height))
+    edit.align(egui::Align2::LEFT_CENTER).margin(vec2(t.form_inset, 0.0)).min_size(vec2(0.0, t.control_height))
 }
 
 /// Expression editor with the application's existing completion and number-focus behaviour.
@@ -64,7 +64,7 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
     let row = label(ui).to_owned();
     for (delta, half, name) in [(1, column.split_top_bottom_at_fraction(0.5).0, "up"), (-1, column.split_top_bottom_at_fraction(0.5).1, "down")] {
         let next = step_count(value, delta, limits);
-        let arrow = ui.interact(half, ui.id().with(("sc_count_step", &row, name)), egui::Sense::click());
+        let arrow = ui.interact(half, ui.scope_id().with(("sc_count_step", &row, name)), egui::Sense::click());
         let enabled = ui.is_enabled() && next.is_some();
         // The arrows stand inside the editor, which claims the text cursor across its whole
         // rect: they are not text, so each one takes the ordinary cursor back after it. The
@@ -85,7 +85,7 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
             egui::Stroke::NONE,
         ));
         let sign = if delta > 0 { "+1" } else { "−1" };
-        arrow.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, format!("{} {sign}", crate::i18n::tr_label(&row))));
+        arrow.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, format!("{} {sign}", crate::i18n::tr_label(&row))));
         scenario::publish_handle(&format!("dialog:{row} {name}"), half.center());
         if let (true, true, Some(next)) = (enabled, arrow.clicked(), next) {
             *value = next;
@@ -126,6 +126,119 @@ fn step_count(text: &str, delta: i64, limits: &Count<'_>) -> Option<String> {
     let candidates =
         [tail.map(|(base, n)| offset(base, n.saturating_add(step))), Some(offset(trimmed, step)), Some(offset(&format!("({trimmed})"), step))];
     candidates.into_iter().flatten().find(|c| (limits.eval)(c).is_some_and(|v| (v - target as f64).abs() < 1e-9))
+}
+
+/// A value a label drag can change: a number with an optional unit ("20 mm", "1,5 in", "45°").
+#[derive(Clone, Debug, PartialEq)]
+struct Literal {
+    number: f64,
+    /// The text after the number, as written (" mm").
+    unit: String,
+    comma: bool,
+}
+
+/// The largest value a label drag reads or writes.
+const LITERAL_CAP: f64 = 1e12;
+
+/// `text` as a [`Literal`], or None for anything else: a parameter, a formula, an empty field.
+/// Dragging never rewrites an expression, so a driving parameter stays driving.
+fn literal(text: &str) -> Option<Literal> {
+    let text = text.trim();
+    if !solidcraft_engine::doc::expr::is_literal(text) {
+        return None;
+    }
+    let sign = usize::from(text.starts_with(['-', '+']));
+    let end = text.char_indices().skip(sign).find(|(_, c)| !(c.is_ascii_digit() || *c == '.' || *c == ',')).map_or(text.len(), |(at, _)| at);
+    let (number, unit) = (text.get(..end)?, text.get(end..)?);
+    // An exponent ("1e3") or anything else that is not a unit is left alone.
+    solidcraft_engine::doc::expr::unit_info(unit)?;
+    let comma = number.contains(',');
+    let number: f64 = number.replace(',', ".").parse().ok().filter(|n: &f64| n.is_finite() && n.abs() < LITERAL_CAP)?;
+    Some(Literal { number, unit: unit.to_owned(), comma })
+}
+
+/// How much one point of drag changes a value of this size, before Shift or Ctrl: about a
+/// hundredth of it, as a power of ten, so 20 mm moves by 0.1 mm and 250 mm by 1 mm.
+fn scrub_step(number: f64) -> f64 {
+    let decade = number.abs().max(1.0).log10().floor().clamp(0.0, 8.0);
+    10f64.powf(decade - 2.0)
+}
+
+/// `anchor` moved by `points` of drag at `step` per point, on the step's grid. A value that
+/// starts at zero or above stays there: a drag never turns a size negative.
+fn scrubbed(anchor: f64, points: f32, step: f64) -> f64 {
+    let moved = ((anchor + f64::from(points) * step) / step).round() * step;
+    let moved = if anchor >= 0.0 { moved.max(0.0) } else { moved };
+    // Literal values are capped where `literal` reads them; a drag never leaves that range.
+    if moved.is_finite() && moved.abs() < LITERAL_CAP { moved } else { anchor }
+}
+
+/// The scrubbed text: as many decimals as the step needs, the unit and decimal mark as typed.
+fn scrub_text(number: f64, step: f64, literal: &Literal) -> String {
+    let decimals = (-step.log10()).ceil().clamp(0.0, 6.0) as usize;
+    let mut text = format!("{number:.decimals$}");
+    if text.starts_with('-') && text.trim_start_matches(['-', '0', '.']).is_empty() {
+        text.remove(0);
+    }
+    if literal.comma {
+        text = text.replace('.', ",");
+    }
+    text + &literal.unit
+}
+
+/// An ongoing label drag: the value and pointer x it is measured from, and the speed in use.
+#[derive(Clone)]
+struct Scrub {
+    anchor: f64,
+    origin: f32,
+    step: f64,
+}
+
+/// Dragging a row's label sideways changes the literal value in its field: Shift for a tenth of
+/// the speed, Ctrl (Cmd on a Mac) for ten times. The text changes as if typed, so previews
+/// follow, and the dialog's OK still makes the one command (and the one undo step). A field
+/// holding an expression or a parameter is left alone. Returns whether the text changed.
+pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
+    let id = label.id.with("sc_scrub");
+    let Some(now) = literal(value).filter(|_| ui.is_enabled()) else {
+        ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
+        return false;
+    };
+    if label.hovered() || label.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    }
+    if !label.dragged() {
+        ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
+        return false;
+    }
+    let factor = ui.input(|i| {
+        if i.modifiers.shift {
+            0.1
+        } else if i.modifiers.command {
+            10.0
+        } else {
+            1.0
+        }
+    });
+    // Measured from where the pointer is, not summed per frame, so no frame's jump is lost or doubled.
+    let (Some(x), Some(pressed)) = ui.input(|i| (i.pointer.latest_pos().map(|p| p.x), i.pointer.press_origin().map(|p| p.x))) else {
+        return false;
+    };
+    let base = ui.ctx().data(|data| data.get_temp::<Scrub>(id));
+    // A new drag starts from where it was pressed; a changed modifier starts over from here.
+    let state = match base {
+        Some(state) if (state.step - scrub_step(state.anchor) * factor).abs() <= state.step * 1e-9 => state,
+        Some(_) => Scrub { anchor: now.number, origin: x, step: scrub_step(now.number) * factor },
+        None => Scrub { anchor: now.number, origin: pressed, step: scrub_step(now.number) * factor },
+    };
+    let points = x - state.origin;
+    let text = scrub_text(scrubbed(state.anchor, if points.is_finite() { points } else { 0.0 }, state.step), state.step, &now);
+    ui.ctx().data_mut(|data| data.insert_temp(id, state));
+    if text == *value {
+        return false;
+    }
+    *value = text;
+    true
 }
 
 /// Names, thread designations and plain numeric counts do not accept expression completion.
@@ -172,7 +285,7 @@ pub(crate) fn multiline_text_field(ui: &mut Ui, label: &str, id: egui::Id, value
                 .background_color(t.input_fill()),
         );
         super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINES);
-        publish(ui, &response, egui::WidgetType::TextEdit);
+        publish(ui, &response, egui::Role::TextInput);
         response
     })
 }
@@ -274,7 +387,7 @@ fn searchable_dropdown_with(
     if popup.inner.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         response.request_focus();
     }
-    publish(ui, &response, egui::WidgetType::ComboBox);
+    publish(ui, &response, egui::Role::ComboBox);
     chosen
 }
 
@@ -341,7 +454,7 @@ pub(crate) fn search_picker(ui: &mut Ui, p: SearchPicker<'_>) -> egui::InnerResp
     {
         return egui::InnerResponse::new(None, crate::prefs_search::hidden_response(ui));
     }
-    let state = egui::Id::new(p.id);
+    let state = egui::Id::unique(p.id);
     let mut picked = None;
     let response = ui
         .add_enabled_ui(p.enabled, |ui| {
@@ -367,7 +480,7 @@ pub(crate) fn search_picker(ui: &mut Ui, p: SearchPicker<'_>) -> egui::InnerResp
             response
         })
         .inner;
-    publish(ui, &response, egui::WidgetType::ComboBox);
+    publish(ui, &response, egui::Role::ComboBox);
     scenario::publish_target(p.handles, response.rect);
     egui::InnerResponse::new(picked, response)
 }
@@ -691,7 +804,7 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
     }
     let mut response = ui.add_sized(vec2(width, row_height()), edit);
     if response.has_focus() {
-        ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("sc_focused_editor"), response.id));
+        ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("sc_focused_editor"), response.id));
     }
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     if response.has_focus() {
@@ -699,7 +812,7 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
     }
     if completion && ui.is_enabled() {
         ui.ctx().data_mut(|data| {
-            let id = egui::Id::new("sc_value_fields");
+            let id = egui::Id::unique("sc_value_fields");
             if data.get_temp::<Vec<(egui::Id, usize)>>(id).is_some() {
                 data.get_temp_mut_or_default::<Vec<(egui::Id, usize)>>(id).push((response.id, value.chars().count()));
             }
@@ -709,7 +822,7 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
     t.input_bevel(ui, &response);
     let label = crate::i18n::tr_label(label(ui));
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), label);
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), label);
         info.current_text_value = Some(value.clone());
         info
     });
@@ -814,6 +927,52 @@ pub(crate) fn dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str,
     dropdown_menu_with_close_behavior(ui, id, current, egui::PopupCloseBehavior::CloseOnClick, add)
 }
 
+/// A width-bounded toolbar picker. Long selected values and popup rows truncate;
+/// callers can retain their complete labels in hover text.
+pub(crate) fn bounded_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str, width: f32, add: impl FnOnce(&mut Ui)) -> Response {
+    crate::prefs_search::note_current(ui, current);
+    if crate::prefs_search::querying(ui)
+        && (!ui.is_visible() || (crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[current])))
+    {
+        return crate::prefs_search::hidden_response(ui);
+    }
+    let width = dimension(width);
+    let response = ui
+        .allocate_ui_with_layout(vec2(width, row_height()), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.set_width(width);
+            let widget = ui.make_persistent_id(egui::IdSalt::new(&id));
+            let combo = egui::ComboBox::from_id_salt(id)
+                .width(width)
+                .height(Tokens::get().space_24 * 14.0)
+                .selected_text(current)
+                .truncate()
+                .icon(dropdown_arrow);
+            let popup = super::container::show_combo(ui, widget, combo, |ui| {
+                ui.set_max_width(width);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                add(ui);
+            });
+            let response = popup.response;
+            if popup.inner.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                response.request_focus();
+            }
+            response
+        })
+        .inner;
+    publish(ui, &response, egui::Role::ComboBox);
+    // The shared kit publication supplies chrome and row metadata, but omits
+    // the selected value. Restore both for the final focus/click announcement;
+    // visual truncation must not truncate the accessible captured-source name.
+    response.widget_info(|| {
+        let row_label = label(ui);
+        let name = if row_label.trim().is_empty() { current } else { crate::i18n::tr_label(row_label) };
+        let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), name);
+        info.current_text_value = Some(current.to_owned());
+        info
+    });
+    response
+}
+
 /// Dropdown with explicit dismissal behavior. For editable content use `CloseOnClickOutside`
 /// and close the popup when a choice is accepted.
 pub(crate) fn dropdown_menu_with_close_behavior(
@@ -872,7 +1031,17 @@ fn dropdown_menu_width(
     if let Some(icon) = leading_icon {
         paint_dropdown_icon(ui, response.rect, icon);
     }
-    publish(ui, &response, egui::WidgetType::ComboBox);
+    publish(ui, &response, egui::Role::ComboBox);
+    // Kit chrome publishes the row label after egui's selected-text metadata.
+    // Keep that label when present, and the visible action/value for a bare
+    // dropdown, without losing its full current value in the final announcement.
+    response.widget_info(|| {
+        let row_label = label(ui);
+        let name = if row_label.trim().is_empty() { current } else { crate::i18n::tr_label(row_label) };
+        let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), name);
+        info.current_text_value = Some(current.to_owned());
+        info
+    });
     response
 }
 
@@ -930,7 +1099,7 @@ pub(crate) fn selection_field(ui: &mut Ui, text: &str, options: Selection) -> Re
         },
         false,
     );
-    publish(ui, &response, egui::WidgetType::Button);
+    publish(ui, &response, egui::Role::Button);
     scenario::publish_rect(&format!("dialog:field:{}", label(ui)), rect);
     scenario::publish_count(&format!("dialog:selection:{}:filled", label(ui)), f64::from(filled));
     scenario::publish_count(&format!("dialog:selection:{}:active", label(ui)), f64::from(active));
@@ -1029,12 +1198,12 @@ fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, 
     let mut response = ui.add_sized(vec2(dimension(ui.available_width()), row_height()), editor);
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE.limited(limit));
     if frame {
-        publish(ui, &response, egui::WidgetType::TextEdit);
+        publish(ui, &response, egui::Role::TextInput);
     } else {
         super::layout::publish_geometry(ui, &response);
     }
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), crate::i18n::tr_label(label(ui)));
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), crate::i18n::tr_label(label(ui)));
         info.current_text_value = Some(value.clone());
         info
     });
@@ -1104,7 +1273,7 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
                     response.surrender_focus();
                 }
                 super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
-                publish(ui, &response, egui::WidgetType::TextEdit);
+                publish(ui, &response, egui::Role::TextInput);
                 crate::theme::TabAccent::number_focus(ui, &response);
                 t.input_bevel(ui, &response);
                 let (text, error) = note;
@@ -1122,7 +1291,7 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
     });
     let response = shown.inner;
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, enabled, crate::i18n::tr_label(hint));
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, enabled, crate::i18n::tr_label(hint));
         info.current_text_value = Some(value.clone());
         info
     });
@@ -1151,7 +1320,7 @@ pub(crate) fn search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     crate::icons::paint_ink(ui.painter(), icon, "zoom", t.form_dim);
     super::layout::publish_geometry(ui, &response);
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), hint);
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), hint);
         info.current_text_value = Some(value.clone());
         info
     });
@@ -1201,7 +1370,7 @@ pub(crate) fn menu_filter(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &
         })
         .inner;
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), hint_text);
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), hint_text);
         info.current_text_value = Some(value.clone());
         info
     });
@@ -1357,7 +1526,7 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
             t.control_fill
         };
         ui.painter().circle(center, t.space_8, fill, egui::Stroke::new(t.space_2, if off { t.form_dim } else { primary }));
-        publish(ui, &response, egui::WidgetType::Slider);
+        publish(ui, &response, egui::Role::Slider);
         response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), value.to_f64(), crate::i18n::tr_label(label(ui))));
         scenario::publish_rect(&format!("dialog:slider_track:{}", label(ui)), slider);
         scenario::publish_target(&format!("dialog:slider:{}", label(ui)), response.rect);
@@ -1491,7 +1660,7 @@ pub(crate) fn text_area(ui: &mut Ui, label: &str, id: egui::Id, value: &mut Stri
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINES.limited(limit));
     t.input_bevel(ui, &response);
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), label);
+        let mut info = egui::WidgetInfo::labeled(egui::Role::MultilineTextInput, ui.is_enabled(), label);
         info.current_text_value = Some(value.clone());
         info
     });
@@ -1512,7 +1681,7 @@ pub(crate) fn password_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint
             .background_color(t.input_fill()),
     );
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field { secret: true, ..super::text_menu::Field::LINE });
-    publish(ui, &response, egui::WidgetType::TextEdit);
+    publish(ui, &response, egui::Role::TextInput);
     response
 }
 
@@ -1525,7 +1694,38 @@ pub(crate) fn number_field<T: egui::emath::Numeric>(
     speed: f64,
     suffix: &str,
 ) -> Response {
-    let response = ui.add(egui::DragValue::new(value).range(range).speed(speed).suffix(suffix).custom_parser(crate::prefs::parse_number));
+    bounded_number_field(ui, value, range, speed, suffix, true)
+}
+
+/// A bounded editor that preserves an existing out-of-range value until the person edits it.
+/// Useful when a selected resource profile changes the admissible range: revealing the field
+/// must not silently lower saved intent. Typing and dragging still respect the current limits.
+pub(crate) fn number_field_preserving<T: egui::emath::Numeric>(
+    ui: &mut Ui,
+    value: &mut T,
+    range: std::ops::RangeInclusive<T>,
+    speed: f64,
+    suffix: &str,
+) -> Response {
+    bounded_number_field(ui, value, range, speed, suffix, false)
+}
+
+fn bounded_number_field<T: egui::emath::Numeric>(
+    ui: &mut Ui,
+    value: &mut T,
+    range: std::ops::RangeInclusive<T>,
+    speed: f64,
+    suffix: &str,
+    clamp_existing: bool,
+) -> Response {
+    let response = ui.add(
+        egui::DragValue::new(value)
+            .range(range)
+            .clamp_existing_to_range(clamp_existing)
+            .speed(speed)
+            .suffix(suffix)
+            .custom_parser(crate::prefs::parse_number),
+    );
     if response.has_focus() {
         crate::prefs_search::note_key_sink(ui.ctx());
     }
@@ -1663,7 +1863,7 @@ pub(crate) fn canvas_value_field(ui: &mut Ui, id: egui::Id, value: &mut String, 
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     t.input_bevel(ui, &response);
     let field = (ui.ctx().cumulative_pass_nr(), response.id, value.chars().count());
-    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("sc_canvas_value_focus"), field));
+    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("sc_canvas_value_focus"), field));
     response
 }
 
@@ -1681,6 +1881,8 @@ pub(crate) fn placement_field(ui: &mut Ui, id: egui::Id, value: &mut String, hin
     let t = Tokens::get();
     let font = egui::FontId::proportional(t.font_body);
     let size = placement_field_content_size(ui, value);
+    // egui 0.37 floors a text edit's height at the theme's interact height: lower it for this one.
+    let interact = std::mem::replace(&mut ui.spacing_mut().interact_size.y, size.y);
     let mut response = ui.add(
         text_input(egui::TextEdit::singleline(value))
             .id(id)
@@ -1693,10 +1895,11 @@ pub(crate) fn placement_field(ui: &mut Ui, id: egui::Id, value: &mut String, hin
             .text_color(t.form_ink)
             .clip_text(true),
     );
+    ui.spacing_mut().interact_size.y = interact;
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
-    publish(ui, &response, egui::WidgetType::TextEdit);
+    publish(ui, &response, egui::Role::TextInput);
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), crate::i18n::tr_label(hint));
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), crate::i18n::tr_label(hint));
         info.current_text_value = Some(value.clone());
         info
     });
@@ -1736,10 +1939,8 @@ pub(crate) fn library_cell(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
 /// Inline tree-name editor in caller-owned geometry; preserves its native focus and selection ID.
 /// Tokens: text. The caller retains commit/cancel and select-all behavior.
 pub(crate) fn inline_name(ui: &mut Ui, rect: egui::Rect, id: egui::Id, value: &mut String) -> Response {
-    let mut response = ui.put(
-        rect,
-        egui::TextEdit::singleline(value).id(id).frame(egui::Frame::NONE).text_color(Tokens::get().text).vertical_align(egui::Align::Center),
-    );
+    let mut response = ui
+        .put(rect, egui::TextEdit::singleline(value).id(id).frame(egui::Frame::NONE).text_color(Tokens::get().text).align(egui::Align2::LEFT_CENTER));
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     response
 }

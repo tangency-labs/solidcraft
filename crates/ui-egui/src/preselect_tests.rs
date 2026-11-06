@@ -2102,6 +2102,141 @@ fn surface_dialogs_make_their_commands() {
 }
 
 #[test]
+fn fair_surface_dialog_defaults_picks_and_edit_values() {
+    use solidcraft_engine::doc::{BodyName, FeatureKind, IDENTITY};
+    let mut app = app_with(json!([]));
+    let mut d = start(&mut app, vec![Sel::Body { name: "Sheet".into() }], "surface.fair");
+    assert_eq!(d.inputs.len(), 1);
+    assert_eq!(d.inputs[0].accept, crate::selection::BODIES | crate::selection::FACES);
+    let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(id, "surface.fair");
+    assert_eq!(p, json!({"body":"Sheet", "faces":[], "strength":1.0, "iterations":1, "keep_edges":true}));
+    d.inputs[0].items = vec![Sel::Face { body: "Sheet".into(), index: 0, point: Vec3::new(1.0, 2.0, 3.0) }];
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["faces"], json!([[1.0, 2.0, 3.0]]));
+    d.inputs[0].items.push(Sel::Body { name: "Other".into() });
+    assert!(apply_commands(&app, &d).is_err());
+    d.inputs[0].items.clear();
+    assert!(apply_commands(&app, &d).is_err());
+
+    let feature = FeatureKind::SurfaceFair {
+        body: BodyName::from("Sheet"),
+        faces: vec![],
+        strength: 0.4,
+        iterations: 7,
+        keep_edges: false,
+        tolerance: "0.2 mm".into(),
+    };
+    let (kind, inputs, extra) = crate::dialogs_surface::for_feature(&app, &feature, &IDENTITY).unwrap();
+    let cmds = if let Kind::Surface(k) = kind {
+        crate::dialogs_surface::commands(&app, &k, &inputs, &extra).unwrap()
+    } else {
+        panic!("expected a surface dialog")
+    };
+    assert_eq!(cmds[0].1, json!({"body":"Sheet", "faces":[], "strength":0.4, "iterations":7, "keep_edges":false, "tolerance":"0.2 mm"}));
+}
+
+#[test]
+fn match_surface_dialog_defaults_picks_and_edit_values() {
+    use solidcraft_engine::doc::kernel::Continuity;
+    use solidcraft_engine::doc::{BodyName, FeatureKind, IDENTITY, Position};
+    let mut app = app_with(json!([{"command":"solid.box", "params":{"length":10,"width":10,"height":10,"body_name":"Target"}}]));
+    let mut d = start(&mut app, vec![Sel::Body { name: "Sheet".into() }], "surface.match");
+    assert_eq!(d.inputs.len(), 3);
+    assert_eq!(d.inputs[0].accept, crate::selection::BODIES | crate::selection::FACES);
+    assert_eq!(d.inputs[1].accept, crate::selection::BODIES | crate::selection::FACES);
+    assert_eq!(d.inputs[2].accept, crate::selection::EDGES);
+    assert!(apply_commands(&app, &d).is_err());
+    d.inputs[1].items = vec![Sel::Body { name: "Target".into() }];
+    assert!(apply_commands(&app, &d).is_err());
+    let point = Vec3::new(5.0, 0.0, 0.0);
+    d.inputs[2].items = vec![crate::dialogs::edge_sel(&app.session, point).unwrap()];
+    let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(id, "surface.match");
+    assert_eq!(p, json!({"body":"Sheet", "faces":[], "target":"Target", "edges":[[5.0,0.0,0.0]], "order":"g2"}));
+    d.inputs[0].items = vec![Sel::Face { body: "Sheet".into(), index: 0, point: Vec3::new(1.0, 2.0, 3.0) }];
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["faces"], json!([[1.0, 2.0, 3.0]]));
+    d.inputs[1].items = vec![Sel::Face { body: "Target".into(), index: 0, point: Vec3::new(5.0, 5.0, 10.0) }];
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["target"], json!("Target"));
+    d.inputs[1].items = vec![Sel::Body { name: "Other".into() }];
+    assert!(apply_commands(&app, &d).is_err());
+
+    let face = Sel::Face { body: "Sheet".into(), index: 0, point: Vec3::new(1.0, 2.0, 3.0) };
+    let preselected = start(&mut app, vec![face.clone()], "surface.match");
+    assert_eq!(preselected.inputs[0].items, vec![face]);
+    assert!(preselected.inputs[1].items.is_empty());
+
+    let feature = FeatureKind::SurfaceMatch {
+        body: BodyName::from("Sheet"),
+        faces: vec![],
+        target: BodyName::from("Target"),
+        edges: vec![Position(point)],
+        order: Continuity::G3,
+    };
+    let (kind, inputs, extra) = crate::dialogs_surface::for_feature(&app, &feature, &IDENTITY).unwrap();
+    let cmds = if let Kind::Surface(k) = kind {
+        crate::dialogs_surface::commands(&app, &k, &inputs, &extra).unwrap()
+    } else {
+        panic!("expected a surface dialog")
+    };
+    assert_eq!(cmds[0].1, json!({"body":"Sheet", "faces":[], "target":"Target", "edges":[[5.0,0.0,0.0]], "order":"g3"}));
+}
+
+/// A Fair tolerance is a length: a bare value follows the design unit on OK, like Stitch's.
+#[test]
+fn fair_surface_tolerance_is_a_length_in_the_design_unit() {
+    let mut app = app_with(json!([]));
+    app.session.execute("document.units", &json!({"units":"in"})).unwrap();
+    let mut d = start(&mut app, vec![Sel::Body { name: "Sheet".into() }], "surface.fair");
+    if let Kind::Surface(crate::dialogs_surface::Surf::Fair { tolerance, .. }) = &mut d.kind {
+        *tolerance = "0.1".into();
+    } else {
+        panic!("expected the Fair dialog");
+    }
+    let (_, p) = apply_commands(&app, &d).unwrap().remove(0);
+    let sent = p["tolerance"].as_str().unwrap_or_default();
+    let mm = app.session.doc.eval(sent, ValueKind::Length).unwrap();
+    assert!((mm - 2.54).abs() < 1e-9, "{sent} -> {mm}");
+    // Refilling an edit goes through the same length fields.
+    let mut k = d.kind.clone();
+    assert_eq!(crate::length_input::fields(&app.session.doc, &mut k).len(), 1);
+}
+
+/// Edit Feature restores a Fair or Match pick on the body it was saved on, even when another
+/// body has geometry at the same point (here the seam the two boxes share).
+#[test]
+fn fair_and_match_picks_reopen_on_their_saved_bodies() {
+    use solidcraft_engine::doc::kernel::Continuity;
+    use solidcraft_engine::doc::{BodyName, FacePick, FeatureKind, IDENTITY, Position};
+    let app = app_with(json!([
+        {"command":"solid.box", "params":{"corner":[0,0,0],"length":10,"width":10,"height":10,"body_name":"Src"}},
+        {"command":"solid.box", "params":{"corner":[10,0,0],"length":10,"width":10,"height":10,"body_name":"Target","operation":"new"}}
+    ]));
+    // The shared wall is x = 10 and the shared edge runs along it at y = 0.
+    let wall = FacePick(Vec3::new(10.0, 5.0, 5.0));
+    let edge = Position(Vec3::new(10.0, 0.0, 5.0));
+    let fair = FeatureKind::SurfaceFair {
+        body: BodyName::from("Target"),
+        faces: vec![wall],
+        strength: 1.0,
+        iterations: 1,
+        keep_edges: true,
+        tolerance: String::new().into(),
+    };
+    let (_, inputs, _) = crate::dialogs_surface::for_feature(&app, &fair, &IDENTITY).unwrap();
+    assert!(matches!(inputs[0].items.as_slice(), [Sel::Face { body, .. }] if body == "Target"), "{:?}", inputs[0].items);
+    let matched = FeatureKind::SurfaceMatch {
+        body: BodyName::from("Target"),
+        faces: vec![wall],
+        target: BodyName::from("Target"),
+        edges: vec![edge],
+        order: Continuity::G2,
+    };
+    let (_, inputs, _) = crate::dialogs_surface::for_feature(&app, &matched, &IDENTITY).unwrap();
+    assert!(matches!(inputs[0].items.as_slice(), [Sel::Face { body, .. }] if body == "Target"), "{:?}", inputs[0].items);
+    assert!(matches!(inputs[2].items.as_slice(), [Sel::Edge { body, .. }] if body == "Target"), "{:?}", inputs[2].items);
+}
+
+#[test]
 fn surface_extrude_dialog_takes_profiles_and_curves() {
     // A rectangle and a free line in one sketch: the dialog sends both (the profile's walls
     // and the line's wall) as one surface extrude, and Edit Feature brings the picks back.
@@ -2712,6 +2847,63 @@ fn offset_plane_through_a_picked_vertex() {
     assert!(matches!(reopened.inputs[1].items.as_slice(), [Sel::Vertex { body, .. }] if body == "Box"), "{:?}", reopened.inputs[1].items);
 }
 
+/// Plane at Angle's "Use axis direction only" option shows a Pivot pick and sends both parameters (#12041).
+#[test]
+fn plane_at_angle_direction_only_shows_a_pivot_and_applies() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Box"})).unwrap();
+    h.app.start("construct.plane.at_angle");
+    h.frames(2);
+    let d = h.app.dialog.as_mut().unwrap();
+    assert!(matches!(d.kind, Kind::AnglePlane { direction_only: false, .. }));
+    assert!(!d.inputs.iter().any(|i| i.label == "Pivot"), "{:?}", d.inputs);
+    d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+    d.inputs[1].items = vec![Sel::Axis { name: "Y".into() }];
+    if let Kind::AnglePlane { direction_only, .. } = &mut d.kind {
+        *direction_only = true;
+    }
+    // The dense form adds Pivot once the option is on; mirror that here for the parameter build.
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        crate::dialogs::set_object_accepting(
+            &mut d.inputs,
+            &mut d.active,
+            "Pivot",
+            crate::selection::VERTICES | crate::selection::POINTS | crate::selection::CONSTRUCTION_POINTS,
+            true,
+        );
+        let pivot = d.inputs.iter_mut().find(|i| i.label == "Pivot").expect("Pivot");
+        pivot.items = vec![Sel::Vertex { body: "Box".into(), point: Vec3::new(40.0, 0.0, 0.0) }];
+        if let Kind::AnglePlane { angle, .. } = &mut d.kind {
+            *angle = "90 deg".into();
+        }
+    }
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        commands.first().map(|c| c.1.clone()),
+        Some(json!({
+            "base": "XY",
+            "axis": "Y",
+            "angle": "90 deg",
+            "direction_only": true,
+            "pivot": {"vertex": [40.0, 0.0, 0.0]}
+        }))
+    );
+    let (cmd, params) = commands.into_iter().next().unwrap();
+    h.app.dialog = None;
+    let id = h.app.run(&cmd, params).unwrap()["feature"].as_u64().unwrap();
+    let pl = solidcraft_engine::view::construction_planes(&h.app.session)
+        .into_iter()
+        .find(|(fid, _, _)| *fid == id)
+        .map(|(_, _, pl)| pl)
+        .expect("the plane");
+    assert!(pl.origin.dist(Vec3::new(40.0, 0.0, 40.0)) < 1e-3, "{pl:?}");
+    assert!(pl.normal().cross(Vec3::X).len() < 1e-6, "{pl:?}");
+    let reopened = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    assert!(matches!(reopened.kind, Kind::AnglePlane { direction_only: true, .. }), "{:?}", reopened.kind);
+    assert!(reopened.inputs.iter().any(|i| i.label == "Pivot" && !i.items.is_empty()), "{:?}", reopened.inputs);
+}
+
 /// Plane at Angle draws the tilted plane while its dialog is open, when created and when edited,
 /// and redraws it when the angle changes (it used to show only the picked plane and the label).
 #[test]
@@ -2726,7 +2918,7 @@ fn plane_at_angle_previews_the_tilted_plane_when_edited() {
     assert!(d.previews(), "the edited plane is previewed");
     wait_feature_preview(&mut h);
     let first = h.app.preview.key;
-    if let Kind::AnglePlane { angle } = &mut h.app.dialog.as_mut().unwrap().kind {
+    if let Kind::AnglePlane { angle, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
         *angle = "30 deg".into();
     }
     wait_feature_preview(&mut h);
@@ -3603,4 +3795,67 @@ fn shell_lists_the_faces_its_chip_counts() {
     h.frames(2);
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![back]);
     assert!(h.widget("1 selected").is_some());
+}
+
+/// #11663: Fix started with only points selected (no curve to fix them through) gives each of
+/// them its own Fix constraint, so a selection of loose points is not silently dropped.
+#[test]
+fn fix_takes_a_selection_of_only_points() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.point", json!({"point": [10, 10]})).unwrap();
+    h.app.run("sketch.point", json!({"point": [30, 20]})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    let ids: Vec<String> = h.app.session.doc.sketch(sid).unwrap().points.iter().skip(1).map(|p| p.id.clone()).collect();
+    assert_eq!(ids.len(), 2, "two loose points to select");
+    let fixes = |h: &crate::scenario::Harness| h.app.session.doc.sketch(sid).unwrap().constraints.iter().filter(|c| c.kind.name() == "Fix").count();
+    let before = fixes(&h);
+    h.app.session.selection = ids.iter().map(|id| Sel::SketchPoint { id: id.clone() }).collect();
+    h.app.start("sketch.constraint.fix");
+    assert_eq!(fixes(&h), before + 2, "each selected point got a Fix constraint ({:?})", h.app.status);
+    assert!(h.app.tool.is_none(), "Fix applied at once, no pick tool left running");
+}
+
+/// #11663: a curve of another sketch is named by its sketch, and its bare id could be a curve of
+/// the active one; Fix leaves such a selection to the pick tool and changes nothing.
+#[test]
+fn fix_leaves_a_curve_of_another_sketch_to_the_pick_tool() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0, 0], [20, 2]], "infer": false, "connect": false})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    h.app.session.selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: Some(sid + 1000) }];
+    h.app.start("sketch.constraint.fix");
+    assert!(h.app.tool.is_some(), "the pick tool is left to ask ({:?})", h.app.status);
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert!(sk.curves.iter().all(|c| !c.fixed), "the active sketch's l1 was not fixed by a bare id");
+}
+
+/// #11663: a box drawn over a sketch takes its dimensions and constraint icons along with its
+/// lines and points. Fix started with that selection fixes the lines and points; it does not fall
+/// back to the pick tool. Hundreds of entities (more than the 200 a constraint pick takes) too.
+#[test]
+fn fix_takes_a_boxed_selection_with_its_dimensions_and_hundreds_of_entities() {
+    for lines in [3, 110] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        for i in 0..lines {
+            let y = 5 * i;
+            h.app.run("sketch.line", json!({"points": [[0, y], [20, y + 2]], "infer": false, "connect": false})).unwrap();
+        }
+        h.app.run("sketch.dimension", json!({"entities": ["l1"], "value": "21 mm"})).unwrap();
+        let sid = h.app.session.active_sketch.unwrap();
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        let mut selection: Vec<Sel> = sk.curves.iter().map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None }).collect();
+        selection.extend(sk.points.iter().skip(1).map(|p| Sel::SketchPoint { id: p.id.clone() }));
+        selection.extend(sk.constraints.iter().map(|c| Sel::SketchConstraint { id: c.id.clone() }));
+        assert!(selection.iter().any(|s| matches!(s, Sel::SketchConstraint { .. })), "the box holds the dimension");
+        h.app.session.selection = selection;
+        h.app.start("sketch.constraint.fix");
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        let loose: Vec<&str> = sk.curves.iter().filter(|c| !c.fixed).map(|c| c.id.as_str()).collect();
+        assert!(loose.is_empty(), "{lines} lines: not fixed {loose:?} ({:?})", h.app.status);
+        assert!(h.app.tool.is_none(), "{lines} lines: Fix applied at once, no pick tool left running");
+        assert!(h.app.session.selection.is_empty(), "{lines} lines: the selection is used up");
+    }
 }
