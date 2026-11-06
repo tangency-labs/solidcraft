@@ -3416,7 +3416,7 @@ pub(crate) fn show_shader_preparation(app: &mut SolveApp, ctx: &egui::Context) -
         return false;
     }
     let mut cancel = false;
-    crate::ui_kit::Window::new(egui::Id::new("render_shader_preparation"), "", app.tr("render.image_preparing")).required().show_body(ctx, |ui| {
+    crate::ui_kit::Window::new(egui::Id::new("render_shader_preparation"), "", app.tr("render.image_preparing")).show_passive_body(ctx, |ui| {
         let warning = ui.label(app.tr("render.gpu_job_shader_wait"));
         crate::scenario::publish_rect("render:shader-preparation:warning", warning.rect);
         ui.horizontal(|ui| {
@@ -3460,9 +3460,6 @@ pub(crate) fn progress_pill(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) ->
     };
     let phase = status["progress"]["phase"].as_str().unwrap_or("unknown");
     if !matches!(phase, "queued" | "preparing" | "running" | "encoding" | "cancelling") {
-        return false;
-    }
-    if phase == "preparing" && status["resolved"]["executor"] == "gpu-path" {
         return false;
     }
     let done = status["progress"]["done"].as_u64().unwrap_or(0);

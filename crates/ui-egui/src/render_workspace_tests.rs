@@ -7009,10 +7009,20 @@ fn gpu_preparation_shows_shader_warning_then_reports_job_failure() {
     let handle = h.app.session.render_job_handle(job).unwrap();
     preparing.recv_timeout(Duration::from_secs(10)).unwrap();
     assert_eq!(handle.status().unwrap().progress.phase, job::Phase::Preparing);
-    let _ = h.ctx.run_ui(Default::default(), |ui| {
+    let keys = [egui::Key::Enter, egui::Key::Escape];
+    let events = keys
+        .into_iter()
+        .map(|key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE })
+        .collect();
+    let _ = h.ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
         assert!(show_shader_preparation(&mut h.app, ui.ctx()));
-        assert!(!progress_pill(&mut h.app, ui, "render:progress"));
+        for key in keys {
+            assert!(ui.ctx().input_mut(|input| input.consume_key(egui::Modifiers::NONE, key)), "{key:?} must be available to other windows");
+        }
+        assert!(progress_pill(&mut h.app, ui, "render:progress"));
     });
+    assert!(crate::scenario::rect_of("render:progress:name").is_some());
+    assert!(crate::scenario::rect_of("dialog:progress:render:progress").is_some());
     for control in ["warning", "spinner", "cancel"] {
         assert!(crate::scenario::rect_of(&format!("render:shader-preparation:{control}")).is_some());
     }
