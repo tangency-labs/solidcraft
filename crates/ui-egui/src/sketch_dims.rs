@@ -341,8 +341,11 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
         ("sketch.circle.two_tangent", 2) => {
             vec![(crate::sketch_tools::two_tangent_default_radius(app, t), (first + a) * 0.5 + dir_or_x(a - first).perp() * off)]
         }
-        ("sketch.arc.center_point" | "sketch.slot.arc_center", 1)
-        | ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed" | "sketch.polygon.edge", 1) => {
+        // Out along the radius, beyond the cursor, as the sweep box: at the radius's middle the
+        // box covered the cursor of a short radius and took the click meant for the start point,
+        // so the arc waited for Enter (#12208).
+        ("sketch.arc.center_point" | "sketch.slot.arc_center", 1) => vec![((e - a).len(), e + dir_or_x(e - a) * (2.5 * off))],
+        ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed" | "sketch.polygon.edge", 1) => {
             vec![((e - a).len(), (a + e) * 0.5), (6.0, a + (e - a) * 0.5 + (e - a).perp() * 0.3)]
         }
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 2) => {
