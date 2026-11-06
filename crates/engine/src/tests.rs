@@ -5562,3 +5562,19 @@ fn vibration_assembly_bonds_a_touching_part_and_rejects_a_floating_one() {
     let error = s.execute(vibration::COMMAND, &params).unwrap_err().to_string();
     assert!(error.contains("No bonded planar interface") && error.contains("Floating"), "{error}");
 }
+
+#[test]
+fn vibration_bonds_touching_bodies_with_separate_supports() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name":"Left","length":60,"width":12,"height":12,"corner":[0,0,0],"operation":"new"}));
+    run(&mut s, "solid.box", json!({"body_name":"Right","length":60,"width":12,"height":12,"corner":[60,0,0],"operation":"new"}));
+    vibration_steel(&mut s, &["Left", "Right"]);
+    let left = vibration_support(&s, "Left", |p| p.x);
+    let right = vibration_support(&s, "Right", |p| p.x - 120.0);
+    let params = json!({"supports":[{"body":"Left","face":left},{"body":"Right","face":right}],"start_hz":100.0,"end_hz":9000.0});
+    let result: vibration::SweepResult = serde_json::from_value(run(&mut s, vibration::COMMAND, params)).unwrap();
+    let first = result.modes.first().expect("the bonded beam has a bending mode in this range").hz;
+    // Two unbonded halves act as cantilevers. A bonded beam has both outer ends clamped.
+    let cantilever = 1.87510407_f64.powi(2) / (2.0 * PI * 0.06_f64.powi(2)) * (200e9_f64 / 7850.0 * 0.012_f64.powi(2) / 12.0).sqrt();
+    assert!(first > 1.25 * cantilever, "first mode {first:.1} Hz, unbonded cantilever {cantilever:.1} Hz");
+}

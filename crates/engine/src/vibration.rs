@@ -52,7 +52,7 @@ pub struct Support {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SweepParams {
-    /// World body name for a part. Omit to analyse all world bodies as an assembly.
+    /// World body name for a part. Omit to analyse all world bodies, including hidden bodies.
     pub body: Option<String>,
     pub supports: Vec<Support>,
     pub start_hz: f64,
@@ -210,7 +210,7 @@ fn append_body(
         model.set_node(label(node_offset, i)?, xyz.map(|x| x * MM_TO_M)).map_err(error)?;
     }
     let mut elements = Vec::with_capacity(mesh.elements.len());
-    let density = body.material.density.ok_or_else(|| error("missing density"))?;
+    let density = body.material.density.ok_or_else(|| error(format!("{}: assign a material with a density", body.name)))?;
     for (i, element) in mesh.elements.iter().enumerate() {
         let element_label = label(element_offset, i)?;
         let nodes: Vec<_> = element.iter().map(|&v| label(node_offset, v as usize)).collect::<Result<_>>()?;
@@ -270,12 +270,14 @@ fn append_body(
 }
 
 fn bond(model: &mut Model, bodies: &[BodyMesh], faces: &[FaceSets]) -> Result<()> {
-    let mut connected: Vec<_> = bodies.iter().map(|b| !b.fixed.is_empty()).collect();
-    // Grow away from the supports, with each newly reached body following bodies already
-    // tied to the base. This keeps the mortar constraints directed and avoids cyclic ties.
+    let mut order: Vec<_> = bodies.iter().zip(faces).enumerate().collect();
+    order.sort_by_key(|(_, (body, _))| body.fixed.is_empty());
+    let mut connected = vec![false; bodies.len()];
+    // Visit the supported bodies first and check their mutual interfaces too. Every tie runs
+    // from an earlier body to a newly reached body, so the dependency graph stays acyclic.
     while connected.iter().any(|&v| !v) {
         let mut next = None;
-        for (i, (body, map)) in bodies.iter().zip(faces).enumerate().filter(|(i, _)| !connected[*i]) {
+        for &(i, (body, map)) in order.iter().filter(|(i, _)| !connected[*i]) {
             let mut contacts = Vec::new();
             for (j, (main, main_map)) in bodies.iter().zip(faces).enumerate().filter(|(j, _)| connected[*j]) {
                 if !body.bounds.inflated(BOND_GAP_MM).meets(&main.bounds) {
@@ -291,7 +293,7 @@ fn bond(model: &mut Model, bodies: &[BodyMesh], faces: &[FaceSets]) -> Result<()
                     }
                 }
             }
-            if !contacts.is_empty() {
+            if !body.fixed.is_empty() || !contacts.is_empty() {
                 next = Some((i, contacts));
                 break;
             }

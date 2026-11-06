@@ -92,6 +92,7 @@ inspect.compare_picture           display analysis: a picture compared with the 
 inspect.curvature_map             display analysis: shading
 inspect.environment_map           display analysis: shading
 inspect.silhouette                display analysis: outline
+inspect.vibration                 analysis: cantilever response and bonded assembly tests in crates/engine/src/tests.rs
 inspect.zebra                     display analysis: shading
 layout.apply                      application panel layout; no geometry (engine/UI/MCP tests)
 layout.get                        application panel layout; no geometry (engine/UI/MCP tests)

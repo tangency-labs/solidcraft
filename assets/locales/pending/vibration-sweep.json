@@ -1,7 +1,7 @@
 {
   "en": {
     "vibration.add": "Add selected faces",
-    "vibration.all": "Entire assembly / all bodies",
+    "vibration.all": "All bodies (including hidden)",
     "vibration.back": "Back to setup",
     "vibration.band_maximum": "No interior peak. Showing the largest response in the range.",
     "vibration.clear": "Clear",
@@ -26,14 +26,14 @@
     "vibration.target": "Analysis target",
     "vibration.title": "Vibration Sweep",
     "cmd.inspect.vibration": "Vibration Sweep",
-    "help.inspect.vibration": "Sweeps a range of frequencies and shows how a part or assembly vibrates. Use it to find resonances and see where the model moves most."
+    "help.inspect.vibration": "Finds resonances and shows where a part or assembly moves most. The assembly sweep includes hidden bodies."
   },
   "en-GB": {
     "vibration.normalized": "Normalised to 100% at the mode's largest surface motion."
   },
   "ar": {
     "vibration.add": "إضافة الأوجه المحددة",
-    "vibration.all": "التجميع بالكامل / جميع الأجسام",
+    "vibration.all": "جميع الأجسام (بما فيها المخفية)",
     "vibration.back": "العودة إلى الإعداد",
     "vibration.band_maximum": "لا توجد ذروة داخل النطاق. تُعرض أكبر استجابة ضمن النطاق.",
     "vibration.clear": "مسح",
@@ -58,11 +58,11 @@
     "vibration.target": "هدف التحليل",
     "vibration.title": "مسح ترددات الاهتزاز",
     "cmd.inspect.vibration": "مسح ترددات الاهتزاز",
-    "help.inspect.vibration": "يمسح نطاقًا من الترددات ويعرض كيفية اهتزاز جزء أو تجميع. استخدمه لتحديد ترددات الرنين ومعرفة مواضع أكبر حركة في النموذج."
+    "help.inspect.vibration": "يحدّد ترددات الرنين ويعرض مواضع أكبر حركة في الجزء أو التجميع. يشمل مسح التجميع الأجسام المخفية."
   },
   "de": {
     "vibration.add": "Ausgewählte Flächen hinzufügen",
-    "vibration.all": "Gesamte Baugruppe / alle Körper",
+    "vibration.all": "Alle Körper (auch ausgeblendete)",
     "vibration.back": "Zurück zur Einrichtung",
     "vibration.band_maximum": "Keine Spitze im Inneren des Bereichs. Die größte Antwort im Bereich wird angezeigt.",
     "vibration.clear": "Auswahl löschen",
@@ -87,11 +87,11 @@
     "vibration.target": "Analyseobjekt",
     "vibration.title": "Schwingungsanalyse per Frequenzdurchlauf",
     "cmd.inspect.vibration": "Schwingungsanalyse per Frequenzdurchlauf",
-    "help.inspect.vibration": "Durchläuft einen Frequenzbereich und zeigt, wie ein Teil oder eine Baugruppe schwingt. Verwenden Sie das Werkzeug, um Resonanzen und die Stellen mit der größten Bewegung am Modell zu finden."
+    "help.inspect.vibration": "Findet Resonanzen und zeigt, wo sich ein Teil oder eine Baugruppe am stärksten bewegt. Der Frequenzdurchlauf der Baugruppe umfasst auch ausgeblendete Körper."
   },
   "he": {
     "vibration.add": "הוספת הפאות שנבחרו",
-    "vibration.all": "המכלול כולו / כל הגופים",
+    "vibration.all": "כל הגופים (כולל גופים מוסתרים)",
     "vibration.back": "חזרה להגדרות",
     "vibration.band_maximum": "אין שיא בתוך הטווח. מוצגת התגובה הגדולה ביותר בטווח.",
     "vibration.clear": "ניקוי",
@@ -116,11 +116,11 @@
     "vibration.target": "יעד הניתוח",
     "vibration.title": "סריקת תדרי רעידות",
     "cmd.inspect.vibration": "סריקת תדרי רעידות",
-    "help.inspect.vibration": "סורק טווח תדרים ומראה כיצד חלק או מכלול רוטטים. אפשר להשתמש בכלי כדי למצוא תדרי תהודה ולראות היכן התנועה בדגם מרבית."
+    "help.inspect.vibration": "מוצא תהודות ומראה היכן התנועה בחלק או במכלול מרבית. סריקת המכלול כוללת גופים מוסתרים."
   },
   "ja": {
     "vibration.add": "選択中の面を追加",
-    "vibration.all": "アセンブリ全体／全ボディ",
+    "vibration.all": "全ボディ（非表示を含む）",
     "vibration.back": "設定に戻る",
     "vibration.band_maximum": "範囲内に応答ピークがないため、この範囲での最大応答を表示します。",
     "vibration.clear": "すべて解除",
@@ -145,11 +145,11 @@
     "vibration.target": "解析対象",
     "vibration.title": "振動スイープ",
     "cmd.inspect.vibration": "振動スイープ",
-    "help.inspect.vibration": "周波数を掃引し、パーツやアセンブリの振動を表示します。共振周波数と、モデル上で振幅が最大となる位置を調べるときに使います。"
+    "help.inspect.vibration": "共振周波数を調べ、部品やアセンブリの振幅が最大となる位置を表示します。アセンブリ全体の解析には非表示のボディも含まれます。"
   },
   "ko": {
     "vibration.add": "선택한 면 추가",
-    "vibration.all": "전체 어셈블리 / 모든 바디",
+    "vibration.all": "모든 바디 (숨긴 바디 포함)",
     "vibration.back": "설정으로 돌아가기",
     "vibration.band_maximum": "범위 내부에 피크가 없습니다. 범위 내 최대 응답을 표시합니다.",
     "vibration.clear": "선택 지우기",
@@ -174,11 +174,11 @@
     "vibration.target": "해석 대상",
     "vibration.title": "진동 스윕",
     "cmd.inspect.vibration": "진동 스윕",
-    "help.inspect.vibration": "주파수 범위를 스윕하여 부품이나 어셈블리가 어떻게 진동하는지 보여 줍니다. 공진 주파수와 모델에서 가장 크게 움직이는 위치를 찾는 데 사용하세요."
+    "help.inspect.vibration": "공진 주파수를 찾고 부품이나 어셈블리에서 가장 크게 움직이는 위치를 표시합니다. 어셈블리 전체를 스윕할 때는 숨긴 바디도 포함됩니다."
   },
   "vi": {
     "vibration.add": "Thêm các mặt đã chọn",
-    "vibration.all": "Toàn bộ cụm lắp ráp / tất cả vật thể",
+    "vibration.all": "Tất cả vật thể (kể cả vật thể ẩn)",
     "vibration.back": "Quay lại thiết lập",
     "vibration.band_maximum": "Không có đỉnh bên trong khoảng quét. Đang hiển thị đáp ứng lớn nhất trong khoảng.",
     "vibration.clear": "Xóa lựa chọn",
@@ -203,11 +203,11 @@
     "vibration.target": "Đối tượng phân tích",
     "vibration.title": "Quét tần số dao động",
     "cmd.inspect.vibration": "Quét tần số dao động",
-    "help.inspect.vibration": "Quét một khoảng tần số và cho biết chi tiết hoặc cụm lắp ráp dao động như thế nào. Dùng công cụ này để tìm tần số cộng hưởng và xem vị trí chuyển động lớn nhất trên mô hình."
+    "help.inspect.vibration": "Tìm tần số cộng hưởng và cho biết vị trí chuyển động lớn nhất trên chi tiết hoặc cụm lắp ráp. Phép quét toàn bộ cụm lắp ráp bao gồm cả vật thể ẩn."
   },
   "zh": {
     "vibration.add": "添加选中的面",
-    "vibration.all": "整个装配体 / 所有实体",
+    "vibration.all": "所有实体（包括隐藏实体）",
     "vibration.back": "返回设置",
     "vibration.band_maximum": "扫频范围内部没有峰值。正在显示范围内的最大响应。",
     "vibration.clear": "清除",
@@ -232,6 +232,6 @@
     "vibration.target": "分析对象",
     "vibration.title": "振动扫频",
     "cmd.inspect.vibration": "振动扫频",
-    "help.inspect.vibration": "扫描一个频率范围并显示零件或装配体的振动。可用来查找共振频率，并查看模型上振动幅度最大的位置。"
+    "help.inspect.vibration": "查找共振频率并显示零件或装配体上振幅最大的位置。装配体扫频包含隐藏实体。"
   }
 }
