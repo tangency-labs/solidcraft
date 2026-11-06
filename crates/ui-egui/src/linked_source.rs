@@ -1,5 +1,5 @@
-//! Explicitly choose a linked component's source; all its instances share that source. Extract
-//! makes a component that is not linked the source of its own design file.
+//! Explicitly choose a linked component's source, for all its placements or for one of them.
+//! Extract makes a component that is not linked the source of its own design file.
 
 use std::sync::Arc;
 
@@ -7,6 +7,8 @@ use serde_json::{Value, json};
 
 use crate::SolveApp;
 
+/// Relink Source for the selection, which must name exactly one linked component, through
+/// its browser rows or placements.
 pub(crate) fn start_selected(app: &mut SolveApp) {
     let mut components = app.tree.picked_components.clone();
     for selection in &app.session.selection {

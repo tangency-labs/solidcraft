@@ -782,6 +782,8 @@ fn numbered_references(s: &Session, comp: u64, feature: u64) -> Vec<String> {
     joints.chain(origins).collect()
 }
 
+/// `component.relink`: a linked component shows the design at `path` instead, in all its
+/// placements, or with `occurrence` in that placement only.
 fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.relink";
     let comp = component_key(s, p, "component", cmd)?;

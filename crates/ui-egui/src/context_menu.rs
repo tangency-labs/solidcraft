@@ -947,6 +947,8 @@ fn joint_items(app: &SolveApp, id: u64) -> Vec<Item> {
     ]
 }
 
+/// The menu of the placement at `path`: its component's menu, with the rows aimed at this
+/// placement, and "Relink Source…" for it alone when the component is placed more than once.
 fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
     let Ok(placement) = app.session.occurrence_placement(path) else { return Vec::new() };
     let mut entries = component_items(app, placement.component);
