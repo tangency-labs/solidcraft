@@ -1814,7 +1814,14 @@ impl Session {
     fn define_inline(&mut self, id: &str, mut v: Value) -> Result<Value> {
         let mut doc = (*self.doc).clone();
         let defined = doc.define_inline().map_err(|e| EngineError::BadParams { cmd: id.to_string(), msg: e.to_string() })?;
-        let Some(first) = defined.first() else { return Ok(v) };
+        let Some(first) = defined.first() else {
+            // Only definitions of parameters that already exist, typed again as they were made:
+            // nothing new to report, but the text now names the parameter.
+            if doc != *self.doc {
+                self.doc = Arc::new(doc);
+            }
+            return Ok(v);
+        };
         if let Some(out) = v.as_object_mut() {
             out.insert("defined".into(), serde_json::json!(first.name));
             out.insert("definitions".into(), serde_json::json!(defined));
