@@ -988,6 +988,7 @@ mod tests {
             sketch,
             report,
             profiles: Vec::new(),
+            profiles_3d: Vec::new(),
             ends: Default::default(),
         }
     }
