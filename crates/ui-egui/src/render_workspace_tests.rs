@@ -7019,13 +7019,16 @@ fn gpu_preparation_shows_shader_warning_then_reports_job_failure() {
         .into_iter()
         .map(|key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE })
         .collect();
-    let _ = h.ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
-        assert!(show_shader_preparation(&mut h.app, ui.ctx()));
-        for key in keys {
-            assert!(ui.ctx().input_mut(|input| input.consume_key(egui::Modifiers::NONE, key)), "{key:?} must be available to other windows");
-        }
-        assert!(progress_pill(&mut h.app, ui, "render:progress"));
-    });
+    h.ctx
+        .run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+            assert!(show_shader_preparation(&mut h.app, ui.ctx()));
+            for key in keys {
+                assert!(ui.ctx().input_mut(|input| input.consume_key(egui::Modifiers::NONE, key)), "{key:?} must be available to other windows");
+            }
+            assert!(progress_pill(&mut h.app, ui, "render:progress"));
+        })
+        .textures_delta
+        .clear();
     assert!(crate::scenario::rect_of("render:progress:name").is_some());
     assert!(crate::scenario::rect_of("dialog:progress:render:progress").is_some());
     for control in ["warning", "spinner", "cancel"] {
