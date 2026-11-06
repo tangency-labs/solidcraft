@@ -78,6 +78,19 @@ jobs:
         with:
           workspaces: ". -> bin"
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Panic-prone calls the deny lints don't see (integer / and %, Vec::remove, ...; #2490):
+      # one more clippy pass over the library crates with type-resolved lints (dependencies
+      # are already checked above), compared with plan/panic-sites.tsv, which may only shrink.
+      - name: Panic-site inventory
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          if [ -n "$BASE" ]; then
+            git cat-file -e "$BASE^{commit}" 2>/dev/null || git fetch -q --no-tags --depth=1 origin "$BASE"
+            python3 -I scripts/ci/check_panic_sites.py --base "$BASE"
+          else
+            python3 -I scripts/ci/check_panic_sites.py
+          fi
 
   test:
     needs: changes
