@@ -127,6 +127,7 @@
     "what": "as report-fillet-concave-arc-and-front-top-edge-together-solver-residues, at r5: the corner patch stands out of the bar's front face (known limit past r4); reported from the app (2026-10-30, test-peg part)"
   },
   "expressible": true,
+  "gallery_note": "The new view shows the completed round at the front junction of the convex bar edge and the concave cylinder arc. The inset shows the whole part.",
   "operation_expressible": true,
   "outcome": {
     "ran": true,

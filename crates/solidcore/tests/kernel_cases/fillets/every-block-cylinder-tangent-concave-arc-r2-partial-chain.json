@@ -96,6 +96,7 @@
     "what": "the concave half circle where a block as wide as the cylinder's diameter meets the cylinder's wall above its top, rounded r2 alone (Tangent chain off)"
   },
   "expressible": false,
+  "gallery_note": "The new view shows the input at the tangent end before the isolated blend stops. The native corpus still lists this case as failing; the application accepting a refusal does not remove that entry. The inset shows the whole part.",
   "operation_expressible": true,
   "outcome": {
     "engine_error": "step 3 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001) (a picked edge continues tangentially into the edge at (4.734, 8.808, 15.000), which is not blended with it, and the blend cannot end there: with tangent propagation on, tangent_chain: true, its tangent chain is blended as one)",

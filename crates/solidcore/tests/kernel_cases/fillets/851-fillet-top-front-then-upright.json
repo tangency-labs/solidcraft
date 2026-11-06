@@ -163,7 +163,7 @@
     "what": "on #851's knife-edge part (tessellation/1263): the top front edge R2, then the front upright at the arc R2 as a fillet of its own"
   },
   "expressible": false,
-  "gallery_note": "the round along the first round's end curve is the ball about (39.2538, -19, 8) touching front, top and wall, the shape and volume of the three edges rounded together (9524.343665); on SMLib 5e8c9c1 it failed with status 1001",
+  "gallery_note": "the round along the first round's end curve is the ball about (39.2538, -19, 8) touching front, top and wall, the shape and volume of the three edges rounded together (9524.343665); on SMLib 5e8c9c1 it failed with status 1001. The new view shows the rounded end where the second fillet meets the first, with the spherical corner and its joining edges. The inset shows the whole part.",
   "operation_expressible": true,
   "outcome": {
     "ran": true,

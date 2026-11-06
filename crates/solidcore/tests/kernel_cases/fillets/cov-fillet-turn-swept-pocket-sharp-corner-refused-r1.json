@@ -402,6 +402,7 @@
     "solidcraft": "8f264574875d46860614e9381ee5f8222db7b7a6"
   },
   "expressible": true,
+  "gallery_note": "The new view shows the sharp pocket-floor corner before the refused swept turn. The adjoining vertical edge must first be rounded to at least radius 1. The inset shows the whole part.",
   "operation_expressible": true,
   "outcome": {
     "engine_error": "step 6 (solid.fillet): invalid input: the fillet's swept corner at (10.000, 20.000, 5.000) is not built: a swept turn cannot pass the sharp concave corner edge between the rounds; round that edge at a radius of at least 1 first",

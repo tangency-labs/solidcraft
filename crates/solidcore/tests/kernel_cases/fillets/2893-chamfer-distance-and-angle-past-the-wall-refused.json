@@ -128,5 +128,5 @@
   ],
   "what": "the top rim of a cylinder r10 x 20 chamfered 2 across the top at 90.573 deg from it: refused",
   "why_not": [],
-  "gallery_note": "at 90.573 degrees from the top the chamfer's line runs out through the wall: it meets the wall only below 90 degrees, pi less the wedge. The kernel refuses with the angle and that bound (BlendRefusal::ChamferAngleTooLarge)"
+  "gallery_note": "at 90.573 degrees from the top the chamfer's line runs out through the wall: it meets the wall only below 90 degrees, pi less the wedge. The kernel refuses with the angle and that bound (BlendRefusal::ChamferAngleTooLarge). The new image shows the input at the top rim. The application currently reports generic invalid-input text, so its angle-wording check still fails. The inset shows the whole part."
 }

@@ -130,6 +130,7 @@
     "what": "the peg's front top edge (convex) and the concave arc where its top meets the cylinder, rounded r5 together: the two edges are tangent where they meet, at the point where the front face runs tangent into the cylinder, and the corner patch there stood out of the front face; reported from the app (2026-10-30, test-peg part)"
   },
   "expressible": false,
+  "gallery_note": "The new view shows the completed round at the front junction of the convex bar edge and the concave cylinder arc. The inset shows the whole part.",
   "operation_expressible": true,
   "outcome": {
     "ran": true,

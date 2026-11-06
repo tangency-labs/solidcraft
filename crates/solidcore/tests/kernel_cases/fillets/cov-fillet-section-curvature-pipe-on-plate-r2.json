@@ -122,6 +122,7 @@
     "what": "the concave edge where a pipe dips into a plate rounded curvature-continuous size 2: the order-2 section meets the plane G2 (curvature 0) and the pipe G3 (its curvature 1/10 and that curvature's rate, 0)"
   },
   "expressible": false,
+  "gallery_note": "The new view looks toward the pipe end at x = 60, showing the section and the smooth plane/pipe joins. The case grades continuity; shading alone does not prove it. The inset shows the whole part.",
   "operation_expressible": true,
   "outcome": {
     "ran": true,
