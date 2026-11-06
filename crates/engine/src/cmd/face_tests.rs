@@ -553,13 +553,15 @@ fn body_volume(s: &mut Session, name: &str) -> f64 {
 }
 
 #[test]
-fn a_face_pick_on_coincident_faces_of_two_bodies_needs_the_body_named() {
+fn a_face_pick_on_coincident_faces_of_two_bodies_warns_and_names_them() {
     let mut s = Session::default();
     flush_boxes(&mut s);
-    // The point lies on Big's end face and on Small's: without `body` it says neither.
-    let err = s.execute("solid.offset_face", &json!({"faces": [[15, 0, 7.5]], "distance": 2})).unwrap_err().to_string();
-    assert!(err.contains("Big") && err.contains("Small") && err.contains("`body`"), "{err}");
-    assert!((body_volume(&mut s, "Big") - 24000.0).abs() < 1e-6);
+    // The point lies on Big's end face and on Small's: without `body` it says neither. The
+    // command does what it always did (Big, first, takes it: 40 × 32 × 20), and says so.
+    let out = run(&mut s, "solid.offset_face", json!({"faces": [[15, 0, 7.5]], "distance": 2}));
+    let warning = out["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("Big and Small") && warning.contains("Big was changed") && warning.contains("`body`"), "{out}");
+    assert!((body_volume(&mut s, "Big") - 25600.0).abs() < 1e-6);
     assert!((body_volume(&mut s, "Small") - 500.0).abs() < 1e-6);
 }
 
@@ -593,14 +595,20 @@ fn a_face_pick_on_one_body_of_several_saves_that_body_in_the_feature() {
 }
 
 #[test]
-fn replace_face_moves_the_named_body_of_a_flush_face_and_refuses_an_unnamed_one() {
+fn replace_face_moves_the_named_body_of_a_flush_face_and_warns_for_an_unnamed_one() {
+    let target = json!({"origin": [0, -3, 0], "normal": [0, 1, 0]});
+    // Unnamed, the shared face says neither body: the planar face is still found, Big takes it
+    // (its front face moves to Y=-3: 40 × 33 × 20) and the result warns.
     let mut s = Session::default();
     flush_boxes(&mut s);
-    let target = json!({"origin": [0, -3, 0], "normal": [0, 1, 0]});
-    // Unnamed, the shared face says neither body.
-    let err = s.execute("solid.replace_face", &json!({"faces": [[15, 0, 7.5]], "target": target})).unwrap_err().to_string();
-    assert!(err.contains("Big") && err.contains("Small") && err.contains("`body`"), "{err}");
+    let out = run(&mut s, "solid.replace_face", json!({"faces": [[15, 0, 7.5]], "target": target}));
+    let warning = out["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("Big and Small") && warning.contains("`body`"), "{out}");
+    assert!((body_volume(&mut s, "Big") - 26400.0).abs() < 1e-6, "{}", body_volume(&mut s, "Big"));
+    assert!((body_volume(&mut s, "Small") - 500.0).abs() < 1e-6);
     // Named, Small's back face moves to Y=-3: 10 × 7 × 5.
+    let mut s = Session::default();
+    flush_boxes(&mut s);
     run(&mut s, "solid.replace_face", json!({"faces": [[15, 0, 7.5]], "target": target, "body": "Small"}));
     assert!((body_volume(&mut s, "Small") - 350.0).abs() < 1e-6, "{}", body_volume(&mut s, "Small"));
     assert!((body_volume(&mut s, "Big") - 24000.0).abs() < 1e-6);
