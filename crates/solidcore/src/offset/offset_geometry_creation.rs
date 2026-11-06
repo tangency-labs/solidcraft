@@ -170,7 +170,8 @@ use crate::blend::fillet_standard_solver::p1::CircularCrossSectionFsg;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::{Curve, CurveKind, ELLIPSE_TYPE, LINE_TYPE};
 use crate::curve::curve::p8::CurveIntersectOptions;
-use crate::error::{Result, SolidError};
+use crate::error::offset::OffsetFailure;
+use crate::error::{Failure, Reason, Result, SolidError};
 use crate::geom::assert_array::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::context::MarkType;
@@ -199,7 +200,7 @@ use crate::nurbs::math::{NOW, NOZ};
 use crate::query::brep::BrepFaceServices;
 use crate::query::edge::ClosestPoint;
 use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN as OFFSET_SS_UNKNOWN};
-use crate::surface::surface::p1::SurfaceSolveContext;
+use crate::surface::surface::p1::{SurfaceIntersectContext, SurfaceSolveContext};
 use crate::surface::surface::p2::{
     SurfaceKind, TsectCurveType, CONE_TYPE, CYLINDER_TYPE, PLANE_TYPE, SPHERE_TYPE, TORUS_TYPE,
 };
@@ -416,6 +417,14 @@ pub trait OffsetExecutive<O> {
     fn is_local_operation(&self) -> bool {
         false
     }
+    /// Not upstream: whether original edge use `original`'s edge keeps its geometry in a
+    /// local operation (its faces and every face at its vertices keep their surfaces):
+    /// its offsets keep their faces' own curves, not mated again; `false` unless the
+    /// adapter says so.
+    fn keeps_edge(&self, original: O) -> bool {
+        let _ = original;
+        false
+    }
     /// Not upstream (WR-346): whether any inset face's offset collapsed (a convex round
     /// thinner than the wall); `false` unless `Kernel::fixes.offset_collapsed_rounds_mated`.
     fn has_collapsed_faces(&self) -> bool {
@@ -455,6 +464,16 @@ pub trait OffsetExecutive<O> {
         brep: &mut B,
         base: O,
     ) -> Result<(O, Extent2d)>;
+    /// The margin the analytic copy of `base` is extended by for the exact mate
+    /// (`Kernel::fixes.offset_analytic_mate_edges`): the one its extension
+    /// ([`Self::get_create_extended_surface`]) is made with, so the copy holds every piece
+    /// marched on that extension. The default is `upstream`, the fork's five offset
+    /// distances (an implementation compared against it keeps it); the executive's
+    /// adapter gives its face's recorded reach (not upstream).
+    fn analytic_extension_margin(&self, base: O, upstream: f64) -> f64 {
+        let _ = base;
+        upstream
+    }
 }
 
 /// What the unit reads from and writes to the original and offset B-reps,
@@ -3844,6 +3863,35 @@ impl OffsetGeometryCreation {
             Some(ssi_tol),
             Some(deg20_rad),
         )?;
+        // Not upstream: an extension kept exactly keeps its analytic kind, so the
+        // intersection may be an analytic special case's exact curve, over the whole
+        // analytic surfaces and without UV curves, where upstream's fitted extensions give
+        // marched pieces bounded by the domains, with their UV curves. Each such curve is
+        // its pieces inside both extended domains, with their UV curves, proved on both.
+        // Every failure of the cut is typed and passed on (never read as "unmated").
+        // The drops run under the intersection's face-aware context: an extended surface
+        // that is a face's own surface traces on its face's cache.
+        ssi.clip_exact_curves_with_context(
+            k,
+            Some(SurfaceIntersectContext {
+                solver: &mut OffsetSurfaceSolveContext(brep),
+                handles: [Some(ext_surface1), Some(ext_surface2)],
+            }),
+            &s1,
+            &domain1,
+            other,
+            &domain2,
+            ssi_tol,
+        )
+        .map_err(|e| {
+            if e.is_unported_or_cancelled() {
+                e
+            } else {
+                Failure::new(OP_MATE, OffsetFailure::ExactCurveUncut)
+                    .caused_by(e)
+                    .into_error()
+            }
+        })?;
 
         // `Kernel::fixes.offset_analytic_mate_edges` (tangency-labs/smlib@fddc366 and
         // @98ab1b0, #1453/#1130): two analytic surfaces meet on lines and conics. The
@@ -3853,9 +3901,11 @@ impl OffsetGeometryCreation {
         // analytic surfaces, not on a tangent extension) is replaced by that curve, its
         // UV curves dropped from it.
         if k.fixes.offset_analytic_mate_edges {
-            let ext_dist = self.offset_distance().abs() * 5.0;
-            let analytic1 = create_analytic_extension(k, surface_of(brep, surf1)?, ext_dist)?;
-            let analytic2 = create_analytic_extension(k, surface_of(brep, surf2)?, ext_dist)?;
+            let upstream = self.offset_distance().abs() * 5.0;
+            let margin1 = executive.analytic_extension_margin(surf1, upstream);
+            let margin2 = executive.analytic_extension_margin(surf2, upstream);
+            let analytic1 = create_analytic_extension(k, surface_of(brep, surf1)?, margin1)?;
+            let analytic2 = create_analytic_extension(k, surface_of(brep, surf2)?, margin2)?;
             if let (Some(analytic1), Some(analytic2)) = (&analytic1, &analytic2) {
                 if !ssi.curves_3d.is_empty() {
                     let exact = analytic1.global_surface_intersect(
@@ -3950,17 +4000,25 @@ impl OffsetGeometryCreation {
                 continue;
             }
 
-            // get iith XSect 3D and UVTrim Curves (null UVTrimCurves are an error)
+            // get iith XSect 3D and UVTrim Curves (null UVTrimCurves are an error; not
+            // upstream: a port invariant, every curve the intersection gives here has
+            // both, so it is passed on, never taken for an edge that cannot be mated)
+            let missing_uv = || {
+                SolidError::port_invariant(
+                    OP_MATE,
+                    "an intersection curve of the extended surfaces has no UV curve",
+                )
+            };
             let uv1 = surface1_uv_curves
                 .get(ii)
                 .copied()
                 .flatten()
-                .ok_or(SolidError::null_pointer(OP_MATE))?;
+                .ok_or_else(missing_uv)?;
             let uv2 = surface2_uv_curves
                 .get(ii)
                 .copied()
                 .flatten()
-                .ok_or(SolidError::null_pointer(OP_MATE))?;
+                .ok_or_else(missing_uv)?;
             if !is_b_spline_kind(curve_of(brep, uv1)?) || !is_b_spline_kind(curve_of(brep, uv2)?) {
                 return Err(SolidError::null_pointer(OP_MATE));
             }
@@ -4025,14 +4083,29 @@ impl OffsetGeometryCreation {
 
         // (the found curves are removed from the arrays upstream so that they are not deleted)
 
-        // Trim bound best XSectCurves to sTrimIvl (may snap sIvl by tol to existing knots:
-        // the snapped interval is what the next trim gets)
-        let mut ti = trim_ivl;
+        // Trim bound best XSectCurves to sTrimIvl (may snap sIvl by tol to existing knots).
+        // Not upstream: upstream trims them in turn, the interval snapped by each trim
+        // given to the next, so a curve trimmed before a later snap ends at the unsnapped
+        // parameter: the edge's interval (its 3D curve's, `replace_edge_curves`) is then
+        // not its UV curves'. Upstream's marched curves share their knots and snap alike;
+        // an exact curve's piece (`clip_exact_curves`, a conic snapping onto its NURB's
+        // knots) and its dropped UV curves do not. All three are trimmed to the one
+        // interval none of their trims snaps.
+        let ti = crate::surface::surface::exact_pieces::common_trim_interval(
+            k,
+            [
+                curve_of(brep, curve_3d_found)?,
+                curve_of(brep, uv_curve1_found)?,
+                curve_of(brep, uv_curve2_found)?,
+            ],
+            trim_ivl,
+            OP_MATE,
+        )?;
         for h in [curve_3d_found, uv_curve1_found, uv_curve2_found] {
             let c = brep
                 .curve_mut(h)
                 .ok_or(dangling("curve handle cannot be resolved"))?;
-            c.trim(k, &mut ti, TrimMode::Notify)?;
+            crate::surface::surface::exact_pieces::trim_unsnapped(k, c, ti, OP_MATE)?;
         }
 
         // Replace Curve of edge and set its new domain.
@@ -4367,6 +4440,12 @@ impl OffsetGeometryCreation {
 
         // If we are extending convex edges, extend both offset surfaces to hit each other.
         if executive.extend_convex_edges() && !shell_tangent_gap {
+            // Not upstream: in a local operation, an edge whose faces and vertices' faces
+            // all keep their surfaces keeps its geometry: the offset edges keep the faces'
+            // own curves (owner's decision; their surfaces are not intersected again)
+            if executive.keeps_edge(original_edgeuse) {
+                return Ok(out);
+            }
             let lamina = brep.edge_is_lamina(orig_edge)?;
 
             // No, we have to call ExtendTrimEdges() for Lamina Edges.  [cbi B01; B256 ok]
@@ -4415,8 +4494,10 @@ impl OffsetGeometryCreation {
                 return Ok(out);
             }
 
-            // Mate a couple of edges by extension and intersection (a problem is only reported).
-            let mated = ignore_soft(self.mate_edges(
+            // Mate a couple of edges by extension and intersection (a problem is only
+            // reported; not upstream: a port invariant (through `ignore_soft`), and an
+            // exact intersection curve that cannot be cut into its pieces, are passed on)
+            let mated = match self.mate_edges(
                 k,
                 brep,
                 executive,
@@ -4425,7 +4506,17 @@ impl OffsetGeometryCreation {
                 offset_edgeuse,
                 other_offset_edgeuse,
                 mark,
-            ))?;
+            ) {
+                Err(e)
+                    if matches!(
+                        e.failure().map(|f| &f.reason),
+                        Some(Reason::Offset(OffsetFailure::ExactCurveUncut))
+                    ) =>
+                {
+                    return Err(e)
+                }
+                r => ignore_soft(r)?,
+            };
             // Not upstream (WR-344 refinement, #1795): the merge must still intersect the
             // offsets of an edge that could not be mated
             if mated.is_none() && k.fixes.offset_extended_edges_mated {

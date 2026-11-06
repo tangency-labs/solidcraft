@@ -144,6 +144,8 @@ fn refused(e: SolidError) -> Error {
 ///   the length not be measurable to the kernel's stop within the distance (with the longest
 ///   that works, when the kernel names one);
 /// - [`Error::NotExact`]: the distance not met to the kernel's stop, no shorter one named;
+/// - [`Error::NoEffect`]: the distance below the side's resolution (the shortest extension its
+///   knot can carry is proved longer): no extension, the sheet would be returned as it is;
 /// - the kernel's errors.
 pub fn extend_sheet(
     sheet: &Body,
@@ -207,13 +209,17 @@ pub fn extend_sheet(
                 "an edge that is not all of one side of the box",
             )));
         };
-        let extended = match surf.extended_by_distance(k, &dom, grow, how, distance) {
-            Ok(e) => e,
+        // a distance below the side's resolution is no extension: the sheet would come back
+        // as it is, which is not what was asked
+        let (grown, mapped) = match surf.extended_by_distance(k, &dom, grow, how, distance) {
+            Ok(Some(e)) => {
+                let mapped = BoxSide::ALL.map(|s| e.side_of(s));
+                (e.surface, mapped)
+            }
+            Ok(None) => return Ok(Err(Error::NoEffect)),
             Err(e) if e.is_unported() || e.is_cancelled() => return Err(e),
             Err(e) => return Ok(Err(refused(e))),
         };
-        let mapped = BoxSide::ALL.map(|s| extended.side_of(s));
-        let grown = extended.surface;
         let grown_eval = grown.copy(k)?;
         let (mut r, nf) = sheet_on(k, grown, b.tolerance())?;
         // the face and each side stand for the face and side they continue
@@ -384,6 +390,21 @@ mod tests {
         assert!(rel(a, 125.0 * std::f64::consts::PI) < 1e-9, "area {a}");
         assert_eq!(out.counts().unwrap(), raw_counts(&e));
         assert!(matches!(step_box(&out).0, SurfaceKind::Cone(_)));
+    }
+
+    /// A distance below the side's resolution grows nothing: refused as no effect, not
+    /// returned as if extended.
+    #[test]
+    fn a_rounding_sized_distance_is_no_effect() {
+        let (sheet, order) = quarter();
+        let top = edge_at(&sheet, &order, [9.84807753012208, 1.7364817766693033, 20.0]);
+        for d in [3.5691962659704166e-16, f64::MIN_POSITIVE] {
+            assert_eq!(
+                extend_sheet(&sheet, &order, top, d, Continuation::Natural).err(),
+                Some(Error::NoEffect),
+                "{d:e}"
+            );
+        }
     }
 
     #[test]

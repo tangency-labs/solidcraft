@@ -57,7 +57,9 @@
 //! A side is left where the analytic closes in its direction (a full turn), where the side
 //! is not proved longer than a point (a pole or an apex), or a plane's side at
 //! `+-INFINITE_PARAMETER`, as [`Surface::extended_sides`] leaves them; where no side is
-//! extended the result is the source itself. Every other side asked is extended `distance` across it, capped (said so,
+//! extendable the result is the source itself. A side whose reach is below its resolution
+//! ([`SideExtension::Unchanged`]) is extendable: with no side extended, the result is the
+//! form itself (the same B-spline family as any extension). Every other side asked is extended `distance` across it, capped (said so,
 //! [`SideExtension::UpToLimit`]):
 //! - **round the axis**, no farther than a quarter of the turn the source leaves open (the
 //!   shell's rule for a round, WR-532), so it never laps itself;
@@ -79,9 +81,9 @@
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
-use super::ball::{knot_box, reach};
+use super::ball::{knot_box, reach, source_iso};
 use super::sides::{round_the_axis, ExtendedSides, SideExtension};
-use super::{keeps, Continuity, ExtendRefusal, Local};
+use super::{below_resolution, keeps, Continuity, ExtendRefusal, Local};
 use crate::error::{Result, SolidError};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::Vec3;
@@ -290,8 +292,12 @@ pub(super) fn analytic_extended_sides(
         } else {
             along
         };
-        let (grown, across, capped, bound) =
-            extend_side(&cur, side, &frame, iso, &implicit, distance)?;
+        let Some((grown, across, capped, bound)) =
+            extend_side(&cur, side, &frame, iso, &implicit, distance)?
+        else {
+            *done = SideExtension::Unchanged;
+            continue;
+        };
         cur = grown;
         extension = extension.max(bound);
         *done = if capped {
@@ -300,11 +306,17 @@ pub(super) fn analytic_extended_sides(
             SideExtension::Extended(across)
         };
     }
-    // nothing extended: the source itself, as [`Surface::extended_sides`] leaves it
-    if !sides
-        .iter()
-        .any(|x| matches!(x, SideExtension::Extended(_) | SideExtension::UpToLimit(_)))
-    {
+    // no side extendable (each closed, collapsed or unbounded): the source itself, as
+    // [`Surface::extended_sides`] leaves it. A side left `Unchanged` is extendable, its reach
+    // below its resolution: the result is the form continued by nothing, the same B-spline
+    // family as a reach one least step longer (a plane kept as itself here takes the shell
+    // offset's plane branches, which the form does not).
+    if !sides.iter().any(|x| {
+        matches!(
+            x,
+            SideExtension::Extended(_) | SideExtension::UpToLimit(_) | SideExtension::Unchanged
+        )
+    }) {
         return Ok(Some(ExtendedSides {
             surface: s.copy(k)?,
             sides,
@@ -365,13 +377,16 @@ fn circle(f: &Frame, iso: Iso, x0: Vec3) -> Result<Option<(Vec3, Vec3, f64)>> {
     })
 }
 
-/// The length along the iso from `x0` through `xm` to `x1`, in closed form.
-fn length(f: &Frame, iso: Iso, x0: Vec3, xm: Vec3, x1: Vec3) -> Result<f64> {
+/// The length along the iso from `x0` to `x1`, in closed form, the way round that continues
+/// the source's iso outward: from its far end `x_far` through its halfway point `x_half` to
+/// `x0` (`ball::source_iso`; the extension's own points are too close at the least step to
+/// say the sense).
+fn length(f: &Frame, iso: Iso, (x_far, x_half): (Vec3, Vec3), x0: Vec3, x1: Vec3) -> Result<f64> {
     let Some((centre, n, radius)) = circle(f, iso, x0)? else {
         return Ok((x1 - x0).length());
     };
-    // the swept angle, the way round through the middle point
-    let n = if (xm - x0).cross(x1 - xm).dot(n) < 0.0 {
+    // the swept angle, the way round the source's iso turns
+    let n = if (x_half - x_far).cross(x0 - x_half).dot(n) < 0.0 {
         n * -1.0
     } else {
         n
@@ -385,7 +400,8 @@ fn length(f: &Frame, iso: Iso, x0: Vec3, xm: Vec3, x1: Vec3) -> Result<f64> {
 }
 
 /// `cur` continued Natural past `side` by `distance` across it, capped (module docs): the
-/// result, its across length, whether the cap stopped it, and its construction bound.
+/// result, its across length, whether the cap stopped it, and its construction bound;
+/// `None` where the (capped) distance is below the side's resolution ([`below_resolution`]).
 fn extend_side(
     cur: &BSplineSurface,
     side: BoxSide,
@@ -393,7 +409,7 @@ fn extend_side(
     iso: Iso,
     implicit: &Implicit,
     distance: f64,
-) -> Result<(BSplineSurface, Across, bool, f64)> {
+) -> Result<Option<(BSplineSurface, Across, bool, f64)>> {
     let net = cur.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
     if matches!(iso, Iso::Ruling) && (if side.is_u() { net.p() } else { net.q() }) != 1 {
         return Err(SolidError::Unsupported {
@@ -441,13 +457,31 @@ fn extend_side(
             Point2::new(middle.x, x)
         }
     };
+    let sense = source_iso(cur, &dom, side, middle)?;
     let measure = |s: &BSplineSurface| -> Result<f64> {
         let x0 = s.evaluate_point(at(s, 0.0))?;
-        let xm = s.evaluate_point(at(s, 0.5))?;
         let x1 = s.evaluate_point(at(s, 1.0))?;
-        length(f, iso, x0, xm, x1)
+        length(f, iso, sense, x0, x1)
     };
     let value = |e: f64| -> Result<Option<f64>> { made(e)?.map(|(s, _)| measure(&s)).transpose() };
+    // the length across an extension whose construction bound is `bound`, with the closed
+    // form's rounding (the evaluations at the points' size, the products, the atan2) and the
+    // points' construction bound through the angle
+    let across_of = |s: &BSplineSurface, bound: f64| -> Result<Across> {
+        let length = measure(s)?;
+        let rounding = gamma(64) * (length + f.size) + 4.0 * bound;
+        Ok(Across {
+            enclosure: Bracket {
+                lower: (length - rounding).max(0.0),
+                upper: length + rounding,
+            },
+            truncation: 0.0,
+            rounding,
+            converged: true,
+            // a closed form at the points' size: its rounding part is sized on the part
+            resolution: 0.0,
+        })
+    };
     // the cap, from the side's middle point and the iso's other end inside the source
     let x_side = cur.evaluate_point(middle)?;
     let inside = {
@@ -478,23 +512,17 @@ fn extend_side(
     };
     let target = distance.min(cap);
     let capped = target < distance;
-    let e = reach(&value, target, source.range()?)?;
+    let least = source.least_step()?;
+    if let Some((g, bound)) = made(least)? {
+        if below_resolution(Some(&across_of(&g, bound)?), bound, target) {
+            return Ok(None);
+        }
+    }
+    let e = reach(&value, target, source.range()?, least)?;
     let (grown, bound) = made(e)?.ok_or_else(|| SolidError::sm_err(OP))?;
-    let length = measure(&grown)?;
+    let across = across_of(&grown, bound)?;
     certify_iso(&grown, side, middle, f, iso)?;
-    // the closed form's rounding (the evaluations at the points' size, the products, the
-    // atan2), and the points' construction bound through the angle
-    let rounding = gamma(64) * (length + f.size) + 4.0 * bound;
-    let across = Across {
-        enclosure: Bracket {
-            lower: (length - rounding).max(0.0),
-            upper: length + rounding,
-        },
-        truncation: 0.0,
-        rounding,
-        converged: true,
-    };
-    Ok((grown, across, capped, bound))
+    Ok(Some((grown, across, capped, bound)))
 }
 
 /// `out`, a net of degree 1 across `side` continued Natural past it, with the joint knot

@@ -126,7 +126,6 @@
   "local_operation_box_holds_new_surfaces",
   "offset_walls_touch_refused",
   "offset_keep_cavity_regions",
-  "local_operation_offset_status",
   "local_operation_refuses_loose_tangent_edges",
   "local_operation_step_walls",
   "offset_closes_loop_gaps",

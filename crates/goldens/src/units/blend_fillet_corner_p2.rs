@@ -85,14 +85,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::blend::fillet_corner::p2 as corner;
+use solidcore::blend::fillet_corner::p3::{CornerEnv, FilletCorner};
 use solidcore::error::SolidError;
 use solidcore::kernel::Kernel;
 use solidcore::topology::edgeuse::p1 as eu1;
-use solidcore::topology::{Brep, EdgeuseId, VertexId};
+use solidcore::topology::{Brep, EdgeuseId, FaceId, VertexId};
 
 use super::blend_fillet_corner_p1 as p1;
 use super::blend_fillet_corner_p3::{
-    corner_rust_status, edge_in, gen_nx2_model, line, plane_srf, vin, CornerIn,
+    corner_bodies, corner_rust_status, edge_in, gen_nx2_model, line, plane_srf, vin, CornerIn,
     EuSel,
 };
 use super::blend_fillet_geom_p1::{Crv, Model};
@@ -403,7 +404,20 @@ fn corner_rust(
     c: &CornerIn,
     split: [usize; 2],
 ) -> Result<Output, HarnessError> {
-    corner_rust_status(k, model, c, |c, env, faces| match method {
+    corner_rust_status(k, model, c, |c, env, faces| {
+        run_method(method, split, c, env, faces)
+    })
+}
+
+/// The corner method of a `corner` case on its corner; the record's status on success.
+fn run_method(
+    method: CornerMethod,
+    split: [usize; 2],
+    c: &mut FilletCorner,
+    env: &mut CornerEnv<'_>,
+    faces: &[FaceId],
+) -> solidcore::Result<f64> {
+    match method {
         CornerMethod::AdjustConcave => c.adjust_topology(env).map(|()| 0.0),
         CornerMethod::UpdateSplitFace => {
             let (Some(&orig), Some(&new)) = (faces.get(split[0]), faces.get(split[1])) else {
@@ -415,7 +429,67 @@ fn corner_rust(
         CornerMethod::Analytic => c
             .make_analytic_corner_surface(env)
             .map(|made| if made { 1.0 } else { 0.0 }),
-    })
+    }
+}
+
+/// The case's bodies (for `examples/case_smb.rs`): a `find_concave` case's B-rep
+/// (`input`; the op does not change it); a `corner` case's target B-rep after its method
+/// (`target`), its fillet B-rep when it has faces (`fillet`) and each corner surface as a
+/// one-face sheet over its natural UV domain (`corner_surface`).
+///
+/// # Errors
+///
+/// The case's inputs are bad, it ends before its op (a refused or deferred case), or it is
+/// a `p1_corner` case (unit `blend.fillet_corner_p1`'s runner).
+pub fn result_breps(case: &Case) -> Result<super::surface_surface_p2::Drawn, HarnessError> {
+    let cannot = |why: String| harness(format!("case {}: cannot be drawn: {why}", case.name));
+    let i: Inputs = case.parse()?;
+    match &i {
+        Inputs::P1Corner { .. } => Err(cannot(
+            "a p1_corner case runs unit blend.fillet_corner_p1's runner".into(),
+        )),
+        Inputs::FindConcave { .. } => match topo(&i)? {
+            Ok(t) => Ok((Kernel::default(), vec![("input", t.brep)])),
+            Err(o) => Err(cannot(format!(
+                "it ends before the op ({})",
+                o.error.as_deref().unwrap_or("deferred")
+            ))),
+        },
+        Inputs::Corner {
+            method,
+            model,
+            corner,
+            split,
+        } => {
+            let (method, split) = (*method, *split);
+            let k = Kernel::default();
+            let ran = corner_bodies(&k, model, corner, |c, env, faces| {
+                run_method(method, split, c, env, faces)
+            })?;
+            let mut b = match ran {
+                Ok(b) => b,
+                Err(o) => {
+                    return Err(cannot(format!(
+                        "it ends before the record ({})",
+                        o.error.as_deref().unwrap_or("deferred")
+                    )))
+                }
+            };
+            let mut drawn = vec![("target", b.target)];
+            if !b.fillet.faces().is_empty() {
+                drawn.push(("fillet", b.fillet));
+            }
+            for s in b.surfaces {
+                let dom = s
+                    .natural_uv_domain_with_nurb(&b.k)
+                    .map_err(|e| cannot(format!("a corner surface's UV domain: {e}")))?;
+                let sheet = super::surface_surface_p2::sheet(&mut b.k, s, &dom)
+                    .map_err(|e| harness(format!("case {}: {e}", case.name)))?;
+                drawn.push(("corner_surface", sheet));
+            }
+            Ok((b.k, drawn))
+        }
+    }
 }
 
 /// `inner` as a case of unit `blend.fillet_corner_p1`.

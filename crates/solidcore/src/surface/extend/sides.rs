@@ -12,7 +12,9 @@
 //! extension would lap the surface) or where the side is not proved longer than a point (a
 //! pole or an apex: its certified diameter's lower bound is 0), as upstream leaves a closed
 //! direction and a singular side. Every other side is extended or refused with the side's
-//! own typed error.
+//! own typed error. A side asked a distance below its resolution (the shortest extension its
+//! knot can carry is proved past it) is left unchanged, and said so
+//! ([`SideExtension::Unchanged`]), on every path.
 //!
 //! Two more rules (owner, 2026-11-04):
 //! - **Unbounded.** A plane's side at `+-INFINITE_PARAMETER` (the kernel's infinite plane) is
@@ -67,6 +69,11 @@ pub enum SideExtension {
     AroundAxis,
     /// Extended less than asked, up to an apex, pole or full turn: the length across it.
     UpToLimit(Across),
+    /// Left: the distance is below the side's resolution, the shortest extension its knot
+    /// can carry proved past it (`super::below_resolution`): no extension, the surface as
+    /// it is there. One rule on every path (analytic, an analytic widened on its own
+    /// parameters where its box ends at its form's end, ball patch, B-spline).
+    Unchanged,
 }
 
 /// For a cone, sphere, torus or surface of revolution, whether side `side` runs round its
@@ -245,7 +252,10 @@ impl Surface {
                 *done = SideExtension::AroundAxis;
                 continue;
             }
-            let grown = surface.extended_by_distance(k, &dom, side, how, distance)?;
+            let Some(grown) = surface.extended_by_distance(k, &dom, side, how, distance)? else {
+                *done = SideExtension::Unchanged;
+                continue;
+            };
             for s in &mut on {
                 *s = grown.side_of(*s);
             }

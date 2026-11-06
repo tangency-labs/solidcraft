@@ -1450,7 +1450,6 @@ impl<'s> SurfaceDropCurve<'s> {
                             .unwrap_or(Vec3::ZERO);
                         let curve_end = ignored(iso_curve.evaluate_point(k, iso_ivl.max()))?
                             .unwrap_or(Vec3::ZERO);
-
                         let iso_u_ivl = Extent1d::from_min_max(
                             min2(curve_start.x, curve_end.x),
                             max2(curve_start.x, curve_end.x),
@@ -1459,6 +1458,12 @@ impl<'s> SurfaceDropCurve<'s> {
                             min2(curve_start.y, curve_end.y),
                             max2(curve_start.y, curve_end.y),
                         );
+                        // An iso curve along the seam (its middle on it) has a twin, the
+                        // seam's UV line on the other side: a separate UV curve, from which
+                        // callers choose the side of an edge use, so its start is traced too
+                        let mid = iso_curve.evaluate_point(k, iso_ivl.evaluate(0.5))?;
+                        let along_seam =
+                            is_on_seam(k, surface, Point2::new(mid.x, mid.y))?.is_some();
 
                         // Remove other solutions that are on this curve
                         let mut kk = jj + 1;
@@ -1466,8 +1471,20 @@ impl<'s> SurfaceDropCurve<'s> {
                             let next = index2(&solutions, kk)?;
 
                             // If the point drops to the curve, remove it from solutions to check
-                            if iso_u_ivl.contains_value(next.x, 0.0)
-                                && iso_v_ivl.contains_value(next.y, 0.0)
+                            // (not upstream: or, for an iso curve that leaves the seam, its
+                            // image across the seam does, the same point of the curve, whose
+                            // iso curve would be this one again: upstream traces it a
+                            // second time)
+                            let on_iso = |uv: Point2| {
+                                iso_u_ivl.contains_value(uv.x, 0.0)
+                                    && iso_v_ivl.contains_value(uv.y, 0.0)
+                            };
+                            let across = if on_iso(next) || along_seam {
+                                None
+                            } else {
+                                is_on_seam(k, surface, next)?
+                            };
+                            if on_iso(next) || across.is_some_and(|uvs| uvs.into_iter().any(on_iso))
                             {
                                 solutions.remove(kk);
                             } else {
@@ -2374,6 +2391,59 @@ mod tests {
         let id = t.base.new_point(TracePoint::zeroed());
         let mut out = TraceOutput::default();
         assert!(t.trace_curve_2(&k, id, &mut out).is_err());
+    }
+
+    /// A line along a cone's seam drops to both of the seam's UV lines, `u` min and `u`
+    /// max: two UV curves of one 3D piece, from which an edge use's side is chosen (the
+    /// offset of a cone's seam edge use keeps its original's side).
+    #[test]
+    fn a_line_along_a_cone_seam_drops_to_both_seam_lines() {
+        let k = &Kernel::default();
+        let mut cone = crate::surface::cone::Cone::new_bounded(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            5.0,
+            2.5,
+            0.0,
+            360.0,
+            10.0,
+            false,
+            false,
+            false,
+        );
+        cone.make_nurb(k).unwrap();
+        let s = Surface::from(cone);
+        let d = s.natural_uv_domain_with_nurb(k).unwrap();
+        // the generator at angle 0, the seam
+        let seam = segment(Vec3::new(5.0, 0.0, 0.0), Vec3::new(2.5, 0.0, 10.0));
+        let dropped = s
+            .drop_and_trim_curve::<NoObject>(
+                k,
+                &d,
+                &seam,
+                &seam.natural_interval(),
+                1e-6,
+                true,
+                true,
+                None,
+            )
+            .unwrap();
+        assert_eq!(dropped.uv_curves.len(), 2);
+        let mut sides = Vec::new();
+        for uv in &dropped.uv_curves {
+            let ivl = uv.natural_interval();
+            let (a, b) = (
+                uv.evaluate_point(k, ivl.min()).unwrap(),
+                uv.evaluate_point(k, ivl.max()).unwrap(),
+            );
+            // a u-constant line over the whole height
+            assert_eq!(a.x, b.x);
+            assert!((a.y - b.y).abs() >= d.v_max() - d.v_min() - 1e-9);
+            sides.push(a.x);
+        }
+        sides.sort_by(f64::total_cmp);
+        assert_eq!(sides, vec![d.u_min(), d.u_max()]);
     }
 
     #[test]

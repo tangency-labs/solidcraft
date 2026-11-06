@@ -830,6 +830,40 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     }
 }
 
+/// The surface of an `iso` or `trim` case as a one-face sheet over the op's UV domain (the
+/// case's, or for a `trim` without one the surface's natural domain), labelled `surface`
+/// (for `examples/case_smb.rs`). The dropped UV curves are open pieces, not loops, so the
+/// sheet does not show them.
+///
+/// # Errors
+///
+/// The case's inputs are bad, its op has no surface (every op but `iso` and `trim`), or
+/// its surface of revolution cannot be made.
+pub fn result_breps(case: &Case) -> Result<super::surface_surface_p2::Drawn, HarnessError> {
+    let cannot = |why: String| harness(format!("case {}: cannot be drawn: {why}", case.name));
+    let mut k = Kernel::default();
+    let (surface, domain) = match case.parse::<Inputs>()? {
+        Inputs::Iso {
+            surface, domain, ..
+        } => (surface, Some(domain)),
+        Inputs::Trim {
+            surface, domain, ..
+        } => (surface, domain),
+        _ => return Err(cannot("the op has no surface (only iso and trim do)".into())),
+    };
+    let s = rust_surface(&k, &surface)?
+        .ok_or_else(|| cannot("the surface of revolution cannot be made".into()))?;
+    let dom = match domain {
+        Some(d) => ext(d),
+        None => s
+            .natural_uv_domain_with_nurb(&k)
+            .map_err(|e| cannot(format!("natural UV domain: {e}")))?,
+    };
+    let b = super::surface_surface_p2::sheet(&mut k, s, &dom)
+        .map_err(|e| harness(format!("case {}: {e}", case.name)))?;
+    Ok((k, vec![("surface", b)]))
+}
+
 // ---- generation ---------------------------------------------------------------------
 
 fn pick<T: Copy>(rng: &mut Rng, xs: &[T], default: T) -> T {

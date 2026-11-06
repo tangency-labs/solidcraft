@@ -62,6 +62,7 @@ use solidcore::surface::surface::p2::{
     TangencyType,
 };
 use solidcore::topology::database_io::{DatabaseReader, FileType};
+use solidcore::topology::Brep;
 use solidcore::SolidError;
 
 use crate::case::CaseContext;
@@ -806,11 +807,21 @@ fn edit(s: &mut Option<Surface>, f: impl FnOnce(&mut Surface) -> solidcore::Resu
 }
 
 fn rust_surface_op(k: &Kernel, op: &OpIn, t: &This) -> Result<Run, HarnessError> {
+    surface_op_on(k, op, t).map(|(run, _)| run)
+}
+
+/// [`rust_surface_op`] with `this` as the op leaves it (`None`: the base class, or a
+/// revolution record that did not read).
+fn surface_op_on(
+    k: &Kernel,
+    op: &OpIn,
+    t: &This,
+) -> Result<(Run, Option<Surface>), HarnessError> {
     // `base` first, then `rev`, then the B-spline surface
     let mut s = match t.rev.as_ref().filter(|_| !t.base) {
         Some(r) => match revolution_surface(k, r)? {
             Ok(s) => Some(s),
-            Err(e) => return Ok(Err(e)),
+            Err(e) => return Ok((Err(e), None)),
         },
         None => this_surface(t)?,
     };
@@ -1126,7 +1137,7 @@ fn rust_surface_op(k: &Kernel, op: &OpIn, t: &This) -> Result<Run, HarnessError>
         }
         _ => return Err(harness("not a surface op")),
     };
-    Ok(run)
+    Ok((run, s))
 }
 
 fn cross_values(s: &CrossSets) -> (Vec<Vec3>, Vec<Vec3>, [Option<Vec<Vec3>>; 6]) {
@@ -1691,6 +1702,58 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
         Ok(o) => to_output(&o),
         Err(e) => Output::unported(&e).unwrap_or_else(|| to_output(&[status(&e)])),
     })
+}
+
+// ---- drawing (examples/case_smb.rs) ----------------------------------------------------
+
+/// A case's bodies to draw: the kernel they were made in and each body with its label.
+pub type Drawn = (Kernel, Vec<(&'static str, Brep)>);
+
+/// A one-face sheet of `surface` over `dom` (`CreateFaceFromSurface` on a new B-rep), for
+/// drawing a surface result. An unbounded or empty domain cannot be drawn.
+pub(crate) fn sheet(k: &mut Kernel, surface: Surface, dom: &Extent2d) -> Result<Brep, HarnessError> {
+    let b = [dom.u_min(), dom.v_min(), dom.u_max(), dom.v_max()];
+    let [u0, v0, u1, v1] = b;
+    let bounded = b
+        .iter()
+        .all(|x| x.is_finite() && x.abs() < solidcore::math::INFINITE_PARAMETER);
+    if !bounded || u0 >= u1 || v0 >= v1 {
+        return Err(harness(format!(
+            "cannot be drawn: the surface's UV domain {b:?} is unbounded or empty"
+        )));
+    }
+    let made = crate::own_builder::in_new_brep(k, |k, brep| {
+        crate::own_builder::create_face(k, brep, surface, b).map(|_| ())
+    })?;
+    made.map_err(|e| harness(format!("cannot be drawn: the sheet's face: {e}")))
+}
+
+/// The case's `this` surface as the op leaves it, as a one-face sheet over its natural UV
+/// domain, labelled `this` (for `examples/case_smb.rs`).
+///
+/// # Errors
+///
+/// The case's inputs are bad, or it has no surface: the base class, a static op, a
+/// revolution record that did not read, or a `common_*` case (another unit's runner).
+pub fn result_breps(case: &Case) -> Result<Drawn, HarnessError> {
+    let cannot = |why: &str| harness(format!("case {}: cannot be drawn: {why}", case.name));
+    if case
+        .inputs
+        .as_object()
+        .is_some_and(|o| o.keys().any(|key| key.starts_with("common_")))
+    {
+        return Err(cannot("a common_* case runs another unit's runner"));
+    }
+    let i: Inputs = case.parse()?;
+    let t = i.this.as_ref().ok_or_else(|| cannot("a static op has no surface"))?;
+    let mut k = Kernel::default();
+    let (_, s) = surface_op_on(&k, &i.op, t)?;
+    let s = s.ok_or_else(|| cannot("the base class (or an unread record) has no surface"))?;
+    let dom = s
+        .natural_uv_domain_with_nurb(&k)
+        .map_err(|e| cannot(&format!("natural UV domain: {e}")))?;
+    let b = sheet(&mut k, s, &dom)?;
+    Ok((k, vec![("this", b)]))
 }
 
 // ---- input contract -----------------------------------------------------------------

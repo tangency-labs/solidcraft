@@ -6,8 +6,8 @@
 //!
 //! The cases are the fork's, rebuilt here: a block whose top is imprinted with a split,
 //! one piece moved up or down (the step adds or takes off the piece's footprint times
-//! the move), and WR-530's boss wall moved out 1 off its base round (the 8 of wall above
-//! the round grows from r10 to r11: plus pi * (121 - 100) * 8).
+//! the move), and WR-530's boss wall moved out 1 off its base round, which the local
+//! reach refuses as uncertified: the round beside the wall is a torus.
 //!
 //! Each moved face gets its own surface offset (`CreateOffsetSurface`), as the fork's
 //! `smlib_offset_faces` moves it: the local operation lifts the face's edges onto the new
@@ -22,9 +22,7 @@
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
 
-use std::f64::consts::PI;
-
-use offset_fixture::{planar_faces_at, report, volume, Notifications};
+use offset_fixture::{planar_faces_at, report, Notifications};
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::{boolean_union, boolean_with_options};
 use solidcore::boolean::merge::MergeOptions;
@@ -226,23 +224,25 @@ fn move_boss_wall(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<()> {
     local_operation(k, b, &faces, surfaces, &mut notifications.context())
 }
 
-/// The boss wall moved off its base round keeps the round and gains a ledge on top of
-/// it (the step wall round the circle, built without folding through its own axis).
+/// The boss wall moved off its base round is refused before anything is built: the
+/// round beside it is a torus, and the local reach certifies only a plane beside a plane,
+/// cylinder, cone or sphere, so it has no certified bound there and refuses the input's
+/// face 7 as `ReachUncertified`.
 #[test]
-fn wr_530_boss_wall_moved_off_its_round_builds_the_step() {
+fn wr_530_boss_wall_beside_a_torus_round_is_refused_as_reach_uncertified() {
+    use solidcore::error::offset::OffsetFailure;
+    use solidcore::error::Reason;
     let mut k = kernel(true);
     let mut b = boss_part(&mut k);
-    let before = volume(&k, &mut b).unwrap();
-    move_boss_wall(&mut k, &mut b).unwrap();
-    b.refresh_cached_topology();
-    let want = before + PI * 21.0 * 8.0;
-    assert!(report(
-        &k,
-        "wr_530 boss wall out 1",
-        Ok(b),
-        Some(want),
-        1e-6
-    ));
+    let e = move_boss_wall(&mut k, &mut b).unwrap_err();
+    assert_eq!(
+        e.failure().map(|f| &f.reason),
+        Some(&Reason::Offset(OffsetFailure::ReachUncertified {
+            face: FaceId::from_index(7)
+        })),
+        "{e}"
+    );
+    assert_eq!(e.sm_status(), Some(SM_ERR));
 }
 
 #[test]

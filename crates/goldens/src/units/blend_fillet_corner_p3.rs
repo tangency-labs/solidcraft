@@ -841,7 +841,7 @@ fn corner_rust(
     ci: &CornerIn,
     gs: &[Option<SolverIn>],
 ) -> Result<Output, HarnessError> {
-    corner_rust_status_gs(k, model, ci, gs, |c, env, _| {
+    corner_rust_status_gs(k, model, ci, gs, None, |c, env, _| {
         match op {
             CornerOp::CalcGeom => c.calc_corner_geom(env),
             CornerOp::Patch => c.create_corner_patch(env),
@@ -865,15 +865,40 @@ pub(super) fn corner_rust_status(
     ci: &CornerIn,
     run: impl FnOnce(&mut FilletCorner, &mut CornerEnv<'_>, &[FaceId]) -> solidcore::Result<f64>,
 ) -> Result<Output, HarnessError> {
-    corner_rust_status_gs(k, model, ci, &[], run)
+    corner_rust_status_gs(k, model, ci, &[], None, run)
 }
 
-/// [`corner_rust_status`] with solvers on the model's geometries (as the shim's).
+/// What a corner case leaves after its method runs (for `examples/case_smb.rs`): the
+/// model's kernel, its target B-rep, the fillet B-rep (`m_pFilletBrep`) and the corner's
+/// surfaces (`m_vSurfaces`).
+pub(super) struct CornerBodies {
+    pub(super) k: Kernel,
+    pub(super) target: Brep,
+    pub(super) fillet: Brep,
+    pub(super) surfaces: Vec<Surface>,
+}
+
+/// [`corner_rust_status`] that also hands back the case's [`CornerBodies`]; `Err(output)`
+/// when the case ends before the record (a deferred method), with its output.
+pub(super) fn corner_bodies(
+    k: &Kernel,
+    model: &Model,
+    ci: &CornerIn,
+    run: impl FnOnce(&mut FilletCorner, &mut CornerEnv<'_>, &[FaceId]) -> solidcore::Result<f64>,
+) -> Result<Result<CornerBodies, Output>, HarnessError> {
+    let mut bodies = None;
+    let out = corner_rust_status_gs(k, model, ci, &[], Some(&mut bodies), run)?;
+    Ok(bodies.ok_or(out))
+}
+
+/// [`corner_rust_status`] with solvers on the model's geometries (as the shim's); with
+/// `bodies`, what the run leaves is moved there once the record is made.
 fn corner_rust_status_gs(
     k: &Kernel,
     model: &Model,
     ci: &CornerIn,
     gs: &[Option<SolverIn>],
+    bodies: Option<&mut Option<CornerBodies>>,
     run: impl FnOnce(&mut FilletCorner, &mut CornerEnv<'_>, &[FaceId]) -> solidcore::Result<f64>,
 ) -> Result<Output, HarnessError> {
     let h = |e: SolidError| harness(e.to_string());
@@ -1087,7 +1112,16 @@ fn corner_rust_status_gs(
     put_corner_surfaces(&mut rec, &c.surfaces)?;
     put_fillet_brep(&mut rec, &fillet_brep)?;
     put_error_info(&mut rec, &exec.error, c.filleted_vertex());
-    corner_output(&rec)
+    let out = corner_output(&rec);
+    if let Some(slot) = bodies {
+        *slot = Some(CornerBodies {
+            k: rm.k,
+            target: rm.target,
+            fillet: fillet_brep,
+            surfaces: std::mem::take(&mut c.surfaces),
+        });
+    }
+    out
 }
 
 /// Distinct identities for the face makers' notifications in the fillet B-rep.

@@ -136,7 +136,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::tol::zone_tol3d;
 use crate::geom::tools::{
-    find_coincident_edge, find_first_vertex_within_tol_to_pnt, CoincidentEdgeQuery,
+    find_coincident_edge, find_first_vertex_within_tol_to_pnt, CoincidentEdgeQuery, VertexMatch,
 };
 use crate::intersect::curve_class::p1::{CurveClassification, CurveInterval};
 use crate::intersect::curve_class::p4::ClassificationInit;
@@ -1156,13 +1156,12 @@ pub fn make_face_with_curves(
     )
 }
 
-/// [`make_face_with_curves`] retaining each input curve slot's owning edge.
-/// Degenerate and coincident curves discarded by construction have no owner;
-/// output slots preserve their original input positions. Completed owners remain
-/// in `curve_owners` if a later construction step fails.
+/// [`make_face_with_curve_owners`] without vertex slots: every curve is an edge unless it
+/// is degenerate where it lies.
 ///
 /// # Errors
 /// As [`make_face_with_curves`].
+#[allow(clippy::too_many_arguments)]
 pub fn make_face_with_curve_owners(
     k: &mut Kernel,
     b: &mut Brep,
@@ -1176,7 +1175,7 @@ pub fn make_face_with_curve_owners(
     curve_owners: &mut Vec<Option<EdgeId>>,
     env: &mut ed::NotifyEnv<'_>,
 ) -> Result<NewFace> {
-    make_face_with_curves_impl(
+    make_face_with_curve_owners_at_vertices(
         k,
         b,
         region,
@@ -1186,9 +1185,64 @@ pub fn make_face_with_curve_owners(
         orientation,
         crv_on_surf,
         this_face,
+        &[],
+        curve_owners,
+        env,
+    )
+}
+
+/// [`make_face_with_curves`] retaining each input curve slot's owning edge.
+/// Degenerate and coincident curves discarded by construction have no owner;
+/// output slots preserve their original input positions. Completed owners remain
+/// in `curve_owners` if a later construction step fails.
+///
+/// (not upstream) Each slot in `vertex_slots` stands for a vertex, not an edge: its curve
+/// closes the UV loop (a pole's UV gap, where two edge uses end at one vertex at two
+/// parameters) and is lifted as the others are, but made no edge, whatever it lifts to on
+/// `surface`: the next curve starts at the vertex the one before it ends at (where the
+/// slot closes the loop, the last curve ends at the loop's first vertex). It has no owner.
+/// The join is topological: where the slot lifts to more than a point, the edges either
+/// side end apart from the vertex they share, and the caller closes that gap. The local
+/// operation intersects those edges again with the faces beside them, and its soundness
+/// gate checks the body. Crate-private for that reason: nothing outside the crate can make
+/// a face whose edges end off their vertices.
+///
+/// # Errors
+/// As [`make_face_with_curves`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn make_face_with_curve_owners_at_vertices(
+    k: &mut Kernel,
+    b: &mut Brep,
+    region: Option<RegionId>,
+    input: FaceCurvesInput,
+    surface: Surface,
+    uv_domain: &Extent2d,
+    orientation: OrientType,
+    crv_on_surf: Option<bool>,
+    this_face: &dyn Fn(FaceId) -> ObjectRef,
+    vertex_slots: &[usize],
+    curve_owners: &mut Vec<Option<EdgeId>>,
+    env: &mut ed::NotifyEnv<'_>,
+) -> Result<NewFace> {
+    let mut transfer = p6::FaceSurfaceTransfer::new(surface);
+    let mut out = NewFace::default();
+    make_face_with_curves_transfer_impl(
+        k,
+        b,
+        region,
+        input,
+        &mut transfer,
+        uv_domain,
+        orientation,
+        crv_on_surf,
+        this_face,
+        vertex_slots,
         curve_owners,
         &mut ed::NotifyState::from_env(env),
-    )
+        &mut out,
+        true,
+    )?;
+    Ok(out)
 }
 
 /// [`make_face_with_curves`] using caller-owned notification stores and the actual
@@ -1275,6 +1329,7 @@ fn make_face_with_curves_impl(
         orientation,
         crv_on_surf,
         this_face,
+        &[],
         curve_owners,
         state,
         &mut out,
@@ -1308,6 +1363,7 @@ pub(crate) fn make_face_with_curves_transfer(
         orientation,
         crv_on_surf,
         this_face,
+        &[],
         &mut Vec::new(),
         &mut ed::NotifyState::from_env(env),
         out,
@@ -1326,6 +1382,7 @@ fn make_face_with_curves_transfer_impl(
     orientation: OrientType,
     crv_on_surf: Option<bool>,
     this_face: &dyn Fn(FaceId) -> ObjectRef,
+    vertex_slots: &[usize],
     curve_owners: &mut Vec<Option<EdgeId>>,
     state: &mut ed::NotifyState<'_>,
     out: &mut NewFace,
@@ -1518,9 +1575,18 @@ fn make_face_with_curves_transfer_impl(
     for &n in &loops {
         let mut degenerate = 0usize;
         let mut vertices: Vec<VertexId> = Vec::new();
+        // (not upstream) the end vertex of the last edge made, which the next curve starts
+        // at when a vertex slot stands between them
+        let mut last_end: Option<VertexId> = None;
+        let is_vertex_slot = |i: usize| vertex_slots.contains(&i);
         for jj in 0..n {
             let slot = curve_total + jj;
             curve_owners.push(None);
+            if is_vertex_slot(slot) {
+                // a vertex: no edge, its neighbours share the vertex
+                degenerate += 1;
+                continue;
+            }
             let Some(curve) = curves_3d.get_mut(slot).and_then(Option::take) else {
                 degenerate += 1;
                 continue;
@@ -1540,9 +1606,21 @@ fn make_face_with_curves_transfer_impl(
                     (ivl.max(), ivl.min(), OrientType::Opposite, 1u8)
                 };
 
-            // find or make the start vertex
+            // find or make the start vertex (after a vertex slot, the last edge's end)
             let start_pt = curve.evaluate_point(k, start_param)?;
-            let mut m = find_first_vertex_within_tol_to_pnt(b, &vertices, start_pt, zone_tol)?;
+            let joined = if jj > 0 && is_vertex_slot(slot - 1) {
+                last_end
+            } else {
+                None
+            };
+            let mut m = match joined.map(|v| vertices.iter().position(|&w| w == v)) {
+                Some(Some(index)) => VertexMatch {
+                    found: true,
+                    index,
+                    distance: 0.0,
+                },
+                _ => find_first_vertex_within_tol_to_pnt(b, &vertices, start_pt, zone_tol)?,
+            };
             if !vertices.is_empty() && !m.found {
                 if m.distance < zone_tol * LOOP_GAP_ZONES {
                     m = find_first_vertex_within_tol_to_pnt(
@@ -1580,7 +1658,21 @@ fn make_face_with_curves_transfer_impl(
             if end_pt.distance_squared(start_pt) < zone_tol * zone_tol && approx_len < zone_tol {
                 return Err(SolidError::sm_err(OP));
             }
-            let mut me = find_first_vertex_within_tol_to_pnt(b, &vertices, end_pt, zone_tol)?;
+            // the loop's first vertex where only vertex slots follow to the loop's end and
+            // one closes it
+            let rest_vertices = (jj + 1..n).all(|i| is_vertex_slot(curve_total + i));
+            let closes_at_vertex = rest_vertices
+                && (jj + 1 < n || is_vertex_slot(curve_total))
+                && !vertices.is_empty();
+            let mut me = if closes_at_vertex {
+                VertexMatch {
+                    found: true,
+                    index: 0,
+                    distance: 0.0,
+                }
+            } else {
+                find_first_vertex_within_tol_to_pnt(b, &vertices, end_pt, zone_tol)?
+            };
             if jj + 1 == n && !me.found {
                 if me.distance < zone_tol * 100.0 {
                     me = find_first_vertex_within_tol_to_pnt(
@@ -1597,6 +1689,7 @@ fn make_face_with_curves_transfer_impl(
 
             if me.found {
                 let end_vertex = *at(&vertices, me.index)?;
+                last_end = Some(end_vertex);
                 if found_start {
                     let query = CoincidentEdgeQuery {
                         start_vertex,
@@ -1663,6 +1756,7 @@ fn make_face_with_curves_transfer_impl(
                 }
                 edge_orients.push(l_orient);
                 vertices.push(v);
+                last_end = Some(v);
             }
         }
         curve_total += n;
@@ -2969,6 +3063,78 @@ mod tests {
         );
         assert!(matches!(result, Err(error) if !error.is_unported()));
         assert_eq!(owners, vec![None, None, None]);
+    }
+
+    /// The unit square of the plane's parameters as four UV lines, the left one (the last)
+    /// marked a vertex slot: it is made no edge, though it lifts to a unit segment on the
+    /// plane, and the top ends at the loop's first vertex (a triangle of three edges);
+    /// unmarked, the same loop makes four edges.
+    #[test]
+    fn a_vertex_slot_is_made_no_edge_whatever_it_lifts_to() {
+        let corners = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+        let build = |vertex_slots: &[usize]| {
+            let mut k = Kernel::default();
+            let mut b = Brep::new();
+            let region = b
+                .add_region_record(Region {
+                    in_brep: true,
+                    ..Region::default()
+                })
+                .unwrap();
+            b.set_infinite_region(Some(region));
+            let uv_curves = (0..4)
+                .map(|i| {
+                    let (p, q) = (corners[i], corners[(i + 1) % 4]);
+                    Curve::from(
+                        BSplineCurve::create_line_segment(
+                            2,
+                            Vec3::new(p.0, p.1, 0.0),
+                            Vec3::new(q.0, q.1, 0.0),
+                        )
+                        .unwrap(),
+                    )
+                })
+                .collect();
+            let mut owners = Vec::new();
+            let mut records = crate::topology::topology::NotifyRecords::new();
+            let mut attributes = AttributeStore::default();
+            let mut env = ed::NotifyEnv {
+                records: &mut records,
+                attributes: &mut attributes,
+                context: None,
+                key_of: &key_of,
+            };
+            let made = make_face_with_curve_owners_at_vertices(
+                &mut k,
+                &mut b,
+                Some(region),
+                FaceCurvesInput {
+                    loops: vec![4],
+                    curves_3d: None,
+                    uv_curves: Some(uv_curves),
+                    orientations: vec![OrientType::Same; 4],
+                    loop_points: Vec::new(),
+                },
+                plane(),
+                &dom(),
+                OrientType::Same,
+                None,
+                &face_ref,
+                vertex_slots,
+                &mut owners,
+                &mut env,
+            )
+            .unwrap();
+            assert!(made.face.is_some());
+            (owners, b.edges().len(), b.vertices().len())
+        };
+        let (owners, edges, vertices) = build(&[3]);
+        assert_eq!((edges, vertices), (3, 3));
+        assert!(owners[..3].iter().all(Option::is_some), "{owners:?}");
+        assert_eq!(owners[3], None);
+        let (owners, edges, vertices) = build(&[]);
+        assert_eq!((edges, vertices), (4, 4));
+        assert!(owners.iter().all(Option::is_some), "{owners:?}");
     }
 
     #[test]

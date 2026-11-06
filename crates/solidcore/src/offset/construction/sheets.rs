@@ -1283,6 +1283,7 @@ mod tests {
         let out = src
             .extended_by_distance(&k, &dom, BoxSide::UMax, how, e)
             .unwrap()
+            .expect("extended")
             .surface;
         let SurfaceKind::BSpline(net) = out.kind() else {
             panic!("not a B-spline: {out:?}");

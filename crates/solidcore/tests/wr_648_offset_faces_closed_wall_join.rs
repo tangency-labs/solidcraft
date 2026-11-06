@@ -29,7 +29,6 @@ fn kernel(fixed: bool) -> Kernel {
     let mut k = Kernel::default();
     k.fixes.local_operation_step_walls = true;
     k.fixes.local_operation_closes_walls_to_nothing = fixed;
-    k.fixes.local_operation_offset_status = true;
     k
 }
 

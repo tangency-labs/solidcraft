@@ -2556,7 +2556,7 @@
 {"case":"trim0056","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[8.0,"inf","NaN"]],"n":22}}}
 {"case":"trim0057","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0,0.0,0.0]}}
 {"case":"trim0058","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0,0.0,0.0]}}
-{"case":"trim0059","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[8.0,"inf","NaN"]],"n":40}}}
+{"case":"trim0059","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[8.0,"inf","NaN"]],"n":22}}}
 {"case":"trim0060","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":30}}}
 {"case":"trim0061","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0,0.0,0.0]}}
 {"case":"trim0062","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":58}}}
@@ -2604,7 +2604,7 @@
 {"case":"trim0104","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":32}}}
 {"case":"trim0105","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[8.0,"inf","NaN"]],"n":22}}}
 {"case":"trim0106","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":220}}}
-{"case":"trim0107","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[8.0,"inf","NaN"]],"n":40}}}
+{"case":"trim0107","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[8.0,"inf","NaN"]],"n":22}}}
 {"case":"trim0108","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":30}}}
 {"case":"trim0109","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0,0.0,0.0]}}
 {"case":"trim0110","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[8.0,"inf","NaN"]],"n":22}}}

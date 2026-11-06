@@ -1214,6 +1214,13 @@ impl CreatorExecutive<Handle> for Executive<'_> {
         self.inner.operation() == OffsetOperation::LocalOperation
     }
 
+    fn keeps_edge(&self, original: Handle) -> bool {
+        match original.object {
+            Object::Topology(Arena::Original, EntityRef::Edgeuse(u)) => self.inner.keeps_edgeuse(u),
+            _ => false,
+        }
+    }
+
     fn has_collapsed_faces(&self) -> bool {
         !self.inner.collapsed_faces.is_empty()
     }
@@ -1240,6 +1247,19 @@ impl CreatorExecutive<Handle> for Executive<'_> {
     fn note_unmated_edgeuse(&mut self, original: Handle) {
         if let Object::Topology(Arena::Original, EntityRef::Edgeuse(u)) = original.object {
             self.inner.unmated_edgeuses.insert(u);
+        }
+    }
+
+    /// The face's recorded margin, as its extension's (the derived reach, at least the
+    /// body's tolerance in a local operation; the reach and the offset otherwise): not
+    /// upstream's five offset distances, which in a local operation (whose offset distance
+    /// is half the body's bounding radius) is 2.5 times that radius. A surface no face
+    /// owns has no recorded reach: the body's largest.
+    fn analytic_extension_margin(&self, base: Handle, _upstream: f64) -> f64 {
+        match base.object {
+            Object::FaceSurface(Arena::Original, f) => self.inner.original_extension_margin(f),
+            Object::FaceSurface(Arena::Offset, f) => self.inner.offset_extension_margin(f),
+            _ => self.inner.body_extension_reach(),
         }
     }
 

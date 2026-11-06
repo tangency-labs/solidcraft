@@ -3,17 +3,16 @@
 //! [`measure`] found ([`take`]). Off (the default), [`measure`] does nothing, so a run
 //! produces exactly what it did before.
 //!
-//! A body is sound when `check_brep` at level 2 reports nothing, its geometry's owners taken
-//! as the geometry records them (not the runner's naming); a closed one is also a manifold
-//! solid of positive volume.
+//! A body is sound as the kernel's local operation gates its result
+//! ([`validation::soundness`]): `check_brep` at level 2 reports nothing, its geometry's owners
+//! taken as the geometry records them (not the runner's naming), and a manifold one has a
+//! positive volume.
 
 use std::cell::RefCell;
 
-use solidcore::geom::object::ObjectRef;
 use solidcore::kernel::Kernel;
-use solidcore::topology::brep::validation::{check_brep_with_keys, CheckLevel};
+use solidcore::topology::brep::validation;
 use solidcore::topology::Brep;
-use solidcore::EntityRef;
 
 thread_local! {
     static CAPTURED: RefCell<Option<Vec<Soundness>>> = const { RefCell::new(None) };
@@ -95,56 +94,22 @@ fn measured(brep: &mut Brep) -> Soundness {
         solidcore::topology::brep::p1::edges(brep, None).map_or(0, |e| e.len()),
         solidcore::topology::brep::p1::vertices(brep, None).map_or(0, |v| v.len()),
     ];
-    // Each geometry's owner is checked against the identity the body names its owner by;
-    // a runner's export bookkeeping names them as it pleases, so the check is given the
-    // owners the geometry records (an edge's curve's, a face's surface's, an edge use's
-    // trim curve's): what it checks is the body's geometry, not its naming
-    let mut owners = std::collections::BTreeMap::new();
-    for (id, e) in brep.edges().iter() {
-        if let Some(o) = e
-            .curve
-            .as_ref()
-            .and_then(solidcore::curve::curve::Curve::owner)
-        {
-            owners.insert(EntityRef::Edge(id), o);
-        }
-    }
-    for (id, f) in brep.faces().iter() {
-        if let Some(o) = f
-            .surface
-            .as_ref()
-            .and_then(solidcore::surface::surface::Surface::owner)
-        {
-            owners.insert(EntityRef::Face(id), o);
-        }
-    }
-    for (id, u) in brep.edgeuses().iter() {
-        if let Some(o) = u
-            .uv_trim_curve
-            .as_ref()
-            .and_then(solidcore::curve::curve::Curve::owner)
-        {
-            owners.insert(EntityRef::Edgeuse(id), o);
-        }
-    }
-    let keys = |e: EntityRef| {
-        owners.get(&e).copied().unwrap_or(ObjectRef {
-            type_code: 0,
-            key: solidcore::geom::attribute::ObjectKey(0),
-        })
-    };
-    let check = check_brep_with_keys(&mut k, brep, CheckLevel::Level2, &keys)
-        .map(|c| c.lines())
-        .map_err(|e| e.to_string());
-    let manifold = solidcore::query::api_queries::brep_is_manifold_solid(brep).ok();
-    let volume = (manifold == Some(true))
-        .then(|| solidcore::mass::integrator::properties::brep_volume_default(&k, brep, 1e-6).ok())
-        .flatten();
-    Soundness {
-        check,
-        manifold,
-        volume,
-        counts,
+    // the kernel's measure ([`validation::soundness`]): the check given the owners the
+    // geometry records (a runner's export bookkeeping names them as it pleases), the manifold
+    // test and the volume
+    match validation::soundness(&mut k, brep) {
+        Ok(found) => Soundness {
+            check: Ok(found.check.lines()),
+            manifold: Some(found.manifold),
+            volume: found.volume,
+            counts,
+        },
+        Err(e) => Soundness {
+            check: Err(e.to_string()),
+            manifold: None,
+            volume: None,
+            counts,
+        },
     }
 }
 
@@ -172,9 +137,13 @@ pub fn probe(runner: &dyn crate::UnitDiff) {
         let out = runner.run_rust(&case);
         let found = take();
         let status = match &out {
+            // (a runner that records its status as the record's first value: that status)
             Ok(o) => format!(
                 "{:?}{}",
-                o.ints.get("status"),
+                o.ints
+                    .get("status")
+                    .and_then(|s| s.first().map(|&s| s as f64))
+                    .or_else(|| o.values.get("record").and_then(|r| r.first().copied())),
                 o.error
                     .as_deref()
                     .map(|e| format!(" error={e}"))
@@ -191,4 +160,49 @@ pub fn probe(runner: &dyn crate::UnitDiff) {
         );
     }
     std::fs::write(std::env::var("SC_SOUNDNESS").expect("SC_SOUNDNESS"), report).unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{measure, start, take};
+    use solidcore::kernel::Kernel;
+
+    fn cube() -> solidcore::topology::Brep {
+        let mut k = Kernel::default();
+        solidcore::primitive::api_primitives::create_box(
+            &mut k,
+            solidcore::Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            10.0,
+            10.0,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn off_measures_nothing() {
+        let _ = take();
+        let mut b = cube();
+        measure(&mut b);
+        assert!(take().is_empty());
+    }
+
+    #[test]
+    fn a_box_is_sound() {
+        let mut b = cube();
+        start();
+        measure(&mut b);
+        let found = take();
+        assert_eq!(found.len(), 1);
+        let s = &found[0];
+        assert!(s.sound(), "{}", s.line());
+        assert_eq!(s.manifold, Some(true));
+        assert!(
+            s.volume
+                .is_some_and(|v| (v - 1000.0).abs() <= 1e-6 * 1000.0),
+            "{}",
+            s.line()
+        );
+        assert_eq!(s.counts, [6, 12, 8]);
+    }
 }

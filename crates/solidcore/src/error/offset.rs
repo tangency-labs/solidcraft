@@ -14,6 +14,11 @@
 //! | [`OffsetFailure::EdgeVanishes`]        | `SM_ERR_OFFSET_EDGE_VANISHES` (fork 34318f4) |
 //! | [`OffsetFailure::DistanceUnresolved`]  | `SM_ERR_INVALID_INPUT` (solidcore-native) |
 //! | [`OffsetFailure::ToleranceUnresolved`] | `SM_ERR_INVALID_INPUT` (solidcore-native, WR-749) |
+//! | [`OffsetFailure::SeamOpened`]          | `SM_ERR` (solidcore-native)               |
+//! | [`OffsetFailure::ExactCurveUncut`]     | `SM_ERR` (solidcore-native)               |
+//! | [`OffsetFailure::FacesApart`]          | `SM_ERR` (solidcore-native)               |
+//! | [`OffsetFailure::ReachUncertified`]    | `SM_ERR` (solidcore-native)               |
+//! | [`OffsetFailure::Unsound`]             | `SM_ERR` (solidcore-native)               |
 //!
 //! Deviations: not upstream. Entity ids are those of the operation's input B-rep.
 
@@ -102,6 +107,73 @@ pub enum OffsetFailure {
         /// The tolerance asked for, as given (the executive takes its magnitude).
         tolerance: f64,
     },
+    /// A local operation gives `face`, which meets itself across edges (seams of its
+    /// closed surface), a surface on which a seam's two UV lines (the face's loops are
+    /// copied onto it) do not lift to one curve: it is not closed in the seam's direction,
+    /// or the lines are not its seam, one period apart. Each moved edge is found again where the new surfaces on its two sides
+    /// meet; across a seam both sides are the face's own new surface, which a surface open
+    /// across it cannot close onto itself, so the face has no edge there (the topology the
+    /// operation keeps cannot be built).
+    SeamOpened {
+        /// The face, of the operation's input.
+        face: FaceId,
+    },
+    /// The extended surfaces of the faces beside an edge meet on an exact curve (an
+    /// analytic special case's line or conic) that could not be cut into its pieces inside
+    /// both extended domains with their UV curves
+    /// ([`crate::surface::surface::SurfaceIntersection::clip_exact_curves`]; the failure's
+    /// cause says why). The edge's offsets cannot be mated on it.
+    ExactCurveUncut,
+    /// In a local operation, the new surfaces of `face` and of its neighbour across an
+    /// edge meet nowhere near the edge, so no extension of either makes them meet there
+    /// and the edge cannot be found again. (The reach,
+    /// [`crate::offset::offset_executive::reach::local_extension_reach`], no longer refuses
+    /// it: it lists such edges in `LocalReach::apart`, where a step's wall closes the gap
+    /// or the edge's offset fails.)
+    FacesApart {
+        /// The face, of the operation's input.
+        face: FaceId,
+    },
+    /// In a local operation, a surface beside an edge or at a vertex of `face` moves, and
+    /// how far the surfaces there must be extended to meet has no certified bound
+    /// ([`crate::offset::offset_executive::reach::local_extension_reach`]): a pair or corner
+    /// of kinds it does not bound, or an edge piece left undecided. Refused before anything
+    /// changes.
+    ReachUncertified {
+        /// The face, of the operation's input.
+        face: FaceId,
+    },
+    /// A local operation built a body that fails what its input did not
+    /// ([`crate::topology::brep::validation::soundness`] of both): refused, the input B-rep
+    /// left as it came in.
+    Unsound {
+        /// What the built body fails.
+        what: Unsoundness,
+    },
+}
+
+/// What a local operation's built body fails ([`OffsetFailure::Unsound`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Unsoundness {
+    /// The check at `SM_LEVEL_2` reports `failures` failure lines more than the input's
+    /// check did, counted per class
+    /// ([`crate::topology::brep::validation::BrepCheck::failures_beyond`]); the first such
+    /// class is test `test_index` of the reporting type `reporting_type` (`None` for a line
+    /// without a report: a failed status).
+    Check {
+        /// The number of failure lines beyond the input's.
+        failures: usize,
+        /// The first failed report's reporting type and test index.
+        first: Option<(i64, u64)>,
+    },
+    /// The body's pointer check failed, so its geometry was not checked (`AssertValid`
+    /// is skipped then).
+    GeometryUnchecked,
+    /// The input was a manifold solid and the body is not.
+    NotManifoldSolid,
+    /// The body is a manifold solid whose volume is not positive.
+    VolumeNotPositive,
 }
 
 /// How loops of an offset face touch without crossing ([`OffsetFailure::WallsTouch`]).
@@ -149,21 +221,34 @@ impl OffsetFailure {
         match *self {
             Self::Folds { face, .. }
             | Self::NotCertified { face, .. }
-            | Self::Collapses { face, .. } => Some(EntityRef::Face(face)),
+            | Self::Collapses { face, .. }
+            | Self::SeamOpened { face }
+            | Self::FacesApart { face }
+            | Self::ReachUncertified { face } => Some(EntityRef::Face(face)),
             Self::WallsTouch { face, .. } | Self::LoopsCross { face, .. } => {
                 face.map(EntityRef::Face)
             }
             Self::EdgeVanishes { edge, face } => edge
                 .map(EntityRef::Edge)
                 .or_else(|| face.map(EntityRef::Face)),
-            Self::DistanceUnresolved { .. } | Self::ToleranceUnresolved { .. } => None,
+            Self::ExactCurveUncut
+            | Self::Unsound { .. }
+            | Self::DistanceUnresolved { .. }
+            | Self::ToleranceUnresolved { .. } => None,
         }
     }
 
     /// The status the C++ reports for the refusal (difftest's comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Folds { .. } | Self::NotCertified { .. } | Self::Collapses { .. } => SM_ERR,
+            Self::Folds { .. }
+            | Self::NotCertified { .. }
+            | Self::Collapses { .. }
+            | Self::SeamOpened { .. }
+            | Self::FacesApart { .. }
+            | Self::ReachUncertified { .. }
+            | Self::ExactCurveUncut
+            | Self::Unsound { .. } => SM_ERR,
             Self::WallsTouch { .. } => SM_ERR_OFFSET_WALLS_TOUCH,
             Self::LoopsCross { .. } => SM_ERR_BAD_INTERSECTIONS,
             Self::EdgeVanishes { .. } => SM_ERR_OFFSET_EDGE_VANISHES,
@@ -182,6 +267,11 @@ impl OffsetFailure {
             Self::WallsTouch { .. } => ErrorKind::OffsetWallsTouch,
             Self::LoopsCross { .. } => ErrorKind::OffsetLoopsCross,
             Self::EdgeVanishes { .. } => ErrorKind::OffsetEdgeVanishes,
+            Self::SeamOpened { .. }
+            | Self::FacesApart { .. }
+            | Self::ReachUncertified { .. }
+            | Self::ExactCurveUncut
+            | Self::Unsound { .. } => ErrorKind::Unsupported,
             Self::DistanceUnresolved { .. } | Self::ToleranceUnresolved { .. } => {
                 ErrorKind::InvalidInput
             }
@@ -316,6 +406,55 @@ impl core::fmt::Display for OffsetFailure {
                 "invalid input: offset distance {distance:e} is not a finite length of at \
                  least {resolution:e}, the B-rep tolerance (the smallest distance the model \
                  resolves)"
+            ),
+            Self::SeamOpened { face } => write!(
+                f,
+                "face {} meets itself across a seam whose two UV lines do not lift to one \
+                 curve on the surface it is given (not closed that way, or the lines not on \
+                 its seam one period apart): the seam would have no edge",
+                face.index()
+            ),
+            Self::FacesApart { face } => write!(
+                f,
+                "the new surfaces of face {} and of a neighbour meet nowhere near their \
+                 edge: no extension makes them meet there",
+                face.index()
+            ),
+            Self::ReachUncertified { face } => write!(
+                f,
+                "a surface beside an edge or at a vertex of face {} moves, and how far the \
+                 surfaces there must be extended to meet has no certified bound",
+                face.index()
+            ),
+            Self::Unsound { what } => match what {
+                Unsoundness::Check { failures, first } => {
+                    write!(
+                        f,
+                        "the local operation's body fails its check where its input did not ({failures} \
+                         failure lines more"
+                    )?;
+                    if let Some((reporting_type, test_index)) = first {
+                        write!(f, ", the first test #{test_index} of type {reporting_type}")?;
+                    }
+                    f.write_str("): refused, the input unchanged")
+                }
+                Unsoundness::GeometryUnchecked => f.write_str(
+                    "the local operation's body fails its pointer check, so its geometry \
+                     cannot be checked: refused, the input unchanged",
+                ),
+                Unsoundness::NotManifoldSolid => f.write_str(
+                    "the local operation's body is not a manifold solid, as its input was: \
+                     refused, the input unchanged",
+                ),
+                Unsoundness::VolumeNotPositive => f.write_str(
+                    "the local operation's body is a manifold solid whose volume is not \
+                     positive: refused, the input unchanged",
+                ),
+            },
+            Self::ExactCurveUncut => f.write_str(
+                "the extended faces beside an edge meet on an exact curve that could not be \
+                 cut into its pieces with their UV curves, so the edge's offsets cannot be \
+                 mated",
             ),
             Self::ToleranceUnresolved { tolerance } => write!(
                 f,

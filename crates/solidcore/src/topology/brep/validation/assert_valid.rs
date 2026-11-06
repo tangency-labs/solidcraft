@@ -56,6 +56,7 @@ mod shell;
 mod vertex;
 
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 
 use super::{object_info, validate_pointers, Object, SUCCESS};
 use crate::error::{EntityRef, Result, SolidError};
@@ -169,36 +170,117 @@ impl BrepCheck {
     /// returned `false` without reporting a failure.
     #[must_use]
     pub fn lines(&self) -> Vec<String> {
+        self.classified()
+            .into_iter()
+            .map(|(class, report)| match (class, report) {
+                (_, Some(r)) => report_line(r),
+                (FailureClass::PointersStatus(status), None) => {
+                    format!("SmBrep::ValidatePointers failed with status {status}")
+                }
+                (FailureClass::AssertValidSkipped, None) => {
+                    "AssertValid skipped: ValidatePointers failed".to_string()
+                }
+                (FailureClass::AssertValidWithoutReport | FailureClass::Report { .. }, None) => {
+                    "SmBrep::AssertValid failed without a report".to_string()
+                }
+            })
+            .collect()
+    }
+
+    /// How many failure lines ([`BrepCheck::lines`]) of each [`FailureClass`] the check
+    /// has.
+    #[must_use]
+    pub fn failure_classes(&self) -> BTreeMap<FailureClass, usize> {
+        let mut out = BTreeMap::new();
+        for (class, _) in self.classified() {
+            let n: &mut usize = out.entry(class).or_default();
+            *n = n.saturating_add(1);
+        }
+        out
+    }
+
+    /// The failure classes `self` has more lines of than `before` has, each with how many
+    /// more, in [`FailureClass`] order: what a body has failing that `before` (the body it
+    /// was made from) did not. A class `before` has as many lines of, or more, is not
+    /// listed.
+    #[must_use]
+    pub fn failures_beyond(&self, before: &BrepCheck) -> Vec<(FailureClass, usize)> {
+        let had = before.failure_classes();
+        self.failure_classes()
+            .into_iter()
+            .filter_map(|(class, n)| {
+                let more = n.saturating_sub(had.get(&class).copied().unwrap_or(0));
+                (more > 0).then_some((class, more))
+            })
+            .collect()
+    }
+
+    /// The failure lines in [`BrepCheck::lines`] order, each with its class and its report
+    /// (`None` for a synthetic line).
+    fn classified(&self) -> Vec<(FailureClass, Option<&AssertReport>)> {
         let mut out = Vec::new();
         let pointer_failures = self.pointer_reports.reports().iter().any(|r| !r.ok);
         if self.pointers_status != SUCCESS && self.pointer_reports.is_empty() {
-            out.push(format!(
-                "SmBrep::ValidatePointers failed with status {}",
-                self.pointers_status
-            ));
+            out.push((FailureClass::PointersStatus(self.pointers_status), None));
         }
         out.extend(
             self.pointer_reports
                 .reports()
                 .iter()
                 .filter(|r| is_failure(r))
-                .map(report_line),
+                .map(|r| (FailureClass::of(r), Some(r))),
         );
         if pointer_failures {
-            out.push("AssertValid skipped: ValidatePointers failed".to_string());
+            out.push((FailureClass::AssertValidSkipped, None));
             return out;
         }
         if self.assert_valid == Some(false) && !self.reports.reports().iter().any(is_failure) {
-            out.push("SmBrep::AssertValid failed without a report".to_string());
+            out.push((FailureClass::AssertValidWithoutReport, None));
         }
         out.extend(
             self.reports
                 .reports()
                 .iter()
                 .filter(|r| is_failure(r))
-                .map(report_line),
+                .map(|r| (FailureClass::of(r), Some(r))),
         );
         out
+    }
+}
+
+/// What one failure line of a [`BrepCheck`] is, leaving out where: the test that failed
+/// and the type of the object it is about, not which object (an operation that rebuilds a
+/// body's entities gives them new identities, so a failure is compared with its input's
+/// by class: [`BrepCheck::failures_beyond`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum FailureClass {
+    /// A failed report: its reporting type, label table, test and owner type.
+    Report {
+        /// [`AssertReport::reporting_type`].
+        reporting_type: i64,
+        /// [`AssertReport::list_index`].
+        list_index: u64,
+        /// [`AssertReport::test_index`].
+        test_index: u64,
+        /// [`AssertReport::owner_type`].
+        owner_type: i64,
+    },
+    /// `ValidatePointers` failed with this status and no report.
+    PointersStatus(i32),
+    /// `AssertValid` was skipped: `ValidatePointers` reported a failure.
+    AssertValidSkipped,
+    /// `AssertValid` failed without a report.
+    AssertValidWithoutReport,
+}
+
+impl FailureClass {
+    fn of(r: &AssertReport) -> Self {
+        Self::Report {
+            reporting_type: r.reporting_type,
+            list_index: r.list_index,
+            test_index: r.test_index,
+            owner_type: r.owner_type,
+        }
     }
 }
 

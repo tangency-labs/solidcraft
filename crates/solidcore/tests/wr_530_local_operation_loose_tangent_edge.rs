@@ -1,11 +1,9 @@
-//! Regression test for WR-530 (tangency-labs/solidcore#402; the fork's
-//! tangency-labs/smlib@23c5b0a): a 60 x 40 x 10 plate with an r10 boss on it and an r2
-//! round at the boss's base has its boss wall moved out by 1 (`SmBrep::LocalOperation`,
-//! the capi's `smlib_offset_faces`). Only the wall gets a new surface, so the tangent
-//! edge between it and the round is dropped across the 1 mm gap between them. Upstream
-//! ignores that ("will be fixed later") and returns a body with an edge as loose as the
-//! gap; with `local_operation_refuses_loose_tangent_edges` the local operation is
-//! refused.
+//! A 60 x 40 x 10 plate with an r10 boss on it and an r2 round at the boss's base has
+//! its boss wall moved out by 1 (`SmBrep::LocalOperation`, the capi's
+//! `smlib_offset_faces`). Only the wall gets a new surface, so the tangent edge between
+//! it and the round is dropped across the 1 mm gap between them. Upstream ignores that
+//! ("will be fixed later") and returns a body with an edge as loose as the gap; here the
+//! local operation is refused, with or without `local_operation_refuses_loose_tangent_edges`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -68,7 +66,8 @@ fn wall(k: &Kernel, b: &Brep) -> Vec<FaceId> {
         .collect()
 }
 
-fn move_wall(fixed: bool) -> solidcore::Result<()> {
+/// The boss's wall given the r11 cylinder: the wall's faces, and the operation's result.
+fn move_wall(fixed: bool) -> (Vec<FaceId>, solidcore::Result<()>) {
     let mut k = Kernel::default();
     k.fixes.local_operation_refuses_loose_tangent_edges = fixed;
     let mut b = part(&mut k);
@@ -83,25 +82,42 @@ fn move_wall(fixed: bool) -> solidcore::Result<()> {
         })
         .collect();
     let mut notifications = Notifications::new(&mut b);
-    local_operation(
+    let result = local_operation(
         &mut k,
         &mut b,
         &faces,
         surfaces,
         &mut notifications.context(),
-    )
+    );
+    (faces, result)
 }
 
 #[test]
 fn wr_530_moved_boss_wall_beside_its_round_is_refused() {
-    match move_wall(true) {
+    match move_wall(true).1 {
         Err(e) => assert_eq!(e.sm_status(), Some(SM_ERR)),
         other => panic!("{other:?}"),
     }
 }
 
-/// Without the opt-in the local operation returns a body, as upstream does.
+/// Without the opt-in upstream returns the body with the edge as loose as the gap. The
+/// wall meets itself across a seam, and its UV loops, copied onto the surface it takes,
+/// are in the r10 cylinder's parameters, which the r11 cylinder's domain does not carry:
+/// the seam's two UV lines do not lift to one curve on it, so the seam would have no
+/// edge. The local operation refuses that up front, naming the wall's face, before
+/// anything is changed or reached.
 #[test]
-fn wr_530_without_the_opt_in_the_local_operation_succeeds() {
-    move_wall(false).unwrap();
+fn wr_530_without_the_opt_in_the_walls_seam_is_refused_as_opened() {
+    use solidcore::error::offset::OffsetFailure;
+    use solidcore::error::Reason;
+    let (faces, result) = move_wall(false);
+    let e = result.unwrap_err();
+    assert!(
+        matches!(
+            e.failure().map(|f| &f.reason),
+            Some(Reason::Offset(OffsetFailure::SeamOpened { face })) if faces.contains(face)
+        ),
+        "{e}"
+    );
+    assert_eq!(e.sm_status(), Some(SM_ERR));
 }

@@ -5,7 +5,8 @@
 //! intersection and the result is open. A 20 mm cube has its top moved up by 60, 200
 //! and 1000 (its own plane offset along its outward normal). With
 //! `local_operation_box_holds_new_surfaces` the body's box takes in the new surface first
-//! and the result is the closed 20 x 20 x (20 + d) box; by default it is open, of volume 0.
+//! and the result is the closed 20 x 20 x (20 + d) box. By default upstream's was open, of
+//! volume 0; the neighbours' extension is now derived from the moved surface, and it closes.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -66,12 +67,19 @@ fn wr_534_far_moved_top_closes_with_the_fix() {
     }
 }
 
-/// Upstream's neighbours do not reach the moved top: the result is open.
+/// Upstream's neighbours, extended by a multiple of the original body's size, did not
+/// reach the moved top and the result was open. Their extension is now derived from the
+/// moved surface (`reach::local_extension_reach`): without the opt-in the far top closes too.
 #[test]
-fn wr_534_default_leaves_the_far_top_open() {
+fn wr_534_default_closes_the_far_top_too() {
     for d in [60.0, 200.0, 1000.0] {
         let (k, mut b) = raised(false, d);
-        assert!(!brep_is_manifold_solid(&b).unwrap(), "d {d}");
-        assert!(volume(&k, &mut b).unwrap().abs() < 1e-9, "d {d}");
+        assert!(brep_is_manifold_solid(&b).unwrap(), "d {d}");
+        assert_eq!(b.face_list().len(), 6, "d {d}");
+        let (v, exact) = (volume(&k, &mut b).unwrap(), 400.0 * (20.0 + d));
+        assert!(
+            ((v - exact) / exact).abs() < 1e-9,
+            "d {d}: {v} against {exact}"
+        );
     }
 }

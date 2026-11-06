@@ -218,9 +218,15 @@ pub struct OffsetExecutive {
     /// face and by each of its face uses, recorded as the face is offset.
     extension_reaches: BTreeMap<FaceId, f64>,
     faceuse_extension_reaches: BTreeMap<FaceuseId, f64>,
-    /// Not upstream: the margin of every face of an operation whose faces are not offset
-    /// but moved to surfaces of their own (a local operation), set by its caller.
-    extension_bound: Option<f64>,
+    /// Not upstream: the faces of a local operation that move to surfaces of their own
+    /// (the others keep theirs), for their neighbours' reach
+    /// ([`super::reach::local_extension_reach`]).
+    moved_faces: Vec<FaceId>,
+    /// Not upstream: the original edges of a local operation that keep their geometry
+    /// (their faces, and every face at their vertices, keep their surfaces), and their
+    /// edge uses ([`Self::keep_unmoved_edges`]).
+    pub(super) kept_edges: BTreeSet<EdgeId>,
+    pub(super) kept_edgeuses: BTreeSet<EdgeuseId>,
     /// Not upstream (WR-346): the original faces of an inset whose offset collapses (a
     /// convex round thinner than the wall), mated across instead of offset
     /// (`m_sCollapsedFaces`; only with `Kernel::fixes.offset_collapsed_rounds_mated`).
@@ -282,7 +288,9 @@ impl OffsetExecutive {
             extended_surfaces: BTreeMap::new(),
             extension_reaches: BTreeMap::new(),
             faceuse_extension_reaches: BTreeMap::new(),
-            extension_bound: None,
+            moved_faces: Vec::new(),
+            kept_edges: BTreeSet::new(),
+            kept_edgeuses: BTreeSet::new(),
             collapsed_faces: Vec::new(),
             unmated_edgeuses: BTreeSet::new(),
             local_faces: Vec::new(),
@@ -385,10 +393,64 @@ impl OffsetExecutive {
     }
 
     /// The geometry of a local operation (`SmLocalOperationGeometryCreation`'s face and
-    /// surface lists): `surfaces[i]` replaces the surface of `faces[i]`.
-    pub fn set_local_surfaces(&mut self, faces: &[FaceId], surfaces: Vec<Surface>) {
+    /// surface lists): `surfaces[i]` replaces the surface of `faces[i]`. The `moved` faces
+    /// take surfaces of their own, the others copies of theirs (not upstream: each face's
+    /// surface is extended as far as its neighbours' new surfaces need,
+    /// [`super::reach::local_extension_reach`]).
+    pub fn set_local_surfaces(
+        &mut self,
+        faces: &[FaceId],
+        surfaces: Vec<Surface>,
+        moved: &[FaceId],
+    ) {
         self.local_faces = faces.to_vec();
         self.local_surfaces = surfaces;
+        self.moved_faces = moved.to_vec();
+    }
+
+    /// Not upstream: in a local operation, records the edges of `original` that keep their
+    /// geometry: each whose faces, and every face at its vertices, keep their surfaces
+    /// (each is given a copy of its own by [`Self::set_local_surfaces`], none is among
+    /// its moved faces). A face given no surface there is offset by the executive's
+    /// distance (the offset geometry is chosen by whether surfaces were given, not by the
+    /// operation), so it moves, and no edge of it is kept. Such an edge is
+    /// where its surfaces met before and its ends stay put, so its offset edges keep the
+    /// face's own curves, not mated again (`EdgeuseOffset`, [`Self::keeps_edgeuse`]), and
+    /// the merge does not intersect its faces' offsets again. An edge between two faces
+    /// that stay but with a vertex on a moved face changes its length: it is intersected
+    /// again, as the edges of moved faces are.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::NotFound`] for a dangling id.
+    pub(super) fn keep_unmoved_edges(&mut self, original: &Brep) -> Result<()> {
+        self.kept_edges.clear();
+        self.kept_edgeuses.clear();
+        if self.operation != OffsetOperation::LocalOperation {
+            return Ok(());
+        }
+        for e in bp1::edges(original, None)? {
+            let mut faces = edge::faces(original, e, None)?;
+            let (start, end) = vertex::edge_vertex_pair(original, e)?;
+            for v in [start, end].into_iter().flatten() {
+                faces.extend(vertex::faces(original, v)?);
+            }
+            let keeps_surface =
+                |f: &FaceId| self.local_faces.contains(f) && !self.moved_faces.contains(f);
+            if faces.is_empty() || !faces.iter().all(keeps_surface) {
+                continue;
+            }
+            self.kept_edges.insert(e);
+            self.kept_edgeuses
+                .extend(edge::edgeuses(original, e, None, None)?);
+        }
+        Ok(())
+    }
+
+    /// Not upstream: whether the offsets of original edge use `edgeuse` keep their face's
+    /// own curves ([`Self::keep_unmoved_edges`]).
+    pub(super) fn keeps_edgeuse(&self, edgeuse: EdgeuseId) -> bool {
+        self.kept_edgeuses.contains(&edgeuse)
     }
 
     /// Sets `m_eOffsetOperation`.
@@ -552,11 +614,18 @@ impl OffsetExecutive {
     /// neighbours' offsets to meet its offset along `faceuse`
     /// ([`super::reach::extension_reach`] at the executive's offset distance, the shell's
     /// faces staying where they are), and one offset distance, so that the meetings cross
-    /// the extended surface's boundary rather than touch it.
+    /// the extended surface's boundary rather than touch it. In a local operation, for its
+    /// neighbours' new surfaces to meet its own ([`super::reach::local_extension_reach`]),
+    /// and the largest move beside it, and at least the input body's tolerance (the
+    /// offset body takes it): a new edge must cross each neighbouring surface's boundary,
+    /// not sit on it, and the mate and the intersection identify points within that
+    /// tolerance, so a shorter crossing is indistinguishable from touching the boundary.
     ///
     /// # Errors
     ///
-    /// Those of [`super::reach::extension_reach`].
+    /// Those of [`super::reach::extension_reach`] and
+    /// [`super::reach::local_extension_reach`] (in a local operation, its refusal of a
+    /// face beside a move whose reach has no certified bound).
     pub(super) fn record_extension_reach(
         &mut self,
         kernel: &Kernel,
@@ -569,11 +638,11 @@ impl OffsetExecutive {
         // neighbour's offset meets at the edge's image): the margin is the reach and the
         // offset's own size, so each meeting lies at least one offset inside the extension
         // (a tolerance-sized margin is below what an extension can certify). A face with
-        // no neighbour meets no offset and is not extended. A local operation's faces move to surfaces of their
-        // own: its margin is the bound it sets ([`Self::set_extension_bound`]).
-        let reach = if let Some(bound) = self.extension_bound {
-            bound
-        } else {
+        // no neighbour meets no offset and is not extended. A local operation's faces move to
+        // surfaces of their own, and the move takes the offset's place: the margin is the
+        // reach of the new surfaces' meetings and the largest move beside the face, and
+        // at least the body's tolerance.
+        let reach = if self.local_faces.is_empty() {
             super::reach::extension_reach(
                 kernel,
                 original,
@@ -583,6 +652,31 @@ impl OffsetExecutive {
                 self.tangency_tol_radians,
             )?
             .map_or(0.0, |reach| reach + self.offset_distance.abs())
+        } else {
+            // the moved faces' new surfaces, and the copies the others keep
+            let (mut moved, mut kept) = (Vec::new(), Vec::new());
+            for (f, surface) in self.local_faces.iter().zip(&self.local_surfaces) {
+                if self.moved_faces.contains(f) {
+                    moved.push((*f, surface));
+                } else {
+                    kept.push((*f, surface));
+                }
+            }
+            super::reach::local_extension_reach(
+                kernel,
+                original,
+                faceuse,
+                &moved,
+                &kept,
+                self.tangency_tol_radians,
+            )?
+            // A new edge must cross each neighbouring surface's boundary, not sit on it:
+            // the mate and the intersection identify points within the body's tolerance,
+            // so a crossing shorter than that is indistinguishable from touching the
+            // boundary, and the extension reaches at least that far. With nothing moved
+            // beside the face (a face given the plane through its own edges), this floor
+            // is the only margin (the offset branch's is the offset's size).
+            .map_or(0.0, |r| (r.reach + r.shift).max(original.tolerance()))
         };
         self.extension_reaches.insert(face, reach);
         let (primary, mate) = crate::topology::face::p2::faceuses(original, face)?;
@@ -592,26 +686,14 @@ impl OffsetExecutive {
         Ok(())
     }
 
-    /// Sets the margin every face's surface is extended by, in place of its offset's reach
-    /// (a local operation, whose faces move to surfaces of their own); `None` derives it.
-    pub fn set_extension_bound(&mut self, bound: Option<f64>) {
-        self.extension_bound = bound;
-    }
-
     /// The largest reach recorded: the margin of a surface no recorded face accounts for
     /// (an edge's or vertex's cap, a face the offset did not make from one).
-    fn body_extension_reach(&self) -> f64 {
-        if let Some(bound) = self.extension_bound {
-            return bound;
-        }
+    pub(super) fn body_extension_reach(&self) -> f64 {
         self.extension_reaches.values().fold(0.0, |a, &b| a.max(b))
     }
 
     /// The margin the surface of original face `face` is extended by: its recorded reach.
     pub(super) fn original_extension_margin(&self, face: FaceId) -> f64 {
-        if let Some(bound) = self.extension_bound {
-            return bound;
-        }
         self.extension_reaches
             .get(&face)
             .copied()
@@ -621,9 +703,6 @@ impl OffsetExecutive {
     /// The margin the surface of offset face `face` is extended by: the reach of the
     /// original face use it was made from.
     pub(super) fn offset_extension_margin(&self, face: FaceId) -> f64 {
-        if let Some(bound) = self.extension_bound {
-            return bound;
-        }
         let reaches: Vec<f64> = self
             .faceuse_to_faces
             .firsts(face)
@@ -1874,16 +1953,25 @@ impl OffsetExecutive {
                             && edge::edgeuses(original, edge_id, None, None)?
                                 .iter()
                                 .any(|eu| self.unmated_edgeuses.contains(eu));
-                        if relates_mated_offsets(flag, self.extend_convex_edges(), unmated, || {
-                            eu2::is_tangent_sector(
-                                kernel,
-                                original,
-                                primary,
-                                self.tangency_tol_degrees(),
-                                false,
-                                true,
-                            )
-                        })? {
+                        // (not upstream: a kept edge's offsets keep their own curves)
+                        let kept = self.kept_edges.contains(&edge_id);
+                        if kept
+                            || relates_mated_offsets(
+                                flag,
+                                self.extend_convex_edges(),
+                                unmated,
+                                || {
+                                    eu2::is_tangent_sector(
+                                        kernel,
+                                        original,
+                                        primary,
+                                        self.tangency_tol_degrees(),
+                                        false,
+                                        true,
+                                    )
+                                },
+                            )?
+                        {
                             for edgeuse in edge::edgeuses(original, edge_id, None, None)? {
                                 if eu::faceuse(original, edgeuse)? == Some(faceuse) {
                                     let radial = required(eu::radial(original, edgeuse)?)?;
@@ -2393,6 +2481,21 @@ impl OffsetExecutive {
                     .map_err(|_| SolidError::invalid_input(OP, "loop count exceeds usize"))?,
             );
         }
+        // Not upstream: a moved face of a local operation keeps its loops' topology, one
+        // edge per original edge use, each mapped to it and rebuilt where the new surfaces
+        // meet. A UV gap the copy fills (a pole: two edge uses ending at one vertex at two
+        // parameters) is no edge: on the face's own surface its line lifts to that vertex
+        // and the face constructor drops it, but on the new surface it lifts to a curve.
+        // The constructor is told so: the gap's line closes the UV loop and stands for the
+        // vertex, made no edge, and its neighbours meet at one vertex there, as the
+        // original's edge uses do.
+        let vertex_slots = if self.operation == OffsetOperation::LocalOperation
+            && self.moved_faces.contains(&face_id)
+        {
+            curves.filled_gaps.clone()
+        } else {
+            Vec::new()
+        };
         let input = FaceCurvesInput {
             loops,
             curves_3d: None,
@@ -2405,7 +2508,8 @@ impl OffsetExecutive {
         let region = brep.infinite_region();
         // Only success continues; a failed constructor leaves no face to relate.
         // The surface moves into the face constructor and is dropped on failure.
-        let made = match bp7::make_face_with_curves(
+        let mut owners = Vec::new();
+        let made = match bp7::make_face_with_curve_owners_at_vertices(
             kernel,
             brep,
             region,
@@ -2415,6 +2519,8 @@ impl OffsetExecutive {
             orientation,
             None,
             &this_face,
+            &vertex_slots,
+            &mut owners,
             &mut offset_env(notifications, offset_key_of),
         ) {
             Ok(made) => made,
@@ -3991,6 +4097,53 @@ mod tests {
     /// A box offset by `d` either way: every face's offset is met `d` past (or inside) each
     /// edge and `d·√2` from each corner, so each face's margin is `d·√2` and one offset. An offset face takes the margin of the face use it was made from; one made
     /// from none, the body's largest.
+    /// A local operation keeps an edge only where its faces, and the faces at its
+    /// vertices, were given copies of their own surfaces: given no surfaces, every face is
+    /// offset by the executive's distance and no edge is kept; given the box's faces with
+    /// one moved, the edges away from it are kept, those touching it are not.
+    #[test]
+    fn a_local_operation_keeps_only_edges_whose_faces_keep_their_surfaces() {
+        let mut kernel = Kernel::default();
+        let brep = crate::primitive::api_primitives::create_box(
+            &mut kernel,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            1.0,
+            2.0,
+            3.0,
+        )
+        .unwrap();
+        let faces = bp1::faces(&brep, None).unwrap();
+        let mut executive = OffsetExecutive::new(OffsetOperation::LocalOperation, 0.125, 1.0e-6);
+        executive.keep_unmoved_edges(&brep).unwrap();
+        assert!(executive.kept_edges.is_empty());
+        assert!(executive.kept_edgeuses.is_empty());
+
+        let surfaces = faces
+            .iter()
+            .map(|&f| brep.face(f).unwrap().surface.clone().unwrap())
+            .collect();
+        let moved = faces[0];
+        executive.set_local_surfaces(&faces, surfaces, &[moved]);
+        executive.keep_unmoved_edges(&brep).unwrap();
+        // a box face's 4 vertices touch 8 of its 12 edges: the other 4 are kept
+        let touching: BTreeSet<EdgeId> = bp1::vertices(&brep, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&v| vertex::faces(&brep, v).unwrap().contains(&moved))
+            .flat_map(|v| vertex::edges(&brep, v, None).unwrap())
+            .collect();
+        assert_eq!(touching.len(), 8);
+        let expected: BTreeSet<EdgeId> = bp1::edges(&brep, None)
+            .unwrap()
+            .into_iter()
+            .filter(|e| !touching.contains(e))
+            .collect();
+        assert_eq!(expected.len(), 4);
+        assert_eq!(executive.kept_edges, expected);
+        // each edge has four uses: two per face, one on each of its face uses
+        assert_eq!(executive.kept_edgeuses.len(), 16);
+    }
+
     #[test]
     fn a_box_face_margin_is_its_offset_corner_reach() {
         let mut kernel = Kernel::default();

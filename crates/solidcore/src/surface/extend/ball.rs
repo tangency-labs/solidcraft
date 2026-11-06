@@ -42,7 +42,7 @@
 //! Deviations: none (no upstream counterpart). No recursion.
 
 use super::sides::{ExtendedSides, SideExtension};
-use super::{keeps, Continuity, ExtendRefusal, Local};
+use super::{below_resolution, keeps, Continuity, ExtendRefusal, Local};
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
@@ -170,7 +170,11 @@ pub(super) fn ball_extended_sides(
                 turn: 0.5 * (2.0 * PI - lambda),
             }
         };
-        let (grown, across, capped, bound) = extend_side(&cur, side, c, r, z, cap, distance)?;
+        let Some((grown, across, capped, bound)) = extend_side(&cur, side, c, r, z, cap, distance)?
+        else {
+            *done = SideExtension::Unchanged;
+            continue;
+        };
         cur = grown;
         extension = extension.max(bound);
         *done = if capped {
@@ -205,6 +209,37 @@ pub(super) fn knot_box(s: &BSplineSurface) -> Result<Extent2d> {
     }
 }
 
+/// The source's iso across `side` at `middle` (a point of the side): its point at the
+/// opposite side and its point halfway, which with the side's own point orient the iso's
+/// circle. The extension's own points cannot: at the least step they lie within about
+/// `EFF_ZERO_PARAM` of each other, so their chords are nearly parallel and the sense of
+/// their turn is rounding (a sense flipped by it measures the arc the long way round).
+pub(super) fn source_iso(
+    cur: &BSplineSurface,
+    dom: &Extent2d,
+    side: BoxSide,
+    middle: Point2,
+) -> Result<(Vec3, Vec3)> {
+    let (lo, hi) = (dom.min(), dom.max());
+    let (far, half) = match side {
+        BoxSide::UMin | BoxSide::UMax => {
+            let far = if side == BoxSide::UMin { hi.x } else { lo.x };
+            (
+                Point2::new(far, middle.y),
+                Point2::new(0.5 * (lo.x + hi.x), middle.y),
+            )
+        }
+        BoxSide::VMin | BoxSide::VMax => {
+            let far = if side == BoxSide::VMin { hi.y } else { lo.y };
+            (
+                Point2::new(middle.x, far),
+                Point2::new(middle.x, 0.5 * (lo.y + hi.y)),
+            )
+        }
+    };
+    Ok((cur.evaluate_point(far)?, cur.evaluate_point(half)?))
+}
+
 /// What one ask's extension measures: its length across the side and its turn round the
 /// pole's axis.
 #[derive(Debug, Clone, Copy)]
@@ -214,7 +249,9 @@ struct Measure {
 }
 
 /// `cur` continued Natural past `side` by `distance` across it, capped by `cap`: the
-/// result, its across length, whether the cap stopped it, and its construction bound.
+/// result, its across length, whether the cap stopped it, and its construction bound;
+/// `None` where the length asked (the distance, or the length cap below it) is below the
+/// side's resolution ([`below_resolution`]).
 fn extend_side(
     cur: &BSplineSurface,
     side: BoxSide,
@@ -223,7 +260,7 @@ fn extend_side(
     z: Vec3,
     cap: Cap,
     distance: f64,
-) -> Result<(BSplineSurface, Across, bool, f64)> {
+) -> Result<Option<(BSplineSurface, Across, bool, f64)>> {
     let net = cur.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
     let source = Local::of(net, side)?;
     let dom = knot_box(cur)?;
@@ -257,16 +294,21 @@ fn extend_side(
             Point2::new(middle.x, x)
         }
     };
-    let measure = |s: &BSplineSurface| -> Result<Measure> {
-        let x0 = s.evaluate_point(at(s, 0.0))? - c;
-        let xm = s.evaluate_point(at(s, 0.5))? - c;
-        let x1 = s.evaluate_point(at(s, 1.0))? - c;
-        let n = (xm - x0).cross(x1 - xm);
+    // the iso's circle, its plane through the source's own points (`source_iso`), its
+    // normal turning from the source's far end through the side, outward
+    let (x_far, x_half) = source_iso(cur, &dom, side, middle)?;
+    let x_side = cur.evaluate_point(middle)?;
+    let n = {
+        let n = (x_half - x_far).cross(x_side - x_half);
         let len = n.length();
         if len.is_nan() || len <= 0.0 {
             return Err(SolidError::sm_err(OP));
         }
-        let n = n * (1.0 / len);
+        n * (1.0 / len)
+    };
+    let measure = |s: &BSplineSurface| -> Result<Measure> {
+        let x0 = s.evaluate_point(at(s, 0.0))? - c;
+        let x1 = s.evaluate_point(at(s, 1.0))? - c;
         let cc = n * n.dot(x0);
         let (u0, u1) = (x0 - cc, x1 - cc);
         let mut phi = u0.cross(u1).dot(n).atan2(u0.dot(u1));
@@ -288,18 +330,50 @@ fn extend_side(
             None => None,
         })
     };
+    // the length across an extension whose construction bound is `bound`, with the closed
+    // form's rounding (the evaluations at the points' size, the cross products, the atan2)
+    // and the points' construction bound through the angle
+    let size = c.length() + r;
+    let across_of = |s: &BSplineSurface, bound: f64| -> Result<Across> {
+        let length = measure(s)?.length;
+        let rounding = gamma(64) * (length + size) + 4.0 * bound;
+        Ok(Across {
+            enclosure: Bracket {
+                lower: (length - rounding).max(0.0),
+                upper: length + rounding,
+            },
+            truncation: 0.0,
+            rounding,
+            converged: true,
+            // a closed form at the points' size: its rounding part is sized on the part
+            resolution: 0.0,
+        })
+    };
     let range = source.range()?;
-    let (e, capped) = match cap {
+    let least = source.least_step()?;
+    let asked = match cap {
+        Cap::Arc(arc) => distance.min(r * arc),
+        Cap::Round { length, .. } => distance.min(length),
+    };
+    if let Some((g, bound)) = made(least)? {
+        if below_resolution(Some(&across_of(&g, bound)?), bound, asked) {
+            return Ok(None);
+        }
+    }
+    // the extension parameter, the length it was solved to (the distance or its cap; none
+    // where the turn's cap sets it) and whether the cap holds it short of the distance
+    let (e, goal, capped) = match cap {
         Cap::Arc(arc) => {
             let target = distance.min(r * arc);
             (
-                reach(&|e| value(e, false), target, range)?,
+                reach(&|e| value(e, false), target, range, least)?,
+                Some(target),
                 target < distance,
             )
         }
         Cap::Round { length, turn } => {
             // within the length cap and the turn's (none where the turn never gets there)
-            let at_turn = match solve(&|e| value(e, true), turn, range)? {
+            let at_turn = match solve(&|e| value(e, true), turn, range, least)? {
                 Reach::At(e_turn) => Some((
                     e_turn,
                     value(e_turn, false)?.ok_or_else(|| SolidError::sm_err(OP))?,
@@ -308,31 +382,41 @@ fn extend_side(
             };
             let target = distance.min(length);
             match at_turn {
-                Some((e_turn, l_turn)) if l_turn <= target => (e_turn, true),
+                Some((e_turn, l_turn)) if l_turn <= target => (e_turn, None, true),
                 _ => (
-                    reach(&|e| value(e, false), target, range)?,
+                    reach(&|e| value(e, false), target, range, least)?,
+                    Some(target),
                     target < distance,
                 ),
             }
         }
     };
     let (grown, bound) = made(e)?.ok_or_else(|| SolidError::sm_err(OP))?;
-    let length = measure(&grown)?.length;
-    // the closed form's rounding (the evaluations at the points' size, the cross products,
-    // the atan2), and the points' construction bound through the angle
-    let size = c.length() + r;
-    let rounding = gamma(64) * (length + size) + 4.0 * bound;
+    let across = across_of(&grown, bound)?;
+    // a length solved for is met, or the extension is refused naming a length that works
+    if goal.is_some_and(|goal| !solved_length_met(&across, bound, goal, e <= least)) {
+        return Err(refused(
+            ExtendRefusal::NotExact,
+            super::workable(Some(&across), bound),
+        ));
+    }
     certify_circle(&grown, side, middle, c, size)?;
-    let across = Across {
-        enclosure: Bracket {
-            lower: (length - rounding).max(0.0),
-            upper: length + rounding,
-        },
-        truncation: 0.0,
-        rounding,
-        converged: true,
-    };
-    Ok((grown, across, capped, bound))
+    Ok(Some((grown, across, capped, bound)))
+}
+
+/// Whether the across length `across` of an extension whose construction bound is `bound`
+/// meets the length `goal` it was solved to: the measure exact at it (converged, its rounding
+/// within the owner's `1e-6` of it) and its middle within the bisection's stop of it, at or
+/// past it at the least step (`least_step`), which can be no shorter. A bisection that ran
+/// out before meeting it does not.
+pub(super) fn solved_length_met(across: &Across, bound: f64, goal: f64, least_step: bool) -> bool {
+    let off = across.enclosure.mid() - goal;
+    super::exact(across, bound, goal)
+        && if least_step {
+            off >= -MEET * goal
+        } else {
+            off.abs() <= MEET * goal
+        }
 }
 
 /// Where `f` reaches its target ([`solve`]).
@@ -346,12 +430,22 @@ pub(super) enum Reach {
 
 /// The extension parameter where `f` (increasing from 0, `None` where a weight is not
 /// positive) reaches `target`: bracketed by doubling from `e0`, then bisected. A target past
-/// every positive ask is refused naming the longest value found.
-pub(super) fn solve(f: &dyn Fn(f64) -> Result<Option<f64>>, target: f64, e0: f64) -> Result<Reach> {
+/// every positive ask is refused naming the longest value found. No ask is below `least`,
+/// the shortest extension the side's knot can carry ([`Local::least_step`]): a
+/// target its value is proved past is below the side's resolution and asked of no solve
+/// ([`below_resolution`], the callers' check); a shorter target is met by it.
+///
+/// [`Local::least_step`]: super::Local::least_step
+pub(super) fn solve(
+    f: &dyn Fn(f64) -> Result<Option<f64>>,
+    target: f64,
+    e0: f64,
+    least: f64,
+) -> Result<Reach> {
     let (mut lo, mut lo_v) = (0.0_f64, 0.0_f64);
     let mut hi = None;
     let mut bad = None;
-    let mut e = e0;
+    let mut e = e0.max(least);
     for _ in 0..BRACKET_TRIES {
         match f(e)? {
             Some(v) if v >= target => {
@@ -376,12 +470,14 @@ pub(super) fn solve(f: &dyn Fn(f64) -> Result<Option<f64>>, target: f64, e0: f64
         (None, Some(mut b)) => {
             // the longest positive ask below the first whose weights are not
             for _ in 0..BISECTIONS {
-                let m = 0.5 * (lo + b);
+                let m = (0.5 * (lo + b)).max(least);
                 if !(m > lo && m < b) {
                     break;
                 }
                 match f(m)? {
-                    Some(v) if v >= target => return Ok(Reach::At(bisect(f, target, lo, m)?)),
+                    Some(v) if v >= target => {
+                        return Ok(Reach::At(bisect(f, target, lo, m, least)?))
+                    }
                     Some(v) => {
                         lo = m;
                         lo_v = v;
@@ -396,24 +492,35 @@ pub(super) fn solve(f: &dyn Fn(f64) -> Result<Option<f64>>, target: f64, e0: f64
         }
         (None, None) => return Ok(Reach::Short(lo_v)),
     };
-    Ok(Reach::At(bisect(f, target, lo, hi)?))
+    Ok(Reach::At(bisect(f, target, lo, hi, least)?))
 }
 
-/// The parameter where `f` reaches `target`, or refused as not exact naming the longest
-/// value reached.
-pub(super) fn reach(f: &dyn Fn(f64) -> Result<Option<f64>>, target: f64, e0: f64) -> Result<f64> {
-    match solve(f, target, e0)? {
+/// The parameter where `f` reaches `target` (no ask below `least`, [`solve`]), or refused
+/// as not exact naming the longest value reached.
+pub(super) fn reach(
+    f: &dyn Fn(f64) -> Result<Option<f64>>,
+    target: f64,
+    e0: f64,
+    least: f64,
+) -> Result<f64> {
+    match solve(f, target, e0, least)? {
         Reach::At(e) => Ok(e),
         Reach::Short(v) => Err(refused(ExtendRefusal::NotExact, (v > 0.0).then_some(v))),
     }
 }
 
 /// Bisection of `[lo, hi]` (`f(lo) < target <= f(hi)`) until `f` is within `MEET` of the
-/// target.
-fn bisect(f: &dyn Fn(f64) -> Result<Option<f64>>, target: f64, lo: f64, hi: f64) -> Result<f64> {
+/// target, asking nothing below `least` (`least` itself when the target is below its value).
+fn bisect(
+    f: &dyn Fn(f64) -> Result<Option<f64>>,
+    target: f64,
+    lo: f64,
+    hi: f64,
+    least: f64,
+) -> Result<f64> {
     let (mut lo, mut hi) = (lo, hi);
     for _ in 0..BISECTIONS {
-        let m = 0.5 * (lo + hi);
+        let m = (0.5 * (lo + hi)).max(least);
         if !(m > lo && m < hi) {
             break;
         }

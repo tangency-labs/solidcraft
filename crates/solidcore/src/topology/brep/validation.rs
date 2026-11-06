@@ -7,6 +7,7 @@
 //! |------|----------|
 //! | [`validate_pointers`] | `SmBrep::ValidatePointers` |
 //! | [`contains_coincident_topology`] | `SmBrep::ContainsCoincidentTopology` |
+//! | [`soundness`], [`standing`], [`volume`] | (not upstream) the check at level 2, the manifold test and the volume |
 //! | `check_edge_geometry` | `SmEdge::ValidateGeometry(FALSE)` |
 //! | `check_edgeuse_geometry` | `sm_CheckEdgeuseGeometry` |
 //!
@@ -22,15 +23,17 @@ mod assert_valid;
 pub(crate) use assert_valid::standalone_curve_assert_valid;
 mod coincidence;
 mod pointers;
+mod soundness;
 pub(crate) mod spatial;
 
 pub use assert_valid::{
     assert_valid, check_brep, check_brep_with_keys, curve_assert_valid,
-    validate_and_update_tolerances, BrepCheck, CheckLevel, ToleranceGaps,
+    validate_and_update_tolerances, BrepCheck, CheckLevel, FailureClass, ToleranceGaps,
 };
 pub use coincidence::{contains_coincident_topology, CoincidenceResult};
 pub(crate) use pointers::validate_geometry;
 pub use pointers::validate_pointers;
+pub use soundness::{soundness, standing, volume, Soundness, Standing};
 
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::assert_array::{AssertArray, AssertReport, ObjectKey, ReportSpec};

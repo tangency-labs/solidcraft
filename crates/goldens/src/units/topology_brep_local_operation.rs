@@ -212,53 +212,109 @@ fn with_notifications<R>(
     f(b, &mut notifications)
 }
 
+/// How a case's edit ends: before or without an edit (the case's whole output), or with
+/// the edited B-rep and its record (boxed: a kernel and a B-rep are large beside an
+/// output).
+enum Edited {
+    Ended(Output),
+    Done(Box<Done>),
+}
+
+/// An edit's kernel, edited B-rep and record.
+struct Done {
+    k: Kernel,
+    b: Brep,
+    record: Vec<f64>,
+}
+
+/// Reads the case's solid and runs `local_operation` on it ([`Runner`]'s edit).
+fn edited(case: &Case) -> Result<Edited, HarnessError> {
+    let i: Inputs = case.parse()?;
+    let mut k = Kernel::default();
+    // the Rust reader's B-rep of the same file, its geometry owners named by the
+    // Rust reader (no C++ export or owner reaches the Rust side)
+    let mut b = match crate::own_reader::read_file_rebuild(&mut k, &path(&i)?, i.rebuild)? {
+        Ok(b) => b,
+        Err(e) => {
+            let o = Output::unported(&e).ok_or_else(|| herr(format!("rust read: {e}")))?;
+            return Ok(Edited::Ended(o));
+        }
+    };
+    let mut run = || -> SolidResult<Option<Vec<f64>>> {
+        let Some((faces, surfaces)) = planes(&k, &b, &i)? else {
+            return Ok(None);
+        };
+        if i.attributed {
+            tag(&mut b)?;
+        }
+        let st = status(with_notifications(&mut b, |b, notes| {
+            local_operation(&mut k, b, &faces, surfaces, notes)
+        }))?;
+        let mut record = vec![st];
+        record.extend(geometry(&k, &b, true)?);
+        if i.attributed {
+            put_tags(&mut record, &b)?;
+        }
+        Ok(Some(record))
+    };
+    match run() {
+        Ok(None) => Ok(Edited::Ended(Output::new())),
+        Ok(Some(record)) => Ok(Edited::Done(Box::new(Done { k, b, record }))),
+        Err(e) => Output::unported(&e)
+            .map(Edited::Ended)
+            .ok_or_else(|| herr(e)),
+    }
+}
+
+/// The case's edited B-rep, labelled `edited` (for `examples/case_smb.rs`). A case whose
+/// replacements cannot be built, that ends before the edit, or whose edit is refused (the
+/// input put back) has none.
+///
+/// # Errors
+///
+/// The case's inputs are bad, or it has no edited B-rep.
+pub fn result_breps(case: &Case) -> Result<super::surface_surface_p2::Drawn, HarnessError> {
+    match edited(case)? {
+        Edited::Done(d) => {
+            let Done { k, b, record } = *d;
+            match record.first() {
+                Some(&0.) => Ok((k, vec![("edited", b)])),
+                st => Err(herr(format!(
+                    "case {}: cannot be drawn: the edit is refused (status {st:?}), the input \
+                     put back",
+                    case.name
+                ))),
+            }
+        }
+        Edited::Ended(_) => Err(herr(format!(
+            "case {}: cannot be drawn: it ends before the edit (replacements not built, \
+             or the read deferred)",
+            case.name
+        ))),
+    }
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "topology.brep_local_operation"
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        let i: Inputs = case.parse()?;
-        let mut k = Kernel::default();
-        // the Rust reader's B-rep of the same file, its geometry owners named by the
-        // Rust reader (no C++ export or owner reaches the Rust side)
-        let mut b = match crate::own_reader::read_file_rebuild(&mut k, &path(&i)?, i.rebuild)? {
-            Ok(b) => b,
-            Err(e) => {
-                return Output::unported(&e).ok_or_else(|| herr(format!("rust read: {e}")));
+        let (mut k, mut b, record) = match edited(case)? {
+            Edited::Ended(o) => return Ok(o),
+            Edited::Done(d) => {
+                let Done { k, b, record } = *d;
+                (k, b, record)
             }
         };
-        let mut run = || -> SolidResult<Option<Vec<f64>>> {
-            let Some((faces, surfaces)) = planes(&k, &b, &i)? else {
-                return Ok(None);
-            };
-            if i.attributed {
-                tag(&mut b)?;
-            }
-            let st = status(with_notifications(&mut b, |b, notes| {
-                local_operation(&mut k, b, &faces, surfaces, notes)
-            }))?;
-            let mut record = vec![st];
-            record.extend(geometry(&k, &b, true)?);
-            if i.attributed {
-                put_tags(&mut record, &b)?;
-            }
-            Ok(Some(record))
-        };
-        match run() {
-            Ok(None) => Ok(Output::new()),
-            Ok(Some(record)) => {
-                // (a probe's measure, before the export strips the body: capture off, none)
-                crate::soundness::measure(&mut b);
-                strip_unrecorded(&mut b).map_err(herr)?;
-                normalize_face_shells(&mut b).map_err(herr)?;
-                // (the serial whose topology keys name the edit's new geometry)
-                let serial = solidcore::topology::brep::p3::notify_serial(&mut k.context, &mut b)
-                    .map_err(herr)?;
-                Ok(graph_owned(&b, record, Some(serial)))
-            }
-            Err(e) => Output::unported(&e).ok_or_else(|| herr(e)),
-        }
+        // (a probe's measure, before the export strips the body: capture off, none)
+        crate::soundness::measure(&mut b);
+        strip_unrecorded(&mut b).map_err(herr)?;
+        normalize_face_shells(&mut b).map_err(herr)?;
+        // (the serial whose topology keys name the edit's new geometry)
+        let serial =
+            solidcore::topology::brep::p3::notify_serial(&mut k.context, &mut b).map_err(herr)?;
+        Ok(graph_owned(&b, record, Some(serial)))
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
@@ -434,5 +490,51 @@ mod soundness_probe {
     #[ignore = "a measurement run on demand (`$SC_SOUNDNESS_CASES`)"]
     fn moved_cases_results_measured() {
         crate::soundness::probe(&Runner);
+    }
+}
+
+#[cfg(test)]
+mod result_breps_tests {
+    use super::*;
+
+    fn case(inputs: Value) -> Case {
+        Case {
+            unit: "topology.brep_local_operation".into(),
+            name: "result_breps".into(),
+            source: crate::CaseSource::Inline,
+            inputs,
+        }
+    }
+
+    /// The default case (`Solids/box.smb`, face 0 moved 0.5 along its normal) draws one
+    /// body, still six faces.
+    #[test]
+    fn result_breps_default_case_is_the_edited_box() {
+        let (_, bodies) = result_breps(&case(serde_json::json!({}))).unwrap();
+        assert_eq!(bodies.len(), 1);
+        assert_eq!(bodies[0].0, "edited");
+        assert_eq!(bodies[0].1.faces().len(), 6);
+    }
+
+    /// A face index past the solid's faces builds no replacement: nothing to draw.
+    #[test]
+    fn result_breps_rejected_case_cannot_be_drawn() {
+        let inputs = serde_json::json!({
+            "replaced": [{ "face": 99, "offset": 0.5, "tilt": [0.0, 0.0, 0.0] }]
+        });
+        let e = result_breps(&case(inputs)).err().unwrap();
+        assert!(e.0.contains("cannot be drawn"), "{e}");
+    }
+
+    /// A refused edit puts the input back: drawing it as `edited` would show the input.
+    /// `cone.smb`'s full-turn side face given a plane is refused as its seam opening.
+    #[test]
+    fn result_breps_refused_edit_cannot_be_drawn() {
+        let inputs = serde_json::json!({
+            "file": "cone.smb",
+            "replaced": [{ "face": 0, "offset": 0.5, "tilt": [0.0, 0.0, 0.0] }]
+        });
+        let e = result_breps(&case(inputs)).err().unwrap();
+        assert!(e.0.contains("the edit is refused"), "{e}");
     }
 }

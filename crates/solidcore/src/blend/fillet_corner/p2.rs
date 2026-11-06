@@ -293,11 +293,19 @@ impl FilletCorner {
     ///
     /// # Errors
     ///
+    /// Everything it reads and every step that can fail (the side face's extension, the
+    /// fillet geometry of each cross section at the vertex) comes before the first change,
+    /// so a refusal leaves the pseudo-B-rep and the corner as they came in. Not upstream,
+    /// which makes the new vertices and edges first and stops at a `NULL` dereference with
+    /// the corner half made.
+    ///
+    /// # Errors
+    ///
     /// `SM_ERR_NULL_POINTER` when no `SM_FV_RAIL_X_EDGEUSE` vertex has two fillet
-    /// geometries (or a cross-section edge use and its mate have none);
-    /// [`SolidError::InvalidInput`] where upstream dereferences `NULL` or casts a
-    /// classification object that is not an edge use; [`SolidError::Unported`] (module
-    /// docs).
+    /// geometries; [`SolidError::InvalidInput`] where upstream dereferences `NULL` or casts
+    /// a classification object that is not an edge use, and for a cross section at the
+    /// vertex with no fillet geometry on either of its edge uses; those of the side
+    /// surface's extension; [`SolidError::Unported`] (module docs).
     pub fn adjust_concave_corner_topology(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
         self.adjust_concave_corner_topology_with(
             env.k,
@@ -405,27 +413,8 @@ impl FilletCorner {
             eu1::face(target, radial)?
         };
 
-        // Create two new FilletVertices where each rail hits the side edge.
-        let new_vert_l = new_rail_x_edgeuse_vertex_in(k, pseudo, corner, pnt_l, t_l)?; // "Large"
-        let new_vert_s = new_rail_x_edgeuse_vertex_in(k, pseudo, corner, pnt_s, t_s)?; // "Small"
-        self.vertices.push(new_vert_l);
-        self.vertices.push(new_vert_s);
-
-        let fv = pseudo.fillet_vertex_mut(adjust_vert)?;
-        fv.set_fillet_vertex_type(FilletVertexType::FilletXFillet);
-        fv.set_status(FilStatus::Unprocessed);
-
-        move_vertexuse(pseudo, vu_on_large_fg, adjust_vert, new_vert_l)?;
-        move_vertexuse(pseudo, vu_on_small_fg, adjust_vert, new_vert_s)?;
-
-        let new_edge = pseudo.make_fillet_edge(Some(adjust_vert), Some(new_vert_l), corner)?;
-        let fe = pseudo.fillet_edge_mut(new_edge)?;
-        fe.set_fillet_edge_type(FilletEdgeType::FilletXSideFace);
-        fe.set_original_face(side_face);
-        let prim_eu = primary_eu(pseudo, new_edge, OP_CONCAVE_TOPO)?;
-        pseudo.set_edgeuse_fillet_geom(prim_eu, Some(large_fg))?;
-
-        // Need to extend the side surface
+        // Need to extend the side surface (made here, before anything changes, so that its
+        // failure leaves the corner as it came in)
         let side_face_id = side_face.ok_or_else(|| null_deref("no side face"))?;
         let side_surface = target
             .face(side_face_id)?
@@ -446,6 +435,59 @@ impl FilletCorner {
                 10.0 * gap_dist,
             )?
             .surface;
+
+        // pAdjustVert comes in with two mates, in the common face: the other ends of its
+        // SM_FE_CROSS_SECTION FilletEdges. Each cross section's fillet geometry (its edge
+        // use's, else its mate's) is read now; one with none on either side is refused
+        // here (upstream stops on it after the new vertices and edges are made).
+        let mut cross_sections = Vec::new();
+        for vu in pseudo.brep().vertex(adjust_vert)?.vertexuses.clone() {
+            if vu == vu_on_large_fg || vu == vu_on_small_fg {
+                continue; // moved to the new vertices below
+            }
+            let eu = eu1::vertexuse_edgeuse(pseudo.brep(), vu)?
+                .ok_or_else(|| null_deref("vertex use without edge use"))?;
+            let fillet_e = pseudo
+                .brep()
+                .edgeuse(eu)?
+                .edge
+                .ok_or_else(|| null_deref("edge use without edge"))?;
+            if pseudo.fillet_edge(fillet_e)?.fillet_edge_type() != FilletEdgeType::CrossSection {
+                continue;
+            }
+            let other_vert = edge::other_vertex(pseudo.brep(), fillet_e, Some(adjust_vert))?;
+            let fg = if let Some(fg) = pseudo.fillet_edgeuse(eu)?.fillet_geom() {
+                fg
+            } else {
+                let mate = eu1::mate(pseudo.brep(), eu)?
+                    .ok_or_else(|| null_deref("edge use without mate"))?;
+                pseudo.fillet_edgeuse(mate)?.fillet_geom().ok_or_else(|| {
+                    null_deref("a cross section at the corner has no fillet geometry")
+                })?
+            };
+            cross_sections.push((other_vert, fg));
+        }
+
+        // Create two new FilletVertices where each rail hits the side edge.
+        let new_vert_l = new_rail_x_edgeuse_vertex_in(k, pseudo, corner, pnt_l, t_l)?; // "Large"
+        let new_vert_s = new_rail_x_edgeuse_vertex_in(k, pseudo, corner, pnt_s, t_s)?; // "Small"
+        self.vertices.push(new_vert_l);
+        self.vertices.push(new_vert_s);
+
+        let fv = pseudo.fillet_vertex_mut(adjust_vert)?;
+        fv.set_fillet_vertex_type(FilletVertexType::FilletXFillet);
+        fv.set_status(FilStatus::Unprocessed);
+
+        move_vertexuse(pseudo, vu_on_large_fg, adjust_vert, new_vert_l)?;
+        move_vertexuse(pseudo, vu_on_small_fg, adjust_vert, new_vert_s)?;
+
+        let new_edge = pseudo.make_fillet_edge(Some(adjust_vert), Some(new_vert_l), corner)?;
+        let fe = pseudo.fillet_edge_mut(new_edge)?;
+        fe.set_fillet_edge_type(FilletEdgeType::FilletXSideFace);
+        fe.set_original_face(side_face);
+        let prim_eu = primary_eu(pseudo, new_edge, OP_CONCAVE_TOPO)?;
+        pseudo.set_edgeuse_fillet_geom(prim_eu, Some(large_fg))?;
+
         Self::add_extended_original_surface_with_map(
             extended_surfaces,
             side_face_id,
@@ -469,43 +511,17 @@ impl FilletCorner {
         self.edges.push(new_edge1);
         self.edges.push(new_edge2);
 
-        // pAdjustVert comes in with two mates, in the common face.
-        // Find them -- they are at the other end of the two FilletEdges
-        // of type SM_FE_CROSS_SECTION -- and reset them as mates of
-        // the two FilletVertices we just created.
-        let vus = pseudo.brep().vertex(adjust_vert)?.vertexuses.clone();
-        for vu in vus {
-            let eu = eu1::vertexuse_edgeuse(pseudo.brep(), vu)?
-                .ok_or_else(|| null_deref("vertex use without edge use"))?;
-            let fillet_e = pseudo
-                .brep()
-                .edgeuse(eu)?
-                .edge
-                .ok_or_else(|| null_deref("edge use without edge"))?;
-            if pseudo.fillet_edge(fillet_e)?.fillet_edge_type() != FilletEdgeType::CrossSection {
-                continue;
-            }
-
-            // FilletEdge of type SM_FE_CROSS_SECTION:
-            let other_vert = edge::other_vertex(pseudo.brep(), fillet_e, Some(adjust_vert))?;
-            let mut fg = pseudo.fillet_edgeuse(eu)?.fillet_geom();
-            if fg.is_none() {
-                let mate = eu1::mate(pseudo.brep(), eu)?
-                    .ok_or_else(|| null_deref("edge use without mate"))?;
-                fg = pseudo.fillet_edgeuse(mate)?.fillet_geom();
-                if fg.is_none() {
-                    return Err(SolidError::null_pointer(OP_CONCAVE_TOPO));
-                }
-            }
+        // reset the cross sections' other ends as mates of the two new FilletVertices
+        for (other_vert, fg) in cross_sections {
             // pOtherVert->GetMate(0) is read only when the geometry matches
             let has_mate = |pseudo: &FilletBrep| -> Result<bool> {
                 let other =
                     other_vert.ok_or_else(|| null_deref("cross section without other vertex"))?;
                 Ok(pseudo.fillet_vertex(other)?.mate(0).is_some())
             };
-            let new_v = if fg == Some(small_fg) && has_mate(pseudo)? {
+            let new_v = if fg == small_fg && has_mate(pseudo)? {
                 Some(new_vert_s)
-            } else if fg == Some(large_fg) && has_mate(pseudo)? {
+            } else if fg == large_fg && has_mate(pseudo)? {
                 Some(new_vert_l)
             } else {
                 None

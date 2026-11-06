@@ -5,6 +5,9 @@
     "real-box-high-corner-setback-eight": "tangency-labs/solidcore#2933: the corner patch overruns the setback of 8 along the top round and folds (pinched creases, two sliver faces); edge tolerance 5.17e-5",
     "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.5": "tangency-labs/solidcore#3053: with every fix off the round builds a body that is not closed (29 vertices, 44 edges, 9 faces, mass status 1007), where it was refused with status 1001"
   },
+  "offset.offset_executive_p1": {
+    "extend_bilinear_huge": "tangency-labs/solidcore#3000: a 5e8 extension of a bilinear sheet extends 3 of 4 sides; the opposite side's diameter is rounded on the whole net and reads as collapsed"
+  },
   "offset.offset_executive_p2": {
     "fuzz00108": "tangency-labs/solidcore#3023: the edge's arc crosses its closed offset curve's seam, no interval gives it; the edge is left bad and status is success",
     "fuzz00117": "tangency-labs/solidcore#3023: the edge's arc crosses its closed offset curve's seam, no interval gives it; the edge is left bad and status is success",
@@ -12,38 +15,13 @@
     "pe_Fillet_box_diff_cyl_f1_d0_out_ext": "tangency-labs/solidcore#3023: the edge's arc crosses its closed offset curve's seam, no interval gives it; the edge is left bad and status is success",
     "pe_Fillet_box_diff_cyl_f2_d0_out_ext": "tangency-labs/solidcore#3023: the edge's arc crosses its closed offset curve's seam, no interval gives it; the edge is left bad and status is success"
   },
+  "offset.offset_geometry_creation": {
+    "gen0049": "tangency-labs/solidcore#3002: the result has an edge whose pcurve interval differs from its 3D curve's, after the local-operation change",
+    "gen0732": "tangency-labs/solidcore#3001: the offset result's edge pcurve interval differs from its 3D curve's, on main as well",
+    "gen0779": "tangency-labs/solidcore#3002: the result has an edge whose pcurve interval differs from its 3D curve's, after the local-operation change"
+  },
   "primitive.primitive_creation_p2": {
     "gen0092": "tangency-labs/solidcore#2794: a circle of radius 1e-3 swept along two 1e-2 legs at a right angle returns success, but the body fails check_brep level 2 (vertex 1.8284271e-3 off its faces); a refusal or the valid body of volume 6.2832e-8 is right; fix in #2840",
     "gen0189": "tangency-labs/solidcore#2794: the same input as gen0092 (circle of radius 1e-3 swept along two 1e-2 legs at a right angle) returns success with an invalid body (vertex 1.8284271e-3 off its faces); fix in #2840"
-  },
-  "topology.brep_local_operation": {
-    "attributed_nurb_fillet_face0_same": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "attributed_nurb_fillet_face1_same": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "attributed_nurb_fillet_face2_same": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "attributed_nurb_fillet_face3_same": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "attributed_nurb_fillet_face4_same": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "attributed_nurb_fillet_face6_same": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "attributed_nurb_fillet_face7_same": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "fc0000": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "fc0002": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "fc0003": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "fc0004": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "fc0007": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "fc0013": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "fc0014": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "fc0016": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "fc0020": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "fc0024": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "fc0025": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "fc0027": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "fc0030": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "nurb_fillet_face0_same": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "nurb_fillet_face1_same": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "nurb_fillet_face2_same": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "nurb_fillet_face3_same": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "nurb_fillet_face4_same": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "nurb_fillet_face5_same": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "nurb_fillet_face6_same": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it",
-    "nurb_fillet_face7_same": "tangency-labs/solidcore#3042: the Ruled product form reaches past the rows' end, the extended offset then returns a non-manifold body (at the raw kernel call; ops' finish refuses it NotSolid and keeps the body); refused as not exact before it"
   }
 }

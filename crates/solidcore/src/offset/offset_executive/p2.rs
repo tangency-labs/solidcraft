@@ -790,6 +790,8 @@ impl OffsetExecutive {
         }
 
         let mapped = order_edgeuses_by_brep(original, &self.mapped_original_edgeuses())?;
+        // (not upstream) a local operation's edges whose surfaces all stay are kept
+        self.keep_unmoved_edges(original)?;
         with_mark_lock(kernel, ALL_MARKS, |kernel, mark_type| {
             // The same claimed mark reaches both mapped-edge passes. Source and
             // result keys stay disjoint through p1's synchronization and Copy calls.
@@ -1056,6 +1058,9 @@ impl OffsetExecutive {
             if kernel.fixes.offset_resolve_crossing_loops {
                 self.resolve_crossing_loops(kernel, original, notifications)?;
             }
+
+            // (not upstream) each kept edge is the original edge on both its faces
+            self.restore_kept_edges(kernel, original, notifications)?;
 
             let mut result = self.piecewise_merge(kernel, original, Some(&mut *notifications))?;
             // (WR-341: with the opt-in this also runs for a solid input whatever

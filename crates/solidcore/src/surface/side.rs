@@ -109,6 +109,17 @@ pub struct Across {
     /// Whether every leaf met `rel`; a leaf too short to cut again before it did leaves the
     /// length not measured to `rel`.
     pub converged: bool,
+    /// The stored net's own resolution of the length: how far the length can move when each
+    /// stored coordinate of the points it is made of moves by one ulp (`8 p sqrt3 u M`, `M`
+    /// their largest Euclidean coordinate: a point within `2 u |H|` and its weight within `2
+    /// u w` moves by at most `4 sqrt3 u |E|`, the length by `2 p` times that). No net of
+    /// floats places its length nearer than this to a length asked for; 0 for a closed form.
+    /// Not part of the enclosure, which is the stored net's own length. It is a stop
+    /// allowance only: stopping a length solve tighter than one ulp of the stored net can
+    /// move the length is not resolvable, so the solve's stop is at least this wide; the
+    /// certificate (the enclosure, `extend`'s `exact()`, the `1e-6 d`
+    /// rounding criterion) is unchanged.
+    pub resolution: f64,
 }
 
 /// A certified enclosure of a computed quantity: the exact value of the quantity, for the
@@ -138,41 +149,209 @@ impl Bracket {
     }
 }
 
-/// `form`'s net translated by `P0` (the iso's first point, as computed), and the
-/// translation's rounding: each homogeneous point `(X w - P0 w, w)`, its coordinates within
-/// `gamma_2 (|x| + |P0| |w|)` of the exact translation's (a product and a difference; the
-/// weights exact). A length is the same on the translated surface (`S - P0`, `P0` a fixed
-/// vector); measured there, the points' and their rounding's magnitudes are the net's size
-/// about `P0`, not its distance from the origin.
+/// The column of the direction measured along (knots `along`, degree `dp`) that the iso
+/// curve's point at `from` is, when `from` is a knot of multiplicity `dp` or more: the iso's
+/// control point there is its point (the basis function of that column is 1 at `from`, every
+/// other 0), taken on `to`'s side of a knot of multiplicity `dp + 1`. `None` otherwise.
+fn joint_column(along: &[f64], dp: usize, from: f64, to: f64) -> Option<usize> {
+    let mult = along.iter().filter(|&&x| x == from).count();
+    if dp == 0 || mult < dp {
+        return None;
+    }
+    if to > from {
+        // `u_(s+1) = .. = u_(s+dp) = from`, the last copy `s + dp`
+        along.iter().rposition(|&x| x == from)?.checked_sub(dp)
+    } else {
+        // the first copy `s + 1`
+        along.iter().position(|&x| x == from)?.checked_sub(1)
+    }
+}
+
+/// The net's points the iso curve's pieces over `[from, to]` at `fixed` are made of
+/// (`[i along u][j along v]`), as [`Rounding::local`] reads them: the iso's extraction at
+/// `fixed` is column by column (each across row's points combined at `fixed` alone), so
+/// across only the rows whose basis function's support holds `fixed`; along, those whose
+/// support meets `[from, to]` (closed: a support ending at an end is kept). Past a joint
+/// ([`joint_column`], `s`) only the columns on `to`'s side of it, `s` itself included: the
+/// Bezier decomposition starts the segment at a knot of multiplicity `p` or more from the
+/// points `s .. s + p` as they are (no insertion there, `r = p - mult <= 0`), and the segment
+/// ending at it needs no insertion at its end, so no piece on one side of the joint is
+/// combined from a point on the other.
+struct Window {
+    along_u: bool,
+    along: std::ops::RangeInclusive<usize>,
+    held: std::ops::RangeInclusive<usize>,
+    joint: Option<usize>,
+    up: bool,
+}
+
+impl Window {
+    fn of(
+        nurb: &crate::nurbs::srf_basic::Surface,
+        along_u: bool,
+        fixed: f64,
+        from: f64,
+        to: f64,
+    ) -> Self {
+        let (p, q) = nurb.degrees();
+        let (held, along, dp, dq) = if along_u {
+            (nurb.v_knots(), nurb.u_knots(), p, q)
+        } else {
+            (nurb.u_knots(), nurb.v_knots(), q, p)
+        };
+        let (a, b) = (from.min(to), from.max(to));
+        Self {
+            along_u,
+            along: support_meets(along, dp, a, b),
+            held: support_meets(held, dq, fixed, fixed),
+            joint: joint_column(along, dp, from, to),
+            up: to > from,
+        }
+    }
+
+    /// Whether the point `[i along u][j along v]` enters the pieces.
+    fn keeps(&self, i: usize, j: usize) -> bool {
+        let (ia, ih) = if self.along_u { (i, j) } else { (j, i) };
+        let side = match self.joint {
+            Some(s) if self.up => ia >= s,
+            Some(s) => ia <= s,
+            None => true,
+        };
+        self.along.contains(&ia) && side && self.held.contains(&ih)
+    }
+}
+
+/// The column along the measured direction, among those `window` keeps, with the largest
+/// weight in any kept row (the first of them; the window's first for a polynomial net).
+fn heaviest_column(nurb: &crate::nurbs::srf_basic::Surface, window: &Window) -> usize {
+    let mut best = (*window.along.start(), f64::NEG_INFINITY);
+    for (i, row) in nurb.rows().enumerate() {
+        for (j, c) in row.iter().enumerate() {
+            if !window.keeps(i, j) {
+                continue;
+            }
+            let w = if c.w == NOW { 1.0 } else { c.w };
+            let column = if window.along_u { i } else { j };
+            if w > best.1 || (w == best.1 && column < best.0) {
+                best = (column, w);
+            }
+        }
+    }
+    best.0
+}
+
+/// [`Across::resolution`] of the points `window` keeps: `8 p sqrt3 u M` (`p` the measured
+/// direction's degree, `M` the points' largest Euclidean coordinate), a few ulps wider for its
+/// own rounding.
+///
+/// # Errors
+///
+/// `InvalidInput` for a weight not positive or a resolution not finite.
+fn resolution_of(
+    nurb: &crate::nurbs::srf_basic::Surface,
+    window: &Window,
+    op: &'static str,
+) -> Result<f64> {
+    let (p, q) = nurb.degrees();
+    let dp = if window.along_u { p } else { q };
+    let mut m = 0.0_f64;
+    for (i, row) in nurb.rows().enumerate() {
+        for (j, c) in row.iter().enumerate() {
+            if !window.keeps(i, j) {
+                continue;
+            }
+            let w = if c.w == NOW { 1.0 } else { c.w };
+            if w.is_nan() || w <= 0.0 {
+                return Err(SolidError::invalid_input(op, "a weight is not positive"));
+            }
+            m = m.max(c.x.abs().max(c.y.abs()).max(c.z.abs()) / w);
+        }
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let res = 8.0 * dp as f64 * 3f64.sqrt() * crate::nurbs::math::UNIT * m * (1.0 + gamma(8));
+    if res.is_finite() {
+        Ok(res)
+    } else {
+        Err(SolidError::invalid_input(
+            op,
+            "the net's resolution is not bounded",
+        ))
+    }
+}
+
+/// `form`'s net in difference form about the column `s` along the measured direction: each
+/// homogeneous point `(H, w)` (`H = w X`) made `(H - H_s - C (w - w_s), w)`, `H_s, w_s` the
+/// point of column `s` in the same across row and `C` a fixed point; the weights kept. The
+/// extraction and decomposition are linear in each coordinate and the B-spline basis sums
+/// to 1, so the iso curve of the result at `fixed` is, in homogeneous form,
+/// `H(t) - C w(t) - r` with `r = H_s(fixed) - C w_s(fixed)` (`H_s(fixed)` the iso's control
+/// point of column `s`): the iso translated by `C`, less the constant `(r, 0)`. Its points'
+/// magnitudes are the net's differences from column `s` (past a joint, the extension's own
+/// size), not the part's size or position.
+///
+/// The rounding of making it, on each coordinate the points `keep` names enter with
+/// (`fl(fl(H - H_s) - fl(C fl(w - w_s)))`, each operation exact to a relative `u` of its
+/// result): at most `gamma_1 (|D~| + |dH~| + 2 |C| |dw~|)` from the computed difference
+/// `D~`, homogeneous difference `dH~` and weight difference `dw~`. A polynomial net's
+/// weights are all 1 (`dw = 0` exactly): the difference of its points alone.
 ///
 /// # Errors
 ///
 /// `SM_ERR` for a form without a NURBS net; those of the net.
-fn translated(form: &BSplineSurface, p0: Vec3, op: &'static str) -> Result<(BSplineSurface, f64)> {
+fn differenced(
+    form: &BSplineSurface,
+    window: &Window,
+    s: usize,
+    c: Vec3,
+    op: &'static str,
+) -> Result<(BSplineSurface, f64)> {
     let nurb = form.gw_nurb().ok_or_else(|| SolidError::sm_err(op))?;
     let cpts = nurb.cpts();
-    let size = p0.x.abs().max(p0.y.abs()).max(p0.z.abs());
+    let size = c.x.abs().max(c.y.abs()).max(c.z.abs());
     let g = gamma(2);
     let mut shift = 0.0_f64;
-    let net: Vec<Vec<CPoint>> = cpts
-        .iter()
-        .map(|row| {
-            row.iter()
-                .map(|c| {
-                    let w = if c.w == NOW { 1.0 } else { c.w };
-                    let mag = c.x.abs().max(c.y.abs()).max(c.z.abs());
-                    shift = shift.max(g * (mag + size * w.abs()));
-                    CPoint::new(c.x - p0.x * w, c.y - p0.y * w, c.z - p0.z * w, c.w)
-                })
-                .collect()
-        })
-        .collect();
+    let mut net: Vec<Vec<CPoint>> = Vec::new();
+    for (i, row) in cpts.iter().enumerate() {
+        let mut out = Vec::new();
+        for (j, p) in row.iter().enumerate() {
+            let (ri, rj) = if window.along_u { (s, j) } else { (i, s) };
+            let r = cpts
+                .get(ri)
+                .and_then(|row| row.get(rj))
+                .ok_or_else(|| SolidError::port_invariant(op, "a column past the net"))?;
+            let (d, dh, dw) = if p.w == NOW || r.w == NOW {
+                if p.w != r.w {
+                    return Err(SolidError::invalid_input(
+                        op,
+                        "the net mixes rational and polynomial points",
+                    ));
+                }
+                let dh = [p.x - r.x, p.y - r.y, p.z - r.z];
+                (dh, dh, 0.0)
+            } else {
+                let dw = p.w - r.w;
+                let dh = [p.x - r.x, p.y - r.y, p.z - r.z];
+                (
+                    [dh[0] - c.x * dw, dh[1] - c.y * dw, dh[2] - c.z * dw],
+                    dh,
+                    dw,
+                )
+            };
+            if window.keeps(i, j) {
+                for (x, y) in d.iter().zip(dh) {
+                    shift = shift.max(g * (x.abs() + y.abs() + 2.0 * size * dw.abs()));
+                }
+            }
+            out.push(CPoint::new(d[0], d[1], d[2], p.w));
+        }
+        net.push(out);
+    }
     let (p, q) = nurb.degrees();
     let out = Net::new(net, p, q, nurb.u_knots().to_vec(), nurb.v_knots().to_vec())?;
     if !shift.is_finite() {
         return Err(SolidError::invalid_input(
             op,
-            "the net's translation is not bounded",
+            "the net's differences are not bounded",
         ));
     }
     Ok((BSplineSurface::from_gw_nurb(&out), shift))
@@ -220,7 +399,9 @@ struct Rounding {
     level: f64,
     /// `M_H w_max / w_min^2`.
     scale: f64,
-    /// `M_H`, the net's largest homogeneous coordinate.
+    /// `M_H`, the net's largest homogeneous point coordinate (`x, y, z`: a combination's
+    /// coordinate is made of the same coordinate of its points alone, the weight's error is
+    /// [`Rounding::weight`]'s).
     homogeneous: f64,
     /// `w_max`, the net's largest weight.
     weights: f64,
@@ -259,26 +440,31 @@ fn knot_window(kv: &[f64], a: f64, b: f64, margin: usize) -> (f64, f64) {
     (kmax, smin)
 }
 
-/// [`knot_window`] for the iso's extraction at `t` of a direction of degree `q` (full knot
-/// vector `kv`): knot insertion at `t` in its span `[u_s, u_(s+1))` forms its coefficients
-/// `(t - u_i) / (u_(i+q-j+1) - u_i)` from the knots `u_(s-q+1) .. u_(s+q)` only.
+/// The largest knot magnitude and the least denominator of the iso's extraction at `t` of a
+/// direction of degree `q` (full knot vector `kv`), as `extract_iso_crv` forms them: `t` in
+/// its span `(u_s, u_(s+1)]` (`Side::Left`, of multiplicity `m`), each coefficient
+/// `(t - u_(a+j)) / (u_(s+j+1) - u_(a+j))` with `a + j <= s - m` and `s + j + 1 >= s + 1`.
+/// So the knots read are `u_(s-q+1) .. u_(s+q)` and every denominator spans `t`'s own span:
+/// it is at least `u_(s+1) - u_s`, whatever shorter spans lie in the window (an extension's
+/// sliver at the net's end is no denominator of an extraction in the middle). A `t` with no
+/// span left of it is the net's start, extracted as its row (no coefficient: `INFINITY`).
 fn extraction_window(kv: &[f64], t: f64, q: usize) -> (f64, f64) {
-    let s = kv.iter().rposition(|&x| x <= t).unwrap_or(0);
-    let (lo, hi) = (s.saturating_sub(q), s.saturating_add(q));
-    let window: Vec<f64> = kv
-        .iter()
-        .enumerate()
-        .filter(|&(i, _)| i >= lo && i <= hi)
-        .map(|(_, &x)| x)
-        .collect();
-    let (mut kmax, mut smin) = (t.abs(), f64::INFINITY);
-    for (&x, &y) in window.iter().zip(window.iter().skip(1)) {
-        kmax = kmax.max(x.abs()).max(y.abs());
-        if y > x {
-            smin = smin.min(y - x);
+    let Some(s) = kv.iter().rposition(|&x| x < t) else {
+        return (t.abs(), f64::INFINITY);
+    };
+    let (lo, hi) = (s.saturating_add(1).saturating_sub(q), s.saturating_add(q));
+    let mut kmax = t.abs();
+    for (i, &x) in kv.iter().enumerate() {
+        if i >= lo && i <= hi {
+            kmax = kmax.max(x.abs());
         }
     }
-    (kmax, smin)
+    let span = match (kv.get(s), kv.get(s.saturating_add(1))) {
+        (Some(&a), Some(&b)) if b > a => b - a,
+        // `t` past the last knot: the net's end, extracted as its row
+        _ => f64::INFINITY,
+    };
+    (kmax, span)
 }
 
 /// [`knot_window`] for the Bezier decomposition along the pieces over `[a, b]` of a curve of
@@ -344,7 +530,7 @@ impl Rounding {
     /// at the net's other end) does not touch them.
     fn local(
         form: &BSplineSurface,
-        along_u: bool,
+        window: &Window,
         fixed: f64,
         from: f64,
         to: f64,
@@ -352,7 +538,7 @@ impl Rounding {
     ) -> Result<Self> {
         let nurb = form.gw_nurb().ok_or_else(|| SolidError::sm_err(op))?;
         let (p, q) = nurb.degrees();
-        let (held, along, dp, dq) = if along_u {
+        let (held, along, dp, dq) = if window.along_u {
             (nurb.v_knots(), nurb.u_knots(), p, q)
         } else {
             (nurb.u_knots(), nurb.v_knots(), q, p)
@@ -362,16 +548,9 @@ impl Rounding {
         let (k1, s1) = decomposed_window(along, a, b, dp);
         let (k2, s2) = extraction_window(held, fixed, dq);
         let ratio = (k1.max(from.abs()).max(to.abs()) / s1).max(k2 / s2);
-        // and only the control points the pieces are made of: those whose basis function's
-        // support meets `[from, to]` along and holds `fixed` across (a far row's size, the
-        // other end of a long spine, enters no piece)
-        let along_ix = support_meets(along, dp, a, b);
-        let held_ix = support_meets(held, dq, fixed, fixed);
-        let keep = |i: usize, j: usize| {
-            let (ia, ih) = if along_u { (i, j) } else { (j, i) };
-            along_ix.contains(&ia) && held_ix.contains(&ih)
-        };
-        Self::with_ratio_in(nurb, ratio, op, &keep)
+        // and only the control points the pieces are made of ([`Window`]): a far row's
+        // size, the other end of a long spine, or the source's past a joint, enters no piece
+        Self::with_ratio_in(nurb, ratio, op, &|i, j| window.keeps(i, j))
     }
 
     fn of(form: &BSplineSurface, extra: &[f64], op: &'static str) -> Result<Self> {
@@ -432,7 +611,7 @@ impl Rounding {
             Ok(Self {
                 level,
                 scale,
-                homogeneous: h.max(wmax),
+                homogeneous: h,
                 weights: wmax,
             })
         } else {
@@ -499,6 +678,12 @@ struct PieceBounds {
     fixed: f64,
     /// The move per unit of the exact piece's length, `B`.
     per_length: f64,
+    /// A bound on `int |w'| / w^2`, the variation of `1 / w`, over the exact piece: the least
+    /// of its weights' variation (widened by `2 made_w` a difference) over the square of
+    /// their least `w_lo` (less `made_w` and the cut's), and `p / w_lo`: `w'` is a polynomial
+    /// of degree `p - 1`, so `w` has at most `p` monotone runs, each moving `1 / w` by less
+    /// than `1 / w_lo`.
+    inverse_weight: f64,
 }
 
 impl PieceBounds {
@@ -534,12 +719,15 @@ impl PieceBounds {
         let fixed =
             (2.0 * p * sqrt3 * made + (m + point) * 2.0 * p * made_w + point * w1) / low * slack;
         let per_length = made_w / low * slack;
-        (cut.is_finite() && fixed.is_finite() && per_length < 0.5).then_some(Self {
-            p,
-            cut,
-            fixed,
-            per_length,
-        })
+        let inverse_weight = (w1 / (low * low)).min(p / low) * slack;
+        (cut.is_finite() && fixed.is_finite() && inverse_weight.is_finite() && per_length < 0.5)
+            .then_some(Self {
+                p,
+                cut,
+                fixed,
+                per_length,
+                inverse_weight,
+            })
     }
 
     /// The bound on the length's move from the piece's rounding, `length` an upper bound
@@ -763,6 +951,21 @@ impl Surface {
     /// ([`PieceBounds`]): a cost per piece, not per leaf, so a finer `rel` costs only the
     /// leaves' cuts.
     ///
+    /// **Sized on the length, not the part.** The curve is measured on the net in difference
+    /// form about one column ([`differenced`]: the joint's when the side is a knot of
+    /// multiplicity `p`, an extension's joint; else the heaviest the pieces use), so every
+    /// magnitude the rounding is sized by is the measured span's own: past a joint only the
+    /// columns on its far side enter the pieces ([`Window`]), each `w_i (P_i - P_s)`. The
+    /// level's coefficient bound reads, across, the span holding the iso's parameter (every
+    /// extraction denominator spans it), not the window's least, and a point coordinate's
+    /// rounding is sized by the point coordinates alone. On a rational net the measured curve
+    /// is the iso less `r / w(t)` (`|r|` bounded from the reference point's own extraction):
+    /// its length moves by at most `|r| int |w'| / w^2 <= |r| min(TV(w) / w_lo^2, p / w_lo)`
+    /// a piece. So for an extension of length `L` from a joint the rounding is about
+    /// `c(p) u L` (measured `2e-12 L` to `7e-12 L` on sides 170 from the origin, for `L` from
+    /// `1e-5` to `1e-3`; a high-precision reference length is within the enclosure, its
+    /// middle `1e-19` to `1e-14` off), where it was `c(p) u` times the part's size.
+    ///
     /// # Errors
     ///
     /// `InvalidInput` for `rel` not in `(0, 1)`, a procedural blend (its net's length
@@ -808,24 +1011,97 @@ impl Surface {
                 truncation: 0.0,
                 rounding: 0.0,
                 converged: true,
+                resolution: 0.0,
             });
         }
-        let start = if side.is_u() {
-            Point2::new(from, fixed)
-        } else {
-            Point2::new(fixed, from)
+        let along_u = side.is_u();
+        let nurb = form
+            .gw_nurb()
+            .ok_or_else(|| SolidError::sm_err(OP_LENGTH))?;
+        let window = Window::of(nurb, along_u, fixed, from, to);
+        let rational = nurb.is_rational();
+        let resolution = resolution_of(nurb, &window, OP_LENGTH)?;
+        // the reference column: the joint's (its iso point the curve's at `from`), else the
+        // one of the largest weight among those the pieces are made of (a difference is about
+        // `w_i (P_i - P_s)`, so the heaviest column's term is the one taken out)
+        let s = match window.joint {
+            Some(s) => s,
+            None => heaviest_column(nurb, &window),
         };
-        let (form, shift) = translated(&form, form.evaluate_point(start)?, OP_LENGTH)?;
-        let rounding = Rounding::local(&form, side.is_u(), fixed, from, to, OP_LENGTH)?;
-        let (pieces, levels) = iso_pieces(k, &form, side.is_u(), fixed, from, to)?;
+        // `C`: the iso's control point of column `s` as computed (a rational net's; a
+        // polynomial net's differences do not read it), and a bound on `|r|`
+        // ([`differenced`])
+        let (c, r) = if rational {
+            let rounding = Rounding::local(&form, &window, fixed, from, to, OP_LENGTH)?;
+            let param = if along_u {
+                SurfParamType::V
+            } else {
+                SurfParamType::U
+            };
+            let opts = IsoCurveOptions {
+                domain: None,
+                uv_iso_curve: false,
+            };
+            let iso = form
+                .create_iso_parametric_curve(k, param, fixed, opts)?
+                .curve;
+            let cpts = iso
+                .nurb
+                .as_ref()
+                .ok_or_else(|| SolidError::sm_err(OP_LENGTH))?
+                .cpts();
+            let columns = nurb.cpts().len();
+            let columns = if along_u {
+                columns
+            } else {
+                nurb.cpts().first().map_or(0, Vec::len)
+            };
+            if cpts.len() != columns {
+                return Err(SolidError::port_invariant(
+                    OP_LENGTH,
+                    "the iso curve is not one point a column",
+                ));
+            }
+            let h = cpts.get(s).ok_or_else(|| {
+                SolidError::port_invariant(OP_LENGTH, "the reference column past the iso")
+            })?;
+            let w = if h.w == NOW { 1.0 } else { h.w };
+            let c = Vec3::new(h.x / w, h.y / w, h.z / w);
+            // `r = H_s - C w_s` (the exact control point, homogeneous): with the computed
+            // `H~ = H + dH`, `w~ = w + dw` and `C = (H~ / w~)(1 + theta)` a coordinate,
+            // `r = -theta H~ - dH + C dw`, so each coordinate is within `u |H~| + |dH| + |C|
+            // |dw|`: the extraction's levels (at most the across degree) on the points and
+            // on the weights
+            let levels = form.degree(param) + 1;
+            let hmax = h.x.abs().max(h.y.abs()).max(h.z.abs());
+            let cmax = c.x.abs().max(c.y.abs()).max(c.z.abs());
+            let r = 3f64.sqrt()
+                * (crate::nurbs::math::UNIT * hmax
+                    + rounding.homogeneous(levels)
+                    + cmax * rounding.weight(levels))
+                * (1.0 + gamma(4));
+            (c, r)
+        } else {
+            (Vec3::new(0.0, 0.0, 0.0), 0.0)
+        };
+        if !(r.is_finite() && c.x.is_finite() && c.y.is_finite() && c.z.is_finite()) {
+            return Err(SolidError::invalid_input(
+                OP_LENGTH,
+                "the iso's reference point is not bounded",
+            ));
+        }
+        let (form, shift) = differenced(&form, &window, s, c, OP_LENGTH)?;
+        let rounding = Rounding::local(&form, &window, fixed, from, to, OP_LENGTH)?;
+        let (pieces, levels) = iso_pieces(k, &form, along_u, fixed, from, to)?;
         // the pieces' homogeneous points as computed, within this of the exact ones (of the
-        // net translated exactly), the translation's rounding carried through the levels'
+        // net differenced exactly), the differences' rounding carried through the levels'
         // convex combinations unchanged
         let made = rounding.homogeneous(levels) + shift;
-        // the weights are not translated: their own levels' rounding alone
+        // the weights are not differenced: their own levels' rounding alone
         let made_w = rounding.weight(levels);
         let (mut chords, mut polygons, mut leaves) = (0.0_f64, 0.0_f64, 0_usize);
         let (mut chord_cuts, mut polygon_cuts, mut moved) = (0.0_f64, 0.0_f64, 0.0_f64);
+        let mut offset = 0.0_f64;
         let mut converged = true;
         for piece in &pieces {
             // a weight not proved positive past the rounding: no measurement
@@ -838,6 +1114,7 @@ impl Surface {
                     truncation: f64::INFINITY,
                     rounding: f64::INFINITY,
                     converged: false,
+                    resolution: f64::INFINITY,
                 });
             };
             let mut n = 0_usize;
@@ -887,10 +1164,17 @@ impl Surface {
             // rounding and cuts
             moved +=
                 bounds.moved(piece_polygons * (1.0 + g_piece) + n * 2.0 * bounds.p * bounds.cut);
+            // the measured curve is the iso translated by `C` less `r / w(t)`
+            // ([`differenced`]): their lengths differ by at most `|r| int |w'| / w^2` (none
+            // on a polynomial net, `w = 1`)
+            if rational {
+                offset += r * bounds.inverse_weight;
+            }
         }
         let g = gamma(leaves + 6 + pieces.iter().map(Vec::len).max().unwrap_or(0));
         // the leaves enclose the length of the pieces as computed; the exact curve's is within
         // `moved` of it (the pieces' points' rounding, through their derivatives)
+        let moved = moved + offset * (1.0 + gamma(4));
         let rounding = g * (chords + polygons) + chord_cuts + polygon_cuts + 2.0 * moved;
         Ok(Across {
             enclosure: Bracket {
@@ -900,6 +1184,7 @@ impl Surface {
             truncation: polygons - chords,
             rounding,
             converged,
+            resolution,
         })
     }
 }

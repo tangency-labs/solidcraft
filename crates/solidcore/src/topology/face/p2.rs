@@ -2755,6 +2755,10 @@ pub struct FaceCurves {
     pub curve_orients: Vec<OrientType>,
     /// `rLoopPoints`: the point of each vertex loop.
     pub loop_points: Vec<Point3>,
+    /// (not upstream) The indices into `uv_curves` of the gap-filling UV lines: where two
+    /// consecutive edge uses of a loop end at one vertex at two parameters (a pole), so
+    /// they stand for no edge of the face.
+    pub filled_gaps: Vec<usize>,
 }
 
 /// `CreateCurvesFromFace`: copies of the face's loop curves (3D and/or UV) of the face
@@ -2837,6 +2841,7 @@ pub fn create_curves_from_face(
                 // fill the gap with a line segment - add segment to output
                 let line = BSplineCurve::create_line_segment(2, last_uv, curr_uv)?;
                 if let Some(list) = out.uv_curves.as_mut() {
+                    out.filled_gaps.push(list.len());
                     list.push(Curve::from(line));
                 }
                 out.curve_orients.push(OrientType::Same);

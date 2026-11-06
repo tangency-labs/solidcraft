@@ -1320,6 +1320,40 @@ impl Brep {
         }
     }
 
+    /// [`Brep::with_rollback`] that leaves the B-rep itself untouched until `keep` takes
+    /// the result: `edit` runs on its exact copy ([`Brep::snapshot`], the surfaces' caches
+    /// starting empty), and a refused or panicking edit puts back the B-rep that came in,
+    /// with the caches it had (none built by `edit`). A kept edit leaves the copy, its
+    /// caches built by `edit` alone. Not upstream: an operation that queries the B-rep
+    /// before it edits it (and so builds caches on it, which later readers observe through
+    /// the cache slots) leaves nothing of itself on a refusal.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Brep::snapshot`], before `edit` runs and with nothing changed; `edit`'s.
+    pub fn with_rollback_untouched<T>(
+        &mut self,
+        edit: impl FnOnce(&mut Brep) -> Result<T>,
+        keep: impl FnOnce(&Result<T>) -> bool,
+    ) -> Result<T> {
+        use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+        let mut saved = self.snapshot()?;
+        // the copy is edited; the B-rep itself is kept aside as it came in
+        std::mem::swap(self, &mut saved.0);
+        match catch_unwind(AssertUnwindSafe(|| edit(&mut *self))) {
+            Ok(r) => {
+                if !keep(&r) {
+                    self.restore(saved);
+                }
+                r
+            }
+            Err(p) => {
+                self.restore(saved);
+                resume_unwind(p)
+            }
+        }
+    }
+
     /// Ends the innermost [`Brep::begin_surface_owner_cleared`] scope of face `f`.
     pub fn end_surface_owner_cleared(&mut self, f: FaceId) {
         if let Some(i) = self.surface_owner_cleared.iter().rposition(|&g| g == f) {

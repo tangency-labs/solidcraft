@@ -2306,6 +2306,11 @@ fn is_bspline_kind(c: &SmCurve) -> bool {
 
 #[allow(clippy::too_many_lines)]
 fn run_rust_script(i: &Inputs, p: Prepared) -> Result<Vec<f64>, Fail> {
+    run_script(i, p).map(|(o, _)| o)
+}
+
+/// [`run_rust_script`] with the two B-reps as the script leaves them.
+fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
     let k = Kernel::default();
     let Prepared {
         mut two, hdr, ops, ..
@@ -2883,7 +2888,7 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<Vec<f64>, Fail> {
             }
         }
     }
-    Ok(o)
+    Ok((o, two))
 }
 
 /// The Rust surface of a surface input (what the shim's `read_surface` builds).
@@ -2932,6 +2937,43 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             "rust: the script reaches the {label} hang guard, which the C++ side rejects"
         ))),
     }
+}
+
+/// The case's two B-reps as its script leaves them, labelled `a` and `b` (for
+/// `examples/case_smb.rs`).
+///
+/// # Errors
+///
+/// The case's inputs are bad, it ends before the script (a failed build or an unresolved
+/// handle), or the script fails.
+pub fn result_breps(case: &Case) -> Result<super::surface_surface_p2::Drawn, HarnessError> {
+    let i: Inputs = case.parse()?;
+    let p = match prepare(&i) {
+        Ok(p) => p,
+        Err(r) => {
+            return Err(match *r {
+                Ok(o) => harness(format!(
+                    "case {}: cannot be drawn: it ends before the script ({})",
+                    case.name,
+                    o.error.as_deref().unwrap_or("deferred")
+                )),
+                Err(e) => e,
+            })
+        }
+    };
+    let (_, two) = run_script(&i, p).map_err(|f| match f {
+        Fail::Solid(e) => harness(format!("case {}: the script fails: {e}", case.name)),
+        Fail::Harness(h) => h,
+        Fail::Hang(label) => harness(format!(
+            "case {}: the script reaches the {label} hang guard",
+            case.name
+        )),
+    })?;
+    let [a, b] = two.breps;
+    let mut drawn = Vec::new();
+    drawn.extend(a.map(|a| ("a", a)));
+    drawn.extend(b.map(|b| ("b", b)));
+    Ok((Kernel::default(), drawn))
 }
 
 // ---- generation -----------------------------------------------------------------------------

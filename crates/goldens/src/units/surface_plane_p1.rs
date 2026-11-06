@@ -800,11 +800,23 @@ fn op_code(op: &OpIn) -> f64 {
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+    Ok(match planed(i)? {
+        Ok((mut o, a)) => {
+            put_state(&mut o, &a);
+            to_output(o)
+        }
+        Err(o) => o,
+    })
+}
+
+/// The plane of `i.make` after `i.ops` and the record so far (without the closing
+/// state), or the output of a case that ends before (a failed make, a deferred op).
+fn planed(i: &Inputs) -> Result<Result<(Vec<f64>, Plane), Output>, HarnessError> {
     let k = Kernel::default();
     let mut o = Vec::new();
     let made = match rust_make(&i.make) {
         Ok(m) => m,
-        Err(Fail::Deferred(d)) => return Ok(*d),
+        Err(Fail::Deferred(d)) => return Ok(Err(*d)),
         Err(Fail::Harness(e)) => return Err(e),
     };
     let mut a = match made {
@@ -814,19 +826,39 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         Err(s) => {
             o.push(s);
-            return Ok(to_output(o));
+            return Ok(Err(to_output(o)));
         }
     };
     for op in &i.ops {
         o.push(op_code(op));
         match rust_op(&k, op, &mut a, &mut o) {
             Ok(()) => {}
-            Err(Fail::Deferred(d)) => return Ok(*d),
+            Err(Fail::Deferred(d)) => return Ok(Err(*d)),
             Err(Fail::Harness(e)) => return Err(e),
         }
     }
-    put_state(&mut o, &a);
-    Ok(to_output(o))
+    Ok(Ok((o, a)))
+}
+
+/// The case's plane after its ops as a one-face sheet over its natural UV domain,
+/// labelled `plane` (for `examples/case_smb.rs`).
+///
+/// # Errors
+///
+/// The case's inputs are bad, it ends before the ops finish, or the plane's domain is
+/// unbounded (a plane made from a normal or a frame).
+pub fn result_breps(case: &Case) -> Result<super::surface_surface_p2::Drawn, HarnessError> {
+    let Ok((_, a)) = planed(&case.parse()?)? else {
+        return Err(harness(format!(
+            "case {}: cannot be drawn: it ends before its ops finish",
+            case.name
+        )));
+    };
+    let mut k = Kernel::default();
+    let dom = a.natural_uv_domain();
+    let b = super::surface_surface_p2::sheet(&mut k, Surface::from(a), &dom)
+        .map_err(|e| harness(format!("case {}: {e}", case.name)))?;
+    Ok((k, vec![("plane", b)]))
 }
 
 // ---- generated cases --------------------------------------------------------------
@@ -1353,3 +1385,42 @@ impl UnitDiff for Runner {
     }
 }
 
+
+#[cfg(test)]
+mod result_breps_tests {
+    use super::*;
+
+    fn case(make: &Value) -> Case {
+        Case {
+            unit: "surface.plane_p1".into(),
+            name: "result_breps".into(),
+            source: crate::CaseSource::Inline,
+            inputs: serde_json::json!({ "make": make, "ops": [] }),
+        }
+    }
+
+    /// A bounded plane draws as a one-face sheet.
+    #[test]
+    fn result_breps_bounded_plane_is_a_one_face_sheet() {
+        let make = serde_json::json!({
+            "kind": "bounded",
+            "o": [0.0, 0.0, 0.0],
+            "x": [1.0, 0.0, 0.0],
+            "y": [0.0, 1.0, 0.0],
+            "scale": [1.0, 1.0],
+            "domain": [0.0, 0.0, 2.0, 3.0],
+        });
+        let (_, bodies) = result_breps(&case(&make)).unwrap();
+        assert_eq!(bodies.len(), 1);
+        assert_eq!(bodies[0].0, "plane");
+        assert_eq!(bodies[0].1.faces().len(), 1);
+    }
+
+    /// A plane from a normal has the essentially infinite domain: it cannot be drawn.
+    #[test]
+    fn result_breps_unbounded_plane_cannot_be_drawn() {
+        let make = serde_json::json!({ "kind": "normal", "o": [0.0, 0.0, 0.0], "n": [0.0, 0.0, 1.0] });
+        let e = result_breps(&case(&make)).err().unwrap();
+        assert!(e.0.contains("cannot be drawn"), "{e}");
+    }
+}

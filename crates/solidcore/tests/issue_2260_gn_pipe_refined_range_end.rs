@@ -206,7 +206,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "linear_sweep_arc_to_cylinder_zero",
     "local_operation_box_holds_new_surfaces",
     "local_operation_closes_walls_to_nothing",
-    "local_operation_offset_status",
     "local_operation_refuses_loose_tangent_edges",
     "local_operation_step_walls",
     "local_solve1d_unbounded_newton_step",
