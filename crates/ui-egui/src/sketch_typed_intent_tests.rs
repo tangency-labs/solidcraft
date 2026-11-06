@@ -330,3 +330,52 @@ fn the_arc_end_pick_snaps_to_a_point_under_the_value_box() {
         assert!(snapped, "{command}: the third pick snapped to the line's end: {:?}", sketch.constraints.iter().map(|c| &c.kind).collect::<Vec<_>>());
     }
 }
+
+/// The Control Point Spline tool draws at the degree typed in its Degree box (#12323). The box
+/// stands still beside the first control point, so it can be clicked; it does not take the
+/// keyboard by itself, so Backspace still takes back the last point; and the typed degree stays
+/// for every later point, through that Backspace, until the spline is finished.
+#[test]
+fn control_point_spline_draws_at_the_degree_typed_in_its_degree_box() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.step(&json!({"start":"sketch.spline.control_point"})).unwrap();
+    h.step(&json!({"click":{"world":[0,0,0]}})).unwrap();
+    h.step(&json!({"move":{"world":[10,10,0]}})).unwrap();
+    let tool = h.app.tool.as_ref().unwrap();
+    assert_eq!(tool.dims.iter().map(|d| (d.label, d.value.as_str(), d.locked)).collect::<Vec<_>>(), [("Degree", "3", false)]);
+    let focused = h.ctx.memory(|m| m.focused());
+    assert!(focused.is_none(), "the Degree box waits for a click: {focused:?}");
+    let first = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", 0usize)))).expect("the Degree box is shown");
+    h.step(&json!({"move":{"world":[30,10,0]}})).unwrap();
+    let later = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", 0usize)))).expect("the Degree box is shown");
+    assert!(first.center().distance(later.center()) < 0.5, "the box stays put while the pointer moves: {first:?} then {later:?}");
+    h.step(&json!({"click":[later.center().x, later.center().y]})).unwrap();
+    assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 1, "a click into the box places no control point");
+    type_value(&mut h, "12");
+    assert!(crate::sketch_dims::validate(&h.app, h.app.tool.as_ref().unwrap()).is_err(), "degree 12 is past the highest, 9");
+    type_value(&mut h, "6");
+    enter(&mut h);
+    assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 1, "Enter keeps the degree and places no point");
+    assert_eq!(crate::sketch_dims::spline_degree(h.app.tool.as_ref().unwrap()), Some(6));
+    for x in [10, 20, 30, 40, 50, 70] {
+        h.step(&json!({"click":{"world":[x, (x / 10 % 2) * 10, 0]}})).unwrap();
+    }
+    // Backspace takes back the stray last point, and the degree stays.
+    h.step(&json!({"key":"Backspace"})).unwrap();
+    assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 6);
+    assert_eq!(crate::sketch_dims::spline_degree(h.app.tool.as_ref().unwrap()), Some(6), "the degree outlives a Backspace");
+    h.step(&json!({"click":{"world":[60,0,0]}})).unwrap();
+    h.step(&json!({"click":{"world":[60,0,0]}, "button":"right"})).unwrap();
+    let state = h.app.session.model.state();
+    let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let splines: Vec<_> = sketch
+        .curves
+        .iter()
+        .filter_map(|c| match &c.kind {
+            CurveKind::Spline { pts, control: true, degree, .. } => Some((pts.len(), *degree)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(splines, [(7, 6)], "one control point spline, seven points at degree 6");
+}

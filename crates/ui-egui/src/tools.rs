@@ -878,7 +878,11 @@ pub fn undo_spline_point(app: &mut SolveApp) -> bool {
         return false;
     }
     t.pts.pop();
+    // A typed degree stays while the spline still has points (#12323): the next sync takes the
+    // locked box over into the rebuilt ones.
+    let degree: Vec<_> = t.dims.iter().filter(|b| b.label == "Degree" && b.locked).cloned().collect();
     crate::sketch_dims::reset(t);
+    t.dims = degree;
     true
 }
 
@@ -1103,7 +1107,11 @@ pub(crate) fn preview_curve(
                 CurveKind::Spline {
                     pts: indices,
                     control: t.cmd != "sketch.spline.fit_point",
-                    degree: if t.cmd == "sketch.spline.control_point_5" { 5 } else { 3 },
+                    degree: match t.cmd {
+                        "sketch.spline.control_point_5" => 5,
+                        crate::sketch_dims::SPLINE_WITH_DEGREE => crate::sketch_dims::spline_degree(t).unwrap_or(3),
+                        _ => 3,
+                    },
                     periodic,
                     nurbs: None,
                 },

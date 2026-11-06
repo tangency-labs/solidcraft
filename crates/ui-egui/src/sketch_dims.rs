@@ -21,6 +21,21 @@ use crate::viewport::Proj;
 /// What an untyped construction line Length box shows: the line stays infinite.
 const INFINITE: &str = "\u{221e}";
 
+/// The spline tool whose Degree box chooses the degree it draws at (#12323).
+pub(crate) const SPLINE_WITH_DEGREE: &str = "sketch.spline.control_point";
+
+/// The degree the control point spline tool draws at: a typed whole number from 1 to 9, else
+/// none (the tool's cubic). Plain digits only, so the preview, the check and the command read
+/// the same number without evaluating an expression.
+pub(crate) fn spline_degree(t: &Tool) -> Option<u8> {
+    let b = t.dims.iter().chain(&t.dim_history).find(|b| b.label == "Degree" && b.locked)?;
+    degree_text(&b.value)
+}
+
+fn degree_text(text: &str) -> Option<u8> {
+    text.trim().parse::<u8>().ok().filter(|d| (1..=solidcore_record::MAX_BEZIER_DEGREE as u8).contains(d))
+}
+
 /// One value box.
 #[derive(Clone, Debug)]
 pub struct DimBox {
@@ -68,6 +83,8 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
         ("sketch.polygon.edge", 1) => vec![b("Length", Length), b("Sides", Unitless)],
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 1) => vec![b("Length", Length)],
         ("sketch.conic", 2) => vec![b("Rho", Unitless)],
+        // The degree the control point spline is drawn at, from its first point on (#12323).
+        (SPLINE_WITH_DEGREE, n) if n >= 1 => vec![b("Degree", Unitless)],
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 2)
         | ("sketch.slot.arc_center" | "sketch.slot.arc_three_point", 3) => vec![b("Width", Length)],
         _ => Vec::new(),
@@ -92,7 +109,7 @@ fn is_dimension(t: &Tool, label: &str) -> bool {
     if solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some() {
         return (t.cmd == "sketch.construction_line.angle" && label == "Angle") || label == "Length";
     }
-    !matches!(label, "Sides" | "Rho") && !(t.cmd == "sketch.rectangle.rounded" && label == "Radius")
+    !matches!(label, "Sides" | "Rho" | "Degree") && !(t.cmd == "sketch.rectangle.rounded" && label == "Radius")
 }
 
 fn dir_or_x(v: Vec2) -> Vec2 {
@@ -377,6 +394,9 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
             vec![(2.0 * (e.dist(first) - start.dist(first)).abs(), e + dir_or_x(e - first) * (2.5 * off))]
         }
         ("sketch.slot.arc_three_point", 3) => vec![(2.0 * e.dist(a), e + dir_or_x(e - a) * (2.5 * off))],
+        // Below and left of the first control point, a fixed number of pixels away: it does not
+        // follow the pointer, so it can be clicked, and the click into it places no point.
+        (SPLINE_WITH_DEGREE, n) if n >= 1 => vec![(f64::from(spline_degree(t).unwrap_or(3)), first + Vec2::new(-2.5 * off, -1.5 * off))],
         _ => Vec::new(),
     }
 }
@@ -415,8 +435,10 @@ pub fn sync(t: &mut Tool) {
         }
         let before = std::mem::replace(&mut t.dims, boxes_for(t.cmd, t.pts.len()));
         let construction = solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some();
-        if construction && t.pts.len() == t.dims_stage.saturating_add(1) {
-            // A length typed before the start click is still the line's length after it.
+        // A length typed before the start click is still the line's length after it, and a
+        // spline's typed degree stays for all its later points (#12323).
+        let spline = t.cmd == SPLINE_WITH_DEGREE;
+        if (construction && t.pts.len() == t.dims_stage.saturating_add(1)) || spline {
             for b in &mut t.dims {
                 if let Some(kept) = before.iter().find(|old| old.label == b.label && old.locked) {
                     *b = kept.clone();
@@ -424,8 +446,10 @@ pub fn sync(t: &mut Tool) {
             }
         }
         t.dims_stage = t.pts.len();
-        // Before the first click, the box waits for a digit: letters stay tool shortcuts.
-        t.dims_focus = !t.dims.is_empty() && !(construction && t.pts.is_empty());
+        // Before the first click, the box waits for a digit: letters stay tool shortcuts. A
+        // spline's Degree box takes the keyboard only when clicked: Backspace and Ctrl+Z keep
+        // taking back the last control point.
+        t.dims_focus = !t.dims.is_empty() && !(construction && t.pts.is_empty()) && !spline;
     }
 }
 
@@ -498,6 +522,8 @@ pub fn validate(app: &SolveApp, t: &Tool) -> Result<(), String> {
             "Sweep" => return Err("Sweep must lie strictly between -360 and 360 degrees, and cannot be zero".into()),
             "Sides" if (3.0..=200.0).contains(&value) && value.fract() == 0.0 => {}
             "Sides" => return Err("Sides must be an integer from 3 to 200".into()),
+            "Degree" if degree_text(&dimension.value).is_some() => {}
+            "Degree" => return Err("Degree must be a whole number from 1 to 9".into()),
             "Rho" if value > 1e-6 && value < 1.0 - 1e-6 => {}
             "Rho" => return Err("Rho must lie strictly between 0 and 1 (below 0.5 an ellipse, 0.5 a parabola, above 0.5 a hyperbola)".into()),
             _ if value > 1e-9 => {}
@@ -562,6 +588,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     let Some(mut t) = app.tool.take() else { return };
     sync(&mut t);
     let place = if t.dims.is_empty() { None } else { boxes(app, ui, proj, &mut t) };
+    // Enter in a spline's Degree box keeps the degree; only a click places a control point.
+    let place = place.filter(|_| t.cmd != SPLINE_WITH_DEGREE);
     crate::sketch_construction::line_type_switch(ui, &mut t);
     app.tool = Some(t);
     if let Some(p) = place {
