@@ -532,4 +532,6 @@ fn dimension_values(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
             });
         });
     });
+    let corner = setting::dimension_corner_drag(app, ui).on_hover_text(app.tr("prefs.dimension_corner_drag_note"));
+    crate::scenario::publish_target("prefs:dimension_corner_drag", corner.rect);
 }
