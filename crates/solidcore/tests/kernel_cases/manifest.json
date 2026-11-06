@@ -100,17 +100,18 @@
       "ungraded": {}
     },
     "fillets": {
-      "cases": 265,
+      "cases": 270,
       "chain": {
+        "1": 5,
         "13": 4,
         "2": 6,
         "4": 236,
         "7": 2,
         "8": 1
       },
-      "expressible": 41,
+      "expressible": 46,
       "not_expressible": 16,
-      "operation_expressible": 249,
+      "operation_expressible": 254,
       "reasons": {
         "SolidCraft has no command for it yet": 2,
         "refused or failed in SolidCraft, not in a kernel operation": 14
@@ -122,6 +123,8 @@
         "refusal \"continues tangentially\"": 3,
         "refusal \"larger than the faces beside its edges allow\"": 1,
         "refusal \"meets a corner of this kind\"": 1,
+        "refusal \"the largest radius that fits is 3\"": 1,
+        "refusal \"the largest radius that fits is 4\"": 1,
         "refusal \"the largest radius that fits is 7.5 mm\"": 1,
         "watertight": 9
       }

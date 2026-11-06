@@ -15,6 +15,31 @@
     "reason": "continuity_order: got {'body': 'Slab', 'edges': 'blend', 'order': 'g0',  want >= g1 at every blend seam"
   },
   {
+    "case": "fillets/11991-round-cylinder-edge-ending-on-a-round-tangent-line",
+    "issue": "solidcore#2843",
+    "reason": "round status 1001 where the cylinder's end lies on the round's tangent line; builds at x = 5.001"
+  },
+  {
+    "case": "fillets/12034-round-loft-square-to-circle-circular-rim",
+    "issue": "solidcore#2844",
+    "reason": "the round of the loft's circular rim is not a closed solid"
+  },
+  {
+    "case": "fillets/12342-round-wall-and-ledge-edges-r2-5",
+    "issue": "solidcore#2845",
+    "reason": "status 1001 instead of a closed solid"
+  },
+  {
+    "case": "fillets/12342-round-wall-and-ledge-edges-r5-refused",
+    "issue": "solidcore#2845",
+    "reason": "status 1001 instead of the refusal naming the size that fits"
+  },
+  {
+    "case": "fillets/12342-round-wall-edge-r5-past-the-wall-refused",
+    "issue": "solidcore#2845",
+    "reason": "status 1001 instead of the refusal naming the size that fits"
+  },
+  {
     "case": "fillets/2893-chamfer-distance-and-angle-past-the-wall-refused",
     "issue": "to file",
     "reason": "refused, but not because \"angle\": step 2 (solid.chamfer): SMLib chamfer: operation: SMLib rejected the input (SM_ERR_INVALID_INPUT)"
@@ -90,12 +115,12 @@
     "reason": "step 13 (solid.fillet): invalid input: not supported yet: the fillet meets a corner of this kind, which SMLib's blends do not handle yet (where its ed"
   },
   {
-    "case": "fillets/report-fillet-curvature-three-edges-at-bar-corner-solver-residues",
+    "case": "fillets/report-fillet-curvature-three-edges-at-bar-corner",
     "issue": "solidcore#2697",
     "reason": "continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0 (see KNOWN_FAILING)"
   },
   {
-    "case": "fillets/report-fillet-curvature-three-edges-at-bar-corner",
+    "case": "fillets/report-fillet-curvature-three-edges-at-bar-corner-solver-residues",
     "issue": "solidcore#2697",
     "reason": "continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0 (see KNOWN_FAILING)"
   },

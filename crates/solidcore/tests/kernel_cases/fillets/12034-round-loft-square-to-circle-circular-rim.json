@@ -1,0 +1,139 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "error": "the result is not a closed solid",
+      "inputs": [
+        "b1"
+      ],
+      "op": "blend_dropping",
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  7.071067811865475,
+                  -7.071067811865477,
+                  30.0
+                ],
+                [
+                  7.071067811865475,
+                  7.0710678118654755,
+                  30.0
+                ]
+              ],
+              "index": 2
+            },
+            {
+              "at": [
+                [
+                  -7.071067811865477,
+                  -7.071067811865475,
+                  30.0
+                ],
+                [
+                  7.071067811865475,
+                  -7.071067811865477,
+                  30.0
+                ]
+              ],
+              "index": 1
+            },
+            {
+              "at": [
+                [
+                  7.071067811865475,
+                  7.0710678118654755,
+                  30.0
+                ],
+                [
+                  -7.071067811865475,
+                  7.0710678118654755,
+                  30.0
+                ]
+              ],
+              "index": 3
+            },
+            {
+              "at": [
+                [
+                  -7.071067811865475,
+                  7.0710678118654755,
+                  30.0
+                ],
+                [
+                  -7.071067811865477,
+                  -7.071067811865475,
+                  30.0
+                ]
+              ],
+              "index": 0
+            }
+          ],
+          "points": [
+            [
+              10.0,
+              0.0,
+              30.0
+            ],
+            [
+              0.0,
+              -10.0,
+              30.0
+            ],
+            [
+              0.0,
+              10.0,
+              30.0
+            ],
+            [
+              -10.0,
+              0.0,
+              30.0
+            ]
+          ],
+          "tolerance": 0.01
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0,
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "12034-round-loft-square-to-circle-circular-rim",
+  "expected": {
+    "body_count": 1,
+    "method": "the rim is the circle r10 at z = 30; the walls meet the top disc at 99.5 degrees over the middle of a square side (atan(5/30) off square) to 110.5 degrees over a corner (atan(11.213/30)). SolidCraft's reporter expects the round to build; a round of a ruled wall has no closed-form volume, so the case asks one closed valid solid. body_count 1",
+    "outcome": "solid",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#12034",
+      "tangency-labs/solidcore#2844"
+    ],
+    "what": "a ruled loft (degree 1) from the square of side 30 at z = 0 (four lines) to the circle r10 at z = 30 (four quarter arcs centred on the square's sides' directions): six faces, the top a plane disc. Its circular top rim, the four arcs as one tangent chain, rounded R2 must give one closed solid; it gives a body that is not closed (r1 the same)"
+  },
+  "expressible": true,
+  "gallery_note": "the top disc's rim (highlighted) rounded R2 leaves a body that is not closed",
+  "operation_expressible": true,
+  "records": "12034-round-loft-square-to-circle-circular-rim.bodies.json.gz",
+  "result": [],
+  "sources": [
+    "tangency-labs/solidcraft#12034",
+    "tangency-labs/solidcore#2844"
+  ],
+  "ungraded": [],
+  "what": "a ruled loft (degree 1) from the square of side 30 at z = 0 (four lines) to the circle r10 at z = 30 (four quarter arcs centred on the square's sides' directions): six faces, the top a plane disc. Its circular top rim, the four arcs as one tangent chain, rounded R2 must give one closed solid; it gives a body that is not closed (r1 the same)",
+  "why_not": []
+}
