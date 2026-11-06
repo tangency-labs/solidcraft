@@ -509,6 +509,30 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn vibration_waits_for_a_pending_feature_edit() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 20, "width": 10, "height": 5})).unwrap();
+        let feature = h.app.session.doc.features[0].id;
+        h.app.prepare_feature_edit(feature, 0, None);
+
+        h.app.start(COMMAND);
+        assert!(h.app.vibration.is_none(), "wait for the original timeline before opening");
+
+        for _ in 0..500 {
+            h.frames(1);
+            if h.app.pending_feature_edit.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(h.app.pending_feature_edit.is_none());
+        assert!(h.app.dialog.is_none());
+        assert!(h.app.session.doc.marker.is_none());
+        assert!(h.app.vibration.as_ref().is_some_and(|study| study.current(&h.app)));
+    }
+
+    #[test]
     fn vibration_window_runs_a_selected_support_and_draws_the_response() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
