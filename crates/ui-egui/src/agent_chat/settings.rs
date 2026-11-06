@@ -446,7 +446,7 @@ fn timeout_field(ui: &mut egui::Ui, secs: &mut u64, handle: &str) -> bool {
 
 /// The free-text reasoning effort field with its hover hint; true when the text changed.
 fn effort_field(ui: &mut egui::Ui, effort: &mut String, handle: &str) -> bool {
-    let response = ui_kit::cell_editor(ui, ui.id().with("ai_reasoning_effort"), effort, tr("ui.ai_reasoning_effort_field_hint"), false)
+    let response = ui_kit::cell_editor(ui, ui.scope_id().with("ai_reasoning_effort"), effort, tr("ui.ai_reasoning_effort_field_hint"), false)
         .backing_on_hover_text(tr("ui.ai_reasoning_effort_hint"));
     crate::scenario::publish_target(handle, response.rect);
     response.changed()
@@ -529,7 +529,7 @@ fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// Custom instructions (#8220): text every new chat's system note carries.
 fn instructions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "instructions", tr("ai.prefs.instructions"), |ui| {
-        let id = egui::Id::new("prefs_agent_instructions");
+        let id = egui::Id::unique("prefs_agent_instructions");
         let text = &mut app.preferences.agent_instructions;
         let response = ui_kit::text_area(ui, tr("ai.prefs.instructions"), id, text, 6, acp::INSTRUCTIONS_LIMIT);
         if response.has_focus() {
@@ -1038,7 +1038,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     if let Some(url) = app.agent_chat.settings.add.as_ref().and_then(|s| s.confirm_insecure_http.clone()) {
-        let (closed, action) = ui_kit::Confirm::new(egui::Id::new("sc_ai_http_consent"), "status_warning", tr("ai.http.allow"))
+        let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_ai_http_consent"), "status_warning", tr("ai.http.allow"))
             .tone(ui_kit::Tone::Warning)
             .actions(tr("ai.http.confirm"), tr("ui.cancel"), None)
             .selected(ui_kit::Action::Cancel)
@@ -1074,7 +1074,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
     // Editing keeps the agent's kind: the kind switch is for adding only.
     let editing = app.agent_chat.settings.add.as_ref().is_some_and(|s| s.editing.is_some());
     let (title, ok) = if editing { ("ui.ai_edit_agent_title", "ui.ai_save") } else { ("ui.ai_add_agent_title", "ui.ai_add") };
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_ai_add"), "settings", tr(title))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_ai_add"), "settings", tr(title))
         .cards(2.0)
         .fields()
         .actions(tr(ok), "Cancel", None)
@@ -1176,7 +1176,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                         ui_kit::text_field(ui, &mut s.name, "");
                     });
                     ui_kit::row(ui, tr("ui.ai_base_url"), |ui| {
-                        let r = ui_kit::cell_editor(ui, egui::Id::new("sc_ai_add_url"), &mut s.base_url, tr("ui.ai_url_hint"), false);
+                        let r = ui_kit::cell_editor(ui, egui::Id::unique("sc_ai_add_url"), &mut s.base_url, tr("ui.ai_url_hint"), false);
                         s.list_again |= r.lost_focus();
                         if r.changed() {
                             s.insecure_http_url = None;
@@ -1220,7 +1220,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::row(ui, tr("ui.ai_key"), |ui| {
                         ui.add_enabled_ui(has_keychain, |ui| {
                             let hint = tr(if s.saved_key { "ui.ai_key_keep_hint" } else { "ui.ai_key_hint" });
-                            let r = ui_kit::password_field(ui, egui::Id::new("sc_ai_add_key"), &mut s.key, hint);
+                            let r = ui_kit::password_field(ui, egui::Id::unique("sc_ai_add_key"), &mut s.key, hint);
                             crate::scenario::publish_target("ai_add:key", r.rect);
                             s.list_again |= r.lost_focus();
                         });
@@ -2431,7 +2431,7 @@ mod card_tests {
         h.frames(3);
         h.step(&json!({"text":"  vendor/own "})).unwrap();
         h.frames(3);
-        assert!(h.ctx.memory(|m| m.has_focus(egui::Id::new("sc_ai_model:api-1").with("search"))), "the box keeps the focus over Preferences");
+        assert!(h.ctx.memory(|m| m.has_focus(egui::Id::unique("sc_ai_model:api-1").with("search"))), "the box keeps the focus over Preferences");
         h.step(&json!({"click":{"handle":"prefs:ai_model:api-1:custom"}})).unwrap();
         h.frames(3);
         assert_eq!(model(&h).as_deref(), Some("vendor/own"));

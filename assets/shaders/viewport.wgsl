@@ -16,6 +16,9 @@ struct U {
     ana_c: array<vec4<f32>, 8>,
     ana_f: vec4<f32>,  // x = 1: stripe the negative draft and blocked faces
     depth: vec4<f32>,  // x = 1: reversed depth (1 near, 0 far); y, z: the faces' push (`FACE_BIAS`)
+    // Where the drawn geometry is moved in the world: identity, or a dragged component's move
+    // from where its scene was built (`MovingLayer`)
+    model: mat4x4<f32>,
     tint: vec4<f32>,   // xyz added to a whole hovered body's colour before lighting
     sel: vec4<f32>,    // xyz a whole selected body's colour before lighting
     // the section hatch colours by part (`solidcraft_render::hatch`), the first the cap's own
@@ -24,6 +27,16 @@ struct U {
     product_lights: array<vec4<f32>,84>, // position/kind, radiance, axis/cone, attenuation
     sky: vec4<f32>,    // xyz = world up; w = 1: shade in linear light with a sky fill (#7974)
 };
+
+/// A scene's point in the world (see `U.model`).
+fn placed(p: vec3<f32>) -> vec3<f32> {
+    return (u.model * vec4<f32>(p, 1.0)).xyz;
+}
+
+/// A scene's direction in the world (see `placed`).
+fn turned(n: vec3<f32>) -> vec3<f32> {
+    return (u.model * vec4<f32>(n, 0.0)).xyz;
+}
 
 fn reversed() -> bool {
     return u.depth.x > 0.5;
@@ -83,10 +96,11 @@ struct TOut {
 };
 
 @vertex
-fn vs_tri(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> TOut {
+fn vs_tri(@location(0) local: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> TOut {
     var o: TOut;
+    let p = placed(local);
     o.pos = u.vp * vec4<f32>(p, 1.0);
-    o.n = n;
+    o.n = turned(n);
     let e = palette_entry(c);
     o.c = unpack_color(e.x);
     o.h = e.y;
@@ -95,7 +109,8 @@ fn vs_tri(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: 
 }
 
 /// Shared triangles (in their part's own frame) drawn at one placement: the rows of its rigid
-/// move (`r0`..`r2`, a point's coordinates are their dot products with (p, 1)) and its colour.
+/// move (`r0`..`r2`, a point's coordinates are their dot products with (p, 1)) and its colour,
+/// then moved like the rest of its scene (`placed`: a dragged component's layer).
 /// The vertex colour (location 2) is not read.
 @vertex
 fn vs_tri_inst(
@@ -107,10 +122,11 @@ fn vs_tri_inst(
     @location(6) c: u32,
 ) -> TOut {
     let q = vec4<f32>(p, 1.0);
-    let wp = vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q));
+    let wp = placed(vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
+    let pn = vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n));
     var o: TOut;
     o.pos = u.vp * vec4<f32>(wp, 1.0);
-    o.n = vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n));
+    o.n = turned(pn);
     let e = palette_entry(c);
     o.c = unpack_color(e.x);
     o.h = e.y;
@@ -140,7 +156,7 @@ fn vs_tri_inst_flat(
     @location(6) c: u32,
 ) -> FOut {
     let q = vec4<f32>(p, 1.0);
-    let wp = vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q));
+    let wp = placed(vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
     var o: FOut;
     o.pos = u.vp * vec4<f32>(wp, 1.0);
     o.rp = wp - u.eye.xyz;
@@ -785,7 +801,9 @@ fn lifted_z(p: vec3<f32>, c: vec4<f32>, px: f32, half: vec2<f32>) -> f32 {
 }
 
 @vertex
-fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(1) b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> LOut {
+fn vs_line(@builtin(vertex_index) vi: u32, @location(0) local_a: vec3<f32>, @location(1) local_b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> LOut {
+    let a = placed(local_a);
+    let b = placed(local_b);
     var pa = a;
     var pb = b;
     var ca = u.vp * vec4<f32>(a, 1.0);
@@ -832,7 +850,7 @@ fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(
     var z = base.z;
     if (lifted && base.w > 1e-6) {
         let p = select(pa, pb, t > 0.5);
-        let g = grazing(p, octahedral(wbits & 4095u), octahedral((wbits >> 12u) & 4095u));
+        let g = grazing(p, turned(octahedral(wbits & 4095u)), turned(octahedral((wbits >> 12u) & 4095u)));
         z = lifted_z(p, base, wd * 0.5 * g + 1.0, half);
     }
     var o: LOut;
@@ -883,10 +901,10 @@ fn fs_line_all(i: LOut) -> @location(0) vec4<f32> {
     return out_color(i.c);
 }
 
-// Point clouds (`view/clouds.rs`): each point is a round dot a few pixels across, facing the
-// screen, depth-tested and written like the model's faces, so the model hides the points behind
-// it and they hide it. The cloud's style colours them by their own colour, a ramp or a palette,
-// and shows only those whose filtered values lie in its ranges or sets.
+// Point clouds and their cells (`view/clouds.rs`): dots, segments as beads (or lines when they
+// have no size) and triangles, from one record per element. The cloud's style colours them by
+// their own colour, a ramp or a palette, and shows only those whose filtered values lie in its
+// ranges or sets; values vary across an element, so a range cuts it where its value crosses an end.
 
 struct Cloud {
     style: vec4<f32>,               // x: colour (0 own, 1 ramp, 2 palette), y: dot size (px), z, w: ramp range
@@ -895,21 +913,47 @@ struct Cloud {
 @group(1) @binding(3) var<uniform> cloud: Cloud;
 
 struct CIn {
-    @location(0) p: vec3<f32>,
-    @location(1) v: f32,
-    @location(2) f: vec4<f32>,
-    @location(3) rgb: vec4<f32>,
+    @location(0) a: vec3<f32>,
+    @location(1) b: vec3<f32>,
+    @location(2) c: vec3<f32>,
+    @location(8) before: vec3<f32>,
+    @location(9) after: vec3<f32>,
+    @location(3) v: vec3<f32>,
+    @location(4) f0: vec3<f32>,
+    @location(5) f1: vec3<f32>,
+    @location(10) f2: vec3<f32>,
+    @location(11) f3: vec3<f32>,
+    @location(6) size: vec2<f32>,
+    @location(7) rgb: vec4<f32>,
 };
 
 struct COut {
     @builtin(position) pos: vec4<f32>,
     @location(0) wp: vec3<f32>,
-    @location(1) v: f32,
-    @location(2) f: vec4<f32>,
-    @location(3) rgb: vec3<f32>,
-    @location(4) at: vec2<f32>,    // the place on its disc
-    @location(5) @interpolate(flat) has: u32,
+    @location(1) n: vec3<f32>,     // zero: not lit
+    @location(2) v: f32,
+    @location(3) f: vec4<f32>,
+    @location(4) rgb: vec3<f32>,
+    @location(5) at: vec2<f32>,    // a dot's place on its disc
+    @location(6) @interpolate(flat) has: u32,
 };
+
+fn cloud_out(i: CIn, w: vec3<f32>, wp: vec3<f32>, pos: vec4<f32>, n: vec3<f32>) -> COut {
+    var o: COut;
+    o.pos = pos;
+    o.wp = wp;
+    o.n = n;
+    o.v = dot(w, i.v);
+    o.f = vec4<f32>(dot(w, i.f0), dot(w, i.f1), dot(w, i.f2), dot(w, i.f3));
+    o.rgb = i.rgb.rgb;
+    o.at = vec2<f32>(0.0);
+    o.has = u32(round(i.rgb.a * 255.0));
+    return o;
+}
+
+fn behind(c: vec4<f32>) -> bool {
+    return near_z(c) < 0.0;
+}
 
 @vertex
 fn vs_cloud_dot(@builtin(vertex_index) vi: u32, i: CIn) -> COut {
@@ -917,19 +961,38 @@ fn vs_cloud_dot(@builtin(vertex_index) vi: u32, i: CIn) -> COut {
     var ys = array<f32, 6>(-1.0, -1.0, 1.0, -1.0, 1.0, 1.0);
     let at = vec2<f32>(xs[vi], ys[vi]);
     let size = max(cloud.style.y, 1.0);
-    let centre = u.vp * vec4<f32>(i.p, 1.0);
-    var o: COut;
-    o.pos = vec4<f32>(centre.xy + at * size / u.screen.xy * centre.w, centre.z, centre.w);
-    // Behind the eye: nothing.
-    if (near_z(centre) < 0.0) { o.pos = vec4<f32>(0.0, 0.0, 0.0, -1.0); }
-    o.wp = i.p;
-    o.v = i.v;
-    o.f = i.f;
-    o.rgb = i.rgb.rgb;
-    o.has = u32(round(i.rgb.a * 255.0));
+    let centre = u.vp * vec4<f32>(i.a, 1.0);
+    var pos = vec4<f32>(centre.xy + at * size / u.screen.xy * centre.w, centre.z, centre.w);
+    if (behind(centre)) { pos = vec4<f32>(0.0, 0.0, 0.0, -1.0); }
+    var o = cloud_out(i, vec3<f32>(1.0, 0.0, 0.0), i.a, pos, vec3<f32>(0.0));
     // Dots under two pixels are squares: a disc that small loses its centre pixel.
     o.at = at * select(1.0, 0.0, size < 2.0);
     return o;
+}
+
+/// The least half-width of a segment on screen, in pixels.
+const MIN_HALF_PX: f32 = 0.75;
+
+/// The frame of a bead along `d`: along it, across it level, and up, its height axis.
+fn bead_frame(d: vec3<f32>) -> mat3x3<f32> {
+    var t = vec3<f32>(1.0, 0.0, 0.0);
+    if (length(d) > 1e-9) { t = d / length(d); }
+    var side = cross(vec3<f32>(0.0, 0.0, 1.0), t);
+    if (length(side) < 1e-6) { side = vec3<f32>(1.0, 0.0, 0.0); }
+    side = normalize(side);
+    return mat3x3<f32>(t, side, cross(t, side));
+}
+
+/// Corner `j` (0…9) of a bead's cross-section, a stadium: its place across and up, and its
+/// normal. Corners 0…4 go up the right half-disc, 5…9 down the left one, so 4–5 is the flat top
+/// and 9–0 the flat bottom.
+fn stadium(j: u32, size: vec2<f32>) -> vec4<f32> {
+    let k = j % 10u;
+    let right = k < 5u;
+    let a = -1.5707963 + 0.7853982 * f32(k % 5u) + select(3.1415927, 0.0, right);
+    let r = 0.5 * size.y;
+    let flat_half = 0.5 * max(size.x - size.y, 0.0);
+    return vec4<f32>(select(-flat_half, flat_half, right) + r * cos(a), r * sin(a), cos(a), sin(a));
 }
 
 /// Whether filter `f` keeps the value `v`.
@@ -938,6 +1001,101 @@ fn cloud_keeps(f: vec4<f32>, v: f32) -> bool {
     if (f.x < 1.5) { return v >= f.y && v <= f.z; }
     let k = i32(round(v)) - i32(round(f.y));
     return k >= 0 && k < 32 && ((bitcast<u32>(f.w) >> u32(k)) & 1u) != 0u;
+}
+
+/// Whether filter `f` leaves out a whole element with values `v` at its corners: all on one
+/// side of a range, or one value at every corner, not kept. A set of values with corners that
+/// differ may keep part of the element: its fragments decide.
+fn cloud_drops(f: vec4<f32>, v: vec3<f32>) -> bool {
+    if (f.x > 1.5) { return all(v == vec3<f32>(v.x)) && !cloud_keeps(f, v.x); }
+    return f.x > 0.5 && (all(v < vec3<f32>(f.y)) || all(v > vec3<f32>(f.z)));
+}
+
+/// Whether a filter leaves out the whole element.
+fn filtered_out(i: CIn) -> bool {
+    let has = u32(round(i.rgb.a * 255.0));
+    let values = array<vec3<f32>, 4>(i.f0, i.f1, i.f2, i.f3);
+    for (var k = 0u; k < 4u; k++) {
+        if (((has >> k) & 1u) != 0u && cloud_drops(cloud.filters[k], values[k])) { return true; }
+    }
+    return false;
+}
+
+/// The part in front of the near plane of the segment between clip-space `a` and `b`, as
+/// fractions of it from `a`; empty (first above second) when all of it is behind. Clip-space
+/// coordinates are affine along a line, so the crossing is exact.
+fn in_front(a: vec4<f32>, b: vec4<f32>) -> vec2<f32> {
+    let za = near_z(a);
+    let zb = near_z(b);
+    if (za < 0.0 && zb < 0.0) { return vec2<f32>(1.0, 0.0); }
+    let t = za / (za - zb);
+    return vec2<f32>(select(0.0, t, za < 0.0), select(1.0, t, zb < 0.0));
+}
+
+@vertex
+fn vs_cloud_segment(@builtin(vertex_index) vi: u32, i: CIn) -> COut {
+    // Corner `vi % 10` of the cross-section at the start (`vi < 10`) or the end; the index
+    // buffer joins them into the bead's sides.
+    let pa = u.vp * vec4<f32>(i.a, 1.0);
+    let pb = u.vp * vec4<f32>(i.b, 1.0);
+    let part = in_front(pa, pb);
+    if (filtered_out(i) || part.x > part.y) {
+        return cloud_out(i, vec3<f32>(1.0, 0.0, 0.0), i.a, vec4<f32>(0.0, 0.0, 0.0, -1.0), vec3<f32>(0.0));
+    }
+    // Where the near plane cuts it, the bead ends there, square; its numbers are exact at `e`.
+    let at_end = vi >= 10u;
+    let e = select(part.x, part.y, at_end);
+    let cut = e != select(0.0, 1.0, at_end);
+    let f = bead_frame(i.b - i.a);
+    let c = stadium(vi % 10u, i.size);
+    let axis = mix(i.a, i.b, e);
+    // Where it meets the next or the previous bead, the cross-section lies in the plane halfway
+    // between their directions, stretched across to keep its width: both beads end on the same
+    // section. A turn sharper than 120° ends square instead.
+    let other = select(i.a - i.before, i.after - i.b, at_end);
+    var across_dir = f[1];
+    var stretch = 1.0;
+    if (!cut && length(other) > 1e-9) {
+        let g = bead_frame(other);
+        let mid = f[1] + g[1];
+        if (length(mid) > 1e-6 && dot(normalize(mid), f[1]) > 0.5) {
+            across_dir = normalize(mid);
+            stretch = 1.0 / dot(across_dir, f[1]);
+        }
+    }
+    let wp = axis + across_dir * (c.x * stretch) + f[2] * c.y;
+    let ca = u.vp * vec4<f32>(axis, 1.0);
+    let cw = u.vp * vec4<f32>(wp, 1.0);
+    let half = u.screen.xy * 0.5;
+    var pos = cw;
+    // At least a pixel and a half across: a bead seen from afar, or a line without size. A corner
+    // behind the eye has no place on the screen and needs no widening: the rasteriser clips it.
+    if (cw.w > 0.0) {
+        let c0 = mix(pa, pb, part.x);
+        let c1 = mix(pa, pb, part.y);
+        let along = (c1.xy / c1.w - c0.xy / c0.w) * half;
+        var across = vec2<f32>(-along.y, along.x);
+        if (length(across) < 1e-6) { across = vec2<f32>(1.0, 0.0); }
+        across = normalize(across);
+        var px = (cw.xy / cw.w - ca.xy / ca.w) * half;
+        if (length(px) < MIN_HALF_PX * abs(c.z)) {
+            px = across * c.z * MIN_HALF_PX;
+            pos = vec4<f32>((ca.xy / ca.w + px / half) * cw.w, cw.z, cw.w);
+        }
+    }
+    let n = select(f[1] * c.z + f[2] * c.w, vec3<f32>(0.0), i.size.y <= 0.0);
+    return cloud_out(i, vec3<f32>(1.0 - e, e, 0.0), wp, pos, n);
+}
+
+@vertex
+fn vs_cloud_triangle(@builtin(vertex_index) vi: u32, i: CIn) -> COut {
+    // Not `w[vi] = 1.0`: the Windows D3D12 shader compiler cannot write through a dynamic vector index.
+    let w = vec3<f32>(f32(vi == 0u), f32(vi == 1u), f32(vi == 2u));
+    let wp = i.a * w.x + i.b * w.y + i.c * w.z;
+    var n = cross(i.b - i.a, i.c - i.a);
+    if (length(n) > 0.0) { n = normalize(n); }
+    // The true clip-space corner, even behind the eye: the rasteriser clips a triangle exactly.
+    return cloud_out(i, w, wp, u.vp * vec4<f32>(wp, 1.0), n);
 }
 
 fn cloud_ramp(t: f32) -> vec3<f32> {
@@ -973,6 +1131,9 @@ fn fs_cloud(o: COut) -> @location(0) vec4<f32> {
         c = cloud_palette(o.v);
     } else if ((o.has & 16u) != 0u && mode > 0.5) {
         c = cloud_ramp((o.v - cloud.style.z) / max(cloud.style.w - cloud.style.z, 1e-12));
+    }
+    if (length(o.n) > 0.5) {
+        c = c * (0.45 + 0.55 * abs(dot(normalize(o.n), normalize(u.back.xyz))));
     }
     return out_color(vec4<f32>(c, 1.0));
 }

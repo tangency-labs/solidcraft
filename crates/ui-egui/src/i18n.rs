@@ -57,7 +57,9 @@ impl Catalog {
 
 static ENGLISH: Catalog = Catalog::new("en", "English", include_str!(concat!(env!("OUT_DIR"), "/locales/en.json")));
 static ARABIC: Catalog = Catalog::new("ar", "العربية", include_str!(concat!(env!("OUT_DIR"), "/locales/ar.json")));
+static BULGARIAN: Catalog = Catalog::new("bg", "Български", include_str!(concat!(env!("OUT_DIR"), "/locales/bg.json")));
 static BOSNIAN: Catalog = Catalog::new("bs", "Bosanski", include_str!(concat!(env!("OUT_DIR"), "/locales/bs.json")));
+static CATALAN: Catalog = Catalog::new("ca", "Català", include_str!(concat!(env!("OUT_DIR"), "/locales/ca.json")));
 static CZECH: Catalog = Catalog::new("cs", "Čeština", include_str!(concat!(env!("OUT_DIR"), "/locales/cs.json")));
 static DANISH: Catalog = Catalog::new("da", "Dansk", include_str!(concat!(env!("OUT_DIR"), "/locales/da.json")));
 static GERMAN: Catalog = Catalog::new("de", "Deutsch", include_str!(concat!(env!("OUT_DIR"), "/locales/de.json")));
@@ -95,7 +97,9 @@ static CHINESE_TRADITIONAL: Catalog = Catalog::new("zh-TW", "繁體中文", incl
 pub const LOCALES: &[&Catalog] = &[
     &ENGLISH,
     &ARABIC,
+    &BULGARIAN,
     &BOSNIAN,
+    &CATALAN,
     &CZECH,
     &DANISH,
     &GERMAN,
@@ -698,12 +702,10 @@ mod tests {
         ENGLISH.messages().values().map(String::as_str).collect()
     }
 
-    /// Catalogs delivered complete. English is the source catalog; Arabic, Czech, Italian, Japanese and Chinese
-    /// are complete. German, Korean, Malay, Russian, French and Ukrainian
-    /// are partial (German and Korean predate the coverage guards; Russian, French and Ukrainian
-    /// are kept partial so a new label doesn't need more translations), so their gaps fall back
-    /// to English and are reported by `cargo xtask i18n` without failing the build, while
-    /// nothing in the complete catalogs may regress.
+    /// English is the source catalog. Arabic, Hebrew, Japanese, Vietnamese and Chinese
+    /// are complete; every English key must be present. Other catalogs are partial:
+    /// gaps fall back to English and `cargo xtask i18n` reports them without failing.
+    /// New labels still require German and Korean under the contributor policy.
     const COMPLETE: &[&str] = &["ar", "he", "ja", "vi", "zh"];
 
     /// `text()` falls back to English silently, so a message a complete locale never received is
@@ -781,7 +783,7 @@ mod tests {
     #[test]
     fn newly_catalogued_command_labels_translate() {
         let cases = [
-            ("cs", "Příruba", "Zebra analýza", "Studie pohybu"),
+            ("cs", "Obruba", "Zebra analýza", "Pohybová studie"),
             ("da", "Flange", "Zebraanalyse", "Bevægelsesanalyse"),
             ("nb", "Flens", "Zebraanalyse", "Bevegelsesanalyse"),
             ("zh", "法兰", "斑马纹分析", "运动研究"),

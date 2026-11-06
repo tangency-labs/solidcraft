@@ -1071,6 +1071,38 @@ fn a_refused_definition_changes_nothing() {
     assert!(r.get("defined").is_none(), "{r}");
 }
 
+/// Several holes made one command at a time, each with its depth typed as `ScrewDepth = 5`: the
+/// first defines `ScrewDepth`, the later ones name it instead of being refused because it
+/// already exists. Typed again with another value, it is still refused and changes nothing.
+#[test]
+fn the_same_definition_typed_again_uses_the_parameter() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 12}));
+    let r = run(&mut s, "solid.hole", json!({"position": [15, 20, 12], "diameter": 5, "depth": "ScrewDepth = 5"}));
+    assert_eq!(r["definitions"].as_array().map(Vec::len), Some(1), "{r}");
+    let r = run(&mut s, "solid.hole", json!({"position": [45, 20, 12], "diameter": 5, "depth": "ScrewDepth = 5"}));
+    assert!(r.get("definitions").is_none_or(|d| d.as_array().is_some_and(Vec::is_empty)), "nothing new is defined: {r}");
+    assert_eq!(s.doc.params.iter().filter(|p| p.name == "ScrewDepth").count(), 1);
+    assert_eq!(expr_of(&mut s, "ScrewDepth"), "5");
+    let depths: Vec<&str> = s
+        .doc
+        .features
+        .iter()
+        .filter_map(|f| match &f.kind {
+            solidcraft_doc::FeatureKind::Hole { depth, .. } => depth.as_ref().map(|d| d.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(depths, ["ScrewDepth", "ScrewDepth"]);
+    run(&mut s, "parameters.change", json!({"changes": {"ScrewDepth": "8"}}));
+    // Another value for the name is still a parameter that already exists.
+    let undo = s.undo.len();
+    let e = err(&mut s, "solid.hole", json!({"position": [30, 30, 12], "diameter": 5, "depth": "ScrewDepth = 6"}));
+    assert!(e.contains("there is already a parameter `ScrewDepth`"), "{e}");
+    assert_eq!(s.undo.len(), undo);
+    assert_eq!(expr_of(&mut s, "ScrewDepth"), "8");
+}
+
 /// Changing a parameter to `name = expression` names it (#4071): the dimension's or feature
 /// input's own parameter is renamed, references follow, and it takes the expression; no other
 /// parameter is made. One undo takes both back.

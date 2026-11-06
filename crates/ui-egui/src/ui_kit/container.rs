@@ -226,17 +226,103 @@ impl BackingTooltipExt for egui::Response {
     }
 }
 
+const MAX_LAYER_RAISES_PER_PASS: usize = 256;
+const MAX_HOST_WINDOWS_PER_PASS: usize = 256;
+
+#[derive(Clone, Default)]
+struct HostWindows {
+    stamp: (u64, u64),
+    windows: Vec<(Id, egui::Rect)>,
+    exhausted: bool,
+}
+
+fn host_windows_key(ctx: &Context) -> Id {
+    Id::unique(("solidcraft_host_windows", ctx.viewport_id()))
+}
+
+#[derive(Clone, Default)]
+struct LayerRaises {
+    stamp: (egui::ViewportId, u64, u64),
+    layers: Vec<egui::LayerId>,
+    exhausted: bool,
+}
+
+fn layer_raise_key(ctx: &Context) -> Id {
+    Id::unique(("solidcraft_container_layer_raises", ctx.viewport_id()))
+}
+
+#[derive(Clone)]
+struct ModalBoundary {
+    stamp: (u64, u64),
+}
+
+#[derive(Clone)]
+struct HostEscape {
+    stamp: (u64, u64),
+    event: egui::Event,
+}
+
+fn modal_boundary_key(ctx: &Context) -> Id {
+    Id::unique(("solidcraft_container_modal", ctx.viewport_id()))
+}
+fn host_escape_key(ctx: &Context) -> Id {
+    Id::unique(("solidcraft_container_host_escape", ctx.viewport_id()))
+}
+
+/// The shared modal show boundary, including its first invisible sizing pass.
+/// Constructing a modal alone never changes the input context.
+#[must_use]
+pub struct ModalHost {
+    modal: BackingModal,
+}
+
+impl ModalHost {
+    pub fn backdrop_color(mut self, color: Color32) -> Self {
+        self.modal = self.modal.backdrop_color(color);
+        self
+    }
+
+    pub fn frame(mut self, frame: Frame) -> Self {
+        self.modal = self.modal.frame(frame);
+        self
+    }
+
+    pub fn show<T>(self, ctx: &Context, content: impl FnOnce(&mut egui::Ui) -> T) -> egui::ModalResponse<T> {
+        let stamp = (ctx.cumulative_frame_nr(), ctx.cumulative_pass_nr());
+        let modal_key = modal_boundary_key(ctx);
+        let escape_key = host_escape_key(ctx);
+        let reserved = ctx.data_mut(|data| {
+            data.insert_temp(modal_key, ModalBoundary { stamp });
+            let reserved = data.get_temp::<HostEscape>(escape_key);
+            data.remove::<HostEscape>(escape_key);
+            reserved.filter(|reserved| reserved.stamp == stamp)
+        });
+        // A modal can open after logic reserved Escape for a panel gesture.
+        // Transfer the original event once to the modal, without replaying it
+        // to ordinary windows or changing the pending panel layout state.
+        if let Some(reserved) = reserved {
+            ctx.input_mut(|input| {
+                if !input.key_pressed(egui::Key::Escape) {
+                    input.events.push(reserved.event);
+                }
+            });
+        }
+        self.modal.show(ctx, content)
+    }
+}
+
 /// The feature sheet's deliberately restricted stock Window (no title, scrolling or fades).
 /// Keep its builder private: the marker's layer and host clip are owned here.
 pub(crate) struct FeatureWindow<'a> {
     window: egui::Window<'a>,
     id: Id,
     frame: Frame,
+    open: Option<bool>,
 }
 
 impl<'a> FeatureWindow<'a> {
     pub(super) fn new(window: egui::Window<'a>, id: Id, frame: Frame) -> Self {
-        Self { window, id, frame }
+        Self { window, id, frame, open: None }
     }
 
     pub(crate) fn fixed_size(mut self, size: egui::Vec2) -> Self {
@@ -249,8 +335,9 @@ impl<'a> FeatureWindow<'a> {
     where
         'a: 'open,
     {
+        let is_open = *open;
         let window: egui::Window<'open> = self.window;
-        FeatureWindow { window: window.open(open), id: self.id, frame: self.frame }
+        FeatureWindow { window: window.open(open), id: self.id, frame: self.frame, open: Some(is_open) }
     }
 
     pub(crate) fn show<R>(self, ctx: &Context, body: impl FnOnce(&mut egui::Ui) -> R) -> Option<egui::InnerResponse<Option<R>>> {
@@ -264,11 +351,38 @@ impl<'a> FeatureWindow<'a> {
         background: Option<Background>,
         body: impl FnOnce(&mut egui::Ui) -> R,
     ) -> Option<egui::InnerResponse<Option<R>>> {
-        let Some(background) = background else { return self.window.show(ctx, body) };
-        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, self.id));
-        let slot = painter.add(egui::Shape::Noop);
+        let backing = background.map(|background| {
+            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, self.id));
+            let slot = painter.add(egui::Shape::Noop);
+            (background, slot)
+        });
+        // Window::show animates its open flag even with fade_out(false).
+        // A closed feature must disappear before its body or footprint is produced.
+        if self.open == Some(false) {
+            Container::record_host_window(ctx, self.id, None);
+            return None;
+        }
+        let Some((background, slot)) = backing else {
+            let mut painted = false;
+            let shown = self.window.show(ctx, |ui| {
+                painted = ui.is_visible() && !ui.is_sizing_pass();
+                body(ui)
+            });
+            let bounds = shown
+                .as_ref()
+                .filter(|shown| {
+                    painted
+                        || shown.inner.is_none()
+                            && egui::containers::AreaState::load(ctx, shown.response.layer_id.id).is_some_and(|area| area.interactable)
+                })
+                .map(|shown| shown.response.rect);
+            Container::record_host_window(ctx, self.id, bounds);
+            return shown;
+        };
         let mut host_painter = None;
+        let mut painted = false;
         let shown = self.window.show(ctx, |ui| {
+            painted = ui.is_visible() && !ui.is_sizing_pass();
             // Resize's content clip omits the frame border/padding. This bounded Window
             // uses Area's default viewport clip, with no fades or native title bar.
             let mut painter = ui.painter().clone();
@@ -276,6 +390,15 @@ impl<'a> FeatureWindow<'a> {
             host_painter = Some(painter);
             body(ui)
         });
+        let bounds = shown
+            .as_ref()
+            .filter(|shown| {
+                painted
+                    || shown.inner.is_none()
+                        && egui::containers::AreaState::load(ctx, shown.response.layer_id.id).is_some_and(|area| area.interactable)
+            })
+            .map(|shown| shown.response.rect);
+        Container::record_host_window(ctx, self.id, bounds);
         if let (Some(shown), Some(painter)) = (&shown, host_painter) {
             // Window relocates inner_margin into an internal content Frame. Its final
             // Area response still includes all margins and the original stroke width.
@@ -673,11 +796,19 @@ impl Container {
     /// Optional companion to a primary outline, painted inside the allocated surface.
     /// It consumes no layout space or input target. Tiny/collapsed surfaces omit it.
     pub(crate) fn paint_inset(painter: &egui::Painter, widget: egui::Rect, frame: Frame) {
+        // Ordinary hosts supply a content well clip, which excludes their padding.
+        // Their companion belongs to the whole surface instead of that well.
+        Self::paint_inset_clipped(painter, widget, frame, painter.ctx().content_rect());
+    }
+
+    /// Bounded hosts supply their inherited outer clip so decoration cannot
+    /// escape a partially visible card. Geometry matches the ordinary companion.
+    pub(crate) fn paint_inset_clipped(painter: &egui::Painter, widget: egui::Rect, frame: Frame, outer_clip: egui::Rect) {
+        let mut painter = painter.clone();
+        painter.set_clip_rect(widget.intersect(painter.ctx().content_rect()).intersect(outer_clip));
         let t = Tokens::get();
         if let Some(bevel) = t.borders.bevel {
-            let mut chrome = painter.clone();
-            chrome.set_clip_rect(widget.intersect(painter.ctx().content_rect()));
-            bevel.paint(&chrome, widget, frame.corner_radius, false, true);
+            bevel.paint(&painter, widget, frame.corner_radius, false, true);
         }
         let Some(inset) = t.borders.primary_inset else {
             return;
@@ -689,10 +820,6 @@ impl Container {
         }
         let reduce = |r: u8| r.saturating_sub(distance.ceil() as u8);
         let radius = frame.corner_radius;
-        // A host's content clip excludes its padding. The companion belongs to the whole
-        // host, so clip to that known surface and the viewport instead of the content well.
-        let mut painter = painter.clone();
-        painter.set_clip_rect(widget.intersect(painter.ctx().content_rect()));
         painter.rect_stroke(
             rect,
             egui::CornerRadius { nw: reduce(radius.nw), ne: reduce(radius.ne), sw: reduce(radius.sw), se: reduce(radius.se) },
@@ -734,12 +861,130 @@ impl Container {
         egui::Area::new(id).enabled(self.input_enabled()).order(order)
     }
 
-    pub fn edge(self, id: impl Into<Id>, edge: Edge) -> egui::Panel {
+    /// Start collection only for the opt-in host, isolated to this native
+    /// viewport and egui pass. Ordinary shared windows keep their old behavior.
+    pub(crate) fn begin_host_windows(ctx: &Context) {
+        let stamp = (ctx.cumulative_frame_nr(), ctx.cumulative_pass_nr());
+        let key = host_windows_key(ctx);
+        ctx.data_mut(|data| data.insert_temp(key, HostWindows { stamp, ..Default::default() }));
+    }
+
+    /// Persistent Feature/Window wrappers declare actual paint here. Popup,
+    /// Modal and model-following Area wrappers never enter this ledger.
+    pub(crate) fn record_host_window(ctx: &Context, id: Id, bounds: Option<egui::Rect>) {
+        let stamp = (ctx.cumulative_frame_nr(), ctx.cumulative_pass_nr());
+        let key = host_windows_key(ctx);
+        ctx.data_mut(|data| {
+            let Some(mut windows) = data.get_temp::<HostWindows>(key).filter(|windows| windows.stamp == stamp) else {
+                return;
+            };
+            if let Some(bounds) = bounds {
+                if !bounds.is_positive() || !bounds.is_finite() {
+                    windows.exhausted = true;
+                } else if let Some(entry) = windows.windows.iter_mut().find(|(existing, _)| *existing == id) {
+                    entry.1 = bounds;
+                } else if windows.windows.len() < MAX_HOST_WINDOWS_PER_PASS {
+                    windows.windows.push((id, bounds));
+                } else {
+                    windows.exhausted = true;
+                }
+            } else {
+                windows.windows.retain(|(existing, _)| *existing != id);
+            }
+            data.insert_temp(key, windows);
+        });
+    }
+
+    /// None refuses framing/control placement when the bounded ledger failed.
+    pub(crate) fn host_window_regions(ctx: &Context) -> Option<Vec<egui::Rect>> {
+        let stamp = (ctx.cumulative_frame_nr(), ctx.cumulative_pass_nr());
+        let key = host_windows_key(ctx);
+        match ctx.data(|data| data.get_temp::<HostWindows>(key)) {
+            Some(windows) if windows.stamp == stamp => (!windows.exhausted).then(|| windows.windows.into_iter().map(|(_, bounds)| bounds).collect()),
+            _ => Some(Vec::new()),
+        }
+    }
+
+    /// Raise an outer host through the shared kit. egui applies raises at the
+    /// end of the pass; deferred host actions also need to observe that intent.
+    /// Raised layers form a set: egui preserves their existing relative order.
+    pub fn bring_to_front(ctx: &Context, layer: egui::LayerId) {
+        let stamp = (ctx.viewport_id(), ctx.cumulative_frame_nr(), ctx.cumulative_pass_nr());
+        let key = layer_raise_key(ctx);
+        ctx.data_mut(|data| {
+            let mut raises = data.get_temp::<LayerRaises>(key).unwrap_or_default();
+            if raises.stamp != stamp {
+                raises = LayerRaises { stamp, ..Default::default() };
+            }
+            if !raises.layers.contains(&layer) {
+                if raises.layers.len() < MAX_LAYER_RAISES_PER_PASS {
+                    raises.layers.push(layer);
+                } else {
+                    raises.exhausted = true;
+                }
+            }
+            data.insert_temp(key, raises);
+        });
+        ctx.move_to_top(layer);
+    }
+
+    /// None means the bounded raise ledger overflowed; consumers refuse their
+    /// own pending actions rather than inventing a viewport-wide input shield.
+    pub(crate) fn current_layer_raises(ctx: &Context) -> Option<Vec<egui::LayerId>> {
+        let stamp = (ctx.viewport_id(), ctx.cumulative_frame_nr(), ctx.cumulative_pass_nr());
+        let key = layer_raise_key(ctx);
+        let raises = ctx.data(|data| data.get_temp::<LayerRaises>(key));
+        match raises {
+            Some(raises) if raises.stamp == stamp => (!raises.exhausted).then_some(raises.layers),
+            _ => Some(Vec::new()),
+        }
+    }
+
+    /// Current shared show intent supplements egui's previous-frame modal state.
+    pub(crate) fn modal_input_blocked(ctx: &Context) -> bool {
+        let stamp = (ctx.cumulative_frame_nr(), ctx.cumulative_pass_nr());
+        let key = modal_boundary_key(ctx);
+        ctx.data(|data| data.get_temp::<ModalBoundary>(key).is_some_and(|boundary| boundary.stamp == stamp))
+            || ctx.memory(|memory| memory.top_modal_layer().is_some())
+    }
+
+    pub(crate) fn reserve_host_escape(ctx: &Context) -> bool {
+        if Self::modal_input_blocked(ctx) {
+            return false;
+        }
+        let event = ctx.input_mut(|input| {
+            let event = input
+                .events
+                .iter()
+                .find(|event| {
+                    matches!(event,
+                        egui::Event::Key { key: egui::Key::Escape, pressed: true, modifiers, .. }
+                            if modifiers.matches_logically(egui::Modifiers::NONE)
+                    )
+                })
+                .cloned();
+            if event.is_some() {
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+            }
+            event
+        });
+        if let Some(event) = event {
+            let stamp = (ctx.cumulative_frame_nr(), ctx.cumulative_pass_nr());
+            let key = host_escape_key(ctx);
+            ctx.data_mut(|data| data.insert_temp(key, HostEscape { stamp, event }));
+            true
+        } else {
+            false
+        }
+    }
+
+    /// A panel on `edge`, keyed by `salt` within the Ui it is shown in.
+    pub fn edge(self, salt: impl egui::AsIdSalt, edge: Edge) -> egui::Panel {
         let panel = match edge {
-            Edge::Left => egui::Panel::left(id),
-            Edge::Right => egui::Panel::right(id),
-            Edge::Top => egui::Panel::top(id),
-            Edge::Bottom => egui::Panel::bottom(id),
+            Edge::Left => egui::Panel::left(salt),
+            Edge::Right => egui::Panel::right(salt),
+            Edge::Top => egui::Panel::top(salt),
+            Edge::Bottom => egui::Panel::bottom(salt),
         };
         if self.adaptive() && !self.floating() { panel.show_separator_line(false) } else { panel }
     }
@@ -831,8 +1076,8 @@ impl Container {
             .inner_margin(egui::Margin::symmetric(t.space_8 as i8, t.space_4 as i8))
     }
 
-    pub fn modal(self, id: Id) -> BackingModal {
-        BackingModal { modal: egui::Modal::new(id).area(egui::Modal::default_area(id).fade_in(false)), id }
+    pub fn modal(self, id: Id) -> ModalHost {
+        ModalHost { modal: BackingModal { modal: egui::Modal::new(id).area(egui::Modal::default_area(id).fade_in(false)), id } }
     }
 
     pub fn central(self) -> egui::CentralPanel {

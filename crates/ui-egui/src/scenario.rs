@@ -16,6 +16,8 @@
 //!   cursor can act it out first); fails if the answer came in fewer than `min_frames` frames
 //! - `{"call": "ui.view", "params": {…}}`: any other control request (`fail: true` expects an
 //!   error)
+//! - `{"panel_fixture": {"enabled": true, "preset": "docks"}}`: explicit synthetic content
+//!   in the real workspace panel host; `{}` inspects and `{"enabled": false}` tears it down
 //! - `{"make_image": "pic.png"}`: a picture in the scenario's folder
 //! - `{"choose_file": "part.step"}`: the next Open picker returns that file of the scenario's
 //!   folder (Save pickers save there)
@@ -218,6 +220,12 @@ impl Harness {
         crate::recovery_ui::start(&mut self.app, &self.dir.join("recovery"), std::time::Duration::ZERO);
     }
 
+    /// The next frame's time, 1/60 s on. A frame run without a time (the control channel's) moves
+    /// the context's clock by egui's f32 `predicted_dt`, so follow it: time never goes backwards.
+    fn tick(&mut self) {
+        self.time = self.time.max(self.ctx.input(|i| i.time)) + 1.0 / 60.0;
+    }
+
     /// Lay out and draw one frame (feeding queued pointer and key events).
     pub fn frame(&mut self) {
         self.frame_with(Vec::new());
@@ -226,7 +234,7 @@ impl Harness {
     /// One frame that receives all these events at once (a quick tap, or input queued during a
     /// slow frame), before any queued ones.
     pub fn frame_with(&mut self, events: Vec<egui::Event>) {
-        self.time += 1.0 / 60.0;
+        self.tick();
         let mut raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
             time: Some(self.time),
@@ -261,7 +269,7 @@ impl Harness {
     /// One frame in which files are dragged over the window (`hovered`) or dropped, the pointer
     /// last seen at `at`.
     pub fn drag_files(&mut self, at: egui::Pos2, hovered: Vec<egui::HoveredFile>, dropped: Vec<egui::DroppedFileHandle>) {
-        self.time += 1.0 / 60.0;
+        self.tick();
         let raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
             time: Some(self.time),
@@ -387,7 +395,7 @@ impl Harness {
     }
 
     /// Centres of the visible widgets whose label or value is `text`, last drawn first.
-    fn widgets(&self, text: &str) -> Vec<[f64; 2]> {
+    pub fn widgets(&self, text: &str) -> Vec<[f64; 2]> {
         let Some(tree) = self.output.accesskit_update.as_ref() else { return Vec::new() };
         let centre =
             |n: &egui::accesskit::Node| n.bounds().filter(|b| b.x1 > b.x0 && b.y1 > b.y0).map(|b| [(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0]);
@@ -469,7 +477,9 @@ impl Harness {
     pub fn step(&mut self, s: &Value) -> Result<(), String> {
         let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
         let res =
-            if let Some(id) = s.get("start").and_then(Value::as_str) {
+            if let Some(params) = s.get("panel_fixture") {
+                self.call("ui.panel_fixture", params.clone())
+            } else if let Some(id) = s.get("start").and_then(Value::as_str) {
                 self.call("ui.start", json!({ "command": id }))
             } else if let Some(k) = s.get("key").and_then(Value::as_str) {
                 {

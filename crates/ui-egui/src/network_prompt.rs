@@ -118,7 +118,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let _language = crate::i18n::scope(&app.preferences.language);
     let hosts = prompt.hosts.iter().map(|h| format!("\\\\{h}")).collect::<Vec<_>>().join(", ");
     let detail = crate::i18n::format("network.prompt_detail", &[("host", &hosts)]);
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("sc_network_prompt"), "status_warning", crate::i18n::tr("network.prompt_title"))
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_network_prompt"), "status_warning", crate::i18n::tr("network.prompt_title"))
         .tone(ui_kit::Tone::Warning)
         .actions(crate::i18n::tr("network.allow_once"), crate::i18n::tr("ui.cancel"), Some(crate::i18n::tr("network.always_allow")))
         .selected(ui_kit::Action::Cancel)

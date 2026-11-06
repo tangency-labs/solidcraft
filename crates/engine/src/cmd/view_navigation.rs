@@ -6,14 +6,16 @@ use solidcraft_render::{Camera, StandardView};
 use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
 use crate::schema::view_navigation::{
-    CameraReply, NavigatorParams, NormalToParams, RenderBrowser, RenderFocus, RenderSelect, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams,
-    TabStep, TabStepParams,
+    CameraReply, NavigatorParams, NormalToParams, RenderBrowser, RenderFocus, RenderLive, RenderSelect, RibbonTabsOnly, RibbonTabsOnlyParams,
+    StandardViewParams, TabStep, TabStepParams, ZoomTool,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
 
+const ZOOM_TOOL_CONTRACT: TypedContract<ZoomTool> = TypedContract::new();
 const FOCUS_CONTRACT: TypedContract<RenderFocus> = TypedContract::new();
 const NAVIGATOR_CONTRACT: TypedContract<NavigatorParams> = TypedContract::new();
+const RENDER_LIVE_CONTRACT: TypedContract<RenderLive> = TypedContract::new();
 const BROWSER_CONTRACT: TypedContract<RenderBrowserRequest> = TypedContract::new();
 const TAB_STEP_CONTRACT: TypedContract<TabStepParams> = TypedContract::new();
 const STANDARD_VIEW_CONTRACT: TypedContract<StandardViewParams> = TypedContract::new();
@@ -57,6 +59,10 @@ CommandSpec::new("view.home", "Home View", home)
     .icon("home").noundo().doc_only().params("no parameters → home orientation framing the active canvas; display only"),
 CommandSpec::new("view.tool", "Navigation Tool", tool)
     .icon("orbit").noundo().doc_only().params("tool: orbit|pan|zoom|none → tool; latch a camera tool, none releases it"),
+CommandSpec::new("view.tool.zoom", "Drag to Zoom", crate::checked!("view.tool.zoom", zoom_tool))
+    .icon("zoom").noundo().doc_only()
+    .contract(&ZOOM_TOOL_CONTRACT).output(output_schema_for::<ZoomTool>)
+    .params("on?: bool (omitted: toggle) → on?; latch the Zoom tool for left-button drags. A shortcut assigned in the UI zooms while held"),
 CommandSpec::new("view.spin", "Continuous Orbit", spin)
     .icon("spin").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; continuous orbit until the next click or key"),
 CommandSpec::new("view.visual_style", "Visual Style", visual_style)
@@ -90,6 +96,10 @@ CommandSpec::new("view.render_browser", "Render Browser", crate::checked!("view.
 CommandSpec::new("view.render_inspector", "Render Inspector", render_inspector)
     .icon("inspect").noundo().doc_only()
     .params("visible: bool → {visible}; per-document Inspector visibility; never edits the design or opens a dialog"),
+CommandSpec::new("view.render_live", "Pause or Resume Live Render", crate::checked!("view.render_live", render_live))
+    .icon("render_image").noundo().doc_only()
+    .contract(&RENDER_LIVE_CONTRACT).output(output_schema_for::<RenderLive>)
+    .params("paused: bool → {paused}; pause or resume this document's live Render preview; headless validation only, never saves settings or changes a final image"),
 CommandSpec::new("view.render_select", "Render selection", crate::checked!("view.render_select", render_select))
     .contract(&RENDER_SELECT).output(output_schema_for::<RenderSelect>)
     .icon("select").noundo().doc_only()
@@ -312,6 +322,10 @@ fn view_toggle(p: &Value, cmd: &str, key: &str) -> Result<Value> {
     }
 }
 
+fn zoom_tool(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.tool.zoom", "on")
+}
+
 fn spin(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.spin", "on")
 }
@@ -359,6 +373,11 @@ fn navigator(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn render_focus(_s: &mut Session, p: &Value) -> Result<Value> {
     let request: RenderFocus = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_focus", e.to_string()))?;
+    Ok(json!(request))
+}
+
+fn render_live(_s: &mut Session, p: &Value) -> Result<Value> {
+    let request: RenderLive = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_live", e.to_string()))?;
     Ok(json!(request))
 }
 
@@ -641,7 +660,9 @@ mod tests {
                 assert!(s.execute(id, &json!({key:value})).is_err(), "{id}: {value}");
             }
         }
-        for (id, key) in [("view.spin", "on"), ("view.grid", "on"), ("view.ground_shadow", "on"), ("view.navigation_bar", "visible")] {
+        for (id, key) in
+            [("view.tool.zoom", "on"), ("view.spin", "on"), ("view.grid", "on"), ("view.ground_shadow", "on"), ("view.navigation_bar", "visible")]
+        {
             assert_eq!(s.execute(id, &json!({})).unwrap(), json!({}));
             assert_eq!(s.execute(id, &Value::Null).unwrap(), json!({}));
             for on in [false, true] {
@@ -651,7 +672,17 @@ mod tests {
                 assert!(s.execute(id, &json!({key:value})).is_err(), "{id}: {value}");
             }
         }
-        for id in ["view.fit", "view.home", "view.tool", "view.spin", "view.visual_style", "view.grid", "view.ground_shadow", "view.navigation_bar"] {
+        for id in [
+            "view.fit",
+            "view.home",
+            "view.tool",
+            "view.tool.zoom",
+            "view.spin",
+            "view.visual_style",
+            "view.grid",
+            "view.ground_shadow",
+            "view.navigation_bar",
+        ] {
             for params in [json!(true), json!(1), json!("orbit"), json!([]), json!({"unexpected":true})] {
                 assert!(s.execute(id, &params).is_err(), "{id}: {params}");
             }
@@ -1177,7 +1208,7 @@ fn render_workspace_focus_and_browser_validate_without_side_effects() {
     let camera = session.camera;
     let document = session.doc.clone();
     let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
-    for (id, field) in [("view.render_focus", "on"), ("view.render_browser", "open")] {
+    for (id, field) in [("view.render_focus", "on"), ("view.render_browser", "open"), ("view.render_live", "paused")] {
         let command = crate::find_command(id).unwrap();
         assert!(command.contract.is_some() && command.output.is_some());
         for on in [true, false] {

@@ -298,6 +298,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 &mut app.preferences.keep_work_on_tab_switch,
                 "keep_work_on_tab_switch",
             );
+            layout_check(
+                ui,
+                app.tr("prefs.tab_double_click_renames"),
+                app.tr("prefs.tab_double_click_renames_note"),
+                &mut app.preferences.tab_double_click_renames,
+                "tab_double_click_renames",
+            );
         });
         if let Some(rect) = crate::scenario::rect_of(&format!("dialog:section:{}", app.tr("prefs.layout_page.window"))) {
             crate::scenario::publish_target(&format!("dialog:section:{}", app.tr("prefs.layout")), rect);

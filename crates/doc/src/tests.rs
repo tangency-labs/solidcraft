@@ -39,6 +39,7 @@ fn plate_doc() -> (Document, u64) {
                 distance2: None,
                 start_offset: None,
                 through_all: false,
+                second_follows_first: false,
                 taper: None,
                 corner: Default::default(),
                 to: None,
@@ -345,6 +346,7 @@ fn box_fillet_cut_timeline() {
                 distance2: None,
                 start_offset: None,
                 through_all: false,
+                second_follows_first: false,
                 taper: None,
                 corner: Default::default(),
                 to: None,
@@ -660,6 +662,26 @@ fn a_folder_naming_missing_or_repeated_features_still_opens() {
     assert_eq!(opened.timeline_groups[1].features, vec![c], "no missing feature, nor one the first folder holds");
     assert!(opened.timeline_groups[1].joints.is_empty());
     assert_eq!(opened.timeline_groups.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["Repeats", "Stale"], "both folders are kept");
+}
+
+/// Timeline folders nested 10 000 deep open at once: each folder's chain of parents is walked
+/// once, not again for every folder inside it (a 588 KB design took over three minutes). A
+/// cycle is still refused.
+#[test]
+fn deeply_nested_timeline_folders_open_and_a_cycle_does_not() {
+    let mut doc = Document::new("nested folders");
+    let n = 10_000u64;
+    doc.timeline_groups = (0..n)
+        .map(|i| TimelineGroup { id: 100 + i, name: "f".into(), parent: (i + 1 < n).then_some(101 + i), features: vec![], joints: vec![] })
+        .collect();
+    let started = std::time::Instant::now();
+    let opened = Document::from_json(&doc.to_json()).expect("the design opens");
+    assert_eq!(opened.timeline_groups.len(), n as usize);
+    assert!(started.elapsed() < std::time::Duration::from_secs(20), "{:?}", started.elapsed());
+    doc.timeline_groups =
+        (0..3).map(|i| TimelineGroup { id: 100 + i, name: "f".into(), parent: Some(100 + (i + 1) % 3), features: vec![], joints: vec![] }).collect();
+    let refused = Document::from_json(&doc.to_json()).unwrap_err().to_string();
+    assert!(refused.contains("cyclic timeline folders"), "{refused}");
 }
 
 /// A marker after the last feature leaves every feature active, as no marker does, so a feature
@@ -1130,6 +1152,7 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             distance2: None,
             start_offset: None,
             through_all: false,
+            second_follows_first: false,
             taper: None,
             corner: Default::default(),
             to: None,

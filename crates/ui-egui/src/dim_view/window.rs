@@ -101,7 +101,7 @@ thread_local! {
 /// Whether the open window is under `p`: the wheel there steps its value, so the camera under it
 /// does not zoom (navigation asks).
 pub(crate) fn covers(ctx: &egui::Context, p: Pos2) -> bool {
-    super::editing() && ctx.memory(|m| m.area_rect(egui::Id::new(AREA))).is_some_and(|r| r.contains(p))
+    super::editing() && ctx.memory(|m| m.area_rect(egui::Id::unique(AREA))).is_some_and(|r| r.contains(p))
 }
 
 /// Forget the worked-out value (the edit closed).
@@ -183,13 +183,13 @@ fn place(app: &SolveApp, ctx: &egui::Context, param: &str, at: Pos2, size: egui:
 /// the control channel. True when clicked.
 fn button(ui: &mut egui::Ui, rect: Rect, key: &str, tip: &str, icon: &str) -> bool {
     let t = Tokens::get();
-    let response = ui.interact(rect, ui.id().with(key), egui::Sense::click());
+    let response = ui.interact(rect, ui.scope_id().with(key), egui::Sense::click());
     if response.hovered() {
         ui.painter().rect_filled(rect, t.control_radius, t.hover);
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     crate::icons::paint_icon(ui.painter(), rect.shrink(t.space_4), icon, 1.0);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tip));
     crate::scenario::publish_target(key, rect);
     response.on_hover_text(tip).clicked()
 }
@@ -199,8 +199,8 @@ fn button(ui: &mut egui::Ui, rect: Rect, key: &str, tip: &str, icon: &str) -> bo
 /// whether a new dimension's picks go too (the cross, Esc), as Esc in the box does.
 pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Pos2) -> (Option<bool>, bool) {
     let t = Tokens::get();
-    let id = egui::Id::new("sc_dim_edit");
-    let area = egui::Id::new(AREA);
+    let id = egui::Id::unique("sc_dim_edit");
+    let area = egui::Id::unique(AREA);
     let (kind, error) = match &e.draft {
         Some(draft) => (kind(&draft.preview_doc, &e.param), draft.error.clone()),
         None => (kind(&app.session.doc, &e.param), existing(app, &e.param, &e.expr).1),

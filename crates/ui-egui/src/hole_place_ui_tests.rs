@@ -466,3 +466,38 @@ fn editing_a_hole_replaces_its_face_instead_of_adding_one() {
     assert_eq!(again, hole, "the same feature");
     assert!(position.dist(on_top) < 1e-3, "OK uses the new face: {position:?}");
 }
+
+/// Single holes on two faces with the depth typed as `ScrewDepth = 5`: OK runs one command per
+/// hole, the first defines `ScrewDepth` and both holes use it, instead of the second hole being
+/// refused because the parameter already exists.
+#[test]
+fn single_holes_on_two_faces_share_a_parameter_typed_in_the_dialog() {
+    let mut h = block_as_installed();
+    h.step(&json!({"call": "ui.view", "params": {"view": "iso"}})).unwrap();
+    h.settle();
+    let before = h.app.session.doc.features.len();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    for p in [Vec3::new(30.0, 20.0, 20.0), Vec3::new(25.0, 0.0, 10.0)] {
+        let at = screen(&mut h, p);
+        h.step(&json!({"click": at})).unwrap();
+    }
+    assert_eq!(places(&h).len(), 2, "a place on the top and one on the front: {:?}", places(&h));
+    match h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        Some(Kind::Hole { depth, .. }) => *depth = "ScrewDepth = 5".into(),
+        _ => panic!("the Hole dialog is open"),
+    }
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let param = h.app.session.doc.param("ScrewDepth").expect("the first hole defines ScrewDepth");
+    assert_eq!(param.unit, "mm");
+    let depths: Vec<String> = h.app.session.doc.features[before..]
+        .iter()
+        .filter_map(|f| match &f.kind {
+            FeatureKind::Hole { depth, .. } => depth.as_ref().map(|d| d.as_str().to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(depths, ["ScrewDepth", "ScrewDepth"]);
+    assert!(!solid_at(&h, Vec3::new(30.0, 20.0, 17.0)) && !solid_at(&h, Vec3::new(25.0, 3.0, 10.0)), "both holes are drilled");
+    assert!(solid_at(&h, Vec3::new(30.0, 20.0, 8.0)), "5 mm deep (and its drill point), not through");
+}

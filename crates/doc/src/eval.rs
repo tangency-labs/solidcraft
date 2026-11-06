@@ -254,6 +254,35 @@ impl ModelBody {
         self.mesh.clone()
     }
 
+    /// Identity of the display cells of the solid this body shows: its own, or for a rigidly
+    /// placed copy its definition's (shared by every placement of it).
+    fn solid_id(&self) -> usize {
+        self.mesh_placement.as_deref().map_or(Arc::as_ptr(&self.mesh) as usize, placed_mesh::PlacedMesh::definition_id)
+    }
+
+    /// How this body is drawn moved from `before`: [`crate::IDENTITY`] when it is `before` where
+    /// it stood (its meshes and plans the same), the rigid motion between them when it is the same
+    /// solid placed elsewhere (a dragged component's body: `before`'s meshes and plans drawn moved
+    /// show it; a definition shown where it is defined is its own placement), `None` when it is
+    /// another body or its geometry differs.
+    pub fn display_moved_from(&self, before: &ModelBody) -> Option<crate::Mat> {
+        if self.name != before.name || self.solid_id() != before.solid_id() {
+            return None;
+        }
+        let (now, was) = (self.mesh_placement.as_deref(), before.mesh_placement.as_deref());
+        if let (Some(now), Some(was)) = (now, was)
+            && now.tolerance.to_bits() != was.tolerance.to_bits()
+        {
+            return None;
+        }
+        let at = |p: Option<&placed_mesh::PlacedMesh>| p.map_or(crate::IDENTITY, |p| *p.transform());
+        let (now, was) = (at(now), at(was));
+        if now == was {
+            return Some(crate::IDENTITY);
+        }
+        Some(crate::mat_mul(&now, &crate::mat_inverse(&was)?))
+    }
+
     /// [`ModelBody::mesh`] as a shared mesh and the move that places it: for a rigid placement
     /// of a definition, the definition's own mesh (the same one for every placement of it) and
     /// the placement; for any other body its own mesh, unmoved. The mesh moved by the matrix is
@@ -438,6 +467,21 @@ fn removed_note(gone: &[Vec3]) -> String {
     }
 }
 
+thread_local! {
+    /// Current feature evaluation validation mode (`EachStep`, `EachFeature`, or `Off`).
+    static EVAL_VALIDATION: std::cell::Cell<kernel::Validation> = const { std::cell::Cell::new(kernel::Validation::EachFeature) };
+}
+
+/// Restores `EVAL_VALIDATION` to its previous value when dropped.
+struct EvalValidationGuard(kernel::Validation);
+
+impl Drop for EvalValidationGuard {
+    /// Restores the saved validation mode on scope exit.
+    fn drop(&mut self) {
+        EVAL_VALIDATION.set(self.0);
+    }
+}
+
 /// A blend's refusal as too large (`why`) with the largest `size` (radius, distance) that fits,
 /// as `search` finds it by building candidates ([`kernel::fillet_max`]): the refusal as it is
 /// when none fits or the search itself fails (a candidate failing for another reason says
@@ -447,6 +491,9 @@ fn with_largest_fit(
     size: &str,
     search: impl FnOnce() -> std::result::Result<Option<(f64, kernel::Body)>, kernel::KernelError>,
 ) -> kernel::KernelError {
+    if EVAL_VALIDATION.get() == kernel::Validation::Off {
+        return kernel::KernelError::TooLarge(why);
+    }
     // On solidcore the refusal names a size already, less a margin (34.99 where 35 builds), and
     // its edge: the edge stays, the size is the largest the search builds, solidcore's where the
     // search finds none.
@@ -2321,6 +2368,7 @@ impl Model {
             let r = match frame_error.or(bad_param) {
                 Some(e) => Err(kernel::KernelError::Failed(e)),
                 None => kernel::guard(&f.name, || {
+                    let _val_guard = EvalValidationGuard(EVAL_VALIDATION.replace(validation));
                     let (r, deferred) =
                         kernel::validating(validation, || eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair));
                     r.map_err(|e| match e {
@@ -5716,13 +5764,13 @@ fn feature_tools_with_constructor(
         FeatureKind::Torus { center, major, minor, .. } => {
             Ok(unnamed(vec![kernel::torus(point(vals, center)?, val(vals, major, Kind::Length)?, val(vals, minor, Kind::Length)?)?]))
         }
-        FeatureKind::Cone { base, axis, radius, top_radius, height, .. } => Ok(unnamed(vec![more::cone(
+        FeatureKind::Cone { base, axis, radius, top_radius, height, .. } => Ok(vec![more::cone(
             point(vals, base)?,
             axis.0,
             val(vals, radius, Kind::Length)?,
             val(vals, top_radius, Kind::Length)?,
             val(vals, height, Kind::Length)?,
-        )?])),
+        )?]),
         FeatureKind::Hole { .. } => Ok(hole_feature_tools(vals, st, f)?.into_iter().map(|(tool, _)| tool).collect()),
         _ => Err(DocError::Invalid(format!("{} cannot be patterned or mirrored yet", f.name))),
     }
@@ -6054,15 +6102,28 @@ fn from_profile_on_closed_path(segs: Vec<solidcore_record::Seg2>, path: &Plane, 
 /// Where an extrude of distance `d` starts and ends along the sketch normal, before any start
 /// offset: one side, the other, both (symmetric), or a second distance on the other side.
 ///
-/// A second distance (`distance2`) goes the other way from the first side, wherever that went:
-/// against the normal for `direction: negative` (#2700), and back along it when a negative
-/// distance or a To Object below the sketch sends the first side down.
+/// A second distance (`distance2`) goes the other way from the first side: against the normal,
+/// or along it for `direction: negative` (#2700). Entered distances keep those sides whatever
+/// their signs; a To Object below the sketch or a Through All that reaches down sends the first
+/// side down and the second back along the normal.
 pub(crate) fn extent_sides(vals: &BTreeMap<String, Value>, extent: &crate::Extent, d: f64, direction: crate::Direction) -> Result<(f64, f64)> {
     Ok(match (&extent.distance2, direction) {
         (Some(d2), _) => {
-            let first = if direction == crate::Direction::Negative { -d } else { d };
+            let negative = direction == crate::Direction::Negative;
+            let first = if negative { -d } else { d };
             let d2 = val(vals, d2, Kind::Length)?;
-            (if first < 0.0 { d2 } else { -d2 }, first)
+            // An entered distance keeps its side whatever its sign: Direction fixes the sides,
+            // and a sign only turns its own side over. A reach computed from the model (To
+            // Object, Through All) has the sign of where the object is, so the other side
+            // follows it.
+            let second = if extent.second_follows_first || extent.to.is_some() || extent.through_all {
+                if first < 0.0 { d2 } else { -d2 }
+            } else if negative {
+                d2
+            } else {
+                -d2
+            };
+            (second, first)
         }
         (None, crate::Direction::Positive) => (0.0, d),
         (None, crate::Direction::Negative) => (-d, 0.0),
@@ -7122,12 +7183,14 @@ pub(crate) fn sheet_face_plane_in_frame(doc: &Document, st: &ModelState, comp: u
         PlaneRef::Offset { base, distance } => {
             PlaneRef::Offset { base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?), distance: distance.clone() }
         }
-        PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line } => PlaneRef::AtAngle {
+        PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line, direction_only, pivot } => PlaneRef::AtAngle {
             base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?),
             axis_origin: *axis_origin,
             axis_dir: *axis_dir,
             angle: angle.clone(),
             line: line.clone(),
+            direction_only: *direction_only,
+            pivot: pivot.clone(),
         },
         PlaneRef::Flipped { base, about_y } => {
             PlaneRef::Flipped { base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?), about_y: *about_y }
@@ -7228,6 +7291,7 @@ fn eval_feature(
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
     match &f.kind {
+        FeatureKind::NewerFileFeature { raw } => Err(DocError::Invalid(raw.why())),
         FeatureKind::BodyTransfer { bodies, from, to, transform } => {
             crate::body_transfer::evaluate(doc, st, &crate::plain(bodies), *from, *to, *transform)
         }
@@ -7926,8 +7990,8 @@ fn eval_feature(
         FeatureKind::Cone { base, axis, radius, top_radius, height, operation } => {
             let (radius, top_radius, height) =
                 (val(vals, radius, Kind::Length)?, val(vals, top_radius, Kind::Length)?, val(vals, height, Kind::Length)?);
-            let b = more::cone(point(vals, base)?, axis.0, radius, top_radius, height)?;
-            apply_op(doc, st, f, vec![b], *operation, &[])
+            let tool = more::cone(point(vals, base)?, axis.0, radius, top_radius, height)?;
+            apply_traced(doc, st, f, vec![tool], *operation, &[])
         }
         FeatureKind::Combine { target, tools, operation, keep_tools } => {
             if tools.iter().any(|t| t == target) {
@@ -8276,7 +8340,7 @@ fn move_constructions_with(doc: &Document, st: &mut ModelState, moved: &[crate::
 fn plane_is_fixed(plane: &PlaneRef) -> bool {
     match plane {
         PlaneRef::Origin { .. } | PlaneRef::Custom { .. } | PlaneRef::Placed { .. } => true,
-        PlaneRef::AtAngle { line: Some(_), .. } => false,
+        PlaneRef::AtAngle { line: Some(_), .. } | PlaneRef::AtAngle { pivot: Some(_), .. } => false,
         PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => plane_is_fixed(base),
         _ => false,
     }
@@ -8287,7 +8351,7 @@ fn plane_is_fixed(plane: &PlaneRef) -> bool {
 fn plane_reads_geometry(plane: &PlaneRef) -> bool {
     match plane {
         PlaneRef::Origin { .. } | PlaneRef::Custom { .. } | PlaneRef::Placed { .. } | PlaneRef::Construction { .. } => false,
-        PlaneRef::AtAngle { line: Some(_), .. } => true,
+        PlaneRef::AtAngle { line: Some(_), .. } | PlaneRef::AtAngle { pivot: Some(_), .. } => true,
         PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => plane_reads_geometry(base),
         PlaneRef::ThroughPoint { .. }
         | PlaneRef::Midplane { .. }
@@ -8993,6 +9057,49 @@ mod world_placement_cache_tests {
         let again = world_state(&doc, &state).unwrap();
         assert!(Arc::ptr_eq(&original_mesh, &again.body("Block").unwrap().mesh()));
         assert!(Arc::ptr_eq(&names, &crate::naming::face_names(again.body(&second_name).unwrap())));
+    }
+
+    /// A dragged component's bodies are drawn from the meshes and plans made where the drag found
+    /// them, moved: each is the same solid moved rigidly, the others stand where they were, and a
+    /// body whose geometry changed is no such move.
+    #[test]
+    fn a_moved_placement_is_drawn_moved_from_where_it_stood() {
+        // A placement moved, and the part moved off where it is defined.
+        for from_definition in [false, true] {
+            let mut doc = Document::new("placements");
+            let component = doc.add_component(Some("Part"), 0).unwrap();
+            doc.body_components.insert("Block".into(), component);
+            let start = if from_definition { crate::IDENTITY } else { crate::rigid(Vec3::new(10., 20., 0.), Vec3::ZERO, Vec3::Z, 0.4) };
+            let second = doc.add_occurrence(component, 0, start).unwrap();
+            let mut state = ModelState::default();
+            state.bodies.push(ModelBody::new("Block".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(2., 3., 4.)).unwrap(), 1));
+            let before = world_state(&doc, &state).unwrap();
+            let delta = crate::rigid(Vec3::new(4., -7., 1.5), Vec3::new(1., 1., 0.), Vec3::new(0., 1., 1.), 0.6);
+            let moved = doc.occurrences.iter_mut().find(|o| o.id == second).unwrap();
+            moved.transform = crate::mat_mul(&delta, &moved.transform);
+            let after = world_state(&doc, &state).unwrap();
+            assert_eq!(after.bodies.len(), 2);
+            let mut moves = 0;
+            for now in &after.bodies {
+                let was = before.body(&now.name).unwrap();
+                let d = now.display_moved_from(was).unwrap();
+                if d == crate::IDENTITY {
+                    assert!(Arc::ptr_eq(&now.mesh(), &was.mesh()), "{}: unchanged, the same mesh", now.name);
+                    continue;
+                }
+                moves += 1;
+                assert!(d.iter().flatten().zip(delta.iter().flatten()).all(|(a, b)| (a - b).abs() < 1e-9), "{}: {d:?}", now.name);
+                // `was`'s mesh drawn moved is `now`'s.
+                for (p, q) in was.mesh().positions.iter().zip(&now.mesh().positions) {
+                    assert!(crate::apply_point(&d, *p).dist(*q) < 1e-9);
+                }
+            }
+            assert_eq!(moves, 1, "from its definition: {from_definition}");
+            // Another body, or other geometry: no move draws it.
+            assert!(after.bodies[0].display_moved_from(&before.bodies[1]).is_none());
+            let other = ModelBody::new(before.bodies[0].name.clone(), kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap(), 1);
+            assert!(other.display_moved_from(&before.bodies[0]).is_none());
+        }
     }
 }
 
