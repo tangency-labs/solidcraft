@@ -1727,10 +1727,6 @@ impl SolveApp {
             return;
         }
         timeline::stop_playback(self);
-        if id == solidcraft_engine::vibration::COMMAND {
-            vibration::open(self);
-            return;
-        }
         // A file is loading: the design waits for it.
         if self.file_load.busy() || self.file_picker.is_some() {
             return;
@@ -2069,6 +2065,13 @@ impl SolveApp {
         }
         if id == "assembly.bom" {
             bom_panel::open(self);
+            return;
+        }
+        if id == solidcraft_engine::vibration::COMMAND {
+            if self.dialog.is_some() {
+                dialogs::cancel(self);
+            }
+            vibration::open(self);
             return;
         }
         // Inspect → Measure → Properties: the window, not a reply nobody sees (#8095).

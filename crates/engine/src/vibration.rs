@@ -26,7 +26,7 @@ const CONTRACT: TypedContract<SweepParams> = TypedContract::new();
 pub(crate) static COMMANDS: &[CommandSpec] = &[CommandSpec::new(COMMAND, "Vibration Sweep", crate::checked!("inspect.vibration", execute))
     .contract(&CONTRACT).output(output_schema_for::<SweepResult>)
     .at("SOLID", "INSPECT").icon("graph").noundo().params(
-        "body?: one world body name, omit for all bodies; supports: [{body, face}], start_hz and end_hz.         Returns a modal and Z-base excitation study of the current geometry without editing it.",
+        "body?: one world body name, omit for all bodies; supports: [{body, face}], start_hz and end_hz. Returns a modal and Z-base excitation study of the current geometry without editing it.",
     )];
 
 fn execute(s: &mut Session, p: &serde_json::Value) -> Result<serde_json::Value> {
