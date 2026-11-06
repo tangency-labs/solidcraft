@@ -1,65 +1,81 @@
 {
   "en": {
-    "browser.straighten_angle": "Angle of the line",
+    "browser.straighten_angle": "Edge direction",
     "browser.straighten_click_a": "Click the image at one end of an edge that should be straight, or type its coordinates.",
     "browser.straighten_click_b": "Click the other end of the edge, or type its coordinates.",
+    "browser.straighten_horizontal": "Horizontal",
     "browser.straighten_title": "Straighten: {name}",
+    "browser.straighten_vertical": "Vertical",
     "cmd.canvas_straighten": "Straighten Canvas",
     "ui.straighten": "Straighten"
   },
   "ar": {
-    "browser.straighten_angle": "زاوية الخط",
+    "browser.straighten_angle": "اتجاه الحافة",
     "browser.straighten_click_a": "انقر الصورة عند أحد طرفي حافة يجب أن تكون مستقيمة، أو اكتب إحداثياتها.",
     "browser.straighten_click_b": "انقر الطرف الآخر للحافة، أو اكتب إحداثياته.",
+    "browser.straighten_horizontal": "أفقي",
     "browser.straighten_title": "تقويم: {name}",
+    "browser.straighten_vertical": "رأسي",
     "cmd.canvas_straighten": "تقويم اللوحة",
     "ui.straighten": "تقويم"
   },
   "de": {
-    "browser.straighten_angle": "Winkel der Linie",
+    "browser.straighten_angle": "Richtung der Kante",
     "browser.straighten_click_a": "Klicken Sie im Bild auf ein Ende einer Kante, die gerade sein soll, oder geben Sie die Koordinaten ein.",
     "browser.straighten_click_b": "Klicken Sie auf das andere Ende der Kante, oder geben Sie die Koordinaten ein.",
+    "browser.straighten_horizontal": "Horizontal",
     "browser.straighten_title": "Ausrichten: {name}",
+    "browser.straighten_vertical": "Vertikal",
     "cmd.canvas_straighten": "Zeichenfläche ausrichten",
     "ui.straighten": "Ausrichten"
   },
   "he": {
-    "browser.straighten_angle": "זווית הקו",
+    "browser.straighten_angle": "כיוון הקצה",
     "browser.straighten_click_a": "לחץ על התמונה בקצה אחד של קצה שאמור להיות ישר, או הקלד את הקואורדינטות שלו.",
     "browser.straighten_click_b": "לחץ על הקצה השני, או הקלד את הקואורדינטות שלו.",
+    "browser.straighten_horizontal": "אופקי",
     "browser.straighten_title": "יישור: {name}",
+    "browser.straighten_vertical": "אנכי",
     "cmd.canvas_straighten": "יישור קנבס",
     "ui.straighten": "יישור"
   },
   "ja": {
-    "browser.straighten_angle": "線の角度",
+    "browser.straighten_angle": "エッジの向き",
     "browser.straighten_click_a": "まっすぐにしたいエッジの一端を画像上でクリックするか、座標を入力してください。",
     "browser.straighten_click_b": "エッジのもう一端をクリックするか、座標を入力してください。",
+    "browser.straighten_horizontal": "水平",
     "browser.straighten_title": "傾き補正: {name}",
+    "browser.straighten_vertical": "垂直",
     "cmd.canvas_straighten": "キャンバスの傾き補正",
     "ui.straighten": "傾き補正"
   },
   "ko": {
-    "browser.straighten_angle": "선의 각도",
+    "browser.straighten_angle": "모서리 방향",
     "browser.straighten_click_a": "곧아야 하는 모서리의 한쪽 끝을 이미지에서 클릭하거나 좌표를 입력하세요.",
     "browser.straighten_click_b": "모서리의 다른 쪽 끝을 클릭하거나 좌표를 입력하세요.",
+    "browser.straighten_horizontal": "수평",
     "browser.straighten_title": "수평 맞추기: {name}",
+    "browser.straighten_vertical": "수직",
     "cmd.canvas_straighten": "캔버스 수평 맞추기",
     "ui.straighten": "수평 맞추기"
   },
   "vi": {
-    "browser.straighten_angle": "Góc của đường",
+    "browser.straighten_angle": "Hướng của cạnh",
     "browser.straighten_click_a": "Nhấp vào ảnh tại một đầu của cạnh cần thẳng, hoặc nhập tọa độ của nó.",
     "browser.straighten_click_b": "Nhấp vào đầu kia của cạnh, hoặc nhập tọa độ của nó.",
+    "browser.straighten_horizontal": "Ngang",
     "browser.straighten_title": "Làm thẳng: {name}",
+    "browser.straighten_vertical": "Dọc",
     "cmd.canvas_straighten": "Làm thẳng hình ảnh Canvas",
     "ui.straighten": "Làm thẳng"
   },
   "zh": {
-    "browser.straighten_angle": "直线的角度",
+    "browser.straighten_angle": "边的方向",
     "browser.straighten_click_a": "在图像上单击应为直线的边的一端，或输入其坐标。",
     "browser.straighten_click_b": "单击该边的另一端，或输入其坐标。",
+    "browser.straighten_horizontal": "水平",
     "browser.straighten_title": "拉直：{name}",
+    "browser.straighten_vertical": "垂直",
     "cmd.canvas_straighten": "拉直画布",
     "ui.straighten": "拉直"
   }
