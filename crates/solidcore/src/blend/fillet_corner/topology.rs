@@ -17,6 +17,8 @@
 //! | 4x3, open and degenerate corners ([`end_corners`]) | `SmFillet4x3Corner`, `SmFilletOpenCorner`, `SmFilletDegenerateCorner` `::MakeCornerTopology` |
 //!
 //! Deviations: the caller lends the actual target, pseudo-B-rep and solver.
+//! Not the fork's (#2843): a tangent seam whose across face does not reach the other side
+//! edge is no tangent end; the rail ends on it as on an edge of opposite convexity.
 //! Missing topology that native dereferences is an input error. The Nx1 end rib,
 //! surface extension and cap topology are in [`nx1_end`]; the mixed-convexity 4x2
 //! corner's `Make4x2ConcaveCornerTopology` is in `concave_4x2`. The Nx2 corner's two solvers are resolved by the
@@ -512,6 +514,38 @@ impl FilletCorner {
             crate::math::rad_to_deg(self.tangency_tol_radians),
             same,
         )?;
+        // A tangent seam closes the corner only when the face across it reaches the other
+        // side edge: that face is the end face, and the end rib lies on it. With a face
+        // between them (a half cylinder's end disc standing on the line where a flat runs
+        // tangent into a round) nothing lies across the rail's end on that face, which
+        // only touches the blend. The rail ends on the seam as on any edge of opposite
+        // convexity, and the end face is the one past the other side edge (#2843).
+        let mut seam_side = [false, false];
+        if !closed_side && total > 3 {
+            for kk in 0..2 {
+                let other = 1 - kk;
+                if !*need(tangent_side.get(kk), "side index")?
+                    || *need(tangent_side.get(other), "side index")?
+                {
+                    continue;
+                }
+                let seam = *need(sides.get(kk), "side index")?;
+                let seam_face = eu1::face(target, seam)?;
+                let across = if is_fillet_side_face(target, filleted, seam_face)? {
+                    eu1::face(target, radial(target, seam)?)?
+                } else {
+                    seam_face
+                };
+                let other_side = *need(sides.get(other), "side index")?;
+                if across != eu1::face(target, other_side)?
+                    && across != eu1::face(target, radial(target, other_side)?)?
+                {
+                    *need(seam_side.get_mut(kk), "side index")? = true;
+                    *need(same.get_mut(kk), "convexity index")? = false;
+                    *need(tangent_side.get_mut(kk), "side index")? = false;
+                }
+            }
+        }
         // A side edge whose faces meet tangentially at the vertex (a flat top running
         // smoothly onto a round) is no edge of the corner: the corner's side edge is
         // the one reached past it round the vertex (tangency-labs/smlib@d5ebcb3, WR-457).
@@ -522,6 +556,7 @@ impl FilletCorner {
             for kk in 0..2 {
                 let other = 1 - kk;
                 if *need(tangent_side.get(kk), "side index")?
+                    || *need(seam_side.get(kk), "side index")?
                     || *need(same.get(other), "convexity index")?
                     || check_tangential_edgeuse_at_vertex(
                         k,
@@ -703,7 +738,12 @@ impl FilletCorner {
             vertex,
             total: corner_total,
             mixed,
-            same,
+            // the end face is picked from the side edge that is not the seam
+            same: if seam_side[0] || seam_side[1] {
+                [seam_side[1], seam_side[0]]
+            } else {
+                same
+            },
             tangent_side,
             sides,
             end_face,
