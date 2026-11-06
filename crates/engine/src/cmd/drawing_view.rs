@@ -50,7 +50,7 @@ use solidcraft_io::paper::MAX_PICTURE_DPI;
 use solidcraft_render::VisualStyle;
 
 use super::CommandSpec;
-use crate::drawing_view::{CHORD_RANGE, Extents, LineRequest, Lines, NOTHING_CHOSEN, OnSheet, Room, ShownSet, Styles, Unmeasured};
+use crate::drawing_view::{CHORD_RANGE, Extents, LeftOut, LineRequest, Lines, NOTHING_CHOSEN, OnSheet, Room, ShownSet, Styles, Unmeasured};
 use crate::params::bad;
 use crate::schema::drawing_view::{
     AccuracyResult, AlongParam, AngleFromParam, BaseParams, BoxResult, ChoicesResult, CopyParams, CreateResult, DPI_RANGE, EditParams, EditResult,
@@ -314,6 +314,45 @@ fn measurements(s: &Session, request: &SnapshotParams, basis: &Plane, scale: Sca
     };
     let read = request.measure.iter().enumerate().map(|(at, m)| one(m).map_err(|why| bad(CMD, format!("measure[{at}]: {why}"))));
     read.collect()
+}
+
+/// Refused when saved view `view` of `record` doesn't draw a part that one of the occurrence paths
+/// `paths` places: an annotation attaches only to what its view draws.
+pub(super) fn check_drawn<'a>(record: &Drawing, view: u64, paths: impl IntoIterator<Item = &'a [u64]>, cmd: &str) -> Result<()> {
+    match not_drawn(record, view, paths) {
+        Some(why) => Err(bad(cmd, format!("view {} doesn't draw that part: {why}", ids::encode(view)))),
+        None => Ok(()),
+    }
+}
+
+/// Why view `view` of `record` doesn't draw the first of `paths` it leaves out, in words ([`left_out`]);
+/// nothing when it draws them all, or for a view that can't be resolved, which its own reply reports.
+/// The view is resolved once, however many paths there are.
+fn not_drawn<'a>(record: &Drawing, view: u64, paths: impl IntoIterator<Item = &'a [u64]>) -> Option<String> {
+    let resolved = record.resolve_view(view).ok()?;
+    let left = paths.into_iter().find_map(|path| crate::drawing_view::left_out(&resolved, path))?;
+    Some(match left {
+        LeftOut::Hidden { by, set_by } => format!("its hide leaves out occurrence path {by:?}{}", set_on(set_by)),
+        LeftOut::NotChosen { set_by } => format!("its source draws only the occurrences it chose{}", set_on(set_by)),
+    })
+}
+
+/// Where a setting that leaves a part out was set, in words for [`not_drawn`]: nothing when the view
+/// itself or the default set it. Hide and the chosen occurrences come from a view's chain today, but
+/// a sheet and a drawing can set other settings (its line group), so each says where.
+fn set_on(set_by: SetBy) -> String {
+    match set_by {
+        SetBy::Parent(parent) => format!(" (set on view {})", ids::encode(parent)),
+        SetBy::Sheet => " (set on its sheet)".to_string(),
+        SetBy::Drawing => " (set on the drawing)".to_string(),
+        SetBy::This | SetBy::Default => String::new(),
+    }
+}
+
+/// The warning for an annotation on view `view` that points through `paths`, when the view's
+/// settings were changed to leave one of them out after it was added: it stays, and says so.
+pub(super) fn drawn_warning<'a>(record: &Drawing, view: u64, paths: impl IntoIterator<Item = &'a [u64]>) -> Vec<String> {
+    not_drawn(record, view, paths).map(|why| format!("view {} doesn't draw this part now: {why}", ids::encode(view))).into_iter().collect()
 }
 
 /// Refused when `view` would show nothing of a design that has bodies to show. One with nothing to

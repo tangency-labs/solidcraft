@@ -12,6 +12,7 @@ use solidcraft_doc::ids;
 
 use super::CommandSpec;
 use super::drawing_dimension::status_words;
+use super::drawing_view::{check_drawn, drawn_warning};
 use crate::params::bad;
 use crate::schema::drawing_note::{AddParams, AnchorParam, EditParams, EditResult, InspectParams, NoteResult};
 use crate::schema::{TypedContract, output_schema_for};
@@ -35,7 +36,8 @@ pub static COMMANDS: &[CommandSpec] = &[
             "anchor: {sheet: id or name}, {view: id}, {edge: {view, edge}} or {corner: {view, corner}} (an edge or a corner as drawing.dimension.add \
              takes it; its leader ends there); at: [x, y] on paper in mm, from the sheet's lower-left corner or the view's centre; content: text, \
              or [{text} or {field: {source: component|drawing|sheet|revision, key, format?}}]; cap_mm?: 0.5..100, its text height → what \
-             drawing.note.inspect answers for it. Saved by name, never the point picked. One undo step; no model is evaluated.",
+             drawing.note.inspect answers for it. Saved by name, never the point picked; an edge or a corner on a part its view doesn't \
+             draw is refused. One undo step; no model is evaluated.",
         ),
     CommandSpec::new(EDIT, "Edit Note", crate::checked!("drawing.note.edit", edit))
         .icon("edit")
@@ -56,7 +58,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<NoteResult>)
         .params(
             "note: its id → {note, record: as saved, status: ok, ambiguous, suppressed or lost, why?, point?: where its leader ends, in the \
-             design's frame, exact, candidates?: [{edge: {body, index}}]}. A lost reference keeps the note and its text in place, without a \
+             design's frame, exact, candidates?: [{edge: {body, index}}], warnings?: its view edited since to leave out the part its leader points \
+             at}. A lost reference keeps the note and its text in place, without a \
              leader. Read-only; no model is evaluated.",
         ),
 ];
@@ -77,6 +80,9 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
             point: s.doc.corner_reference(&s.model, &corner.pick, &corner.path).map_err(|why| bad(ADD, why.to_string()))?,
         },
     };
+    if let (Some(view), Some(path)) = (anchor.view(), anchor.path()) {
+        check_drawn(&record, view, [path], ADD)?;
+    }
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
     let note = Note { id, anchor, at: request.at, content: request.content.0, cap_mm: request.cap_mm };
     s.edit_drawing(ADD, |d| {
@@ -131,6 +137,10 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
         point: r.point.map(|p| [p.x, p.y, p.z]),
         exact: r.exact,
         candidates,
+        warnings: match (note.anchor.view(), note.anchor.path()) {
+            (Some(view), Some(path)) => drawn_warning(d, view, [path]),
+            _ => Vec::new(),
+        },
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))

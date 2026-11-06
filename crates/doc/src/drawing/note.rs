@@ -66,6 +66,15 @@ impl Anchor {
         }
     }
 
+    /// The occurrence path of the model reference its leader points at, if it points at one.
+    pub fn path(&self) -> Option<&[u64]> {
+        match self {
+            Anchor::Sheet(_) | Anchor::View(_) => None,
+            Anchor::Edge { edge, .. } => Some(&edge.path),
+            Anchor::Corner { point, .. } => Some(&point.path),
+        }
+    }
+
     /// The same anchor on view `view`, when it is on one.
     pub fn on_view(&self, view: u64) -> Anchor {
         let mut anchor = self.clone();

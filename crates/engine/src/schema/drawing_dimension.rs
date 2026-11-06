@@ -524,6 +524,9 @@ pub struct DimensionResult {
     /// What its name finds when ambiguous, or the leads when lost: never taken but by a repair.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<CandidateResult>,
+    /// What to know about it: a view edited since to leave out what it points at.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

@@ -102,6 +102,46 @@ fn a_balloon_is_refused_what_it_cant_point_at() {
     assert_eq!(saved(&s), before);
 }
 
+/// A balloon attaches only to a part its view draws. One on a part the view's hide leaves out, or
+/// that its source doesn't choose, is refused in words that name the view and the setting, and the
+/// drawing is left as it was. A view projected from it follows its parent's hide and names the parent.
+#[test]
+fn a_balloon_is_refused_on_a_part_its_view_leaves_out() {
+    let (mut s, view, [_, bracket]) = placed();
+    let v = ids::encode(view);
+    let on = |view: &str| json!({"view": view, "edge": {"point": [40, 0, 0], "path": [bracket]}, "at": [60, 40]});
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide": [[bracket]]}}));
+    let projected = run(&mut s, "drawing.view.projected", json!({"parent": v, "side": "right"}))["view"].as_str().unwrap().to_string();
+    let before = saved(&s);
+    let e = refused(&mut s, ADD, on(&v));
+    assert!(e.contains(&format!("view {v} doesn't draw that part: its hide leaves out occurrence path [{bracket}]")), "{e}");
+    let e = refused(&mut s, ADD, on(&projected));
+    assert!(e.contains(&format!("view {projected} doesn't draw that part")) && e.contains(&format!("(set on view {v})")), "{e}");
+    assert_eq!(saved(&s), before);
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide": null, "source": {"occurrences": [[]]}}}));
+    let e = refused(&mut s, ADD, on(&v));
+    assert!(e.contains(&format!("view {v} doesn't draw that part: its source draws only the occurrences it chose")), "{e}");
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"source": null}}));
+    assert_eq!(add(&mut s, view, bracket)["status"], "ok");
+}
+
+/// A balloon added before its view's settings left its part out stays where it is, and inspect
+/// warns, until the edit is undone.
+#[test]
+fn a_balloon_warns_when_its_view_leaves_its_part_out_later() {
+    let (mut s, view, [_, bracket]) = placed();
+    let v = ids::encode(view);
+    let id = add(&mut s, view, bracket)["balloon"].clone();
+    assert!(run(&mut s, INSPECT, json!({"balloon": id}))["warnings"].is_null());
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide": [[bracket]]}}));
+    let warned = run(&mut s, INSPECT, json!({"balloon": id}));
+    let words = format!("view {v} doesn't draw this part now: its hide leaves out occurrence path [{bracket}]");
+    assert_eq!(warned["warnings"], json!([words]), "{warned}");
+    assert_eq!(warned["status"], "ok", "it still points at its part");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(run(&mut s, INSPECT, json!({"balloon": id}))["warnings"].is_null());
+}
+
 /// An edit moves a balloon and names what changed, as one undo step; the same place again changes
 /// nothing and adds no step. What it points at isn't one of its settings.
 #[test]
