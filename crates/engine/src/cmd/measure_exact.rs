@@ -133,6 +133,10 @@ fn edge_sweep(body: &Body, edge: usize, forward: bool, frame: &PlaneFrame, tol: 
         let c = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).ok()?;
         let [t0, t1] = e.interval;
         let (a, b) = (c.point(t0)?, c.point(t1)?);
+        let off = |p: Vec3| (p - frame.origin).dot(frame.normal).abs() > tol.max(e.tolerance);
+        if off(a) || off(b) {
+            return None;
+        }
         return Some(if forward { triangle(a, b) } else { triangle(b, a) });
     }
     let c = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).ok()?;

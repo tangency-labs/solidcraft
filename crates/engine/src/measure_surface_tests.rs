@@ -139,6 +139,30 @@ fn a_flat_face_with_an_arc_in_its_outline_is_exact() {
     assert!(close(&r["items"][0]["area_mm2"], want, 1e-6), "the plate less a quarter of the bite is {want}: {r}");
 }
 
+/// A flat face with an elliptic hole is the plate less the ellipse, πab: an edge that is neither
+/// a line nor a circle is summed along its curve (#12372). The kernel keeps the ellipse as a
+/// cubic spline fitted to it, which encloses 2·10⁻³ mm² more than πab here; the display mesh's
+/// polygon read 2024.696 mm², 1.7 mm² off. Both faces read the same, though their loops run
+/// the hole's edges opposite ways round.
+#[test]
+fn a_flat_face_with_an_elliptic_hole_is_the_plate_less_the_exact_ellipse() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Cut"}));
+    run(&mut s, "sketch.ellipse", json!({"center": [30, 20], "major": [45, 20], "minor_radius": 8}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Cut", "through_all": true, "operation": "cut", "direction": "symmetric"}));
+    let want = 60.0 * 40.0 - std::f64::consts::PI * 15.0 * 8.0;
+    let mut areas = Vec::new();
+    for z in [0.0, 10.0] {
+        let face = flat_face_at(&s, z);
+        let r = measure(&mut s, vec![face]);
+        assert!(close(&r["items"][0]["area_mm2"], want, 1e-2), "the face at z = {z} is 60 × 40 − π·15·8 = {want}: {r}");
+        areas.push(r["items"][0]["area_mm2"].as_f64().unwrap());
+    }
+    assert!((areas[0] - areas[1]).abs() < 1e-9, "both faces read the same: {areas:?}");
+}
+
 /// The body's own volume is its exact πr²h, not the display mesh's (#9086).
 ///
 /// The volume of a body is still measured on a tessellation of it: the exact volume of a
