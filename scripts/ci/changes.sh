@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Prints the CI `changes` job outputs (code=, full=) for .github/workflows/ci.yml.
-# code=false only for a pull_request or merge_group whose diff against its base touches
-# nothing outside DOCS_ONLY (prose read by no build, test or goldens run). Anything else, and
-# any doubt (no base, fetch failure), is code=true. full=true when code=true and the event
-# is not a push to main (pushes run only the jobs that publish main's artifacts).
+# code=false only for a pull_request, merge_group or push whose diff against its base (for a
+# push, the commit before it) touches nothing outside DOCS_ONLY (prose read by no build, test or
+# goldens run), so a docs- or site-only merge to main runs no code job either. Anything else, and
+# any doubt (no base, a new branch's all-zero base, fetch failure), is code=true. full=true when
+# code=true and the event is not a push to main (pushes run only the jobs that publish main's
+# artifacts).
 # Usage: changes.sh <event> [base sha]
 set -euo pipefail
 event=${1:?event}; base=${2:-}
@@ -11,7 +13,7 @@ event=${1:?event}; base=${2:-}
 # unit statuses), not crates/** READMEs (cargo package reads them), not scripts/ or harness/.
 DOCS_ONLY='^(plan/findings/.*|plan/upstream-issues/.*|plan/[^/]*\.md|site/.*|docs/.*|assets/.*|[^/]*\.md)$'
 code=true
-if [ "$event" = pull_request ] || [ "$event" = merge_group ]; then
+if [ "$event" = pull_request ] || [ "$event" = merge_group ] || [ "$event" = push ]; then
   if [ -n "$base" ] && { git cat-file -e "$base^{commit}" 2>/dev/null || git fetch -q --depth=1 origin "$base"; }; then
     # --no-renames: a rename lists both its old and new path, so moving code into a docs path
     # still counts as a code change. Quoted (unusual) paths never match, which fails closed.

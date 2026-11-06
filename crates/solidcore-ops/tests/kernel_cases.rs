@@ -12,8 +12,10 @@
 //!   false), the rig itself rated it unsupported, or the conversion does not carry a record yet;
 //! - **unported**: an operation this crate does not have yet, named, so the case is not run;
 //! - **known-failing**: listed in `known_failing.json` beside the corpus, the one list, each entry
-//!   with its reason and issue. A listed case whose result moves from the rig's is reported, so
-//!   the list can shrink.
+//!   with its reason and issue. A listed case is steady while it reproduces the rig's result,
+//!   or, when its entry records `fails` (solidcore fails it differently from the rig), while it
+//!   fails exactly so. A listed case that moves from that (it passes, or fails otherwise) is
+//!   reported, so the list can shrink.
 //!
 //! The corpus's rules: `transform` is a copy, then the copy moved in place; `tagged` changes no
 //! geometry and its history is not graded; picks are record indices, passed to the operations
@@ -123,6 +125,12 @@ struct Listed {
     case: String,
     issue: String,
     reason: String,
+    /// For a case solidcore fails differently from the rig's recorded result: the failure it
+    /// was listed for, as the run reports it. The case is steady while it fails exactly so,
+    /// and moved when it passes or fails otherwise. Without it, a listed case is steady while
+    /// it reproduces the rig's result.
+    #[serde(default)]
+    fails: Option<String>,
 }
 
 fn known_failing() -> BTreeMap<String, Listed> {
@@ -1644,6 +1652,7 @@ fn grade(entry: &Path, listed: &BTreeMap<String, Listed>, timeout: Duration) -> 
         hang: false,
     };
     let is_listed = listed.contains_key(&key);
+    let fails = listed.get(&key).and_then(|l| l.fails.clone());
     let rig_status = e["rig"]["status"].as_str().unwrap_or("").to_owned();
     if !e["operation_expressible"].as_bool().unwrap_or(false) {
         g.kind = if is_listed {
@@ -1698,7 +1707,12 @@ fn grade(entry: &Path, listed: &BTreeMap<String, Listed>, timeout: Duration) -> 
     match r {
         Ok(dev) => {
             g.deviation = dev;
-            if is_listed {
+            if let Some(f) = &fails {
+                // listed for a failure, and it now gives the rig's result: off the list
+                g.kind = Kind::KnownFailing;
+                g.moved = true;
+                g.note = format!("gives the rig's result now (listed failing with: {f})");
+            } else if is_listed {
                 g.kind = Kind::KnownFailing;
                 "the rig's result (still failing as listed)".clone_into(&mut g.note);
             } else if rig_status == "unsupported" {
@@ -1720,7 +1734,8 @@ fn grade(entry: &Path, listed: &BTreeMap<String, Listed>, timeout: Duration) -> 
             } else {
                 Kind::Fail
             };
-            g.moved = is_listed;
+            // steady only when it fails exactly as it was listed for
+            g.moved = is_listed && fails.as_deref() != Some(w.as_str());
             g.note = w;
         }
     }

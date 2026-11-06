@@ -46,7 +46,7 @@ jobs:
       - id: c
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: scripts/ci/changes.sh "$EVENT" "$BASE" >> "$GITHUB_OUTPUT"
 
   ci-scripts:
@@ -133,30 +133,68 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-  # The kernel rig (#2394): SolidCraft's operation-level cases in
-  # crates/solidcore/tests/kernel_cases, replayed through solidcore-ops' public
-  # operations and graded against the rig's values (crates/solidcore-ops/tests/
-  # kernel_cases.rs). The test is #[ignore]d out of the workspace run; here it runs whole
-  # (about 15 s today). It fails on a case that fails, on a hang, and on a known-failing
-  # case whose result moved (the list must shrink); an operation solidcore-ops does not
-  # have yet is reported unported, not run. When the corpus grows slow, shard it by area
-  # with KERNEL_CASES_AREA. The table is uploaded.
-  kernel-rig:
+  # One build of solidcore in the goldens profile for the two checks that only run a binary:
+  # the kernel rig's test binary and the goldens binary, uploaded for the kernel-rig and
+  # goldens jobs below, so neither compiles the kernel again (rust-cache keeps dependencies,
+  # not workspace crates). The test job builds its own (every test binary, gigabytes, too much
+  # to pass between jobs) in parallel with this one.
+  build:
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: blacksmith-16vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> bin"
+          key: build
+      - name: Build the rig and goldens binaries (goldens profile)
+        run: |
+          mkdir -p dist
+          rig=$(cargo test --profile goldens -p solidcore-ops --test kernel_cases --no-run \
+                  --message-format=json \
+                | jq -r 'select(.reason == "compiler-artifact" and .target.name == "kernel_cases"
+                                and .profile.test) | .executable' | tail -n 1)
+          test -x "$rig"
+          cp "$rig" dist/kernel_cases
+          if [ "${{ needs.changes.outputs.full }}" = true ]; then
+            cargo build --profile goldens -p goldens
+            cp bin/goldens/goldens dist/goldens
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: check-binaries
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  # The kernel rig (#2394): SolidCraft's operation-level cases in
+  # crates/solidcore/tests/kernel_cases, replayed through solidcore-ops' public
+  # operations and graded against the rig's values (crates/solidcore-ops/tests/
+  # kernel_cases.rs). The test is #[ignore]d out of the workspace run; here it runs whole,
+  # from the build job's binary. It fails on a case that fails, on a hang, and on a
+  # known-failing case whose result moved (the list must shrink); an operation solidcore-ops
+  # does not have yet is reported unported, not run. When the corpus grows slow, shard it
+  # by area with KERNEL_CASES_AREA. The table is uploaded.
+  kernel-rig:
+    needs: [changes, build]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: check-binaries
+          path: dist
       - name: Kernel rig
         env:
-          # the test runs in its crate's directory, so the report path is absolute
           KERNEL_CASES_REPORT: ${{ github.workspace }}/reports/kernel-rig/table.md
+        # run as cargo test runs it: from the crate's directory
         run: |
           mkdir -p reports/kernel-rig
-          cargo test --profile goldens -p solidcore-ops --test kernel_cases -- --ignored --nocapture
+          chmod +x dist/kernel_cases
+          cd crates/solidcore-ops
+          "$GITHUB_WORKSPACE/dist/kernel_cases" --ignored --nocapture
       - name: Upload the table
         if: always()
         uses: actions/upload-artifact@v4
@@ -207,7 +245,7 @@ jobs:
   # differences. A golden changes only with `--bless`, justified in the pull request.
   # --jobs 0: one child process per unit, one per vCPU (same output as a serial run).
   goldens:
-    needs: changes
+    needs: [changes, build]
     if: needs.changes.outputs.full == 'true'
     runs-on: blacksmith-16vcpu-ubuntu-2404
     steps:
@@ -215,11 +253,11 @@ jobs:
       # upstream/TestFiles: the .smb, .sms and point files many fixtures read.
       - name: Upstream sources (TestFiles)
         uses: ./.github/actions/upstream
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
         with:
-          workspaces: ". -> bin"
-          key: goldens
-      - name: Build
-        run: cargo build --profile goldens -p goldens
+          name: check-binaries
+          path: dist
       - name: Every unit against its golden
-        run: bin/goldens/goldens --all --goldens --jobs 0 --no-report
+        run: |
+          chmod +x dist/goldens
+          dist/goldens --all --goldens --jobs 0 --no-report
