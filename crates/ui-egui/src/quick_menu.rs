@@ -97,7 +97,8 @@ pub(crate) fn watch(app: &mut SolveApp, ctx: &egui::Context) {
             crate::context_menu::close(app);
         }
         // Only a click's own selection: not a box selection, a browser pick or a script's.
-        if let Some((p, t)) = app.menu.quick.click
+        // The click is used up here, so a later change of the selection can't take it again.
+        if let Some((p, t)) = app.menu.quick.click.take()
             && now - t < 0.5
             && after_selection_ready(app)
         {
