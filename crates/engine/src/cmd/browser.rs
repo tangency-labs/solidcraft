@@ -157,7 +157,10 @@ fn keys(p: &Value, k: &str, cmd: &str) -> Result<Vec<String>> {
         _ => None,
     };
     let v = v.ok_or_else(|| bad(cmd, format!("`{k}` must be a list of item keys")))?;
-    if v.len() > 10_000 || v.iter().any(|x| x.is_empty() || (x.len() > 256 && crate::origins::item(x).is_none())) {
+    // Past the 256-character cap only the datum keys go through, each bounded by its own parser:
+    // an item's `o:<ids>/origin/<item>`, a folder's `o:<ids>/origin` - deep placements need them.
+    let past_cap = |x: &String| x.len() > 256 && crate::origins::item(x).is_none() && crate::origins::folder_path(x).is_none();
+    if v.len() > 10_000 || v.iter().any(|x| x.is_empty() || past_cap(x)) {
         return Err(bad(cmd, format!("`{k}` has bad keys")));
     }
     Ok(v)
