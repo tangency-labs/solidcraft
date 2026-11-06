@@ -102,11 +102,7 @@ render.library.environment.apply
 render.library.physical.prepare
 render.library.studio.apply
 render.library.studio.prepare
-render.library.surface.bind
 render.library.surface.prepare
-render.library.surface.unbind
-render.optics.bind
-render.optics.unbind
 render.preflight
 render.result.pin
 render.result.regrade
