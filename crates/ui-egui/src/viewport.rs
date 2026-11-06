@@ -90,6 +90,8 @@ pub struct ViewportState {
     /// A tool's click moved on the way (#2448): egui takes a press that moves past its
     /// click distance, or is held past its click time, as a drag, so its release is the click.
     pub(crate) tool_click: bool,
+    /// An active Dimension-mode drag from a corner; it owns the pointer through release.
+    pub(crate) corner_dimension_drag: Option<crate::tools::CornerDimensionDrag>,
     /// A Trim drag is drawing its path (`sketch_tools::trim_drag_*`).
     pub(crate) trim_drag: bool,
     /// Per-body boxes of one world state, held (not just its address, which a later state can
@@ -5086,6 +5088,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // A two-point shape being dragged out (#1630) follows the pointer and ends where it is let go,
     // even over the shape's own dimension box, which rides along beside the pointer.
     app.viewport.draw_drag_handled = false;
+    if app.viewport.corner_dimension_drag.is_some()
+        && (resp.drag_stopped() || !primary_down || app.tool.is_none() || held)
+        && let Some(drag) = app.viewport.corner_dimension_drag.take()
+    {
+        let at =
+            ui.input(|i| i.pointer.latest_pos()).filter(|p| resp.drag_stopped() && !held && rect.contains(*p) && !crate::shell::covered(app, *p));
+        crate::tools::corner_dimension_end(app, &proj, drag, at);
+        app.viewport.draw_drag_handled = true;
+    }
     if let Some(from) = app.viewport.draw_drag {
         let at = ui.input(|i| i.pointer.latest_pos()).filter(|p| rect.contains(*p) && !crate::shell::covered(app, *p));
         if resp.drag_stopped() || !primary_down {
@@ -5200,6 +5211,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         // places the first point as a click there would, the release the second. So does a line
         // with Preferences › Sketch › "Press and drag draws one line" (#7247).
         let line_drag = app.preferences.line_drag_draws_one;
+        if !held
+            && primary_nav.is_none()
+            && mode.is_none()
+            && mods.is_none()
+            && resp.drag_started_by(egui::PointerButton::Primary)
+            && let Some(a) = ui.input(|i| i.pointer.press_origin())
+        {
+            app.viewport.corner_dimension_drag = crate::tools::corner_dimension_start(app, &proj, a);
+        }
         let two_point_start = app
             .tool
             .as_ref()
@@ -5215,6 +5235,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.viewport.draw_drag = app.tool.as_ref().is_some_and(|t| t.pts.len() == 1).then_some(a);
         } else if app.tool.is_some()
             && !app.viewport.trim_drag
+            && app.viewport.corner_dimension_drag.is_none()
             && !held
             && primary_nav.is_none()
             && mode.is_none()
