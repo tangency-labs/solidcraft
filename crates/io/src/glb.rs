@@ -62,6 +62,7 @@ impl GlbMaterial {
         (self.name.clone(), self.color, self.metallic.to_bits(), self.roughness.to_bits(), self.ior.to_bits())
     }
 
+    /// The glTF material: linear base colour, metallic and roughness, and IOR when it is written.
     fn json(&self) -> Value {
         let [r, g, b] = self.color.map(solidcraft_geom::srgb::decode8);
         let mut m = json!({
@@ -162,6 +163,8 @@ struct Arrays {
     groups: BTreeMap<usize, Vec<[u32; 3]>>,
 }
 
+/// `b`'s mesh as [`Arrays`], refused when a point is not finite, a triangle uses a point the mesh
+/// does not have, or a material index is not one of the `materials`.
 fn arrays(b: &GlbBody, materials: usize) -> Result<Arrays> {
     let m = &b.mesh;
     let count = u32::try_from(m.positions.len()).ok().filter(|n| *n < u32::MAX).ok_or_else(|| too_large(&b.name))?;
@@ -213,6 +216,7 @@ fn arrays(b: &GlbBody, materials: usize) -> Result<Arrays> {
     Ok(Arrays { positions, min, max, normals, groups })
 }
 
+/// Why `body` is not written: the file would pass [`MAX_GLB_BYTES`].
 fn too_large(body: &str) -> IoError {
     IoError::Invalid(format!(
         "{body}: the mesh is too large for a GLB file (at most {} MiB); export fewer bodies or use standard quality",
@@ -261,11 +265,13 @@ impl Chunk {
         Ok(self.views.len() - 1)
     }
 
+    /// Add accessor `a` and return its index.
     fn accessor(&mut self, a: Value) -> usize {
         self.accessors.push(a);
         self.accessors.len() - 1
     }
 
+    /// Append `v` as a vertex-attribute buffer view and return the view's index.
     fn vec3s(&mut self, v: &[[f32; 3]]) -> Result<usize> {
         self.view(v.iter().flatten().map(|x| x.to_le_bytes()), ARRAY_BUFFER)
     }
