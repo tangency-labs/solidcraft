@@ -16,6 +16,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             "Snap to face and edge centres",
                         ),
                         (setting::hole_moves, "prefs.design_tools.hole_moves_help", "hole_moves", "Move holes by clicking or dragging"),
+                        (setting::hole_several, "prefs.design_tools.hole_several_help", "hole_several", "Several holes on one face"),
                     ] {
                         ui.horizontal_wrapped(|ui| {
                             let response = setting(app, ui).backing_on_hover_text(app.tr(help));

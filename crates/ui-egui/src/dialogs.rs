@@ -5804,10 +5804,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 );
             } else {
                 // One hole per pick: a curved surface split at its seam is picked whole (both
-                // halves, the clicked one first), but the hole goes where it was clicked only.
+                // halves, the clicked one first), but the hole goes where it was clicked only. A
+                // face takes one hole, or several when Preferences says so.
+                let several = crate::hole_place::several(app, d).then(|| crate::hole_place::several_places(s, sels(d, 0)));
                 let mut taken: Vec<Sel> = Vec::new();
-                for x in sels(d, 0) {
-                    if !matches!(x, Sel::Face { .. }) || taken.iter().any(|t| same_face(t, x)) {
+                for (i, x) in sels(d, 0).iter().enumerate() {
+                    let skip = match &several {
+                        Some(places) => !places.contains(&i),
+                        None => !matches!(x, Sel::Face { .. }) || taken.iter().any(|t| same_face(t, x)),
+                    };
+                    if skip {
                         continue;
                     }
                     taken.extend(crate::viewport::grouped_selection(s, x));

@@ -865,6 +865,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `hidden_toolbar_tabs` (default `[]`: all existing tabs, including Sheet Metal and Weldments, stay visible; lists tabs to hide, each once, e.g. `["SURFACE", "SHEET METAL"]`; hidden tabs stay hidden regardless of the design's features; [ribbon layout](ribbon-layout.md))
 - `history_sketches` (`in_order` (default), `under_feature`: the History at the left lists a sketch under the first feature built from it, #6489; the timeline at the bottom keeps the creation order)
 - `hole_moves` (default false: a placed Single hole has a drag handle (`hole:<n>`), and a pick on a face that has a hole moves it there)
+- `hole_several` (default false: a face takes several Single holes; a pick elsewhere on a face that has a hole adds another, and a pick on a hole takes it out)
 - `hole_snaps` (default false: a Single hole snaps to its face's middle and round edges' centres)
 - `home_fit_size` (0.1…1, default 1: how much of the view the model fills when Home, Fit, an opened design or a navigator view change frames it, with `navigator_fit` on or off; 1 fills the room between the panels, the compass and the navigation bar, as before; #10091)
 - `joint_rotation_coarse` (default 10°): coarse Assembly Move rotation step, in 0.001…180°.
