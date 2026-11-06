@@ -1419,6 +1419,11 @@ preference_settings! {
     /// Each tree row's eye between its fold arrow and its radio, as before #8718, instead of in a
     /// column at the rows' right end. Off by default.
     browser_eye_left: bool = false, PAGE_LAYOUT;
+    /// Drag a row in the Browser's ordinary Features folder to a new place in the timeline
+    /// (#12766). An order that would break a feature or split a folder is refused and the design
+    /// stays as it was. Off, those rows do not reorder. The History in the browser, and the
+    /// Sketches and Bodies folders, are unchanged.
+    browser_feature_reorder: bool = true, PAGE_LAYOUT;
     /// Every component placement in the browser starts open, as before #9274, instead of closed
     /// until the user opens it. Off by default.
     browser_components_open: bool = false, PAGE_LAYOUT;
@@ -6294,6 +6299,7 @@ mod tests {
             ("view_confirm_corner", json!(true), PAGE_LAYOUT),
             ("status_bar", json!(true), PAGE_LAYOUT),
             ("browser_eye_left", json!(true), PAGE_LAYOUT),
+            ("browser_feature_reorder", json!(false), PAGE_LAYOUT),
             ("browser_components_open", json!(true), PAGE_LAYOUT),
             ("browser_rows_start_closed", json!(true), PAGE_LAYOUT),
             ("quick_measure", json!(true), PAGE_GRAPHICS),

@@ -2518,6 +2518,8 @@
   "prefs.browser_components_open_note": "浏览器中的每个组件都像以前一样初始展开，而不是在您展开前保持折叠。",
   "prefs.browser_eye_left": "折叠箭头旁的眼睛图标",
   "prefs.browser_eye_left_note": "浏览器各行的显示切换像以前一样位于折叠箭头旁，而不是在行右端的一列中。",
+  "prefs.browser_feature_reorder": "拖动特征行以重新排序",
+  "prefs.browser_feature_reorder_note": "在浏览器的特征文件夹中，将一行拖到时间线的新位置。会破坏特征或拆开文件夹的顺序会被拒绝，设计保持原样。",
   "prefs.browser_reveal_on_hover": "悬停时显示",
   "prefs.browser_rows_start_closed": "浏览器中的行默认折叠",
   "prefs.browser_rows_start_closed_note": "浏览器中的放置和文件夹默认折叠，因此包含大量组件的设计只显示顶层行。每一行可通过其箭头、“全部展开”或“在浏览器中查找”打开；“在浏览器中查找”只展开通往该实体的行，并重新折叠上次查找展开的行。在 3D 视图中选取实体不会改变浏览器。关闭时文件夹默认展开，放置按“组件初始展开”的设置显示，在 3D 视图中选取会使浏览器展开到该实体，与以前相同。",

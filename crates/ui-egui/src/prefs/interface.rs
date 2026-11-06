@@ -457,6 +457,14 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.browser_eye_left,
                     "browser_eye_left",
                 );
+                // Dragging a Features row reorders the timeline (#12766).
+                layout_check(
+                    ui,
+                    app.tr("prefs.browser_feature_reorder"),
+                    app.tr("prefs.browser_feature_reorder_note"),
+                    &mut app.preferences.browser_feature_reorder,
+                    "browser_feature_reorder",
+                );
             });
         });
         ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {

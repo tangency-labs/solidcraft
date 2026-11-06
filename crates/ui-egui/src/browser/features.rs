@@ -147,8 +147,22 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
         if id.is_some_and(|id| lit.contains(&id) || from_view.contains(&Some(id))) { Mark::Here } else { Mark::None }
     };
     if !compact {
-        for index in indices.into_iter().take_while(|&index| index < shown) {
-            let _ = feature_row(app, ui, acts, &here, index, depth + 1, None, mark(app, index), None);
+        // The ordinary Features folder lists the timeline order. Dragging a row uses the same
+        // reorder as the History, which refuses a place that would break a feature or split a
+        // folder (#12766). The History-in-Browser layout below has its own drag.
+        let reorder = app.preferences.browser_feature_reorder;
+        let drag_id = ui.scope_id().with(("sc_browser_features_drag", &scope));
+        let mut dragged = reorder.then(|| app.tree.content.current_mut().feature_drags.get(&drag_id).cloned()).flatten();
+        let listed: Vec<usize> = indices.into_iter().take_while(|&index| index < shown).collect();
+        let end = listed.last().map(|last| last + 1).unwrap_or(0);
+        let mut drops = Vec::with_capacity(listed.len() + 1);
+        for index in listed {
+            drops.push((ui.cursor().min.y, index));
+            let _ = feature_row(app, ui, acts, &here, index, depth + 1, None, mark(app, index), reorder.then_some(&mut dragged));
+        }
+        drops.push((ui.cursor().min.y, end));
+        if reorder {
+            drop_feature_rows(app, ui, drag_id, dragged, &drops);
         }
         return;
     }
@@ -446,6 +460,64 @@ fn drag_rows(
     app.tree.content.current_mut().feature_drags.insert(drag_id, drag);
 }
 
+/// Dragging a row in the ordinary Features folder. Letting go reorders the timeline; a place the
+/// reorder refuses (a feature would break, or a folder would split) leaves the design as it was
+/// and says so (#12766).
+fn drop_feature_rows(app: &mut SolveApp, ui: &egui::Ui, drag_id: egui::Id, dragged: Option<FeatureDrag>, drops: &[(f32, usize)]) {
+    let Some(drag) = dragged else { return };
+    if !crate::semantic_content::source_present(app, drag.source) {
+        app.tree.content.current_mut().feature_drags.remove(&drag_id);
+        return;
+    }
+    let (released, down) = ui.input(|i| (i.pointer.any_released(), i.pointer.any_down()));
+    if released || !down {
+        app.tree.content.current_mut().feature_drags.remove(&drag_id);
+    }
+    if !released && !down {
+        return;
+    }
+    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    let reach = crate::ui_kit::TREE_ROW_HEIGHT;
+    let (top, bottom) = drops.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(top, bottom), (y, _)| (top.min(*y), bottom.max(*y)));
+    let slot = ui
+        .ctx()
+        .pointer_latest_pos()
+        .filter(|p| ui.max_rect().x_range().contains(p.x) && p.y >= top - reach && p.y <= bottom + reach)
+        .and_then(|p| drops.iter().min_by(|a, b| (a.0 - p.y).abs().total_cmp(&(b.0 - p.y).abs())).copied());
+    if released {
+        if let Some((_, position)) = slot {
+            reorder_dropped(app, &drag.features, position);
+        }
+        return;
+    }
+    if let Some((y, _)) = slot {
+        let rect = ui.max_rect();
+        crate::ui_kit::history_drop_bar(
+            ui.painter(),
+            Rect::from_min_max(pos2(rect.left() + 4.0, y), pos2(rect.right() - 5.0, y)),
+            true,
+            Tokens::get().sketch_accent,
+        );
+    }
+    app.tree.content.current_mut().feature_drags.insert(drag_id, drag);
+}
+
+/// `slot` is a place in the timeline before the features there were removed. The moved features
+/// stay active when they land before the history marker, and rolled back when they land on it or
+/// behind it. A history that is fully rolled forward has no rolled-back place, so its last slot
+/// stays active.
+fn reorder_dropped(app: &mut SolveApp, features: &[u64], slot: usize) {
+    if features.is_empty() {
+        return;
+    }
+    let n = app.session.doc.features.len();
+    let marker = app.session.doc.marker.unwrap_or(n);
+    let active = slot < marker || marker >= n;
+    if let Err(why) = app.run("timeline.reorder_many", json!({ "features": features, "position": slot, "active": active })) {
+        app.set_status(why, true);
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -487,6 +559,104 @@ mod tests {
         assert_eq!(h.app.session.visibility.hidden_bodies, ["Plate"]);
         h.step(&json!({"click":{"handle":"eye:Box1"}})).unwrap();
         assert!(h.app.session.visibility.hidden_bodies.is_empty());
+    }
+
+    fn feature_names(h: &Harness) -> Vec<String> {
+        h.app.session.doc.features.iter().map(|feature| feature.name.clone()).collect()
+    }
+
+    fn open_features(h: &mut Harness) {
+        h.app.home.open = false;
+        h.app.tree.expanded.insert("c0/features".into());
+        h.settle();
+    }
+
+    fn row_handle(id: u64) -> String {
+        format!("row:browser-feature:c0:{id}")
+    }
+
+    /// #12766: dragging a later feature above an earlier one reorders the timeline, and Undo puts
+    /// it back. The history marker stays at the end, since both features stay active.
+    #[test]
+    fn dragging_a_features_row_reorders_the_timeline_and_undo_puts_it_back() {
+        let mut h = Harness::new();
+        let mut ids = Vec::new();
+        for name in ["First", "Second"] {
+            ids.push(h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":name})).unwrap()["feature"].as_u64().unwrap());
+        }
+        open_features(&mut h);
+        let undo = h.app.session.undo.len();
+        let first = crate::scenario::handle_at(&row_handle(ids[0])).expect("the first feature row");
+        h.step(&json!({"drag":[{"handle":row_handle(ids[1])},[first.x, first.y - 15.0]]})).unwrap();
+        h.settle();
+        assert_eq!(feature_names(&h), ["Second", "First"]);
+        assert!(h.app.session.doc.marker.is_none(), "both features stay rolled forward");
+        assert_eq!(h.app.session.undo.len(), undo + 1, "the reorder is one undo step");
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(feature_names(&h), ["First", "Second"]);
+    }
+
+    /// Reordering two features that are both in front of the history marker leaves the marker
+    /// where it is: the feature behind it stays rolled back.
+    #[test]
+    fn dragging_a_features_row_keeps_the_history_marker_with_the_features() {
+        let mut h = Harness::new();
+        let mut ids = Vec::new();
+        for name in ["First", "Second", "Third"] {
+            ids.push(h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":name})).unwrap()["feature"].as_u64().unwrap());
+        }
+        h.app.run("timeline.roll_to", json!({"position":2})).unwrap();
+        open_features(&mut h);
+        let first = crate::scenario::handle_at(&row_handle(ids[0])).expect("the first feature row");
+        h.step(&json!({"drag":[{"handle":row_handle(ids[1])},[first.x, first.y - 15.0]]})).unwrap();
+        h.settle();
+        assert_eq!(feature_names(&h), ["Second", "First", "Third"]);
+        assert_eq!(h.app.session.doc.marker, Some(2), "Third stays rolled back, and the two in front stay active");
+    }
+
+    /// A folder's features stay in that folder. Dropping one outside the folder is refused: the
+    /// order, the folder and the undo depth stay as they were.
+    #[test]
+    fn dragging_a_feature_out_of_its_folder_is_refused() {
+        let mut h = Harness::new();
+        let mut ids = Vec::new();
+        for name in ["First", "Second", "Third"] {
+            ids.push(h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":name})).unwrap()["feature"].as_u64().unwrap());
+        }
+        h.app.run("timeline.group", json!({"name":"Pair","features":[ids[0], ids[1]]})).unwrap();
+        let folder = h.app.session.doc.timeline_groups.iter().find(|group| group.name == "Pair").expect("the folder").features.clone();
+        open_features(&mut h);
+        let saved = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+        let third = crate::scenario::handle_at(&row_handle(ids[2])).expect("the third feature row");
+        h.step(&json!({"drag":[{"handle":row_handle(ids[0])},[third.x, third.y + 15.0]]})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.doc.to_json(), saved, "a split folder is refused");
+        assert_eq!(h.app.session.doc.timeline_groups.iter().find(|group| group.name == "Pair").map(|group| &group.features), Some(&folder));
+        assert_eq!(h.app.session.undo.len(), undo);
+        let (status, _, error) = h.app.status.clone().expect("the refusal reaches the status line");
+        assert!(error && status.contains("folder"), "{status}");
+    }
+
+    /// The preference turns the gesture off. Sketches stay out of this folder either way.
+    #[test]
+    fn the_feature_reorder_preference_leaves_rows_where_they_are() {
+        let mut h = Harness::new();
+        h.app.preferences.browser_feature_reorder = false;
+        let mut ids = Vec::new();
+        for name in ["First", "Second"] {
+            ids.push(h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":name})).unwrap()["feature"].as_u64().unwrap());
+        }
+        h.app.run("sketch.create", json!({"plane":"XY","name":"Sketch1"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        open_features(&mut h);
+        let labels = feature_rows(&mut h, "current");
+        assert!(labels.contains(&"First".to_string()) && labels.contains(&"Second".to_string()), "{labels:?}");
+        assert!(!labels.iter().any(|label| label == "Sketch1"), "{labels:?}");
+        let first = crate::scenario::handle_at(&row_handle(ids[0])).expect("the first feature row");
+        h.step(&json!({"drag":[{"handle":row_handle(ids[1])},[first.x, first.y - 15.0]]})).unwrap();
+        h.settle();
+        assert_eq!(feature_names(&h), ["First", "Second", "Sketch1"]);
     }
 
     #[test]

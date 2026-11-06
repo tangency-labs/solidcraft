@@ -2518,6 +2518,8 @@
   "prefs.browser_components_open_note": "Mọi thành phần trong trình duyệt đều mở sẵn như trước, thay vì đóng cho đến khi bạn mở.",
   "prefs.browser_eye_left": "Biểu tượng mắt cạnh mũi tên thu gọn",
   "prefs.browser_eye_left_note": "Các hàng trong cây thư mục hiển thị biểu tượng mắt bật/tắt cạnh mũi tên thu gọn như trước đây, thay vì trong một cột ở đầu bên phải của các hàng.",
+  "prefs.browser_feature_reorder": "Kéo hàng đối tượng để sắp xếp lại",
+  "prefs.browser_feature_reorder_note": "Trong thư mục Đối tượng của trình duyệt, kéo một hàng tới vị trí mới trên dòng thời gian. Thứ tự làm hỏng một đối tượng hoặc tách một thư mục sẽ bị từ chối, và thiết kế giữ nguyên.",
   "prefs.browser_reveal_on_hover": "Hiện khi di chuột",
   "prefs.browser_rows_start_closed": "Các dòng trong cây thư mục đóng sẵn",
   "prefs.browser_rows_start_closed_note": "Vị trí đặt và thư mục trong cây thư mục bắt đầu ở trạng thái đóng, nên thiết kế có nhiều thành phần chỉ hiện các dòng cấp trên cùng. Mỗi dòng mở bằng mũi tên của nó, “Mở rộng tất cả” hoặc “Tìm trong cây đối tượng”, lệnh này chỉ mở các dòng dẫn tới thân khối và đóng lại các dòng mà lần tìm trước đã mở. Chọn một thân khối trong khung nhìn 3D không làm thay đổi cây thư mục. Khi tắt, các thư mục mở sẵn, vị trí đặt theo tùy chọn “Thành phần mở sẵn”, và việc chọn trong khung nhìn 3D mở cây thư mục tới thân khối đó, như trước đây.",

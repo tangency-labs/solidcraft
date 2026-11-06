@@ -2518,6 +2518,8 @@
   "prefs.browser_components_open_note": "Every component in the browser starts open, as before, instead of closed until you open it.",
   "prefs.browser_eye_left": "Eye beside the fold arrow",
   "prefs.browser_eye_left_note": "Browser rows show their show/hide eye next to the fold arrow, as before, instead of in a column at the right end of the rows.",
+  "prefs.browser_feature_reorder": "Drag Features rows to reorder",
+  "prefs.browser_feature_reorder_note": "In the Browser's Features folder, drag a row to a new place in the timeline. An order that would break a feature or split a folder is refused, and the design stays as it was.",
   "prefs.browser_reveal_on_hover": "Reveal on hover",
   "prefs.browser_rows_start_closed": "Browser rows start closed",
   "prefs.browser_rows_start_closed_note": "Placements and folders in the Browser start closed, so a design with many components shows its top-level rows. Each opens with its arrow, Expand All or Find in Browser, which opens just the rows down to its body and closes again the ones the last find opened. A body picked in the 3D view leaves the Browser as it is. When off, folders start open, placements start as Components start open says, and a pick in the 3D view opens the Browser down to its body, as before.",

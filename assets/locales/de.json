@@ -2305,6 +2305,8 @@
   "prefs.browser_components_open_note": "Jede Komponente im Browser ist wie bisher von Anfang an aufgeklappt, statt zugeklappt zu bleiben, bis du sie aufklappst.",
   "prefs.browser_eye_left": "Auge neben dem Aufklapppfeil",
   "prefs.browser_eye_left_note": "Browserzeilen zeigen ihr Auge zum Ein- und Ausblenden wie bisher neben dem Aufklapppfeil statt in einer Spalte am rechten Zeilenende.",
+  "prefs.browser_feature_reorder": "Feature-Zeilen zum Umordnen ziehen",
+  "prefs.browser_feature_reorder_note": "Ziehen Sie im Ordner Features des Browsers eine Zeile an eine neue Stelle in der Zeitleiste. Eine Reihenfolge, die ein Feature beschädigen oder einen Ordner teilen würde, wird abgelehnt, und der Entwurf bleibt unverändert.",
   "prefs.browser_reveal_on_hover": "Beim Überfahren einblenden",
   "prefs.browser_rows_start_closed": "Browser-Zeilen beginnen geschlossen",
   "prefs.browser_rows_start_closed_note": "Platzierungen und Ordner im Browser beginnen geschlossen, sodass ein Entwurf mit vielen Komponenten seine obersten Zeilen zeigt. Jede öffnet sich mit ihrem Pfeil, „Alle ausklappen“ oder „Im Browser suchen“, das nur die Zeilen bis zu seinem Körper öffnet und die von der letzten Suche geöffneten wieder schließt. Ein in der 3D-Ansicht gewählter Körper lässt den Browser, wie er ist. Ist es aus, beginnen die Ordner geöffnet, Platzierungen so, wie „Komponenten zu Beginn aufgeklappt“ es festlegt, und eine Auswahl in der 3D-Ansicht öffnet den Browser bis zu ihrem Körper, wie bisher.",

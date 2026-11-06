@@ -45,6 +45,7 @@ const PROFILE_KEYS: &[&str] = &[
     "browser_bodies_folders",
     "browser_collapsed",
     "browser_eye_left",
+    "browser_feature_reorder",
     "browser_float",
     "browser_share",
     "browser_show",
