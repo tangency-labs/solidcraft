@@ -418,7 +418,7 @@ fn parameter_inventory_remains_reachable_with_regular_draft_rows() {
     h.step(&json!({"text":"missing_parameter"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(scenario::count_of("param:new:valid"), Some(0.0));
-    assert!(h.app.params.as_ref().unwrap().error.is_some());
+    assert!(h.app.params.as_ref().unwrap().banner().is_some());
     assert_eq!(h.app.session.doc.params.iter().filter(|p| !p.model).count(), 2);
     h.step(&json!({"click":{"handle":"dialog:Filter"}})).unwrap();
     assert!(!h.app.params.as_ref().unwrap().adding, "an abandoned nameless draft disappears");
