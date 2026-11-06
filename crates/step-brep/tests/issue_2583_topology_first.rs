@@ -143,7 +143,7 @@ fn volume(brep: &Brep) -> Option<f64> {
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
-    let mut copy = brep.clone();
+    let mut copy = brep.clone_standing_for_self().ok()?;
     brep_volume(&kernel, &mut copy, ACCURACY, &attrs).ok()
 }
 
@@ -190,7 +190,7 @@ fn rod_closed_form_is_the_bored_rod() {
 
 /// The Level 2 failures of `brep` (`check_brep`).
 fn level2_failures(brep: &Brep) -> usize {
-    let mut copy = brep.clone();
+    let mut copy = brep.clone_standing_for_self().expect("a copy of the body");
     let mut kernel = Kernel::default();
     check_brep(&mut kernel, &mut copy, CheckLevel::Level2)
         .expect("checks")
