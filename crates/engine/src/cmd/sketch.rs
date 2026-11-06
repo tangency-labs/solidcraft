@@ -2542,6 +2542,27 @@ fn ended_by(sk: &Sketch, q: usize, other: Option<usize>) -> Option<usize> {
     owners.next().is_none().then_some(first)
 }
 
+/// Whether `k` already holds through the sketch's own constraints, so Tangent need not add it
+/// (#12092): the same constraint (a coincident in either order), or a point on a curve that is one
+/// of that curve's ends or is joined to one by a coincident.
+fn already_held(sk: &Sketch, k: &ConstraintKind) -> bool {
+    let joined = |p: usize, q: usize| {
+        p == q
+            || sk
+                .constraints
+                .iter()
+                .any(|c| !c.driven && matches!(c.kind, ConstraintKind::Coincident { p: x, q: y } if (x, y) == (p, q) || (x, y) == (q, p)))
+    };
+    match *k {
+        ConstraintKind::Coincident { p, q } => joined(p, q),
+        ConstraintKind::PointOnCurve { p, c } => {
+            sk.curves.get(c).and_then(|curve| curve.kind.ends()).is_some_and(|(start, end)| joined(p, start) || joined(p, end))
+                || sk.constraints.iter().any(|x| !x.driven && x.kind == *k)
+        }
+        _ => sk.constraints.iter().any(|c| !c.driven && c.kind == *k),
+    }
+}
+
 /// Tangent with a curve's end point for `a` or `b` (#12092): that end lies on the other curve,
 /// or on the other end point, and the curve it ends is tangent to the other curve there. Both
 /// constraints come in one step. A line's end picked with a curve is what moves; otherwise the
@@ -2567,34 +2588,37 @@ fn tangent_at_end(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
             (None, None) => return Err(not_an_end("b")),
         };
         let (a, b) = two_different(cmd, (a, b))?;
-        let held = |k: &ConstraintKind| sk.constraints.iter().any(|c| !c.driven && c.kind == *k);
         let touch = match (pa, pb) {
             (Some(q), Some(r)) if q != r => Some(ConstraintKind::Coincident { p: q, q: r }),
             (Some(q), None) => Some(ConstraintKind::PointOnCurve { p: q, c: b }),
             (None, Some(r)) => Some(ConstraintKind::PointOnCurve { p: r, c: a }),
             _ => None,
         };
+        // A joint: the end already lies on the other curve (it is that curve's end, or joined to it).
+        let joint = touch.as_ref().is_some_and(|k| already_held(sk, k));
         let mut ids = Vec::new();
-        if let Some(k) = touch.filter(|k| !held(k)) {
+        if let Some(k) = touch.filter(|_| !joint) {
             ids.push(add_c(sk, k)?);
         }
         let tangent = add_c(sk, ConstraintKind::Tangent { a, b })?;
         ids.push(tangent.clone());
         // A line's end and a curve, in either order: only that end moves, so the line turns about
-        // its other end and gets longer or shorter to meet the curve (#12092). Otherwise, as for
-        // two curves, the first pick stays and the second moves.
+        // its other end and gets longer or shorter to meet the curve (#12092). At a joint that end
+        // can't leave the other curve: the curve it ends stays, and the other curve moves. Otherwise,
+        // as for two curves, the first pick stays and the second moves.
         let end = match (pa, pb) {
             (Some(q), None) => Some((q, a, b)),
             (None, Some(r)) => Some((r, b, a)),
             _ => None,
         };
-        let far = end.and_then(|(q, line, other)| match sk.curves.get(line).map(|c| &c.kind) {
+        let far = end.filter(|_| !joint).and_then(|(q, line, other)| match sk.curves.get(line).map(|c| &c.kind) {
             Some(k @ CurveKind::Line { .. }) => k.ends().map(|(start, end)| (q, if start == q { end } else { start }, other)),
             _ => None,
         });
+        let (stay, moves) = end.filter(|_| joint).map_or((a, b), |(_, own, other)| (own, other));
         match far {
             Some((q, f, other)) => apply_in_order(sk, &rep, &[Ent::Curve(other), Ent::Point(f)], Ent::Point(q), cmd, &ids)?,
-            None => apply_in_order(sk, &rep, &[Ent::Curve(a)], Ent::Curve(b), cmd, &ids)?,
+            None => apply_in_order(sk, &rep, &[Ent::Curve(stay)], Ent::Curve(moves), cmd, &ids)?,
         }
         Ok((tangent, ids))
     })?;

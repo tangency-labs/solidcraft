@@ -373,6 +373,30 @@ fn tangent_at_a_lines_end_puts_the_end_on_the_circle() {
     assert!(e.contains("end"), "{e}");
 }
 
+/// A line whose end is already joined to an arc's end (the coincident a click there adds): Tangent
+/// on that end and the arc, or on the two ends in either order, adds only the tangent, since the
+/// end already lies on the arc. The joint holds. With the end and the arc the line stays and the
+/// arc moves; with two ends the first pick stays.
+#[test]
+fn tangent_at_a_joint_adds_only_the_tangent() {
+    for (a, b, stays) in [("l1.end", "a1", "l1"), ("a1", "l1.end", "l1"), ("l1.end", "a1.start", "l1"), ("a1.start", "l1.end", "a1")] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [[2, 3], [12, 3]]}));
+        run(&mut s, "sketch.arc.center_point", json!({"center": [16, 9], "start": [12, 3], "sweep": 90}));
+        let joints = sketch(&s).constraints.len();
+        let kept = snap(&s, stays);
+        let r = run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
+        assert!(same(&snap(&s, stays), &kept), "{a}, {b}: {stays} moved");
+        assert_eq!(r["constraints"].as_array().map(Vec::len), Some(1), "{a}, {b}: {r}");
+        assert_eq!(sketch(&s).constraints.len(), joints + 1, "{a}, {b}: only the tangent is new");
+        let sk = sketch(&s);
+        let arc = sk.curve_index("a1").unwrap();
+        let (p, q, c) = (pt(&s, "l1.start"), pt(&s, "l1.end"), sk.center(arc).unwrap());
+        assert!(q.dist(pt(&s, "a1.start")) < 1e-6, "{a}, {b}: the joint came apart");
+        assert!(((q - p).cross(c - p).abs() / p.dist(q) - sk.radius(arc).unwrap()).abs() < 1e-6, "{a}, {b}: not tangent");
+    }
+}
+
 #[test]
 fn a_fixed_second_pick_makes_the_first_move() {
     let mut s = line_and_circle();
