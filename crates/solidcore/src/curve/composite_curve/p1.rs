@@ -1189,7 +1189,7 @@ impl CompositeCurve {
         }
 
         // create an array of link-list curve objects
-        let mut items: Vec<CurveItem> = Vec::with_capacity(total);
+        let mut items: Vec<CurveItem> = Vec::new();
         for c in curves {
             let mut item = CurveItem::new(c);
             // (status ignored upstream: GetEnds returns void)
@@ -1514,7 +1514,7 @@ fn flush_crv(
         // when a composite curve needs to be created
         if create_composite {
             let use_gaps = gaps.len() == curves.len();
-            let mut cs = Vec::with_capacity(curves.len());
+            let mut cs = Vec::new();
             for p in curves.drain(..) {
                 cs.push(match p {
                     Pending::Item(i) => take_curve(items, i)?,
@@ -1602,8 +1602,8 @@ pub(super) fn convert_to_bspline_curves_indexed(
     just_copy_bsplines: bool,
 ) -> Result<(Vec<Curve>, Vec<f64>, Vec<usize>)> {
     // init output
-    let mut out = Vec::with_capacity(curves.len());
-    let mut gaps = Vec::with_capacity(curves.len());
+    let mut out = Vec::new();
+    let mut gaps = Vec::new();
     let mut sources = Vec::with_capacity(curves.len());
 
     // locals

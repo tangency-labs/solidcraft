@@ -487,7 +487,7 @@ impl Parabola {
         let sols =
             curve.global_point_solve(k, &ivl, operation, test_point, tol, requested, &opts)?;
 
-        let mut out = Vec::with_capacity(sols.len());
+        let mut out = Vec::new();
         for sol in sols.as_slice() {
             let point_on_curve = curve.evaluate_point(k, sol.start.parameters[0])?;
             let (angle_param, _) = self.step_inversion(point_on_curve, false);

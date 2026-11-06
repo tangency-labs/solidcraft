@@ -2187,7 +2187,7 @@ impl Ellipse {
         )?;
 
         // Convert NURBS solutions to STEP solutions
-        let mut out = Vec::with_capacity(sols.len());
+        let mut out = Vec::new();
         for sol in sols.as_slice() {
             let mut r: Solution<ObjectRef> = Solution::new();
             r.solution_type = sol.solution_type;

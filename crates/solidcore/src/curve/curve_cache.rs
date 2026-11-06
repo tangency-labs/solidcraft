@@ -1476,7 +1476,7 @@ pub fn build_bezier_spans(k: &Kernel, curve: &Curve, knots: &[f64]) -> Result<Ve
     if knots.len() < 2 {
         return Err(SolidError::sm_err(OP_BUILD));
     }
-    let mut out = Vec::with_capacity(knots.len() - 1);
+    let mut out = Vec::new();
     let mut pv = [Vec3::UNDEF; 2];
 
     let mut param = knots.first().copied().unwrap_or(0.0);
