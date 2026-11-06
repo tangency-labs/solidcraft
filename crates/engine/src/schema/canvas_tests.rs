@@ -3,7 +3,7 @@ use solidcraft_doc::canvas::base64_encode;
 
 use super::{
     CanvasCalibrateParams, CanvasCalibrated, CanvasDecalParams, CanvasDeleteParams, CanvasDeleted, CanvasEditParams, CanvasEdited,
-    CanvasInsertParams, CanvasPlaced, CanvasPlane, DecalFace,
+    CanvasInsertParams, CanvasPlaced, CanvasPlane, CanvasStraightenParams, CanvasStraightened, DecalFace,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -30,6 +30,7 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(input_schema_for::<CanvasEditParams>(), &["angle", "canvas", "center", "flip", "name", "opacity", "visible", "width"]);
     assert_keys(input_schema_for::<CanvasCalibrateParams>(), &["a", "b", "canvas", "distance"]);
+    assert_keys(input_schema_for::<CanvasStraightenParams>(), &["a", "angle", "b", "canvas"]);
     assert_keys(input_schema_for::<CanvasDeleteParams>(), &["canvas"]);
 }
 
@@ -48,6 +49,8 @@ fn strict_keeps_todays_errors() {
         ("canvas.delete", json!({"canvas": ["Canvas1"]})),
         ("canvas.calibrate", json!({})),
         ("canvas.calibrate", json!({"canvas": {}})),
+        ("canvas.straighten", json!({})),
+        ("canvas.straighten", json!({"canvas": [1]})),
         ("canvas.decal", json!({"data": png()})),
         ("canvas.decal", json!({"data": png(), "face": null})),
         ("canvas.decal", json!({"data": png(), "face": [1, 2]})),
@@ -87,9 +90,13 @@ fn strict_keeps_todays_errors_with_a_canvas() {
             ("canvas.calibrate", json!({"canvas": c, "a": [0, 0], "b": [1, 0], "distance": 0})),
             ("canvas.calibrate", json!({"canvas": c, "a": [0, 0], "b": [1, 0], "distance": "5"})),
             ("canvas.calibrate", json!({"canvas": c, "a": [0, 0], "b": [1, 0], "distance": -2})),
+            ("canvas.straighten", json!({"canvas": c, "b": [1, 0]})),
+            ("canvas.straighten", json!({"canvas": c, "a": [0, 0], "b": [1]})),
+            ("canvas.straighten", json!({"canvas": c, "a": [0, 0], "b": [1, 0], "angle": "flat"})),
+            ("canvas.straighten", json!({"canvas": c, "a": [0, 0], "b": [1, 0], "angle": 1e12})),
         ]
     };
-    for index in 0..9 {
+    for index in 0..13 {
         let error = |level: ParamCheck| {
             let mut s = Session { param_check: level, ..Session::default() };
             let c = s.execute("canvas.insert", &json!({"data": png()})).unwrap()["canvas"].as_u64().unwrap();
@@ -148,6 +155,18 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"canvas": 1, "a": [0, 0], "b": [20, 0]}), false),
             (json!({"a": [0, 0], "b": [20, 0], "distance": 50}), false),
             (json!({"canvas": 1, "a": [0, 0], "b": [20, 0], "distance": 0}), false),
+        ],
+    );
+    check(
+        input_schema_for::<CanvasStraightenParams>(),
+        &[
+            (json!({"canvas": "Canvas1", "a": [0, 0], "b": {"x": 20, "y": 1}}), true),
+            (json!({"canvas": 1, "a": [0, 0], "b": [20, 1], "angle": 90}), true),
+            (json!({"canvas": 1, "a": [0, 0], "b": [20, 1], "angle": null}), true),
+            (json!({"canvas": 1, "a": [0, 0], "angle": 90}), false),
+            (json!({"a": [0, 0], "b": [20, 1]}), false),
+            (json!({"canvas": 1, "a": [0, 0], "b": [20, 1], "angle": "vertical"}), false),
+            (json!({"canvas": 1, "a": [0, 0], "b": [20, 1], "distance": 5}), false),
         ],
     );
     check(input_schema_for::<CanvasEditParams>(), &[(json!({"canvas": 2, "visible": false}), true), (json!({"visible": false}), false)]);
@@ -220,6 +239,15 @@ fn replies_match_the_output_schema() {
     let r = run(&mut s, "canvas.calibrate", json!({"canvas": "Renamed", "a": [0, 0], "b": {"x": 20, "y": 0}, "distance": 50}));
     matches(output_schema_for::<CanvasCalibrated>(), &r);
     assert!((r["width"].as_f64().unwrap_or_default() - 150.0).abs() < 1e-9, "{r}");
+    for p in [
+        json!({"canvas": "Renamed", "a": [0, 0], "b": {"x": 20, "y": 2}}),
+        json!({"canvas": first, "a": [0, 0], "b": [20, 2], "angle": 90}),
+        json!({"canvas": first, "a": [1, 1], "b": [-20, 3], "angle": null}),
+    ] {
+        let r = run(&mut s, "canvas.straighten", p);
+        matches(output_schema_for::<CanvasStraightened>(), &r);
+        assert_eq!(r["canvas"], json!(first), "{r}");
+    }
     let r = run(&mut s, "canvas.delete", json!({"canvas": first}));
     matches(output_schema_for::<CanvasDeleted>(), &r);
     assert_eq!(r, json!({"deleted": first}));
