@@ -332,10 +332,10 @@ pub(crate) fn selected_equation(app: &SolveApp) -> Option<String> {
     state.sketch(sid)?.sketch.equation_of(id).map(|e| e.curve.clone())
 }
 
-/// Sketch modify inputs accept only the sketch being edited. Origin axes remain valid
-/// rectangular-pattern directions, while Hole continues using its separate POINTS mask.
-pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) -> Option<Sel> {
-    active_candidate(d, session, hit).or_else(|| entities_candidate(d, session, hit))
+/// What a click on `hit` picks in a sketch modify window: what the active input takes
+/// ([`candidate`]), else what the Entities list takes ([`entities_candidate`]).
+pub(crate) fn pick_candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) -> Option<Sel> {
+    candidate(d, session, hit).or_else(|| entities_candidate(d, session, hit))
 }
 
 /// The selection a hit adds to the Entities list although another input is active: the commands
@@ -365,10 +365,13 @@ fn entities_candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hi
 /// Whether a click on `hit` goes to the Entities list rather than the active input (see
 /// [`entities_candidate`]).
 pub(crate) fn picks_entity(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) -> bool {
-    active_candidate(d, session, hit).is_none() && entities_candidate(d, session, hit).is_some()
+    candidate(d, session, hit).is_none() && entities_candidate(d, session, hit).is_some()
 }
 
-fn active_candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) -> Option<Sel> {
+/// What the active input of a sketch modify window takes. Sketch modify inputs accept only the
+/// sketch being edited. Origin axes remain valid rectangular-pattern directions, while Hole
+/// continues using its separate POINTS mask.
+pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) -> Option<Sel> {
     let active = session.active_sketch?;
     match hit {
         Hit::SketchCurve { sketch, .. } | Hit::SketchPoint { sketch, .. } | Hit::Profile { sketch, .. } if *sketch != active => None,
