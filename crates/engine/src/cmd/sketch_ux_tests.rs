@@ -2079,11 +2079,8 @@ fn the_first_dimension_scales_a_free_shape_about_its_own_centre() {
         let mut s = new_sketch();
         run(&mut s, "sketch.rectangle.center", json!({"center": [100, 100], "corner": [105, 105]}));
         let before = sketch(&s);
-        let out = run(
-            &mut s,
-            "sketch.dimension",
-            json!({"entities": ["l1"], "value": "500 mm", "scale_sketch": true, "scale_about_origin": about_origin}),
-        );
+        let out =
+            run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "500 mm", "scale_sketch": true, "scale_about_origin": about_origin}));
         assert_eq!(out["scaled"], 50.0, "{out}");
         assert_eq!(out["measured"], 500.0, "{out}");
         let after = sketch(&s);
