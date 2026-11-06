@@ -3435,8 +3435,15 @@ pub(crate) fn progress_pill(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) ->
     let fraction = (done as f64 / total as f64).clamp(0.0, 1.0) as f32;
     let phase_key = format!("render.image_{phase}");
     let name = app.render_workspace.view.job_shot.as_ref().unwrap_or(&app.render_workspace.view.name).clone();
-    let status = format!("· {} · {:.0}%", app.tr(&phase_key), fraction * 100.0);
-    let cancel = crate::ui_kit::progress_action(ui, key, &name, &status, fraction, app.tr_label("Cancel"));
+    let (message, meter) = if phase == "preparing" && status["resolved"]["executor"] == "gpu-path" {
+        let warning = app.tr("render.gpu_job_shader_wait");
+        let message =
+            app.session.render_job_handle(job).map_or_else(|_| format!("· {warning}"), |handle| format!("· {warning} · {}", mmss(handle.elapsed())));
+        (message, None)
+    } else {
+        (format!("· {} · {:.0}%", app.tr(&phase_key), fraction * 100.0), Some(fraction))
+    };
+    let cancel = crate::ui_kit::progress_action(ui, key, &name, &message, meter, app.tr_label("Cancel"));
     crate::scenario::publish_target("render:progress-cancel", cancel.rect);
     if cancel.clicked() {
         app.start("render.cancel");

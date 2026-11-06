@@ -6975,9 +6975,11 @@ fn auto_opened_image_cancel_returns_to_model_and_preserves_previous_or_explicit_
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn auto_opened_image_failure_returns_to_model_and_reports_the_job_error() {
+fn gpu_preparation_shows_shader_warning_then_reports_job_failure() {
     use solidcraft_engine::render::job;
-    struct Failed;
+    use std::sync::{Mutex, mpsc};
+    use std::time::Duration;
+    struct Failed(mpsc::Sender<()>, Mutex<mpsc::Receiver<()>>);
     impl job::ImageExecutor for Failed {
         fn descriptor(&self) -> job::Result<ExecutorDescriptor> {
             let mut descriptor = job::CpuHost::cooperative().descriptor()?;
@@ -6989,11 +6991,15 @@ fn auto_opened_image_failure_returns_to_model_and_reports_the_job_error() {
             job::admit(scene, request)
         }
         fn begin(&self, _: ProductScene, _: job::ImageRequest, _: job::JobOptions, _: job::CancelToken) -> job::Result<Box<dyn job::ImageWork>> {
+            self.0.send(()).unwrap();
+            let _ = self.1.lock().unwrap().recv_timeout(Duration::from_secs(10));
             Err(job::JobError::new(job::ErrorCode::Internal, "controlled image failure"))
         }
     }
     let mut h = output_viewer_fixture();
-    let host = job::ImageHost::with_executor(Arc::new(Failed)).unwrap();
+    let (entered, preparing) = mpsc::channel();
+    let (release, wait) = mpsc::channel();
+    let host = job::ImageHost::with_executor(Arc::new(Failed(entered, Mutex::new(wait)))).unwrap();
     h.app.session.register_render_job_host(host.clone()).unwrap();
     h.app.render_workspace.path_host = PathHost::Ready(host);
     h.app.render_workspace.view.method = ImageMethod::GpuRaytrace;
@@ -7001,7 +7007,23 @@ fn auto_opened_image_failure_returns_to_model_and_reports_the_job_error() {
     let job = h.app.render_workspace.view.job.unwrap();
     assert_eq!(h.app.render_workspace.view.auto_result_job.as_ref().map(|auto| auto.job), Some(job));
     let handle = h.app.session.render_job_handle(job).unwrap();
-    assert_eq!(handle.wait_timeout(std::time::Duration::from_secs(10)).unwrap().progress.phase, job::Phase::Failed);
+    preparing.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(handle.status().unwrap().progress.phase, job::Phase::Preparing);
+    let before = handle.elapsed();
+    let _ = h.ctx.run_ui(Default::default(), |ui| {
+        assert!(progress_pill(&mut h.app, ui, "render:progress"));
+    });
+    let warning = h.app.tr("render.gpu_job_shader_wait");
+    assert!(
+        [before, handle.elapsed()]
+            .into_iter()
+            .any(|elapsed| { crate::scenario::rect_of(&format!("dialog:inline:· {warning} · {}", mmss(elapsed))).is_some() })
+    );
+    assert!(crate::scenario::rect_of("render:progress:spinner").is_some());
+    assert!(crate::scenario::rect_of("dialog:progress:render:progress").is_none());
+    assert!(crate::scenario::rect_of("render:progress:cancel").is_some());
+    release.send(()).unwrap();
+    assert_eq!(handle.wait_timeout(Duration::from_secs(10)).unwrap().progress.phase, job::Phase::Failed);
     cache_render_images(&mut h.app, &h.ctx);
     assert!(!h.app.render_workspace.view.result);
     assert!(h.app.render_workspace.view.auto_result_job.is_none());
