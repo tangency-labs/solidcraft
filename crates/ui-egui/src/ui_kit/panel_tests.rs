@@ -2461,6 +2461,30 @@ fn inset_border_skips_tiny_or_invalid_surfaces_and_keeps_dock_contacts_square() 
 }
 
 #[test]
+fn inset_border_of_a_host_scrolled_out_of_view_draws_nothing() {
+    let mut t = Tokens::light();
+    t.borders.primary_inset = Some(crate::theme::InsetBorder { stroke: egui::Stroke::new(1.0, egui::Color32::YELLOW), gap: 0.0 });
+    let _restore = crate::theme::scoped_tokens(t);
+    let ctx = crate::fonts::test_context();
+    let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+        let frame = Container::for_layout(crate::shell::LayoutMode::Floating, Surface::Panel)
+            .frame(&ctx, t.panel, crate::frame::Side::Left)
+            .inner_margin(8.0);
+        // A scroll area's viewport, and a card that has scrolled above it.
+        let viewport = egui::Rect::from_min_size(egui::pos2(0.0, 300.0), egui::vec2(400.0, 300.0));
+        let card = egui::Rect::from_min_size(egui::pos2(20.0, 100.0), egui::vec2(300.0, 120.0));
+        Container::paint_inset(&ui.painter().with_clip_rect(viewport), card, frame);
+    });
+    for shape in &output.shapes {
+        crate::test_support::each_shape(&shape.shape, &mut |s| {
+            if let egui::Shape::Rect(rect) = s {
+                assert_ne!(rect.stroke.color, egui::Color32::YELLOW, "the outline stays inside the scroll area");
+            }
+        });
+    }
+}
+
+#[test]
 fn menu_companion_is_visible_in_frame_padding_and_bounded_by_its_surface() {
     let mut t = Tokens::dark();
     t.borders.primary = Some(egui::Stroke::new(2.0, egui::Color32::WHITE));

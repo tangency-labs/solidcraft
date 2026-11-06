@@ -797,15 +797,22 @@ impl Container {
     /// It consumes no layout space or input target. Tiny/collapsed surfaces omit it.
     pub(crate) fn paint_inset(painter: &egui::Painter, widget: egui::Rect, frame: Frame) {
         // Ordinary hosts supply a content well clip, which excludes their padding.
-        // Their companion belongs to the whole surface instead of that well.
-        Self::paint_inset_clipped(painter, widget, frame, painter.ctx().content_rect());
+        // Their companion belongs to the whole surface instead of that well, but no further:
+        // a host scrolled out of view (a Preferences preview) leaves no outline behind.
+        let m = frame.inner_margin;
+        let padding = [m.leftf(), m.rightf(), m.topf(), m.bottomf()].into_iter().fold(0.0, f32::max) + frame.stroke.width;
+        Self::paint_inset_clipped(painter, widget, frame, painter.clip_rect().expand(padding));
     }
 
     /// Bounded hosts supply their inherited outer clip so decoration cannot
     /// escape a partially visible card. Geometry matches the ordinary companion.
     pub(crate) fn paint_inset_clipped(painter: &egui::Painter, widget: egui::Rect, frame: Frame, outer_clip: egui::Rect) {
         let mut painter = painter.clone();
-        painter.set_clip_rect(widget.intersect(painter.ctx().content_rect()).intersect(outer_clip));
+        let visible = widget.intersect(painter.ctx().content_rect()).intersect(outer_clip);
+        if !visible.is_positive() {
+            return;
+        }
+        painter.set_clip_rect(visible);
         let t = Tokens::get();
         if let Some(bevel) = t.borders.bevel {
             bevel.paint(&painter, widget, frame.corner_radius, false, true);
