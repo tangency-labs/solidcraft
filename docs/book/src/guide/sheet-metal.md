@@ -205,8 +205,9 @@ two segments meet, and `then` is refused on a split edge: bend each segment's fa
 feature. Stretches that meet within 1e-9 (the junction tolerance, `SEGMENT_JOIN_EPS`) are one
 partition: the junction is snapped shut whatever the two stretches' angle, height or side are, so
 no gap survives into trimming or the flat pattern, and only stretches that match make one bend. A
-stretch narrower than that tolerance is no bend of its own: the junction closes over it (its angle
-and height do not build), so no reversed span reaches the flat pattern.
+stretch narrower than that tolerance is no bend of its own: the run before it takes that stretch
+(its angle and height do not build), so the bends still tile the edge with nothing left uncovered
+and no reversed span reaches the flat pattern.
 The whole stretch must lie on one straight line of the outline, with no gap in it: a stretch
 along a curve is refused (its fractions would only follow chords), a stretch across a notch or a
 step is refused too, and a straight edge a cut-out has shortened can still be split because the

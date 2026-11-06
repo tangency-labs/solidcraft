@@ -7109,3 +7109,81 @@ fn flange_segments_split_the_piece_a_notch_leaves() {
     assert!((bends[0].3 - 0.0).abs() < 1e-9 && (bends[1].4 - 80.0).abs() < 1e-9, "{bends:?}");
     assert!((bends[2].3 - 120.0).abs() < 1e-9 && (bends[3].4 - 200.0).abs() < 1e-9, "{bends:?}");
 }
+/// Two slivers narrower than the junction tolerance, with heights of their own, between two 20 mm
+/// stretches: the run before each sliver absorbs it, so the bends tile the edge with no gap or
+/// overlap, and the part is the one the equivalent merged partition builds (#5927, #5928).
+#[test]
+fn flange_segments_absorb_a_collapsed_stretch_so_the_edge_stays_covered() {
+    for position in ["inside", "outside"] {
+        let mut s = Session::default();
+        al2_base(&mut s);
+        run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0.0,"to":0.5,"height":"20 mm"},
+                {"from":0.5,"to":0.50000000075,"height":"15 mm"},
+                {"from":0.50000000075,"to":0.5000000015,"height":"10 mm"},
+                {"from":0.5000000015,"to":1.0,"height":"20 mm"}]}],
+                "height":"20 mm","angle":"90 deg","position":position}),
+        );
+        assert!(no_errors_or_warnings(&s), "{position}: {:?}", s.model.results);
+        let f = flat(&mut s);
+        let bends = bends_of(&f);
+        assert!(!bends.is_empty(), "{position}: no bend: {f}");
+        // The bends tile the edge's 200 mm: the first starts at 0, each starts where the one before
+        // it ends and the last ends at 200, so no interval of the edge is left uncovered (and none
+        // is covered twice).
+        assert!((bends[0].3 - 0.0).abs() < 1e-9, "{position}: the first bend starts at {}: {bends:?}", bends[0].3);
+        assert!((bends[bends.len() - 1].4 - 200.0).abs() < 1e-9, "{position}: the last bend ends at {}: {bends:?}", bends[bends.len() - 1].4);
+        for pair in bends.windows(2) {
+            assert!((pair[0].4 - pair[1].3).abs() < 1e-9, "{position}: the bends leave a gap or overlap at {}: {bends:?}", pair[0].4);
+        }
+        // The two slivers join the 20 mm bend on either side of them (their own heights do not
+        // build), so the equivalent merged partition of this list is the whole edge at 20 mm, and
+        // the part is that partition's: same volume, same bends.
+        let mut merged = Session::default();
+        al2_base(&mut merged);
+        run(&mut merged, "sheet.flange", json!({"edges":[[100,0,2]],"height":"20 mm","angle":"90 deg","position":position}));
+        assert!(no_errors_or_warnings(&merged), "{position}: {:?}", merged.model.results);
+        assert!(rel(volume(&mut s), volume(&mut merged)) < 1e-9, "{position}: {} vs {}", volume(&mut s), volume(&mut merged));
+        assert_eq!(f["bends"], flat(&mut merged)["bends"], "{position}: {f}");
+    }
+}
+
+/// Three slivers in a row, together wider than the junction tolerance: each is absorbed by the run
+/// before it, so repeated absorption cannot leave a hole and the part is the merged partition's
+/// (#5927, #5928).
+#[test]
+fn flange_segments_absorb_a_run_of_slivers_without_leaving_a_hole() {
+    for position in ["inside", "outside"] {
+        let mut s = Session::default();
+        al2_base(&mut s);
+        run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0.0,"to":0.5,"height":"20 mm"},
+                {"from":0.5,"to":0.50000000075,"height":"15 mm"},
+                {"from":0.50000000075,"to":0.5000000015,"height":"10 mm"},
+                {"from":0.5000000015,"to":0.50000000225,"height":"15 mm"},
+                {"from":0.50000000225,"to":1.0,"height":"20 mm"}]}],
+                "height":"20 mm","angle":"90 deg","position":position}),
+        );
+        assert!(no_errors_or_warnings(&s), "{position}: {:?}", s.model.results);
+        let f = flat(&mut s);
+        let bends = bends_of(&f);
+        assert!(!bends.is_empty(), "{position}: no bend: {f}");
+        assert!((bends[0].3 - 0.0).abs() < 1e-9, "{position}: the first bend starts at {}: {bends:?}", bends[0].3);
+        assert!((bends[bends.len() - 1].4 - 200.0).abs() < 1e-9, "{position}: the last bend ends at {}: {bends:?}", bends[bends.len() - 1].4);
+        for pair in bends.windows(2) {
+            assert!((pair[0].4 - pair[1].3).abs() < 1e-9, "{position}: the bends leave a gap or overlap at {}: {bends:?}", pair[0].4);
+        }
+        let mut merged = Session::default();
+        al2_base(&mut merged);
+        run(&mut merged, "sheet.flange", json!({"edges":[[100,0,2]],"height":"20 mm","angle":"90 deg","position":position}));
+        assert!(no_errors_or_warnings(&merged), "{position}: {:?}", merged.model.results);
+        assert!(rel(volume(&mut s), volume(&mut merged)) < 1e-9, "{position}: {} vs {}", volume(&mut s), volume(&mut merged));
+        assert_eq!(f["bends"], flat(&mut merged)["bends"], "{position}: {f}");
+    }
+}

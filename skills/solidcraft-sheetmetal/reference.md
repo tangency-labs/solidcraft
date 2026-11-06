@@ -114,9 +114,9 @@ falls back to the edge's own value, then the feature's.
 - **Junctions:** no bend relief is cut where two segments meet and no corner is closed there; the
   two bends butt along the junction line. Only the outermost segments take part in corner closing
   and end relief. A junction the command accepts within `SEGMENT_JOIN_EPS` is snapped shut, and a
-  stretch narrower than that tolerance is no bend of its own: the junction closes over it (its
-  angle and height do not build), so every span the build makes runs forwards and none reaches the
-  flat pattern reversed.
+  stretch narrower than that tolerance is no bend of its own: the run before it takes that stretch
+  (its angle and height do not build), so the bends still tile the edge with nothing left uncovered,
+  every span the build makes runs forwards, and none reaches the flat pattern reversed.
 - **Refused:** `segments` on a base or contour flange; a split edge whose stretch leaves one
   straight line of the outline (a cut-out that shortened the line is fine, a notch or a step across
   it is not); `then` with `segments` (the Flange dialog refuses it and names the edge, rather than

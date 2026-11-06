@@ -703,14 +703,18 @@ pub(super) fn sheet_eval(
                         Some(last) => {
                             // Another bend starts at the junction. Snapping its start to the run
                             // before it closes a tolerated gap or overlap. A stretch narrower than
-                            // the junction tolerance cannot be a bend of its own: its end is no
-                            // further on than the run before it ends, so snapping would leave it
-                            // reversed, and the junction closes over it instead (a sliver that
-                            // narrow is below what the kernel builds). Every span the build makes
-                            // then runs forwards, so none reaches trimming or the flat pattern
-                            // reversed.
+                            // the junction tolerance cannot be a bend of its own: the run before it
+                            // absorbs the stretch instead, its end moving on to the sliver's end, so
+                            // the edge stays covered from the first stretch to the last and no
+                            // interval is left out of trimming or the flat pattern (the sliver's own
+                            // angle and height do not build). Every span the build makes then runs
+                            // forwards, so none reaches trimming or the flat pattern reversed.
                             if seg.to - seg.from > sheet::SEGMENT_JOIN_EPS && seg.to > last.1 {
                                 runs.push((last.1, seg.to, height, angle, side));
+                            } else if let Some(last) = runs.last_mut() {
+                                // The run before the sliver takes its stretch; a run never ends
+                                // before the stretch it absorbed.
+                                last.1 = last.1.max(seg.to);
                             }
                         }
                         None => runs.push((seg.from, seg.to, height, angle, side)),
