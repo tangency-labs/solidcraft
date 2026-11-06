@@ -41,7 +41,6 @@ sketch.slot.overall
 solid.align
 solid.chamfer
 solid.coil
-solid.draft
 solid.emboss
 solid.hole
 solid.loft
@@ -54,7 +53,6 @@ solid.pattern.rectangular
 solid.press_pull
 solid.replace_face
 solid.revolve
-solid.shell
 solid.split_body
 solid.split_face
 solid.sweep

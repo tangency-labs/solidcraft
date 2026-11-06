@@ -5,6 +5,8 @@
 //! fields whose descriptions say so; the contracts don't check the combinations, and the
 //! handlers ignore those keys otherwise.
 
+use std::borrow::Cow;
+
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -12,11 +14,12 @@ use serde_json::Value;
 
 use super::check::whole;
 use super::config::NameList;
+use super::motion::require;
 use super::types::{
-    AngleExpr, AxisDir, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FacesParam,
+    AngleExpr, AxisDir, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FaceRefs, FacesParam,
     FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr, NumberExpr,
-    OperationParam, PlaneCommon, PlaneOrFace, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint,
-    TouchingParam, feature_common, present,
+    OperationParam, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam,
+    ToPoint, TouchingParam, feature_common, present,
 };
 use crate::params::MAX_STRING_LIST;
 
@@ -604,6 +607,124 @@ pub struct FilletResult {
     /// With `fit: reduce` where it reduced the radius: each edge's radius.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub radii_applied: Option<Vec<AppliedRadius>>,
+}
+
+// ---- Shell and Draft (#12752) ----
+//
+// Both read their faces with `features::face_points` ([`FaceRefs`]), Draft its neutral plane
+// with `features::plane_param` ([`PlaneParam`]). The keys a handler needs are optional in the
+// types and required in the schemas, so a call without one gets the handler's own message; a
+// `null` goes to the key's type (`present`), which refuses it with that message.
+
+/// Shell's `faces`: the faces to open, as [`FaceRefs`] reads them, or an empty list for a closed
+/// hollow body, its void sealed inside.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShellFaces(pub Option<FaceRefs>);
+
+impl<'de> Deserialize<'de> for ShellFaces {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::Array(list) if list.is_empty() => Ok(ShellFaces(None)),
+            v => FaceRefs::deserialize(v).map(|faces| ShellFaces(Some(faces))).map_err(D::Error::custom),
+        }
+    }
+}
+
+impl JsonSchema for ShellFaces {
+    fn schema_name() -> Cow<'static, str> {
+        "ShellFaces".into()
+    }
+    fn inline_schema() -> bool {
+        true
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The faces to open, 1 to 1000 points or face names; or an empty list for a closed hollow body, its void sealed inside.",
+            "anyOf": [{"type": "array", "maxItems": 0}, generator.subschema_for::<FaceRefs>()]
+        })
+    }
+}
+
+/// The values of Shell's `direction` (lowercased), as the handler reads them: empty text is
+/// inside, the default.
+const SHELL_DIRECTIONS: [&str; 4] = ["inside", "outside", "both", ""];
+
+/// Shell's `direction`, with the handler's message for a word it doesn't know. The handler reads
+/// a `direction` that isn't text as left out; the contract refuses it.
+fn shell_direction<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::String(s) if SHELL_DIRECTIONS.contains(&s.to_ascii_lowercase().as_str()) => Ok(Some(s.to_ascii_lowercase())),
+        _ => Err(D::Error::custom(whole("`direction` must be inside, outside or both"))),
+    }
+}
+
+fn shell_direction_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Which way the walls grow from the body's faces: inside (the default; empty text too), outside or both. Matching ignores case.",
+        "type": ["string", "null"],
+        "enum": [SHELL_DIRECTIONS[0], SHELL_DIRECTIONS[1], SHELL_DIRECTIONS[2], SHELL_DIRECTIONS[3], null]
+    })
+}
+
+fn faces_required(schema: &mut Schema) {
+    require(schema, "faces");
+}
+
+/// Hollow a solid into walls of a thickness, opening the faces picked (none: a closed hollow
+/// body). One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = faces_required)]
+pub struct ShellParams {
+    // Optional in the type, required in the schema: left out, the handler refuses the call with
+    // its own message; a `null` goes to `ShellFaces` (`present`), which refuses it the same way.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "ShellFaces")]
+    pub faces: Option<ShellFaces>,
+    /// The walls' thickness.
+    pub thickness: LengthExpr,
+    #[serde(default, deserialize_with = "shell_direction")]
+    #[schemars(schema_with = "shell_direction_schema")]
+    pub direction: Option<String>,
+    /// The body to hollow, by name. Needed with no faces when the design has several bodies.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// True: each face picked opens its whole chain of smoothly joined faces too. Default: false.
+    #[serde(default)]
+    pub tangent_chain: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+fn faces_and_neutral_required(schema: &mut Schema) {
+    require(schema, "faces");
+    require(schema, "neutral");
+}
+
+/// Tilt faces by an angle about where they meet a neutral plane, so the part comes out of its
+/// mould along the pull direction. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = faces_and_neutral_required)]
+pub struct DraftParams {
+    // Required in the schema (`faces_and_neutral_required`), optional in the type, as Shell's.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "FaceRefs")]
+    pub faces: Option<FaceRefs>,
+    /// The draft angle.
+    pub angle: AngleExpr,
+    // As `faces`. The handler names this key `plane` in its messages, and so does `PlaneParam`.
+    /// The neutral plane: the faces keep their size where they cross it.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PlaneParam")]
+    pub neutral: Option<PlaneParam>,
+    /// The pull direction, [x, y, z]. Default: the neutral plane's normal.
+    #[serde(default)]
+    pub pull: Option<Point3>,
+    /// The body the faces are on, by name. Default: the body at each face.
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
 }
 
 /// What a feature command returns.
