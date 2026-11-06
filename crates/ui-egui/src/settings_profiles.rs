@@ -54,6 +54,7 @@ const PROFILE_KEYS: &[&str] = &[
     "dialog_buttons",
     "dialog_place",
     "direct_interaction",
+    "escape_twice_finishes_sketch",
     "free_orbit",
     "free_orbit_upright",
     "hidden_toolbar_tabs",
