@@ -369,6 +369,55 @@ mod tests {
     }
 
     #[test]
+    fn a_round_refitted_to_the_exact_section_still_meets_its_neighbours() {
+        use solidcore_record::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let v = Vec2::new;
+        // A 10 x 10 square with an R2 round at its top right corner, fitted from mesh crossings:
+        // the arc misses the round's circle (centre (8, 8)) by 5e-4 but meets the sides exactly.
+        // The exact crossings lie on the circle, and the refit puts the arc on it. The outline has
+        // to stay closed: the sketch joins ends only within 1e-7, so a gap leaves no profile (the
+        // R2 rounds of a section at y = 20 through grooved walls, tangency-labs/solidcore#2908).
+        let c = v(7.9995, 7.9995);
+        let (p, q) = (v(10., c.y), v(c.x, 10.));
+        let exact: Vec<Vec2> =
+            (0..=8).map(|k| f64::from(k) * std::f64::consts::FRAC_PI_16).map(|t| v(8. + 2. * t.cos(), 8. + 2. * t.sin())).collect();
+        let square = |top: Vec<LinkGeom>| {
+            let mut out = vec![LinkGeom::Line(v(0., 0.), v(10., 0.)), LinkGeom::Line(v(10., 0.), p), LinkGeom::Arc { c, a: p, b: q }];
+            out.extend(top);
+            out.push(LinkGeom::Line(v(0., 10.), v(0., 0.)));
+            out
+        };
+        // The top side a line, or an arc of radius 10 (a shallow round on it) and then a line.
+        let bulge = v(c.x, 20.);
+        let from = bulge + v(-(10f64.to_radians().sin()), -(10f64.to_radians().cos())) * 10.;
+        let cases =
+            [square(vec![LinkGeom::Line(q, v(0., 10.))]), square(vec![LinkGeom::Arc { c: bulge, a: from, b: q }, LinkGeom::Line(from, v(0., 10.))])];
+        // Ends as the sketch takes them: an arc ends on the circle through its start.
+        let ends = |g: &LinkGeom| match *g {
+            LinkGeom::Line(s, t) => vec![s, t],
+            LinkGeom::Arc { c, a, b } => vec![a, c + (b - c).normalized().unwrap_or(Vec2::X) * c.dist(a)],
+            _ => Vec::new(),
+        };
+        for (n, fitted) in cases.into_iter().enumerate() {
+            // The size of the section: the square's diagonal.
+            let out = super::super::refine_rounds(fitted, &exact, 200f64.sqrt());
+            for (i, g) in out.iter().enumerate() {
+                for e in ends(g) {
+                    let gap =
+                        out.iter().enumerate().filter(|(j, _)| *j != i).flat_map(|(_, h)| ends(h)).map(|x| x.dist(e)).fold(f64::INFINITY, f64::min);
+                    assert!(gap < 1e-9, "case {n}: gap {gap} at {e:?}: {out:?}");
+                }
+            }
+            // Where the round meets only lines, the arc lies on the round's circle.
+            if n == 0 {
+                let Some(LinkGeom::Arc { c, a, b }) = out.get(2) else { panic!("{out:?}") };
+                assert!(c.dist(v(8., 8.)) < 1e-9 && (c.dist(*a) - 2.).abs() < 1e-9 && (c.dist(*b) - 2.).abs() < 1e-9, "{out:?}");
+            }
+        }
+    }
+
+    #[test]
     fn boundaries_touching_at_a_vertex_project() {
         // Two squares of one face family meet only at the corner (1, 1): four boundary edges meet
         // there (a pinch), and the walk keeps each square's loop on its own face.

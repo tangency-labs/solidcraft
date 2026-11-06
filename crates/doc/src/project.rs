@@ -1612,8 +1612,7 @@ pub(crate) fn section(plane: &Plane, m: &Mesh, face: Option<u32>) -> Vec<LinkGeo
     let size = m.bounds().diagonal().max(1e-9);
     let (segs, exact) = section_segments(plane, m, face);
     let segs: Vec<(Vec2, Vec2)> = segs.into_iter().map(|(a, b, _)| (a, b)).collect();
-    let loose = size * 2e-3;
-    let refine = |v: Vec<LinkGeom>| -> Vec<LinkGeom> { v.into_iter().map(|g| refine_round(g, &exact, loose)).collect() };
+    let refine = |v: Vec<LinkGeom>| -> Vec<LinkGeom> { refine_rounds(v, &exact, size) };
     let lossy = refine(fit_segments(&segs, size, false));
     // Lines and arcs that follow the section closely (the corners of a rounded profile stay
     // where they are) are kept when they take no more curves than the loose fit.
@@ -1783,6 +1782,11 @@ fn section_segments(plane: &Plane, m: &Mesh, face: Option<u32>) -> (Vec<(Vec2, V
         }
     }
     (segs, exact.into_inner())
+}
+
+/// Re-fit each circle and arc of a fitted section through the exact section points near it.
+fn refine_rounds(v: Vec<LinkGeom>, exact: &[Vec2], size: f64) -> Vec<LinkGeom> {
+    v.into_iter().map(|g| refine_round(g, exact, size * 2e-3)).collect()
 }
 
 /// Re-fit a circle or arc through the exact section points near it, when there are enough.
