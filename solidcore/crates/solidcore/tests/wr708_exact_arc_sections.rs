@@ -25,13 +25,15 @@
 )] // test helpers
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::global_solver::SolverOperation;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::math::{Point2, Point3, Vec3, BIG_DOUBLE};
 use solidcore::primitive::api_curves as curves;
-use solidcore::query::api_queries::get_edges;
+use solidcore::primitive::api_primitives::create_box;
+use solidcore::query::api_queries::{get_edges, get_faces};
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
@@ -181,6 +183,85 @@ fn the_round_ends_on_the_exact_section_it_joins() {
     let (off, ok) = rounds_in_turn(&UpstreamFixes::all());
     assert!(off < 1e-9, "off the exact section by {off:e}");
     assert!(ok, "check_brep");
+}
+
+/// The box 20 x 30 x 20 on the given kernel, its edge y = 30, z = 20 rounded by the linear
+/// law 1 to 5 along x (a variable round, so its face stays a B-spline whichever kernel builds
+/// it): how far its end sections lie off the ball's circle. Each end section is a station of
+/// the skin, in its end plane x = 0 or 20: the quarter circle tangent to the top z = 20 and
+/// the back y = 30, of the radius r its end point on the top gives (30 - y there), about
+/// (30 - r, 20 - r) in that plane. Each boundary iso of the face's domain whose 17 points
+/// share one x is such a section.
+fn variable_round_end_sections_off_their_circles(k: &mut Kernel) -> f64 {
+    let mut b = create_box(k, Point3::ZERO, 20.0, 30.0, 20.0).unwrap();
+    let e = pick(k, &b, [10.0, 30.0, 20.0]);
+    let curve = edge::curve(&b, e).unwrap().unwrap().clone();
+    let start = curve
+        .evaluate_point(k, edge::interval(&b, e).unwrap().min())
+        .unwrap();
+    let (r0, r1) = if start.x < 10.0 {
+        (1.0, 5.0)
+    } else {
+        (5.0, 1.0)
+    };
+    {
+        let mut s = FilletSession::new(k, &mut b).unwrap();
+        s.prepare_variable_radius_edges(k, &[e], r0, FilletLaw::linear(r0, r1, None), 1, 1)
+            .unwrap();
+        s.do_fillet(k).unwrap();
+    }
+    let mut off = -1.0_f64;
+    for f in get_faces(&b).unwrap() {
+        let surface = face2::surface(&b, f).unwrap().unwrap();
+        if surface.type_string() == "SmPlane_TYPE" {
+            continue;
+        }
+        let dom = face2::uv_domain(&b, f).unwrap();
+        let (u, v) = (dom.u_interval(), dom.v_interval());
+        let isos = [
+            (Some(u.min()), None),
+            (Some(u.max()), None),
+            (None, Some(v.min())),
+            (None, Some(v.max())),
+        ];
+        for (fixed_u, fixed_v) in isos {
+            let points: Vec<Point3> = (0..=16)
+                .map(|i| {
+                    let t = f64::from(i) / 16.0;
+                    let uv = Point2::new(
+                        fixed_u.unwrap_or_else(|| u.evaluate(t)),
+                        fixed_v.unwrap_or_else(|| v.evaluate(t)),
+                    );
+                    surface.evaluate_point(k, uv).unwrap()
+                })
+                .collect();
+            let x = points[0].x;
+            if points.iter().any(|q| (q.x - x).abs() > 1e-9) {
+                continue; // along the edge, not a section
+            }
+            let on_top = points
+                .iter()
+                .min_by(|a, b| (a.z - 20.0).abs().total_cmp(&(b.z - 20.0).abs()))
+                .unwrap();
+            let r = 30.0 - on_top.y;
+            for q in &points {
+                off = off.max(((q.y - 30.0 + r).hypot(q.z - 20.0 + r) - r).abs());
+            }
+        }
+    }
+    assert!(off >= 0.0, "no end section of a round face");
+    off
+}
+
+/// The default kernel (every fix off) rounds on the ball's exact circle: the exact section is
+/// the default, with no flag (WR-708 addendum 2026-11-06, #2330). Before, only
+/// `fillet_exact_arc_sections` gave it, and the default round's sections were polynomial arcs
+/// off the circle.
+#[test]
+fn the_default_kernel_rounds_on_the_exact_circle() {
+    let off = variable_round_end_sections_off_their_circles(&mut Kernel::default());
+    eprintln!("default kernel: end sections off their circles by {off:e}");
+    assert!(off < 1e-12, "off the ball's circle by {off:e}");
 }
 
 #[test]
