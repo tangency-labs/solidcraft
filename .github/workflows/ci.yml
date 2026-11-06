@@ -223,23 +223,3 @@ jobs:
         run: cargo build --profile goldens -p goldens
       - name: Every unit against its golden
         run: bin/goldens/goldens --all --goldens --jobs 0 --no-report
-
-  # Exists only for the required-check name `difftest` (the branch ruleset requires that
-  # check until an admin renames it): it succeeds exactly when `goldens` did, or when the run
-  # had nothing to check (docs-only changes, a push to main).
-  difftest:
-    needs: [changes, goldens]
-    if: always()
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - name: Require goldens
-        env:
-          CHANGES: ${{ needs.changes.result }}
-          FULL: ${{ needs.changes.outputs.full }}
-          GOLDENS: ${{ needs.goldens.result }}
-        run: |
-          [ "$CHANGES" = success ] || { echo "the changes job did not succeed"; exit 1; }
-          if [ "$FULL" != true ]; then
-            echo "not a full run (full=$FULL): goldens not run"; exit 0
-          fi
-          [ "$GOLDENS" = success ] || { echo "goldens: $GOLDENS"; exit 1; }
