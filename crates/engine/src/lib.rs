@@ -2062,6 +2062,8 @@ impl Session {
             camera: self.camera,
             render_viewport: self.render_viewport.clone(),
             render_jobs: self.render_jobs.scratch(),
+            // The open drawing's lines are the sheet page's: a copy for an export takes them
+            // (`scratch_as_shown`), the many others never read them.
             drawing_scenes: Default::default(),
             saved_visibility: self.saved_visibility.clone(),
             dimension_values: self.dimension_values.clone(),
@@ -2071,6 +2073,13 @@ impl Session {
             command_check: self.command_check.clone(),
             crash_journal: false,
         }
+    }
+
+    /// [`Session::scratch`], showing the drawing open as this session does: a deferred drawing held
+    /// since its last update keeps its views' last lines. The copy a sheet export runs on beside the
+    /// window.
+    pub fn scratch_as_shown(&self) -> Session {
+        Session { drawing_scenes: self.drawing_scenes.shown_copy(), ..self.scratch() }
     }
 
     /// Evaluate a feature dialog's complete transaction, including the dependent timeline.

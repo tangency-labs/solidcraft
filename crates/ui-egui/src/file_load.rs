@@ -483,7 +483,14 @@ fn start(app: &mut SolveApp) {
     let insert = request.insert();
     let before = if insert { crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).collect() } else { Vec::new() };
     let update = request.kind == Kind::UpdateLinks;
-    let mut scratch = if insert || update || request.kind.exports() { app.session.scratch() } else { Session::default() };
+    // An export writes the sheet as the session shows it.
+    let mut scratch = if request.kind.exports() {
+        app.session.scratch_as_shown()
+    } else if insert || update {
+        app.session.scratch()
+    } else {
+        Session::default()
+    };
     // A design opened or recovered here is run through the host's pre-command check too, and
     // evaluated under the user's validation mode.
     scratch.set_command_check(app.session.command_check());
@@ -1657,6 +1664,46 @@ mod tests {
         assert!(control(&mut app, later).is_none());
         let running = app.file_load.running.as_ref().map(|r| (r.request.kind.clone(), r.request.options.get("path").cloned()));
         assert_eq!(running, Some((Kind::ExportSheet, Some(json!("sheet.png")))));
+    }
+
+    /// A deferred drawing held since its last update (the model changed after it), written to a file
+    /// beside the window, is the sheet an export at once gives: its views' last lines, not a sheet
+    /// without them.
+    #[test]
+    fn a_held_deferred_sheet_written_beside_the_window_is_the_one_exported_at_once() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-held-sheet-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sheet.svg").to_string_lossy().into_owned();
+        let ctx = crate::fonts::test_context();
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let run = |app: &mut SolveApp, id: &str, p: Value| app.session.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
+        run(&mut app, "solid.box", json!({"length": 100, "width": 50, "height": 20}));
+        let drawing = run(&mut app, "drawing.create", json!({}))["id"].clone();
+        let front = run(&mut app, "drawing.view.base", json!({"sheet": "Sheet 1", "view": "front", "scale": "1:2", "position_mm": [150, 150]}));
+        run(&mut app, "drawing.view.projected", json!({"parent": front["view"], "side": "above"}));
+        run(&mut app, "drawing.set", json!({"updates": "deferred"}));
+        run(&mut app, "drawing.update", json!({}));
+        let svg = json!({"sheet": "Sheet 1", "format": "svg"});
+        run(&mut app, "drawing.export", svg.clone());
+        run(&mut app, "drawing.close", json!({}));
+        let block = app.session.doc.features[0].id;
+        run(&mut app, "timeline.edit", json!({"feature": block.to_string(), "set": {"height": 40}}));
+        run(&mut app, "drawing.open", json!({"drawing": drawing}));
+        let at_once = run(&mut app, "drawing.export", svg);
+        assert_eq!(at_once["out_of_date"].as_array().map(Vec::len), Some(2), "held: {at_once}");
+        let request = json!({"command": "drawing.export", "params": {"sheet": "Sheet 1", "format": "svg", "path": path}});
+        let (request, _reply) = crate::control::ControlRequest::new("engine.execute", request);
+        assert!(control(&mut app, request).is_none(), "written beside the window");
+        for _ in 0..5000 {
+            if app.file_load.running.is_none() {
+                break;
+            }
+            tick(&mut app, &ctx);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(app.file_load.running.is_none(), "the export finished");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), at_once["svg"].as_str().unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
