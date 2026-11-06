@@ -3,7 +3,8 @@
 
 use crate::Session;
 use serde_json::{Value, json};
-use solidcraft_geom::{Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{CurveKind, LinkPlacement, LinkSource};
 
 fn run(s: &mut Session, cmd: &str, params: Value) -> Value {

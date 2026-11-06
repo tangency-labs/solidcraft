@@ -554,7 +554,7 @@ pub(super) fn link_pieces(
 ) -> std::collections::BTreeMap<String, std::result::Result<Vec<solidcraft_doc::project::EdgePieces>, String>> {
     let raw = s.model.state_before(id);
     let shown = placed_candidate(s, doc);
-    let sketch = doc.sketch(id).ok();
+    let sketch = sketch_store::read(doc, id).ok();
     let named: Vec<&str> = sketch.iter().flat_map(|sk| sk.links.iter()).filter(|l| links.contains(&l.id)).flat_map(|l| l.source.bodies()).collect();
     let framed = state_for_sketch(s, &shown, id, &raw, &named).map_err(|e| e.to_string());
     let plane = framed.as_ref().map_err(Clone::clone).and_then(|framed| sketch_plane(&shown, id, framed).map_err(|e| e.to_string()));

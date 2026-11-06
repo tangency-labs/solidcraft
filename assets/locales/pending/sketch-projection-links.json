@@ -22,7 +22,8 @@
     "cmd.sketch_remove_link": "投影を削除",
     "cmd.sketch_repair_link": "リンクを修復",
     "cmd.sketch_resume_link": "リンクを再開",
-    "cmd.sketch_update_references": "参照を更新"
+    "cmd.sketch_update_references": "参照を更新",
+    "sketch.hint.constraint.fix": "固定: 固定するスケッチ要素を選択"
   },
   "pl": {
     "browser.link_frozen": "Zamrożone",
@@ -34,7 +35,8 @@
     "cmd.sketch_remove_link": "Usuń rzutowanie",
     "cmd.sketch_repair_link": "Napraw łącze",
     "cmd.sketch_resume_link": "Wznów łącze",
-    "cmd.sketch_update_references": "Aktualizuj odniesienia"
+    "cmd.sketch_update_references": "Aktualizuj odniesienia",
+    "sketch.hint.constraint.fix": "Ustal: wybierz elementy szkicu do ustalenia"
   },
   "zh": {
     "browser.link_frozen": "已冻结",
@@ -46,7 +48,8 @@
     "cmd.sketch_remove_link": "移除投影",
     "cmd.sketch_repair_link": "修复链接",
     "cmd.sketch_resume_link": "恢复链接",
-    "cmd.sketch_update_references": "更新参照"
+    "cmd.sketch_update_references": "更新参照",
+    "sketch.hint.constraint.fix": "固定：选择要固定的草图元素"
   },
   "ar": {
     "browser.link_frozen": "مجمّد",
@@ -58,7 +61,8 @@
     "cmd.sketch_remove_link": "إزالة الإسقاط",
     "cmd.sketch_repair_link": "إصلاح الرابط",
     "cmd.sketch_resume_link": "استئناف الرابط",
-    "cmd.sketch_update_references": "تحديث المراجع"
+    "cmd.sketch_update_references": "تحديث المراجع",
+    "sketch.hint.constraint.fix": "تثبيت: اختر عناصر الرسم المراد تثبيتها"
   },
   "he": {
     "browser.link_frozen": "מוקפא",
@@ -70,7 +74,8 @@
     "cmd.sketch_remove_link": "הסרת הטלה",
     "cmd.sketch_repair_link": "תיקון קישור",
     "cmd.sketch_resume_link": "חידוש קישור",
-    "cmd.sketch_update_references": "עדכון ייחוסים"
+    "cmd.sketch_update_references": "עדכון ייחוסים",
+    "sketch.hint.constraint.fix": "קיבוע: בחרו את רכיבי הסקיצה לקיבוע"
   },
   "vi": {
     "browser.link_frozen": "Đã đóng băng",
@@ -82,6 +87,7 @@
     "cmd.sketch_remove_link": "Xóa hình chiếu",
     "cmd.sketch_repair_link": "Sửa liên kết",
     "cmd.sketch_resume_link": "Tiếp tục liên kết",
-    "cmd.sketch_update_references": "Cập nhật tham chiếu"
+    "cmd.sketch_update_references": "Cập nhật tham chiếu",
+    "sketch.hint.constraint.fix": "Cố định: chọn các thực thể phác thảo cần cố định"
   }
 }

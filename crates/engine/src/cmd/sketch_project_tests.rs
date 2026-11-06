@@ -1756,10 +1756,15 @@ fn a_second_placements_face_and_edge_project_where_it_is_placed() {
     let copy = s.doc.occurrences.iter().map(|o| o.id).find(|id| *id != first).unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence":copy,"translate":[0,15,0],"capture":true}));
     check(&s, 15.0);
-    // Renaming the part or the body renames the copy ("Base (Housing:2)"): the links follow it.
+    // Renaming the part or the body: the links follow it. A link keeps the copy by its placement,
+    // so it names the body by its own name and the copy by its occurrence.
     run(&mut s, "component.rename", json!({"component":part["component"],"name":"Housing"}));
     run(&mut s, "body.rename", json!({"body":"Block","name":"Base"}));
-    assert!(s.model.state().sketch(sketches[0]).unwrap().sketch.links.iter().all(|l| l.source.bodies() == ["Base (Housing:2)"]));
+    let state = s.model.state();
+    for l in &state.sketch(sketches[0]).unwrap().sketch.links {
+        assert_eq!(l.source.bodies(), ["Base"], "{l:?}");
+        assert_eq!(l.placement.as_ref().map(|p| p.source.clone()), Some(vec![copy]), "{l:?}");
+    }
     check(&s, 15.0);
     check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()), 15.0);
 }

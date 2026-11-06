@@ -87,7 +87,7 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: us
         let selected = active && !members.is_empty() && members.iter().all(|m| app.session.selection.contains(m));
         let response = draw_row(
             ui,
-            ui.id().with(("sketch_link", sketch, &link.id)),
+            ui.scope_id().with(("sketch_link", sketch, &link.id)),
             &Row {
                 depth,
                 eye: Some(!link.hidden),
@@ -207,7 +207,7 @@ mod tests {
         assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.repair_link"));
         // A:1's top face, the same shape as the one that went.
         h.settle();
-        h.app.cam.target = solidcraft_engine::geom::Vec3::new(20.0, 20.0, 10.0);
+        h.app.cam.target = solidcore_record::Vec3::new(20.0, 20.0, 10.0);
         h.app.cam.distance = 200.0;
         let at = h.call("ui.at", json!({"world":[5,5,10]}))["result"].clone();
         h.step(&json!({ "click": at })).unwrap();

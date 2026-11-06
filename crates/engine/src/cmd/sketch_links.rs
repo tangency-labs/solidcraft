@@ -10,7 +10,8 @@
 //! geometry it had.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{LinkGeom, LinkKind, Sketch};
 
 use super::sketch::edit;
@@ -150,11 +151,11 @@ fn target_sketches(s: &Session, p: &Value, cmd: &str, all: bool) -> Result<Vec<u
 }
 
 /// Where each of a link's points is, by id.
-fn link_spots(sk: &Sketch, link: &str) -> Vec<(String, solidcraft_geom::Vec2)> {
+fn link_spots(sk: &Sketch, link: &str) -> Vec<(String, Vec2)> {
     sk.link_points(link).iter().filter_map(|p| sk.points.get(*p)).map(|p| (p.id.clone(), p.pos)).collect()
 }
 
-fn moved(a: &[(String, solidcraft_geom::Vec2)], b: &[(String, solidcraft_geom::Vec2)]) -> bool {
+fn moved(a: &[(String, Vec2)], b: &[(String, Vec2)]) -> bool {
     a.len() != b.len() || a.iter().zip(b).any(|((ia, pa), (ib, pb))| ia != ib || pa.dist(*pb) > 1e-9)
 }
 
@@ -553,7 +554,7 @@ fn repair_link(s: &mut Session, p: &Value) -> Result<Value> {
     let used: std::collections::BTreeSet<usize> = curves.iter().filter_map(|c| scratch.curves.get(*c)).flat_map(|c| c.kind.point_ids()).collect();
     let mut geom: Vec<LinkGeom> = curves.iter().filter_map(|c| scratch.curve_link_geom(*c)).collect();
     geom.extend(scratch.link_points(&fresh).into_iter().filter(|q| !used.contains(q)).filter_map(|q| scratch.point(q)).map(LinkGeom::Point));
-    let wires: Vec<Vec<solidcraft_geom::Vec3>> =
+    let wires: Vec<Vec<solidcore_record::Vec3>> =
         scratch.link_wires(&fresh).iter().filter_map(|w| scratch.wires.get(*w).map(|w| w.pts.clone())).collect();
     if let Some(l) = sk.links.iter_mut().find(|l| l.id == link) {
         l.source = new.source;
