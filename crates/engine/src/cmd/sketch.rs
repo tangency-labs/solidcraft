@@ -3238,13 +3238,20 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
             && !is_angle
             && let Some(want) = want
             && let Some(factor) = Some(want / cur).filter(|f| f.is_finite() && (f - 1.0).abs() > 1e-9)
-            && let Some(big) = sk.scaled_for_first_dimension(factor)
-            && (sk.links.is_empty()
-                || solidcraft_sketch::measure_dimension(&big, &k).is_some_and(|v| (v - want).abs() <= solidcraft_sketch::CONSISTENT))
         {
-            *sk = big;
-            scaled = Some(factor);
-            residual = Some(0.0);
+            if let Some(big) = sk.scaled_for_first_dimension(factor, &k).filter(|big| {
+                sk.links.is_empty()
+                    || solidcraft_sketch::measure_dimension(big, &k).is_some_and(|v| (v - want).abs() <= solidcraft_sketch::CONSISTENT)
+            }) {
+                *sk = big;
+                scaled = Some(factor);
+                residual = Some(0.0);
+            } else if let Some(sized) = sk.lone_circle_sized_for_first_dimension(factor, &k) {
+                // A lone circle's radius or diameter changes only its radius (#11438), seeded
+                // here so even a size far from the drawn one solves with the centre in place.
+                *sk = sized;
+                residual = Some(0.0);
+            }
         }
         let name = k.name();
         let id = sk.add_constraint(k, Some(pname.clone()))?;
