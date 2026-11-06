@@ -58,8 +58,18 @@ impl SolveApp {
         {
             return false;
         }
+        // The pick is in the world, the history's meshes in the component's own frame: a point of
+        // a placed occurrence is taken back through where it is shown (a move not captured yet
+        // included) first.
+        let path = self.session.active_occurrence_path.clone().unwrap_or_else(|| self.session.doc.first_path(self.session.active_component));
+        let at = self
+            .session
+            .occurrence_placement(&path)
+            .ok()
+            .and_then(|placed| solidcraft_engine::doc::mat_inverse(&placed.world))
+            .map_or(point, |to_model| solidcraft_engine::doc::apply_point(&to_model, point));
         let Some(feature) =
-            crate::dialogs::blend_feature(&self.session, body, index).or_else(|| crate::dialogs::feature_of_face(&self.session, body, index, point))
+            crate::dialogs::blend_feature(&self.session, body, index).or_else(|| crate::dialogs::feature_of_face(&self.session, body, index, at))
         else {
             return false;
         };

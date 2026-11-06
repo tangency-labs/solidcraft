@@ -890,3 +890,22 @@ fn double_clicking_a_face_inside_an_open_dialog_leaves_it() {
     assert_eq!(editing_feature(&h), None);
     assert!(h.app.pending_feature_edit.is_none());
 }
+
+// In a component placed away from the origin the face is found in the component's own frame,
+// so a later feature beside it is not opened instead: placed for good, or moved and not captured.
+#[test]
+fn double_clicking_a_face_of_a_moved_component_edits_its_feature() {
+    for capture in [true, false] {
+        let mut h = make(json!({}));
+        let part = h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+        let occurrence = part["occurrence"].as_u64().unwrap();
+        h.app.run("solid.box", json!({"corner":[0,0,0],"length":4,"width":4,"height":4,"name":"Inner"})).unwrap();
+        h.app.run("solid.box", json!({"corner":[20,0,0],"length":4,"width":4,"height":4,"name":"Later"})).unwrap();
+        h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[40,0,0],"capture":capture})).unwrap();
+        h.app.animate_fit_all();
+        h.frames(30);
+        h.step(&json!({"click":{"world":[42,2,4]},"double":true})).unwrap();
+        h.frames(8);
+        assert_eq!(editing_feature(&h), Some(feature_id(&h, "Inner")), "capture: {capture}");
+    }
+}
