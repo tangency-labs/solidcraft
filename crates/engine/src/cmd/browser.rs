@@ -14,23 +14,75 @@ use serde_json::{Value, json};
 use solidcraft_doc::{BrowserEntry, FeatureKind, MAX_GROUP_NESTING};
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, str_};
+use super::features::{add_feature, check_expr};
+use crate::params::{bad, bool_, expr, str_};
+use crate::schema::browser::{
+    BodyRenameParams, BodyRenamed, BrowserFoldParams, BrowserFoldResult, BrowserGroupMade, BrowserGroupParams, BrowserGroupRenamed,
+    BrowserMoveParams, BrowserMoved, BrowserOrderParams, BrowserOrdered, BrowserRenameGroupParams, BrowserUngroupParams, BrowserUngrouped,
+    BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, Isolated, RepairDone, RepairFace, RepairHole,
+    RepairParams, RepairResult, RepairSewn, VisibilityState,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
+const REPAIR_CONTRACT: TypedContract<RepairParams> = TypedContract::new();
+const UNITS_CONTRACT: TypedContract<DocumentUnitsParams> = TypedContract::new();
+const RENAME_BODY_CONTRACT: TypedContract<BodyRenameParams> = TypedContract::new();
+const GROUP_CONTRACT: TypedContract<BrowserGroupParams> = TypedContract::new();
+const UNGROUP_CONTRACT: TypedContract<BrowserUngroupParams> = TypedContract::new();
+const RENAME_GROUP_CONTRACT: TypedContract<BrowserRenameGroupParams> = TypedContract::new();
+const MOVE_CONTRACT: TypedContract<BrowserMoveParams> = TypedContract::new();
+const ORDER_CONTRACT: TypedContract<BrowserOrderParams> = TypedContract::new();
+const VISIBILITY_CONTRACT: TypedContract<BrowserVisibilityParams> = TypedContract::new();
+const FOLD_CONTRACT: TypedContract<BrowserFoldParams> = TypedContract::new();
+
+/// A reply as JSON: the commands here build their replies from the types their output schemas
+/// describe, so the two can't drift apart.
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("body.rename", "Rename Body", rename_body).icon("rename").params("body: its name, name: the new name (features that use the body follow)"),
+    CommandSpec::new("body.rename", "Rename Body", crate::checked!("body.rename", rename_body))
+        .icon("rename")
+        .contract(&RENAME_BODY_CONTRACT)
+        .output(output_schema_for::<BodyRenamed>)
+        .params("body: its name, name: the new name (features that use the body follow)"),
+    // The import and failed operations offer it for a part the modelling kernel refuses.
+    CommandSpec::new("body.repair", "Repair Part", crate::checked!("body.repair", repair_body))
+        .icon("body")
+        .contract(&REPAIR_CONTRACT)
+        .output(output_schema_for::<RepairResult>)
+        .params(
+            "body: its name (a part the modelling kernel refuses, or an open part that should be a solid); gap?: expr (default 0.2 mm, at most 1 mm: free edges that pair up within it are sewn, each sewn edge carrying its own gap as its tolerance); patch_holes?: bool (default false: loops of free edges left are patched, in the plane of the faces around them where those are that plane, else tangent to them, and sewn in; otherwise the reply offers the patches); name? → the feature, and repair: what changed face by face (rebuilt and refused faces, sewn gaps, holes with their surface.patch), faces and largest edge tolerance before and after, closed, modelling, volume. Refused with why when nothing applies",
+        ),
     CommandSpec::new("sketch.redefine", "Redefine Sketch Plane", redefine_sketch)
         .icon("plane")
         .params("sketch: id or name; plane: as sketch.create; frame?: as sketch.create; author_path?: exact owner occurrence ids; explicitly rebinds or freezes the plane while preserving geometry and dimension names"),
-    CommandSpec::new("browser.group", "New Group", group)
+    CommandSpec::new("browser.group", "New Group", crate::checked!("browser.group", group))
         .icon("folder")
+        .contract(&GROUP_CONTRACT)
+        .output(output_schema_for::<BrowserGroupMade>)
         .params("folder?: bodies|sketches|construction; component?: id (default 0); parent?: group id (the new group nests in it, taking its component and folder; at most 8 levels); name?; items?: [keys] (they leave other groups)"),
-    CommandSpec::new("browser.ungroup", "Ungroup", ungroup).icon("folder").params("group: id (its items and child groups go up to the group that holds it, or the folder)"),
-    CommandSpec::new("browser.rename_group", "Rename Group", rename_group).icon("rename").params("group: id, name"),
-    CommandSpec::new("browser.move", "Move Browser Items", move_items).icon("reorder")
+    CommandSpec::new("browser.ungroup", "Ungroup", crate::checked!("browser.ungroup", ungroup))
+        .icon("folder")
+        .contract(&UNGROUP_CONTRACT)
+        .output(output_schema_for::<BrowserUngrouped>)
+        .params("group: id (its items and child groups go up to the group that holds it, or the folder)"),
+    CommandSpec::new("browser.rename_group", "Rename Group", crate::checked!("browser.rename_group", rename_group))
+        .icon("rename")
+        .contract(&RENAME_GROUP_CONTRACT)
+        .output(output_schema_for::<BrowserGroupRenamed>)
+        .params("group: id, name"),
+    CommandSpec::new("browser.move", "Move Browser Items", crate::checked!("browser.move", move_items))
+        .icon("reorder")
+        .contract(&MOVE_CONTRACT)
+        .output(output_schema_for::<BrowserMoved>)
         .params("folder, component?, items: [keys (strings) and group ids (numbers)]; group?: id (into it; omit for the folder's top level); before?: key or group id (position in it; default the end). A group cannot go into itself or past 8 levels"),
-    CommandSpec::new("document.units", "Change Design Units", document_units)
+    CommandSpec::new("document.units", "Change Design Units", crate::checked!("document.units", document_units))
         .icon("settings")
+        .contract(&UNITS_CONTRACT)
+        .output(crate::schema::output_schema_for::<DocumentUnitsResult>)
         .params("units: mm|cm|m|in|ft (display and unit-less parameters; values keep their meaning)"),
     CommandSpec::new("view.save", "New Named View", view_save)
         .icon("camera")
@@ -41,21 +93,39 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("view.apply", "Restore Named View", view_apply).icon("camera").noundo().params(
         "view?: front|back|top|bottom|left|right|iso|home (frames the model) | a named view's name; or camera?: {target: [x,y,z], yaw, pitch, distance, fov?, roll?} (radians, mm, about the up axis; yaw: heading of the line of sight, 0 along +Y (Front), π/2 along +X (Left), π (Back), −π/2 (Right); pitch: the eye's elevation, within ±π/2, π/2 = Top; roll defaults to 0, turns the picture clockwise, must be finite and is clamped to ±π; the View angles readout shows these in degrees; up is refused: the up axis comes from the design settings) → camera. The viewport (and the MCP screenshot) moves there. View state: not saved, not an undo step",
     ),
-    CommandSpec::new("browser.order", "Order Browser Items", order).icon("reorder").params("folder: bodies|sketches|construction|components, component?, order: [keys (strings) and top-level group ids (numbers)] (display order; for `components`, the ids of the components placed in it)"),
-    CommandSpec::new("browser.visibility", "Show/Hide", visibility).icon("eye").params(
+    CommandSpec::new("browser.order", "Order Browser Items", crate::checked!("browser.order", order))
+        .icon("reorder")
+        .contract(&ORDER_CONTRACT)
+        .output(output_schema_for::<BrowserOrdered>)
+        .params("folder: bodies|sketches|construction|components, component?, order: [keys (strings) and top-level group ids (numbers)] (display order; for `components`, the ids of the components placed in it)"),
+    CommandSpec::new("browser.visibility", "Show/Hide", crate::checked!("browser.visibility", visibility))
+        .icon("eye")
+        .contract(&VISIBILITY_CONTRACT)
+        .output(output_schema_for::<BrowserVisibilityResult>)
+        .params(
         "visible: bool; items?: [sketch id or name | body name | construction name | joint name | O|X|Y|Z|XY|XZ|YZ]; \
          or joints?: [joint id or name] (their glyphs; they still constrain and move parts); \
          or features?: [feature id or name] (the bodies they made; path?: [occurrence ids] for only that placement's); \
          or folder?: bodies|sketches|construction|origin|joints|all (all of it; showing also shows its browser folders and groups, and `all` takes in the occurrence hides too); \
          or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, c0/g7, c0/joints, c0/canvases, c0/point_clouds] (the folder or group itself: its items keep their own state); \
-         or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (requires paths and visible:true). Saved with the design and undone like any other change (the camera is not)",
+         or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (with paths or items of bodies, and visible:true: everything else is hidden, other placements as placements). Saved with the design and undone like any other change (the camera is not)",
     ),
-    CommandSpec::new("browser.expand_all", "Expand All", expand_all).icon("folder").noundo().params(
+    CommandSpec::new("browser.expand_all", "Expand All", crate::checked!("browser.expand_all", expand_all))
+        .icon("folder")
+        .noundo()
+        .contract(&FOLD_CONTRACT)
+        .output(output_schema_for::<BrowserFoldResult>)
+        .params(
         "path?: [occurrence ids] (that placement and its descendants); component?: id (that component's own folders); \
          omit both for the whole tree, including folders that start closed (Origin, Named Views, Features). \
          Display only: open/closed rows are not saved in the design and are not an undo step → open, open_by_default, closed_by_default",
     ),
-    CommandSpec::new("browser.collapse_all", "Collapse All", collapse_all).icon("folder").noundo().params(
+    CommandSpec::new("browser.collapse_all", "Collapse All", crate::checked!("browser.collapse_all", collapse_all))
+        .icon("folder")
+        .noundo()
+        .contract(&FOLD_CONTRACT)
+        .output(output_schema_for::<BrowserFoldResult>)
+        .params(
         "path?: [occurrence ids]; component?: id; omit both for the whole tree. The row it starts from (the design row for the whole tree) stays open, so its first level remains visible. \
          Display only; not an undo step → open, open_by_default, closed_by_default",
     ),
@@ -205,7 +275,7 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
     take_out(d, component, &folder, &gone);
     let items = gone;
     d.browser_groups.push(solidcraft_doc::BrowserGroup { id, name: name.clone(), component, folder, parent, items });
-    Ok(json!({ "group": id, "name": name, "parent": parent }))
+    reply(cmd, BrowserGroupMade { group: id, name, parent, param_warnings: Vec::new() })
 }
 
 /// A group's contents go up to the group that holds it (the folder's top level for a top-level
@@ -213,7 +283,7 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
 fn ungroup(s: &mut Session, p: &Value) -> Result<Value> {
     let id = group_id(s, p, "browser.ungroup")?;
     let d = s.doc_mut();
-    let Some(g) = d.browser_group(id).cloned() else { return Ok(json!({ "group": id })) };
+    let Some(g) = d.browser_group(id).cloned() else { return reply("browser.ungroup", BrowserUngrouped { group: id, param_warnings: Vec::new() }) };
     settle(d, g.component, &g.folder, Some(id));
     settle(d, g.component, &g.folder, g.parent);
     let inside = d.browser_group(id).map(|g| g.items.clone()).unwrap_or_default();
@@ -227,7 +297,7 @@ fn ungroup(s: &mut Session, p: &Value) -> Result<Value> {
     }
     take_out(d, g.component, &g.folder, &[BrowserEntry::Group(id)]);
     d.browser_groups.retain(|x| x.id != id);
-    Ok(json!({ "group": id }))
+    reply("browser.ungroup", BrowserUngrouped { group: id, param_warnings: Vec::new() })
 }
 
 fn rename_group(s: &mut Session, p: &Value) -> Result<Value> {
@@ -238,7 +308,7 @@ fn rename_group(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(g) = s.doc_mut().browser_groups.iter_mut().find(|g| g.id == id) {
         g.name = name.to_string();
     }
-    Ok(json!({ "group": id, "name": name }))
+    reply(cmd, BrowserGroupRenamed { group: id, name: name.to_string(), param_warnings: Vec::new() })
 }
 
 fn move_items(s: &mut Session, p: &Value) -> Result<Value> {
@@ -296,7 +366,7 @@ fn move_items(s: &mut Session, p: &Value) -> Result<Value> {
         let at = before.as_ref().and_then(|b| list.iter().position(|e| e == b)).unwrap_or(list.len());
         list.splice(at..at, items.iter().cloned());
     }
-    Ok(json!({ "items": items, "group": to }))
+    reply(cmd, BrowserMoved { items, group: to, param_warnings: Vec::new() })
 }
 
 fn order(s: &mut Session, p: &Value) -> Result<Value> {
@@ -332,7 +402,7 @@ fn order(s: &mut Session, p: &Value) -> Result<Value> {
         // An item that sits in a group belongs to the group's list only.
         d.browser_order.insert(key, order);
     }
-    Ok(json!({}))
+    reply(cmd, BrowserOrdered { param_warnings: Vec::new() })
 }
 
 const ORIGIN: [&str; 7] = ["O", "X", "Y", "Z", "XY", "XZ", "YZ"];
@@ -351,29 +421,30 @@ fn is_construction(k: &FeatureKind) -> bool {
     matches!(k, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
 }
 
-/// The item a key names, or `None` when it names none.
+/// The item a key names, or `None` when it names none; bodies are looked for in the placed model
+/// `world`.
 ///
 /// The rule, the same for showing and for hiding: an exact name wins over a name that only
 /// matches it by case, so the body called "Back Lid" is not the sketch called "Back lid"
 /// (#6967). Among the exact matches the order is the one there always was: a feature (by id
 /// or by name), then a body, then a joint. With no exact match the name is compared without
 /// regard to case, as it always was: a feature first, then an origin item.
-fn shown_item(s: &Session, key: &str) -> Option<Shown> {
-    shown_item_exact(s, key).or_else(|| shown_item_ignore_case(s, key))
+fn shown_item(s: &Session, world: &solidcraft_doc::ModelState, key: &str) -> Option<Shown> {
+    shown_item_exact(s, world, key).or_else(|| shown_item_ignore_case(s, world, key))
 }
 
 /// The item a key names exactly: a feature, a body or a joint whose name is the key itself.
-fn shown_item_exact(s: &Session, key: &str) -> Option<Shown> {
+fn shown_item_exact(s: &Session, world: &solidcraft_doc::ModelState, key: &str) -> Option<Shown> {
     // A feature is found by id or by name, as `find_feature` does, but the name must be the
     // key itself here.
     let feature = match key.parse::<u64>() {
         Ok(id) => s.doc.feature(id).or_else(|| s.doc.features.iter().find(|f| f.name == key)),
         Err(_) => s.doc.features.iter().find(|f| f.name == key),
     };
-    if let Some(shown) = feature.and_then(|f| shown_feature(s, f, key)) {
+    if let Some(shown) = feature.and_then(|f| shown_feature(world, f, key)) {
         return Some(shown);
     }
-    if s.world_state().bodies.iter().any(|b| b.name == key) {
+    if world.bodies.iter().any(|b| b.name == key) {
         return Some(Shown::Body(key.to_string()));
     }
     s.doc.assembly.joints.iter().find(|j| j.name == key).map(|j| Shown::Joint(j.id))
@@ -381,8 +452,8 @@ fn shown_item_exact(s: &Session, key: &str) -> Option<Shown> {
 
 /// The item a key names when nothing matches it exactly: the name is compared without regard to
 /// case, as it always was.
-fn shown_item_ignore_case(s: &Session, key: &str) -> Option<Shown> {
-    if let Some(shown) = s.doc.find_feature(key).and_then(|f| shown_feature(s, f, key)) {
+fn shown_item_ignore_case(s: &Session, world: &solidcraft_doc::ModelState, key: &str) -> Option<Shown> {
+    if let Some(shown) = s.doc.find_feature(key).and_then(|f| shown_feature(world, f, key)) {
         return Some(shown);
     }
     ORIGIN.iter().find(|o| o.eq_ignore_ascii_case(key)).map(|o| Shown::Origin(o.to_string()))
@@ -391,12 +462,12 @@ fn shown_item_ignore_case(s: &Session, key: &str) -> Option<Shown> {
 /// The item a feature is: a sketch, or construction geometry by name. A feature that is neither
 /// (an extrude, a fillet) is not an item of its own, and the key goes on to the next kind. A
 /// sketch that shares its name with a body is the body's (#7206).
-fn shown_feature(s: &Session, f: &solidcraft_doc::Feature, key: &str) -> Option<Shown> {
+fn shown_feature(world: &solidcraft_doc::ModelState, f: &solidcraft_doc::Feature, key: &str) -> Option<Shown> {
     if matches!(f.kind, FeatureKind::Sketch { .. }) {
         // A sketch and a body with exactly the same name, a sketch named after the body it
         // makes (#7206): the name is the body's. The browser names a sketch by its id and a
         // body only by its name, so the body could not be reached otherwise.
-        if f.name == key && s.world_state().bodies.iter().any(|b| b.name == key) {
+        if f.name == key && world.bodies.iter().any(|b| b.name == key) {
             return Some(Shown::Body(key.to_string()));
         }
         return Some(Shown::Sketch(f.id));
@@ -409,7 +480,7 @@ fn shown_feature(s: &Session, f: &solidcraft_doc::Feature, key: &str) -> Option<
 
 /// A browser folder or group key (`Visibility::hidden_folders`): `c0` or `o:<ids>`, then
 /// `/bodies`, `/sketches`, `/construction`, `/joints`, `/canvases` or `/g<group id>`.
-fn tree_folder_key(k: &str) -> bool {
+pub(crate) fn tree_folder_key(k: &str) -> bool {
     let Some((scope, last)) = k.rsplit_once('/') else { return false };
     let scope_ok =
         scope == "c0" || scope.strip_prefix("o:").is_some_and(|ids| ids.split('/').count() <= 64 && ids.split('/').all(|i| i.parse::<u64>().is_ok()));
@@ -417,6 +488,93 @@ fn tree_folder_key(k: &str) -> bool {
         || ["joints", "canvases", "point_clouds"].contains(&last)
         || last.strip_prefix('g').is_some_and(|g| g.parse::<u64>().is_ok());
     k.len() <= 2048 && scope_ok && last_ok
+}
+
+/// Isolate bodies (#7896): the picked bodies stay, and so do the placements that hold them, down
+/// to their own; those placements' other bodies and the root's other bodies are hidden one by
+/// one, and every other placement is hidden as a placement, so its Browser row shows it is off and
+/// its eye brings it back.
+fn isolate_bodies(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
+    let cmd = "browser.visibility";
+    if !visible {
+        return Err(bad(cmd, "isolate requires visible:true"));
+    }
+    if ["folder", "features", "joints"].iter().any(|k| p.get(*k).is_some()) {
+        return Err(bad(cmd, "isolate takes `paths` or `items` (bodies)"));
+    }
+    let keys = keys(p, "items", cmd)?;
+    if keys.is_empty() {
+        return Err(bad(cmd, "isolate needs `paths` or `items` (bodies)"));
+    }
+    let world = s.world_state()?;
+    let keep: Vec<String> = keys
+        .iter()
+        .map(|k| match shown_item(s, &world, k) {
+            Some(Shown::Body(name)) => Ok(name),
+            _ => Err(bad(cmd, format!("no body `{k}`"))),
+        })
+        .collect::<Result<_>>()?;
+    let mut hidden_bodies: Vec<String> =
+        s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == 0 && !keep.contains(&b.name)).map(|b| b.name.clone()).collect();
+    let mut hidden = Vec::new();
+    let mut stack = vec![Vec::<u64>::new()];
+    let mut count = 0;
+    while let Some(parent) = stack.pop() {
+        for child in s.occurrence_children(&parent)? {
+            count += 1;
+            if count > 100_000 {
+                return Err(bad(cmd, "isolate exceeds 100000 placements"));
+            }
+            if s.occurrence_bodies_shared(&child.path, true)?.iter().any(|b| keep.contains(b)) {
+                hidden_bodies.extend(child.bodies.into_iter().map(|b| b.world).filter(|b| !keep.contains(b)));
+                stack.push(child.path);
+            } else {
+                hidden.push(child.path);
+            }
+        }
+    }
+    // A hidden Bodies folder or group a picked body is in would keep it hidden: those show
+    // again. Their other bodies are hidden one by one above, as the root's are.
+    let shown_folders = folders_holding(s, &keep);
+    s.visibility.hidden_folders.retain(|k| !shown_folders.contains(k));
+    s.visibility.hidden_occurrences = hidden;
+    s.visibility.hidden_bodies = hidden_bodies;
+    s.refresh_display();
+    let visibility = VisibilityState::from(&s.visibility);
+    reply(
+        cmd,
+        BrowserVisibilityResult { visible: true, changed: None, isolated: Some(Isolated::Bodies(keep)), visibility, param_warnings: Vec::new() },
+    )
+}
+
+/// The tree keys of the Bodies folders and groups (with the groups they are in) that hold the
+/// bodies named `world` in some placement.
+fn folders_holding(s: &Session, world: &[String]) -> std::collections::BTreeSet<String> {
+    let mut keys = std::collections::BTreeSet::new();
+    if s.visibility.hidden_folders.is_empty() {
+        return keys;
+    }
+    let st = s.model.state();
+    let names = solidcraft_doc::WorldNames::new(&s.doc, &st);
+    // Each body's component, found once rather than once per placement.
+    let owned: Vec<(u64, &str)> = s.doc.model_body_components(&st).into_iter().zip(st.bodies.iter().map(|b| b.name.as_str())).collect();
+    for (component, path, _) in s.doc.placements() {
+        let scope = Session::folder_scope(&path);
+        for b in owned.iter().filter(|(c, _)| *c == component).map(|(_, name)| *name) {
+            if !world.contains(&names.name(b, component, &path)) {
+                continue;
+            }
+            keys.insert(format!("{scope}/bodies"));
+            for g in s.doc.browser_groups.iter().filter(|g| g.component == component && g.folder == "bodies" && g.has_item(b)) {
+                for id in std::iter::successors(Some(g.id), |id| s.doc.browser_group(*id).and_then(|g| g.parent))
+                    .take(solidcraft_doc::MAX_GROUP_NESTING + 1)
+                {
+                    keys.insert(format!("{scope}/g{id}"));
+                }
+            }
+        }
+    }
+    keys
 }
 
 fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
@@ -446,7 +604,8 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         s.refresh_display();
-        return Ok(json!({"visible":visible,"changed":keys.len(),"visibility":s.visibility}));
+        let visibility = VisibilityState::from(&s.visibility);
+        return reply(cmd, BrowserVisibilityResult { visible, changed: Some(keys.len()), isolated: None, visibility, param_warnings: Vec::new() });
     }
     if let Some(value) = p.get("paths") {
         if p.get("items").is_some() || p.get("folder").is_some() {
@@ -497,7 +656,17 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             s.visibility.hidden_occurrences = hidden;
             s.visibility.hidden_bodies = root_bodies;
             s.refresh_display();
-            return Ok(json!({"visible":true,"isolated":paths,"visibility":s.visibility}));
+            let visibility = VisibilityState::from(&s.visibility);
+            return reply(
+                cmd,
+                BrowserVisibilityResult {
+                    visible: true,
+                    changed: None,
+                    isolated: Some(Isolated::Paths(paths)),
+                    visibility,
+                    param_warnings: Vec::new(),
+                },
+            );
         }
         for path in &paths {
             s.visibility.hidden_occurrences.retain(|p| p != path);
@@ -506,7 +675,11 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         s.refresh_display();
-        return Ok(json!({"visible":visible,"changed":paths.len(),"visibility":s.visibility}));
+        let visibility = VisibilityState::from(&s.visibility);
+        return reply(cmd, BrowserVisibilityResult { visible, changed: Some(paths.len()), isolated: None, visibility, param_warnings: Vec::new() });
+    }
+    if bool_(p, "isolate").unwrap_or(false) {
+        return isolate_bodies(s, p, visible);
     }
     let items: Vec<Shown> = match (str_(p, "folder"), p.get("items")) {
         _ if p.get("features").is_some() => {
@@ -527,7 +700,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             list.iter().map(|j| super::joints::joint_id(s, Some(j), cmd).map(Shown::Joint)).collect::<Result<_>>()?
         }
         (Some(_), Some(_)) => return Err(bad(cmd, "give `items` or `folder`, not both")),
-        (Some("bodies"), None) => s.world_state().bodies.iter().map(|b| Shown::Body(b.name.clone())).collect(),
+        (Some("bodies"), None) => s.world_state()?.bodies.iter().map(|b| Shown::Body(b.name.clone())).collect(),
         (Some("sketches"), None) => s.model.state().sketches.iter().map(|x| Shown::Sketch(x.feature)).collect(),
         (Some("construction"), None) => s.doc.features.iter().filter(|f| is_construction(&f.kind)).map(|f| Shown::Origin(f.name.clone())).collect(),
         (Some("origin"), None) => ORIGIN.iter().map(|o| Shown::Origin(o.to_string())).collect(),
@@ -535,7 +708,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
         // Everything at once, for a single "show all" step: every body, sketch, construction
         // item, origin item and joint.
         (Some("all"), None) => {
-            let mut all: Vec<Shown> = s.world_state().bodies.iter().map(|b| Shown::Body(b.name.clone())).collect();
+            let mut all: Vec<Shown> = s.world_state()?.bodies.iter().map(|b| Shown::Body(b.name.clone())).collect();
             all.extend(s.model.state().sketches.iter().map(|x| Shown::Sketch(x.feature)));
             all.extend(s.doc.features.iter().filter(|f| is_construction(&f.kind)).map(|f| Shown::Origin(f.name.clone())));
             all.extend(ORIGIN.iter().map(|o| Shown::Origin(o.to_string())));
@@ -549,8 +722,9 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
                 return Err(bad(cmd, "`items` must list sketches, bodies or construction geometry"));
             }
             // Every item is found before anything changes.
+            let world = s.world_state()?;
             keys.iter()
-                .map(|k| shown_item(s, k).ok_or_else(|| bad(cmd, format!("no sketch, body, construction item or joint `{k}`"))))
+                .map(|k| shown_item(s, &world, k).ok_or_else(|| bad(cmd, format!("no sketch, body, construction item or joint `{k}`"))))
                 .collect::<Result<_>>()?
         }
         (None, None) => return Err(bad(cmd, "`items` or `folder` is required")),
@@ -566,6 +740,10 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             s.visibility.hidden_folders.retain(|k| !k.ends_with(&own) && !groups.iter().any(|g| k.ends_with(g.as_str())));
         }
     }
+    // Only a sketch a feature uses is kept shown on its own: one nothing uses yet is shown anyway,
+    // and marking it would keep it shown once an Extrude uses it (#9954).
+    let used: Vec<u64> =
+        items.iter().filter_map(|it| if let Shown::Sketch(id) = it { crate::view::sketch_consumed(s, *id).then_some(*id) } else { None }).collect();
     let v = &mut s.visibility;
     match str_(p, "folder") {
         Some("bodies" | "all") if visible => {
@@ -584,7 +762,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             Shown::Sketch(id) => {
                 if visible {
                     v.hidden_sketches.retain(|x| x != id);
-                    if !v.shown_sketches.contains(id) {
+                    if used.contains(id) && !v.shown_sketches.contains(id) {
                         v.shown_sketches.push(*id);
                     }
                 } else {
@@ -618,7 +796,8 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     s.refresh_display();
-    Ok(json!({ "visible": visible, "changed": items.len(), "visibility": s.visibility }))
+    let visibility = VisibilityState::from(&s.visibility);
+    reply(cmd, BrowserVisibilityResult { visible, changed: Some(items.len()), isolated: None, visibility, param_warnings: Vec::new() })
 }
 
 /// Browser rows that start open (`c0`, Bodies, placements) vs closed (Origin, Features).
@@ -765,11 +944,8 @@ fn fold_tree(s: &mut Session, p: &Value, open: bool, cmd: &str) -> Result<Value>
     if keys.open.len().saturating_add(keys.closed.len()) > MAX_FOLD_KEYS {
         return Err(bad(cmd, "expand/collapse exceeds 10000 browser rows"));
     }
-    Ok(json!({
-        "open": open,
-        "open_by_default": keys.open.into_iter().collect::<Vec<_>>(),
-        "closed_by_default": keys.closed.into_iter().collect::<Vec<_>>(),
-    }))
+    let (open_by_default, closed_by_default) = (keys.open.into_iter().collect(), keys.closed.into_iter().collect());
+    reply(cmd, BrowserFoldResult { open, open_by_default, closed_by_default, param_warnings: Vec::new() })
 }
 
 fn expand_all(s: &mut Session, p: &Value) -> Result<Value> {
@@ -825,8 +1001,11 @@ fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`units` must be mm, cm, m, in or ft"));
     }
     let old = s.doc.units.clone();
+    let reply = |kept: Vec<String>| {
+        serde_json::to_value(DocumentUnitsResult { units: u.to_string(), kept, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
+    };
     if old == u {
-        return Ok(json!({ "units": u, "kept": [] }));
+        return reply(Vec::new());
     }
     // What the geometry reads: every feature's length inputs.
     let matched_configuration = s.doc.configuration_matches().then(|| s.doc.configs.active.clone()).flatten();
@@ -867,7 +1046,7 @@ fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc_mut().apply_configuration(&row)?;
     }
     s.settle_value_edit(&solved)?;
-    Ok(json!({ "units": u, "kept": kept }))
+    reply(kept)
 }
 
 fn view_save(s: &mut Session, p: &Value) -> Result<Value> {
@@ -919,9 +1098,9 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
         // Standard view names come first, as in the browser's Named Views folder.
         (Some(name), None) => match crate::render::StandardView::parse(name) {
             Some(sv) => {
-                let mut c = crate::view::home_camera(s);
+                let mut c = crate::view::home_camera(s)?;
                 c.set_view(sv);
-                c.fit(&crate::view::bounds(s));
+                c.fit(&crate::view::bounds(s)?);
                 c
             }
             None => s.doc.named_views.iter().find(|v| v.name == name).map(camera_of).ok_or_else(|| bad(cmd, format!("no named view `{name}`")))?,
@@ -1007,16 +1186,91 @@ pub(crate) fn counted(f: &solidcraft_doc::Feature, i: usize) -> bool {
     f.body_names.get(i).is_none_or(|n| n.trim().is_empty()) && (f.shell_piece_order || i < f.body_names.len() || !first)
 }
 
+/// Repair Part (#8371): a feature, which repairs the part as it evaluates (a part with nothing
+/// to repair fails it, with why, and the command changes nothing); the reply is what that
+/// evaluation changed, face by face.
+fn repair_body(s: &mut Session, p: &Value) -> Result<Value> {
+    use solidcraft_doc::expr::Kind;
+    use solidcraft_kernel::{Continuity, SurfaceKind};
+    let cmd = "body.repair";
+    let name = str_(p, "body").filter(|b| !b.trim().is_empty()).ok_or_else(|| bad(cmd, "`body` must name the part to repair"))?.to_string();
+    let state = s.model.state();
+    let source = state.body(&name).ok_or_else(|| bad(cmd, format!("no body `{name}`")))?;
+    if source.body.is_mesh() {
+        return Err(bad(cmd, "a mesh body has no faces to repair: convert it first"));
+    }
+    let gap = expr(p, "gap").unwrap_or_else(|| "0.2 mm".into());
+    check_expr(s, &gap, Kind::Length, cmd, "gap")?;
+    let patch_holes = bool_(p, "patch_holes").unwrap_or(false);
+    let v = add_feature(s, p, FeatureKind::Repair { body: name.clone().into(), gap, patch_holes })?;
+    let field = |k: &str| v.get(k).cloned().unwrap_or(Value::Null);
+    let feature = field("feature").as_u64().unwrap_or(0);
+    let report = s
+        .model
+        .result(feature)
+        .and_then(|r| r.repair.clone())
+        .ok_or_else(|| crate::EngineError::Other(format!("{cmd}: the feature kept no report of the repair")))?;
+    let repaired = s.model.state().body(&name).map(|b| b.body.clone());
+    let volume = repaired.filter(|_| report.closed).and_then(|b| solidcraft_kernel::measure(&b).ok()).map(|m| m.volume);
+    let surface = |k: SurfaceKind| format!("{k:?}").to_lowercase();
+    let face = |face: usize, k: SurfaceKind, why: &str| RepairFace { face, surface: surface(k), why: why.to_string() };
+    let done = RepairDone {
+        rebuilt: report.rebuilt.iter().map(|r| face(r.face, r.surface, &r.why)).collect(),
+        refused: report.refused.iter().map(|r| face(r.face, r.surface, &r.why)).collect(),
+        sewn: report.sewn.iter().map(|g| RepairSewn { faces: g.faces, gap: g.gap, at: [g.at.x, g.at.y, g.at.z] }).collect(),
+        holes: report
+            .holes
+            .iter()
+            .map(|h| {
+                let g = if h.continuity == Continuity::G0 { "g0" } else { "g1" };
+                let edges: Vec<[f64; 3]> = h.edges.iter().map(|q| [q.x, q.y, q.z]).collect();
+                RepairHole {
+                    faces: h.faces.clone(),
+                    continuity: g.into(),
+                    patched: h.patched,
+                    why: h.why.clone(),
+                    patch: json!({"command": "surface.patch", "params": {"body": name, "edges": edges, "continuity": g}}),
+                }
+            })
+            .collect(),
+        faces: report.faces,
+        largest_edge_tolerance: report.largest_edge_tolerance,
+        closed: report.closed,
+        modelling: report.modelling,
+        volume,
+    };
+    let list =
+        |k: &str| v.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+    let reply = RepairResult {
+        feature,
+        name: field("name").as_str().unwrap_or_default().to_string(),
+        bodies: list("bodies"),
+        created_bodies: list("created_bodies"),
+        changed_bodies: list("changed_bodies"),
+        removed_bodies: list("removed_bodies"),
+        warning: field("warning").as_str().map(str::to_string),
+        ms: field("ms").as_f64(),
+        repair: done,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
 fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "body.rename";
-    let old = str_(p, "body").ok_or_else(|| bad(cmd, "`body` must be a body name"))?.to_string();
+    let given = str_(p, "body").ok_or_else(|| bad(cmd, "`body` must be a body name"))?;
+    // A placed copy's name (`KB (K:2)`, the name the browser lists a pasted placement's body by)
+    // means the body it shows, as appearance.assign takes it (#9740): renaming it renames that body,
+    // in every placement of its component (#10017).
+    let old = s.own_body_name(given).ok_or_else(|| bad(cmd, format!("no body `{given}`")))?;
     let name =
         str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
     if name == old {
-        return Ok(json!({"body": old, "name": name}));
+        return reply(cmd, BodyRenamed { body: old, name: name.to_string(), param_warnings: Vec::new() });
     }
     let previous = s.doc.clone();
     let st = s.model.state();
+    let placed = s.doc.body_frames_with_source(&st);
     let b = st.body(&old).ok_or_else(|| bad(cmd, format!("no body `{old}`")))?;
     if st.body(name).is_some() {
         return Err(bad(cmd, format!("another body is called `{name}`")));
@@ -1134,8 +1388,10 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, e));
     }
     d.rename_body_keys(&old, name);
+    // A sketch projecting the body in another placement of its component keeps it.
+    super::sketch_project::follow_placed_renames(d, &st, &placed, Some((&old, name)));
     s.remember_body_rename(&previous, &old, name);
-    Ok(json!({"body": old, "name": name}))
+    reply(cmd, BodyRenamed { body: old, name: name.to_string(), param_warnings: Vec::new() })
 }
 
 fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1265,6 +1521,69 @@ mod tests {
         s.model.state().bodies.iter().map(|b| b.name.clone()).collect()
     }
 
+    /// #10017: a pasted placement's body is listed by its placed name (`KB (K:2)`), and Rename
+    /// sends that name. It renames the body that placement shows, so both placements show the new
+    /// name; a name that is neither a body's nor a placed copy's is still refused.
+    #[test]
+    fn a_placed_copys_body_renames_by_its_placed_name() {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "K"}));
+        run(&mut s, "solid.box", json!({"body_name": "KB", "length": 10, "width": 10, "height": 10}));
+        run(&mut s, "occurrence.copy", json!({"component": "K", "translate": [30, 0, 0]}));
+        // The copy hidden first stays hidden under its new name, and one undo brings both names
+        // back.
+        run(&mut s, "browser.visibility", json!({"items": ["KB (K:2)"], "visible": false}));
+        let r = run(&mut s, "body.rename", json!({"body": "KB (K:2)", "name": "Lid"}));
+        assert_eq!((r["body"].as_str(), r["name"].as_str()), (Some("KB"), Some("Lid")), "{r}");
+        let world = |s: &Session| s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+        let renamed = world(&s);
+        assert!(renamed.iter().any(|n| n == "Lid") && renamed.iter().any(|n| n == "Lid (K:2)"), "{renamed:?}");
+        assert!(!renamed.iter().any(|n| n.starts_with("KB")), "{renamed:?}");
+        assert!(!s.body_visible("Lid (K:2)") && s.body_visible("Lid"), "{:?}", s.visibility.hidden_bodies);
+        assert!(s.execute("body.rename", &json!({"body": "Lid (K:9)", "name": "Other"})).is_err());
+        run(&mut s, "edit.undo", json!({}));
+        let back = world(&s);
+        assert!(back.iter().any(|n| n == "KB") && back.iter().any(|n| n == "KB (K:2)"), "{back:?}");
+    }
+
+    #[test]
+    fn repair_part_patches_a_missing_face_as_one_undoable_feature() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"}));
+        run(&mut s, "surface.unstitch", json!({"body": "Box", "faces": [[5, 5, 10]]}));
+        let open = |s: &Session| s.model.state().body("Box").is_some_and(|b| b.body.is_surface());
+        assert!(open(&s));
+        // A hole alone: nothing is sewn, and the reason names the hole.
+        let err = s.execute("body.repair", &json!({"body": "Box"})).unwrap_err().to_string();
+        assert!(err.contains("a loop of 4 edges"), "{err}");
+        let features = s.doc.features.len();
+        let v = run(&mut s, "body.repair", json!({"body": "Box", "patch_holes": true}));
+        assert_eq!(s.doc.features.len(), features + 1);
+        let done = &v["repair"];
+        assert_eq!(done["holes"][0]["patched"], json!(true), "{v}");
+        assert_eq!(done["holes"][0]["continuity"], json!("g0"), "{v}");
+        assert_eq!(done["holes"][0]["patch"]["command"], json!("surface.patch"), "{v}");
+        assert_eq!(done["faces"], json!([5, 6]));
+        assert_eq!((done["closed"].clone(), done["modelling"].clone()), (json!(true), json!(true)));
+        assert!((done["volume"].as_f64().unwrap() - 1000.0).abs() < 1e-6, "{v}");
+        assert_eq!(v["changed_bodies"], json!(["Box"]));
+        assert!(!open(&s));
+        // Saved and opened again, the feature repairs the part again.
+        let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert!(cold.model.state().body("Box").is_some_and(|b| !b.body.is_surface()));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(open(&s));
+        // A solid with nothing to repair, an unknown body, a gap out of range: refused, nothing added.
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "Solid"}));
+        for p in
+            [json!({"body": "Solid"}), json!({"body": "Nope"}), json!({}), json!({"body": "Box", "gap": "5 mm"}), json!({"body": "Box", "gap": "-1"})]
+        {
+            let n = s.doc.features.len();
+            assert!(s.execute("body.repair", &p).is_err(), "{p}");
+            assert_eq!(s.doc.features.len(), n, "{p}");
+        }
+    }
+
     #[test]
     fn body_rename_preserves_plastic_rules_and_current_visibility_through_history() {
         let mut s = Session::default();
@@ -1391,6 +1710,51 @@ mod tests {
         assert_eq!(s.selection.len(), 2);
     }
 
+    /// The viewport asks whether each body is shown several times a frame: a lookup reads the
+    /// set of hidden bodies, not the list, and follows every change of the list, one written in
+    /// place included.
+    #[test]
+    fn hidden_body_lookups_do_not_walk_the_hidden_body_list() {
+        use crate::occurrences::visibility_work;
+
+        let mut s = Session::default();
+        let hide_many = |s: &mut Session, n: usize| {
+            s.visibility.hidden_bodies.clear();
+            s.visibility.hidden_bodies.extend((0..n).map(|i| format!("Hidden{i}")));
+        };
+        let walked_by = |s: &Session, name: &str| {
+            visibility_work::take();
+            let visible = s.body_visible(name);
+            (visible, visibility_work::take())
+        };
+        hide_many(&mut s, 10);
+        let (_, few) = walked_by(&s, "Shown");
+        hide_many(&mut s, 10_000);
+        visibility_work::built_take();
+        let (visible, many) = walked_by(&s, "Shown");
+        assert!(visible);
+        assert!(many <= few, "a lookup walked {many} entries of 10,000 hidden bodies and {few} of 10");
+        assert_eq!(visibility_work::built_take(), 10_000, "the hidden bodies are read into the set once");
+        for i in 0..300 {
+            assert!(walked_by(&s, &format!("Body{i}")) == (true, 0));
+        }
+        assert_eq!(visibility_work::built_take(), 0, "and not again for the next lookups");
+        assert!(!s.body_visible("Hidden5000") && !s.body_visible("Hidden9999"));
+        s.visibility.hidden_bodies.retain(|name| name != "Hidden5000");
+        assert!(s.body_visible("Hidden5000"), "shown again in place");
+        s.visibility.hidden_bodies.push("Shown".into());
+        assert!(!s.body_visible("Shown"), "hidden in place");
+        s.visibility.hidden_bodies.clear();
+        assert!(s.body_visible("Shown") && s.body_visible("Hidden0"), "all shown");
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Peg"}));
+        run(&mut s, "browser.visibility", json!({"items": ["Peg"], "visible": false}));
+        assert!(!s.body_visible("Peg"));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.body_visible("Peg"), "undo shows it again");
+        run(&mut s, "edit.redo", json!({}));
+        assert!(!s.body_visible("Peg"), "redo hides it again");
+    }
+
     #[test]
     fn show_all_bodies_clears_stale_hidden_names() {
         for folder in ["bodies", "all"] {
@@ -1424,6 +1788,51 @@ mod tests {
     }
 
     #[test]
+    fn body_rename_reusing_a_hidden_name_preserves_visibility_and_history() {
+        for computed in [false, true] {
+            for hidden in [false, true] {
+                let mut s = Session::default();
+                two_boxes(&mut s);
+                let retired = s.doc.features[0].id;
+                run(&mut s, "browser.visibility", json!({"items": ["A"], "visible": false}));
+                run(&mut s, "timeline.delete", json!({"feature": retired}));
+                if hidden {
+                    run(&mut s, "browser.visibility", json!({"items": ["B"], "visible": false}));
+                }
+                let before = s.visibility.clone();
+                assert_eq!(s.body_visible("B"), !hidden);
+                if computed {
+                    let mut scratch = s.scratch();
+                    run(&mut scratch, "body.rename", json!({"body": "B", "name": "A"}));
+                    s.accept_computed(scratch);
+                } else {
+                    run(&mut s, "body.rename", json!({"body": "B", "name": "A"}));
+                }
+                assert_eq!(names(&s), ["A"]);
+                assert_eq!(s.body_visible("A"), !hidden, "computed={computed}, hidden={hidden}: rename preserves visibility");
+                assert_eq!(s.visibility.hidden_bodies, if hidden { vec!["A"] } else { vec![] });
+                run(&mut s, "edit.undo", json!({}));
+                assert_eq!(names(&s), ["B"]);
+                assert_eq!(s.visibility, before, "undo restores the original hidden names, including the deleted body's");
+                assert_eq!(s.body_visible("B"), !hidden, "undo must not transfer the stale hide to B");
+                if !hidden {
+                    run(&mut s, "edit.undo", json!({}));
+                    assert_eq!(names(&s), ["A", "B"]);
+                    assert!(!s.body_visible("A") && s.body_visible("B"), "restoring the deleted body restores its own visibility");
+                    run(&mut s, "edit.redo", json!({}));
+                }
+                run(&mut s, "edit.redo", json!({}));
+                assert_eq!(s.body_visible("A"), !hidden, "redo preserves visibility");
+                let mut saved = (*s.doc).clone();
+                saved.visibility = s.visibility.clone();
+                let reopened = Session::new(serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap());
+                assert_eq!(names(&reopened), ["A"]);
+                assert_eq!(reopened.body_visible("A"), !hidden, "reopening preserves visibility");
+            }
+        }
+    }
+
+    #[test]
     fn renamed_body_keeps_its_users() {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
@@ -1439,6 +1848,90 @@ mod tests {
         assert!(s.execute("body.rename", &json!({"body": "Lid", "name": " "})).is_err());
         run(&mut s, "edit.undo", json!({}));
         assert_eq!(names(&s)[1], b);
+    }
+
+    /// #10123: renaming a piece cut off a frame member must land on that piece after a rebuild,
+    /// not on the first line's member. The repro is the issue's, verbatim.
+    #[test]
+    fn renaming_a_cut_off_frame_piece_lands_on_that_piece_after_rebuild() {
+        let dir = std::env::temp_dir().join(format!("sc-10123-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let saved = dir.join("rename_repro.sc");
+        let mut s = Session::default();
+        run(&mut s, "document.units", json!({"units": "in"}));
+        run(
+            &mut s,
+            "timeline.add",
+            json!({"feature": {
+                "id": 1, "name": "Lines", "type": "sketch", "suppressed": false,
+                "plane": {"name": "XY", "type": "origin"},
+                "sketch": {
+                    "constraints": [{"id": "k1", "p": 0, "q": 1, "type": "coincident"}],
+                    "counters": {"k": 1, "l": 2},
+                    "curves": [
+                        {"a": 1, "b": 2, "construction": false, "id": "l1", "type": "line"},
+                        {"a": 3, "b": 4, "construction": false, "id": "l2", "type": "line"}
+                    ],
+                    "points": [
+                        {"fixed": true, "id": "origin", "pos": [0.0, 0.0]},
+                        {"fixed": false, "id": "l1.start", "pos": [0.0, 0.0]},
+                        {"fixed": false, "id": "l1.end", "pos": [100.0, 0.0]},
+                        {"fixed": false, "id": "l2.start", "pos": [0.0, 50.0]},
+                        {"fixed": false, "id": "l2.end", "pos": [100.0, 50.0]}
+                    ]
+                }
+            }}),
+        );
+        run(
+            &mut s,
+            "timeline.add",
+            json!({"feature": {
+                "id": 2, "name": "Members", "type": "frame_member", "suppressed": false,
+                "body_names": ["A", "B"], "names": {"l1": "A", "l2": "B"}, "param_names": ["d1"],
+                "path_sketch": 1,
+                "profile": {"profile": {"diameter": "10 mm", "kind": "round_bar"}, "source": "library"}
+            }}),
+        );
+        run(
+            &mut s,
+            "timeline.add",
+            json!({"feature": {
+                "id": 3, "name": "Cutter", "type": "box", "suppressed": false,
+                "body_names": ["Cutter"], "corner": [45.0, 40.0, -10.0],
+                "height": "20 mm", "length": "10 mm", "width": "20 mm",
+                "operation": "new_body", "param_names": ["d2", "d3", "d4"]
+            }}),
+        );
+        run(
+            &mut s,
+            "timeline.add",
+            json!({"feature": {
+                "id": 4, "name": "Cut B", "type": "combine", "suppressed": false,
+                "operation": "cut", "target": "B", "tools": ["Cutter"], "keep_tools": true
+            }}),
+        );
+        let sorted = |v: Vec<String>| {
+            let mut v = v;
+            v.sort();
+            v
+        };
+        assert_eq!(sorted(names(&s)), ["A", "B", "B (1)", "Cutter"]);
+        run(&mut s, "body.rename", json!({"body": "B (1)", "name": "B2"}));
+        assert_eq!(sorted(names(&s)), ["A", "B", "B2", "Cutter"]);
+        // The new name is the cut's second piece's, stored by the cut, not in the members' slots.
+        let stored = |id: u64| s.doc.features.iter().find(|f| f.id == id).map(|f| f.body_names.clone()).unwrap_or_default();
+        assert!(!stored(2).contains(&"B2".to_string()), "members: {:?}", stored(2));
+        assert_eq!(stored(4), ["B2"], "the cut stores its piece's name");
+        run(&mut s, "file.save_as", json!({"path": saved.to_string_lossy()}));
+        let mut reopened = Session::default();
+        run(&mut reopened, "doc.open", json!({"path": saved.to_string_lossy()}));
+        assert_eq!(sorted(names(&reopened)), ["A", "B", "B2", "Cutter"], "the rename must not move to member A on rebuild");
+        // `solidcraft-cli eval` of the saved file rebuilds it from its features alone, with no
+        // saved model to take the names from (#10438).
+        let rebuilt = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert_eq!(sorted(names(&rebuilt)), ["A", "B", "B2", "Cutter"], "a rebuild from the features alone keeps the rename too");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1595,7 +2088,9 @@ mod tests {
         run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "operation": "new", "body_name": "Tab"}));
         run(&mut s, "solid.combine", json!({"target": "A", "tools": ["Tab"], "operation": "join", "name": "Joined"}));
         let want = total(&mut s);
+        s.evaluations = 0;
         run(&mut s, "body.rename", json!({"body": "A", "name": "B"}));
+        assert_eq!(s.evaluations, 0, "renaming primitive participants changes no geometry");
         assert!(
             s.model.results.iter().all(|r| r.error.is_none()),
             "{:?}",
@@ -1605,6 +2100,7 @@ mod tests {
         assert!((total(&mut s) - want).abs() < 1e-6);
         run(&mut s, "edit.undo", json!({}));
         assert_eq!(s.doc.find_feature("Hole").unwrap().participants, vec!["A".to_string()]);
+        assert_eq!(s.evaluations, 0);
     }
 
     /// #1109: renaming counted bodies (`Body1`, `Body2` of one pattern) leaves the counted bodies
@@ -1668,12 +2164,78 @@ mod tests {
         assert_eq!(names(&s), vec!["Plate".to_string(), "B".to_string()]);
         assert_eq!(s.evaluations, 0, "undo and redo of a rename evaluate nothing");
         assert_eq!(meshes(&s), shown);
-        // A body a later feature uses is renamed in that feature too: that is evaluated.
+        // A later feature's body reference follows the rename without rebuilding geometry.
         run(&mut s, "solid.combine", json!({"target": "Plate", "tools": ["B"], "operation": "join", "keep_tools": true}));
+        let shown = meshes(&s);
         s.evaluations = 0;
         run(&mut s, "body.rename", json!({"body": "B", "name": "Tool"}));
-        assert!(s.evaluations > 0);
+        assert_eq!(s.evaluations, 0);
+        assert_eq!(meshes(&s), shown);
         assert!(names(&s).contains(&"Tool".to_string()));
+    }
+
+    /// #6287: one rename in a timeline of named body references used to rebuild every feature
+    /// and replace every mesh, including the other bodies' meshes.
+    #[test]
+    fn renaming_a_body_with_downstream_references_keeps_every_mesh() {
+        let mut s = Session::default();
+        for i in 0..18 {
+            run(
+                &mut s,
+                "solid.box",
+                json!({"length": 40, "width": 30, "height": 10, "center": [50 * i, 0, 0], "operation": "new", "body_name": format!("Block{i}")}),
+            );
+        }
+        for _ in 0..2 {
+            for i in 0..18 {
+                run(&mut s, "solid.move", json!({"bodies": [format!("Block{i}")], "translate": [0, 5, 0]}));
+            }
+        }
+        assert_eq!(s.doc.features.len(), 54);
+        let meshes = |s: &Session| s.model.state().bodies.iter().map(|b| b.mesh()).collect::<Vec<_>>();
+        let looks = |s: &Session| {
+            s.model.state().bodies.iter().map(|b| (b.name.clone(), (*solidcraft_doc::naming::face_names(b)).clone())).collect::<Vec<_>>()
+        };
+        let shown = meshes(&s);
+        let before = looks(&s);
+        let measurements = run(&mut s, "inspect.measure", json!({}))["total"].clone();
+        assert!((measurements["volume_mm3"].as_f64().unwrap() - 216_000.0).abs() < 1e-6);
+        s.evaluations = 0;
+        run(&mut s, "body.rename", json!({"body": "Block0", "name": "Bracket"}));
+        assert_eq!(s.evaluations, 0, "renaming references must not evaluate the timeline");
+        let after = looks(&s);
+        assert_eq!(after[0].0, "Bracket");
+        let mut fresh = Session::new((*s.doc).clone());
+        fresh.refresh();
+        assert_eq!(looks(&fresh), after, "the same bodies and face names as rebuilding");
+        assert_eq!(run(&mut fresh, "inspect.measure", json!({}))["total"], measurements);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(looks(&s), before);
+        run(&mut s, "edit.redo", json!({}));
+        assert_eq!(looks(&s), after);
+        assert_eq!(s.evaluations, 0, "undo and redo must also retain the evaluated model");
+        assert!(shown.iter().zip(meshes(&s)).all(|(a, b)| std::sync::Arc::ptr_eq(a, &b)), "every body retains its display mesh");
+    }
+
+    #[test]
+    fn a_body_rename_with_changed_dimensions_still_evaluates() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Block"}));
+        run(&mut s, "solid.move", json!({"bodies": ["Block"], "translate": [5, 0, 0]}));
+        let before = s.doc.clone();
+        let model = s.model.clone();
+        run(&mut s, "body.rename", json!({"body": "Block", "name": "Bracket"}));
+        // An outside edit can include a rename and a geometry change together. It must not
+        // take the rename shortcut merely because the later Move's body reference matches.
+        let solidcraft_doc::FeatureKind::Box { height, .. } = &mut s.doc_mut().features[0].kind else { panic!("expected the box") };
+        *height = "20".into();
+        s.model = model;
+        s.evaluations = 0;
+        s.refresh_from(&before, false);
+        assert_eq!(s.evaluations, 1);
+        assert_eq!(names(&s), ["Bracket"]);
+        let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+        assert!((volume - 24_000.0).abs() < 1e-6, "the changed height must be evaluated: {volume}");
     }
 
     #[test]
@@ -1767,7 +2329,7 @@ mod tests {
         assert!(s.camera.is_none());
         let r = run(&mut s, "view.apply", json!({"view": "Photo"}));
         let c = s.camera.expect("a camera for the view");
-        assert_eq!((c.target, c.yaw, c.pitch, c.distance), (solidcraft_geom::Vec3::new(1.0, 2.0, 3.0), 0.5, -0.6, 150.0));
+        assert_eq!((c.target, c.yaw, c.pitch, c.distance), (solidcore_record::Vec3::new(1.0, 2.0, 3.0), 0.5, -0.6, 150.0));
         assert_eq!(r["camera"]["yaw"], 0.5);
         // A standard view looks from its direction and frames the model.
         run(&mut s, "view.apply", json!({"view": "top"}));
@@ -1932,6 +2494,23 @@ mod tests {
         assert!(s.visibility.hidden_bodies.is_empty());
     }
 
+    /// #9954: a sketch hidden and shown again before an Extrude uses it hides itself once the
+    /// Extrude uses it, as a sketch never hidden does; shown after the Extrude, it stays shown.
+    #[test]
+    fn a_sketch_shown_before_an_extrude_hides_itself_once_the_extrude_uses_it() {
+        let mut s = Session::default();
+        let sketch = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "browser.visibility", json!({"items": [sketch], "visible": false}));
+        run(&mut s, "browser.visibility", json!({"items": [sketch], "visible": true}));
+        assert!(crate::view::sketch_shown(&s, sketch));
+        run(&mut s, "solid.extrude", json!({"sketch": sketch, "distance": 10}));
+        assert!(!crate::view::sketch_shown(&s, sketch), "the Extrude uses it: it hides itself");
+        run(&mut s, "browser.visibility", json!({"items": [sketch], "visible": true}));
+        assert!(crate::view::sketch_shown(&s, sketch), "shown on its own, it stays shown");
+    }
+
     #[test]
     fn a_sheet_metal_flange_hides_its_sketch_as_an_extrude_does() {
         // #6804: the base flange's sketch stayed shown; its line on the plate's bottom edge then
@@ -2010,7 +2589,7 @@ mod tests {
         let body = s.model.state().bodies[0].name.clone();
         let drain_name = s.doc.feature(drain).unwrap().name.clone();
         let cam = solidcraft_render::Camera::default();
-        let lines = |s: &Session| crate::view::scene(s, &cam).lines.len();
+        let lines = |s: &Session| crate::view::scene(s, &cam).unwrap().lines.len();
         let shown = |s: &mut Session| {
             let d = run(s, "document.inspect", json!({}));
             d["sketches"].as_array().unwrap().iter().filter(|x| x["visible"] == true).count()
@@ -2029,7 +2608,7 @@ mod tests {
         assert_eq!(lines(&s), n0);
         // The browser's Sketches folder hidden: sketches shown one by one aren't drawn either,
         // only the sketch being edited.
-        assert!(s.visibility.shown_sketches.contains(&floor));
+        assert!(crate::view::sketch_shown(&s, floor));
         run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/sketches"], "visible": false}));
         assert!([floor, drain].iter().all(|id| !crate::view::sketch_shown(&s, *id)));
         s.active_sketch = Some(floor);
@@ -2038,7 +2617,7 @@ mod tests {
         run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/sketches"], "visible": true}));
         // Bodies (following a rename) and construction planes.
         run(&mut s, "browser.visibility", json!({"items": [body.clone(), "Floor", "xy"], "visible": false}));
-        assert!(crate::view::scene(&s, &cam).meshes.is_empty());
+        assert!(crate::view::scene(&s, &cam).unwrap().meshes.is_empty());
         assert_eq!(s.visibility.hidden_origin, vec!["Floor".to_string(), "XY".to_string()]);
         run(&mut s, "body.rename", json!({"body": body, "name": "Tray"}));
         assert_eq!(s.visibility.hidden_bodies, vec!["Tray".to_string()]);
@@ -2093,7 +2672,8 @@ mod tests {
         assert!(s.visibility.hidden_bodies.is_empty());
         run(&mut s, "browser.visibility", json!({"items": ["BACK LID"], "visible": true}));
         assert!(s.visibility.hidden_sketches.is_empty());
-        assert_eq!(s.visibility.shown_sketches, vec![sketch]);
+        // Nothing uses the sketch: shown again, it is on neither list (#9954).
+        assert!(s.visibility.shown_sketches.is_empty() && crate::view::sketch_shown(&s, sketch));
     }
 
     /// #2219: hiding is a step of its own, so Ctrl+Z brings the body back instead of undoing the
@@ -2104,7 +2684,7 @@ mod tests {
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"}));
         s.mark_saved();
         let cam = solidcraft_render::Camera::default();
-        let drawn = |s: &Session| crate::view::scene(s, &cam).meshes.len();
+        let drawn = |s: &Session| crate::view::scene(s, &cam).unwrap().meshes.len();
         assert!(drawn(&s) > 0, "the box is drawn");
         assert!(!s.is_dirty());
         let steps = s.undo.len();

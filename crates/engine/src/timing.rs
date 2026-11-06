@@ -40,6 +40,20 @@ pub fn time<T>(profile: bool, f: impl FnOnce() -> T) -> (T, Step) {
     }
 }
 
+/// `SOLIDCRAFT_PROFILE` asks for the profiler from the start: `1`, `true`, `on` or `yes`.
+pub fn profile_env_on(value: Option<&str>) -> bool {
+    value.map(|v| v.trim().to_ascii_lowercase()).is_some_and(|v| matches!(v.as_str(), "1" | "true" | "on" | "yes"))
+}
+
+/// Start the profiler when `SOLIDCRAFT_PROFILE` asks for it (the apps call this at start-up);
+/// true when it is recording.
+pub fn profile_from_env() -> bool {
+    if profile_env_on(solidcraft_geom::env::var("PROFILE").as_deref()) {
+        solidcraft_profile::set_enabled(true);
+    }
+    solidcraft_profile::enabled()
+}
+
 /// Milliseconds to the microsecond, so the JSON stays readable.
 pub fn round_ms(ms: f64) -> f64 {
     if ms.is_finite() { (ms * 1000.0).round() / 1000.0 } else { 0.0 }
@@ -63,6 +77,16 @@ impl Step {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_profile_variable_takes_the_usual_yes_words() {
+        for v in ["1", "true", " ON ", "yes"] {
+            assert!(profile_env_on(Some(v)), "{v}");
+        }
+        for v in [None, Some(""), Some("0"), Some("off"), Some("2")] {
+            assert!(!profile_env_on(v), "{v:?}");
+        }
+    }
 
     #[test]
     fn steps_report_their_time_and_profile_only_when_asked() {

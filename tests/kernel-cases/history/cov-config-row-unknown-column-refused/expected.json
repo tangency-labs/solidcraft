@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "config.row with a value for a column the table does not have",
+ "source": "invariants",
+ "method": "Depth is not a column: refused, saying how to add one",
+ "outcome": "refused",
+ "refusal": "`Depth` is not a column (config.column adds one)"
+}

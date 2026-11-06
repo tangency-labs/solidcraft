@@ -3,9 +3,11 @@
 
 use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
-use solidcraft_engine::geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
+use crate::i18n::tr;
 use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
 use crate::viewport::{Hit, Proj, pick_for_tool as pick, sketch_point_at};
 
@@ -97,6 +99,12 @@ pub struct Tool {
     /// Where each point was placed and the sketch points the snap lined it up with (#7828):
     /// constrained to them once the shape is made.
     pub lined: Vec<(Vec2, Vec<crate::sketch_tools::Lined>)>,
+    /// The Line tool's chain, which a rest on its last point switches to tangent arcs and back
+    /// (#9489).
+    pub chain: crate::sketch_line_arc::LineChain,
+    /// The construction line tools' Construction/Normal switch (#10258): a segment with a length
+    /// becomes a normal sketch line. Each start of a tool begins at Construction.
+    pub normal: bool,
 }
 
 impl Tool {
@@ -149,34 +157,32 @@ impl Tool {
             dims_focus: false,
             arc_turn: 0.0,
             lined: Vec::new(),
+            chain: Default::default(),
+            normal: false,
         })
     }
 }
 
 pub fn hint(id: &str) -> String {
     match id {
-        "sketch.line" => "Line: click points; right-click or Esc to finish".into(),
-        "sketch.rectangle.two_point" => "Rectangle: click two opposite corners".into(),
-        "sketch.rectangle.center" => "Center rectangle: click the centre, then a corner".into(),
-        "sketch.rectangle.rounded" => "Rounded rectangle: click two opposite corners (Tab to the radius box to type the corner radius)".into(),
-        "sketch.rectangle.three_point" => "3-point rectangle: click two points of one edge, then the width".into(),
-        "sketch.circle.center" => "Circle: click the centre, then a point on the circle".into(),
-        "sketch.arc.three_point" => "Arc: click start, end, then a point on the arc".into(),
-        "sketch.arc3d" => "3D Arc: click start, end, then a point on the arc (points may leave the sketch plane)".into(),
-        "sketch.line3d" => "3D Line: click world points; right-click or Esc to finish (points may leave the sketch plane)".into(),
-        "sketch.spline3d" => "3D Spline: click fit points in 3D; right-click or Esc to finish".into(),
-        "sketch.point3d" => "3D Point: click where a 3D point goes".into(),
-        "sketch.arc.center_point" => "Arc: click centre and start, go round either way and click the end, or type a signed sweep".into(),
-        "sketch.dimension" => {
-            "Dimension: pick one or two entities and type the value (or click to place it first); click a dimension to edit it; Enter applies".into()
-        }
-        "sketch.constraint.horizontal_vertical" => {
-            "Horizontal/Vertical: pick a line, two points, or a point and a line; hold Shift to pick a line midpoint".into()
-        }
-        "sketch.slot.center_to_center" | "sketch.slot.overall" => "Slot: click both ends, then the width".into(),
-        "sketch.constraint.midpoint" => "MidPoint: pick a point and a line, or two lines to centre the second on the first".into(),
-        _ if id.starts_with("sketch.constraint.") => "Constraint: pick the sketch entities".into(),
-        _ => crate::sketch_tools::hint(id).unwrap_or_else(|| "Click in the sketch".into()),
+        "sketch.line" => tr("sketch.hint.line").into(),
+        "sketch.rectangle.two_point" => tr("sketch.hint.rectangle.two_point").into(),
+        "sketch.rectangle.center" => tr("sketch.hint.rectangle.center").into(),
+        "sketch.rectangle.rounded" => tr("sketch.hint.rectangle.rounded").into(),
+        "sketch.rectangle.three_point" => tr("sketch.hint.rectangle.three_point").into(),
+        "sketch.circle.center" => tr("sketch.hint.circle.center").into(),
+        "sketch.arc.three_point" => tr("sketch.hint.arc.three_point").into(),
+        "sketch.arc3d" => tr("sketch.hint.arc3d").into(),
+        "sketch.line3d" => tr("sketch.hint.line3d").into(),
+        "sketch.spline3d" => tr("sketch.hint.spline3d").into(),
+        "sketch.point3d" => tr("sketch.hint.point3d").into(),
+        "sketch.arc.center_point" => tr("sketch.hint.arc.center_point").into(),
+        "sketch.dimension" => tr("sketch.hint.dimension").into(),
+        "sketch.constraint.horizontal_vertical" => tr("sketch.hint.constraint.horizontal_vertical").into(),
+        "sketch.slot.center_to_center" | "sketch.slot.overall" => tr("sketch.hint.slot").into(),
+        "sketch.constraint.midpoint" => tr("sketch.hint.constraint.midpoint").into(),
+        _ if id.starts_with("sketch.constraint.") => tr("sketch.hint.constraint.generic").into(),
+        _ => crate::sketch_tools::hint(id).unwrap_or_else(|| tr("sketch.hint.fallback").into()),
     }
 }
 
@@ -194,7 +200,7 @@ fn xy(p: &(Vec2, Option<String>)) -> Value {
 /// Shift exposes a line midpoint as a point target, only in the alignment tool.
 fn midpoint_at(app: &SolveApp, proj: &Proj, pos: Pos2, radius: f32) -> Option<(Vec2, String)> {
     let sid = app.session.active_sketch?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let ss = state.sketch(sid)?;
     pick(app, proj, pos).into_iter().find_map(|hit| {
         let Hit::SketchCurve { sketch, id, straight: true, .. } = hit else { return None };
@@ -211,6 +217,10 @@ fn midpoint_at(app: &SolveApp, proj: &Proj, pos: Pos2, radius: f32) -> Option<(V
 
 pub fn on_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     crate::sketch3d::on_hover(app, proj, pos);
+    if let Some(mut tool) = app.tool.take() {
+        crate::sketch_line_arc::rejoin(app, &mut tool);
+        app.tool = Some(tool);
+    }
     let midpoint = (shift && app.tool.as_ref().is_some_and(|t| t.kind == Kind::HorizontalVertical))
         .then(|| midpoint_at(app, proj, pos, f32::INFINITY))
         .flatten();
@@ -318,7 +328,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                 let params = match first {
                     None => Some(json!({"line": id})),
                     Some(point) => {
-                        let state = app.session.world_state();
+                        let state = crate::open_meshing::session_world(&app.session);
                         app.session.active_sketch.and_then(|sid| state.sketch(sid)).and_then(|ss| point_line_alignment(&ss.sketch, &point, id))
                     }
                 };
@@ -365,7 +375,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                 if id.starts_with("mid:") { return Some(id); }
                 // An earlier dimension may already have materialized this midpoint.
                 // Picking that point retains the same midpoint intent on subsequent dimensions.
-                let state = app.session.world_state();
+                let state = crate::open_meshing::session_world(&app.session);
                 let ss = app.session.active_sketch.and_then(|sid| state.sketch(sid))?;
                 let point = ss.sketch.resolve_point(&id)?;
                 ss.sketch.constraints.iter().find_map(|c| match c.kind {
@@ -376,7 +386,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                 })
             }).filter(|id| {
                 let Some(line) = id.strip_prefix("mid:") else { return false };
-                let state = app.session.world_state();
+                let state = crate::open_meshing::session_world(&app.session);
                 app.session
                     .active_sketch
                     .and_then(|sid| state.sketch(sid))
@@ -398,6 +408,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                         Hit::SketchCurve { sketch, id, straight, .. } if Some(*sketch) == app.session.active_sketch => {
                             Some((id.clone(), true, *straight))
                         }
+                        Hit::Axis { name } => sketch_axis_of(app, name).map(|a| (a.to_string(), true, true)),
                         _ => None,
                     })
                 })
@@ -497,6 +508,7 @@ fn dimension_picks(tool: &Tool, id: String, midpoint: Option<&str>, midpoint_tar
 /// the typed values as dimension constraints).
 pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
     let Some(mut tool) = app.tool.take() else { return };
+    crate::sketch_line_arc::rejoin(app, &mut tool);
     if tool.kind == Kind::Ext {
         crate::sketch_tools::place_point(app, &mut tool, p);
         // A placed text opens Edit Text, which ends the tool.
@@ -518,6 +530,10 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
     tool.pts.push(p);
     let before = crate::sketch_tools::point_ids(app);
     if tool.cmd == "sketch.line" {
+        // A new chain's first point: nothing drawn yet to go on tangent from.
+        if tool.pts.len() == 1 {
+            tool.chain = Default::default();
+        }
         if tool.pts.len() >= 2 {
             let (a, b) = (tool.pts[tool.pts.len() - 2].clone(), tool.pts[tool.pts.len() - 1].clone());
             let angled = crate::sketch_dims::has_locked(&tool, "Angle");
@@ -543,6 +559,7 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
                     tool.pts[last].1 = Some(format!("{id}.end"));
                     // The chain needs only its current endpoint, even after many segments.
                     tool.pts = vec![tool.pts[last].clone()];
+                    tool.chain.placed(id, a.clone());
                 }
                 crate::sketch_dims::reset(&mut tool);
             } else {
@@ -730,13 +747,11 @@ pub(crate) fn constraint_preselection(
             point_line_alignment(sketch?, &json!(id), line)
         }
         ("sketch.constraint.horizontal_vertical", _) => crate::selection::alignment_points(selection).map(|points| json!({"points": points})),
-        ("sketch.constraint.coincident", [a, b]) => {
-            let entity = |s: &solidcraft_engine::Sel| match s {
-                SketchPoint { id } | SketchCurve { id, .. } => Some(id.clone()),
-                _ => None,
-            };
-            let (a, b) = (entity(a)?, entity(b)?);
-            (a != b).then(|| json!({"a":a,"b":b}))
+        ("sketch.constraint.coincident", [_, _]) => crate::selection::coincident_operands(selection),
+        ("sketch.constraint.concentric", [SketchCurve { id: a, .. }, SketchPoint { id: b }] | [SketchPoint { id: a }, SketchCurve { id: b, .. }])
+            if a != b =>
+        {
+            Some(json!({"a":a,"b":b}))
         }
         (
             "sketch.constraint.midpoint",
@@ -769,6 +784,9 @@ pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> O
             Some(match item {
                 Sel::Body { name } => json!({"body":name}),
                 Sel::ExternalSketchCurve { sketch, id } => json!({"sketch":sketch,"curve":id}),
+                // A straight line of another sketch, picked into the dialog, names its sketch
+                // (#3726): the same reference the external pick stands for (#10291).
+                Sel::SketchCurve { id, sketch: Some(sketch) } => json!({"sketch":sketch,"curve":id}),
                 Sel::ExternalSketchPoint { sketch, id } => json!({"sketch":sketch,"point":id}),
                 Sel::Vertex { body, point } => json!({"body":body,"vertex":[point.x,point.y,point.z]}),
                 Sel::Edge { body, point, .. } => json!({"body":body,"edge":[point.x,point.y,point.z]}),
@@ -784,14 +802,14 @@ pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> O
 /// `x` or `y` when the origin axis `name` is the active sketch's own x or y axis: along it, and
 /// through the sketch's origin.
 pub(crate) fn sketch_axis_of(app: &SolveApp, name: &str) -> Option<&'static str> {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let dir = match name {
         "X" => Vec3::X,
         "Y" => Vec3::Y,
         "Z" => Vec3::Z,
         _ => return None,
     };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let plane = st.sketch(app.session.active_sketch?)?.plane;
     let o = plane.origin;
     if (o - dir * o.dot(dir)).len() > 1e-6 {
@@ -839,7 +857,7 @@ fn run_pick(app: &mut SolveApp, t: &Tool) {
         "sketch.constraint.midpoint" => json!({"a": k[0], "b": k[1]}),
         "sketch.constraint.symmetry" => {
             let params = {
-                let state = app.session.world_state();
+                let state = crate::open_meshing::session_world(&app.session);
                 symmetry_args(&k, app.session.active_sketch.and_then(|id| state.sketch(id)).map(|ss| &ss.sketch))
             };
             let Some(params) = params else {
@@ -870,6 +888,9 @@ pub fn finish(app: &mut SolveApp) {
     if crate::sketch3d::finish(app) {
         return;
     }
+    if crate::sketch_line_arc::finish(app) {
+        return;
+    }
     if let Some(mut t) = app.tool.take_if(|t| t.kind == Kind::Ext) {
         if crate::sketch_tools::finish(app, &mut t) {
             app.tool = Some(t);
@@ -890,7 +911,7 @@ pub fn finish(app: &mut SolveApp) {
 /// Rubber-band preview of the shape being drawn.
 pub(crate) fn paint_preview_curve(
     mut sketch: solidcraft_engine::sketch::Sketch,
-    plane: &solidcraft_engine::geom::Plane,
+    plane: &solidcore_record::Plane,
     painter: &egui::Painter,
     proj: &Proj,
     stroke: Stroke,
@@ -909,7 +930,7 @@ pub(crate) fn paint_preview_curve(
     crate::scenario::publish_count("tool_preview_curves", sketch.curves.len() as f64);
 }
 
-pub(crate) fn paint_sketch_path(points: &[solidcraft_engine::geom::Vec3], mode: u8, painter: &egui::Painter, proj: &Proj, stroke: Stroke) {
+pub(crate) fn paint_sketch_path(points: &[solidcore_record::Vec3], mode: u8, painter: &egui::Painter, proj: &Proj, stroke: Stroke) {
     if mode == 0 {
         let screen: Vec<_> = points.iter().filter_map(|point| proj.to_screen(*point)).collect();
         if screen.len() >= 2 {
@@ -928,7 +949,7 @@ pub(crate) fn paint_sketch_path(points: &[solidcraft_engine::geom::Vec3], mode: 
 pub(crate) fn paint_curve(
     sketch: &solidcraft_engine::sketch::Sketch,
     index: usize,
-    plane: &solidcraft_engine::geom::Plane,
+    plane: &solidcore_record::Plane,
     painter: &egui::Painter,
     proj: &Proj,
     stroke: Stroke,
@@ -1084,6 +1105,7 @@ pub(crate) fn preview_curve(
                     control: t.cmd != "sketch.spline.fit_point",
                     degree: if t.cmd == "sketch.spline.control_point_5" { 5 } else { 3 },
                     periodic,
+                    nurbs: None,
                 },
                 None,
             )
@@ -1144,7 +1166,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         return crate::sketch_tools::preview(app, t, painter, proj);
     }
     let Some(sid) = app.session.active_sketch else { return };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = st.sketch(sid) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     // Drawn straight onto the view: its side's colours (#4146).
@@ -1157,14 +1179,17 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         if snap.as_deref() == Some("Midpoint") && t.kind == Kind::HorizontalVertical {
             painter.circle_stroke(sp, 8.0, Stroke::new(2.0, tk.accent));
         }
-        let readout = painter.text(
-            crate::tool_cursor::readout_at(painter, proj.rect, sp),
-            egui::Align2::LEFT_TOP,
-            format!("{}, {}", crate::prefs::show_mm(app, hp.x, 1), crate::prefs::show_mm(app, hp.y, 1)),
-            egui::FontId::proportional(crate::theme::Tokens::get().font_small),
-            tk.text_dim,
-        );
-        crate::scenario::publish_rect("viewport:readout", readout);
+        // The design's coordinates: not while a value is typed and the sketch is drawn at it.
+        if crate::dim_view::preview_world(app).is_none() {
+            let readout = painter.text(
+                crate::tool_cursor::readout_at(painter, proj.rect, sp),
+                egui::Align2::LEFT_TOP,
+                format!("{}, {}", crate::prefs::show_mm(app, hp.x, 1), crate::prefs::show_mm(app, hp.y, 1)),
+                egui::FontId::proportional(crate::theme::Tokens::get().font_small),
+                tk.text_dim,
+            );
+            crate::scenario::publish_rect("viewport:readout", readout);
+        }
     }
     if matches!(t.kind, Kind::HorizontalVertical | Kind::Dimension) {
         for target in &t.point_picks {

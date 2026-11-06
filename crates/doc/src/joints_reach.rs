@@ -2,10 +2,11 @@
 //! point of it reaches a target (and an axis of it points a given way), every value within its
 //! limits, motion links followed, and the closed loops those values are in kept closed.
 
+use solidcraft_geom::prelude::*;
 use std::cell::Cell;
 use std::collections::BTreeSet;
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_sketch::linalg;
 
 use super::{

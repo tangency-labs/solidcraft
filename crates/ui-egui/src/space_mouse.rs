@@ -307,7 +307,7 @@ pub fn buttons_hook(app: &mut SolveApp, ctx: &egui::Context, seen: Buttons, raw:
 fn run_button_job(app: &mut SolveApp, job: &ButtonJob, modifiers: egui::Modifiers, raw: &mut egui::RawInput) {
     match job {
         // Navigation, where the 3D mouse's section is.
-        ButtonJob::Settings => crate::prefs::open_at(app, crate::prefs::PAGE_NAVIGATION),
+        ButtonJob::Settings => crate::prefs::open_at(app, crate::prefs::PAGE_MOUSE3D),
         ButtonJob::View(view) => app.animate_view(view),
         ButtonJob::Key(ButtonKey::Esc) => {
             for pressed in [true, false] {
@@ -689,6 +689,7 @@ mod tests {
     use super::*;
     use crate::Services;
     use solidcraft_engine::Session;
+    use solidcraft_engine::geom::prelude::*;
     use solidcraft_engine::render::Camera;
 
     /// The camera math the page applies the motion with (`navigation::device`): `sketch` keeps
@@ -1159,6 +1160,7 @@ mod tests {
 
     fn wheel(dy: f32) -> egui::Event {
         egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
             delta: egui::vec2(0.0, dy),
             modifiers: egui::Modifiers::NONE,

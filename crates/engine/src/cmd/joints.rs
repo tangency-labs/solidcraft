@@ -3,13 +3,15 @@
 //! joint graph and moves the occurrences it places; the session re-solves after any edit too,
 //! so joints follow the geometry their origins snap to.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
-use solidcraft_doc::expr::Kind;
+use solidcore_record::Vec3;
+use solidcraft_doc::expr::{self, Kind};
 use solidcraft_doc::joints::cam::{self, Cam, CamProfile, Follower};
 use solidcraft_doc::joints::{self, Coupling, Joint, JointExprs, JointKind, JointOrigin, MotionLink, NamedOrigin, Size, Snap, XRef};
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcraft_geom::Aabb3;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec3};
@@ -89,7 +91,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "joint; a?, b?: joint origins as joint.create takes them (a side left out keeps its place; the two must stay on different occurrences); \
              type?, flip?, offset?, angle? (a number, or an expression the joint then follows), suppressed?, name?; the joint re-solves, keeping \
-             its limits and expressions (a relation's values start again where its parts are)",
+             its limits and expressions (a relation's values start again where its parts are); an edit that places it again (not a rename alone) \
+             meets a loop it closes as joint.create does, turning an angle a half turn where only that meets it",
         ),
     CommandSpec::new("joint.delete", "Delete Joint", delete).icon("delete").params("joint: id|name (or origin: name, link: index)"),
     CommandSpec::new("joint.list", "List Joints", list).icon("list").noundo().params(
@@ -107,7 +110,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("joint.solve", "Solve Joints", solve_cmd).icon("compute").params("re-place the occurrences from the joints → conflicts, errors, dof"),
     CommandSpec::new("inspect.interference", "Interference", super::interference::interference).at("SOLID", "INSPECT").icon("interference").noundo().params(
-        "bodies?: [names] (default: all, in world placement; a name that is no body is refused); budget_s?: seconds (default 240, at most 86400: pairs not finished by then are listed in unchecked as \"not checked: the time budget … ran out\" and the call returns) → interferences: pairs that overlap with the overlap volume, area, bounding box and centre (a pin a hair off the axis of a hole of its size also has near_coaxial: {offset_mm, length_mm}, its volume the crescent the walls share); unchecked: [{a, b, reason}], the pairs that could not be checked, with the reason, and each mesh body (STL, 3MF or OBJ import: not intersected) as {a: name, b: null, reason: \"mesh body: not checked\"}, so count: 0 is not read as no overlap (checked counts the solid bodies). Bodies are pruned by bounding box first, then by their display meshes (pairs whose meshes stay apart by more than their chord tolerances, neither inside the other, are clear without a boolean), so any number of bodies is fine; the pairs left are intersected exactly, in parallel on desktop, the slowest first; at most 20000 pairs whose boxes overlap are intersected per call (truncated: true and skipped_pairs: n say when more were left out). Also: pairs_candidate (boxes overlap), pairs_cleared (by the meshes), pairs_intersected, pairs_not_checked, budget_exceeded, threads (worker threads; 0: on the calling thread), boolean_ms and tessellate_ms (kernel time summed over the pairs), slowest: [{a, b, ms, boolean_ms, tessellate_ms}] and ms",
+        "bodies?: [names] (default: all, in world placement; a name that is no body is refused); budget_s?: seconds (default 240, at most 86400: pairs not finished by then are listed in unchecked as \"not checked: the time budget … ran out\" and the call returns) → interferences: pairs that overlap with the overlap volume, area, bounding box and centre; unchecked: [{a, b, reason}], the pairs that could not be checked, with the reason, and each mesh body (STL, 3MF or OBJ import: not intersected) as {a: name, b: null, reason: \"mesh body: not checked\"}, so count: 0 is not read as no overlap (checked counts the solid bodies). Bodies are pruned by bounding box first, then by their display meshes (pairs whose meshes stay apart by more than their chord tolerances, neither inside the other, are clear without a boolean), so any number of bodies is fine; the pairs left are intersected exactly, in parallel on desktop, the slowest first; at most 20000 pairs whose boxes overlap are intersected per call (truncated: true and skipped_pairs: n say when more were left out). Also: pairs_candidate (boxes overlap), pairs_cleared (by the meshes), pairs_intersected, pairs_not_checked, budget_exceeded, threads (worker threads; 0: on the calling thread), boolean_ms and tessellate_ms (kernel time summed over the pairs), slowest: [{a, b, ms, boolean_ms, tessellate_ms}] and ms",
     ),
 ];
 
@@ -232,7 +235,8 @@ fn sol_json(sol: &joints::Solution, p: &Value) -> Value {
 }
 
 /// A joint's values as `joint.list` gives them: degrees for angles, mm for distances, each with
-/// its name and limits.
+/// its name and limits. The numbers are rounded for reading (#10747); the joint keeps full
+/// precision.
 pub(crate) fn named_values(j: &Joint, q: &[f64]) -> Vec<Value> {
     j.kind
         .dofs()
@@ -240,8 +244,8 @@ pub(crate) fn named_values(j: &Joint, q: &[f64]) -> Vec<Value> {
         .enumerate()
         .map(|(i, n)| {
             let (v, angle) = (q.get(i).copied().unwrap_or(0.0), j.kind.is_angle(i));
-            json!({"name": n, "value": if angle { v.to_degrees() } else { v }, "unit": if angle { "deg" } else { "mm" },
-                "limits": j.limits.get(i).copied().flatten().map(|(a, b)| if angle { [a.to_degrees(), b.to_degrees()] } else { [a, b] })})
+            json!({"name": n, "value": expr::round_reported(if angle { v.to_degrees() } else { v }), "unit": if angle { "deg" } else { "mm" },
+                "limits": j.limits.get(i).copied().flatten().map(|(a, b)| if angle { [expr::round_reported(a.to_degrees()), expr::round_reported(b.to_degrees())] } else { [expr::round_reported(a), expr::round_reported(b)] })})
         })
         .collect()
 }
@@ -494,7 +498,7 @@ fn same_frame(s: &Session, o: &JointOrigin, at: Vec3, z: Vec3) -> bool {
 const MAX_FACE_NAME: usize = 16_384;
 
 /// The component an occurrence places (0 for the root, or an unknown occurrence).
-fn component_of(s: &Session, occurrence: u64) -> u64 {
+pub(crate) fn component_of(s: &Session, occurrence: u64) -> u64 {
     if occurrence == 0 { 0 } else { s.doc.occurrences.iter().find(|o| o.id == occurrence).map_or(0, |o| o.component) }
 }
 
@@ -616,12 +620,13 @@ pub(crate) fn joint_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64>
 /// A joint value: numbers are degrees for angles and mm for distances; text is an expression.
 pub(crate) fn value(s: &Session, v: &Value, angle: bool, cmd: &str) -> Result<f64> {
     let kind = if angle { Kind::Angle } else { Kind::Length };
+    // A number out of range says so, rather than that it is not a number (#9625).
     let e = match v {
         Value::Number(n) => n.as_f64().filter(|x| x.is_finite() && x.abs() < 1e9).map(|x| x.to_string()),
         Value::String(t) => Some(t.clone()),
         _ => None,
     }
-    .ok_or_else(|| bad(cmd, "values must be numbers or expressions"))?;
+    .ok_or_else(|| bad(cmd, format!("a joint value {}", crate::params::expr_problem(Some(v)))))?;
     s.doc.eval(&e, kind).map_err(|e| bad(cmd, e.to_string()))
 }
 
@@ -697,11 +702,47 @@ fn check_sides(a: &JointOrigin, b: &JointOrigin, cmd: &str) -> Result<()> {
     Ok(())
 }
 
+/// A path already joins the two sides, including paths through grounded occurrences.
+fn closes_loop(s: &Session, j: &Joint) -> bool {
+    let mut at: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+    for joint in s.doc.assembly.joints.iter().filter(|j| !j.suppressed).take(joints::MAX_JOINTS) {
+        at.entry(joint.a.occurrence).or_default().push(joint.b.occurrence);
+        at.entry(joint.b.occurrence).or_default().push(joint.a.occurrence);
+    }
+    // The solver fixes the root and every grounded occurrence in the same world frame.
+    for o in s.doc.occurrences.iter().filter(|o| o.grounded) {
+        at.entry(0).or_default().push(o.id);
+        at.entry(o.id).or_default().push(0);
+    }
+    let mut seen = BTreeSet::from([j.a.occurrence]);
+    let mut pending = vec![j.a.occurrence];
+    while let Some(occ) = pending.pop() {
+        if occ == j.b.occurrence {
+            return true;
+        }
+        for other in at.get(&occ).into_iter().flatten() {
+            if seen.insert(*other) {
+                pending.push(*other);
+            }
+        }
+    }
+    false
+}
+
 fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
     if s.doc.assembly.joints.len() >= 10_000 {
         return Err(EngineError::Other("too many joints".into()));
     }
     check_sides(&j.a, &j.b, "joint.create")?;
+    // Relations and loop-closing typed joints start where their parts are. A typed joint in
+    // an open chain keeps its usual initial values; explicitly supplied values also keep theirs.
+    if p.get("values").is_none()
+        && p.get("value").is_none()
+        && (j.kind.is_relation() || closes_loop(s, &j))
+        && let Some(q) = joints::relation_values(&s.doc, &s.model.state(), &j)
+    {
+        j.values = q;
+    }
     // It starts at its values inside its limits. A value moved to a limit moves the part as it
     // is joined, which the answer says.
     let mut q = j.values.clone();
@@ -731,7 +772,10 @@ fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
     // A new joint starts shown, even if a stale visibility entry came from an older design.
     s.visibility.hidden_joints.retain(|h| *h != id);
     s.doc_mut().assembly.joints.push(j);
-    let sol = resolve(s);
+    let mut sol = resolve(s);
+    if sol.conflicts.iter().any(|(c, ..)| *c == id) && close_by_half_turn(s, id, &sol) {
+        sol = resolve(s);
+    }
     let mut out = sol_json(&sol, p);
     out["joint"] = json!(id);
     out["name"] = json!(name);
@@ -739,6 +783,96 @@ fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
         out["warnings"] = json!(warnings);
     }
     Ok(out)
+}
+
+/// Sets of angle values a new loop-closing joint tries a half turn round, at most.
+const HALF_TURN_TRIALS: usize = 16;
+
+/// A new joint that closes a loop is met from where the loop's parts sit. Where its parts only
+/// meet with one of them turned a half turn about a joint on the way between them (a second
+/// planar joint mating two faces that point the same way, #10331), the loop solve starts at a
+/// pose turned exactly away and sees no way round, and the joint is left as a conflict. As the
+/// first joint of a chain moves its part into place, turn the new joint's own angle, each angle
+/// on the shortest joint path between its two parts, or one of each, a half turn, and keep the
+/// first that meets it with no new conflict or error elsewhere than `before` had (stored, for
+/// the caller's resolve). False, and nothing changed, when none does. Values a motion link or an
+/// expression sets, and turns their limits stop short, are left alone. `joint.edit` does the same
+/// for a joint it places again (#9687).
+fn close_by_half_turn(s: &mut Session, id: u64, before: &joints::Solution) -> bool {
+    let asm = &s.doc.assembly;
+    let Some(new) = asm.joints.iter().find(|j| j.id == id) else { return false };
+    let (from, to) = (new.a.occurrence, new.b.occurrence);
+    // Breadth first over the other joints, from A's occurrence to B's.
+    let mut reached: BTreeMap<u64, Option<usize>> = BTreeMap::from([(from, None)]);
+    let mut frontier = vec![from];
+    while !frontier.is_empty() && !reached.contains_key(&to) {
+        let mut next = Vec::new();
+        for at in frontier {
+            for (k, j) in asm.joints.iter().enumerate().filter(|(_, j)| j.id != id && !j.suppressed) {
+                let other = if j.a.occurrence == at {
+                    j.b.occurrence
+                } else if j.b.occurrence == at {
+                    j.a.occurrence
+                } else {
+                    continue;
+                };
+                if let std::collections::btree_map::Entry::Vacant(e) = reached.entry(other) {
+                    e.insert(Some(k));
+                    next.push(other);
+                }
+            }
+        }
+        frontier = next;
+    }
+    let mut path = Vec::new();
+    let mut at = to;
+    while let Some(Some(k)) = reached.get(&at).copied() {
+        let Some(j) = asm.joints.get(k) else { break };
+        path.push(k);
+        at = if j.a.occurrence == at { j.b.occurrence } else { j.a.occurrence };
+    }
+    let linked: BTreeSet<(u64, usize)> = asm.links.iter().map(|l| (l.b, l.ib)).collect();
+    // The angle values that may turn: on the path, and the new joint's own (turned exactly
+    // away about its axis, its own value sees no way round either).
+    let angles = |ks: &[usize]| -> Vec<(usize, usize)> {
+        ks.iter()
+            .filter_map(|k| asm.joints.get(*k).map(|j| (*k, j)))
+            .flat_map(|(k, j)| (0..j.kind.dofs().len()).filter(move |i| j.kind.is_angle(*i)).map(move |i| (k, j, i)))
+            .filter(|(_, j, i)| j.exprs.value(*i).is_none() && !linked.contains(&(j.id, *i)))
+            .map(|(k, _, i)| (k, i))
+            .collect()
+    };
+    let own = asm.joints.iter().position(|j| j.id == id).map(|k| angles(&[k])).unwrap_or_default();
+    let mut trials: Vec<Vec<(usize, usize)>> = own.iter().map(|v| vec![*v]).collect();
+    for v in angles(&path) {
+        trials.push(vec![v]);
+        trials.extend(own.iter().map(|w| vec![v, *w]));
+    }
+    trials.truncate(HALF_TURN_TRIALS);
+    let st = s.model.state();
+    'trial: for turns in trials {
+        let mut doc = (*s.doc).clone();
+        for (k, i) in turns {
+            let Some(j) = doc.assembly.joints.get_mut(k) else { continue 'trial };
+            j.values.resize(j.kind.dofs().len(), 0.0);
+            let Some(q) = j.values.get(i).copied() else { continue 'trial };
+            let mut turned = j.values.clone();
+            if let Some(slot) = turned.get_mut(i) {
+                *slot = q + std::f64::consts::PI;
+            }
+            joints::clamp(j, &mut turned);
+            if turned.get(i).is_none_or(|v| (v - q - std::f64::consts::PI).abs() > 1e-9) {
+                continue 'trial;
+            }
+            j.values = turned;
+        }
+        let sol = joints::solve_holding_with_analysis(&doc, &st, &BTreeMap::new(), joints::Analysis::Placement);
+        if sol.conflicts.len() < before.conflicts.len() && !sol.conflicts.iter().any(|(c, ..)| *c == id) && sol.errors.len() <= before.errors.len() {
+            s.doc_mut().assembly.joints = doc.assembly.joints;
+            return true;
+        }
+    }
+    false
 }
 
 fn joint_origin(s: &mut Session, p: &Value) -> Result<Value> {
@@ -761,11 +895,27 @@ fn kind_param(p: &Value, cmd: &str) -> Result<JointKind> {
         .ok_or_else(|| bad(cmd, "`type` must be rigid, revolute, slider, cylindrical, pin_slot, planar, ball, parallel, perpendicular, angle, point_on_plane, point_on_line or line_on_plane"))
 }
 
-fn new_joint_name(s: &Session, p: &Value) -> String {
-    str_(p, "name").map(str::to_string).unwrap_or_else(|| {
+fn new_joint_name(s: &Session, p: &Value, kind: JointKind) -> String {
+    str_(p, "name").map(str::trim).filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| {
+        let label = match kind {
+            JointKind::Rigid => "Rigid",
+            JointKind::Revolute => "Revolute",
+            JointKind::Slider => "Slider",
+            JointKind::Cylindrical => "Cylindrical",
+            JointKind::PinSlot => "Pin_slot",
+            JointKind::Planar => "Planar",
+            JointKind::Ball => "Ball",
+            JointKind::Parallel => "Parallel",
+            JointKind::Perpendicular => "Perpendicular",
+            JointKind::Angle => "Angle",
+            JointKind::PointOnPlane => "Point_on_plane",
+            JointKind::PointOnLine => "Point_on_line",
+            JointKind::LineOnPlane => "Line_on_plane",
+        };
+        let prefix = format!("{label} Joint");
         let names: std::collections::BTreeSet<_> = s.doc.assembly.joints.iter().map(|j| j.name.as_str()).collect();
-        let number = (1..=s.doc.assembly.joints.len().saturating_add(1)).find(|n| !names.contains(format!("Joint{n}").as_str())).unwrap_or(1);
-        format!("Joint{number}")
+        let number = (1..=s.doc.assembly.joints.len().saturating_add(1)).find(|n| !names.contains(format!("{prefix}{n}").as_str())).unwrap_or(1);
+        format!("{prefix}{number}")
     })
 }
 
@@ -775,7 +925,7 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
     let a = origin_param(s, p.get("a"), cmd)?;
     let b = origin_param(s, p.get("b"), cmd)?;
     let id = s.doc_mut().allocate_id()?;
-    let name = new_joint_name(s, p);
+    let name = new_joint_name(s, p, kind);
     let offset = match p.get("offset") {
         Some(v) => value(s, v, false, cmd)?,
         None => 0.0,
@@ -798,13 +948,6 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
         suppressed: false,
         exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p) },
     };
-    // A relation given no values starts from where its parts are: B moves no further than it must.
-    if p.get("values").is_none()
-        && p.get("value").is_none()
-        && let Some(q) = joints::relation_values(&s.doc, &s.model.state(), &j)
-    {
-        j.values = q;
-    }
     // No angle given: B keeps its turn about the joint's axis where a half turn would otherwise
     // come only from how its origin's x was chosen. (An angle relation's angle is its tilt.)
     if angle.is_none() && !j.kind.is_relation() {
@@ -834,7 +977,7 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
     let fa = side(oa)?;
     let fb = side(ob)?;
     let id = s.doc_mut().allocate_id()?;
-    let name = new_joint_name(s, p);
+    let name = new_joint_name(s, p, kind);
     let n = kind.dofs().len();
     let j = Joint {
         id,
@@ -982,7 +1125,7 @@ fn held_values(s: &Session, j: &Joint, requested: &[f64], driven: &[usize], r: &
             continue;
         }
         let angle = j.kind.is_angle(i);
-        let shown = |v: f64| if angle { v.to_degrees() } else { v };
+        let shown = |v: f64| expr::round_reported(if angle { v.to_degrees() } else { v });
         let name = names.get(i).copied().unwrap_or("value");
         let why = if let Some(l) = s.doc.assembly.links.iter().find(|l| l.b == j.id && l.ib == i) {
             let coupling = match &l.coupling {
@@ -1515,14 +1658,21 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     // A relation whose type, offset, tilt or flip changes starts again from where its parts are.
     let reseat = kind.is_some() || offset.is_some() || angle.is_some() || p.get("flip").is_some() || sides;
     if reseat {
-        let edited = s.doc.assembly.joints.iter().find(|j| j.id == id).cloned();
+        let edited = s.doc.assembly.joints.iter().find(|j| j.id == id).filter(|j| j.kind.is_relation()).cloned();
         if let Some(q) = edited.and_then(|j| joints::relation_values(&s.doc, &s.model.state(), &j))
             && let Some(j) = s.doc_mut().assembly.joints.iter_mut().find(|j| j.id == id)
         {
             j.values = q;
         }
     }
-    let sol = resolve(s);
+    let mut sol = resolve(s);
+    // An edit that places the joint again (Edit Joint's OK, Unsuppress) meets a loop it closes as
+    // joint.create does: a joint saved as a conflict before create turned its part (#9687), or
+    // unsuppressed after its part was turned away, is met then. A rename alone moves nothing.
+    let placed = reseat || bool_(p, "suppressed") == Some(false);
+    if placed && sol.conflicts.iter().any(|(c, ..)| *c == id) && close_by_half_turn(s, id, &sol) {
+        sol = resolve(s);
+    }
     Ok(sol_json(&sol, p))
 }
 

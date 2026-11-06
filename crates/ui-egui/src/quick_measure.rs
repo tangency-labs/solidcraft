@@ -6,6 +6,7 @@
 //! the selection or the design changes; nothing shows while it computes, or for a selection with
 //! nothing to measure. A click copies the readout.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 
@@ -151,13 +152,36 @@ pub(crate) fn item_lines(app: &SolveApp, it: &Value) -> Vec<String> {
     match it["type"].as_str() {
         Some("edge" | "sketch_curve") if !round => lines.push(format!("{}  {}", tr("Length"), mm(&it["length_mm"]))),
         Some("face" | "profile") => lines.push(format!("{}  {}", tr("Area"), crate::prefs::show_mm(app, it["area_mm2"].as_f64().unwrap_or(0.0), 2))),
-        Some("vertex" | "sketch_point") => {
+        Some("vertex" | "sketch_point" | "point") => {
             let p = &it["position"];
             lines.push(format!("{}  {}, {}, {}", tr("measure.at"), mm(&p[0]), mm(&p[1]), mm(&p[2])));
+        }
+        Some("plane") => {
+            let p = &it["point"];
+            lines.push(format!("{}  {}, {}, {}", tr("measure.at"), mm(&p[0]), mm(&p[1]), mm(&p[2])));
+            let n = &it["normal"];
+            lines.push(format!("Normal  {}, {}, {}", mm(&n[0]), mm(&n[1]), mm(&n[2])));
+        }
+        Some("axis") => {
+            let p = &it["origin"];
+            lines.push(format!("{}  {}, {}, {}", tr("measure.at"), mm(&p[0]), mm(&p[1]), mm(&p[2])));
+            let d = &it["direction"];
+            lines.push(format!("Direction  {}, {}, {}", mm(&d[0]), mm(&d[1]), mm(&d[2])));
         }
         _ => {}
     }
     lines
+}
+
+/// The label of a pair's centre distance: from a straight edge to a circle's centre, or
+/// centre to centre.
+pub(crate) fn centre_distance_label(r: &Value) -> &'static str {
+    let is_circle = |item: &Value| item.get("round").and_then(Value::as_str) == Some("circle");
+    let is_line = |item: &Value| matches!(item.get("type").and_then(Value::as_str), Some("edge" | "sketch_curve")) && item.get("round").is_none();
+    match r["items"].as_array().map(Vec::as_slice) {
+        Some([a, b]) if (is_circle(a) && is_line(b)) || (is_circle(b) && is_line(a)) => crate::i18n::tr("measure.line_to_centre"),
+        _ => crate::i18n::tr("Centre to centre"),
+    }
 }
 
 /// The readout's rows for a measurement.
@@ -180,7 +204,7 @@ fn lines(app: &SolveApp, r: &Value) -> Vec<(String, String)> {
     }
     let mut rows = Vec::new();
     if let Some(d) = r["center_distance"].as_f64() {
-        rows.push((crate::i18n::tr("Centre to centre").to_string(), crate::prefs::show_mm(app, d, 1)));
+        rows.push((centre_distance_label(r).to_string(), crate::prefs::show_mm(app, d, 1)));
     }
     if let Some(d) = r["distance_mm"].as_f64() {
         rows.push((crate::i18n::tr_label("Distance").to_string(), crate::prefs::show_mm(app, d, 1)));
@@ -227,7 +251,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: egui::Rect, taken: &
     if !view.contains_rect(r) {
         return None;
     }
-    let response = ui.interact(r, egui::Id::new("sc_quick_measure"), egui::Sense::click()).on_hover_text(crate::i18n::tr("measure.quick_copy"));
+    let response =
+        ui.interact(r, egui::Id::unique("sc_quick_measure"), egui::Sense::click()).backing_on_hover_text(crate::i18n::tr("measure.quick_copy"));
     crate::scenario::publish_rect("measure:quick", r);
     painter.rect_filled(r, t.radius_sm, if response.hovered() { t.hover } else { t.overlay });
     painter.rect_stroke(r, t.radius_sm, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Inside);

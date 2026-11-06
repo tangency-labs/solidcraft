@@ -1,0 +1,58 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 40,
+    "height": 10,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 30,
+    "width": 20,
+    "height": 6,
+    "corner": [
+     15,
+     10,
+     5
+    ],
+    "operation": "cut",
+    "targets": [
+     "Plate"
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      30,
+      10,
+      5
+     ],
+     [
+      30,
+      30,
+      5
+     ],
+     [
+      15,
+      20,
+      5
+     ],
+     [
+      45,
+      20,
+      5
+     ]
+    ],
+    "radius": 2
+   }
+  }
+ ]
+}

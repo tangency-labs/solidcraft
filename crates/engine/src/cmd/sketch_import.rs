@@ -1,9 +1,10 @@
 //! Sketch drawing exchange: Insert DXF, Insert SVG and sketch DXF export.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 use solidcraft_io::{Geom2, MAX_DRAWING_BYTES};
 use solidcraft_sketch::{CurveKind, LinkKind, LinkSource, Sketch};
 
@@ -115,7 +116,7 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
                         idx.push(i);
                     }
                 }
-                (idx.len() >= 2).then_some(CurveKind::Spline { pts: idx, control: *control, degree: *degree, periodic: false })
+                (idx.len() >= 2).then_some(CurveKind::Spline { pts: idx, control: *control, degree: *degree, periodic: false, nurbs: None })
             }
             Geom2::Conic { a, apex, b, rho } => {
                 let (a, x, b) = (pt(sk, *a)?, pt(sk, *apex)?, pt(sk, *b)?);
@@ -169,7 +170,7 @@ fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
             // Points along the curve, not its apex, which can lie well outside it (an elliptical
             // arc of a DXF comes in as conics, #8155).
             Geom2::Conic { a, apex, b, rho } if *rho > 0.0 && *rho < 1.0 => {
-                let seg = solidcraft_geom::Seg2::Conic { a: *a, apex: *apex, b: *b, w: rho / (1.0 - rho) };
+                let seg = solidcore_record::Seg2::Conic { a: *a, apex: *apex, b: *b, w: rho / (1.0 - rho) };
                 pts.extend((0..=64).map(|i| seg.point_at(f64::from(i) / 64.0)));
             }
             Geom2::Conic { a, apex, b, .. } => pts.extend([*a, *apex, *b]),
@@ -245,6 +246,11 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         let v = (q - pivot) * k;
         Vec2::new(v.x * cos - v.y * sin, v.x * sin + v.y * cos) + off
     };
+    // A dense SVG/DXF (a floorplan) can yield far more entities than a sketch takes; refuse
+    // before adding so the message names the cap (#10874). Scale alone does not shrink the count.
+    if geom.len() > solidcraft_sketch::MAX_POINTS {
+        return Err(solidcraft_sketch::SketchError::TooLarge.into());
+    }
     let ((curves, texts), info) = edit(s, p, cmd, false, |sk, _| {
         let (cs, texts) = add_geometry(sk, &geom, &f, k, tol)?;
         Ok((ids_of(sk, &cs), texts))
@@ -369,6 +375,22 @@ mod tests {
             assert_eq!(r["curves"], 1, "{n} points: {r}");
             s.execute("sketch.finish", &json!({})).unwrap();
         }
+    }
+
+    /// #10874: a drawing with more entities than a sketch can hold is refused with the point
+    /// cap and that scale alone does not help (a floorplan SVG often hits this).
+    #[test]
+    fn a_drawing_with_too_many_entities_names_the_sketch_cap() {
+        let n = solidcraft_sketch::MAX_POINTS + 1;
+        let mut dxf = String::from("0\nSECTION\n2\nENTITIES\n");
+        for i in 0..n {
+            dxf.push_str(&format!("0\nLINE\n10\n{i}\n20\n0\n11\n{}\n21\n1\n", i + 1));
+        }
+        dxf.push_str("0\nENDSEC\n0\nEOF\n");
+        let mut s = Session::default();
+        let e = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap_err().to_string();
+        assert!(e.contains("20000") && e.contains("scale"), "{e}");
+        assert!(s.active_sketch.is_none(), "a refused insert leaves no empty sketch behind");
     }
 
     /// #9641: an SVG with nothing SolidCraft can draw (here only an embedded picture) is refused

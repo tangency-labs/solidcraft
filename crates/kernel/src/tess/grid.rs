@@ -6,6 +6,37 @@
 /// Most grid points of one face.
 pub(crate) const MAX_FACE_GRID: usize = 150_000;
 
+/// Keep at most `cap` grid points (`us` × `vs`) by taking evenly spaced lines in both
+/// directions, the ends kept.
+pub(crate) fn thin(us: &mut Vec<f64>, vs: &mut Vec<f64>, cap: usize) {
+    let total = us.len().saturating_mul(vs.len());
+    if total <= cap {
+        return;
+    }
+    let f = (total as f64 / cap.max(4) as f64).sqrt();
+    // At least the two ends in each direction (never more lines than there are).
+    let keep = |len: usize| ((len as f64 / f).floor() as usize).max(2).min(len);
+    let (mut nu, mut nv) = (keep(us.len()), keep(vs.len()));
+    // Rounding can leave the product a little over: the longer direction gives up the rest.
+    while nu.saturating_mul(nv) > cap.max(4) {
+        if nu >= nv && nu > 2 {
+            nu -= 1;
+        } else if nv > 2 {
+            nv -= 1;
+        } else {
+            break;
+        }
+    }
+    let pick = |d: &mut Vec<f64>, n: usize| {
+        if d.len() > n && n >= 2 {
+            let len = d.len();
+            *d = (0..n).filter_map(|i| d.get(i * (len - 1) / (n - 1)).copied()).collect();
+        }
+    };
+    pick(us, nu);
+    pick(vs, nv);
+}
+
 /// The four sides of a parameter box, in counter-clockwise order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Side {
@@ -292,8 +323,15 @@ mod tests {
         // A triangle-like patch whose top side is a pole (two copies of one point in 3D).
         let b = vec![[0.0, 0.0], [0.5, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
         let Some(q) = quad(&b) else { panic!("a quad") };
-        let Some((_, tris)) = structured(&b, &q, &[0.5], &[0.5]) else { panic!("meshes") };
-        assert!(!tris.is_empty());
+        let Some((extra, tris)) = structured(&b, &q, &[0.5], &[0.5]) else { panic!("meshes") };
+        // One grid node, (0.5, 0.5), fanned to each of the five boundary segments: one triangle
+        // each, the pole's single segment among them, every one of positive area, tiling the box.
+        assert_eq!(extra, [[0.5, 0.5]]);
+        assert_eq!(tris.len(), 5);
+        let mut uv = b.clone();
+        uv.extend(extra);
+        assert!(tris.iter().all(|t| signed_area(&uv, *t).is_some_and(|a| a > 0.0)));
+        assert!((area(&uv, &tris) - 1.0).abs() < 1e-12);
     }
 
     #[test]

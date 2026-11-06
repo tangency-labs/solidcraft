@@ -1,0 +1,110 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -20,
+     -15
+    ],
+    "p1": [
+     20,
+     15
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 20
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "face": [
+      0,
+      0,
+      20
+     ]
+    },
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -10,
+     -5
+    ],
+    "p1": [
+     10,
+     5
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 10,
+    "operation": "join",
+    "profiles": [
+     {
+      "curves": [
+       "l1",
+       "l2",
+       "l3",
+       "l4"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "command": "sketch.edit",
+   "params": {
+    "sketch": "Sketch2"
+   }
+  },
+  {
+   "command": "sketch.move_point",
+   "params": {
+    "point": "p3",
+    "to": [
+     30,
+     25
+    ]
+   }
+  },
+  {
+   "command": "sketch.move_point",
+   "params": {
+    "point": "p1",
+    "to": [
+     -30,
+     -25
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  }
+ ]
+}

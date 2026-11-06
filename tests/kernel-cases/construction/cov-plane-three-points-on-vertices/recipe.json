@@ -1,0 +1,40 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "Box"
+   }
+  },
+  {
+   "command": "construct.plane.three_points",
+   "params": {
+    "a": {
+     "vertex": [
+      40,
+      0,
+      0
+     ]
+    },
+    "b": {
+     "vertex": [
+      0,
+      30,
+      0
+     ]
+    },
+    "c": {
+     "vertex": [
+      0,
+      0,
+      20
+     ]
+    },
+    "name": "T"
+   }
+  }
+ ]
+}

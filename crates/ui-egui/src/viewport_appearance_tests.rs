@@ -1,7 +1,8 @@
 use super::build_scene;
 use crate::{Services, SolveApp};
 use serde_json::json;
-use solidcraft_engine::{Session, doc, geom::Vec3, kernel};
+use solidcore_record::Vec3;
+use solidcraft_engine::{Session, doc, kernel};
 
 #[test]
 fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
@@ -99,7 +100,7 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
     let mut app = SolveApp::new(session, Services::default());
     app.ui.ground_shadow = false;
     app.set_origin_shown(false);
-    let placed = app.session.world_state().bodies.iter().find(|b| b.name != source).unwrap().name.clone();
+    let placed = app.session.world_state().unwrap().bodies.iter().find(|b| b.name != source).unwrap().name.clone();
     app.session.selection = vec![solidcraft_engine::Sel::Body { name: placed }];
     app.start("appearance.assign");
     let crate::dialogs::Kind::Appearance(appearance) = &app.dialog.as_ref().unwrap().kind else { panic!("appearance dialog") };
@@ -112,7 +113,7 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
         scene.tris.is_empty(),
         "opaque triangles {}, bodies {:?}",
         scene.tris.len(),
-        app.session.world_state().bodies.iter().map(|b| (&b.name, b.body.paint(), &b.imported)).collect::<Vec<_>>()
+        app.session.world_state().unwrap().bodies.iter().map(|b| (&b.name, b.body.paint(), &b.imported)).collect::<Vec<_>>()
     );
     let (vertices, remainder) = scene.glass.as_chunks::<{ crate::gpu::TRI_SIZE }>();
     assert!(remainder.is_empty());
@@ -161,7 +162,7 @@ fn selection_does_not_rebuild_the_model_scene() {
     let highlight = h.app.viewport.hl_key;
     // Clear the scene the first frame uploaded; an untouched model must not upload another.
     let _ = h.app.viewport.slot.lock().unwrap().take();
-    let name = h.app.session.world_state().bodies[0].name.clone();
+    let name = h.app.session.world_state().unwrap().bodies[0].name.clone();
     h.app.session.selection = vec![solidcraft_engine::Sel::Body { name }];
     h.frame();
     assert_eq!(h.app.viewport.key, key, "a selection does not change the model scene key");
@@ -190,7 +191,7 @@ fn a_colour_edit_reuses_every_block_vertex() {
     app.ui.ground_shadow = false;
     app.set_origin_shown(false);
     app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
-    let name = app.session.world_state().bodies[0].name.clone();
+    let name = app.session.world_state().unwrap().bodies[0].name.clone();
     let first = build_scene(&app);
     let block = first.blocks.iter().find(|b| !b.bytes.vertices.is_empty()).expect("the box has a block");
     let (key, vertices) = (block.key, block.bytes.vertices.clone());
@@ -207,7 +208,7 @@ fn a_material_colour_edit_its_undo_and_redo_reach_the_viewport() {
     app.ui.ground_shadow = false;
     app.set_origin_shown(false);
     app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
-    let name = app.session.world_state().bodies[0].name.clone();
+    let name = crate::open_meshing::session_world(&app.session).bodies[0].name.clone();
     app.run("material.create", json!({"name": "Wood dark", "density_g_cm3": 0.7, "color": "#c8a573"})).unwrap();
     app.run("material.assign", json!({"bodies": [name], "material": "Wood dark"})).unwrap();
     let colour = |app: &SolveApp| {
@@ -230,7 +231,7 @@ fn an_opacity_class_change_keeps_vertices_and_rewrites_only_the_runs() {
     app.ui.ground_shadow = false;
     app.set_origin_shown(false);
     app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
-    let name = app.session.world_state().bodies[0].name.clone();
+    let name = app.session.world_state().unwrap().bodies[0].name.clone();
     let first = build_scene(&app);
     let block = first.blocks.iter().find(|b| !b.bytes.vertices.is_empty()).expect("the box has a block");
     let (key, bytes) = (block.key, block.bytes.clone());
@@ -242,7 +243,9 @@ fn an_opacity_class_change_keeps_vertices_and_rewrites_only_the_runs() {
     assert!(block.bytes.opaque.is_empty() && !block.bytes.glass.is_empty(), "the triangles moved to the glass runs");
     let triangles: u32 = block.bytes.glass.iter().map(|r| r.len() as u32).sum::<u32>() / 3;
     assert_eq!(block.bytes.glass.len(), 1, "one body of one class is one run, drawn with no index buffer");
-    assert_eq!(triangles, 12, "every triangle of the box");
+    // The planner's grids, no side longer than a fifth of the box's 26.9 mm diagonal: edges in
+    // 4, 3 and 2 pieces, faces of 4 × 3, 4 × 2 and 3 × 2 cells, 2 · (12 + 8 + 6) · 2 triangles.
+    assert_eq!(triangles, 104, "every triangle of the box");
     let vertex = block.bytes.glass.first().map_or(0, |r| r.start) as usize;
     let at = vertex * crate::gpu::TRI_SIZE;
     let colour = first_vertex(&second, block.bytes.vertices.get(at..).unwrap_or_default()).1;
@@ -266,7 +269,7 @@ fn appearance_edits_upload_palette_rows_only() {
         Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
     app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
     app.fit_view();
-    let name = app.session.world_state().bodies[0].name.clone();
+    let name = app.session.world_state().unwrap().bodies[0].name.clone();
     let highlight: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
     let mut key = 0;
     let mut draw = |app: &SolveApp| {
@@ -311,15 +314,23 @@ fn bodies_out_of_the_view_are_not_drawn() {
     let scene = build_scene(&app);
     let spans: usize = scene.blocks.iter().map(|b| b.bytes.bodies.len()).sum();
     assert_eq!(spans, 2, "each body's box is kept with its block");
+    // Each box's triangles as the mesher made them (12 or more, by kernel), told apart by where
+    // they lie: the near box at the origin, the far one 1000 mm along x.
+    let triangles = |near: bool| -> u64 {
+        let spans = scene.blocks.iter().flat_map(|b| b.bytes.bodies.iter());
+        spans.filter(|s| (s.bounds[0][0] < 500.0) == near).map(|s| u64::from(s.vertices.end.saturating_sub(s.vertices.start)) / 3).sum()
+    };
+    let (near, far) = (triangles(true), triangles(false));
+    assert!(near >= 12 && far >= 12, "a box is at least two triangles a side: {near} and {far}");
     let slot: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(Some(scene)));
     let none: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
     frames.frame(crate::scale_tests::view_frame(&app, SIZE, (1, &slot), (0, &none)));
     let both = frames.stats().triangles;
-    assert_eq!(both, 24, "both boxes in view");
-    app.cam.target = solidcraft_engine::geom::Vec3::new(5.0, 5.0, 5.0);
+    assert_eq!(both, near + far, "both boxes in view");
+    app.cam.target = solidcore_record::Vec3::new(5.0, 5.0, 5.0);
     app.cam.distance = 40.0;
     frames.frame(crate::scale_tests::view_frame(&app, SIZE, (1, &slot), (0, &none)));
-    assert_eq!(frames.stats().triangles, 12, "the far box is not drawn");
+    assert_eq!(frames.stats().triangles, near, "the far box is not drawn");
     app.fit_view();
     frames.frame(crate::scale_tests::view_frame(&app, SIZE, (1, &slot), (0, &none)));
     assert_eq!(frames.stats().triangles, both, "and drawn again once in view");
@@ -336,11 +347,11 @@ fn theme_switches_refresh_cached_viewport_colours_without_remeshing() {
     h.app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
     h.app.viewport.gpu =
         Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
-    let body = h.app.session.world_state().bodies[0].name.clone();
+    let body = crate::open_meshing::session_world(&h.app.session).bodies[0].name.clone();
     h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: body.clone() }];
     h.frame();
     let revision = h.app.session.revision;
-    let mesh = h.app.session.world_state().bodies[0].cached_mesh().unwrap();
+    let mesh = crate::open_meshing::session_world(&h.app.session).bodies[0].cached_mesh().unwrap();
     let mut previous: Option<(u64, u64, u64)> = None;
     for theme in ["dark", "gruvbox-dark", "blueprint", "dark", "light", "solidcraft-95", "cupertino", "light"] {
         let result = h.call("ui.prefs", json!({"theme": theme}));
@@ -359,7 +370,7 @@ fn theme_switches_refresh_cached_viewport_colours_without_remeshing() {
         let colour = super::c4(crate::theme::Tokens::get().body);
         assert!(vertices.iter().all(|v| vertex_color(&scene, v) == colour), "{theme}: stale body colour");
         assert_eq!(h.app.session.revision, revision, "theme changes must not edit the design");
-        assert!(std::sync::Arc::ptr_eq(&mesh, &h.app.session.world_state().bodies[0].cached_mesh().unwrap()));
+        assert!(std::sync::Arc::ptr_eq(&mesh, &crate::open_meshing::session_world(&h.app.session).bodies[0].cached_mesh().unwrap()));
         h.frame();
         assert_eq!((h.app.viewport.key, h.app.viewport.sketch_key, h.app.viewport.hl_key), keys);
         assert!(h.app.viewport.slot.lock().unwrap().is_none(), "an unchanged theme reuses its scene");
@@ -401,32 +412,43 @@ fn cancelling_theme_preview_restores_viewport_palette_keys() {
     assert_ne!(keys(&h.app), first);
 }
 
+/// The on/off state a screen reader hears for the widget labelled `label`.
+fn announced_state(h: &crate::scenario::Harness, label: &str) -> Option<egui::accesskit::Toggled> {
+    let tree = h.output.accesskit_update.as_ref().unwrap();
+    tree.nodes.iter().find(|(_, n)| n.label() == Some(label)).and_then(|(_, n)| n.toggled())
+}
+
 #[test]
 fn inspect_menu_toggles_component_colors_without_a_dialog_and_refreshes_scene() {
     let mut h = crate::scenario::Harness::new();
+    h.app.preferences.language = "en".into();
     h.frames(3);
     let command = solidcraft_engine::find_command("inspect.colored_components").unwrap();
     let info = command.info(&h.app.session);
-    assert_eq!((info.label, info.icon), ("Enable Component Colors", "colored_components"));
+    assert_eq!((info.label, info.icon), ("Component Colors", "colored_components"));
     h.step(&json!({"click": {"handle": "tab:INSPECT"}})).unwrap();
     h.frames(2);
     let original_key = super::scene_key(&h.app);
     h.step(&json!({"click": {"handle": "panel:INSPECT:CHECK"}})).unwrap();
     h.frames(2);
-    assert!(h.widget("Enable Component Colors").is_some());
+    assert!(h.widget("Component Colors").is_some());
+    assert!(!crate::toolbar::persistent_pressed(&h.app, "inspect.colored_components"));
+    assert_eq!(announced_state(&h, "Component Colors"), Some(egui::accesskit::Toggled::False));
     h.step(&json!({"click": {"handle": "dropdown:inspect.colored_components"}})).unwrap();
     assert!(h.app.session.colored_components.is_some());
     assert!(h.app.dialog.is_none());
     assert_ne!(super::scene_key(&h.app), original_key);
     let info = command.info(&h.app.session);
-    assert_eq!((info.label, info.icon), ("Disable Component Colors", "colored_components_off"));
+    assert_eq!((info.label, info.icon), ("Component Colors", "colored_components"));
     h.step(&json!({"click": {"handle": "panel:INSPECT:CHECK"}})).unwrap();
     h.frames(2);
-    assert!(h.widget("Disable Component Colors").is_some());
+    assert!(h.widget("Component Colors").is_some());
+    assert!(crate::toolbar::persistent_pressed(&h.app, "inspect.colored_components"));
+    assert_eq!(announced_state(&h, "Component Colors"), Some(egui::accesskit::Toggled::True));
     h.step(&json!({"click": {"handle": "dropdown:inspect.colored_components"}})).unwrap();
     assert!(h.app.session.colored_components.is_none());
     let info = command.info(&h.app.session);
-    assert_eq!((info.label, info.icon), ("Enable Component Colors", "colored_components"));
+    assert_eq!((info.label, info.icon), ("Component Colors", "colored_components"));
 }
 
 /// Every shape the last frame painted in `colour`: point squares, glyph outlines, dimension
@@ -498,7 +520,7 @@ fn conflicting_curves_points_glyphs_and_dimensions_take_the_conflict_colour_unti
         h.app.edit_sketch(reach);
         h.settle();
         assert_eq!(h.app.session.active_sketch, Some(reach));
-        let st = h.app.session.world_state();
+        let st = crate::open_meshing::session_world(&h.app.session);
         let ss = st.sketch(reach).unwrap();
         assert_eq!(!ss.report.ok(), conflicting, "w = {w}: {:?}", ss.report);
         let conflict = super::Conflict::of(&h.app, &ss.sketch, &ss.report);
@@ -569,4 +591,26 @@ fn vertex_markers_follow_the_edges_display_mode() {
         assert_eq!(corners.len(), front.len(), "style {style}: each corner once");
         assert!(front.iter().all(|(_, c)| Some(*c) == edge), "style {style}: markers in the edge colour");
     }
+}
+
+/// The radius is 4% of what the frame draws (#9327): in an empty design a preview's box, not the
+/// floor that left the depth map's precision to show as specks; nothing drawn, or AO off, is off.
+#[test]
+fn the_ambient_occlusion_radius_follows_what_is_drawn() {
+    use solidcraft_engine::geom::Aabb3;
+
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.preferences.ambient_occlusion = true;
+    app.ui.visual_style = 0;
+    assert_eq!(super::ao_radius(&app), 0.0, "nothing to occlude");
+    app.preview.bounds = Aabb3 { min: Vec3::ZERO, max: Vec3::new(30.0, 40.0, 0.0) };
+    assert_eq!(super::ao_radius(&app), 2.0, "the preview's box, its diagonal 50");
+    app.preview.bounds = Aabb3::EMPTY;
+    app.run("solid.box", json!({"length": 300, "width": 400, "height": 0.001})).unwrap();
+    assert!((super::ao_radius(&app) - 20.0).abs() < 1e-3, "the body's box");
+    app.ui.visual_style = 2;
+    assert_eq!(super::ao_radius(&app), 0.0, "wireframe");
+    app.ui.visual_style = 0;
+    app.preferences.ambient_occlusion = false;
+    assert_eq!(super::ao_radius(&app), 0.0, "off");
 }

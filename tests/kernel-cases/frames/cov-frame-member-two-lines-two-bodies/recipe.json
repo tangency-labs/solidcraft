@@ -1,0 +1,65 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Frame"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      100,
+      0
+     ]
+    ],
+    "ids": [
+     "l1"
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      0,
+      50
+     ]
+    ],
+    "ids": [
+     "l2"
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {
+    "sketch": "Frame"
+   }
+  },
+  {
+   "command": "frame.member",
+   "params": {
+    "sketch": "Frame",
+    "profile": {
+     "kind": "round_bar",
+     "diameter": 10
+    }
+   }
+  }
+ ]
+}

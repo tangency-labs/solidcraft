@@ -15,6 +15,8 @@ fn harness() -> Harness {
     let mut h = Harness::new();
     h.app.home.open = false;
     h.app.ui.show_browser = true;
+    // The tests read the Joints folders inside placements, which start closed (#9274).
+    h.app.preferences.browser_components_open = true;
     crate::test_support::grounded_boxes(&[("A", 0), ("B", 30), ("C", 60)], |id, p| h.app.run(id, p).unwrap());
     h.app
         .run("joint.create", json!({"type": "revolute", "name": "Hinge", "a": {"occurrence": "A:1", "face": [10, 10, 10]}, "b": {"occurrence": "B:1", "face": [40, 10, 0]}}))
@@ -399,5 +401,27 @@ mod delete {
         assert_eq!(features(&h), before);
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.assembly.joints.len(), 2);
+    }
+}
+
+/// Edit Joint Limits has its own id, so `ui.menuPick` tells it from Edit Joint, and it opens the
+/// joint's dialog on its Limits (#10745).
+#[test]
+fn edit_joint_limits_opens_the_limits_and_has_its_own_id() {
+    let mut h = harness();
+    let hinge = id(&h, "Hinge");
+    let items = context_menu::items(&h.app, &Target::Joint { id: hinge });
+    let ids = |label: &str| items.iter().filter(|i| i.label == label).map(|i| i.id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids("Edit Joint"), ["ui.editJoint"]);
+    assert_eq!(ids("Edit Joint Limits"), ["ui.editJointLimits"]);
+
+    for (item, limits) in [("ui.editJoint", false), ("ui.editJointLimits", true)] {
+        crate::dialogs::cancel(&mut h.app);
+        h.frames(2);
+        h.call("ui.menu", json!({"x": 150, "y": 400, "target": {"type": "joint", "id": hinge}}));
+        assert_eq!(h.call("ui.menuPick", json!({"item": item}))["ok"], true, "{item}");
+        h.frames(3);
+        assert!(h.app.dialog.is_some(), "{item} opens the joint's dialog");
+        assert_eq!(h.widget("Angle limits").is_some(), limits, "{item}: the Limits section open");
     }
 }

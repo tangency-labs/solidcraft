@@ -10,6 +10,315 @@ fn server() -> Server {
     Server::new(Box::new(Headless::default()))
 }
 
+fn panel_headless() -> Headless {
+    Headless::new(solidcraft_engine::Session::default()).with_panels(solidcraft_engine::panels::fixture_command_backend().unwrap())
+}
+fn panel_mcp_steps() -> Vec<Value> {
+    vec![
+        json!({"command":"panel.open","params":{"kind":"fixture.log","instance":"log","destination":{"type":"new_section","section":"logs","index":0,
+        "location":{"type":"dock","zone":"left"},"size":{"width":280,"height":240}}}}),
+        json!({"command":"panel.collapse","params":{"target":{"type":"instance","id":"log"},"collapsed":true}}),
+    ]
+}
+#[test]
+fn headless_panel_single_batch_and_script_keep_one_backend_and_never_change_the_session() {
+    use crate::Backend;
+    let mut one = panel_headless();
+    let mut batch = panel_headless();
+    let mut script = panel_headless();
+    let doc = one.session.doc.clone();
+    let model = one.session.model.state();
+    let before = (one.session.document_id.clone(), one.session.revision, one.session.undo.len(), one.session.is_dirty(), one.session.camera);
+    for step in panel_mcp_steps() {
+        one.call("engine.execute", step).unwrap();
+    }
+    batch.call("engine.batch", json!({"commands":panel_mcp_steps()})).unwrap();
+    script.call("engine.script", json!({"commands":panel_mcp_steps()})).unwrap();
+    let state = one.call("engine.execute", json!({"command":"layout.get"})).unwrap();
+    assert_eq!(batch.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"], state["state"]["layout"]);
+    assert_eq!(script.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"], state["state"]["layout"]);
+    assert_eq!(state["state"]["capabilities"]["native_windows"], false);
+    assert_eq!((one.session.document_id.clone(), one.session.revision, one.session.undo.len(), one.session.is_dirty(), one.session.camera), before);
+    assert!(std::sync::Arc::ptr_eq(&doc, &one.session.doc));
+    assert!(std::sync::Arc::ptr_eq(&model, &one.session.model.state()));
+    one.call("engine.script", json!({"commands":[{"command":"layout.save","params":{"name":"MCP saved"}},{"command":"layout.reset"}]})).unwrap();
+    one.call("engine.execute", json!({"command":"layout.apply","params":{"name":"MCP saved"}})).unwrap();
+    assert_eq!(one.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"], state["state"]["layout"]);
+}
+#[test]
+fn mcp_panel_tools_publish_structured_errors_and_committed_state_through_shared_backend() {
+    let mut s = Server::new(Box::new(panel_headless()));
+    let input = panel_mcp_steps()[0].clone();
+    let result = tool(&mut s, "execute", input);
+    assert_eq!(result["layout"]["instances"][0]["id"], "log");
+    let result = tool(
+        &mut s,
+        "batch",
+        json!({"commands":[
+        {"command":"panel.collapse","params":{"target":{"type":"instance","id":"log"},"collapsed":true}},
+        {"command":"panel.peek","params":{"target":{"type":"instance","id":"log"}}}]}),
+    );
+    assert_eq!(result["completed"], 2);
+    let result = raw_tool(&mut s, "execute", json!({"command":"panel.focus","params":{"id":"fixture.log"}}));
+    assert_eq!(result["result"]["isError"], true);
+    assert_eq!(result["result"]["structuredContent"]["panel_error"]["rule"], "exactly_once");
+    let result = raw_tool(&mut s, "execute", json!({"command":"layout.get","params":{"unknown":true}}));
+    assert_eq!(result["result"]["structuredContent"]["panel_error"]["rule"], "schema");
+}
+#[test]
+fn headless_catalogue_atomic_batch_failure_keeps_presets_and_layout_and_session_only_is_truthful() {
+    use crate::Backend;
+    use solidcraft_engine::panels::{ActionSink, commands::LayoutCatalogue};
+    let mut h = panel_headless();
+    let state = h.panels.as_ref().unwrap().service.inspect();
+    let catalogue = h.panels.as_ref().unwrap().catalogue.state().clone();
+    let error = h
+        .call(
+            "engine.batch",
+            json!({"commands":[
+        {"command":"layout.save","params":{"name":"Not committed"}},
+        {"command":"layout.workspace.select","params":{"workspace":"not-registered"}}]}),
+        )
+        .unwrap_err();
+    assert_eq!(solidcraft_engine::panels::commands::structured_error(&error).unwrap()["rule"], "missing_target");
+    assert_eq!(h.panels.as_ref().unwrap().service.inspect(), state);
+    assert_eq!(h.panels.as_ref().unwrap().catalogue.state(), &catalogue);
+    let mut plain = Headless::default();
+    let got = plain.call("engine.execute", json!({"command":"panel.list"})).unwrap();
+    assert!(got["kinds"].as_array().unwrap().is_empty());
+    assert_eq!(got["state"]["capabilities"]["native_windows"], false);
+    assert!(plain.call("engine.execute", json!({"command":"layout.reset"})).is_err());
+    assert!(solidcraft_engine::Session::default().run_script(&json!({"commands":[{"command":"layout.get"}]})).is_err());
+}
+
+#[test]
+fn auto_backend_keeps_headless_layout_work_even_without_document_features() {
+    use crate::Backend;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let mut headless = panel_headless();
+    headless.call("engine.execute", json!({"command":"layout.save","params":{"name":"Owned headless layout"}})).unwrap();
+    let discoveries = Rc::new(Cell::new(0));
+    let seen = discoveries.clone();
+    let mut auto = crate::Auto::new(
+        headless,
+        Box::new(move || {
+            seen.set(seen.get() + 1);
+            None
+        }),
+        None,
+    );
+    assert_eq!(auto.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"]["workspace"], "fixture.workspace");
+    assert_eq!(discoveries.get(), 0, "owned layout must not be discarded while probing for an app");
+}
+
+#[test]
+fn remote_panel_single_batch_and_script_forward_to_one_authoritative_backend() {
+    use crate::Backend;
+    let authoritative = std::sync::Arc::new(std::sync::Mutex::new(solidcraft_engine::panels::fixture_command_backend().unwrap()));
+    let state = authoritative.clone();
+    // This is an authored local transport fixture, never run during implementation.
+    let (addr, seen) = scripted_app(move |request| {
+        let mut backend = state.lock().unwrap();
+        let params = &request["params"];
+        let result = match request["method"].as_str() {
+            Some("engine.execute") => backend.execute(params["command"].as_str().unwrap(), params.get("params").unwrap_or(&json!({}))),
+            Some("engine.batch") => backend.batch(params["commands"].as_array().unwrap()),
+            Some("engine.script") => {
+                let mut replies = Vec::new();
+                for step in params["commands"].as_array().unwrap() {
+                    replies.push(backend.execute(step["command"].as_str().unwrap(), step.get("params").unwrap_or(&json!({}))).unwrap());
+                }
+                Ok(json!(replies))
+            }
+            _ => return json!({"ok":false,"error":"unknown method"}),
+        };
+        match result {
+            Ok(result) => json!({"ok":true,"result":result}),
+            Err(reason) => json!({"ok":false,"error":solidcraft_engine::panels::commands::error_text(reason)}),
+        }
+    });
+    let mut remote = crate::Remote::connect_with_token(&addr, Some("0123456789abcdef0123456789abcdef")).unwrap();
+    remote.call("engine.execute", panel_mcp_steps()[0].clone()).unwrap();
+    remote
+        .call(
+            "engine.batch",
+            json!({"commands":[panel_mcp_steps()[1].clone(),{"command":"panel.peek","params":{"target":{"type":"instance","id":"log"}}}]}),
+        )
+        .unwrap();
+    authoritative.lock().unwrap().execute("panel.collapse", &json!({"target":{"type":"instance","id":"log"},"collapsed":false})).unwrap();
+    assert_eq!(
+        remote.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"]["sections"][0]["collapsed"],
+        false,
+        "remote reads external live changes"
+    );
+    remote
+        .call("engine.script", json!({"commands":[{"command":"layout.save","params":{"name":"Remote saved"}},{"command":"layout.reset"}]}))
+        .unwrap();
+    assert!(remote.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"]["instances"].as_array().unwrap().is_empty());
+    let seen = seen.lock().unwrap();
+    assert!(seen.1.iter().any(|method| method == "engine.batch"));
+    assert!(seen.1.iter().any(|method| method == "engine.script"));
+}
+
+#[test]
+fn headless_null_params_match_all_panel_routes_and_normal_document_sequences() {
+    use crate::Backend;
+    let mut headless = panel_headless();
+    let expected = headless.call("engine.execute", json!({"command":"panel.list","params":null})).unwrap();
+    for (method, rollback) in [("engine.batch", true), ("engine.batch", false), ("engine.script", false)] {
+        let reply = headless
+            .call(
+                method,
+                json!({"rollback":rollback,"commands":[
+                    {"command":"panel.list","params":null},{"command":"layout.get","params":null},
+                ]}),
+            )
+            .unwrap();
+        let results = if method == "engine.script" { &reply } else { &reply["results"] };
+        assert_eq!(results[0], expected);
+        assert_eq!(results[1]["state"], expected["state"]);
+    }
+    for method in ["engine.batch", "engine.script"] {
+        let previous = headless.session.document_id.clone();
+        let reply = headless
+            .call(
+                method,
+                json!({"rollback":false,"commands":[
+                    {"command":"file.new","params":null},{"command":"panel.list","params":null},{"command":"parameters.list","params":null},
+                ]}),
+            )
+            .unwrap();
+        assert!(reply.get("failed").is_none(), "{reply}");
+        assert_ne!(headless.session.document_id, previous);
+    }
+}
+
+struct LayoutFallbackBackend {
+    headless: Headless,
+    calls: Vec<(String, String)>,
+}
+impl LayoutFallbackBackend {
+    fn new() -> Self {
+        Self { headless: panel_headless(), calls: Vec::new() }
+    }
+}
+impl crate::Backend for LayoutFallbackBackend {
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        self.calls.push((method.into(), params.get("command").and_then(Value::as_str).unwrap_or_default().into()));
+        if method == "engine.batch" {
+            return Err("engine.batch unavailable: fixture has no atomic endpoint".into());
+        }
+        crate::Backend::call(&mut self.headless, method, params)
+    }
+    fn has_ui(&self) -> bool {
+        false
+    }
+    fn in_process(&self) -> bool {
+        true
+    }
+    fn describe(&self) -> String {
+        "synthetic layout fallback boundary".into()
+    }
+}
+fn fallback_tool_reply(backend: &mut LayoutFallbackBackend, args: Value) -> (Value, Value) {
+    let tool = crate::tools::call_tool(backend, "batch", &args);
+    let body = serde_json::from_str(tool["content"][0]["text"].as_str().unwrap()).unwrap();
+    (tool, body)
+}
+
+#[test]
+fn atomic_tool_layout_batches_never_emulate_an_unavailable_backend_with_document_undo() {
+    use solidcraft_engine::panels::{ActionSink, commands::LayoutCatalogue};
+    let open = panel_mcp_steps()[0].clone();
+    for steps in [
+        json!([open.clone()]),
+        json!([open.clone(),{"command":"parameters.change","params":{"name":"broken","expression":"("}}]),
+        json!([{"command":"execute","params":{"command":"panel.open","params":open["params"]}}]),
+    ] {
+        let mut backend = LayoutFallbackBackend::new();
+        let before = backend.headless.panels.as_ref().unwrap().service.inspect();
+        let catalogue = backend.headless.panels.as_ref().unwrap().catalogue.state().clone();
+        let document = backend.headless.session.doc.clone();
+        let model = backend.headless.session.model.state();
+        let session = (backend.headless.session.revision, backend.headless.session.undo.len(), backend.headless.session.is_dirty());
+        let (tool, body) = fallback_tool_reply(&mut backend, json!({"commands":steps}));
+        assert_eq!(tool["isError"], true);
+        assert_eq!(tool["structuredContent"]["panel_error"]["rule"], "capability");
+        assert_eq!(body["completed"], 0);
+        assert_eq!(body["applied"], json!([]));
+        assert_eq!(body["rolled_back"], false);
+        assert_eq!(backend.calls, vec![("engine.batch".into(), String::new())], "no checkpoint, inspection or single layout call");
+        assert_eq!(backend.headless.panels.as_ref().unwrap().service.inspect(), before);
+        assert_eq!(backend.headless.panels.as_ref().unwrap().catalogue.state(), &catalogue);
+        assert!(std::sync::Arc::ptr_eq(&document, &backend.headless.session.doc));
+        assert!(std::sync::Arc::ptr_eq(&model, &backend.headless.session.model.state()));
+        assert_eq!((backend.headless.session.revision, backend.headless.session.undo.len(), backend.headless.session.is_dirty()), session);
+    }
+}
+
+#[test]
+fn oversized_atomic_tool_layout_batch_refuses_before_any_backend_or_checkpoint_call() {
+    use solidcraft_engine::panels::{ActionSink, commands::LayoutCatalogue};
+    let mut backend = LayoutFallbackBackend::new();
+    let before = backend.headless.panels.as_ref().unwrap().service.inspect();
+    let catalogue = backend.headless.panels.as_ref().unwrap().catalogue.state().clone();
+    let document = backend.headless.session.doc.clone();
+    let model = backend.headless.session.model.state();
+    let args = json!({"commands":[panel_mcp_steps()[0],{"command":"parameters.change","params":{"name":"broken","expression":"x".repeat(solidcraft_engine::MAX_LINE-32768)}}]});
+    assert!(args.to_string().len() < solidcraft_engine::MAX_LINE, "fixture fits the incoming line but exceeds the outgoing margin");
+    let (tool, body) = fallback_tool_reply(&mut backend, args);
+    assert_eq!(tool["isError"], true);
+    assert_eq!(tool["structuredContent"]["panel_error"]["rule"], "collection_limit");
+    assert_eq!(body["completed"], 0);
+    assert_eq!(body["applied"], json!([]));
+    assert!(backend.calls.is_empty());
+    assert_eq!(backend.headless.panels.as_ref().unwrap().service.inspect(), before);
+    assert_eq!(backend.headless.panels.as_ref().unwrap().catalogue.state(), &catalogue);
+    assert!(std::sync::Arc::ptr_eq(&document, &backend.headless.session.doc));
+    assert!(std::sync::Arc::ptr_eq(&model, &backend.headless.session.model.state()));
+}
+
+#[test]
+fn sequential_tool_layout_fallback_truthfully_retains_completed_changes_without_checkpointing() {
+    use solidcraft_engine::panels::{ActionSink, InstanceId, commands::LayoutCatalogue};
+    let mut backend = LayoutFallbackBackend::new();
+    let (_, body) = fallback_tool_reply(
+        &mut backend,
+        json!({"rollback":false,"commands":[
+            panel_mcp_steps()[0],{"command":"parameters.change","params":{"name":"broken","expression":"("}},
+        ]}),
+    );
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["completed"], 1);
+    assert_eq!(body["applied"], json!([0]));
+    assert_eq!(body["rolled_back"], false);
+    assert_eq!(body["undone"], 0);
+    let panels = backend.headless.panels.as_ref().unwrap();
+    assert!(panels.service.layout().instance(&InstanceId::new("log").unwrap()).unwrap().requested_open);
+    assert_eq!(panels.service.inspect().revision, 1);
+    assert!(panels.catalogue.state().remembered(&panels.service.layout().workspace).is_some());
+    assert!(!backend.calls.iter().any(|(_, command)| command == "edit.checkpoint" || command == "edit.restore_checkpoint"));
+    assert_eq!(backend.calls.iter().filter(|(_, command)| command == "panel.open").count(), 1);
+}
+
+#[test]
+fn document_only_atomic_tool_fallback_keeps_existing_checkpoint_rollback_behavior() {
+    let mut backend = LayoutFallbackBackend::new();
+    let (_, body) = fallback_tool_reply(
+        &mut backend,
+        json!({"commands":[
+            {"command":"parameters.change","params":{"name":"temporary","expression":1}},
+            {"command":"parameters.change","params":{"name":"broken","expression":"("}},
+        ]}),
+    );
+    assert_eq!(body["rolled_back"], true, "{body}");
+    assert_eq!(body["applied"], json!([]));
+    assert!(backend.headless.session.doc.param("temporary").is_none());
+    assert!(backend.calls.iter().any(|(_, command)| command == "edit.checkpoint"));
+    assert!(backend.calls.iter().any(|(_, command)| command == "edit.restore_checkpoint"));
+}
+
 /// Screenshots are drawn on the GPU by the renderer the host installs (`solidcraft-cli mcp`); the
 /// tests install the same one. `false`, with the reason printed, on a machine without a GPU
 /// adapter: the screenshots are then left out of the test.
@@ -137,6 +446,7 @@ fn handshake_and_tools_list() {
         "set_parameter",
         "check_parameters",
         "screenshot",
+        "compare_picture",
         "export",
         "undo",
         "redo",
@@ -809,6 +1119,13 @@ fn batch_stops_at_first_error_and_rolls_back() {
     assert_eq!(r["result"]["isError"], true);
     assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("solid.extrude"));
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 2);
+    // `names_only` passes through, directly and as a batch step.
+    let n = tool(&mut s, "measure", json!({"names_only": true}));
+    assert_eq!(n["body_count"], 2, "{n}");
+    assert!(n["bodies"][0]["name"].is_string() && n["bodies"][0].get("volume_mm3").is_none(), "{n}");
+    assert_eq!(tool(&mut s, "measure", json!({"names_only": true, "summary": true})), n, "summary has nothing to narrow in a names list");
+    let r = tool(&mut s, "batch", json!({"commands": [{"command": "measure", "params": {"names_only": true, "summary": true}}]}));
+    assert!(r.to_string().contains("\"definition\""), "{r}");
 }
 
 /// #5853: a misspelled command, however late in the batch, refuses the batch before its first
@@ -826,6 +1143,23 @@ fn batch_refuses_an_unknown_command_before_the_first_step() {
     assert_eq!((body["applied"].clone(), body["not_run"].as_array().map(Vec::len)), (json!([]), Some(21)), "{body}");
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "no step ran");
     assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["undo"], 0);
+}
+
+/// A step with its parameters under another key (`args`) refuses the batch before its first
+/// step, naming the key, instead of running the command without them.
+#[test]
+fn batch_refuses_a_step_with_an_unknown_key() {
+    let mut s = server();
+    let steps = json!([
+        {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}},
+        {"command": "sketch.create", "args": {"plane": "XY"}},
+    ]);
+    let r = raw_tool(&mut s, "batch", json!({"commands": steps}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((body["completed"].clone(), body["failed"]["index"].clone()), (json!(0), json!(1)), "{body}");
+    assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("unknown key `args`") && e.contains("`params`")), "{body}");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "no step ran");
 }
 
 /// #5822: with `coalesce_parameters` a batch of parameter edits, one per step, rebuilds the
@@ -988,12 +1322,15 @@ fn a_batch_with_a_matching_expect_reports_the_expectation_met() {
     let box40 = json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20, "corner": [0, 0, 0]}});
     let r = tool(&mut s, "batch", json!({"commands": [box40]}));
     assert!(r.get("expectation").is_none(), "{r}");
-    // `expect` is the tool's argument, not a step key: a step carrying one runs as any step with
-    // a stray key does, and nothing is checked.
+    // `expect` is the tool's argument, not a step key: a step carrying one is refused, as any step
+    // with a stray key is, saying where `expect` goes, instead of running with nothing checked.
     let sphere = json!({"command": "solid.sphere", "params": {"radius": 5, "center": [100, 0, 0]}, "expect": {"bodies": 7}});
-    let r = tool(&mut s, "batch", json!({"commands": [sphere]}));
-    assert_eq!(r["completed"], 1, "{r}");
-    assert!(r.get("expectation").is_none() && r["results"][0].get("expectation").is_none(), "{r}");
+    let r = raw_tool(&mut s, "batch", json!({"commands": [sphere]}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((body["completed"].clone(), body["failed"]["index"].clone()), (json!(0), json!(0)), "{body}");
+    assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("`expect` is the batch's argument")), "{body}");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1, "the sphere did not run");
 }
 
 /// A volume the design does not match flags the reply as an error that names the mismatch
@@ -1244,6 +1581,77 @@ fn tool_unknown_command_errors_explain_packed_params() {
     assert!(body["failed"]["error"].as_str().unwrap().contains("command ids have no parameters; pass them in `params`"), "{body}");
 }
 
+/// #10678: through direct `execute`, an unknown command id that is exactly a registered
+/// MCP tool name gets the namespace hint instead of unrelated closest-command suggestions.
+#[test]
+fn tool_name_command_ids_get_namespace_hint_via_execute() {
+    let mut s = server();
+    for id in ["execute", "list_commands", "describe_command", "screenshot"] {
+        let r = raw_tool(&mut s, "execute", json!({"command": id, "params": {}}));
+        assert_eq!(r["result"]["isError"], true, "{r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with(&format!("unknown command `{id}`")), "{text}");
+        assert!(text.contains(&format!("`{id}` is an MCP tool, not an engine command id")), "{text}");
+        assert!(text.contains("tools/list") && text.contains("list_commands"), "{text}");
+        assert!(!text.contains("closest:"), "{text}");
+    }
+}
+
+/// #10678: the direct `describe_command` hint inspects the requested `id`, not the outer
+/// `engine.describe` command `exec` sees.
+#[test]
+fn tool_name_command_ids_get_namespace_hint_via_describe_command() {
+    let mut s = server();
+    for id in ["execute", "list_commands"] {
+        let r = raw_tool(&mut s, "describe_command", json!({"id": id}));
+        assert_eq!(r["result"]["isError"], true, "{r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with(&format!("unknown command `{id}`")), "{text}");
+        assert!(text.contains(&format!("`{id}` is an MCP tool, not an engine command id")), "{text}");
+        assert!(!text.contains("engine.describe"), "{text}");
+    }
+    // Control: a valid engine command id still describes itself.
+    let r = raw_tool(&mut s, "describe_command", json!({"id": "solid.box"}));
+    assert_ne!(r["result"]["isError"], true, "{r}");
+}
+
+/// #10678: an engine-id typo keeps its closest-command suggestions; the tool-name hint is
+/// only for exact registered tool names.
+#[test]
+fn engine_command_id_typo_still_gets_closest_suggestions() {
+    let mut s = server();
+    let r = raw_tool(&mut s, "execute", json!({"command": "solid.bxo"}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let text = r["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("closest: `solid.box`"), "{text}");
+    assert!(!text.contains("MCP tool"), "{text}");
+}
+
+/// #10678: a genuinely unknown id keeps the ordinary unknown-command error on both paths.
+#[test]
+fn genuinely_unknown_command_id_keeps_the_ordinary_error() {
+    let mut s = server();
+    for (name, args) in [("execute", json!({"command": "madeup.thing"})), ("describe_command", json!({"id": "madeup.thing"}))] {
+        let r = raw_tool(&mut s, name, args);
+        assert_eq!(r["result"]["isError"], true, "{r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("unknown command `madeup.thing`"), "{text}");
+        assert!(!text.contains("MCP tool"), "{text}");
+    }
+}
+
+/// #10678: a valid engine command id that overlaps a tool name resolves as a command —
+/// the engine accepts it before any tool-name hint could apply.
+#[test]
+fn valid_engine_command_id_overlapping_a_tool_name_resolves_as_command() {
+    let mut b = Recorder { calls: Vec::new(), batch: Ok(json!({})) };
+    let r = crate::tools::call_tool(&mut b, "execute", &json!({"command": "measure"}));
+    assert_ne!(r["isError"], json!(true), "{r}");
+    assert!(r["content"][0]["text"].as_str().unwrap().contains("measure"), "{r}");
+    let r = crate::tools::call_tool(&mut b, "describe_command", &json!({"id": "measure"}));
+    assert_ne!(r["isError"], json!(true), "{r}");
+}
+
 fn hostile_values() -> Vec<Value> {
     vec![
         Value::Null,
@@ -1333,6 +1741,75 @@ fn list_commands_filter_by_a_command_id_matches_ids() {
     assert!(ids.iter().all(|id| id.contains("sketch.delete")), "{} commands matched: {ids:?}", ids.len());
 }
 
+/// #11726: `list_commands` narrows by id prefix and by panel, shrinks each entry to id and label
+/// or to chosen keys, and pages; with none of these the reply is the whole catalog as before. A
+/// batch step narrows the same way, and a bad argument is a tool error that names it.
+#[test]
+fn list_commands_narrows_by_prefix_panel_fields_and_page() {
+    let mut s = server();
+    let all = tool(&mut s, "list_commands", json!({}));
+    let all = all.as_array().unwrap();
+    assert!(all.len() > 100 && all[0].get("params").is_some(), "the whole catalog, every key");
+    let ids = |v: &Value| v.as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    let sketch = tool(&mut s, "list_commands", json!({"prefix": "SKETCH."}));
+    assert!(!ids(&sketch).is_empty() && ids(&sketch).iter().all(|id| id.starts_with("sketch.")), "{:?}", ids(&sketch));
+    let want = all.iter().filter(|c| c["id"].as_str().unwrap().starts_with("sketch.")).count();
+    assert_eq!(ids(&sketch).len(), want, "every sketch command, not only those on a toolbar");
+    let modify = tool(&mut s, "list_commands", json!({"panel": "modify"}));
+    assert!(!ids(&modify).is_empty(), "{modify}");
+    assert!(
+        modify
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["panel"].as_str().unwrap().eq_ignore_ascii_case("modify") || c["tab"].as_str().unwrap().eq_ignore_ascii_case("modify")),
+        "only the whole panel name matches"
+    );
+    let compact = tool(&mut s, "list_commands", json!({"compact": true}));
+    assert_eq!(ids(&compact), ids(&Value::Array(all.clone())), "compact keeps every command");
+    assert!(compact.as_array().unwrap().iter().all(|c| c.as_object().unwrap().keys().eq(["id", "label"].iter())), "{}", compact[0]);
+    assert!(compact.to_string().len() * 5 < Value::Array(all.clone()).to_string().len(), "compact is far smaller");
+    let picked = tool(&mut s, "list_commands", json!({"prefix": "solid.fillet", "fields": ["id", "enabled"], "compact": true}));
+    assert_eq!(picked[0], json!({"id": "solid.fillet", "enabled": picked[0]["enabled"]}), "fields wins over compact");
+    // Pages: together they are the whole match list, in order.
+    let mut paged = Vec::new();
+    let mut offset = json!(0);
+    while let Some(at) = offset.as_u64() {
+        let page = tool(&mut s, "list_commands", json!({"prefix": "sketch.", "compact": true, "limit": 7, "offset": at}));
+        assert_eq!(page["total"], want, "{page}");
+        assert_eq!(page["offset"], at);
+        assert!(page["commands"].as_array().unwrap().len() <= 7);
+        paged.extend(ids(&page["commands"]));
+        offset = page["next_offset"].clone();
+    }
+    assert_eq!(paged, ids(&sketch));
+    let past = tool(&mut s, "list_commands", json!({"limit": 5, "offset": 1_000_000}));
+    assert_eq!((past["commands"].as_array().unwrap().len(), &past["next_offset"]), (0, &Value::Null), "{past}");
+    // A batch step narrows as the tool does.
+    let r = tool(&mut s, "batch", json!({"commands": [{"command": "list_commands", "params": {"prefix": "sketch.", "compact": true, "limit": 3}}]}));
+    let step = r["results"][0].clone();
+    assert_eq!(step["commands"].as_array().map(Vec::len), Some(3), "{r}");
+    assert_eq!(step["total"], want, "{r}");
+    for bad in [
+        json!({"limit": 0}),
+        json!({"limit": -1}),
+        json!({"offset": "x"}),
+        json!({"fields": ["nope"]}),
+        json!({"fields": "id"}),
+        json!({"compact": 1}),
+        json!({"prefix": 3}),
+    ] {
+        // The argument schema refuses a wrong type before the tool runs; the tool refuses the rest.
+        let r = raw_tool(&mut s, "list_commands", bad.clone());
+        let text = r["result"]["content"][0]["text"].as_str().or(r["error"]["message"].as_str()).unwrap_or_default().to_string();
+        assert!(r["result"]["isError"] == json!(true) || r["error"]["code"].is_i64(), "{bad}: {r}");
+        let key = bad.as_object().unwrap().keys().next().unwrap().clone();
+        assert!(text.contains(&format!("`{key}`")), "{bad}: the error names the argument: {text}");
+        let r = raw_tool(&mut s, "batch", json!({"commands": [{"command": "list_commands", "params": bad.clone()}]}));
+        assert!(r["result"]["isError"] == json!(true) || r.to_string().contains(&format!("`{key}`")), "{bad} as a step: {r}");
+    }
+}
+
 /// Compatibility shims (docs/compatibility.md): a design saved before the rename (legacy
 /// extension and format tag) opens through MCP, and the legacy resource URIs still read.
 #[test]
@@ -1369,6 +1846,46 @@ fn legacy_design_files_and_resource_uris() {
     tool(&mut s, "open", json!({"path": new.to_string_lossy()}));
     assert!(old.is_file() && new.is_file(), "save as leaves the old file");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `compare_picture` (#1486): the overlay comes back as an image block and the numbers as text.
+#[test]
+fn compare_picture_returns_the_overlay_as_an_image() {
+    use image::ImageEncoder as _;
+    use std::io::Cursor;
+    // A scoped server, like `solidcraft-cli mcp`: the reference must be inside the folders.
+    let base = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-mcp-compare-{}", std::process::id()));
+    let recovery = base.join("recovery");
+    std::fs::create_dir_all(&recovery).unwrap();
+    let scope = crate::agent_scope_with(Some(recovery.clone()), []);
+    let mut s = Server::new(Box::new(Headless::default())).with_path_scope(Some(scope));
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 20, "width": 10, "height": 30}}));
+    // A white rectangle on grey with the box's front-view proportions (20 x 30 mm).
+    let (w, h) = (200u32, 300u32);
+    let mut img = image::RgbaImage::from_pixel(w, h, image::Rgba([200, 200, 200, 255]));
+    for y in 20..280 {
+        for x in 20..180 {
+            img.put_pixel(x, y, image::Rgba([255, 255, 255, 255]));
+        }
+    }
+    let mut png = Cursor::new(Vec::new());
+    image::codecs::png::PngEncoder::new(&mut png).write_image(img.as_raw(), w, h, image::ExtendedColorType::Rgba8).unwrap();
+    let path = recovery.join("target.png");
+    std::fs::write(&path, png.into_inner()).unwrap();
+
+    let r = raw_tool(&mut s, "compare_picture", json!({"reference": path.to_string_lossy(), "view": "front"}));
+    assert_ne!(r["result"]["isError"], json!(true), "{r}");
+    let content = r["result"]["content"].as_array().unwrap().clone();
+    assert_eq!(content[0]["type"], "image", "{content:?}");
+    assert_eq!(content[0]["mimeType"], "image/png");
+    assert!(content[0]["data"].as_str().unwrap().starts_with("iVBORw0KGgo"), "not a PNG");
+    let info: Value = serde_json::from_str(content[1]["text"].as_str().unwrap()).unwrap();
+    assert!(info["overlap"].as_f64().unwrap() > 0.9, "{info}");
+    assert!(info.get("overlay_png").is_none(), "the base64 blob belongs in the image block only");
+    // A reference outside the server's folders is refused through the existing path rules.
+    let outside = raw_tool(&mut s, "compare_picture", json!({"reference": "/etc/hostname"}));
+    assert_eq!(outside["result"]["isError"], json!(true), "{outside}");
+    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// The default folders (#205): the recovery folder works out of the box, `screenshot` without a
@@ -1613,6 +2130,39 @@ fn a_bridged_request_carries_the_agents_folders() {
     assert_eq!(got["command"], "file.new");
     assert_eq!(got["sent_token"], "0123456789abcdef0123456789abcdef");
     echo.join().unwrap();
+}
+
+/// A server started before its first tool call keeps no connection waiting (the app closes one
+/// that shows no token in time), and a call on a connection the app has closed meanwhile goes out
+/// on a new one without an error.
+#[test]
+fn a_bridge_holds_no_idle_connection_and_survives_one_closed_before_its_first_call() {
+    use std::io::{BufRead, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let app = std::thread::spawn(move || {
+        let (mut probe, _) = listener.accept().unwrap();
+        probe.set_read_timeout(Some(std::time::Duration::from_secs(10))).unwrap();
+        assert_eq!(probe.read(&mut [0u8; 1]).unwrap(), 0, "the probe closes at once and sends nothing");
+        // The connection the second bridge makes first: closed unanswered, as a timed-out one is.
+        drop(listener.accept().unwrap());
+        for _ in 0..2 {
+            let (stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            std::io::BufReader::new(stream.try_clone().unwrap()).read_line(&mut line).unwrap();
+            let req: Value = serde_json::from_str(&line).unwrap();
+            writeln!(&stream, "{}", json!({"id": req["id"], "ok": true, "result": {"method": req["method"]}})).unwrap();
+        }
+    });
+    let token = "0123456789abcdef0123456789abcdef";
+    let mut early = crate::Remote::new(&addr, Some(token));
+    early.try_connect().unwrap();
+    let mut idle = crate::Remote::connect_with_token(&addr, Some(token)).unwrap();
+    let got = crate::Backend::call(&mut early, "ui.view", json!({})).unwrap();
+    assert_eq!(got["method"], "ui.view", "{got}");
+    let got = crate::Backend::call(&mut idle, "ui.view", json!({})).unwrap();
+    assert_eq!(got["method"], "ui.view", "{got}");
+    app.join().unwrap();
 }
 
 /// #7181, bridged: once the agent has saved a design through the app, that file's folder goes
@@ -2868,6 +3418,62 @@ fn a_failed_batch_reports_what_really_happened() {
     assert_eq!(methods(&b), ["engine.batch"]);
 }
 
+/// #5957: `batch` runs the steps of a script file (`path`), as an array or `{commands}`, as it
+/// runs them sent inline: tool steps, rollback and reply. The file is read within the agent's
+/// folders; one outside them, missing, not JSON or without steps, or `path` with `commands`,
+/// fails before anything runs.
+#[test]
+fn batch_runs_a_script_file() {
+    use solidcraft_engine::io::vfs::PathScope;
+    let base = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-mcp-script-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let (root, out) = (base.join("root"), base.join("out"));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&out).unwrap();
+    let file = |d: &std::path::Path, name: &str, text: &str| {
+        let p = d.join(name);
+        std::fs::write(&p, text).unwrap();
+        p.to_string_lossy().to_string()
+    };
+    let steps = json!([
+        {"command": "set_parameter", "params": {"name": "w", "value": 20}},
+        {"command": "solid.box", "params": {"length": "w", "width": 10, "height": 10}},
+    ]);
+    let mut s = Server::new(Box::new(Headless::default())).with_path_scope(Some(PathScope::new([root.clone()])));
+    let array = file(&root, "steps.json", &steps.to_string());
+    let r = tool(&mut s, "batch", json!({"path": array}));
+    assert_eq!((&r["completed"], &r["results"][0]["value"]), (&json!(2), &json!(20.0)), "{r}");
+    let bodies = tool(&mut s, "inspect_design", json!({"measure": false}))["bodies"].as_array().map(Vec::len);
+    assert_eq!(bodies, Some(1));
+
+    // `{commands}`, as `solidcraft-cli script` writes it; a failing step rolls the batch back.
+    let script = json!({"commands": [{"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5}}, {"command": "parameters.change", "params": {"name": "h2", "expression": "1 +"}}]});
+    let r = raw_tool(&mut s, "batch", json!({"path": file(&root, "script.json", &script.to_string())}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((&body["failed"]["index"], &body["rolled_back"]), (&json!(1), &json!(true)), "{body}");
+    assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["bodies"].as_array().map(Vec::len), Some(1));
+
+    let outside = file(&out, "steps.json", &steps.to_string());
+    for (args, says) in [
+        (json!({"path": outside}), "outside"),
+        (json!({"path": root.join("missing.json").to_string_lossy()}), "missing.json"),
+        (json!({"path": file(&root, "bad.json", "[{")}), "not JSON"),
+        (json!({"path": file(&root, "empty.json", "[]")}), "no steps"),
+        (json!({"path": file(&root, "odd.json", "{\"steps\": []}")}), "no `commands`"),
+        (json!({"path": array, "commands": steps}), "not both"),
+        (json!({"path": ""}), "must name"),
+        (json!({}), "`commands` must be"),
+    ] {
+        let r = raw_tool(&mut s, "batch", args.clone());
+        assert_eq!(r["result"]["isError"], true, "{args}: {r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap_or_default();
+        assert!(text.contains(says), "{args}: {text}");
+    }
+    assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["bodies"].as_array().map(Vec::len), Some(1), "nothing ran");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
 /// Batch steps may name the tools an agent knows: `list_commands` and `set_parameter` run as
 /// engine.commands (filtered as the tool filters) and parameters.change; tools that can't be
 /// steps fail the batch before anything is sent.
@@ -2999,9 +3605,9 @@ fn a_bridged_server_checks_calls_at_its_param_check_level() {
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
     assert!(text(&r).contains(&format!("invalid parameters for `solid.box`: {warning}")), "{r}");
     assert_eq!(sent("engine.execute solid.box"), 0, "refused unsent");
-    let r = raw_tool(&mut s, "execute", json!({"command": "solid.fillet", "params": {"nonsense": 1}}));
+    let r = raw_tool(&mut s, "execute", json!({"command": "solid.chamfer", "params": {"nonsense": 1}}));
     assert_ne!(r["result"]["isError"], json!(true), "{r}");
-    assert_eq!(sent("engine.execute solid.fillet"), 1, "no contract here: the app decides");
+    assert_eq!(sent("engine.execute solid.chamfer"), 1, "no contract here: the app decides");
     let r = raw_tool(&mut s, "batch", json!({"commands": [good, misspelt]}));
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
     let reply: Value = serde_json::from_str(&text(&r)).unwrap();
@@ -3035,6 +3641,8 @@ fn a_bridged_server_leaves_the_check_to_an_app_that_makes_it() {
         let level = req["params"]["param_check"].clone();
         match req["method"].as_str() {
             Some("control.capabilities") => json!({"ok": true, "result": {"param_check": ["off", "warn", "strict"]}}),
+            // The server's own question, not a tool call: it carries no level.
+            Some("mcp.options") => json!({"ok": true, "result": {"compact": false}}),
             Some("engine.batch") => {
                 log.lock().unwrap().push(level.clone());
                 json!({"ok": true, "result": {"completed": 1, "results": [{"param_warnings": ["the app's own"]}], "undone": 0}, "param_check": level})
@@ -3141,4 +3749,170 @@ fn plain_headless_adds_no_notice() {
     let mut s = server();
     let r = raw_tool(&mut s, "list_commands", json!({}));
     assert_eq!(r["result"]["content"].as_array().unwrap().len(), 1);
+}
+
+/// A design with one 720-point sketch extruded into Body1, on a server with these options.
+fn server_with_big_sketch(options: crate::Options) -> Server {
+    let mut s = Server::new(Box::new(Headless::default())).with_options(options);
+    let points: Vec<[f64; 2]> = (0..720)
+        .map(|i| {
+            let t = f64::from(i) / 720.0 * std::f64::consts::TAU;
+            [30.0 * t.cos(), 30.0 * t.sin()]
+        })
+        .collect();
+    tool(
+        &mut s,
+        "batch",
+        json!({"commands": [
+            {"command": "sketch.create", "params": {"plane": "XY"}},
+            {"command": "sketch.line", "params": {"points": points, "closed": true}},
+            {"command": "sketch.finish"},
+            {"command": "solid.extrude", "params": {"distance": 5}},
+        ]}),
+    );
+    s
+}
+
+/// `inspect_design`'s text and error flag.
+fn inspect_text(s: &mut Server, args: Value) -> (bool, String) {
+    let r = raw_tool(s, "inspect_design", args);
+    (r["result"]["isError"] == json!(true), r["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string())
+}
+
+/// Off by default: `inspect_design` has its old arguments and returns every sketch in full,
+/// pretty-printed; `document.inspect` adds no sketch counts unless asked.
+#[test]
+fn inspect_design_is_unchanged_without_compact_output() {
+    let mut s = server_with_big_sketch(crate::Options::default());
+    let defs = tool_definitions();
+    let def = defs.iter().find(|d| d["name"] == "inspect_design").unwrap();
+    assert_eq!(def["inputSchema"]["properties"]["sketches"]["type"], "boolean", "{def}");
+    assert!(def["inputSchema"]["properties"].get("bodies").is_none(), "{def}");
+    let listed = call(&mut s, 1, "tools/list", json!({}));
+    assert!(listed["result"]["tools"].as_array().unwrap().iter().any(|t| t == def), "tools/list serves the default definition");
+
+    let (err, full) = inspect_text(&mut s, json!({"measure": false}));
+    assert!(!err && full.contains("\n  "), "pretty-printed");
+    let d: Value = serde_json::from_str(&full).unwrap();
+    assert_eq!(d["sketches"][0]["curves"].as_array().map(Vec::len), Some(720), "full sketch contents by default");
+    let (_, summary) = inspect_text(&mut s, json!({"measure": false, "sketches": false}));
+    let d: Value = serde_json::from_str(&summary).unwrap();
+    assert_eq!(d["sketches"][0]["curves"], 720, "{d}");
+    assert!(d["sketches"][0].get("points").is_none() && d["sketches"][0].get("plane").is_none(), "{d}");
+
+    // The compact arguments are not there.
+    let r = raw_tool(&mut s, "inspect_design", json!({"bodies": ["Body1"]}));
+    assert_eq!(r["error"]["code"], -32602, "{r}");
+    let r = raw_tool(&mut s, "inspect_design", json!({"sketches": ["Sketch1"]}));
+    assert_eq!(r["error"]["code"], -32602, "{r}");
+}
+
+/// With compact output (#15): sketch summaries, compact JSON; full sketch contents only for the
+/// sketches asked for; `bodies` keeps only those bodies.
+#[test]
+fn compact_inspect_design_summarises_sketches_unless_asked() {
+    let mut s = server_with_big_sketch(crate::Options { compact: true });
+    let listed = call(&mut s, 1, "tools/list", json!({}));
+    let def = listed["result"]["tools"].as_array().unwrap().iter().find(|d| d["name"] == "inspect_design").cloned().unwrap();
+    assert!(def["inputSchema"]["properties"]["bodies"].is_object(), "{def}");
+    assert_eq!(def, crate::tool_definitions_with(crate::Options { compact: true }).into_iter().find(|d| d["name"] == "inspect_design").unwrap());
+    // Arguments are checked against the tools as listed: `bodies` only with compact output.
+    let bodies = json!({"bodies": ["Body1"]});
+    assert!(crate::tools::check_arguments_with("inspect_design", &bodies, crate::Options { compact: true }).is_ok());
+    assert!(crate::tools::check_arguments("inspect_design", &bodies).is_err_and(|e| e.contains("bodies")));
+
+    let (_, summary) = inspect_text(&mut s, json!({"measure": false}));
+    assert!(summary.len() < 4000, "{} bytes: {summary}", summary.len());
+    assert!(!summary.contains("\n "), "compact JSON");
+    let d: Value = serde_json::from_str(&summary).unwrap();
+    let sk = &d["sketches"][0];
+    assert!(sk["points"].as_u64().is_some_and(|n| n >= 720), "{sk}");
+    assert_eq!((&sk["curves"], &sk["profiles"]), (&json!(720), &json!(1)), "{sk}");
+    assert!(sk["constraints"].is_u64() && sk["dof"].is_number() && sk["plane"].is_object(), "{sk}");
+    assert_eq!(inspect_text(&mut s, json!({"measure": false, "sketches": false})).1, summary);
+    assert_eq!(inspect_text(&mut s, json!({"measure": false, "sketches": "summary"})).1, summary);
+    let name = sk["name"].as_str().unwrap().to_string();
+    let (_, full) = inspect_text(&mut s, json!({"measure": false, "sketches": [name]}));
+    assert!(full.len() > 50_000 && full.len() > 20 * summary.len(), "{} vs {}", full.len(), summary.len());
+    let f: Value = serde_json::from_str(&full).unwrap();
+    assert_eq!(f["sketches"][0]["curves"].as_array().map(Vec::len), Some(720));
+    assert_eq!(inspect_text(&mut s, json!({"measure": false, "sketches": true})).1.len(), full.len());
+    let (err, e) = inspect_text(&mut s, json!({"sketches": ["Nope"]}));
+    assert!(err && e.contains("no sketch") && e.contains(&name), "{e}");
+
+    let (_, one) = inspect_text(&mut s, json!({"bodies": ["Body1"]}));
+    let one: Value = serde_json::from_str(&one).unwrap();
+    assert_eq!(one["bodies"].as_array().map(Vec::len), Some(1), "{one}");
+    assert!(one["bodies"][0]["volume_mm3"].as_f64().is_some_and(|v| v > 0.0) && one["bodies"][0]["visible"] == true, "{one}");
+    let (err, e) = inspect_text(&mut s, json!({"bodies": ["Nope"]}));
+    assert!(err && e.contains("no body `Nope`") && e.contains("Body1"), "{e}");
+
+    // Other tools' JSON is compact too.
+    let r = raw_tool(&mut s, "measure", json!({}));
+    let text = r["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(!text.contains('\n') && serde_json::from_str::<Value>(text).is_ok(), "{text}");
+}
+
+/// A headless design behind an "app" whose `mcp.options` answers are `replies`, one per question
+/// (the last one repeats), counting the questions in `asked`.
+struct AppWithPrefs {
+    inner: Headless,
+    replies: Vec<Result<Option<Value>, String>>,
+    asked: std::rc::Rc<std::cell::Cell<usize>>,
+}
+
+impl crate::Backend for AppWithPrefs {
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        self.inner.call(method, params)
+    }
+    fn has_ui(&self) -> bool {
+        false
+    }
+    fn describe(&self) -> String {
+        "test app".into()
+    }
+    fn app_options(&mut self) -> Result<Option<Value>, String> {
+        let n = self.asked.get();
+        self.asked.set(n + 1);
+        self.replies.get(n).or(self.replies.last()).cloned().unwrap_or(Ok(None))
+    }
+}
+
+fn inspect_design_is_compact(s: &mut Server) -> bool {
+    let listed = call(s, 1, "tools/list", json!({}));
+    let def = listed["result"]["tools"].as_array().and_then(|t| t.iter().find(|d| d["name"] == "inspect_design")).cloned().unwrap_or_default();
+    def["inputSchema"]["properties"]["bodies"].is_object()
+}
+
+/// The app's Preferences turn compact output on for a bridged server; it asks until the app
+/// answers once (here: not running at first), then keeps that answer for the session.
+#[test]
+fn compact_output_follows_the_apps_preference() {
+    let asked = std::rc::Rc::new(std::cell::Cell::new(0));
+    let app = |replies: Vec<Result<Option<Value>, String>>| {
+        Box::new(AppWithPrefs { inner: Headless::default(), replies, asked: asked.clone() }) as Box<dyn crate::Backend>
+    };
+    let not_running = Err(format!("{} 127.0.0.1:7878 (refused)", crate::backend::NOT_RUNNING));
+
+    let mut s = Server::new(app(vec![not_running.clone(), Ok(Some(json!({"compact": true}))), Ok(Some(json!({"compact": false})))]));
+    assert!(!inspect_design_is_compact(&mut s), "not known yet: the server's own options (off)");
+    assert!(inspect_design_is_compact(&mut s), "the app answered: compact");
+    assert!(inspect_design_is_compact(&mut s), "kept for the session");
+    let r = raw_tool(&mut s, "measure", json!({}));
+    assert!(!r["result"]["content"][0]["text"].as_str().unwrap_or("\n").contains('\n'), "tool calls follow it too: {r}");
+    assert_eq!(asked.get(), 2, "not asked again once answered");
+
+    // An app from before the setting, or with it off: off.
+    asked.set(0);
+    let mut s = Server::new(app(vec![Ok(None)]));
+    assert!(!inspect_design_is_compact(&mut s) && !inspect_design_is_compact(&mut s));
+    assert_eq!(asked.get(), 1);
+    let mut s = Server::new(app(vec![Ok(Some(json!({"compact": false})))]));
+    assert!(!inspect_design_is_compact(&mut s));
+
+    // The command line turns it on whatever the app says.
+    let mut s = Server::new(app(vec![Ok(Some(json!({"compact": false})))])).with_options(crate::Options { compact: true });
+    assert!(inspect_design_is_compact(&mut s));
+    let mut s = Server::new(app(vec![not_running])).with_options(crate::Options { compact: true });
+    assert!(inspect_design_is_compact(&mut s));
 }

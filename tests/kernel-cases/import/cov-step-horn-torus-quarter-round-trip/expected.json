@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a quarter horn torus (a circle r5 touching its axis, revolved 90 deg) written to STEP and read back: the same solid",
+ "source": "analytic",
+ "method": "the disc r5 about (5, 0) on XZ touches the Z axis at the origin; Pappus, its centroid 5 from the axis: V = pi 25 x 2 pi 5 / 4 = 616.850275; read back into a new design, the same",
+ "body_count": 1,
+ "volume_mm3": 616.8502750680849
+}
