@@ -3502,6 +3502,12 @@ impl SheetBody {
             if !(e.angle > 1e-6 && e.angle <= std::f64::consts::PI - 1e-6) {
                 return Err(DocError::Invalid(format!("{}the flange angle must be between 0 and 180°", on(k))));
             }
+            // A segment's span runs from where it starts to where it ends. A reversed one would be
+            // measured as the positive distance between its ends and overlap the stretch after it,
+            // so it is refused here, before anything is trimmed or the flat pattern is made.
+            if !(e.span.1 > e.span.0) {
+                return Err(DocError::Invalid(format!("{}a segment of the edge has no length", on(k))));
+            }
             let sharp = (radius + self.t) * (e.angle / 2.0).tan();
             // How far inside the picked edge the bend starts (the base is cut back that far), with
             // bend angle θ, inner radius R and thickness T:
@@ -3614,8 +3620,14 @@ impl SheetBody {
                 // leaves them alone).
                 let inward = Vec2::new(-d.y, d.x);
                 let l = a.dist(b);
+                // A span that runs backwards is refused here, not measured as the distance between
+                // its ends: that distance is positive, so a reversed stretch would pass for one
+                // and overlap the stretch after it.
+                if !(span.1 > span.0) {
+                    return Err(DocError::Invalid("a segment of the edge has no length".into()));
+                }
                 let (sub_a, sub_b) = (a + d * (span.0 * l), a + d * (span.1 * l));
-                let len = sub_a.dist(sub_b);
+                let len = (span.1 - span.0) * l;
                 if !(len > 1e-9) {
                     return Err(DocError::Invalid("a segment of the edge has no length".into()));
                 }
@@ -3817,6 +3829,8 @@ impl SheetBody {
         let inward = Vec2::new(-d.y, d.x);
         let l = a.dist(b);
         let (u0, u1) = (span.0 * l, span.1 * l);
+        // A span that runs backwards is refused here as well: `u1 - u0` is negative then, so it
+        // never passes for a length and no reversed stretch is trimmed.
         if !(u1 - u0 > 1e-9) {
             return Err(DocError::Invalid("a segment of the edge has no length".into()));
         }

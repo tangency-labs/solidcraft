@@ -1588,6 +1588,138 @@ fn deleting_the_last_or_only_segment_leaves_the_whole_edge() {
     assert_eq!(bends.as_array().map(Vec::len), Some(1), "one bend over the whole edge: {bends}");
 }
 
+/// A four-stretch edge in the Flange dialog, restored from a design whose boundaries are not equal
+/// (0, 0.1, 0.4, 0.8, 1), each stretch with its own angle and height.
+fn four_stretch_flange(h: &mut crate::scenario::Harness) -> u64 {
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app
+        .run(
+            "sheet.flange",
+            json!({
+                "type": "edge",
+                "edges": [{"point": [50.0, 0.0, 2.5], "segments": [
+                    {"from": 0.0, "to": 0.1, "angle": "90 deg", "height": "20 mm"},
+                    {"from": 0.1, "to": 0.4, "angle": "45 deg", "height": "15 mm"},
+                    {"from": 0.4, "to": 0.8, "angle": "90 deg", "height": "20 mm"},
+                    {"from": 0.8, "to": 1.0, "angle": "45 deg", "height": "15 mm"}
+                ]}],
+                "height": "20 mm", "angle": "90 deg", "position": "inside", "flip": false
+            }),
+        )
+        .unwrap();
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    h.app.session.doc.features.last().unwrap().id
+}
+
+/// The stretches the dialog holds for the one edge, as `from`…`to` typed, from a design with the
+/// boundaries 0, 0.1, 0.4, 0.8, 1: deleting a stretch whose values are intact bridges the gap from
+/// the neighbours, so only the removed stretch's boundaries change and OK submits a partition the
+/// command accepts (#5927, #5928).
+#[test]
+fn deleting_a_segment_with_its_values_intact_keeps_every_other_boundary() {
+    let mut h = crate::scenario::Harness::new();
+    let id = four_stretch_flange(&mut h);
+    let count = h.app.session.doc.features.len();
+    h.app.edit_feature(id);
+    h.frames(6);
+    assert_eq!(
+        restored_stretches(&h),
+        vec![vec![
+            ("0".to_string(), "0.1".to_string()),
+            ("0.1".to_string(), "0.4".to_string()),
+            ("0.4".to_string(), "0.8".to_string()),
+            ("0.8".to_string(), "1".to_string())
+        ]],
+        "the design's own fractions come back"
+    );
+    // The second stretch's bin takes it out: the first reaches to where the third starts.
+    h.step(&json!({"click": {"handle": "dialog:button:Segment 2:Delete"}})).unwrap();
+    h.frames(3);
+    assert_eq!(
+        restored_stretches(&h),
+        vec![vec![("0".to_string(), "0.4".to_string()), ("0.4".to_string(), "0.8".to_string()), ("0.8".to_string(), "1".to_string())]],
+        "the boundaries 0.4, 0.8 and 1 are where they were"
+    );
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(
+        c[0].1["params"]["edges"][0]["segments"],
+        json!([
+            {"from": 0.0, "to": 0.4, "angle": "90 deg", "height": "20 mm"},
+            {"from": 0.4, "to": 0.8, "angle": "90 deg", "height": "20 mm"},
+            {"from": 0.8, "to": 1.0, "angle": "45 deg", "height": "15 mm"}
+        ]),
+        "{}",
+        c[0].1["params"]
+    );
+    // OK submits it: the feature is redefined in place and builds.
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "OK applies the repaired list");
+    assert_eq!(h.app.session.doc.features.len(), count, "redefined in place");
+    let f = h.app.session.doc.features.last().unwrap().clone();
+    let FeatureKind::SheetFlange { edges, .. } = &f.kind else { panic!("not a flange feature") };
+    let segs: Vec<(f64, f64)> = edges[0].segments.iter().map(|s| (s.from, s.to)).collect();
+    assert_eq!(segs, vec![(0.0, 0.4), (0.4, 0.8), (0.8, 1.0)], "a partition of the edge");
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    assert_eq!(
+        h.app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"].as_array().map(Vec::len),
+        Some(2),
+        "the two bends that are left"
+    );
+}
+
+/// The same delete with the removed stretch's `to` cleared, as a user leaves it mid-edit: the repair
+/// reads the neighbours, not the removed row, so the boundaries the user did not touch stay put
+/// (the untouched 0.8 does not become 2/3) and OK submits a valid partition (#5927, #5928).
+#[test]
+fn deleting_a_mid_edit_segment_keeps_the_boundaries_it_did_not_touch() {
+    let mut h = crate::scenario::Harness::new();
+    let id = four_stretch_flange(&mut h);
+    let count = h.app.session.doc.features.len();
+    h.app.edit_feature(id);
+    h.frames(6);
+    // The user clears the second stretch's `to` in its field.
+    h.step(&json!({"widget": "Segment 2 to"})).unwrap();
+    h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    h.step(&json!({"key": "Delete"})).unwrap();
+    h.frames(3);
+    assert_eq!(restored_stretches(&h)[0][1], ("0.1".to_string(), String::new()), "the removed stretch's `to` is empty, as while editing");
+    // Delete that stretch: the gap is bridged from the neighbours.
+    h.step(&json!({"click": {"handle": "dialog:button:Segment 2:Delete"}})).unwrap();
+    h.frames(3);
+    assert_eq!(
+        restored_stretches(&h),
+        vec![vec![("0".to_string(), "0.4".to_string()), ("0.4".to_string(), "0.8".to_string()), ("0.8".to_string(), "1".to_string())]],
+        "the untouched boundaries 0.8 and 1 did not move"
+    );
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(
+        c[0].1["params"]["edges"][0]["segments"],
+        json!([
+            {"from": 0.0, "to": 0.4, "angle": "90 deg", "height": "20 mm"},
+            {"from": 0.4, "to": 0.8, "angle": "90 deg", "height": "20 mm"},
+            {"from": 0.8, "to": 1.0, "angle": "45 deg", "height": "15 mm"}
+        ]),
+        "{}",
+        c[0].1["params"]
+    );
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "OK applies the repaired list");
+    assert_eq!(h.app.session.doc.features.len(), count, "redefined in place");
+    let f = h.app.session.doc.features.last().unwrap().clone();
+    let FeatureKind::SheetFlange { edges, .. } = &f.kind else { panic!("not a flange feature") };
+    let segs: Vec<(f64, f64)> = edges[0].segments.iter().map(|s| (s.from, s.to)).collect();
+    assert_eq!(segs, vec![(0.0, 0.4), (0.4, 0.8), (0.8, 1.0)], "a partition of the edge");
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+}
+
 /// `then` with a split edge is refused, not dropped: the message names the edge and says where the
 /// chain goes instead, and the guide carries the same words (#5927, #5928).
 #[test]

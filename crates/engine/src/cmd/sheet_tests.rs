@@ -7025,6 +7025,59 @@ fn flange_segments_snap_a_tolerated_junction_even_when_the_stretches_differ() {
     assert_eq!(f["bends"], flat(&mut exact)["bends"], "{f}");
 }
 
+/// A stretch narrower than the junction tolerance that snapping would leave reversed is closed over
+/// by the junction instead: for the spans [0, 0.5], [0.4999999995, 0.4999999997],
+/// [0.4999999997, 1] the build is the exact partition's part, inside and outside the bend, and every
+/// span the flat pattern reports runs forwards (#5927, #5928).
+#[test]
+fn flange_segments_never_reverse_a_stretch_narrower_than_the_junction() {
+    for position in ["inside", "outside"] {
+        let mut s = Session::default();
+        al2_base(&mut s);
+        run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0.0,"to":0.5,"height":"20 mm"},
+                {"from":0.4999999995,"to":0.4999999997,"height":"15 mm"},
+                {"from":0.4999999997,"to":1.0,"height":"20 mm"}]}],
+                "height":"20 mm","angle":"90 deg","position":position}),
+        );
+        assert!(no_errors_or_warnings(&s), "{position}: {:?}", s.model.results);
+        let f = flat(&mut s);
+        // Each bend's span as the flat pattern reports it: it must run forwards.
+        let spans: Vec<(f64, f64)> = f["bends"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .map(|b| (b["start"][0].as_f64().unwrap_or(f64::NAN), b["end"][0].as_f64().unwrap_or(f64::NAN)))
+            .collect();
+        assert!(!spans.is_empty(), "{position}: no bend: {f}");
+        for (start, end) in &spans {
+            assert!(end > start, "{position}: a span runs backwards: {spans:?}");
+        }
+        // The middle stretch is 2e-10 of the edge, narrower than `SEGMENT_JOIN_EPS`: it cannot be a
+        // bend of its own (its end is before the run before it ends, so snapping would reverse it),
+        // so the junction closes over it and the two stretches left are one bend. That is the exact
+        // partition of the edge the tolerance leaves, and the build is that partition's part.
+        let mut exact = Session::default();
+        al2_base(&mut exact);
+        run(
+            &mut exact,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0.0,"to":0.5,"height":"20 mm"},
+                {"from":0.5,"to":1.0,"height":"20 mm"}]}],
+                "height":"20 mm","angle":"90 deg","position":position}),
+        );
+        assert!(no_errors_or_warnings(&exact), "{position}: {:?}", exact.model.results);
+        assert_eq!(spans.len(), 1, "{position}: the two stretches left are one bend: {spans:?}");
+        assert!(rel(volume(&mut s), volume(&mut exact)) < 1e-9, "{position}: {} vs {}", volume(&mut s), volume(&mut exact));
+        assert_eq!(f["bends"], flat(&mut exact)["bends"], "{position}: {f}");
+    }
+}
+
 /// A notch cut into the plate's bottom edge leaves two straight pieces of it, and either piece
 /// splits into stretches: the stretch the pick lands on lies along one line of the outline. The
 /// span-level check that refuses a stretch across the notch leaves the pieces themselves splittable

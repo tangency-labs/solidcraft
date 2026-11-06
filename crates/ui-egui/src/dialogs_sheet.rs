@@ -769,11 +769,14 @@ fn add_segment(list: &mut Vec<SegmentRow>) {
     list[i].equal = false;
 }
 
-/// Take one stretch out of an edge's list and keep the list a partition of the edge: the stretch
-/// before the one removed reaches to its end (the one after it, where it was the first, starts at
-/// its start), the list's first stretch starts at the edge's start and its last ends at the edge's
-/// end, and removing the only stretch leaves the whole edge. A list whose fractions don't parse
-/// falls back to equal stretches. Deleting never leaves a list the command would refuse.
+/// Take one stretch out of an edge's list and keep the list a partition of the edge: the gap the
+/// removed stretch leaves is bridged from the stretches beside it, never from the removed row,
+/// whose fields may be mid-edit and empty. The stretch before the removed one reaches to where the
+/// stretch after it starts (or to the edge's end when none follows), the list's first stretch
+/// starts at the edge's start and its last ends at the edge's end, and removing the only stretch
+/// leaves the whole edge. A boundary the user did not touch never moves: a neighbour whose value
+/// doesn't parse is the only reason to fall back to equal stretches. Deleting never leaves a list
+/// the command refuses unless another row's own value was already mid-edit.
 fn remove_segment(list: &mut Vec<SegmentRow>, m: usize) {
     if m >= list.len() {
         return;
@@ -782,19 +785,34 @@ fn remove_segment(list: &mut Vec<SegmentRow>, m: usize) {
         list.clear();
         return;
     }
-    let fraction = |text: &str| text.trim().parse::<f64>().ok().filter(|x| x.is_finite());
-    let (from, to) = (fraction(&list[m].from), fraction(&list[m].to));
+    let fraction = |text: &str| text.trim().parse::<f64>().ok().filter(|x| x.is_finite() && (0.0..=1.0).contains(x));
     list.remove(m);
     for row in list.iter_mut() {
         row.equal = false;
     }
-    // The neighbour takes the removed stretch's place.
-    let repaired = match (m.checked_sub(1), from, to) {
-        (Some(i), _, Some(to)) => list.get_mut(i).map(|r| r.to = format!("{to}")).is_some(),
-        (None, Some(from), _) => list.first_mut().map(|r| r.from = format!("{from}")).is_some(),
-        _ => false,
+    // Where the gap the removed stretch leaves now ends: the stretch after it starts there, and
+    // with none after it, the edge does.
+    let target = match list.get(m) {
+        Some(next) => fraction(&next.from),
+        None => Some(1.0),
     };
-    if !repaired {
+    // The stretch before the removed one takes the gap. The removed row's `from`/`to` are not read.
+    let bridged = match (target, m.checked_sub(1)) {
+        // The removed stretch was the first: pinning the new first stretch's start covers it.
+        (_, None) => true,
+        (Some(to), Some(i)) => match list.get_mut(i) {
+            Some(prev) => {
+                let ok = fraction(&prev.from).is_some_and(|from| to > from);
+                if ok {
+                    prev.to = format!("{to}");
+                }
+                ok
+            }
+            None => false,
+        },
+        (None, Some(_)) => false,
+    };
+    if !bridged {
         let n = list.len();
         for (i, row) in list.iter_mut().enumerate() {
             row.from = format!("{}", i as f64 / n as f64);

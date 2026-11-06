@@ -113,7 +113,10 @@ falls back to the edge's own value, then the feature's.
   lines, or keep the partition symmetric, and swap the fractions if the bends land mirrored.
 - **Junctions:** no bend relief is cut where two segments meet and no corner is closed there; the
   two bends butt along the junction line. Only the outermost segments take part in corner closing
-  and end relief.
+  and end relief. A junction the command accepts within `SEGMENT_JOIN_EPS` is snapped shut, and a
+  stretch narrower than that tolerance is no bend of its own: the junction closes over it (its
+  angle and height do not build), so every span the build makes runs forwards and none reaches the
+  flat pattern reversed.
 - **Refused:** `segments` on a base or contour flange; a split edge whose stretch leaves one
   straight line of the outline (a cut-out that shortened the line is fine, a notch or a step across
   it is not); `then` with `segments` (the Flange dialog refuses it and names the edge, rather than
@@ -157,6 +160,10 @@ With bend angle θ (radians), inner radius R, thickness T and K-factor k:
 For the AL2 rule above (T 2, k 0.5, R 1) at 90°: allowance π = 3.141592653589793, setback 3, so a
 20 mm flange has a 17 mm leg. At 45°: allowance π/2, setback 3·tan(22.5°) =
 1.2426406871192852, and a 15 mm flange has a 13.757359312880714 mm leg.
+
+The worked numbers here and the volume check (flat area times thickness) assume the rule's K-factor
+is 0.5, as the example rule's is: with another K the allowance, the flat area and the volume it
+implies all change.
 
 ## Rule values and the unfold method
 
@@ -242,10 +249,11 @@ which edge is "the long edge" on a near-square part) before building.
 - **Fractions need the direction:** an asymmetric partition can land mirrored. Check the bend
   table's centre lines against the plan, or keep the partition symmetric.
 - **Segments are not set-backs:** they tile the edge; a gap is refused.
-- **Deleting a stretch in the Flange dialog keeps the edge whole:** the stretch before the one
-  removed reaches to its end (the one after it, when the removed one was first, starts at its
-  start), and removing the only stretch left makes the whole edge. The dialog never submits a
-  list with a gap.
+- **Deleting a stretch in the Flange dialog keeps the edge whole:** the gap the removed stretch
+  leaves is bridged from the stretches beside it, never from the removed row (its fields may be
+  mid-edit and empty): the stretch before it reaches to where the stretch after it starts, or to
+  the edge's end when none follows. A boundary the user did not touch does not move, and removing
+  the only stretch left makes the whole edge. The dialog never submits a list with a gap.
 - **Per-edge versus per-segment:** `angle` and `height` at the edge entry are that edge's values; a
   segment's own values override them; the feature's values are the last fallback.
 - **`flip` is per segment:** it sets each bend's side.

@@ -204,14 +204,17 @@ differ and the flange's far edge steps where their heights differ. No bend relie
 two segments meet, and `then` is refused on a split edge: bend each segment's far edge in its own
 feature. Stretches that meet within 1e-9 (the junction tolerance, `SEGMENT_JOIN_EPS`) are one
 partition: the junction is snapped shut whatever the two stretches' angle, height or side are, so
-no gap survives into trimming or the flat pattern, and only stretches that match make one bend.
+no gap survives into trimming or the flat pattern, and only stretches that match make one bend. A
+stretch narrower than that tolerance is no bend of its own: the junction closes over it (its angle
+and height do not build), so no reversed span reaches the flat pattern.
 The whole stretch must lie on one straight line of the outline, with no gap in it: a stretch
 along a curve is refused (its fractions would only follow chords), a stretch across a notch or a
 step is refused too, and a straight edge a cut-out has shortened can still be split because the
 stretch that is left lies along the same straight line. In the Flange dialog, each picked edge has
 its own **Segments** list, **Split Edge** adds one more equal stretch (or splits the last one on an
-edge the design already split), removing a stretch keeps the edge whole (the stretch beside it
-takes its place, or the whole edge when it was the only one), and editing a feature keeps every
+edge the design already split), removing a stretch keeps the edge whole (the gap is bridged from
+the stretches beside it, never from the removed row, so a boundary the user did not touch does not
+move, or the whole edge when it was the only one), and editing a feature keeps every
 edge's fractions, angle, height and side, an explicit `flip: false` included. The dialog refuses
 `then` on a split edge by name, rather than dropping the chain.
 

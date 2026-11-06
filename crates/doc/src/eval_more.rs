@@ -695,10 +695,24 @@ pub(super) fn sheet_eval(
                     match joined {
                         Some(last) if (last.2 - height).abs() < 1e-12 && (last.3 - angle).abs() < 1e-12 && last.4 == side => {
                             if let Some(last) = runs.last_mut() {
-                                last.1 = seg.to;
+                                // The same bend carries on: the junction closes, and the run never
+                                // shrinks past the stretch that carries it on.
+                                last.1 = last.1.max(seg.to);
                             }
                         }
-                        Some(last) => runs.push((last.1, seg.to, height, angle, side)),
+                        Some(last) => {
+                            // Another bend starts at the junction. Snapping its start to the run
+                            // before it closes a tolerated gap or overlap. A stretch narrower than
+                            // the junction tolerance cannot be a bend of its own: its end is no
+                            // further on than the run before it ends, so snapping would leave it
+                            // reversed, and the junction closes over it instead (a sliver that
+                            // narrow is below what the kernel builds). Every span the build makes
+                            // then runs forwards, so none reaches trimming or the flat pattern
+                            // reversed.
+                            if seg.to - seg.from > sheet::SEGMENT_JOIN_EPS && seg.to > last.1 {
+                                runs.push((last.1, seg.to, height, angle, side));
+                            }
+                        }
                         None => runs.push((seg.from, seg.to, height, angle, side)),
                     }
                 }
