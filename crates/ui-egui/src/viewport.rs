@@ -2422,18 +2422,20 @@ pub(crate) fn line_in_view(vp: &Mat4, o: Vec3, d: Vec3) -> Option<(f64, f64)> {
     (t0.is_finite() && t1.is_finite() && t0 <= t1).then_some((t0, t1))
 }
 
+/// How many half view heights either side of the origin the origin axes run when they cross the
+/// whole view. Far past any edge of a view centred anywhere near the model (4 m either side of
+/// a view 1 mm high), and short enough that the ends, cut at the view's edges by the GPU in f32,
+/// stay within a fraction of a pixel of the line.
+const ACROSS_VIEW_REACH: f64 = 8192.0;
+
 /// How far either side of the origin the origin axes run when they cross the whole view
-/// ([`Prefs::origin_axes_across_view`](crate::prefs::Prefs)): to where the last of
-/// the three leaves the view `vp`, rounded up to a power of two, so the drawing is built again
-/// only when that grows or shrinks by half, not at every pan or orbit (the GPU cuts the rest
-/// off at the view's edges). At least `floor`, the short axes' length.
-pub(crate) fn origin_axis_reach(vp: &Mat4, floor: f64) -> f64 {
-    let reach = [Vec3::X, Vec3::Y, Vec3::Z]
-        .into_iter()
-        .filter_map(|d| line_in_view(vp, Vec3::ZERO, d))
-        .map(|(t0, t1)| t0.abs().max(t1.abs()))
-        .fold(floor, f64::max);
-    if reach.is_finite() && reach > 0.0 { reach.log2().ceil().exp2().max(reach) } else { floor }
+/// ([`Prefs::origin_axes_across_view`](crate::prefs::Prefs)), for a view `half_height` high:
+/// it follows the zoom only, which the highlight is already built again for, so a pan or an
+/// orbit keeps the drawing. The GPU cuts the rest off at the view's edges.
+pub(crate) fn origin_axis_reach(half_height: f64) -> f64 {
+    let floor = origin_size(half_height) * AXIS_LEN;
+    let reach = half_height * ACROSS_VIEW_REACH;
+    if reach.is_finite() { reach.max(floor) } else { floor }
 }
 
 /// The point of the line through the origin along unit `a` nearest the ray from `o` along unit
@@ -2448,7 +2450,7 @@ pub(crate) fn axis_point_nearest_ray(a: Vec3, o: Vec3, d: Vec3) -> Vec3 {
 /// [`origin_axis_reach`] for the view as it is now, or `None` when the origin axes are drawn
 /// short (the preference is off).
 fn origin_axes_reach_now(app: &SolveApp) -> Option<f64> {
-    app.preferences.origin_axes_across_view.then(|| origin_axis_reach(&display_proj(app).vp, origin_size(app.cam.half_height()) * AXIS_LEN))
+    app.preferences.origin_axes_across_view.then(|| origin_axis_reach(app.cam.half_height()))
 }
 
 /// Construction axes shown, as segments: across the model where the axis passes it (a little
@@ -3166,30 +3168,35 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     // Origin axes.
     let size = origin_size(app.cam.half_height());
     let mut besta = Near::new(all);
-    // Axes drawn over the model are picked through it too (see `build_highlight`).
-    let axes_through = through || wireframe || app.picking_plane() || app.preferences.reference_geometry_through_bodies;
+    // The short axis from the origin is picked as it always was, ahead of the surfaces.
     for (name, dir) in origin_axes(app) {
-        // Across the view, the part of the whole line the view shows; else the short axis.
-        let (from, to) = if app.preferences.origin_axes_across_view {
-            match line_in_view(&proj.vp, Vec3::ZERO, dir) {
-                Some((t0, t1)) => (dir * t0, dir * t1),
-                None => continue,
-            }
-        } else {
-            (Vec3::ZERO, dir * (size * AXIS_LEN))
-        };
-        // An axis across the view runs behind the bodies it passes: where a face hides it, a
-        // click there is the face's, as the drawing shows.
-        if app.preferences.origin_axes_across_view
-            && !axes_through
-            && hidden_from.is_some_and(|t| (axis_point_nearest_ray(dir, o, d) - o).dot(d) > t + slack)
-        {
-            continue;
-        }
-        if let (Some(a), Some(b)) = (proj.to_screen(from), proj.to_screen(to)) {
+        if let (Some(a), Some(b)) = (proj.to_screen(Vec3::ZERO), proj.to_screen(dir * (size * AXIS_LEN))) {
             let dd = seg_dist(pos, a, b);
             if dd < 5.0 && besta.wants(dd) {
                 besta.offer(dd, Hit::Axis { name: name.into() });
+            }
+        }
+    }
+    // The rest of an axis drawn across the view (#11123) is the last thing a click picks, after
+    // every surface, and only while an axis is wanted: in an open sketch (constraints to the
+    // axes) or by a dialog input that takes axes. Elsewhere a click in empty space stays empty,
+    // and handles and bodies keep their picks. Where a face hides it (it runs behind the bodies
+    // it passes, unless reference geometry is drawn through them) a click there is the face's.
+    let mut far_axes = Near::new(all);
+    let axis_wanted = app.session.active_sketch.is_some()
+        || app.dialog.as_ref().and_then(|dl| dl.active_input()).is_some_and(|i| i.accept & crate::selection::AXES != 0);
+    if app.preferences.origin_axes_across_view && axis_wanted {
+        let axes_through = through || wireframe || app.picking_plane() || app.preferences.reference_geometry_through_bodies;
+        for (name, dir) in origin_axes(app) {
+            let Some((t0, t1)) = line_in_view(&proj.vp, Vec3::ZERO, dir) else { continue };
+            if !axes_through && hidden_from.is_some_and(|t| (axis_point_nearest_ray(dir, o, d) - o).dot(d) > t + slack) {
+                continue;
+            }
+            if let (Some(a), Some(b)) = (proj.to_screen(dir * t0), proj.to_screen(dir * t1)) {
+                let dd = seg_dist(pos, a, b);
+                if dd < 5.0 && far_axes.wants(dd) {
+                    far_axes.offer(dd, Hit::Axis { name: name.into() });
+                }
             }
         }
     }
@@ -3267,6 +3274,11 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     surf.extend(planes.into_iter().map(|(t, h)| (through.unwrap_or(t + slack), h)));
     surf.sort_by(|a, b| a.0.total_cmp(&b.0));
     hits.extend(surf.into_iter().map(|x| x.1));
+    for far in far_axes.hits() {
+        if !hits.contains(&far) {
+            hits.push(far);
+        }
+    }
     hits
 }
 
@@ -4112,10 +4124,8 @@ pub(crate) fn highlight_key(app: &SolveApp) -> u64 {
     highlight_geometry_key(app).hash(&mut h);
     let selected = app.highlighted();
     app.cam.half_height().to_bits().hash(&mut h);
-    // Origin axes across the view are built as far as the view reaches, in steps (#11123).
-    if app.origin_visible() {
-        origin_axes_reach_now(app).map(f64::to_bits).hash(&mut h);
-    }
+    // Origin axes across the view or short (#11123); their reach follows the zoom, keyed above.
+    app.preferences.origin_axes_across_view.hash(&mut h);
     // A typed dimension value hides the hovered profile (see `build_highlight`).
     crate::dim_view::preview_solve(app).is_some().hash(&mut h);
     // Body triangles and outlines live in world space; the GPU applies the new camera.
@@ -14288,53 +14298,77 @@ mod grid_plane_tests {
         assert_eq!(line_in_view(&cam.view_proj(aspect, 50.0), Vec3::ZERO, Vec3::new(f64::INFINITY, 0.0, 0.0)), None);
     }
 
-    /// #11123: the origin axes are drawn as far as the view reaches, in steps of a power of two,
-    /// so a small pan or orbit keeps the drawing and a big one builds it further out. The reach
-    /// covers every axis's stretch in view, and is never shorter than the short axes.
+    /// #11123: the origin axes are drawn far enough to cross the view, orthographic or in
+    /// perspective, looking down, at a slant or almost level, from a view a little way off the
+    /// origin, for a scene up to a metre deep: the stretch of each axis in view, cut to the drawn
+    /// reach, ends on screen within two pixels of where the whole stretch does (what lies past
+    /// the reach is far along the view, where the axis runs into its vanishing point). The reach
+    /// follows the zoom only, is never shorter than the short axes, and stays finite.
     #[test]
-    fn origin_axes_reach_past_the_view_in_steps() {
-        let aspect = 800.0 / 600.0;
-        let reach = |cam: &Camera| origin_axis_reach(&cam.view_proj(aspect, 50.0), 1.0);
-        for (target, fov) in [(Vec3::ZERO, 0.0), (Vec3::new(500.0, 3.0, 0.0), 0.0), (Vec3::new(-4.0, 900.0, 5.0), 0.7)] {
-            let cam = top_view(target, 20.0, fov);
-            let r = reach(&cam);
-            assert_eq!(r.log2().fract(), 0.0, "{target:?}: {r} is a power of two");
-            let mut furthest = 0.0_f64;
-            for d in [Vec3::X, Vec3::Y, Vec3::Z] {
-                if let Some((t0, t1)) = line_in_view(&cam.view_proj(aspect, 50.0), Vec3::ZERO, d) {
-                    assert!(t0 >= -r && t1 <= r, "{target:?} {d:?}: {t0}..{t1} drawn within ±{r}");
-                    furthest = furthest.max(t0.abs()).max(t1.abs());
+    fn origin_axes_reach_past_the_view() {
+        let (w, h) = (800.0, 600.0);
+        for fov in [0.0, 0.7] {
+            for distance in [0.5, 20.0, 5e3] {
+                for k in [0.0, 0.3, 3.0] {
+                    for pitch in [std::f64::consts::FRAC_PI_2, 0.6, 0.05] {
+                        let target = Vec3::new(k * distance, -k * distance * 0.5, k * distance * 0.2);
+                        let cam = Camera { yaw: 0.4, pitch, ..top_view(target, distance, fov) };
+                        let reach = origin_axis_reach(cam.half_height());
+                        for radius in [10.0, 1e3] {
+                            let screen = |p: Vec3| cam.to_screen(p, w, h, radius).map(|(x, y, _)| (x, y));
+                            for d in [Vec3::X, Vec3::Y, Vec3::Z] {
+                                let Some((t0, t1)) = line_in_view(&cam.view_proj(w / h, radius), Vec3::ZERO, d) else { continue };
+                                for (t, cut) in [(t0, t0.max(-reach).min(t1)), (t1, t1.min(reach).max(t0))] {
+                                    let (Some(a), Some(b)) = (screen(d * t), screen(d * cut)) else {
+                                        panic!("fov {fov} distance {distance} k {k} pitch {pitch} {d:?}: {t} or {cut} off the view")
+                                    };
+                                    let gap = (a.0 - b.0).hypot(a.1 - b.1);
+                                    assert!(
+                                        gap < 2.0,
+                                        "fov {fov} distance {distance} k {k} pitch {pitch} {d:?}: ends {gap} px short ({t} cut to {cut}, reach {reach})"
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            assert!(furthest > 1.0 && furthest * 2.0 > r, "{target:?}: an axis is in view, reached no more than twice as far: {furthest} {r}");
-            let nudged = top_view(target + Vec3::new(0.01, 0.0, 0.0), 20.0, fov);
-            assert_eq!(reach(&nudged), r, "{target:?}: a small pan keeps the drawing");
         }
-        assert_eq!(reach(&top_view(Vec3::new(5e3, 0.0, 0.0), 20.0, 0.0)), 8192.0, "a view 5 m off reaches past it");
-        assert_eq!(origin_axis_reach(&Mat4([[f64::NAN; 4]; 4]), 3.0), 3.0, "no view: the short axes' length");
+        for h in [1e-9, 1.0, 1e6] {
+            assert!(origin_axis_reach(h) >= origin_size(h) * AXIS_LEN, "{h}: at least the short axes");
+        }
+        assert!(origin_axis_reach(f64::NAN).is_finite() && origin_axis_reach(f64::INFINITY).is_finite(), "no view: still a length");
     }
 
-    /// #11123: zoomed in on a spot of the X axis far from the origin, the axis is there to pick
-    /// (it was 1.8 origin sizes long, off screen); with the preference off it is as before. Where
-    /// a body hides the axis a click there picks the body's face, unless reference geometry is
-    /// drawn through bodies.
+    /// #11123: in an open sketch, zoomed in on a spot of the X axis far from the origin, the axis
+    /// is there to pick (it was 1.8 origin sizes long, off screen); with the preference off it
+    /// is as before. Out of a sketch (and of a dialog that takes axes) a click there stays in
+    /// empty space, so handles and bodies keep their picks. The long axis is the last hit:
+    /// where a body hides it a click there is the body's face alone, and drawn through bodies
+    /// it comes after the face.
     #[test]
-    fn origin_axes_across_the_view_are_picked_where_they_show() {
+    fn origin_axes_across_the_view_are_picked_last_where_they_show() {
         let mut s = solidcraft_engine::Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "corner": [180, -20, -20], "operation": "new"})).unwrap();
         let mut app = SolveApp::new(s, crate::Services::default());
         app.ui.perspective = false;
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(800., 600.));
+        let axis = |hits: &[Hit]| hits.iter().position(|h| matches!(h, Hit::Axis { name } if name == "X"));
         assert!(app.preferences.origin_axes_across_view, "on by default");
         // Far from the origin and the box, on the X axis.
         app.cam = top_view(Vec3::new(500.0, 0.0, 0.0), 50.0, 0.0);
         let proj = projection(&app, rect);
         let at = proj.to_screen(Vec3::new(510.0, 0.0, 0.0)).unwrap();
-        assert!(matches!(pick(&app, &proj, at).first(), Some(Hit::Axis { name }) if name == "X"), "the X axis runs past x = 510");
+        assert_eq!(pick(&app, &proj, at), Vec::new(), "out of a sketch, empty space stays empty");
+        app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        assert!(app.session.active_sketch.is_some());
+        app.cam = top_view(Vec3::new(500.0, 0.0, 0.0), 50.0, 0.0);
+        let proj = projection(&app, rect);
+        assert_eq!(axis(&pick(&app, &proj, at)), Some(0), "in a sketch the X axis runs past x = 510");
         let off = proj.to_screen(Vec3::new(510.0, 10.0, 0.0)).unwrap();
-        assert!(!pick(&app, &proj, off).iter().any(|h| matches!(h, Hit::Axis { .. })), "nothing off the axis");
+        assert_eq!(axis(&pick(&app, &proj, off)), None, "nothing off the axis");
         app.preferences.origin_axes_across_view = false;
-        assert!(!pick(&app, &proj, at).iter().any(|h| matches!(h, Hit::Axis { .. })), "the short axis ends near the origin");
+        assert_eq!(axis(&pick(&app, &proj, at)), None, "the short axis ends near the origin");
         app.preferences.origin_axes_across_view = true;
         // The X axis runs through the box: from the top its face hides the axis.
         app.cam = top_view(Vec3::new(200.0, 0.0, 0.0), 200.0, 0.0);
@@ -14342,30 +14376,28 @@ mod grid_plane_tests {
         let inside = proj.to_screen(Vec3::new(195.0, 0.0, 0.0)).unwrap();
         let hits = pick(&app, &proj, inside);
         assert!(matches!(hits.first(), Some(Hit::Face { .. })), "the box's top face, not the axis under it: {hits:?}");
-        assert!(!hits.iter().any(|h| matches!(h, Hit::Axis { .. })), "{hits:?}");
+        assert_eq!(axis(&hits), None, "{hits:?}");
         let beside = proj.to_screen(Vec3::new(150.0, 0.0, 0.0)).unwrap();
-        assert!(matches!(pick(&app, &proj, beside).first(), Some(Hit::Axis { name }) if name == "X"), "out of the box the axis shows");
+        assert_eq!(axis(&pick(&app, &proj, beside)), Some(0), "out of the box the axis shows");
         crate::prefs::set(&mut app, &json!({"reference_geometry_through_bodies": true})).unwrap();
-        assert!(pick(&app, &proj, inside).iter().any(|h| matches!(h, Hit::Axis { name } if name == "X")), "drawn through, picked through");
+        let hits = pick(&app, &proj, inside);
+        assert!(matches!(hits.first(), Some(Hit::Face { .. })) && axis(&hits).is_some(), "drawn through, picked after the face: {hits:?}");
     }
 
-    /// #11123: the highlight is built again when the axes need to reach further, not at every
-    /// small pan; with the preference off the camera's position does not enter it.
+    /// #11123: the long axes' drawing follows the zoom only, so no pan, however long, builds the
+    /// highlight again; switching the preference does.
     #[test]
-    fn origin_axes_rebuild_only_when_their_reach_changes() {
+    fn origin_axes_across_the_view_are_not_rebuilt_by_a_pan() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         app.ui.perspective = false;
         app.cam = top_view(Vec3::new(500.0, 0.0, 0.0), 50.0, 0.0);
         let key = highlight_key(&app);
-        app.cam.target.x += 0.5;
-        assert_eq!(highlight_key(&app), key, "a small pan keeps the drawing");
-        app.cam.target.x = 5e4;
-        let far = highlight_key(&app);
-        assert_ne!(far, key, "a long pan reaches further");
+        for x in [500.5, 5e4, -3e3] {
+            app.cam.target.x = x;
+            assert_eq!(highlight_key(&app), key, "a pan to x = {x} keeps the drawing");
+        }
         app.preferences.origin_axes_across_view = false;
-        let short = highlight_key(&app);
-        app.cam.target.x = 500.0;
-        assert_eq!(highlight_key(&app), short, "short axes don't follow the camera");
+        assert_ne!(highlight_key(&app), key, "short axes are another drawing");
     }
 
     /// Primary rolls a live preview back for reselect, but not while a manipulator is dragged
