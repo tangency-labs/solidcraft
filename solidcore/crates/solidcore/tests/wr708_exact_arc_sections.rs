@@ -1,5 +1,6 @@
-//! WR-708 (`Kernel::fixes.fillet_exact_arc_sections`, the fork's tangency-labs/smlib@523bc25):
-//! the executive's circular rounds take the ball's exact rational circle as their section.
+//! WR-708 (the fork's tangency-labs/smlib@523bc25): the executive's circular rounds take the
+//! ball's exact rational circle as their section, on every kernel (the flag that made it
+//! opt-in, `fillet_exact_arc_sections`, is retired: addendum 2026-11-06, #2330).
 //!
 //! The part is the fork's tangent peg (capi `tangent_peg(0)`, as in
 //! `fork_9bebf34_tangent_end_cases.rs`): a bar 40 x 16 x 10 whose far end is a half disc R 8
@@ -12,10 +13,10 @@
 //! 2 about (32, 2, 12) (the ball touching the plane z = 10 at radius 10 from the axis and the
 //! cylinder of radius 8 at z = 12, in the radial plane through (32, 2)).
 //!
-//! With the fix the B-spline round ends on that circle (fork 5e8c9c1, built locally and run
-//! on this case: its edge's UV trim on the round 1.6e-13 off the edge). Without it the
-//! round's approximated end section is up to 1.6e-3 off it (fork 523bc25's parent 58d03ef:
-//! 1.642e-3, the same as here).
+//! The B-spline round ends on that circle (fork 5e8c9c1, built locally and run on this case:
+//! its edge's UV trim on the round 1.6e-13 off the edge). Upstream's approximated end section
+//! was up to 1.6e-3 off it (fork 523bc25's parent 58d03ef: 1.642e-3, the same as the port
+//! before).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -172,12 +173,6 @@ fn rounds_in_turn(fixes: &UpstreamFixes) -> (f64, bool) {
     (off, ok)
 }
 
-fn without_exact_arcs() -> UpstreamFixes {
-    let mut f = UpstreamFixes::all();
-    *f.flag_mut("fillet_exact_arc_sections").unwrap() = false;
-    f
-}
-
 #[test]
 fn the_round_ends_on_the_exact_section_it_joins() {
     let (off, ok) = rounds_in_turn(&UpstreamFixes::all());
@@ -254,18 +249,12 @@ fn variable_round_end_sections_off_their_circles(k: &mut Kernel) -> f64 {
 }
 
 /// The default kernel (every fix off) rounds on the ball's exact circle: the exact section is
-/// the default, with no flag (WR-708 addendum 2026-11-06, #2330). Before, only
-/// `fillet_exact_arc_sections` gave it, and the default round's sections were polynomial arcs
-/// off the circle.
+/// the default, with no flag (WR-708 addendum 2026-11-06, #2330). Before, only the retired
+/// `fillet_exact_arc_sections` gave it, and the default kernel's end sections here were
+/// upstream's polynomial arcs, 2.34e-4 off the circle.
 #[test]
 fn the_default_kernel_rounds_on_the_exact_circle() {
     let off = variable_round_end_sections_off_their_circles(&mut Kernel::default());
     eprintln!("default kernel: end sections off their circles by {off:e}");
     assert!(off < 1e-12, "off the ball's circle by {off:e}");
-}
-
-#[test]
-fn without_it_the_approximated_section_is_off() {
-    let (off, _) = rounds_in_turn(&without_exact_arcs());
-    assert!(off > 1e-4, "off the exact section by only {off:e}");
 }

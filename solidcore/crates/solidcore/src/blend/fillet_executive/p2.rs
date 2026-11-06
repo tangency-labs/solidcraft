@@ -23,10 +23,10 @@
 //! | [`FilletLaw::bspline`] | `SmBSplineFilletLaw::SmBSplineFilletLaw(SmBSplineCurve*, const SmExtent1d&)` |
 //!
 //! Deviations:
-//! - **Exact arcs.** With `Kernel::fixes.fillet_exact_arc_sections` (WR-708, the
-//!   fork's tangency-labs/smlib@523bc25) a circular round's generator takes the exact
-//!   circle; the fork builds it as its `SmGnSectionFSG` order-1 circle (3aae1c4), here
-//!   the pinned `SmCircularCrossSectionFSG` with `bApproximateArcs` FALSE.
+//! - **Exact arcs.** A circular round's generator takes the exact circle, as the fork's
+//!   tangency-labs/smlib@523bc25 does, where upstream takes approximated arcs (WR-708);
+//!   the fork builds it as its `SmGnSectionFSG` order-1 circle (3aae1c4), here the pinned
+//!   `SmCircularCrossSectionFSG` with `bApproximateArcs` FALSE.
 //! - **Object model.** As in `p3`, solvers, corners, fillet geometry, surface
 //!   generators, laws handed in by the caller and B-reps are handles `O` resolved by an
 //!   [`ExecutiveAccess`] adapter; the executive is p3's [`FilletExecutive`] state.
@@ -722,7 +722,6 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             .ok_or_else(|| first("no radius"))?;
         let mut generator: Option<O> = None;
 
-        let exact_arcs = k.fixes.fillet_exact_arc_sections;
         // the fork's SmGnSectionFSG in place of the blend curve (WR-685)
         let gn_order = params.continuity as usize;
         let gn_invalid = |kind: FilletSurfaceGeneratorType| {
@@ -731,9 +730,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         };
         let generator_spec = |kind: FilletSurfaceGeneratorType, circular_tol: f64| match kind {
             FilletSurfaceGeneratorType::Linear => Some(FilletSurfaceGenerator::Linear),
-            // the fork's exact circle (WR-708, tangency-labs/smlib@523bc25)
+            // the exact circle, not upstream's approximated arcs (WR-708)
             FilletSurfaceGeneratorType::Circular => Some(FilletSurfaceGenerator::circular(
-                !exact_arcs,
+                false,
                 circular_tol,
                 false,
                 false,
