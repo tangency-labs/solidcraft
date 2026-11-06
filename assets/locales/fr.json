@@ -2782,6 +2782,8 @@
   "render.cpu_lighting": "Préréglage d'éclairage",
   "render.cpu_lights": "Lumières CPU",
   "render.cpu_linear_color": "Couleur linéaire (R, V, B)",
+  "render.cpu_maps_saved_help": "Le rendu CPU accepte les cartes opaques enregistrées : choisissez une surface, puis enregistrez ses cartes dans la vue. Avec l’éclairage indirect, un autre corps peut utiliser Verre ; le corps avec les cartes ne le peut pas. Désactivez les réflexions sélectionnées, l’anisotropie et les effets procéduraux. Les fichiers temporaires de cartes utilisent le GPU.",
+  "render.cpu_material_certification": "La vérification CPU valide la géométrie de verre prise en charge avant le rendu. Le verre fermé utilise la distance géométrique.",
   "render.cpu_neutral": "Neutre",
   "render.cpu_opaque_required": "Le lancer de rayons CPU nécessite un arrière-plan opaque. Décochez Arrière-plan transparent pour continuer.",
   "render.cpu_options_pending": "Ce panneau CPU ne peut pas encore modifier l'émission, les effets de surface, le verre ni l'anisotropie. Effacez ces options d'API avant de l'utiliser.",

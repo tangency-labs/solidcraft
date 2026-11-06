@@ -294,6 +294,8 @@ fn nested_anchor_saved_fixed_conversion_preserves_rotated_second_author_plane() 
         axis_dir: Vec3::X,
         angle: "15 deg".into(),
         line: None,
+        direction_only: false,
+        pivot: None,
     };
     h.app.session = solidcraft_engine::Session::new(document);
     let raw = h.app.session.doc.sketch(id).unwrap().clone();

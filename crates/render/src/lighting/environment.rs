@@ -39,7 +39,7 @@ impl SkyGradient {
         }
         Ok(())
     }
-    fn evaluate(self, z: f64) -> [f32; 3] {
+    pub(crate) fn evaluate(self, z: f64) -> [f32; 3] {
         let endpoint = if z >= 0.0 { self.zenith } else { self.ground };
         let blend = z.abs().sqrt() as f32;
         std::array::from_fn(|i| self.horizon[i] * (1.0 - blend) + endpoint[i] * blend)

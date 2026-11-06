@@ -1,6 +1,6 @@
 //! GPU studio editors. Numeric intent is portable; HDR resources cross the engine capture boundary.
 use serde_json::{Value, json};
-use solidcraft_engine::render::job::{AreaLight, AreaLights, StudioLighting, Sun, ThinLens, ToneMap};
+use solidcraft_engine::render::job::{AreaLight, AreaLights, DirectionalLights, PunctualLights, StudioLighting, Sun, ThinLens, ToneMap};
 use solidcraft_engine::render::lighting::environment::SkyGradient;
 
 use super::hdr;
@@ -41,6 +41,8 @@ pub(super) struct View {
     pub sun_enabled: bool,
     pub sun: Sun,
     pub area_lights: Vec<AreaLight>,
+    pub directional_lights: DirectionalLights,
+    pub punctual_lights: PunctualLights,
 }
 
 impl Default for View {
@@ -71,8 +73,22 @@ impl Default for View {
             sun_enabled: false,
             sun: Sun { direction: [-0.4, -0.6, 0.7], angular_radius_rad: 0.02, radiance: [1000.0, 950.0, 850.0] },
             area_lights: Vec::new(),
+            directional_lights: Default::default(),
+            punctual_lights: Default::default(),
         }
     }
+}
+
+/// CPU and GPU editors share presentation intent; CPU transport options remain independent.
+/// Preserve an explicitly saved identity object instead of erasing it on an unedited reload.
+pub(super) fn cpu_output(view: &super::ViewState) -> Option<Box<solidcraft_engine::render::job::OutputOptions>> {
+    let settings = solidcraft_engine::render::job::OutputOptions {
+        tone_map: view.studio.tone_map,
+        finishing: view.studio.finishing,
+        backdrop: view.studio.backdrop_enabled.then_some(view.studio.backdrop),
+        linear_exr: view.studio.linear_exr,
+    };
+    if settings == Default::default() && view.raytrace.output.is_none() { None } else { Some(Box::new(settings)) }
 }
 
 pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
@@ -96,6 +112,8 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
     }
     if view.lighting_enabled {
         let lighting = StudioLighting {
+            punctual_lights: view.punctual_lights,
+            directional_lights: view.directional_lights,
             environment: view.ambient,
             sun: view.sun_enabled.then_some(view.sun),
             area_lights: AreaLights::new(&view.area_lights).map_err(|error| error.to_string())?,
@@ -415,22 +433,24 @@ pub(super) fn export_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::scenario::publish_target("render:export-format", response.rect);
 }
 pub(super) fn format_choices(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
+    let available = linear_export_available(app);
     ui.scope(|ui| {
-        let reason = app.tr("render.output_exr_unavailable");
+        let reason = app.tr("render.output_master_unavailable");
         let mut format = usize::from(app.render_workspace.view.studio.export_exr);
         if ui_kit::segmented(
             ui,
             &mut format,
             &["PNG", "EXR"],
             ui_kit::Segments {
-                disabled_reasons: &[None, Some(reason)],
+                disabled_reasons: &[None, (!available).then_some(reason)],
+                targets: &["render:format-png", "render:format-exr"],
                 workspace_accent: true,
                 intrinsic: true,
                 compact: true,
                 ..Default::default()
             },
         ) {
-            app.render_workspace.view.studio.export_exr = false;
+            app.render_workspace.view.studio.export_exr = format == 1;
         }
     })
     .response
