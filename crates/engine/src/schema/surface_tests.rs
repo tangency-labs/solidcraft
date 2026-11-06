@@ -93,6 +93,28 @@ fn assert_strict_keeps_errors_on(fixture: fn(ParamCheck) -> Session, cases: &[(&
     }
 }
 
+/// #12627: a `null` or empty `bodies` (Stitch, Thicken), and a `null` `faces` (Offset Surface)
+/// or `face` (Untrim), which the handlers refuse, are refused by the contracts too, with the
+/// handlers' messages. So the check (warn, strict, MCP validation, batch preflight) catches them
+/// before the handler runs. Only a key left out goes on to the handler, for its own message.
+#[test]
+fn the_contracts_refuse_null_and_empty_where_the_handlers_do() {
+    for (id, p, message) in [
+        ("surface.stitch", json!({"bodies": null}), "`bodies` must list bodies"),
+        ("surface.stitch", json!({"bodies": []}), "`bodies` must list bodies"),
+        ("surface.thicken", json!({"bodies": null, "thickness": 1}), "`bodies` must list bodies"),
+        ("surface.thicken", json!({"bodies": [], "thickness": 1}), "`bodies` must list bodies"),
+        ("surface.offset", json!({"faces": null, "distance": 1}), "`faces` must list points on the faces to offset"),
+        ("surface.untrim", json!({"face": null}), "`face.body` must name a body"),
+    ] {
+        let messages: Vec<String> = crate::schema::issues(id, &p).into_iter().map(|i| i.message).collect();
+        assert_eq!(messages, [message], "{id} {p}");
+    }
+    for (id, p) in [("surface.stitch", json!({})), ("surface.offset", json!({"distance": 1})), ("surface.untrim", json!({}))] {
+        assert!(crate::schema::issues(id, &p).is_empty(), "{id} {p}: left out, the handler refuses it");
+    }
+}
+
 /// #12627: calls that fail today get the same message in strict. The first ones fail on the
 /// shared helper's sketch, which has no body; the rest need the cube, the sheet, the plate or the
 /// shell to get past the handler's check of the body.
