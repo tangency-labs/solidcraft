@@ -2924,6 +2924,16 @@ fn plane_tool_opens_as_the_method_its_picks_call_for() {
     let d = h.app.dialog.as_ref().unwrap();
     assert!(matches!(d.kind, Kind::Midplane), "a second plane chooses Midplane: {d:?}");
     assert_eq!(d.items(), vec![Sel::Plane { name: "XY".into() }, Sel::Plane { name: "Shelf".into() }]);
+    // Clicking Shelf again takes it out: one plane chooses Offset Plane again.
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, Sel::Plane { name: "Shelf".into() });
+    h.frames(2);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(matches!(d.kind, Kind::OffsetPlane { .. }), "taking the second plane out chooses Offset Plane again: {d:?}");
+    assert_eq!(d.items(), vec![Sel::Plane { name: "XY".into() }]);
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, Sel::Plane { name: "Shelf".into() });
+    h.frames(2);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(matches!(d.kind, Kind::Midplane), "{d:?}");
     let commands = apply_commands(&h.app, d).unwrap();
     assert_eq!(commands[0].0, "construct.plane.midplane", "OK runs the method's own command");
     h.step(&json!({"key":"Enter"})).unwrap();
