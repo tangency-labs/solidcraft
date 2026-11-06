@@ -381,38 +381,33 @@ fn edge_sides(edge: &str) -> Option<(&str, &str)> {
 fn face_name_end(s: &str, from: usize) -> Option<usize> {
     const MARK: &str = ":blend:";
     // The faces still to read: a blend face's name is read as the two of its edge.
-    let (mut pending, mut at) = (1usize, from);
+    let mut pending = 1usize;
     let mut depth = 0usize;
-    while at < s.len() {
-        let rest = &s[at..];
+    // The text is walked by character: a curve id may hold a character outside ASCII, and a byte
+    // at a time would cut it in half.
+    let mut chars = s.get(from..)?.char_indices();
+    while let Some((i, c)) = chars.next() {
+        let at = from + i;
         // The older form: the text after the mark holds an edge of its own.
-        if depth == 0 && rest.starts_with(MARK) {
+        if depth == 0 && c == ':' && s.get(at..)?.starts_with(MARK) {
             pending += 1;
-            at += MARK.len();
+            // The mark is ASCII: it is as many characters as it is bytes.
+            for _ in 1..MARK.len() {
+                let _ = chars.next();
+            }
             continue;
         }
-        match rest.as_bytes()[0] {
-            b'(' => {
-                depth += 1;
-                at += 1;
-                continue;
-            }
-            b')' => {
-                depth = depth.saturating_sub(1);
-                at += 1;
-                continue;
-            }
-            b'|' if depth == 0 => {
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            '|' if depth == 0 => {
                 pending -= 1;
                 if pending == 0 {
                     return Some(at);
                 }
-                at += 1;
-                continue;
             }
             _ => {}
         }
-        at += 1;
     }
     (pending == 1).then_some(s.len())
 }
@@ -1369,6 +1364,23 @@ mod tests {
     }
 
     use super::*;
+
+    /// A curve id may hold a character outside ASCII (`F2:side:曲`), and the name of a blend face
+    /// holds the curve id of the edge it replaced. The name was read a byte at a time, which cut
+    /// that character in half and panicked.
+    #[test]
+    fn test_face_name_end_handles_non_ascii_curve_id() {
+        let read = |name: &str| std::panic::catch_unwind(|| face_name_end(name, 0)).expect("a name with a non-ASCII curve id must not panic");
+        // The name of a blend face holds the whole edge it replaced: the `|` inside it is its own.
+        let name = "F5:blend(F2:side:曲|F2:top)";
+        let end = read(name).expect("the name of one face ends at the end of the text");
+        assert_eq!(&name[..end], name, "the whole name is the one face name");
+        // A `|` outside the blend's own edge separates two faces.
+        let pair = "F5:blend(F2:side:曲|F2:top)|F6:+y";
+        let end = read(pair).expect("the first face of a pair ends at its bar");
+        assert_eq!(&pair[..end], "F5:blend(F2:side:曲|F2:top)", "the first face of a pair is the blend face");
+        assert_eq!(face_name_end(pair, end + 1), Some(pair.len()), "the second face of a pair ends at the end of the text");
+    }
 
     /// A cone's tip repeats its apex vertex, so a triangle can have a zero-length edge. The nearest
     /// point on it must still be a real point (it used to be NaN, which broke picking the tip).
