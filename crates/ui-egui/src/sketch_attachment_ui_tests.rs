@@ -530,3 +530,39 @@ fn face_pick_makes_its_part_active_only_with_the_preference() {
         assert_eq!(h.app.session.active_component, if on { component } else { 0 }, "the part stays active as after Activate");
     }
 }
+
+/// #12540: a plane or a flat face picked in the view while Redefine Sketch Plane is open fills
+/// its Plane field; a pick that was already there when the panel opened does not.
+#[test]
+fn redefine_panel_takes_a_plane_or_face_picked_in_the_view() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.session.auto_project = false;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"})).unwrap();
+    h.app.run("construct.plane.offset", json!({"base":"XZ","offset":30,"name":"Front30"})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[20,20],"p1":[30,25]})).unwrap();
+    h.app.finish_sketch();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.settle();
+    h.app.session.selection = vec![solidcraft_engine::Sel::Plane { name: "YZ".into() }];
+    crate::browser::redefine_sketch(&mut h.app, sketch);
+    h.frames(3);
+    assert!(crate::sketch_attachment_ui::commands(&h.app).is_none(), "a selection from before the panel opened is not a pick");
+
+    h.app.session.selection = vec![solidcraft_engine::Sel::Plane { name: "Front30".into() }];
+    h.frames(2);
+    assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap(), vec![("sketch.redefine".into(), json!({"sketch":sketch,"plane":"Front30"}))]);
+
+    h.app.session.selection.clear();
+    h.frames(2);
+    h.step(&json!({"click":{"world":[3,4,10]}})).unwrap();
+    h.frames(2);
+    assert!(matches!(h.app.session.selection.first(), Some(solidcraft_engine::Sel::Face { body, .. }) if body == "Block"));
+    let commands = crate::sketch_attachment_ui::commands(&h.app).expect("the picked face fills the Plane field");
+    assert_eq!(commands[0].1["plane"]["body"], "Block", "{commands:?}");
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    assert!(h.app.tree.redefine.is_none());
+    assert!(h.app.session.model.result(sketch).unwrap().error.is_none());
+}
