@@ -38,11 +38,28 @@ pub struct RenderFocus {
     pub on: bool,
 }
 
+/// Pause or resume the current document's live Render preview without saving a setup.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RenderLive {
+    /// True pauses refinement; false resumes it using the current visual settings.
+    pub paused: bool,
+}
+
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RenderBrowser {
     /// Open the floating Browser card in a narrow Render window.
     pub open: bool,
+}
+
+/// Latch or release the viewport's Zoom tool. With no flag, the UI toggles it.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ZoomTool {
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub on: Option<bool>,
 }
 
 /// Empty input for the read-only viewport effect query.

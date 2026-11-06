@@ -49,6 +49,9 @@ enum K {
 
 use K::*;
 
+/// What `timeline.redefine` maps for a surface revolve, which no command is called.
+const SURFACE_REVOLVE_EDIT: &str = "surface.revolve (edit)";
+
 /// The parameters each command takes in world coordinates.
 fn table(id: &str) -> &'static [(&'static str, K)] {
     match id {
@@ -56,6 +59,10 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
             &[("face", Pick), ("faces", Picks), ("face_body", Body), ("from", Make), ("to", Make), ("targets", Body), ("participants", Body)]
         }
         "solid.revolve" => &[("face", Pick), ("axis", Axis), ("to", Make), ("targets", Body), ("participants", Body)],
+        // Edit Feature of a surface revolve (`map_local`): its `{origin, dir}` axis. A new surface
+        // revolve has no entry, so it is taken into the active frame whole (`to_active_frame`),
+        // picked edge and face axes too.
+        SURFACE_REVOLVE_EDIT => &[("axis", Axis)],
         "solid.box" | "solid.sphere" => &[("corner", Make), ("center", Make)],
         "solid.cylinder" | "solid.coil" | "solid.torus" | "solid.cone" => &[("base", Make), ("center", Make), ("axis", Dir)],
         "solid.fillet" | "solid.chamfer" => &[("edges", Picks), ("body", Body)],
@@ -537,7 +544,8 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
         }
         // Nothing to map (a surface revolve has no picks; a design with no placed component needs
         // none): an untouched explicit axis is still restored below.
-        let mapped = if placed(s) { map_local(&context, world, cmd, params.get("params")?) } else { None };
+        let edited = if cmd == "surface.revolve" { SURFACE_REVOLVE_EDIT } else { cmd };
+        let mapped = if placed(s) { map_local(&context, world, edited, params.get("params")?) } else { None };
         let mut inner = match mapped {
             Some(inner) => inner,
             None if matches!(cmd, "solid.revolve" | "surface.revolve") => params.get("params")?.clone(),

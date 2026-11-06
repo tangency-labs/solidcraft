@@ -35,7 +35,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<InsertedPart>)
-        .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction?, name?"),
+        .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction? (from the shank's tip toward the head), name?"),
     CommandSpec::new("parts.insert", "Insert Part", crate::checked!("parts.insert", insert_atomic))
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
@@ -45,7 +45,9 @@ pub static COMMANDS: &[CommandSpec] = &[
          hex_cap_screw_inch | hex_nut_inch | washer_sae | washer_uss); size (\"M6\", \"608\" for bearings, \"1/2-13 UNC\" for inch screws and nuts, \
          \"1/2\" for inch washers); length? (mm, inch parts too; screws, bolts, set screws, pins; default a standard length near 2.5 d); \
          at?: [x,y,z] on a hole's rim or wall (the part seats on the hole's face with a rigid joint), or a list of them (one component, \
-         placed and seated once per hole) | point?: [x,y,z] with direction?: [x,y,z] (no joint); name? → component, occurrence, joint?, \
+         placed and seated once per hole) | point?: [x,y,z] with direction?: [x,y,z] (no joint: the part's seating plane, under a head or \
+         the bottom of a nut, washer or bearing, the top of a set screw or pin, goes to point, and direction is its +z, from the shank's tip toward the head; default [0,0,1], \
+         head up, shank down -z); name? → component, occurrence, joint?, \
          and with at: occurrences, joints (one per hole, in pick order)",
         ),
     CommandSpec::new("parts.resize", "Change Part Size", crate::checked!("parts.resize", resize_atomic))
@@ -1209,6 +1211,27 @@ mod tests {
         let (lo, hi) = bbox(&s, "SHCS M8x20");
         assert!(lo.dist(solidcore_record::Vec3::new(21.6, 43.5, 53.5)) < 1e-6, "{lo:?}");
         assert!(hi.dist(solidcore_record::Vec3::new(49.6, 56.5, 66.5)) < 1e-6, "{hi:?}");
+    }
+
+    /// #11729: placed at a point, the part's seating plane is at `point` and `direction` points
+    /// from the shank's tip toward the head, as the help now says: `[0, 0, 1]` puts a screw head
+    /// up with its shank down into a plate's top face, `[0, 0, -1]` upside down.
+    #[test]
+    fn a_part_placed_at_a_point_points_its_head_along_direction() {
+        let help = super::COMMANDS.iter().find(|c| c.id == "parts.insert").map(|c| c.params).unwrap_or_default();
+        assert!(help.contains("seating plane") && help.contains("from the shank's tip toward the head"), "{help}");
+        for (direction, head_up) in [([0, 0, 1], true), ([0, 0, -1], false)] {
+            let mut s = Session::default();
+            run(
+                &mut s,
+                "parts.insert",
+                json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20, "point": [5, 5, 10], "direction": direction}),
+            );
+            let (lo, hi) = bbox(&s, "SHCS M6x20");
+            // The 6 mm head on one side of z = 10, the 20 mm shank on the other.
+            let (head, shank) = if head_up { (hi.z - 10.0, 10.0 - lo.z) } else { (10.0 - lo.z, hi.z - 10.0) };
+            assert!((head - 6.0).abs() < 1e-6 && (shank - 20.0).abs() < 1e-6, "{direction:?}: {lo:?} {hi:?}");
+        }
     }
 
     /// Several holes in one insert: one component placed and seated once per hole, in one undo

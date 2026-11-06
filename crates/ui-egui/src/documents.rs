@@ -193,6 +193,33 @@ impl Documents {
     }
 }
 
+/// Route native render completion by the document-lifetime owner, never by the
+/// selected tab or a mutable path/name. The engine capsule verifies its registry.
+pub(crate) fn render_owner(app: &SolveApp, uid: u64) -> Option<&Session> {
+    if app.session.uid == uid { Some(&app.session) } else { app.docs.background().find(|s| s.uid == uid) }
+}
+pub(crate) fn with_render_owner<T>(
+    app: &mut SolveApp,
+    uid: u64,
+    apply: impl FnOnce(&mut Session, &mut crate::render_workspace::ViewState) -> T,
+) -> Option<T> {
+    if app.session.uid == uid {
+        Some(apply(&mut app.session, &mut app.render_workspace.view))
+    } else {
+        let slot = app.docs.background_mut().find(|slot| slot.session.uid == uid)?;
+        Some(apply(&mut slot.session, &mut slot.view.render))
+    }
+}
+
+/// The host renamed a design file: every open tab of that path follows it, including the
+/// borrowed design name the tab title shows (#11375).
+pub fn follow_file_rename(app: &mut SolveApp, old_path: &str, new_path: &str) {
+    app.session.follow_file_rename(old_path, new_path);
+    for slot in app.docs.background_mut() {
+        slot.session.follow_file_rename(old_path, new_path);
+    }
+}
+
 fn take_view(app: &mut SolveApp) -> DocView {
     DocView {
         render: std::mem::take(&mut app.render_workspace.view),
@@ -319,7 +346,9 @@ pub fn switch(app: &mut SolveApp, i: usize) {
     if i == app.docs.active || i >= app.docs.slots.len() {
         return;
     }
-    let Some(incoming) = app.docs.slots.get_mut(i).and_then(Option::take) else { return };
+    let Some(incoming) = app.docs.slots.get_mut(i).and_then(Option::take) else {
+        return;
+    };
     crate::linked_source::note_unread(app);
     let out = swap_in(app, incoming);
     let a = app.docs.active;
@@ -375,7 +404,9 @@ pub(crate) fn record_stamps_at(app: &mut SolveApp, path: &str, stamps: &[(u64, c
         &mut app.docs.link_stamps
     } else {
         let saved_at = |s: &DocSlot| s.session.path.as_deref().is_some_and(|p| same_path(p, path));
-        let Some(slot) = app.docs.slots.iter_mut().flatten().find(|s| saved_at(s)) else { return };
+        let Some(slot) = app.docs.slots.iter_mut().flatten().find(|s| saved_at(s)) else {
+            return;
+        };
         &mut slot.link_stamps
     };
     for (c, s) in stamps {
@@ -600,6 +631,10 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         return;
     }
     app.docs.closing = None;
+    let closing_uid = if i == app.docs.active { Some(app.session.uid) } else { app.docs.slots[i].as_ref().map(|slot| slot.session.uid) };
+    if let Some(uid) = closing_uid {
+        crate::render_workspace::prepare::document_closing(app, uid);
+    }
     if n <= 1 {
         crate::browser::discard_reveals(app);
         crate::semantic_content::leave_document(app);
@@ -724,7 +759,9 @@ pub fn request_quit(app: &mut SolveApp) {
 
 /// Ask about the next design with unsaved changes, or quit when none is left.
 fn quit_step(app: &mut SolveApp) {
-    let Some(skip) = app.docs.quitting.clone() else { return };
+    let Some(skip) = app.docs.quitting.clone() else {
+        return;
+    };
     if app.docs.closing.is_some() {
         return;
     }
@@ -977,7 +1014,9 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     order.extend(held.map(|(from, _)| from));
     let mut dropped: Option<(usize, usize)> = None;
     for i in order {
-        let Some((name, dirty)) = info.get(i) else { continue };
+        let Some((name, dirty)) = info.get(i) else {
+            continue;
+        };
         let w = width(i);
         let left = match held {
             Some((from, left)) if from == i => left,
@@ -1391,6 +1430,26 @@ mod tests {
         a.open_path(&path);
         assert_eq!(a.docs.count(), 2);
         assert!(std::sync::Arc::ptr_eq(&doc, &a.session.doc));
+    }
+
+    #[test]
+    fn follow_file_rename_updates_every_open_tab_title() {
+        let mut a = app();
+        a.session.doc_mut().name = "Plate".into();
+        a.session.path = Some("opfs://Plate.solidcraft".into());
+        a.session.user_named = false;
+        new_tab(&mut a);
+        a.session.doc_mut().name = "Other".into();
+        a.session.path = Some("opfs://Other.solidcraft".into());
+        // Background tab is Plate; active is Other.
+        follow_file_rename(&mut a, "opfs://Plate.solidcraft", "opfs://Bracket.solidcraft");
+        assert_eq!(a.session.doc.name, "Other");
+        assert_eq!(a.session.path.as_deref(), Some("opfs://Other.solidcraft"));
+        let bg = a.docs.background().next().expect("background Plate");
+        assert_eq!(bg.doc.name, "Bracket");
+        assert_eq!(bg.path.as_deref(), Some("opfs://Bracket.solidcraft"));
+        switch(&mut a, 0);
+        assert_eq!(a.session.doc.name, "Bracket");
     }
 
     #[test]

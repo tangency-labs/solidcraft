@@ -134,6 +134,7 @@
   "render.aging_metallic": "Layer metallic fraction",
   "render.aging_origin": "Field origin · world mm",
   "render.aging_patina": "Copper-green patina",
+  "render.aging_raytrace_help": "Ageing is applied by CPU ray tracing and GPU path tracing. Raster keeps schematic rendering.",
   "render.aging_refresh_targets": "Inspect current bodies",
   "render.aging_roughness": "Layer roughness",
   "render.aging_rust": "Oxidized iron / rust",
