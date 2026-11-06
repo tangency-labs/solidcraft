@@ -47,7 +47,6 @@
   "offset_edges_keep_source_tolerance",
   "revolution_offset_axis_both_sides",
   "offset_extended_edges_mated",
-  "offset_extends_cones_as_themselves",
   "offset_swap_uv_extended_distance",
   "thicken_planar_side_walls",
   "remove_slit_loops_where_solids_touch",

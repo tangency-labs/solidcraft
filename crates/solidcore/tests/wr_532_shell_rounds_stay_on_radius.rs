@@ -1,8 +1,8 @@
 //! Regression test for WR-532 (the fork's tangency-labs/smlib@b283ea2, capi test
 //! `shelled_rounded_box_rim`): a 60 x 40 x 20 box with its four vertical edges rounded
 //! r6, shelled 2 mm inward open at the top. The cavity's rounds are the r4 offsets of
-//! the outer ones. With `offset_extends_cones_as_themselves` the extended offset
-//! extends the rounds' cylinders as themselves, so the rim faces that reach a hair
+//! the outer ones. The extended offset extends the rounds' cylinders as themselves
+//! (`Surface::extended_sides`, on the default kernel), so the rim faces that reach a hair
 //! past the rounds' ends stay on the circle, and every cylinder of the result has the
 //! radius of its round to 1e-12. A single r5 round comes back a cylinder of radius 3
 //! (tangency-labs/smlib@3626d4b, capi `shelled_single_round_stays_a_cylinder`).
@@ -24,10 +24,9 @@ use solidcore::surface::surface::SurfaceKind;
 use solidcore::Kernel;
 
 /// A 60 x 40 x 20 box with `count` of its vertical edges rounded `radius`, shelled 2 mm
-/// inward open at the top with the opt-in: the radii of the result's cylinder faces.
+/// inward open at the top on the default kernel: the radii of the result's cylinder faces.
 fn shelled_round_radii(count: usize, radius: f64) -> Vec<f64> {
     let mut k = Kernel::default();
-    k.fixes.offset_extends_cones_as_themselves = true;
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
     let vertical: Vec<_> = b
         .edges()

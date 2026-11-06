@@ -57,7 +57,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.offset_clip_right_side_out = true;
     k.fixes.revolution_offset_axis_both_sides = true;
     k.fixes.offset_extended_edges_mated = true;
-    k.fixes.offset_extends_cones_as_themselves = true;
     k.fixes.thicken_planar_side_walls = true;
     k.fixes.remove_slit_loops_where_solids_touch = true;
     k.fixes.keep_operand_uv_trims = true;

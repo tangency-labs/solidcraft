@@ -726,19 +726,18 @@ impl OffsetExecutive {
     /// Returns a cached extension, creating it `margin` past every side of `base`'s box
     /// (none for a margin of zero: the base itself), every side exactly ruled
     /// ([`Surface::extended_sides_keeping_parameters`], [`Continuity::Ruled`]): a plane,
-    /// cone, sphere, torus or ball patch as itself, a procedural blend by its definition, an
-    /// offset surface as the offset of its base extended. A hit never re-extends or replaces
-    /// the cached surface.
+    /// cone, sphere or torus as itself, a ball patch with its pole (a side collapsed to a
+    /// point) as a ball patch on the same sphere (one without a pole takes the generic ruled
+    /// extension), a procedural blend by its definition, an offset surface as the offset of
+    /// its base extended. A hit never re-extends or replaces the cached surface.
     ///
     /// The margin is how far the face's offset must reach past the face for its
     /// neighbours' offsets to meet it ([`Self::original_extension_margin`],
     /// [`Self::offset_extension_margin`]: [`super::reach::extension_reach`]).
     ///
     /// Not upstream: upstream's `CreateExtendedSurface(.., SM_CT_G1R, ..)` extends by five
-    /// offset distances, fits a ruled extension and removes knots within a tolerance (the
-    /// WR-532 / WR-728 opt-ins `offset_extends_cones_as_themselves` and
-    /// `offset_extends_ball_patches_as_themselves` extended cones and ball patches as
-    /// themselves; the exact path always does, so the flags no longer change this).
+    /// offset distances, fits a ruled extension and removes knots within a tolerance, which
+    /// leaves a cylinder or a ball patch's sphere at once (WR-532, WR-728).
     ///
     /// `base_key` represents upstream pointer identity, including across Rust clones.
     /// Distinct source identities must use distinct keys. Failed extensions are not cached.

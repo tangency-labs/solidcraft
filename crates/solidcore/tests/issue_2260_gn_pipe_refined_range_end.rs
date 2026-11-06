@@ -228,7 +228,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "offset_edges_keep_source_tolerance",
     "offset_excess_faces_after_merge",
     "offset_extended_edges_mated",
-    "offset_extends_cones_as_themselves",
     "offset_extension_as_itself",
     "offset_extension_from_base",
     "offset_four_face_vertex_split",

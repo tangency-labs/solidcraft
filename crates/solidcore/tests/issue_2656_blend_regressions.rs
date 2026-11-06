@@ -58,13 +58,12 @@ use solidcore::topology::{edge, Brep, EdgeId};
 use solidcore::Kernel;
 use std::f64::consts::FRAC_PI_4;
 
-/// SolidCraft's fixes at the 5d2635d36 pin: the corpus's `fixes.json` and the eight the bump
-/// turns on (tangency-labs/solidcraft#11875).
+/// SolidCraft's fixes at the 5d2635d36 pin: the corpus's `fixes.json` and the bump's other fixes
+/// (tangency-labs/solidcraft#11875).
 fn solidcraft_kernel() -> Kernel {
     let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
     let mut f = UpstreamFixes::default();
     for name in names.iter().map(String::as_str).chain([
-        "offset_extends_ball_patches_as_themselves",
         "approximate_surface_checks_every_row",
         "topological_vertex_has_only_edge_uses",
         "planar_section_face_tolerance",

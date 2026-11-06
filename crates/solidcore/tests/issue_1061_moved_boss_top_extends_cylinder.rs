@@ -6,8 +6,8 @@
 //! `MateEdges` marches as a B-spline 7.5e-7 off the circle (its trim on the wall a
 //! degree 3 curve of 358 control points), so the top's disc loses a sliver: 9.7e-9 of the
 //! volume. With `offset_analytic_mate_edges` (WR-495, the fork's tangency-labs/smlib@fddc366
-//! and @98ab1b0) the rim is the exact circle and the volume is exact. WR-532
-//! (`offset_extends_cones_as_themselves`) changes neither.
+//! and @98ab1b0) the rim is the exact circle and the volume is exact. Extending the wall's
+//! cylinder as itself (WR-532, now the only extension) changes neither.
 //!
 //! The part: a 60 x 40 x 10 plate with an r10 boss on it at (30, 20), its top at z = 20,
 //! moved to z = 22 by its own plane offset by 2 (`CreateOffsetSurface`, as the capi moves a
