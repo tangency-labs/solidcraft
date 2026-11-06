@@ -907,11 +907,13 @@ fn a_round_on_a_reopened_round_lies_on_it() {
             // Newton step, of 150 948), and the session's question (`round_too_small`)
             // whether the round changes the part, which reads the faces' normals across the
             // edge on the reopened round's definition: one evaluation and one solve more
-            // (65 and 13 measured with it, 64 and 12 before it)
+            // (65 and 13 measured with it, 64 and 12 before it). Three solves more since the
+            // section's curve ends on the crossing, not at the given point (#2907): 16 of one
+            // Newton step, the evaluations still 65; with the given point back, the 13 hold
             assert!(pb.bound() < 1e-8, "the bound {:e}", pb.bound());
             assert!(
                 counts.evaluations <= 65
-                    && counts.solves <= 13
+                    && counts.solves <= 16
                     && counts.most_newton_steps <= 1
                     && counts.evaluations * 1000 <= counts.net_evaluations,
                 "{counts:?}"

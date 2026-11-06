@@ -12,7 +12,10 @@
 //! Deviations: out-params become return values; the context argument is dropped; `UVRate`'s
 //! `(void)Eval` becomes `?`, where upstream would read an unset derivative array after a
 //! failed evaluation. A blend by its definition is evaluated as its certified net where the
-//! net's bound is within the tenth of `tol` the curve is held to (#2510).
+//! net's bound is within the tenth of `tol` the curve is held to (#2510). An end goes onto
+//! the crossing by the least 3D step, not `OntoPlane`'s least uv step, and the curve ends
+//! there, not at the given point (#2907): a point within `tol` of both surfaces is what the
+//! vertices are, and the curve is held to the crossing itself.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // a NaN must take the failing branch, as upstream
 
@@ -112,6 +115,31 @@ impl Tracer<'_> {
                 return Ok(false);
             }
             let (du, dv) = (-g * gu / gg, -g * gv / gg);
+            *uv = Point2::new(uv.x + du, uv.y + dv);
+            if g.abs() <= 1.0e-12 * self.scale
+                && du.abs() + dv.abs() <= 1.0e-14 * (1.0 + uv.x.abs() + uv.y.abs())
+            {
+                return Ok(true);
+            }
+        }
+        let (_, _, _, g) = self.eval(*uv)?;
+        Ok(g.abs() <= 1.0e-10 * self.scale)
+    }
+
+    /// From `uv`, the crossing's point nearest in 3D: Newton steps of least 3D length, the
+    /// surface's first fundamental form weighing the uv step. [`Tracer::onto_plane`]'s
+    /// least uv step runs along the crossing wherever the parameters' speeds differ.
+    fn onto_plane_nearest(&self, uv: &mut Point2) -> Result<bool> {
+        for _ in 0..40 {
+            let (_, su, sv, g) = self.eval(*uv)?;
+            let (gu, gv) = (su.dot(self.normal), sv.dot(self.normal));
+            let (e, f, h) = (su.dot(su), su.dot(sv), sv.dot(sv));
+            let (mu, mv) = (h * gu - f * gv, e * gv - f * gu);
+            let gg = gu * mu + gv * mv;
+            if !(gg > 0.0) {
+                return Ok(false);
+            }
+            let (du, dv) = (-g * mu / gg, -g * mv / gg);
             *uv = Point2::new(uv.x + du, uv.y + dv);
             if g.abs() <= 1.0e-12 * self.scale
                 && du.abs() + dv.abs() <= 1.0e-14 * (1.0 + uv.x.abs() + uv.y.abs())
@@ -239,23 +267,34 @@ pub fn surface_plane_curve(
     // both ends on the surface
     let dom = surf.natural_uv_domain_with_nurb(k)?;
     let mut end_uv = [Point2::new(0.0, 0.0); 2];
-    for (uv, &p) in end_uv.iter_mut().zip([start, end].iter()) {
+    let mut end_x = [start, end];
+    for ((uv, x), &p) in end_uv
+        .iter_mut()
+        .zip(end_x.iter_mut())
+        .zip([start, end].iter())
+    {
         let d = surf.drop_point::<NoObject>(k, p, &dom, &DropPointOptions::default())?;
         *uv = d.result_uv;
-        let ok = if d.success { tr.onto_plane(uv)? } else { false };
+        let ok = if d.success {
+            tr.onto_plane_nearest(uv)?
+        } else {
+            false
+        };
         let on = surf.evaluate_point(k, *uv)?;
         if !ok || on.distance(p) > tol || (p - origin).dot(normal).abs() > tol {
             // an end is off the surface or the plane
             return Err(fail());
         }
+        *x = on;
     }
     let [start_uv, stop_uv] = end_uv;
+    let [start_x, stop_x] = end_x;
 
     // the stations: from the start, along the level line, to the end
     let (t0, r0) = tr.tangent(start_uv, start_dir.unwrap_or(end - start))?;
     let mut st = vec![Station {
         uv: start_uv,
-        x: start,
+        x: start_x,
         t: t0,
         rate: r0,
     }];
@@ -271,7 +310,7 @@ pub fn surface_plane_curve(
             }
             st.push(Station {
                 uv: stop_uv,
-                x: end,
+                x: stop_x,
                 t: te,
                 rate: re,
             });
@@ -452,4 +491,47 @@ pub fn ends_on_both(
         }
     }
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::extent2d::Extent2d;
+    use crate::geom::vector2d::Vec2;
+    use crate::kernel::KernelOptions;
+    use crate::surface::plane::Plane;
+
+    /// A plane `z = 0` whose `u` runs 100 times faster than its `v`, cut by a plane at 45
+    /// degrees along a line nearly along `u`, from a start 2e-6 off the crossing. The crossing's
+    /// nearest point is about that far away. The least uv step, which is nearly equal in `u`
+    /// and `v` here, lands about 1e-4 along the line instead, past the tolerance (#2907).
+    #[test]
+    fn an_end_off_the_crossing_goes_to_its_nearest_point_with_uneven_parameter_speeds() {
+        let k = Kernel::new(&KernelOptions::default());
+        let domain = Extent2d::from_bounds(-1.0, -50.0, 1.0, 50.0);
+        let surf = Surface::from(Plane::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(100.0, 1.0),
+            &domain,
+        ));
+        // the cutter: y + z + 0.01 x = 0
+        let cut = |x: f64, z: f64| Point3::new(x, -z - 0.01 * x, z);
+        let along = Vec3::new(1.0, -0.01, 0.0).unitize().unwrap();
+        let cutter = Surface::from(Plane::new(
+            Point3::new(0.0, 0.0, 0.0),
+            along,
+            along.cross(Vec3::new(0.01, 1.0, 1.0).unitize().unwrap()),
+            Vec2::new(1.0, 1.0),
+            &domain,
+        ));
+        let (start, end) = (cut(10.0, 2.0e-6), cut(20.0, 0.0));
+        let c = surface_plane_curve(&k, &surf, &cutter, start, end, None, 4.0e-5, 0.1).unwrap();
+        let first = c.curve_3d.evaluate_point(&k, 0.0).unwrap();
+        // on the crossing, y = -0.01 x, z = 0, and as near the start as the geometry allows
+        assert!(first.z.abs() <= 1.0e-11, "{first:?}");
+        assert!((first.y + 0.01 * first.x).abs() <= 1.0e-11, "{first:?}");
+        assert!(first.distance(start) <= 3.0e-6, "{}", first.distance(start));
+    }
 }
