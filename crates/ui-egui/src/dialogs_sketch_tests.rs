@@ -288,6 +288,30 @@ fn intersect_dialog_takes_a_line_of_another_sketch() {
     assert!(at[0].dist(solidcore_record::Vec3::new(20.0, 0.0, 0.0)) < 1e-6, "{at:?}");
 }
 
+/// A Project of an edge and a vertex beside it names both in the status line: the curve, and
+/// the point that is not one of its ends.
+#[test]
+fn project_status_names_a_lone_point_beside_a_curve() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Post"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","offset":30})).unwrap();
+    h.settle();
+    h.app.start("sketch.project");
+    h.settle();
+    {
+        let d = h.app.dialog.as_mut().expect("Project opens its dialog");
+        d.inputs[0].items = vec![
+            Sel::Edge { body: "Post".into(), index: 0, point: solidcore_record::Vec3::new(20.0, 0.0, 20.0) },
+            Sel::Vertex { body: "Post".into(), point: solidcore_record::Vec3::new(40.0, 30.0, 20.0) },
+        ];
+    }
+    h.app.status = None;
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.status.clone().map(|(text, _, error)| (text, error)), Some(("Project added 1 curve and 1 point to the sketch.".into(), false)));
+}
+
 #[test]
 fn project_dialog_keeps_geometry_targets_and_can_project_whole_bodies_unlinked() {
     let mut h = Harness::new();
@@ -728,4 +752,52 @@ fn transform_scales_about_a_picked_center() {
     }
     assert!((lo.0 - 10.0).abs() < 1e-6 && (lo.1 - 10.0).abs() < 1e-6, "the picked corner stayed: {lo:?}");
     assert!((hi.0 - 70.0).abs() < 1e-6 && (hi.1 - 50.0).abs() < 1e-6, "twice the size away from it: {hi:?}");
+}
+
+/// An Intersect whose result the sketch hides (Projected Geometries off) said nothing, so it
+/// looked as if the pick had done nothing, and each try laid another point on the first. The
+/// status line now says what was added and why it is not shown, and the same curve again adds
+/// no second point.
+#[test]
+fn intersect_says_what_it_added_and_that_projected_geometries_hides_it() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"YZ","offset":20})).unwrap();
+    h.app.run("sketch.options", json!({"show_projected": false})).unwrap();
+    h.app.run("view.home", json!({})).unwrap();
+    h.settle();
+    let intersect = |h: &mut Harness, at: [f64; 3]| {
+        h.app.status = None;
+        h.app.start("sketch.intersect");
+        h.settle();
+        h.step(&json!({"click":{"world":at}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.settle();
+        let state = h.app.session.world_state().unwrap();
+        let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        (h.app.status.clone().map(|(text, _, error)| (text, error)), sk.links.len(), sk.points.len())
+    };
+    let (status, links, points) = intersect(&mut h, [10.0, 0.0, 0.0]);
+    assert_eq!(
+        status,
+        Some((
+            "Intersect added 1 point to the sketch. The result is hidden because Projected Geometries is off in the sketch palette.".into(),
+            false
+        ))
+    );
+    assert_eq!(links, 1);
+    // The same side again adds nothing, and the refusal is guidance: nothing to report.
+    let (status, again, more) = intersect(&mut h, [10.0, 0.0, 0.0]);
+    assert_eq!((again, more), (links, points), "{status:?}");
+    h.frames(2);
+    assert!(h.app.dialog.as_ref().and_then(|d| d.error.clone()).is_some_and(|e| e.contains("already intersected")), "{status:?}");
+    assert!(scenario::handle_at("dialog:create_issue").is_none(), "no Create Issue for a pick the sketch holds");
+    h.app.dialog = None;
+    // Shown, the status says only what was added.
+    h.app.run("sketch.options", json!({"show_projected": true})).unwrap();
+    let (status, links, _) = intersect(&mut h, [10.0, 30.0, 0.0]);
+    assert_eq!(status, Some(("Intersect added 1 point to the sketch.".into(), false)));
+    assert_eq!(links, 2);
 }

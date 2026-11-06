@@ -3200,11 +3200,22 @@ fn missing_pick(error: &str) -> bool {
     awaiting_selection(error) || error.get(..5).is_some_and(|start| start.eq_ignore_ascii_case("pick "))
 }
 
+/// A refusal that is guidance, not a failure of the design, so the dialog offers nothing to
+/// report (#10181): the command is not available here, or the pick is in the sketch already.
+fn context_refusal(app: &SolveApp, d: &Dialog, error: &str) -> bool {
+    already_linked(error) || command_disabled(app, d, error)
+}
+
+/// Project's or Intersect's refusal of a pick the sketch already holds ("already intersected into
+/// this sketch: sketch curve l1"): guidance too, the pick is in the sketch already.
+fn already_linked(error: &str) -> bool {
+    ["already projected into this sketch", "already intersected into this sketch"].iter().any(|k| error.contains(k))
+}
+
 /// A refusal that says the command is not available in this context ("`sketch.project` is not
 /// available right now: no sketch is being edited"): the engine's own `Disabled` refusal for the
-/// command this dialog runs, so the sketch ended or the mode changed under it. Guidance, not a
-/// failure of the design: there is nothing to report (#10181).
-fn context_refusal(app: &SolveApp, d: &Dialog, error: &str) -> bool {
+/// command this dialog runs, so the sketch ended or the mode changed under it.
+fn command_disabled(app: &SolveApp, d: &Dialog, error: &str) -> bool {
     let Some(id) = d.command() else { return false };
     let Some(spec) = solidcraft_engine::find_command(id) else { return false };
     spec.disabled_refusal(&app.session).is_some_and(|refusal| refusal == error)
@@ -4900,6 +4911,11 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
                 {
                     app.set_status(why, false);
                 }
+                if matches!(cmd.as_str(), "sketch.intersect" | "sketch.project")
+                    && let Some(what) = link_status(app, &cmd, &reply)
+                {
+                    app.set_status(what, false);
+                }
             }
             Err(error) => {
                 if let Some((id, _)) = d.editing {
@@ -4920,6 +4936,54 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
         };
     }
     Ok(())
+}
+
+/// What an Intersect or Project added to the sketch, for the status line, and that it is hidden
+/// when the sketch's Projected Geometries option is off: such a result showed nothing and said
+/// nothing, so it looked as if the click had done nothing.
+fn link_status(app: &SolveApp, cmd: &str, reply: &Value) -> Option<String> {
+    let links = reply.get("links").and_then(Value::as_array)?;
+    let ids = |key: &str| -> Vec<&str> {
+        links.iter().flat_map(|l| l.get(key).and_then(Value::as_array).into_iter().flatten()).filter_map(Value::as_str).collect()
+    };
+    let (curves, points) = (ids("curves"), ids("points"));
+    let world = app.session.world_state().ok();
+    let sketch = app.session.active_sketch.and_then(|id| world.as_ref()?.sketch(id)).map(|s| &s.sketch);
+    // A curve's ends and centre are points of its link too: a point counts on its own only when
+    // no curve uses it (a projected vertex beside a projected edge).
+    let lone = match sketch {
+        Some(sk) => {
+            // Once over the sketch, not once per point: a large outline returns many points.
+            let on_curves: std::collections::HashSet<usize> = sk.curves.iter().flat_map(|c| c.kind.point_ids()).collect();
+            let index: std::collections::HashMap<&str, usize> = sk.points.iter().enumerate().map(|(i, p)| (p.id.as_str(), i)).collect();
+            points.iter().filter(|id| index.get(**id).is_some_and(|i| !on_curves.contains(i))).count()
+        }
+        None if curves.is_empty() => points.len(),
+        None => 0,
+    };
+    let command = crate::i18n::tr(if cmd == "sketch.intersect" { "ui.intersect" } else { "ui.project" });
+    let counted = |id: &str, n: usize| crate::i18n::format(id, &[("command", command), ("count", &n.to_string())]);
+    let mut text = match (curves.len(), lone) {
+        (0, 0) => return None,
+        (1, 0) => counted("ui.sketch_links_added_curve", 1),
+        (n, 0) => counted("ui.sketch_links_added_curves", n),
+        (0, 1) => counted("ui.sketch_links_added_point", 1),
+        (0, n) => counted("ui.sketch_links_added_points", n),
+        (c, p) => crate::i18n::format(
+            "ui.sketch_links_added_curves_and_points",
+            &[
+                ("command", command),
+                ("curves", &counted(if c == 1 { "ui.sketch_links_curve_count_one" } else { "ui.sketch_links_curve_count" }, c)),
+                ("points", &counted(if p == 1 { "ui.sketch_links_point_count_one" } else { "ui.sketch_links_point_count" }, p)),
+            ],
+        ),
+    };
+    let linked = links.iter().any(|l| l.get("link").is_some_and(|l| !l.is_null()));
+    if linked && sketch.is_some_and(|sk| sk.view.hide_projected) {
+        text.push(' ');
+        text.push_str(&crate::i18n::format("ui.sketch_links_hidden", &[("option", crate::i18n::tr("ui.show_projected_geometries"))]));
+    }
+    Some(text)
 }
 
 /// Edit Section Analysis: its dialog, where the dialog that made the section shown (or hidden)
