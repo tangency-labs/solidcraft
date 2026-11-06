@@ -1310,13 +1310,25 @@ pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Opti
         return;
     }
     // The drag's whole turn so far, applied to the camera it began with: the view depends on
-    // where the pointer is, not on the path it took, so fast or erratic drags (a pitch held at
-    // straight up or down for a while, many tiny steps) can't drift. Anything else that moves
+    // where the pointer is, not on the path it took (once the view is upright; while it stands
+    // up, each step turns through the roll it has then), so fast or erratic drags (a pitch held
+    // at straight up or down for a while, many tiny steps) can't drift. Anything else that moves
     // the camera meanwhile (a wheel zoom, a new pivot) starts the sum again from there.
     let from = match app.viewport.orbit_from {
         Some(f) if f.last == app.cam && f.pivot == pivot => f,
         _ => OrbitFrom { start: app.cam, dx: 0.0, dy: 0.0, pivot, last: app.cam },
     };
+    if !app.preferences.upright_orbit_unrolls {
+        // Off: a rolled view keeps its roll and turns about the world's up axis, as before.
+        let (dx, dy) = (from.dx + dx, from.dy + dy);
+        app.cam = from.start;
+        match pivot {
+            Some(p) => app.cam.orbit_about(dx, dy, p),
+            None => app.cam.orbit(dx, dy),
+        }
+        app.viewport.orbit_from = Some(OrbitFrom { dx, dy, last: app.cam, ..from });
+        return;
+    }
     // A rolled view (facing a sketch on a tilted plane rolls it to square the sketch's axes)
     // stands upright again as the pointer moves: the upright orbit turns about the world's up
     // axis, and kept rolled (upside down, say) the model turned against the pointer and never
@@ -1662,6 +1674,24 @@ mod tests {
         }
         assert!(app.cam.roll.abs() < 1e-9, "the sketch view stays rolled: {}", app.cam.roll);
         assert!(app.cam.up_dir().z > 0.0 && app.cam.pitch > 0.5, "not looking from above: pitch {}", app.cam.pitch);
+        // Off, the upright orbit is the one before: a rolled view keeps its roll and turns about
+        // the world's up axis, about the view centre or a pivot alike.
+        for around in [OrbitAround::ViewCentre, OrbitAround::Origin] {
+            let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+            assert!(app.preferences.upright_orbit_unrolls, "standing a rolled view up is the default");
+            app.preferences.upright_orbit_unrolls = false;
+            app.preferences.orbit_around = around;
+            app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), yaw: 0.4, pitch: 0.5, roll: std::f64::consts::PI, ..Default::default() };
+            let mut expected = app.cam;
+            match around {
+                OrbitAround::Origin => expected.orbit_about(30.0, -20.0, Vec3::ZERO),
+                _ => expected.orbit(30.0, -20.0),
+            }
+            orbit(&mut app, rect, 10.0, -5.0, None);
+            orbit(&mut app, rect, 20.0, -15.0, None);
+            assert_eq!(app.cam, expected, "the old upright orbit changed ({around:?})");
+            assert_eq!(app.cam.roll, std::f64::consts::PI);
+        }
     }
 
     #[test]
