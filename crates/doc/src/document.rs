@@ -535,28 +535,45 @@ impl EmbossFace {
 
     /// Resolve one saved component path without expanding other occurrences.
     pub fn component_frame(doc: &Document, owner: u64, path: &[u64]) -> Result<crate::Mat> {
-        if path.len() > 64 || doc.occurrences.len() > 100_000 {
-            return Err(DocError::Invalid("selected cylinder path exceeds work limits".into()));
+        let frame = doc.placement_frame(path)?;
+        match path.split_last() {
+            None => Ok(doc.component_transform(owner)),
+            Some((last, _)) => {
+                let component = doc.occurrences.iter().find(|o| o.id == *last).map(|o| o.component);
+                if component == Some(owner) {
+                    Ok(frame)
+                } else {
+                    Err(DocError::Invalid("selected cylinder path belongs to another component".into()))
+                }
+            }
+        }
+    }
+}
+
+impl Document {
+    /// The world frame of one exact placement, without expanding every occurrence: the frame
+    /// every origin datum of the placement resolves in ([`crate::construct::resolve_datum`]).
+    /// The empty path is the root design frame. The shared walk of an exact placement (the
+    /// Emboss selection's `component_frame` delegates to it): depth at most 64, non-zero
+    /// canonical ids, no id repeated in a path, at most 100 000 occurrences.
+    pub fn placement_frame(&self, path: &[u64]) -> Result<crate::Mat> {
+        if path.len() > 64 || self.occurrences.len() > 100_000 {
+            return Err(DocError::Invalid("the placement path exceeds work limits".into()));
         }
         let mut frame = crate::IDENTITY;
         let mut component = 0;
         let mut seen = std::collections::BTreeSet::new();
         for id in path {
             if *id == 0 || !seen.insert(*id) {
-                return Err(DocError::Invalid("invalid selected cylinder path".into()));
+                return Err(DocError::Invalid("invalid placement path".into()));
             }
-            let occurrence = doc
+            let occurrence = self
                 .occurrences
                 .iter()
                 .find(|o| o.id == *id && o.parent == component)
-                .ok_or_else(|| DocError::Invalid("selected cylinder placement no longer exists".into()))?;
+                .ok_or_else(|| DocError::Invalid("the placement no longer exists".into()))?;
             frame = crate::mat_mul(&frame, &occurrence.transform);
             component = occurrence.component;
-        }
-        if path.is_empty() {
-            frame = doc.component_transform(owner);
-        } else if component != owner {
-            return Err(DocError::Invalid("selected cylinder path belongs to another component".into()));
         }
         Ok(frame)
     }
@@ -3288,6 +3305,9 @@ pub struct Visibility {
     /// The browser's Origin folder is hidden (`None`: the app's preference decides).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin_hidden: Option<bool>,
+    /// Component Origin folders explicitly shown, by complete occurrence path. Hidden by default.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub shown_component_origins: Vec<Vec<u64>>,
     /// Finished sketches whose closed profiles are not shaded, by feature id.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hidden_profiles: Vec<u64>,
@@ -3315,6 +3335,7 @@ impl Visibility {
             && self.shown_sketches.is_empty()
             && self.hidden_joints.is_empty()
             && self.origin_hidden.is_none()
+            && self.shown_component_origins.is_empty()
             && self.hidden_profiles.is_empty()
             && self.shown_dimensions.is_empty()
             && self.locked_bodies.is_empty()

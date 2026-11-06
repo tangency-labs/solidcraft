@@ -1,4 +1,5 @@
 use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::Vec3Geom;
 use solidcraft_kernel::measure;
 use solidcraft_sketch::{ConstraintKind, Sketch};
 
@@ -731,6 +732,104 @@ fn self_referencing_construction_planes_are_errors() {
     let mut m = Model::new();
     m.evaluate(&doc);
     assert!(m.results.iter().any(|r| r.error.is_some()), "a cyclic perpendicular plane must report an error: {:?}", m.results);
+}
+
+/// A rigid translation, the way the evaluation moves an occurrence.
+fn translation(t: Vec3) -> crate::Mat {
+    [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [t.x, t.y, t.z, 1.0]]
+}
+
+/// The seven datum items parse their names without regard to case, and a datum key is strict:
+/// canonical non-zero decimal occurrence ids, at most 64 of them, at most 2048 characters. The
+/// root keeps its own controls, so nothing that names the design's origin parses as a datum.
+#[test]
+fn datum_refs_parse_strictly() {
+    use construct::{DatumItem, DatumRef};
+    assert_eq!(DatumRef { path: vec![2, 3], item: DatumItem::XY }.key(), "o:2/3/origin/XY");
+    let parsed = DatumRef::parse_key("o:2/3/origin/XY").unwrap();
+    assert_eq!(parsed.path, vec![2, 3]);
+    assert_eq!(parsed.item, DatumItem::XY);
+    // The item parses without regard to case, and every item round-trips through its key.
+    assert_eq!(DatumRef::parse_key("o:5/origin/xy").unwrap().item, DatumItem::XY);
+    assert_eq!(DatumRef::parse_key("o:5/origin/o").unwrap().item, DatumItem::O);
+    for item in ["O", "X", "Y", "Z", "XY", "XZ", "YZ"] {
+        let key = DatumRef { path: vec![5], item: DatumItem::parse(item).unwrap() }.key();
+        assert_eq!(DatumRef::parse_key(&key).unwrap().item, DatumItem::parse(item).unwrap(), "{item}");
+    }
+    // The Plane::named aliases stay root-only.
+    assert_eq!(DatumItem::parse("TOP"), None);
+    assert_eq!(DatumItem::parse("front"), None);
+    // The design's own origin has its own controls: no `c0`, no bare item, no `o:`, an empty
+    // path, leading zeros, a zero id, a sign, an empty link, a missing item, an unknown item.
+    for invalid in ["c0/origin/XY", "origin/XY", "XY", "2/3/origin/X", "o:/origin/X", "o:0/origin/X", "o:01/origin/X", "o:+2/origin/X"] {
+        assert!(DatumRef::parse_key(invalid).is_none(), "{invalid}");
+    }
+    for invalid in ["o:2//origin/X", "o:2/3/origin/", "o:2/3/origin/X/", "o:2/3/origin/XX", "o:2/3/origin/TOP", "o:2/origin/origin/X"] {
+        assert!(DatumRef::parse_key(invalid).is_none(), "{invalid}");
+    }
+    // 64 occurrences deep is fine, 65 is not, and absurd lengths are refused without panicking.
+    let deep = |n: usize| format!("o:{}/origin/X", vec!["1"; n].join("/"));
+    assert!(DatumRef::parse_key(&deep(64)).is_some());
+    assert!(DatumRef::parse_key(&deep(65)).is_none());
+    assert!(DatumRef::parse_key(&deep(64).repeat(40)).is_none());
+}
+
+/// `Document::placement_frame` walks one exact placement the way the engine's occurrence walk
+/// does: the #7313 scenario's parent translated +100, a child +20, a copy of the parent another
+/// +50 - the copied child's XY plane sits at (170, 0, 0) against the original at (120, 0, 0).
+#[test]
+fn placement_frame_matches_the_occurrence_walk() {
+    let mut doc = Document::new("datum frames");
+    let assembly = doc.add_component(Some("Assembly"), 0).unwrap();
+    doc.add_component(Some("Child"), assembly).unwrap();
+    let first = doc.occurrences.iter().find(|o| o.component == assembly).unwrap().id;
+    let child = doc.occurrences.iter().find(|o| o.parent == assembly).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == first).unwrap().transform = translation(Vec3::new(100.0, 0.0, 0.0));
+    doc.occurrences.iter_mut().find(|o| o.id == child).unwrap().transform = translation(Vec3::new(20.0, 0.0, 0.0));
+    // A second placement of the same assembly: the original's frame carried another +50.
+    let second = doc.add_occurrence(assembly, 0, translation(Vec3::new(150.0, 0.0, 0.0))).unwrap();
+    let origin = |path: &[u64]| crate::apply_point(&doc.placement_frame(path).unwrap(), Vec3::ZERO);
+    let (one, two) = ([first, child], [second, child]);
+    assert!(origin(&one).dist(Vec3::new(120.0, 0.0, 0.0)) < 1e-9, "the original child's frame: {:?}", origin(&one));
+    assert!(origin(&two).dist(Vec3::new(170.0, 0.0, 0.0)) < 1e-9, "the copied child's frame: {:?}", origin(&two));
+    // The same placement twice in a path is refused, and so is a path through a missing link.
+    assert!(doc.placement_frame(&[first, first]).is_err());
+    assert!(doc.placement_frame(&[999_999, child]).is_err());
+}
+
+/// A datum resolves through its placement's frame at evaluation time: two parents of one child
+/// give two distinct world planes, and moving the child moves both of them with it.
+#[test]
+fn resolve_datum_places_nested_and_repeated() {
+    let mut doc = Document::new("datum resolve");
+    let assembly = doc.add_component(Some("Assembly"), 0).unwrap();
+    doc.add_component(Some("Child"), assembly).unwrap();
+    let first = doc.occurrences.iter().find(|o| o.component == assembly).unwrap().id;
+    let child = doc.occurrences.iter().find(|o| o.parent == assembly).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == first).unwrap().transform = translation(Vec3::new(100.0, 0.0, 0.0));
+    doc.occurrences.iter_mut().find(|o| o.id == child).unwrap().transform = translation(Vec3::new(20.0, 0.0, 0.0));
+    let second = doc.add_occurrence(assembly, 0, translation(Vec3::new(150.0, 0.0, 0.0))).unwrap();
+    let origins = |doc: &Document| {
+        let datum = |path: &[u64]| construct::DatumRef { path: path.to_vec(), item: construct::DatumItem::XY };
+        let mut m = Model::new();
+        m.evaluate(doc);
+        let st = m.state();
+        let plane = |g: construct::ConstructGeom| match g {
+            construct::ConstructGeom::Plane(p) => p,
+            other => panic!("a plane datum resolves to a plane, got {other:?}"),
+        };
+        let one = construct::resolve_datum(doc, &st, &datum(&[first, child])).unwrap();
+        let two = construct::resolve_datum(doc, &st, &datum(&[second, child])).unwrap();
+        (plane(one), plane(two))
+    };
+    let (a, b) = origins(&doc);
+    assert!(a.origin.dist(Vec3::new(120.0, 0.0, 0.0)) < 1e-9, "{a:?}");
+    assert!(b.origin.dist(Vec3::new(170.0, 0.0, 0.0)) < 1e-9, "{b:?}");
+    // Moving the child moves its datum in both placements: nothing is frozen at pick time.
+    doc.occurrences.iter_mut().find(|o| o.id == child).unwrap().transform = translation(Vec3::new(30.0, 0.0, 0.0));
+    let (a, b) = origins(&doc);
+    assert!(a.origin.dist(Vec3::new(130.0, 0.0, 0.0)) < 1e-9, "{a:?}");
+    assert!(b.origin.dist(Vec3::new(180.0, 0.0, 0.0)) < 1e-9, "{b:?}");
 }
 
 /// New names take the first free number after their stem, whatever else is named alike: a gap
