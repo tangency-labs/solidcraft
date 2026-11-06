@@ -354,7 +354,8 @@ its `--out` and `--save` files, because the bodies lack what those features shou
 
 `--quality standard|fine|finest` sets how closely an STL, OBJ or 3MF written by `--out`
 follows curved faces, as `file.export`'s `quality` does: a chord tolerance of 2e-4, 5e-5 or
-1e-5 of each body's size. The default is `standard`.
+1e-5 of each body's size, though never under 1 µm, so on a small body `fine` and `finest`
+can come out the same. The default is `standard`.
 
 ```sh
 solidcraft-cli run --in part.sc --out part.stl --quality fine

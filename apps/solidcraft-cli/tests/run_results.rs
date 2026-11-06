@@ -69,6 +69,7 @@ fn run_rejects_invalid_options_before_script_execution_or_output_writes() {
         (&["--unknown"][..], "doesn't take --unknown"),
         (&["--quality"][..], "--quality needs a value"),
         (&["--quality", "best"][..], "--quality must be standard, fine or finest, not `best`"),
+        (&["--quality", "standard", "--quality", "best"][..], "--quality is given more than once"),
     ];
     for existing in [false, true] {
         let saved = dir.0.join(format!("{existing}.solidcraft"));
