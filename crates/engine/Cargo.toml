@@ -36,6 +36,10 @@ required-features = ["solver-profiling"]
 
 [dependencies]
 solidcraft-viewport = { workspace = true }
+fieldcraft-fem = { git = "https://github.com/tangency-labs/fieldcraft.git", rev = "6b613217851b4c5ddf2d315930db12e9e25354dc" }
+fieldcraft-mesh = { git = "https://github.com/tangency-labs/fieldcraft.git", rev = "6b613217851b4c5ddf2d315930db12e9e25354dc" }
+fieldcraft-model = { git = "https://github.com/tangency-labs/fieldcraft.git", rev = "6b613217851b4c5ddf2d315930db12e9e25354dc" }
+fieldcraft-solver = { git = "https://github.com/tangency-labs/fieldcraft.git", rev = "6b613217851b4c5ddf2d315930db12e9e25354dc" }
 solidcore-record = { workspace = true }
 solidcraft-color = { workspace = true }
 solidcraft-control = { workspace = true }

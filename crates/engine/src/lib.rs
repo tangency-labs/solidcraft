@@ -38,6 +38,7 @@ pub mod snap;
 pub mod status_details;
 pub mod status_items;
 pub mod timing;
+pub mod vibration;
 pub mod view;
 
 use solidcraft_geom::prelude::*;
