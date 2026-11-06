@@ -448,10 +448,6 @@ fn curvature_meets_every_distance_across_a_mirror_knot() {
         BoxSide::UMax,
     )
     .unwrap();
-    let net = match s.kind() {
-        SurfaceKind::BSpline(b) => b.gw_nurb().unwrap().clone(),
-        _ => panic!(),
-    };
     let mut last = 0.0;
     for i in 1..=60 {
         let e = 0.85 + 0.005 * f64::from(i);
@@ -459,7 +455,7 @@ fn curvature_meets_every_distance_across_a_mirror_knot() {
             break;
         };
         let out = Surface::from(BSplineSurface::from_gw_nurb(
-            &g.surface(&net, BoxSide::UMax).unwrap(),
+            &g.surface(BoxSide::UMax).unwrap(),
         ));
         let l = out
             .length_across_side(&k(), &dom(&s), BoxSide::UMax, 1e-8)
@@ -1041,10 +1037,11 @@ fn ruled_on_a_polynomial_row_is_the_elevated_tangent_line() {
 }
 
 #[test]
-fn ruled_with_end_weight_ratios_that_differ_is_c1_and_straight_up_to_its_reach() {
+fn ruled_with_end_weight_ratios_that_differ_is_c1_straight_and_reaches_any_distance() {
     // a rational row pair whose last two weights differ in ratio (1 and 2 on the two rows):
-    // one rho, the largest, keeps it C1 and every ruling straight; the row with the smaller
-    // ratio has growing weights, so the length across saturates
+    // within one rho's reach its form, the source's net kept; past it the ruled surface S + s
+    // S_u (#2878); straight at every v, C1 at the joint, the source the same surface and
+    // parameters either way
     let rows = [
         vec![[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]],
         vec![[0.5, 0.0, 0.0, 1.0], [1.0, 0.0, 2.0, 2.0]],
@@ -1058,43 +1055,212 @@ fn ruled_with_end_weight_ratios_that_differ_is_c1_and_straight_up_to_its_reach()
         &[0.0, 0.0, 1.0, 1.0],
         true,
     );
-    let e = s
-        .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Ruled, 0.1)
-        .unwrap();
-    meets(&e, 0.1);
-    let SurfaceKind::BSpline(b) = e.surface.kind() else {
-        panic!()
-    };
-    let d = dom(&e.surface);
-    for v in [0.0, 0.3, 0.5, 0.9, 1.0] {
-        let c = extract_iso_crv(b.gw_nurb().unwrap(), v, Direction::U).unwrap();
-        // C1 at the joint
-        let l = c.derivs(1.0, Side::Left, 1).unwrap()[1];
-        let r = c.derivs(1.0, Side::Right, 1).unwrap()[1];
-        assert!(l.distance(r) < 1e-12 * l.length(), "{v}: {l:?} {r:?}");
-        // straight past it: every point on the line through the joint along S_u
-        let p0 = e.surface.evaluate_point(&k(), Vec2::new(1.0, v)).unwrap();
-        for i in 1..=8 {
-            let u = 1.0 + (d.max().x - 1.0) * f64::from(i) / 8.0;
-            let p = e.surface.evaluate_point(&k(), Vec2::new(u, v)).unwrap();
-            let off = (p - p0).cross(l).length() / l.length();
-            assert!(off < 1e-12, "{v} {u}: {p:?} off {off}");
+    for distance in [0.1, 10.0, 1e3] {
+        let e = s
+            .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Ruled, distance)
+            .unwrap();
+        let a = e.across;
+        assert!(a.converged, "{a:?}");
+        let tol = (1e-9 * distance).max(a.truncation + a.rounding);
+        assert!(
+            a.enclosure.lower >= distance - tol && a.enclosure.upper <= distance + tol,
+            "{a:?} for {distance}"
+        );
+        assert!(e.source <= 1e-12, "{}", e.source);
+        if distance == 0.1 {
+            assert_eq!(e.source, 0.0);
+        } else if distance == 1e3 {
+            assert!(e.source > 0.0);
+        }
+        for u in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            for v in [0.0, 0.3, 0.5, 0.9, 1.0] {
+                let uv = Vec2::new(u, v);
+                let was = s.evaluate_point(&k(), uv).unwrap();
+                let now = e.surface.evaluate_point(&k(), uv).unwrap();
+                assert!(was.distance(now) <= e.source, "{u} {v}: {was:?} {now:?}");
+            }
+        }
+        let SurfaceKind::BSpline(b) = e.surface.kind() else {
+            panic!()
+        };
+        let d = dom(&e.surface);
+        for v in [0.0, 0.3, 0.5, 0.9, 1.0] {
+            let c = extract_iso_crv(b.gw_nurb().unwrap(), v, Direction::U).unwrap();
+            // C1 at the joint
+            let l = c.derivs(1.0, Side::Left, 1).unwrap()[1];
+            let r = c.derivs(1.0, Side::Right, 1).unwrap()[1];
+            assert!(l.distance(r) < 1e-12 * l.length(), "{v}: {l:?} {r:?}");
+            // straight past it: every point on the line through the joint along S_u
+            let p0 = e.surface.evaluate_point(&k(), Vec2::new(1.0, v)).unwrap();
+            for i in 1..=8 {
+                let u = 1.0 + (d.max().x - 1.0) * f64::from(i) / 8.0;
+                let p = e.surface.evaluate_point(&k(), Vec2::new(u, v)).unwrap();
+                let off = (p - p0).cross(l).length() / l.length();
+                assert!(off < 1e-12 * (1.0 + distance), "{v} {u}: {p:?} off {off}");
+            }
         }
     }
-    let named = match s.extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Ruled, 1e3)
-    {
-        Err(SolidError::ExtendRefused {
-            refusal: ExtendRefusal::NotExact,
-            distance: Some(x),
-            ..
-        }) => x,
-        other => panic!("{other:?}"),
+}
+
+/// A rational net of degree 2 both ways, of 3 spans in v (one knot double), whose weights are
+/// no product (`1 + 0.4 i j`): the end ratios differ at every side.
+fn ruled_product_net() -> Surface {
+    let rows: Vec<Vec<[f64; 4]>> = (0..3_u32)
+        .map(|i| {
+            (0..6_u32)
+                .map(|j| {
+                    let (x, y) = (f64::from(i), f64::from(j));
+                    let w = 1.0 + 0.4 * x * y;
+                    let z = if (i + j) % 2 == 0 { 0.5 } else { -0.25 };
+                    [x * w, y * w, z * w, w]
+                })
+                .collect()
+        })
+        .collect();
+    spline(
+        &rows,
+        2,
+        2,
+        &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        &[0.0, 0.0, 0.0, 0.25, 0.25, 0.6, 1.0, 1.0, 1.0],
+        true,
+    )
+}
+
+/// Ruled over rows whose end ratios differ, past every side and over interior knots across
+/// (one of them already double), past the rows' reach: the source is the same surface and
+/// parameters to the bound reported, and past the joint every row is straight along the side's
+/// tangent, C1.
+#[test]
+fn the_ruled_product_form_past_every_side_keeps_the_source_and_every_row_is_straight() {
+    let s = ruled_product_net();
+    let (nu, nv) = (5, 5);
+    for side in BoxSide::ALL {
+        let e = s
+            .extended_by_distance(&k(), &dom(&s), side, Continuity::Ruled, 400.0)
+            .unwrap();
+        assert!(
+            e.source > 0.0 && e.source <= 1e-11,
+            "{side:?}: {}",
+            e.source
+        );
+        for i in 0..=nu {
+            for j in 0..=nv {
+                let uv = Vec2::new(f64::from(i) / f64::from(nu), f64::from(j) / f64::from(nv));
+                let was = s.evaluate_point(&k(), uv).unwrap();
+                let now = e.surface.evaluate_point(&k(), uv).unwrap();
+                assert!(
+                    was.distance(now) <= e.source,
+                    "{side:?} {uv:?}: {}",
+                    was.distance(now)
+                );
+            }
+        }
+        let SurfaceKind::BSpline(b) = e.surface.kind() else {
+            panic!()
+        };
+        let net = b.gw_nurb().unwrap();
+        assert_eq!(if side.is_u() { net.q() } else { net.p() }, 4);
+        let d = dom(&e.surface);
+        let (joint, far) = if side.is_high() {
+            (1.0, if side.is_u() { d.max().x } else { d.max().y })
+        } else {
+            (0.0, if side.is_u() { d.min().x } else { d.min().y })
+        };
+        let uv = |along: f64, t: f64| {
+            if side.is_u() {
+                Vec2::new(along, t)
+            } else {
+                Vec2::new(t, along)
+            }
+        };
+        for t in [0.0, 0.25, 0.4, 0.6, 1.0] {
+            let dir = if side.is_u() {
+                Direction::U
+            } else {
+                Direction::V
+            };
+            let c = extract_iso_crv(net, t, dir).unwrap();
+            let l = c.derivs(joint, Side::Left, 1).unwrap()[1];
+            let r = c.derivs(joint, Side::Right, 1).unwrap()[1];
+            assert!(
+                l.distance(r) < 1e-9 * l.length(),
+                "{side:?} {t}: {l:?} {r:?}"
+            );
+            let p0 = e.surface.evaluate_point(&k(), uv(joint, t)).unwrap();
+            for i in 1..=8 {
+                let a = joint + (far - joint) * f64::from(i) / 8.0;
+                let p = e.surface.evaluate_point(&k(), uv(a, t)).unwrap();
+                let off = (p - p0).cross(l).length() / l.length();
+                assert!(off < 1e-9, "{side:?} {t} {a}: off {off}");
+            }
+        }
+    }
+}
+
+/// The form on the form: a second side doubles the degree again, the sum of the two bounds
+/// still holding the source.
+#[test]
+fn the_ruled_product_form_extends_past_a_second_side() {
+    let s = ruled_product_net();
+    let sides = s
+        .extended_sides(
+            &k(),
+            &[BoxSide::UMin, BoxSide::UMax],
+            Continuity::Ruled,
+            400.0,
+        )
+        .unwrap();
+    assert!(
+        // the second form's rounding is of the first's reach: held to the stop's rounding part
+        sides.source > 0.0 && sides.source <= 1e-6 * 400.0,
+        "{}",
+        sides.source
+    );
+    let SurfaceKind::BSpline(b) = sides.surface.kind() else {
+        panic!()
     };
-    assert!(named > 0.1 && named < 1e3, "{named}");
+    assert_eq!(b.gw_nurb().unwrap().q(), 8);
+    for (u, v) in [(0.0, 0.0), (0.5, 0.3), (0.25, 0.6), (1.0, 1.0)] {
+        let uv = Vec2::new(u, v);
+        let was = s.evaluate_point(&k(), uv).unwrap();
+        let now = sides.surface.evaluate_point(&k(), uv).unwrap();
+        assert!(was.distance(now) <= sides.source, "{uv:?}");
+    }
+}
+
+/// A degree across whose double has no B-spline form here keeps the rows' refusal, naming a
+/// distance that works.
+#[test]
+fn the_ruled_product_form_past_the_largest_degree_keeps_the_rows_refusal() {
+    let q = MAX_DEGREE / 2 + 1;
+    let rows: Vec<Vec<[f64; 4]>> = (0..2_u32)
+        .map(|i| {
+            (0..=q)
+                .map(|j| {
+                    #[allow(clippy::cast_precision_loss)]
+                    let y = j as f64;
+                    let x = f64::from(i);
+                    let w = 1.0 + 0.1 * x * y;
+                    [x * w, y * w, 0.0, w]
+                })
+                .collect()
+        })
+        .collect();
+    let v: Vec<f64> = std::iter::repeat_n(0.0, q + 1)
+        .chain(std::iter::repeat_n(1.0, q + 1))
+        .collect();
+    let s = spline(&rows, 1, q, &[0.0, 0.0, 1.0, 1.0], &v, true);
+    let d = 1e3;
+    let err = s
+        .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Ruled, d)
+        .unwrap_err();
+    let named = not_exact_naming(err).unwrap();
+    assert!(named > 0.0 && named < d, "{named}");
     let e = s
         .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Ruled, named)
         .unwrap();
-    meets(&e, named);
+    assert_eq!(e.source, 0.0);
 }
 
 /// A ball of radius 2 between the planes y = 0 (side -1) and z = 0 (side +1) along the

@@ -190,6 +190,7 @@ pub(super) fn ball_extended_sides(
     Ok(Some(ExtendedSides {
         surface: Surface::from(BallPatch::create(&cur, c, r)?),
         sides,
+        source: 0.0,
         extension,
     }))
 }
@@ -235,7 +236,7 @@ fn extend_side(
             return Ok(None);
         }
         let bound = g.bound();
-        let out = g.surface(net, side)?;
+        let out = g.surface(side)?;
         if !keeps(net, &out, side)? {
             return Err(SolidError::port_invariant(
                 OP,

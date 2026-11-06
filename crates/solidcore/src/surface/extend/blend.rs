@@ -400,7 +400,7 @@ fn along(
         // levels of convex combinations, the part's ends a few more)
         grown.err = gamma(16) * grown.size();
         let bound = grown.bound();
-        let out = grown.surface(source_net, side)?;
+        let out = grown.surface(side)?;
         Ok(Some((
             Some(Surface::from(BSplineSurface::from_gw_nurb(&out))),
             bound,
@@ -645,6 +645,7 @@ fn continued_curve(c: &BSplineCurve, s_new: f64, up: bool) -> Result<BSplineCurv
         err: 0.0,
         q: 0,
         frame: None,
+        across: Vec::new(),
     };
     if !up {
         l.reverse();

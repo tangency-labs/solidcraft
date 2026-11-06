@@ -36,7 +36,7 @@
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
-use super::{Continuity, Extended};
+use super::{Continuity, ExtendRefusal, Extended};
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::INFINITE_PARAMETER;
@@ -45,6 +45,9 @@ use crate::surface::side::{Across, BoxSide};
 use crate::surface::surface::{Surface, SurfaceKind};
 
 const OP: &str = "surface::extend::Surface::extended_sides";
+
+/// Halvings of an ask whose side was refused naming nothing, to name a distance that works.
+const NAMING_HALVINGS: usize = 60;
 
 /// What [`Surface::extended_sides`] did at one side of the source's box.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -85,9 +88,11 @@ pub struct ExtendedSides {
     pub surface: Surface,
     /// What was done at each side of the source's box, in [`BoxSide::ALL`]'s order.
     pub sides: [SideExtension; 4],
+    /// How far the result over the source's box is from the source: the sum of the sides'
+    /// [`Extended::source`], each on the one before.
+    pub source: f64,
     /// The largest construction bound of the sides' extensions ([`Extended::extension`]):
-    /// the result over the source's box is the source (bound 0), each extension within this
-    /// of its construction.
+    /// each extension is within this of its construction.
     pub extension: f64,
 }
 
@@ -99,7 +104,10 @@ impl Surface {
     /// # Errors
     ///
     /// Those of [`Surface::extended_by_distance`] at the first side that is refused, and of
-    /// the closure and diameter queries.
+    /// the closure and diameter queries. A side refused as not exact with no distance named
+    /// (it stands on the sides extended before it, so far out that nothing there is measured
+    /// to the stop) is refused naming the longest of `distance / 2^i` at which every side
+    /// extends, if any.
     pub fn extended_sides(
         &self,
         k: &Kernel,
@@ -149,11 +157,45 @@ impl Surface {
         {
             return Ok(e);
         }
+        match self.extended_in_turn(k, asked, how, distance) {
+            Err(SolidError::ExtendRefused {
+                operation,
+                refusal: ExtendRefusal::NotExact,
+                distance: None,
+            }) => {
+                let mut tried = distance;
+                let mut named = None;
+                for _ in 0..NAMING_HALVINGS {
+                    tried *= 0.5;
+                    if self.extended_in_turn(k, asked, how, tried).is_ok() {
+                        named = Some(tried);
+                        break;
+                    }
+                }
+                Err(SolidError::ExtendRefused {
+                    operation,
+                    refusal: ExtendRefusal::NotExact,
+                    distance: named,
+                })
+            }
+            other => other,
+        }
+    }
+
+    /// The sides of `asked` extended `distance` in turn, each on the box the sides before it
+    /// left.
+    fn extended_in_turn(
+        &self,
+        k: &Kernel,
+        asked: &[BoxSide],
+        how: Continuity,
+        distance: f64,
+    ) -> Result<ExtendedSides> {
         let mut current: Option<Extended> = None;
         // the side of the current result each side of the source's box is on
         let mut on = BoxSide::ALL;
         let mut sides = [SideExtension::NotAsked; 4];
-        let mut extension = 0.0_f64;
+        let (mut source, mut extension) = (0.0_f64, 0.0_f64);
         for ((&source_side, done), at) in BoxSide::ALL.iter().zip(sides.iter_mut()).zip(0..) {
             if !asked.contains(&source_side) {
                 continue;
@@ -196,6 +238,7 @@ impl Surface {
             for s in &mut on {
                 *s = grown.side_of(*s);
             }
+            source += grown.source;
             extension = extension.max(grown.extension);
             *done = SideExtension::Extended(grown.across);
             current = Some(grown);
@@ -209,6 +252,7 @@ impl Surface {
         Ok(ExtendedSides {
             surface,
             sides,
+            source,
             extension,
         })
     }

@@ -308,6 +308,7 @@ pub(super) fn analytic_extended_sides(
         return Ok(Some(ExtendedSides {
             surface: s.copy(k)?,
             sides,
+            source: 0.0,
             extension,
         }));
     }
@@ -321,6 +322,7 @@ pub(super) fn analytic_extended_sides(
     Ok(Some(ExtendedSides {
         surface,
         sides,
+        source: 0.0,
         extension,
     }))
 }
@@ -411,7 +413,7 @@ fn extend_side(
             return Ok(None);
         }
         let bound = g.bound();
-        let out = g.surface(net, side)?;
+        let out = g.surface(side)?;
         if !keeps(net, &out, side)? {
             return Err(SolidError::port_invariant(
                 OP,

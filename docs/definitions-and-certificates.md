@@ -368,15 +368,21 @@ is worked on its homogeneous net, one row along the extended direction at a time
 | `Natural` | the boundary span's polynomial continued on the homogeneous rows: a conic stays on its conic | the surface itself |
 | `Tangent` | the boundary piece mirrored: L C(b − s), L the linear map of R⁴ fixing the lifted mirror plane | C1 |
 | `Curvature` | the Tangent mirror with its second row solved from the C2 condition, in closed form | C2: curvature continuous |
-| `Ruled` | each row continued by the homogeneous line H_n + sD, one ρ for every row, degree-elevated to one span | C1, straight in s |
+| `Ruled` | each row continued by the homogeneous line H_n + sD, one ρ for every row, degree-elevated to one span; past the reach of rows whose end weight ratios differ, the ruled surface S + s S_u in the form (HW + s(H_u W − H W_u), W²) | C1, straight in s |
 
 ### 6.2 The joint
 
 The source's net and knots are kept bit for bit. The end knot stays at multiplicity p as the joint,
 and the extension's spans follow it; no knot is removed. So over the source's box the result is the
-source (`Extended::source` = 0, proved), and a face keeps its trims on it. Every weight of the
-result is positive, which proves w > 0 on it. For `Curvature` the homogeneous surface is C2 across
-the side, so the surface is curvature continuous where w > 0 (test
+source (`Extended::source` = 0, proved), and a face keeps its trims on it. The one exception is
+`Ruled` past the reach of rows whose end weight ratios differ (a variable round's sections): one ρ
+leaves such a row's line ending at a finite point, so an ask it cannot reach takes S + s S_u, of
+degree 2q along the side, and the source is written in the same form, its homogeneous points times W. It is the same surface
+with the same parameters, so a face keeps its trims, and `Extended::source` is the rounding bound of
+that product, not 0.
+
+Every weight of the result is positive, which proves w > 0 on it. For `Curvature` the homogeneous
+surface is C2 across the side, so the surface is curvature continuous where w > 0 (test
 `curvature_is_curvature_continuous_across_interior_knots`, `surface/extend/tests.rs`).
 
 ### 6.3 The distance and its refusals
@@ -410,6 +416,8 @@ An extension that cannot be made exactly is refused with `SolidError::ExtendRefu
 box the sides before it left, and reports a `SideExtension` per side: a closed direction, a
 collapsed side (a pole or apex), an unbounded plane side or a revolution's side round its axis is
 left and said so.
+A side refused as `NotExact` with no distance named (it stands far out on the sides before it) is
+refused naming the longest of d/2ⁱ at which every side extends.
 
 ### 6.5 A caller keeping its face's own net
 
@@ -473,7 +481,8 @@ A reviewer checks each of these on a change that touches a definition, a net or 
     a motion a definition cannot follow (`KeptDefinition::follows`: a sweep under a non-uniform
     scale) drops it rather than keep a wrong one.
 11. **An extension keeps its source.** Over the source's box the extended surface is the source,
-    net and knots bit for bit.
+    net and knots bit for bit; `Ruled` past the reach of rows whose end weight ratios differ keeps
+    the surface and parameters within `Extended::source` (§6.2).
 12. **Bounded work.** Certificates run fixed loop counts (8 Krawczyk steps, levels 0 to 6, budgets
     on cells and mirror steps) with no recursion, and poll the kernel's cancel token.
 
@@ -494,8 +503,8 @@ coefficient, its value and its bound. A value just past its bound at a large coo
 rounding term undercounted (§4.4); a value far past it is a net that is not on the surface.
 
 **An extension is refused.** `WeightVanishes` and `NotExact` name a distance that works; ask for
-it to see the extension, and look at the weight ratio across the side (`Ruled` with differing end
-ratios has a bounded reach).
+it to see the extension, and look at the weight ratio across the side (`Ruled` past both forms'
+reach, or where the product form has no B-spline).
 
 **What to measure.** Distances to S (not to B), exact volumes, seam angles, counts of spans,
 stations and Newton steps (`BlendCounts`, machine independent). Never timings.
