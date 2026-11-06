@@ -24,6 +24,10 @@
 //! drawing closes, all but its views' lines (`drawing_scene_kept.rs`), which the drawing opened
 //! again starts from.
 //!
+//! A deferred drawing ([`Updates::Deferred`]) draws nothing once the model has moved on from its last
+//! `drawing.update`, which isn't saved: its last lines show, listed in `stale`, and every command that reads
+//! a sheet ([`as_shown`]) reads those and says so.
+//!
 //! [`hit`] says which of a scene's objects is under a point of the sheet, the one rule for picking
 //! there: the sheet page's hover and `drawing.scene.hit`.
 //!
@@ -39,7 +43,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 use solidcraft_doc::drawing::dimension::{self, Dimension};
 use solidcraft_doc::drawing::view::{ResolvedView, View};
-use solidcraft_doc::drawing::{Drawing, Sheet};
+use solidcraft_doc::drawing::{Drawing, Sheet, Updates};
 use solidcraft_doc::drawing_view::TangentEdges;
 use solidcraft_doc::{DocError, ModelState, ids};
 use solidcraft_geom::cell::Projection;
@@ -145,6 +149,8 @@ pub struct SheetScene {
     pub objects: Vec<SheetObject>,
     /// Each dimension of a view on the sheet, by view and id.
     pub dimensions: Vec<DimensionState>,
+    /// The views and dimensions a deferred drawing shows as they last were ([`as_shown`]).
+    pub out_of_date: Vec<u64>,
 }
 
 /// One sheet as the provider last drew it ([`extract`]).
@@ -235,16 +241,16 @@ pub struct LineHit {
 /// drawn first, as the page draws them ([`step`]), so the line is one the page shows. A view that
 /// can't be drawn, or isn't in the scene, has no lines. No model is evaluated.
 pub fn line_at(s: &mut Session, sheet: u64, point_mm: Vec2, band_mm: f64) -> Result<Option<LineHit>> {
+    let d = s.drawing(CMD)?.clone();
     extract(s, sheet)?;
-    while step(s) {}
+    settle(s, &d);
     let answer = extract(s, sheet)?;
     let views: Vec<SheetObject> = answer.objects.iter().filter(|o| o.kind == ObjectKind::View).copied().collect();
     let Some(view) = hit(&views, point_mm, band_mm).map(|h| h.object) else { return Ok(None) };
     if !answer.views.iter().any(|v| v.view == view && v.status == Status::Drawn) {
         return Ok(None);
     }
-    let d = s.drawing(CMD)?;
-    let centre = views_on(d, sheet)?.into_iter().find(|(id, ..)| *id == view).map(|(.., centre)| centre);
+    let centre = views_on(&d, sheet)?.into_iter().find(|(id, ..)| *id == view).map(|(.., centre)| centre);
     let drawn = s.drawing_scenes.views.get(&view).map(|e| &e.drawn);
     let (Some(centre), Some(Drawn { group: Some(group), owners: Some(owners), .. })) = (centre, drawn) else { return Ok(None) };
     // The group is centred on the view, as it was drawn.
@@ -280,7 +286,42 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let dimensions = draw_dimensions(s, drawing, &wanted, |view| frames.get(&view).copied());
     assembly.add_dimensions(dimensions.iter());
     let (scene, views, objects, dimensions) = assembly.finish()?;
-    Ok(SheetScene { scene, views, objects, dimensions })
+    Ok(SheetScene { scene, views, objects, dimensions, out_of_date: Vec::new() })
+}
+
+/// Sheet `sheet` of `d`, the drawing open, as a command reads it: drawn at once ([`build`]), or for a
+/// deferred drawing, what its last [`update`] allows, with what that leaves behind listed.
+pub fn as_shown(s: &mut Session, d: &Drawing, sheet: u64) -> Result<SheetScene> {
+    if d.updates == Updates::Automatic {
+        return build(s, d, sheet);
+    }
+    extract(s, sheet)?;
+    settle(s, d);
+    let shown = extract(s, sheet)?;
+    let out_of_date = shown.stale.into_iter().chain(shown.stale_dimensions).collect();
+    let (scene, objects) = (Arc::unwrap_or_clone(shown.scene), shown.objects.to_vec());
+    Ok(SheetScene { scene, views: shown.views, objects, dimensions: shown.dimensions, out_of_date })
+}
+
+/// Draws what is waiting on the sheet last extracted, as the sheet page would: each view once, then
+/// each view's dimensions once, so a script reads what the page shows.
+pub(crate) fn settle(s: &mut Session, d: &Drawing) {
+    for _ in 0..=d.views.len().saturating_mul(2) {
+        if !step(s) {
+            break;
+        }
+    }
+}
+
+/// Lets the drawing open draw from the model as it is now, until that moves on: then a deferred
+/// drawing holds again. [`step`] does the drawing, on whichever sheet is shown.
+pub(crate) fn update(s: &mut Session) {
+    s.drawing_scenes.updated = s.world_state().ok();
+}
+
+/// `d`, the drawing open, is deferred and the model has moved on from its last [`update`].
+pub(crate) fn held(s: &Session, d: &Drawing) -> bool {
+    s.world_state().is_ok_and(|state| s.drawing_scenes.holds(d, &state))
 }
 
 /// A view's lines for a sheet scene, centred on the view, or why it has none.
@@ -608,6 +649,8 @@ pub struct Cache {
     /// The shown set of the world state views were last drawn from, worked out once for it.
     shown: Option<(Arc<ModelState>, std::result::Result<ShownSet, Unmeasured>)>,
     last: Option<Assembled>,
+    /// The world state a deferred drawing may draw from: its last [`update`].
+    updated: Option<Arc<ModelState>>,
     /// Numbers each view drawn and each read of dimensions, so a scene is assembled again only when
     /// one of its views or dimensions was.
     serial: u64,
@@ -698,6 +741,11 @@ impl Cache {
             let entry = Entry { state: gone.clone(), shows: kept.shows, view: kept.view, drawn: kept.drawn, serial: self.serial };
             self.views.insert(id, entry);
         }
+    }
+
+    /// `d` is deferred, and `state` isn't the one its last [`update`] took.
+    fn holds(&self, d: &Drawing, state: &Arc<ModelState>) -> bool {
+        d.updates == Updates::Deferred && !self.updated.as_ref().is_some_and(|updated| Arc::ptr_eq(updated, state))
     }
 
     /// Whether view `id`, drawing as `view` now, was last drawn so, from `state`.
@@ -840,8 +888,11 @@ pub fn step(s: &mut Session) -> bool {
     let (Ok(d), Some(sheet)) = (s.drawing(CMD).cloned(), s.drawing_scenes.sheet) else { return false };
     let Ok(on) = views_on(&d, sheet) else { return false };
     let Ok(state) = s.world_state() else { return false };
-    let units = s.doc.drawing_units(&d).to_string();
     keep_what_shows_the_same(s, &on, &state);
+    if s.drawing_scenes.holds(&d, &state) {
+        return false;
+    }
+    let units = s.doc.drawing_units(&d).to_string();
     let waiting: Vec<(u64, ResolvedView)> =
         on.iter().filter(|(id, view, _)| !s.drawing_scenes.fresh(*id, &state, view)).map(|(id, view, _)| (*id, view.clone())).collect();
     let Some((id, view)) = waiting.first().cloned() else { return step_dimensions(s, &d, &on, &state, units) };

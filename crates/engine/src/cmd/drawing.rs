@@ -15,7 +15,7 @@ use solidcraft_doc::drawing::balloon::balloons_by_row;
 use solidcraft_doc::drawing::fields::{Component, Values};
 use solidcraft_doc::drawing::table::Kind;
 use solidcraft_doc::drawing::view::{MAX_VIEW_DEPTH, View, ViewKind};
-use solidcraft_doc::drawing::{self, Drawing, Source, Units, template};
+use solidcraft_doc::drawing::{self, Drawing, Source, Units, Updates, template};
 use solidcraft_doc::drawing_view::ViewDirection;
 use solidcraft_doc::{Document, ids};
 use solidcraft_geom::cell::{Content, Projection};
@@ -93,13 +93,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         "drawing: id → deleted: its id; closed when it was open (one undo step of the model)",
     ),
     CommandSpec::new("drawing.inspect", "Inspect Drawing", inspect).in_drawing().icon("inspect").noundo().doc_only().params(
-        "→ {id, name, units, projection, language, font, font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?}] (each text cell as the sheet shows it: its fields' values, \"-\" for one with none, or the text typed over it with the value it hides as `value`), title_block_overrides, dpi, documents, excluded, views: [{id, kind: base|projected, parent?, side?, label, dimensions: [ids], balloons: [ids]}], base views by id, each followed by those projected from it}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
+        "→ {id, name, units, projection, updates: automatic or deferred, language, font, font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?}] (each text cell as the sheet shows it: its fields' values, \"-\" for one with none, or the text typed over it with the value it hides as `value`), title_block_overrides, dpi, documents, excluded, views: [{id, kind: base|projected, parent?, side?, label, dimensions: [ids], balloons: [ids]}], base views by id, each followed by those projected from it}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
     ),
     CommandSpec::new("drawing.set", "Drawing Settings", set)
         .in_drawing()
         .icon("settings")
         .doc_only()
-        .params("name?, language?: a BCP 47 tag, units?: \"follow_model\" or one length unit such as \"mm\", projection?: first or third (angle), which every projected view follows, font?: the font family its text is set in, by name, never a file (\"\": the built-in font). revision_numbering?: {start: 0 or 1}, the number new revisions count from: rows already there stay as typed. One undo step."),
+        .params("name?, language?: a BCP 47 tag, units?: \"follow_model\" or one length unit such as \"mm\", projection?: first or third (angle), which every projected view follows, updates?: automatic, or deferred: its views follow a changed model only on drawing.update, font?: the font family its text is set in, by name, never a file (\"\": the built-in font). revision_numbering?: {start: 0 or 1}, the number new revisions count from: rows already there stay as typed. One undo step."),
     CommandSpec::new("drawing.properties", "Drawing Properties", properties).in_drawing().icon("settings").noundo().doc_only().params(
         "→ metadata: the drawing's properties as saved (other tools' keys too); properties: project, part_number, revision, author, organization, description and license, each its text or null. The design properties' rules (document.metadata).",
     ),
@@ -128,6 +128,14 @@ fn projection(cmd: &str, p: &Value) -> Result<Option<Projection>> {
     match p.get("projection") {
         None => Ok(None),
         Some(v) => serde_json::from_value(v.clone()).map(Some).map_err(|_| bad(cmd, "`projection` is first or third (angle)")),
+    }
+}
+
+/// `updates` as given: when the views follow a changed model.
+fn updates(cmd: &str, p: &Value) -> Result<Option<Updates>> {
+    match p.get("updates") {
+        None => Ok(None),
+        Some(v) => serde_json::from_value(v.clone()).map(Some).map_err(|_| bad(cmd, "`updates` is automatic or deferred")),
     }
 }
 
@@ -409,6 +417,7 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
         "name": d.name,
         "units": d.units,
         "projection": d.projection,
+        "updates": d.updates,
         "language": d.language,
         "font": d.font,
         "font_note": solidcraft_sketch::paper_font_note(&solidcraft_sketch::font_dirs(), &d.font),
@@ -492,6 +501,9 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if let Some(projection) = projection(cmd, p)? {
             d.projection = projection;
+        }
+        if let Some(updates) = updates(cmd, p)? {
+            d.updates = updates;
         }
         if let Some(font) = font(cmd, p)? {
             d.font = font.to_string();

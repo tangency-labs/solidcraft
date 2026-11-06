@@ -344,6 +344,30 @@ fn a_drawings_projection_is_first_or_third_angle() {
     }
 }
 
+/// A drawing's views follow the model automatically, or only on `drawing.update` when deferred:
+/// shown by `drawing.inspect`, changed by `drawing.set` as one undo step, saved with the design only
+/// when deferred, and anything else refused.
+#[test]
+fn a_drawings_updates_are_automatic_or_deferred() {
+    let folder = Folder::new("drawing-updates");
+    let mut s = design();
+    assert_eq!(run(&mut s, "drawing.create", json!({}))["updates"], "automatic");
+    let saved = serde_json::to_value(&*open_one(&s)).unwrap();
+    assert!(saved.get("updates").is_none(), "automatic isn't saved: {saved}");
+    let steps = s.undo.len();
+    assert_eq!(run(&mut s, "drawing.set", json!({"updates": "deferred"}))["updates"], "deferred");
+    assert_eq!(s.undo.len(), steps + 1);
+    run(&mut s, "file.save", json!({"path": folder.path("plate.solidcraft")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("plate.solidcraft")}));
+    assert_eq!(opened.doc.drawings[0].updates, drawing::Updates::Deferred);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, "drawing.inspect", json!({}))["updates"], "automatic");
+    for bad in [json!("sometimes"), json!("Deferred"), json!(true), json!(null)] {
+        assert!(refused(&mut s, "drawing.set", json!({"updates": bad})).contains("automatic or deferred"), "{bad}");
+    }
+}
+
 /// A drawing's font is a family named by `drawing.create` or `drawing.set` (one undo step), saved
 /// with the design; the built-in font when none is named. A family this computer lacks is named in
 /// `font_note`, and a font file or anything but text is refused.

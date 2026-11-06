@@ -90,7 +90,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         }
         solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
     }
-    let built = crate::drawing_scene::build(s, &d, sheet)?;
+    let built = crate::drawing_scene::as_shown(s, &d, sheet)?;
     let failed: Vec<String> = built
         .views
         .iter()
@@ -138,6 +138,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         report: ExportReport { widths_snapped: grid.widths_snapped, pieces_merged: grid.pieces_merged, pixels },
         views: built.views.into_iter().map(Into::into).collect(),
         dimensions: super::drawing_scene::dimension_results(built.dimensions),
+        out_of_date: built.out_of_date.iter().map(|id| ids::encode(*id)).collect(),
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))

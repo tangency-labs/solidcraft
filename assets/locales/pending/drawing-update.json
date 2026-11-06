@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_update": "Update Drawing"
+  },
+  "ar": {
+    "cmd.drawing_update": "تحديث اللوحة"
+  },
+  "de": {
+    "cmd.drawing_update": "Zeichnung aktualisieren"
+  },
+  "he": {
+    "cmd.drawing_update": "עדכון שרטוט"
+  },
+  "ja": {
+    "cmd.drawing_update": "図面を更新"
+  },
+  "ko": {
+    "cmd.drawing_update": "도면 업데이트"
+  },
+  "vi": {
+    "cmd.drawing_update": "Cập nhật bản vẽ"
+  },
+  "zh": {
+    "cmd.drawing_update": "更新图纸"
+  }
+}
