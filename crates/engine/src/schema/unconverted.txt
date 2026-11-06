@@ -91,9 +91,6 @@ plastic.rest
 plastic.snap_fit
 render.aging.describe
 render.backends
-render.camera.fit
-render.camera.get
-render.camera.set
 render.cancel
 render.effects.describe
 render.export
@@ -107,7 +104,6 @@ render.preflight
 render.result.pin
 render.result.regrade
 render.scene
-render.settings.apply
 render.settings.get
 render.settings.set
 render.start
