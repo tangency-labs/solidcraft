@@ -154,7 +154,7 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "DRAWING PARTS", panel: "ASSEMBLY", promoted: 2, ids: &["drawing.parts_list", "drawing.balloon"] },
     Section { tab: "DRAWING PARTS", panel: "TABLES", promoted: 2, ids: &["drawing.table.edit", "drawing.revision_table"] },
     Section { tab: "DRAWING PARTS", panel: "SOURCE", promoted: 2, ids: &["assembly.bom", "sheet.flat_pattern"] },
-    Section { tab: "DRAWING REVIEW", panel: "CHANGES", promoted: 2, ids: &["drawing.update", "drawing.check"] },
+    Section { tab: "DRAWING REVIEW", panel: "CHANGES", promoted: 2, ids: &["drawing.update.planned", "drawing.check"] },
     Section { tab: "DRAWING REVIEW", panel: "REVISION", promoted: 2, ids: &["drawing.revision", "drawing.revision_table"] },
     Section { tab: "DRAWING REVIEW", panel: "OUTPUT", promoted: 2, ids: &["drawing.export.planned", "drawing.print"] },
     Section {
@@ -480,7 +480,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("drawing.revision", "Add Revision"),
     ("drawing.revision_table", "Revision Tbl."),
     ("drawing.table.edit", "Edit Table"),
-    ("drawing.update", "Update"),
+    ("drawing.update.planned", "Update"),
     ("drawing.view.projected.planned", "Projected"),
     ("drawing.view.section", "Section View"),
     ("document.units", "Units"),

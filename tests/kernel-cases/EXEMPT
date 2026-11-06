@@ -113,6 +113,7 @@ drawing.table.edit                a drawing: its tests in crates/engine/src/cmd/
 drawing.template.apply            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.template.list             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.template.save             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.update                    a drawing: its tests in crates/engine/src/drawing_scene_tests.rs
 drawing.view.base                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.copy_to_sheet        a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.edit                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs

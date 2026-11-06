@@ -548,6 +548,63 @@ fn a_part_made_reference_draws_again() {
     assert_eq!(extract(&mut s, sheet).unwrap().stale.len(), 2);
 }
 
+/// A deferred drawing draws nothing until `drawing.update`: then from the model as it is now, until
+/// that changes. Reopened, it waits again. While it waits, every command that reads its sheet reads
+/// what the page shows and lists what is out of date, and `drawing.status` says it is held.
+#[test]
+fn a_deferred_drawing_keeps_its_lines_until_it_is_updated() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    let checkpoint = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].clone();
+    extract(&mut s, sheet).unwrap();
+    assert!(!step(&mut s), "nothing is drawn before an update");
+    assert_eq!(run(&mut s, "drawing.update", json!({}))["waiting"], 2);
+    let before = settled(&mut s, sheet);
+    assert!(before.stale.is_empty());
+
+    run(&mut s, "drawing.close", json!({}));
+    let block = s.doc.features[0].id;
+    run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"height": 40}}));
+    run(&mut s, "drawing.open", drawing);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:4"}}));
+    let held = settled(&mut s, sheet);
+    assert_eq!((held.stale.len(), bytes(&held.scene)), (2, bytes(&before.scene)), "its last lines, out of date");
+    let status = run(&mut s, "drawing.status", json!({}));
+    assert_eq!((&status["held"], &status["waiting"]), (&json!(true), &json!(2)));
+    let sheet_id = ids::encode(sheet);
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": sheet_id}));
+    let mut listed: Vec<String> = serde_json::from_value(scene["out_of_date"].clone()).unwrap();
+    listed.sort();
+    let mut both = vec![ids::encode(front), ids::encode(top)];
+    both.sort();
+    assert_eq!(listed, both);
+    assert_eq!(run(&mut s, "drawing.export", json!({"sheet": sheet_id}))["out_of_date"].as_array().map(Vec::len), Some(2));
+    assert_eq!(s.drawing_scenes.projections, 0);
+
+    run(&mut s, "drawing.update", json!({}));
+    let now = settled(&mut s, sheet);
+    assert_eq!((now.stale.len(), bytes(&now.scene)), (0, bytes(&built(&s, sheet).scene)));
+    assert!(run(&mut s, "drawing.status", json!({})).get("held").is_none());
+    assert!(run(&mut s, "drawing.scene", json!({"sheet": sheet_id})).get("out_of_date").is_none());
+
+    // The next change waits again: back to 20 tall, its lines stay 40 tall.
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": checkpoint}));
+    let waiting = settled(&mut s, sheet);
+    assert_eq!((waiting.stale.len(), bytes(&waiting.scene)), (2, bytes(&now.scene)));
+}
+
+/// `drawing.update` on a drawing that follows the model changes nothing, and draws nothing itself.
+#[test]
+fn updating_an_automatic_drawing_changes_nothing() {
+    let (mut s, sheet, _) = front_and_top();
+    let doc = s.doc.clone();
+    assert_eq!(run(&mut s, "drawing.update", json!({}))["waiting"], 2);
+    assert_eq!(s.drawing_scenes.projections, 0);
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+    assert!(settled(&mut s, sheet).stale.is_empty());
+}
+
 /// Opened again after a model change, with a view's scale changed too, a drawing shows its last
 /// lines, out of date, until each view is drawn; then it draws as the built scene does.
 #[test]

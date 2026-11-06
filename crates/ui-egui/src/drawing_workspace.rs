@@ -561,7 +561,7 @@ mod tests {
             assert_eq!(h.app.cam, cam);
         }
         assert!(!can_open_options("drawing.export.planned"));
-        assert!(!can_open_options("drawing.update"));
+        assert!(!can_open_options("drawing.update.planned"));
     }
 
     fn app_width(h: &Harness) -> f32 {
