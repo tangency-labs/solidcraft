@@ -1700,4 +1700,29 @@ fn a_ray_through_a_hole_opening_projects_its_rim() {
     let refs: Vec<Value> = rim.edges.iter().map(|p| json!({"edge": [p.x, p.y, p.z], "body": rim.body})).collect();
     run(&mut wide, "sketch.project", json!({"refs": refs}));
     assert_rim(&mut wide, 40.0, [50.0, 50.0]);
+
+    // A displayed occurrence can share its definition's mesh. The exact B-rep it places is the
+    // one the ray meets, in the displayed body's world position, not back at the definition.
+    let mut placed = Session::default();
+    run(&mut placed, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut placed, "solid.hole", json!({"position": [20, 15, 20], "diameter": 10, "depth": 20}));
+    let part = run(&mut placed, "component.create", json!({"name": "Part", "parent": 0, "grounded": false}));
+    let occurrence = part["occurrence"].as_u64().unwrap();
+    assert_eq!(placed.world_state().unwrap().bodies.len(), 1);
+    // Put all features in the part before placing it, retaining its geometry in world coordinates.
+    let features: Vec<u64> = placed.doc.features.iter().map(|f| f.id).collect();
+    run(&mut placed, "component.move_features", json!({"features": features, "component": part["component"]}));
+    assert_eq!(placed.world_state().unwrap().bodies.len(), 1);
+    run(
+        &mut placed,
+        "occurrence.move",
+        json!({"occurrence": occurrence, "translate": [100, 250, 40], "axis": [0, 0, 1], "angle": "90 deg", "space": "world"}),
+    );
+    let st = placed.world_state().unwrap();
+    let body = st.bodies.first().expect("the placed part");
+    let rim = solidcraft_doc::project::hole_rim_along_ray(&st, solidcore_record::Vec3::new(85.0, 270.0, 180.0), down, |_| true);
+    let rim = rim.expect("a ray through the moved opening names its rim");
+    assert_eq!(rim.body, body.name);
+    assert!(rim.at.dist(solidcore_record::Vec3::new(85.0, 270.0, 60.0)) < 1e-4, "{rim:?}");
+    assert!(rim.edges.iter().all(|p| (p.z - 60.0).abs() < 1e-4 && (p.z - 60.0).abs() + rim.at.dist(*p) > 0.0), "{rim:?}");
 }
