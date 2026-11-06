@@ -120,6 +120,37 @@ fn a_hole_can_measure_from_a_plane_or_an_axis() {
 }
 
 #[test]
+fn a_hole_keeps_its_side_of_a_reference_plane_that_moves_past_it() {
+    let mut s = plate();
+    run(&mut s, "parameters.add", json!({"name": "off", "expression": "20 mm"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": "off", "name": "Mid"}));
+    // Picked at x = 30, on the side of the plane x = 20 its normal (+x) points to.
+    run(&mut s, "solid.hole", referenced(json!([{"plane": "Mid", "distance": 8}])));
+    assert!(!hole(&s).1[0].opposite);
+    bore_at(&s, 28.0, 25.0, 10.0);
+    // The plane moves past the hole: the hole stays on its +x side, at x = 35 + 8.
+    run(&mut s, "parameters.change", json!({"name": "off", "expression": "35 mm"}));
+    bore_at(&s, 43.0, 25.0, 10.0);
+    // Picked at x = 30 again, now on the other side of the plane x = 35: x = 27, then x = 17 once
+    // the plane moves back to x = 25, past it.
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [30, 25, 10], "diameter": 5, "depth": 4, "name": "K", "references": [{"plane": "Mid", "distance": 8}]}),
+    );
+    assert!(hole(&s).1[0].opposite);
+    bore_at(&s, 27.0, 25.0, 10.0);
+    run(&mut s, "parameters.change", json!({"name": "off", "expression": "25 mm"}));
+    bore_at(&s, 17.0, 25.0, 10.0);
+    bore_at(&s, 33.0, 25.0, 10.0);
+    // The side is saved with the design.
+    let mut t = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    t.refresh();
+    bore_at(&t, 17.0, 25.0, 10.0);
+    assert_eq!(hole(&t).1, hole(&s).1);
+}
+
+#[test]
 fn a_reference_plane_square_to_the_face_or_two_parallel_references_are_refused() {
     let mut s = plate();
     let before = s.doc.features.len();
