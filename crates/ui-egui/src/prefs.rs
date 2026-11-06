@@ -1145,7 +1145,7 @@ preference_settings! {
     nav_bridge_enabled: bool = false, PAGE_MOUSE3D;
     /// The loopback port the device app listens on (0: none).
     nav_bridge_port: u16 = 8765, PAGE_MOUSE3D;
-    /// Anti-aliasing samples (applies on restart).
+    /// Anti-aliasing samples (applies on restart, on trial: [`Graphics`]).
     msaa: u32 = 4, PAGE_GRAPHICS;
     /// Share shading and Continuity; false preserves their independent legacy behavior.
     single_surface_analysis: bool = true, PAGE_GRAPHICS => check_id("prefs.graphics_page.single_surface_analysis");
@@ -1154,6 +1154,8 @@ preference_settings! {
     window_system: String = "auto".into(), PAGE_GRAPHICS;
     /// Exact graphics adapter name; empty selects automatically on the next start.
     graphics_adapter: String = String::new(), PAGE_GRAPHICS;
+    /// The graphics API: `auto`, or one of [`Graphics::apis`] (applies on restart, on trial).
+    graphics_api: String = "auto".into(), PAGE_GRAPHICS;
     /// Soft contact shading in the GPU viewport; optional and applied immediately.
     ambient_occlusion: bool = false, PAGE_GRAPHICS;
     /// Restore the shadow plane at the lowest visible body, including above the origin (#9838).
@@ -1916,7 +1918,7 @@ impl Snapshot {
         }
     }
     fn restore(self, app: &mut SolveApp) {
-        let graphics = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
+        let graphics = (selected_graphics(app), app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
         let units_changed = app.preferences.default_units != self.prefs.default_units;
         // Update bookkeeping isn't a setting: a check that finished while the dialog was open stays.
         let update = std::mem::take(&mut app.preferences.update);
@@ -1943,8 +1945,8 @@ impl Snapshot {
         app.toolbar_custom.load(&self.toolbar);
         app.sbox.pinned = self.favourites;
         app.settings_profiles.active = self.profile.filter(|name| app.settings_profiles.names().contains(name));
-        if (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone()) != graphics {
-            save_graphics(app);
+        if (selected_graphics(app), app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone()) != graphics {
+            save_graphics(app, true);
         }
     }
 
@@ -2183,7 +2185,7 @@ fn ui_font_row(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 /// Restore Defaults for one page.
 fn defaults(app: &mut SolveApp, page: usize) {
-    let (msaa, window_system, adapter) = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
+    let graphics = (selected_graphics(app), app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
     let units = app.preferences.default_units.clone();
     reset_preferences(&mut app.preferences, page);
     sync_surface_analysis(app);
@@ -2215,8 +2217,8 @@ fn defaults(app: &mut SolveApp, page: usize) {
             app.ui.show_grid = true;
             app.ui.ground_shadow = true;
             app.ui.perspective = false;
-            if app.preferences.msaa != msaa || app.preferences.window_system != window_system || app.preferences.graphics_adapter != adapter {
-                save_graphics(app);
+            if (selected_graphics(app), app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone()) != graphics {
+                save_graphics(app, true);
             }
         }
         PAGE_SKETCH => {
@@ -2577,21 +2579,170 @@ fn window_system_row(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
     }
 }
 
-/// Write the anti-aliasing and window system settings where the host reads them at start (neither
-/// can change while the window is open).
-fn save_graphics(app: &SolveApp) {
-    if let Some(path) = &app.services.graphics_path {
-        // Other settings in the file (the graphics `backend`) stay as they are.
-        let mut graphics = std::fs::read_to_string(path)
-            .ok()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .filter(serde_json::Value::is_object)
-            .unwrap_or_else(|| json!({}));
-        graphics["msaa"] = json!(app.preferences.msaa);
-        graphics["window_system"] = json!(app.preferences.window_system);
-        graphics["adapter"] = json!(app.preferences.graphics_adapter);
-        let _ = std::fs::write(path, graphics.to_string());
+/// Graphics settings that apply when SolidCraft starts: the API and the anti-aliasing (#4015).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GraphicsChoice {
+    /// `auto`, or a backend as `graphics.json` names it (`dx12`, `vulkan`, `gl`).
+    pub api: String,
+    pub msaa: u32,
+}
+
+impl Default for GraphicsChoice {
+    fn default() -> Self {
+        let p = Prefs::default();
+        GraphicsChoice { api: p.graphics_api, msaa: p.msaa }
     }
+}
+
+impl GraphicsChoice {
+    /// As the trial question names it, with only what differs from `other` ("Vulkan, 8×
+    /// anti-aliasing").
+    pub fn describe(&self, other: &GraphicsChoice) -> String {
+        let mut parts = Vec::new();
+        if self.api != other.api || self.msaa == other.msaa {
+            parts.push(graphics_api_label(&self.api));
+        }
+        if self.msaa != other.msaa {
+            parts.push(crate::i18n::format("settings.graphics_msaa", &[("samples", &self.msaa.to_string())]));
+        }
+        parts.join(", ")
+    }
+}
+
+/// The graphics settings that apply at start, as the host reports them (#4015). The window
+/// can't change its API or samples while it is open, so a change in Preferences is tried at the
+/// next start: the host starts with it, [`crate::prefs_notice`] asks whether to keep it and goes
+/// back unless it is kept, and a start that never gets that far is dropped by the next one.
+#[derive(Clone, Debug, Default)]
+pub struct Graphics {
+    /// The APIs offered besides Automatic, as `graphics.json` names them. None: no choice
+    /// (macOS, which has Metal alone; the browser).
+    pub apis: Vec<&'static str>,
+    /// Of those, the ones known to freeze this GPU (D3D12 on AMD integrated graphics): a warning
+    /// shows while one is chosen, as no trial start helps once the whole screen is frozen.
+    pub freezes: Vec<&'static str>,
+    /// `WGPU_BACKEND`, which decides the API when it is set.
+    pub env_override: Option<String>,
+    /// The settings kept for every start (`graphics.json`'s `backend` and `msaa`).
+    pub saved: GraphicsChoice,
+    /// This start tries settings, now in the preferences.
+    pub trial: Option<GraphicsTrial>,
+    /// Start again once closed: to try settings, or to go back from them.
+    pub restart: bool,
+}
+
+/// Settings on trial at this start.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GraphicsTrial {
+    /// What a "go back" returns to: the saved settings.
+    pub previous: GraphicsChoice,
+    /// Seconds the question has waited ([`crate::prefs_notice::TRIAL_SECONDS`]).
+    pub shown: f64,
+    /// The `egui` input time of the last frame that drew the question.
+    pub last_frame: Option<f64>,
+}
+
+/// An API's name as people know it; Automatic in the interface language.
+pub fn graphics_api_label(api: &str) -> String {
+    match api {
+        "auto" => crate::i18n::tr("ui.graphics_api_auto").to_string(),
+        "dx12" => "Direct3D 12".into(),
+        "vulkan" => "Vulkan".into(),
+        "gl" => "OpenGL".into(),
+        "metal" => "Metal".into(),
+        other => other.to_string(),
+    }
+}
+
+/// The warning under the graphics API while the chosen one is known to freeze this GPU
+/// ([`Graphics::freezes`]); none while `WGPU_BACKEND` decides.
+fn freeze_warning(app: &SolveApp) -> Option<String> {
+    let api = app.preferences.graphics_api.as_str();
+    (app.graphics.env_override.is_none() && app.graphics.freezes.contains(&api))
+        .then(|| crate::i18n::format("settings.graphics_api_freezes", &[("api", &graphics_api_label(api))]))
+}
+
+/// The graphics settings chosen in the preferences.
+pub fn selected_graphics(app: &SolveApp) -> GraphicsChoice {
+    GraphicsChoice { api: app.preferences.graphics_api.clone(), msaa: app.preferences.msaa }
+}
+
+/// `graphics.json` with the chosen settings. `trial`: chosen in the Preferences window, so they
+/// are tried at the next start (its `trial` object) and the saved `backend` and `msaa` stay as
+/// they are; none when they are the saved ones. Else (the control channel, a setting put back at
+/// start, kept settings) the ones that differ from the saved ones are saved at once: a script
+/// that sets only `msaa` leaves the saved `backend` as it is. Other entries stay.
+pub fn graphics_file(old: Option<serde_json::Value>, selected: &GraphicsChoice, saved: &GraphicsChoice, trial: bool) -> serde_json::Value {
+    let mut graphics = old.filter(serde_json::Value::is_object).unwrap_or_else(|| json!({}));
+    let previous = graphics.as_object_mut().and_then(|o| o.remove("trial"));
+    if selected == saved {
+        return graphics;
+    }
+    if trial {
+        // The same settings already on trial keep their `started` mark: a change to the window
+        // system or the card during the trial must not let a start that failed run again.
+        graphics["trial"] = match previous {
+            Some(t) if t["backend"] == json!(selected.api) && t["msaa"] == json!(selected.msaa) => t,
+            _ => json!({"backend": selected.api, "msaa": selected.msaa}),
+        };
+    } else {
+        if selected.api != saved.api {
+            graphics["backend"] = json!(selected.api);
+        }
+        if selected.msaa != saved.msaa {
+            graphics["msaa"] = json!(selected.msaa);
+        }
+    }
+    graphics
+}
+
+/// Write the graphics settings where the host reads them at start ([`graphics_file`], the window
+/// system and the graphics card).
+fn save_graphics(app: &mut SolveApp, trial: bool) {
+    let selected = selected_graphics(app);
+    if let Some(path) = &app.services.graphics_path {
+        let old = std::fs::read_to_string(path).ok().and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+        let mut file = graphics_file(old, &selected, &app.graphics.saved, trial);
+        // The window system and the graphics card apply at the next start too, without a trial;
+        // written once they aren't the defaults.
+        let defaults = Prefs::default();
+        for (key, value, default) in [
+            ("window_system", &app.preferences.window_system, &defaults.window_system),
+            ("adapter", &app.preferences.graphics_adapter, &defaults.graphics_adapter),
+        ] {
+            if value != default || file.get(key).is_some() {
+                file[key] = json!(value);
+            }
+        }
+        if let Err(e) = std::fs::write(path, file.to_string()) {
+            log::warn!("graphics: writing {path}: {e}");
+        }
+    }
+    if !trial {
+        app.graphics.saved = selected;
+    }
+}
+
+/// Keep the settings on trial: they become the saved ones.
+pub fn keep_graphics(app: &mut SolveApp) {
+    app.graphics.trial = None;
+    save_graphics(app, false);
+}
+
+/// Go back from the settings on trial: the saved ones return, and SolidCraft starts again with
+/// them once closed (asking about unsaved designs first).
+pub fn revert_graphics(app: &mut SolveApp) {
+    let Some(trial) = app.graphics.trial.take() else { return };
+    app.preferences.graphics_api = trial.previous.api;
+    app.preferences.msaa = trial.previous.msaa;
+    save_graphics(app, false);
+    restart_for_graphics(app);
+}
+
+/// Close (asking about unsaved designs), then start again: the host reads the graphics settings.
+fn restart_for_graphics(app: &mut SolveApp) {
+    app.graphics.restart = true;
+    crate::documents::request_quit(app);
 }
 
 /// At start, reflect a confirmed startup fallback in Graphics, or reset an unsupported
@@ -2610,7 +2761,12 @@ pub fn check_msaa(app: &mut SolveApp, requested: u32) {
     let reset = supported.iter().copied().filter(|&n| n <= default).max().unwrap_or(1);
     let supported = supported.clone();
     app.preferences.msaa = reset;
-    save_graphics(app);
+    // Settings on trial are kept or dropped as a whole. Without a trial, the saved count is the
+    // one this start asked for, so the reset is written ([`graphics_file`] saves what changed).
+    if app.graphics.trial.is_none() {
+        app.graphics.saved.msaa = requested;
+        save_graphics(app, false);
+    }
     app.settings_reset.push(SettingReset::Msaa { requested, reset, supported });
 }
 
@@ -2739,8 +2895,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if app.preferences.msaa != before.msaa
         || app.preferences.window_system != before.window_system
         || app.preferences.graphics_adapter != before.graphics_adapter
+        || app.preferences.graphics_api != before.graphics_api
     {
-        save_graphics(app);
+        save_graphics(app, true);
     }
     if app.preferences.up_axis != before.up_axis {
         up_axis_changed(app);
@@ -4016,6 +4173,11 @@ fn prepare_preferences(
     if !WINDOW_SYSTEMS.contains(&new.window_system.as_str()) {
         return Err(format!("`window_system` must be one of {}", WINDOW_SYSTEMS.join(", ")));
     }
+    let api_offered = new.graphics_api == "auto" || app.graphics.apis.contains(&new.graphics_api.as_str());
+    if new.graphics_api != app.preferences.graphics_api && !api_offered {
+        let apis: Vec<&str> = std::iter::once("auto").chain(app.graphics.apis.iter().copied()).collect();
+        return Err(format!("`graphics_api` must be one of: {}", apis.join(", ")));
+    }
     if !NAV_PRESETS.iter().any(|p| p.id == new.nav) || !MSAA.contains(&new.msaa) {
         return Err(format!("`nav` must be one of {} and `msaa` 1, 2, 4 or 8", NAV_PRESETS.iter().map(|p| p.id).collect::<Vec<_>>().join(", ")));
     }
@@ -4120,9 +4282,12 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     }
     let units_changed = new.default_units != app.preferences.default_units;
     let up_changed = new.up_axis != app.preferences.up_axis;
+    // The graphics API and anti-aliasing are what a trial tries (#4015).
+    let tried_changed = new.msaa != app.preferences.msaa || new.graphics_api != app.preferences.graphics_api;
     let graphics_changed = new.msaa != app.preferences.msaa
         || new.window_system != app.preferences.window_system
-        || new.graphics_adapter != app.preferences.graphics_adapter;
+        || new.graphics_adapter != app.preferences.graphics_adapter
+        || new.graphics_api != app.preferences.graphics_api;
     if p.get("layout").is_some() {
         app.ui.layout = new.layout;
     }
@@ -4135,8 +4300,16 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     if units_changed {
         default_units_changed(app);
     }
+    // Kept at once, without a question: a script that changes them knows what it asked for. A
+    // script that changes only the window system or the card leaves settings on trial on trial:
+    // it didn't ask for them ([`graphics_file`] keeps the trial and its `started` mark).
     if graphics_changed {
-        save_graphics(app);
+        if tried_changed || app.graphics.trial.is_none() {
+            app.graphics.trial = None;
+            save_graphics(app, false);
+        } else {
+            save_graphics(app, true);
+        }
     }
     if up_changed {
         up_axis_changed(app);
@@ -9092,7 +9265,9 @@ mod tests {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), services);
         // WebGPU's guarantee for the surface format: 8x saved, the device can only do 1x and 4x.
         app.msaa_supported = vec![1, 4];
+        // As the host reads them from the file at start.
         app.preferences.msaa = 8;
+        app.preferences.graphics_api = "vulkan".into();
         std::fs::write(&path, r#"{"msaa":8,"backend":"vulkan"}"#).unwrap();
         check_msaa(&mut app, 8);
         assert_eq!(app.preferences.msaa, 4);
@@ -9125,6 +9300,121 @@ mod tests {
             assert!(app.settings_reset.is_empty());
             assert_eq!(app.preferences.msaa, requested);
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// D3D12 froze AMD integrated GPUs past what a trial start can undo (#3321): choosing it there
+    /// warns first, and nowhere else.
+    #[test]
+    fn choosing_an_api_that_freezes_this_gpu_warns() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.graphics = Graphics { apis: vec!["dx12", "vulkan", "gl"], freezes: vec!["dx12"], ..Default::default() };
+        app.preferences.graphics_api = "vulkan".into();
+        assert_eq!(freeze_warning(&app), None);
+        app.preferences.graphics_api = "dx12".into();
+        assert_eq!(
+            freeze_warning(&app).as_deref(),
+            Some(
+                "On AMD integrated graphics, Direct3D 12 can freeze the screen, sometimes until the computer is restarted. Automatic uses Vulkan here."
+            )
+        );
+        app.graphics.env_override = Some("dx12".into());
+        assert_eq!(freeze_warning(&app), None, "WGPU_BACKEND decides, and its own note says so");
+        app.graphics = Graphics { apis: vec!["dx12", "vulkan", "gl"], ..Default::default() };
+        assert_eq!(freeze_warning(&app), None);
+    }
+
+    /// Rewriting `graphics.json` during a started trial (the window system or the card changed)
+    /// keeps the trial's `started` mark, so a start that failed on it doesn't run again (#4015).
+    #[test]
+    fn a_started_trial_rewritten_with_the_same_settings_stays_started() {
+        let saved = GraphicsChoice { api: "auto".into(), msaa: 4 };
+        let tried = GraphicsChoice { api: "vulkan".into(), msaa: 4 };
+        let old = json!({"msaa":4,"trial":{"backend":"vulkan","msaa":4,"started":true},"adapter":"X"});
+        let file = graphics_file(Some(old.clone()), &tried, &saved, true);
+        assert_eq!(file["trial"], json!({"backend":"vulkan","msaa":4,"started":true}));
+        assert_eq!(file["adapter"], "X", "other entries stay");
+        let other = GraphicsChoice { api: "gl".into(), msaa: 4 };
+        assert_eq!(
+            graphics_file(Some(old.clone()), &other, &saved, true)["trial"],
+            json!({"backend":"gl","msaa":4}),
+            "new settings start a new trial"
+        );
+        assert!(graphics_file(Some(old), &saved, &saved, true).get("trial").is_none(), "the saved settings need no trial");
+    }
+
+    /// The graphics API and anti-aliasing (#4015): a change in the Preferences window is saved as
+    /// a trial for the next start, and Cancel takes it back; the control channel saves at once.
+    /// Keep makes the settings on trial the saved ones; Go back returns to those and restarts.
+    #[test]
+    fn graphics_settings_are_tried_from_the_window_and_saved_at_once_from_scripts() {
+        let dir = std::env::temp_dir().join(format!("sc_graphics_trial_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("graphics.json");
+        let read = || serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&path).unwrap_or_default()).unwrap_or_default();
+        let services = crate::Services { graphics_path: Some(path.to_string_lossy().to_string()), ..Default::default() };
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), services);
+        let dx12 = GraphicsChoice { api: "dx12".into(), msaa: 4 };
+        let vulkan = GraphicsChoice { api: "vulkan".into(), msaa: 8 };
+        app.graphics = Graphics { apis: vec!["dx12", "vulkan", "gl"], saved: dx12.clone(), ..Default::default() };
+        (app.preferences.graphics_api, app.preferences.msaa) = ("dx12".into(), 4);
+        std::fs::write(&path, r#"{"backend":"dx12","msaa":4,"other":1}"#).unwrap();
+
+        // The window: a trial, next to the saved settings; back to them, no trial.
+        app.prefs_window.open = true;
+        let snapshot = Snapshot::take(&app);
+        (app.preferences.graphics_api, app.preferences.msaa) = ("vulkan".into(), 8);
+        save_graphics(&mut app, true);
+        assert_eq!(read(), json!({"backend": "dx12", "msaa": 4, "other": 1, "trial": {"backend": "vulkan", "msaa": 8}}));
+        assert_eq!(app.graphics.saved, dx12, "only tried");
+        snapshot.restore(&mut app);
+        assert_eq!(read(), json!({"backend": "dx12", "msaa": 4, "other": 1}), "Cancel takes the trial back");
+
+        // The control channel: only an API this system offers; saved at once, any trial dropped.
+        assert!(set(&mut app, &json!({"graphics_api": "metal"})).is_err());
+        app.graphics.trial = Some(GraphicsTrial { previous: dx12.clone(), shown: 0.0, last_frame: None });
+        set(&mut app, &json!({"graphics_api": "vulkan", "msaa": 8})).unwrap();
+        assert_eq!((app.graphics.saved.clone(), app.graphics.trial.clone()), (vulkan.clone(), None));
+        assert_eq!(read(), json!({"backend": "vulkan", "msaa": 8, "other": 1}));
+        // A script that changes only the window system or the card during a trial keeps the
+        // settings on trial on trial, started mark and all: it didn't ask for them.
+        std::fs::write(&path, r#"{"backend":"dx12","msaa":4,"trial":{"backend":"vulkan","msaa":8,"started":true}}"#).unwrap();
+        app.graphics.saved = dx12.clone();
+        app.graphics.trial = Some(GraphicsTrial { previous: dx12.clone(), shown: 0.0, last_frame: None });
+        (app.preferences.graphics_api, app.preferences.msaa) = ("vulkan".into(), 8);
+        set(&mut app, &json!({"graphics_adapter": "Other GPU"})).unwrap();
+        assert!(app.graphics.trial.is_some(), "still asks Keep these graphics settings?");
+        assert_eq!(app.graphics.saved, dx12);
+        assert_eq!(read(), json!({"backend": "dx12", "msaa": 4, "adapter": "Other GPU", "trial": {"backend": "vulkan", "msaa": 8, "started": true}}));
+        // The card goes back to Automatic for the steps below, which write it too.
+        app.preferences.graphics_adapter.clear();
+
+        // On trial: a device that can't do the samples changes the selection but saves nothing,
+        // as the trial is kept or dropped as a whole.
+        std::fs::write(&path, r#"{"backend":"dx12","msaa":4,"trial":{"backend":"vulkan","msaa":8,"started":true}}"#).unwrap();
+        app.graphics.saved = dx12.clone();
+        app.graphics.trial = Some(GraphicsTrial { previous: dx12.clone(), shown: 0.0, last_frame: None });
+        app.msaa_supported = vec![1, 4];
+        check_msaa(&mut app, 8);
+        assert_eq!(app.preferences.msaa, 4);
+        assert_eq!(read()["trial"]["started"], json!(true));
+        // Keep: the tried API (with the samples the device does) is saved, the trial goes.
+        keep_graphics(&mut app);
+        assert_eq!(read(), json!({"backend": "vulkan", "msaa": 4}));
+        assert!(app.graphics.trial.is_none() && !app.graphics.restart);
+
+        // Go back: the saved settings return, and SolidCraft starts again once closed.
+        std::fs::write(&path, r#"{"backend":"dx12","msaa":4,"trial":{"backend":"gl","msaa":4,"started":true}}"#).unwrap();
+        app.graphics.saved = dx12.clone();
+        app.graphics.trial = Some(GraphicsTrial { previous: dx12.clone(), shown: 0.0, last_frame: None });
+        app.preferences.graphics_api = "gl".into();
+        revert_graphics(&mut app);
+        assert_eq!((app.preferences.graphics_api.as_str(), app.preferences.msaa), ("dx12", 4));
+        assert_eq!(read(), json!({"backend": "dx12", "msaa": 4}));
+        assert!(app.graphics.trial.is_none() && app.graphics.restart && app.quit_requested, "no unsaved design: closes at once");
+        assert_eq!(GraphicsChoice { api: "gl".into(), msaa: 4 }.describe(&dx12), "OpenGL");
+        assert_eq!(vulkan.describe(&dx12), "Vulkan, 8× anti-aliasing");
+        assert_eq!(GraphicsChoice { api: "auto".into(), msaa: 2 }.describe(&GraphicsChoice { api: "auto".into(), msaa: 4 }), "2× anti-aliasing");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -11099,9 +11389,12 @@ mod graphics_preset_tests {
             assert!(tree.nodes.iter().any(|(_, node)| node.role() == Role::RadioButton && node.label() == Some("8×") && node.is_disabled()));
             click_graphics(&mut h, "Anti-aliasing", "prefs:msaa:2");
             assert_eq!(h.app.preferences.msaa, 2);
+            // A change in the window is tried at the next start; the saved level stays (#4015).
             let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-            assert_eq!(saved["msaa"], 2);
+            assert_eq!(saved["msaa"], 4, "{saved}");
             assert_eq!(saved["backend"], "vulkan");
+            // The trial holds the chosen API (this harness's default) with the new level.
+            assert_eq!(saved["trial"], json!({"backend":h.app.preferences.graphics_api,"msaa":2}), "{saved}");
             assert_eq!(
                 h.app.viewport.gpu.as_ref().map(|gpu| gpu.samples),
                 active_samples,
@@ -11124,6 +11417,7 @@ mod graphics_preset_tests {
             let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
             assert_eq!(saved["msaa"], 4, "Cancel restores startup persistence too");
             assert_eq!(saved["backend"], "vulkan");
+            assert!(saved.get("trial").is_none(), "Cancel removes the trial: {saved}");
             std::fs::remove_dir_all(dir).unwrap();
         }
     }
