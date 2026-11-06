@@ -206,6 +206,23 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     drag_rows(app, ui, &plan, drag_id, dragged, &drops, resp.rect.center().y);
 }
 
+/// The features that built a body, one level in under its row (#11945): the feature rows the
+/// Features folder draws, without dragging, each lit as there when the view lights it.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn body_rows(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, component: u64, path: &[u64], body_row: &str, features: &[u64], depth: usize) {
+    let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(path) };
+    let here = Here { component, path, scope: &scope };
+    let from_view = [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)];
+    // A feature that built several bodies is listed under each: its rows need ids of their own.
+    ui.push_id(("body_features", body_row), |ui| {
+        for id in features {
+            let Some(index) = app.session.doc.features.iter().position(|f| f.id == *id) else { continue };
+            let mark = if from_view.contains(&Some(*id)) { Mark::Here } else { Mark::None };
+            let _ = feature_row(app, ui, acts, &here, index, depth, None, mark, None);
+        }
+    });
+}
+
 /// A place in the browser's History where dragged rows can land: its height, the timeline
 /// position they move to and the folder they join (`None`: the timeline root).
 #[derive(Clone, Copy)]
@@ -1261,5 +1278,38 @@ mod tests {
         settle_heavy(&mut h);
         assert_eq!(h.app.session.doc.marker, Some(2), "the marker drag still rolls back");
         assert_eq!(order(&h), [ids[2], ids[0], ids[1]], "rolling back moves no feature");
+    }
+
+    /// #11945: with Features under bodies on, a body row folds open on the features that built it,
+    /// in timeline order and only those; a click on one selects it. Off, the default, body rows
+    /// have no fold arrow and list nothing.
+    #[test]
+    fn body_rows_fold_open_on_the_features_that_built_them() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"name":"Base","body_name":"Plate"})).unwrap();
+        h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"corner":[50,0,0],"operation":"new","name":"Block","body_name":"Other"})).unwrap();
+        let round = h.app.run("solid.fillet", json!({"body":"Plate","edges":[[10,0,10]],"radius":1,"name":"Round"})).unwrap()["feature"].as_u64().unwrap();
+        h.frames(3);
+        assert_eq!(fold_of("Plate"), None, "off by default: no fold arrow on a body");
+        assert_eq!(count("Round"), 0);
+
+        assert_eq!(h.call("ui.prefs", json!({"browser_body_features": true}))["ok"], true);
+        h.frames(2);
+        assert_eq!(fold_of("Plate"), Some(false), "the body starts folded");
+        assert_eq!(count("Round"), 0);
+        h.step(&json!({"click": {"handle": "fold:Plate"}})).unwrap();
+        h.frames(2);
+        let rows = drawn_rows();
+        let top = |label: &str| rows.iter().find(|(l, ..)| l == label).map(|row| row.1.top()).unwrap();
+        assert_eq!((count("Base"), count("Round"), count("Block")), (1, 1, 0), "only what built Plate");
+        assert!(top("Plate") < top("Base") && top("Base") < top("Round") && top("Round") < top("Other"), "under Plate, in timeline order");
+
+        let at = rows.iter().find(|(l, ..)| l == "Round").map(|row| row.1.center()).unwrap();
+        h.step(&json!({"click": [at.x, at.y]})).unwrap();
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: round }]);
+
+        h.call("ui.prefs", json!({"browser_body_features": false}));
+        h.frames(2);
+        assert_eq!((fold_of("Plate"), count("Round")), (None, 0), "off again: as before");
     }
 }

@@ -1422,6 +1422,9 @@ preference_settings! {
     /// Every component placement in the browser starts open, as before #9274, instead of closed
     /// until the user opens it. Off by default.
     browser_components_open: bool = false, PAGE_LAYOUT;
+    /// Each body row in the Browser folds open on the timeline features that built it, in
+    /// timeline order (#11945). Off by default: body rows have no fold arrow, as before.
+    browser_body_features: bool = false, PAGE_LAYOUT;
     /// Folders in the Browser start closed, and placements too whatever "Components start open"
     /// says, and they open only on request (#8768): with their arrow, Expand All or Find in
     /// Browser, which opens just the rows down to its body and closes again the ones the last find
