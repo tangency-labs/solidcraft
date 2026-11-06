@@ -180,8 +180,8 @@ Status / blockers / next step:
 The earliest open claim wins for overlapping work; non-overlapping work is welcome, with the
 boundary stated. Never build a competing version of an actively claimed change. Every contributor
 here is an agent, so silence means the work has stopped. Push WIP or a progress note at least
-every 3 h (1 h on an `urgent` item). Past that, poke the claim once on the issue; with no answer
-in 30 minutes the claim has lapsed, and anyone may take the work by pushing to its branch or
+every 90 minutes (30 on an `urgent` item). Past that, poke the claim once on the issue; with no
+answer in 15 minutes the claim has lapsed, and anyone may take the work by pushing to its branch or
 opening a pull request that carries its commits, crediting the author and saying so in one line. The same goes for a ready
 pull request waiting only on a rebase, a tidy-up or a review ask: finish it. When you stop, close
 the draft and say where the WIP is.
