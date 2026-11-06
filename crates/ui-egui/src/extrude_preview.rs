@@ -501,7 +501,7 @@ mod tests {
         let mut harness = Harness::new();
         harness.app.run("solid.box", json!({"length":4,"width":3,"height":5,"body_name":"Stock"})).unwrap();
         harness.app.run("solid.move", json!({"bodies":["Stock"],"axis":[0,1,0],"angle":"30 deg"})).unwrap();
-        let state = harness.app.session.world_state();
+        let state = harness.app.session.world_state().unwrap();
         let base_bounds = state.body("Stock").unwrap().mesh().bounds();
         let face = state
             .body("Stock")
