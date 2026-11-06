@@ -3,9 +3,21 @@
     "ui.first_dimension_scales": "The first dimension scales the drawing",
     "ui.first_dimension_scales_tip": "On: a sketch's first length dimension scales the drawing it measures, so its shape stays the same. Off: the dimension sizes only what it measures."
   },
+  "ar": {
+    "ui.first_dimension_scales": "البُعد الأول يغيّر مقياس الرسم",
+    "ui.first_dimension_scales_tip": "تشغيل: أول بُعد طولي في المخطط يغيّر مقياس الرسم الذي يقيسه، فيبقى شكله كما هو. إيقاف: يغيّر البُعد حجم ما يقيسه فقط."
+  },
+  "he": {
+    "ui.first_dimension_scales": "המידה הראשונה משנה את קנה המידה של הציור",
+    "ui.first_dimension_scales_tip": "פועל: מידת האורך הראשונה בסקיצה משנה את קנה המידה של הציור שהיא מודדת, כך שצורתו נשמרת. כבוי: המידה משנה רק את גודל מה שהיא מודדת."
+  },
   "ja": {
     "ui.first_dimension_scales": "最初の寸法で図形全体をスケールする",
     "ui.first_dimension_scales_tip": "オン: スケッチの最初の長さ寸法で、測定する図形全体をスケールし、形を保ちます。オフ: 寸法は測定する対象のサイズだけを変えます。"
+  },
+  "vi": {
+    "ui.first_dimension_scales": "Kích thước đầu tiên co giãn bản vẽ",
+    "ui.first_dimension_scales_tip": "Bật: kích thước chiều dài đầu tiên của bản phác thảo co giãn toàn bộ hình mà nó đo, nên hình dạng được giữ nguyên. Tắt: kích thước chỉ đổi cỡ phần mà nó đo."
   },
   "zh": {
     "ui.first_dimension_scales": "第一个尺寸缩放整个图形",
