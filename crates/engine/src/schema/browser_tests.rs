@@ -237,6 +237,7 @@ fn the_visibility_reply_type_matches_the_design_s() {
         shown_sketches: vec![5],
         hidden_joints: vec![6],
         origin_hidden: Some(true),
+        shown_component_origins: vec![vec![3]],
         hidden_profiles: vec![7],
         shown_dimensions: vec![8],
         locked_bodies: vec!["B".into()],

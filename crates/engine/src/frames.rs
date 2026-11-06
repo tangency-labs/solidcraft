@@ -317,6 +317,11 @@ impl Mapper<'_> {
         if v.is_array() {
             return self.pick(v, None);
         }
+        let origin = v.as_str().and_then(|name| self.s.origin_plane(name)).map(|p| {
+            self.changed = true;
+            serde_json::json!({"origin":pt(p.origin),"x_dir":pt(p.x),"y_dir":pt(p.y)})
+        });
+        let v = origin.as_ref().unwrap_or(v);
         let o = v.as_object()?;
         let mut m = o.clone();
         if let Some(x) = o.get("face").and_then(|x| self.pick(x, None)) {
@@ -677,6 +682,11 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
                     vec3(v).and_then(|p| m.local_point(&frame, p))
                 }
                 Axis => {
+                    let origin = v.as_str().and_then(|name| s.origin_axis(name)).map(|(o, d)| {
+                        m.changed = true;
+                        serde_json::json!({"origin":pt(o),"dir":pt(d)})
+                    });
+                    let v = origin.as_ref().unwrap_or(v);
                     if let Some(axis) = v.as_object() {
                         let mut axis = axis.clone();
                         if let Some(origin) = axis.get("origin").and_then(|o| m.make(o)) {
