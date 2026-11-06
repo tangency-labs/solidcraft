@@ -749,3 +749,38 @@ fn a_watcher_sees_the_bodies_measured_and_can_stop_them() {
     let stopped = solidcraft_doc::progress::watch(progress, || s.execute("component.properties", &json!({"component": "root"})));
     assert!(stopped.unwrap_err().to_string().contains("cancelled"));
 }
+
+/// #12721: an occurrence's properties name where it sits, in its parent and in the world, as the
+/// 3×4 matrix `occurrence.move` takes. A move that is still pending is included.
+#[test]
+fn occurrence_properties_report_the_placement_in_the_parent_and_in_the_world() {
+    let mut s = Session::default();
+    let arm = run(&mut s, "component.create", json!({"name": "arm", "grounded": false}))["occurrence"].as_u64().unwrap();
+    let bracket = run(&mut s, "component.create", json!({"name": "bracket", "parent": "arm"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 8, "name": "Plate", "body_name": "bracket"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.move", json!({"occurrence": arm, "matrix": [[1, 0, 0, 116], [0, 1, 0, 235], [0, 0, 1, 1492]]}));
+    run(&mut s, "occurrence.move", json!({"occurrence": bracket, "matrix": [[0, 0, 1, 0], [0, 1, 0, -120], [-1, 0, 0, 0]]}));
+    let r = run(&mut s, "occurrence.properties", json!({"occurrence": bracket, "path": [arm, bracket]}));
+    let parent = &r["placement"]["in_parent"];
+    let world = &r["placement"]["world"];
+    close(&parent["position"][0], 0.0);
+    close(&parent["position"][1], -120.0);
+    close(&parent["position"][2], 0.0);
+    close(&parent["axis"][1], 1.0);
+    close(&parent["angle_deg"], 90.0);
+    assert_eq!(parent["matrix"][0][2], 1.0);
+    assert_eq!(parent["matrix"][1][3], -120.0);
+    close(&world["position"][0], 116.0);
+    close(&world["position"][1], 115.0);
+    close(&world["position"][2], 1492.0);
+    close(&world["angle_deg"], 90.0);
+    let stored = s.doc.occurrences.iter().find(|o| o.id == arm).map(|o| o.transform[3][0]).expect("stored");
+    run(&mut s, "occurrence.move", json!({"occurrence": arm, "translate": [4, 0, 0], "capture": false}));
+    let pending = run(&mut s, "occurrence.properties", json!({"occurrence": bracket, "path": [arm, bracket]}));
+    close(&pending["placement"]["world"]["position"][0], 120.0);
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == arm).map(|o| o.transform[3][0]), Some(stored));
+}
