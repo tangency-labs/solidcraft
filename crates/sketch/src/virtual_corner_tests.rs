@@ -51,7 +51,8 @@ fn curve_centres_and_spline_interior_points_are_used_and_invalid_incidence_is_sa
     let last = point(&mut sk, 21., 21.);
     let mut spline = sk.curves[a].clone();
     spline.id = "interior_spline".into();
-    spline.kind = CurveKind::Spline { pts: vec![first, interior, last], control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() };
+    spline.kind =
+        CurveKind::Spline { pts: vec![first, interior, last], control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() };
     sk.curves.push(spline);
     for p in [centre, interior] {
         for c in [a, b] {

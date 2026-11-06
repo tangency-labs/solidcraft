@@ -98,8 +98,7 @@ impl Sketch {
     /// `equation` kept beside it. Returns the curve's index.
     pub fn add_equation_curve(&mut self, at: &[Vec2], closed: bool, mut equation: EquationCurve) -> Result<usize> {
         let pts = self.equation_points(at, closed, None)?;
-        let curve =
-            self.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: closed, nurbs: None, handles: Vec::new() }, None)?;
+        let curve = self.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: closed, nurbs: None, handles: Vec::new() }, None)?;
         equation.curve = self.curves.get(curve).map(|c| c.id.clone()).ok_or_else(|| SketchError::Invalid("the new curve is missing".into()))?;
         self.equations.push(equation);
         Ok(curve)

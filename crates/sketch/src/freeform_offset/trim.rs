@@ -1213,7 +1213,14 @@ mod tests {
             let end = if k + 1 == beziers.len() { first } else { sk.add_point(Vec2::new(b[3].0, b[3].1), None).unwrap() };
             let c = sk
                 .add_curve(
-                    CurveKind::Spline { pts: vec![start, mid[0], mid[1], end], control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() },
+                    CurveKind::Spline {
+                        pts: vec![start, mid[0], mid[1], end],
+                        control: true,
+                        degree: 3,
+                        periodic: false,
+                        nurbs: None,
+                        handles: Vec::new(),
+                    },
                     None,
                 )
                 .unwrap();

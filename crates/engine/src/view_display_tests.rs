@@ -1,6 +1,6 @@
 use super::*;
 use serde_json::json;
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 use solidcraft_sketch::{CurveKind, LinkGeom, LinkKind, LinkSource};
 
 fn line(sk: &mut Sketch, y: f64) -> usize {
@@ -125,8 +125,9 @@ fn spline_tangent_guides_are_hidden_from_normal_sketch_drawing_and_extend_both_s
     let mut sk = Sketch::new();
     let positions = [Vec2::new(0., 0.), Vec2::new(8., 6.), Vec2::new(17., 2.), Vec2::new(25., 10.)];
     let points = positions.iter().map(|point| sk.add_point(*point, None).unwrap()).collect();
-    let spline =
-        sk.add_curve(CurveKind::Spline { pts: points, control: false, degree: 3, periodic: false, handles: Vec::new() }, Some("s1")).unwrap();
+    let spline = sk
+        .add_curve(CurveKind::Spline { pts: points, control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, Some("s1"))
+        .unwrap();
     sk.add_spline_handles(spline).unwrap();
 
     let CurveKind::Spline { pts, handles, .. } = &sk.curves[spline].kind else { panic!("expected a fit spline") };

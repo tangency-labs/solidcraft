@@ -7842,8 +7842,9 @@ mod tests {
         let mut sketch = solidcraft_engine::sketch::Sketch::new();
         let points =
             [Vec2::new(0., 0.), Vec2::new(8., 6.), Vec2::new(17., 2.)].into_iter().map(|point| sketch.add_point(point, None).unwrap()).collect();
-        let spline =
-            sketch.add_curve(CurveKind::Spline { pts: points, control: false, degree: 3, periodic: false, handles: Vec::new() }, Some("s1")).unwrap();
+        let spline = sketch
+            .add_curve(CurveKind::Spline { pts: points, control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, Some("s1"))
+            .unwrap();
         sketch.add_spline_handles(spline).unwrap();
 
         let (unselected, hidden_points) = selected_spline_handles(&sketch, &[]);

@@ -427,10 +427,7 @@ impl State<'_> {
                 let q = self.spline_points(pts, *periodic);
                 let at_end = pts.last() == Some(&p) && pts.first() != Some(&p);
                 if handles.is_empty() || *control {
-                    crate::curves::end_curvature(
-                        &|t| crate::curves::spline_point_mode(&q, *control, *degree, *periodic, nurbs.as_ref(), t),
-                        at_end,
-                    )
+                    crate::curves::end_curvature(&|t| crate::curves::spline_point_mode(&q, *control, *degree, *periodic, nurbs.as_ref(), t), at_end)
                 } else {
                     let handles: Vec<Vec2> = handles.iter().map(|point| self.p(*point)).collect();
                     crate::curves::end_curvature(&|t| crate::curves::spline_point_with_handles(&q, &handles, *periodic, t), at_end)

@@ -1776,9 +1776,7 @@ impl Sketch {
                 let handles: Option<Vec<Vec2>> = handles.iter().map(pt).collect();
                 match (p, handles) {
                     (Some(p), Some(handles)) if !control => crate::curves::spline_polyline_with_handles(&p, &handles, *periodic),
-                    (Some(p), Some(_)) | (Some(p), None) => {
-                        crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic, nurbs.as_ref())
-                    }
+                    (Some(p), Some(_)) | (Some(p), None) => crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic, nurbs.as_ref()),
                     _ => Vec::new(),
                 }
             }
@@ -1823,7 +1821,8 @@ impl Sketch {
                     }
                     nurbs.check(pts.len(), *degree)?;
                 }
-                if pts.len() < 2 || pts.len() > crate::curves::MAX_SPLINE_POINTS || !(1..=solidcore_record::MAX_BEZIER_DEGREE as u8).contains(degree) {
+                if pts.len() < 2 || pts.len() > crate::curves::MAX_SPLINE_POINTS || !(1..=solidcore_record::MAX_BEZIER_DEGREE as u8).contains(degree)
+                {
                     return Err(SketchError::Invalid(format!(
                         "a spline needs 2 to 500 points and degree 1 to {}",
                         solidcore_record::MAX_BEZIER_DEGREE

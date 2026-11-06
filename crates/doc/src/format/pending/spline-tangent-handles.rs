@@ -25,7 +25,8 @@ pub fn step(value: &mut Value) -> crate::Result<()> {
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
+    use solidcraft_geom::{Seg2Geom, Vec2Geom};
     use solidcraft_sketch::{CurveKind, Sketch};
 
     #[test]
@@ -40,7 +41,12 @@ mod tests {
         .into_iter()
         .map(|point| sketch.add_point(point, None).unwrap())
         .collect::<Vec<_>>();
-        let curve = sketch.add_curve(CurveKind::Spline { pts: points, control: false, degree: 3, periodic: false, handles: Vec::new() }, None).unwrap();
+        let curve = sketch
+            .add_curve(
+                CurveKind::Spline { pts: points, control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() },
+                None,
+            )
+            .unwrap();
         let before = sketch.exact_segs(curve).unwrap();
         let output = sketch.add_freeform_offset(curve, true, 2.0).unwrap();
         let output_id = sketch.curves[output].id.clone();

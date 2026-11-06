@@ -485,7 +485,7 @@ fn a_centre_rectangles_centre_held_on_the_origin_keeps_the_rectangle_when_dragge
     let mut path = vec![a];
     path.extend(steps(a, b, 6));
     press_and_move(&mut h, &path);
-    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _)| id.as_str()), Some("p5"), "grabbed the centre, not the diagonal");
+    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _, _, _)| id.as_str()), Some("p5"), "grabbed the centre, not the diagonal");
     h.frames(4);
     release(&mut h, b);
     assert!(point(&h, "p5").len() < 1e-6, "the centre left the origin: {:?}", point(&h, "p5"));

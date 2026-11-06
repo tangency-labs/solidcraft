@@ -192,13 +192,6 @@ pub fn fit_beziers(p: &[Vec2]) -> Vec<[Vec2; 4]> {
 pub fn fit_beziers_mode(p: &[Vec2], periodic: bool) -> crate::model::Result<Vec<[Vec2; 4]>> {
     if periodic { crate::periodic_beziers(p) } else { Ok(fit_beziers(p)) }
 }
-/// Point of a spline at `t` in [0, 1]: through its points, over them as a clamped uniform
-/// B-spline, or with its own knots and weights (`nurbs`).
-pub fn spline_point_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool, nurbs: Option<&crate::Nurbs>, t: f64) -> Vec2 {
-    if let Some(nurbs) = nurbs {
-        return nurbs.point(p, degree, t).unwrap_or_else(|| p.first().copied().unwrap_or_default());
-    }
-
 /// Tangent endpoints for one editable handle at each fit point. Each handle stores 4.55 times the
 /// natural tangent derivative per unit chord length; evaluation compensates to preserve the
 /// natural interpolant until a handle is moved.
@@ -355,6 +348,13 @@ pub fn spline_end_tangent_with_handles(p: &[Vec2], handles: &[Vec2], periodic: b
     let piece = if at_end { pieces.last()? } else { pieces.first()? };
     if at_end { (piece[3] - piece[2]).normalized() } else { (piece[1] - piece[0]).normalized() }
 }
+
+/// Point of a spline at `t` in [0, 1]: through its points, over them as a clamped uniform
+/// B-spline, or with its own knots and weights (`nurbs`).
+pub fn spline_point_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool, nurbs: Option<&crate::Nurbs>, t: f64) -> Vec2 {
+    if let Some(nurbs) = nurbs {
+        return nurbs.point(p, degree, t).unwrap_or_else(|| p.first().copied().unwrap_or_default());
+    }
     if !periodic {
         return spline_point(p, control, degree, t);
     }
