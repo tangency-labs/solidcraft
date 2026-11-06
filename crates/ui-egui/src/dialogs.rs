@@ -49,6 +49,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "solid.replace_face", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.boundary_fill", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.align", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "solid.arrange", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.remove", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     // Pattern parameters are dialog-only - no viewport modifier chords.
     ToolModifiers { tool: "solid.pattern.path", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
@@ -302,6 +303,24 @@ crate::dialog_descriptor::dialog_descriptors! {
             },
             /// Remove bodies from here on in the timeline.
             Remove,
+            /// Lay bodies out side by side on a rectangle of the XY plane (`solid.arrange`).
+            Arrange {
+                width: String,
+                length: String,
+                spacing: String,
+                margin: String,
+                /// The step of the turns about Z a body may be given (0: none).
+                angle_step: String,
+                /// An index into [`ARRANGE_METHODS`].
+                method: usize,
+                /// Lay each body on the flat side it rests on best first.
+                lay_flat: bool,
+                keep: bool,
+                /// How many of each body.
+                quantity: String,
+                /// How many sheets to fill.
+                sheets: String,
+            },
             /// Pattern bodies along a path of sketch curves.
             PathPattern {
                 count: String,
@@ -953,6 +972,25 @@ impl Dialog {
                 )
             }
             "solid.remove" => Dialog::new(Kind::Remove, vec![SelInput::new("Bodies", BODIES, true)]),
+            "solid.arrange" => Dialog::new(
+                Kind::Arrange {
+                    width: length_default(s, "200"),
+                    length: length_default(s, "200"),
+                    spacing: length_default(s, "1"),
+                    margin: length_default(s, "0"),
+                    angle_step: "90 deg".into(),
+                    method: 0,
+                    lay_flat: false,
+                    keep: false,
+                    quantity: "1".into(),
+                    sheets: "1".into(),
+                },
+                vec![
+                    SelInput::new("Bodies", BODIES, true).tip("arrange.tip_bodies"),
+                    SelInput::new("Bottom Faces", PLANAR_FACES, true).tip("arrange.tip_bottoms"),
+                    SelInput::new("Sheet Face", PLANAR_FACES, false).tip("arrange.tip_sheet"),
+                ],
+            ),
             "solid.pattern.path" => Dialog::new(
                 Kind::PathPattern { count: "4".into(), spacing: length_default(s, "20") },
                 vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
@@ -1407,6 +1445,7 @@ impl Dialog {
                 | Kind::Primitive { .. }
                 | Kind::Combine { .. }
                 | Kind::BoundaryFill { .. }
+                | Kind::Arrange { .. }
         )
     }
 
@@ -2585,6 +2624,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Align { .. } => "ALIGN",
         Kind::BoundaryFill { .. } => "BOUNDARY FILL",
         Kind::Remove => "REMOVE",
+        Kind::Arrange { .. } => "ARRANGE",
         Kind::ChatContext => "PICK CONTEXT",
         Kind::PathPattern { .. } => "PATTERN ON PATH",
         Kind::Split => "SPLIT BODY",
@@ -4229,6 +4269,7 @@ fn rememberable(kind: &Kind) -> bool {
             | Kind::BoundaryFill { .. }
             | Kind::Align { .. }
             | Kind::PathPattern { .. }
+            | Kind::Arrange { .. }
             | Kind::Section { .. }
             | Kind::Move { .. }
             | Kind::Hole { .. }
@@ -4614,6 +4655,9 @@ pub(crate) const CHAMFER_TYPES: [&str; 3] = ["Equal Distance", "Two Distances", 
 fn fillet_kind(size: &str, chamfer: bool) -> Kind {
     Kind::Fillet { radius: size.into(), chamfer, chain: true, ctype: 0, distance2: size.into(), angle: "45 deg".into(), flip: false, setback: None }
 }
+
+/// `solid.arrange` methods: the command's word and the dialog's label.
+pub(crate) const ARRANGE_METHODS: [(&str, &str); 2] = [("true_shape", "arrange.true_shape"), ("rectangular", "Rectangular")];
 
 /// A length field's first text: `number` in the design's units, with the unit written out so the
 /// field shows it as the other dialogs show theirs ("20 mm", "20 in"). OK makes the size the bare
@@ -5657,6 +5701,25 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Remove => {
             need(0, "bodies")?;
             ("solid.remove", json!({"bodies": sels(d, 0).body_names()}))
+        }
+        Kind::Arrange { width, length, spacing, margin, angle_step, method, lay_flat, keep, quantity, sheets } => {
+            need(0, "bodies")?;
+            let method = ARRANGE_METHODS.get(*method).map_or("true_shape", |(m, _)| *m);
+            let mut p = json!({"bodies": sels(d, 0).body_names(), "spacing": spacing, "margin": margin, "angle_step": angle_step,
+                "method": method, "lay_flat": lay_flat, "copy": keep, "quantity": quantity, "sheets": sheets});
+            // A picked face is the sheet; else the rectangle.
+            match face_points(2).into_iter().next() {
+                Some(sheet) => p["sheet"] = sheet,
+                None => {
+                    p["width"] = json!(width);
+                    p["length"] = json!(length);
+                }
+            }
+            let bottoms = face_points(1);
+            if !bottoms.is_empty() {
+                p["bottoms"] = json!(bottoms);
+            }
+            ("solid.arrange", p)
         }
         Kind::PathPattern { count, spacing } => {
             need(0, "objects")?;

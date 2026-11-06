@@ -212,6 +212,50 @@ fn squares_fill_a_sheet_in_rows() {
 }
 
 #[test]
+fn interlocking_strips_cut_from_a_sheet_fill_it_again() {
+    // A 300 x 200 sheet cut into six strips along staircase lines: every strip but the end ones
+    // is concave on both sides, and only an exact fit puts all six back.
+    let stairs = |x: f64| -> Vec<(f64, f64)> {
+        (0..8)
+            .flat_map(|k| {
+                let (y, step) = (f64::from(k) * 25.0, if k % 2 == 0 { 0.0 } else { 15.0 });
+                [(x + step, y), (x + step, y + 25.0)]
+            })
+            .collect()
+    };
+    let items: Vec<ArrangeItem> = (0..6)
+        .map(|i| {
+            let (x0, x1) = (f64::from(i) * 50.0, f64::from(i + 1) * 50.0);
+            let right = if i == 5 { vec![(300.0, 0.0), (300.0, 200.0)] } else { stairs(x1) };
+            let left = if i == 0 { vec![(0.0, 0.0), (0.0, 200.0)] } else { stairs(x0) };
+            let ring: Vec<(f64, f64)> = right.into_iter().chain(left.into_iter().rev()).map(|(x, y)| (x - x0, y)).collect();
+            item(poly(&ring), 1, &[0.0, 180.0])
+        })
+        .collect();
+    let r = run(&items, &Shape2::rectangle(300.0, 200.0), &ArrangeOptions::default());
+    assert_eq!(r.placed.len(), 6, "unplaced {:?}", r.unplaced);
+    assert!((r.fill - 1.0).abs() < 1e-6, "fill {}", r.fill);
+}
+
+#[test]
+fn a_tight_plate_takes_more_parts_once_the_search_stands_some_on_end() {
+    // A build plate a hand layout fills well: three 95 x 66 cases stood on end in a row, the
+    // 100 mm square and the round parts above them. The lowest spot for each case lies it flat,
+    // which breaks the room up; only a search that holds turns gets back to the hand layout.
+    let items = [
+        item(Shape2::rectangle(100.0, 100.0), 1, &[0.0, 90.0]),
+        item(Shape2::rectangle(95.0, 66.0), 3, &[0.0, 90.0]),
+        item(ngon(48, 25.0), 1, &[0.0, 90.0]),
+        item(ngon(48, 20.0), 5, &[0.0, 90.0]),
+    ];
+    let sheet = Shape2::rectangle(205.0, 200.0);
+    let greedy = ArrangeOptions { spacing: 2.0, ..ArrangeOptions::default() };
+    let first = run(&items, &sheet, &greedy).placed.len();
+    let searched = run(&items, &sheet, &ArrangeOptions { improve: 300, ..greedy }).placed.len();
+    assert!(searched >= 8 && searched > first, "greedy {first}, searched {searched}");
+}
+
+#[test]
 fn spacing_and_margin_are_kept_and_cost_room() {
     let items = [item(Shape2::rectangle(10.0, 10.0), 12, &[])];
     let sheet = Shape2::rectangle(40.0, 30.0);
@@ -535,4 +579,28 @@ fn odd_but_valid_input_still_lays_out() {
     // Tiny slivers next to big parts.
     let sliver = poly(&[(0.0, 0.0), (50.0, 0.0), (50.0, 1e-3)]);
     run(&[item(sliver, 20, &[0.0, 180.0]), item(Shape2::rectangle(40.0, 40.0), 2, &[])], &sheet, &ArrangeOptions::default());
+}
+
+#[test]
+fn obstacles_stand_where_they_are_and_parts_keep_clear() {
+    // A 30 x 30 obstacle in the middle of a 50 x 50 sheet leaves a 10 wide frame round it, which
+    // takes 16 squares of 10 at no spacing, and none at a spacing of 1.
+    let sheet = Shape2::rectangle(50.0, 50.0);
+    let block = Shape2 { outer: vec![v(10.0, 10.0), v(40.0, 10.0), v(40.0, 40.0), v(10.0, 40.0)], holes: Vec::new() };
+    let item = ArrangeItem { shape: Shape2::rectangle(10.0, 10.0), quantity: 20, rotations_deg: vec![0.0] };
+    let opts = ArrangeOptions { part_in_part: false, ..ArrangeOptions::default() };
+    let r = arrange_around(std::slice::from_ref(&item), &sheet, std::slice::from_ref(&block), &opts, &|| false).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(r.placed.len(), 16, "{r:?}");
+    for p in &r.placed {
+        let (x, y) = (p.shift.x, p.shift.y);
+        assert!(x + 10.0 <= 10.0 + 1e-9 || x >= 40.0 - 1e-9 || y + 10.0 <= 10.0 + 1e-9 || y >= 40.0 - 1e-9, "on the obstacle: {p:?}");
+    }
+    let spaced = ArrangeOptions { spacing: 1.0, ..opts.clone() };
+    let r = arrange_around(std::slice::from_ref(&item), &sheet, std::slice::from_ref(&block), &spaced, &|| false).unwrap_or_else(|e| panic!("{e}"));
+    assert!(r.placed.is_empty(), "{r:?}");
+    // One far away is no obstacle; fill counts the parts only.
+    let far = Shape2 { outer: block.outer.iter().map(|p| v(p.x + 500.0, p.y)).collect(), holes: Vec::new() };
+    let r = arrange_around(std::slice::from_ref(&item), &sheet, &[far], &opts, &|| false).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(r.placed.len(), 20, "{r:?}");
+    assert!((r.fill - 0.8).abs() < 1e-9, "{r:?}");
 }

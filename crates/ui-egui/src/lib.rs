@@ -1335,6 +1335,16 @@ impl SolveApp {
                     self.preferences.ribbon_tabs_only = on;
                     self.ui.ribbon_open = false;
                 }
+                // What did not fit stays where it was: say so, or it looks as if it had been missed.
+                "solid.arrange" => {
+                    let left: Vec<&str> = v.get("unplaced").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
+                    let copies = v.get("copies_left").and_then(Value::as_u64).unwrap_or(0);
+                    if !left.is_empty() {
+                        self.set_status(i18n::format("arrange.left_out", &[("count", &left.len().to_string()), ("names", &left.join(", "))]), false);
+                    } else if copies > 0 {
+                        self.set_status(i18n::format("arrange.copies_left", &[("count", &copies.to_string())]), false);
+                    }
+                }
                 // An edit OK'd on a feature behind the history marker changes nothing in the view:
                 // say why, or the edit looks as if it had silently failed (#8100).
                 "timeline.redefine" if v.get("rolled_back").and_then(Value::as_bool) == Some(true) => {

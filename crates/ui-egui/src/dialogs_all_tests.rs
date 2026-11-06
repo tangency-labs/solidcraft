@@ -303,6 +303,12 @@ fn representative(h: &Harness, command: &str) -> Dialog {
     if let Kind::Thread { designation, .. } = &mut d.kind {
         *designation = "M20x2.5".into();
     }
+    // With a sheet face picked the rectangle's size is not asked for.
+    if let Kind::Arrange { .. } = &d.kind
+        && let Some(sheet) = d.inputs.get_mut(2)
+    {
+        sheet.items.clear();
+    }
     if let Kind::Assembly(crate::dialogs_assembly::Asm::Cam(f)) = &mut d.kind {
         f.b = s.doc.assembly.joints[2].id;
     }
@@ -422,7 +428,8 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         | "Nut" | "Cam" | "Follower" | "Anchor" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
-        "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
+        "arrange.fit" => Role::ComboBox,
+        "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" | "arrange.lay_flat" | "arrange.keep" => Role::CheckBox,
         "Animate" => Role::Button,
         "Ratio" if command.starts_with("joint.") && command != "joint.motion_link" => return None,
         _ => Role::TextInput,
@@ -673,6 +680,22 @@ form_case!(remove, "solid.remove", []);
 form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing"]);
 form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
+form_case!(
+    arrange,
+    "solid.arrange",
+    [
+        "ui.width",
+        "ui.length",
+        "ui.spacing",
+        "Margin",
+        "arrange.turn_step",
+        "arrange.fit",
+        "arrange.lay_flat",
+        "arrange.keep",
+        "Quantity",
+        "arrange.sheets"
+    ]
+);
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);
 form_case!(thread, "solid.thread", ["Form", "Size", "Pitch", "Designation", "Hand", "Starts", "Extent", "Start", "End"]);
 form_case!(primitive_box, "solid.box", ["ui.length", "ui.width", "ui.height", "Operation"]);

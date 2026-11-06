@@ -163,6 +163,25 @@ pub enum ArrangeError {
 /// spacing to another part, leaves the sheet, covers one of its holes or comes closer than the
 /// margin to its edges. `cancel`, when set, stops the work within one part's search.
 pub fn arrange(items: &[ArrangeItem], sheet: &Shape2, options: &ArrangeOptions, cancel: Option<&AtomicBool>) -> Result<ArrangeResult, ArrangeError> {
+    arrange_around(items, sheet, &[], options, &|| cancel.is_some_and(|c| c.load(Ordering::Relaxed)))
+}
+
+/// Most fixed obstacles [`arrange_around`] takes.
+pub const MAX_OBSTACLES: usize = 2_000;
+
+/// [`arrange`], with `obstacles` already standing where they are (sheet coordinates, anywhere):
+/// nothing placed comes closer than the spacing to one. They count for neither the fill nor
+/// the used box. The work stops soon after `cancel` says so.
+pub fn arrange_around(
+    items: &[ArrangeItem],
+    sheet: &Shape2,
+    obstacles: &[Shape2],
+    options: &ArrangeOptions,
+    cancel: &dyn Fn() -> bool,
+) -> Result<ArrangeResult, ArrangeError> {
+    if obstacles.len() > MAX_OBSTACLES {
+        return Err(ArrangeError::TooMuchWork);
+    }
     for (what, v) in [("spacing", options.spacing), ("margin", options.margin)] {
         if !(0.0..=MAX_COORD).contains(&v) {
             return Err(ArrangeError::BadDistance { what, value: v });
@@ -198,7 +217,22 @@ pub fn arrange(items: &[ArrangeItem], sheet: &Shape2, options: &ArrangeOptions, 
         kinds.push(kind);
     }
     let size = sheet.shape.bbox.diag();
+    // Obstacles off the sheet's box (grown by the spacing) can never be in the way.
+    let reach = sheet.shape.bbox.grow(options.spacing + options.margin);
+    let mut fixed = Vec::new();
+    for (i, o) in obstacles.iter().enumerate() {
+        let region = Region::new(o, &format!("obstacle {i}"))?;
+        corners = corners.saturating_add(region.shape.corners());
+        if corners > MAX_POSE_CORNERS {
+            return Err(ArrangeError::TooMuchWork);
+        }
+        let shape = region.shape.moved(region.min.sub(sheet.min));
+        if shape.bbox.hits(&reach) {
+            fixed.push(Laid { kind: usize::MAX, pose: 0, at: P::new(0.0, 0.0), shape });
+        }
+    }
     let ctx = Ctx {
+        fixed: &fixed,
         sheet: &sheet.shape,
         kinds: &kinds,
         spacing: options.spacing,
@@ -208,20 +242,23 @@ pub fn arrange(items: &[ArrangeItem], sheet: &Shape2, options: &ArrangeOptions, 
         cancel,
     };
 
-    // Largest first; ties keep the caller's order.
-    let mut order: Vec<usize> = Vec::with_capacity(copies);
+    // Largest first; ties keep the caller's order. Each part may take any of its turns.
+    let mut order: Vec<Gene> = Vec::with_capacity(copies);
     for (i, item) in items.iter().enumerate() {
-        order.extend(std::iter::repeat_n(i, item.quantity));
+        order.extend(std::iter::repeat_n(Gene { kind: i, pose: None }, item.quantity));
     }
-    order.sort_by(|a, b| kinds_area(&kinds, *b).total_cmp(&kinds_area(&kinds, *a)));
+    order.sort_by(|a, b| kinds_area(&kinds, b.kind).total_cmp(&kinds_area(&kinds, a.kind)));
 
     let better = Better { area: 1e-9 * sheet.area, length: ctx.tol * 1e3 };
     let mut best = ctx.lay(&order, None)?;
     let mut rng = Rng(options.seed ^ 0x9E37_79B9_7F4A_7C15);
     for _ in 0..options.improve {
-        let Some((next, from)) = rng.reorder(&order) else { break };
+        let poses = |k: usize| kinds.get(k).map_or(0, |kind| kind.poses.len());
+        let Some((next, from)) = rng.reorder(&order, poses) else { break };
         let layout = ctx.lay(&next, Some((&best, from)))?;
-        if better.is(&layout, &best) {
+        // A layout as good as the best is taken too, so the search walks across plateaus
+        // (a turn held that changes nothing yet) instead of stopping on them.
+        if !better.is(&best, &layout) {
             best = layout;
             order = next;
         }
@@ -404,6 +441,11 @@ impl Wedge {
     /// Where the arc starts, measured counter-clockwise from direction angle `d`.
     fn from(self, d: f64) -> f64 {
         (self.start - d).rem_euclid(TAU)
+    }
+
+    /// Whether two arcs share directions.
+    fn meets(self, o: Wedge) -> bool {
+        o.from(self.start) < self.width - ANGLE_TOL || self.from(o.start) < o.width - ANGLE_TOL
     }
 
     fn holds(self, d: f64) -> bool {
@@ -635,6 +677,12 @@ impl Region {
     }
 }
 
+/// Whether `ring` is a region outline [`arrange`] takes: at least three corners, an area, and no
+/// edge meeting another but at the corners neighbours share.
+pub(crate) fn is_simple(ring: &[Vec2]) -> bool {
+    Region::new(&Shape2 { outer: ring.to_vec(), holes: Vec::new() }, "ring").is_ok()
+}
+
 /// Whether any two edges of `rings` meet other than at the corner two neighbouring edges share,
 /// or two neighbours fold back along each other.
 fn any_contact(rings: &[Vec<P>], tol: f64) -> bool {
@@ -795,7 +843,7 @@ fn clear_of(a: &Shape, b: &Shape, clear: f64, tol: f64) -> bool {
     if clear <= tol || !a.bbox.grow(clear).hits(&b.bbox) {
         return true;
     }
-    let need = clear - tol;
+    let need = clear - 1e-3 * tol;
     let close = |v: P, (c, d): (P, P)| seg_dist(v, c, d) < need;
     for ra in &a.rings {
         for rb in &b.rings {
@@ -1000,6 +1048,13 @@ struct Grid {
 
 const GRID: usize = 48;
 
+/// How many fitting starts [`Ctx::best_spot`] settles before taking the best.
+const SETTLE_TRIES: usize = 8;
+
+/// Most start positions one part's search keeps: the best by where they would end. Detailed
+/// outlines at fine turns would otherwise make millions (and as many bytes times forty).
+const MAX_STARTS: usize = 1 << 17;
+
 impl Grid {
     fn new(over: Box2) -> Grid {
         let s = over.size();
@@ -1047,13 +1102,15 @@ impl Grid {
 // ---------- laying parts out ----------
 
 struct Ctx<'a> {
+    /// Parts standing on the sheet before any is laid; first in every layout.
+    fixed: &'a [Laid],
     sheet: &'a Shape,
     kinds: &'a [Kind],
     spacing: f64,
     margin: f64,
     part_in_part: bool,
     tol: f64,
-    cancel: Option<&'a AtomicBool>,
+    cancel: &'a dyn Fn() -> bool,
 }
 
 /// A part on the sheet.
@@ -1097,29 +1154,33 @@ impl Better {
 
 impl Ctx<'_> {
     fn cancelled(&self) -> Result<(), ArrangeError> {
-        if self.cancel.is_some_and(|c| c.load(Ordering::Relaxed)) { Err(ArrangeError::Cancelled) } else { Ok(()) }
+        if (self.cancel)() { Err(ArrangeError::Cancelled) } else { Ok(()) }
     }
 
     /// Lays out the parts in `order`; with `base`, reuses its layout of the first `from` entries
     /// (the same as in `order`).
-    fn lay(&self, order: &[usize], base: Option<(&Layout, usize)>) -> Result<Layout, ArrangeError> {
+    fn lay(&self, order: &[Gene], base: Option<(&Layout, usize)>) -> Result<Layout, ArrangeError> {
         let from = base.map_or(0, |(_, f)| f);
         let (mut laid, mut after, mut failed) = match base {
             Some((b, f)) => {
-                let keep = f.checked_sub(1).and_then(|i| b.after.get(i)).copied().unwrap_or(0);
+                let keep = f.checked_sub(1).and_then(|i| b.after.get(i)).copied().unwrap_or(self.fixed.len());
                 (
                     b.parts.get(..keep).map(<[Laid]>::to_vec).unwrap_or_default(),
                     b.after.get(..f).map(<[usize]>::to_vec).unwrap_or_default(),
                     b.failed.get(..f).map(<[bool]>::to_vec).unwrap_or_default(),
                 )
             }
-            None => (Vec::new(), Vec::new(), Vec::new()),
+            None => (self.fixed.to_vec(), Vec::new(), Vec::new()),
         };
-        // A kind that found no place is not tried again: the sheet only fills up. (New parts do
-        // bring new starts beside them, so this can miss a late fit; it keeps a full sheet fast.)
+        // A kind that found no place at any turn is not tried again: the sheet only fills up.
+        // (New parts do bring new starts beside them, so this can miss a late fit; it keeps a
+        // full sheet fast.)
         let mut no_room = vec![false; self.kinds.len()];
-        for (k, f) in order.iter().zip(&failed) {
-            if *f && let Some(n) = no_room.get_mut(*k) {
+        for (g, f) in order.iter().zip(&failed) {
+            if *f
+                && g.pose.is_none()
+                && let Some(n) = no_room.get_mut(g.kind)
+            {
                 *n = true;
             }
         }
@@ -1129,20 +1190,20 @@ impl Ctx<'_> {
             grid.insert(i, &l.shape.bbox);
             area += kinds_area(self.kinds, l.kind);
         }
-        for &k in order.iter().skip(from) {
+        for &Gene { kind: k, pose: lock } in order.iter().skip(from) {
             self.cancelled()?;
             let mut fail = false;
             if let (Some(kind), Some(full)) = (self.kinds.get(k), no_room.get_mut(k))
                 && !*full
             {
-                match self.best_spot(k, kind, &laid, &grid)? {
+                match self.best_spot(k, kind, lock, &laid, &grid)? {
                     Some(l) => {
                         area += kind.area;
                         grid.insert(laid.len(), &l.shape.bbox);
                         laid.push(l);
                     }
                     None => {
-                        *full = true;
+                        *full |= lock.is_none();
                         fail = true;
                     }
                 }
@@ -1150,45 +1211,102 @@ impl Ctx<'_> {
             after.push(laid.len());
             failed.push(fail);
         }
-        let used = laid.iter().fold(Box2::EMPTY, |b, l| b.union(l.shape.bbox));
-        let (top, right) = if laid.is_empty() { (0.0, 0.0) } else { (used.max.y, used.max.x) };
+        let own = laid.get(self.fixed.len()..).unwrap_or_default();
+        let used = own.iter().fold(Box2::EMPTY, |b, l| b.union(l.shape.bbox));
+        let (top, right) = if own.is_empty() { (0.0, 0.0) } else { (used.max.y, used.max.x) };
         Ok(Layout { parts: laid, after, failed, area, top, right })
     }
 
-    fn best_spot(&self, k: usize, kind: &Kind, laid: &[Laid], grid: &Grid) -> Result<Option<Laid>, ArrangeError> {
+    /// The best spot for a part of kind `k`, at any of its turns or only at `lock`.
+    fn best_spot(&self, k: usize, kind: &Kind, lock: Option<usize>, laid: &[Laid], grid: &Grid) -> Result<Option<Laid>, ArrangeError> {
+        // Every start of every rotation, best first by where its box would end (lowest top, then
+        // leftmost). Settling only moves a part down or left, so the first few that fit hold the
+        // best spots; later ones only get looked at when those fail.
+        let mut cands: Vec<(f64, f64, usize, P)> = Vec::new();
+        let order = |a: &(f64, f64, usize, P), b: &(f64, f64, usize, P)| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2));
+        for (pi, pose) in kind.poses.iter().enumerate().filter(|(pi, _)| lock.is_none_or(|l| l == *pi)) {
+            self.cancelled()?;
+            cands.extend(self.starts(pose, laid).into_iter().map(|at| (at.y + pose.size.y, at.x + pose.size.x, pi, at)));
+            if cands.len() > 2 * MAX_STARTS {
+                cands.select_nth_unstable_by(MAX_STARTS, order);
+                cands.truncate(MAX_STARTS);
+            }
+        }
+        cands.sort_by(order);
         let mut best: Option<(P, usize, Box2)> = None;
         let q = self.tol * 1e3;
-        for (pi, pose) in kind.poses.iter().enumerate() {
-            for (si, start) in self.starts(pose, laid).into_iter().enumerate() {
-                if si % 64 == 0 {
-                    self.cancelled()?;
-                }
-                if !self.fits(pose, start, laid, grid) {
-                    continue;
-                }
-                let at = self.settle(pose, start, laid, grid);
-                // Settling only moves through free space, but a check after it keeps a numerical
-                // slip from ever letting an overlap through.
-                if at != start && !self.fits(pose, at, laid, grid) {
-                    continue;
-                }
-                let b = Box2 { min: at, max: at.add(pose.size) };
-                let better = match &best {
-                    None => true,
-                    Some((_, _, o)) => {
-                        if (b.max.y - o.max.y).abs() > q {
-                            b.max.y < o.max.y
-                        } else {
-                            b.max.x < o.max.x - q
-                        }
+        let mut found = 0;
+        for (ci, &(top, right, pi, start)) in cands.iter().enumerate() {
+            if ci % 64 == 0 {
+                self.cancelled()?;
+            }
+            if found >= SETTLE_TRIES {
+                break;
+            }
+            // Nothing further down the list can beat a settled spot below its start.
+            if let Some((_, _, o)) = &best
+                && (top > o.max.y + q || (top > o.max.y - q && right >= o.max.x - q))
+                && found > 0
+            {
+                break;
+            }
+            let Some(pose) = kind.poses.get(pi) else { continue };
+            if !self.fits(pose, start, laid, grid) {
+                continue;
+            }
+            let at = self.settle(pose, start, laid, grid);
+            // Settling only moves through free space, but a check after it keeps a numerical
+            // slip from ever letting an overlap through.
+            if at != start && !self.fits(pose, at, laid, grid) {
+                continue;
+            }
+            found += 1;
+            let b = Box2 { min: at, max: at.add(pose.size) };
+            let better = match &best {
+                None => true,
+                Some((_, _, o)) => {
+                    if (b.max.y - o.max.y).abs() > q {
+                        b.max.y < o.max.y
+                    } else {
+                        b.max.x < o.max.x - q
                     }
-                };
-                if better {
-                    best = Some((at, pi, b));
                 }
+            };
+            if better {
+                best = Some((at, pi, b));
             }
         }
         Ok(best.and_then(|(at, pi, _)| Some(Laid { kind: k, pose: pi, at, shape: kind.poses.get(pi)?.shape.moved(at) })))
+    }
+
+    /// Positions where a corner of `pose`'s outline sits on a corner of `ring` (pushed out from it
+    /// by `gap` along the corner's outward bisector): the tight spots between parts, which sliding
+    /// down and left alone would miss.
+    fn contacts(&self, pose: &Pose, ring: &Ring, side: f64, gap: f64, out: &mut Vec<P>) {
+        let Some(outline) = pose.shape.rings.first() else { return };
+        let own: Vec<(P, Wedge)> = (0..outline.pts.len())
+            .map(|j| {
+                let (pp, v, pn) = outline.corner(j);
+                (v, Wedge::at(pp, v, pn, outline.side))
+            })
+            .collect();
+        // Pushed a hair past the gap so rounding never leaves it short.
+        let push = if gap > self.tol { gap + self.tol } else { 0.0 };
+        for i in 0..ring.pts.len() {
+            if out.len() >= 2 * MAX_STARTS {
+                return;
+            }
+            let (prev, w, next) = ring.corner(i);
+            let wedge = Wedge::at(prev, w, next, side);
+            let mid = wedge.start + wedge.width / 2.0;
+            let at = w.add(P::new(-mid.cos(), -mid.sin()).scale(push));
+            for (v, mine) in &own {
+                // Corners whose materials would overlap where they meet cannot touch there.
+                if !wedge.meets(*mine) {
+                    out.push(at.sub(*v));
+                }
+            }
+        }
     }
 
     /// Start positions for the box corner of `pose`: along the sheet's top and its corners; above,
@@ -1212,12 +1330,26 @@ impl Ctx<'_> {
                 out.extend([P::new(c.x, c.y), P::new(c.x - w, c.y), P::new(c.x, c.y - h), P::new(c.x - w, c.y - h)]);
             }
         }
+        for r in &self.sheet.rings {
+            self.contacts(pose, r, -r.side, m, &mut out);
+        }
         let pile_top = laid.iter().fold(f64::NEG_INFINITY, |t, l| t.max(l.shape.bbox.max.y));
         for l in laid {
             let b = l.shape.bbox;
-            // Dropping from the top only helps beside the parts that are not buried.
+            // Dropping from the top and corner contacts only help beside the parts that are not
+            // buried (and in holes).
             if b.max.y >= pile_top - 2.0 * h - s {
                 out.extend([P::new(b.max.x + s, top), P::new(b.min.x, top), P::new(b.min.x - s - w, top)]);
+                for r in l.shape.outer() {
+                    self.contacts(pose, r, r.side, s, &mut out);
+                }
+            }
+            if self.part_in_part {
+                for r in l.shape.rings.iter().skip(1) {
+                    if r.bbox.size().x >= w && r.bbox.size().y >= h {
+                        self.contacts(pose, r, r.side, s, &mut out);
+                    }
+                }
             }
             out.extend([
                 P::new(b.max.x + s, b.min.y),
@@ -1294,7 +1426,8 @@ impl Ctx<'_> {
         for _ in 0..64 {
             let mut moved = 0.0;
             for dir in [P::new(0.0, -1.0), P::new(-1.0, 0.0)] {
-                let t = self.travel(pose, at, dir, laid, grid);
+                // Short of a band by a hair, so rounding never leaves a gap below the spacing.
+                let t = self.travel(pose, at, dir, laid, grid) - if self.spacing > self.tol || self.margin > self.tol { self.tol } else { 0.0 };
                 if t.is_finite() && t > self.tol {
                     at = at.add(dir.scale(t));
                     moved += t;
@@ -1336,6 +1469,14 @@ impl Ctx<'_> {
     }
 }
 
+/// One entry of the order the parts are laid in: the part's kind and, when the search holds it to
+/// one, the turn it must take.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Gene {
+    kind: usize,
+    pose: Option<usize>,
+}
+
 /// A small deterministic generator for the order search.
 struct Rng(u64);
 
@@ -1349,20 +1490,32 @@ impl Rng {
         if n == 0 { 0 } else { (self.next() % n as u64) as usize }
     }
 
-    /// A different order, by swapping two entries or moving one, and the first index where it
-    /// differs; none when every entry is the same kind.
-    fn reorder(&mut self, order: &[usize]) -> Option<(Vec<usize>, usize)> {
-        if order.len() < 2 {
+    /// A different order, by swapping two entries, moving one, or holding one part to one of its
+    /// `poses(kind)` turns (or freeing it again), and the first index where it differs; none
+    /// when nothing can change. Holding a turn reaches layouts the greedy choice of the lowest
+    /// spot never makes: a part stood on end in a row with its likes rather than laid flat.
+    fn reorder(&mut self, order: &[Gene], poses: impl Fn(usize) -> usize) -> Option<(Vec<Gene>, usize)> {
+        if order.is_empty() {
             return None;
         }
         for _ in 0..32 {
             let mut next = order.to_vec();
             let (a, b) = (self.below(next.len()), self.below(next.len()));
-            if self.below(2) == 0 {
-                next.swap(a, b);
-            } else {
-                let k = next.remove(a);
-                next.insert(b.min(next.len()), k);
+            match self.below(3) {
+                0 => next.swap(a, b),
+                1 => {
+                    let k = next.remove(a);
+                    next.insert(b.min(next.len()), k);
+                }
+                _ => {
+                    if let Some(g) = next.get_mut(a) {
+                        let n = poses(g.kind);
+                        if n > 1 {
+                            let pick = self.below(n + 1);
+                            g.pose = if pick == n { None } else { Some(pick) };
+                        }
+                    }
+                }
             }
             if let Some(from) = next.iter().zip(order).position(|(x, y)| x != y) {
                 return Some((next, from));

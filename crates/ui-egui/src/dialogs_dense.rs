@@ -52,6 +52,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::BoundaryFill { .. } => Some("solid.boundary_fill"),
         Kind::Align { .. } => Some("solid.align"),
         Kind::Remove => Some("solid.remove"),
+        Kind::Arrange { .. } => Some("solid.arrange"),
         Kind::PathPattern { .. } => Some("solid.pattern.path"),
         Kind::Combine { .. } => Some("solid.combine"),
         Kind::Rib { web, .. } => Some(if *web { "solid.web" } else { "solid.rib" }),
@@ -828,6 +829,7 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let mut enter = false;
     let through_point = offset_through_point(d).is_some();
+    let on_face = matches!(d.kind, Kind::Arrange { .. }) && d.inputs.get(2).is_some_and(|i| !i.items.is_empty());
     match &mut d.kind {
         Kind::Revolve { angle, operation, .. } => {
             let cur = usize::from(to_object_on(&d.inputs));
@@ -988,6 +990,22 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         Kind::Stock { margin } => {
             enter |= expr_row(ui, "Margin", margin);
+        }
+        Kind::Arrange { width, length, spacing, margin, angle_step, method, lay_flat, keep, quantity, sheets } => {
+            // A picked sheet face is the sheet: its size is the face's.
+            if !on_face {
+                enter |= expr_row(ui, "ui.width", width);
+                enter |= expr_row(ui, "ui.length", length);
+            }
+            enter |= expr_row(ui, "ui.spacing", spacing);
+            enter |= expr_row(ui, "Margin", margin);
+            enter |= expr_row(ui, "arrange.turn_step", angle_step);
+            let labels = crate::dialogs::ARRANGE_METHODS.map(|(_, label)| label);
+            choice_row(ui, "arrange.fit", "arrange_method", method, &labels);
+            form_row(ui, "arrange.lay_flat", |ui| crate::dialogs::check(ui, lay_flat));
+            form_row(ui, "arrange.keep", |ui| crate::dialogs::check(ui, keep));
+            enter |= quantity_row(ui, &app.session.doc, "Quantity", quantity);
+            enter |= count_row_to(ui, &app.session.doc, "arrange.sheets", sheets, 100);
         }
         Kind::Scale { factor, per_axis, factor_y, factor_z } => {
             form_row(ui, "Type", |ui| {
