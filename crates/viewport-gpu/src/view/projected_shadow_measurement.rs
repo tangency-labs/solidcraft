@@ -469,6 +469,7 @@ fn comparison_frame(scene: GpuScene, cam: &Camera, width: u32, height: u32, key:
         hatch: Default::default(),
         sky: [0.0; 4],
         ssaa: 1.0,
+        moving: None,
     }
 }
 
