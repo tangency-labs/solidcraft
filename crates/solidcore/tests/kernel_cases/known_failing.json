@@ -55,24 +55,6 @@
     "reason": "continuity_order: got Box: no null seams want >= g1 at every blend seam"
   },
   {
-    "case": "fillets/851-chamfer-knife-edge-tip-2-box-less-cylinder",
-    "issue": "tangency-labs/solidcore#2965",
-    "reason": "refused at call 3 (blend_dropping) with SM_ERR_INVALID_INPUT: prepare_chamfers_along measures the wedge between the knife edge's two faces, which are tangent and folded back on each other, and refuses; the ruling is that they build, as the chord between the ball's contact points",
-    "fails": "call 3 (blend_dropping) refused: solidcore rejected the input (SM_ERR_INVALID_INPUT)"
-  },
-  {
-    "case": "fillets/851-chamfer-knife-edge-tip-2-sketched",
-    "issue": "tangency-labs/solidcore#2965",
-    "reason": "refused at call 3 (blend_dropping) with SM_ERR_INVALID_INPUT: prepare_chamfers_along measures the wedge between the knife edge's two faces, which are tangent and folded back on each other, and refuses; the ruling is that they build, as the chord between the ball's contact points",
-    "fails": "call 3 (blend_dropping) refused: solidcore rejected the input (SM_ERR_INVALID_INPUT)"
-  },
-  {
-    "case": "fillets/851-chamfer-knife-edge-tip-5",
-    "issue": "tangency-labs/solidcore#2965",
-    "reason": "refused at call 3 (blend_dropping) with SM_ERR_INVALID_INPUT: prepare_chamfers_along measures the wedge between the knife edge's two faces, which are tangent and folded back on each other, and refuses; the ruling is that they build, as the chord between the ball's contact points",
-    "fails": "call 3 (blend_dropping) refused: solidcore rejected the input (SM_ERR_INVALID_INPUT)"
-  },
-  {
     "case": "fillets/9-fillet-corner-curvature-with-reduce-fit",
     "issue": "tangency-labs/solidcraft#12645",
     "reason": "solid.fillet builds `corner: g2` with `fit: exact` only"
