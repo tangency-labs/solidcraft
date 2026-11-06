@@ -1521,6 +1521,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
 /// keeps the sketch's x and y closest to where they were. `None` when it already faces that
 /// way, or when either plane cannot be placed (a lost face: nothing to keep).
 fn keep_facing(s: &Session, sketch: u64, next: &PlaneRef) -> Option<bool> {
+    use solidcraft_geom::{PlaneGeom, Vec3Geom};
     let FeatureKind::Sketch { plane: now, .. } = &s.doc.feature(sketch)?.kind else { return None };
     let (vals, _) = s.doc.param_values();
     let state = s.model.state();
