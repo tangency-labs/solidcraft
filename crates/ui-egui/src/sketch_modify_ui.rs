@@ -335,6 +335,40 @@ pub(crate) fn selected_equation(app: &SolveApp) -> Option<String> {
 /// Sketch modify inputs accept only the sketch being edited. Origin axes remain valid
 /// rectangular-pattern directions, while Hole continues using its separate POINTS mask.
 pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) -> Option<Sel> {
+    active_candidate(d, session, hit).or_else(|| entities_candidate(d, session, hit))
+}
+
+/// The selection a hit adds to the Entities list although another input is active: the commands
+/// whose first input is that shared list (Mirror, Move/Copy, Scale, Transform, the patterns) take
+/// a curve, point or region the active input refuses there, so one clicked after the window
+/// moved on to the mirror line, centre or direction joins the others instead of being dropped
+/// without a word (#11700).
+fn entities_candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) -> Option<Sel> {
+    let active = session.active_sketch?;
+    let shared = matches!(
+        &d.kind,
+        Kind::SketchModify(
+            Mod::Scale { .. } | Mod::Mirror | Mod::Move { .. } | Mod::Transform { .. } | Mod::PatternRect { .. } | Mod::PatternCirc { .. }
+        )
+    );
+    if !shared || d.active == 0 {
+        return None;
+    }
+    if let Hit::SketchCurve { sketch, .. } | Hit::SketchPoint { sketch, .. } | Hit::Profile { sketch, .. } = hit
+        && *sketch != active
+    {
+        return None;
+    }
+    d.inputs.first().filter(|input| input.multi)?.accepts(hit, Some(active), |_, _| false)
+}
+
+/// Whether a click on `hit` goes to the Entities list rather than the active input (see
+/// [`entities_candidate`]).
+pub(crate) fn picks_entity(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) -> bool {
+    active_candidate(d, session, hit).is_none() && entities_candidate(d, session, hit).is_some()
+}
+
+fn active_candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) -> Option<Sel> {
     let active = session.active_sketch?;
     match hit {
         Hit::SketchCurve { sketch, .. } | Hit::SketchPoint { sketch, .. } | Hit::Profile { sketch, .. } if *sketch != active => None,
