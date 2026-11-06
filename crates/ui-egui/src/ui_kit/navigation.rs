@@ -176,7 +176,7 @@ pub(crate) fn navigation_button_editable(ui: &mut Ui, rect: Rect, button: Naviga
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), button.selected, button.label));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), button.selected, button.label));
     response
 }
 
@@ -199,8 +199,10 @@ pub(crate) fn navigation_edit_outline(ui: &Ui, rect: Rect, hidden: bool, selecte
         let mut points = Vec::new();
         egui::epaint::tessellator::path::rounded_rectangle(
             &mut points,
-            rect.shrink(NAV_BORDER / 2.0),
-            egui::epaint::CornerRadiusF32::same(f32::from(metrics.button_radius) - NAV_BORDER / 2.0),
+            egui::epaint::RoundedRect::new(
+                rect.shrink(NAV_BORDER / 2.0),
+                egui::epaint::CornerRadiusF32::same(f32::from(metrics.button_radius) - NAV_BORDER / 2.0),
+            ),
         );
         if let Some(first) = points.first().copied() {
             points.push(first);

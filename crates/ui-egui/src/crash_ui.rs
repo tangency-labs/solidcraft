@@ -76,7 +76,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let mut report: Option<String> = None;
     let mut delete: Option<Option<String>> = None;
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_crash_reports"), "bug_report", crate::i18n::tr_label("Crash Reports"))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_crash_reports"), "bug_report", crate::i18n::tr_label("Crash Reports"))
         .cards(2.0)
         .actions("", crate::i18n::tr("ui.close"), None)
         .show(ctx, true, |ui| {
@@ -281,7 +281,7 @@ mod tests {
         h.app.crashes.folder = Some(d.clone());
         super::open(&mut h.app);
         h.frames(6);
-        let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_crash_reports"))).unwrap();
+        let window = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_crash_reports"))).unwrap();
         // The frame's margins come on top of the content's maximum width.
         assert!(window.width() <= 760.0 + 40.0, "{} wide", window.width());
         let _ = std::fs::remove_dir_all(&d);

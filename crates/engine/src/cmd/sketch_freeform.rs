@@ -176,7 +176,7 @@ fn add_pieces(sk: &mut Sketch, segs: &[Seg2], start: Option<usize>, end: Option<
                 pts.push(to);
                 CurveKind::Spline { pts, control: true, degree: n, periodic: false, nurbs: None }
             }
-            Seg2::Arc { .. } => return Err(bad("trim", "unexpected arc piece")),
+            Seg2::Arc { .. } => return Err(bad("sketch.trim", "unexpected arc piece")),
         };
         let c = sk.add_curve(kind, None)?;
         if let Some(cu) = sk.curves.get_mut(c) {

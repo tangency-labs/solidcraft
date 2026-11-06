@@ -35,7 +35,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<InsertedPart>)
-        .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction?, name?"),
+        .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction? (from the shank's tip toward the head), name?"),
     CommandSpec::new("parts.insert", "Insert Part", crate::checked!("parts.insert", insert_atomic))
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
@@ -45,7 +45,9 @@ pub static COMMANDS: &[CommandSpec] = &[
          hex_cap_screw_inch | hex_nut_inch | washer_sae | washer_uss); size (\"M6\", \"608\" for bearings, \"1/2-13 UNC\" for inch screws and nuts, \
          \"1/2\" for inch washers); length? (mm, inch parts too; screws, bolts, set screws, pins; default a standard length near 2.5 d); \
          at?: [x,y,z] on a hole's rim or wall (the part seats on the hole's face with a rigid joint), or a list of them (one component, \
-         placed and seated once per hole) | point?: [x,y,z] with direction?: [x,y,z] (no joint); name? → component, occurrence, joint?, \
+         placed and seated once per hole) | point?: [x,y,z] with direction?: [x,y,z] (no joint: the part's seating plane, under a head or \
+         the bottom of a nut, washer or bearing, the top of a set screw or pin, goes to point, and direction is its +z, from the shank's tip toward the head; default [0,0,1], \
+         head up, shank down -z); name? → component, occurrence, joint?, \
          and with at: occurrences, joints (one per hole, in pick order)",
         ),
     CommandSpec::new("parts.resize", "Change Part Size", crate::checked!("parts.resize", resize_atomic))
@@ -750,18 +752,29 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     // A pick on a hole's rim also touches its end face: step onto the wall just inside the rim.
     // Each hole's occurrence is found before the part exists, so a pick off every body fails the
     // insert before anything is made.
-    let mut holes = Vec::new();
-    let mut seats: Vec<(u64, Vec3)> = Vec::new();
+    let mut holes: Vec<(Vec3, u64)> = Vec::new();
+    let mut seats: Vec<(u64, HoleWall)> = Vec::new();
     for a in hole_picks(p, cmd)? {
-        let (a, seat) = hole_wall(s, a).unwrap_or((a, a));
-        let host = super::joints::occurrence_at(s, a).ok_or_else(|| bad(cmd, "no body at `at` (pick a hole's rim or wall)"))?;
-        // A rim is drawn as more than one edge, and one click on it picks them all: the picks
-        // of one rim seat one part.
-        if seats.iter().any(|(h, q)| *h == host && (*q - seat).len() < 1e-3) {
-            continue;
+        let wall = hole_wall(s, a).unwrap_or(HoleWall { at: a, seat: a, axis: None, ends: None, open: true });
+        let host = super::joints::occurrence_at(s, wall.at).ok_or_else(|| bad(cmd, "no body at `at` (pick a hole's rim or wall)"))?;
+        // A rim is drawn as more than one edge, and one click on it picks them all; a hole can
+        // also be picked at both its ends (#12191). The picks of one hole seat one part, at an
+        // open end: seated at a blind hole's floor it would stand on its head in the material.
+        match seats.iter().position(|(h, w)| *h == host && w.same_hole(&wall)) {
+            Some(i) => {
+                if !seats.get(i).is_some_and(|(_, w)| w.open)
+                    && wall.open
+                    && let (Some(seat), Some(hole)) = (seats.get_mut(i), holes.get_mut(i))
+                {
+                    *hole = (wall.at, host);
+                    seat.1 = wall;
+                }
+            }
+            None => {
+                holes.push((wall.at, host));
+                seats.push((host, wall));
+            }
         }
-        seats.push((host, seat));
-        holes.push((a, host));
     }
     let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| part_name(&family, &size, &sh));
     let active = s.active_component;
@@ -848,9 +861,43 @@ fn hole_picks(p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
     }
 }
 
-/// A point on the cylindrical wall of the hole at `a`, a little in from the picked rim, and the
-/// point on the hole's axis level with it (the same for every pick on one rim).
-fn hole_wall(s: &Session, a: Vec3) -> Option<(Vec3, Vec3)> {
+/// Where a pick on a hole's rim seats a part.
+#[derive(Clone, Copy, Debug)]
+struct HoleWall {
+    /// A point on the hole's cylindrical wall, a little in from the picked rim.
+    at: Vec3,
+    /// The point on the hole's axis level with `at` (the same for every pick on one rim).
+    seat: Vec3,
+    /// The hole's axis, when the pick is on a hole.
+    axis: Option<Vec3>,
+    /// The two ends of the picked cylindrical wall, on the axis.
+    ends: Option<[Vec3; 2]>,
+    /// The picked rim opens onto air, not onto the floor of a blind hole.
+    open: bool,
+}
+
+impl HoleWall {
+    /// The two picks seat on one hole: at one point, or on one axis line with walls that meet.
+    /// Two blind holes drilled towards each other from opposite faces share an axis, but solid
+    /// material between their walls keeps them two holes.
+    fn same_hole(&self, other: &HoleWall) -> bool {
+        if (self.seat - other.seat).len() < 1e-3 {
+            return true;
+        }
+        match (self.axis, other.axis, self.ends, other.ends) {
+            (Some(a), Some(b), Some(e), Some(f)) if a.cross(b).len() < 1e-6 && (other.seat - self.seat).cross(a).len() < 1e-3 => {
+                let along = |p: Vec3| (p - self.seat).dot(a);
+                let ([e0, e1], [f0, f1]) = (e.map(along), f.map(along));
+                e0.min(e1) <= f0.max(f1) + 1e-3 && f0.min(f1) <= e0.max(e1) + 1e-3
+            }
+            _ => false,
+        }
+    }
+}
+
+/// The wall of the hole at `a`, a little in from the picked rim, and whether that rim is an open
+/// end of the hole: just past it along the axis is not the body's material.
+fn hole_wall(s: &Session, a: Vec3) -> Option<HoleWall> {
     // Picks are in world coordinates, including rims on already placed standard parts.
     let st = s.world_state().ok()?;
     let dirs = [Vec3::Z * -1.0, Vec3::Z, Vec3::X, Vec3::X * -1.0, Vec3::Y, Vec3::Y * -1.0];
@@ -863,7 +910,13 @@ fn hole_wall(s: &Session, a: Vec3) -> Option<(Vec3, Vec3)> {
                     let along = v.dot(c.axis);
                     let on_wall = ((v - c.axis * along).len() - c.radius).abs() < 1e-3 && along > c.start && along < c.end;
                     if on_wall {
-                        return Some((q, c.axis_point + c.axis * along));
+                        let axis: Vec3 = c.axis * 1.0;
+                        // The end of the wall nearer the pick, and a point on the axis just past it.
+                        let (end, out) = if along - c.start < c.end - along { (c.start, -1.0) } else { (c.end, 1.0) };
+                        let past = c.axis_point + axis * (end + out * (c.end - c.start).min(1.0) * 0.25);
+                        let open = !matches!(b.body.classify_point(past), Ok(solidcraft_doc::kernel::PointClass::Inside));
+                        let ends = [c.axis_point + axis * c.start, c.axis_point + axis * c.end];
+                        return Some(HoleWall { at: q, seat: c.axis_point + axis * along, axis: Some(axis), ends: Some(ends), open });
                     }
                 }
             }
@@ -1211,6 +1264,27 @@ mod tests {
         assert!(hi.dist(solidcore_record::Vec3::new(49.6, 56.5, 66.5)) < 1e-6, "{hi:?}");
     }
 
+    /// #11729: placed at a point, the part's seating plane is at `point` and `direction` points
+    /// from the shank's tip toward the head, as the help now says: `[0, 0, 1]` puts a screw head
+    /// up with its shank down into a plate's top face, `[0, 0, -1]` upside down.
+    #[test]
+    fn a_part_placed_at_a_point_points_its_head_along_direction() {
+        let help = super::COMMANDS.iter().find(|c| c.id == "parts.insert").map(|c| c.params).unwrap_or_default();
+        assert!(help.contains("seating plane") && help.contains("from the shank's tip toward the head"), "{help}");
+        for (direction, head_up) in [([0, 0, 1], true), ([0, 0, -1], false)] {
+            let mut s = Session::default();
+            run(
+                &mut s,
+                "parts.insert",
+                json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20, "point": [5, 5, 10], "direction": direction}),
+            );
+            let (lo, hi) = bbox(&s, "SHCS M6x20");
+            // The 6 mm head on one side of z = 10, the 20 mm shank on the other.
+            let (head, shank) = if head_up { (hi.z - 10.0, 10.0 - lo.z) } else { (10.0 - lo.z, hi.z - 10.0) };
+            assert!((head - 6.0).abs() < 1e-6 && (shank - 20.0).abs() < 1e-6, "{direction:?}: {lo:?} {hi:?}");
+        }
+    }
+
     /// Several holes in one insert: one component placed and seated once per hole, in one undo
     /// step (#9341); two picks of one rim are one hole; a pick off every body fails the whole
     /// insert.
@@ -1257,6 +1331,61 @@ mod tests {
         assert_eq!(s.undo.len(), undo + 1);
         run(&mut s, "edit.undo", json!({}));
         assert_eq!((s.doc.components.len(), s.doc.occurrences.len()), (comps, occs));
+    }
+
+    /// #12191: a hole picked at both ends (a blind hole's rim and its floor edge, a through
+    /// hole's top and bottom rims) gets one fastener, head at the open end, not a second one
+    /// turned over.
+    #[test]
+    fn a_hole_picked_at_both_ends_gets_one_fastener_at_its_open_end() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Block"}));
+        let blind = [(8.0, 8.0), (32.0, 8.0), (32.0, 22.0)];
+        for (x, y) in blind {
+            run(&mut s, "solid.hole", json!({"position": [x, y, 20], "diameter": 3.4, "depth": 10}));
+        }
+        let through = (8.0, 22.0);
+        run(&mut s, "solid.hole", json!({"position": [through.0, through.1, 20], "diameter": 3.4}));
+        // The first blind hole is picked at its floor edge first, then at its rim; the second at
+        // its rim, then its floor; the third at its rim only; the through hole at both rims.
+        let rim = |(x, y): (f64, f64), z: f64| json!([x + 1.7, y, z]);
+        let at = vec![
+            rim(blind[0], 10.0),
+            rim(blind[0], 20.0),
+            rim(blind[1], 20.0),
+            rim(blind[1], 10.0),
+            rim(blind[2], 20.0),
+            rim(through, 20.0),
+            rim(through, 0.0),
+        ];
+        let r = run(&mut s, "parts.fastener", json!({"family": "socket_head_cap_screw", "size": "M3", "length": 8, "at": at}));
+        let comp = r["component"].as_u64().unwrap_or(0);
+        assert_eq!(r["occurrences"].as_array().map(Vec::len), Some(4), "one screw per hole: {r}");
+        let st = s.world_state().unwrap();
+        let mut seated: Vec<(f64, f64)> = Vec::new();
+        for b in st.bodies.iter().filter(|b| s.doc.model_body_component(b) == comp) {
+            let (lo, hi) = (b.mesh().bounds().min, b.mesh().bounds().max);
+            // Head on the top face (3 mm tall), shank 8 mm down the hole.
+            assert!((hi.z - 23.0).abs() < 1e-6 && (lo.z - 12.0).abs() < 1e-6, "{lo:?} {hi:?}");
+            seated.push(((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0));
+        }
+        assert_eq!(seated.len(), 4, "{seated:?}");
+        for (x, y) in blind.into_iter().chain([through]) {
+            assert!(seated.iter().any(|c| (c.0 - x).abs() < 1e-6 && (c.1 - y).abs() < 1e-6), "no screw at ({x}, {y}): {seated:?}");
+        }
+    }
+
+    /// #12191: two blind holes drilled towards each other from opposite faces share an axis, but
+    /// the material between them keeps them two holes: each rim picked gets its own fastener.
+    #[test]
+    fn coaxial_blind_holes_from_opposite_faces_get_a_fastener_each() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Block"}));
+        run(&mut s, "solid.hole", json!({"position": [20, 15, 20], "diameter": 3.4, "depth": 6}));
+        run(&mut s, "solid.hole", json!({"position": [20, 15, 0], "direction": [0, 0, 1], "diameter": 3.4, "depth": 6}));
+        let at = json!([[21.7, 15, 20], [21.7, 15, 0]]);
+        let r = run(&mut s, "parts.fastener", json!({"family": "socket_head_cap_screw", "size": "M3", "length": 6, "at": at}));
+        assert_eq!(r["occurrences"].as_array().map(Vec::len), Some(2), "one screw per hole: {r}");
     }
 
     #[test]

@@ -400,6 +400,62 @@ fn an_untouched_revolve_axis_keeps_its_origin_expressions_through_redefine() {
     }
 }
 
+/// A surface revolve's `{origin, dir}` axis is a world axis in a moved or turned component, as a
+/// solid revolve's is, when the revolve is made and when its axis is changed in Edit Feature.
+#[test]
+fn a_surface_revolve_axis_maps_into_a_moved_component() {
+    let made = |command: &str, turned: bool| {
+        let mut s = moved_part();
+        if turned {
+            run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "90 deg", "origin": [50, 0, 0]}));
+        }
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Ring"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"sketch": "Ring", "axis": {"origin": [50, 0, 0], "dir": [0, 0, 1]}, "name": "Turn"});
+        if command == "solid.revolve" {
+            p["operation"] = json!("new");
+        }
+        run(&mut s, command, p.clone());
+        let body = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
+        let first = world_bbox(&s, &body);
+        // Edit Feature with a new axis, also given in the world: 2 mm along the sketch's X, which
+        // the quarter turn lays along the world's Y.
+        p["axis"]["origin"] = if turned { json!([50, 2, 0]) } else { json!([52, 0, 0]) };
+        run(&mut s, "timeline.redefine", json!({"feature": "Turn", "command": command, "params": p}));
+        let body = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
+        (first, world_bbox(&s, &body))
+    };
+    for turned in [false, true] {
+        let (solid, solid_edit) = made("solid.revolve", turned);
+        let (surface, surface_edit) = made("surface.revolve", turned);
+        assert!(near(solid.0, surface.0) && near(solid.1, surface.1), "turned {turned}: {solid:?} against {surface:?}");
+        assert!(
+            near(solid_edit.0, surface_edit.0) && near(solid_edit.1, surface_edit.1),
+            "turned {turned}, edited: {solid_edit:?} against {surface_edit:?}"
+        );
+    }
+}
+
+/// A surface revolve about a picked edge of a moved component turns about that edge where it is
+/// shown, as one about the same axis given as `{origin, dir}` does.
+#[test]
+fn a_surface_revolve_about_a_picked_edge_of_a_moved_component() {
+    let made = |axis: Value| {
+        let mut s = moved_part();
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Ring"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.revolve", json!({"sketch": "Ring", "axis": axis, "name": "Turn"}));
+        let body = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
+        world_bbox(&s, &body)
+    };
+    // The block's vertical edge at its corner, shown at world x = 50.
+    let edge = made(json!({"edge": [50, 0, 5]}));
+    let line = made(json!({"origin": [50, 0, 0], "dir": [0, 0, 1]}));
+    assert!(near(edge.0, line.0) && near(edge.1, line.1), "{edge:?} against {line:?}");
+}
+
 /// A revolve axis written `{x, y, z}` maps into a moved or turned component like `[x, y, z]`:
 /// an origin of numbers or expressions, and a direction.
 #[test]
