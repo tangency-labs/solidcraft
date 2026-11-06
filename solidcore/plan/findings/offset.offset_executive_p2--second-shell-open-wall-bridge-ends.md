@@ -43,21 +43,40 @@ directory on the `evidence/2999-double-shell` branch of tdamsma/solidcore.
 The native renderer refuses to convert this intermediate to a record because it
 is a sheet touching itself along an edge; it renders the original input normally.
 
-The defect precedes the final shell subtraction. The bridge ends are inconsistent
-with the moved adjacent floor/rim. The suspected source is the tangent open-face
-bridge's rail/centre-line endpoint construction in `edgeuse_offset`
-(`offset_geometry_creation.rs`, the shell tangent-gap branch and rail manicuring),
-and its subsequent mitre/merge. This is not yet a traced root cause: the individual
-rail endpoints at creation have not been captured. The retained old height range
-is evidence to trace, not justification for a case-specific extension or cap.
+The defect precedes the final shell subtraction. A second private trace captures the
+actual two bridge rail pairs before and after the rail/centre-line manicuring in
+`edgeuse_offset`. For both ends, both rails span z = 1.9999999999999996..30
+before and after; the centre line is trimmed to those same heights. The resulting
+intermediate SMB is byte-identical to the first capture (SHA-256
+`f4d0e307aeb1f67347d44d25b456c09e35ac33c34df4bbf57b368f122761241d`).
+The observed wrong endpoints are present at bridge creation, not introduced by the
+final subtraction or by the diagnostic readback.
+
+`do_extended_offset` constructs tangent pairs first, through `mapped_edge_prefix`,
+then marks them so the later general mapped-edge pass skips them. These particular
+pairs enter `shell_tangent_gap` and make a planar bridge from the old rails.
+Their neighbours' non-tangent floor/rim mitres are processed later. The bridge
+therefore retains the old rail interval while the adjacent offset boundaries end
+at z = 1.5 and 29.5. The missing dependency is the bridge ends on those neighbouring
+mitres. A repair must resolve that dependency for the shared construction; a later
+bridge phase is a candidate, not an implemented or verified fix.
+
+Additional public-API controls on the same saved operand:
+- Opening the reported inner face at distances −0.25, −0.5 and −0.75 returns
+  the same shell_brep 1001 status.
+- Opening any of the four inner flat walls (record faces 12, 14, 16, 18) at −0.5
+  is refused.
+- Opening any of the four outer flat walls, the bottom, the rim or the inner floor
+  returns a manifold solid. Their measured volumes are retained in the evidence,
+  but are not independently graded here; successful status is not a correctness
+  claim for those seven controls.
 
 Initial pointer-integrity errors refer to cached topology. After
 `refresh_cached_topology`, both readback bodies pass `integrity::check`; the
 intermediate remains nonmanifold. A stale cache is not established as the cause.
 
 No production repair, successful second shell, tolerance change, golden change or
-known-failure reclassification is claimed. The private cfg(test) instrumentation
-was removed; p2.rs was verified against its original SHA-256
+known-failure reclassification is claimed. Both private cfg(test) probes were removed. p2.rs was verified against its original SHA-256
 `de511e6119b4d576431a8688e7884c00f097538d8d678b6e66c2f527844e7826`.
 The regression remains explicitly ignored while the draft diagnoses the failure.
 
@@ -66,3 +85,6 @@ Patrikalakis, Maekawa and Cho, *Shape Interrogation*, §11.3.1:
 https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node224.html.
 The shared bridge construction and the S2 mitres in `docs/offset-and-shell.md`
 are the relevant design boundary; coordinate there before changing the construction.
+
+The geometry creator was also restored byte for byte: SHA-256
+`3c584bc98713f701845e5e24ffd131773a39313efbe58f940e97c34dd6ed2614`.
