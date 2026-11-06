@@ -984,9 +984,10 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
             let x = if scale != 0.0 { a.v / scale } else { a.v };
             // Unit conversions leave a rounding error of an ulp or two (`3 in / 1 in` is
             // 2.9999999999999996): a value that close to a whole number is that number, so `floor`
-            // does not drop to 2. Only that noise is absorbed, never a real fraction.
+            // does not drop to 2. The tolerance is relative to the whole number, so a tiny value
+            // never snaps to 0, and it stays under 1/8 so no real fraction is absorbed.
             let nearest = x.round();
-            let x = if (x - nearest).abs() <= 4.0 * f64::EPSILON * nearest.abs().max(1.0) { nearest } else { x };
+            let x = if (x - nearest).abs() <= (4.0 * f64::EPSILON * nearest.abs()).min(0.125) { nearest } else { x };
             let r = match f {
                 "floor" => x.floor(),
                 "ceil" => x.ceil(),
@@ -1474,6 +1475,13 @@ mod tests {
             ("ceil(1000000000.7)", 1_000_000_001.0),
             ("trunc(1000000000.7)", 1_000_000_000.0),
             ("round(1000000000.7)", 1_000_000_001.0),
+            ("ceil(1e-16)", 1.0),
+            ("floor(-1e-16)", -1.0),
+            ("trunc(1e-16)", 0.0),
+            ("trunc(-1e-16)", 0.0),
+            ("round(1e-16)", 0.0),
+            ("round(-1e-16)", 0.0),
+            ("floor(1000000000000000.5)", 1_000_000_000_000_000.0),
         ] {
             assert_eq!(ev(e, Kind::Unitless).unwrap(), want, "{e}");
         }
