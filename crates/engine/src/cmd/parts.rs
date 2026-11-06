@@ -755,7 +755,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     let mut holes: Vec<(Vec3, u64)> = Vec::new();
     let mut seats: Vec<(u64, HoleWall)> = Vec::new();
     for a in hole_picks(p, cmd)? {
-        let wall = hole_wall(s, a).unwrap_or(HoleWall { at: a, seat: a, axis: None, open: true });
+        let wall = hole_wall(s, a).unwrap_or(HoleWall { at: a, seat: a, axis: None, ends: None, open: true });
         let host = super::joints::occurrence_at(s, wall.at).ok_or_else(|| bad(cmd, "no body at `at` (pick a hole's rim or wall)"))?;
         // A rim is drawn as more than one edge, and one click on it picks them all; a hole can
         // also be picked at both its ends (#12191). The picks of one hole seat one part, at an
@@ -870,18 +870,26 @@ struct HoleWall {
     seat: Vec3,
     /// The hole's axis, when the pick is on a hole.
     axis: Option<Vec3>,
+    /// The two ends of the picked cylindrical wall, on the axis.
+    ends: Option<[Vec3; 2]>,
     /// The picked rim opens onto air, not onto the floor of a blind hole.
     open: bool,
 }
 
 impl HoleWall {
-    /// The two picks seat on one hole: at one point, or on one axis line.
+    /// The two picks seat on one hole: at one point, or on one axis line with walls that meet.
+    /// Two blind holes drilled towards each other from opposite faces share an axis, but solid
+    /// material between their walls keeps them two holes.
     fn same_hole(&self, other: &HoleWall) -> bool {
         if (self.seat - other.seat).len() < 1e-3 {
             return true;
         }
-        match (self.axis, other.axis) {
-            (Some(a), Some(b)) => a.cross(b).len() < 1e-6 && (other.seat - self.seat).cross(a).len() < 1e-3,
+        match (self.axis, other.axis, self.ends, other.ends) {
+            (Some(a), Some(b), Some(e), Some(f)) if a.cross(b).len() < 1e-6 && (other.seat - self.seat).cross(a).len() < 1e-3 => {
+                let along = |p: Vec3| (p - self.seat).dot(a);
+                let ([e0, e1], [f0, f1]) = (e.map(along), f.map(along));
+                e0.min(e1) <= f0.max(f1) + 1e-3 && f0.min(f1) <= e0.max(e1) + 1e-3
+            }
             _ => false,
         }
     }
@@ -907,7 +915,8 @@ fn hole_wall(s: &Session, a: Vec3) -> Option<HoleWall> {
                         let (end, out) = if along - c.start < c.end - along { (c.start, -1.0) } else { (c.end, 1.0) };
                         let past = c.axis_point + axis * (end + out * (c.end - c.start).min(1.0) * 0.25);
                         let open = !matches!(b.body.classify_point(past), Ok(solidcraft_doc::kernel::PointClass::Inside));
-                        return Some(HoleWall { at: q, seat: c.axis_point + axis * along, axis: Some(axis), open });
+                        let ends = [c.axis_point + axis * c.start, c.axis_point + axis * c.end];
+                        return Some(HoleWall { at: q, seat: c.axis_point + axis * along, axis: Some(axis), ends: Some(ends), open });
                     }
                 }
             }
@@ -1364,6 +1373,19 @@ mod tests {
         for (x, y) in blind.into_iter().chain([through]) {
             assert!(seated.iter().any(|c| (c.0 - x).abs() < 1e-6 && (c.1 - y).abs() < 1e-6), "no screw at ({x}, {y}): {seated:?}");
         }
+    }
+
+    /// #12191: two blind holes drilled towards each other from opposite faces share an axis, but
+    /// the material between them keeps them two holes: each rim picked gets its own fastener.
+    #[test]
+    fn coaxial_blind_holes_from_opposite_faces_get_a_fastener_each() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Block"}));
+        run(&mut s, "solid.hole", json!({"position": [20, 15, 20], "diameter": 3.4, "depth": 6}));
+        run(&mut s, "solid.hole", json!({"position": [20, 15, 0], "direction": [0, 0, 1], "diameter": 3.4, "depth": 6}));
+        let at = json!([[21.7, 15, 20], [21.7, 15, 0]]);
+        let r = run(&mut s, "parts.fastener", json!({"family": "socket_head_cap_screw", "size": "M3", "length": 6, "at": at}));
+        assert_eq!(r["occurrences"].as_array().map(Vec::len), Some(2), "one screw per hole: {r}");
     }
 
     #[test]
