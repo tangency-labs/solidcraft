@@ -66,7 +66,7 @@
   },
   {
     "case": "fillets/cov-fillet-g2-pocket-corner",
-    "issue": "to file",
+    "issue": "solidcore#2697",
     "reason": "continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0"
   },
   {
@@ -91,12 +91,12 @@
   },
   {
     "case": "fillets/report-fillet-curvature-three-edges-at-bar-corner-solver-residues",
-    "issue": "to file",
+    "issue": "solidcore#2697",
     "reason": "continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0 (see KNOWN_FAILING)"
   },
   {
     "case": "fillets/report-fillet-curvature-three-edges-at-bar-corner",
-    "issue": "to file",
+    "issue": "solidcore#2697",
     "reason": "continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0 (see KNOWN_FAILING)"
   },
   {

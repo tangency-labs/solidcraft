@@ -18,7 +18,7 @@
 //! The corpus's rules: `transform` is a copy, then the copy moved in place; `tagged` changes no
 //! geometry and its history is not graded; picks are record indices, passed to the operations
 //! with the body's record [`Order`] (the one face index convention).
-//! Shell, face offset and thicken copy their inputs before editing, as SolidCraft does.
+//! Shell, face offset, thicken and stitch copy their inputs before editing, as SolidCraft does.
 //! A copy gets its own entity IDs; an existing pick order follows the kernel's copy map.
 //!
 //! The test is `#[ignore]`d, out of the workspace run: run it with `--ignored`.
@@ -53,6 +53,7 @@ use solidcore_ops::blend::{
     blend, chamfer_sides_ordered, edge_faces_along_ordered, Blend, ChamferSecond, Corners,
 };
 use solidcore_ops::boolean::{boolean, BooleanOp};
+use solidcore_ops::stitch::stitch;
 use solidcore_ops::sweep::{extrude, loft, revolve, Curve, DraftCorner};
 use solidcore_ops::{make_sphere, offset, session, Body, Order};
 use solidcore_record::brep::Brep as Record;
@@ -77,6 +78,8 @@ const PORTED: &[&str] = &[
     "loft",
     "blend_dropping",
     "chamfer_sides",
+    "stitch",
+    "split_body_by_sheet",
 ];
 
 /// The relative tolerance the rig grades volume and area with when a case states none.
@@ -279,11 +282,54 @@ fn made(b: solidcore_ops::Result<Body>) -> Result<Slot, String> {
     .map_err(|e| e.to_string())
 }
 
+/// Runs a traced call in output order, keeping a split's two bodies distinct.
+fn call_outputs(c: &Value, ins: &mut [Slot]) -> Result<Result<Vec<Slot>, String>, Stop> {
+    if c["op"].as_str() != Some("split_body_by_sheet") {
+        return call(c, ins).map(|r| r.map(|out| vec![out]));
+    }
+    let bad = |what: &str| Stop::Fail(format!("split_body_by_sheet: {what}"));
+    if ins.len() != 2 {
+        return Err(bad("requires a body and a sheet"));
+    }
+    let face = c["params"]["face"]
+        .as_u64()
+        .and_then(|i| usize::try_from(i).ok())
+        .ok_or_else(|| bad("parameter face"))?;
+    let (body, sheet) = ins.split_at_mut(1);
+    let sheet = &mut sheet[0];
+    if sheet.order.is_none() {
+        let (_, order) = sheet
+            .body
+            .to_record()
+            .map_err(|e| bad(&format!("sheet record order: {e}")))?;
+        sheet.order = Some(order);
+    }
+    let order = sheet.order.as_ref().unwrap();
+    if order.faces.get(face).is_none() {
+        return Err(bad("face outside sheet record order"));
+    }
+    Ok(
+        match solidcore_ops::split::split_body_by_sheet(&body[0].body, &sheet.body, order, face) {
+            Ok(Some((back, front))) => Ok([back, front]
+                .into_iter()
+                .map(|body| Slot {
+                    body: Arc::new(body),
+                    order: None,
+                })
+                .collect()),
+            Ok(None) => Err("sheet does not divide the body".to_owned()),
+            Err(e) => Err(e.to_string()),
+        },
+    )
+}
+
 /// Runs one traced call: its output, or the operation's error as text.
 fn call(c: &Value, ins: &mut [Slot]) -> Result<Result<Slot, String>, Stop> {
     call_with_copy(c, ins, Slot::copied)
 }
 
+/// Dispatches a single-output call with an injectable preparation copy; replay failures
+/// remain separate from a traced operation refusal.
 fn call_with_copy(
     c: &Value,
     ins: &mut [Slot],
@@ -480,6 +526,14 @@ fn call_with_copy(
             let r = blend(&s.body, kind, &unique, &each, &[], Corners::Filled).map(|_| ());
             in_place(Slot { order: None, ..s }, r)
         }
+        "stitch" => {
+            let s = copy_for_edit(&first()?)?;
+            let t = p["tolerance"].as_f64().ok_or_else(|| bad("tolerance"))?;
+            let body = Arc::try_unwrap(s.body)
+                .map_err(|_| Stop::Fail("copy before stitch: the copy is shared".to_owned()))?;
+            // whether the result closed into a solid is not traced: the body is the output
+            made(stitch(body, t).map(|(b, _closed)| b))
+        }
         other => {
             return Err(Stop::Fail(format!(
                 "{other} is listed as ported but not run"
@@ -539,6 +593,8 @@ fn run_case(entry: &Path, e: &Value) -> Result<Option<f64>, Stop> {
     run_case_with_records(e, || records(entry, e))
 }
 
+/// Loads named operand records, binds each call's outputs in order, and grades the selected
+/// final bodies; the record supplier also permits closed-form tests without corpus files.
 fn run_case_with_records(
     e: &Value,
     records: impl FnOnce() -> serde_json::Map<String, Value>,
@@ -610,10 +666,23 @@ fn run_case_with_records(
             );
         }
         let traced_error = c.get("error").and_then(Value::as_str);
-        match (call(c, &mut ins)?, traced_error) {
+        match (call_outputs(c, &mut ins)?, traced_error) {
             (Ok(out), None) => {
-                for n in c["outputs"].as_array().into_iter().flatten() {
-                    bodies.insert(n.as_str().unwrap().to_owned(), out.clone());
+                let names = c["outputs"].as_array().ok_or_else(|| {
+                    Stop::Fail(format!("call {i} ({op}): outputs must be an array"))
+                })?;
+                if names.len() != out.len() {
+                    return Err(Stop::Fail(format!(
+                        "call {i} ({op}): {} output names for {} bodies",
+                        names.len(),
+                        out.len()
+                    )));
+                }
+                for (n, body) in names.iter().zip(out) {
+                    let name = n.as_str().ok_or_else(|| {
+                        Stop::Fail(format!("call {i} ({op}): output name must be a string"))
+                    })?;
+                    bodies.insert(name.to_owned(), body);
                 }
             }
             // A handled refusal is an attempt, not the case's outcome. Keep checking the
@@ -1151,6 +1220,7 @@ fn a_pre_edit_copy_failure_cannot_count_as_the_edits_refusal() {
         "offset_faces",
         "thicken",
         "chamfer_sides",
+        "stitch",
     ] {
         let step = serde_json::json!({
             "op": op, "error": "expected edit refusal",
@@ -1203,6 +1273,7 @@ fn an_invalid_copy_order_cannot_count_as_an_expected_refusal() {
         serde_json::json!({"op": "chamfer_sides", "params": {
             "distance": 1, "first": [0,0,1], "second": {"distance": 2}
         }}),
+        serde_json::json!({"op": "stitch", "params": {"tolerance": 1e-5}}),
     ] {
         step["error"] = serde_json::json!("expected refusal");
         match call(&step, &mut [input.clone()]) {
@@ -1270,6 +1341,138 @@ fn a_discarded_thicken_preserves_the_retained_sheet() {
         &serde_json::json!({"body_count": 1, "volume_mm3": 30.0 * 20.0 * 2.0}),
         serde_json::json!({"body_count": 1, "faces": 1, "edges": 4, "vertices": 4}),
     );
+}
+
+/// The sheet normal orders unequal box parts; grading each output name catches aliasing,
+/// and neither the solid nor the tool record may change.
+#[test]
+fn split_sheet_keeps_distinct_parts_in_normal_order_and_preserves_inputs() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    for reversed in [false, true] {
+        let mut k = solidcore::Kernel::default();
+        let (a, b) = if reversed { (11.0, -1.0) } else { (-1.0, 11.0) };
+        let line = solidcore::curve::line::Line::create_line_segment(
+            3,
+            solidcore::Vec3::new(3.0, a, -1.0),
+            solidcore::Vec3::new(3.0, b, -1.0),
+            None,
+        )
+        .unwrap();
+        let curve = solidcore::curve::curve::Curve::from(line);
+        let mut sheet = solidcore::sweep::api_brep::create_linear_sweep(
+            &mut k,
+            &[Some(&curve)],
+            solidcore::Vec3::new(0.0, 0.0, 1.0),
+            12.0,
+            false,
+        )
+        .unwrap();
+        let record = solidcore_convert::brep::to_record(&mut k, &mut sheet)
+            .unwrap()
+            .0;
+        let (sheet, order) = Body::from_record(&record, true).unwrap();
+        let mut ins = [
+            Slot {
+                body: Arc::new(solidcore_ops::make_box([0.0; 3], [10.0; 3]).unwrap()),
+                order: None,
+            },
+            Slot {
+                body: Arc::new(sheet),
+                order: Some(order),
+            },
+        ];
+        let before: Vec<_> = ins.iter().map(|s| s.body.to_record().unwrap().0).collect();
+        let step = serde_json::json!({"op": "split_body_by_sheet", "params": {"face": 0}});
+        let parts = call_outputs(&step, &mut ins).unwrap().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert!(!Arc::ptr_eq(&parts[0].body, &parts[1].body));
+        let want = if reversed {
+            [700.0, 300.0]
+        } else {
+            [300.0, 700.0]
+        };
+        for (part, volume) in parts.iter().zip(want) {
+            assert!((part.body.volume(1e-9).unwrap() - volume).abs() < 1e-7);
+            assert_eq!(part.body.counts().unwrap(), [6, 12, 8]);
+            assert!(part.order.is_none());
+        }
+        let after: Vec<_> = ins.iter().map(|s| s.body.to_record().unwrap().0).collect();
+        assert_eq!(before, after);
+        // Grade each traced output separately: duplicating one body under both names fails.
+        let records = serde_json::json!({"solid": before[0], "sheet": before[1]})
+            .as_object()
+            .unwrap()
+            .clone();
+        for (name, volume) in ["back", "front"].into_iter().zip(want) {
+            let e = serde_json::json!({
+                "bodies": {"solid": {"trusted": true}, "sheet": {"trusted": true}},
+                "calls": [{"op": "split_body_by_sheet", "inputs": ["solid", "sheet"],
+                    "params": {"face": 0}, "outputs": ["back", "front"]}],
+                "result": [{"made": name}],
+                "expected": {"body_count": 1, "volume_mm3": volume,
+                    "faces": 6, "edges": 12, "vertices": 8, "tolerance": {"rel": 1e-9}}
+            });
+            assert!(run_case_with_records(&e, || records.clone())
+                .unwrap()
+                .is_some());
+        }
+    }
+}
+
+/// The recorded spline sheet cuts the cup into two parts and remains as the third body.
+#[test]
+fn split_sheet_replays_the_cup_and_retains_the_tool() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let entry = corpus().join("booleans/3830-split-cup-by-extended-spline-surface.json");
+    let e: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+    assert_eq!(e["result"].as_array().unwrap().len(), 3);
+    assert!(run_case(&entry, &e).unwrap().is_some());
+}
+
+/// The corpus's stitch of two 10 x 10 sheets that share the edge x = 10, and its operand.
+fn two_squares() -> (PathBuf, Value, Slot) {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let entry = corpus().join("surfaces/cov-stitch-two-squares-along-a-shared-edge.json");
+    let e: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+    let record: Record = serde_json::from_value(records(&entry, &e)["b1"].clone()).unwrap();
+    let (body, order) = Body::from_record(&record, true).unwrap();
+    let input = Slot {
+        body: Arc::new(body),
+        order: Some(order),
+    };
+    (entry, e, input)
+}
+
+/// The traced stitch sews a copy of its operand along the shared edge and leaves the operand as
+/// it came in; the whole case replays to the rig's values.
+#[test]
+fn a_stitch_sews_a_copy_at_the_traced_tolerance() {
+    let (entry, e, input) = two_squares();
+    let step = &e["calls"][1];
+    assert_eq!(step["op"], "stitch");
+    let out = call(step, &mut [input.clone()]).unwrap().unwrap();
+    // the shared edge is one edge of both faces, and its two vertex pairs are one each
+    assert_eq!(out.body.counts().unwrap(), [2, 7, 6]);
+    assert_eq!(input.body.counts().unwrap(), [2, 8, 8]);
+    run_case(&entry, &e).unwrap();
+}
+
+/// A tolerance the operation refuses is its refusal; a call without one is bad replay data.
+#[test]
+fn a_stitch_refusal_is_the_operations_and_a_missing_tolerance_is_not() {
+    let (_, _, input) = two_squares();
+    let step = |params: Value| serde_json::json!({"op": "stitch", "params": params});
+    assert!(matches!(
+        call(
+            &step(serde_json::json!({"tolerance": 0.0})),
+            &mut [input.clone()]
+        ),
+        Ok(Err(_))
+    ));
+    assert!(matches!(
+        call(&step(serde_json::json!({})), &mut [input]),
+        Err(Stop::Fail(why)) if why.contains("tolerance")
+    ));
 }
 
 fn grade(entry: &Path, listed: &BTreeMap<String, Listed>, timeout: Duration) -> Graded {
