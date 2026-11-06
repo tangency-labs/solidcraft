@@ -377,8 +377,8 @@ pub enum SolidError {
     /// A blend refused on one of its edges or corners, with what an application words it
     /// with ([`crate::blend::blend_refusal::BlendRefusal`]): an edge with no blend, a round
     /// too small to change the part, a blend that cannot end where its edge runs on
-    /// tangentially, a setback too short or too long. `code` is the status the refusal
-    /// stood for before it was typed (`SM_ERR_INVALID_INPUT` for an edge with no blend,
+    /// tangentially, a setback too short or too long, a chamfer's angle past the other
+    /// face. `code` is the status the refusal stood for before it was typed (`SM_ERR_INVALID_INPUT` for an edge with no blend,
     /// `SM_ERR` for the others), so [`SolidError::sm_status`] is unchanged.
     #[error("{operation}: upstream status {code}: refused ({refusal:?})")]
     BlendRefused {

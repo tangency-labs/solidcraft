@@ -190,6 +190,17 @@ pub enum Error {
         /// The bound below which a setback fits.
         largest: f64,
     },
+    /// A chamfer's angle that runs out past the other face instead of meeting it (the
+    /// kernel's `BlendRefusal::ChamferAngleTooLarge`): no chamfer of the edge between its
+    /// faces has it. Radians.
+    ChamferAngleTooLarge {
+        /// The edge's index.
+        edge: usize,
+        /// The angle asked.
+        angle: f64,
+        /// The bound below which an angle meets the other face.
+        largest: f64,
+    },
 }
 
 /// Why an edge has no blend ([`Error::EdgeNotBlendable`]), as the kernel names it
@@ -343,6 +354,14 @@ impl std::fmt::Display for Error {
             Error::SetbackTooLong { vertex, largest } => {
                 write!(f, "the setback at vertex {vertex} does not fit: below {largest} fits")
             }
+            Error::ChamferAngleTooLarge {
+                edge,
+                angle,
+                largest,
+            } => write!(
+                f,
+                "the chamfer angle {angle} rad of edge {edge} runs past the other face: below {largest} rad fits"
+            ),
         }
     }
 }

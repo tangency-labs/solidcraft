@@ -1,6 +1,6 @@
 //! A blend refused on its edges or corners, as data ([`BlendRefusal`], carried by
 //! [`crate::SolidError::BlendRefused`]), and the queries the refusals rest on: the tangent
-//! chain of edges ([`tangent_chain`]), the edge a blended edge runs on into
+//! chain of edges ([`tangent_chain`], [`chains_among`]), the edge a blended edge runs on into
 //! ([`continuation`]) and a round too small to change the part ([`round_too_small`]).
 //!
 //! Not upstream (solidcore's). The chain follows the blend corner's own test of an edge
@@ -80,6 +80,18 @@ pub enum BlendRefusal {
         /// The bound below which a setback fits.
         largest: f64,
     },
+    /// A chamfer's angle to its first face that runs out past the other face instead of
+    /// meeting it: the chamfer's line and the other face meet only at an angle less than
+    /// pi less the wedge between the faces. Radians, at the wedge the edge's chamfer is
+    /// measured at ([`crate::surface::procedural_blend::chamfer`]).
+    ChamferAngleTooLarge {
+        /// The edge.
+        edge: EdgeId,
+        /// The angle asked.
+        angle: f64,
+        /// The bound below which an angle meets the other face: pi less the wedge.
+        largest: f64,
+    },
 }
 
 impl BlendRefusal {
@@ -99,7 +111,8 @@ impl BlendRefusal {
         match *self {
             Self::EdgeNotBlendable { edge, .. }
             | Self::ContinuesInto { edge, .. }
-            | Self::RoundTooSmall { edge, .. } => EntityRef::Edge(edge),
+            | Self::RoundTooSmall { edge, .. }
+            | Self::ChamferAngleTooLarge { edge, .. } => EntityRef::Edge(edge),
             Self::SetbackTooShort { vertex, .. } | Self::SetbackTooLong { vertex, .. } => {
                 EntityRef::Vertex(vertex)
             }
@@ -154,6 +167,49 @@ fn runs_on_into(
         out.extend(found.into_iter().map(|f| (v, f)));
     }
     Ok(out)
+}
+
+/// Which tangent chain among `edges` each of them is on: one number per edge, the same for
+/// two edges exactly when a run of edges of `edges` joins them, each running on into the next
+/// at a vertex as in [`tangent_chain`] (an edge not in `edges` joins nothing). A closed
+/// rim's arcs are one chain.
+///
+/// # Errors
+/// Those of [`edge::blend_edgeuse`] and [`continuing_edges`].
+pub fn chains_among(
+    k: &Kernel,
+    b: &mut Brep,
+    edges: &[EdgeId],
+    tangency: f64,
+) -> Result<Vec<usize>> {
+    let mut chains: Vec<usize> = (0..edges.len()).collect();
+    let mut ends = Vec::new();
+    for &e in edges {
+        ends.push([edge::start_vertex(b, e)?, edge::end_vertex(b, e)?]);
+    }
+    for (i, &e) in edges.iter().enumerate() {
+        // only an edge sharing a vertex with another of them can run on into it
+        let meets = |(j, other): (usize, &[Option<VertexId>; 2])| {
+            let mine = ends.get(i).into_iter().flatten().flatten();
+            j != i && mine.into_iter().any(|v| other.contains(&Some(*v)))
+        };
+        if !ends.iter().enumerate().any(meets) {
+            continue;
+        }
+        for (_, f) in runs_on_into(k, b, e, tangency, false)? {
+            let Some(j) = edges.iter().position(|&x| x == f) else {
+                continue;
+            };
+            if let (Some(&keep), Some(&gone)) = (chains.get(i), chains.get(j)) {
+                for c in &mut chains {
+                    if *c == gone {
+                        *c = keep;
+                    }
+                }
+            }
+        }
+    }
+    Ok(chains)
 }
 
 /// The tangent chain of `edges`: `edges` (each once, in order), then every edge with a

@@ -26,6 +26,8 @@
 //! | `power_to_bernstein`, `power_eval`, `bil` (private) | `sm_PowerToBernstein`, `sm_PowerEval`, its `bil` lambda |
 //!
 //! Deviations:
+//! - **A chamfer's two offsets (not the fork, #2950).** `round_rows` takes the spine's offset
+//!   from each face: the fork takes one, so an unequal chamfer's rail missed its face.
 //! - **Out-params.** `sm_NodalQuartic` returns its coefficients and branch tangents.
 //!   The polynomial helpers return their results; `sm_RoundRows` returns
 //!   its rows.
@@ -320,12 +322,20 @@ fn contact_of(o: &BlendQuadric, contact: f64, s: &Segment) -> Contact {
 /// round over one spine segment from contact `a` to contact `b`: three for the ball's arc
 /// (the rational quadratic through the meeting point of its end tangents, weights
 /// `2 G L`, `G L`, `Da Db L` with `G = Da Db (1 + cos)`), two for a chamfer's line. Face
-/// `a` is a plane, sphere or cylinder when either is.
-fn round_rows(a: &Contact, b: &Contact, s: &Segment, r: f64, arc: bool) -> (Vec<VPoly>, Vec<Poly>) {
+/// `a` is a plane, sphere or cylinder when either is. `radii` are the spine's offsets from
+/// `a` and `b`: the ball's radius twice for an arc; a chamfer's two (the fork takes one).
+fn round_rows(
+    a: &Contact,
+    b: &Contact,
+    s: &Segment,
+    radii: [f64; 2],
+    arc: bool,
+) -> (Vec<VPoly>, Vec<Poly>) {
+    let [ra, rb] = radii;
     let mut rx = Vec::new();
     let mut rw = Vec::new();
     // contact numerators: A over w (bW) or w Da
-    let num = |c: &Contact| {
+    let num = |c: &Contact, r: f64| {
         if c.plane {
             v_add(&s.m, &v_mul(&c.e, &s.w), r)
         } else if c.bw {
@@ -334,8 +344,8 @@ fn round_rows(a: &Contact, b: &Contact, s: &Segment, r: f64, arc: bool) -> (Vec<
             v_add(&v_mul(&s.m, &c.d), &v_mul(&c.e, &s.w), r)
         }
     };
-    let na = num(a);
-    let nb = num(b);
+    let na = num(a, ra);
+    let nb = num(b, rb);
     if !arc {
         // a chamfer: the line from contact to contact, each row over its own denominator
         rx.push(na);
@@ -349,7 +359,7 @@ fn round_rows(a: &Contact, b: &Contact, s: &Segment, r: f64, arc: bool) -> (Vec<
     // r w (Ea Db + Eb Da), the middle row's offset from G M
     let mid = v_mul(
         &v_add(&v_mul(&a.e, &b.d), &v_mul(&b.e, &a.d), 1.0),
-        &scale(&s.w, r),
+        &scale(&s.w, ra),
     );
     if a.bw {
         // L = w
@@ -1048,6 +1058,18 @@ pub fn calc_rational_spine_fillet_geom(
     } else {
         (o1, blend.contact[1], o0, blend.contact[0])
     };
+    // a chamfer's two offsets; a ball's one radius
+    let radii = {
+        let [r0, r1] = match blend.inputs {
+            Some(inputs) if !arc => inputs.offsets.map(f64::abs),
+            _ => [r, r],
+        };
+        if ia == 0 {
+            [r0, r1]
+        } else {
+            [r1, r0]
+        }
+    };
     let mut rows_x: Vec<Vec<VPoly>> = Vec::new();
     let mut rows_w: Vec<Vec<Poly>> = Vec::new();
     let mut done: Vec<Segment> = Vec::new();
@@ -1059,7 +1081,7 @@ pub fn calc_rational_spine_fillet_geom(
                 &contact_of(&oa, ca, &ss),
                 &contact_of(&ob, cb, &ss),
                 &ss,
-                r,
+                radii,
                 arc,
             );
             let mut all_positive = true;

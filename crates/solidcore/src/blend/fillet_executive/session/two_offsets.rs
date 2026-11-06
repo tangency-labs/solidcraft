@@ -15,9 +15,11 @@
 //! ball of radius the distance (#2793's rig cases). No recursion.
 
 use super::{FilletBody, FilletObject, FilletSession, FilletSurfaceGenerator};
+use crate::blend::blend_refusal::{chains_among, BlendRefusal};
 use crate::blend::fillet_executive::p2::FilletParametersAccess;
 use crate::blend::fillet_solver::p5::is_knife_edge;
 use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
+use crate::surface::surface::SurfaceKind;
 use crate::topology::{edge, EdgeId};
 use crate::{EntityRef, Kernel, Result, SolidError};
 
@@ -29,11 +31,91 @@ fn invalid() -> SolidError {
     }
 }
 
+/// The tangency of a solver these prepare, radians: 10 degrees.
+const TANGENCY: f64 = 10.0 * (crate::math::PI / 180.0);
+
 fn value<T: Copy>(values: &[T], index: usize) -> Result<T> {
     values
         .get(if values.len() == 1 { 0 } else { index })
         .copied()
         .ok_or_else(invalid)
+}
+
+/// The refusal of `size` on edge `id` at `wedge`, which [`ChamferDefinition::new`] refused:
+/// [`BlendRefusal::ChamferAngleTooLarge`] for a good angle past a good wedge's room, else
+/// native invalid input.
+fn refused_size(id: EdgeId, size: ChamferSize, wedge: f64) -> SolidError {
+    match size {
+        ChamferSize::DistanceAngle { angle, .. }
+            if wedge > 0.0
+                && wedge < crate::math::PI
+                && angle > 0.0
+                && angle.is_finite()
+                && angle + wedge >= crate::math::PI =>
+        {
+            BlendRefusal::ChamferAngleTooLarge {
+                edge: id,
+                angle,
+                largest: crate::math::PI - wedge,
+            }
+            .error(
+                "blend::fillet_executive::session::prepare_chamfers_along",
+                crate::error::SM_ERR_INVALID_INPUT,
+            )
+        }
+        _ => invalid(),
+    }
+}
+
+/// Whether edge use `u` bounds a face on a plane.
+fn on_plane(b: &crate::Brep, u: crate::topology::EdgeuseId) -> Result<bool> {
+    use crate::topology::edgeuse::p1 as eu1;
+    let Some(face) = eu1::face(b, u)? else {
+        return Ok(false);
+    };
+    Ok(crate::topology::face::p2::surface(b, face)?
+        .is_some_and(|s| matches!(s.kind(), SurfaceKind::Plane(_))))
+}
+
+/// The wedge edge `index`'s chamfer is measured at. `wedges` are the wedges at the edges'
+/// middles, `between_planes` which edges lie between two planes, `alike` which edges are one
+/// chamfer with it (its tangent chain's, of its size).
+///
+/// An edge between planes keeps its own wedge: it holds there all along, so the sizes do. On
+/// any other edge the wedge is the chain's edges' between planes, so its offsets are theirs;
+/// where those differ no one pair of offsets holds the sizes on them all, and the edge keeps
+/// its own. Without one it is the widest of the chain, where the setbacks fold last
+/// (`d_1 = (r_2 + r_1 cos alpha) / sin alpha` falls as `alpha` grows).
+fn chain_wedge(
+    wedges: &[f64],
+    between_planes: &[bool],
+    index: usize,
+    alike: impl Fn(usize) -> Result<bool>,
+) -> Result<f64> {
+    let own = wedges.get(index).copied().ok_or_else(invalid)?;
+    if between_planes.get(index).copied().unwrap_or(false) {
+        return Ok(own);
+    }
+    let mut anchor: Option<f64> = None;
+    let mut widest = own;
+    for (other, (&w, &planes)) in wedges.iter().zip(between_planes).enumerate() {
+        if !alike(other)? {
+            continue;
+        }
+        if w > widest {
+            widest = w;
+        }
+        if planes {
+            // the rounding of an angle measured from two unit vectors
+            let room = 64.0 * f64::EPSILON / w.sin();
+            match anchor {
+                Some(a) if (a - w).abs() > room => return Ok(own),
+                Some(_) => {}
+                None => anchor = Some(w),
+            }
+        }
+    }
+    Ok(anchor.unwrap_or(widest))
 }
 
 impl FilletSession<'_> {
@@ -105,7 +187,7 @@ impl FilletSession<'_> {
                 value(second, index)?,
                 approx_tol,
                 20.0 * (crate::math::PI / 180.0),
-                10.0 * (crate::math::PI / 180.0),
+                TANGENCY,
             )?;
             self.load_solver(k, solver)?;
             let generator = match shared {
@@ -121,14 +203,17 @@ impl FilletSession<'_> {
     /// Chamfers `edges` by their sizes (`sizes`: one for all edges or one per edge): two
     /// distances, a distance and an angle, or a chord. Each edge's sizes are converted to
     /// its two offsets at the wedge between its faces at the edge's middle (the angle
-    /// between the directions into them there, [`ChamferDefinition::offsets`]), then
-    /// prepared as [`Self::prepare_per_edge_two_offsets`] with the linear section, and the
+    /// between the directions into them there, [`ChamferDefinition::offsets`]); the edges
+    /// of one size on a tangent chain ([`chains_among`]) are one chamfer, measured at the
+    /// wedge of its edges between planes, else at the widest of its wedges, so their rails
+    /// meet where they run on into each other. Then prepared as [`Self::prepare_per_edge_two_offsets`] with the linear section, and the
     /// solver keeps the sizes: with `fixes.fillet_gn_section_generator` and
     /// `fixes.fillet_round_as_definition` the chamfer's surface is its definition, the
     /// chord of order 0, and keeps them too. A distance is along the edge's blend edge
     /// use's face (support 1) or its radial mate's (support 2); an angle is to support 1.
     /// Between planes the sizes hold all along the edge; on a curved face, where the wedge
-    /// was measured. Not upstream (solidcore's, #2486).
+    /// was measured, and elsewhere along the edge they drift (the module's page of
+    /// [`crate::surface::procedural_blend::chamfer`]). Not upstream (solidcore's, #2486).
     ///
     /// # Errors
     ///
@@ -136,8 +221,8 @@ impl FilletSession<'_> {
     /// without a blend edge use or its mate, faces that do not make a wedge there (tangent,
     /// or folded back other than a knife edge chamfered at equal distances, which is the chord
     /// between the contacts of the ball of radius the distance), sizes that are not finite and
-    /// positive, an angle past the wedge's room, or two distances that fold on it (one at most
-    /// the other's `cos(wedge)`).
+    /// positive, or two distances that fold on it (one at most the other's `cos(wedge)`);
+    /// [`BlendRefusal::ChamferAngleTooLarge`] for an angle past the wedge's room.
     pub fn prepare_chamfers(
         &mut self,
         k: &Kernel,
@@ -174,12 +259,45 @@ impl FilletSession<'_> {
         {
             return Err(invalid());
         }
+        let mut wedges = Vec::new();
+        let mut between_planes = Vec::new();
+        let mut knife = Vec::new();
+        let knife_tol = k.tolerances.ang_tol_deg * (crate::math::PI / 180.0);
+        for &id in edges {
+            let u0 = self.blendable_edgeuse(k, id)?;
+            let target: &mut crate::Brep = &mut *self.objects.target;
+            let u1 = eu1::radial(target, u0)?.ok_or_else(invalid)?;
+            // a knife edge has no wedge: none to measure, and none its chain could take
+            let is_knife = is_knife_edge(k, target, id, knife_tol)?;
+            knife.push(is_knife);
+            if is_knife {
+                wedges.push(0.0);
+                between_planes.push(false);
+                continue;
+            }
+            let t = target
+                .edge(id)
+                .map_err(|_| invalid())?
+                .interval
+                .evaluate(0.5);
+            let o = BinormalOptions::default();
+            let b0 = evaluate_binormal(k, target, u0, t, false, &o)?
+                .binormal
+                .unitize()?;
+            let b1 = evaluate_binormal(k, target, u1, t, false, &o)?
+                .binormal
+                .unitize()?;
+            // clamp: constant bounds, the lower below the upper (cannot panic)
+            wedges.push(b0.dot(b1).clamp(-1.0, 1.0).acos());
+            between_planes.push(on_plane(target, u0)? && on_plane(target, u1)?);
+        }
+        let chains = chains_among(k, &mut *self.objects.target, edges, TANGENCY)?;
         let mut chamfers = Vec::new();
         let mut first = Vec::new();
         let mut second = Vec::new();
         for (index, &id) in edges.iter().enumerate() {
             let u0 = self.blendable_edgeuse(k, id)?;
-            let target: &mut crate::Brep = &mut *self.objects.target;
+            let target: &crate::Brep = &*self.objects.target;
             let u1 = eu1::radial(target, u0)?.ok_or_else(invalid)?;
             // the support the first size is along: 1 unless `along` names support 2's face
             let on_second = match along.get(index) {
@@ -200,12 +318,12 @@ impl FilletSession<'_> {
                     }
                 }
             };
+            let size = value(sizes, index)?;
             // a knife edge has no wedge: equal distances are the chord between the contacts of
             // the ball of that radius, kept as the linear section on those offsets; other
             // sizes have no such chord
-            let tol = k.tolerances.ang_tol_deg * (crate::math::PI / 180.0);
-            if is_knife_edge(k, target, id, tol)? {
-                let ChamferSize::Distances([d, d2]) = value(sizes, index)? else {
+            if knife.get(index).copied().unwrap_or(false) {
+                let ChamferSize::Distances([d, d2]) = size else {
                     return Err(invalid());
                 };
                 if !(d == d2 && d.is_finite() && d > 0.0) {
@@ -216,22 +334,12 @@ impl FilletSession<'_> {
                 chamfers.push(None);
                 continue;
             }
-            let t = target
-                .edge(id)
-                .map_err(|_| invalid())?
-                .interval
-                .evaluate(0.5);
-            let o = BinormalOptions::default();
-            let b0 = evaluate_binormal(k, target, u0, t, false, &o)?
-                .binormal
-                .unitize()?;
-            let b1 = evaluate_binormal(k, target, u1, t, false, &o)?
-                .binormal
-                .unitize()?;
-            // clamp: constant bounds, the lower below the upper (cannot panic)
-            let wedge = b0.dot(b1).clamp(-1.0, 1.0).acos();
+            let alike = |other: usize| -> Result<bool> {
+                Ok(chains.get(index) == chains.get(other) && value(sizes, other)? == size)
+            };
+            let wedge = chain_wedge(&wedges, &between_planes, index, alike)?;
             let asked =
-                ChamferDefinition::new(value(sizes, index)?, wedge).map_err(|_| invalid())?;
+                ChamferDefinition::new(size, wedge).map_err(|_| refused_size(id, size, wedge))?;
             let chamfer = if on_second {
                 let [a, b] = asked.setbacks();
                 let size = match asked.size {
@@ -272,5 +380,34 @@ impl FilletSession<'_> {
             }
         }
         Ok(offsets)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_chain_is_measured_on_its_edges_between_planes_else_at_its_widest() {
+        let all = |_: usize| Ok(true);
+        // none between planes: the widest, whichever edge asks
+        let w = [1.0, 1.5, 1.2];
+        for i in 0..3 {
+            assert_eq!(chain_wedge(&w, &[false; 3], i, all).unwrap(), 1.5);
+        }
+        // one between planes: its wedge on the others, narrower or wider than their own
+        let planes = [false, false, true];
+        assert_eq!(chain_wedge(&w, &planes, 0, all).unwrap(), 1.2);
+        assert_eq!(chain_wedge(&w, &planes, 1, all).unwrap(), 1.2);
+        assert_eq!(chain_wedge(&w, &planes, 2, all).unwrap(), 1.2);
+        // two between planes of different wedges: no one pair, each keeps its own
+        let planes = [false, true, true];
+        assert_eq!(chain_wedge(&w, &planes, 0, all).unwrap(), 1.0);
+        assert_eq!(chain_wedge(&w, &planes, 1, all).unwrap(), 1.5);
+        assert_eq!(chain_wedge(&w, &planes, 2, all).unwrap(), 1.2);
+        // an edge of another chain or size does not count
+        let alone = |other: usize| Ok(other != 1);
+        assert_eq!(chain_wedge(&w, &[false; 3], 0, alone).unwrap(), 1.2);
     }
 }

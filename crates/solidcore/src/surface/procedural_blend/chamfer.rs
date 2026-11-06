@@ -19,7 +19,14 @@
 //!
 //! Between planes `alpha` is the planes' angle, and the sizes hold all along the edge.
 //! Elsewhere they hold where the wedge was measured: the offsets, not the setbacks, are
-//! what the definition keeps along the edge.
+//! what the definition keeps along the edge. Edges of one size on a tangent chain are one
+//! chamfer, so one pair of offsets, and their rails meet where the edges run on into each
+//! other: its wedge is that of its edges between planes, on which the sizes then hold all
+//! along, else the widest of those at its edges' middles, where the setbacks stay positive
+//! at every narrower wedge. They do drift. A rim whose wedge runs from 63.4 to 116.6 degrees,
+//! asked 1 and 2 and measured at 101.5, has setbacks from 0.47 to 2.72 and from 1.80 to 3.22.
+//! Setbacks that hold at every station are another definition. Edges between planes of
+//! different wedges have no one pair: each keeps its own.
 //!
 //! Not upstream (solidcore's, #2486). Deviations: none. No recursion.
 

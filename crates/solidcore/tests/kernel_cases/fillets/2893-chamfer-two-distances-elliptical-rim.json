@@ -40,7 +40,6 @@
       }
     },
     {
-      "error": "SMLib failed (status 1001)",
       "inputs": [
         "b15"
       ],
@@ -103,13 +102,16 @@
         "second": {
           "distance": 2.0
         }
-      }
+      },
+      "outputs": [
+        "b16"
+      ]
     }
   ],
   "case": "2893-chamfer-two-distances-elliptical-rim",
   "expected": {
     "body_count": 1,
-    "method": "the axis (1, 0, 2)/sqrt5 through (0, 0, -10) meets z = 10 at (10, 0, 10); the rim is the ellipse there with semi-axes 5 (along y) and 5 sqrt5/2 (along x); (10, 5, 10) is on it. An unequal chamfer of an ellipse has no closed-form volume: one closed valid solid (the owner, 2026-10-31: it builds).",
+    "method": "the axis (1, 0, 2)/sqrt5 through (0, 0, -10) meets z = 10 at (10, 0, 10); the rim is the ellipse there with semi-axes 5 (along y) and 5 sqrt5/2 (along x); (10, 5, 10) is on it. An unequal chamfer of an ellipse has no closed-form volume: one closed valid solid (the owner, 2026-10-31: it builds). The two arcs are one chamfer with one pair of offsets, measured at the wider of their middles' wedges (101.46 deg): the top's offset (2 + cos w') / sin w' = 2.2435 and the wall's (1 + 2 cos w') / sin w' = 1.4259, w' = 78.54 deg.",
     "outcome": "solid",
     "source": "invariants",
     "sources": [
@@ -118,22 +120,15 @@
     "what": "a cylinder r5 tilted 26.6 deg from Z cut flat at z = 10, its elliptical rim chamfered 1 and 2: one closed valid solid"
   },
   "expressible": true,
-  "gallery_note": "the two arcs of the rim take their chamfer offsets each at its own midpoint, where the faces' angle differs (78.5 and 101.5 deg), and their chamfers do not meet at the tangent corners (held for the owner's ruling on unequal chamfers of a varying angle)",
+  "gallery_note": "the rim's two arcs are one chamfer, one pair of offsets measured where the wedge is widest of their middles (101.5 deg), so the sizes 1 and 2 hold only there: the wedge runs 63.4 to 116.6 deg round the rim, and the setbacks run 0.47 to 2.72 along the top and 1.80 to 3.22 down the wall. Setbacks that hold at every station are another definition (a follow-up)",
   "operation_expressible": true,
-  "outcome": {
-    "engine_error": "step 3 (solid.chamfer): SMLib chamfer: operation: SMLib failed (status 1001) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
-    "kernel_error": "SMLib failed (status 1001)",
-    "ran": false
-  },
   "records": "2893-chamfer-two-distances-elliptical-rim.bodies.json.gz",
-  "result": [],
-  "rig": {
-    "error": "step 3 (solid.chamfer): SMLib chamfer: operation: SMLib failed (status 1001) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
-    "known_failing": "[fail] refused, but not because \"not supported yet\": step 3 (solid.chamfer): SMLib chamfer: operation: SMLib failed (status 1001) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain:",
-    "measured": null,
-    "refused_with": null,
-    "status": "fail"
-  },
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b16"
+    }
+  ],
   "sources": [
     "tangency-labs/solidcraft#2893"
   ],

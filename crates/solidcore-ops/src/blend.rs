@@ -333,6 +333,15 @@ fn refused(b: &Brep, refusal: &BlendRefusal) -> Option<Error> {
             vertex: vertex(v)?,
             largest,
         },
+        BlendRefusal::ChamferAngleTooLarge {
+            edge: e,
+            angle,
+            largest,
+        } => Error::ChamferAngleTooLarge {
+            edge: edge(e)?,
+            angle,
+            largest,
+        },
         _ => return None,
     })
 }
@@ -1373,9 +1382,9 @@ pub fn tangent_chain(body: &Body, edges: &[usize], angle: f64) -> Result<Vec<usi
 /// [`Error::Argument`] for no edges, `along` not one per edge, an index past its list or an
 /// edge repeated, a distance not finite, positive and at most [`MAX_SIZE`], or an angle not
 /// strictly between 0 and pi; the kernel's refusals ([`Error::Status`] for a face that is not
-/// the edge's, faces that make no wedge, an angle past the wedge's room or distances that fold
-/// on it); [`Error::TooLarge`], [`Error::NoRoom`] and [`Error::NoEffect`] as for [`blend`];
-/// those of [`finish`].
+/// the edge's, faces that make no wedge or distances that fold on it,
+/// [`Error::ChamferAngleTooLarge`] for an angle past the wedge's room); [`Error::TooLarge`],
+/// [`Error::NoRoom`] and [`Error::NoEffect`] as for [`blend`]; those of [`finish`].
 pub fn chamfer_sides(
     body: &Body,
     edges: &[usize],
